@@ -5,77 +5,102 @@ Last refreshed: 2026-09-07
 Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 Production implementation authorized: **NO**
 
-> Repository continuity is the source of truth for programme state. Source documents preserve product intent and architectural framing; repository behaviour remains authoritative for implementation claims.
+> Repository continuity is the source of truth for programme state. Source documents preserve product intent/context; repository behaviour remains authoritative for implementation claims.
 
 ## Fresh-chat instruction
 
 ```text
-Continue KEYFLOWOS from canonical repository intelligence. Do not restart from scratch.
-Load 04-CONCEPT-REGISTRY.md, 04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md,
-04B-CANONICAL-ID-ALLOCATION-LEDGER.md, 07-CURRENT-STATE.md, CURRENT-HANDOFF.md,
-CURRENT-STATE.yaml and both ROLLOVER files.
-Run Context Integrity Check first.
-Production code remains read-only.
+Continue KEYFLOWOS from canonical repository intelligence. Do not restart.
+Load 04-CONCEPT-REGISTRY.md, 04A, 04B, 07-CURRENT-STATE.md,
+CURRENT-HANDOFF.md, CURRENT-STATE.yaml and both ROLLOVER files.
+Run Context Integrity Check first. Production code remains read-only.
 J10 is pooled through F214/C164/KF-REC-054.
-J11 is ACTIVE and already contains F215/C165 and F216/C166.
-Do NOT resume frontier selection or rediscover those findings.
-The exact frontier is ContractAlert acknowledgement regeneration anti-duplication against J17/KF-REC-051, followed by Contract deletion/termination/correction versus already-raised renewal work.
-F217/C167/KF-REC-055 are next free IDs but remain UNALLOCATED.
+J11 code-level microscopic pool is stable through F218/C168.
+Do NOT resume alert acknowledgement anti-duplication, deletion tracing, or rediscover F215-F218.
+Exact frontier: J11 standards/OSS/frontier pressure test, then decide whether a bounded KF-REC-055 is genuinely necessary.
 ```
 
-## Canonical ranges
+## Evidence baseline / ranges
 
 ```text
-Findings:         F216
-Contradictions:   C166
-Recommendations: KF-REC-054
-Concepts:         KF-CONCEPT-042
-next free:        F217 / C167 / KF-REC-055 — UNALLOCATED
+repository:        SaCH-PRO/KEYFLOWOS
+main:              8f173bfe79f1418159cf4099ea18b0d60d203ec2
+intelligence:      docs/keyflow-intelligence-foundation
+Findings:          F218
+Contradictions:    C168
+Recommendations:  KF-REC-054
+Concepts:          KF-CONCEPT-042
+next free:         F219 / C169 / KF-REC-055
+runtime proof:     NOT EXECUTED
 ```
 
-## J11 current durable result
+## J11 canonical result so far
 
-- **F215 / C165** — ContractVersion is neither complete nor reconstructable as authoritative Contract revision history; principal mutation can bypass it.
-- **F216 / C166** — probabilistic contract extraction can promote uncertain renewal/value/party state into authoritative Contract truth without preserving confidence, verification or governance promotion evidence.
-- Renewal-cycle occurrence identity is not a new root; reuse the J23 temporal Definition/Occurrence law and KF-REC-047.
+```text
+F215/C165 ContractVersion/revision history incomplete and non-reconstructable
+F216/C166 uncertain AI extraction can become authoritative Contract/renewal truth
+F217/C167 lifecycle status presence can falsely discharge renewal work; ACTIVE is also renewal-eligible
+F218/C168 retention semantics do not constrain hard delete, which cascades registry evidence/history
+```
 
-Canonical homes:
+Homes:
+- F215–F216 `08AS`; C165–C166 `09AS`
+- F217 `08AT`; C167 `09AT`
+- F218 `08AU`; C168 `09AU`
 
-- `08AS-FINDING-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
-- `09AS-CONTRADICTION-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
+Dossier:
+`docs/intelligence/journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md`
+
+Microscopic trace:
+`docs/intelligence/investigations/J11-CONTRACT-RENEWAL-PROJECTION-OCCURRENCE-CONVERGENCE-TRACE.md`
+
+## Reuse decisions — do not duplicate
+
+```text
+renewal occurrence identity                    → J23 / KF-REC-047
+ContractAlert acknowledgement resurrection     → F182 / KF-REC-051
+ContractAlert threshold advancement             → J23 / KF-REC-047
+source deletion orphaning renewal work         → F182 / KF-REC-051
+renewal-date/notice correction stale work      → F182 / KF-REC-051
+local alert vs obligation actionability        → KF-REC-047/051 pressure, no new root
+clauseAnalysis                                 → advisory derived projection/value-density review
+```
+
+## Emerging target boundary
+
+Potential irreducible Contract-domain semantics:
+
+```text
+ContractRevision
+RenewalOccurrence
+RenewalDecision + qualifying evidence
+Retention/DeletionDecision
+```
+
+Explicit delegations:
+
+```text
+provenance/epistemic promotion → KF-REC-049
+recurrence/temporal visibility → KF-REC-047
+operator attention/disposition → KF-REC-051
+recovery/certainty             → KF-REC-048
+financial valuation            → KF-REC-052
+commercial obligation rules    → KF-REC-053
+```
 
 ## Exact next work
 
 ```text
-1. fetch J17 F179–F184 / C129–C134 and KF-REC-051;
-2. anti-duplicate this reachable loop:
-   derived ContractAlert → acknowledge → regenerateAlerts deleteMany/createMany → acknowledgement lost → equivalent alert resurfaces;
-3. allocate nothing until SAME / SPECIALIZATION / RELATED DISTINCT / GENUINELY NEW is decided;
-4. revalidate current main implementation head before exact SHA claims;
-5. trace ContractsService delete/update/regenerate + ContractRenewalSweep + Prisma relations;
-6. determine what happens to already-raised renewal work after Contract termination/archive/correction/deletion;
-7. distinguish notification disposition from obligation disposition;
-8. persist genuinely new roots only after canonical gate;
-9. build/update J11 journey dossier when microscopic pool stabilizes;
-10. pressure-test, backward re-audit, then converge;
-11. keep production code untouched.
+1. research current authoritative standards and useful OSS patterns for records integrity/revision provenance, contract lifecycle/renewal decisions, occurrence identity, retention/deletion and audit evidence;
+2. pressure-test F215-F218 and the emerging target boundary;
+3. reject jurisdiction-specific assumptions and enterprise bulk not required by KeyFlow product semantics;
+4. decide whether irreducible Contract-domain semantics justify KF-REC-055;
+5. if yes, anti-duplicate and allocate the smallest bounded recommendation;
+6. run backward re-audit across J12/J23/J18/J17/J7/J3-J4 and K4/K6/K7/K8/K11;
+7. update canonical continuity;
+8. keep production untouched.
 ```
 
-## Constellation to preserve
-
-```text
-J11 ↔ J12 document/evidence/K4 knowledge
-J11 ↔ J23 temporal recurrence/work
-J11 ↔ J18 recovery
-J11 ↔ J17 operator attention
-J11 ↔ J7 valuation
-J11 ↔ J3/J4 commercial obligations
-```
-
-## Programme purpose
-
-Continue surgical whole-app mapping through journeys, kernels, constellations, macro/micro pools and dynamic/causal/feedback loops. Optimize for value density: preserve core value primitives, keep necessary domain specialization, identify derived projections and compatibility layers, converge duplication, and expose accidental complexity, dead/low-value and value-detracting structures.
-
-If this chat disappears now, resume from **J11 alert-disposition anti-duplication**, not J10 or journey selection.
+If continuity is lost, resume from **J11 standards/frontier pressure test after F218/C168**.
 
 No production implementation is authorized.
