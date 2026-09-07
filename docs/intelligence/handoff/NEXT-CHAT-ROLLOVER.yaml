@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 22
+rollover_version: 23
 last_updated: 2026-09-06
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -17,8 +17,8 @@ taxonomy:
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   mandatory_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F196
-  contradictions_through: C146
+  findings_through: F199
+  contradictions_through: C149
   recommendations_through: KF-REC-052
   concepts_through: KF-CONCEPT-042
 programme:
@@ -29,9 +29,6 @@ latest_j7_pool:
   recommendation: KF-REC-052
   findings: [F185,F186,F187,F188,F189,F190,F191,F192,F193,F194,F195,F196]
   contradictions: [C135,C136,C137,C138,C139,C140,C141,C142,C143,C144,C145,C146]
-  standards_frontier_pressure_test: docs/intelligence/investigations/J7-FINANCIAL-TRUTH-STANDARDS-FRONTIER-PRESSURE-TEST.md
-  backward_reaudit: docs/intelligence/investigations/J3-J4-J17-J18-J23-J7-FINANCIAL-TRUTH-BACKWARD-REAUDIT.md
-  proof_architecture: docs/intelligence/investigations/J7-FINANCIAL-TRUTH-PROOF-ARCHITECTURE.md
   proof_obligations: 32
   deterministic_fault_points: 16
   runtime_proof_executed: false
@@ -42,15 +39,22 @@ active_frontier:
   primary_name: Lead_to_Customer_to_Cash
   secondary_journey: J4
   secondary_name: Booking_to_Service_to_Payment
-  stage: COMMERCIAL_TO_CASH_MICROSCOPIC_RECONSTRUCTION
-  inherited_targets: [KF-REC-052,KF-REC-048,KF-REC-051,KF-REC-047]
+  stage: COMMERCIAL_SERVICE_CONSEQUENCE_TRACE
+  findings: [F197,F198,F199]
+  contradictions: [C147,C148,C149]
+  inherited_targets: [KF-REC-052,KF-REC-048,KF-REC-051,KF-REC-047,KF-REC-049]
+  key_roots:
+    F197: customer_commercial_evidence_can_advance_while_Contact_status_remains_LEAD
+    F198: ContactInsight_LTV_adds_won_Deal_value_and_PAID_Invoice_total_so_same_sale_can_be_double_counted
+    F199: completed_booking_can_lose_required_completion_time_invoice_consequence_into_log_only_failure
   next_actions:
-    - reconstruct_lead_quote_invoice_customer_cash_chain
-    - reconstruct_booking_service_invoice_payment_chain
-    - trace_business_complete_vs_financial_complete_boundaries
-    - trace_refund_credit_note_void_chargeback_failure_reopening
-    - trace_customer_value_revenue_cash_projection_semantics
-    - reuse_J7_financial_roots_before_any_new_ID
+    - resolve_Contact_status_lifecycleStage_pipelineStage_tags_and_Deal_state_ownership
+    - trace_booking_deposit_and_final_invoice_commercial_lineage
+    - trace_booking_cancel_no_show_after_deposit_or_invoice_creation
+    - trace_refund_credit_void_and_chargeback_reopening_of_booking_customer_state
+    - trace_RevenueAttribution_BOOKING_semantics_and_consumers
+    - determine_if_completed_booking_without_invoice_surfaces_to_J17_or_recovery_projection
+    - reuse_J7_J18_J23_roots_before_any_new_ID
 latest_j17_pool:
   journey: J17
   recommendation: KF-REC-051
@@ -82,7 +86,7 @@ continuity:
 constraints:
   - production_code_read_only
   - do_not_treat_customer_or_service_completion_as_financial_completion
-  - do_not_treat_invoice_PAID_or_Payment_SUCCESSFUL_as_cash_convergence_without_declared_financial_completion
-  - do_not_duplicate_J7_financial_roots
+  - do_not_treat_pipeline_attribution_as_realized_revenue_without_explicit_semantics
+  - do_not_duplicate_J7_J18_J23_roots
   - do_not_create_duplicate_canonical_ids
   - preserve_anti_normalization_method
