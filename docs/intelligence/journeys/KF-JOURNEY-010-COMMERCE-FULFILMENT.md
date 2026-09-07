@@ -1,7 +1,7 @@
 # KF-JOURNEY-010 — Commerce / Fulfilment
 
-Status: **ACTIVE MICROSCOPIC FORENSICS / THROUGH F213/C163**
-Last updated: 2026-09-06
+Status: **ACTIVE MICROSCOPIC FORENSICS / THROUGH F214/C164 / TARGET SYNTHESIS READY**
+Last updated: 2026-09-07
 Implementation evidence: `main@4e9f60c65bdb78fbdadcb08731c5dab95b3645c7`
 Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 Production implementation remains **UNAUTHORIZED / READ-ONLY**.
@@ -29,6 +29,7 @@ catalog/listing + customer intent
 → Invoice/Payment/accounting descendants
 → inventory allocation lineage
 → required fulfilment route set
+→ strategy-specific fulfilment effects
 → shipment/delivery outcomes
 → correction/cancel/refund/return convergence
 → customer/value/operator/automation projections
@@ -186,7 +187,7 @@ ObservedRouteSet(order)
 → reconcile missing/failed semantic effects
 ```
 
-Any existing child != complete required descendant set. Owner pressure: KF-REC-048/K11.
+Any existing child != complete required descendant set. Owner pressure: KF-REC-048/K11 plus J10 domain definition of the required set.
 
 ---
 
@@ -240,7 +241,41 @@ Raw provider payload remains provenance; opaque JSON is not a substitute for str
 
 ---
 
-## L. Refund / correction classification
+## L. F214/C164 — strategy descendant can commit before route identity exists
+
+DROPSHIP and PREORDER persist an effectful business descendant before the `FulfillmentRoute` that `routeOrder()` later uses as its retry/idempotency signal:
+
+```text
+DROPSHIP: PurchaseOrder → FulfillmentRoute
+PREORDER: PreOrder → FulfillmentRoute
+```
+
+Those writes are not one shared atomic unit. A failure after the first write can therefore leave:
+
+```text
+strategy business effect exists
++ route does not exist
+```
+
+Retry sees route absence and can execute the strategy again, creating another PurchaseOrder/PreOrder for the same semantic obligation. HYBRID inherits the risk when it selects the effectful branch.
+
+Target law:
+
+```text
+StrategyEffectIdentity
+= business + order + order item/split + strategy + relevant revision
+
+retry/reconcile:
+  compare route + strategy-specific descendants against StrategyEffectIdentity
+  repair/link safe orphan descendants
+  create only genuinely missing effects
+```
+
+This is distinct from F211: F211 starts with a non-empty partial route set; F214 starts with an already-committed auxiliary business effect whose route guard is missing.
+
+---
+
+## M. Refund / correction classification
 
 Store-order refund actions currently change order/payment projection and emit events without themselves composing provider refund, negative Payment, Invoice reconciliation, ledger reversal and stock restoration.
 
@@ -248,7 +283,7 @@ Store-order refund actions currently change order/payment projection and emit ev
 
 ---
 
-## M. Canonical J10 invariants — current tranche
+## N. Canonical J10 invariants — stable microscopic tranche
 
 1. Order/fulfilment state is not payment/accounting truth.
 2. One economic order obligation has one semantic Invoice-descendant identity unless policy explicitly requires multiple documents.
@@ -268,29 +303,54 @@ Store-order refund actions currently change order/payment projection and emit ev
 16. Provider customer labels require lifecycle adapters.
 17. Refund/correction must converge the effects actually applied without rewriting history.
 18. Retry identity binds semantic effects, not merely process attempts or existence of any child row.
+19. FulfillmentRoute absence is not proof that an effectful strategy descendant is absent.
+20. Strategy-specific business effects and route state reconcile through one semantic StrategyEffectIdentity.
 
 ---
 
-## N. Current target ownership pressure
+## O. Recommendation ownership result
 
-No KF-REC-054 is allocated yet.
+The programme-required anti-duplication search is complete.
 
-Working partition:
+Existing owners remain authoritative for their dimensions:
 
 ```text
-F206 + commercial obligation identity → KF-REC-053
-F207 financial precondition            → KF-REC-052 + KF-REC-053
-F208 inventory effect lineage          → J10 target pressure; owner not frozen
-F209/F211 recovery/outcome completeness→ KF-REC-048 + KF-REC-051/K8
-F210/F212/F213 external identity/materialization
-                                      → K9 / earlier recommendation corpus under review
+KF-REC-035–037 → ingress occurrence/lifecycle/reconciliation boundaries
+KF-REC-048     → certainty-aware recovery and consequence completeness
+KF-REC-052     → financial truth, money movement, valuation and corrections
+KF-REC-053     → commercial relationship/obligation lineage and commercial value stages
 ```
 
-Next required step is an anti-duplication search across existing recommendation registers before any new target contract is justified.
+They do not fully own this J10 domain cluster:
+
+```text
+order operational state algebra
+inventory allocation/effect lineage
+required fulfilment-set definition
+strategy-effect identity
+provider entity identity for commerce resources
+operational external-order materialization
+aggregate fulfilment outcome semantics
+```
+
+Therefore a distinct, narrow **Commerce & Fulfilment Contract** is justified in principle. It must compose with the mature contracts above and must not become a universal commerce runtime or duplicate financial/recovery ownership.
 
 ---
 
-## O. Proof pressure
+## P. Standards / external-reality pressure
+
+Current external reference semantics support, but do not dictate, the target separation:
+
+- stable provider resource identity is separate from mutable merchant attributes such as SKU;
+- external orders expose line items structurally rather than solely as opaque metadata;
+- fulfilment work is derived from purchased line-item obligations;
+- inventory quantity semantics distinguish availability/commitment/reservation/on-hand concepts rather than repeatedly applying one sold quantity as unrelated decrements.
+
+These references are corroborating pressure only. KeyFlow’s canonical contract remains domain-owned and provider-independent.
+
+---
+
+## Q. Proof pressure
 
 Future proof must include:
 
@@ -299,6 +359,7 @@ Future proof must include:
 - reserve/consume/ship/cancel/refund effects compose exactly once;
 - failed required route prevents unqualified aggregate success;
 - failure after route 1 of N repairs only missing descendants;
+- failure after PurchaseOrder/PreOrder creation but before route creation cannot duplicate the semantic strategy effect;
 - Shopify Product and Contact identities survive mutable SKU/email changes;
 - imported Shopify orders either materialize structural item obligations or are technically excluded from native effectful flows;
 - repeated sync converges regardless endpoint order/pagination/retry;
@@ -308,35 +369,35 @@ Runtime proof has not been executed.
 
 ---
 
-## P. Exact next microscopic trace
+## R. Exact next programme step
 
 ```text
-1. search existing recommendation corpus for K9/external identity/provider reconciliation/materialization ownership;
-2. classify F210/F212/F213 before considering a new recommendation;
-3. trace DROPSHIP/PREORDER/HYBRID/MANUAL/SERVICE descendant effect identities and partial-failure recovery;
-4. trace F207/F209 propagation through CRM/calendar/webhooks/KEY/temporal/operator surfaces;
-5. continue cancel/refund/return under F208/J7 unless genuinely distinct evidence appears;
-6. run J10 standards/frontier pressure test only after the above trace is stable;
-7. reuse F001–F213/C001–C163/KF-REC-001–053 before allocation;
-8. keep production code untouched.
+1. synthesize the narrow J10 Commerce & Fulfilment target contract;
+2. pressure-test against KF-REC-048/052/053 and earlier K9 ingress contracts;
+3. allocate KF-REC-054 only if the contract remains independently load-bearing;
+4. backward re-audit J7, J3/J4, J18, J23, K9 and J17 boundaries;
+5. then mark J10 target-aligned and choose the next first-pass journey frontier;
+6. reuse F001–F214/C001–C164/KF-REC-001–053 before any further allocation;
+7. keep production code untouched.
 ```
 
 ---
 
-## Q. Machine-readable record
+## S. Machine-readable record
 
 ```yaml
 journey: KF-JOURNEY-010
 name: Commerce / Fulfilment
-status: ACTIVE_MICROSCOPIC_FORENSICS_THROUGH_F213_C163
+status: ACTIVE_MICROSCOPIC_FORENSICS_THROUGH_F214_C164_TARGET_SYNTHESIS_READY
 implementation_baseline: 4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
 production_implementation_authorized: false
 primary_kernels: [K6,K7,K8,K9,K10,K11,K4]
 adjacent_journeys: [J3,J4,J7,J14,J17,J18,J23]
-new_findings: [F206,F207,F208,F209,F210,F211,F212,F213]
-new_contradictions: [C156,C157,C158,C159,C160,C161,C162,C163]
-reused_recommendations: [KF-REC-047,KF-REC-048,KF-REC-051,KF-REC-052,KF-REC-053]
-current_trace: recommendation_ownership_check_then_strategy_specific_fulfilment_descendants
+new_findings: [F206,F207,F208,F209,F210,F211,F212,F213,F214]
+new_contradictions: [C156,C157,C158,C159,C160,C161,C162,C163,C164]
+reused_recommendations: [KF-REC-035,KF-REC-036,KF-REC-037,KF-REC-047,KF-REC-048,KF-REC-051,KF-REC-052,KF-REC-053]
+new_recommendation_pressure: Commerce_And_Fulfilment_Contract
+current_trace: standards_frontier_synthesis
 runtime_proof: NOT_EXECUTED
 reopenable: true
 ```
