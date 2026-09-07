@@ -17,12 +17,10 @@ CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first.
 Production code remains read-only.
 J7 Financial Truth is pooled through F196/C146/KF-REC-052.
-J3/J4 Commercial Relationship & Obligation is pooled through F205/C155/KF-REC-053,
-has completed its standards/frontier pressure test and backward re-audits,
-and now has canonical J3 and J4 journey dossiers.
-Do NOT resume from the old Booking.paymentStatus checklist as though J3/J4 synthesis is unfinished.
-Resume with programme coverage / next-constellation selection, then begin the next microscopic trace.
-Leading adjacent candidates: J10 Commerce/Fulfilment and J11 Contract/Obligation/Renewal.
+J3/J4 Commercial Relationship & Obligation is pooled through F205/C155/KF-REC-053.
+J10 Commerce/Fulfilment is now ACTIVE and canonical through F209/C159.
+Resume J10 after F209/C159 — do not return to next-constellation selection.
+Start with fulfilment recovery/completeness and Shopify repeat-sync external identity.
 ```
 
 ## Context integrity
@@ -41,84 +39,100 @@ Implementation:          UNAUTHORIZED / READ-ONLY
 ## Canonical taxonomy
 
 ```text
-Findings:        F205
-Contradictions:  C155
+Findings:        F209
+Contradictions:  C159
 Recommendations: KF-REC-053
 Concepts:        KF-CONCEPT-042
 ```
 
-## J3/J4 commercial-to-cash tranche
-
-Canonical roots:
+## Mature pooled architecture
 
 ```text
-F197/C147 customer evidence vs Contact lifecycle convergence
-F198/C148 duplicate-stage customer LTV
-F199/C149 completed service vs missing required receivable
-F200/C150 deposit vs final service receivable settlement
-F201/C151 cancellation/no-show vs financial descendant disposition
-F202/C152 RevenueAttribution pipeline vs realized stage
-F203/C153 KeyCortex noncanonical status predicates
-F204/C154 booking.completed event/template/tool schema mismatch
-F205/C155 persisted Contact.status incompatible lifecycle/health dialects
+J16/K4 → KF-REC-049
+J17    → F179–F184 / C129–C134 / KF-REC-051
+J7     → F185–F196 / C135–C146 / KF-REC-052
+J3/J4  → F197–F205 / C147–C155 / KF-REC-053
 ```
 
-Canonical recommendation:
+J3/J4 have canonical dossiers, completed current-tranche pressure test and backward re-audits. Do not reopen them without new evidence.
 
-`KF-REC-053 — Commercial Relationship & Obligation Contract`
+## Active J10 dossier
 
-Canonical journey dossiers:
+`docs/intelligence/journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
 
-- `docs/intelligence/journeys/KF-JOURNEY-003-LEAD-CUSTOMER-CASH.md`
-- `docs/intelligence/journeys/KF-JOURNEY-004-BOOKING-SERVICE-PAYMENT.md`
-
-Completed current-tranche synthesis:
-
-- customer lifecycle ownership matrix complete;
-- commercial relationship/obligation standards-frontier pressure test complete;
-- J17/J18/J23 backward re-audit complete;
-- J7/K4 backward re-audit complete;
-- local proof architecture defined: 28 proof obligations / 12 deterministic fault-injection points;
-- runtime proof not executed.
-
-## Critical distinctions
+Positive seam to preserve:
 
 ```text
-CustomerLifecycleState != RelationshipHealthState != DealState/DealStage != tags/segments
-commercial customer evidence != lifecycle transition until policy says so
-pipeline/expected != committed != invoiced != collected != net realized value
-service complete != financially complete
-missing required descendant != nothing left to do
-deposit != additive charge unless explicitly modeled as one
-booking CANCELLED / NO_SHOW != financial disposition complete
-canonical event payload != template-local assumed payload
-plan-step idempotency != commercial-obligation/effect idempotency
+native paid storefront checkout
+→ one transaction:
+   Invoice workflow DRAFT→SENT→PAID
+   + Payment SUCCESSFUL
+   + ledger posting
+   + tracked stock decrement / StockMovement
+   + RevenueAttribution ORDER
+   + MarketplaceOrder paymentStatus=PAID/status=CONFIRMED
+→ commit
+→ buffered invoice events
+→ store_order.paid
 ```
 
-## Fresh source verification / unresolved inventory
+## J10 canonical roots
 
-A fresh repository trace reproduced the F200/F201/F202 behavior and did not observe a live runtime writer maintaining `Booking.paymentStatus = DEPOSIT_PAID|PAID` on the canonical payment path. Treat that field as an unresolved live-data/migration inventory question inside KF-REC-053 unless new evidence establishes a distinct root.
+### F206 / C156 — duplicate paid Invoice descendant
 
-Before implementation, still inventory:
+The checkout transaction creates paid Invoice A. `store_order.paid` then reaches mounted `CommerceIntegrationService`, whose `createRevenueRecord()` dedupe searches `notes contains order:{order.id}`. Invoice A uses only `Storefront order {orderNumber}` in notes, so a second PAID Invoice B can be created for the same order.
 
-- real persisted `Booking.paymentStatus` values/origins;
-- historical `Contact.status` values and ambiguous aliases;
-- `RevenueAttribution` live rows/consumers by stage/source/lineage;
-- representative deposit/final-invoice/payment/cancellation/no-show lineages;
-- KF-REC-053 runtime/fault-injection proof obligations.
+Target reuse: one semantic commercial effect/obligation lineage under KF-REC-053; financial truth under KF-REC-052.
+
+### F207 / C157 — operational confirmation manufactures paid semantics
+
+Authenticated UI exposes `pending → confirmed`. `updateOrderStatus(CONFIRMED)` updates only order status but emits `store_order.paid`, even while `paymentStatus` can remain PENDING/UNPAID. Paid-event consumers can then create PAID invoice semantics and route fulfilment.
+
+Target law: `OrderFulfilmentState != PaymentCompletionEvidence`.
+
+### F208 / C158 — same sold stock is decremented then reserved again
+
+`completeCheckout()` decrements tracked `InventoryStock.quantity` by Q. Post-payment fulfilment then calculates `available = quantity - reserved` and can increase `reserved` by Q for the same order item. Last-unit sale example:
+
+```text
+before: quantity=1,reserved=0
+checkout: quantity=0
+routing: available=0 < Q
+→ FulfillmentRoute FAILED
+```
+
+Target: one inventory-allocation lineage/state machine; reservation/consumption/release/restoration compose exactly once.
+
+### F209 / C159 — failed item route can still emit aggregate fulfillment_routed
+
+`routeLocalStock()` can persist and return `FulfillmentRoute.status=FAILED` without throwing. `StoreOrderRoutingListener` treats normal return as success and emits `store_order.fulfillment_routed`; `routing_failed` is emitted only on exception. Downstream contact semantics label the event “Order routed to fulfillment.”
+
+Target: aggregate fulfilment outcome derives from required per-route outcomes, not process return.
+
+## Refund classification — existing roots, not a new ID yet
+
+Store Orders refund surface only flips order/paymentStatus to REFUNDED and emits an event; it does not itself invoke provider refund, negative Payment, Invoice reconciliation, ledger reversal or stock restoration. `PaymentsService` does contain stronger negative-Payment + ledger-reversal refund primitives. Treat this as J7/KF-REC-052 entry-surface convergence pressure unless new evidence proves a distinct root.
+
+## External-commerce pressure
+
+Shopify:
+- order `financial_status` maps to `MarketplaceOrder.paymentStatus` — external evidence, not local financial convergence;
+- customer sync writes `CUSTOMER|LEAD` — reuse F205/C155;
+- product sync currently looks up by synthetic `shopify:{variantId}` SKU but persists a real provider SKU when present — repeat-sync identity behavior is the next K9/J10 investigation.
 
 ## Exact next work
 
 ```text
-1. finish context/index consistency checks after KF-REC-053 ingestion;
-2. inspect canonical journey/kernel coverage;
-3. select the highest-leverage unpooled adjacent journey;
-4. leading candidates are J10 Commerce/Fulfilment and J11 Contract/Obligation/Renewal;
-5. prefer the journey most likely to falsify/refine KF-REC-053 and other mature kernels;
-6. run MAP → MICROSCOPIC TRACE → JOURNEY → CONSTELLATION → KERNEL CROSS-REFERENCE;
-7. reopen J3/J4 only for genuinely new evidence;
-8. load 04A + 04B and reuse mature roots before allocating any new F/C/KF-REC ID;
-9. persist every material tranche and keep continuity artifacts synchronized.
+1. continue FulfillmentRoutingService across LOCAL_STOCK/DROPSHIP/PREORDER/HYBRID/MANUAL/SERVICE;
+2. classify required-route completeness, retry/idempotency, and whether failed routing becomes durable recoverable/operator work;
+3. inspect consumers of store_order.routing_failed and fulfillment_routed;
+4. verify actual Product schema SKU uniqueness plus CatalogService create/update behavior;
+5. prove Shopify product repeat-sync outcome when provider supplies a real SKU;
+6. trace Shopify order/customer external identity and correction semantics;
+7. trace cancel/refund/return stock restoration only where it adds evidence beyond F208/J7 roots;
+8. trace order events into CRM/calendar/webhooks/KEY/temporal projections;
+9. reuse F001–F209 / C001–C159 / KF-REC-001–053 before allocating any new identity;
+10. keep production code untouched and refresh continuity after each material tranche.
 ```
 
-Production code remains untouched.
+No production implementation is authorized.
