@@ -69,8 +69,9 @@ Examples:
 
 ```text
 J16 — Business Genome Evolution
+J17 — Command Center → Priority → Action
 J19 — Privacy / Deletion / Exit
-J17 — Command Center → Priority → Action  (candidate next frontier; existing canonical journey)
+J7  — Financial Truth
 ```
 
 ## Kernels
@@ -83,6 +84,8 @@ Identity source: `12-KERNEL-PROGRAMME.md`.
 Detailed dossiers: `docs/intelligence/kernels/`.
 
 `Business Knowledge Kernel`, `Knowledge Kernel`, and Genome-knowledge architecture refer to K4 unless a narrower implementation seam is explicitly intended.
+
+`Financial Truth` refers to K10 at kernel level and J7 at journey level; the journey and kernel are related but not interchangeable identifiers.
 
 ## Concepts
 
@@ -109,15 +112,21 @@ Canonical home: `08*` registers; allocation owner: 04B.
 
 Current range:
 ```text
-F001–F178
+F001–F189
 ```
 
-Latest J16/K4 roots:
+Latest pooled roots:
 ```text
 F175 epistemic readiness eligibility
 F176 prompt/current-truth eligibility
 F177 causal learning attribution
 F178 correction/withdrawal influence lineage
+F179–F184 Command Center / operator-attention roots
+F185 live cash ownership
+F186 multi-currency valuation
+F187 payroll financial outcome
+F188 PayPal capture financial consequence completeness
+F189 canonical financial source identity / CreditNote reversal reachability
 ```
 
 ## Contradictions
@@ -130,15 +139,18 @@ Canonical home: `09*` registers; allocation owner: 04B.
 
 Current range:
 ```text
-C001–C128
+C001–C139
 ```
 
-Latest roots:
+Latest pooled roots:
 ```text
-C125 weak fact vs automation-ready state
-C126 weak/stale/disputed fact vs active prompt current knowledge
-C127 one outcome vs confidence update across unrelated recommendation patterns
-C128 corrected source knowledge vs still-active derivatives
+C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
+C129–C134 J17 Command Center / operator-control contradictions
+C135 live cash projection vs ledger-derived truth
+C136 heterogeneous currency addition vs valuation truth
+C137 PayrollRun PAID vs proved disbursement/accounting consequence
+C138 provider/payment/invoice success vs payment accounting consequence completion
+C139 canonical Invoice posting lineage vs mismatched CreditNote lookup discriminator
 ```
 
 ## Recommendations
@@ -151,7 +163,7 @@ Canonical home: `10*` continuations; allocation owner: 04B.
 
 Current range:
 ```text
-KF-REC-001–KF-REC-050
+KF-REC-001–KF-REC-052
 ```
 
 Current major targets:
@@ -160,6 +172,8 @@ KF-REC-047 Temporal Work Projection
 KF-REC-048 certainty-aware Recovery Contract
 KF-REC-049 provenance/revision-aware Business Knowledge Contract
 KF-REC-050 load-bearing WorkDefinition controls
+KF-REC-051 Operator Attention & Priority Contract
+KF-REC-052 Financial Truth & Valuation Contract
 ```
 
 ## Decisions
@@ -222,6 +236,8 @@ AUTHORITY     authoritative | derived | advisory | compatibility
 | Execution Claim | KF-CONCEPT-028 | exclusive consumption/effect pursuit, distinct from AttemptOwnership |
 | Temporal Work Projection | KF-REC-047 target | derived operator projection, not workflow truth |
 | Recovery Control Twin | J23/J18 target-candidate | derived operational lens, not separate source of truth |
+| Operator Attention & Priority Contract | KF-REC-051 | governs derivative attention/priority semantics, not business truth or authority |
+| Financial Truth & Valuation Contract | KF-REC-052 | governs financial truth layers, valuation and consequence completeness |
 | historical workflow-control findings | F167/F168 | remapped by 04B |
 | historical recurrence findings | F169/F170 | remapped by 04B |
 | historical provider-recovery findings | F171/F172 | remapped by 04B |
@@ -283,6 +299,11 @@ Stored fact != EpistemicEligibility for a consumer
 Correction != descendant convergence
 Projection != authoritative truth
 Learning != authority
+Operational financial state != external money reality != accounting truth
+Payment row existence != financial consequence completeness
+Webhook receipt identity != descendant consequence completion
+Native currency amount != reporting valuation amount
+Financial source string literal != canonical FinancialSourceIdentity
 ```
 
 ---
@@ -314,7 +335,7 @@ load 04B
 8. `04B` owns numeric F/C/KF-REC allocation.
 9. Journey/Kernel maps own J/K identity.
 10. CURRENT/HANDOFF/ROLLOVER carry current ranges/frontier.
-11. A duplicate is an intelligence-integrity defect and is repaired before broad analysis continues.
+11. A duplicate or stale canonical range is an intelligence-integrity defect and is repaired before broad analysis continues.
 12. Search/reuse is mandatory across ChatGPT, Claude Code and Kimi Code sessions.
 
 ---
@@ -324,13 +345,13 @@ load 04B
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F178
-Contradiction range:     through C128
-Recommendation range:    through KF-REC-050
+Finding range:           through F189
+Contradiction range:     through C139
+Recommendation range:    through KF-REC-052
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-The discovered historical collision band is reconciled without deleting evidence. K4 candidate vocabulary remains reserved rather than prematurely promoted.
+The historical collision band remains reconciled without deleting evidence. K4 candidate vocabulary remains reserved rather than prematurely promoted. J17 and J7 targets remain recommendations, not new parallel systems.
 
 No production implementation is authorized by this taxonomy artifact.
