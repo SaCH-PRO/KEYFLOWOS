@@ -19,6 +19,7 @@ F185–F196 J7 Financial Truth
 F197–F205 J3/J4 commercial-to-cash
 F206–F214 J10 Commerce/Fulfilment
 F215–F218 J11 Contract/Obligation/Renewal
+F219       J12 Document/Evidence Lifecycle
 ```
 
 ```text
@@ -29,6 +30,7 @@ C135–C146 J7 contradictions
 C147–C155 J3/J4 contradictions
 C156–C164 J10 contradictions
 C165–C168 J11 contradictions
+C169       J12 Document/Evidence Lifecycle
 ```
 
 Current recommendation range is through `KF-REC-055`.
@@ -112,18 +114,34 @@ commercial obligation discipline    → KF-REC-053
 
 It does not authorize a universal event store, EDMS/CLM suite, second workflow runtime, second attention queue, second knowledge engine or jurisdiction-wide legal-rules engine.
 
+## J12 Document / Evidence Lifecycle allocations
+
+- F219 / C169 — transient document extraction or raw-text fallback can be admitted directly as successful payment evidence, including explicitly low-confidence fallback output, without an observed consumer-specific evidence-admission / verification decision before `Payment SUCCESSFUL`, Invoice state mutation and downstream financial consequences — `08AV` / `09AV`.
+
+J12 anti-duplication decisions:
+
+```text
+manual inline edit approved through stale stored version → F161 / KF-REC-049 specialization
+AI tweak partial mutation vs version evidence            → check F164 before allocation
+contract extraction promotion                            → F216/C166 + KF-REC-055 manifestation
+payment evidence admission                               → F219/C169 J12/K8 root; delegates epistemics to KF-REC-049 and financial claim strength to KF-REC-052
+same payment evidence replay / fresh payment identity    → KF-REC-048 specialization; no F220 from this seam
+```
+
+F219 owns only the document/evidence admission boundary. It does not create a second knowledge/provenance system, financial-truth system or recovery/idempotency system.
+
 ## Current ranges
 
 ```text
-Findings:        F001–F218
-Contradictions:  C001–C168
+Findings:         F001–F219
+Contradictions:   C001–C169
 Recommendations: KF-REC-001–KF-REC-055
 ```
 
 Next free IDs:
 
 ```text
-F219 / C169 / KF-REC-056
+F220 / C170 / KF-REC-056
 ```
 
 ## Agent pre-allocation gate
