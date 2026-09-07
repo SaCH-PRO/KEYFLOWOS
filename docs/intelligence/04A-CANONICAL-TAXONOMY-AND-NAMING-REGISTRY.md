@@ -41,26 +41,19 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Journeys: `J1 ... J25` — `03-ANALYSIS-MAP.md`.
 - Kernels: `K1 ... K12` — `12-KERNEL-PROGRAMME.md`.
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
-- Findings: `F001–F217` — `08*`; allocator 04B.
-- Contradictions: `C001–C167` — `09*`; allocator 04B.
+- Findings: `F001–F218` — `08*`; allocator 04B.
+- Contradictions: `C001–C168` — `09*`; allocator 04B.
 - Recommendations: `KF-REC-001–KF-REC-054` — `10*`; allocator 04B.
 
 Latest roots:
 ```text
 F185–F196 / C135–C146 — J7 Financial Truth
 F197–F205 / C147–C155 — J3/J4 commercial-to-cash
-F206/C156 — duplicate paid-Invoice descendant ownership for one storefront order
-F207/C157 — operational order CONFIRMED emits paid semantics while payment state can remain unpaid
-F208/C158 — checkout/routing/shipment/correction compete for ownership of one tracked-stock effect
-F209/C159 — aggregate fulfillment_routed can be emitted while required route state is FAILED
-F210/C160 — Shopify variant lookup identity differs from persisted Product identity
-F211/C161 — partial fulfilment route set can block recovery because any existing route is treated as complete
-F212/C162 — Shopify order/customer sync writers disagree on Contact identity resolution
-F213/C163 — Shopify order enters native MarketplaceOrder without native relational item descendants
-F214/C164 — strategy-specific PurchaseOrder/PreOrder can commit before FulfillmentRoute, so route-based retry can duplicate the same fulfilment obligation
+F206–F214 / C156–C164 — J10 Commerce/Fulfilment
 F215/C165 — ContractVersion is not a complete reconstructable authoritative Contract revision history
 F216/C166 — uncertain AI contract extraction can be promoted into authoritative Contract/renewal truth without epistemic/governance promotion evidence
-F217/C167 — supplied Contract lifecycle status can falsely discharge renewal work; ACTIVE is also simultaneously eligible to raise that work
+F217/C167 — supplied Contract lifecycle status can falsely discharge renewal work; ACTIVE is simultaneously eligible to raise that work
+F218/C168 — Contract retention semantics do not constrain hard deletion, which cascades Contract-owned evidence/history
 ```
 
 Current major pooled targets:
@@ -85,25 +78,22 @@ Commercial evidence != lifecycle transition until policy says so
 Pipeline/expected != committed != invoiced != collected != net-realized value
 Service complete != financially complete
 OrderOperationalState != PaymentCompletionEvidence != AggregateFulfilmentOutcome
-One order occurrence != permission for multiple paid-Invoice descendants
-Free-form notes != canonical commercial-effect identity
 Inventory reservation != inventory consumption != release/restoration
 Route row created != required route outcome satisfied
-Normal routeOrder return != aggregate fulfilment success
 Any existing child effect != complete required descendant set
-FulfillmentRoute absence != absence of an already-committed strategy business effect
 Merchant SKU != immutable provider external identity
 Mutable customer email != immutable provider customer identity
-Provider metadata line items != native operational OrderItem descendants
-External provider paid/refunded label != local Payment/ledger convergence
 Plan-step/process idempotency != semantic effect idempotency
 Document extraction assertion != authoritative Contract truth
 Contract current projection != ContractRevision evidence/history
 Contract definition/source identity != renewal WorkOccurrence identity
-Derived alert fact != durable operator disposition
-Contract deletion != obligation settlement/cancellation by implication
 ContractLifecycleState != RenewalDecisionOccurrence != RenewalDecisionEvidence != RenewalObligationDisposition
 DTO contains status != status transition != evidence that a renewal decision occurred
+Derived alert fact != durable operator disposition
+Future renewal visibility != actionable renewal obligation
+Contract deletion != obligation settlement/cancellation by implication
+RetentionPolicy != decorative metadata when exposed as domain retention state
+ARCHIVE / RETIRE / SUPERSEDE != HARD DELETE
 ```
 
 ---
@@ -126,6 +116,8 @@ DTO contains status != status transition != evidence that a renewal decision occ
 | ContractAssertion / extraction evidence | J11 specialization of K4/KF-REC-049; not authoritative by default |
 | Renewal WorkOccurrence | J11 specialization of J23/KF-REC-047; one cycle != Contract definition identity |
 | RenewalDecision | J11 target vocabulary under F217/C167; requires occurrence-specific qualifying evidence |
+| Contract retention decision | J11 target vocabulary under F218/C168; enforcement shape not frozen |
+| ContractAlert | J11 local contextual derived projection; not a second canonical obligation spine |
 | Contract renewal operator disposition | J11 specialization of J17/KF-REC-051; recomputation must preserve disposition |
 | CustomerLifecycleState | KF-REC-053 target vocabulary; exact enum not frozen |
 | RelationshipHealthState | KF-REC-053; orthogonal to lifecycle |
@@ -167,36 +159,27 @@ DTO contains status != status transition != evidence that a renewal decision occ
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F217
-Contradiction range:     through C167
+Finding range:           through F218
+Contradiction range:     through C168
 Recommendation range:    through KF-REC-054
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-Next free:               F218 / C168 / KF-REC-055 — UNALLOCATED
+Next free:               F219 / C169 / KF-REC-055 — UNALLOCATED
 ```
 
-J3/J4 are provisionally converged and target-aligned through KF-REC-053. J10 is provisionally converged and target-aligned through KF-REC-054 after its standards/frontier pressure test and backward re-audit. J11 is active through F217/C167 with no recommendation yet allocated.
-
-Current J10 homes:
-- `journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
-- F206/C156 — `08AK` / `09AK`
-- F207/C157 — `08AL` / `09AL`
-- F208–F209/C158–C159 — `08AM` / `09AM`
-- F210/C160 — `08AN` / `09AN`
-- F211/C161 — `08AO` / `09AO`
-- F212/C162 — `08AP` / `09AP`
-- F213/C163 — `08AQ` / `09AQ`
-- F214/C164 — `08AR` / `09AR`
-- `KF-REC-054` — `10M`
+J3/J4 are provisionally converged through KF-REC-053. J10 is provisionally converged through KF-REC-054 after pressure test + backward re-audit. J11 is active through F218/C168 with no recommendation yet allocated.
 
 Current J11 homes / reuse decisions:
 - `journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md`
 - F215–F216 — `08AS`; C165–C166 — `09AS`
 - F217 — `08AT`; C167 — `09AT`
+- F218 — `08AU`; C168 — `09AU`
 - renewal-cycle identity → reuse J23 / KF-REC-047
 - ContractAlert disposition resurrection → reuse F182 / KF-REC-051
+- local alert temporal advancement → reuse J23 / KF-REC-047
 - Contract deletion orphaning renewal work → reuse F182 / KF-REC-051
-- hard deletion of Contract history → strengthens F215/C165 pending retention-specific analysis
+- renewal-date/notice correction leaving stale work → reuse F182 / KF-REC-051
+- clauseAnalysis → derived/advisory projection; value-density review, not authoritative ContractRevision by default
 
 Do not allocate new recurrence/operator-projection/knowledge roots where mature KF-REC-047/049/051 already own the semantic defect. Do not allocate a J11 recommendation until irreducible contract-domain semantics remain after delegation.
 
