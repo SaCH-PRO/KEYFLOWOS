@@ -112,7 +112,7 @@ Canonical home: `08*` registers; allocation owner: 04B.
 
 Current range:
 ```text
-F001–F189
+F001–F192
 ```
 
 Latest pooled roots:
@@ -127,6 +127,9 @@ F186 multi-currency valuation
 F187 payroll financial outcome
 F188 PayPal capture financial consequence completeness
 F189 canonical financial source identity / CreditNote reversal reachability
+F190 provider webhook receipt vs financial consumption completeness
+F191 reconciliation lock vs later current-period corrective reversal
+F192 AccountingPeriod CLOSED vs canonical posting enforcement
 ```
 
 ## Contradictions
@@ -139,7 +142,7 @@ Canonical home: `09*` registers; allocation owner: 04B.
 
 Current range:
 ```text
-C001–C139
+C001–C142
 ```
 
 Latest pooled roots:
@@ -151,6 +154,9 @@ C136 heterogeneous currency addition vs valuation truth
 C137 PayrollRun PAID vs proved disbursement/accounting consequence
 C138 provider/payment/invoice success vs payment accounting consequence completion
 C139 canonical Invoice posting lineage vs mismatched CreditNote lookup discriminator
+C140 provider webhook receipt vs incomplete financial consequence processing
+C141 closed historical accounting evidence vs representability of later refund/reversal
+C142 AccountingPeriod CLOSED vs new in-period postings through PostingService
 ```
 
 ## Recommendations
@@ -304,6 +310,8 @@ Payment row existence != financial consequence completeness
 Webhook receipt identity != descendant consequence completion
 Native currency amount != reporting valuation amount
 Financial source string literal != canonical FinancialSourceIdentity
+AccountingPeriod CLOSED != posting prohibition unless enforced at ledger write door
+Reconciliation lock != prohibition on new current-period corrective consequence
 ```
 
 ---
@@ -345,8 +353,8 @@ load 04B
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F189
-Contradiction range:     through C139
+Finding range:           through F192
+Contradiction range:     through C142
 Recommendation range:    through KF-REC-052
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
