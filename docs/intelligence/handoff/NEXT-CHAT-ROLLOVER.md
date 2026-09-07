@@ -13,12 +13,9 @@ Load 04-CONCEPT-REGISTRY.md, 04A, 04B, 07-CURRENT-STATE.md,
 CURRENT-HANDOFF.md, CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first. Production code remains read-only.
 J11 is provisionally converged through F218/C168/KF-REC-055.
-J12 is ACTIVE through F220/C170.
-Do NOT resume post-J11 frontier selection or J11 pressure testing.
-Next free IDs are F221 / C171 / KF-REC-056 and remain UNALLOCATED.
-Exact frontier: direct AI upload → generated Document tweak crash/F164 closure → accepted-evidence correction/replacement/supersession/deletion.
-Device reviewed-state reprocessing is F161/KF-REC-049 reuse, not F221.
-Expense receipt extraction prefills editable fields and requires explicit human submit; provenance remains open pressure, not a new root yet.
+J12 is ACTIVE through F221/C171 at the pre-pooling convergence gate.
+Next free IDs: F222 / C172 / KF-REC-056 — UNALLOCATED.
+Exact frontier: trace downstream descendants after source correction/supersession/destruction; compare against F178/C128; then decide whether F219-F221 are sufficient for a bounded J12 target and standards pressure test before KF-REC-056.
 ```
 
 ## Baseline / ranges
@@ -27,28 +24,28 @@ Expense receipt extraction prefills editable fields and requires explicit human 
 repository:        SaCH-PRO/KEYFLOWOS
 main:              8f173bfe79f1418159cf4099ea18b0d60d203ec2
 intelligence:      docs/keyflow-intelligence-foundation
-Findings:          F220
-Contradictions:    C170
+Findings:          F221
+Contradictions:    C171
 Recommendations:  KF-REC-055
 Concepts:          KF-CONCEPT-042
-next free:         F221 / C171 / KF-REC-056
+next free:         F222 / C172 / KF-REC-056
 runtime proof:     NOT EXECUTED
 ```
 
 ## J12 canonical roots
 
 ```text
-F219/C169 — transient document assertion can become successful payment evidence without explicit consumer-specific evidence admission
-F220/C170 — a materially new external document revision can be suppressed as the prior ingestion occurrence when stable object identity is used as dedupe identity
+F219/C169 — document assertion → successful payment evidence without explicit consumer-specific admission
+F220/C170 — new external document revision suppressed as prior ingestion occurrence by object-id-only dedupe
+F221/C171 — DocumentInstance hard delete destroys/detaches version-review proof without disposition decision
 ```
 
 Homes:
 
 ```text
-F219 → docs/intelligence/08AV-FINDING-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
-C169 → docs/intelligence/09AV-CONTRADICTION-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
-F220 → docs/intelligence/08AW-FINDING-REGISTER-DOCUMENT-SOURCE-REVISION-OCCURRENCE-SUPPLEMENT.md
-C170 → docs/intelligence/09AW-CONTRADICTION-REGISTER-DOCUMENT-SOURCE-REVISION-OCCURRENCE-SUPPLEMENT.md
+F219/C169 → 08AV / 09AV
+F220/C170 → 08AW / 09AW
+F221/C171 → 08AX / 09AX
 ```
 
 Dossier:
@@ -57,41 +54,31 @@ Dossier:
 Consumer trace:
 `docs/intelligence/investigations/J12-DOCUMENT-INTELLIGENCE-CONSUMER-REVISION-LINEAGE-TRACE.md`
 
-## Key distinctions / delegations
-
-```text
-Document assertion != qualifying evidence != domain truth
-ExternalObjectId != ExternalSourceRevisionId != ExtractionOccurrenceId != IngestionOccurrenceId
-J12 evidence admission → F219/C169
-J12 source-revision occurrence boundary → F220/C170
-generic revision/provenance → KF-REC-049
-ingress occurrence direction → KF-REC-035
-financial claim strength → KF-REC-052
-same-occurrence replay/effect identity → KF-REC-048
-```
-
 ## Reuse checkpoint
 
 ```text
-manual DocumentSection edit later approved through stale version → F161 / KF-REC-049
-Device ACCEPTED/REJECTED VisualIntake reprocessed in-place → F161 / KF-REC-049; NO F221
-AI tweak partial mutation/version crash → exact F164 check remains open
-contract extraction promotion → F216/C166 + KF-REC-055
+manual DocumentSection edit approved through stale version → F161 / KF-REC-049
+Device reviewed-state reprocessing → F161 / KF-REC-049
+AI tweak mutation before version evidence → F164 / KF-REC-049
+Drive import replacement without version → F161 + F164 pressure
+contract extraction → F216/C166 + KF-REC-055
 payment evidence replay → KF-REC-048
-Expense extract-receipt → editable human-submit seam; provenance open, no root yet
+Expense extraction → explicit editable human submit; provenance pressure only
+Direct AI document processing → extraction-only boundary
 Drive R2 suppressed as duplicate R1 → F220/C170
+DocumentInstance destructive delete → F221/C171 + J19 pressure
 ```
 
 ## Exact next work
 
 ```text
-1. inspect direct AI upload endpoint: extraction-only vs downstream side effect;
-2. close generated Document tweak crash boundary against F164;
-3. trace correction/replacement/supersession/deletion across accepted evidence;
-4. follow Expense provenance only where materially distinct consequences exist;
-5. classify all seams before F221/C171;
-6. pool stable J12 roots before considering KF-REC-056;
+1. trace dependent domain/ingestion/AI state after evidence revision correction, supersession or destruction;
+2. compare stale descendants against F178/C128 before F222/C172;
+3. update the J12 consumer investigation;
+4. pool F219-F221 with reused F161/F164/F178/KF-REC-035/048/049/052;
+5. if stable, run standards/frontier pressure test;
+6. allocate KF-REC-056 only if a bounded irreducible J12 contract remains;
 7. keep production untouched and do not claim runtime proof.
 ```
 
-If continuity is lost, resume from **J12 F220/C170 source-revision occurrence checkpoint**.
+If continuity is lost, resume from **J12 F221/C171 pre-pooling convergence gate**.
