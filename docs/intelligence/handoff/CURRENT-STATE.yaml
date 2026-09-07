@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-analysis_version: 46
+analysis_version: 47
 last_updated: 2026-09-07
 phase: whole_system_virtual_model_j11_microscopic_trace
 status: J11_CONTRACT_OBLIGATION_RENEWAL_ACTIVE
@@ -12,7 +12,8 @@ source_evidence_policy:
   implementation_authority: reachable_repository_behavior
 implementation_evidence:
   branch: main
-  exact_head_status: REVALIDATE_BEFORE_SHA_CLAIMS
+  current_head: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+  head_revalidated: true
 canonical_ranges:
   findings_through: F216
   contradictions_through: C166
@@ -34,43 +35,53 @@ mature_pools:
 
 j11:
   status: ACTIVE_MICROSCOPIC_TRACE
+  dossier: docs/intelligence/journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md
+  latest_trace: docs/intelligence/investigations/J11-CONTRACT-RENEWAL-PROJECTION-OCCURRENCE-CONVERGENCE-TRACE.md
   allocated_findings:
     F215: ContractVersion is not a complete reconstructable authoritative Contract revision history.
     F216: AI contract extraction can promote uncertain inferred values into authoritative Contract and renewal state without epistemic/governance promotion evidence.
   allocated_contradictions:
     C165: ContractVersion implies revision history while mutations can bypass it and records cannot reconstruct state.
     C166: Contract extraction carries uncertainty while registry consumption treats promoted values as current truth.
-  reused_law:
-    renewal_occurrence_identity: KF-REC-047
+  reuse_verdicts:
+    renewal_occurrence_identity: J23_KF_REC_047_SPECIALIZATION
+    contract_alert_ack_regeneration: F182_KF_REC_051_SPECIALIZATION
+    delete_source_orphans_obligation: F182_KF_REC_051_SPECIALIZATION
+    hard_delete_destroys_history: F215_C165_STRENGTHENING
+    ai_fact_drives_work: F216_C166_KF_REC_049_COMPOSITION
+
+confirmed_dynamic_breaks:
+  - ContractAlert delete/recreate can erase acknowledgement disposition.
+  - Contract hard delete emits no obligation settlement and can leave independently persisted renewal work orphaned.
+  - Contract-owned version/alert descendants cascade on hard delete, strengthening the revision-history defect.
+  - The renewal five-tuple correctly dedupes repeat emissions for one occurrence but cannot distinguish a later renewal cycle; a terminal CommandItem can therefore suppress a genuinely new occurrence.
+
+positive_seams:
+  - ObligationListener upsert preserves disposition while refreshing facts.
+  - Contract status update has explicit WORK_OBLIGATION_SETTLED path for ACTIVE EXPIRED TERMINATED ARCHIVED.
+  - Repeated sweep emission is safe under the obligation five-tuple for the same occurrence.
 
 active_frontier:
   stage: J11_MICROSCOPIC_TRACE
   primary_journey: J11
   focus:
-    - ALERT_ACKNOWLEDGEMENT_REGENERATION_ANTI_DUPLICATION
-    - CONTRACT_DELETION_CORRECTION_VS_RAISED_RENEWAL_WORK
-  instruction: Anti-duplicate alert disposition against J17/KF-REC-051 before any F217/C167 allocation, then trace source Contract termination/deletion/correction into already-created renewal work and its cancellation/supersession/settlement semantics.
-
-constellation_links:
-  - J11_J12_DOCUMENT_EVIDENCE_K4
-  - J11_J23_TEMPORAL_RECURRENCE
-  - J11_J18_RECOVERY
-  - J11_J17_OPERATOR_ATTENTION
-  - J11_J7_VALUATION
-  - J11_J3_J4_COMMERCIAL_OBLIGATION
+    - CLASSIFY_CONTRACT_ALERT_TYPES_VS_OPERATOR_OBLIGATION_AND_TEMPORAL_PROJECTION
+    - TEST_ACTIVE_STATUS_AS_RENEWAL_SETTLEMENT_SEMANTICS
+    - TRACE_RETENTION_POLICY_VS_HARD_DELETE
+    - TRACE_MUTATION_AUTHORIZATION_AUDIT_AND_REEVALUATION_SYMMETRY
+  instruction: Determine whether ContractAlert and CommandItem are intentionally distinct projections or redundant durable attention systems. Classify each ContractAlertType. Trace whether ACTIVE can prematurely or ambiguously discharge renewal work, retentionPolicy/retentionUntil versus hard delete, and every material mutation/delete door for audit/revision/renewal re-evaluation. Reuse mature J17/J23/K4 roots before any new allocation.
 
 exact_next_action:
-  title: anti_duplicate_alert_disposition_then_trace_contract_deletion
-  instruction: Fetch J17 findings F179-F184, contradictions C129-C134 and KF-REC-051. Classify the ContractAlert acknowledgement-regeneration loop as SAME, SPECIALIZATION, RELATED_DISTINCT or GENUINELY_NEW. Do not allocate F217/C167 until this gate completes. Revalidate current main implementation evidence, then trace ContractsService delete/update/regenerate and ContractRenewalSweep plus Prisma downstream relations. Persist only genuinely new architecture roots. Keep production code read-only.
+  title: classify_attention_roles_then_retention_and_settlement_semantics
+  instruction: Trace ContractAlertType EXPIRY_30 EXPIRY_7 EXPIRY_1 RENEWAL_DUE EXPIRED through UI and consumers and compare with CommandItem CONTRACT_RENEWAL/Temporal Work. Then trace status ACTIVE settlement meaning across renewal-date changes and next-cycle recurrence. Trace retentionPolicy/retentionUntil against deleteContract and authorization/audit evidence. Allocate nothing unless a genuinely distinct semantic owner survives anti-duplication. Keep production code read-only.
 
 constraints:
   - production_code_read_only
   - source_documents_do_not_override_repository_behavior
   - anti_duplication_before_allocation
-  - do_not_allocate_F217_C167_yet
-  - do_not_allocate_KF_REC_055_prematurely
-  - document_extraction_not_authoritative_truth_by_default
-  - renewal_occurrence_identity_reuses_temporal_kernel
-  - projection_recomputation_must_not_silently_erase_durable_disposition
-  - contract_deletion_not_equal_business_obligation_cancellation
+  - F217_C167_KF_REC_055_remain_unallocated
+  - recurrence_requires_occurrence_identity_not_definition_identity
+  - derived_fact_recomputation_must_preserve_durable_disposition
+  - contract_deletion_not_equal_obligation_cancellation
+  - hard_delete_must_not_silently_erase_required_history
   - continuously_refresh_cross_agent_continuity
