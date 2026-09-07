@@ -5,7 +5,7 @@ Status: CANONICAL CURRENT PROGRAMME STATE
 
 ## Analytical phase
 
-`WHOLE-SYSTEM VIRTUAL MODEL / J11 CONTRACT-INTEGRITY TARGET SYNTHESIS + BACKWARD RE-AUDIT COMPLETE / NEXT FRONTIER SELECTION`
+`WHOLE-SYSTEM VIRTUAL MODEL / J12 DOCUMENT-EVIDENCE MICROSCOPIC FORENSICS / F219-C169 PAYMENT-EVIDENCE ADMISSION ROOT ALLOCATED`
 
 Production implementation remains **READ-ONLY / UNAUTHORIZED**.
 Runtime proof has **NOT** been executed.
@@ -38,11 +38,11 @@ Revalidate if `main` gains code-bearing changes.
 ## Canonical ranges
 
 ```text
-Findings:         F001–F218
-Contradictions:   C001–C168
+Findings:         F001–F219
+Contradictions:   C001–C169
 Recommendations: KF-REC-001–KF-REC-055
 Concepts:         KF-CONCEPT-001–KF-CONCEPT-042
-Next free:        F219 / C169 / KF-REC-056
+Next free:        F220 / C170 / KF-REC-056
 ```
 
 Mandatory governors: `04-CONCEPT-REGISTRY.md`, `04A`, `04B`.
@@ -68,113 +68,88 @@ KF-REC-055 Contract Integrity & Renewal Contract
 - J23/J18 → KF-REC-047/048 temporal/recovery pool.
 - J7 → F185–F196 / C135–C146 / KF-REC-052.
 - J3/J4 → F197–F205 / C147–C155 / KF-REC-053; provisionally converged.
-- J10 → F206–F214 / C156–C164 / KF-REC-054; provisionally converged after pressure test/backward re-audit.
-- **J11 → F215–F218 / C165–C168 / KF-REC-055; provisionally converged after pressure test/backward re-audit.**
+- J10 → F206–F214 / C156–C164 / KF-REC-054; provisionally converged.
+- J11 → F215–F218 / C165–C168 / KF-REC-055; provisionally converged.
+- **J12 → ACTIVE microscopic forensics through F219/C169; no recommendation allocated yet.**
 
-## J11 durable result
+## Active J12 frontier
 
 Dossier:
-`journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md`
+`journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md`
 
-Microscopic trace:
-`investigations/J11-CONTRACT-RENEWAL-PROJECTION-OCCURRENCE-CONVERGENCE-TRACE.md`
-
-Pressure test:
-`investigations/J11-CONTRACT-OBLIGATION-RENEWAL-STANDARDS-FRONTIER-PRESSURE-TEST.md`
-
-Backward re-audit:
-`investigations/J11-J12-J23-J18-J17-J7-J3-J4-K4-K6-K7-K8-K11-CONTRACT-INTEGRITY-BACKWARD-REAUDIT.md`
-
-Recommendation:
-`10N-RECOMMENDATION-REGISTER-CONTRACT-INTEGRITY-RENEWAL-CONTINUATION.md`
-
-Canonical roots:
+Canonical root:
 
 ```text
-F215/C165 ContractVersion/current Contract mutation does not provide reconstructable authoritative revision history
-F216/C166 uncertain AI contract extraction can become authoritative Contract/renewal truth without promotion evidence
-F217/C167 generic Contract edit/status presence can falsely discharge renewal work; ACTIVE is also renewal-eligible
-F218/C168 retention semantics do not constrain hard delete, which cascades Contract-owned evidence/history
+F219/C169 — transient document assertions can be admitted as successful payment evidence without an explicit consumer-specific evidence-admission decision
 ```
 
-## KF-REC-055 target boundary
-
-KF-REC-055 owns only:
+Homes:
 
 ```text
-ContractRevision authoritative agreement-state lineage
-contract-specific assertion promotion into accepted ContractRevision
-RenewalDecision binding to the relevant ContractRevision + RenewalOccurrence
-RetentionDeletionDecision for agreement archival/destructive disposition
+08AV-FINDING-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+09AV-CONTRADICTION-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
 ```
 
-Explicit delegations:
+Reachable payment-evidence chain:
 
 ```text
-provenance / epistemic eligibility → KF-REC-049
-occurrence / temporal work mechanics→ KF-REC-047
-recovery / outcome certainty        → KF-REC-048
-operator attention / disposition    → KF-REC-051
-financial truth / valuation         → KF-REC-052
-commercial obligation discipline    → KF-REC-053
-generic governance / clearance      → K3
-cross-domain evidence architecture  → K8
+CommerceController
+→ PaymentEvidenceService.processEvidence()
+→ DocumentIntelligence extraction OR raw-text fallback
+→ transient payment-like assertion
+→ no observed consumer-specific admission/verification gate
+→ CommerceService.recordPayment()
+→ Payment SUCCESSFUL
+→ Invoice / financial consequences
 ```
 
-## Reuse / non-allocation decisions
+The raw-text fallback can explicitly carry low confidence (`0.3`) without an observed admission threshold before the payment mutation.
+
+F219 owns only the J12/K8 document/evidence admission boundary. It delegates:
 
 ```text
-renewal-cycle occurrence identity                  → J23 / KF-REC-047
-ContractAlert acknowledgement resurrection         → F182 / KF-REC-051
-ContractAlert threshold time progression           → J23 / KF-REC-047
-source deletion leaves renewal work orphaned       → F182 / KF-REC-051
-renewal date/notice correction leaves stale work   → F182 / KF-REC-051
-local renewal alert vs obligation actionability    → KF-REC-047/051 pressure; no new root
-clauseAnalysis                                     → advisory derived projection/value-density review
+generic provenance / epistemic eligibility → KF-REC-049
+financial claim strength / valuation        → KF-REC-052
+retry / replay / effect identity            → KF-REC-048
 ```
 
-## J11 backward re-audit verdict
+## J12 anti-duplication decisions
 
 ```text
-KF-REC-055 invalidated                               = NO
-parallel knowledge/provenance system                = NO
-parallel temporal/workflow system                   = NO
-parallel operator-attention system                  = NO
-parallel recovery system                            = NO
-parallel financial-truth system                     = NO
-parallel commercial-obligation system               = NO
-parallel governance/evidence runtime                = NO
-universal records/contract mega-runtime required    = NO
-new finding/contradiction from backward re-audit    = NO
-J11 target provisionally converged                  = YES
-runtime proof executed                              = NO
-production implementation authorized                = NO
+manual inline edit approved through stale version      → F161 / KF-REC-049
+AI tweak partial mutation vs version evidence          → exact F164 check still open
+contract extraction promotion                          → F216/C166 + KF-REC-055
+payment-evidence admission                             → F219/C169
+same payment evidence replay / fresh payment identity  → KF-REC-048 specialization; NO F220
 ```
+
+The replay seam is not a second J12 root: J18/KF-REC-048 already requires retries to preserve semantic EffectId and successful effect evidence to prevent duplicate effect.
+
+## J11 state remains stable
+
+J11 stays provisionally converged / target-aligned through F218/C168/KF-REC-055 and remains reopenable if J12 or later proof invalidates its assumptions. Do not convert KF-REC-055 into an implementation packet merely because its target is synthesized.
 
 ## Immediate programme frontier
-
-J11 returns to the pooled whole-system model. Do **not** convert KF-REC-055 into an implementation packet.
 
 Exact next action:
 
 ```text
-1. load 03-ANALYSIS-MAP + current journey dossier inventory;
-2. identify genuinely unpooled / under-covered first-pass journeys;
-3. compare reachable native implementation footprint and cross-kernel leverage;
-4. activate the highest-leverage next frontier;
-5. begin microscopic tracing from a native domain write/effect path;
-6. reuse F001–F218 / C001–C168 / KF-REC-001–055 before allocating anything new;
-7. keep production code untouched.
+1. continue J12 microscopic tracing across all material DocumentIntelligence consumers;
+2. trace stable source identity + exact source revision across upload, Drive, Asset, Device and Expense paths;
+3. identify which consumers persist extraction/assertion evidence versus only final domain state;
+4. trace correction/reprocessing/replacement/supersession/deletion and descendant invalidation;
+5. close the Document tweak crash boundary against F164 before any new allocation;
+6. classify new manifestations against F219/KF-REC-049/KF-REC-048/KF-REC-052 before F220/C170;
+7. pool stable J12 roots before considering KF-REC-056;
+8. keep production code untouched.
 ```
-
-J11 remains reopenable if J12, later journeys, migration design or runtime/concurrency/fault proof falsifies its target semantics.
 
 ## Do not yet
 
 - modify production code;
-- create implementation tickets merely because KF-REC-055 is synthesized;
-- allocate F219/C169/KF-REC-056 without the canonical anti-duplication gate;
-- make ContractAlert a second global obligation system;
-- infer renewal decisions from Contract.status alone;
-- claim jurisdiction-specific retention obligations without evidence;
-- claim runtime proof passed unless actually executed.
+- claim runtime proof passed;
+- allocate F220/C170 without the canonical anti-duplication gate;
+- allocate KF-REC-056 merely because F219 exists;
+- create a universal document/evidence runtime without proving physical convergence value;
+- duplicate KF-REC-049 epistemics, KF-REC-048 effect identity/recovery, or KF-REC-052 financial truth;
+- resume obsolete post-J11 frontier selection — J12 is already active.
