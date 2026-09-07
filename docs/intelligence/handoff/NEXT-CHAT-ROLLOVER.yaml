@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 21
+rollover_version: 22
 last_updated: 2026-09-06
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -8,7 +8,8 @@ context_integrity: PASS
 repository: SaCH-PRO/KEYFLOWOS
 implementation_evidence:
   branch: main
-  current_head: 9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
+  current_head: 4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
+  previous_head: 9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   delta_class: audit_architecture_journal_only
 taxonomy:
@@ -16,64 +17,46 @@ taxonomy:
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   mandatory_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F193
-  contradictions_through: C143
+  findings_through: F196
+  contradictions_through: C146
   recommendations_through: KF-REC-052
   concepts_through: KF-CONCEPT-042
 programme:
-  phase: whole-system-virtual-model-expansion-j7-financial-truth
+  phase: whole-system-virtual-model-expansion-commercial-cash-constellation
   objective: whole_system_target_migration_proof_and_repository_transformation_architecture_before_implementation
-active_frontier:
+latest_j7_pool:
   journey: J7
-  name: Financial_Truth
-  stage: FINANCIAL_PROJECTION_VALUATION_AND_STATUS_CONVERGENCE
-  dossier: docs/intelligence/journeys/KF-JOURNEY-007-FINANCIAL-TRUTH.md
   recommendation: KF-REC-052
-  findings: [F185,F186,F187,F188,F189,F190,F191,F192,F193]
-  contradictions: [C135,C136,C137,C138,C139,C140,C141,C142,C143]
-  key_new_roots:
-    F188: direct_PayPal_capture_successful_Payment_and_PAID_Invoice_can_exist_without_payment_ledger_posting_and_same_provider_id_dedupe_blocks_webhook_repair
-    F189: CreditNote_reversal_looks_up_INVOICE_while_canonical_posting_uses_Invoice_so_financial_lineage_is_unreachable
-    F190: WebhookEvent_receipt_is_persisted_before_financial_consequence_completion_and_redelivery_can_be_consumed_by_incomplete_first_attempt
-    F191: reconciliation_lock_blocks_new_current_period_reversal_for_later_real_refund_without_observed_reconciliation_unlock_or_adjustment_path
-    F192: AccountingPeriod_CLOSED_does_not_block_new_backdated_PostingService_entries
-    F193: Expense_void_directly_writes_ledger_reversal_rows_and_bypasses_PostingService_controls
-  reused_roots:
-    F155: direct_provider_refund_missing_ledger_and_invoice_consequence_repair_do_not_duplicate
-    F158: provider_success_plus_failed_local_Payment_persistence_is_separate_from_F188
-  strengthened_roots:
-    F186: ExchangeRateService_exists_but_no_accounting_reporting_consumer_found
-  positive_results:
-    - manual_invoice_recordPayment_transactionally_couples_SUCCESSFUL_Payment_and_ledger_posting
-    - bill_markBillPaid_transactionally_couples_PAID_state_and_AP_cash_posting
+  findings: [F185,F186,F187,F188,F189,F190,F191,F192,F193,F194,F195,F196]
+  contradictions: [C135,C136,C137,C138,C139,C140,C141,C142,C143,C144,C145,C146]
+  standards_frontier_pressure_test: docs/intelligence/investigations/J7-FINANCIAL-TRUTH-STANDARDS-FRONTIER-PRESSURE-TEST.md
+  backward_reaudit: docs/intelligence/investigations/J3-J4-J17-J18-J23-J7-FINANCIAL-TRUTH-BACKWARD-REAUDIT.md
+  proof_architecture: docs/intelligence/investigations/J7-FINANCIAL-TRUTH-PROOF-ARCHITECTURE.md
+  proof_obligations: 32
+  deterministic_fault_points: 16
+  runtime_proof_executed: false
+  role_now: pooled_input_to_whole_system_model
+active_frontier:
+  constellation: [J3,J4]
+  primary_journey: J3
+  primary_name: Lead_to_Customer_to_Cash
+  secondary_journey: J4
+  secondary_name: Booking_to_Service_to_Payment
+  stage: COMMERCIAL_TO_CASH_MICROSCOPIC_RECONSTRUCTION
+  inherited_targets: [KF-REC-052,KF-REC-048,KF-REC-051,KF-REC-047]
   next_actions:
-    - trace_user_facing_payment_refund_summary_divergence_from_reconcileFromPayments
-    - map_all_FinancialAccount_currentBalance_consumers_to_ledger_or_explicit_materialization_target
-    - map_ExchangeRate_into_or_outside_balance_reporting_paths
-    - trace_remaining_strong_PAID_REFUNDED_VOID_SETTLED_states
-    - complete_scope_search_for_raw_ledger_writes_and_reversal_paths
-    - pressure_test_KF_REC_052_with_current_financial_standards_and_frontier_research
-    - backward_reaudit_J3_J4_J17_J18_J23_and_K8_K9_K10_K11_K3
-  key_laws:
-    - operational_document_state_not_equal_external_money_not_equal_payment_record_not_equal_ledger_truth
-    - occurrence_or_Payment_dedupe_not_equal_financial_consequence_completeness
-    - receipt_idempotency_not_equal_consumption_completeness
-    - FinancialSourceIdentity_must_be_canonical_typed_and_stable
-    - closed_historical_entry_immutability_not_equal_ban_on_later_current_period_correction
-    - AccountingPeriod_CLOSED_must_be_enforced_at_canonical_ledger_write_door
-    - all_ordinary_ledger_writes_and_reversals_use_one_governed_posting_contract
-    - strong_financial_outcome_claims_require_declared_evidence_contract
-    - stored_cash_projection_not_silent_competitor_to_ledger_truth
-    - heterogeneous_currency_values_not_directly_additive_without_valuation
-    - reversal_refund_is_new_consequence_not_history_deletion
-    - derived_financial_figures_expose_basis_asOf_currency_completeness
+    - reconstruct_lead_quote_invoice_customer_cash_chain
+    - reconstruct_booking_service_invoice_payment_chain
+    - trace_business_complete_vs_financial_complete_boundaries
+    - trace_refund_credit_note_void_chargeback_failure_reopening
+    - trace_customer_value_revenue_cash_projection_semantics
+    - reuse_J7_financial_roots_before_any_new_ID
 latest_j17_pool:
   journey: J17
   recommendation: KF-REC-051
   findings: [F179,F180,F181,F182,F183,F184]
   contradictions: [C129,C130,C131,C132,C133,C134]
   proof_obligations: 20
-  role_now: pooled_input_to_whole_system_model
 mature_business_knowledge_pool:
   journey: J16
   kernel: K4
@@ -98,11 +81,8 @@ continuity:
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 constraints:
   - production_code_read_only
-  - do_not_treat_financial_projection_as_ledger_or_provider_truth
-  - do_not_treat_operational_PAID_as_money_moved_without_evidence
-  - do_not_treat_WebhookEvent_receipt_or_Payment_identity_as_consequence_completion
-  - do_not_sum_heterogeneous_currencies_without_valuation_contract_in_target
-  - do_not_treat_closed_period_status_as_enforced_without_posting_door_control
-  - do_not_bypass_PostingService_for_ordinary_ledger_mutation_in_target
+  - do_not_treat_customer_or_service_completion_as_financial_completion
+  - do_not_treat_invoice_PAID_or_Payment_SUCCESSFUL_as_cash_convergence_without_declared_financial_completion
+  - do_not_duplicate_J7_financial_roots
   - do_not_create_duplicate_canonical_ids
   - preserve_anti_normalization_method
