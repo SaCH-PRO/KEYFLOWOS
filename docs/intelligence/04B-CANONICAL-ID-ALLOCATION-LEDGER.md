@@ -19,7 +19,7 @@ F161–F166 initial J16/K4 epistemic-integrity findings
 F167–F174 recovered historical collision-band findings
 F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
-F185–F189 J7 Financial Truth findings
+F185–F191 J7 Financial Truth findings
 ```
 
 ```text
@@ -28,7 +28,7 @@ C111–C116 initial J16/K4 contradictions
 C117–C124 recovered historical collision-band contradictions
 C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
-C135–C139 J7 Financial Truth contradictions
+C135–C141 J7 Financial Truth contradictions
 ```
 
 ```text
@@ -139,6 +139,33 @@ canonical invoice posting sourceType = 'Invoice'
 
 A valid canonical invoice posting can exist while `CreditNoteService.apply()` cannot discover its lineage. Financial source discriminators must be canonical/typed enough for posting, reversal, reconciliation, reporting and repair to resolve the same business consequence.
 
+### F190 / C140 — provider webhook receipt vs financial consumption completeness
+Home:
+- `08AA-FINDING-REGISTER-FINANCIAL-CONSUMPTION-AND-CLOSED-PERIOD-SUPPLEMENT.md`
+- `09AA-CONTRADICTION-REGISTER-FINANCIAL-CONSUMPTION-AND-CLOSED-PERIOD-SUPPLEMENT.md`
+
+Distinct root:
+
+```text
+WebhookEvent receipt persisted
+!= provider occurrence consumption complete
+!= financial descendants complete
+```
+
+Stripe, PayPal and WiPay persist `(provider, providerEventId)` before downstream financial consequences. Redelivery is then treated as duplicate even when first-attempt consequences failed or were swallowed. No independent WebhookEvent processing lifecycle/re-drive owner was found in the repository search for this tranche.
+
+### F191 / C141 — closed-period immutability vs later corrective consequence
+Home: same `08AA` / `09AA` pair.
+
+Distinct root:
+
+```text
+original reconciled LedgerEntry locked
+!= later current-period reversal must be prohibited
+```
+
+`PostingService.reverse()` intends to create a new reversal dated now, but first rejects any original transaction containing reconciliation-locked entries. `ReconciliationService` states admin override is required, while repository search found no unlock/reopen operation or separate current-period adjustment path.
+
 ### Reused J7 recovery root — F155
 
 `PaymentsOpsService.refundCharge()` remains an instance of mature F155 and does **not** receive another J7 ID:
@@ -165,13 +192,13 @@ commercial/operational financial state
 → derived financial/operator projection
 ```
 
-Target preserves the strong PostingService/reversal/reconciliation seams while preventing stored balances, operational statuses and raw heterogeneous currencies from silently competing with ledger/reconciled financial truth.
+Target preserves the strong PostingService/reversal/reconciliation seams while preventing stored balances, operational statuses, raw heterogeneous currencies, receipt-only idempotency and closed-period policy gaps from silently competing with reconciled financial truth.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F189
-Contradictions:  C001–C139
+Findings:        F001–F191
+Contradictions:  C001–C141
 Recommendations: KF-REC-001–KF-REC-052
 ```
 
