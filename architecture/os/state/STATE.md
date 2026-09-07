@@ -1,7 +1,7 @@
 ---
 kind: state
 writers: [truth-cycle]           # §Runtime rows: audit-cycle
-derived: 2026-09-06
+derived: 2026-09-07
 baseline: architecture/VERIFIED_STATE_2026-08-11.md
 ---
 
@@ -15,7 +15,7 @@ timestamp.
 
 ## Shape
 
-| Measure | Value | Prev (2026-09-05) | Command |
+| Measure | Value | Prev (2026-09-06) | Command |
 |---|---:|---:|---|
 | Prisma models | 441 | 441 | `grep -c '^model ' packages/db/prisma/schema.prisma` |
 | Server modules | 110 | 110 | `ls apps/server/src/modules \| wc -l` |
@@ -24,7 +24,7 @@ timestamp.
 | Web pages | 251 | 251 | `find apps/web/src/app -name page.tsx \| wc -l` |
 | Migrations | 21 | 21 | `find packages/db/prisma/migrations -name migration.sql \| wc -l` |
 | Spec/test files (server) | 428 | 428 | `find apps/server/src apps/server/test -name '*.spec.ts' -o -name '*.test.ts' \| wc -l` |
-| Server tests passing | **3,658 in 373 files, 0 skipped** (unit config) | 3,658 in 373 files, 0 skipped | `cd apps/server && pnpm test:unit` (= `vitest -c vitest.unit.config.ts`; do NOT run bare `npx vitest run` — needs DB, false-reds as skips, see truth.md); seed `1788679112431` |
+| Server tests passing | **3,658 in 373 files, 0 skipped** (unit config) | 3,658 in 373 files, 0 skipped | `cd apps/server && pnpm test:unit` (= `vitest -c vitest.unit.config.ts`; do NOT run bare `npx vitest run` — needs DB, false-reds as skips, see truth.md); seed `1788765484757` |
 | Web tests passing | **210 in 22 files** | 210 in 22 files | `cd apps/web && npx vitest run` |
 | Tests in `packages/*` | **12 in 2 files** (db 7, api 5) | 12 in 2 files (db 7, api 5) | `pnpm --filter @keyflow/db --filter @keyflow/api test:unit` |
 | Routes mapped at boot | — | — | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` (runtime only; not derivable in this sandbox — no docker) |
@@ -75,11 +75,11 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 (12 because their real re-derived count matched last cycle exactly; 2 because
 they stay frozen regardless of the real count underneath). **2 rows remain
 frozen** from 2026-08-31 —
-`node scripts/os/ledger-sizes.mjs` (2026-09-06) again reports
+`node scripts/os/ledger-sizes.mjs` (2026-09-07) again reports
 `tenant.never_scope` at 10 (a `fixed` ledger, still diverged from its frozen
 3) and `auth.public_handlers` at 223 (a `shrink` ledger, still diverged from
 its frozen 219) — **identical to last cycle's real values, no further
-movement**. `git diff --name-only 8635576a..HEAD` (last truth commit →
+movement**. `git diff --name-only 3e1fcf12..HEAD` (last truth commit →
 this run's start) touched zero `*.spec.ts`/`*.test.ts` files, so step 7's
 attribution check has nothing to flag and no gate-integrity issue was opened.
 The existing issues,
@@ -94,10 +94,10 @@ per truth.md step 6.
 
 | Artifact | Generator | Last generated |
 |---|---|---|
-| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-09-06 (no real drift — only `generated:` date changed on all five files; `git diff` confirms zero non-date-line changes) |
-| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-09-06 (byte-identical output to 2026-09-05 — no drift; 286 flowTools, 207 cortexCapabilities, 12 domains, 32 targets (15 active/17 planned) unchanged) |
-| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-09-06 (small, fully-attributable delta: total_files 4293→4298 (+5), total_lines 1,040,793→1,041,240 (+447) — the real accumulated diff since the last truth commit `8635576a` is 5 new journal files plus STATE.md's own prior +1 line: `2026-09-05-audit-13.md` (59), `2026-09-05-audit-19.md` (63), `2026-09-05-truth.md` (151, written after that day's own inventory snapshot was taken, so it only shows up as "new" in this run), `2026-09-06-audit-01.md` (90), `2026-09-06-audit-07.md` (83) = 446 lines / 5 files + STATE.md 108→109 (+1) = 447, verified line-by-line against `8635576a`'s committed inventory.json; the `.claude/coordination/sessions/<uuid>.json` rename is a net-zero swap; no unexplained movement) |
-| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-09-06 (byte-identical to the committed 2026-09-05 file — no drift from this run) |
+| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-09-07 (no real drift — only `generated:` date changed on all five files; `git diff` confirms zero non-date-line changes) |
+| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-09-07 (byte-identical output to 2026-09-06 — no drift; 286 flowTools, 207 cortexCapabilities, 12 domains, 32 targets (15 active/17 planned) unchanged) |
+| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-09-07 (small, fully-attributable delta: total_files 4298→4303 (+5), total_lines 1,041,240→1,041,661 (+421) — the real accumulated diff since the last truth commit `3e1fcf12` is exactly 5 new journal files: `2026-09-06-audit-13.md` (70), `2026-09-06-audit-19.md` (78), `2026-09-06-truth.md` (115), `2026-09-07-audit-01.md` (86), `2026-09-07-audit-07.md` (72) = 421 lines / 5 files, verified line-by-line against `3e1fcf12`'s committed inventory.json; the `.claude/coordination/sessions/<uuid>.json` rename is a net-zero swap (7→7 lines); no unexplained movement) |
+| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-09-07 (byte-identical to the committed 2026-09-06 file — no drift from this run) |
 
 ## Runtime (written by audit cycle only)
 
