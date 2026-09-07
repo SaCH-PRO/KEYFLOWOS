@@ -1,7 +1,7 @@
 # KeyFlowOS Canonical Taxonomy and Naming Registry
 
 Status: CANONICAL GOVERNANCE ARTIFACT
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 Purpose: prevent semantic duplication, alias drift, repeated indexing, inconsistent naming and multiple canonical entries for the same KeyFlowOS concept.
 
@@ -41,8 +41,8 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Journeys: `J1 ... J25` — `03-ANALYSIS-MAP.md`.
 - Kernels: `K1 ... K12` — `12-KERNEL-PROGRAMME.md`.
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
-- Findings: `F001–F213` — `08*`; allocator 04B.
-- Contradictions: `C001–C163` — `09*`; allocator 04B.
+- Findings: `F001–F214` — `08*`; allocator 04B.
+- Contradictions: `C001–C164` — `09*`; allocator 04B.
 - Recommendations: `KF-REC-001–KF-REC-053` — `10*`; allocator 04B.
 
 Latest roots:
@@ -57,6 +57,7 @@ F210/C160 — Shopify variant lookup identity differs from persisted Product ide
 F211/C161 — partial fulfilment route set can block recovery because any existing route is treated as complete
 F212/C162 — Shopify order/customer sync writers disagree on Contact identity resolution
 F213/C163 — Shopify order enters native MarketplaceOrder without native relational item descendants
+F214/C164 — strategy-specific PurchaseOrder/PreOrder can commit before FulfillmentRoute, so route-based retry can duplicate the same fulfilment obligation
 ```
 
 Current major pooled targets:
@@ -86,6 +87,7 @@ Inventory reservation != inventory consumption != release/restoration
 Route row created != required route outcome satisfied
 Normal routeOrder return != aggregate fulfilment success
 Any existing child effect != complete required descendant set
+FulfillmentRoute absence != absence of an already-committed strategy business effect
 Merchant SKU != immutable provider external identity
 Mutable customer email != immutable provider customer identity
 Provider metadata line items != native operational OrderItem descendants
@@ -119,6 +121,7 @@ Plan-step/process idempotency != semantic effect idempotency
 | Provider external-entity identity | J10 F210/F212 K9 pressure; structural and business-scoped |
 | RequiredRouteSet / ObservedRouteSet | J10 F211/C161 recovery vocabulary; working semantics |
 | Operational external-order materialization | J10 F213/C163; explicit choice between native effectful aggregate and summary/evidence projection |
+| StrategyEffectIdentity | J10 F214/C164; stable semantic identity spanning route + strategy-specific descendants |
 
 ---
 
@@ -144,8 +147,8 @@ Plan-step/process idempotency != semantic effect idempotency
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F213
-Contradiction range:     through C163
+Finding range:           through F214
+Contradiction range:     through C164
 Recommendation range:    through KF-REC-053
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
@@ -162,7 +165,8 @@ Current J10 homes:
 - F211/C161 — `08AO` / `09AO`
 - F212/C162 — `08AP` / `09AP`
 - F213/C163 — `08AQ` / `09AQ`
+- F214/C164 — `08AR` / `09AR`
 
-Do not allocate a new commerce/integration recommendation until the earlier K9/external-reality recommendation corpus is searched for semantic ownership. Do not allocate new refund/provider/lifecycle/recovery roots where mature KF-REC-047/048/052/053 and existing findings already own the defect.
+The earlier K9/external-reality recommendation corpus has now been searched. It does not fully own stable provider entity identity, operational provider-order materialization, inventory-effect lineage, required fulfilment-set semantics, or strategy-effect identity. J10 is therefore under a final standards/frontier pressure test for a distinct narrow Commerce & Fulfilment target contract. Do not allocate new refund/provider/lifecycle/recovery roots where mature KF-REC-047/048/052/053 and existing findings already own the defect.
 
 No production implementation is authorized by this taxonomy artifact.
