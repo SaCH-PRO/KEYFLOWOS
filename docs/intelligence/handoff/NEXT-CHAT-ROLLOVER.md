@@ -17,8 +17,8 @@ Load AGENTS.md, AGENT-CONTINUITY.md, 00-START-HERE.md,
 CURRENT-HANDOFF.md, CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first.
 Production code remains read-only.
-J17 — Command Center → Priority → Action is the active frontier.
-Resume at the dual-projection/runtime-materialization proof after F180/C130.
+J17 — Command Center → Priority → Action has completed its main microscopic/research/backward-re-audit tranche.
+Resume at J17 source-family classification / persistence-vs-read-model / proof architecture, then return J17 to the whole-system pool and select the next frontier.
 ```
 
 ## Context integrity
@@ -37,9 +37,9 @@ Implementation:          UNAUTHORIZED / READ-ONLY
 ## Canonical taxonomy
 
 ```text
-Findings:        F180
-Contradictions:  C130
-Recommendations: KF-REC-050
+Findings:        F184
+Contradictions:  C134
+Recommendations: KF-REC-051
 Concepts:        KF-CONCEPT-042
 ```
 
@@ -54,110 +54,137 @@ LOAD 04A + 04B
 → only then allocate if genuinely distinct
 ```
 
-## Active frontier — J17
+## J17 findings and target
 
-J17 is confirmed and active.
-
-The Command Center currently exposes two operational universes on the same page:
+Canonical J17 roots:
 
 ```text
-BusinessCommandCenter snapshot
-→ transient CommandCenterItems
-→ Top Priorities / briefing / recommended actions
-
-persistent CommandItem spine
-→ Command Queue / Due obligations
-→ durable disposition / assignment / priority / due state
+F179/C129 — degraded source can masquerade as healthy zero projection
+F180/C130 — CommandItem can claim EXECUTED without source/effect proof
+F181/C131 — overdue-invoice Temporal priority consumer lacks standard materialization path
+F182/C132 — source-derived CommandItem can remain open after source resolves
+F183/C133 — multi-status queue UI operates over OPEN-only server dataset
+F184/C134 — source ranking semantics are compressed/discarded in global Top Priorities
 ```
 
-### F179 / C129
+Target:
+`KF-REC-051 — Establish a source-grounded Operator Attention & Priority Contract for Command Center → Action.`
 
-Fail-soft aggregation can convert source failure into empty/zero fallback without exposing degraded completeness:
+Core model:
 
 ```text
-SOURCE UNKNOWN
-!= HEALTHY ZERO
+source condition / authoritative state
+→ selective AttentionAdmission
+→ operator work/attention projection
+→ source health / completeness
+→ multidimensional PriorityAssessment
+→ explicit query lens
+→ user/KEY disposition or ActionIntent
+→ canonical governance/effect owner
+→ OutcomeEvidence
+→ projection convergence / attention reset
 ```
 
-### F180 / C130
-
-Persistent CommandItem `Approve` and `Execute` currently terminalize the projection as `EXECUTED` without an observed source approval resolution, executionTool invocation, canonical governed effect, Effect/Attempt lineage or OutcomeEvidence.
+Critical non-collapse:
 
 ```text
-CommandItem EXECUTED
-!= source resolved
-!= effect executed
-!= outcome proven
+IMPORTANT
+!= ACTIONABLE
+!= AUTHORIZED
+!= OWED
+!= RECOVERABLE
+!= EXECUTED
+!= RESOLVED
 ```
 
-The visible web controls call these status-only endpoints directly. Unit tests currently assert the status-only behavior.
+## Research pressure test
 
-`HealthScoreService` consumes CommandItem status as risk truth, so false terminalization can affect downstream intelligence.
+Artifact:
+`investigations/J17-OPERATOR-ATTENTION-PRIORITY-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+
+ISA alarm-management lifecycle, Google SRE alert quality and NIST AI RMF/deployed-AI monitoring strengthen:
+
+- selective/rationalized attention admission;
+- actionability and expected-response semantics;
+- scarce-attention / noise control;
+- explicit shelving/snooze lifecycle;
+- source reset/convergence monitoring;
+- human override/snooze/dismiss as feedback, not truth mutation;
+- post-deployment attention-quality monitoring.
+
+Candidate assurance metrics:
+
+```text
+attention precision
+attention recall
+detection lag
+reset lag
+stale attention rate
+actionability rate
+projection degradation rate
+snooze/dismiss/override recurrence
+```
+
+## Backward re-audit
+
+Artifact:
+`investigations/J6-J7-J15-J17-J18-J23-OPERATOR-ATTENTION-BACKWARD-REAUDIT.md`
+
+Verdict:
+
+```text
+KF-REC-051 ROOT INVALIDATED             = NO
+UNIVERSAL COMMAND/ATTENTION TABLE        = NO
+UNIVERSAL PRIORITY SCALAR                = NO
+NEW AUTHORITY/RECOVERY SYSTEM            = NO
+NEW F/C ID FROM RE-AUDIT                 = NO
+IMPLEMENTATION AUTHORIZED                = NO
+```
+
+J6/J7/J15/J18/J23 and K3/K4/K7/K8/K11 remain coherent if J17 stays derivative.
 
 ## Positive seams
 
-- canonical KeyActionProposal execution revalidates AutonomyOrchestrator + Genome policy at effect time;
-- CommandItem `SUGGESTION` vs `OBLIGATION` distinction is useful;
-- obligation due/overdue/snooze/discharge semantics are being made load-bearing;
-- obligation writer uses stable upsert identity;
-- deterministic snapshot ranking remains explainable.
+- `KeyActionProposalService.execute()` revalidates governance at effect time.
+- CommandItem `SUGGESTION` vs `OBLIGATION`.
+- `WORK_OBLIGATION_RAISED / SETTLED` bidirectional contract.
+- stable obligation identity.
+- due/overdue/snooze/discharge semantics.
+- FinanceIntelligence paired CommandItem mirror+dismiss for FIN8 detections.
+- rich explainable GenomeRecommendationRanker.
 
-## Exact unresolved proof
+## Rejected overbuild
 
-Candidate F181/C131 is **NOT allocated**.
+Do not create by default:
 
-Need prove/reject whether one same business condition is load-bearing in both persistent and synthesized priority projections.
+- universal CommandItem persistence for every signal;
+- generic application-event → TemporalFlow mirroring;
+- universal attention database;
+- one universal priority scalar;
+- opaque ML ranker;
+- Command Center authority engine;
+- projection-owned effect truth.
 
-Best trace:
-
-```text
-Invoice becomes OVERDUE
-→ CommandGenerator scans Invoice.status=OVERDUE into CommandItem
-→ invoice.overdue event emitted
-→ ? runtime bridge ?
-→ TemporalFlowEvent(source=APP,type=invoice.overdue)
-→ BusinessCommandCenter Temporal urgent/risk item
-```
-
-Repository evidence already proves each side except the runtime materialization bridge marked `?`.
-
-If proven, then trace whether:
-- snooze;
-- dismiss;
-- complete;
-- discharge;
-- source resolution
-
-converge both projections or allow resurfacing/contradictory operator state.
-
-Do not allocate F181 until duplicate-checking F120, F141–F144, F179 and F180.
-
-## Next priority pressure
-
-After dual-projection proof, trace how both control surfaces represent:
+## Exact next work
 
 ```text
-urgency
-deadline/lateness
-impact/expected value
-confidence / epistemic eligibility
-authority / actionability
-recovery / consequence state
-freshness / supersession
-user disposition
+1. classify current CommandItem writer/source families;
+2. classify each as suggestion / obligation / durable work / control / recovery / compatibility projection;
+3. map admission identity, authoritative source owner, reverse-convergence owner and disposition semantics;
+4. classify persist vs assemble-on-read vs KF-REC-047 adapter;
+5. draft initial J17 proof obligations using attention precision/recall, detection/reset lag, stale attention, actionability and degraded projection cases;
+6. re-audit J1/J2/J25 only if operator ActionIntent routing changes authority assumptions;
+7. return J17 to the whole-system pool;
+8. select and verify the next high-leverage journey/kernel frontier.
 ```
 
-Target principle:
-
-> Multiple display projections are allowed. Multiple independent execution truths are not.
-
-CommandItem may become/retain a durable operator-attention/work projection for suitable classes, especially obligations, without becoming canonical authority/effect/business truth.
+Load 04A/04B before new IDs.
 
 ## Pooled prior work
 
-J16/K4 Business Knowledge: pooled through F178/C128 / KF-REC-049.
-J23/J18 temporal/recovery pool: 39 proof obligations / 16 deterministic fault points, no runtime proof executed.
-Historical reconciliation pool: F167–F174 / C117–C124 / KF-REC-050.
+J16/K4 Business Knowledge remains pooled through F178/C128 / KF-REC-049.
+J23/J18 temporal/recovery pool remains at 39 proof obligations / 16 deterministic fault points; runtime proof not executed.
+Historical reconciliation pool remains F167–F174 / C117–C124 / KF-REC-050.
 
 ## KF-EXEC boundary
 
@@ -183,4 +210,4 @@ material tranche
 → only then begin next broad tranche
 ```
 
-> If this chat disappears, resume at J17 invoice-overdue dual-projection materialization proof after F180/C130. Do not restart from J16 and do not implement production code.
+> If this chat disappears, resume at J17 source-family classification / proof architecture. Do not restart from J16 and do not implement production code.
