@@ -21,7 +21,7 @@ F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
 F185–F196 J7 Financial Truth findings
 F197–F205 J3/J4 commercial-to-cash findings
-F206+      J10 Commerce/Fulfilment active microscopic findings
+F206–F207 J10 Commerce/Fulfilment active microscopic findings
 ```
 
 ```text
@@ -32,7 +32,7 @@ C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
 C135–C146 J7 Financial Truth contradictions
 C147–C155 J3/J4 commercial-to-cash contradictions
-C156+      J10 Commerce/Fulfilment active contradictions
+C156–C157 J10 Commerce/Fulfilment active contradictions
 ```
 
 ```text
@@ -120,14 +120,15 @@ Current local proof architecture: 28 proof obligations / 12 deterministic fault-
 ## J10 Commerce / Fulfilment allocations
 
 - F206 / C156 — one successful storefront checkout has two mounted paid-invoice creation owners whose dedupe identities do not compose — `08AK` / `09AK`.
+- F207 / C157 — operational order `CONFIRMED` emits `store_order.paid` while separate payment state can remain PENDING/UNPAID — `08AL` / `09AL`.
 
-F206 reuses KF-REC-053 commercial lineage/effect-idempotency and KF-REC-052 financial truth; it does not create a new recommendation by itself.
+J10 currently reuses KF-REC-053 commercial lineage/state semantics and KF-REC-052 financial truth; no new recommendation allocated yet.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F206
-Contradictions:  C001–C156
+Findings:        F001–F207
+Contradictions:  C001–C157
 Recommendations: KF-REC-001–KF-REC-053
 ```
 
