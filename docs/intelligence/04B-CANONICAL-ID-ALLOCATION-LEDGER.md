@@ -19,7 +19,7 @@ F185–F196 J7 Financial Truth
 F197–F205 J3/J4 commercial-to-cash
 F206–F214 J10 Commerce/Fulfilment
 F215–F218 J11 Contract/Obligation/Renewal
-F219       J12 Document/Evidence Lifecycle
+F219–F220 J12 Document/Evidence Lifecycle
 ```
 
 ```text
@@ -30,7 +30,7 @@ C135–C146 J7 contradictions
 C147–C155 J3/J4 contradictions
 C156–C164 J10 contradictions
 C165–C168 J11 contradictions
-C169       J12 Document/Evidence Lifecycle
+C169–C170 J12 Document/Evidence Lifecycle
 ```
 
 Current recommendation range is through `KF-REC-055`.
@@ -117,6 +117,7 @@ It does not authorize a universal event store, EDMS/CLM suite, second workflow r
 ## J12 Document / Evidence Lifecycle allocations
 
 - F219 / C169 — transient document extraction or raw-text fallback can be admitted directly as successful payment evidence, including explicitly low-confidence fallback output, without an observed consumer-specific evidence-admission / verification decision before `Payment SUCCESSFUL`, Invoice state mutation and downstream financial consequences — `08AV` / `09AV`.
+- F220 / C170 — Google Drive connector recognizes a materially newer source revision by `driveFileId + modifiedTime`, but canonical ingestion deduplicates only by `businessId + sourceType + externalId(=driveFileId)`, so the legitimate new revision is suppressed as the prior occurrence and its ingestion plan is not rebuilt — `08AW` / `09AW`.
 
 J12 anti-duplication decisions:
 
@@ -125,23 +126,40 @@ manual inline edit approved through stale stored version → F161 / KF-REC-049 s
 AI tweak partial mutation vs version evidence            → check F164 before allocation
 contract extraction promotion                            → F216/C166 + KF-REC-055 manifestation
 payment evidence admission                               → F219/C169 J12/K8 root; delegates epistemics to KF-REC-049 and financial claim strength to KF-REC-052
-same payment evidence replay / fresh payment identity    → KF-REC-048 specialization; no F220 from this seam
+same payment evidence replay / fresh payment identity    → KF-REC-048 specialization; no new root
+Drive mutable intake revision overwrite                  → KF-REC-049 pressure, but downstream occurrence suppression is F220/C170
+Drive R2 suppressed as duplicate R1                      → F220/C170; reuses J14/KF-REC-035 occurrence contract direction
 ```
 
-F219 owns only the document/evidence admission boundary. It does not create a second knowledge/provenance system, financial-truth system or recovery/idempotency system.
+F219 owns only the document/evidence admission boundary. F220 owns only the external-object-vs-source-revision ingestion-occurrence distinction for mutable document sources. Neither creates a second knowledge/provenance, ingress, financial-truth or recovery runtime.
+
+### F220 anti-duplication boundary
+
+```text
+F127/C080:
+SAME occurrence → first-seen claim → processing fails → replay cannot resume
+
+F220/C170:
+DISTINCT source revision R2 → same external object id → incorrectly classified as duplicate R1
+```
+
+F220 reuses:
+- `KF-REC-035` for ingress occurrence identity/processing semantics;
+- `KF-REC-049` for revision/provenance lineage;
+- `KF-REC-048` for same-occurrence replay/effect identity.
 
 ## Current ranges
 
 ```text
-Findings:         F001–F219
-Contradictions:   C001–C169
+Findings:         F001–F220
+Contradictions:   C001–C170
 Recommendations: KF-REC-001–KF-REC-055
 ```
 
 Next free IDs:
 
 ```text
-F220 / C170 / KF-REC-056
+F221 / C171 / KF-REC-056
 ```
 
 ## Agent pre-allocation gate
