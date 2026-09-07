@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 25
+rollover_version: 26
 last_updated: 2026-09-06
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -9,7 +9,6 @@ repository: SaCH-PRO/KEYFLOWOS
 implementation_evidence:
   branch: main
   current_head: 4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
-  previous_head: 9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   delta_class: audit_architecture_journal_only
 taxonomy:
@@ -17,8 +16,8 @@ taxonomy:
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   mandatory_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F204
-  contradictions_through: C154
+  findings_through: F205
+  contradictions_through: C155
   recommendations_through: KF-REC-052
   concepts_through: KF-CONCEPT-042
 programme:
@@ -34,38 +33,40 @@ latest_j7_pool:
   runtime_proof_executed: false
 active_frontier:
   constellation: [J3,J4]
-  primary_journey: J3
-  primary_name: Lead_to_Customer_to_Cash
-  secondary_journey: J4
-  secondary_name: Booking_to_Service_to_Payment
-  stage: COMMERCIAL_OBLIGATION_AND_LIFECYCLE_CONVERGENCE
-  findings: [F197,F198,F199,F200,F201,F202,F203,F204]
-  contradictions: [C147,C148,C149,C150,C151,C152,C153,C154]
-  inherited_targets: [KF-REC-052,KF-REC-048,KF-REC-051,KF-REC-047,KF-REC-049]
+  stage: SERVICE_FINANCIAL_DISPOSITION_AND_CUSTOMER_LIFECYCLE_CONVERGENCE
+  findings: [F197,F198,F199,F200,F201,F202,F203,F204,F205]
+  contradictions: [C147,C148,C149,C150,C151,C152,C153,C154,C155]
+  ownership_matrix: docs/intelligence/investigations/J3-CUSTOMER-LIFECYCLE-STATE-OWNERSHIP-MATRIX.md
   key_roots:
     F197: commercial_customer_evidence_can_exist_while_Contact_status_remains_LEAD
     F198: ContactInsight_LTV_adds_won_Deal_and_PAID_Invoice_value_for_same_sale
     F199: completed_booking_can_lose_required_completion_invoice_into_log_only_failure
-    F200: deposit_D_plus_completion_full_price_P_are_not_composed_as_one_service_obligation
-    F201: booking_cancelled_or_no_show_has_no_declared_financial_descendant_disposition
-    F202: RevenueAttribution_mixes_BOOKING_pipeline_and_paid_INVOICE_stages_as_additive_revenue_rows
-    F203: KeyCortex_queries_lowercase_lead_customer_instead_of_canonical_LEAD_PROSPECT_CLIENT_LOST
-    F204: live_post_booking_journey_event_template_tool_contracts_do_not_compose_so_intended_invoice_CLIENT_followup_chain_is_not_load_bearing
+    F200: deposit_D_plus_completion_full_price_P_do_not_compose_one_service_obligation
+    F201: booking_CANCELLED_or_NO_SHOW_has_no_declared_financial_descendant_disposition
+    F202: RevenueAttribution_mixes_BOOKING_pipeline_and_paid_INVOICE_stages_as_additive_revenue
+    F203: KeyCortex_queries_noncanonical_lead_customer_status_values
+    F204: live_post_booking_event_template_tool_contracts_do_not_compose
+    F205: persisted_Contact_status_has_incompatible_CRM_Shopify_PeopleFlow_KeyCortex_dialects
+  strengthened_evidence:
+    - Service_has_depositRequired_depositType_depositValue_invoiceTiming_but_no_booking_financial_cancellation_policy_field_found
+    - Booking_has_invoiceId_depositInvoiceId_paymentStatus_but_cancel_no_show_does_not_resolve_financial_descendants
+    - no_DEPOSIT_PAID_runtime_writer_observed_yet
+    - RevenueAttribution_summarizeBySource_sums_heterogeneous_BOOKING_INVOICE_ORDER_rows_by_source
+    - no_operator_scan_observed_for_COMPLETED_booking_missing_invoiceId
   working_target_vocabulary:
-    - CustomerLifecycle
+    - CustomerLifecycleState
+    - RelationshipHealthState
     - CommercialObligationLineage
     - CommercialValueStage
     - ServiceFinancialDisposition
     - EventToActionContractAdapter
-  narrowed_results:
-    - second_valid_booking_invoice_via_AI_journey_not_proven_current_AI_path_is_contract_malformed
   next_actions:
-    - locate_Service_Booking_schema_and_load_bearing_deposit_cancellation_no_show_policy_fields
-    - trace_paid_deposit_through_cancel_no_show_refund_retain_credit_fee_disposition
-    - map_Contact_status_lifecycleStage_pipelineStage_Deal_state_tags_automatic_writers_and_consumers
-    - trace_RevenueAttribution_consumers_and_cross_stage_dedupe
-    - check_J17_J18_J23_projection_of_missing_receivable_and_cancelled_financial_descendants
-    - reuse_J7_J18_J23_roots_before_any_new_ID
+    - trace_Booking_paymentStatus_all_writers_consumers_and_invoice_payment_refund_events
+    - trace_paid_deposit_through_CANCELLED_NO_SHOW_for_refund_retain_credit_fee_behavior
+    - finish_RevenueAttribution_consumer_stage_classification
+    - backward_reaudit_J17_J18_J23_for_missing_descendant_and_customer_state_dialect_visibility
+    - then_pressure_test_CustomerLifecycle_and_CommercialObligationLineage_against_current_standards_frontier
+    - decide_if_new_recommendation_is_justified_without_duplicating_KF_REC_049_052
 latest_j17_pool:
   journey: J17
   recommendation: KF-REC-051
@@ -96,10 +97,10 @@ continuity:
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 constraints:
   - production_code_read_only
-  - do_not_treat_customer_or_service_completion_as_financial_completion
-  - do_not_treat_pipeline_attribution_as_realized_revenue_without_explicit_semantics
-  - do_not_assume_deposit_refundability_or_revenue_recognition_policy_without_evidence
-  - do_not_treat_template_intent_as_load_bearing_without_schema_composition
+  - no_assumption_of_deposit_refundability_or_revenue_recognition_policy
+  - do_not_expand_one_catch_all_Contact_status_enum_as_target
+  - do_not_treat_missing_row_as_no_required_work
+  - do_not_treat_pipeline_attribution_as_realized_revenue
   - do_not_duplicate_J7_J18_J23_roots
   - do_not_create_duplicate_canonical_ids
   - preserve_anti_normalization_method
