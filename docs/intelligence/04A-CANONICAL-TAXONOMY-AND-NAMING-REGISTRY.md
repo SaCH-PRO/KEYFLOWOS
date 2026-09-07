@@ -61,7 +61,7 @@ J1 ... J25
 ```
 
 Identity source: `03-ANALYSIS-MAP.md`.
-Journey number is identity. New wording does not create a second journey for the same end-to-end business/user transition.
+Journey number is identity.
 
 ## Kernels
 
@@ -71,9 +71,6 @@ K1 ... K12
 
 Identity source: `12-KERNEL-PROGRAMME.md`.
 
-`Business Knowledge Kernel` / `Knowledge Kernel` refer to K4 unless a narrower seam is explicit.
-`Financial Truth` refers to K10 at kernel level and J7 at journey level; they are related but not interchangeable identifiers.
-
 ## Concepts
 
 ```text
@@ -81,13 +78,7 @@ KF-CONCEPT-###
 ```
 
 Canonical home: `04-CONCEPT-REGISTRY.md`.
-
-Current range:
-```text
-KF-CONCEPT-001–KF-CONCEPT-042
-```
-
-Use only for stable reusable semantic concepts, not implementation class names or temporary investigative phrases.
+Current range: `KF-CONCEPT-001–KF-CONCEPT-042`.
 
 ## Findings
 
@@ -96,26 +87,14 @@ F###
 ```
 
 Canonical home: `08*` registers; allocation owner: 04B.
+Current range: `F001–F199`.
 
-Current range:
+Latest roots:
 ```text
-F001–F196
-```
-
-Latest pooled J7 roots:
-```text
-F185 live cash ownership
-F186 multi-currency valuation
-F187 payroll financial outcome
-F188 PayPal capture financial consequence completeness
-F189 canonical financial source identity / CreditNote apply reachability
-F190 provider webhook receipt vs financial consumption completeness
-F191 reconciliation lock vs later corrective consequence
-F192 AccountingPeriod CLOSED vs canonical posting enforcement
-F193 Expense void bypasses canonical ledger/reversal writer
-F194 gross-successful payment projection vs canonical net payment balance
-F195 applied CreditNote VOID without descendant financial convergence
-F196 CreditNoteService parallel invoice state machine
+F185–F196 J7 Financial Truth
+F197 commercial customer evidence vs Contact lifecycle convergence
+F198 pipeline value + realized revenue vs non-duplicative customer LTV
+F199 completed service vs missing durable receivable consequence
 ```
 
 ## Contradictions
@@ -125,18 +104,14 @@ C###
 ```
 
 Canonical home: `09*` registers; allocation owner: 04B.
+Current range: `C001–C149`.
 
-Current range:
+Latest roots:
 ```text
-C001–C146
-```
-
-Latest J7 roots:
-```text
-C135–C143 finance truth / consequence / period / ledger-writer contradictions
-C144 canonical net invoice balance vs gross-successful payment projections
-C145 CreditNote VOID vs still-active accounting/invoice descendants
-C146 InvoiceWorkflow single-owner claim vs CreditNote undeclared status mutation
+C135–C146 J7 Financial Truth
+C147 customer commercial reality vs Contact.status
+C148 pipeline value + realized revenue vs customer LTV
+C149 completed service vs missing durable receivable consequence
 ```
 
 ## Recommendations
@@ -146,11 +121,7 @@ KF-REC-###
 ```
 
 Canonical home: `10*` continuations; allocation owner: 04B.
-
-Current range:
-```text
-KF-REC-001–KF-REC-052
-```
+Current range: `KF-REC-001–KF-REC-052`.
 
 Current major pooled targets:
 ```text
@@ -181,11 +152,7 @@ Execution identity is implementation scope, not concept identity.
 
 ## Proof obligations
 
-Preferred bounded form:
-```text
-PF-<SCOPE>-###
-```
-
+Preferred bounded form: `PF-<SCOPE>-###`.
 Proof IDs remain local to a declared scope until deliberately promoted.
 
 ---
@@ -214,15 +181,16 @@ AUTHORITY     authoritative | derived | advisory | compatibility
 | GenomeFact | KF-CONCEPT-004 | implementation primitive, not automatically canonical truth |
 | Resolved / Canonical Fact | KF-CONCEPT-017 | ontology-resolved current truth |
 | Business Blueprint | KF-CONCEPT-002 | declaration/configuration |
-| Business Graph | KF-CONCEPT-007 | complete factual business reality KeyFlow may legitimately treat as true |
+| Business Graph | KF-CONCEPT-007 | factual business reality KeyFlow may legitimately treat as true |
 | Clearance | KF-CONCEPT-026 | current exact authorization to execute |
 | Execution Claim | KF-CONCEPT-028 | exclusive exact-effect pursuit |
 | Temporal Work Projection | KF-REC-047 target | derived operator projection, not workflow truth |
 | Operator Attention & Priority Contract | KF-REC-051 | derivative attention/priority semantics, not business truth or authority |
 | Financial Truth & Valuation Contract | KF-REC-052 | financial truth layers, valuation, corrections and consequence completeness |
-| FinancialConsequenceVector | inside KF-REC-052 | target candidate vocabulary; not a standalone concept yet |
-| ValuationEvidence | inside KF-REC-052 | target candidate vocabulary; not a standalone concept yet |
-| CanonicalInvoiceBalance | inside KF-REC-052 | reusable read semantic; not a standalone concept yet |
+| FinancialConsequenceVector | inside KF-REC-052 | candidate vocabulary, not standalone concept |
+| ValuationEvidence | inside KF-REC-052 | candidate vocabulary, not standalone concept |
+| CanonicalInvoiceBalance | inside KF-REC-052 | reusable financial read semantic, not standalone concept |
+| CustomerLifecycle | J3 target vocabulary | working semantic dimension; do not promote until status/lifecycleStage/pipelineStage ownership is resolved |
 
 ---
 
@@ -275,6 +243,10 @@ AccountingPeriod CLOSED != posting prohibition unless enforced at ledger write d
 Reconciliation lock != prohibition on new current-period corrective consequence
 CreditNote VOID != accounting/document descendant convergence complete
 Invoice status column != permission for multiple lifecycle owners
+Commercial customer evidence != Contact.status until lifecycle convergence policy is declared
+Pipeline value != invoiced value != realized revenue != customer lifetime value
+Service complete != financially complete
+Required descendant not created != nothing left to do
 ```
 
 ---
@@ -316,13 +288,13 @@ load 04B
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F196
-Contradiction range:     through C146
+Finding range:           through F199
+Contradiction range:     through C149
 Recommendation range:    through KF-REC-052
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-J7 has completed its current microscopic/standards/backward-re-audit/proof tranche and is pooled into the whole-system virtual model. Its candidate internal vocabulary remains inside KF-REC-052 until a later taxonomy pass proves a need for standalone concepts.
+J7 is pooled. J3/J4 commercial-to-cash microscopic reconstruction is active through F199/C149. `CustomerLifecycle` remains working target vocabulary until the relationship among Contact.status, lifecycleStage, pipelineStage, Deal state and descriptive tags is fully resolved.
 
 No production implementation is authorized by this taxonomy artifact.
