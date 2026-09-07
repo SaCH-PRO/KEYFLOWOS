@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 49
+analysis_version: 50
 last_updated: 2026-09-07
-phase: whole_system_virtual_model_post_j11_frontier_selection
-status: J11_PROVISIONALLY_CONVERGED_SELECT_NEXT_FRONTIER
+phase: whole_system_virtual_model_j12_document_evidence_forensics
+status: J12_ACTIVE_FORENSICS_F219_C169_ALLOCATED_CONTINUE_EXTRACTION_TRACE
 canonical_branch: docs/keyflow-intelligence-foundation
 context_integrity: PASS
 implementation_authorized: false
@@ -15,13 +15,13 @@ implementation_evidence:
   current_head: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   head_revalidated: true
 canonical_ranges:
-  findings_through: F218
-  contradictions_through: C168
+  findings_through: F219
+  contradictions_through: C169
   recommendations_through: KF-REC-055
   concepts_through: KF-CONCEPT-042
 next_free_ids:
-  finding: F219
-  contradiction: C169
+  finding: F220
+  contradiction: C170
   recommendation: KF-REC-056
   allocation_status: UNALLOCATED
 mature_pools:
@@ -32,42 +32,44 @@ mature_pools:
   J3_J4: { recommendation: KF-REC-053, findings: F197-F205, contradictions: C147-C155, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
   J10: { recommendation: KF-REC-054, findings: F206-F214, contradictions: C156-C164, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
   J11: { recommendation: KF-REC-055, findings: F215-F218, contradictions: C165-C168, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
-j11:
-  dossier: docs/intelligence/journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md
-  trace: docs/intelligence/investigations/J11-CONTRACT-RENEWAL-PROJECTION-OCCURRENCE-CONVERGENCE-TRACE.md
-  pressure_test: docs/intelligence/investigations/J11-CONTRACT-OBLIGATION-RENEWAL-STANDARDS-FRONTIER-PRESSURE-TEST.md
-  backward_reaudit: docs/intelligence/investigations/J11-J12-J23-J18-J17-J7-J3-J4-K4-K6-K7-K8-K11-CONTRACT-INTEGRITY-BACKWARD-REAUDIT.md
-  recommendation: docs/intelligence/10N-RECOMMENDATION-REGISTER-CONTRACT-INTEGRITY-RENEWAL-CONTINUATION.md
-  target_semantics:
-    - ContractRevision
-    - ContractAssertionPromotion
-    - RenewalDecision_binding_to_RenewalOccurrence
-    - RetentionDeletionDecision
-  backward_reaudit_verdict:
-    recommendation_invalidated: false
-    parallel_knowledge_system: false
-    parallel_temporal_workflow_system: false
-    parallel_operator_attention_system: false
-    parallel_recovery_system: false
-    parallel_financial_system: false
-    parallel_commercial_obligation_system: false
-    parallel_governance_evidence_runtime: false
-    universal_contract_records_runtime_required: false
-    new_root_found: false
-    provisionally_converged: true
-    runtime_proof_executed: false
+j12:
+  dossier: docs/intelligence/journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md
+  finding_home: docs/intelligence/08AV-FINDING-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+  contradiction_home: docs/intelligence/09AV-CONTRADICTION-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+  status: ACTIVE_MICROSCOPIC_FORENSICS
+  findings: [F219]
+  contradictions: [C169]
+  recommendation: null
+  current_root: document_assertion_to_payment_evidence_without_explicit_admission_decision
+  ownership:
+    document_evidence_admission: J12_K8_F219_C169
+    generic_epistemics: KF-REC-049
+    financial_claim_strength: KF-REC-052
+    replay_effect_identity: KF-REC-048
+  anti_duplication:
+    manual_edit_stale_approval: F161_KF_REC_049
+    ai_tweak_partial_mutation: CHECK_F164
+    contract_extraction_promotion: F216_C166_KF_REC_055
+    payment_evidence_replay: KF_REC_048_SPECIALIZATION_NO_F220
 active_frontier:
-  stage: SELECT_NEXT_FIRST_PASS_JOURNEY_AFTER_J11_CONVERGENCE
-  primary_journey: null
-  requirement: VERIFY_JOURNEY_INVENTORY_AND_REACHABLE_IMPLEMENTATION_FOOTPRINT_BEFORE_ACTIVATION
+  stage: J12_CROSS_DOMAIN_DOCUMENT_EXTRACTION_TRACE
+  primary_journey: J12
+  primary_kernel: K8
+  anti_duplication_required_before_new_id: true
+  next_free_finding: F220
 exact_next_action:
-  title: select_next_unpooled_journey
-  instruction: Load 03-ANALYSIS-MAP and the current journey dossier inventory. Identify genuinely unpooled or under-covered journeys, compare reachable native implementation footprint and cross-kernel leverage, and activate the highest-leverage next frontier. Begin at native domain write/effect paths. Reuse F001-F218 C001-C168 KF-REC-001-055 before allocating anything new. Do not turn KF-REC-055 into an implementation packet. Keep production code read-only.
+  title: continue_j12_document_evidence_trace
+  instruction: Continue J12 across all material DocumentIntelligence consumers. Trace stable source identity and exact source revision through upload, Drive, Asset, Device and Expense paths; identify durable assertion/evidence/admission lineage versus final-state-only consumers; trace correction, replacement, reprocessing, supersession and deletion; close the generated-document tweak crash seam against F164; classify all new seams against F219 and mature KF-REC-049/048/052 before allocating F220/C170; pool stable J12 roots before considering KF-REC-056. Keep production code read-only.
 constraints:
   - production_code_read_only
-  - do_not_resume_J11_pressure_test
+  - runtime_proof_not_executed
+  - do_not_resume_post_j11_frontier_selection
   - do_not_convert_KF_REC_055_into_implementation_packet
-  - F219_C169_KF_REC_056_are_next_free
+  - F220_C170_KF_REC_056_are_next_free
   - anti_duplication_before_allocation
+  - do_not_allocate_KF_REC_056_merely_because_F219_exists
+  - do_not_duplicate_KF_REC_049_epistemics
+  - do_not_duplicate_KF_REC_048_effect_identity
+  - do_not_duplicate_KF_REC_052_financial_truth
   - source_documents_do_not_override_repository_behavior
   - continuously_refresh_cross_agent_continuity
