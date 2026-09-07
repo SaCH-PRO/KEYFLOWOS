@@ -43,7 +43,7 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
 - Findings: `F001–F214` — `08*`; allocator 04B.
 - Contradictions: `C001–C164` — `09*`; allocator 04B.
-- Recommendations: `KF-REC-001–KF-REC-053` — `10*`; allocator 04B.
+- Recommendations: `KF-REC-001–KF-REC-054` — `10*`; allocator 04B.
 
 Latest roots:
 ```text
@@ -69,6 +69,7 @@ KF-REC-050 load-bearing WorkDefinition controls
 KF-REC-051 Operator Attention & Priority Contract
 KF-REC-052 Financial Truth & Valuation Contract
 KF-REC-053 Commercial Relationship & Obligation Contract
+KF-REC-054 Commerce & Fulfilment Contract
 ```
 
 ---
@@ -80,7 +81,7 @@ CustomerLifecycleState != RelationshipHealthState != DealState/DealStage != tags
 Commercial evidence != lifecycle transition until policy says so
 Pipeline/expected != committed != invoiced != collected != net-realized value
 Service complete != financially complete
-OrderFulfilmentState != PaymentCompletionEvidence
+OrderOperationalState != PaymentCompletionEvidence != AggregateFulfilmentOutcome
 One order occurrence != permission for multiple paid-Invoice descendants
 Free-form notes != canonical commercial-effect identity
 Inventory reservation != inventory consumption != release/restoration
@@ -110,18 +111,21 @@ Plan-step/process idempotency != semantic effect idempotency
 | Operator Attention & Priority Contract | KF-REC-051 |
 | Financial Truth & Valuation Contract | KF-REC-052 |
 | Commercial Relationship & Obligation Contract | KF-REC-053 |
+| Commerce & Fulfilment Contract | KF-REC-054 |
 | CustomerLifecycleState | KF-REC-053 target vocabulary; exact enum not frozen |
 | RelationshipHealthState | KF-REC-053; orthogonal to lifecycle |
 | CommercialObligationLineage | KF-REC-053; origin/descendant lineage |
 | CommercialValueStage | KF-REC-053; stage-explicit value |
 | ServiceFinancialDisposition | KF-REC-053 correction/cancellation semantics |
 | EventToActionContractAdapter | KF-REC-053 typed/versioned event→tool composition |
-| Order-item inventory allocation lineage | J10 F208/C158 target pressure; exact representation not frozen |
-| Aggregate fulfilment outcome | J10 F209/C159; derived from required route outcomes |
-| Provider external-entity identity | J10 F210/F212 K9 pressure; structural and business-scoped |
-| RequiredRouteSet / ObservedRouteSet | J10 F211/C161 recovery vocabulary; working semantics |
-| Operational external-order materialization | J10 F213/C163; explicit choice between native effectful aggregate and summary/evidence projection |
-| StrategyEffectIdentity | J10 F214/C164; stable semantic identity spanning route + strategy-specific descendants |
+| OrderOperationalState | KF-REC-054; operational commerce progression only |
+| InventoryAllocationLineage | KF-REC-054; one semantic order-item inventory effect lineage |
+| AggregateFulfilmentOutcome | KF-REC-054; derived from required fulfilment effects |
+| ExternalEntityIdentity | KF-REC-054 for provider commerce resources; business-scoped provider-stable identity |
+| RequiredFulfilmentSet | KF-REC-054; required semantic effects per order item/split/revision |
+| OperationalOrderMaterialization | KF-REC-054; operational vs summary/evidence-only provider-order representation |
+| StrategyEffectIdentity | KF-REC-054; stable semantic identity spanning route + strategy-specific descendants |
+| CommerceEffectIdentity | KF-REC-054 boundary identity for order-derived operational/commercial effects |
 
 ---
 
@@ -149,12 +153,12 @@ Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
 Finding range:           through F214
 Contradiction range:     through C164
-Recommendation range:    through KF-REC-053
+Recommendation range:    through KF-REC-054
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-J3/J4 are provisionally converged and target-aligned through KF-REC-053. J10 Commerce/Fulfilment is the active microscopic frontier.
+J3/J4 are provisionally converged and target-aligned through KF-REC-053. J10 is provisionally converged and target-aligned through KF-REC-054 after its standards/frontier pressure test and backward re-audit.
 
 Current J10 homes:
 - `journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
@@ -166,7 +170,10 @@ Current J10 homes:
 - F212/C162 — `08AP` / `09AP`
 - F213/C163 — `08AQ` / `09AQ`
 - F214/C164 — `08AR` / `09AR`
+- `KF-REC-054` — `10M`
+- pressure test — `investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+- backward re-audit — `investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md`
 
-The earlier K9/external-reality recommendation corpus has now been searched. It does not fully own stable provider entity identity, operational provider-order materialization, inventory-effect lineage, required fulfilment-set semantics, or strategy-effect identity. J10 is therefore under a final standards/frontier pressure test for a distinct narrow Commerce & Fulfilment target contract. Do not allocate new refund/provider/lifecycle/recovery roots where mature KF-REC-047/048/052/053 and existing findings already own the defect.
+Do not allocate new refund/provider/lifecycle/recovery roots where mature KF-REC-035–037/047/048/051/052/053/054 and existing findings already own the semantic defect. The next journey frontier must be revalidated against the journey inventory before activation.
 
 No production implementation is authorized by this taxonomy artifact.
