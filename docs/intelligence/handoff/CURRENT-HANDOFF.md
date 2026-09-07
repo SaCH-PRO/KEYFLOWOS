@@ -1,7 +1,7 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-06
-Status: CURRENT — J10 COMMERCE/FULFILMENT ACTIVE THROUGH F211/C161
+Status: CURRENT — J10 COMMERCE/FULFILMENT ACTIVE THROUGH F213/C163
 
 ## Programme identity / integrity
 
@@ -18,8 +18,8 @@ context integrity:     PASS
 ## Canonical ranges
 
 ```text
-Findings:        F211
-Contradictions:  C161
+Findings:        F213
+Contradictions:  C163
 Recommendations: KF-REC-053
 Concepts:        KF-CONCEPT-042
 ```
@@ -54,51 +54,49 @@ Invoice workflow DRAFT→SENT→PAID
 → store_order.paid
 ```
 
-### F206/C156 — duplicate paid Invoice descendant
+### Canonical J10 roots
 
-Checkout creates paid Invoice A; mounted `store_order.paid` listener can create paid Invoice B because its notes-based dedupe identity cannot see Invoice A. Target reuses KF-REC-053 semantic effect identity and KF-REC-052 financial truth.
-
-### F207/C157 — CONFIRMED conflates order and payment state
-
-Authenticated order confirmation can emit `store_order.paid` while `paymentStatus` remains PENDING/UNPAID. Routing also maps legacy `CONFIRMED → awaiting_payment`, even though strong native paid checkout itself writes `CONFIRMED`. Target law: `OrderFulfilmentState != PaymentCompletionEvidence`.
-
-### F208/C158 — inventory effect ownership conflict
-
-Native paid checkout decrements on-hand Q; LOCAL_STOCK routing can reserve Q; shipment later decrements Q again and releases reservation. Cancel releases reservation but does not restore the checkout decrement; refund changes order/payment projection without restoring stock in that action.
-
-Target: one order-item inventory allocation lineage/state machine for reserve/commit/consume/release/restore, exact-once and correction-aware.
-
-### F209/C159 — failed route can become aggregate fulfilment success
-
-A `FulfillmentRoute(status=FAILED)` can return normally, causing `store_order.fulfillment_routed`. Thrown `routing_failed` reaches `RevenueActionService`, but persisted FAILED route outcomes bypass that exception-based recovery path. CRM also stores thrown `routing_failed` under success event type `store_order.fulfillment_routed` with `failed:true`.
-
-### F210/C160 — Shopify product repeat-sync external identity breaks
-
-Sync lookup uses `sku=shopify:{variantId}`, while persistence uses `variant.sku` whenever a real SKU exists and only stores Shopify IDs in `executionMeta`. Next sync cannot rediscover the prior Product. Depending on DB constraints it duplicates or fails, but semantic reconciliation is broken either way.
-
-Target: immutable provider external identity → one business-scoped internal Product; merchant SKU remains catalog data.
-
-### F211/C161 — partial route set blocks recovery
-
-`routeOrder()` creates routes incrementally across items, but retry returns immediately when `existingRoutes.length > 0`. A failure after item 1 of N can therefore leave a partial route set; retry skips missing item routes and may advance order state.
-
-Target: reconcile `RequiredRouteSet` vs `ObservedRouteSet` by semantic route/effect identity, not “skip if any child exists.” Reuse KF-REC-048/K11.
+- **F206/C156** — checkout creates paid Invoice A; mounted `store_order.paid` listener can create paid Invoice B because its notes-based dedupe identity cannot see A. Reuse KF-REC-053 semantic effect identity + KF-REC-052 financial truth.
+- **F207/C157** — authenticated order `CONFIRMED` can emit `store_order.paid` while `paymentStatus` remains PENDING/UNPAID. `OrderFulfilmentState != PaymentCompletionEvidence`.
+- **F208/C158** — checkout decrement, fulfilment reservation, shipment decrement and cancellation/refund correction do not share one inventory allocation/effect lineage. One order-item inventory effect must compose exactly once.
+- **F209/C159** — persisted required `FulfillmentRoute=FAILED` can still yield aggregate `store_order.fulfillment_routed`; thrown failures have a RevenueAction seam, but state-encoded failures bypass it and CRM failure evidence is stored under the success event type.
+- **F210/C160** — Shopify Product sync searches by synthetic `shopify:{variantId}` SKU but persists real merchant SKU when supplied, so repeat sync cannot rediscover the prior Product.
+- **F211/C161** — `routeOrder()` treats any existing route as idempotent completion; a partial route set after item-level failure can make retries skip missing required routes.
+- **F212/C162** — Shopify customer sync resolves Contact by email OR provider ID, while order sync resolves only by email. After provider email change, the same Shopify customer can split into duplicate Contacts.
+- **F213/C163** — Shopify orders occupy the native `MarketplaceOrder` aggregate while line items exist only in `metadata.lineItems`; no listener materializes native `MarketplaceOrderItem` descendants required by fulfilment/inventory/COGS logic.
 
 ## Refund classification
 
 Store-order refund entry surfaces remain classified under mature J7/KF-REC-052 unless a distinct new root emerges. `PaymentsService` contains stronger negative-Payment + ledger-reversal refund primitives; StoreOrder/Marketplace refund actions do not automatically compose those with inventory restoration.
 
+## Recommendation ownership check — ACTIVE
+
+Do **not** allocate KF-REC-054 yet.
+
+The next architecture step is to search the earlier K9/integration/external-reality recommendation corpus and classify F210/F212/F213 against existing external identity/materialization contracts. In parallel, test whether KF-REC-053 legitimately owns F206 plus order-obligation semantics while KF-REC-048/051 own F209/F211, without stretching one recommendation into a catch-all.
+
+Current likely semantic partitions:
+
+```text
+commercial obligation/effect identity → KF-REC-053
+financial truth                     → KF-REC-052
+recovery completeness               → KF-REC-048
+operator attention                  → KF-REC-051
+external identity/materialization   → K9 / earlier recommendation corpus under review
+inventory allocation/effect lineage → J10 target pressure, owner not yet frozen
+```
+
 ## Exact next action
 
 ```text
-1. finish J10 external-identity trace for Shopify customers and orders;
-2. test changed-email/customer-id reconciliation and order external identity stability;
-3. inspect all routing strategies for strategy-specific descendant idempotency (PO/PreOrder/manual/service);
-4. trace cancellation/refund/return inventory correction against F208 rather than duplicating it;
-5. trace J10 events into CRM/calendar/webhooks/KEY/temporal/operator surfaces for propagation of F207/F209;
-6. assess whether F206–F211 still fit KF-REC-047/048/051/052/053 or justify a distinct commerce/fulfilment target recommendation;
-7. reuse F001–F211 / C001–C161 / KF-REC-001–053 before new IDs;
+1. search existing recommendation registers for external identity, provider reconciliation, integration/external reality and operational materialization ownership;
+2. do not allocate KF-REC-054 until duplicate/overlap is ruled out;
+3. inspect DROPSHIP / PREORDER / HYBRID / MANUAL / SERVICE route descendants for semantic idempotency and partial-failure recovery;
+4. trace propagation of F207/F209 into CRM/calendar/webhooks/KEY/temporal/operator surfaces;
+5. continue cancel/refund/return inventory correction under F208 unless a distinct architecture root is proven;
+6. decide whether F206–F213 compose under mature contracts or require a distinct Commerce/Fulfilment target contract;
+7. reuse F001–F213 / C001–C163 / KF-REC-001–053 before new IDs;
 8. persist every material tranche; do not modify production code.
 ```
 
-If this chat disappears, resume **J10 after F211/C161**, starting with Shopify customer/order external identity and strategy-specific fulfilment descendant idempotency.
+If this chat disappears, resume **J10 after F213/C163**, beginning with the recommendation-ownership anti-duplication check, then strategy-specific fulfilment descendant idempotency.
