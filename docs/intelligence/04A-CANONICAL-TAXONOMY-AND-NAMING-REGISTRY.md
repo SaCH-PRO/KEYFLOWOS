@@ -192,7 +192,7 @@ Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 Next free:               F219 / C169 / KF-REC-056 — UNALLOCATED
 ```
 
-J3/J4 are provisionally converged through KF-REC-053. J10 is provisionally converged through KF-REC-054. J11 target is synthesized as KF-REC-055 and is awaiting backward re-audit before provisional convergence.
+J3/J4 are provisionally converged through KF-REC-053. J10 is provisionally converged through KF-REC-054. **J11 is provisionally converged / target-aligned through F218/C168/KF-REC-055 after standards/frontier pressure testing and backward re-audit.**
 
 Current J11 homes:
 - `journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md`
@@ -201,6 +201,7 @@ Current J11 homes:
 - F218 — `08AU`; C168 — `09AU`
 - KF-REC-055 — `10N`
 - pressure test — `investigations/J11-CONTRACT-OBLIGATION-RENEWAL-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+- backward re-audit — `investigations/J11-J12-J23-J18-J17-J7-J3-J4-K4-K6-K7-K8-K11-CONTRACT-INTEGRITY-BACKWARD-REAUDIT.md`
 
 Reuse decisions remain:
 - renewal-cycle identity → J23 / KF-REC-047
@@ -209,5 +210,7 @@ Reuse decisions remain:
 - Contract deletion orphaning renewal work → F182 / KF-REC-051
 - renewal-date/notice correction leaving stale work → F182 / KF-REC-051
 - clauseAnalysis → derived/advisory projection; value-density review
+
+Next programme action is frontier selection from genuinely unpooled journeys, not implementation of KF-REC-055.
 
 No production implementation is authorized by this taxonomy artifact.
