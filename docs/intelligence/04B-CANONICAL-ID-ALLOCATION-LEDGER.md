@@ -18,7 +18,7 @@ F179–F184 J17 operator-control lineage
 F185–F196 J7 Financial Truth
 F197–F205 J3/J4 commercial-to-cash
 F206–F214 J10 Commerce/Fulfilment
-F215–F216 J11 Contract/Obligation/Renewal
+F215–F217 J11 Contract/Obligation/Renewal
 ```
 
 ```text
@@ -28,7 +28,7 @@ C129–C134 J17 contradictions
 C135–C146 J7 contradictions
 C147–C155 J3/J4 contradictions
 C156–C164 J10 contradictions
-C165–C166 J11 contradictions
+C165–C167 J11 contradictions
 ```
 
 Current recommendation range is through `KF-REC-054`.
@@ -80,16 +80,17 @@ KF-REC-053 commercial relationship/obligation lineage
 
 - F215 / C165 — `ContractVersion` is neither a complete mutation ledger nor a reconstructable historical Contract revision; principal manual PATCH is unversioned — `08AS` / `09AS`.
 - F216 / C166 — probabilistic contract-document extraction can promote inferred renewal/value/party state into authoritative Contract truth without a confidence/verification/governance promotion gate — `08AS` / `09AS`.
+- F217 / C167 — ordinary Contract edits can falsely discharge renewal obligations because supplied lifecycle status is treated as renewal-decision evidence; `ACTIVE` is also simultaneously eligible to raise renewal work — `08AT` / `09AT`.
 
-J11 also reuses mature temporal recurrence laws from J23 for renewal-cycle occurrence identity. Do not allocate a new finding merely because a multi-cycle contract manifests the existing Definition/Occurrence identity law.
+J11 also reuses mature temporal recurrence laws from J23 for renewal-cycle occurrence identity. Do not allocate a new finding merely because a multi-cycle contract manifests the existing Definition/Occurrence identity law. ContractAlert acknowledgement resurrection and orphaned operator work after Contract deletion currently reuse F182/KF-REC-051 unless later evidence proves a distinct root.
 
-No J11 recommendation has yet been allocated. Continue microscopic reconstruction and anti-duplication before deciding whether J11 requires a distinct target contract or is fully owned by existing K4/K7/K8/K11 contracts.
+No J11 recommendation has yet been allocated. Continue microscopic reconstruction and anti-duplication before deciding whether J11 requires a distinct target contract or is fully owned by existing K4/K7/K8/K11/commercial-obligation contracts.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F216
-Contradictions:  C001–C166
+Findings:        F001–F217
+Contradictions:  C001–C167
 Recommendations: KF-REC-001–KF-REC-054
 ```
 
