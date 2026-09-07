@@ -1,7 +1,7 @@
 project: KEYFLOWOS
-rollover_version: 35
+rollover_version: 36
 last_updated: 2026-09-07
-status: LIVE_CONTINUITY_ARTIFACT_J12_ACTIVE_F220_C170
+status: LIVE_CONTINUITY_ARTIFACT_J12_F221_C171_PRE_POOLING
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: false
 context_integrity: PASS
@@ -12,44 +12,44 @@ implementation_evidence:
   current_head: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   head_revalidated: true
 canonical_ranges:
-  findings_through: F220
-  contradictions_through: C170
+  findings_through: F221
+  contradictions_through: C171
   recommendations_through: KF-REC-055
   concepts_through: KF-CONCEPT-042
 next_free_ids:
-  finding: F221
-  contradiction: C171
+  finding: F222
+  contradiction: C172
   recommendation: KF-REC-056
   status: UNALLOCATED
 j12:
-  status: ACTIVE_MICROSCOPIC_FORENSICS
+  status: ACTIVE_PRE_POOLING_CONVERGENCE_GATE
   dossier: docs/intelligence/journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md
   investigation: docs/intelligence/investigations/J12-DOCUMENT-INTELLIGENCE-CONSUMER-REVISION-LINEAGE-TRACE.md
-  findings: [F219,F220]
-  contradictions: [C169,C170]
+  findings: [F219,F220,F221]
+  contradictions: [C169,C170,C171]
   recommendation: null
-  roots:
-    F219_C169: document_assertion_to_payment_evidence_without_explicit_admission_decision
-    F220_C170: external_object_identity_collapses_new_source_revision_at_ingestion_dedupe
   reuse:
     manual_edit_stale_approval: F161_KF_REC_049
-    device_reviewed_state_reprocess: F161_KF_REC_049_NO_F221
-    ai_tweak_partial_mutation: CHECK_F164
+    device_reviewed_state_reprocess: F161_KF_REC_049
+    ai_tweak_partial_mutation: F164_KF_REC_049
+    drive_import_no_version: F161_F164_PRESSURE
     contract_extraction: F216_C166_KF_REC_055
-    payment_evidence_replay: KF_REC_048_SPECIALIZATION
-    expense_extract_create: HUMAN_EDITABLE_SUBMIT_SEAM_PROVENANCE_PRESSURE_NO_ROOT_YET
+    payment_evidence_replay: KF_REC_048
+    expense_extract_create: HUMAN_EDITABLE_SUBMIT_PROVENANCE_PRESSURE
+    direct_ai_upload: EXTRACTION_ONLY
+  roots:
+    F219_C169: evidence_admission
+    F220_C170: source_revision_occurrence_identity
+    F221_C171: destructive_document_disposition
 active_frontier:
-  stage: J12_DIRECT_UPLOAD_DOCUMENT_TWEAK_CORRECTION_TRACE
-  primary_journey: J12
-  anti_duplication_required_before_new_id: true
+  stage: J12_CORRECTION_SUPERSESSION_DESCENDANT_GATE
 exact_next_action:
-  title: continue_j12_after_device_expense_classification
-  instruction: Inspect direct AI upload endpoint as extraction-only versus downstream side-effect surface; close generated Document tweak crash semantics against F164; trace correction, replacement, supersession and deletion across accepted evidence; classify all new seams against F161/F219/F220 and mature KF-REC-049/035/048/052 before F221/C171; pool stable roots before considering KF-REC-056. Keep production code read-only.
+  instruction: Trace downstream descendants after evidence/source revision correction, supersession or destruction; compare stale-descendant behavior exactly against F178/C128 before F222/C172. Then pool F219-F221 with reused mature contracts and run standards/frontier pressure test before considering KF-REC-056. Keep production code read-only.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
-  - F221_C171_KF_REC_056_are_next_free
+  - F222_C172_KF_REC_056_are_next_free
   - anti_duplication_before_allocation
-  - do_not_allocate_KF_REC_056_merely_because_F219_F220_exist
-  - do_not_duplicate_existing_revision_occurrence_recovery_financial_contracts
+  - do_not_allocate_KF_REC_056_before_pooling_and_pressure_test
+  - do_not_create_universal_document_or_privacy_runtime
   - continuously_refresh_cross_agent_continuity
