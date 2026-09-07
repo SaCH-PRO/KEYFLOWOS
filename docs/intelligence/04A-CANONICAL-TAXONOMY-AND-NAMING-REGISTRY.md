@@ -43,8 +43,8 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Journeys: `J1 ... J25` — `03-ANALYSIS-MAP.md`.
 - Kernels: `K1 ... K12` — `12-KERNEL-PROGRAMME.md`.
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
-- Findings: `F001–F206` — `08*`; allocator 04B.
-- Contradictions: `C001–C156` — `09*`; allocator 04B.
+- Findings: `F001–F209` — `08*`; allocator 04B.
+- Contradictions: `C001–C159` — `09*`; allocator 04B.
 - Recommendations: `KF-REC-001–KF-REC-053` — `10*`; allocator 04B.
 - Decisions: `KF-DEC-###` — `05-DECISION-REGISTER.md`.
 - Execution packets: `KF-EXEC-<DOMAIN>-###`.
@@ -54,7 +54,10 @@ Latest roots:
 ```text
 F185–F196 / C135–C146 — J7 Financial Truth
 F197–F205 / C147–C155 — J3/J4 commercial-to-cash
-F206/C156 — native storefront paid checkout has two mounted paid-Invoice descendant owners with incompatible dedupe identities
+F206/C156 — one successful storefront checkout has two mounted paid-Invoice descendant owners with incompatible dedupe identities
+F207/C157 — operational order CONFIRMED emits store_order.paid while payment state can remain PENDING/UNPAID
+F208/C158 — paid checkout decrements tracked stock while post-payment routing reserves the same sold units again
+F209/C159 — aggregate fulfillment_routed can be emitted while required per-item route state is FAILED
 ```
 
 Current major pooled targets:
@@ -106,7 +109,10 @@ AUTHORITY     authoritative | derived | advisory | compatibility
 | CommercialValueStage | KF-REC-053 target vocabulary for stage-explicit commercial value |
 | ServiceFinancialDisposition | KF-REC-053 target vocabulary for cancellation/no-show/correction financial outcomes |
 | EventToActionContractAdapter | KF-REC-053 target vocabulary for typed/versioned event→tool mapping |
-| StoreOrder paid-Invoice semantic effect | F206/C156 current J10 specialization of KF-REC-053 lineage/effect-idempotency; do not create a separate recommendation by reflex |
+| StoreOrder paid-Invoice semantic effect | F206/C156 specialization of KF-REC-053 lineage/effect-idempotency |
+| OrderFulfilmentState vs PaymentCompletionEvidence | F207/C157; separate axes |
+| Inventory allocation / reservation / sale consumption | F208/C158 active J10 state-algebra pressure; one order-item allocation lineage required |
+| Aggregate fulfilment outcome | F209/C159; must derive from required per-route outcomes, not normal function return |
 
 ---
 
@@ -169,8 +175,13 @@ Booking CANCELLED / NO_SHOW != financial disposition complete
 Canonical event payload != template-local assumed payload
 Plan-step idempotency != semantic commercial-obligation idempotency
 Order/fulfilment status != payment/accounting truth
+Order CONFIRMED != payment completed
 One order occurrence != permission for multiple paid-Invoice descendants
 Free-form notes != canonical commercial-effect identity
+Inventory on-hand decrement != separate reservation of the same sold units
+Route row created != route outcome satisfied
+Normal routeOrder return != aggregate fulfilment success
+External provider paid/refunded label != local Payment/ledger convergence
 ```
 
 ---
@@ -212,19 +223,21 @@ load 04B
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F206
-Contradiction range:     through C156
+Finding range:           through F209
+Contradiction range:     through C159
 Recommendation range:    through KF-REC-053
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-J3/J4 are provisionally converged and target-aligned through KF-REC-053, with canonical journey dossiers ingrained. J10 Commerce/Fulfilment is now the active microscopic frontier.
+J3/J4 are provisionally converged and target-aligned through KF-REC-053, with canonical journey dossiers ingrained. J10 Commerce/Fulfilment is the active microscopic frontier.
 
-Current J10 canonical entry:
+Current J10 canonical entries:
 - `journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
 - F206/C156 in `08AK` / `09AK`.
+- F207/C157 in `08AL` / `09AL`.
+- F208–F209 / C158–C159 in `08AM` / `09AM`.
 
-Do not allocate a new refund/provider/customer-lifecycle root where F193/F194/F196/F202/F205 or KF-REC-052/053 already own the semantic defect. New J10 IDs require a genuinely distinct architecture root after source/reachability verification.
+Do not allocate a new refund/provider/customer-lifecycle root where F187/F193/F194/F196/F202/F205 or KF-REC-052/053 already own the semantic defect. New J10 IDs require a genuinely distinct architecture root after source/reachability verification.
 
 No production implementation is authorized by this taxonomy artifact.
