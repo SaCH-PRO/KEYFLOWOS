@@ -5,7 +5,7 @@ Status: CANONICAL CURRENT PROGRAMME STATE
 
 ## Analytical phase
 
-`WHOLE-SYSTEM VIRTUAL MODEL / J12 DOCUMENT-EVIDENCE FORENSICS / F219-C169 ADMISSION + F220-C170 REVISION-OCCURRENCE + F221-C171 DESTRUCTIVE-DISPOSITION ROOTS / PRE-POOLING CONVERGENCE GATE`
+`WHOLE-SYSTEM VIRTUAL MODEL / J12 DOCUMENT-EVIDENCE TARGET SYNTHESIS + BACKWARD RE-AUDIT COMPLETE / NEXT FRONTIER SELECTION`
 
 Production implementation remains **READ-ONLY / UNAUTHORIZED**.
 Runtime proof has **NOT** been executed.
@@ -25,80 +25,87 @@ intelligence branch:   docs/keyflow-intelligence-foundation
 ```text
 Findings:         F001–F221
 Contradictions:   C001–C171
-Recommendations: KF-REC-001–KF-REC-055
+Recommendations: KF-REC-001–KF-REC-056
 Concepts:         KF-CONCEPT-001–KF-CONCEPT-042
-Next free:        F222 / C172 / KF-REC-056
+Next free:        F222 / C172 / KF-REC-057
 ```
 
-Mandatory governors: `04-CONCEPT-REGISTRY.md`, `04A`, `04B`.
-
-## Mature anchors
+## Mature / pooled journey state
 
 ```text
-KF-REC-035 ingress occurrence direction
-KF-REC-047 Temporal Work Projection
-KF-REC-048 certainty-aware Recovery Contract
-KF-REC-049 provenance/revision-aware Business Knowledge Contract
-KF-REC-050 load-bearing WorkDefinition control contract
-KF-REC-051 Operator Attention & Priority Contract
-KF-REC-052 Financial Truth & Valuation Contract
-KF-REC-053 Commercial Relationship & Obligation Contract
-KF-REC-054 Commerce & Fulfilment Contract
-KF-REC-055 Contract Integrity & Renewal Contract
+J16/K4 → F161–F178 / C111–C128 / KF-REC-049
+J17    → F179–F184 / C129–C134 / KF-REC-051
+J23/J18→ KF-REC-047/048
+J7     → F185–F196 / C135–C146 / KF-REC-052
+J3/J4  → F197–F205 / C147–C155 / KF-REC-053; provisionally converged
+J10    → F206–F214 / C156–C164 / KF-REC-054; provisionally converged
+J11    → F215–F218 / C165–C168 / KF-REC-055; provisionally converged
+J12    → F219–F221 / C169–C171 / KF-REC-056; provisionally converged
 ```
 
-## Active J12 roots
-
-```text
-F219/C169 — transient document assertion can become successful payment evidence without explicit consumer-specific evidence admission
-F220/C170 — materially new external document revision can be suppressed as the prior ingestion occurrence because stable object identity is used as dedupe identity
-F221/C171 — mounted DocumentInstance hard delete can destroy version/approval/review evidence and detach surviving change history without a disposition decision
-```
-
-Homes:
-
-```text
-F219/C169 → 08AV / 09AV
-F220/C170 → 08AW / 09AW
-F221/C171 → 08AX / 09AX
-```
+## J12 durable result
 
 Dossier:
 `journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md`
 
-Consumer trace:
-`investigations/J12-DOCUMENT-INTELLIGENCE-CONSUMER-REVISION-LINEAGE-TRACE.md`
-
-## J12 reuse / non-allocation decisions
+Canonical roots:
 
 ```text
-manual DocumentSection edit approved through stale version → F161 / KF-REC-049
-Device reviewed-state reprocessing under mutable coordinate  → F161 / KF-REC-049
-AI tweak section mutation before version evidence            → F164 / KF-REC-049
-Drive import replacing sections without new version          → F161 + F164 pressure
-contract extraction promotion                                → F216/C166 + KF-REC-055
-payment evidence replay                                      → KF-REC-048
-Expense extraction → editable human submit                   → admission seam exists; provenance KF-REC-049/KF-REC-052 pressure
-Direct AI document processing                                → extraction-only controller boundary
-Drive revised file suppressed by externalId dedupe           → F220/C170
-DocumentInstance hard-delete proof destruction               → F221/C171 + J19 pressure
+F219/C169 evidence admission
+F220/C170 source-revision / ingestion-occurrence identity
+F221/C171 destructive disposition of versioned/reviewed document evidence
+```
+
+Recommendation:
+`10O-RECOMMENDATION-REGISTER-DOCUMENT-EVIDENCE-REVISION-INTEGRITY-CONTINUATION.md`
+
+Pressure test:
+`investigations/J12-DOCUMENT-EVIDENCE-LIFECYCLE-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+
+Backward re-audit:
+`investigations/J12-J16-J14-J18-J7-J11-J19-J17-DOCUMENT-EVIDENCE-INTEGRITY-BACKWARD-REAUDIT.md`
+
+KF-REC-056 owns only:
+
+```text
+DocumentEvidenceReference
+EvidenceAdmissionDecision
+SourceRevisionOccurrence boundary binding
+DocumentDispositionDecision
+```
+
+It delegates mature provenance, ingress, recovery, operator, financial, contract and privacy semantics to their canonical owners.
+
+Backward re-audit verdict:
+
+```text
+parallel provenance system      = NO
+parallel ingress runtime        = NO
+parallel recovery runtime       = NO
+parallel financial system       = NO
+parallel contract system        = NO
+parallel operator system        = NO
+parallel privacy rules engine   = NO
+universal EDMS required         = NO
+new F/C from re-audit           = NO
+J12 provisionally converged     = YES
+runtime proof                   = NOT EXECUTED
 ```
 
 ## Immediate programme frontier
 
+J12 returns to the pooled whole-system model. Do not convert KF-REC-056 into an implementation packet.
+
+Exact next action:
+
 ```text
-1. finish correction/supersession dependency trace: identify downstream effects that remain active after source revision correction or destruction;
-2. compare those manifestations exactly against F178/C128 before F222/C172;
-3. update consumer trace with direct upload, Expense, F164 reuse and F221;
-4. test whether F219–F221 plus mature reused contracts are sufficient for one bounded J12 target contract;
-5. if roots are stable, run standards/frontier pressure test before allocating KF-REC-056;
-6. keep production code untouched and do not claim runtime proof.
+1. load 03-ANALYSIS-MAP + current journey dossier inventory;
+2. identify genuinely unpooled / under-covered journeys after J12 convergence;
+3. compare reachable native implementation footprint and cross-kernel leverage;
+4. activate the highest-leverage next frontier;
+5. begin microscopic tracing from native domain write/effect paths;
+6. reuse F001–F221 / C001–C171 / KF-REC-001–056 before new allocation;
+7. keep production code untouched.
 ```
 
-## Do not yet
-
-- modify production code;
-- allocate F222/C172 without anti-duplication;
-- allocate KF-REC-056 before pooling and standards pressure testing;
-- create a universal EDMS, provenance engine, ingress runtime, recovery runtime or privacy rules engine;
-- resume obsolete post-J11 frontier selection.
+J12 remains reopenable if J19, later journeys, migration design or runtime/concurrency/fault proof falsifies its target semantics.
