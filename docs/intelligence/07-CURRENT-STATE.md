@@ -5,48 +5,40 @@ Status: CANONICAL CURRENT PROGRAMME STATE
 
 ## Analytical phase
 
-`WHOLE-SYSTEM VIRTUAL MODEL / J10 COMMERCE-FULFILMENT TARGET SYNTHESIS + BACKWARD RE-AUDIT COMPLETE / NEXT FRONTIER SELECTION PENDING`
+`WHOLE-SYSTEM VIRTUAL MODEL / J11 CONTRACT-OBLIGATION-RENEWAL MICROSCOPIC TRACE ACTIVE`
 
 Production implementation remains **READ-ONLY / UNAUTHORIZED**.
-Runtime proof for the synthesized target contracts has **NOT** been executed.
+Runtime proof for synthesized target contracts has **NOT** been executed.
 
-Context integrity: `PASS` after continuity repair.
+Context integrity: `PASS` after J11 continuity repair.
 
 ## Programme identity
 
-> KeyFlowOS analysis is constructing a repository-grounded virtual architectural / causal model of the entire application, repeatedly pooling and backward-re-auditing it before a comprehensive repository transformation programme is allowed to become the frontier.
+> KeyFlowOS analysis is constructing a repository-grounded virtual architectural / causal model of the entire application, recursively tracing journeys, kernels, constellations, macro/micro pools and feedback loops, then converging duplicated semantics and value detractors before any comprehensive repository transformation programme is authorized.
 
 ```text
 MAP → MICROSCOPIC TRACE → JOURNEY → CONSTELLATION → KERNELS
 → DYNAMIC / CAUSAL / FEEDBACK GRAPHS
-→ STANDARDS / OSS / FRONTIER RESEARCH
-→ FINDINGS / CONTRADICTIONS / OPTIONS
-→ POOL → TARGET SYNTHESIS → BACKWARD RE-AUDIT
-→ REOPEN / REFINE → LOOP AT LARGER SCALE
+→ FINDING / CONTRADICTION
+→ ANTI-DUPLICATION GATE
+→ STANDARDS / OSS / FRONTIER PRESSURE TEST
+→ TARGET CONTRACT
+→ BACKWARD RE-AUDIT
+→ CONVERGENCE / REOPEN / REFINE
 ```
 
-Final destination:
-
-```text
-whole-system target architecture
-+ migration architecture
-+ proof architecture
-+ compatibility / rollout sequencing
-+ exact dependency-ordered repository transformation programme
-```
+Source documents provide product intent and architectural context; reachable repository behaviour remains the authority for implementation claims.
 
 ## Durable evidence baseline
 
 ```text
 repository:            SaCH-PRO/KEYFLOWOS
 implementation branch: main
-implementation head:   4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
-code-bearing baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
 intelligence branch:   docs/keyflow-intelligence-foundation
 production code:       READ-ONLY / UNAUTHORIZED
 ```
 
-Revalidate implementation evidence if `main` gains code-bearing changes.
+Implementation-head metadata must be revalidated before exact SHA claims because continuity sources contain different journal-only head observations. Revalidate whenever `main` gains code-bearing changes.
 
 ## Canonical taxonomy integrity
 
@@ -59,11 +51,13 @@ Mandatory governors:
 Current ranges:
 
 ```text
-Findings:         F001–F214
-Contradictions:   C001–C164
+Findings:         F001–F216
+Contradictions:   C001–C166
 Recommendations: KF-REC-001–KF-REC-054
 Concepts:         KF-CONCEPT-001–KF-CONCEPT-042
 ```
+
+Next free IDs are F217 / C167 / KF-REC-055. They are **not allocated**.
 
 Law:
 
@@ -92,177 +86,125 @@ These contracts compose; none is permission to create a universal runtime.
 
 ## Mature / pooled journey state
 
-### J16 / K4 — Business Knowledge
+- J16/K4 — Business Knowledge: F161–F178 / C111–C128 / KF-REC-049.
+- J17 — Command Center → Priority → Action: F179–F184 / C129–C134 / KF-REC-051.
+- J23/J18 — Temporal Flow / Failure-Recovery: mature via KF-REC-047/048.
+- J7 — Financial Truth: F185–F196 / C135–C146 / KF-REC-052.
+- J3/J4 — Commercial-to-Cash: F197–F205 / C147–C155 / KF-REC-053; provisionally converged.
+- J10 — Commerce/Fulfilment: F206–F214 / C156–C164 / KF-REC-054; provisionally converged after pressure test and backward re-audit.
 
-Pooled through F161–F178 / C111–C128 with KF-REC-049. Provenance, revision, epistemic eligibility, correction/influence closure and bounded learning semantics remain accepted target pressure. Runtime proof not executed.
+## J11 — Contract / Obligation / Renewal
 
-### J17 — Command Center → Priority → Action
+**ACTIVE MICROSCOPIC TRACE.**
 
-Pooled through F179–F184 / C129–C134 with KF-REC-051. Operator attention consumes truthful unresolved work; it does not own source-domain truth.
+Canonical evidence already allocated:
 
-### J23 / J18 — Temporal Flow / Failure-Recovery
+- **F215 / C165** — `ContractVersion` does not provide a complete, reconstructable revision history for authoritative Contract state; principal mutations can bypass it.
+- **F216 / C166** — probabilistic contract-document extraction can promote inferred renewal/value/party state into authoritative Contract truth without preserving confidence/verification/governance promotion evidence.
 
-Mature temporal/recovery pool retained through KF-REC-047/048. Stable semantic EffectId vs AttemptId, outcome certainty, consequence completeness and recovery clearance remain accepted. Runtime/fault-injection proof not executed.
+Canonical homes:
 
-### J7 — Financial Truth
+- `08AS-FINDING-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
+- `09AS-CONTRADICTION-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
 
-Pooled through F185–F196 / C135–C146 with KF-REC-052.
-
-Financial truth owns Payment/Invoice/ledger/refund/credit/reversal/valuation semantics. Operational/commercial domains may require financial consequences but do not redefine them.
-
-### J3 / J4 — Commercial-to-Cash
-
-Provisionally converged / target-aligned through F197–F205 / C147–C155 with KF-REC-053.
-
-Canonical dossier homes:
-- `journeys/KF-JOURNEY-003-LEAD-CUSTOMER-CASH.md`
-- `journeys/KF-JOURNEY-004-BOOKING-SERVICE-PAYMENT.md`
-
-Target separation retained:
+Important anti-duplication decision already made:
 
 ```text
-CustomerLifecycleState != RelationshipHealthState != DealState/DealStage
-commercial obligation/value stage != financial truth
+contract renewal-cycle occurrence identity
+→ manifestation of mature J23 temporal Definition/Occurrence law
+→ reuse KF-REC-047
+→ do not allocate a duplicate finding
 ```
 
-### J10 — Commerce / Fulfilment
+## Exact active frontier
 
-**PROVISIONALLY CONVERGED / TARGET-ALIGNED for the current analytical tranche.**
+### Frontier A — alert regeneration versus operator disposition
 
-Dossier:
-`journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
-
-Canonical evidence:
+Reachable loop observed:
 
 ```text
-F206/C156 duplicate paid-Invoice descendant ownership
-F207/C157 operational CONFIRMED can manufacture paid event semantics
-F208/C158 competing tracked-stock effect ownership across checkout/routing/shipment/correction
-F209/C159 failed required route can be reported as aggregate fulfillment_routed
-F210/C160 Shopify Product provider identity fails repeat sync when SKU differs
-F211/C161 partial route set can suppress missing-route recovery
-F212/C162 Shopify customer identity differs by sync entrypoint after email change
-F213/C163 imported Shopify MarketplaceOrder lacks native relational order-item materialization
-F214/C164 PurchaseOrder/PreOrder can commit before route-based idempotency identity exists
+contract-derived alert
+→ operator acknowledges alert
+→ later contract mutation / extraction triggers regenerateAlerts()
+→ deleteMany(contract alerts)
+→ createMany(recomputed alerts)
+→ same semantic alert receives a new row
+→ prior acknowledgedAt / acknowledgedBy evidence disappears
+→ previously disposed attention can reappear as unresolved work
 ```
 
-Target recommendation:
-`10M-RECOMMENDATION-REGISTER-COMMERCE-FULFILMENT-CONTINUATION.md`
+This is **not yet a new canonical finding**. First anti-duplicate against J17 F179–F184 / C129–C134 / KF-REC-051 and J23 temporal projection law. Classify SAME / SPECIALIZATION / RELATED DISTINCT before F217/C167 allocation.
 
-Pressure test:
-`investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+### Frontier B — source Contract deletion/correction versus already-raised renewal work
 
-Backward re-audit:
-`investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md`
-
-Backward re-audit verdict:
+Trace exact reachable behaviour for:
 
 ```text
-KF-REC-054 invalidated                        = NO
-parallel financial system                    = NO
-parallel commercial-obligation system        = NO
-universal recovery/workflow runtime created  = NO
-universal integration runtime created        = NO
-universal order/warehouse table required     = NO
-new finding from re-audit                    = NO
-J10 target can be provisionally converged    = YES
-runtime proof executed                       = NO
+Contract termination / archival / correction / deletion
+→ existing ContractAlert rows
+→ renewal sweep occurrence
+→ already-created workflow/task/obligation/effect rows
+→ cancellation / supersession / settlement / orphaning semantics
+→ operator surfaces / stats / AI consumers
+→ retry / recurrence / later regeneration
 ```
 
-## KF-REC-054 target semantics
+Do not equate deletion of a source record with cancellation or settlement of a business obligation.
 
-KF-REC-054 owns the domain semantics that remain after delegation:
+## J11 constellation pressure
+
+Continuously compose J11 with:
 
 ```text
-OrderOperationalState
-ExternalEntityIdentity for commerce resources
-OperationalOrderMaterialization
-InventoryAllocationLineage
-RequiredFulfilmentSet
-StrategyEffectIdentity
-CommerceEffectIdentity
-AggregateFulfilmentOutcome
+J12 document/evidence                 → KF-REC-049 / future evidence specialization
+J23 temporal recurrence/work          → KF-REC-047
+J18 failure/recovery                   → KF-REC-048
+J17 operator attention                 → KF-REC-051
+J7 financial valuation                 → KF-REC-052
+J3/J4 commercial obligations           → KF-REC-053
 ```
 
-Critical laws:
+No J11-specific recommendation has been allocated. Only synthesize KF-REC-055 if irreducible contract-domain semantics remain after those delegations.
+
+## Whole-app value-density classification
+
+Important structures should eventually be classified as:
 
 ```text
-OrderOperationalState != PaymentCompletionEvidence != AggregateFulfilmentOutcome
-merchant SKU / mutable email != stable provider identity
-provider metadata line items != native operational OrderItem descendants
-one order-item quantity → one exact-once inventory allocation/effect lineage
-any existing route != complete required fulfilment set
-route absence != absence of already-committed PurchaseOrder/PreOrder effect
-aggregate fulfilment outcome = policy over required semantic child effects
+CORE VALUE PRIMITIVE
+NECESSARY DOMAIN SPECIALIZATION
+DERIVED PROJECTION
+COMPATIBILITY / MIGRATION LAYER
+REDUNDANT / DUPLICATIVE
+ACCIDENTAL COMPLEXITY
+DEAD / LOW-VALUE
+VALUE-DETRACTING
 ```
 
-Delegations:
+The objective is maximum value density, not abstraction proliferation.
+
+## Immediate programme action
 
 ```text
-ingress occurrence lifecycle → KF-REC-035–037
-recovery mechanics           → KF-REC-048
-operator attention           → KF-REC-051
-financial truth              → KF-REC-052
-commercial obligation/state  → KF-REC-053
+1. load J17 operator-control findings and KF-REC-051;
+2. anti-duplicate the contract-alert acknowledgement resurrection loop;
+3. revalidate current production implementation baseline;
+4. trace Contract deletion/termination/correction into renewal sweep and downstream work;
+5. stabilize the J11 microscopic pool;
+6. create/update the J11 journey dossier and constellation links;
+7. only then run standards/frontier pressure testing;
+8. synthesize a J11 target contract only if genuinely distinct semantics remain;
+9. backward re-audit affected mature journeys;
+10. refresh allocator/taxonomy/CURRENT/HANDOFF/ROLLOVER after each material tranche.
 ```
-
-## Positive J10 seam to preserve
-
-Native `StoreOrderService.completeCheckout()` currently provides a strong transaction boundary coupling:
-
-```text
-Invoice workflow
-+ Payment SUCCESSFUL
-+ ledger posting
-+ tracked stock mutation / StockMovement
-+ RevenueAttribution
-+ paid order projection
-→ commit
-→ buffered invoice events
-```
-
-Target architecture should preserve strong transactional seams while removing duplicate/competing semantic ownership around them.
-
-## Current open proof / migration pressure
-
-No runtime proof has been claimed. Future proof must include at least:
-
-- one successful commerce occurrence produces one semantic paid-Invoice lineage;
-- generic operational confirmation cannot create payment truth;
-- inventory reserve/consume/release/restore composes exactly once;
-- failed/partial required fulfilment prevents false aggregate success;
-- retry after item 1 of N repairs only missing semantic effects;
-- retry after PurchaseOrder/PreOrder commit but before route commit cannot duplicate the supplier/preorder obligation;
-- provider Product/Customer identity survives SKU/email mutation and sync-entrypoint order;
-- operational imported orders materialize structural OrderItems or are technically excluded from native effectful flows;
-- corrections converge the exact effects actually applied without erasing history.
-
-## Immediate programme frontier
-
-J10 should now return to the pooled model rather than becoming an implementation packet.
-
-The next broad action is **frontier selection / coverage verification**, with J11 as the previously identified candidate. Before activating J11:
-
-```text
-1. load journey inventory / analysis map;
-2. verify J11 has no canonical dossier / hidden later tranche;
-3. compare its reachable implementation footprint and cross-kernel leverage against other first-pass gaps;
-4. activate the highest-leverage genuinely unpooled journey;
-5. start at a native domain write/effect path, not documentation or provider adapter;
-6. preserve F001–F214 / C001–C164 / KF-REC-001–054 allocation discipline;
-7. keep production code untouched.
-```
-
-J10 remains reopenable if later journeys, migration design or runtime proof falsify its target semantics.
 
 ## Do not yet
 
 - modify production code;
-- create implementation tickets merely because KF-REC-054 is synthesized;
-- collapse operational order, payment and fulfilment state into one enum;
-- use mutable provider attributes as identity;
-- treat opaque provider metadata as operational completeness;
-- treat child-row existence as semantic effect completion;
-- let recovery, temporal projection or operator attention become source-domain truth owners;
-- allocate duplicate findings/recommendations;
-- claim runtime tests/proofs passed unless actually executed.
+- allocate F217/C167 before anti-duplication;
+- allocate KF-REC-055 prematurely;
+- treat document extraction as authoritative truth by default;
+- treat renewal recurrence as a new temporal architecture root;
+- treat regenerated projection rows as equivalent to durable operator disposition without proof;
+- treat Contract deletion as automatic cancellation of downstream obligations;
+- claim runtime proof passed unless executed.
