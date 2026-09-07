@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-analysis_version: 36
+analysis_version: 37
 last_updated: 2026-09-06
 phase: whole-system-virtual-model-expansion-commercial-cash-constellation
 status: CONTINUE_J3_J4_COMMERCIAL_OBLIGATION_AND_LIFECYCLE_CONVERGENCE
@@ -17,8 +17,8 @@ taxonomy_integrity:
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   create_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F203
-  contradictions_through: C153
+  findings_through: F204
+  contradictions_through: C154
   recommendations_through: KF-REC-052
   concepts_through: KF-CONCEPT-042
 active_mesh:
@@ -47,16 +47,18 @@ active_frontier:
     - J17_attention_basis_completeness
     - J23_work_occurrence_semantics
     - J16_epistemic_eligibility_for_customer_projection
-  findings: [F197,F198,F199,F200,F201,F202,F203]
-  contradictions: [C147,C148,C149,C150,C151,C152,C153]
+  findings: [F197,F198,F199,F200,F201,F202,F203,F204]
+  contradictions: [C147,C148,C149,C150,C151,C152,C153,C154]
   finding_supplements:
     - docs/intelligence/08AF-FINDING-REGISTER-CUSTOMER-LIFECYCLE-AND-VALUE-SUPPLEMENT.md
     - docs/intelligence/08AG-FINDING-REGISTER-SERVICE-COMPLETION-RECEIVABLE-SUPPLEMENT.md
     - docs/intelligence/08AH-FINDING-REGISTER-COMMERCIAL-SERVICE-LINEAGE-SUPPLEMENT.md
+    - docs/intelligence/08AI-FINDING-REGISTER-JOURNEY-EVENT-CONTRACT-SUPPLEMENT.md
   contradiction_supplements:
     - docs/intelligence/09AF-CONTRADICTION-REGISTER-CUSTOMER-LIFECYCLE-AND-VALUE-SUPPLEMENT.md
     - docs/intelligence/09AG-CONTRADICTION-REGISTER-SERVICE-COMPLETION-RECEIVABLE-SUPPLEMENT.md
     - docs/intelligence/09AH-CONTRADICTION-REGISTER-COMMERCIAL-SERVICE-LINEAGE-SUPPLEMENT.md
+    - docs/intelligence/09AI-CONTRADICTION-REGISTER-JOURNEY-EVENT-CONTRACT-SUPPLEMENT.md
   findings_summary:
     F197: commercial_customer_evidence_can_advance_through_deal_quote_invoice_order_while_Contact_status_remains_LEAD_and_downstream_consumers_count_CLIENT_as_customer_truth
     F198: ContactInsight_lifetimeValue_adds_won_Deal_value_and_PAID_Invoice_total_so_one_sale_can_be_double_counted_and_refund_valuation_drift_inherits_J7_roots
@@ -65,15 +67,17 @@ active_frontier:
     F201: Booking_CANCELLED_or_NO_SHOW_does_not_run_declared_financial_disposition_over_existing_deposit_invoice_payment_and_attribution_descendants
     F202: RevenueAttribution_persists_BOOKING_pipeline_value_and_paid_INVOICE_value_as_additive_revenue_rows_without_shared_stage_lineage_semantics
     F203: KeyCortex_CRM_context_queries_lead_and_customer_while_canonical_Contact_status_vocabulary_is_LEAD_PROSPECT_CLIENT_LOST
+    F204: live_booking_completed_to_post_booking_AI_journey_contract_is_incompatible_with_BookingCompletedPayload_and_commerce_create_invoice_tool_schema_so_intended_invoice_CLIENT_followup_chain_is_not_load_bearing
   positive_seams:
     - quote_conversion_transactionally_links_quote_and_invoice
     - RevenueEventListener_centralizes_revenue_timeline_rows
-    - booking_completion_emits_explicit_booking_completed
+    - booking_completion_emits_typed_booking_completed_event
     - booking_to_invoice_link_is_idempotent_when_invoiceId_exists
     - booking_invoice_created_timeline_write_is_bus_centralized
     - service_invoice_timing_supports_BOOKING_COMPLETION_and_DEPOSIT_modes
     - RevenueAttribution_unique_key_prevents_duplicate_same_type_same_id_rows
     - revenuePerHour_contains_local_booking_invoice_dedupe_showing_recognized_cross_stage_overlap
+    - AgentTrigger_JourneyOrchestrator_PlanExecutor_BullMQ_ActionDispatcher_chain_is_runtime_reachable
   target_laws:
     - commercial_customer_evidence_not_equal_contact_lifecycle_state_until_declared_convergence_contract
     - canonical_contact_status_not_equal_pipelineStage_not_equal_lifecycleStage_not_equal_descriptive_tag
@@ -87,14 +91,16 @@ active_frontier:
     - booking_cancelled_or_no_show_not_equal_financial_disposition_complete
     - revenue_attribution_must_expose_value_stage_and_commercial_lineage
     - derived_CRM_AI_context_must_use_canonical_customer_status_algebra_or_versioned_owner_mapping
+    - canonical_domain_event_to_automated_action_requires_versioned_typed_adapter_and_validated_tool_schema
+    - plan_step_idempotency_not_equal_semantic_commercial_obligation_idempotency
   working_target_vocabulary_not_new_concepts:
     - CustomerLifecycle
     - CommercialObligationLineage
     - CommercialValueStage
     - ServiceFinancialDisposition
-  candidate_evidence_not_yet_canonical_finding:
-    - booking_completed_AI_post_booking_journey_template_also_contains_commerce_create_invoice_while_BookingsService_already_auto_generates_completion_invoice
-    - journey_runtime_is_reachable_via_AgentTriggerService_onAny_to_JourneyOrchestrator_but_duplicate_effect_requires_plan_execution_payload_and_idempotency_trace_before_allocation
+    - EventToActionContractAdapter
+  narrowed_candidates:
+    - duplicate_booking_invoice_via_post_booking_AI_journey_is_NOT_PROVEN_current_path_is_malformed_before_valid_second_invoice
   open_questions:
     - whether_Contact_status_lifecycleStage_pipelineStage_tags_and_Deal_state_are_distinct_dimensions_or_competing_customer_lifecycle_truths
     - whether_customer_lifecycle_should_transition_at_deal_won_quote_acceptance_first_paid_invoice_completed_service_or_policy_specific_evidence
@@ -102,16 +108,16 @@ active_frontier:
     - whether_paid_deposit_is_advance_liability_or_earned_revenue_under_target_business_policy
     - how_booking_cancellation_no_show_should_select_refund_retain_fee_credit_or_balance_outcome
     - whether_RevenueAttribution_consumers_beyond_revenuePerHour_sum_pipeline_and_realized_stages_without_dedupe
-    - whether_completed_booking_without_invoice_surfaces_to_J17_or_temporal_recovery_projections
-    - whether_post_booking_AI_journey_can_create_duplicate_invoice_or_fails_due_payload_shape_before_effect
+    - whether_completed_booking_without_invoice_or_unresolved_cancellation_descendants_surface_to_J17_J18_J23
 exact_next_action:
-  title: continue_J3_J4_customer_lifecycle_and_service_financial_disposition_trace
-  instruction: Continue J3/J4 from F197-F203. Trace automatic/manual ownership of Contact.status, lifecycleStage, pipelineStage and Deal state; trace booking.completed through AgentTriggerService/JourneyOrchestrator/PlanExecutor/commerce_create_invoice to decide duplicate-invoice reachability; trace cancellation/no-show financial policy and deposit/payment disposition; trace RevenueAttribution consumers and stage dedupe. Reuse J7/J18/J23 roots where equivalent. Do not modify production code.
+  title: trace_J4_financial_disposition_and_J3_customer_lifecycle_ownership
+  instruction: Continue J3/J4 from F197-F204. Locate Service/Booking schema and all load-bearing deposit/cancellation/no-show policy fields and code; trace paid deposit through cancel/no-show disposition. Then map every automatic writer/consumer of Contact.status, lifecycleStage, pipelineStage, Deal state and tags; trace RevenueAttribution consumers and J17/J18/J23 visibility of missing receivable/cancellation descendants. Reuse J7/J18/J23 roots where equivalent. Do not modify production code.
 constraints:
   - do_not_modify_production_code
   - do_not_treat_customer_or_service_completion_as_financial_completion
   - do_not_treat_pipeline_attribution_as_realized_revenue_without_explicit_semantics
   - do_not_assume_deposit_refundability_or_revenue_recognition_policy_without_evidence
+  - do_not_treat_template_intent_as_load_bearing_without_schema_composition
   - do_not_duplicate_J7_J18_J23_roots
   - do_not_create_duplicate_canonical_concepts_or_ids
   - preserve_anti_normalization_method
