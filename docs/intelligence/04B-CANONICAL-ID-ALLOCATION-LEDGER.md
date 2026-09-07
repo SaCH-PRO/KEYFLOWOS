@@ -19,7 +19,7 @@ F161–F166 initial J16/K4 epistemic-integrity findings
 F167–F174 recovered historical collision-band findings
 F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
-F185–F192 J7 Financial Truth findings
+F185–F193 J7 Financial Truth findings
 ```
 
 ```text
@@ -28,7 +28,7 @@ C111–C116 initial J16/K4 contradictions
 C117–C124 recovered historical collision-band contradictions
 C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
-C135–C142 J7 Financial Truth contradictions
+C135–C143 J7 Financial Truth contradictions
 ```
 
 ```text
@@ -71,35 +71,25 @@ Home: `10J-RECOMMENDATION-REGISTER-OPERATOR-PRIORITY-CONTINUATION.md`.
 ## J7 allocations
 
 ### F185 / C135 — live cash ownership
-Home:
-- `08Y-FINDING-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md`
-- `09Y-CONTRADICTION-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md`
-
-Distinct root:
+Home: `08Y` / `09Y`.
 
 ```text
 ledger-derived cash movement/balance
 != FinancialAccount.currentBalance initialized from opening balance
 ```
 
-`currentBalance` is initialized but not maintained by posting, while SafeToSpend and other product surfaces consume it as live cash.
-
 ### F186 / C136 — multi-currency valuation
-Home: same `08Y` / `09Y` pair.
-
-Distinct root:
+Home: `08Y` / `09Y`.
 
 ```text
 currency-specific LedgerEntry amounts
 != directly additive account/report values without valuation
 ```
 
-Posting preserves currency, while LedgerBalance groups/sums by account without currency separation or FX conversion. `ExchangeRateService` exists but repository search found no accounting/reporting consumer that makes rates load-bearing in ledger valuation.
+`ExchangeRateService` exists but repository search found no accounting/reporting consumer that makes rates load-bearing in ledger valuation.
 
 ### F187 / C137 — payroll financial outcome
-Home: same `08Y` / `09Y` pair.
-
-Distinct root:
+Home: `08Y` / `09Y`.
 
 ```text
 PayrollRun.status = PAID
@@ -107,14 +97,8 @@ PayrollRun.status = PAID
 != accounting consequence posted
 ```
 
-`markRunPaid()` currently updates PayrollRun status/timestamp only.
-
 ### F188 / C138 — PayPal capture financial consequence completeness
-Home:
-- `08Z-FINDING-REGISTER-FINANCIAL-CONSEQUENCE-COMPLETENESS-SUPPLEMENT.md`
-- `09Z-CONTRADICTION-REGISTER-FINANCIAL-CONSEQUENCE-COMPLETENESS-SUPPLEMENT.md`
-
-Distinct root:
+Home: `08Z` / `09Z`.
 
 ```text
 provider capture COMPLETED
@@ -123,28 +107,16 @@ provider capture COMPLETED
 != payment ledger consequence complete
 ```
 
-The direct PayPal capture path creates a successful Payment and reconciles the Invoice without using `createPaymentWithPosting()`. The later webhook sees the same provider capture ID and dedupes before the missing posting is repaired.
-
-F188 is distinct from F158: F158 has failed local Payment persistence after provider success; F188 has successful Payment persistence with an omitted mandatory accounting consequence.
-
 ### F189 / C139 — canonical financial source identity / CreditNote reversal reachability
-Home: same `08Z` / `09Z` pair.
-
-Distinct root:
+Home: `08Z` / `09Z`.
 
 ```text
 canonical invoice posting sourceType = 'Invoice'
 != CreditNote reversal lookup sourceType = 'INVOICE'
 ```
 
-A valid canonical invoice posting can exist while `CreditNoteService.apply()` cannot discover its lineage. Financial source discriminators must be canonical/typed enough for posting, reversal, reconciliation, reporting and repair to resolve the same business consequence.
-
 ### F190 / C140 — provider webhook receipt vs financial consumption completeness
-Home:
-- `08AA-FINDING-REGISTER-FINANCIAL-CONSUMPTION-AND-CLOSED-PERIOD-SUPPLEMENT.md`
-- `09AA-CONTRADICTION-REGISTER-FINANCIAL-CONSUMPTION-AND-CLOSED-PERIOD-SUPPLEMENT.md`
-
-Distinct root:
+Home: `08AA` / `09AA`.
 
 ```text
 WebhookEvent receipt persisted
@@ -152,49 +124,44 @@ WebhookEvent receipt persisted
 != financial descendants complete
 ```
 
-Stripe, PayPal and WiPay persist `(provider, providerEventId)` before downstream financial consequences. Redelivery is then treated as duplicate even when first-attempt consequences failed or were swallowed. No independent WebhookEvent processing lifecycle/re-drive owner was found in the repository search for this tranche.
-
 ### F191 / C141 — closed-period immutability vs later corrective consequence
-Home: same `08AA` / `09AA` pair.
-
-Distinct root:
+Home: `08AA` / `09AA`.
 
 ```text
 original reconciled LedgerEntry locked
 != later current-period reversal must be prohibited
 ```
 
-`PostingService.reverse()` intends to create a new reversal dated now, but first rejects any original transaction containing reconciliation-locked entries. `ReconciliationService` states admin override is required, while repository search found no reconciliation unlock/reopen operation or separate current-period adjustment path. `AccountingPeriodService.reopen()` only clears its own `lockedByPeriod` metadata and does not clear `lockedByReconciliationId`, so it does not repair this path.
+`AccountingPeriodService.reopen()` clears its own period metadata but does not clear reconciliation locks.
 
 ### F192 / C142 — AccountingPeriod closure is not load-bearing at the ledger write door
-Home:
-- `08AB-FINDING-REGISTER-ACCOUNTING-PERIOD-ENFORCEMENT-SUPPLEMENT.md`
-- `09AB-CONTRADICTION-REGISTER-ACCOUNTING-PERIOD-ENFORCEMENT-SUPPLEMENT.md`
-
-Distinct root:
+Home: `08AB` / `09AB`.
 
 ```text
 AccountingPeriod.status = CLOSED
 != canonical posting path rejects new in-period postings
 ```
 
-`AccountingPeriodService.close()` stamps transactions that already exist and exposes `checkClosed()`, but repository search found no caller of `checkClosed()` outside the service. `PostingService.post()` accepts caller-supplied dates without consulting AccountingPeriod closure, so new back-dated entries can alter a closed period.
+### F193 / C143 — Expense void bypasses the canonical ledger/reversal writer
+Home:
+- `08AC-FINDING-REGISTER-LEDGER-WRITER-INTEGRITY-SUPPLEMENT.md`
+- `09AC-CONTRADICTION-REGISTER-LEDGER-WRITER-INTEGRITY-SUPPLEMENT.md`
+
+Distinct root:
+
+```text
+PostingService.reverse() canonical controls
+!= ExpensesService.voidExpense() raw FinancialTransaction + LedgerEntry reversal writes
+```
+
+Repository search found `ExpensesService.voidExpense()` as the production raw `ledgerEntry.create` path and the only `financialTransaction.create` path outside PostingService. It can bypass reconciliation-lock enforcement and other controls that belong at the canonical ledger write door.
 
 ### Reused J7 recovery root — F155
 
-`PaymentsOpsService.refundCharge()` remains an instance of mature F155 and does **not** receive another J7 ID:
-
-```text
-provider refund succeeds
-→ REFUNDED Payment exists
-→ ledger/invoice consequences omitted
-→ webhook dedupe suppresses missing consequence repair
-```
+`PaymentsOpsService.refundCharge()` remains an instance of mature F155 and does not receive another J7 ID.
 
 ### KF-REC-052 — Financial Truth & Valuation Contract
 Home: `10K-RECOMMENDATION-REGISTER-FINANCIAL-TRUTH-CONTINUATION.md`.
-
-Distinct responsibility:
 
 ```text
 commercial/operational financial state
@@ -206,13 +173,11 @@ commercial/operational financial state
 → derived financial/operator projection
 ```
 
-Target preserves the strong PostingService/reversal/reconciliation seams while preventing stored balances, operational statuses, raw heterogeneous currencies, receipt-only idempotency and inconsistent period-closure controls from silently competing with reconciled financial truth.
-
 ## Current ranges
 
 ```text
-Findings:        F001–F192
-Contradictions:  C001–C142
+Findings:        F001–F193
+Contradictions:  C001–C143
 Recommendations: KF-REC-001–KF-REC-052
 ```
 
