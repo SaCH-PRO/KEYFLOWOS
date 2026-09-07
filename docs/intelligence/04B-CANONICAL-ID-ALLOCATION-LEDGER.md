@@ -20,7 +20,7 @@ F167–F174 recovered historical collision-band findings
 F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
 F185–F196 J7 Financial Truth findings
-F197–F199 J3/J4 commercial-to-cash findings
+F197–F203 J3/J4 commercial-to-cash findings
 ```
 
 ```text
@@ -30,7 +30,7 @@ C117–C124 recovered historical collision-band contradictions
 C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
 C135–C146 J7 Financial Truth contradictions
-C147–C149 J3/J4 commercial-to-cash contradictions
+C147–C153 J3/J4 commercial-to-cash contradictions
 ```
 
 ```text
@@ -122,41 +122,59 @@ Home:
 - `08AF-FINDING-REGISTER-CUSTOMER-LIFECYCLE-AND-VALUE-SUPPLEMENT.md`
 - `09AF-CONTRADICTION-REGISTER-CUSTOMER-LIFECYCLE-AND-VALUE-SUPPLEMENT.md`
 
-```text
-Deal WON / Quote accepted+converted / Invoice PAID / StoreOrder PAID
-!= Contact.status automatically converged to CLIENT
-```
-
-Core revenue events can establish strong customer evidence while `Contact.status` remains LEAD. Multiple CRM/People/OS consumers nevertheless treat `CLIENT` as operative customer classification. Manual `updateContact()` and AI template writes do not constitute a domain-owned lifecycle convergence contract.
-
 ### F198 / C148 — pipeline value plus realized revenue vs non-duplicative customer lifetime value
 Home: same `08AF` / `09AF` pair.
-
-```text
-won Deal value + PAID Invoice total
-!= non-duplicative customer lifetime value
-```
-
-`ContactInsightService` adds won deal value and paid invoice total even when they can represent the same economic sale. Refund/valuation weaknesses reuse J7 F194/F186; the distinct J3 root is pipeline/conversion value being added to realized revenue as independent customer value.
 
 ### F199 / C149 — completed service vs missing required receivable consequence
 Home:
 - `08AG-FINDING-REGISTER-SERVICE-COMPLETION-RECEIVABLE-SUPPLEMENT.md`
 - `09AG-CONTRADICTION-REGISTER-SERVICE-COMPLETION-RECEIVABLE-SUPPLEMENT.md`
 
+### F200 / C150 — service deposit vs final receivable settlement lineage
+Home:
+- `08AH-FINDING-REGISTER-COMMERCIAL-SERVICE-LINEAGE-SUPPLEMENT.md`
+- `09AH-CONTRADICTION-REGISTER-COMMERCIAL-SERVICE-LINEAGE-SUPPLEMENT.md`
+
 ```text
-Booking.status = COMPLETED
-+ completion-time invoicing required
-!= Invoice consequence durably created or durably owed
+DEPOSIT invoice D + completion FULL invoice P
+!= one service obligation P with declared deposit settlement
 ```
 
-Booking completion commits before auto-invoice generation. The helper catches invoice-generation/linking failure and only logs it, so a required receivable consequence can disappear without a durable recovery owner. This specializes J18/J23 incomplete-descendant recovery semantics and does not imply service completion must be financially atomic.
+### F201 / C151 — booking cancellation/no-show vs financial descendant disposition
+Home: same `08AH` / `09AH` pair.
+
+```text
+Booking CANCELLED / NO_SHOW
+!= deposit / invoice / payment / attribution disposition resolved
+```
+
+No cancellation/no-show financial policy owner was observed in the inspected booking path.
+
+### F202 / C152 — RevenueAttribution pipeline stage vs realized revenue stage
+Home: same `08AH` / `09AH` pair.
+
+```text
+BOOKING pipeline attribution + paid INVOICE attribution
+!= directly additive realized revenue
+```
+
+Generic attribution rollups can sum heterogeneous commercial stages; local consumer-specific dedupe does not repair the shared semantic model.
+
+### F203 / C153 — canonical CRM statuses vs KeyCortex lowercase/non-canonical predicates
+Home: same `08AH` / `09AH` pair.
+
+```text
+LEAD | PROSPECT | CLIENT | LOST
+!= lead | customer
+```
+
+KeyCortex CRM context filters with lowercase/non-canonical values, so canonical customer rows can disappear even if F197 is repaired.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F199
-Contradictions:  C001–C149
+Findings:        F001–F203
+Contradictions:  C001–C153
 Recommendations: KF-REC-001–KF-REC-052
 ```
 
