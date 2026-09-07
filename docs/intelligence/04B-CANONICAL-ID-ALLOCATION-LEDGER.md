@@ -19,7 +19,7 @@ F161–F166 initial J16/K4 epistemic-integrity findings
 F167–F174 recovered historical collision-band findings
 F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
-F185–F193 J7 Financial Truth findings
+F185–F196 J7 Financial Truth findings
 ```
 
 ```text
@@ -28,7 +28,7 @@ C111–C116 initial J16/K4 contradictions
 C117–C124 recovered historical collision-band contradictions
 C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
-C135–C143 J7 Financial Truth contradictions
+C135–C146 J7 Financial Truth contradictions
 ```
 
 ```text
@@ -143,18 +143,47 @@ AccountingPeriod.status = CLOSED
 ```
 
 ### F193 / C143 — Expense void bypasses the canonical ledger/reversal writer
-Home:
-- `08AC-FINDING-REGISTER-LEDGER-WRITER-INTEGRITY-SUPPLEMENT.md`
-- `09AC-CONTRADICTION-REGISTER-LEDGER-WRITER-INTEGRITY-SUPPLEMENT.md`
-
-Distinct root:
+Home: `08AC` / `09AC`.
 
 ```text
 PostingService.reverse() canonical controls
 != ExpensesService.voidExpense() raw FinancialTransaction + LedgerEntry reversal writes
 ```
 
-Repository search found `ExpensesService.voidExpense()` as the production raw `ledgerEntry.create` path and the only `financialTransaction.create` path outside PostingService. It can bypass reconciliation-lock enforcement and other controls that belong at the canonical ledger write door.
+### F194 / C144 — gross-successful payment projection vs canonical net payment balance
+Home:
+- `08AD-FINDING-REGISTER-PAYMENT-PROJECTION-SEMANTICS-SUPPLEMENT.md`
+- `09AD-CONTRADICTION-REGISTER-PAYMENT-PROJECTION-SEMANTICS-SUPPLEMENT.md`
+
+```text
+SUCCESSFUL-only projection
+!= SUCCESSFUL - REFUNDED canonical invoice balance
+```
+
+Active server/UI payment summaries, invoice progress and Finance Overview revenue can retain pre-refund gross values while `InvoiceWorkflowService` correctly reopens the invoice from net Payment rows.
+
+### F195 / C145 — applied CreditNote VOID without descendant financial convergence
+Home:
+- `08AE-FINDING-REGISTER-CREDIT-NOTE-REVERSAL-AND-INVOICE-STATE-SUPPLEMENT.md`
+- `09AE-CONTRADICTION-REGISTER-CREDIT-NOTE-REVERSAL-AND-INVOICE-STATE-SUPPLEMENT.md`
+
+```text
+CreditNote.status = VOID
+!= credit-note accounting consequence reversed
+!= invoice credited state recomputed
+```
+
+`CreditNoteService.void()` can void an APPLIED credit note by status/timestamp only, leaving the posted credit-note consequence and dependent invoice state active.
+
+### F196 / C146 — parallel Invoice state machine introduced by CreditNoteService
+Home: same `08AE` / `09AE` pair.
+
+```text
+InvoiceWorkflowService canonical InvoiceStatus algebra
+!= CreditNoteService direct PARTIALLY_CREDITED / FULLY_CREDITED writes
+```
+
+Credit-note application bypasses the declared invoice lifecycle owner and writes states absent from its canonical type/transition map.
 
 ### Reused J7 recovery root — F155
 
@@ -176,8 +205,8 @@ commercial/operational financial state
 ## Current ranges
 
 ```text
-Findings:        F001–F193
-Contradictions:  C001–C143
+Findings:        F001–F196
+Contradictions:  C001–C146
 Recommendations: KF-REC-001–KF-REC-052
 ```
 
