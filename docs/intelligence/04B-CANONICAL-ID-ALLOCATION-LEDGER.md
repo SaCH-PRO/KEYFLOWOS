@@ -31,7 +31,7 @@ C156–C164 J10 contradictions
 C165–C168 J11 contradictions
 ```
 
-Current recommendation range is through `KF-REC-054`.
+Current recommendation range is through `KF-REC-055`.
 
 ## Mature recommendation anchors
 
@@ -44,6 +44,7 @@ KF-REC-051 Operator Attention & Priority Contract
 KF-REC-052 Financial Truth & Valuation Contract
 KF-REC-053 Commercial Relationship & Obligation Contract
 KF-REC-054 Commerce & Fulfilment Contract
+KF-REC-055 Contract Integrity & Renewal Contract
 ```
 
 ## J10 Commerce / Fulfilment allocations
@@ -64,35 +65,64 @@ KF-REC-054 Commerce & Fulfilment Contract
 - Pressure test: `investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md`.
 - Backward re-audit: `investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md`.
 
-KF-REC-054 owns the commerce-domain semantics that remain after anti-duplication delegation: operational order-state separation, provider commerce-entity identity, operational external-order materialization, inventory allocation/effect lineage, required fulfilment-set semantics, aggregate fulfilment outcome and strategy-effect identity.
-
-It composes with rather than replaces:
-
-```text
-KF-REC-035–037 ingress occurrence/lifecycle contracts
-KF-REC-048 recovery semantics
-KF-REC-051 operator attention
-KF-REC-052 financial truth
-KF-REC-053 commercial relationship/obligation lineage
-```
-
 ## J11 Contract / Obligation / Renewal allocations
 
-- F215 / C165 — `ContractVersion` is neither a complete mutation ledger nor a reconstructable historical Contract revision; principal manual PATCH is unversioned — `08AS` / `09AS`.
+- F215 / C165 — `ContractVersion` is neither a complete mutation ledger nor a reconstructable historical Contract revision; principal manual/KEY PATCH is unversioned — `08AS` / `09AS`.
 - F216 / C166 — probabilistic contract-document extraction can promote inferred renewal/value/party state into authoritative Contract truth without a confidence/verification/governance promotion gate — `08AS` / `09AS`.
 - F217 / C167 — ordinary Contract edits can falsely discharge renewal obligations because supplied lifecycle status is treated as renewal-decision evidence; `ACTIVE` is also simultaneously eligible to raise renewal work — `08AT` / `09AT`.
 - F218 / C168 — persisted/product-facing Contract retention semantics do not constrain hard deletion, which cascades Contract-owned evidence/history — `08AU` / `09AU`.
 
-J11 also reuses mature temporal recurrence laws from J23 for renewal-cycle occurrence identity. Do not allocate a new finding merely because a multi-cycle contract manifests the existing Definition/Occurrence identity law. ContractAlert acknowledgement resurrection and orphaned operator work after Contract deletion currently reuse F182/KF-REC-051 unless later evidence proves a distinct root.
+J11 reuse decisions:
 
-No J11 recommendation has yet been allocated. Continue microscopic reconstruction and anti-duplication before deciding whether J11 requires a distinct target contract or is fully owned by existing K4/K7/K8/K11/commercial-obligation contracts.
+```text
+renewal-cycle occurrence identity                  → J23 / KF-REC-047
+ContractAlert acknowledgement resurrection         → F182 / KF-REC-051
+ContractAlert threshold time progression           → J23 / KF-REC-047
+source deletion leaves renewal work orphaned       → F182 / KF-REC-051
+renewal date/notice correction leaves stale work   → F182 / KF-REC-051
+local renewal alert vs obligation actionability    → KF-REC-047/051 pressure; no new root
+```
+
+## J11 target allocation
+
+- `KF-REC-055 — Contract Integrity & Renewal Contract` — `10N`.
+- Pressure test: `investigations/J11-CONTRACT-OBLIGATION-RENEWAL-STANDARDS-FRONTIER-PRESSURE-TEST.md`.
+- Backward re-audit: pending immediately after allocation.
+
+KF-REC-055 owns only the irreducible contract-domain semantics left after delegation:
+
+```text
+ContractRevision / authoritative agreement-state lineage
+contract-specific assertion promotion into accepted ContractRevision
+RenewalDecision binding to the relevant renewal occurrence/revision
+RetentionDeletionDecision for contract archival/destruction eligibility/evidence
+```
+
+It explicitly delegates:
+
+```text
+provenance / epistemic eligibility → KF-REC-049
+occurrence / temporal work mechanics→ KF-REC-047
+recovery / outcome certainty        → KF-REC-048
+operator attention / disposition    → KF-REC-051
+financial truth / valuation         → KF-REC-052
+commercial obligation discipline    → KF-REC-053
+```
+
+It does not authorize a universal event store, EDMS/CLM suite, second workflow runtime, second attention queue, second knowledge engine or jurisdiction-wide legal-rules engine.
 
 ## Current ranges
 
 ```text
 Findings:        F001–F218
 Contradictions:  C001–C168
-Recommendations: KF-REC-001–KF-REC-054
+Recommendations: KF-REC-001–KF-REC-055
+```
+
+Next free IDs:
+
+```text
+F219 / C169 / KF-REC-056
 ```
 
 ## Agent pre-allocation gate
