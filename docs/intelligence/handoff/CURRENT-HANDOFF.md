@@ -1,7 +1,7 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-06
-Status: CURRENT — J7 FINANCIAL TRUTH / CONSEQUENCE COMPLETENESS + REVERSAL FORENSICS ACTIVE
+Status: CURRENT — J7 FINANCIAL TRUTH / PROJECTION + VALUATION + STATUS CONVERGENCE ACTIVE
 
 ## Programme identity
 
@@ -33,20 +33,10 @@ Load `04-CONCEPT-REGISTRY.md`, `04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md`, 
 Current canonical ranges:
 
 ```text
-Findings:        F189
-Contradictions:  C139
+Findings:        F193
+Contradictions:  C143
 Recommendations: KF-REC-052
 Concepts:        KF-CONCEPT-042
-```
-
-## Pooled prior frontier — J17
-
-J17 Command Center → Priority → Action is pooled through F179–F184 / C129–C134 / KF-REC-051 with 20 local proof obligations.
-
-Retained law:
-
-```text
-IMPORTANT != ACTIONABLE != AUTHORIZED != EXECUTED != RESOLVED
 ```
 
 ## Active frontier — J7 Financial Truth
@@ -73,108 +63,80 @@ Prime law:
 NO LAYER MAY SILENTLY CLAIM A STRONGER FINANCIAL OUTCOME THAN ITS EVIDENCE SUPPORTS
 ```
 
-## Canonical J7 findings
-
-### F185 / C135 — live cash ownership
-`FinancialAccount.currentBalance` is initialized from opening balance, not maintained by PostingService, yet SafeToSpend and multiple product/intelligence surfaces consume it as live cash.
-
-### F186 / C136 — valuation semantics
-Ledger entries retain currency but LedgerBalance aggregates by account without currency separation or FX conversion.
-
-### F187 / C137 — payroll financial outcome
-`PayrollRun.markRunPaid()` sets PAID/paidAt without a Payment, Expense, FinancialTransaction or LedgerEntry on the inspected path.
-
-### F188 / C138 — PayPal capture consequence completeness
-The browser-driven direct PayPal capture path can produce:
+## Canonical J7 roots
 
 ```text
-provider capture = COMPLETED
-Payment = SUCCESSFUL
-Invoice = PAID
-COGS = possibly posted
-payment deposit / AR-or-revenue ledger leg = absent
+F185/C135 — FinancialAccount.currentBalance opening snapshot consumed as live cash
+F186/C136 — currency-tagged ledger values aggregated without load-bearing valuation/FX
+F187/C137 — PayrollRun PAID without proved disbursement/accounting consequence
+F188/C138 — direct PayPal capture can reach SUCCESSFUL Payment + PAID Invoice without payment ledger leg, then provider-id dedupe suppresses webhook repair
+F189/C139 — CreditNote reversal looks up INVOICE while canonical invoice posting uses Invoice
+F190/C140 — WebhookEvent receipt is durable before financial consequence completion; redelivery can be consumed by an incomplete first attempt
+F191/C141 — reconciliation lock on original entry blocks a later current-period corrective reversal; no reconciliation unlock/adjustment path observed
+F192/C142 — AccountingPeriod CLOSED does not make PostingService reject new back-dated entries in that period
+F193/C143 — ExpensesService.voidExpense directly writes reversal FinancialTransaction/LedgerEntry rows and bypasses PostingService controls
 ```
 
-because it directly creates Payment and calls `reconcileFromPayments()` rather than `createPaymentWithPosting()`.
-
-The later PayPal capture webhook sees the same provider capture ID on Payment and returns before the missing posting is repaired.
+Reused roots:
 
 ```text
-OCCURRENCE / PAYMENT DEDUPE
-!= FINANCIAL CONSEQUENCE COMPLETENESS
+F155 — direct provider refund may create REFUNDED Payment while ledger/invoice consequences remain incomplete; do not duplicate
+F158 — provider success + failed Payment persistence; distinct from F188
 ```
 
-F188 is distinct from F158: F158 is provider success + failed Payment persistence; F188 is successful Payment persistence + omitted accounting consequence.
+## Positive results from current tranche
 
-### F189 / C139 — financial source identity / CreditNote reversal reachability
-Canonical invoice posting uses:
+- Manual invoice `recordPayment()` transactionally couples SUCCESSFUL Payment + `RevenuePostingService.onPaymentRecorded()`.
+- Bill `markBillPaid()` transactionally couples PAID Expense/Bill + AP/cash ledger posting.
+- `ExchangeRateService` exists but search found no accounting/reporting consumer; this strengthens F186 rather than creating a duplicate.
+- `AccountingPeriodService.reopen()` clears only its own period metadata and does not clear reconciliation-entry locks, so it does not falsify F191.
+- Production search found raw `financialTransaction.create` outside PostingService in `ExpensesService.voidExpense()` and raw `ledgerEntry.create` there, supporting F193.
 
-```text
-sourceType = 'Invoice'
-```
+## Strong seams to preserve, but qualify
 
-while `CreditNoteService.apply()` queries:
-
-```text
-sourceType = 'INVOICE'
-```
-
-so a legitimate canonical Invoice ledger posting can exist while the CreditNote reversal path cannot discover it.
-
-Target pressure:
-
-```text
-FinancialSourceIdentity
-= canonical typed source discriminator
-+ stable source id
-+ consequence kind/version where required
-```
-
-## Reused mature root — F155
-
-Do NOT create another ID for `PaymentsOpsService.refundCharge()`.
-
-It remains exactly the mature F155 root:
-
-```text
-provider refund succeeds
-→ REFUNDED Payment written
-→ ledger reversal + invoice reconciliation omitted
-→ later webhook dedupes on same refund id
-→ missing consequences can remain unrepaired
-```
-
-## Strong seams to preserve
-
-- `PostingService` is the single sanctioned ledger writer.
+- `PostingService` is intended as the canonical ledger writer; F193 proves current enforcement is incomplete.
 - Decimal balanced-posting validation.
 - deterministic business-scoped posting idempotency.
-- transactional Payment + ledger posting where `createPaymentWithPosting()` is used.
-- transactional refund Payment + reversal where canonical refund helpers are used.
-- history-preserving reversal transactions.
-- reconciliation locks.
-- `reconcileFromPayments()` derives Invoice state from all Payment rows.
-- Invoice PAID + inventory COGS consequence are transactionally coupled.
+- transactional Payment + posting where canonical wrapper is used.
+- transactional Bill PAID + posting.
+- history-preserving reversal semantics.
+- reconciliation locks as historical-integrity evidence, with F191 target refinement.
+- `reconcileFromPayments()` recomputes Invoice state from Payment rows.
+- PAID + inventory COGS transactional coupling.
 - ledger-native reporting.
-- invoice-vs-ledger AR drift visibility.
+- AR invoice-vs-ledger drift visibility.
+
+## Target laws now forced by J7
+
+```text
+Payment/Invoice terminal status != mandatory financial consequences complete
+receipt idempotency != provider-event consumption completeness
+FinancialSourceIdentity must be canonical, typed and stable
+closed historical evidence may remain immutable while later corrective consequences remain representable
+AccountingPeriod CLOSED must be enforced at the canonical ledger write door
+ordinary ledger writes/reversals must use one governed posting contract
+stored cash projection must not silently compete with ledger truth
+heterogeneous currencies are not directly additive without valuation
+strong PAID / REFUNDED / VOID / SETTLED claims require declared evidence contracts
+```
 
 ## Exact next action
 
 ```text
-1. verify Stripe, WiPay and manual successful-payment paths against createPaymentWithPosting;
-2. trace CreditNote apply/void posting and bookkeeping end-to-end;
-3. characterize reconciliation-lock interaction with refunds/reversals and any reopen/unlock mechanism;
-4. map every FinancialAccount.currentBalance consumer to target ledger/materialized-projection semantics;
-5. trace ExchangeRate, provider currency behavior and reporting valuation intent;
-6. pressure-test KF-REC-052 with current accounting/payment/reconciliation standards and frontier architecture;
+1. trace user-facing payment/refund summaries against reconcileFromPayments and ledger truth;
+2. map all FinancialAccount.currentBalance consumers to ledger/materialized-projection target semantics;
+3. complete ExchangeRate/reporting valuation trace and choose single-currency enforcement vs multi-currency valuation pressure;
+4. trace remaining strong financial status transitions across payment operations, CreditNote, Expense/Bill, payroll and tax;
+5. complete raw ledger-writer/reversal scope search;
+6. pressure-test KF-REC-052 against current accounting/payment/reconciliation standards and frontier architecture;
 7. backward re-audit J3/J4/J17/J18/J23 + K8/K9/K10/K11/K3;
-8. load 04A/04B before any new ID and reuse F155/F158 wherever roots overlap.
+8. reuse mature roots before allocating new IDs.
 ```
 
 ## Mature pools retained
 
 - J16/K4 Business Knowledge through F178/C128 / KF-REC-049.
-- J17 Operator Attention through F184/C134 / KF-REC-051.
+- J17 Operator Attention through F184/C134 / KF-REC-051 / 20 local proof obligations.
 - J23/J18 temporal/recovery: 39 proof obligations / 16 deterministic fault points; runtime proof not executed.
 - reconciled historical band F167–F174 / C117–C124 / KF-REC-050.
 
@@ -200,4 +162,4 @@ PERSIST
 → ONLY THEN OPEN NEXT BROAD TRANCHE
 ```
 
-If this chat disappears, resume at **J7 financial consequence completeness / CreditNote reversal / cash+FX trace after F189/C139**. Do not implement production code.
+If this chat disappears, resume at **J7 projection/valuation/status convergence after F193/C143**. Do not implement production code.
