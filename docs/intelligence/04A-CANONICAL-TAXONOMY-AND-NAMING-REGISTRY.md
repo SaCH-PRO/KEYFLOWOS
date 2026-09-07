@@ -43,13 +43,10 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
 - Findings: `F001–F218` — `08*`; allocator 04B.
 - Contradictions: `C001–C168` — `09*`; allocator 04B.
-- Recommendations: `KF-REC-001–KF-REC-054` — `10*`; allocator 04B.
+- Recommendations: `KF-REC-001–KF-REC-055` — `10*`; allocator 04B.
 
-Latest roots:
+Latest J11 roots:
 ```text
-F185–F196 / C135–C146 — J7 Financial Truth
-F197–F205 / C147–C155 — J3/J4 commercial-to-cash
-F206–F214 / C156–C164 — J10 Commerce/Fulfilment
 F215/C165 — ContractVersion is not a complete reconstructable authoritative Contract revision history
 F216/C166 — uncertain AI contract extraction can be promoted into authoritative Contract/renewal truth without epistemic/governance promotion evidence
 F217/C167 — supplied Contract lifecycle status can falsely discharge renewal work; ACTIVE is simultaneously eligible to raise that work
@@ -66,6 +63,7 @@ KF-REC-051 Operator Attention & Priority Contract
 KF-REC-052 Financial Truth & Valuation Contract
 KF-REC-053 Commercial Relationship & Obligation Contract
 KF-REC-054 Commerce & Fulfilment Contract
+KF-REC-055 Contract Integrity & Renewal Contract
 ```
 
 ---
@@ -112,11 +110,12 @@ ARCHIVE / RETIRE / SUPERSEDE != HARD DELETE
 | Financial Truth & Valuation Contract | KF-REC-052 |
 | Commercial Relationship & Obligation Contract | KF-REC-053 |
 | Commerce & Fulfilment Contract | KF-REC-054 |
-| ContractRevision | J11 target vocabulary under F215/C165; exact persistence shape not frozen |
-| ContractAssertion / extraction evidence | J11 specialization of K4/KF-REC-049; not authoritative by default |
-| Renewal WorkOccurrence | J11 specialization of J23/KF-REC-047; one cycle != Contract definition identity |
-| RenewalDecision | J11 target vocabulary under F217/C167; requires occurrence-specific qualifying evidence |
-| Contract retention decision | J11 target vocabulary under F218/C168; enforcement shape not frozen |
+| Contract Integrity & Renewal Contract | KF-REC-055 |
+| ContractRevision | KF-REC-055 authoritative agreement-state revision lineage; generic provenance mechanics delegate to KF-REC-049 |
+| ContractAssertion / extraction evidence | KF-REC-055 domain promotion input; generic epistemics delegate to KF-REC-049 |
+| Renewal WorkOccurrence | KF-REC-055 domain binding to J23/KF-REC-047 occurrence mechanics; one cycle != Contract definition identity |
+| RenewalDecision | KF-REC-055; requires occurrence-specific qualifying evidence, not lifecycle-status presence |
+| RetentionDeletionDecision | KF-REC-055; contract-specific archive/destruction eligibility/evidence; legal duration not globally frozen |
 | ContractAlert | J11 local contextual derived projection; not a second canonical obligation spine |
 | Contract renewal operator disposition | J11 specialization of J17/KF-REC-051; recomputation must preserve disposition |
 | CustomerLifecycleState | KF-REC-053 target vocabulary; exact enum not frozen |
@@ -136,7 +135,33 @@ ARCHIVE / RETIRE / SUPERSEDE != HARD DELETE
 
 ---
 
-# 6. Index integrity rules
+# 6. KF-REC-055 ownership boundary
+
+KF-REC-055 owns only:
+
+```text
+ContractRevision authoritative agreement-state lineage
+contract-specific assertion promotion into an accepted ContractRevision
+RenewalDecision binding to the relevant ContractRevision + renewal occurrence
+RetentionDeletionDecision for agreement archival/destructive disposition
+```
+
+It delegates:
+
+```text
+provenance / epistemic eligibility → KF-REC-049
+occurrence / temporal work mechanics→ KF-REC-047
+recovery / outcome certainty        → KF-REC-048
+operator attention / disposition    → KF-REC-051
+financial truth / valuation         → KF-REC-052
+commercial obligation discipline    → KF-REC-053
+```
+
+Do not let KF-REC-055 become a universal event store, EDMS/CLM suite, second knowledge/provenance engine, second temporal/workflow runtime, second operator queue or jurisdiction-wide legal rules engine.
+
+---
+
+# 7. Index integrity rules
 
 1. IDs are monotonically allocated and never reused.
 2. One canonical ID has one current semantic meaning/home.
@@ -154,33 +179,35 @@ ARCHIVE / RETIRE / SUPERSEDE != HARD DELETE
 
 ---
 
-# 7. Current anti-duplication checkpoint
+# 8. Current anti-duplication checkpoint
 
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
 Finding range:           through F218
 Contradiction range:     through C168
-Recommendation range:    through KF-REC-054
+Recommendation range:    through KF-REC-055
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-Next free:               F219 / C169 / KF-REC-055 — UNALLOCATED
+Next free:               F219 / C169 / KF-REC-056 — UNALLOCATED
 ```
 
-J3/J4 are provisionally converged through KF-REC-053. J10 is provisionally converged through KF-REC-054 after pressure test + backward re-audit. J11 is active through F218/C168 with no recommendation yet allocated.
+J3/J4 are provisionally converged through KF-REC-053. J10 is provisionally converged through KF-REC-054. J11 target is synthesized as KF-REC-055 and is awaiting backward re-audit before provisional convergence.
 
-Current J11 homes / reuse decisions:
+Current J11 homes:
 - `journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md`
 - F215–F216 — `08AS`; C165–C166 — `09AS`
 - F217 — `08AT`; C167 — `09AT`
 - F218 — `08AU`; C168 — `09AU`
-- renewal-cycle identity → reuse J23 / KF-REC-047
-- ContractAlert disposition resurrection → reuse F182 / KF-REC-051
-- local alert temporal advancement → reuse J23 / KF-REC-047
-- Contract deletion orphaning renewal work → reuse F182 / KF-REC-051
-- renewal-date/notice correction leaving stale work → reuse F182 / KF-REC-051
-- clauseAnalysis → derived/advisory projection; value-density review, not authoritative ContractRevision by default
+- KF-REC-055 — `10N`
+- pressure test — `investigations/J11-CONTRACT-OBLIGATION-RENEWAL-STANDARDS-FRONTIER-PRESSURE-TEST.md`
 
-Do not allocate new recurrence/operator-projection/knowledge roots where mature KF-REC-047/049/051 already own the semantic defect. Do not allocate a J11 recommendation until irreducible contract-domain semantics remain after delegation.
+Reuse decisions remain:
+- renewal-cycle identity → J23 / KF-REC-047
+- ContractAlert disposition resurrection → F182 / KF-REC-051
+- local alert temporal advancement → J23 / KF-REC-047
+- Contract deletion orphaning renewal work → F182 / KF-REC-051
+- renewal-date/notice correction leaving stale work → F182 / KF-REC-051
+- clauseAnalysis → derived/advisory projection; value-density review
 
 No production implementation is authorized by this taxonomy artifact.
