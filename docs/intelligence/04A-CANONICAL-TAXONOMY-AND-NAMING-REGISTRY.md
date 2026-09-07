@@ -87,7 +87,7 @@ F###
 ```
 
 Canonical home: `08*` registers; allocation owner: 04B.
-Current range: `F001–F199`.
+Current range: `F001–F203`.
 
 Latest roots:
 ```text
@@ -95,6 +95,10 @@ F185–F196 J7 Financial Truth
 F197 commercial customer evidence vs Contact lifecycle convergence
 F198 pipeline value + realized revenue vs non-duplicative customer LTV
 F199 completed service vs missing durable receivable consequence
+F200 deposit vs final service receivable settlement lineage
+F201 cancellation/no-show vs financial descendant disposition
+F202 RevenueAttribution pipeline vs realized revenue stage
+F203 canonical CRM statuses vs KeyCortex lowercase/non-canonical predicates
 ```
 
 ## Contradictions
@@ -104,7 +108,7 @@ C###
 ```
 
 Canonical home: `09*` registers; allocation owner: 04B.
-Current range: `C001–C149`.
+Current range: `C001–C153`.
 
 Latest roots:
 ```text
@@ -112,6 +116,10 @@ C135–C146 J7 Financial Truth
 C147 customer commercial reality vs Contact.status
 C148 pipeline value + realized revenue vs customer LTV
 C149 completed service vs missing durable receivable consequence
+C150 deposit semantics vs additive final service receivable
+C151 booking cancellation/no-show vs unresolved financial descendants
+C152 RevenueAttribution as one revenue stage vs heterogeneous value stages
+C153 canonical CRM status algebra vs KeyCortex lead/customer aliases
 ```
 
 ## Recommendations
@@ -191,6 +199,8 @@ AUTHORITY     authoritative | derived | advisory | compatibility
 | ValuationEvidence | inside KF-REC-052 | candidate vocabulary, not standalone concept |
 | CanonicalInvoiceBalance | inside KF-REC-052 | reusable financial read semantic, not standalone concept |
 | CustomerLifecycle | J3 target vocabulary | working semantic dimension; do not promote until status/lifecycleStage/pipelineStage ownership is resolved |
+| CommercialObligationLineage | J3/J4 target vocabulary | working semantic dimension binding service/booking/deposit/invoice/payment/correction stages; not standalone concept yet |
+| RevenueAttribution stage | J3/J4 target vocabulary | attribution stage must be explicit; BOOKING pipeline value is not automatically realized revenue |
 
 ---
 
@@ -244,9 +254,14 @@ Reconciliation lock != prohibition on new current-period corrective consequence
 CreditNote VOID != accounting/document descendant convergence complete
 Invoice status column != permission for multiple lifecycle owners
 Commercial customer evidence != Contact.status until lifecycle convergence policy is declared
+Canonical Contact status != pipelineStage != lifecycleStage != descriptive tag
 Pipeline value != invoiced value != realized revenue != customer lifetime value
+Booking attribution != invoice attribution unless a declared stage/lineage mapping says so
 Service complete != financially complete
 Required descendant not created != nothing left to do
+Deposit != additive charge unless explicitly modeled as one
+Booking CANCELLED / NO_SHOW != financial disposition complete
+LEAD | PROSPECT | CLIENT | LOST != lead | customer aliases in persistent query predicates
 ```
 
 ---
@@ -288,13 +303,13 @@ load 04B
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F199
-Contradiction range:     through C149
+Finding range:           through F203
+Contradiction range:     through C153
 Recommendation range:    through KF-REC-052
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-J7 is pooled. J3/J4 commercial-to-cash microscopic reconstruction is active through F199/C149. `CustomerLifecycle` remains working target vocabulary until the relationship among Contact.status, lifecycleStage, pipelineStage, Deal state and descriptive tags is fully resolved.
+J7 is pooled. J3/J4 commercial-to-cash microscopic reconstruction is active through F203/C153. `CustomerLifecycle` and `CommercialObligationLineage` remain working target vocabulary until broader convergence proves a need for standalone concepts.
 
 No production implementation is authorized by this taxonomy artifact.
