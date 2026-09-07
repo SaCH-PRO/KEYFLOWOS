@@ -20,6 +20,7 @@ F167–F174 recovered historical collision-band findings
 F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
 F185–F196 J7 Financial Truth findings
+F197–F199 J3/J4 commercial-to-cash findings
 ```
 
 ```text
@@ -29,6 +30,7 @@ C117–C124 recovered historical collision-band contradictions
 C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
 C135–C146 J7 Financial Truth contradictions
+C147–C149 J3/J4 commercial-to-cash contradictions
 ```
 
 ```text
@@ -73,117 +75,38 @@ Home: `10J-RECOMMENDATION-REGISTER-OPERATOR-PRIORITY-CONTINUATION.md`.
 ### F185 / C135 — live cash ownership
 Home: `08Y` / `09Y`.
 
-```text
-ledger-derived cash movement/balance
-!= FinancialAccount.currentBalance initialized from opening balance
-```
-
 ### F186 / C136 — multi-currency valuation
 Home: `08Y` / `09Y`.
-
-```text
-currency-specific LedgerEntry amounts
-!= directly additive account/report values without valuation
-```
-
-`ExchangeRateService` exists but repository search found no accounting/reporting consumer that makes rates load-bearing in ledger valuation.
 
 ### F187 / C137 — payroll financial outcome
 Home: `08Y` / `09Y`.
 
-```text
-PayrollRun.status = PAID
-!= payment/disbursement proved
-!= accounting consequence posted
-```
-
 ### F188 / C138 — PayPal capture financial consequence completeness
 Home: `08Z` / `09Z`.
-
-```text
-provider capture COMPLETED
-+ Payment SUCCESSFUL
-+ Invoice PAID
-!= payment ledger consequence complete
-```
 
 ### F189 / C139 — canonical financial source identity / CreditNote reversal reachability
 Home: `08Z` / `09Z`.
 
-```text
-canonical invoice posting sourceType = 'Invoice'
-!= CreditNote reversal lookup sourceType = 'INVOICE'
-```
-
 ### F190 / C140 — provider webhook receipt vs financial consumption completeness
 Home: `08AA` / `09AA`.
-
-```text
-WebhookEvent receipt persisted
-!= provider occurrence consumption complete
-!= financial descendants complete
-```
 
 ### F191 / C141 — closed-period immutability vs later corrective consequence
 Home: `08AA` / `09AA`.
 
-```text
-original reconciled LedgerEntry locked
-!= later current-period reversal must be prohibited
-```
-
-`AccountingPeriodService.reopen()` clears its own period metadata but does not clear reconciliation locks.
-
 ### F192 / C142 — AccountingPeriod closure is not load-bearing at the ledger write door
 Home: `08AB` / `09AB`.
-
-```text
-AccountingPeriod.status = CLOSED
-!= canonical posting path rejects new in-period postings
-```
 
 ### F193 / C143 — Expense void bypasses the canonical ledger/reversal writer
 Home: `08AC` / `09AC`.
 
-```text
-PostingService.reverse() canonical controls
-!= ExpensesService.voidExpense() raw FinancialTransaction + LedgerEntry reversal writes
-```
-
 ### F194 / C144 — gross-successful payment projection vs canonical net payment balance
-Home:
-- `08AD-FINDING-REGISTER-PAYMENT-PROJECTION-SEMANTICS-SUPPLEMENT.md`
-- `09AD-CONTRADICTION-REGISTER-PAYMENT-PROJECTION-SEMANTICS-SUPPLEMENT.md`
-
-```text
-SUCCESSFUL-only projection
-!= SUCCESSFUL - REFUNDED canonical invoice balance
-```
-
-Active server/UI payment summaries, invoice progress and Finance Overview revenue can retain pre-refund gross values while `InvoiceWorkflowService` correctly reopens the invoice from net Payment rows.
+Home: `08AD` / `09AD`.
 
 ### F195 / C145 — applied CreditNote VOID without descendant financial convergence
-Home:
-- `08AE-FINDING-REGISTER-CREDIT-NOTE-REVERSAL-AND-INVOICE-STATE-SUPPLEMENT.md`
-- `09AE-CONTRADICTION-REGISTER-CREDIT-NOTE-REVERSAL-AND-INVOICE-STATE-SUPPLEMENT.md`
-
-```text
-CreditNote.status = VOID
-!= credit-note accounting consequence reversed
-!= invoice credited state recomputed
-```
-
-`CreditNoteService.void()` can void an APPLIED credit note by status/timestamp only, leaving the posted credit-note consequence and dependent invoice state active.
+Home: `08AE` / `09AE`.
 
 ### F196 / C146 — parallel Invoice state machine introduced by CreditNoteService
-Home: same `08AE` / `09AE` pair.
-
-```text
-InvoiceWorkflowService canonical InvoiceStatus algebra
-!= CreditNoteService direct PARTIALLY_CREDITED / FULLY_CREDITED writes
-```
-
-Credit-note application bypasses the declared invoice lifecycle owner and writes states absent from its canonical type/transition map.
+Home: `08AE` / `09AE`.
 
 ### Reused J7 recovery root — F155
 
@@ -192,21 +115,48 @@ Credit-note application bypasses the declared invoice lifecycle owner and writes
 ### KF-REC-052 — Financial Truth & Valuation Contract
 Home: `10K-RECOMMENDATION-REGISTER-FINANCIAL-TRUTH-CONTINUATION.md`.
 
+## J3 / J4 commercial-to-cash allocations
+
+### F197 / C147 — commercial customer reality vs Contact lifecycle convergence
+Home:
+- `08AF-FINDING-REGISTER-CUSTOMER-LIFECYCLE-AND-VALUE-SUPPLEMENT.md`
+- `09AF-CONTRADICTION-REGISTER-CUSTOMER-LIFECYCLE-AND-VALUE-SUPPLEMENT.md`
+
 ```text
-commercial/operational financial state
-→ external money reality
-→ KeyFlow money-movement record
-→ accounting truth
-→ reconciliation truth
-→ valuation truth
-→ derived financial/operator projection
+Deal WON / Quote accepted+converted / Invoice PAID / StoreOrder PAID
+!= Contact.status automatically converged to CLIENT
 ```
+
+Core revenue events can establish strong customer evidence while `Contact.status` remains LEAD. Multiple CRM/People/OS consumers nevertheless treat `CLIENT` as operative customer classification. Manual `updateContact()` and AI template writes do not constitute a domain-owned lifecycle convergence contract.
+
+### F198 / C148 — pipeline value plus realized revenue vs non-duplicative customer lifetime value
+Home: same `08AF` / `09AF` pair.
+
+```text
+won Deal value + PAID Invoice total
+!= non-duplicative customer lifetime value
+```
+
+`ContactInsightService` adds won deal value and paid invoice total even when they can represent the same economic sale. Refund/valuation weaknesses reuse J7 F194/F186; the distinct J3 root is pipeline/conversion value being added to realized revenue as independent customer value.
+
+### F199 / C149 — completed service vs missing required receivable consequence
+Home:
+- `08AG-FINDING-REGISTER-SERVICE-COMPLETION-RECEIVABLE-SUPPLEMENT.md`
+- `09AG-CONTRADICTION-REGISTER-SERVICE-COMPLETION-RECEIVABLE-SUPPLEMENT.md`
+
+```text
+Booking.status = COMPLETED
++ completion-time invoicing required
+!= Invoice consequence durably created or durably owed
+```
+
+Booking completion commits before auto-invoice generation. The helper catches invoice-generation/linking failure and only logs it, so a required receivable consequence can disappear without a durable recovery owner. This specializes J18/J23 incomplete-descendant recovery semantics and does not imply service completion must be financially atomic.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F196
-Contradictions:  C001–C146
+Findings:        F001–F199
+Contradictions:  C001–C149
 Recommendations: KF-REC-001–KF-REC-052
 ```
 
