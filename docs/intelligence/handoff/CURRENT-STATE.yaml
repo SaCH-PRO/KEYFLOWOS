@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 29
+analysis_version: 30
 last_updated: 2026-09-06
 phase: whole-system-virtual-model-expansion-j7-financial-truth
-status: CONTINUE_J7_PAYMENT_CONSEQUENCE_AND_RECOVERY_FORENSICS
+status: CONTINUE_J7_CONSEQUENCE_COMPLETENESS_REVERSAL_AND_VALUATION_FORENSICS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -16,8 +16,8 @@ taxonomy_integrity:
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   create_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F187
-  contradictions_through: C137
+  findings_through: F189
+  contradictions_through: C139
   recommendations_through: KF-REC-052
   concepts_through: KF-CONCEPT-042
 active_mesh:
@@ -26,14 +26,19 @@ active_mesh:
 active_frontier:
   journey: J7
   name: Financial_Truth
-  stage: PAYMENT_CONSEQUENCE_COMPLETION_AND_RECOVERY_TRACE
+  stage: FINANCIAL_CONSEQUENCE_COMPLETENESS_REVERSAL_AND_VALUATION_TRACE
   dossier: docs/intelligence/journeys/KF-JOURNEY-007-FINANCIAL-TRUTH.md
   recommendation: KF-REC-052
   primary_kernels: [K10,K8,K9,K6,K11,K3]
-  findings: [F185,F186,F187]
-  contradictions: [C135,C136,C137]
+  findings: [F185,F186,F187,F188,F189]
+  contradictions: [C135,C136,C137,C138,C139]
   evidence_packet: docs/intelligence/sessions/J7-PAYMENT-CONSEQUENCE-COMPLETION-TRACE-2026-09-06.md
-  candidate_new_id_allocated: false
+  finding_supplements:
+    - docs/intelligence/08Y-FINDING-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md
+    - docs/intelligence/08Z-FINDING-REGISTER-FINANCIAL-CONSEQUENCE-COMPLETENESS-SUPPLEMENT.md
+  contradiction_supplements:
+    - docs/intelligence/09Y-CONTRADICTION-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md
+    - docs/intelligence/09Z-CONTRADICTION-REGISTER-FINANCIAL-CONSEQUENCE-COMPLETENESS-SUPPLEMENT.md
   core_layers:
     - commercial_operational_document_state
     - external_money_reality
@@ -51,32 +56,27 @@ active_frontier:
     - history_preserving_reversal_transactions
     - reconciliation_locks
     - invoice_reconcile_from_all_Payment_rows
+    - transactional_invoice_PAID_plus_COGS_consequence
     - ledger_native_reporting
     - AR_invoice_vs_ledger_drift_visibility
-  new_evidence:
-    - synchronous_PayPal_capture_directly_creates_SUCCESSFUL_Payment_without_observed_RevenuePosting_wrapper
-    - later_PayPal_capture_webhook_dedupes_on_same_providerPaymentId_and_can_return_before_posting
-    - PaymentsOps_refund_calls_provider_then_best_effort_directly_creates_REFUNDED_Payment_without_ledger_reversal_or_invoice_reconcile
-    - Stripe_refund_webhook_dedupes_on_same_refund_providerPaymentId_and_can_skip_the_repair_path
-    - WebhookEvent_checkpoint_records_receipt_identity_not_consequence_completion
-    - PostingService_reversal_correctly_blocks_reconciliation_locked_entries
-    - no_reconciliation_unlock_or_reopen_path_found_in_repository_search_so_far
-  candidate_laws:
-    - Payment_row_exists_not_equal_financial_consequence_complete
-    - Webhook_event_seen_not_equal_webhook_consequences_complete
-    - provider_event_dedupe_not_equal_descendant_effect_idempotency
-    - reconciliation_lock_safety_requires_explicit_external_refund_recovery_path
-  taxonomy_status:
-    payment_consequence_candidate: HOLD_FOR_J18_J23_DUPLICATE_RECONCILIATION
-    reason: may_specialize_existing_external_effect_and_recovery_roots
+  findings_summary:
+    F185: FinancialAccount_currentBalance_is_opening_snapshot_consumed_as_live_cash
+    F186: currency_tagged_ledger_entries_are_aggregated_without_currency_separation_or_FX_valuation
+    F187: PayrollRun_PAID_can_exist_without_disbursement_or_accounting_consequence
+    F188: direct_PayPal_capture_can_create_SUCCESSFUL_Payment_and_PAID_Invoice_without_payment_ledger_posting_then_dedupe_blocks_webhook_repair
+    F189: CreditNote_apply_queries_INVOICE_while_canonical_invoice_posting_uses_Invoice_so_reversal_lineage_is_unreachable
+  reused_mature_roots:
+    F155: direct_provider_refund_can_write_REFUNDED_Payment_then_suppress_missing_ledger_and_invoice_consequence_repair
+    F158: provider_capture_success_plus_local_Payment_persistence_failure_remains_separate_from_F188
   target_laws:
     - operational_document_state_not_equal_external_money_not_equal_payment_record_not_equal_ledger_truth
-    - ledger_accounting_consequence_uses_one_posting_contract
+    - one_successful_financial_occurrence_must_have_checkable_mandatory_consequence_completeness
+    - provider_or_Payment_dedupe_suppresses_duplicate_occurrence_not_missing_descendant_consequence_repair
+    - FinancialSourceIdentity_uses_canonical_typed_discriminator_plus_source_id_plus_consequence_kind_where_required
     - stored_cash_projection_must_not_compete_silently_with_ledger_balance
     - strong_paid_refunded_settled_states_require_declared_evidence_contracts
     - multi_currency_aggregation_requires_explicit_valuation_basis_or_currency_separation
     - reversal_refund_is_new_financial_consequence_not_history_deletion
-    - provider_receipt_or_Payment_identity_must_not_substitute_for_descendant_completion_evidence
     - derived_financial_figures_expose_basis_asOf_currency_completeness_and_known_exclusions
     - financial_importance_does_not_grant_money_movement_authority
 latest_j17_pool:
@@ -111,13 +111,13 @@ continuity:
   taxonomy_check_after_major_tranche: true
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 exact_next_action:
-  title: reconcile_J7_payment_consequence_candidate_then_trace_repair_and_invoice_convergence
-  instruction: Load 04A/04B and mature J18/J23 recovery lineage before allocating any ID. Reconcile the J7 payment-consequence packet against provider-success/local-consequence, idempotency and certainty-aware recovery roots. Then prove provider handler error propagation, search for independent Payment/WebhookEvent repair workers, trace reconciliation unlock/reopen behavior, trace reconcileFromPayments after each success/refund path, and inspect onPaymentRefunded when the original posting is absent/already reversed. Continue cash-basis consumers and FX after this atomic trace. Do not modify production code.
+  title: continue_J7_consequence_repair_credit_note_reconciliation_and_cash_FX_trace
+  instruction: Continue the J7 financial consequence graph from F188/F189. Verify all Stripe/WiPay/manual-payment success paths against createPaymentWithPosting; trace CreditNote apply/void posting and bookkeeping; characterize reconciliation lock interaction with refunds/reversals and any reopen/unlock mechanism; map all FinancialAccount.currentBalance consumers to ledger-derived alternatives; trace ExchangeRate and PayPal currency behavior; then pressure-test KF-REC-052 and backward re-audit J3/J4/J17/J18/J23 plus K8/K9/K10/K11/K3. Reuse F155/F158 and other mature roots where semantic equivalence exists. Load 04A/04B before any new ID.
 constraints:
   - do_not_modify_production_code
   - do_not_treat_financial_projection_as_ledger_or_provider_truth
   - do_not_treat_operational_PAID_as_money_moved_without_evidence
-  - do_not_treat_WebhookEvent_receipt_as_consequence_completion
+  - do_not_treat_WebhookEvent_receipt_or_Payment_identity_as_consequence_completion
   - do_not_sum_heterogeneous_currencies_without_valuation_contract_in_target
   - do_not_create_duplicate_canonical_concepts_or_ids
   - preserve_anti_normalization_method
