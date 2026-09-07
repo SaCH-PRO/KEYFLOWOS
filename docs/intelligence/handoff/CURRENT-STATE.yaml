@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 50
+analysis_version: 51
 last_updated: 2026-09-07
 phase: whole_system_virtual_model_j12_document_evidence_forensics
-status: J12_ACTIVE_FORENSICS_F219_C169_ALLOCATED_CONTINUE_EXTRACTION_TRACE
+status: J12_ACTIVE_FORENSICS_F219_C169_F220_C170_CONTINUE_DEVICE_EXPENSE_CORRECTION_TRACE
 canonical_branch: docs/keyflow-intelligence-foundation
 context_integrity: PASS
 implementation_authorized: false
@@ -15,13 +15,13 @@ implementation_evidence:
   current_head: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   head_revalidated: true
 canonical_ranges:
-  findings_through: F219
-  contradictions_through: C169
+  findings_through: F220
+  contradictions_through: C170
   recommendations_through: KF-REC-055
   concepts_through: KF-CONCEPT-042
 next_free_ids:
-  finding: F220
-  contradiction: C170
+  finding: F221
+  contradiction: C171
   recommendation: KF-REC-056
   allocation_status: UNALLOCATED
 mature_pools:
@@ -34,41 +34,53 @@ mature_pools:
   J11: { recommendation: KF-REC-055, findings: F215-F218, contradictions: C165-C168, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
 j12:
   dossier: docs/intelligence/journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md
-  finding_home: docs/intelligence/08AV-FINDING-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
-  contradiction_home: docs/intelligence/09AV-CONTRADICTION-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+  investigation: docs/intelligence/investigations/J12-DOCUMENT-INTELLIGENCE-CONSUMER-REVISION-LINEAGE-TRACE.md
   status: ACTIVE_MICROSCOPIC_FORENSICS
-  findings: [F219]
-  contradictions: [C169]
+  findings: [F219,F220]
+  contradictions: [C169,C170]
   recommendation: null
-  current_root: document_assertion_to_payment_evidence_without_explicit_admission_decision
+  roots:
+    F219_C169: document_assertion_to_payment_evidence_without_explicit_admission_decision
+    F220_C170: external_object_identity_collapses_new_source_revision_at_ingestion_dedupe
+  homes:
+    F219: docs/intelligence/08AV-FINDING-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+    C169: docs/intelligence/09AV-CONTRADICTION-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+    F220: docs/intelligence/08AW-FINDING-REGISTER-DOCUMENT-SOURCE-REVISION-OCCURRENCE-SUPPLEMENT.md
+    C170: docs/intelligence/09AW-CONTRADICTION-REGISTER-DOCUMENT-SOURCE-REVISION-OCCURRENCE-SUPPLEMENT.md
   ownership:
     document_evidence_admission: J12_K8_F219_C169
-    generic_epistemics: KF-REC-049
+    source_revision_ingestion_occurrence: J12_K8_K9_F220_C170
+    generic_epistemics_revision: KF-REC-049
+    ingress_occurrence_contract_direction: KF-REC-035
     financial_claim_strength: KF-REC-052
     replay_effect_identity: KF-REC-048
   anti_duplication:
     manual_edit_stale_approval: F161_KF_REC_049
     ai_tweak_partial_mutation: CHECK_F164
     contract_extraction_promotion: F216_C166_KF_REC_055
-    payment_evidence_replay: KF_REC_048_SPECIALIZATION_NO_F220
+    payment_evidence_replay: KF_REC_048_SPECIALIZATION_NO_NEW_ROOT
+    drive_mutable_revision_provenance: KF_REC_049_PRESSURE
+    drive_new_revision_suppressed_by_object_id_dedupe: F220_C170_REUSES_KF_REC_035
 active_frontier:
-  stage: J12_CROSS_DOMAIN_DOCUMENT_EXTRACTION_TRACE
+  stage: J12_DEVICE_EXPENSE_DIRECT_UPLOAD_CORRECTION_TRACE
   primary_journey: J12
-  primary_kernel: K8
+  primary_kernels: [K8,K9]
   anti_duplication_required_before_new_id: true
-  next_free_finding: F220
+  next_free_finding: F221
 exact_next_action:
-  title: continue_j12_document_evidence_trace
-  instruction: Continue J12 across all material DocumentIntelligence consumers. Trace stable source identity and exact source revision through upload, Drive, Asset, Device and Expense paths; identify durable assertion/evidence/admission lineage versus final-state-only consumers; trace correction, replacement, reprocessing, supersession and deletion; close the generated-document tweak crash seam against F164; classify all new seams against F219 and mature KF-REC-049/048/052 before allocating F220/C170; pool stable J12 roots before considering KF-REC-056. Keep production code read-only.
+  title: continue_j12_after_drive_occurrence_root
+  instruction: Inspect Device reprocess reachability and guards after ACCEPTED/REJECTED, trace Expense extract-receipt output through client/frontend into Expense creation, inspect direct AI upload behavior, close generated Document tweak crash semantics against F164, and trace correction/replacement/supersession/deletion across accepted evidence. Classify all seams against F219/F220 and mature KF-REC-049/035/048/052 before F221/C171. Pool stable J12 roots before considering KF-REC-056. Keep production code read-only.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
   - do_not_resume_post_j11_frontier_selection
+  - do_not_resume_j11_pressure_test
   - do_not_convert_KF_REC_055_into_implementation_packet
-  - F220_C170_KF_REC_056_are_next_free
+  - F221_C171_KF_REC_056_are_next_free
   - anti_duplication_before_allocation
-  - do_not_allocate_KF_REC_056_merely_because_F219_exists
-  - do_not_duplicate_KF_REC_049_epistemics
+  - do_not_allocate_KF_REC_056_merely_because_F219_F220_exist
+  - do_not_duplicate_KF_REC_049_revision_epistemics
+  - do_not_duplicate_KF_REC_035_ingress_occurrence_runtime
   - do_not_duplicate_KF_REC_048_effect_identity
   - do_not_duplicate_KF_REC_052_financial_truth
   - source_documents_do_not_override_repository_behavior
