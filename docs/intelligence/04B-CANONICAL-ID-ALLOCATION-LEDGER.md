@@ -19,7 +19,7 @@ F185–F196 J7 Financial Truth
 F197–F205 J3/J4 commercial-to-cash
 F206–F214 J10 Commerce/Fulfilment
 F215–F218 J11 Contract/Obligation/Renewal
-F219–F220 J12 Document/Evidence Lifecycle
+F219–F221 J12 Document/Evidence Lifecycle
 ```
 
 ```text
@@ -30,7 +30,7 @@ C135–C146 J7 contradictions
 C147–C155 J3/J4 contradictions
 C156–C164 J10 contradictions
 C165–C168 J11 contradictions
-C169–C170 J12 Document/Evidence Lifecycle
+C169–C171 J12 Document/Evidence Lifecycle
 ```
 
 Current recommendation range is through `KF-REC-055`.
@@ -74,92 +74,70 @@ KF-REC-055 Contract Integrity & Renewal Contract
 - F217 / C167 — ordinary Contract edits can falsely discharge renewal obligations because supplied lifecycle status is treated as renewal-decision evidence; `ACTIVE` is also simultaneously eligible to raise renewal work — `08AT` / `09AT`.
 - F218 / C168 — persisted/product-facing Contract retention semantics do not constrain hard deletion, which cascades Contract-owned evidence/history — `08AU` / `09AU`.
 
-J11 reuse decisions:
-
-```text
-renewal-cycle occurrence identity                  → J23 / KF-REC-047
-ContractAlert acknowledgement resurrection         → F182 / KF-REC-051
-ContractAlert threshold time progression           → J23 / KF-REC-047
-source deletion leaves renewal work orphaned       → F182 / KF-REC-051
-renewal date/notice correction leaves stale work   → F182 / KF-REC-051
-local renewal alert vs obligation actionability    → KF-REC-047/051 pressure; no new root
-```
-
 ## J11 target allocation
 
 - `KF-REC-055 — Contract Integrity & Renewal Contract` — `10N`.
 - Pressure test: `investigations/J11-CONTRACT-OBLIGATION-RENEWAL-STANDARDS-FRONTIER-PRESSURE-TEST.md`.
 - Backward re-audit: `investigations/J11-J12-J23-J18-J17-J7-J3-J4-K4-K6-K7-K8-K11-CONTRACT-INTEGRITY-BACKWARD-REAUDIT.md`.
-- Backward re-audit verdict: KF-REC-055 not invalidated; no parallel knowledge, temporal/workflow, operator-attention, recovery, financial, commercial-obligation, governance or evidence runtime; no universal records/contract mega-runtime; no new finding/contradiction; J11 provisionally converged; runtime proof not executed.
 
-KF-REC-055 owns only the irreducible contract-domain semantics left after delegation:
-
-```text
-ContractRevision / authoritative agreement-state lineage
-contract-specific assertion promotion into accepted ContractRevision
-RenewalDecision binding to the relevant renewal occurrence/revision
-RetentionDeletionDecision for contract archival/destruction eligibility/evidence
-```
-
-It explicitly delegates:
-
-```text
-provenance / epistemic eligibility → KF-REC-049
-occurrence / temporal work mechanics→ KF-REC-047
-recovery / outcome certainty        → KF-REC-048
-operator attention / disposition    → KF-REC-051
-financial truth / valuation         → KF-REC-052
-commercial obligation discipline    → KF-REC-053
-```
-
-It does not authorize a universal event store, EDMS/CLM suite, second workflow runtime, second attention queue, second knowledge engine or jurisdiction-wide legal-rules engine.
+KF-REC-055 owns only ContractRevision lineage, contract-specific assertion promotion, RenewalDecision binding and contract RetentionDeletionDecision; it delegates generic provenance, temporal, recovery, operator-attention, financial and commercial-obligation semantics to mature shared contracts.
 
 ## J12 Document / Evidence Lifecycle allocations
 
 - F219 / C169 — transient document extraction or raw-text fallback can be admitted directly as successful payment evidence, including explicitly low-confidence fallback output, without an observed consumer-specific evidence-admission / verification decision before `Payment SUCCESSFUL`, Invoice state mutation and downstream financial consequences — `08AV` / `09AV`.
 - F220 / C170 — Google Drive connector recognizes a materially newer source revision by `driveFileId + modifiedTime`, but canonical ingestion deduplicates only by `businessId + sourceType + externalId(=driveFileId)`, so the legitimate new revision is suppressed as the prior occurrence and its ingestion plan is not rebuilt — `08AW` / `09AW`.
+- F221 / C171 — mounted `DocumentInstance` hard delete can destroy `DocumentVersion` approval/history and `ReviewTask` evidence while setting surviving `DocumentChangeLog.instanceId` to null, without an observed document-disposition decision — `08AX` / `09AX`.
 
 J12 anti-duplication decisions:
 
 ```text
 manual inline edit approved through stale stored version → F161 / KF-REC-049 specialization
-AI tweak partial mutation vs version evidence            → check F164 before allocation
+Device ACCEPTED/REJECTED intake reprocessed in-place     → F161 / KF-REC-049 specialization; no new root
+AI tweak section mutations before version evidence       → F164 specialization; no new root
+Drive import replacing sections without new version      → F161 + F164 pressure; no new root
+direct AI upload controller                              → extraction-only response; no new root
 contract extraction promotion                            → F216/C166 + KF-REC-055 manifestation
-payment evidence admission                               → F219/C169 J12/K8 root; delegates epistemics to KF-REC-049 and financial claim strength to KF-REC-052
+payment evidence admission                               → F219/C169 J12/K8 root
 same payment evidence replay / fresh payment identity    → KF-REC-048 specialization; no new root
-Drive mutable intake revision overwrite                  → KF-REC-049 pressure, but downstream occurrence suppression is F220/C170
-Drive R2 suppressed as duplicate R1                      → F220/C170; reuses J14/KF-REC-035 occurrence contract direction
+Drive mutable intake revision overwrite                  → KF-REC-049 pressure
+Drive R2 suppressed as duplicate R1                      → F220/C170; reuses J14/KF-REC-035 occurrence direction
+DocumentInstance hard-delete proof destruction           → F221/C171; J19 retention/privacy pressure
 ```
 
-F219 owns only the document/evidence admission boundary. F220 owns only the external-object-vs-source-revision ingestion-occurrence distinction for mutable document sources. Neither creates a second knowledge/provenance, ingress, financial-truth or recovery runtime.
-
-### F220 anti-duplication boundary
+### J12 ownership boundaries
 
 ```text
-F127/C080:
-SAME occurrence → first-seen claim → processing fails → replay cannot resume
-
-F220/C170:
-DISTINCT source revision R2 → same external object id → incorrectly classified as duplicate R1
+F219 → document/evidence admission boundary; delegates generic epistemics to KF-REC-049 and financial claim strength to KF-REC-052
+F220 → external-object vs source-revision ingestion-occurrence distinction; reuses KF-REC-035/KF-REC-049/KF-REC-048
+F221 → destructive disposition of versioned/reviewed document evidence; delegates generic retention/privacy policy to J19 and revision semantics to KF-REC-049
 ```
 
-F220 reuses:
-- `KF-REC-035` for ingress occurrence identity/processing semantics;
-- `KF-REC-049` for revision/provenance lineage;
-- `KF-REC-048` for same-occurrence replay/effect identity.
+### F221 anti-duplication boundary
+
+```text
+F218/C168:
+Contract-specific retained state exists
+→ hard delete ignores Contract retention semantics
+
+F221/C171:
+versioned/reviewed/approved DocumentInstance evidence exists
+→ generic mounted hard delete destroys or detaches its proof lineage
+```
+
+F221 is also distinct from F178/C128, which concerns correction/withdrawal leaving derived descendants active rather than physical destruction/severance of the source evidence history.
 
 ## Current ranges
 
 ```text
-Findings:         F001–F220
-Contradictions:   C001–C170
+Findings:         F001–F221
+Contradictions:   C001–C171
 Recommendations: KF-REC-001–KF-REC-055
 ```
 
 Next free IDs:
 
 ```text
-F221 / C171 / KF-REC-056
+F222 / C172 / KF-REC-056
 ```
 
 ## Agent pre-allocation gate
