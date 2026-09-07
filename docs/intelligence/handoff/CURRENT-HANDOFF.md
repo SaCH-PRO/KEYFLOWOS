@@ -1,7 +1,7 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-06
-Status: CURRENT — J7 POOLED / J3+J4 COMMERCIAL-TO-CASH CONSTELLATION ACTIVE
+Status: CURRENT — J7 POOLED / J3+J4 COMMERCIAL OBLIGATION + LIFECYCLE CONVERGENCE ACTIVE
 
 ## Programme identity
 
@@ -30,8 +30,8 @@ context integrity:     PASS
 ## Canonical ranges
 
 ```text
-Findings:        F196
-Contradictions:  C146
+Findings:        F203
+Contradictions:  C153
 Recommendations: KF-REC-052
 Concepts:        KF-CONCEPT-042
 ```
@@ -41,25 +41,10 @@ Load `04A` + `04B` before new IDs.
 ## J7 Financial Truth — pooled
 
 Recommendation: `KF-REC-052 — Financial Truth & Valuation Contract`
-
 Canonical J7 roots: F185–F196 / C135–C146.
+Proof architecture: 32 proof obligations / 16 deterministic fault-injection points; runtime proof not executed.
 
-J7 is now pooled after:
-
-- microscopic financial consequence / valuation / correction tracing;
-- standards/frontier pressure test;
-- backward re-audit into J3/J4/J17/J18/J23 and K8/K9/K10/K11/K3;
-- proof architecture with **32 proof obligations** and **16 deterministic fault-injection points**.
-
-Runtime proof has not been executed.
-
-Key artifacts:
-
-- `docs/intelligence/investigations/J7-FINANCIAL-TRUTH-STANDARDS-FRONTIER-PRESSURE-TEST.md`
-- `docs/intelligence/investigations/J3-J4-J17-J18-J23-J7-FINANCIAL-TRUTH-BACKWARD-REAUDIT.md`
-- `docs/intelligence/investigations/J7-FINANCIAL-TRUTH-PROOF-ARCHITECTURE.md`
-
-Key retained laws:
+Retained laws:
 
 ```text
 operational state != external money != money-movement record != accounting != reconciliation != valuation
@@ -71,9 +56,7 @@ one invoice lifecycle owner → one declared state algebra
 financial correction != descendant convergence complete until ledger + document + projection converge
 ```
 
-Candidate terms such as `FinancialConsequenceVector`, `ValuationEvidence`, `CanonicalInvoiceBalance` and `CanonicalCashPosition` remain internal vocabulary within KF-REC-052, not standalone concepts.
-
-## Active frontier — J3 + J4 commercial-to-cash constellation
+## Active frontier — J3 + J4
 
 Primary: `J3 — Lead → Customer → Cash`
 Secondary: `J4 — Booking → Service → Payment`
@@ -81,38 +64,90 @@ Secondary: `J4 — Booking → Service → Payment`
 Stage:
 
 ```text
-COMMERCIAL_TO_CASH_MICROSCOPIC_RECONSTRUCTION
+COMMERCIAL_OBLIGATION_AND_LIFECYCLE_CONVERGENCE
 ```
 
-Inherited pressure:
-
-- J7 financial truth/completion;
-- J18 recovery certainty;
-- J17 attention basis/completeness;
-- J23 durable work semantics.
-
-Exact trace:
+Current canonical roots:
 
 ```text
-lead / booking
-→ commercial intent / quote / service commitment
-→ invoice / amount owed
-→ payment occurrence / money-movement record
-→ accounting + reconciliation + valuation
-→ customer/service/business completion
-→ refund / credit / void / failure / correction reopening
-→ customer value / revenue / cash / attention projections
+F197/C147 — customer evidence can advance while Contact.status remains LEAD
+F198/C148 — ContactInsight LTV adds won Deal + PAID Invoice value for one sale
+F199/C149 — completed booking can lose required completion invoice into log-only failure
+F200/C150 — deposit D + completion full-price invoice P do not compose one service obligation
+F201/C151 — CANCELLED/NO_SHOW has no declared financial-descendant disposition
+F202/C152 — RevenueAttribution mixes BOOKING pipeline + paid INVOICE stages as additive revenue
+F203/C153 — KeyCortex queries lead/customer instead of canonical LEAD/PROSPECT/CLIENT/LOST
 ```
 
-Questions:
+Working target vocabulary — not standalone concepts:
 
-1. What exact event turns a lead/booking into an amount owed?
-2. Which quote/invoice/booking/service states are authoritative vs derivative?
-3. Where does payment truth enter each journey?
-4. When does each journey claim business complete vs financially complete?
-5. How do refunds, credit notes, voids, chargebacks and payment failures reopen state?
-6. Do customer-value/revenue/cash projections consume canonical financial reads?
-7. Which transitions need K3 current authority vs deterministic bookkeeping?
+```text
+CustomerLifecycle
+CommercialObligationLineage
+CommercialValueStage
+ServiceFinancialDisposition
+```
+
+## J4 service-financial evidence
+
+### Deposit lineage
+
+```text
+service price = P
+→ DEPOSIT invoice = D
+→ Booking.depositInvoiceId = deposit
+→ Booking.invoiceId remains null
+→ booking COMPLETED
+→ completion helper sees no Booking.invoiceId
+→ creates FULL invoice P
+```
+
+No inspected path applies D to the final balance. Target must distinguish advance, retained fee and refundable deposit policies rather than hard-code one interpretation.
+
+### Cancellation/no-show
+
+Operational status and events change, but the inspected path does not resolve existing deposit/invoice/payment/attribution descendants. This is absence of a financial-disposition contract, not evidence that every cancellation should refund.
+
+### Attribution stage
+
+Booking creation records full service price as `RevenueAttribution(BOOKING)` for immediate pipeline visibility. Paid booking invoices later produce `RevenueAttribution(INVOICE)`. Generic source rollups can add heterogeneous stages; `revenuePerHour()` contains a local dedupe, proving recognized overlap but not shared semantic convergence.
+
+## J3 customer-lifecycle evidence
+
+Canonical status vocabulary is:
+
+```text
+LEAD | PROSPECT | CLIENT | LOST
+```
+
+But commercial evidence does not automatically converge to CLIENT, while KeyCortex additionally queries lowercase `lead` and nonexistent `customer` predicates. `lifecycleStage`, `pipelineStage`, Deal state and tags remain separate/unresolved dimensions requiring explicit ownership.
+
+## Candidate duplicate-receivable path — not yet canonical
+
+`booking.completed` currently appears to feed two invoice-generation mechanisms:
+
+```text
+BookingsService.autoGenerateInvoiceForCompletedBooking()
++
+AgentTriggerService.onAny
+→ JourneyOrchestrator post-booking template
+→ commerce_create_invoice
+```
+
+Journey templates are runtime-reachable via `AgentTriggerService`; `commerce_create_invoice` is tier 2 and JourneyOrchestrator can auto-approve such a plan. Exact duplicate effect still requires proving PlanExecutor execution, event payload mapping, valid tool arguments and absence of idempotency/lineage blocking.
+
+## Exact next action
+
+```text
+1. trace booking.completed → AgentTriggerService → JourneyOrchestrator → plan.approved → PlanExecutor → FlowOrchestrator commerce_create_invoice;
+2. prove exact booking.completed payload shape against the post-booking template's expected flat fields;
+3. determine whether a second invoice is created, malformed, rejected or otherwise neutralized;
+4. trace cancellation/no-show financial policy and paid-deposit disposition;
+5. resolve Contact.status/lifecycleStage/pipelineStage/Deal/tags ownership;
+6. trace RevenueAttribution consumers and cross-stage dedupe;
+7. check J17/J18/J23 visibility of missing receivables and unresolved cancellation descendants;
+8. reuse mature roots before new IDs and persist before broadening.
+```
 
 ## Mature pools retained
 
@@ -143,4 +178,4 @@ PERSIST
 → ONLY THEN OPEN NEXT BROAD TRANCHE
 ```
 
-If this chat disappears, resume at **J3/J4 commercial-to-cash microscopic reconstruction after J7 pooled through F196/C146**. Do not implement production code.
+If this chat disappears, resume at **J3/J4 after F203/C153 with the booking.completed AI invoice reachability trace**. Do not implement production code.
