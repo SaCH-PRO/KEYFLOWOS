@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 18
+rollover_version: 19
 last_updated: 2026-09-06
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -26,25 +26,44 @@ programme:
 active_frontier:
   journey: J7
   name: Financial_Truth
-  stage: INITIAL_MICROSCOPIC_TRANCHE_PERSISTED
+  stage: PAYMENT_CONSEQUENCE_COMPLETION_AND_RECOVERY_TRACE
   dossier: docs/intelligence/journeys/KF-JOURNEY-007-FINANCIAL-TRUTH.md
   recommendation: KF-REC-052
   findings: [F185,F186,F187]
   contradictions: [C135,C136,C137]
+  evidence_packet: docs/intelligence/sessions/J7-PAYMENT-CONSEQUENCE-COMPLETION-TRACE-2026-09-06.md
+  candidate_new_id_allocated: false
+  candidate_laws:
+    - Payment_row_exists_not_equal_financial_consequence_complete
+    - Webhook_event_seen_not_equal_webhook_consequences_complete
+    - provider_event_dedupe_not_equal_descendant_effect_idempotency
+    - reconciliation_lock_safety_requires_explicit_external_refund_recovery
+  new_evidence:
+    - synchronous_PayPal_capture_direct_Payment_write_can_precede_or_bypass_posting
+    - same_capture_providerPaymentId_can_suppress_later_webhook_posting
+    - PaymentsOps_refund_direct_REFUNDED_Payment_write_omits_reversal_and_invoice_reconcile
+    - same_refund_providerPaymentId_can_suppress_later_webhook_repair
+    - WebhookEvent_is_receipt_checkpoint_without_observed_processing_completion_state
+    - PostingService_reverse_blocks_reconciliation_locked_entries
+    - no_reconciliation_unlock_reopen_path_found_so_far
+  taxonomy_status:
+    payment_consequence_candidate: HOLD_FOR_J18_J23_DUPLICATE_RECONCILIATION
   next_actions:
-    - trace_Invoice_to_provider_payment_to_Payment_to_RevenuePosting_to_LedgerEntry_to_invoice_reconcile
-    - trace_refund_reversal_and_reconciliation_lock_interaction
-    - map_currentBalance_safe_to_spend_runway_cash_consumers
-    - trace_currency_FX_and_decide_single_vs_multi_currency_target_pressure
-    - trace_strong_PAID_REFUNDED_SETTLED_states_in_payroll_AP_credit_notes_change_orders
-    - standards_frontier_pressure_test_KF_REC_052
-    - backward_reaudit_J3_J4_J17_J18_J23_and_K8_K9_K10_K11_K3
+    - reconcile_candidate_against_F145_F160_J18_J23_K8_K9_K11
+    - prove_provider_handler_error_propagation_after_posting_or_reversal_failure
+    - search_independent_Payment_WebhookEvent_repair_workers
+    - prove_or_reject_reconciliation_unlock_reopen_redrive
+    - trace_reconcileFromPayments_for_every_payment_and_refund_entry_path
+    - trace_onPaymentRefunded_missing_or_already_reversed_original_posting
+    - decide_reuse_refine_new_only_after_duplicate_check
+    - then_continue_currentBalance_consumers_FX_valuation_and_strong_financial_states
   key_laws:
     - operational_document_state_not_equal_external_money_not_equal_payment_record_not_equal_ledger_truth
     - strong_financial_outcome_claims_require_declared_evidence_contract
     - stored_cash_projection_not_silent_competitor_to_ledger_truth
     - heterogeneous_currency_values_not_directly_additive_without_valuation
     - reversal_refund_is_new_consequence_not_history_deletion
+    - provider_receipt_or_Payment_identity_not_substitute_for_descendant_completion
     - derived_financial_figures_expose_basis_asOf_currency_completeness
 latest_j17_pool:
   journey: J17
@@ -81,6 +100,7 @@ constraints:
   - production_code_read_only
   - do_not_treat_financial_projection_as_ledger_or_provider_truth
   - do_not_treat_operational_PAID_as_money_moved_without_evidence
+  - do_not_treat_WebhookEvent_receipt_as_consequence_completion
   - do_not_sum_heterogeneous_currencies_without_valuation_contract_in_target
   - do_not_create_duplicate_canonical_ids
   - preserve_anti_normalization_method
