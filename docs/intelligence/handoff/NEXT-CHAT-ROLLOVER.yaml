@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 24
+rollover_version: 25
 last_updated: 2026-09-06
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -17,8 +17,8 @@ taxonomy:
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   mandatory_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F203
-  contradictions_through: C153
+  findings_through: F204
+  contradictions_through: C154
   recommendations_through: KF-REC-052
   concepts_through: KF-CONCEPT-042
 programme:
@@ -32,7 +32,6 @@ latest_j7_pool:
   proof_obligations: 32
   deterministic_fault_points: 16
   runtime_proof_executed: false
-  role_now: pooled_input_to_whole_system_model
 active_frontier:
   constellation: [J3,J4]
   primary_journey: J3
@@ -40,29 +39,30 @@ active_frontier:
   secondary_journey: J4
   secondary_name: Booking_to_Service_to_Payment
   stage: COMMERCIAL_OBLIGATION_AND_LIFECYCLE_CONVERGENCE
-  findings: [F197,F198,F199,F200,F201,F202,F203]
-  contradictions: [C147,C148,C149,C150,C151,C152,C153]
+  findings: [F197,F198,F199,F200,F201,F202,F203,F204]
+  contradictions: [C147,C148,C149,C150,C151,C152,C153,C154]
   inherited_targets: [KF-REC-052,KF-REC-048,KF-REC-051,KF-REC-047,KF-REC-049]
   key_roots:
-    F197: strong_commercial_customer_evidence_can_exist_while_Contact_status_remains_LEAD
+    F197: commercial_customer_evidence_can_exist_while_Contact_status_remains_LEAD
     F198: ContactInsight_LTV_adds_won_Deal_and_PAID_Invoice_value_for_same_sale
     F199: completed_booking_can_lose_required_completion_invoice_into_log_only_failure
     F200: deposit_D_plus_completion_full_price_P_are_not_composed_as_one_service_obligation
     F201: booking_cancelled_or_no_show_has_no_declared_financial_descendant_disposition
     F202: RevenueAttribution_mixes_BOOKING_pipeline_and_paid_INVOICE_stages_as_additive_revenue_rows
     F203: KeyCortex_queries_lowercase_lead_customer_instead_of_canonical_LEAD_PROSPECT_CLIENT_LOST
+    F204: live_post_booking_journey_event_template_tool_contracts_do_not_compose_so_intended_invoice_CLIENT_followup_chain_is_not_load_bearing
   working_target_vocabulary:
     - CustomerLifecycle
     - CommercialObligationLineage
     - CommercialValueStage
     - ServiceFinancialDisposition
-  candidate_not_yet_canonical:
-    - booking_completed_event_can_reach_AI_post_booking_journey_with_commerce_create_invoice_while_BookingsService_already_auto_generates_completion_invoice
-    - exact_duplicate_effect_depends_on_PlanExecutor_reachability_payload_shape_and_invoice_idempotency
+    - EventToActionContractAdapter
+  narrowed_results:
+    - second_valid_booking_invoice_via_AI_journey_not_proven_current_AI_path_is_contract_malformed
   next_actions:
-    - trace_booking_completed_AgentTrigger_JourneyOrchestrator_PlanExecutor_commerce_create_invoice_end_to_end
-    - trace_cancel_no_show_deposit_payment_policy_and_financial_disposition
-    - resolve_Contact_status_lifecycleStage_pipelineStage_tags_Deal_state_ownership
+    - locate_Service_Booking_schema_and_load_bearing_deposit_cancellation_no_show_policy_fields
+    - trace_paid_deposit_through_cancel_no_show_refund_retain_credit_fee_disposition
+    - map_Contact_status_lifecycleStage_pipelineStage_Deal_state_tags_automatic_writers_and_consumers
     - trace_RevenueAttribution_consumers_and_cross_stage_dedupe
     - check_J17_J18_J23_projection_of_missing_receivable_and_cancelled_financial_descendants
     - reuse_J7_J18_J23_roots_before_any_new_ID
@@ -99,6 +99,7 @@ constraints:
   - do_not_treat_customer_or_service_completion_as_financial_completion
   - do_not_treat_pipeline_attribution_as_realized_revenue_without_explicit_semantics
   - do_not_assume_deposit_refundability_or_revenue_recognition_policy_without_evidence
+  - do_not_treat_template_intent_as_load_bearing_without_schema_composition
   - do_not_duplicate_J7_J18_J23_roots
   - do_not_create_duplicate_canonical_ids
   - preserve_anti_normalization_method
