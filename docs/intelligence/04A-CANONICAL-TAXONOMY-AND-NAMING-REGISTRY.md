@@ -41,8 +41,8 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Journeys: `J1 ... J25` — `03-ANALYSIS-MAP.md`.
 - Kernels: `K1 ... K12` — `12-KERNEL-PROGRAMME.md`.
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
-- Findings: `F001–F211` — `08*`; allocator 04B.
-- Contradictions: `C001–C161` — `09*`; allocator 04B.
+- Findings: `F001–F213` — `08*`; allocator 04B.
+- Contradictions: `C001–C163` — `09*`; allocator 04B.
 - Recommendations: `KF-REC-001–KF-REC-053` — `10*`; allocator 04B.
 
 Latest roots:
@@ -51,10 +51,12 @@ F185–F196 / C135–C146 — J7 Financial Truth
 F197–F205 / C147–C155 — J3/J4 commercial-to-cash
 F206/C156 — duplicate paid-Invoice descendant ownership for one storefront order
 F207/C157 — operational order CONFIRMED emits paid semantics while payment state can remain unpaid
-F208/C158 — checkout/routing/shipment compete for ownership of one tracked-stock effect
+F208/C158 — checkout/routing/shipment/correction compete for ownership of one tracked-stock effect
 F209/C159 — aggregate fulfillment_routed can be emitted while required route state is FAILED
-F210/C160 — Shopify variant lookup identity differs from persisted Product identity, breaking repeat-sync convergence
-F211/C161 — any existing fulfilment route is treated as idempotent completion, so partial route sets can strand missing item routes
+F210/C160 — Shopify variant lookup identity differs from persisted Product identity
+F211/C161 — partial fulfilment route set can block recovery because any existing route is treated as complete
+F212/C162 — Shopify order/customer sync writers disagree on Contact identity resolution
+F213/C163 — Shopify order enters native MarketplaceOrder without native relational item descendants
 ```
 
 Current major pooled targets:
@@ -85,6 +87,8 @@ Route row created != required route outcome satisfied
 Normal routeOrder return != aggregate fulfilment success
 Any existing child effect != complete required descendant set
 Merchant SKU != immutable provider external identity
+Mutable customer email != immutable provider customer identity
+Provider metadata line items != native operational OrderItem descendants
 External provider paid/refunded label != local Payment/ledger convergence
 Plan-step/process idempotency != semantic effect idempotency
 ```
@@ -112,8 +116,9 @@ Plan-step/process idempotency != semantic effect idempotency
 | EventToActionContractAdapter | KF-REC-053 typed/versioned event→tool composition |
 | Order-item inventory allocation lineage | J10 F208/C158 target pressure; exact representation not frozen |
 | Aggregate fulfilment outcome | J10 F209/C159; derived from required route outcomes |
-| Provider external-entity identity | J10 F210/C160 K9 pressure; must be structural/business-scoped |
-| RequiredRouteSet / ObservedRouteSet | J10 F211/C161 recovery vocabulary; working target semantics, not new KF-CONCEPT allocation |
+| Provider external-entity identity | J10 F210/F212 K9 pressure; structural and business-scoped |
+| RequiredRouteSet / ObservedRouteSet | J10 F211/C161 recovery vocabulary; working semantics |
+| Operational external-order materialization | J10 F213/C163; explicit choice between native effectful aggregate and summary/evidence projection |
 
 ---
 
@@ -139,8 +144,8 @@ Plan-step/process idempotency != semantic effect idempotency
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F211
-Contradiction range:     through C161
+Finding range:           through F213
+Contradiction range:     through C163
 Recommendation range:    through KF-REC-053
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
@@ -155,7 +160,9 @@ Current J10 homes:
 - F208–F209/C158–C159 — `08AM` / `09AM`
 - F210/C160 — `08AN` / `09AN`
 - F211/C161 — `08AO` / `09AO`
+- F212/C162 — `08AP` / `09AP`
+- F213/C163 — `08AQ` / `09AQ`
 
-Do not allocate new refund/provider/lifecycle/recovery roots where mature F187/F193/F194/F196/F202/F205 or KF-REC-047/048/052/053 already own the semantic defect. New J10 IDs require a distinct architecture root after reachability and anti-duplication proof.
+Do not allocate a new commerce/integration recommendation until the earlier K9/external-reality recommendation corpus is searched for semantic ownership. Do not allocate new refund/provider/lifecycle/recovery roots where mature KF-REC-047/048/052/053 and existing findings already own the defect.
 
 No production implementation is authorized by this taxonomy artifact.
