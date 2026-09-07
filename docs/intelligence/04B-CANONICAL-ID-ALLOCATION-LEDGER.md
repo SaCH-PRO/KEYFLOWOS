@@ -24,6 +24,8 @@ F177 J16/K4 causal-learning attribution
 F178 J16/J19 correction lineage
 F179 J17 Command Center projection completeness
 F180 J17 CommandItem false-terminal execution semantics
+F181 J17 Temporal priority materialization reachability
+F182 J17 CommandItem source-state convergence
 ```
 
 ```text
@@ -35,6 +37,8 @@ C127 J16/K4 causal-learning attribution
 C128 J16/J19 correction lineage
 C129 J17 Command Center projection completeness
 C130 J17 CommandItem projection vs source/effect truth
+C131 J17 overdue domain truth vs absent TemporalFlow projection
+C132 J17 resolved source vs still-open CommandItem projection
 ```
 
 ```text
@@ -48,74 +52,39 @@ KF-REC-050 load-bearing WorkDefinition control contract
 
 ## Historical collision reconciliation
 
-The discovered historical parallel-analysis collision band remains governed by the mappings persisted in:
-
+The discovered historical parallel-analysis collision band remains governed by:
 - `08O-FINDING-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md` — F167–F174;
 - `09O-CONTRADICTION-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md` — C117–C124;
 - `10I-RECOMMENDATION-REGISTER-TAXONOMY-RECONCILIATION-CONTINUATION.md` — KF-REC-050.
 
-Key aliases/remaps include workflow-control, recurrence, provider-recovery, scheduled-recovery and compensation collisions. Historical files retain evidence but do not re-own the numeric IDs.
+Historical files retain evidence but do not re-own remapped numeric IDs.
 
-## Post-reconciliation J16 allocations
+## J16 allocations
 
 ### F175 / C125 — epistemic readiness eligibility
-Home: `08P` / `09P` knowledge-consumption supplements.
-
-```text
-matching GenomeFact row exists
-!= knowledge is epistemically acceptable for automation readiness
-```
+`matching GenomeFact row exists != knowledge is epistemically acceptable for automation readiness`
 
 ### F176 / C126 — epistemic prompt eligibility
-Home: same `08P` / `09P` pair.
-
-```text
-stored/high-ranked GenomeFact
-!= current canonical knowledge eligible for KEY prompt reasoning
-```
+`stored/high-ranked GenomeFact != current canonical knowledge eligible for KEY prompt reasoning`
 
 ### F177 / C127 — causal learning attribution
-Home: `08Q` / `09Q` causal-learning supplements.
-
-```text
-one observed/domain outcome
-!= causal evidence for every recommendation pattern in that domain
-```
+`one observed/domain outcome != causal evidence for every recommendation pattern in that domain`
 
 ### F178 / C128 — knowledge correction lineage
-Home: `08R` / `09R` correction-lineage supplements.
-
-```text
-source/current knowledge corrected or withdrawn
-!= all active derivatives have converged
-```
+`source/current knowledge corrected or withdrawn != all active derivatives have converged`
 
 ## J17 allocations
 
 ### F179 / C129 — Command Center projection completeness
-
-Canonical home:
-- `08S-FINDING-REGISTER-COMMAND-CENTER-PROJECTION-SUPPLEMENT.md`
-- `09S-CONTRADICTION-REGISTER-COMMAND-CENTER-PROJECTION-SUPPLEMENT.md`
-
-Distinct root:
+Home: `08S` / `09S`.
 
 ```text
 SOURCE UNAVAILABLE / UNKNOWN
 != SOURCE HEALTHY + ZERO IMPORTANT ITEMS
 ```
 
-The Command Center's fail-soft aggregation can currently substitute empty/zero fallback values for unavailable sources without exposing source-health/projection-completeness semantics, allowing incomplete inputs to alter health/priority conclusions.
-
-This is not generic service availability; the canonical defect is semantic misrepresentation in a derived operator projection.
-
 ### F180 / C130 — Command spine false-terminal execution semantics
-
-Canonical home:
-- `08T-FINDING-REGISTER-COMMAND-SPINE-SEMANTICS-SUPPLEMENT.md`
-- `09T-CONTRADICTION-REGISTER-COMMAND-SPINE-SEMANTICS-SUPPLEMENT.md`
-
-Distinct root:
+Home: `08T` / `09T`.
 
 ```text
 CommandItem.status = EXECUTED
@@ -125,13 +94,32 @@ CommandItem.status = EXECUTED
 != OutcomeEvidence
 ```
 
-The visible persistent Command Queue's `Approve` and `Execute` controls currently terminalize the projection row without an observed canonical source/control/effect transition. This differs from F143 because F143 has a real descendant handoff; F180 can claim terminal execution with no observed effect or handoff at all.
+### F181 / C131 — Temporal priority materialization reachability
+Home: `08U` / `09U`.
+
+```text
+CONSUMER PRIORITY LOGIC EXISTS
+!= PRODUCER PATH IS WIRED
+!= DOMAIN CONDITION REACHES THAT PROJECTION
+```
+
+Concrete proof: `TemporalFlowService.analyze()` expects `TemporalFlowEvent(source=APP,type=invoice.overdue)` for overdue-invoice urgency/risk, while standard invoice overdue emits EventEmitter `invoice.overdue`; no load-bearing `invoice.overdue → TemporalFlowService.emit()` path or generic app-event listener was observed. `TemporalFlowEvent` create/upsert is owned by `TemporalFlowService.emit()`.
+
+### F182 / C132 — CommandItem source-state convergence
+Home: `08V` / `09V`.
+
+```text
+SOURCE-DERIVED PROJECTION CREATED
+!= PROJECTION REMAINS VALID FOREVER
+```
+
+Concrete proof: CommandGenerator creates OPEN `COLLECT_RECEIVABLE` CommandItems from `Invoice.status=OVERDUE`, but the existing `resolveCommandsForEntity()` has no caller and the generator does not reconcile old rows when source predicates stop matching.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F180
-Contradictions:  C001–C130
+Findings:        F001–F182
+Contradictions:  C001–C132
 Recommendations: KF-REC-001–KF-REC-050
 ```
 
@@ -147,7 +135,7 @@ Supplement letters are organizational labels only, never allocators. Canonical i
 3. Search all registers for semantic equivalent.
 4. Reuse/refine if equivalent.
 5. Allocate only the next globally unused number.
-6. Persist the canonical definition in exactly one home file.
+6. Persist canonical definition in exactly one home file.
 7. Update 04B + CURRENT + ROLLOVER.
 ```
 
