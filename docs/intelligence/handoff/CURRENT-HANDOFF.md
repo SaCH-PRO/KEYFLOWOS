@@ -1,7 +1,7 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-06
-Status: CURRENT — J10 COMMERCE/FULFILMENT ACTIVE THROUGH F207/C157
+Status: CURRENT — J10 COMMERCE/FULFILMENT ACTIVE THROUGH F209/C159
 
 ## Programme identity
 
@@ -22,8 +22,8 @@ context integrity:     PASS
 ## Canonical ranges
 
 ```text
-Findings:        F207
-Contradictions:  C157
+Findings:        F209
+Contradictions:  C159
 Recommendations: KF-REC-053
 Concepts:        KF-CONCEPT-042
 ```
@@ -43,7 +43,7 @@ Load `04-CONCEPT-REGISTRY.md` + `04A` + `04B` before allocating anything new.
 Canonical dossier:
 `docs/intelligence/journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
 
-Native checkout positive seam:
+Positive native seam to preserve:
 
 ```text
 StoreOrderService.completeCheckout()
@@ -59,24 +59,15 @@ StoreOrderService.completeCheckout()
 → store_order.paid
 ```
 
-Preserve this strong transaction boundary.
-
 ## F206 / C156 — duplicate paid-Invoice descendant ownership
 
-`completeCheckout()` already creates paid Invoice A. After commit it emits `store_order.paid`. Mounted `CommerceIntegrationService.handleOrderPaid()` calls `createRevenueRecord()`, whose duplicate check searches Invoice notes for `order:{order.id}`. Invoice A's notes contain only `Storefront order {orderNumber}`. The listener can therefore create Invoice B (`INV-ORD-{orderNumber}`), also PAID, for the same order.
+The checkout transaction creates paid Invoice A. `store_order.paid` then reaches mounted `CommerceIntegrationService`, whose `createRevenueRecord()` dedupe searches `notes contains order:{order.id}`. Invoice A's notes contain only `Storefront order {orderNumber}`. The listener can create Invoice B (`INV-ORD-{orderNumber}`), also PAID, for the same order.
 
-Target reuse: KF-REC-053 semantic commercial-effect identity + KF-REC-052 financial truth. Do not use free-form notes as canonical effect identity.
+Target reuse: KF-REC-053 semantic commercial-effect identity + KF-REC-052 financial truth. Free-form notes are not canonical effect identity.
 
 ## F207 / C157 — operational CONFIRMED emits financial paid semantics
 
-Native order creation can yield:
-
-```text
-status=PENDING
-paymentStatus=PENDING (cash) or UNPAID
-```
-
-The authenticated orders UI exposes `pending → confirmed` as an ordinary order-status step. `updateOrderStatus(CONFIRMED)` updates only `status` but maps `CONFIRMED → store_order.paid`.
+Native order creation can yield `status=PENDING` with `paymentStatus=PENDING|UNPAID`. Authenticated Store UI exposes `pending → confirmed`. `updateOrderStatus(CONFIRMED)` updates only `status` but maps `CONFIRMED → store_order.paid`.
 
 Reachable contradiction:
 
@@ -84,43 +75,59 @@ Reachable contradiction:
 Order status = CONFIRMED
 Order paymentStatus = PENDING/UNPAID
 store_order.paid emitted
-→ mounted consumers can create PAID Invoice semantics and start fulfilment routing
+→ paid-event consumers can create PAID Invoice semantics and start fulfilment routing
 ```
+
+Target law: `OrderFulfilmentState != PaymentCompletionEvidence`.
+
+## F208 / C158 — checkout consumption and fulfilment reservation double-apply one stock effect
+
+`completeCheckout()` decrements tracked on-hand quantity by ordered quantity Q. After payment, `FulfillmentRoutingService.routeLocalStock()` reads the already-decremented row and can increase `reserved` by Q for the same order item.
+
+```text
+checkout: quantity -= Q
+routing:  reserved += Q
+```
+
+A last-unit sale can commit with `quantity=0` then immediately get a FAILED fulfilment route for “insufficient stock.” Target requires one order-item inventory allocation lineage/state machine so reservation, consumption, release and restoration compose exactly once.
+
+## F209 / C159 — aggregate fulfilment success despite failed required route
+
+`routeLocalStock()` can persist and return `FulfillmentRoute.status=FAILED` without throwing. `routeOrder()` returns normally, so `StoreOrderRoutingListener` emits `store_order.fulfillment_routed`; `store_order.routing_failed` is emitted only for exceptions. Downstream contact semantics label the aggregate event “Order routed to fulfillment.”
 
 Target law:
 
 ```text
-OrderFulfilmentState != PaymentCompletionEvidence
-store_order.paid requires a payment transition/evidence, not generic order confirmation
+aggregate fulfilment outcome
+= function(required per-route outcomes)
+!= whether routeOrder returned normally
 ```
 
-If cash/manual confirmation is meant to record payment, it needs an explicit payment capability that records financial evidence.
+Failed/partial route sets must preserve unresolved identities and recovery work.
 
 ## Refund classification — reuse, not new ID yet
 
-Store Orders `refundOrder()` sets order `status/paymentStatus=REFUNDED` and emits `store_order.refunded`; that entry surface itself does not invoke provider refund, negative Payment, invoice reconciliation, ledger reversal or stock restore. Its listener can create a refund Expense.
+Store Orders `refundOrder()` flips order `status/paymentStatus=REFUNDED` and emits `store_order.refunded`; that entry surface itself does not invoke provider refund, negative Payment, Invoice reconciliation, ledger reversal or stock restoration. `PaymentsService` already contains stronger negative-Payment + ledger-reversal refund primitives. Current classification: entry-surface convergence/bypass pressure under J7/KF-REC-052 unless distinct new evidence appears.
 
-However `PaymentsService` already has a stronger `createRefundWithPosting()` primitive that creates a negative Payment and reverses the original ledger posting transactionally. Therefore current refund pressure is classified as an **entry-surface convergence/bypass problem under mature J7/KF-REC-052 roots**, not F208 unless a distinct semantic defect is proven.
+## Shopify / external reality pressure
 
-## Other active J10 pressure
-
-- Shopify order `financial_status` maps directly to `MarketplaceOrder.paymentStatus`; treat this as external/provider evidence, not automatically local Payment/ledger truth.
-- Shopify customer sync writes `CUSTOMER|LEAD` directly to Contact and reuses F205/C155.
-- Shopify product sync looks up by synthetic `shopify:{variantId}` SKU while persistence prefers a provider real SKU; repeat-sync identity behavior still needs DB/catalog verification.
-- `StoreOrderRoutingListener` routes fulfilment asynchronously from `store_order.paid` and emits either `store_order.fulfillment_routed` or `store_order.routing_failed`; durable recovery/operator visibility remains unclassified.
+- order `financial_status` maps to `MarketplaceOrder.paymentStatus`: external evidence, not automatically local Payment/ledger truth;
+- customer sync writes `CUSTOMER|LEAD`: reuse F205/C155;
+- product sync looks up by synthetic `shopify:{variantId}` SKU while persistence prefers provider real SKU when present: repeat-sync identity still requires schema/catalog proof.
 
 ## Exact next action
 
 ```text
-1. trace FulfillmentRoutingService state machine, route idempotency, required-route completeness and failure persistence;
-2. determine whether store_order.routing_failed becomes durable recoverable/projectable/operator work or only event/log signal;
-3. verify Shopify product external identity + SKU uniqueness/catalog behavior under repeated sync;
-4. trace Shopify order/customer external identities and correction semantics;
-5. trace order events into CRM/calendar/webhook/KEY/temporal consumers;
-6. continue refund/cancel/return only where evidence exceeds existing J7 roots;
-7. reuse F001–F207 / C001–C157 / KF-REC-001–053 before new allocation;
-8. pressure-test KF-REC-053 across product-order obligation lineage;
-9. persist each material tranche; do not modify production code.
+1. continue FulfillmentRoutingService across LOCAL_STOCK / DROPSHIP / PREORDER / HYBRID / MANUAL / SERVICE;
+2. classify route retry/idempotency and required-route completeness;
+3. trace every consumer of store_order.fulfillment_routed and store_order.routing_failed;
+4. determine whether failed required routing becomes durable recoverable/projectable/operator work or only an event/log signal;
+5. inspect Product schema SKU constraints and CatalogService create/update behavior;
+6. prove Shopify product repeat-sync behavior when provider supplies a real SKU;
+7. trace Shopify order/customer external identity and correction semantics;
+8. trace cancel/refund/return inventory restoration where evidence extends F208/J7 roots;
+9. reuse F001–F209 / C001–C159 / KF-REC-001–053 before new allocation;
+10. persist every material tranche; production code remains untouched.
 ```
 
-If this chat disappears, resume **J10 after F207/C157**, starting with FulfillmentRoutingService recovery/completeness and Shopify repeat-sync identity.
+If this chat disappears, resume **J10 after F209/C159**, beginning with fulfilment recovery/completeness and Shopify repeat-sync identity.
