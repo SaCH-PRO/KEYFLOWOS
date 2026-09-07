@@ -18,6 +18,7 @@ F179–F184 J17 operator-control lineage
 F185–F196 J7 Financial Truth
 F197–F205 J3/J4 commercial-to-cash
 F206–F214 J10 Commerce/Fulfilment
+F215–F216 J11 Contract/Obligation/Renewal
 ```
 
 ```text
@@ -27,6 +28,7 @@ C129–C134 J17 contradictions
 C135–C146 J7 contradictions
 C147–C155 J3/J4 contradictions
 C156–C164 J10 contradictions
+C165–C166 J11 contradictions
 ```
 
 Current recommendation range is through `KF-REC-054`.
@@ -60,6 +62,7 @@ KF-REC-054 Commerce & Fulfilment Contract
 
 - `KF-REC-054 — Commerce & Fulfilment Contract` — `10M`.
 - Pressure test: `investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md`.
+- Backward re-audit: `investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md`.
 
 KF-REC-054 owns the commerce-domain semantics that remain after anti-duplication delegation: operational order-state separation, provider commerce-entity identity, operational external-order materialization, inventory allocation/effect lineage, required fulfilment-set semantics, aggregate fulfilment outcome and strategy-effect identity.
 
@@ -73,11 +76,20 @@ KF-REC-052 financial truth
 KF-REC-053 commercial relationship/obligation lineage
 ```
 
+## J11 Contract / Obligation / Renewal allocations
+
+- F215 / C165 — `ContractVersion` is neither a complete mutation ledger nor a reconstructable historical Contract revision; principal manual PATCH is unversioned — `08AS` / `09AS`.
+- F216 / C166 — probabilistic contract-document extraction can promote inferred renewal/value/party state into authoritative Contract truth without a confidence/verification/governance promotion gate — `08AS` / `09AS`.
+
+J11 also reuses mature temporal recurrence laws from J23 for renewal-cycle occurrence identity. Do not allocate a new finding merely because a multi-cycle contract manifests the existing Definition/Occurrence identity law.
+
+No J11 recommendation has yet been allocated. Continue microscopic reconstruction and anti-duplication before deciding whether J11 requires a distinct target contract or is fully owned by existing K4/K7/K8/K11 contracts.
+
 ## Current ranges
 
 ```text
-Findings:        F001–F214
-Contradictions:  C001–C164
+Findings:        F001–F216
+Contradictions:  C001–C166
 Recommendations: KF-REC-001–KF-REC-054
 ```
 
@@ -87,10 +99,11 @@ Recommendations: KF-REC-001–KF-REC-054
 LOAD 04A + 04B
 → CHECK CURRENT ranges
 → SEARCH semantic equivalents
+→ classify SAME / SPECIALIZATION / RELATED DISTINCT / ALIAS / HISTORICAL / GENUINELY NEW
 → REUSE / REFINE / CROSS-REFERENCE
 → only then allocate next unused ID
 → one canonical home definition
-→ update 04B + CURRENT + ROLLOVER
+→ update 04B + CURRENT + HANDOFF + ROLLOVER
 ```
 
 No production implementation is authorized by this ledger.
