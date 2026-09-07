@@ -26,8 +26,6 @@ Aliases are references, not new concepts.
 
 # 2. Mandatory pre-create gate
 
-Before creating any journey, kernel, concept, finding, contradiction, recommendation, decision, proof namespace or execution packet:
-
 ```text
 LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 → SEARCH exact term + synonyms + implementation names + target names
@@ -43,21 +41,20 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Journeys: `J1 ... J25` — `03-ANALYSIS-MAP.md`.
 - Kernels: `K1 ... K12` — `12-KERNEL-PROGRAMME.md`.
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
-- Findings: `F001–F209` — `08*`; allocator 04B.
-- Contradictions: `C001–C159` — `09*`; allocator 04B.
+- Findings: `F001–F211` — `08*`; allocator 04B.
+- Contradictions: `C001–C161` — `09*`; allocator 04B.
 - Recommendations: `KF-REC-001–KF-REC-053` — `10*`; allocator 04B.
-- Decisions: `KF-DEC-###` — `05-DECISION-REGISTER.md`.
-- Execution packets: `KF-EXEC-<DOMAIN>-###`.
-- Local proof obligations: `PF-<SCOPE>-###`.
 
 Latest roots:
 ```text
 F185–F196 / C135–C146 — J7 Financial Truth
 F197–F205 / C147–C155 — J3/J4 commercial-to-cash
-F206/C156 — one successful storefront checkout has two mounted paid-Invoice descendant owners with incompatible dedupe identities
-F207/C157 — operational order CONFIRMED emits store_order.paid while payment state can remain PENDING/UNPAID
-F208/C158 — paid checkout decrements tracked stock while post-payment routing reserves the same sold units again
-F209/C159 — aggregate fulfillment_routed can be emitted while required per-item route state is FAILED
+F206/C156 — duplicate paid-Invoice descendant ownership for one storefront order
+F207/C157 — operational order CONFIRMED emits paid semantics while payment state can remain unpaid
+F208/C158 — checkout/routing/shipment compete for ownership of one tracked-stock effect
+F209/C159 — aggregate fulfillment_routed can be emitted while required route state is FAILED
+F210/C160 — Shopify variant lookup identity differs from persisted Product identity, breaking repeat-sync convergence
+F211/C161 — any existing fulfilment route is treated as idempotent completion, so partial route sets can strand missing item routes
 ```
 
 Current major pooled targets:
@@ -73,135 +70,54 @@ KF-REC-053 Commercial Relationship & Obligation Contract
 
 ---
 
-# 4. Canonical naming dimensions
+# 4. High-value distinctions
 
 ```text
-IDENTITY      what semantic thing is this?
-LAYER         product | journey | kernel | semantic primitive | implementation | projection
-OWNER         which kernel/domain owns truth?
-STATUS        canonical | working | candidate | implementation seam | deprecated
-SCOPE         global | journey | domain | provider | bounded packet
-TEMPORALITY   definition | occurrence | revision | attempt | snapshot | projection
-AUTHORITY     authoritative | derived | advisory | compatibility
+CustomerLifecycleState != RelationshipHealthState != DealState/DealStage != tags/segments
+Commercial evidence != lifecycle transition until policy says so
+Pipeline/expected != committed != invoiced != collected != net-realized value
+Service complete != financially complete
+OrderFulfilmentState != PaymentCompletionEvidence
+One order occurrence != permission for multiple paid-Invoice descendants
+Free-form notes != canonical commercial-effect identity
+Inventory reservation != inventory consumption != release/restoration
+Route row created != required route outcome satisfied
+Normal routeOrder return != aggregate fulfilment success
+Any existing child effect != complete required descendant set
+Merchant SKU != immutable provider external identity
+External provider paid/refunded label != local Payment/ledger convergence
+Plan-step/process idempotency != semantic effect idempotency
 ```
 
 ---
 
-# 5. High-value aliases / distinctions
+# 5. High-value aliases / active target vocabulary
 
 | Term | Canonical reference / rule |
 |---|---|
 | Business Knowledge Kernel / Knowledge Kernel | K4 |
 | Business Genome | KF-CONCEPT-003 |
-| GenomeFact | KF-CONCEPT-004; not automatically canonical truth |
-| Resolved / Canonical Fact | KF-CONCEPT-017 |
-| Business Blueprint | KF-CONCEPT-002 |
 | Business Graph | KF-CONCEPT-007 |
 | Clearance | KF-CONCEPT-026 |
 | Execution Claim | KF-CONCEPT-028 |
-| Temporal Work Projection | KF-REC-047 target; derived, not workflow truth |
+| Temporal Work Projection | KF-REC-047 |
 | Operator Attention & Priority Contract | KF-REC-051 |
 | Financial Truth & Valuation Contract | KF-REC-052 |
 | Commercial Relationship & Obligation Contract | KF-REC-053 |
-| CustomerLifecycleState | KF-REC-053 target vocabulary; exact final enum not frozen |
-| RelationshipHealthState | KF-REC-053 target vocabulary; orthogonal to customer lifecycle |
-| CommercialObligationLineage | KF-REC-053 target vocabulary binding origin and descendants |
-| CommercialValueStage | KF-REC-053 target vocabulary for stage-explicit commercial value |
-| ServiceFinancialDisposition | KF-REC-053 target vocabulary for cancellation/no-show/correction financial outcomes |
-| EventToActionContractAdapter | KF-REC-053 target vocabulary for typed/versioned event→tool mapping |
-| StoreOrder paid-Invoice semantic effect | F206/C156 specialization of KF-REC-053 lineage/effect-idempotency |
-| OrderFulfilmentState vs PaymentCompletionEvidence | F207/C157; separate axes |
-| Inventory allocation / reservation / sale consumption | F208/C158 active J10 state-algebra pressure; one order-item allocation lineage required |
-| Aggregate fulfilment outcome | F209/C159; must derive from required per-route outcomes, not normal function return |
+| CustomerLifecycleState | KF-REC-053 target vocabulary; exact enum not frozen |
+| RelationshipHealthState | KF-REC-053; orthogonal to lifecycle |
+| CommercialObligationLineage | KF-REC-053; origin/descendant lineage |
+| CommercialValueStage | KF-REC-053; stage-explicit value |
+| ServiceFinancialDisposition | KF-REC-053 correction/cancellation semantics |
+| EventToActionContractAdapter | KF-REC-053 typed/versioned event→tool composition |
+| Order-item inventory allocation lineage | J10 F208/C158 target pressure; exact representation not frozen |
+| Aggregate fulfilment outcome | J10 F209/C159; derived from required route outcomes |
+| Provider external-entity identity | J10 F210/C160 K9 pressure; must be structural/business-scoped |
+| RequiredRouteSet / ObservedRouteSet | J10 F211/C161 recovery vocabulary; working target semantics, not new KF-CONCEPT allocation |
 
 ---
 
-# 6. Reserved J16/K4 vocabulary
-
-```text
-KnowledgeSubject
-KnowledgeRevision
-KnowledgeAssertion
-KnowledgeInference
-KnowledgeChangeIntent
-KnowledgeVerification
-KnowledgeConflict
-MaterializationState
-EpistemicEligibility
-LearningEligibility
-```
-
-Reserved vocabulary is not automatically a KF-CONCEPT allocation.
-
----
-
-# 7. Commonly confused concepts
-
-```text
-Business Blueprint != Business Genome != Business Graph
-Observation != Assertion != Evidence
-GenomeFact != Resolved Fact
-Accepted != Verified
-Verification != Clearance
-Readiness != Authority
-Approval / ControlEvidence != current Clearance
-Clearance != Execution Claim
-EffectId != AttemptId
-WorkOccurrence != EffectId
-Original EffectId != RecoveryEffectId
-Process success != execution outcome != business outcome != causal learning
-OutcomeCertainty != LearningEligibility
-Stored fact != EpistemicEligibility
-Correction != descendant convergence
-Projection != authoritative truth
-Learning != authority
-Operational financial state != external money reality != money-movement record != accounting truth != reconciliation truth != valuation truth
-Payment row existence != financial consequence completeness
-Webhook receipt identity != descendant consequence completion
-Gross receipts != refunds != net receipts != outstanding balance != accounting revenue
-Native currency amount != functional/presentation valuation amount
-AccountingPeriod CLOSED != posting prohibition unless enforced at ledger write door
-Reconciliation lock != prohibition on new current-period corrective consequence
-Commercial customer evidence != Contact lifecycle state until policy converges it
-CustomerLifecycleState != RelationshipHealthState != DealState/DealStage != tags/segments
-Canonical Contact status != pipelineStage != lifecycleStage != descriptive tag
-CLIENT != CUSTOMER alias until an owned adapter maps it
-DORMANT / AT_RISK relationship condition != customer lifecycle state
-Deal WON != Contact lifecycle transition unless policy says so
-Pipeline value != invoiced value != realized revenue != LTV
-Service complete != financially complete
-Deposit != additive charge unless explicitly modeled as one
-Booking CANCELLED / NO_SHOW != financial disposition complete
-Canonical event payload != template-local assumed payload
-Plan-step idempotency != semantic commercial-obligation idempotency
-Order/fulfilment status != payment/accounting truth
-Order CONFIRMED != payment completed
-One order occurrence != permission for multiple paid-Invoice descendants
-Free-form notes != canonical commercial-effect identity
-Inventory on-hand decrement != separate reservation of the same sold units
-Route row created != route outcome satisfied
-Normal routeOrder return != aggregate fulfilment success
-External provider paid/refunded label != local Payment/ledger convergence
-```
-
----
-
-# 8. Rename / merge procedure
-
-Never silently rename or reassign a canonical ID.
-
-```text
-load 04B
-→ choose surviving canonical ID
-→ remap or alias historical entry
-→ preserve historical evidence
-→ never reuse old numeric meaning
-→ update CURRENT + ROLLOVER
-```
-
----
-
-# 9. Index integrity rules
+# 6. Index integrity rules
 
 1. IDs are monotonically allocated and never reused.
 2. One canonical ID has one current semantic meaning/home.
@@ -218,26 +134,28 @@ load 04B
 
 ---
 
-# 10. Current anti-duplication checkpoint
+# 7. Current anti-duplication checkpoint
 
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F209
-Contradiction range:     through C159
+Finding range:           through F211
+Contradiction range:     through C161
 Recommendation range:    through KF-REC-053
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-J3/J4 are provisionally converged and target-aligned through KF-REC-053, with canonical journey dossiers ingrained. J10 Commerce/Fulfilment is the active microscopic frontier.
+J3/J4 are provisionally converged and target-aligned through KF-REC-053. J10 Commerce/Fulfilment is the active microscopic frontier.
 
-Current J10 canonical entries:
+Current J10 homes:
 - `journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
-- F206/C156 in `08AK` / `09AK`.
-- F207/C157 in `08AL` / `09AL`.
-- F208–F209 / C158–C159 in `08AM` / `09AM`.
+- F206/C156 — `08AK` / `09AK`
+- F207/C157 — `08AL` / `09AL`
+- F208–F209/C158–C159 — `08AM` / `09AM`
+- F210/C160 — `08AN` / `09AN`
+- F211/C161 — `08AO` / `09AO`
 
-Do not allocate a new refund/provider/customer-lifecycle root where F187/F193/F194/F196/F202/F205 or KF-REC-052/053 already own the semantic defect. New J10 IDs require a genuinely distinct architecture root after source/reachability verification.
+Do not allocate new refund/provider/lifecycle/recovery roots where mature F187/F193/F194/F196/F202/F205 or KF-REC-047/048/052/053 already own the semantic defect. New J10 IDs require a distinct architecture root after reachability and anti-duplication proof.
 
 No production implementation is authorized by this taxonomy artifact.
