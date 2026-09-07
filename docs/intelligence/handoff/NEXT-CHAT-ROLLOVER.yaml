@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 16
+rollover_version: 17
 last_updated: 2026-09-06
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -8,56 +8,60 @@ context_integrity: PASS
 repository: SaCH-PRO/KEYFLOWOS
 implementation_evidence:
   branch: main
-  current_head: 168732d0e2226e11ed033c14fbdf7b3ea5344a41
+  current_head: 9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
+  delta_class: audit_architecture_journal_only
 taxonomy:
   governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   mandatory_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F178
-  contradictions_through: C128
-  recommendations_through: KF-REC-050
+  findings_through: F184
+  contradictions_through: C134
+  recommendations_through: KF-REC-051
   concepts_through: KF-CONCEPT-042
 programme:
-  phase: whole-system-pooling-post-j16-k4-backward-reaudit
+  phase: whole-system-pooling-post-j17-operator-attention-convergence
   objective: whole_system_target_migration_proof_and_repository_transformation_architecture_before_implementation
-latest_pool:
-  name: business_knowledge_genome_evolution_epistemic_integrity
-  primary_journey: J16
+active_frontier:
+  journey: J17
+  name: Command_Center_to_Priority_to_Action
+  stage: SOURCE_FAMILY_CLASSIFICATION_AND_PROOF_ARCHITECTURE_REMAIN
+  recommendation: KF-REC-051
+  findings: [F179,F180,F181,F182,F183,F184]
+  contradictions: [C129,C130,C131,C132,C133,C134]
+  research_artifact: docs/intelligence/investigations/J17-OPERATOR-ATTENTION-PRIORITY-STANDARDS-FRONTIER-PRESSURE-TEST.md
+  backward_reaudit_artifact: docs/intelligence/investigations/J6-J7-J15-J17-J18-J23-OPERATOR-ATTENTION-BACKWARD-REAUDIT.md
+  backward_reaudit: PASSED_NO_NEW_IDS
+  target_status: SUBSTANTIALLY_STRENGTHENED_APPROACHING_ARCHITECTURAL_CONVERGENCE
+  next_actions:
+    - classify_CommandItem_writer_and_source_families
+    - map_admission_identity_source_owner_reverse_convergence_owner_disposition_semantics
+    - classify_persist_vs_read_assembled_vs_Temporal_Work_Projection_adapter
+    - define_initial_J17_proof_obligations_and_attention_quality_metrics
+    - return_J17_to_whole_system_pool
+    - select_and_verify_next_high_leverage_frontier
+  key_laws:
+    - important_not_equal_actionable_not_equal_authorized
+    - operator_projection_not_equal_source_truth
+    - user_disposition_not_equal_effect_or_source_resolution
+    - priority_is_multidimensional_before_question_specific_ordering
+    - material_action_revalidates_current_Clearance_and_effect_owner
+    - admission_requires_reverse_convergence
+    - source_health_and_projection_completeness_are_explicit
+    - attention_reset_lag_is_measurable
+mature_business_knowledge_pool:
+  journey: J16
   kernel: K4
-  adjacent_pressure: J19
   recommendation: KF-REC-049
   findings: [F161,F162,F163,F164,F165,F166,F175,F176,F177,F178]
   contradictions: [C111,C112,C113,C114,C115,C116,C125,C126,C127,C128]
-  research_pressure_test: complete
-  backward_reaudit: passed_no_new_ids
   role_now: pooled_input_to_broader_system_model
-  key_target_properties:
-    - revision_specific_provenance_and_verification
-    - valid_business_time_vs_system_known_time_where_material
-    - consumer_specific_EpistemicEligibility
-    - OutcomeCertainty_before_LearningEligibility
-    - exact_enough_causal_and_effect_lineage_for_learning
-    - correction_influence_closure_and_verified_convergence
-    - retained_history_not_active_truth
-    - learning_never_expands_authority
 mature_temporal_recovery_pool:
   proof_obligations: 39
   deterministic_fault_points: 16
   backward_reaudit: passed
   runtime_proof_executed: false
-next_frontier_candidate:
-  journey: J17
-  name: Command_Center_to_Priority_to_Action
-  status: VERIFY_FROM_REPOSITORY_BEFORE_ACTIVATION
-  hypothesis: user_operational_control_surface_combining_K4_knowledge_K7_temporal_work_K8_evidence_K3_governance_and_J18_recovery_state
-  first_actions:
-    - inspect_entry_surfaces_and_command_center_aggregators
-    - trace_priority_ranking_and_freshness
-    - trace_recommendation_action_bridges
-    - trace_authority_and_clearance_before_mutation
-    - compare_cross_kernel_leverage_against_alternative_frontiers
 execution_probe:
   id: KF-EXEC-EXTFX-001
   classification: POOLED_IMPLEMENTATION_SHAPE_EVIDENCE
@@ -74,6 +78,7 @@ continuity:
 constraints:
   - production_code_read_only
   - do_not_promote_local_maturity_to_implementation_authorization
-  - do_not_allow_learning_to_expand_authority
+  - do_not_treat_operator_attention_as_source_truth_or_authority
+  - do_not_create_universal_priority_scalar_as_semantic_truth
   - do_not_create_duplicate_canonical_ids
   - preserve_anti_normalization_method
