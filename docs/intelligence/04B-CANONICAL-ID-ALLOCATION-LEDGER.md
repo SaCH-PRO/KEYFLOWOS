@@ -19,7 +19,7 @@ F161–F166 initial J16/K4 epistemic-integrity findings
 F167–F174 recovered historical collision-band findings
 F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
-F185–F187 initial J7 Financial Truth findings
+F185–F189 J7 Financial Truth findings
 ```
 
 ```text
@@ -28,7 +28,7 @@ C111–C116 initial J16/K4 contradictions
 C117–C124 recovered historical collision-band contradictions
 C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
-C135–C137 initial J7 Financial Truth contradictions
+C135–C139 J7 Financial Truth contradictions
 ```
 
 ```text
@@ -109,6 +109,47 @@ PayrollRun.status = PAID
 
 `markRunPaid()` currently updates PayrollRun status/timestamp only.
 
+### F188 / C138 — PayPal capture financial consequence completeness
+Home:
+- `08Z-FINDING-REGISTER-FINANCIAL-CONSEQUENCE-COMPLETENESS-SUPPLEMENT.md`
+- `09Z-CONTRADICTION-REGISTER-FINANCIAL-CONSEQUENCE-COMPLETENESS-SUPPLEMENT.md`
+
+Distinct root:
+
+```text
+provider capture COMPLETED
++ Payment SUCCESSFUL
++ Invoice PAID
+!= payment ledger consequence complete
+```
+
+The direct PayPal capture path creates a successful Payment and reconciles the Invoice without using `createPaymentWithPosting()`. The later webhook sees the same provider capture ID and dedupes before the missing posting is repaired.
+
+F188 is distinct from F158: F158 has failed local Payment persistence after provider success; F188 has successful Payment persistence with an omitted mandatory accounting consequence.
+
+### F189 / C139 — canonical financial source identity / CreditNote reversal reachability
+Home: same `08Z` / `09Z` pair.
+
+Distinct root:
+
+```text
+canonical invoice posting sourceType = 'Invoice'
+!= CreditNote reversal lookup sourceType = 'INVOICE'
+```
+
+A valid canonical invoice posting can exist while `CreditNoteService.apply()` cannot discover its lineage. Financial source discriminators must be canonical/typed enough for posting, reversal, reconciliation, reporting and repair to resolve the same business consequence.
+
+### Reused J7 recovery root — F155
+
+`PaymentsOpsService.refundCharge()` remains an instance of mature F155 and does **not** receive another J7 ID:
+
+```text
+provider refund succeeds
+→ REFUNDED Payment exists
+→ ledger/invoice consequences omitted
+→ webhook dedupe suppresses missing consequence repair
+```
+
 ### KF-REC-052 — Financial Truth & Valuation Contract
 Home: `10K-RECOMMENDATION-REGISTER-FINANCIAL-TRUTH-CONTINUATION.md`.
 
@@ -129,8 +170,8 @@ Target preserves the strong PostingService/reversal/reconciliation seams while p
 ## Current ranges
 
 ```text
-Findings:        F001–F187
-Contradictions:  C001–C137
+Findings:        F001–F189
+Contradictions:  C001–C139
 Recommendations: KF-REC-001–KF-REC-052
 ```
 
