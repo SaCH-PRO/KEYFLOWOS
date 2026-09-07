@@ -42,6 +42,7 @@ KF-REC-049 provenance/revision-aware Business Knowledge Contract
 KF-REC-050 load-bearing WorkDefinition control contract
 KF-REC-051 Operator Attention & Priority Contract
 KF-REC-052 Financial Truth & Valuation Contract
+KF-REC-053 Commercial Relationship & Obligation Contract
 ```
 
 ## Historical collision reconciliation
@@ -81,56 +82,45 @@ Home: `10K-RECOMMENDATION-REGISTER-FINANCIAL-TRUTH-CONTINUATION.md`.
 
 ## J3 / J4 commercial-to-cash allocations
 
-### F197 / C147 — commercial customer reality vs Contact lifecycle convergence
-Home: `08AF` / `09AF`.
+- F197 / C147 — commercial customer reality vs Contact lifecycle convergence — `08AF` / `09AF`.
+- F198 / C148 — pipeline value plus realized revenue vs non-duplicative customer lifetime value — `08AF` / `09AF`.
+- F199 / C149 — completed service vs missing required receivable consequence — `08AG` / `09AG`.
+- F200 / C150 — service deposit vs final receivable settlement lineage — `08AH` / `09AH`.
+- F201 / C151 — booking cancellation/no-show vs financial descendant disposition — `08AH` / `09AH`.
+- F202 / C152 — RevenueAttribution pipeline stage vs realized revenue stage — `08AH` / `09AH`.
+- F203 / C153 — canonical CRM statuses vs KeyCortex lowercase/non-canonical predicates — `08AH` / `09AH`.
+- F204 / C154 — live post-booking journey event/tool contract mismatch — `08AI` / `09AI`.
+- F205 / C155 — persisted Contact status has incompatible lifecycle / relationship-health dialects — `08AJ` / `09AJ`.
 
-### F198 / C148 — pipeline value plus realized revenue vs non-duplicative customer lifetime value
-Home: `08AF` / `09AF`.
+### KF-REC-053 — Commercial Relationship & Obligation Contract
+Home: `10L-RECOMMENDATION-REGISTER-COMMERCIAL-RELATIONSHIP-OBLIGATION-CONTINUATION.md`.
 
-### F199 / C149 — completed service vs missing required receivable consequence
-Home: `08AG` / `09AG`.
-
-### F200 / C150 — service deposit vs final receivable settlement lineage
-Home: `08AH` / `09AH`.
-
-### F201 / C151 — booking cancellation/no-show vs financial descendant disposition
-Home: `08AH` / `09AH`.
-
-### F202 / C152 — RevenueAttribution pipeline stage vs realized revenue stage
-Home: `08AH` / `09AH`.
-
-### F203 / C153 — canonical CRM statuses vs KeyCortex lowercase/non-canonical predicates
-Home: `08AH` / `09AH`.
-
-### F204 / C154 — live post-booking journey event/tool contract mismatch
-Home: `08AI` / `09AI`.
-
+Scope:
 ```text
-BookingCompletedPayload { booking, contact?, businessId }
-!= post-booking template flat contactId/serviceName/amount/bookingId/contactName
-!= commerce_create_invoice description/quantity/unitPrice tool contract
+customer relationship state algebra
++ commercial obligation lineage
++ commercial value-stage semantics
++ service financial disposition
++ expected consequence semantics
++ event-to-action schema composition
 ```
 
-### F205 / C155 — persisted Contact status has incompatible lifecycle / relationship-health dialects
-Home:
-- `08AJ-FINDING-REGISTER-CUSTOMER-STATE-ALGEBRA-SUPPLEMENT.md`
-- `09AJ-CONTRADICTION-REGISTER-CUSTOMER-STATE-ALGEBRA-SUPPLEMENT.md`
+Delegation boundaries:
+- knowledge provenance / EpistemicEligibility → KF-REC-049;
+- financial/accounting truth → KF-REC-052;
+- temporal projection → KF-REC-047;
+- recovery certainty → KF-REC-048;
+- attention/ranking → KF-REC-051;
+- execution authority → K3.
 
-```text
-CRM-facing status algebra: LEAD | PROSPECT | CLIENT | LOST
-!= Shopify persistence: LEAD | CUSTOMER
-!= People Flow Contact.status interpretation: LEAD | PROSPECT | CUSTOMER | DORMANT | AT_RISK
-!= separate relationshipHealth field that already owns DORMANT / AT_RISK semantics
-```
-
-`Contact.status` is a free-form Prisma String, so direct writers can bypass the CRM DTO contract. Target must separate lifecycle, relationship health, opportunity/pipeline state and descriptive segmentation rather than expanding one catch-all enum.
+Current local proof architecture: 28 proof obligations / 12 deterministic fault-injection points. Runtime proof not executed.
 
 ## Current ranges
 
 ```text
 Findings:        F001–F205
 Contradictions:  C001–C155
-Recommendations: KF-REC-001–KF-REC-052
+Recommendations: KF-REC-001–KF-REC-053
 ```
 
 ## Agent pre-allocation gate
