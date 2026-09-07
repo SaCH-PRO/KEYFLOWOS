@@ -56,38 +56,21 @@ allocate next globally unused ID from 04B
 
 ## Journeys
 
-```text
-J1 ... J25
-```
-
-Identity source: `03-ANALYSIS-MAP.md`.
-Journey number is identity.
+`J1 ... J25` — identity source: `03-ANALYSIS-MAP.md`.
 
 ## Kernels
 
-```text
-K1 ... K12
-```
-
-Identity source: `12-KERNEL-PROGRAMME.md`.
+`K1 ... K12` — identity source: `12-KERNEL-PROGRAMME.md`.
 
 ## Concepts
 
-```text
-KF-CONCEPT-###
-```
-
-Canonical home: `04-CONCEPT-REGISTRY.md`.
+`KF-CONCEPT-###` — canonical home: `04-CONCEPT-REGISTRY.md`.
 Current range: `KF-CONCEPT-001–KF-CONCEPT-042`.
 
 ## Findings
 
-```text
-F###
-```
-
-Canonical home: `08*` registers; allocation owner: 04B.
-Current range: `F001–F203`.
+`F###` — canonical home: `08*` registers; allocation owner: 04B.
+Current range: `F001–F204`.
 
 Latest roots:
 ```text
@@ -99,16 +82,13 @@ F200 deposit vs final service receivable settlement lineage
 F201 cancellation/no-show vs financial descendant disposition
 F202 RevenueAttribution pipeline vs realized revenue stage
 F203 canonical CRM statuses vs KeyCortex lowercase/non-canonical predicates
+F204 canonical booking.completed event vs post-booking journey/tool input contract
 ```
 
 ## Contradictions
 
-```text
-C###
-```
-
-Canonical home: `09*` registers; allocation owner: 04B.
-Current range: `C001–C153`.
+`C###` — canonical home: `09*` registers; allocation owner: 04B.
+Current range: `C001–C154`.
 
 Latest roots:
 ```text
@@ -120,15 +100,12 @@ C150 deposit semantics vs additive final service receivable
 C151 booking cancellation/no-show vs unresolved financial descendants
 C152 RevenueAttribution as one revenue stage vs heterogeneous value stages
 C153 canonical CRM status algebra vs KeyCortex lead/customer aliases
+C154 BookingCompletedPayload vs post-booking template vs commerce_create_invoice tool schema
 ```
 
 ## Recommendations
 
-```text
-KF-REC-###
-```
-
-Canonical home: `10*` continuations; allocation owner: 04B.
+`KF-REC-###` — canonical home: `10*` continuations; allocation owner: 04B.
 Current range: `KF-REC-001–KF-REC-052`.
 
 Current major pooled targets:
@@ -143,25 +120,16 @@ KF-REC-052 Financial Truth & Valuation Contract
 
 ## Decisions
 
-```text
-KF-DEC-###
-```
-
-Canonical home: `05-DECISION-REGISTER.md`.
+`KF-DEC-###` — canonical home: `05-DECISION-REGISTER.md`.
 Recommendations remain provisional until explicitly accepted as decisions.
 
 ## Execution packets
 
-```text
-KF-EXEC-<DOMAIN>-###
-```
-
-Execution identity is implementation scope, not concept identity.
+`KF-EXEC-<DOMAIN>-###` — execution identity is implementation scope, not concept identity.
 
 ## Proof obligations
 
 Preferred bounded form: `PF-<SCOPE>-###`.
-Proof IDs remain local to a declared scope until deliberately promoted.
 
 ---
 
@@ -198,9 +166,11 @@ AUTHORITY     authoritative | derived | advisory | compatibility
 | FinancialConsequenceVector | inside KF-REC-052 | candidate vocabulary, not standalone concept |
 | ValuationEvidence | inside KF-REC-052 | candidate vocabulary, not standalone concept |
 | CanonicalInvoiceBalance | inside KF-REC-052 | reusable financial read semantic, not standalone concept |
-| CustomerLifecycle | J3 target vocabulary | working semantic dimension; do not promote until status/lifecycleStage/pipelineStage ownership is resolved |
-| CommercialObligationLineage | J3/J4 target vocabulary | working semantic dimension binding service/booking/deposit/invoice/payment/correction stages; not standalone concept yet |
-| RevenueAttribution stage | J3/J4 target vocabulary | attribution stage must be explicit; BOOKING pipeline value is not automatically realized revenue |
+| CustomerLifecycle | J3 target vocabulary | working semantic dimension; do not promote until field/state ownership converges |
+| CommercialObligationLineage | J3/J4 target vocabulary | working semantic dimension binding service/booking/deposit/invoice/payment/correction stages |
+| CommercialValueStage | J3/J4 target vocabulary | pipeline/committed/invoiced/collected/reversed basis; not standalone concept yet |
+| ServiceFinancialDisposition | J4 target vocabulary | cancellation/no-show financial outcome selection; not standalone concept yet |
+| Event-to-Action Contract Adapter | J4/K7 target vocabulary | typed/versioned mapping between canonical event payload and tool input; F204 does not justify a new universal runtime |
 
 ---
 
@@ -262,6 +232,9 @@ Required descendant not created != nothing left to do
 Deposit != additive charge unless explicitly modeled as one
 Booking CANCELLED / NO_SHOW != financial disposition complete
 LEAD | PROSPECT | CLIENT | LOST != lead | customer aliases in persistent query predicates
+Canonical event payload != template-local assumed payload
+Template item.amount != commerce_create_invoice quantity/unitPrice input contract
+Plan-step idempotency != semantic commercial-obligation idempotency
 ```
 
 ---
@@ -303,13 +276,13 @@ load 04B
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F203
-Contradiction range:     through C153
+Finding range:           through F204
+Contradiction range:     through C154
 Recommendation range:    through KF-REC-052
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-J7 is pooled. J3/J4 commercial-to-cash microscopic reconstruction is active through F203/C153. `CustomerLifecycle` and `CommercialObligationLineage` remain working target vocabulary until broader convergence proves a need for standalone concepts.
+J7 is pooled. J3/J4 commercial-to-cash microscopic reconstruction is active through F204/C154. `CustomerLifecycle`, `CommercialObligationLineage`, `CommercialValueStage`, `ServiceFinancialDisposition`, and event-to-action adapter vocabulary remain working target language until broader convergence proves standalone concepts are warranted.
 
 No production implementation is authorized by this taxonomy artifact.
