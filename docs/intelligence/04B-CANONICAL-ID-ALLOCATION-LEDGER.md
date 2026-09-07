@@ -19,6 +19,7 @@ F161–F166 initial J16/K4 epistemic-integrity findings
 F167–F174 recovered historical collision-band findings
 F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
+F185–F187 initial J7 Financial Truth findings
 ```
 
 ```text
@@ -27,6 +28,7 @@ C111–C116 initial J16/K4 contradictions
 C117–C124 recovered historical collision-band contradictions
 C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
+C135–C137 initial J7 Financial Truth contradictions
 ```
 
 ```text
@@ -37,6 +39,7 @@ KF-REC-048 certainty-aware Recovery Contract
 KF-REC-049 provenance/revision-aware Business Knowledge Contract
 KF-REC-050 load-bearing WorkDefinition control contract
 KF-REC-051 Operator Attention & Priority Contract
+KF-REC-052 Financial Truth & Valuation Contract
 ```
 
 ## Historical collision reconciliation
@@ -55,66 +58,80 @@ Governed by:
 
 ## J17 allocations
 
-### F179 / C129 — Command Center projection completeness
-Home: `08S` / `09S`.
-
-`SOURCE UNAVAILABLE / UNKNOWN != SOURCE HEALTHY + ZERO IMPORTANT ITEMS`
-
-### F180 / C130 — Command spine false-terminal execution semantics
-Home: `08T` / `09T`.
-
-`CommandItem.status=EXECUTED != source approval resolved != executionTool ran != business effect occurred != OutcomeEvidence`
-
-### F181 / C131 — Temporal priority materialization reachability
-Home: `08U` / `09U`.
-
-`CONSUMER PRIORITY LOGIC EXISTS != PRODUCER PATH IS WIRED != DOMAIN CONDITION REACHES THAT PROJECTION`
-
-### F182 / C132 — CommandItem source-state convergence
-Home: `08V` / `09V`.
-
-`SOURCE-DERIVED PROJECTION CREATED != PROJECTION REMAINS VALID FOREVER`
-
-### F183 / C133 — Command Queue lifecycle visibility
-Home: `08W` / `09W`.
-
-`MULTI-STATUS CLIENT FILTER VOCABULARY != OPEN-ONLY SERVER DATASET`
-
-The main Command Center fetches only OPEN CommandItems while presenting filters for IN_PROGRESS, WAITING_APPROVAL, SNOOZED, COMPLETED and DISMISSED.
-
-### F184 / C134 — priority semantic compression
-Home: `08X` / `09X`.
-
-`SOURCE-SPECIFIC RANKING SEMANTICS != GLOBAL OPERATING PRIORITY`
-
-The Command Center global Top Priorities path ranks priority class → static type weight → recency. It bypasses richer source ranking semantics such as GenomeRecommendationRanker expected gain, confidence, readiness, financial viability, outcome learning, risk and effort. Persistent CommandItems use another scale: numeric priority → urgency → recency.
-
-## Recommendation allocation
+- F179 / C129 — Command Center projection completeness (`08S`/`09S`).
+- F180 / C130 — Command spine false-terminal execution semantics (`08T`/`09T`).
+- F181 / C131 — Temporal priority materialization reachability (`08U`/`09U`).
+- F182 / C132 — CommandItem source-state convergence (`08V`/`09V`).
+- F183 / C133 — Command Queue lifecycle visibility (`08W`/`09W`).
+- F184 / C134 — priority semantic compression (`08X`/`09X`).
 
 ### KF-REC-051 — Operator Attention & Priority Contract
 Home: `10J-RECOMMENDATION-REGISTER-OPERATOR-PRIORITY-CONTINUATION.md`.
 
+## J7 allocations
+
+### F185 / C135 — live cash ownership
+Home:
+- `08Y-FINDING-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md`
+- `09Y-CONTRADICTION-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md`
+
+Distinct root:
+
+```text
+ledger-derived cash movement/balance
+!= FinancialAccount.currentBalance initialized from opening balance
+```
+
+`currentBalance` is initialized but not maintained by posting, while SafeToSpend and other product surfaces consume it as live cash.
+
+### F186 / C136 — multi-currency valuation
+Home: same `08Y` / `09Y` pair.
+
+Distinct root:
+
+```text
+currency-specific LedgerEntry amounts
+!= directly additive account/report values without valuation
+```
+
+Posting preserves currency, while LedgerBalance groups/sums by account without currency separation or FX conversion.
+
+### F187 / C137 — payroll financial outcome
+Home: same `08Y` / `09Y` pair.
+
+Distinct root:
+
+```text
+PayrollRun.status = PAID
+!= payment/disbursement proved
+!= accounting consequence posted
+```
+
+`markRunPaid()` currently updates PayrollRun status/timestamp only.
+
+### KF-REC-052 — Financial Truth & Valuation Contract
+Home: `10K-RECOMMENDATION-REGISTER-FINANCIAL-TRUTH-CONTINUATION.md`.
+
 Distinct responsibility:
 
 ```text
-source truth
-→ admission/convergence into operator attention/work projection
-→ source health/freshness
-→ multidimensional PriorityAssessment
-→ question-specific deterministic ordering
-→ explicit user disposition
-→ canonical current governance/effect execution
-→ OutcomeEvidence-driven projection convergence
+commercial/operational financial state
+→ external money reality
+→ KeyFlow money-movement record
+→ accounting truth
+→ reconciliation truth
+→ valuation truth
+→ derived financial/operator projection
 ```
 
-KF-REC-051 is broader than KF-REC-047. Temporal Work Projection is one major source into operator attention/priority; it is not all business priority truth.
+Target preserves the strong PostingService/reversal/reconciliation seams while preventing stored balances, operational statuses and raw heterogeneous currencies from silently competing with ledger/reconciled financial truth.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F184
-Contradictions:  C001–C134
-Recommendations: KF-REC-001–KF-REC-051
+Findings:        F001–F187
+Contradictions:  C001–C137
+Recommendations: KF-REC-001–KF-REC-052
 ```
 
 ## Agent pre-allocation gate
