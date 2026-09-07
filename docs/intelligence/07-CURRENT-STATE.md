@@ -1,18 +1,20 @@
 # KeyFlowOS Current State
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
+Status: CANONICAL CURRENT PROGRAMME STATE
 
 ## Analytical phase
 
-`WHOLE-SYSTEM VIRTUAL MODEL / J16-K4 BUSINESS KNOWLEDGE CONVERGENCE / J19 CORRECTION PRESSURE / BACKWARD RE-AUDIT COMPLETE`
+`WHOLE-SYSTEM VIRTUAL MODEL / J10 COMMERCE-FULFILMENT TARGET SYNTHESIS + BACKWARD RE-AUDIT COMPLETE / NEXT FRONTIER SELECTION PENDING`
 
-Production implementation remains read-only and unauthorized.
+Production implementation remains **READ-ONLY / UNAUTHORIZED**.
+Runtime proof for the synthesized target contracts has **NOT** been executed.
 
-Context integrity: `PASS`.
+Context integrity: `PASS` after continuity repair.
 
 ## Programme identity
 
-> KeyFlowOS analysis is constructing a repository-grounded virtual architectural / causal model of the entire application, repeatedly pooling and backward-re-auditing it before a comprehensive code transformation programme is allowed to become the frontier.
+> KeyFlowOS analysis is constructing a repository-grounded virtual architectural / causal model of the entire application, repeatedly pooling and backward-re-auditing it before a comprehensive repository transformation programme is allowed to become the frontier.
 
 ```text
 MAP → MICROSCOPIC TRACE → JOURNEY → CONSTELLATION → KERNELS
@@ -29,26 +31,39 @@ Final destination:
 whole-system target architecture
 + migration architecture
 + proof architecture
-+ compatibility/rollout sequencing
++ compatibility / rollout sequencing
 + exact dependency-ordered repository transformation programme
 ```
 
-## Implementation evidence baseline
+## Durable evidence baseline
 
 ```text
-main head:          168732d0e2226e11ed033c14fbdf7b3ea5344a41
-code-bearing base:  d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
-head class:         audit-only
+repository:            SaCH-PRO/KEYFLOWOS
+implementation branch: main
+implementation head:   4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
+code-bearing baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
+intelligence branch:   docs/keyflow-intelligence-foundation
+production code:       READ-ONLY / UNAUTHORIZED
 ```
 
-Revalidate if `main` gains code-bearing changes.
+Revalidate implementation evidence if `main` gains code-bearing changes.
 
-## Taxonomy integrity
+## Canonical taxonomy integrity
 
 Mandatory governors:
 
+- `04-CONCEPT-REGISTRY.md`
 - `04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md`
 - `04B-CANONICAL-ID-ALLOCATION-LEDGER.md`
+
+Current ranges:
+
+```text
+Findings:         F001–F214
+Contradictions:   C001–C164
+Recommendations: KF-REC-001–KF-REC-054
+Concepts:         KF-CONCEPT-001–KF-CONCEPT-042
+```
 
 Law:
 
@@ -60,309 +75,194 @@ ONE SEMANTIC CONCEPT
 → ZERO DUPLICATE CANONICAL MEANINGS
 ```
 
-Before any new ID/name:
+## Mature target anchors
 
 ```text
-LOAD 04A + 04B
-→ SEARCH
-→ REUSE
-→ REFINE
-→ CROSS-REFERENCE
-→ only then allocate if genuinely distinct
+KF-REC-047 Temporal Work Projection
+KF-REC-048 certainty-aware Recovery Contract
+KF-REC-049 provenance/revision-aware Business Knowledge Contract
+KF-REC-050 load-bearing WorkDefinition control contract
+KF-REC-051 Operator Attention & Priority Contract
+KF-REC-052 Financial Truth & Valuation Contract
+KF-REC-053 Commercial Relationship & Obligation Contract
+KF-REC-054 Commerce & Fulfilment Contract
 ```
 
-A historical parallel-analysis collision band was reconciled without deleting evidence.
+These contracts compose; none is permission to create a universal runtime.
 
-## Current canonical ranges
+## Mature / pooled journey state
+
+### J16 / K4 — Business Knowledge
+
+Pooled through F161–F178 / C111–C128 with KF-REC-049. Provenance, revision, epistemic eligibility, correction/influence closure and bounded learning semantics remain accepted target pressure. Runtime proof not executed.
+
+### J17 — Command Center → Priority → Action
+
+Pooled through F179–F184 / C129–C134 with KF-REC-051. Operator attention consumes truthful unresolved work; it does not own source-domain truth.
+
+### J23 / J18 — Temporal Flow / Failure-Recovery
+
+Mature temporal/recovery pool retained through KF-REC-047/048. Stable semantic EffectId vs AttemptId, outcome certainty, consequence completeness and recovery clearance remain accepted. Runtime/fault-injection proof not executed.
+
+### J7 — Financial Truth
+
+Pooled through F185–F196 / C135–C146 with KF-REC-052.
+
+Financial truth owns Payment/Invoice/ledger/refund/credit/reversal/valuation semantics. Operational/commercial domains may require financial consequences but do not redefine them.
+
+### J3 / J4 — Commercial-to-Cash
+
+Provisionally converged / target-aligned through F197–F205 / C147–C155 with KF-REC-053.
+
+Canonical dossier homes:
+- `journeys/KF-JOURNEY-003-LEAD-CUSTOMER-CASH.md`
+- `journeys/KF-JOURNEY-004-BOOKING-SERVICE-PAYMENT.md`
+
+Target separation retained:
 
 ```text
-Findings:        F178
-Contradictions:  C128
-Recommendations: KF-REC-050
-Concepts:        KF-CONCEPT-042
+CustomerLifecycleState != RelationshipHealthState != DealState/DealStage
+commercial obligation/value stage != financial truth
 ```
 
-## Current system thesis
+### J10 — Commerce / Fulfilment
 
-> KeyFlowOS is a governed business-state transition system whose safe autonomy depends on trustworthy business knowledge, current authority, exact effect identity, external outcome certainty, recoverable consequence completion and bounded learning.
+**PROVISIONALLY CONVERGED / TARGET-ALIGNED for the current analytical tranche.**
 
-Enlarged causal model:
+Dossier:
+`journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
+
+Canonical evidence:
 
 ```text
-External / domain / human reality
-→ Observation / Assertion / Evidence
-→ KnowledgeRevision
-→ verification / freshness / conflict / temporal validity
-→ consumer-specific EpistemicEligibility
-→ KEY reasoning / recommendation
-→ CapabilityContract / ActionEnvelope
-→ current authority + policy
-→ ControlRequirement / Clearance
-→ WorkOccurrence / Effect / Attempt
-→ domain/provider consequence
-→ OutcomeEvidence / reconciliation / recovery
-→ OutcomeCertainty
-→ LearningEligibility
-→ bounded knowledge confidence / recommendation priors
-→ future reasoning
+F206/C156 duplicate paid-Invoice descendant ownership
+F207/C157 operational CONFIRMED can manufacture paid event semantics
+F208/C158 competing tracked-stock effect ownership across checkout/routing/shipment/correction
+F209/C159 failed required route can be reported as aggregate fulfillment_routed
+F210/C160 Shopify Product provider identity fails repeat sync when SKU differs
+F211/C161 partial route set can suppress missing-route recovery
+F212/C162 Shopify customer identity differs by sync entrypoint after email change
+F213/C163 imported Shopify MarketplaceOrder lacks native relational order-item materialization
+F214/C164 PurchaseOrder/PreOrder can commit before route-based idempotency identity exists
 ```
 
-Hard law:
+Target recommendation:
+`10M-RECOMMENDATION-REGISTER-COMMERCE-FULFILMENT-CONTINUATION.md`
+
+Pressure test:
+`investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+
+Backward re-audit:
+`investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md`
+
+Backward re-audit verdict:
 
 ```text
-LEARNING MAY ALTER BELIEF / RANKING / CANDIDATE POLICY
-LEARNING MUST NOT CREATE OR EXPAND AUTHORITY
+KF-REC-054 invalidated                        = NO
+parallel financial system                    = NO
+parallel commercial-obligation system        = NO
+universal recovery/workflow runtime created  = NO
+universal integration runtime created        = NO
+universal order/warehouse table required     = NO
+new finding from re-audit                    = NO
+J10 target can be provisionally converged    = YES
+runtime proof executed                       = NO
 ```
 
-## Active / mature constellation
+## KF-REC-054 target semantics
+
+KF-REC-054 owns the domain semantics that remain after delegation:
 
 ```text
-J1  Business Birth
-J25 Human Authority Lifecycle
-J2  KEY Request → Governed Action
-J15 Approval / Governance Lifecycle
-J6  Proactive KEY / Autonomy
-J14 External Event Ingress
-J23 Temporal Flow / Long-Running Workflow
-J18 Failure / Recovery
-J16 Business Genome Evolution
-J19 Privacy / Deletion / Exit     ← current adjacent K4 pressure
+OrderOperationalState
+ExternalEntityIdentity for commerce resources
+OperationalOrderMaterialization
+InventoryAllocationLineage
+RequiredFulfilmentSet
+StrategyEffectIdentity
+CommerceEffectIdentity
+AggregateFulfilmentOutcome
 ```
 
-Kernel pressure:
+Critical laws:
 
 ```text
-K2 Human Authority
-K3 KEY Authority / Governance
-K4 Business Knowledge
-K5 Capability
-K6 State Transition
-K7 Temporal / Event / Workflow
-K8 Evidence / Outcome
-K9 Integration / External Reality
-K10 Financial Truth
-K11 Recovery / Reliability
+OrderOperationalState != PaymentCompletionEvidence != AggregateFulfilmentOutcome
+merchant SKU / mutable email != stable provider identity
+provider metadata line items != native operational OrderItem descendants
+one order-item quantity → one exact-once inventory allocation/effect lineage
+any existing route != complete required fulfilment set
+route absence != absence of already-committed PurchaseOrder/PreOrder effect
+aggregate fulfilment outcome = policy over required semantic child effects
 ```
 
-## Mature J23/J18 pool
-
-Still substantially converged and retained as a major input:
-
-- failure/outcome certainty;
-- stable EffectId vs AttemptId;
-- provider success vs consequence completeness;
-- Recovery Clearance;
-- Temporal Work Projection;
-- financial/provider reconciliation semantics;
-- 39 proof obligations;
-- 16 deterministic fault-injection points;
-- passed prior backward re-audit.
-
-No runtime proof execution is claimed.
-
-`KF-EXEC-EXTFX-001` remains pooled implementation-shape evidence, not programme frontier.
-
-## J16 / K4 Business Knowledge pool
-
-### Initial roots
+Delegations:
 
 ```text
-F161 old verification can survive a replacement value/source
-F162 knowledge mutation authority is mainly access/completeness rather than effective authority
-F163 Blueprint and GenomeFact are asymmetric coexisting truths/materializations
-F164 proposal application and approval evidence are non-atomic
-F165 proposal application is not base-revision bound
-F166 process/control events can become learning semantics stronger than evidence
+ingress occurrence lifecycle → KF-REC-035–037
+recovery mechanics           → KF-REC-048
+operator attention           → KF-REC-051
+financial truth              → KF-REC-052
+commercial obligation/state  → KF-REC-053
 ```
 
-### Consumer / learning / correction roots
+## Positive J10 seam to preserve
+
+Native `StoreOrderService.completeCheckout()` currently provides a strong transaction boundary coupling:
 
 ```text
-F175 weak/stale/disputed/expired facts can satisfy deterministic module readiness
-F176 weak/stale/disputed/expired facts can enter KEY working-knowledge prompt context
-F177 observed/domain outcomes can change confidence for unrelated recommendation patterns
-F178 fine-grained correction/withdrawal lacks lineage-aware convergence of active derivatives
+Invoice workflow
++ Payment SUCCESSFUL
++ ledger posting
++ tracked stock mutation / StockMovement
++ RevenueAttribution
++ paid order projection
+→ commit
+→ buffered invoice events
 ```
 
-Contradictions are C111–C116 and C125–C128.
+Target architecture should preserve strong transactional seams while removing duplicate/competing semantic ownership around them.
 
-### KF-REC-049
+## Current open proof / migration pressure
 
-`Establish a provenance- and revision-aware Business Knowledge Contract for Genome evolution and learning.`
+No runtime proof has been claimed. Future proof must include at least:
 
-Current accepted target properties:
-
-```text
-KnowledgeSubject != KnowledgeRevision
-verification belongs to exact revision
-old verification does not transfer to material replacement
-business-valid time != system-known time where material
-one authoritative knowledge owner per concept + explicit materializations
-consumer-specific EpistemicEligibility derives from one canonical knowledge/evidence state
-OutcomeCertainty precedes LearningEligibility
-LearningEligibility requires exact-enough recommendation/action/effect/outcome/recovery lineage
-correction/withdrawal computes derivation influence closure
-active derivatives are invalidated/recomputed/retracted
-required historical/audit evidence may remain without remaining active truth
-learning never expands authority
-```
-
-Reserved vocabulary remains unallocated as independent concepts until stable:
-
-```text
-KnowledgeSubject
-KnowledgeRevision
-KnowledgeAssertion
-KnowledgeInference
-KnowledgeChangeIntent
-KnowledgeVerification
-KnowledgeConflict
-MaterializationState
-LearningEligibility
-```
-
-## Standards / frontier pressure test
-
-Artifact:
-`investigations/J16-K4-STANDARDS-FRONTIER-PRESSURE-TEST.md`
-
-Research properties adopted:
-
-- W3C PROV: revision as new entity, derivation, attribution, invalidation, provenance chains;
-- OpenLineage: exact-enough typed/namespaced derivation, including field-level lineage where valuable;
-- ISO/IEC 42001 / NIST AI RMF: lifecycle governance, traceability, monitoring and continual evaluation;
-- current bitemporal systems/research: valid/application time distinct from transaction/system time;
-- machine-unlearning research: deleting a source is not equivalent to removing its downstream influence; verification matters.
-
-KeyFlow-specific synthesis retained inside K4/KF-REC-049 rather than minted as a new system:
-
-```text
-Governed epistemic loop
-Epistemic time travel for governed actions
-Verified Influence Closure for material correction/erasure
-Adaptive confidence budget
-Contradiction-preserving reasoning
-```
-
-Not justified:
-
-- dedicated temporal/knowledge-graph database solely for K4;
-- universal RDF/PROV store;
-- generic ML-unlearning platform now;
-- heavyweight approval for all facts;
-- embeddings/vector memory as canonical truth.
-
-## J19 correction/privacy pressure
-
-A first microscopic J19 dossier now exists:
-`journeys/KF-JOURNEY-019-PRIVACY-DELETION-EXIT.md`
-
-Strong positive seam:
-
-`GdprPurgeService` uses database cascade plus post-delete verification across all `business_id` tables before claiming tenant erasure success.
-
-Current K4/J19 concern is narrower:
-
-```text
-current fact corrected/withdrawn
-!=
-all derived recommendations, memories, readiness, prompt context and learning have converged
-```
-
-Target property:
-
-```text
-correction / withdrawal / erasure
-→ classify retention obligation
-→ resolve new revision / invalidate source evidence
-→ compute influence closure
-→ invalidate/recompute/retract active descendants
-→ preserve required historical evidence separately
-→ verify active convergence
-```
-
-## K4 backward re-audit
-
-Artifact:
-`investigations/J1-J25-J2-J15-J6-J14-J23-J18-J16-J19-K4-BACKWARD-REAUDIT.md`
-
-Verdict:
-
-```text
-K4 TARGET ROOT INVALIDATED                       = NO
-NEW PARALLEL AUTHORITY SYSTEM                    = NO
-NEW UNIVERSAL KNOWLEDGE GRAPH/RDF STORE          = NO
-NEW UNIVERSAL WORKFLOW/RECOVERY RUNTIME          = NO
-NEW ML UNLEARNING PLATFORM                       = NO
-NEW FINDING/CONTRADICTION FROM RE-AUDIT          = NO
-J19 ADMITTED AS MATERIAL K4 CONSTELLATION MEMBER = YES
-PRODUCTION IMPLEMENTATION                        = NO
-```
-
-K4 strengthens rather than replaces mature journey semantics.
-
-## Reconciled historical parallel pool
-
-Canonical remapped roots F167–F174 / C117–C124 preserve distinct earlier work on:
-
-- load-bearing workflow controls;
-- runtime/config delay divergence;
-- recurrence phase/misfire semantics;
-- distributed recurring-financial claims;
-- provider idempotency;
-- multi-stage provider checkpoints;
-- scheduled recovery ownership;
-- compensation ownership.
-
-`KF-REC-050` owns load-bearing versioned WorkDefinition controls.
-
-This pool is not the active frontier.
-
-## Proof implications for K4
-
-Do not allocate proof IDs until the dedicated proof tranche. Minimum future obligations now include:
-
-```text
-material value replacement cannot inherit old verification
-stale proposal cannot silently overwrite newer revision
-weak/disputed/expired fact cannot satisfy high-impact readiness
-uncertain prompt fact is explicitly represented as uncertain
-knowledge representations obey declared ownership/materialization contracts
-knowledge mutation + decision evidence are crash-consistent
-retroactive correction preserves valid/system temporal semantics where enabled
-process/control event cannot become business-success learning
-OUTCOME_UNKNOWN cannot produce causal positive/negative learning
-one outcome cannot update unrelated recommendation patterns by domain alone
-correction converges active descendants
-retained history cannot remain active truth
-material correction completion is verifiable
-learning confidence cannot expand authority
-whole-business erasure continues to verify tenant rows are gone
-```
+- one successful commerce occurrence produces one semantic paid-Invoice lineage;
+- generic operational confirmation cannot create payment truth;
+- inventory reserve/consume/release/restore composes exactly once;
+- failed/partial required fulfilment prevents false aggregate success;
+- retry after item 1 of N repairs only missing semantic effects;
+- retry after PurchaseOrder/PreOrder commit but before route commit cannot duplicate the supplier/preorder obligation;
+- provider Product/Customer identity survives SKU/email mutation and sync-entrypoint order;
+- operational imported orders materialize structural OrderItems or are technically excluded from native effectful flows;
+- corrections converge the exact effects actually applied without erasing history.
 
 ## Immediate programme frontier
 
-The J16/K4 tranche is now sufficiently mature to return to the broader pool rather than being turned into an implementation packet.
+J10 should now return to the pooled model rather than becoming an implementation packet.
 
-Next broad pressure point should be selected using:
+The next broad action is **frontier selection / coverage verification**, with J11 as the previously identified candidate. Before activating J11:
 
-- cross-journey leverage;
-- user/product centrality;
-- duplicated/ambiguous truth ownership;
-- ability to stress K3/K4/K7/K8/K11 simultaneously;
-- likelihood of changing whole-system migration/proof sequencing.
+```text
+1. load journey inventory / analysis map;
+2. verify J11 has no canonical dossier / hidden later tranche;
+3. compare its reachable implementation footprint and cross-kernel leverage against other first-pass gaps;
+4. activate the highest-leverage genuinely unpooled journey;
+5. start at a native domain write/effect path, not documentation or provider adapter;
+6. preserve F001–F214 / C001–C164 / KF-REC-001–054 allocation discipline;
+7. keep production code untouched.
+```
 
-High-value candidate now is **J17 — Command Center → Priority → Action**, because it is where Genome/recommendations, temporal work, memory, risk/readiness and governed actions converge into the user's operational control surface. Selection should be verified against repository evidence before it is made the active frontier.
+J10 remains reopenable if later journeys, migration design or runtime proof falsify its target semantics.
 
 ## Do not yet
 
 - modify production code;
-- promote K4 semantic maturity into execution authorization;
-- treat Blueprint, GenomeFact, Constitution, memory or projections as globally canonical without explicit concept ownership;
-- let weak knowledge satisfy high-impact deterministic controls;
-- let uncertain prompt context masquerade as current truth;
-- infer causality from domain correlation;
-- claim correction complete before active derivatives converge or are explicitly stale/incomplete;
-- let learning expand authority;
-- create duplicate IDs or concepts;
-- claim runtime tests/proofs passed unless executed.
+- create implementation tickets merely because KF-REC-054 is synthesized;
+- collapse operational order, payment and fulfilment state into one enum;
+- use mutable provider attributes as identity;
+- treat opaque provider metadata as operational completeness;
+- treat child-row existence as semantic effect completion;
+- let recovery, temporal projection or operator attention become source-domain truth owners;
+- allocate duplicate findings/recommendations;
+- claim runtime tests/proofs passed unless actually executed.
