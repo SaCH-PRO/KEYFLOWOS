@@ -90,16 +90,39 @@ MediaAsset stable id
 Initial deterministic classification creates `ExtractedEntity.status=PROPOSED`.
 AI auto-extraction and explicit `processCapture()` call DocumentIntelligence and update the same VisualIntake.
 
-Observed reprocessing behavior:
+### Reviewed-state reprocessing reachability
+
+`DeviceController` exposes:
+
+```text
+POST businesses/:businessId/captures/:captureId/process
+POST businesses/:businessId/captures/:captureId/approve
+POST businesses/:businessId/captures/:captureId/reject
+```
+
+No lifecycle/status guard was observed on the process route that prevents reprocessing an already `ACCEPTED` or `REJECTED` intake.
+
+`approveIntake()` / `rejectIntake()` bind reviewer metadata to the mutable VisualIntake coordinate:
+
+```text
+status = ACCEPTED / REJECTED
+reviewedById
+reviewedAt
+```
+
+`processCapture()` can subsequently:
 
 ```text
 extract document again
 → overwrite VisualIntake.extractedText
 → overwrite VisualIntake.extractedData
 → overwrite VisualIntake.confidenceScore
-→ existing ExtractedEntity.proposedData overwritten
-→ ExtractedEntity.status reset/remains PROPOSED
+→ set VisualIntake.status = PROCESSED
+→ overwrite existing ExtractedEntity.proposedData
+→ set ExtractedEntity.status = PROPOSED
 ```
+
+The inspected process update does not clear or revision-bind `reviewedById/reviewedAt`. Therefore a reviewed payload can be replaced under the same intake identity while old review provenance remains on the mutable coordinate.
 
 No extraction-occurrence/revision history is observed in these writes.
 
@@ -113,22 +136,38 @@ approveIntake() / rejectIntake()
 
 `createContactFromCard()` additionally creates Contact from explicit caller-supplied values, links MediaAsset, updates ExtractedEntity to ACCEPTED and VisualIntake to ACCEPTED.
 
-### Current classification
+### Canonical classification
 
 ```text
-STABLE SOURCE/INTAKE IDENTITY: POSITIVE
-PROPOSED vs ACCEPTED SEPARATION: POSITIVE
-EXTRACTION REPROCESS REVISION HISTORY: WEAK / MUTABLE OVERWRITE
+SPECIALIZATION → F161 / KF-REC-049
+NO F221 allocation
 ```
 
-Anti-duplication pressure:
+F161 canonical law:
+
+> Verification belongs to an exact knowledge revision/value, not permanently to a field coordinate.
+
+The Device manifestation is the same semantic failure:
 
 ```text
-likely KF-REC-049 revision/provenance specialization
-not F219: extraction remains proposed until an acceptance/action seam
+review/acceptance of assertion revision A
+→ same VisualIntake coordinate reused
+→ assertion replaced by revision B
+→ prior review provenance can remain attached to the coordinate
 ```
 
-Open question: if an already ACCEPTED intake is reprocessed, does `runAutoExtraction()` / `processCapture()` overwrite accepted evidence/proposed data and set intake back to PROCESSED without preserving the accepted revision? Trace controller reachability and state guards before allocating anything.
+The domain object differs from GenomeFact, but the owner and law do not. This strengthens K4/K8 revision-bound verification rather than creating a second Device-specific evidence-review architecture.
+
+Target direction under the existing root:
+
+```text
+review/accept/reject
+must bind exact extraction/assertion revision
+
+reprocess after review
+must create/supersede a new revision/occurrence
+without making old review provenance appear to verify new data
+```
 
 ## 4. Google Drive connector intake
 
@@ -271,7 +310,7 @@ NO new root from payment replay
 | PaymentEvidence | authoritative payment path | weak/filename/source-level | not proven | not proven | absent before SUCCESSFUL payment | F219/C169 |
 | Expenses extract-receipt | extraction response | URL/filename | not proven | not proven | caller-side/open | advisory/extraction-only so far |
 | Flow attachment | prompt/model context | URL/objectPath | not proven | not proven | model context only | KF-REC-049 prompt epistemics |
-| Device intake | MediaAsset + VisualIntake | yes | not explicit revision object | not observed | PROPOSED/ACCEPTED seams exist | KF-REC-049 pressure; positive seam |
+| Device intake | MediaAsset + VisualIntake | yes | mutable coordinate, no explicit assertion revision | not observed | PROPOSED/ACCEPTED/REJECTED; reprocess can replace reviewed data | F161/KF-REC-049 specialization; NO F221 |
 | Google Drive intake | driveFileId | modifiedTime detected | detected upstream but omitted from ingestion identity | not distinct downstream | reviewing/extracted + ingestion plan | F220/C170 |
 | Contracts | Contract target/source request | domain-specific | incomplete | incomplete | unsafe contract promotion already known | F216/C166 + KF-REC-055 |
 
@@ -287,11 +326,10 @@ next free F221 / C171 / KF-REC-056
 ## 8. Immediate next trace
 
 ```text
-1. inspect Device controller guards/reprocess reachability, especially after ACCEPTED/REJECTED;
-2. trace Expense frontend/client flow from extract-receipt result into createExpense;
-3. inspect direct AI upload endpoint as extraction-only vs downstream side-effect surface;
-4. close generated Document tweak crash boundary against F164;
-5. trace correction/replacement/supersession/deletion lineage across accepted evidence;
-6. classify any new seam against F219/F220 + KF-REC-049/035/048 before F221/C171;
-7. pool stable J12 roots before considering KF-REC-056.
+1. trace Expense frontend/client flow from extract-receipt result into createExpense;
+2. inspect direct AI upload endpoint as extraction-only vs downstream side-effect surface;
+3. close generated Document tweak crash boundary against F164;
+4. trace correction/replacement/supersession/deletion lineage across accepted evidence;
+5. classify any new seam against F161/F219/F220 + KF-REC-049/035/048 before F221/C171;
+6. pool stable J12 roots before considering KF-REC-056.
 ```
