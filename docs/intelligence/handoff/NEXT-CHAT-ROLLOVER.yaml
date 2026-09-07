@@ -1,7 +1,7 @@
 project: KEYFLOWOS
-rollover_version: 36
+rollover_version: 37
 last_updated: 2026-09-07
-status: LIVE_CONTINUITY_ARTIFACT_J12_F221_C171_PRE_POOLING
+status: LIVE_CONTINUITY_ARTIFACT_POST_J12_SELECT_NEXT_FRONTIER
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: false
 context_integrity: PASS
@@ -14,42 +14,32 @@ implementation_evidence:
 canonical_ranges:
   findings_through: F221
   contradictions_through: C171
-  recommendations_through: KF-REC-055
+  recommendations_through: KF-REC-056
   concepts_through: KF-CONCEPT-042
 next_free_ids:
   finding: F222
   contradiction: C172
-  recommendation: KF-REC-056
+  recommendation: KF-REC-057
   status: UNALLOCATED
+pooled_journeys:
+  J11: { findings: F215-F218, contradictions: C165-C168, recommendation: KF-REC-055, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
+  J12: { findings: F219-F221, contradictions: C169-C171, recommendation: KF-REC-056, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
 j12:
-  status: ACTIVE_PRE_POOLING_CONVERGENCE_GATE
   dossier: docs/intelligence/journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md
-  investigation: docs/intelligence/investigations/J12-DOCUMENT-INTELLIGENCE-CONSUMER-REVISION-LINEAGE-TRACE.md
-  findings: [F219,F220,F221]
-  contradictions: [C169,C170,C171]
-  recommendation: null
-  reuse:
-    manual_edit_stale_approval: F161_KF_REC_049
-    device_reviewed_state_reprocess: F161_KF_REC_049
-    ai_tweak_partial_mutation: F164_KF_REC_049
-    drive_import_no_version: F161_F164_PRESSURE
-    contract_extraction: F216_C166_KF_REC_055
-    payment_evidence_replay: KF_REC_048
-    expense_extract_create: HUMAN_EDITABLE_SUBMIT_PROVENANCE_PRESSURE
-    direct_ai_upload: EXTRACTION_ONLY
-  roots:
-    F219_C169: evidence_admission
-    F220_C170: source_revision_occurrence_identity
-    F221_C171: destructive_document_disposition
+  pressure_test: docs/intelligence/investigations/J12-DOCUMENT-EVIDENCE-LIFECYCLE-STANDARDS-FRONTIER-PRESSURE-TEST.md
+  backward_reaudit: docs/intelligence/investigations/J12-J16-J14-J18-J7-J11-J19-J17-DOCUMENT-EVIDENCE-INTEGRITY-BACKWARD-REAUDIT.md
+  recommendation: docs/intelligence/10O-RECOMMENDATION-REGISTER-DOCUMENT-EVIDENCE-REVISION-INTEGRITY-CONTINUATION.md
+  status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED
 active_frontier:
-  stage: J12_CORRECTION_SUPERSESSION_DESCENDANT_GATE
+  stage: SELECT_NEXT_FIRST_PASS_JOURNEY_AFTER_J12_CONVERGENCE
+  primary_journey: null
 exact_next_action:
-  instruction: Trace downstream descendants after evidence/source revision correction, supersession or destruction; compare stale-descendant behavior exactly against F178/C128 before F222/C172. Then pool F219-F221 with reused mature contracts and run standards/frontier pressure test before considering KF-REC-056. Keep production code read-only.
+  instruction: Load 03-ANALYSIS-MAP and current journey dossier inventory; identify genuinely under-covered or unpooled journeys; compare reachable native implementation footprint and cross-kernel leverage; activate the highest-leverage next frontier; begin microscopic tracing at native write/effect paths; reuse F001-F221 C001-C171 KF-REC-001-056 before allocation; keep production code read-only.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
-  - F222_C172_KF_REC_056_are_next_free
+  - F222_C172_KF_REC_057_are_next_free
   - anti_duplication_before_allocation
-  - do_not_allocate_KF_REC_056_before_pooling_and_pressure_test
-  - do_not_create_universal_document_or_privacy_runtime
+  - do_not_resume_j12_pressure_test
+  - do_not_convert_KF_REC_056_into_implementation_packet
   - continuously_refresh_cross_agent_continuity
