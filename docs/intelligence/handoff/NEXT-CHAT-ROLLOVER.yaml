@@ -1,10 +1,11 @@
 project: KEYFLOWOS
-rollover_version: 29
-last_updated: 2026-09-06
+rollover_version: 30
+last_updated: 2026-09-07
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: false
 context_integrity: PASS
+runtime_proof_executed: false
 repository: SaCH-PRO/KEYFLOWOS
 implementation_evidence:
   branch: main
@@ -12,54 +13,45 @@ implementation_evidence:
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   delta_class: audit_architecture_journal_only
 canonical_ranges:
-  findings_through: F213
-  contradictions_through: C163
-  recommendations_through: KF-REC-053
+  findings_through: F214
+  contradictions_through: C164
+  recommendations_through: KF-REC-054
   concepts_through: KF-CONCEPT-042
 
+pooled_journeys:
+  J7: { findings: F185-F196, contradictions: C135-C146, recommendation: KF-REC-052 }
+  J3_J4: { findings: F197-F205, contradictions: C147-C155, recommendation: KF-REC-053, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
+  J10:
+    findings: F206-F214
+    contradictions: C156-C164
+    recommendation: KF-REC-054
+    status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED
+    pressure_test: docs/intelligence/investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md
+    backward_reaudit: docs/intelligence/investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md
+
+j10_target_semantics:
+  - OrderOperationalState
+  - ExternalEntityIdentity
+  - OperationalOrderMaterialization
+  - InventoryAllocationLineage
+  - RequiredFulfilmentSet
+  - StrategyEffectIdentity
+  - CommerceEffectIdentity
+  - AggregateFulfilmentOutcome
+
 active_frontier:
-  primary_journey: J10
-  constellation: [J10,J3,J7,J14,J17,J18,J23]
-  dossier: docs/intelligence/journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md
-  stage: RECOMMENDATION_OWNERSHIP_CHECK_AND_STRATEGY_DESCENDANT_IDEMPOTENCY
-  findings: [F206,F207,F208,F209,F210,F211,F212,F213]
-  contradictions: [C156,C157,C158,C159,C160,C161,C162,C163]
-  primary_kernels: [K6,K7,K8,K9,K10,K11,K4]
-
-j10_roots:
-  F206: duplicate_paid_invoice_descendant_ownership
-  F207: order_confirmation_paid_semantic_conflation
-  F208: inventory_allocation_consumption_correction_effect_ownership_conflict
-  F209: aggregate_fulfilment_outcome_false_success_and_failure_evidence_mismatch
-  F210: Shopify_Product_external_identity_repeat_sync_failure
-  F211: partial_route_set_blocks_required_descendant_recovery
-  F212: Shopify_Contact_identity_multi_writer_disagreement
-  F213: Shopify_order_operational_materialization_missing_native_OrderItems
-
-recommendation_ownership_check:
-  status: ACTIVE
-  no_new_recommendation_yet: true
-  do_not_allocate: KF-REC-054
-  partitions:
-    commercial_obligation_effect_identity: KF-REC-053
-    financial_truth: KF-REC-052
-    recovery_completeness: KF-REC-048
-    operator_attention: KF-REC-051
-    external_identity_materialization: K9_EARLIER_RECOMMENDATION_CORPUS_UNDER_REVIEW
-    inventory_allocation_effect_lineage: J10_OWNER_NOT_FROZEN
+  stage: SELECT_NEXT_FIRST_PASS_JOURNEY_AFTER_J10_CONVERGENCE
+  primary_journey: null
+  candidate: J11
+  requirement: VERIFY_JOURNEY_INVENTORY_AND_REACHABLE_IMPLEMENTATION_FOOTPRINT_BEFORE_ACTIVATION
 
 exact_next_action:
-  title: search_existing_integration_contract_then_trace_strategy_descendants
-  instruction: Search existing recommendation registers for external identity provider reconciliation integration/external reality and operational materialization ownership. Classify F210 F212 F213 before considering KF-REC-054. Then inspect DROPSHIP PREORDER HYBRID MANUAL SERVICE route descendants for semantic idempotency and partial-failure recovery. Trace F207 F209 propagation into CRM calendar webhooks KEY temporal/operator consumers. Continue inventory correction under F208 unless a distinct root is proven. Reuse F001-F213 C001-C163 KF-REC-001-053 before new identities. Do not modify production code.
+  title: select_next_unpooled_journey
+  instruction: Load 03-ANALYSIS-MAP and journey inventory plus current dossier set. Verify J11 has no hidden canonical dossier or later tranche. Compare J11 reachable native implementation footprint and cross-kernel leverage against remaining unpooled first-pass gaps. Activate the highest-leverage genuine gap. If J11 wins, begin microscopic tracing from a native domain write/effect path. Reuse F001-F214 C001-C164 KF-REC-001-054 before allocating new identities. Keep production code read-only.
 
 constraints:
   - production_code_read_only
+  - do_not_resume_old_J10_recommendation_ownership_check
+  - do_not_convert_KF_REC_054_into_implementation_packet
   - preserve_strong_native_checkout_transaction
-  - order_fulfilment_state_not_equal_payment_truth
-  - one_order_item_inventory_effect_must_compose_exactly_once
-  - route_process_return_not_equal_required_outcome_success
-  - partial_child_set_not_equal_complete_required_descendant_set
-  - merchant_SKU_and_mutable_email_not_equal_provider_external_identity
-  - provider_metadata_line_items_not_equal_native_operational_OrderItems
-  - do_not_duplicate_mature_recommendations
   - continuously_refresh_cross_thread_continuity
