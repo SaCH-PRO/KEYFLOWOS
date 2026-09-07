@@ -5,7 +5,7 @@ Last refreshed: 2026-09-07
 Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 Production implementation authorized: **NO**
 
-> Repository continuity is the source of truth. A fresh session must continue without restarting the architecture programme.
+> Repository continuity is the source of truth for programme state. Source documents preserve product intent and architectural framing; repository behaviour remains authoritative for implementation claims.
 
 ## Fresh-chat instruction
 
@@ -16,101 +16,66 @@ Load 04-CONCEPT-REGISTRY.md, 04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md,
 CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first.
 Production code remains read-only.
-J7 is pooled through F196/C146/KF-REC-052.
-J3/J4 are pooled through F205/C155/KF-REC-053.
-J10 is now pooled through F214/C164/KF-REC-054 after standards/frontier pressure testing and backward re-audit.
-Do NOT resume the old J10 recommendation-ownership check.
-The exact frontier is journey coverage selection: revalidate J11 against the remaining genuinely unpooled journeys, then activate the highest-leverage first-pass gap.
+J10 is pooled through F214/C164/KF-REC-054.
+J11 is ACTIVE and already contains F215/C165 and F216/C166.
+Do NOT resume frontier selection or rediscover those findings.
+The exact frontier is ContractAlert acknowledgement regeneration anti-duplication against J17/KF-REC-051, followed by Contract deletion/termination/correction versus already-raised renewal work.
+F217/C167/KF-REC-055 are next free IDs but remain UNALLOCATED.
 ```
 
-## Context integrity
+## Canonical ranges
 
 ```text
-Repository:             SaCH-PRO/KEYFLOWOS
-Implementation branch:  main
-Current main head:       4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
-Code-bearing baseline:  d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
-Main delta class:        audit / architecture-journal only
-Intelligence branch:     docs/keyflow-intelligence-foundation
-Context integrity:       PASS
-Implementation:          UNAUTHORIZED / READ-ONLY
-Runtime proof:           NOT EXECUTED
-```
-
-## Canonical taxonomy
-
-```text
-Findings:        F214
-Contradictions:  C164
+Findings:         F216
+Contradictions:   C166
 Recommendations: KF-REC-054
-Concepts:        KF-CONCEPT-042
+Concepts:         KF-CONCEPT-042
+next free:        F217 / C167 / KF-REC-055 — UNALLOCATED
 ```
 
-## J10 pooled result
+## J11 current durable result
 
-```text
-F206/C156 duplicate paid-Invoice descendant ownership
-F207/C157 operational order confirmation can manufacture paid event semantics
-F208/C158 one tracked-stock quantity has competing effect owners
-F209/C159 failed required route can be reported as aggregate routed success
-F210/C160 Shopify Product provider identity fails repeat sync across mutable SKU
-F211/C161 partial route set can block required-route recovery
-F212/C162 Shopify Contact provider identity differs across sync entrypoints
-F213/C163 imported Shopify MarketplaceOrder lacks structural native OrderItems
-F214/C164 strategy PurchaseOrder/PreOrder can commit before route-based retry identity
-```
+- **F215 / C165** — ContractVersion is neither complete nor reconstructable as authoritative Contract revision history; principal mutation can bypass it.
+- **F216 / C166** — probabilistic contract extraction can promote uncertain renewal/value/party state into authoritative Contract truth without preserving confidence, verification or governance promotion evidence.
+- Renewal-cycle occurrence identity is not a new root; reuse the J23 temporal Definition/Occurrence law and KF-REC-047.
 
-`KF-REC-054 — Commerce & Fulfilment Contract` owns:
+Canonical homes:
 
-```text
-OrderOperationalState
-ExternalEntityIdentity for commerce resources
-OperationalOrderMaterialization
-InventoryAllocationLineage
-RequiredFulfilmentSet
-StrategyEffectIdentity
-CommerceEffectIdentity
-AggregateFulfilmentOutcome
-```
-
-Composed owners remain:
-
-```text
-KF-REC-035–037 ingress occurrence lifecycle
-KF-REC-048 recovery mechanics
-KF-REC-051 operator attention
-KF-REC-052 financial truth
-KF-REC-053 commercial obligation/customer state
-```
-
-Pressure test:
-`investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md`
-
-Backward re-audit:
-`investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md`
-
-## Backward re-audit verdict
-
-```text
-KF-REC-054 invalidated                      = NO
-parallel financial/commercial system        = NO
-universal recovery/integration runtime       = NO
-universal order/warehouse table required    = NO
-new root from re-audit                      = NO
-J10 provisionally converged                 = YES
-```
+- `08AS-FINDING-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
+- `09AS-CONTRADICTION-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
 
 ## Exact next work
 
 ```text
-1. load the journey inventory / 03-ANALYSIS-MAP and existing journey dossiers;
-2. verify J11 has no hidden canonical dossier or later tranche;
-3. compare J11's reachable native implementation footprint and cross-kernel leverage with other unpooled first-pass gaps;
-4. activate the highest-leverage genuinely uncovered journey;
-5. if J11 wins, begin at its native domain write/effect path, not a provider adapter or historical plan;
-6. reuse F001–F214 / C001–C164 / KF-REC-001–054 before new allocation;
-7. persist every material tranche and refresh continuity;
-8. keep production code untouched.
+1. fetch J17 F179–F184 / C129–C134 and KF-REC-051;
+2. anti-duplicate this reachable loop:
+   derived ContractAlert → acknowledge → regenerateAlerts deleteMany/createMany → acknowledgement lost → equivalent alert resurfaces;
+3. allocate nothing until SAME / SPECIALIZATION / RELATED DISTINCT / GENUINELY NEW is decided;
+4. revalidate current main implementation head before exact SHA claims;
+5. trace ContractsService delete/update/regenerate + ContractRenewalSweep + Prisma relations;
+6. determine what happens to already-raised renewal work after Contract termination/archive/correction/deletion;
+7. distinguish notification disposition from obligation disposition;
+8. persist genuinely new roots only after canonical gate;
+9. build/update J11 journey dossier when microscopic pool stabilizes;
+10. pressure-test, backward re-audit, then converge;
+11. keep production code untouched.
 ```
+
+## Constellation to preserve
+
+```text
+J11 ↔ J12 document/evidence/K4 knowledge
+J11 ↔ J23 temporal recurrence/work
+J11 ↔ J18 recovery
+J11 ↔ J17 operator attention
+J11 ↔ J7 valuation
+J11 ↔ J3/J4 commercial obligations
+```
+
+## Programme purpose
+
+Continue surgical whole-app mapping through journeys, kernels, constellations, macro/micro pools and dynamic/causal/feedback loops. Optimize for value density: preserve core value primitives, keep necessary domain specialization, identify derived projections and compatibility layers, converge duplication, and expose accidental complexity, dead/low-value and value-detracting structures.
+
+If this chat disappears now, resume from **J11 alert-disposition anti-duplication**, not J10 or journey selection.
 
 No production implementation is authorized.
