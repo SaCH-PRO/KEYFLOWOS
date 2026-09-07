@@ -61,18 +61,7 @@ J1 ... J25
 ```
 
 Identity source: `03-ANALYSIS-MAP.md`.
-Detailed dossiers: `docs/intelligence/journeys/`.
-
 Journey number is identity. New wording does not create a second journey for the same end-to-end business/user transition.
-
-Examples:
-
-```text
-J16 — Business Genome Evolution
-J17 — Command Center → Priority → Action
-J19 — Privacy / Deletion / Exit
-J7  — Financial Truth
-```
 
 ## Kernels
 
@@ -81,11 +70,9 @@ K1 ... K12
 ```
 
 Identity source: `12-KERNEL-PROGRAMME.md`.
-Detailed dossiers: `docs/intelligence/kernels/`.
 
-`Business Knowledge Kernel`, `Knowledge Kernel`, and Genome-knowledge architecture refer to K4 unless a narrower implementation seam is explicitly intended.
-
-`Financial Truth` refers to K10 at kernel level and J7 at journey level; the journey and kernel are related but not interchangeable identifiers.
+`Business Knowledge Kernel` / `Knowledge Kernel` refer to K4 unless a narrower seam is explicit.
+`Financial Truth` refers to K10 at kernel level and J7 at journey level; they are related but not interchangeable identifiers.
 
 ## Concepts
 
@@ -112,24 +99,23 @@ Canonical home: `08*` registers; allocation owner: 04B.
 
 Current range:
 ```text
-F001–F192
+F001–F196
 ```
 
-Latest pooled roots:
+Latest pooled J7 roots:
 ```text
-F175 epistemic readiness eligibility
-F176 prompt/current-truth eligibility
-F177 causal learning attribution
-F178 correction/withdrawal influence lineage
-F179–F184 Command Center / operator-attention roots
 F185 live cash ownership
 F186 multi-currency valuation
 F187 payroll financial outcome
 F188 PayPal capture financial consequence completeness
-F189 canonical financial source identity / CreditNote reversal reachability
+F189 canonical financial source identity / CreditNote apply reachability
 F190 provider webhook receipt vs financial consumption completeness
-F191 reconciliation lock vs later current-period corrective reversal
+F191 reconciliation lock vs later corrective consequence
 F192 AccountingPeriod CLOSED vs canonical posting enforcement
+F193 Expense void bypasses canonical ledger/reversal writer
+F194 gross-successful payment projection vs canonical net payment balance
+F195 applied CreditNote VOID without descendant financial convergence
+F196 CreditNoteService parallel invoice state machine
 ```
 
 ## Contradictions
@@ -142,21 +128,15 @@ Canonical home: `09*` registers; allocation owner: 04B.
 
 Current range:
 ```text
-C001–C142
+C001–C146
 ```
 
-Latest pooled roots:
+Latest J7 roots:
 ```text
-C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
-C129–C134 J17 Command Center / operator-control contradictions
-C135 live cash projection vs ledger-derived truth
-C136 heterogeneous currency addition vs valuation truth
-C137 PayrollRun PAID vs proved disbursement/accounting consequence
-C138 provider/payment/invoice success vs payment accounting consequence completion
-C139 canonical Invoice posting lineage vs mismatched CreditNote lookup discriminator
-C140 provider webhook receipt vs incomplete financial consequence processing
-C141 closed historical accounting evidence vs representability of later refund/reversal
-C142 AccountingPeriod CLOSED vs new in-period postings through PostingService
+C135–C143 finance truth / consequence / period / ledger-writer contradictions
+C144 canonical net invoice balance vs gross-successful payment projections
+C145 CreditNote VOID vs still-active accounting/invoice descendants
+C146 InvoiceWorkflow single-owner claim vs CreditNote undeclared status mutation
 ```
 
 ## Recommendations
@@ -172,7 +152,7 @@ Current range:
 KF-REC-001–KF-REC-052
 ```
 
-Current major targets:
+Current major pooled targets:
 ```text
 KF-REC-047 Temporal Work Projection
 KF-REC-048 certainty-aware Recovery Contract
@@ -197,7 +177,6 @@ Recommendations remain provisional until explicitly accepted as decisions.
 KF-EXEC-<DOMAIN>-###
 ```
 
-Canonical home: `docs/intelligence/execution/`.
 Execution identity is implementation scope, not concept identity.
 
 ## Proof obligations
@@ -213,8 +192,6 @@ Proof IDs remain local to a declared scope until deliberately promoted.
 
 # 4. Canonical naming dimensions
 
-Reusable architecture terms should specify where applicable:
-
 ```text
 IDENTITY      what semantic thing is this?
 LAYER         product | journey | kernel | semantic primitive | implementation | projection
@@ -227,34 +204,29 @@ AUTHORITY     authoritative | derived | advisory | compatibility
 
 ---
 
-# 5. High-value alias / distinction registry
+# 5. High-value aliases / distinctions
 
 | Alias / implementation term | Canonical reference | Rule |
 |---|---|---|
 | Business Knowledge Kernel | K4 | same kernel |
-| Knowledge Kernel | K4 | shorthand in KeyFlow architecture context |
+| Knowledge Kernel | K4 | shorthand |
 | Business Genome | KF-CONCEPT-003 | living evidence-aware interpretation |
-| GenomeFact | KF-CONCEPT-004 | current implementation primitive, not automatically canonical truth |
+| GenomeFact | KF-CONCEPT-004 | implementation primitive, not automatically canonical truth |
 | Resolved / Canonical Fact | KF-CONCEPT-017 | ontology-resolved current truth |
-| Business Blueprint | KF-CONCEPT-002 | declaration/configuration, not resolved operational truth |
+| Business Blueprint | KF-CONCEPT-002 | declaration/configuration |
 | Business Graph | KF-CONCEPT-007 | complete factual business reality KeyFlow may legitimately treat as true |
 | Clearance | KF-CONCEPT-026 | current exact authorization to execute |
-| Execution Claim | KF-CONCEPT-028 | exclusive consumption/effect pursuit, distinct from AttemptOwnership |
+| Execution Claim | KF-CONCEPT-028 | exclusive exact-effect pursuit |
 | Temporal Work Projection | KF-REC-047 target | derived operator projection, not workflow truth |
-| Recovery Control Twin | J23/J18 target-candidate | derived operational lens, not separate source of truth |
-| Operator Attention & Priority Contract | KF-REC-051 | governs derivative attention/priority semantics, not business truth or authority |
-| Financial Truth & Valuation Contract | KF-REC-052 | governs financial truth layers, valuation and consequence completeness |
-| historical workflow-control findings | F167/F168 | remapped by 04B |
-| historical recurrence findings | F169/F170 | remapped by 04B |
-| historical provider-recovery findings | F171/F172 | remapped by 04B |
-| historical scheduled/compensation findings | F173/F174 | remapped by 04B |
-| historical workflow-control KF-REC-046 | KF-REC-050 | preserved KF-REC-046 means workflow versioning |
+| Operator Attention & Priority Contract | KF-REC-051 | derivative attention/priority semantics, not business truth or authority |
+| Financial Truth & Valuation Contract | KF-REC-052 | financial truth layers, valuation, corrections and consequence completeness |
+| FinancialConsequenceVector | inside KF-REC-052 | target candidate vocabulary; not a standalone concept yet |
+| ValuationEvidence | inside KF-REC-052 | target candidate vocabulary; not a standalone concept yet |
+| CanonicalInvoiceBalance | inside KF-REC-052 | reusable read semantic; not a standalone concept yet |
 
 ---
 
 # 6. Reserved J16/K4 vocabulary
-
-Use these exact terms until semantic boundaries stabilize:
 
 ```text
 KnowledgeSubject
@@ -269,19 +241,7 @@ EpistemicEligibility
 LearningEligibility
 ```
 
-Status: **RESERVED TARGET VOCABULARY — NOT YET AUTOMATICALLY KF-CONCEPT IDs**.
-
-Research also uses the following candidate phrases only descriptively; do not canonize without a taxonomy pass:
-
-```text
-Governed Epistemic Loop
-Epistemic Time Travel
-Verified Influence Closure
-Adaptive Confidence Budget
-CorrectionCompletionEvidence
-```
-
-These currently belong inside K4/KF-REC-049, not separate architecture systems.
+Status: RESERVED TARGET VOCABULARY — NOT AUTOMATIC KF-CONCEPT IDs.
 
 ---
 
@@ -301,17 +261,20 @@ WorkOccurrence != EffectId
 Original EffectId != RecoveryEffectId
 Process success != execution outcome != business outcome != causal learning
 OutcomeCertainty != LearningEligibility
-Stored fact != EpistemicEligibility for a consumer
+Stored fact != EpistemicEligibility
 Correction != descendant convergence
 Projection != authoritative truth
 Learning != authority
-Operational financial state != external money reality != accounting truth
+Operational financial state != external money reality != money-movement record != accounting truth != reconciliation truth != valuation truth
 Payment row existence != financial consequence completeness
 Webhook receipt identity != descendant consequence completion
-Native currency amount != reporting valuation amount
+Gross successful receipts != refunds != net receipts != outstanding balance != accounting revenue
+Native currency amount != functional/presentation valuation amount
 Financial source string literal != canonical FinancialSourceIdentity
 AccountingPeriod CLOSED != posting prohibition unless enforced at ledger write door
 Reconciliation lock != prohibition on new current-period corrective consequence
+CreditNote VOID != accounting/document descendant convergence complete
+Invoice status column != permission for multiple lifecycle owners
 ```
 
 ---
@@ -353,13 +316,13 @@ load 04B
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F192
-Contradiction range:     through C142
+Finding range:           through F196
+Contradiction range:     through C146
 Recommendation range:    through KF-REC-052
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-The historical collision band remains reconciled without deleting evidence. K4 candidate vocabulary remains reserved rather than prematurely promoted. J17 and J7 targets remain recommendations, not new parallel systems.
+J7 has completed its current microscopic/standards/backward-re-audit/proof tranche and is pooled into the whole-system virtual model. Its candidate internal vocabulary remains inside KF-REC-052 until a later taxonomy pass proves a need for standalone concepts.
 
 No production implementation is authorized by this taxonomy artifact.
