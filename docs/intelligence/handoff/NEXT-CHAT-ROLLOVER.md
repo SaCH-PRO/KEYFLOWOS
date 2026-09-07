@@ -17,9 +17,9 @@ CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first.
 Production code remains read-only.
 J7 Financial Truth is pooled through F196/C146/KF-REC-052 with 32 proof obligations and 16 deterministic fault points.
-Active frontier is J3/J4 commercial-to-cash through F203/C153.
-Resume at booking.completed → AgentTrigger → JourneyOrchestrator → PlanExecutor → commerce_create_invoice reachability,
-then cancellation/no-show financial disposition, customer lifecycle ownership and RevenueAttribution stage semantics.
+Active frontier is J3/J4 commercial-to-cash through F204/C154.
+The booking.completed AI path is live but contract-malformed; duplicate valid invoice is NOT proven.
+Resume at load-bearing deposit/cancellation/no-show policy → customer lifecycle field ownership → RevenueAttribution consumers → J17/J18/J23 visibility.
 ```
 
 ## Context integrity
@@ -28,7 +28,6 @@ then cancellation/no-show financial disposition, customer lifecycle ownership an
 Repository:             SaCH-PRO/KEYFLOWOS
 Implementation branch:  main
 Current main head:       4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
-Previous main head:      9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
 Code-bearing baseline:  d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
 Main delta class:        audit / architecture-journal only
 Intelligence branch:     docs/keyflow-intelligence-foundation
@@ -39,8 +38,8 @@ Implementation:          UNAUTHORIZED / READ-ONLY
 ## Canonical taxonomy
 
 ```text
-Findings:        F203
-Contradictions:  C153
+Findings:        F204
+Contradictions:  C154
 Recommendations: KF-REC-052
 Concepts:        KF-CONCEPT-042
 ```
@@ -66,105 +65,73 @@ LOAD 04A + 04B
 ```text
 J3 — Lead → Customer → Cash
 J4 — Booking → Service → Payment
-```
-
-Stage:
-
-```text
-COMMERCIAL_OBLIGATION_AND_LIFECYCLE_CONVERGENCE
+stage = COMMERCIAL_OBLIGATION_AND_LIFECYCLE_CONVERGENCE
 ```
 
 Canonical roots:
 
 ```text
-F197/C147 — strong commercial customer evidence can exist while Contact.status remains LEAD
+F197/C147 — commercial customer evidence can exist while Contact.status remains LEAD
 F198/C148 — ContactInsight LTV adds won Deal + PAID Invoice value for the same sale
-F199/C149 — completed booking can lose required completion-time invoice into log-only failure
+F199/C149 — completed booking can lose required completion invoice into log-only failure
 F200/C150 — deposit D + later full-price invoice P do not compose one service obligation
 F201/C151 — CANCELLED/NO_SHOW has no declared financial-descendant disposition
-F202/C152 — RevenueAttribution mixes BOOKING pipeline value + paid INVOICE value as additive revenue stages
-F203/C153 — KeyCortex queries lowercase lead/customer instead of canonical LEAD/PROSPECT/CLIENT/LOST
+F202/C152 — RevenueAttribution mixes BOOKING pipeline + paid INVOICE stages as additive revenue
+F203/C153 — KeyCortex queries lead/customer instead of canonical LEAD/PROSPECT/CLIENT/LOST
+F204/C154 — live booking.completed → post-booking automation has incompatible event/template/tool schemas
 ```
 
-Working target vocabulary — not standalone concepts yet:
+Working target vocabulary — not standalone concepts:
 
 ```text
 CustomerLifecycle
 CommercialObligationLineage
 CommercialValueStage
 ServiceFinancialDisposition
+EventToActionContractAdapter
 ```
 
-## Key current evidence
+## F204 narrowing
 
-### Service deposit lineage
-
-```text
-service price = P
-deposit invoice = D
-Booking.depositInvoiceId = deposit
-Booking.invoiceId = null
-booking COMPLETED
-→ completion helper sees no Booking.invoiceId
-→ creates FULL invoice P
-```
-
-No inspected path applies D against P. Do not assume whether a deposit is refundable or earned; target must make policy explicit.
-
-### Cancellation / no-show
-
-Operational status/events are updated, but the inspected transition does not resolve existing deposit/invoice/payment/attribution descendants. The defect is absence of a declared financial-disposition contract, not a presumption that cancellation always means refund.
-
-### Revenue attribution stage
-
-Booking creation writes full service price as `RevenueAttribution(BOOKING)` for immediate pipeline visibility. Paid booking invoices later write `RevenueAttribution(INVOICE)`. Generic source rollups can add these heterogeneous stages; a local `revenuePerHour()` dedupe demonstrates the overlap but does not repair the shared model.
-
-### CRM status projection
-
-Canonical Contact status is:
+Runtime path is proven:
 
 ```text
-LEAD | PROSPECT | CLIENT | LOST
-```
-
-KeyCortex CRM context uses `lead` and `customer`, so even a correctly converged `CLIENT` can disappear from that projection.
-
-## Candidate evidence — not yet a finding
-
-`booking.completed` appears able to activate two invoice-generation mechanisms:
-
-```text
-BookingsService autoGenerateInvoiceForCompletedBooking()
-+
-AgentTriggerService onAny
+booking.completed
+→ AgentTriggerService onAny
 → JourneyOrchestrator post-booking template
-→ first step commerce_create_invoice
+→ auto-approved tier-2 AiPlan
+→ plan.approved
+→ PlanExecutor
+→ BullMQ
+→ ActionDispatcher
+→ FlowOrchestrator commerce_create_invoice
 ```
 
-The journey template is reachable and `commerce_create_invoice` is tier 2, so JourneyOrchestrator may auto-approve it. However, exact duplicate-effect reachability is not yet proven because the PlanExecutor path, booking event payload shape, tool argument mapping and invoice idempotency must still be traced.
+But the contracts do not compose:
+
+```text
+actual event = { booking, contact?, businessId }
+template expects flat contactId/serviceName/amount/bookingId/contactName
+tool requires item.description/quantity/unitPrice
+```
+
+The first invoice step is therefore malformed. Later intended `Contact.status=CLIENT` / follow-up descendants are not a load-bearing lifecycle path. Do NOT claim a second valid invoice without new evidence.
 
 ## Exact next work
 
 ```text
-1. trace booking.completed → AgentTriggerService → JourneyOrchestrator → AiPlan/AiPlanStep → plan.approved → PlanExecutor → FlowOrchestrator commerce_create_invoice;
-2. determine exact booking.completed payload shape and whether post-booking template inputs are valid;
-3. determine invoice idempotency/lineage protection on that AI path and allocate only if a distinct duplicate-receivable root is proven;
-4. trace cancellation/no-show deposit/payment policy and financial disposition;
-5. resolve Contact.status vs lifecycleStage vs pipelineStage vs Deal state vs tags ownership;
-6. trace RevenueAttribution consumers for stage-aware vs additive treatment;
-7. check whether missing receivable/cancelled financial descendants surface to J17/J18/J23 operator/recovery projections;
-8. reuse J7/J18/J23 roots before new IDs and persist before broadening.
+1. locate Service/Booking Prisma schema and deposit/cancellation/no-show policy fields;
+2. trace paid deposit through cancel/no-show to refund/retain/credit/fee/remaining-balance behavior;
+3. decide whether new evidence strengthens F201 or proves a distinct root;
+4. map all automatic/manual writers and major consumers of Contact.status, lifecycleStage, pipelineStage, Deal state and tags;
+5. trace RevenueAttribution consumers for stage-aware vs additive treatment;
+6. check whether F199/F201 surface to J17/J18/J23 recovery/operator projections;
+7. pressure-test CustomerLifecycle and CommercialObligationLineage only after local semantics converge;
+8. reuse mature roots before new IDs and persist before broadening.
 ```
 
-## KF-EXEC boundary
+## Execution boundary
 
-`KF-EXEC-EXTFX-001` remains pooled implementation-shape evidence only:
+`KF-EXEC-EXTFX-001` remains pooled implementation-shape evidence only. Production code remains untouched.
 
-```text
-PROGRAMME FRONTIER = NO
-AUTHORIZED = NO
-IMPLEMENTED = NO
-TESTED = NO
-```
-
-> If this chat disappears, resume at **J3/J4 after F203/C153, beginning with the booking.completed AI duplicate-invoice reachability trace**. Do not implement production code.
+> If this chat disappears, resume at **J3/J4 after F204/C154, beginning with deposit/cancellation policy and customer lifecycle ownership**.
