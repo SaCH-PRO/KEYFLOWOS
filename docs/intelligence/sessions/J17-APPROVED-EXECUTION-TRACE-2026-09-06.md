@@ -1,6 +1,6 @@
 # J17 Approved → Execution Microscopic Trace — 2026-09-06
 
-Status: EVIDENCE PACKET — NO NEW CANONICAL F/C ID ALLOCATED
+Status: RECONCILED EVIDENCE PACKET — NO NEW CANONICAL F/C ID ALLOCATED
 
 Journey: `KF-JOURNEY-017 — Command Center → Priority → Action`
 
@@ -12,7 +12,7 @@ Production implementation: READ-ONLY.
 
 ## Question
 
-When the Command Center presents an approved KEY proposal as executable, does the actual approved → execute path revalidate current authority/governance state before a material effect, and does execution require fresh human confirmation rather than inheriting an old approval as sufficient intent?
+When the Command Center presents an approved KEY proposal as executable, does the actual APPROVED → EXECUTE path revalidate current governance before a material effect, and does it prove fresh, user-bound confirmation rather than treating old approval state as sufficient execution intent?
 
 Target law:
 
@@ -23,135 +23,202 @@ APPROVED
 != MATERIAL EFFECT
 ```
 
+## Final verdict
+
+`PARTIALLY SUPPORTED — REUSE EXISTING J2/J15/K3 ROOTS; NO NEW J17 ID`
+
+The inspected KeyActionProposal path has a materially positive seam: execution re-evaluates current autonomy policy and current Genome execution policy before invoking the material executor. Therefore `status = APPROVED` is not blindly treated as sufficient current authority.
+
+However, the public controller/orchestrator path discards the execute DTO confirmation fields and the shared orchestrator invokes the proposal service with both confirmation booleans hard-coded `true`. This revalidates the existing canonical confirmation-evidence weakness rather than establishing a distinct J17 root.
+
+Primary reuse:
+
+- `F030` — approval confirmation booleans can be hard-coded instead of evidence-backed.
+
+Adjacent reused roots:
+
+- `F031` — proposal/execution actor provenance drift;
+- `F041` / `F055` — proposal transition / execution-claim concurrency weakness;
+- `F042` — SafetyShell process-local idempotency / weak compensation;
+- `F067` — quick-confirm action binding weakness;
+- `F068` — no canonical exact-action fingerprint binding;
+- `F069` — KeyCortexApprovalOrchestrator is a useful convergence seam but not a complete governance boundary.
+
 ## Evidence trace
 
 ### 1. Command Center wording
 
-The J17 dossier records that approved proposals are projected with wording equivalent to:
+The J17 projection maps approved proposals with wording equivalent to:
 
 ```text
 Execute approved: <title>
 Approved and ready to execute
 ```
 
-This is a projection/navigation affordance and is not itself an execution claim.
+This is a navigation/control affordance, not itself proof of Clearance or effect execution.
 
-### 2. Proposal service execution seam
+### 2. Proposal service execution seam — positive
 
 Inspected:
 
 - `apps/server/src/modules/key-autonomy/key-action-proposal.service.ts`
 
-Observed positive seam:
+Observed shape:
 
 ```text
-proposal status APPROVED
-→ evaluateExecution(...)
-→ evaluateGenomeExecution(...)
-→ module executor
-→ execution record
+load proposal
+→ require APPROVED
+→ evaluate current autonomy execution policy
+→ evaluate current Genome execution policy
+→ require confirmation when those evaluators demand it
+→ set EXECUTING
+→ invoke KeyActionExecutorService
+→ record EXECUTED or FAILED
 ```
 
-The service therefore does not blindly execute solely because `status = APPROVED`.
+Therefore:
 
-It re-evaluates current autonomy policy and current Genome execution policy at execution time. If those evaluations require confirmation and their confirmation flags are false, the service returns without executing the material effect.
+```text
+APPROVED
+!= UNCONDITIONAL EXECUTION
+```
 
-This is a strong target-preserving seam and should not be flattened into a claim that approved proposals bypass all current governance.
+Current policy is re-evaluated immediately before the executor path. This is a strong seam to preserve.
 
-### 3. Controller → orchestrator path
+### 3. Execute DTO is present but discarded by controller
 
 Inspected:
 
+- `apps/server/src/modules/key-autonomy/dto/execute-key-action-proposal.dto.ts`
 - `apps/server/src/modules/key-autonomy/key-action-proposal.controller.ts`
-- `apps/server/src/modules/key-cortex/key-cortex-approval-orchestrator.service.ts`
+
+The DTO exposes:
+
+```text
+confirm?: boolean
+confirmGenomeRisk?: boolean
+```
+
+but the execute controller accepts the body as `_body` and does not propagate either field to the orchestrator.
 
 Observed path:
 
 ```text
 POST :proposalId/execute
-→ controller invokes orchestrator.executeApproved(...)
-→ orchestrator invokes proposalService.execute(...)
+→ controller ignores execute confirmation body
+→ orchestrator.executeApproved(...)
 ```
 
-The controller does not propagate fresh confirmation semantics from its execute DTO into this path.
+### 4. Orchestrator pre-satisfies confirmation gates
 
-The orchestrator currently calls `proposalService.execute(...)` with:
+Inspected:
+
+- `apps/server/src/modules/key-cortex/key-cortex-approval-orchestrator.service.ts`
+
+Observed call:
 
 ```text
-confirm: true
-confirmGenomeRisk: true
+proposalService.execute(
+  businessId,
+  proposalId,
+  userId ?? 'key_ai',
+  true,
+  true,
+)
 ```
 
-hard-coded.
+Therefore the service's confirmation checks are real, but this shared caller supplies both as already satisfied.
 
-It also defaults the execution actor to `key_ai` if no user id is present.
-
-## Current interpretation
-
-The evidence supports a more precise statement than either extreme:
-
-```text
-APPROVED DOES NOT BY ITSELF BYPASS CURRENT POLICY RE-EVALUATION
-```
-
-but the inspected shared orchestrator path appears to pre-satisfy the proposal service's confirmation gates rather than proving that fresh, user-bound confirmation was obtained for this particular execution attempt.
-
-Therefore the remaining question is not simply "is policy revalidated?" — it is:
-
-```text
-WHAT PROVES FRESH EXECUTION INTENT / CONFIRMATION
-AND WHO IS THE ACTOR THAT SUPPLIED IT?
-```
-
-## Candidate pressure — do not allocate an ID yet
-
-Potential semantic pressure:
+Canonical interpretation:
 
 ```text
 CURRENT POLICY RE-EVALUATION
 + HARD-CODED CONFIRMATION TRUE
-!= PROVEN FRESH HUMAN CONFIRMATION
+!= PROVEN FRESH CONFIRMATION EVIDENCE
 ```
 
-Do not promote this to a new finding or contradiction until canonical duplicate/reuse analysis is complete across J15/K3 approval/governance findings and registers `04A`, `04B`, `08*`, `09*`, `10*`.
+This is a current concrete instance of `F030`, not a new J17 finding.
 
-This may be:
+### 5. Public HTTP identity counterargument — partially successful
 
-- an existing approval/governance finding expressed through J17;
-- a refinement of an existing authority/confirmation root;
-- a new J17 presentation/governance edge only if prior taxonomy does not already cover it.
+The execute method itself does not repeat the explicit `req.user.id` guard used by approve/reject, but the route is behind the common class guards and `BusinessGuard` requires `req.user.id`.
 
-## Adversarial checks required next
+Therefore the reachable public HTTP route requires an authenticated human identity before the controller is entered.
 
-1. Trace the frontend execute affordance and request body to determine whether a user confirmation is obtained but discarded before the controller/orchestrator path.
-2. Trace guards/auth around the execute controller and prove whether an authenticated `userId` is mandatory in all reachable execution paths.
-3. Trace `evaluateExecution()` and `evaluateGenomeExecution()` inputs and outputs for freshness, source state, current risk, reversibility and action fingerprint binding.
-4. Trace module executors for any additional pre-effect guard, idempotency or stale-state check.
-5. Search J15/K3 findings/contradictions for an existing canonical root before any new ID allocation.
-6. Trace whether approval itself is bound to the same immutable action fingerprint/payload that is later executed.
-7. Trace whether proposal mutation after approval can change effect semantics without invalidating approval.
+Do not overstate this as an anonymous public execute route.
 
-## Evidence / inference / proposal separation
+Separate issue: the orchestrator can be called from internal paths and defaults actor identity to `key_ai` when no user id is supplied; that belongs under existing principal-lineage pressure such as `F031`.
 
-### Evidence
+### 6. Frontend confirmation semantics
 
-- proposal execution service re-evaluates autonomy and Genome execution policy;
-- proposal service has explicit confirmation gates;
-- shared approval orchestrator supplies both confirmation flags as `true`;
-- controller does not visibly propagate fresh confirmation flags into the orchestrator call.
+Inspected:
 
-### Inference
+- `apps/web/src/lib/api/key-autonomy.ts`
+- `apps/web/src/app/app/key-autonomy/components/proposal-card.tsx`
 
-The inspected path may preserve current policy evaluation while weakening proof that confirmation is fresh, user-bound and action-bound at the moment of execution.
+The web client sends `confirm` and `confirmGenomeRisk`.
 
-### Proposal
+For Genome risk, the UI is designed to first call execution without Genome confirmation, detect a server error containing a confirmation requirement, then expose a stronger confirmation step. But because the server orchestrator forces `confirmGenomeRisk = true`, that intended server-driven second-step gate cannot be reached through the inspected orchestrator path.
 
-None yet. Continue microscopic tracing and taxonomy reconciliation first.
+For high/critical proposal risk, the UI sends `confirm = true` from the execute action. The evidence examined does not show a separately durable confirmation artifact bound to the exact execution attempt.
 
-## Relationship to J17 source-health finding
+### 7. Proposal payload mutability / exact-action binding
 
-This trace does not supersede `F179 / C129`. That existing J17 finding/contradiction concerns Command Center projection completeness and the collapse of failed source reads into valid-looking empty state. The current trace is a separate candidate pressure at the projection → governed-action boundary.
+Repository search found application writes to `KeyActionProposal` concentrated in the proposal service; no ordinary API was found that edits the material proposal payload after approval.
+
+This is a narrowing positive fact: the inspected path reloads and executes the same stored proposal rather than accepting an arbitrary replacement payload from the execute request.
+
+However no universal canonical `ActionFingerprint` / capability version / portable `Clearance` artifact was observed binding approval and confirmation to exact material semantics. That remains covered by `F068` rather than becoming a new J17 root.
+
+### 8. Execution claim / idempotency seam
+
+The proposal service reads APPROVED and later writes EXECUTING without an observed atomic expected-state claim. This continues the `F055` pressure.
+
+`KeyActionExecutorService` invokes `SafetyShellService` with proposal id as idempotency key before plugin/built-in execution. The inspected SafetyShell idempotency set is process-local rather than a distributed durable execution claim; this remains `F042` territory.
+
+## Tests inspected
+
+Tests were inspected, not executed in this repository session.
+
+Observed source tests include:
+
+- `key-action-proposal.service.spec.ts` — direct service confirmation gates and current Genome blocking behavior;
+- `key-cortex-approval-orchestrator.service.spec.ts` — explicitly expects execution call with `true, true` and `key_ai` fallback behavior;
+- `key-action-proposal.controller.spec.ts` — exercises the controller/orchestrator delegation but does not prove execute DTO confirmation propagation.
+
+No runtime test result is claimed.
+
+## Evidence / interpretation separation
+
+### IMPLEMENTATION FACT
+
+- direct proposal execution re-evaluates current autonomy and Genome execution policy;
+- execute DTO contains two confirmation booleans;
+- controller discards those body fields;
+- orchestrator supplies both booleans as `true`;
+- public route remains behind guards requiring authenticated user identity/business access;
+- same stored proposal is reloaded for execution;
+- no universal exact-action fingerprint / portable Clearance was observed on this path;
+- EXECUTING acquisition is not observed as an atomic expected-state claim;
+- SafetyShell idempotency is process-local in the inspected implementation.
+
+### INTERPRETATION
+
+The path preserves current policy evaluation but does not make fresh confirmation evidence load-bearing end-to-end. The dominant causal root is already captured by existing J2/J15/K3 findings, especially F030.
+
+### CANONICAL ACTION
+
+Reuse/cross-reference existing findings. Do not allocate F181/C131 or another J17 identifier for this confirmation trace.
+
+## Relationship to J17 findings
+
+This trace is distinct from:
+
+- `F179 / C129` — degraded source completeness can look like healthy zero in Command Center projection;
+- `F180 / C130` — persistent CommandItem can claim EXECUTED without source/effect truth.
+
+The proposal execution path is actually a favorable contrast to F180 because it does invoke a real executor after current policy re-evaluation. Its remaining confirmation/binding/idempotency weaknesses are older canonical roots.
 
 ## Next handoff
 
-Use this packet as the input to an independent Kimi Code repository trace and, optionally, a Claude Code adversarial review. Both reviewers must attempt to falsify the interpretation above before the canonical synthesizer promotes or reuses any F/C identifier.
+Continue J17 at the priority/projection fabric boundary. Do not spend another tranche inventing a new confirmation finding here unless new implementation evidence demonstrates a genuinely distinct semantic root.
