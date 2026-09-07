@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 41
+analysis_version: 42
 last_updated: 2026-09-06
 phase: whole_system_virtual_model_expansion_j10_commerce_fulfilment
-status: CONTINUE_J10_AFTER_F207_C157
+status: CONTINUE_J10_AFTER_F209_C159
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -17,8 +17,8 @@ taxonomy_integrity:
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   create_rule: LOAD_04_CONCEPT_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F207
-  contradictions_through: C157
+  findings_through: F209
+  contradictions_through: C159
   recommendations_through: KF-REC-053
   concepts_through: KF-CONCEPT-042
 
@@ -37,76 +37,63 @@ active_frontier:
   primary_journey: J10
   constellation: [J10,J3,J7,J14,J17,J18,J23]
   dossier: docs/intelligence/journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md
-  stage: ORDER_PAYMENT_REFUND_FULFILMENT_EXTERNAL_IDENTITY_MICROSCOPIC_TRACE
+  stage: FULFILMENT_RECOVERY_COMPLETENESS_AND_EXTERNAL_IDENTITY_MICROSCOPIC_TRACE
   primary_kernels: [K6,K7,K8,K9,K10,K11,K4]
-  findings: [F206,F207]
-  contradictions: [C156,C157]
+  findings: [F206,F207,F208,F209]
+  contradictions: [C156,C157,C158,C159]
 
-F206:
-  title: storefront_paid_checkout_has_two_mounted_paid_invoice_creation_owners_with_incompatible_dedupe_identities
-  home: docs/intelligence/08AK-FINDING-REGISTER-STOREFRONT-PAID-INVOICE-DUPLICATION-SUPPLEMENT.md
-  contradiction_home: docs/intelligence/09AK-CONTRADICTION-REGISTER-STOREFRONT-PAID-INVOICE-DUPLICATION-SUPPLEMENT.md
-  target_owner: KF-REC-053
-  financial_delegation: KF-REC-052
-
-F207:
-  title: operational_order_confirmation_emits_payment_completion_semantics_while_payment_state_can_remain_unpaid
-  home: docs/intelligence/08AL-FINDING-REGISTER-ORDER-CONFIRMATION-PAID-EVENT-SUPPLEMENT.md
-  contradiction_home: docs/intelligence/09AL-CONTRADICTION-REGISTER-ORDER-CONFIRMATION-PAID-EVENT-SUPPLEMENT.md
-  reachability:
-    - native_store_order_created_Pending_with_paymentStatus_PENDING_or_UNPAID
-    - authenticated_orders_UI_exposes_pending_to_confirmed_next_step
-    - status_endpoint_updates_only_order_status
-    - CONFIRMED_maps_to_store_order_paid
-    - paid_event_consumers_can_create_PAID_invoice_and_route_fulfilment
-  target_law: OrderFulfilmentState_not_equal_PaymentCompletionEvidence
-  target_owner: [KF-REC-052,KF-REC-053]
+j10_findings:
+  F206:
+    meaning: duplicate_paid_invoice_descendant_ownership_for_one_storefront_order
+    target_owner: KF-REC-053
+    financial_delegation: KF-REC-052
+  F207:
+    meaning: operational_CONFIRMED_emits_store_order_paid_while_payment_state_can_remain_unpaid
+    target_law: OrderFulfilmentState_not_equal_PaymentCompletionEvidence
+    target_owner: [KF-REC-052,KF-REC-053]
+  F208:
+    meaning: paid_checkout_decrements_tracked_stock_then_post_payment_fulfilment_reserves_same_units_again
+    target_law: one_order_item_inventory_allocation_lineage_with_exactly_once_reservation_consumption_release_restore
+  F209:
+    meaning: aggregate_fulfillment_routed_emitted_even_when_required_item_route_is_FAILED
+    target_law: aggregate_fulfilment_outcome_derived_from_required_route_outcomes_not_process_return
 
 positive_seam_to_preserve:
   - native_completeCheckout_transaction_couples_invoice_workflow_payment_ledger_tracked_inventory_attribution_and_paid_order_state
   - invoice_events_buffered_until_after_transaction_commit
 
 refund_classification:
-  store_order_UI_path:
-    behavior: sets_MarketplaceOrder_status_and_paymentStatus_REFUNDED_then_emits_store_order_refunded
-    missing_in_that_entry_surface: [provider_refund,negative_Payment,invoice_reconciliation,ledger_reversal,inventory_restore]
-    listener_side_effect: can_create_Expense_for_refund_amount
-  mature_financial_primitive_elsewhere:
-    behavior: PaymentsService_createRefundWithPosting_creates_negative_Payment_and_reverses_original_posting_transactionally
-  classification: REUSE_J7_KF_REC_052_ENTRY_SURFACE_CONVERGENCE_ROOTS_NOT_NEW_FINDING_YET
+  store_order_surface:
+    behavior: sets_order_status_and_paymentStatus_REFUNDED_then_emits_store_order_refunded
+    missing_in_entry_surface: [provider_refund,negative_Payment,invoice_reconciliation,ledger_reversal,inventory_restore]
+  stronger_existing_primitive: PaymentsService_createRefundWithPosting
+  classification: REUSE_J7_KF_REC_052_UNLESS_DISTINCT_ROOT_PROVEN
 
 shopify_pressure:
-  orders: external_financial_status_maps_to_MarketplaceOrder_paymentStatus_without_becoming_local_Payment_ledger_truth
+  orders: external_financial_status_maps_to_order_paymentStatus_but_is_not_local_financial_truth
   customers: direct_CUSTOMER_LEAD_writes_reuse_F205_C155
-  products: synthetic_shopify_variant_identity_lookup_vs_real_SKU_persistence_under_repeat_sync_investigation
+  products: synthetic_shopify_variant_lookup_identity_vs_real_provider_SKU_persistence_repeat_sync_under_investigation
 
 fulfilment_pressure:
-  listener: StoreOrderRoutingListener
-  trigger: store_order.paid
-  outcomes: [store_order.fulfillment_routed,store_order.routing_failed]
-  open_question: whether_routing_failure_becomes_durable_recoverable_projectable_operator_work
-
-reused_roots_do_not_duplicate:
-  - F187_C137_financial_state_stronger_than_proven_effect
-  - F193_C143_ledger_writer_bypass
-  - F194_C144_gross_vs_net_payment_projection
-  - F196_C146_parallel_invoice_state_machine
-  - F202_C152_commercial_value_stage_mixing
-  - F205_C155_provider_customer_lifecycle_dialect_drift
-  - KF_REC_052
-  - KF_REC_053
-  - KF_REC_047
-  - KF_REC_048
+  inventory: F208
+  aggregate_outcome: F209
+  open_questions:
+    - retry_idempotency_all_strategies
+    - route_failure_durable_recovery
+    - operator_attention_projection
+    - cancellation_return_inventory_release_restore
 
 exact_next_action:
-  title: continue_J10_fulfilment_and_external_identity_trace
-  instruction: Trace FulfillmentRoutingService route state machine, idempotency, required-route completeness and routing_failed recovery/operator visibility. Then verify Shopify product repeat-sync identity behavior, including Product SKU uniqueness/catalog create behavior, and trace Shopify order/customer external identities. Continue refund/cancel/return convergence only where it adds evidence beyond mature J7 roots. Trace order events into calendar/webhook/KEY/temporal consumers. Reuse F001-F207 C001-C157 KF-REC-001-053 before allocating new IDs. Do not modify production code.
+  title: continue_fulfilment_recovery_then_shopify_identity
+  instruction: Trace all FulfillmentRoutingService strategies, route retry/idempotency, required-route completeness, and consumers of fulfillment_routed/routing_failed. Determine whether failed required routing becomes durable recoverable/projectable/operator work. Then inspect Product schema SKU constraints and CatalogService create/update behavior to prove Shopify product repeat-sync identity when a real provider SKU exists. Continue external order/customer identity and correction semantics. Reuse F001-F209 C001-C159 KF-REC-001-053 before new IDs. Do not modify production code.
 
 constraints:
   - production_code_read_only
   - preserve_strong_native_checkout_transaction
   - do_not_use_free_form_notes_as_canonical_effect_identity
   - order_fulfilment_state_not_equal_payment_truth
+  - one_order_item_inventory_effect_must_compose_exactly_once
+  - route_process_return_not_equal_required_outcome_success
   - provider_state_not_equal_local_financial_convergence
-  - do_not_duplicate_KF_REC_052_or_KF_REC_053
+  - do_not_duplicate_mature_J7_J18_J23_J3_J4_roots
   - continuously_refresh_cross_thread_continuity
