@@ -1,7 +1,7 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-07
-Status: CURRENT — J12 ACTIVE MICROSCOPIC FORENSICS THROUGH F220/C170
+Status: CURRENT — J12 ACTIVE THROUGH F221/C171 / PRE-POOLING CONVERGENCE GATE
 
 ## Integrity
 
@@ -18,71 +18,57 @@ runtime proof:         NOT EXECUTED
 ## Canonical ranges
 
 ```text
-Findings:         F220
-Contradictions:   C170
+Findings:         F221
+Contradictions:   C171
 Recommendations: KF-REC-055
 Concepts:         KF-CONCEPT-042
-next free:        F221 / C171 / KF-REC-056
+next free:        F222 / C172 / KF-REC-056
 ```
 
 Load `04-CONCEPT-REGISTRY` + 04A + 04B before allocation.
 
-## Active J12 checkpoint
-
-Dossier: `docs/intelligence/journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md`
-Consumer trace: `docs/intelligence/investigations/J12-DOCUMENT-INTELLIGENCE-CONSUMER-REVISION-LINEAGE-TRACE.md`
-
-Canonical roots:
+## Active J12 roots
 
 ```text
-F219/C169 — document assertion can become successful payment evidence without explicit consumer-specific evidence admission
-F220/C170 — materially new external document revision can be suppressed as prior ingestion occurrence because stable object ID is used as dedupe identity
+F219/C169 — document assertion → successful payment evidence without explicit consumer-specific admission
+F220/C170 — new external document revision suppressed as prior ingestion occurrence by object-id-only dedupe
+F221/C171 — mounted DocumentInstance hard delete destroys/detaches version-review proof without disposition decision
 ```
 
 Homes:
 
 ```text
-F219 → 08AV
-C169 → 09AV
-F220 → 08AW
-C170 → 09AW
-```
-
-Ownership/delegation:
-
-```text
-J12/K8 evidence admission                     → F219/C169
-J12/K8/K9 source-revision occurrence boundary → F220/C170
-generic provenance/revision                   → KF-REC-049
-ingress occurrence target direction           → KF-REC-035
-financial claim strength                      → KF-REC-052
-same-occurrence replay/effect identity         → KF-REC-048
+F219/C169 → 08AV / 09AV
+F220/C170 → 08AW / 09AW
+F221/C171 → 08AX / 09AX
 ```
 
 ## Reuse / no-dup decisions
 
 ```text
-manual section edit approved through stale version        → F161 / KF-REC-049
-Device ACCEPTED/REJECTED intake reprocessed in-place       → F161 / KF-REC-049; NO F221
-AI tweak partial mutation/version crash boundary           → exact F164 check open
-contract extraction promotion                              → F216/C166 + KF-REC-055
-same payment evidence replay / fresh payment identity      → KF-REC-048
-Expense extraction → editable human-submit Expense creation→ admission seam exists; provenance KF-REC-049/KF-REC-052 pressure, no new root yet
-Drive modified revision suppressed by externalId dedupe    → F220/C170
+manual section edit approved through stale version     → F161 / KF-REC-049
+Device reviewed-state reprocess                        → F161 / KF-REC-049
+AI tweak mutation before version evidence              → F164 / KF-REC-049
+Drive import replacement without version               → F161 + F164 pressure
+contract extraction                                    → F216/C166 + KF-REC-055
+payment replay                                         → KF-REC-048
+Expense extraction/edit/submit                         → explicit human admission seam; provenance pressure only
+Direct AI document process                             → extraction-only boundary
+Drive revision occurrence suppression                  → F220/C170
+DocumentInstance destructive delete                    → F221/C171 + J19 pressure
 ```
 
 ## Exact next action
 
 ```text
-1. inspect direct AI upload extraction/side-effect behavior;
-2. close generated Document tweak crash seam against F164 exactly;
-3. trace correction/replacement/supersession/deletion across accepted evidence;
-4. follow Expense provenance only where it creates distinct authoritative consequences;
-5. classify new seams against F161/F219/F220 and mature KF-REC-049/035/048/052 before F221/C171;
-6. pool stable J12 roots before considering KF-REC-056;
-7. keep production code untouched.
+1. trace downstream descendants after source correction/supersession/destruction;
+2. compare exactly against F178/C128 before F222/C172;
+3. update consumer investigation with latest closed classifications;
+4. assess F219–F221 as a pooled J12 root set;
+5. if stable, run standards/frontier pressure test before KF-REC-056;
+6. keep production code untouched.
 ```
 
-J11 remains provisionally converged through F218/C168/KF-REC-055 and reopenable. Do not resume J11 pressure testing or obsolete post-J11 frontier selection.
+J11 remains provisionally converged through F218/C168/KF-REC-055 and reopenable.
 
-If continuity is lost, resume from **J12 F220/C170 source-revision occurrence checkpoint**, with Device already classified as F161 reuse and Expense human-submit seam already identified.
+If continuity is lost, resume from **J12 F221/C171 destructive-disposition checkpoint / pre-pooling convergence gate**.
