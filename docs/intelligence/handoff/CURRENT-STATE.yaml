@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 39
+analysis_version: 40
 last_updated: 2026-09-06
-phase: recursive_convergence_post_j3_j4_target_ingrain
-status: SELECT_NEXT_HIGH_LEVERAGE_CONSTELLATION_AFTER_KF_REC_053
+phase: whole_system_virtual_model_expansion_j10_commerce_fulfilment
+status: CONTINUE_J10_AFTER_F206_C156
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -16,118 +16,89 @@ taxonomy_integrity:
   governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   create_rule: LOAD_04_CONCEPT_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
-
 canonical_ranges:
-  findings_through: F205
-  contradictions_through: C155
+  findings_through: F206
+  contradictions_through: C156
   recommendations_through: KF-REC-053
   concepts_through: KF-CONCEPT-042
 
 mature_pools:
-  J16_K4:
-    recommendation: KF-REC-049
-    findings: F161-F178
-    contradictions: C111-C128
-  J17_operator_attention:
-    recommendation: KF-REC-051
-    findings: F179-F184
-    contradictions: C129-C134
-    proof_obligations: 20
-  J23_J18_temporal_recovery:
-    proof_obligations: 39
-    deterministic_fault_points: 16
-    runtime_proof_executed: false
-  J7_financial_truth:
-    recommendation: KF-REC-052
-    findings: F185-F196
-    contradictions: C135-C146
-    proof_obligations: 32
-    deterministic_fault_points: 16
-    runtime_proof_executed: false
-  J3_J4_commercial_relationship_obligation:
+  J16_K4: { recommendation: KF-REC-049 }
+  J17: { recommendation: KF-REC-051, findings: F179-F184, contradictions: C129-C134 }
+  J23_J18: { proof_obligations: 39, deterministic_fault_points: 16, runtime_proof_executed: false }
+  J7: { recommendation: KF-REC-052, findings: F185-F196, contradictions: C135-C146, runtime_proof_executed: false }
+  J3_J4:
     recommendation: KF-REC-053
     findings: F197-F205
     contradictions: C147-C155
-    proof_obligations: 28
-    deterministic_fault_points: 12
+    status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED_INGRAINED
     runtime_proof_executed: false
 
-j3_j4_ingrain:
-  status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED
-  journey_dossiers:
-    - docs/intelligence/journeys/KF-JOURNEY-003-LEAD-CUSTOMER-CASH.md
-    - docs/intelligence/journeys/KF-JOURNEY-004-BOOKING-SERVICE-PAYMENT.md
-  ownership_matrix: docs/intelligence/investigations/J3-CUSTOMER-LIFECYCLE-STATE-OWNERSHIP-MATRIX.md
-  standards_pressure_test: docs/intelligence/investigations/J3-J4-COMMERCIAL-RELATIONSHIP-OBLIGATION-STANDARDS-FRONTIER-PRESSURE-TEST.md
-  backward_reaudits:
-    - docs/intelligence/investigations/J3-J4-J17-J18-J23-COMMERCIAL-RELATIONSHIP-OBLIGATION-BACKWARD-REAUDIT.md
-    - docs/intelligence/investigations/J3-J4-J17-J18-J23-J7-FINANCIAL-TRUTH-BACKWARD-REAUDIT.md
-  recommendation_home: docs/intelligence/10L-RECOMMENDATION-REGISTER-COMMERCIAL-RELATIONSHIP-OBLIGATION-CONTINUATION.md
-
-j3_j4_primary_findings:
-  F197: commercial_customer_evidence_can_advance_without_canonical_contact_lifecycle_convergence
-  F198: customer_lifetime_value_can_double_count_pipeline_and_realized_value
-  F199: completed_service_can_have_missing_required_receivable_with_no_durable_recovery_owner
-  F200: deposit_and_full_final_invoice_do_not_compose_one_service_obligation
-  F201: cancelled_or_no_show_booking_does_not_resolve_financial_descendant_disposition
-  F202: revenue_attribution_persists_heterogeneous_commercial_value_stages_without_lineage_stage_semantics
-  F203: KeyCortex_reads_noncanonical_customer_status_vocabulary
-  F204: booking_completed_event_and_post_booking_tool_contract_do_not_compose
-  F205: persisted_contact_status_admits_incompatible_lifecycle_and_relationship_health_dialects
-
-kf_rec_053_target_laws:
-  - CustomerLifecycleState_not_equal_RelationshipHealthState_not_equal_DealState_or_DealStage_not_equal_tags_segments
-  - commercial_evidence_not_equal_lifecycle_transition_until_policy_says_so
-  - commercial_obligation_may_have_multiple_descendants_bound_by_one_lineage
-  - deposit_not_equal_additive_charge_unless_explicitly_modeled
-  - service_complete_not_equal_financial_complete
-  - cancelled_or_no_show_not_equal_financial_disposition_complete
-  - missing_required_descendant_not_equal_nothing_left_to_do
-  - expected_committed_invoiced_collected_net_realized_value_are_not_interchangeable
-  - event_name_equality_not_equal_schema_compatibility
-  - plan_or_message_idempotency_not_equal_commercial_effect_idempotency
-
-fresh_verification:
-  Booking_paymentStatus:
-    schema_values: [UNPAID,DEPOSIT_PAID,PAID]
-    observed_live_writer_for_DEPOSIT_PAID_or_PAID: false
-    classification: UNRESOLVED_INVENTORY_MIGRATION_QUESTION_INSIDE_KF_REC_053
-    new_finding_allocated: false
-  RevenueAttribution:
-    F202_reproduced: true
-    generic_stage_addition_risk: true
-    live_consumer_exposure_requires_inventory: true
-  paid_deposit_cancel_no_show:
-    F201_reproduced: true
-    declared_financial_disposition_owner_observed: false
-
-remaining_evidence_inventory_before_implementation:
-  - live_Booking_paymentStatus_values_and_origins
-  - historical_Contact_status_values_origins_and_ambiguous_aliases
-  - live_RevenueAttribution_rows_by_stage_source_lineage_and_consumers
-  - representative_booking_deposit_final_invoice_payment_cancel_no_show_lineages
-  - execute_KF_REC_053_runtime_and_fault_injection_proof_architecture
-
 active_frontier:
-  stage: PROGRAMME_COVERAGE_AND_NEXT_CONSTELLATION_SELECTION
-  do_not_repeat_completed_j3_j4_pressure_test: true
-  do_not_repeat_completed_j3_j4_backward_reaudit_without_new_evidence: true
-  leading_adjacent_candidates: [J10,J11]
-  candidate_rationale:
-    J10: commerce_fulfilment_can_falsify_or_refine_customer_lifecycle_commercial_lineage_and_external_import_semantics
-    J11: contract_obligation_renewal_can_falsify_or_refine_obligation_lineage_expected_consequence_and_correction_semantics
+  constellation: [J10,J3,J7,J18,J23,J14]
+  primary_journey: J10
+  stage: NATIVE_STOREFRONT_ORDER_PAYMENT_INVOICE_INVENTORY_FULFILMENT_MICROSCOPIC_TRACE
+  dossier: docs/intelligence/journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md
+  primary_kernels: [K6,K7,K8,K9,K10,K11,K4]
+  findings: [F206]
+  contradictions: [C156]
+
+F206:
+  title: storefront_paid_checkout_has_two_mounted_paid_invoice_creation_owners_with_incompatible_dedupe_identities
+  finding_home: docs/intelligence/08AK-FINDING-REGISTER-STOREFRONT-PAID-INVOICE-DUPLICATION-SUPPLEMENT.md
+  contradiction_home: docs/intelligence/09AK-CONTRADICTION-REGISTER-STOREFRONT-PAID-INVOICE-DUPLICATION-SUPPLEMENT.md
+  evidence:
+    - StoreOrderService_completeCheckout_creates_INV_orderNumber_paid_invoice_inside_transaction
+    - first_invoice_notes_only_Storefront_order_orderNumber
+    - after_commit_store_order_paid_is_emitted
+    - mounted_CommerceIntegrationService_handleOrderPaid_calls_createRevenueRecord
+    - createRevenueRecord_dedupes_by_invoice_notes_contains_order_orderId
+    - listener_can_create_INV_ORD_orderNumber_second_PAID_invoice
+  target_owner: KF-REC-053
+  financial_delegation: KF-REC-052
+
+positive_seam_to_preserve:
+  - native_completeCheckout_transaction_couples_invoice_workflow_payment_ledger_tracked_inventory_attribution_and_paid_order_state
+  - invoice_events_buffered_until_after_transaction_commit
+
+reused_roots_do_not_duplicate:
+  - F193_C143_ledger_writer_bypass
+  - F194_C144_gross_vs_net_payment_projection
+  - F196_C146_parallel_invoice_state_machine
+  - F202_C152_commercial_value_stage_mixing
+  - F205_C155_provider_customer_lifecycle_dialect_drift
+  - KF_REC_052_financial_truth_and_valuation
+  - KF_REC_053_commercial_relationship_and_obligation
+  - KF_REC_047_temporal_work_projection
+  - KF_REC_048_recovery_contract
+
+current_candidate_pressure:
+  confirmed_event_alias:
+    evidence: StoreOrderService_updateOrderStatus_CONFIRMED_emits_store_order_paid_and_authenticated_UI_exposes_pending_to_confirmed
+    status: TRACE_AND_CLASSIFY_BEFORE_NEW_ID
+  refund:
+    evidence: refundOrder_sets_status_and_paymentStatus_REFUNDED_then_emits_event_without_provider_refund_negative_payment_invoice_reconcile_ledger_reversal_or_stock_restore_in_method
+    listener_effect: CommerceIntegrationService_can_create_refund_Expense
+    status: REUSE_J7_ROOTS_UNLESS_DISTINCT_DEFECT_PROVEN
+  shopify_orders:
+    evidence: external_financial_status_maps_directly_to_MarketplaceOrder_paymentStatus
+    status: EXTERNAL_EVIDENCE_NOT_LOCAL_FINANCIAL_TRUTH
+  shopify_products:
+    evidence: lookup_by_synthetic_shopify_variant_SKU_but_persistence_prefers_provider_real_SKU
+    status: VERIFY_DB_CATALOG_UNIQUENESS_AND_REPEAT_SYNC_BEFORE_NEW_ID
+  fulfilment_routing:
+    evidence: async_store_order_paid_listener_routes_then_emits_fulfillment_routed_or_routing_failed
+    status: TRACE_DURABLE_RECOVERY_AND_OPERATOR_VISIBILITY
 
 exact_next_action:
-  title: choose_next_constellation_then_begin_microscopic_trace
-  instruction: Complete the coverage check across canonical journey dossiers and pooled kernels. Select the highest-leverage unpooled adjacent journey, preferring J10 Commerce/Fulfilment or J11 Contract/Obligation/Renewal if evidence confirms the gap. Then run MAP -> MICROSCOPIC TRACE -> JOURNEY -> CONSTELLATION -> KERNEL CROSS-REFERENCE. Reopen J3/J4 only for genuinely new evidence that refines or falsifies KF-REC-053. Reuse F001-F205, C001-C155 and KF-REC-001-053 before allocating any new identity. Do not modify production code.
+  title: continue_J10_order_state_refund_fulfilment_shopify_trace
+  instruction: Finish the StoreOrder status/payment-status writer and event-consumer matrix. Determine whether authenticated pending-to-CONFIRMED can emit store_order.paid without actual payment evidence and classify against existing J7/J10 roots. Trace refund/cancel/return through provider Payment Invoice ledger RevenueAttribution and inventory restoration. Trace FulfillmentRoutingService state/idempotency and routing_failed recovery visibility. Verify Shopify product/order/customer external identity and repeat-sync behavior. Reuse F001-F206 C001-C156 KF-REC-001-053 before allocating new IDs. Do not modify production code.
 
 constraints:
   - production_code_read_only
-  - do_not_expand_one_catch_all_Contact_status_enum
-  - no_assumption_of_deposit_refundability_or_revenue_recognition_policy
-  - do_not_treat_missing_row_as_no_required_work
-  - do_not_treat_pipeline_attribution_as_realized_revenue
-  - do_not_duplicate_J7_J18_J23_J3_J4_roots
-  - do_not_create_duplicate_canonical_ids
-  - preserve_evidence_interpretation_decision_chain
+  - preserve_strong_native_checkout_transaction
+  - do_not_use_free_form_notes_as_canonical_effect_identity
+  - order_or_fulfilment_status_not_equal_payment_accounting_truth
+  - provider_paid_refunded_state_not_equal_local_financial_convergence
+  - do_not_duplicate_KF_REC_052_or_KF_REC_053
   - continuously_refresh_cross_thread_continuity
