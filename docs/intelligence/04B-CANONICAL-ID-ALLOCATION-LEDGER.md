@@ -1,7 +1,7 @@
 # KeyFlowOS Canonical ID Allocation Ledger
 
 Status: CANONICAL — OVERRIDES LEGACY COLLIDING ALLOCATIONS
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 Purpose: provide one unambiguous allocator for Finding (`F###`), Contradiction (`C###`) and Recommendation (`KF-REC-###`) identities.
 
@@ -17,7 +17,7 @@ F161–F178 J16/K4 knowledge lineage
 F179–F184 J17 operator-control lineage
 F185–F196 J7 Financial Truth
 F197–F205 J3/J4 commercial-to-cash
-F206–F213 J10 Commerce/Fulfilment active microscopic findings
+F206–F214 J10 Commerce/Fulfilment active microscopic findings
 ```
 
 ```text
@@ -26,10 +26,10 @@ C111–C128 J16/K4 contradictions
 C129–C134 J17 contradictions
 C135–C146 J7 contradictions
 C147–C155 J3/J4 contradictions
-C156–C163 J10 active contradictions
+C156–C164 J10 active contradictions
 ```
 
-Current recommendation range remains through `KF-REC-053`.
+Current recommendation range remains through `KF-REC-053` pending the J10 standards/frontier synthesis.
 
 ## Mature recommendation anchors
 
@@ -53,14 +53,15 @@ KF-REC-053 Commercial Relationship & Obligation Contract
 - F211 / C161 — partial fulfilment route set can block retry because any existing route is treated as complete idempotency — `08AO` / `09AO`.
 - F212 / C162 — Shopify order sync and customer sync disagree on Contact identity resolution, allowing duplicate Contacts after mutable email change — `08AP` / `09AP`.
 - F213 / C163 — Shopify orders enter MarketplaceOrder without relational order-item descendants; provider line items exist only in metadata with no materialization listener — `08AQ` / `09AQ`.
+- F214 / C164 — DROPSHIP/PREORDER can persist an effectful PurchaseOrder/PreOrder before its FulfillmentRoute, so route-based retry can duplicate the same semantic strategy obligation — `08AR` / `09AR`.
 
-J10 currently reuses KF-REC-053 commercial lineage/state semantics, KF-REC-052 financial truth, KF-REC-048 recovery semantics, and K9 external-identity boundaries. Recommendation pressure is under review; no new recommendation allocated yet.
+J10 currently reuses KF-REC-053 commercial lineage/state semantics, KF-REC-052 financial truth, KF-REC-048 recovery semantics, and the earlier K9 ingress/external-reality corpus. Anti-duplication review indicates those contracts do not fully own provider entity identity, operational import materialization, inventory-effect lineage, required fulfilment sets or strategy-effect identity. A distinct J10 Commerce & Fulfilment target contract is therefore under final standards/frontier pressure test; no new recommendation is allocated until that synthesis is recorded.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F213
-Contradictions:  C001–C163
+Findings:        F001–F214
+Contradictions:  C001–C164
 Recommendations: KF-REC-001–KF-REC-053
 ```
 
