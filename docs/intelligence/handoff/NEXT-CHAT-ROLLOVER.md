@@ -16,10 +16,10 @@ Load 04-CONCEPT-REGISTRY.md, 04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md,
 CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first.
 Production code remains read-only.
-J7 Financial Truth is pooled through F196/C146/KF-REC-052 with 32 proof obligations and 16 deterministic fault points.
-Active frontier is J3/J4 commercial-to-cash through F204/C154.
-The booking.completed AI path is live but contract-malformed; duplicate valid invoice is NOT proven.
-Resume at load-bearing deposit/cancellation/no-show policy → customer lifecycle field ownership → RevenueAttribution consumers → J17/J18/J23 visibility.
+J7 Financial Truth is pooled through F196/C146/KF-REC-052.
+Active frontier is J3/J4 through F205/C155.
+Resume at Booking.paymentStatus writer/consumer convergence, paid-deposit cancellation/no-show disposition,
+RevenueAttribution consumer classification and J17/J18/J23 backward re-audit.
 ```
 
 ## Context integrity
@@ -38,100 +38,60 @@ Implementation:          UNAUTHORIZED / READ-ONLY
 ## Canonical taxonomy
 
 ```text
-Findings:        F204
-Contradictions:  C154
+Findings:        F205
+Contradictions:  C155
 Recommendations: KF-REC-052
 Concepts:        KF-CONCEPT-042
 ```
 
-Before new IDs:
+## Active J3/J4 roots
 
 ```text
-LOAD 04A + 04B
-→ SEARCH exact term + synonyms + implementation names + target names
-→ REUSE / REFINE / CROSS-REFERENCE
-→ allocate only if genuinely distinct
+F197/C147 customer evidence vs Contact lifecycle convergence
+F198/C148 duplicate-stage customer LTV
+F199/C149 completed service vs missing required receivable
+F200/C150 deposit vs final service receivable settlement
+F201/C151 cancellation/no-show vs financial descendant disposition
+F202/C152 RevenueAttribution pipeline vs realized stage
+F203/C153 KeyCortex noncanonical status predicates
+F204/C154 booking.completed event/template/tool schema mismatch
+F205/C155 persisted Contact.status has incompatible lifecycle/health dialects
 ```
 
-## Mature / pooled fronts
+Customer state ownership matrix:
+`docs/intelligence/investigations/J3-CUSTOMER-LIFECYCLE-STATE-OWNERSHIP-MATRIX.md`
 
-- J16/K4 Business Knowledge: through F178/C128 / KF-REC-049.
-- J17 Operator Attention: through F184/C134 / KF-REC-051 / 20 proof obligations.
-- J23/J18 temporal/recovery: 39 proof obligations / 16 deterministic fault points; runtime proof not executed.
-- J7 Financial Truth: F185–F196 / C135–C146 / KF-REC-052 / 32 proof obligations / 16 deterministic fault points; runtime proof not executed.
-
-## Active frontier — J3 + J4
+## Critical distinctions
 
 ```text
-J3 — Lead → Customer → Cash
-J4 — Booking → Service → Payment
-stage = COMMERCIAL_OBLIGATION_AND_LIFECYCLE_CONVERGENCE
+CustomerLifecycleState != RelationshipHealthState != DealState/DealStage != tags/segments
+commercial customer evidence != lifecycle transition until policy says so
+pipeline value != invoiced value != collected value != LTV
+service complete != financially complete
+missing required descendant != nothing left to do
+deposit != additive charge unless explicitly modeled as one
+booking CANCELLED / NO_SHOW != financial disposition complete
+canonical event payload != template-local assumed payload
+plan-step idempotency != commercial-obligation idempotency
 ```
 
-Canonical roots:
+## Important narrowing
 
-```text
-F197/C147 — commercial customer evidence can exist while Contact.status remains LEAD
-F198/C148 — ContactInsight LTV adds won Deal + PAID Invoice value for the same sale
-F199/C149 — completed booking can lose required completion invoice into log-only failure
-F200/C150 — deposit D + later full-price invoice P do not compose one service obligation
-F201/C151 — CANCELLED/NO_SHOW has no declared financial-descendant disposition
-F202/C152 — RevenueAttribution mixes BOOKING pipeline + paid INVOICE stages as additive revenue
-F203/C153 — KeyCortex queries lead/customer instead of canonical LEAD/PROSPECT/CLIENT/LOST
-F204/C154 — live booking.completed → post-booking automation has incompatible event/template/tool schemas
-```
+The post-booking AI journey is live but contract-malformed; a second valid invoice is **NOT proven**.
 
-Working target vocabulary — not standalone concepts:
-
-```text
-CustomerLifecycle
-CommercialObligationLineage
-CommercialValueStage
-ServiceFinancialDisposition
-EventToActionContractAdapter
-```
-
-## F204 narrowing
-
-Runtime path is proven:
-
-```text
-booking.completed
-→ AgentTriggerService onAny
-→ JourneyOrchestrator post-booking template
-→ auto-approved tier-2 AiPlan
-→ plan.approved
-→ PlanExecutor
-→ BullMQ
-→ ActionDispatcher
-→ FlowOrchestrator commerce_create_invoice
-```
-
-But the contracts do not compose:
-
-```text
-actual event = { booking, contact?, businessId }
-template expects flat contactId/serviceName/amount/bookingId/contactName
-tool requires item.description/quantity/unitPrice
-```
-
-The first invoice step is therefore malformed. Later intended `Contact.status=CLIENT` / follow-up descendants are not a load-bearing lifecycle path. Do NOT claim a second valid invoice without new evidence.
+`Booking.paymentStatus = UNPAID | DEPOSIT_PAID | PAID` exists in schema, but no runtime `DEPOSIT_PAID` writer has yet been observed. It remains candidate evidence, not a finding.
 
 ## Exact next work
 
 ```text
-1. locate Service/Booking Prisma schema and deposit/cancellation/no-show policy fields;
-2. trace paid deposit through cancel/no-show to refund/retain/credit/fee/remaining-balance behavior;
-3. decide whether new evidence strengthens F201 or proves a distinct root;
-4. map all automatic/manual writers and major consumers of Contact.status, lifecycleStage, pipelineStage, Deal state and tags;
-5. trace RevenueAttribution consumers for stage-aware vs additive treatment;
-6. check whether F199/F201 surface to J17/J18/J23 recovery/operator projections;
-7. pressure-test CustomerLifecycle and CommercialObligationLineage only after local semantics converge;
-8. reuse mature roots before new IDs and persist before broadening.
+1. trace every Booking.paymentStatus writer/consumer and invoice/payment/refund event;
+2. classify it as live aggregate, stale projection, or dormant competing truth;
+3. trace paid deposit through CANCELLED/NO_SHOW into refund/retain/credit/fee behavior and policy source;
+4. complete RevenueAttribution consumer stage classification;
+5. backward re-audit J17/J18/J23 for missing descendants, unresolved financial dispositions and customer-state dialects;
+6. once local semantics converge, run current standards/frontier pressure test for CustomerLifecycle and CommercialObligationLineage;
+7. decide whether a new recommendation is justified beyond KF-REC-049/KF-REC-052;
+8. reuse mature roots before allocating new IDs and persist every material tranche.
 ```
 
-## Execution boundary
-
-`KF-EXEC-EXTFX-001` remains pooled implementation-shape evidence only. Production code remains untouched.
-
-> If this chat disappears, resume at **J3/J4 after F204/C154, beginning with deposit/cancellation policy and customer lifecycle ownership**.
+Production code remains untouched.
