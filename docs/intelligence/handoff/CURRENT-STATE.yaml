@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 43
+analysis_version: 44
 last_updated: 2026-09-06
 phase: whole_system_virtual_model_expansion_j10_commerce_fulfilment
-status: CONTINUE_J10_AFTER_F211_C161
+status: CONTINUE_J10_AFTER_F213_C163
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -12,8 +12,8 @@ implementation_evidence:
 context_integrity: PASS
 implementation_authorized: false
 canonical_ranges:
-  findings_through: F211
-  contradictions_through: C161
+  findings_through: F213
+  contradictions_through: C163
   recommendations_through: KF-REC-053
   concepts_through: KF-CONCEPT-042
 
@@ -28,33 +28,39 @@ active_frontier:
   primary_journey: J10
   constellation: [J10,J3,J7,J14,J17,J18,J23]
   dossier: docs/intelligence/journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md
-  stage: EXTERNAL_IDENTITY_AND_STRATEGY_SPECIFIC_FULFILMENT_RECOVERY_TRACE
+  stage: RECOMMENDATION_OWNERSHIP_CHECK_AND_STRATEGY_DESCENDANT_IDEMPOTENCY
   primary_kernels: [K6,K7,K8,K9,K10,K11,K4]
-  findings: [F206,F207,F208,F209,F210,F211]
-  contradictions: [C156,C157,C158,C159,C160,C161]
+  findings: [F206,F207,F208,F209,F210,F211,F212,F213]
+  contradictions: [C156,C157,C158,C159,C160,C161,C162,C163]
 
 j10_findings:
   F206: duplicate_paid_invoice_descendant_ownership_for_one_storefront_order
   F207: operational_CONFIRMED_emits_paid_semantics_while_payment_state_can_remain_unpaid
   F208: checkout_routing_shipping_and_correction_compete_for_one_inventory_effect_lineage
-  F209: aggregate_fulfillment_routed_can_mask_required_route_FAILURE_and_exception_failure_evidence_is_inconsistent
+  F209: aggregate_fulfillment_routed_can_mask_required_route_FAILURE_and_failure_evidence_is_inconsistent
   F210: Shopify_variant_lookup_identity_differs_from_persisted_Product_identity_breaking_repeat_sync
   F211: any_existing_fulfilment_route_is_treated_as_complete_idempotent_set_so_partial_retry_skips_missing_routes
+  F212: Shopify_order_and_customer_sync_disagree_on_Contact_identity_resolution_after_mutable_email_change
+  F213: Shopify_orders_enter_native_MarketplaceOrder_without_native_OrderItem_descendants
 
 positive_seam_to_preserve:
   - native_completeCheckout_transaction_couples_invoice_workflow_payment_ledger_tracked_inventory_attribution_and_paid_order_state
   - invoice_events_buffered_until_after_transaction_commit
 
-reused_target_contracts:
-  - KF-REC-047
-  - KF-REC-048
-  - KF-REC-051
-  - KF-REC-052
-  - KF-REC-053
+recommendation_ownership_check:
+  status: ACTIVE_NO_NEW_RECOMMENDATION_YET
+  do_not_allocate: KF-REC-054
+  likely_partitions:
+    commercial_obligation_effect_identity: KF-REC-053
+    financial_truth: KF-REC-052
+    recovery_completeness: KF-REC-048
+    operator_attention: KF-REC-051
+    external_identity_materialization: K9_EARLIER_RECOMMENDATION_CORPUS_UNDER_REVIEW
+    inventory_allocation_effect_lineage: J10_TARGET_PRESSURE_OWNER_NOT_FROZEN
 
 exact_next_action:
-  title: continue_shopify_customer_order_identity_and_strategy_descendant_idempotency
-  instruction: Trace Shopify customer external identity under changed email/customer id and Shopify order identity/correction semantics. Then inspect DROPSHIP/PREORDER/HYBRID/MANUAL/SERVICE descendant idempotency and recovery. Continue inventory correction under F208, not duplicate roots. Trace propagation of F207/F209 into CRM/calendar/webhooks/KEY/temporal/operator consumers. Determine whether F206-F211 compose under mature contracts or justify a new commerce/fulfilment target recommendation. Reuse F001-F211 C001-C161 KF-REC-001-053 before new IDs. Do not modify production code.
+  title: check_existing_external_reality_contract_then_trace_strategy_specific_descendants
+  instruction: Search recommendation registers for external identity, provider reconciliation, integration/external reality and operational materialization ownership. Do not allocate KF-REC-054 until overlap is ruled out. Then inspect DROPSHIP PREORDER HYBRID MANUAL SERVICE route descendants for semantic idempotency and partial-failure recovery. Trace propagation of F207/F209 into CRM calendar webhooks KEY temporal/operator consumers. Keep cancel/refund/return inventory correction under F208 unless a distinct root is proven. Decide whether F206-F213 compose under mature contracts or justify a distinct Commerce/Fulfilment target contract. Reuse F001-F213 C001-C163 KF-REC-001-053 before new IDs. Do not modify production code.
 
 constraints:
   - production_code_read_only
@@ -63,6 +69,7 @@ constraints:
   - one_order_item_inventory_effect_must_compose_exactly_once
   - route_process_return_not_equal_required_outcome_success
   - partial_child_set_not_equal_complete_required_descendant_set
-  - merchant_SKU_not_equal_immutable_provider_external_identity
+  - merchant_SKU_and_mutable_email_not_equal_immutable_provider_identity
+  - provider_metadata_line_items_not_equal_native_operational_OrderItems
   - provider_state_not_equal_local_financial_convergence
   - continuously_refresh_cross_thread_continuity
