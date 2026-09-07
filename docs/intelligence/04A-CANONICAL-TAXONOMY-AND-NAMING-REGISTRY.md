@@ -43,8 +43,8 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Journeys: `J1 ... J25` — `03-ANALYSIS-MAP.md`.
 - Kernels: `K1 ... K12` — `12-KERNEL-PROGRAMME.md`.
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
-- Findings: `F001–F205` — `08*`; allocator 04B.
-- Contradictions: `C001–C155` — `09*`; allocator 04B.
+- Findings: `F001–F206` — `08*`; allocator 04B.
+- Contradictions: `C001–C156` — `09*`; allocator 04B.
 - Recommendations: `KF-REC-001–KF-REC-053` — `10*`; allocator 04B.
 - Decisions: `KF-DEC-###` — `05-DECISION-REGISTER.md`.
 - Execution packets: `KF-EXEC-<DOMAIN>-###`.
@@ -53,15 +53,8 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 Latest roots:
 ```text
 F185–F196 / C135–C146 — J7 Financial Truth
-F197/C147 — commercial customer evidence vs Contact lifecycle convergence
-F198/C148 — pipeline value + realized revenue vs non-duplicative customer LTV
-F199/C149 — completed service vs missing durable receivable consequence
-F200/C150 — deposit vs final service receivable settlement lineage
-F201/C151 — cancellation/no-show vs financial descendant disposition
-F202/C152 — RevenueAttribution pipeline vs realized revenue stage
-F203/C153 — canonical CRM statuses vs KeyCortex lead/customer predicates
-F204/C154 — booking.completed event vs post-booking template/tool contract
-F205/C155 — persisted Contact.status admits incompatible lifecycle/health dialects
+F197–F205 / C147–C155 — J3/J4 commercial-to-cash
+F206/C156 — native storefront paid checkout has two mounted paid-Invoice descendant owners with incompatible dedupe identities
 ```
 
 Current major pooled targets:
@@ -107,13 +100,13 @@ AUTHORITY     authoritative | derived | advisory | compatibility
 | Operator Attention & Priority Contract | KF-REC-051 |
 | Financial Truth & Valuation Contract | KF-REC-052 |
 | Commercial Relationship & Obligation Contract | KF-REC-053 |
-| FinancialConsequenceVector / ValuationEvidence / CanonicalInvoiceBalance | inside KF-REC-052; not standalone concepts yet |
-| CustomerLifecycleState | KF-REC-053 target vocabulary; one commercial relationship dimension, exact final enum not frozen |
-| RelationshipHealthState | KF-REC-053 target vocabulary; orthogonal to CustomerLifecycleState |
-| CommercialObligationLineage | KF-REC-053 target vocabulary binding booking/service/order/deposit/invoice/payment/correction stages |
-| CommercialValueStage | KF-REC-053 target vocabulary for expected/committed/invoiced/collected/net-realized/reversed value basis |
+| CustomerLifecycleState | KF-REC-053 target vocabulary; exact final enum not frozen |
+| RelationshipHealthState | KF-REC-053 target vocabulary; orthogonal to customer lifecycle |
+| CommercialObligationLineage | KF-REC-053 target vocabulary binding origin and descendants |
+| CommercialValueStage | KF-REC-053 target vocabulary for stage-explicit commercial value |
 | ServiceFinancialDisposition | KF-REC-053 target vocabulary for cancellation/no-show/correction financial outcomes |
 | EventToActionContractAdapter | KF-REC-053 target vocabulary for typed/versioned event→tool mapping |
+| StoreOrder paid-Invoice semantic effect | F206/C156 current J10 specialization of KF-REC-053 lineage/effect-idempotency; do not create a separate recommendation by reflex |
 
 ---
 
@@ -175,6 +168,9 @@ Deposit != additive charge unless explicitly modeled as one
 Booking CANCELLED / NO_SHOW != financial disposition complete
 Canonical event payload != template-local assumed payload
 Plan-step idempotency != semantic commercial-obligation idempotency
+Order/fulfilment status != payment/accounting truth
+One order occurrence != permission for multiple paid-Invoice descendants
+Free-form notes != canonical commercial-effect identity
 ```
 
 ---
@@ -216,20 +212,19 @@ load 04B
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F205
-Contradiction range:     through C155
+Finding range:           through F206
+Contradiction range:     through C156
 Recommendation range:    through KF-REC-053
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-J7 is pooled through KF-REC-052. The current J3/J4 commercial-to-cash tranche is reconstructed through F205/C155, target-synthesized through KF-REC-053, backward re-audited against J17/J18/J23/J7/K4, and ingrained in canonical journey dossiers:
+J3/J4 are provisionally converged and target-aligned through KF-REC-053, with canonical journey dossiers ingrained. J10 Commerce/Fulfilment is now the active microscopic frontier.
 
-- `journeys/KF-JOURNEY-003-LEAD-CUSTOMER-CASH.md`
-- `journeys/KF-JOURNEY-004-BOOKING-SERVICE-PAYMENT.md`
+Current J10 canonical entry:
+- `journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
+- F206/C156 in `08AK` / `09AK`.
 
-The customer-state ownership matrix is `investigations/J3-CUSTOMER-LIFECYCLE-STATE-OWNERSHIP-MATRIX.md`.
-
-Do not reopen this tranche merely to repeat already-pooled analysis. Reopen only for new evidence, live-data inventory, implementation planning/proof, or pressure from adjacent journeys such as J10/J11.
+Do not allocate a new refund/provider/customer-lifecycle root where F193/F194/F196/F202/F205 or KF-REC-052/053 already own the semantic defect. New J10 IDs require a genuinely distinct architecture root after source/reachability verification.
 
 No production implementation is authorized by this taxonomy artifact.
