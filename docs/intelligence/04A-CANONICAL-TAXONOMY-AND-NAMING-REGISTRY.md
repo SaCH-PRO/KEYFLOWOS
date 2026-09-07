@@ -45,7 +45,7 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
 - Findings: `F001–F205` — `08*`; allocator 04B.
 - Contradictions: `C001–C155` — `09*`; allocator 04B.
-- Recommendations: `KF-REC-001–KF-REC-052` — `10*`; allocator 04B.
+- Recommendations: `KF-REC-001–KF-REC-053` — `10*`; allocator 04B.
 - Decisions: `KF-DEC-###` — `05-DECISION-REGISTER.md`.
 - Execution packets: `KF-EXEC-<DOMAIN>-###`.
 - Local proof obligations: `PF-<SCOPE>-###`.
@@ -72,6 +72,7 @@ KF-REC-049 provenance/revision-aware Business Knowledge Contract
 KF-REC-050 load-bearing WorkDefinition controls
 KF-REC-051 Operator Attention & Priority Contract
 KF-REC-052 Financial Truth & Valuation Contract
+KF-REC-053 Commercial Relationship & Obligation Contract
 ```
 
 ---
@@ -105,12 +106,14 @@ AUTHORITY     authoritative | derived | advisory | compatibility
 | Temporal Work Projection | KF-REC-047 target; derived, not workflow truth |
 | Operator Attention & Priority Contract | KF-REC-051 |
 | Financial Truth & Valuation Contract | KF-REC-052 |
+| Commercial Relationship & Obligation Contract | KF-REC-053 |
 | FinancialConsequenceVector / ValuationEvidence / CanonicalInvoiceBalance | inside KF-REC-052; not standalone concepts yet |
-| CustomerLifecycle | J3 working target vocabulary; one commercial relationship dimension, not yet a standalone concept |
-| CommercialObligationLineage | J3/J4 working target vocabulary binding service/booking/deposit/invoice/payment/correction stages |
-| CommercialValueStage | J3/J4 working target vocabulary for pipeline/committed/invoiced/collected/reversed value basis |
-| ServiceFinancialDisposition | J4 working target vocabulary for cancellation/no-show financial outcomes |
-| EventToActionContractAdapter | J4/K7 working target vocabulary for typed/versioned event→tool mapping |
+| CustomerLifecycleState | KF-REC-053 target vocabulary; one commercial relationship dimension, exact final enum not frozen |
+| RelationshipHealthState | KF-REC-053 target vocabulary; orthogonal to CustomerLifecycleState |
+| CommercialObligationLineage | KF-REC-053 target vocabulary binding booking/service/order/deposit/invoice/payment/correction stages |
+| CommercialValueStage | KF-REC-053 target vocabulary for expected/committed/invoiced/collected/net-realized/reversed value basis |
+| ServiceFinancialDisposition | KF-REC-053 target vocabulary for cancellation/no-show/correction financial outcomes |
+| EventToActionContractAdapter | KF-REC-053 target vocabulary for typed/versioned event→tool mapping |
 
 ---
 
@@ -215,11 +218,18 @@ Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
 Finding range:           through F205
 Contradiction range:     through C155
-Recommendation range:    through KF-REC-052
+Recommendation range:    through KF-REC-053
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 ```
 
-J7 is pooled. J3/J4 commercial-to-cash reconstruction is active through F205/C155. The customer-lifecycle ownership matrix is `investigations/J3-CUSTOMER-LIFECYCLE-STATE-OWNERSHIP-MATRIX.md`. Do not solve the observed dialect collision by expanding one catch-all Contact status enum.
+J7 is pooled through KF-REC-052. The current J3/J4 commercial-to-cash tranche is reconstructed through F205/C155, target-synthesized through KF-REC-053, backward re-audited against J17/J18/J23/J7/K4, and ingrained in canonical journey dossiers:
+
+- `journeys/KF-JOURNEY-003-LEAD-CUSTOMER-CASH.md`
+- `journeys/KF-JOURNEY-004-BOOKING-SERVICE-PAYMENT.md`
+
+The customer-state ownership matrix is `investigations/J3-CUSTOMER-LIFECYCLE-STATE-OWNERSHIP-MATRIX.md`.
+
+Do not reopen this tranche merely to repeat already-pooled analysis. Reopen only for new evidence, live-data inventory, implementation planning/proof, or pressure from adjacent journeys such as J10/J11.
 
 No production implementation is authorized by this taxonomy artifact.
