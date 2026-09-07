@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 25
+analysis_version: 26
 last_updated: 2026-09-06
-phase: whole-system-virtual-model-expansion-j17-operator-attention-priority
-status: PRESSURE_TEST_AND_BACKWARD_REAUDIT_J17_TARGET
+phase: whole-system-pooling-post-j17-operator-attention-convergence
+status: COMPLETE_J17_SOURCE_FAMILY_AND_PROOF_TRANCHE_THEN_SELECT_NEXT_FRONTIER
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -25,57 +25,71 @@ canonical_ranges:
 active_mesh:
   journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16,J19,J17,J7]
   kernels: [K2,K3,K4,K5,K6,K7,K8,K9,K10,K11]
-active_frontier:
+latest_j17_pool:
   journey: J17
   name: Command_Center_to_Priority_to_Action
-  stage: OPERATOR_ATTENTION_PRIORITY_TARGET_SYNTHESIS_AND_PRESSURE_TEST
-  dossier: docs/intelligence/journeys/KF-JOURNEY-017-COMMAND-CENTER-PRIORITY-ACTION.md
+  stage: RESEARCH_PRESSURE_TEST_AND_BACKWARD_REAUDIT_COMPLETE_SOURCE_FAMILY_CLASSIFICATION_REMAINS
   recommendation: KF-REC-051
-  primary_kernels: [K3,K4,K5,K6,K7,K8,K10,K11]
   findings: [F179,F180,F181,F182,F183,F184]
   contradictions: [C129,C130,C131,C132,C133,C134]
-  topology:
-    - synthesized_BusinessCommandCenter_snapshot_and_persistent_CommandItem_queue_coexist_on_same_page
-    - snapshot_Top_Priorities_rank_priority_class_then_static_type_weight_then_recency
-    - persistent_CommandItem_findMany_ranks_numeric_priority_then_urgency_then_recency
-    - rich_GenomeRecommendationRanker_exists_but_global_Top_Priorities_bypasses_its_rank_semantics
-    - CommandItem_obligation_contract_has_strong_bidirectional_positive_seams_for_some_producers
-  finding_summaries:
-    F179: fail_soft_source_unavailability_can_look_like_healthy_zero_and_improve_projection_health
-    F180: CommandItem_approve_execute_can_claim_EXECUTED_without_source_resolution_or_effect_proof
-    F181: Temporal_invoice_overdue_priority_logic_has_no_observed_standard_invoice_to_TemporalFlow_materialization_path
-    F182: source_derived_CommandItem_creation_can_lack_reverse_convergence_after_source_resolution
-    F183: multi_status_queue_UI_operates_over_OPEN_only_server_dataset
-    F184: global_priority_compresses_or_discards_richer_source_ranking_semantics
+  research_artifact: docs/intelligence/investigations/J17-OPERATOR-ATTENTION-PRIORITY-STANDARDS-FRONTIER-PRESSURE-TEST.md
+  backward_reaudit_artifact: docs/intelligence/investigations/J6-J7-J15-J17-J18-J23-OPERATOR-ATTENTION-BACKWARD-REAUDIT.md
+  backward_reaudit: PASSED_NO_NEW_IDS
+  target_status: SUBSTANTIALLY_STRENGTHENED_APPROACHING_ARCHITECTURAL_CONVERGENCE
+  key_noncollapse:
+    - important_not_equal_actionable
+    - actionable_not_equal_authorized
+    - authorized_not_equal_executed
+    - owed_not_equal_priority_in_all_lenses
+    - failure_severity_not_equal_safe_recovery
+    - user_disposition_not_equal_source_resolution
   target_laws:
     - source_truth_operator_projection_priority_user_disposition_Clearance_effect_outcome_are_distinct
-    - projection_adapter_requires_both_admission_and_reverse_convergence
+    - projection_adapter_requires_selective_admission_and_reverse_convergence
     - source_health_freshness_and_materialization_completeness_are_explicit
     - PriorityAssessment_is_multidimensional_before_question_specific_ordering
-    - risk_priority_urgency_expected_value_and_actionability_are_not_synonyms
-    - operator_disposition_does_not_claim_business_effect_without_evidence
+    - source_specific_rank_evidence_survives_normalization
+    - operator_disposition_does_not_claim_effect_without_evidence
     - material_action_returns_to_canonical_current_governance_and_effect_owner
     - CommandItem_can_own_operator_work_state_without_owning_business_or_effect_truth
-    - Temporal_Work_Projection_is_a_source_into_operator_attention_not_all_priority_truth
+    - Temporal_Work_Projection_is_one_attention_source_not_all_priority_truth
+    - attention_reset_lag_is_a_measurable_projection_quality_property
+  research_strengthening:
+    - attention_admission_is_selective_and_rationalized
+    - interruptive_attention_requires_expected_response_or_decision
+    - human_attention_is_scarce
+    - redundant_root_attention_may_be_coalesced_without_hiding_source_history
+    - human_override_snooze_dismiss_is_feedback_not_truth_or_authority_mutation
+    - attention_quality_requires_post_deployment_monitoring
+  candidate_assurance_metrics:
+    - attention_precision
+    - attention_recall
+    - detection_lag
+    - reset_lag
+    - stale_attention_rate
+    - actionability_rate
+    - projection_degradation_rate
+    - snooze_dismiss_override_recurrence
   positive_seams:
-    - KeyActionProposal_execute_revalidates_AutonomyOrchestrator_and_Genome_policy_before_effect
+    - KeyActionProposal_execute_current_governance_revalidation
     - CommandItem_SUGGESTION_vs_OBLIGATION
-    - work_obligation_raise_settle_bidirectional_contract
-    - obligation_stable_five_tuple_upsert
-    - due_overdue_snooze_and_discharge_semantics
-    - FinanceIntelligence_paired_CommandItem_mirror_and_dismiss_for_its_FIN8_family
-  rejected_or_narrowed_hypotheses:
-    same_invoice_dual_projection_is_primary_root: rejected
-    reason: normal_invoice_overdue_to_TemporalFlow_materialization_not_load_bearing_in_observed_wiring
-    universal_CommandItem_as_all_business_truth: rejected
-    universal_single_scalar_priority_score: rejected
-    opaque_ML_priority_ranker_by_default: rejected
+    - WORK_OBLIGATION_RAISED_SETTLED_bidirectional_contract
+    - stable_obligation_identity
+    - due_overdue_snooze_discharge_semantics
+    - FinanceIntelligence_paired_CommandItem_mirror_and_dismiss
+    - GenomeRecommendationRanker_rich_explainable_score_breakdown
+  rejected_overbuild:
+    - universal_CommandItem_for_every_signal
+    - generic_event_to_TemporalFlow_mirror
+    - universal_attention_database
+    - universal_single_priority_scalar
+    - opaque_ML_ranker_by_default
+    - second_Command_Center_authority_engine
 latest_converged_pool:
   name: business_knowledge_genome_evolution_epistemic_integrity
   primary_journey: J16
   primary_kernel: K4
   adjacent_pressure: J19
-  stage: RESEARCH_AND_BACKWARD_REAUDIT_COMPLETE_RETURNED_TO_BROADER_POOL
   findings: [F161,F162,F163,F164,F165,F166,F175,F176,F177,F178]
   contradictions: [C111,C112,C113,C114,C115,C116,C125,C126,C127,C128]
   recommendation: KF-REC-049
@@ -103,11 +117,11 @@ continuity:
   taxonomy_check_after_major_tranche: true
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 exact_next_action:
-  title: pressure_test_KF_REC_051_then_backward_reaudit
-  instruction: Use current standards/frontier research on alarm/incident attention management, SRE alert quality, human oversight and explainable decision support to pressure-test KF-REC-051. Separate floor, frontier and KeyFlow synthesis; preserve question-specific priority lenses and scarce-attention principles without importing generic alarm-management infrastructure. Persist research, update J17, then backward-reaudit J6/J7/J15/J17/J18/J23 plus K3/K4/K7/K8/K11. Load 04A/04B before any new ID.
+  title: complete_J17_source_family_classification_and_proof_architecture
+  instruction: Classify current CommandItem writers/source families into suggestion, obligation, durable work, control, recovery or compatibility projection. For important families map admission identity, authoritative source owner, reverse-convergence owner, disposition semantics and material-action routing. Decide which J17 surfaces should persist, assemble on read or consume KF-REC-047. Draft initial J17 proof obligations using attention precision/recall, detection/reset lag, stale attention, actionability and degraded-projection tests. Reuse F179-F184/C129-C134/KF-REC-051 unless genuinely new repository behavior appears. Then return J17 to the whole-system pool and select/verify the next high-leverage frontier.
 constraints:
   - do_not_modify_production_code
-  - do_not_treat_Command_Center_projection_as_authoritative_truth
+  - do_not_treat_operator_attention_as_source_truth_or_authority
   - do_not_treat_CommandItem_EXECUTED_as_effect_truth_without_evidence
   - priority_or_recommended_action_is_not_Clearance
   - do_not_create_one_universal_priority_scalar_as_semantic_truth
