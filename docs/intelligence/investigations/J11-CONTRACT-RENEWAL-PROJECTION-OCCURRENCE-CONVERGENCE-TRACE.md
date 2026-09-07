@@ -1,15 +1,13 @@
 # J11 — Contract Renewal Projection / Occurrence / Convergence Trace
 
-Status: MICROSCOPIC TRACE — CANONICAL SUPPORTING EVIDENCE
+Status: MICROSCOPIC TRACE — CANONICAL SUPPORTING EVIDENCE / RECONCILED THROUGH F218/C168
 Last updated: 2026-09-07
 Implementation evidence: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2`
 Production implementation: READ-ONLY / UNAUTHORIZED
 
 ## Purpose
 
-Trace the lifecycle from Contract renewal state into both local ContractAlert projection and canonical operator obligation work, then test acknowledgement, settlement, deletion and later recurrence.
-
-This trace allocates **no new finding or contradiction IDs**. It records J11 manifestations of existing canonical laws.
+Trace Contract renewal state into local ContractAlert projection and canonical operator obligation work, then test acknowledgement, correction, settlement, deletion, retention and later recurrence.
 
 ---
 
@@ -17,37 +15,54 @@ This trace allocates **no new finding or contradiction IDs**. It records J11 man
 
 ```text
 createContract / updateContract / applyExtractionResult
-→ regenerateAlerts(businessId, contractId)
-→ compute alert facts from current expiryDate / renewalDate
-→ deleteMany({ contractId })
-→ createMany(recomputed ContractAlert rows)
+→ regenerateAlerts()
+→ compute expiry / renewal alert facts from current Contract
+→ delete all old ContractAlert rows
+→ create recomputed rows
 ```
 
-Operator action:
+The Contracts UI renders these alerts locally and allows `Ack`, persisting `acknowledgedAt/acknowledgedBy`.
+
+### 1.1 Disposition loss on regeneration
+
+A later regeneration deletes acknowledged rows and recreates the same semantic condition without the prior disposition.
+
+Verdict:
 
 ```text
-Contracts UI
-→ acknowledgeContractAlert(...)
-→ ContractsService.acknowledgeAlert(...)
-→ acknowledgedAt / acknowledgedBy persisted on ContractAlert row
+SPECIALIZATION → F182 / KF-REC-051
 ```
 
-Later regeneration:
+Derived fact recomputation may not erase durable operator disposition if acknowledgement is intended to persist.
+
+### 1.2 Time advancement is write-triggered
+
+EXPIRY_30 / EXPIRY_7 / EXPIRY_1 / EXPIRED are recalculated only when `regenerateAlerts()` runs. Time crossing a threshold does not itself advance the stored local projection.
+
+Verdict:
 
 ```text
-same semantic alert condition still exists
-→ prior row deleted
-→ new row created
-→ prior acknowledgement evidence absent
+SPECIALIZATION → J23 / KF-REC-047 temporal materialization law
 ```
 
-### Classification
+### 1.3 Renewal actionability differs from central obligation
 
-`SPECIALIZATION of F182 / KF-REC-051`
+Local `RENEWAL_DUE` is created whenever `renewalDate > now`, independent of `renewalNoticeDays`.
 
-Reason: stable operator-projection identity and persistent user disposition are already owned by the Operator Attention & Priority Contract. J11 exposes a concrete delete/recreate implementation that violates that law.
+The central renewal obligation only raises once:
 
-No F217/C167 allocation.
+```text
+now >= renewalDate - renewalNoticeDays
+```
+
+Verdict:
+
+```text
+RELATED PROJECTION DIVERGENCE → KF-REC-047 + KF-REC-051
+NO new ID currently allocated
+```
+
+A contextual future renewal date may be useful locally, but it should not be labelled/treated as the same actionable obligation unless the predicates agree.
 
 ---
 
@@ -55,12 +70,13 @@ No F217/C167 allocation.
 
 ```text
 ContractRenewalSweep @ daily 07:00
-→ find Contract where renewalDate <= horizon and status ACTIVE|RENEWAL_DUE
-→ apply contract-specific noticeDays window
-→ emit WORK_OBLIGATION_RAISED
+→ Contract status ACTIVE|RENEWAL_DUE
+→ renewalDate within 365-day coarse horizon
+→ noticeDays eligibility
+→ WORK_OBLIGATION_RAISED
 ```
 
-Identity emitted:
+Current emitted identity:
 
 ```text
 businessId
@@ -70,306 +86,267 @@ businessId
 + actionType=CONTRACT_RENEWAL
 ```
 
-Materialization:
-
-```text
-ObligationListener.onRaised()
-→ CommandItem.upsert(five-tuple)
-→ create kind=OBLIGATION,status=OPEN
-→ on repeat raise update FACTS ONLY
-→ status/completedAt/dismissedAt/dischargedAt intentionally preserved
-```
-
-This is a positive seam for duplicate emission idempotency and disposition preservation.
-
----
-
-## 3. Same-occurrence duplicate versus next-occurrence recurrence
-
-The listener deliberately implements:
-
-```text
-repeat raise of same five-tuple
-→ refresh due/title/value/etc.
-→ DO NOT reopen terminal user disposition
-```
-
-That is correct when the same renewal occurrence is emitted repeatedly by:
-
-- daily sweep;
-- multiple replicas;
-- retry/replay.
-
-But the Contract renewal producer does not include a renewal-cycle/occurrence identity. A later genuine renewal cycle for the same Contract emits the same five-tuple.
-
-Reachable sequence:
-
-```text
-Cycle N renewal enters notice window
-→ five-tuple obligation OPEN
-→ business decides / Contract status update
-→ WORK_OBLIGATION_SETTLED
-→ same CommandItem COMPLETED + dischargedAt
-
-Contract remains/re-enters ACTIVE with a later renewalDate
-→ Cycle N+1 enters notice window
-→ sweep emits same five-tuple
-→ upsert finds prior COMPLETED CommandItem
-→ updates facts only
-→ status remains COMPLETED
-→ new renewal occurrence is not admitted as new actionable work
-```
-
-The existing unit test proves duplicate sweeps intentionally emit the same sourceId/actionType and rely on listener dedupe; it does not test a later renewal cycle.
-
-### Classification
-
-`SAME / SPECIALIZATION of mature J23 temporal Definition != Occurrence law and KF-REC-047`
-
-This is not a new contract-specific architecture root.
-
-Target distinction:
-
-```text
-CONTRACT / RENEWAL DEFINITION IDENTITY
-!= RENEWAL WORK OCCURRENCE IDENTITY
-```
-
-Desired behaviour:
-
-```text
-same occurrence retry/replay
-→ converge on same WorkOccurrence / disposition
-
-next semantic renewal cycle
-→ new WorkOccurrence identity
-→ independently actionable/dischargeable
-→ lineage back to same Contract definition/revision
-```
-
-No F217/C167 allocation.
-
----
-
-## 4. Status-update settlement path
-
-`ContractsService.updateContract()` calls `settleRenewalIfResolved()` after regeneration.
-
-For status values:
-
-```text
-ACTIVE
-EXPIRED
-TERMINATED
-ARCHIVED
-```
-
-it emits:
-
-```text
-WORK_OBLIGATION_SETTLED
-sourceModule=contracts
-sourceType=contract
-sourceId=<contract id>
-actionType=CONTRACT_RENEWAL
-```
-
-`ObligationListener.onSettled()` converges the matching CommandItem to COMPLETED/discharged.
+`ObligationListener` upserts CommandItem on that tuple. Re-raise refreshes facts but intentionally preserves status/disposition.
 
 Positive seam:
 
 ```text
-source resolution
-→ explicit reverse convergence event
-→ durable operator work settlement
+same occurrence duplicate/replay
+→ same row
+→ facts refresh
+→ user disposition does not resurrect
 ```
-
-Open semantic question: `ACTIVE` is overloaded as a settlement signal even though it can mean either "renewal decision completed" or simply "contract currently active". The status vocabulary alone may not prove which renewal occurrence was discharged. Do not allocate a finding until the later recurrence/transition semantics are fully traced.
 
 ---
 
-## 5. Hard-delete asymmetry
+## 3. Same occurrence versus next renewal occurrence
 
-`ContractsService.deleteContract()`:
-
-```text
-find Contract by businessId/id
-→ prisma.contract.delete({ id })
-→ return { deleted: true }
-```
-
-No matching `WORK_OBLIGATION_SETTLED` event is emitted.
-
-The Contract database lineage includes `ON DELETE CASCADE` for Contract-owned descendants including `contract_versions` and `contract_alerts`.
-
-The independently materialized CommandItem obligation is identified by scalar source metadata, not a Contract foreign-key ownership relation.
-
-Therefore:
+The tuple contains no renewal-cycle identity.
 
 ```text
-renewal obligation OPEN
-→ Contract hard delete
-→ Contract source disappears
-→ Contract-owned alert/version history cascades
-→ CommandItem can survive
-→ no settlement/cancellation/supersession event
-→ operator work can remain actionable with no source record
+Cycle N → OPEN → decision → COMPLETED
+Cycle N+1 → same source/action tuple
+→ prior COMPLETED row reused
+→ facts update but terminal disposition remains
 ```
 
-### Classification
-
-Two existing owners:
+Verdict:
 
 ```text
-orphan operator work
-→ SPECIALIZATION of F182 / KF-REC-051
-
-loss of Contract revision/history on destructive lifecycle mutation
-→ STRENGTHENING of F215/C165
+SPECIALIZATION → J23 Definition != Occurrence / KF-REC-047
 ```
 
-No new ID.
-
-Target law:
-
-```text
-SOURCE DESTRUCTION / WITHDRAWAL
-→ explicit lifecycle revision/tombstone where evidence retention requires it
-→ explicit derived-work convergence
-→ KEEP | SETTLE | CANCEL | SUPERSEDE | REDERIVE
-→ history preserved according to retention policy
-```
-
-Deletion itself is not proof that an obligation was discharged.
+No duplicate J11 finding is allocated for this recurrence law.
 
 ---
 
-## 6. Two renewal-attention representations
+## 4. F217/C167 — false settlement from lifecycle-status presence
 
-Current architecture contains both:
+`updateContract()` calls:
+
+```text
+settleRenewalIfResolved(businessId, contractId, dto.status)
+```
+
+and treats:
+
+```text
+ACTIVE | EXPIRED | TERMINATED | ARCHIVED
+```
+
+as sufficient to emit `WORK_OBLIGATION_SETTLED`.
+
+The standard UI edit form is initialized from the current Contract and submits the whole form, including unchanged status.
+
+Reachable path:
+
+```text
+ACTIVE contract + OPEN renewal obligation
+→ edit notes/title/etc.
+→ unchanged status=ACTIVE resubmitted
+→ WORK_OBLIGATION_SETTLED
+→ renewal work COMPLETED without renewal decision
+```
+
+At the same time `ContractRenewalSweep` scans `ACTIVE` contracts to raise renewal work.
+
+Canonical allocation:
+
+```text
+F217 — false renewal discharge from generic Contract edit
+C167 — ACTIVE means both renewal-resolved and renewal-eligible depending on path
+```
+
+Law:
+
+```text
+ContractLifecycleState
+!= RenewalDecisionOccurrence
+!= RenewalDecisionEvidence
+!= RenewalObligationDisposition
+```
+
+---
+
+## 5. Renewal-date / notice correction after work is raised
+
+The obligation upsert can refresh `dueAt`, title, value and other facts when the sweep re-emits the same tuple.
+
+That is useful when the same occurrence's factual details are corrected while it remains actionable.
+
+But if a correction moves the renewal date or notice window so the previously raised obligation is no longer actionable:
+
+```text
+old occurrence/work is OPEN
+→ Contract renewalDate/notice changes outside current action window
+→ updateContract regenerates local alerts
+→ no source-side cancellation/supersession of existing renewal obligation
+→ later sweep emits nothing while outside window
+→ prior CommandItem may remain OPEN
+```
+
+Verdict:
+
+```text
+SPECIALIZATION → F182 / KF-REC-051 reverse convergence
+```
+
+If the date change represents a genuinely new renewal cycle rather than correction of the same occurrence, occurrence identity delegates to J23/KF-REC-047.
+
+---
+
+## 6. Hard-delete / retention asymmetry
+
+`deleteContract()` hard-deletes without consulting `retentionPolicy` or `retentionUntil` and without an observed deletion revision/tombstone.
+
+Database cascades Contract-owned:
+
+```text
+ContractParty
+ContractTerm
+ContractVersion
+ContractAlert
+ContractTagOnContract
+```
+
+The inspected migration does not declare Contract foreign keys to source Asset/BusinessAsset/DocumentInstance/Drive objects; source-document deletion is therefore not claimed.
+
+Canonical allocation:
+
+```text
+F218 — persisted/product-facing retention state is non-load-bearing at hard delete
+C168 — declared retention semantics conflict with unconditional destructive deletion
+```
+
+Separately, an already-raised CommandItem may survive deletion because deletion emits no obligation settle/cancel/supersede event:
+
+```text
+orphan operator work → F182 / KF-REC-051 specialization
+```
+
+---
+
+## 7. Writer inventory / symmetry
+
+### Authoritative create/update/delete owners
+
+Primary authoritative write ownership is concentrated in `ContractsService`:
+
+```text
+manual UI/API create → createContract()
+KEY contracts_create → createContract(... KEY_SYSTEM_ACTOR_ID)
+manual UI/API update → updateContract()
+KEY contracts_update → updateContract()
+explicit document extraction → applyExtractionResult()
+document.extracted listener → create Contract if needed + applyExtractionResult()
+manual UI/API delete → deleteContract()
+KEY contracts_delete → deleteContract()
+```
+
+`ContractClauseService` separately writes `Contract.clauseAnalysis`, but its own documentation classifies zero-shot clause extraction as advisory, human-review output. Repository search found no independent consumer of persisted `clauseAnalysis` outside that extractor. Current classification:
+
+```text
+DERIVED / ADVISORY PROJECTION
+not authoritative ContractRevision truth by itself
+persistence value-density remains questionable
+```
+
+### Revision asymmetry
+
+```text
+createContract → ContractVersion v1
+applyExtractionResult → ContractVersion metadata row
+updateContract manual/KEY → no ContractVersion
+ContractClause advisory projection → no ContractVersion, acceptable if kept explicitly derived
+hard delete → ContractVersion history cascades away
+```
+
+This strengthens F215; no new root required.
+
+### KEY deletion evidence contradiction
+
+The `contracts_delete` tool description itself says:
+
+```text
+Prefer TERMINATED or ARCHIVED — a contract that existed is a fact about the business, and the register is evidence.
+```
+
+and the tool is classified high risk / tier 3, yet its execution handler delegates directly to the unconditional `deleteContract()` path. This strengthens F218/C168 rather than creating another root.
+
+---
+
+## 8. Explicit renewal-decision capability search
+
+Repository search did not reveal a distinct first-class product action such as:
+
+```text
+RENEW
+NON_RENEW
+LAPSE
+ACCEPT_RENEWAL
+REJECT_RENEWAL
+```
+
+The standard product surface exposes generic Contract editing/status selection instead.
+
+Current interpretation:
+
+```text
+absence of explicit decision artifact
++ generic status-as-settlement shortcut
+→ already captured by F217/C167
+```
+
+Do not allocate another finding merely for the absence of a dedicated button/command unless later evidence proves a separate semantic failure.
+
+---
+
+## 9. Attention-role classification
 
 ```text
 ContractAlert
-→ local contracts module projection
-→ acknowledgedAt / acknowledgedBy
-→ Contracts page + contract stats
+→ LOCAL CONTEXTUAL DERIVED PROJECTION
+→ useful for contract-detail awareness
 ```
-
-and:
 
 ```text
-CommandItem(kind=OBLIGATION, actionType=CONTRACT_RENEWAL)
-→ canonical operator-work projection
-→ disposition / due / value / priority / discharge
-→ Command/attention ecosystem
+RenewalOccurrence + CommandItem obligation
+→ DURABLE OWED WORK / CENTRAL OPERATOR ATTENTION
 ```
 
-These are not automatically duplicates:
+Target pressure:
 
-- an informational expiry warning may be a local derived alert;
-- a renewal decision owed by a date is durable operator work.
-
-But overlapping `RENEWAL_DUE` semantics can produce competing attention/disposition unless ownership is explicit.
-
-### Next anti-duplication question
-
-For each ContractAlertType classify:
-
-```text
-INFORMATIONAL LOCAL PROJECTION
-vs
-DURABLE OPERATOR OBLIGATION
-vs
-TEMPORAL OCCURRENCE PROJECTION
-vs
-REDUNDANT COMPETING ATTENTION CHANNEL
-```
-
-Do not retain two durable disposition systems for the same semantic work occurrence.
+- do not create a second canonical obligation spine from ContractAlert;
+- derive local informational warnings cheaply where possible;
+- if local acknowledgement is durable product state, preserve semantic identity/disposition;
+- use the canonical obligation occurrence for due/actionable renewal work;
+- distinguish future visibility from actionability in naming/UI.
 
 ---
 
-## 7. Causal graph
-
-```text
-source evidence / human edit / AI extraction
-→ Contract current projection
-→ renewalDate / noticeDays / renewalType / value
-        ├─→ regenerateAlerts → ContractAlert → local acknowledgement
-        │                        ↑
-        │                        └─ delete/recreate can erase disposition
-        │
-        └─→ daily renewal sweep
-             → work.obligation.raised
-             → stable CommandItem upsert
-             → operator work/disposition
-             → Contract decision/status mutation
-             → work.obligation.settled
-             → CommandItem discharge
-```
-
-Recurrence break:
-
-```text
-Cycle N discharged
-→ later renewalDate for Cycle N+1
-→ same five-tuple
-→ old terminal CommandItem reused
-→ new occurrence can be hidden
-```
-
-Deletion break:
-
-```text
-open obligation
-→ hard-delete Contract
-→ source/history disappear
-→ obligation may survive without convergence
-```
-
-Epistemic upstream pressure:
-
-```text
-uncertain AI-extracted renewal fact
-→ authoritative Contract projection
-→ both alert and obligation systems
-→ operator priority/action
-```
-
-This composes F216 with J17/J23 rather than creating a new epistemic root.
-
----
-
-## 8. Anti-duplication verdict table
+## 10. Anti-duplication verdict table
 
 | J11 manifestation | Canonical owner | Verdict |
 |---|---|---|
-| ContractAlert acknowledgement lost on regeneration | F182 / KF-REC-051 | SPECIALIZATION |
-| Delete source leaves obligation open | F182 / KF-REC-051 | SPECIALIZATION |
-| Hard delete destroys Contract revision descendants | F215 / C165 | STRENGTHENING |
-| Repeated sweep dedupe | KF-REC-051 positive seam | PRESERVE |
-| Next renewal cycle hidden by same five-tuple | J23 / KF-REC-047 | SPECIALIZATION |
-| AI inferred renewal state drives work | F216 / C166 + KF-REC-049 | COMPOSITION |
+| Contract revision incompleteness | F215/C165 | CANONICAL J11 ROOT |
+| uncertain extraction promoted to truth | F216/C166 | CANONICAL J11 ROOT |
+| false renewal discharge via status presence | F217/C167 | CANONICAL J11 ROOT |
+| retention ignored at hard delete | F218/C168 | CANONICAL J11 ROOT |
+| alert acknowledgement lost on regeneration | F182 / KF-REC-051 | SPECIALIZATION |
+| source deletion leaves obligation open | F182 / KF-REC-051 | SPECIALIZATION |
+| date correction makes prior work stale | F182 / KF-REC-051 | SPECIALIZATION |
+| next renewal cycle hidden by same tuple | J23 / KF-REC-047 | SPECIALIZATION |
+| alert thresholds do not advance with time | J23 / KF-REC-047 | SPECIALIZATION |
+| local renewal alert vs obligation timing | KF-REC-047/051 | RELATED PROJECTION DIVERGENCE |
+| advisory clauseAnalysis direct write | derived projection | NO REVISION ROOT; VALUE-DENSITY REVIEW |
 
-Current allocation remains:
+Current canonical ranges:
 
 ```text
-Findings through F216
-Contradictions through C166
+Findings through F218
+Contradictions through C168
 Recommendations through KF-REC-054
-F217 / C167 / KF-REC-055 remain unallocated
+Next free F219 / C169 / KF-REC-055
 ```
 
----
-
-## 9. Exact next trace
-
-1. classify every ContractAlertType against the CommandItem obligation/Temporal Work roles;
-2. determine whether the user can see two actionable representations of one renewal occurrence;
-3. trace update/extraction/status mutation order when renewalDate changes after an obligation has already been raised;
-4. test whether `ACTIVE` as a settlement status can prematurely settle a newly changed/future renewal occurrence;
-5. trace retentionPolicy/retentionUntil versus hard-delete capability;
-6. trace authorization/audit evidence for delete and material contract mutation;
-7. only after these traces, decide whether irreducible J11 semantics justify F217/C167 or KF-REC-055.
-
-No production implementation is authorized by this trace.
+No production implementation is authorized.
