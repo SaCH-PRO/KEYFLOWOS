@@ -1,11 +1,11 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-06
-Status: CURRENT — J7 POOLED / J3+J4 SERVICE FINANCIAL DISPOSITION + CUSTOMER LIFECYCLE CONVERGENCE ACTIVE
+Status: CURRENT — J3/J4 COMMERCIAL-TO-CASH TRANCHE TARGET-ALIGNED / INGRAINED; NEXT CONSTELLATION SELECTION ACTIVE
 
 ## Programme identity
 
-Repository-backed architecture forensics and convergence remain active. Production code is read-only. Destination remains whole-system target architecture + migration architecture + proof architecture + dependency-ordered repository transformation programme before implementation.
+Repository-backed architecture forensics and recursive convergence remain active. Production code is read-only. The destination remains whole-system target architecture + migration architecture + proof architecture + dependency-ordered repository transformation programme before implementation.
 
 ## Context integrity
 
@@ -24,11 +24,11 @@ context integrity:     PASS
 ```text
 Findings:        F205
 Contradictions:  C155
-Recommendations: KF-REC-052
+Recommendations: KF-REC-053
 Concepts:        KF-CONCEPT-042
 ```
 
-Load `04A` + `04B` before allocating anything new.
+Load `04-CONCEPT-REGISTRY.md` + `04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md` + `04B-CANONICAL-ID-ALLOCATION-LEDGER.md` before allocating anything new.
 
 ## Mature pooled architecture
 
@@ -36,14 +36,22 @@ Load `04A` + `04B` before allocating anything new.
 - J17 Operator Attention: F179–F184 / C129–C134 / KF-REC-051 / 20 proof obligations.
 - J23/J18 temporal/recovery: 39 proof obligations / 16 deterministic fault points; runtime proof not executed.
 - J7 Financial Truth: F185–F196 / C135–C146 / KF-REC-052 / 32 proof obligations / 16 deterministic fault points; runtime proof not executed.
+- J3/J4 Commercial Relationship & Obligation: F197–F205 / C147–C155 / KF-REC-053 / 28 local proof obligations / 12 deterministic fault-injection points; runtime proof not executed.
 
-## Active frontier — J3 + J4
+## J3/J4 current tranche — converged state
 
-```text
-J3 — Lead → Customer → Cash
-J4 — Booking → Service → Payment
-stage = SERVICE_FINANCIAL_DISPOSITION_AND_CUSTOMER_LIFECYCLE_CONVERGENCE
-```
+Canonical dossiers now exist:
+
+- `docs/intelligence/journeys/KF-JOURNEY-003-LEAD-CUSTOMER-CASH.md`
+- `docs/intelligence/journeys/KF-JOURNEY-004-BOOKING-SERVICE-PAYMENT.md`
+
+Supporting synthesis/re-audit:
+
+- `investigations/J3-CUSTOMER-LIFECYCLE-STATE-OWNERSHIP-MATRIX.md`
+- `investigations/J3-J4-COMMERCIAL-RELATIONSHIP-OBLIGATION-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+- `investigations/J3-J4-J17-J18-J23-COMMERCIAL-RELATIONSHIP-OBLIGATION-BACKWARD-REAUDIT.md`
+- `investigations/J3-J4-J17-J18-J23-J7-FINANCIAL-TRUTH-BACKWARD-REAUDIT.md`
+- `10L-RECOMMENDATION-REGISTER-COMMERCIAL-RELATIONSHIP-OBLIGATION-CONTINUATION.md`
 
 Current canonical roots:
 
@@ -53,53 +61,57 @@ F198/C148 — ContactInsight LTV adds won Deal + PAID Invoice value for the same
 F199/C149 — completed booking can lose required completion invoice into log-only failure
 F200/C150 — deposit D + completion full-price invoice P do not compose one service obligation
 F201/C151 — CANCELLED/NO_SHOW has no declared financial-descendant disposition
-F202/C152 — RevenueAttribution mixes BOOKING pipeline + paid INVOICE stages as additive revenue
-F203/C153 — KeyCortex queries noncanonical lead/customer status values
+F202/C152 — RevenueAttribution mixes BOOKING pipeline + paid INVOICE stages
+F203/C153 — KeyCortex queries noncanonical customer-status values
 F204/C154 — live booking.completed automation has incompatible event/template/tool contracts
-F205/C155 — persisted Contact.status admits incompatible CRM/Shopify/PeopleFlow/KeyCortex lifecycle-health dialects
+F205/C155 — persisted Contact.status admits incompatible lifecycle/health dialects
 ```
 
-Ownership matrix:
-`docs/intelligence/investigations/J3-CUSTOMER-LIFECYCLE-STATE-OWNERSHIP-MATRIX.md`
-
-## Customer-state target direction
-
-Do not expand one catch-all Contact status enum.
+## Canonical target distinctions from KF-REC-053
 
 ```text
-CustomerLifecycleState
-!= RelationshipHealthState
-!= DealState / DealStage
-!= tags / segments / free-form annotations
+CustomerLifecycleState != RelationshipHealthState != DealState/DealStage != tags/segments
+commercial evidence != lifecycle transition until policy says so
+pipeline/expected value != committed != invoiced != collected != net realized
+service complete != financially complete
+deposit != additive charge unless explicitly modeled as one
+CANCELLED / NO_SHOW != financial disposition complete
+missing required descendant != nothing left to do
+event name equality != event/tool schema compatibility
+plan-step idempotency != commercial-effect idempotency
 ```
 
-`Contact.status` is a free-form database String despite CRM-facing `LEAD|PROSPECT|CLIENT|LOST`; Shopify writes `CUSTOMER`, People Flow interprets `CUSTOMER/DORMANT/AT_RISK`, and KeyCortex uses another lowercase dialect. External labels therefore require owned adapters and transition provenance.
+Target semantic envelopes include `CommercialObligationLineage`, `CommercialValueStage`, `ServiceFinancialDisposition`, `ExpectedConsequence`, and `EventToActionContractAdapter`. They are target semantics, not authorization for new universal tables/runtimes.
 
-## Service-financial evidence
+## Fresh verification / unresolved evidence inventory
 
-Service schema contains `invoiceTiming`, `depositRequired`, `depositType`, `depositValue` but no booking/service cancellation/no-show financial policy field was found. Booking contains `invoiceId`, `depositInvoiceId`, and `paymentStatus = UNPAID|DEPOSIT_PAID|PAID` by comment.
+The latest source trace independently reproduced F200/F201/F202 and found no observed live writer maintaining `Booking.paymentStatus = DEPOSIT_PAID|PAID` on the canonical payment path. Invoice/payment relations and events appear to carry the load-bearing financial evidence. This remains an **inventory/migration question inside KF-REC-053**, not a new finding unless new evidence proves a distinct defect.
 
-No runtime `DEPOSIT_PAID` writer has yet been observed. That field remains candidate evidence until its writer/consumer graph is complete.
+Still worth inventorying before implementation:
 
-F199 is strengthened because current recovery/operator scans start from existing invoices; a COMPLETED booking whose required invoice was never created has no Invoice row for those projections to discover.
+1. persisted `Booking.paymentStatus` values/origins in real data;
+2. persisted historical `Contact.status` values/origins and ambiguous aliases;
+3. live `RevenueAttribution` rows by stage/source/lineage and actual consumers;
+4. representative booking/deposit/final-invoice/payment/cancel/no-show lineages;
+5. runtime proof/fault-injection obligations for KF-REC-053.
 
-F202 is strengthened because `RevenueAttributionService.summarizeBySource()` sums BOOKING/INVOICE/ORDER rows by source without stage separation. `deriveSeedFromArtifact(BOOKING)` can also synthesize a 0.01 booking amount when no invoice exists, reinforcing semantic instability.
+Do not repeat the already-completed J3/J4 pressure test or backward re-audit absent new evidence.
 
-## Exact next action
+## Exact continuation
 
 ```text
-1. trace all Booking.paymentStatus writers/consumers and invoice/payment/refund events;
-2. classify it as live aggregate, stale projection, or dormant competing financial truth;
-3. trace paid deposit through CANCELLED/NO_SHOW into actual refund/retain/credit/fee behavior and policy source;
-4. complete RevenueAttribution consumer classification;
-5. backward re-audit J17/J18/J23 for missing descendants, unresolved financial dispositions and customer-state dialect effects;
-6. after local convergence, run current standards/frontier pressure test for CustomerLifecycle and CommercialObligationLineage;
-7. decide whether a new recommendation is justified beyond KF-REC-049/KF-REC-052;
-8. reuse mature roots before new IDs and persist every material tranche.
+1. finish continuity/index ingestion for KF-REC-053 and J3/J4 dossiers;
+2. perform programme coverage check and select the next highest-leverage unpooled constellation;
+3. prefer an adjacent journey that can falsify/refine KF-REC-053 rather than implementation planning by reflex;
+4. current leading candidates are J10 Commerce/Fulfilment and J11 Contract/Obligation/Renewal;
+5. run MAP → MICROSCOPIC TRACE → JOURNEY → CONSTELLATION → KERNEL CROSS-REFERENCE on the selected frontier;
+6. reopen J3/J4 only where genuinely new evidence invalidates or specializes existing conclusions;
+7. reuse F001–F205 / C001–C155 / KF-REC-001–053 before allocating anything new;
+8. keep production code untouched.
 ```
 
 ## Execution boundary
 
 `KF-EXEC-EXTFX-001` remains pooled implementation-shape evidence only. No production implementation is authorized.
 
-If this chat disappears, resume at **J3/J4 after F205/C155, beginning with Booking.paymentStatus and paid-deposit cancellation disposition**.
+If this chat disappears, resume **after KF-REC-053 and after the canonical J3/J4 dossiers were ingrained**, beginning with programme coverage / next-constellation selection — not with the stale Booking.paymentStatus trace.
