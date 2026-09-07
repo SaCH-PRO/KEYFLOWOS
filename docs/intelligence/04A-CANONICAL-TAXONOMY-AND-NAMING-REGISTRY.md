@@ -41,8 +41,8 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Journeys: `J1 ... J25` — `03-ANALYSIS-MAP.md`.
 - Kernels: `K1 ... K12` — `12-KERNEL-PROGRAMME.md`.
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
-- Findings: `F001–F218` — `08*`; allocator 04B.
-- Contradictions: `C001–C168` — `09*`; allocator 04B.
+- Findings: `F001–F219` — `08*`; allocator 04B.
+- Contradictions: `C001–C169` — `09*`; allocator 04B.
 - Recommendations: `KF-REC-001–KF-REC-055` — `10*`; allocator 04B.
 
 Latest J11 roots:
@@ -51,6 +51,11 @@ F215/C165 — ContractVersion is not a complete reconstructable authoritative Co
 F216/C166 — uncertain AI contract extraction can be promoted into authoritative Contract/renewal truth without epistemic/governance promotion evidence
 F217/C167 — supplied Contract lifecycle status can falsely discharge renewal work; ACTIVE is simultaneously eligible to raise that work
 F218/C168 — Contract retention semantics do not constrain hard deletion, which cascades Contract-owned evidence/history
+```
+
+Latest J12 root:
+```text
+F219/C169 — transient document assertions can be admitted as successful payment evidence without an explicit consumer-specific evidence-admission decision
 ```
 
 Current major pooled targets:
@@ -83,6 +88,9 @@ Merchant SKU != immutable provider external identity
 Mutable customer email != immutable provider customer identity
 Plan-step/process idempotency != semantic effect idempotency
 Document extraction assertion != authoritative Contract truth
+Document extraction assertion != qualifying PaymentCompletionEvidence != Payment SUCCESSFUL / Invoice paid truth
+Document identity != document revision != parsed representation != extraction/assertion occurrence != verified evidence
+EvidenceAdmissionDecision != extraction confidence alone != downstream domain state
 Contract current projection != ContractRevision evidence/history
 Contract definition/source identity != renewal WorkOccurrence identity
 ContractLifecycleState != RenewalDecisionOccurrence != RenewalDecisionEvidence != RenewalObligationDisposition
@@ -111,6 +119,7 @@ ARCHIVE / RETIRE / SUPERSEDE != HARD DELETE
 | Commercial Relationship & Obligation Contract | KF-REC-053 |
 | Commerce & Fulfilment Contract | KF-REC-054 |
 | Contract Integrity & Renewal Contract | KF-REC-055 |
+| EvidenceAdmissionDecision | F219/J12 provisional target vocabulary: consumer-specific decision that an exact assertion/evidence revision is admissible for a material downstream claim; generic epistemic mechanics delegate to KF-REC-049 and financial claim strength to KF-REC-052; no concept ID allocated |
 | ContractRevision | KF-REC-055 authoritative agreement-state revision lineage; generic provenance mechanics delegate to KF-REC-049 |
 | ContractAssertion / extraction evidence | KF-REC-055 domain promotion input; generic epistemics delegate to KF-REC-049 |
 | Renewal WorkOccurrence | KF-REC-055 domain binding to J23/KF-REC-047 occurrence mechanics; one cycle != Contract definition identity |
@@ -176,6 +185,7 @@ Do not let KF-REC-055 become a universal event store, EDMS/CLM suite, second kno
 11. A stale or duplicate canonical range is an intelligence-integrity defect and is repaired before broad analysis continues.
 12. Search/reuse is mandatory across ChatGPT, Claude Code and Kimi Code sessions.
 13. A domain-specific recurrence, projection-disposition or epistemic manifestation reuses the mature kernel root unless it proves a genuinely distinct semantic owner.
+14. A document/extraction assertion must not be treated as qualifying domain evidence merely because it is parseable or carries a confidence score; material promotion requires a consumer-specific admission predicate/decision.
 
 ---
 
@@ -184,15 +194,15 @@ Do not let KF-REC-055 become a universal event store, EDMS/CLM suite, second kno
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F218
-Contradiction range:     through C168
+Finding range:           through F219
+Contradiction range:     through C169
 Recommendation range:    through KF-REC-055
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-Next free:               F219 / C169 / KF-REC-056 — UNALLOCATED
+Next free:               F220 / C170 / KF-REC-056 — UNALLOCATED
 ```
 
-J3/J4 are provisionally converged through KF-REC-053. J10 is provisionally converged through KF-REC-054. **J11 is provisionally converged / target-aligned through F218/C168/KF-REC-055 after standards/frontier pressure testing and backward re-audit.**
+J3/J4 are provisionally converged through KF-REC-053. J10 is provisionally converged through KF-REC-054. J11 is provisionally converged / target-aligned through F218/C168/KF-REC-055. **J12 is ACTIVE microscopic forensics through F219/C169; no J12 recommendation is allocated yet.**
 
 Current J11 homes:
 - `journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md`
@@ -200,17 +210,18 @@ Current J11 homes:
 - F217 — `08AT`; C167 — `09AT`
 - F218 — `08AU`; C168 — `09AU`
 - KF-REC-055 — `10N`
-- pressure test — `investigations/J11-CONTRACT-OBLIGATION-RENEWAL-STANDARDS-FRONTIER-PRESSURE-TEST.md`
-- backward re-audit — `investigations/J11-J12-J23-J18-J17-J7-J3-J4-K4-K6-K7-K8-K11-CONTRACT-INTEGRITY-BACKWARD-REAUDIT.md`
 
-Reuse decisions remain:
-- renewal-cycle identity → J23 / KF-REC-047
-- ContractAlert disposition resurrection → F182 / KF-REC-051
-- local alert temporal advancement → J23 / KF-REC-047
-- Contract deletion orphaning renewal work → F182 / KF-REC-051
-- renewal-date/notice correction leaving stale work → F182 / KF-REC-051
-- clauseAnalysis → derived/advisory projection; value-density review
+Current J12 homes:
+- `journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md`
+- F219 — `08AV`
+- C169 — `09AV`
 
-Next programme action is frontier selection from genuinely unpooled journeys, not implementation of KF-REC-055.
+J12 reuse decisions now include:
+- manual inline edit approved through stale version → F161 / KF-REC-049
+- AI tweak partial mutation vs version evidence → check F164 before allocation
+- contract extraction promotion → F216/C166 + KF-REC-055
+- same payment evidence replay / new random payment identity → KF-REC-048 specialization; no F220 from this seam
+
+Next programme action is continued J12 microscopic tracing across remaining material DocumentIntelligence consumers, source revision identity, correction/reprocess/supersession/deletion and evidence promotion boundaries. Do not allocate KF-REC-056 merely because F219 exists.
 
 No production implementation is authorized by this taxonomy artifact.
