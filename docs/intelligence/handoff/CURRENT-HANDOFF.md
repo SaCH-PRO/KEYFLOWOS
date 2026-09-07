@@ -1,139 +1,119 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-07
-Status: CURRENT — J11 CONTRACT / OBLIGATION / RENEWAL MICROSCOPIC TRACE ACTIVE
+Status: CURRENT — J11 CODE POOL STABLE THROUGH F218/C168; PRESSURE TEST NEXT
 
 ## Programme identity / integrity
 
 ```text
 repository:            SaCH-PRO/KEYFLOWOS
+implementation branch: main
+implementation head:   8f173bfe79f1418159cf4099ea18b0d60d203ec2
 intelligence branch:   docs/keyflow-intelligence-foundation
 production code:       READ-ONLY / UNAUTHORIZED
-context integrity:     PASS after J11 continuity repair
+context integrity:     PASS
+runtime proof:         NOT EXECUTED
 ```
 
-Source documents are product-intent / architecture-context evidence. Reachable repository code is authoritative for implementation behaviour. Revalidate the exact `main` implementation head before relying on historical SHA metadata.
+Source documents provide product-intent/context evidence; repository behaviour is authoritative for implementation claims.
 
 ## Canonical ranges
 
 ```text
-Findings:         F216
-Contradictions:   C166
+Findings:         F218
+Contradictions:   C168
 Recommendations: KF-REC-054
 Concepts:         KF-CONCEPT-042
-next free:        F217 / C167 / KF-REC-055 — NOT ALLOCATED
+next free:        F219 / C169 / KF-REC-055
 ```
 
-Load `04-CONCEPT-REGISTRY.md` + `04A` + `04B` before allocating anything new.
+Load 04-CONCEPT-REGISTRY + 04A + 04B before allocation.
 
 ## Mature pools
 
-- J16/K4 → F161–F178 / C111–C128 / KF-REC-049.
-- J17 → F179–F184 / C129–C134 / KF-REC-051.
-- J23/J18 → mature temporal/recovery pool via KF-REC-047/048; runtime proof not executed.
-- J7 → F185–F196 / C135–C146 / KF-REC-052.
-- J3/J4 → F197–F205 / C147–C155 / KF-REC-053; provisionally converged.
-- J10 → F206–F214 / C156–C164 / KF-REC-054; provisionally converged after pressure test + backward re-audit.
-
-## J11 durable findings already allocated
-
-Canonical homes:
-
-- `docs/intelligence/08AS-FINDING-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
-- `docs/intelligence/09AS-CONTRADICTION-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
-
-Roots:
-
-- **F215 / C165** — `ContractVersion` cannot reconstruct authoritative Contract history and principal manual mutation can bypass version recording.
-- **F216 / C166** — uncertain AI document extraction can promote inferred contract/renewal state into authoritative Contract truth without preserving an epistemic/governance promotion gate.
-
-Anti-duplication already decided:
-
 ```text
-renewal-cycle occurrence identity
-→ existing J23 temporal occurrence / definition lineage
-→ reuse KF-REC-047
-→ no duplicate J11 finding
+J16/K4 → KF-REC-049
+J17    → F179–F184 / C129–C134 / KF-REC-051
+J23/J18→ KF-REC-047/048
+J7     → F185–F196 / C135–C146 / KF-REC-052
+J3/J4  → F197–F205 / C147–C155 / KF-REC-053
+J10    → F206–F214 / C156–C164 / KF-REC-054; provisionally converged
 ```
 
-## Exact current forensic frontier
+## J11 canonical roots
 
-### 1. Alert acknowledgement resurrection — anti-duplication pending
-
-Observed reachable loop:
-
-```text
-ContractAlert derived from Contract dates
-→ operator acknowledgeAlert() stores acknowledgedAt / acknowledgedBy
-→ regenerateAlerts() later runs after contract changes/extraction
-→ deleteMany({ contractId })
-→ createMany(recomputed alerts)
-→ prior acknowledgement row is destroyed
-→ semantically equivalent alert can return as unacknowledged
-```
-
-Do **not** allocate F217/C167 yet. First fetch and compare J17 F179–F184 / C129–C134 and `10J-RECOMMENDATION-REGISTER-OPERATOR-PRIORITY-CONTINUATION.md`. Classify SAME / SPECIALIZATION / RELATED DISTINCT / GENUINELY NEW.
-
-Likely target pressure, subject to that gate:
+Dossier: `docs/intelligence/journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md`
+Trace: `docs/intelligence/investigations/J11-CONTRACT-RENEWAL-PROJECTION-OCCURRENCE-CONVERGENCE-TRACE.md`
 
 ```text
-derived alert fact may be recomputed
-!=
-durable operator disposition may be erased
+F215/C165 ContractVersion/revision history is incomplete and non-reconstructable
+F216/C166 uncertain extraction can become authoritative Contract/renewal truth
+F217/C167 generic Contract edit/status presence can falsely discharge renewal work
+F218/C168 retention semantics are non-load-bearing at destructive delete
 ```
 
-### 2. Contract deletion/correction versus already-raised renewal work
+Homes:
+`08AS/09AS`, `08AT/09AT`, `08AU/09AU`.
 
-After the anti-duplication verdict, trace:
+## Reuse decisions — do not duplicate
 
 ```text
-Contract mutation / termination / archival / deletion
-→ alerts / terms / versions
-→ ContractRenewalSweep
-→ workflow/task/obligation/effect descendants already raised
-→ cancellation / settlement / supersession / orphaning
-→ command-center / stats / AI consumption
-→ recurrence / retry / later regeneration
+renewal occurrence identity                  → J23 / KF-REC-047
+alert acknowledgement resurrection           → F182 / KF-REC-051
+alert temporal-threshold progression         → J23 / KF-REC-047
+source deletion orphaning renewal work       → F182 / KF-REC-051
+renewal date/notice correction stale work    → F182 / KF-REC-051
+local renewal alert/actionability divergence → KF-REC-047/051 pressure; no new root
+clauseAnalysis                               → advisory derived projection/value-density review
 ```
 
-Determine whether downstream work survives source deletion, whether it remains valid, and what exact semantic act closes or supersedes it. Do not assume cascade deletion equals business cancellation.
+## Important code facts
 
-## Important J11 precision
+- `ContractRenewalSweep` emits `WORK_OBLIGATION_RAISED`; obligation listener owns CommandItem materialization.
+- obligation repeat upsert refreshes facts but preserves user disposition; good for same occurrence, insufficient for later cycles without occurrence identity.
+- standard Contract edit form submits full current form including unchanged status; `ACTIVE` can therefore falsely settle an open renewal obligation.
+- daily sweep also treats `ACTIVE` as renewable/eligible, proving status alone cannot carry renewal-decision meaning.
+- hard delete ignores retention fields and cascades ContractParty, ContractTerm, ContractVersion, ContractAlert and ContractTagOnContract.
+- source document objects are not claimed to be cascade-deleted.
+- KEY `contracts_delete` is high-risk/tier-3 and textually advises archive/terminate because the register is evidence, yet handler delegates to the same hard delete.
+- KEY/manual updates share the same `updateContract()` path; no authoritative ContractVersion is created there.
+- no explicit first-class Renew/Non-renew/Lapse action was found; generic edit/status is the de facto decision surface.
 
-- Explicit contract extraction route is definitely reachable and can mutate Contract state.
-- Mounted document-extraction listener can auto-update/create a linked contract **where `sourceId` is supplied**; do not overclaim Google Drive connector reachability until sourceId assignment is proven.
-- Contract status enum flexibility is an observation, not yet a finding.
-- `ContractVersion` version-number race during concurrent extraction is pressure on F215 revision identity, not yet a separate architecture root.
-- Alert acknowledgement may represent notification disposition rather than renewal-obligation disposition; trace before merging those semantics.
+## Emerging target boundary
 
-## Constellation links to maintain
+Potential irreducible J11 semantics:
 
 ```text
-J11 ↔ J12 document/evidence / K4 knowledge
-J11 ↔ J23 temporal recurrence/work
-J11 ↔ J18 outcome/evidence/recovery
-J11 ↔ J17 operator attention
-J11 ↔ J7 financial valuation
-J11 ↔ J3/J4 commercial obligations
+ContractRevision
+RenewalOccurrence
+RenewalDecision + evidence
+Retention/DeletionDecision
 ```
 
-## Programme purpose from reassessment
+Delegations:
 
-This is not ordinary bug review. Maintain simultaneous macro/micro mapping through journeys, kernels, constellations, dynamic/causal/feedback graphs and value-density pools. Continuously classify architecture as core value, necessary specialization, derived projection, compatibility layer, redundant, accidental complexity, dead/low-value or value-detracting. Converge duplicated semantics rather than growing abstractions.
+```text
+epistemic promotion/provenance → KF-REC-049
+recurrence/temporal visibility → KF-REC-047
+operator attention/disposition → KF-REC-051
+recovery/certainty             → KF-REC-048
+financial valuation            → KF-REC-052
+commercial obligation rules    → KF-REC-053
+```
+
+Do not allocate KF-REC-055 until the pressure test shows those semantics require a bounded Contract-domain contract.
 
 ## Exact next action
 
 ```text
-1. fetch 08S–08X, 09S–09X and 10J on the intelligence branch;
-2. anti-duplicate the ContractAlert acknowledgement-regeneration loop;
-3. revalidate current main implementation head / code-bearing delta;
-4. fetch current ContractsService.delete/update/regenerate and ContractRenewalSweep paths;
-5. fetch Prisma Contract/ContractAlert/downstream-work relations;
-6. trace source deletion/termination/correction into already-raised renewal work;
-7. persist any genuinely new J11 root only after canonical gate;
-8. update/create J11 journey dossier when microscopic pool stabilizes;
-9. pressure-test and backward-re-audit before convergence;
-10. keep production untouched.
+1. run current standards/OSS/frontier research for records/revision provenance, contract lifecycle/renewals, temporal occurrence identity, deletion/retention and audit evidence;
+2. compare without importing unnecessary enterprise bulk;
+3. synthesize target invariants/options;
+4. decide whether KF-REC-055 is genuinely necessary;
+5. if yes, allocate only after 04A/04B anti-duplication gate;
+6. run backward re-audit across J12/J23/J18/J17/J7/J3-J4 and K4/K6/K7/K8/K11;
+7. update CURRENT/HANDOFF/ROLLOVER;
+8. production remains untouched.
 ```
 
-If this chat disappears now, resume from **J11 alert-disposition anti-duplication**, not from J10, frontier selection, or F215/F216 discovery.
+If continuity is lost, resume from **J11 standards/frontier pressure test after F218/C168**, not from alert regeneration or F215 discovery.
