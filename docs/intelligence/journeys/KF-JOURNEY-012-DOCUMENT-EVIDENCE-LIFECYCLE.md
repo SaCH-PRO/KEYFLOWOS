@@ -1,10 +1,11 @@
 # KF-JOURNEY-012 — Document / Evidence Lifecycle
 
-Status: **ACTIVE MICROSCOPIC FORENSICS / INITIAL ACTIVATION / NO NEW ID ALLOCATED**
+Status: **ACTIVE MICROSCOPIC FORENSICS / PAYMENT-EVIDENCE ADMISSION ROOT ALLOCATED F219/C169 / CONTINUING CROSS-DOMAIN EXTRACTION TRACE**
 Last updated: 2026-09-07
 Implementation evidence: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2`
 Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 Production implementation remains **UNAUTHORIZED / READ-ONLY**.
+Runtime proof has **NOT** been executed.
 
 ## A. Definition
 
@@ -21,7 +22,7 @@ Adjacent journeys: J11 Contract/Renewal, J7 Financial Truth, J14 External Event 
 
 ## B. Current architecture split
 
-J12 already spans at least two materially different document systems.
+J12 spans at least two materially different document systems.
 
 ### B1. AI-generated DocumentInstance system
 
@@ -68,11 +69,11 @@ Drive / Connector intelligence
 KEY / Flow orchestration
 ```
 
-These two systems must not be assumed to share one canonical document/revision/evidence identity merely because both use the word "document".
+These systems must not be assumed to share one canonical document/revision/evidence identity merely because both use the word "document".
 
 ---
 
-## C. Initial target chain
+## C. Target chain under investigation
 
 ```text
 SOURCE OBJECT / generated document
@@ -81,7 +82,7 @@ SOURCE OBJECT / generated document
 → parse/normalization artifact where applicable
 → extraction/assertion occurrence
 → source spans / evidence / model provenance / confidence
-→ review/verification/promotion policy
+→ review/verification/promotion/admission policy
 → downstream domain decision / accepted revision
 → explicit lineage back to exact evidence revision
 → correction / supersession / deletion / retention convergence
@@ -94,7 +95,8 @@ DOCUMENT IDENTITY
 != DOCUMENT REVISION
 != PARSED REPRESENTATION
 != AI EXTRACTION / ASSERTION
-!= VERIFIED EVIDENCE
+!= VERIFIED / QUALIFYING EVIDENCE
+!= EVIDENCE ADMISSION DECISION
 != DOWNSTREAM DOMAIN TRUTH
 != CURRENT MUTABLE PROJECTION
 != APPROVAL / REVIEW DISPOSITION
@@ -106,13 +108,13 @@ DOCUMENT IDENTITY
 
 ### D1. Generated documents already have explicit DocumentVersion
 
-`generateDocument()` creates the initial current sections and a version snapshot. `tweakDocument()` creates a later `DocumentVersion` after AI edits.
+`generateDocument()` creates initial current sections and a version snapshot. `tweakDocument()` creates a later `DocumentVersion` after AI edits.
 
 ### D2. Generated documents retain change/review concepts
 
 DocumentInstance can include change logs and review tasks. High-risk generated documents can create a pending generation review.
 
-### D3. Document intelligence preserves confidence in its transient extraction result
+### D3. Document intelligence preserves confidence in transient extraction output
 
 Invoice/contact/contract extraction result types carry confidence, and some domain-processing paths apply explicit confidence/governance thresholds.
 
@@ -120,7 +122,7 @@ These seams should be strengthened rather than replaced with a universal documen
 
 ---
 
-## E. Initial microscopic finding candidates / anti-duplication
+## E. Microscopic findings / anti-duplication
 
 ### E1. Manual inline edit versus approved version
 
@@ -152,7 +154,7 @@ F161 law:
 verification belongs to an exact revision/value, not a mutable field coordinate
 ```
 
-No F219 allocation for this manifestation unless later evidence proves a distinct document-specific semantic root.
+No new J12 root for this manifestation.
 
 ### E2. AI tweak mutation/version crash boundary
 
@@ -166,21 +168,19 @@ section mutation succeeds
 → current document changed without matching version evidence
 ```
 
-Initial anti-duplication pressure:
+Current anti-duplication pressure:
 
 ```text
-likely specialization of F164 / K4-K8 crash-consistent governed knowledge mutation evidence
+LIKELY SPECIALIZATION → F164 / K4-K8 crash-consistent governed knowledge mutation evidence
 ```
 
-Do not allocate until exact equivalence is checked.
+Exact equivalence still requires closure before any new allocation.
 
 ### E3. External extraction occurrence lineage
 
-`extractFromDocument()` returns/emits a transient extraction result and logs only a summarized AI execution record. The result shape has optional `sourceId`, but no observed stable extraction-occurrence/revision identifier in the service contract.
+`extractFromDocument()` returns/emits a transient extraction result and logs only a summarized AI execution record. The result shape has optional `sourceId`, but no stable extraction-occurrence/revision identifier has yet been observed in the service contract.
 
-This is the current primary frontier.
-
-Question:
+Open cross-domain question:
 
 ```text
 When extraction creates or mutates material Contract/Invoice/Contact/Expense/etc. state,
@@ -188,27 +188,103 @@ what durable object proves:
 - exact source document identity/revision,
 - exact extraction occurrence/model,
 - exact asserted values/source spans/confidence,
-- review/promotion decision,
+- review/promotion/admission decision,
 - downstream domain effect lineage?
 ```
 
-Do not allocate before tracing each material consumer and checking KF-REC-049 / existing provenance findings.
+Continue consumer-by-consumer tracing; do not collapse all manifestations into F219 automatically.
+
+### E4. F219 / C169 — payment-evidence admission boundary
+
+Reachable path:
+
+```text
+authenticated commerce payment-evidence request
+→ CommerceController
+→ PaymentEvidenceService.processEvidence()
+→ DocumentIntelligenceService.extractFromDocument(...)
+   OR raw-text fallback
+→ transient payment-like assertion
+→ no observed consumer-specific evidence-admission / verification threshold
+→ CommerceService.recordPayment(...)
+→ Payment SUCCESSFUL
+→ Invoice paidAmount/status mutation
+→ revenue/ledger reconciliation
+```
+
+The raw-text fallback can explicitly return `confidence: 0.3`, yet no observed confidence/verification/governance gate intervenes before `recordPayment()`.
+
+Canonical allocation:
+
+```text
+F219 — transient document assertions can become successful payment evidence without an explicit evidence-admission decision
+C169 — payment-evidence semantics imply qualifying evidence while the reachable path accepts an unverified transient document assertion as a successful payment
+```
+
+Homes:
+
+```text
+08AV-FINDING-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+09AV-CONTRADICTION-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+```
+
+Canonical law:
+
+> An extracted document assertion must not become qualifying payment-completion evidence merely because it contains parseable payment-like fields. Promotion must be explicit, consumer-specific, provenance-bearing, revision-bound and evidence-strength-aware.
+
+Anti-duplication verdict:
+
+```text
+RELATED DISTINCT → F219/C169
+```
+
+Delegation boundary:
+
+```text
+generic provenance / epistemic eligibility → KF-REC-049
+financial claim strength / valuation        → KF-REC-052
+retry/replay/effect identity                → KF-REC-048
+J12/K8 owns                                → document/evidence admission boundary
+```
+
+No universal document runtime is implied.
+
+### E5. Same payment evidence replay — no F220
+
+`PaymentEvidenceService.processEvidence()` supplies no stable semantic evidence-effect identity to `recordPayment()`. `recordPayment()` creates a fresh random manual `providerPaymentId`; while an Invoice remains non-terminal, repeated processing can create another `SUCCESSFUL` Payment and additional financial consequences from the same semantic evidence.
+
+Anti-duplication verdict:
+
+```text
+SPECIALIZATION → J18 / KF-REC-048
+NO F220 allocation from this seam
+```
+
+J18 already requires:
+
+```text
+retry same work → same WorkOccurrenceId + EffectId
+new execution attempt → new AttemptId
+successful effect evidence → prevents duplicate effect
+```
+
+The payment manifestation strengthens the recovery/effect-identity contract; it does not justify a second idempotency architecture.
 
 ---
 
-## F. Current cross-domain reachability
+## F. Cross-domain reachability
 
-`extractFromDocument()` is load-bearing across multiple domains, making J12 a high-leverage frontier:
+`extractFromDocument()` is load-bearing across multiple domains:
 
 ```text
 external/upload/Drive/device/expense/payment-evidence sources
 → DocumentIntelligence
-→ transient extraction
-→ domain-specific consumer/promotion
-→ Contacts / Invoice / Contract / other state
+→ transient extraction/assertion
+→ domain-specific consumer/admission/promotion
+→ Contacts / Invoice / Contract / Expense / other state
 ```
 
-This is why J12 was selected ahead of narrower remaining first-pass gaps.
+This cross-domain leverage remains the reason J12 is the active frontier.
 
 ---
 
@@ -217,17 +293,19 @@ This is why J12 was selected ahead of narrower remaining first-pass gaps.
 ### Core value primitives
 
 - stable source document identity;
-- exact document revision/source revision identity;
+- exact document/source revision identity;
+- extraction/assertion occurrence identity;
 - evidence/assertion provenance;
-- exact review/approval/promotion binding;
+- exact review/verification/admission/promotion binding;
+- downstream-effect lineage;
 - correction/supersession/deletion lineage.
 
 ### Necessary domain specialization
 
 - generated-document section/template/profile semantics;
 - OCR/parser representation;
-- invoice/contract/contact-specific extraction schemas;
-- domain-specific promotion policy.
+- invoice/contract/contact/expense-specific extraction schemas;
+- consumer-specific evidence admission/promotion policy.
 
 ### Derived projections
 
@@ -240,42 +318,50 @@ This is why J12 was selected ahead of narrower remaining first-pass gaps.
 
 - multiple document representations without explicit identity/ownership mapping;
 - mutable current content diverging from version approval evidence;
-- transient extraction feeding durable domain state without yet-proven durable extraction lineage.
+- transient extraction feeding durable domain state without durable extraction/admission lineage;
+- downstream financial effects from assertions stronger than their observed admission evidence.
 
 ---
 
 ## H. Current anti-duplication ledger
 
 ```text
-manual inline edit approved through stale version → F161 / KF-REC-049 specialization
-AI tweak partial mutation vs version evidence      → check F164 before allocation
-contract extraction promotion                     → F216/C166 + KF-REC-055 domain manifestation
-contract accepted revision linkage                → KF-REC-055
-operator review/attention                         → KF-REC-051
-recovery                                           → KF-REC-048
-temporal occurrence mechanics                     → KF-REC-047
+manual inline edit approved through stale version       → F161 / KF-REC-049 specialization
+AI tweak partial mutation vs version evidence           → check F164 before allocation
+contract extraction promotion                           → F216/C166 + KF-REC-055 domain manifestation
+contract accepted revision linkage                      → KF-REC-055
+payment evidence admission                              → F219/C169 J12/K8; delegates KF-REC-049/052
+same payment evidence replay / fresh payment identity   → KF-REC-048 specialization; NO F220
+operator review/attention                               → KF-REC-051
+recovery                                                → KF-REC-048
+temporal occurrence mechanics                           → KF-REC-047
 ```
 
-Current canonical ranges remain:
+Current canonical ranges:
 
 ```text
-F001–F218
-C001–C168
+F001–F219
+C001–C169
 KF-REC-001–KF-REC-055
-next free F219 / C169 / KF-REC-056
+KF-CONCEPT-001–KF-CONCEPT-042
+next free F220 / C170 / KF-REC-056
 ```
+
+No J12 recommendation is allocated yet.
 
 ---
 
 ## I. Exact next trace
 
 ```text
-1. enumerate all material callers/consumers of DocumentIntelligence extraction;
-2. trace source identity/revision supplied by upload, Drive, Asset, DocumentInstance and device paths;
-3. trace which consumers persist extraction evidence versus only final domain state;
-4. test repeat/reprocess/correction identity and duplicate descendant behaviour;
-5. trace generated DocumentVersion/updateSection/tweak/status transaction and approval semantics;
-6. classify each seam through F161/F164/F165/KF-REC-049 before new allocation;
-7. cross-link J12 with J11/J7/J13/J14/J19/J23;
-8. keep production code read-only.
+1. enumerate and trace every material DocumentIntelligence consumer still unclosed;
+2. trace stable source identity + exact source revision from upload, Drive, Asset, Device and Expense paths;
+3. determine which consumers persist extraction/assertion evidence versus only final domain state;
+4. trace correction/reprocess/replacement/supersession identity and descendant invalidation;
+5. close E2 against F164 exactly before any allocation;
+6. test whether additional admission failures reuse F219 or expose a genuinely different owner;
+7. cross-link J12 with J11/J7/J13/J14/J19/J23 and K4/K8/K9/K10/K11;
+8. pool stable roots before considering KF-REC-056;
+9. do not allocate KF-REC-056 merely because F219 exists;
+10. keep production code read-only and do not claim runtime proof.
 ```
