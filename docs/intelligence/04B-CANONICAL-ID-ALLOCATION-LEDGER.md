@@ -20,7 +20,7 @@ F167–F174 recovered historical collision-band findings
 F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
 F185–F196 J7 Financial Truth findings
-F197–F203 J3/J4 commercial-to-cash findings
+F197–F204 J3/J4 commercial-to-cash findings
 ```
 
 ```text
@@ -30,7 +30,7 @@ C117–C124 recovered historical collision-band contradictions
 C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
 C135–C146 J7 Financial Truth contradictions
-C147–C153 J3/J4 commercial-to-cash contradictions
+C147–C154 J3/J4 commercial-to-cash contradictions
 ```
 
 ```text
@@ -148,8 +148,6 @@ Booking CANCELLED / NO_SHOW
 != deposit / invoice / payment / attribution disposition resolved
 ```
 
-No cancellation/no-show financial policy owner was observed in the inspected booking path.
-
 ### F202 / C152 — RevenueAttribution pipeline stage vs realized revenue stage
 Home: same `08AH` / `09AH` pair.
 
@@ -157,8 +155,6 @@ Home: same `08AH` / `09AH` pair.
 BOOKING pipeline attribution + paid INVOICE attribution
 != directly additive realized revenue
 ```
-
-Generic attribution rollups can sum heterogeneous commercial stages; local consumer-specific dedupe does not repair the shared semantic model.
 
 ### F203 / C153 — canonical CRM statuses vs KeyCortex lowercase/non-canonical predicates
 Home: same `08AH` / `09AH` pair.
@@ -168,13 +164,24 @@ LEAD | PROSPECT | CLIENT | LOST
 != lead | customer
 ```
 
-KeyCortex CRM context filters with lowercase/non-canonical values, so canonical customer rows can disappear even if F197 is repaired.
+### F204 / C154 — live post-booking journey event/tool contract mismatch
+Home:
+- `08AI-FINDING-REGISTER-JOURNEY-EVENT-CONTRACT-SUPPLEMENT.md`
+- `09AI-CONTRADICTION-REGISTER-JOURNEY-EVENT-CONTRACT-SUPPLEMENT.md`
+
+```text
+BookingCompletedPayload { booking, contact?, businessId }
+!= post-booking template flat contactId/serviceName/amount/bookingId/contactName expectations
+!= commerce_create_invoice description/quantity/unitPrice tool-item contract
+```
+
+The runtime path is mounted through AgentTriggerService → JourneyOrchestrator → plan.approved → PlanExecutor → BullMQ → ActionDispatcher → FlowOrchestrator. The first invoice step is contract-incompatible, so the apparent downstream `Contact.status=CLIENT` automation does not falsify F197. A second valid invoice is not proven and is intentionally not canonized.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F203
-Contradictions:  C001–C153
+Findings:        F001–F204
+Contradictions:  C001–C154
 Recommendations: KF-REC-001–KF-REC-052
 ```
 
