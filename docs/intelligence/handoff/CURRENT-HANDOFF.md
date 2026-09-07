@@ -1,110 +1,139 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-07
-Status: CURRENT — J10 TARGET SYNTHESIS / BACKWARD RE-AUDIT COMPLETE; NEXT FRONTIER SELECTION
+Status: CURRENT — J11 CONTRACT / OBLIGATION / RENEWAL MICROSCOPIC TRACE ACTIVE
 
 ## Programme identity / integrity
 
 ```text
 repository:            SaCH-PRO/KEYFLOWOS
-main head:             4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
-code-bearing baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
-main delta class:      audit / architecture-journal only
 intelligence branch:   docs/keyflow-intelligence-foundation
 production code:       READ-ONLY / UNAUTHORIZED
-context integrity:     PASS
+context integrity:     PASS after J11 continuity repair
 ```
+
+Source documents are product-intent / architecture-context evidence. Reachable repository code is authoritative for implementation behaviour. Revalidate the exact `main` implementation head before relying on historical SHA metadata.
 
 ## Canonical ranges
 
 ```text
-Findings:        F214
-Contradictions:  C164
+Findings:         F216
+Contradictions:   C166
 Recommendations: KF-REC-054
-Concepts:        KF-CONCEPT-042
+Concepts:         KF-CONCEPT-042
+next free:        F217 / C167 / KF-REC-055 — NOT ALLOCATED
 ```
 
 Load `04-CONCEPT-REGISTRY.md` + `04A` + `04B` before allocating anything new.
 
 ## Mature pools
 
-- J16/K4 → KF-REC-049.
+- J16/K4 → F161–F178 / C111–C128 / KF-REC-049.
 - J17 → F179–F184 / C129–C134 / KF-REC-051.
 - J23/J18 → mature temporal/recovery pool via KF-REC-047/048; runtime proof not executed.
 - J7 → F185–F196 / C135–C146 / KF-REC-052.
-- J3/J4 → F197–F205 / C147–C155 / KF-REC-053; provisionally converged / target-aligned.
-- J10 → F206–F214 / C156–C164 / KF-REC-054; provisionally converged / target-aligned after pressure test + backward re-audit.
+- J3/J4 → F197–F205 / C147–C155 / KF-REC-053; provisionally converged.
+- J10 → F206–F214 / C156–C164 / KF-REC-054; provisionally converged after pressure test + backward re-audit.
 
-## J10 durable result
+## J11 durable findings already allocated
 
-Dossier: `docs/intelligence/journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
-Recommendation: `docs/intelligence/10M-RECOMMENDATION-REGISTER-COMMERCE-FULFILMENT-CONTINUATION.md`
-Pressure test: `docs/intelligence/investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md`
-Backward re-audit: `docs/intelligence/investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md`
+Canonical homes:
 
-Canonical J10 roots:
+- `docs/intelligence/08AS-FINDING-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
+- `docs/intelligence/09AS-CONTRADICTION-REGISTER-CONTRACT-REVISION-EPISTEMIC-INTEGRITY-SUPPLEMENT.md`
 
-- **F206/C156** — duplicate paid-Invoice descendant ownership for one successful storefront checkout.
-- **F207/C157** — operational `CONFIRMED` can emit paid semantics while payment remains unproven.
-- **F208/C158** — checkout/routing/shipment/correction compete for one tracked-stock effect lineage.
-- **F209/C159** — required route failure can still surface as aggregate `fulfillment_routed` success.
-- **F210/C160** — Shopify Product repeat sync cannot rediscover prior import when provider identity is conflated with SKU.
-- **F211/C161** — any existing route can be treated as complete idempotency, suppressing missing routes after partial failure.
-- **F212/C162** — Shopify customer identity resolution differs by sync entrypoint after mutable email change.
-- **F213/C163** — imported Shopify MarketplaceOrder lacks native relational order-item descendants required by effectful flows.
-- **F214/C164** — PurchaseOrder/PreOrder can commit before route-based retry identity exists, allowing duplicate strategy obligations.
+Roots:
 
-KF-REC-054 owns:
+- **F215 / C165** — `ContractVersion` cannot reconstruct authoritative Contract history and principal manual mutation can bypass version recording.
+- **F216 / C166** — uncertain AI document extraction can promote inferred contract/renewal state into authoritative Contract truth without preserving an epistemic/governance promotion gate.
+
+Anti-duplication already decided:
 
 ```text
-OrderOperationalState
-ExternalEntityIdentity for commerce resources
-OperationalOrderMaterialization
-InventoryAllocationLineage
-RequiredFulfilmentSet
-StrategyEffectIdentity
-CommerceEffectIdentity
-AggregateFulfilmentOutcome
+renewal-cycle occurrence identity
+→ existing J23 temporal occurrence / definition lineage
+→ reuse KF-REC-047
+→ no duplicate J11 finding
 ```
 
-It explicitly delegates:
+## Exact current forensic frontier
+
+### 1. Alert acknowledgement resurrection — anti-duplication pending
+
+Observed reachable loop:
 
 ```text
-ingress occurrence lifecycle → KF-REC-035–037
-recovery mechanics           → KF-REC-048
-operator attention           → KF-REC-051
-financial truth              → KF-REC-052
-commercial obligation/state  → KF-REC-053
+ContractAlert derived from Contract dates
+→ operator acknowledgeAlert() stores acknowledgedAt / acknowledgedBy
+→ regenerateAlerts() later runs after contract changes/extraction
+→ deleteMany({ contractId })
+→ createMany(recomputed alerts)
+→ prior acknowledgement row is destroyed
+→ semantically equivalent alert can return as unacknowledged
 ```
 
-## Positive seam to preserve
+Do **not** allocate F217/C167 yet. First fetch and compare J17 F179–F184 / C129–C134 and `10J-RECOMMENDATION-REGISTER-OPERATOR-PRIORITY-CONTINUATION.md`. Classify SAME / SPECIALIZATION / RELATED DISTINCT / GENUINELY NEW.
 
-Native `StoreOrderService.completeCheckout()` has a strong transaction coupling Invoice workflow, Payment, ledger posting, tracked-stock mutation, RevenueAttribution and paid order projection before emitting buffered events. Preserve that strength while removing competing post-commit ownership.
-
-## Backward re-audit verdict
+Likely target pressure, subject to that gate:
 
 ```text
-KF-REC-054 invalidated                       = NO
-parallel financial system                   = NO
-parallel commercial-obligation system       = NO
-universal recovery/workflow runtime          = NO
-universal integration runtime                = NO
-universal order/warehouse table required     = NO
-new finding/contradiction from re-audit      = NO
-J10 target provisionally converged           = YES
-runtime proof                                = NOT EXECUTED
+derived alert fact may be recomputed
+!=
+durable operator disposition may be erased
 ```
+
+### 2. Contract deletion/correction versus already-raised renewal work
+
+After the anti-duplication verdict, trace:
+
+```text
+Contract mutation / termination / archival / deletion
+→ alerts / terms / versions
+→ ContractRenewalSweep
+→ workflow/task/obligation/effect descendants already raised
+→ cancellation / settlement / supersession / orphaning
+→ command-center / stats / AI consumption
+→ recurrence / retry / later regeneration
+```
+
+Determine whether downstream work survives source deletion, whether it remains valid, and what exact semantic act closes or supersedes it. Do not assume cascade deletion equals business cancellation.
+
+## Important J11 precision
+
+- Explicit contract extraction route is definitely reachable and can mutate Contract state.
+- Mounted document-extraction listener can auto-update/create a linked contract **where `sourceId` is supplied**; do not overclaim Google Drive connector reachability until sourceId assignment is proven.
+- Contract status enum flexibility is an observation, not yet a finding.
+- `ContractVersion` version-number race during concurrent extraction is pressure on F215 revision identity, not yet a separate architecture root.
+- Alert acknowledgement may represent notification disposition rather than renewal-obligation disposition; trace before merging those semantics.
+
+## Constellation links to maintain
+
+```text
+J11 ↔ J12 document/evidence / K4 knowledge
+J11 ↔ J23 temporal recurrence/work
+J11 ↔ J18 outcome/evidence/recovery
+J11 ↔ J17 operator attention
+J11 ↔ J7 financial valuation
+J11 ↔ J3/J4 commercial obligations
+```
+
+## Programme purpose from reassessment
+
+This is not ordinary bug review. Maintain simultaneous macro/micro mapping through journeys, kernels, constellations, dynamic/causal/feedback graphs and value-density pools. Continuously classify architecture as core value, necessary specialization, derived projection, compatibility layer, redundant, accidental complexity, dead/low-value or value-detracting. Converge duplicated semantics rather than growing abstractions.
 
 ## Exact next action
 
 ```text
-1. verify the journey inventory / analysis map before activating another journey;
-2. revalidate J11 as a genuinely unpooled first-pass gap and compare its reachable footprint with other remaining gaps;
-3. if J11 remains highest leverage, create/activate its canonical journey dossier and begin microscopic tracing from a native domain write/effect path;
-4. do not turn KF-REC-054 into an implementation packet;
-5. reuse F001–F214 / C001–C164 / KF-REC-001–054 before new allocation;
-6. refresh CURRENT + ROLLOVER after the next material tranche;
-7. keep production code untouched.
+1. fetch 08S–08X, 09S–09X and 10J on the intelligence branch;
+2. anti-duplicate the ContractAlert acknowledgement-regeneration loop;
+3. revalidate current main implementation head / code-bearing delta;
+4. fetch current ContractsService.delete/update/regenerate and ContractRenewalSweep paths;
+5. fetch Prisma Contract/ContractAlert/downstream-work relations;
+6. trace source deletion/termination/correction into already-raised renewal work;
+7. persist any genuinely new J11 root only after canonical gate;
+8. update/create J11 journey dossier when microscopic pool stabilizes;
+9. pressure-test and backward-re-audit before convergence;
+10. keep production untouched.
 ```
 
-If this chat disappears now, resume from **frontier selection after J10 convergence**, not from J10 recommendation ownership or F214 discovery.
+If this chat disappears now, resume from **J11 alert-disposition anti-duplication**, not from J10, frontier selection, or F215/F216 discovery.
