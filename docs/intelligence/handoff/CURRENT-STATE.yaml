@@ -1,71 +1,76 @@
 project: KEYFLOWOS
-analysis_version: 45
+analysis_version: 46
 last_updated: 2026-09-07
-phase: whole_system_virtual_model_expansion_post_j10_frontier_selection
-status: J10_CONVERGED_SELECT_NEXT_FRONTIER
+phase: whole_system_virtual_model_j11_microscopic_trace
+status: J11_CONTRACT_OBLIGATION_RENEWAL_ACTIVE
 canonical_branch: docs/keyflow-intelligence-foundation
-implementation_evidence:
-  branch: main
-  current_head: 4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
-  code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
-  current_head_change_class: audit_architecture_journal_only
 context_integrity: PASS
 implementation_authorized: false
 runtime_proof_executed: false
+source_evidence_policy:
+  source_documents: product_intent_and_architecture_context
+  implementation_authority: reachable_repository_behavior
+implementation_evidence:
+  branch: main
+  exact_head_status: REVALIDATE_BEFORE_SHA_CLAIMS
 canonical_ranges:
-  findings_through: F214
-  contradictions_through: C164
+  findings_through: F216
+  contradictions_through: C166
   recommendations_through: KF-REC-054
   concepts_through: KF-CONCEPT-042
+next_free_ids:
+  finding: F217
+  contradiction: C167
+  recommendation: KF-REC-055
+  allocation_status: UNALLOCATED
 
 mature_pools:
-  J16_K4: { recommendation: KF-REC-049 }
+  J16_K4: { recommendation: KF-REC-049, findings: F161-F178, contradictions: C111-C128 }
   J17: { recommendation: KF-REC-051, findings: F179-F184, contradictions: C129-C134 }
   J23_J18: { recommendations: [KF-REC-047,KF-REC-048], runtime_proof_executed: false }
   J7: { recommendation: KF-REC-052, findings: F185-F196, contradictions: C135-C146 }
   J3_J4: { recommendation: KF-REC-053, findings: F197-F205, contradictions: C147-C155, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
-  J10:
-    recommendation: KF-REC-054
-    findings: F206-F214
-    contradictions: C156-C164
-    status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED
-    pressure_test: docs/intelligence/investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md
-    backward_reaudit: docs/intelligence/investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md
+  J10: { recommendation: KF-REC-054, findings: F206-F214, contradictions: C156-C164, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
 
-j10_target_semantics:
-  - OrderOperationalState
-  - ExternalEntityIdentity
-  - OperationalOrderMaterialization
-  - InventoryAllocationLineage
-  - RequiredFulfilmentSet
-  - StrategyEffectIdentity
-  - CommerceEffectIdentity
-  - AggregateFulfilmentOutcome
-
-j10_delegations:
-  ingress_occurrence_lifecycle: KF-REC-035-037
-  recovery_mechanics: KF-REC-048
-  operator_attention: KF-REC-051
-  financial_truth: KF-REC-052
-  commercial_obligation_and_customer_state: KF-REC-053
+j11:
+  status: ACTIVE_MICROSCOPIC_TRACE
+  allocated_findings:
+    F215: ContractVersion is not a complete reconstructable authoritative Contract revision history.
+    F216: AI contract extraction can promote uncertain inferred values into authoritative Contract and renewal state without epistemic/governance promotion evidence.
+  allocated_contradictions:
+    C165: ContractVersion implies revision history while mutations can bypass it and records cannot reconstruct state.
+    C166: Contract extraction carries uncertainty while registry consumption treats promoted values as current truth.
+  reused_law:
+    renewal_occurrence_identity: KF-REC-047
 
 active_frontier:
-  stage: FRONTIER_SELECTION_AFTER_J10_CONVERGENCE
-  primary_journey: null
-  candidate: J11
-  instruction: Revalidate journey inventory and reachable implementation footprint before activating J11 or any other first-pass gap.
+  stage: J11_MICROSCOPIC_TRACE
+  primary_journey: J11
+  focus:
+    - ALERT_ACKNOWLEDGEMENT_REGENERATION_ANTI_DUPLICATION
+    - CONTRACT_DELETION_CORRECTION_VS_RAISED_RENEWAL_WORK
+  instruction: Anti-duplicate alert disposition against J17/KF-REC-051 before any F217/C167 allocation, then trace source Contract termination/deletion/correction into already-created renewal work and its cancellation/supersession/settlement semantics.
+
+constellation_links:
+  - J11_J12_DOCUMENT_EVIDENCE_K4
+  - J11_J23_TEMPORAL_RECURRENCE
+  - J11_J18_RECOVERY
+  - J11_J17_OPERATOR_ATTENTION
+  - J11_J7_VALUATION
+  - J11_J3_J4_COMMERCIAL_OBLIGATION
 
 exact_next_action:
-  title: revalidate_J11_and_select_next_first_pass_journey
-  instruction: Load the canonical journey inventory and analysis map. Verify J11 has no canonical dossier or hidden later tranche. Compare its reachable native implementation footprint and cross-kernel leverage against remaining unpooled journeys. If J11 remains highest leverage, activate J11 and begin microscopic tracing from a native domain write/effect path rather than documentation or provider adapters. Reuse F001-F214 C001-C164 KF-REC-001-054 before allocating new identities. Keep production code read-only.
+  title: anti_duplicate_alert_disposition_then_trace_contract_deletion
+  instruction: Fetch J17 findings F179-F184, contradictions C129-C134 and KF-REC-051. Classify the ContractAlert acknowledgement-regeneration loop as SAME, SPECIALIZATION, RELATED_DISTINCT or GENUINELY_NEW. Do not allocate F217/C167 until this gate completes. Revalidate current main implementation evidence, then trace ContractsService delete/update/regenerate and ContractRenewalSweep plus Prisma downstream relations. Persist only genuinely new architecture roots. Keep production code read-only.
 
 constraints:
   - production_code_read_only
-  - preserve_strong_native_checkout_transaction
-  - do_not_convert_KF_REC_054_into_implementation_packet
-  - order_operational_state_not_equal_payment_truth_or_fulfilment_outcome
-  - one_order_item_inventory_effect_lineage
-  - semantic_required_effect_set_before_recovery
-  - provider_external_identity_not_mutable_business_attribute
-  - provider_metadata_not_operational_materialization
-  - continuously_refresh_cross_thread_continuity
+  - source_documents_do_not_override_repository_behavior
+  - anti_duplication_before_allocation
+  - do_not_allocate_F217_C167_yet
+  - do_not_allocate_KF_REC_055_prematurely
+  - document_extraction_not_authoritative_truth_by_default
+  - renewal_occurrence_identity_reuses_temporal_kernel
+  - projection_recomputation_must_not_silently_erase_durable_disposition
+  - contract_deletion_not_equal_business_obligation_cancellation
+  - continuously_refresh_cross_agent_continuity
