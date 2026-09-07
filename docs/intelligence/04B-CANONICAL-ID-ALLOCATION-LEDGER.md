@@ -9,36 +9,24 @@ Purpose: provide one unambiguous allocator for Finding (`F###`), Contradiction (
 
 If any historical supplement still says `CANONICAL` for a colliding ID, **this ledger wins**. Historical evidence remains valuable; the old numeric heading is not a canonical allocation.
 
-Never delete or reuse an allocated identity. Historical collisions resolve as:
-- **REMAP** — distinct semantic root receives a new unique ID;
-- **ALIAS / SUPERSEDED** — same root references an existing canonical ID.
+Never delete or reuse an allocated identity. Historical collisions resolve as REMAP or ALIAS/SUPERSEDED.
 
 ## Preserved mature lineage
 
 ```text
 F145–F160 temporal/external/recovery lineage
 F161–F166 initial J16/K4 epistemic-integrity findings
-F167–F174 recovered distinct historical collision-band findings
-F175–F176 J16/K4 knowledge-consumption findings
-F177 J16/K4 causal-learning attribution
-F178 J16/J19 correction lineage
-F179 J17 Command Center projection completeness
-F180 J17 CommandItem false-terminal execution semantics
-F181 J17 Temporal priority materialization reachability
-F182 J17 CommandItem source-state convergence
+F167–F174 recovered historical collision-band findings
+F175–F178 J16/K4 knowledge-consumption/learning/correction findings
+F179–F184 J17 Command Center / operator-control findings
 ```
 
 ```text
 C096–C110 temporal/external/recovery lineage
 C111–C116 initial J16/K4 contradictions
-C117–C124 recovered distinct historical collision-band contradictions
-C125–C126 J16/K4 knowledge-consumption contradictions
-C127 J16/K4 causal-learning attribution
-C128 J16/J19 correction lineage
-C129 J17 Command Center projection completeness
-C130 J17 CommandItem projection vs source/effect truth
-C131 J17 overdue domain truth vs absent TemporalFlow projection
-C132 J17 resolved source vs still-open CommandItem projection
+C117–C124 recovered historical collision-band contradictions
+C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
+C129–C134 J17 Command Center / operator-control contradictions
 ```
 
 ```text
@@ -48,95 +36,97 @@ KF-REC-047 Temporal Work Projection
 KF-REC-048 certainty-aware Recovery Contract
 KF-REC-049 provenance/revision-aware Business Knowledge Contract
 KF-REC-050 load-bearing WorkDefinition control contract
+KF-REC-051 Operator Attention & Priority Contract
 ```
 
 ## Historical collision reconciliation
 
-The discovered historical parallel-analysis collision band remains governed by:
+Governed by:
 - `08O-FINDING-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md` — F167–F174;
 - `09O-CONTRADICTION-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md` — C117–C124;
 - `10I-RECOMMENDATION-REGISTER-TAXONOMY-RECONCILIATION-CONTINUATION.md` — KF-REC-050.
 
-Historical files retain evidence but do not re-own remapped numeric IDs.
-
 ## J16 allocations
 
-### F175 / C125 — epistemic readiness eligibility
-`matching GenomeFact row exists != knowledge is epistemically acceptable for automation readiness`
-
-### F176 / C126 — epistemic prompt eligibility
-`stored/high-ranked GenomeFact != current canonical knowledge eligible for KEY prompt reasoning`
-
-### F177 / C127 — causal learning attribution
-`one observed/domain outcome != causal evidence for every recommendation pattern in that domain`
-
-### F178 / C128 — knowledge correction lineage
-`source/current knowledge corrected or withdrawn != all active derivatives have converged`
+- F175 / C125 — epistemic readiness eligibility.
+- F176 / C126 — epistemic prompt eligibility.
+- F177 / C127 — causal learning attribution.
+- F178 / C128 — knowledge correction lineage.
 
 ## J17 allocations
 
 ### F179 / C129 — Command Center projection completeness
 Home: `08S` / `09S`.
 
-```text
-SOURCE UNAVAILABLE / UNKNOWN
-!= SOURCE HEALTHY + ZERO IMPORTANT ITEMS
-```
+`SOURCE UNAVAILABLE / UNKNOWN != SOURCE HEALTHY + ZERO IMPORTANT ITEMS`
 
 ### F180 / C130 — Command spine false-terminal execution semantics
 Home: `08T` / `09T`.
 
-```text
-CommandItem.status = EXECUTED
-!= source approval resolved
-!= executionTool ran
-!= business effect occurred
-!= OutcomeEvidence
-```
+`CommandItem.status=EXECUTED != source approval resolved != executionTool ran != business effect occurred != OutcomeEvidence`
 
 ### F181 / C131 — Temporal priority materialization reachability
 Home: `08U` / `09U`.
 
-```text
-CONSUMER PRIORITY LOGIC EXISTS
-!= PRODUCER PATH IS WIRED
-!= DOMAIN CONDITION REACHES THAT PROJECTION
-```
-
-Concrete proof: `TemporalFlowService.analyze()` expects `TemporalFlowEvent(source=APP,type=invoice.overdue)` for overdue-invoice urgency/risk, while standard invoice overdue emits EventEmitter `invoice.overdue`; no load-bearing `invoice.overdue → TemporalFlowService.emit()` path or generic app-event listener was observed. `TemporalFlowEvent` create/upsert is owned by `TemporalFlowService.emit()`.
+`CONSUMER PRIORITY LOGIC EXISTS != PRODUCER PATH IS WIRED != DOMAIN CONDITION REACHES THAT PROJECTION`
 
 ### F182 / C132 — CommandItem source-state convergence
 Home: `08V` / `09V`.
 
+`SOURCE-DERIVED PROJECTION CREATED != PROJECTION REMAINS VALID FOREVER`
+
+### F183 / C133 — Command Queue lifecycle visibility
+Home: `08W` / `09W`.
+
+`MULTI-STATUS CLIENT FILTER VOCABULARY != OPEN-ONLY SERVER DATASET`
+
+The main Command Center fetches only OPEN CommandItems while presenting filters for IN_PROGRESS, WAITING_APPROVAL, SNOOZED, COMPLETED and DISMISSED.
+
+### F184 / C134 — priority semantic compression
+Home: `08X` / `09X`.
+
+`SOURCE-SPECIFIC RANKING SEMANTICS != GLOBAL OPERATING PRIORITY`
+
+The Command Center global Top Priorities path ranks priority class → static type weight → recency. It bypasses richer source ranking semantics such as GenomeRecommendationRanker expected gain, confidence, readiness, financial viability, outcome learning, risk and effort. Persistent CommandItems use another scale: numeric priority → urgency → recency.
+
+## Recommendation allocation
+
+### KF-REC-051 — Operator Attention & Priority Contract
+Home: `10J-RECOMMENDATION-REGISTER-OPERATOR-PRIORITY-CONTINUATION.md`.
+
+Distinct responsibility:
+
 ```text
-SOURCE-DERIVED PROJECTION CREATED
-!= PROJECTION REMAINS VALID FOREVER
+source truth
+→ admission/convergence into operator attention/work projection
+→ source health/freshness
+→ multidimensional PriorityAssessment
+→ question-specific deterministic ordering
+→ explicit user disposition
+→ canonical current governance/effect execution
+→ OutcomeEvidence-driven projection convergence
 ```
 
-Concrete proof: CommandGenerator creates OPEN `COLLECT_RECEIVABLE` CommandItems from `Invoice.status=OVERDUE`, but the existing `resolveCommandsForEntity()` has no caller and the generator does not reconcile old rows when source predicates stop matching.
+KF-REC-051 is broader than KF-REC-047. Temporal Work Projection is one major source into operator attention/priority; it is not all business priority truth.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F182
-Contradictions:  C001–C132
-Recommendations: KF-REC-001–KF-REC-050
+Findings:        F001–F184
+Contradictions:  C001–C134
+Recommendations: KF-REC-001–KF-REC-051
 ```
-
-## Filename rule
-
-Supplement letters are organizational labels only, never allocators. Canonical identity is determined by this ledger plus exactly one current home definition.
 
 ## Agent pre-allocation gate
 
 ```text
-1. Load 04A + 04B.
-2. Check CURRENT canonical ranges.
-3. Search all registers for semantic equivalent.
-4. Reuse/refine if equivalent.
-5. Allocate only the next globally unused number.
-6. Persist canonical definition in exactly one home file.
-7. Update 04B + CURRENT + ROLLOVER.
+LOAD 04A + 04B
+→ CHECK CURRENT ranges
+→ SEARCH semantic equivalents
+→ REUSE / REFINE / CROSS-REFERENCE
+→ only then allocate next unused ID
+→ one canonical home definition
+→ update 04B + CURRENT + ROLLOVER
 ```
 
 No production implementation is authorized by this ledger.
