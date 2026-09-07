@@ -17,8 +17,9 @@ Load AGENTS.md, AGENT-CONTINUITY.md, 00-START-HERE.md,
 CURRENT-HANDOFF.md, CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first.
 Production code remains read-only.
-J7 — Financial Truth is the active frontier.
-Resume at Invoice → Payment → Ledger → reconcile → Refund/Reversal, then cash-basis, FX/valuation and strong financial-status convergence.
+J7 — Financial Truth is active.
+Resume at J7 Payment/Webhook consequence-completion taxonomy + recovery trace.
+Do not allocate F188/C138 until mature J18/J23 duplicate reconciliation is complete.
 ```
 
 ## Context integrity
@@ -52,24 +53,31 @@ LOAD 04A + 04B
 → only then allocate if genuinely new
 ```
 
-## J17 pooled
+## Pooled fronts
 
-J17 completed source-family classification, standards pressure test, backward re-audit and an initial 20-obligation proof architecture.
+J16/K4 Business Knowledge: through F178/C128 / KF-REC-049.
 
-Canonical J17 set:
-`F179–F184 / C129–C134 / KF-REC-051`.
+J17 Operator Attention: through F184/C134 / KF-REC-051 / 20 local proof obligations.
 
-Role now: pooled operator-attention/priority architecture.
+J23/J18 temporal/recovery: 39 proof obligations / 16 deterministic fault points; runtime proof not executed.
 
 ## Active J7 frontier
 
 Dossier:
-`journeys/KF-JOURNEY-007-FINANCIAL-TRUTH.md`
+`docs/intelligence/journeys/KF-JOURNEY-007-FINANCIAL-TRUTH.md`
 
 Recommendation:
 `KF-REC-052 — Financial Truth & Valuation Contract`
 
-Initial financial-truth layers:
+Canonical J7 findings so far:
+
+```text
+F185 / C135 — currentBalance competes with ledger-derived live cash
+F186 / C136 — currency-tagged ledger entries aggregate without valuation/FX
+F187 / C137 — PayrollRun PAID without proven payment/accounting consequence
+```
+
+Financial truth layers:
 
 ```text
 commercial / operational document state
@@ -81,63 +89,74 @@ commercial / operational document state
 → derived operator/reporting projection
 ```
 
-Prime law:
+## Current atomic evidence packet
+
+`docs/intelligence/sessions/J7-PAYMENT-CONSEQUENCE-COMPLETION-TRACE-2026-09-06.md`
+
+Latest evidence checkpoint: `cb897966369fb66a79d9d3c45b53bd2875560c43`.
+
+No new canonical F/C ID has been allocated from this packet.
+
+### Positive seams
+
+- `createPaymentWithPosting()` couples Payment + RevenuePosting in one DB transaction when used;
+- canonical refund helpers couple negative Payment + original posting reversal when used;
+- PostingService has one sanctioned ledger write path, deterministic posting identity and history-preserving reversal;
+- reconciliation locks protect closed accounting periods;
+- canonical webhook payment/refund handlers call `reconcileFromPayments()` after successful consequence handling.
+
+### New concrete pressure
 
 ```text
-NO LAYER MAY SILENTLY CLAIM A STRONGER FINANCIAL OUTCOME THAN ITS EVIDENCE SUPPORTS
+PAYMENT ROW EXISTS
+!= ACCOUNTING CONSEQUENCE COMPLETE
 ```
 
-### F185 / C135
+Synchronous PayPal capture directly creates `Payment(status=SUCCESSFUL, providerPaymentId=captureId)` without the observed posting wrapper. Later `PAYMENT.CAPTURE.COMPLETED` processing sees the same providerPaymentId and returns before posting.
 
-`FinancialAccount.currentBalance` is initialized from opening balance and not maintained by PostingService, yet SafeToSpend and other product surfaces consume it as live cash.
+```text
+REFUND ROW EXISTS
+!= REVERSAL + INVOICE RECONCILIATION COMPLETE
+```
 
-### F186 / C136
+`PaymentsOpsService.refundCharge()` calls the provider, then best-effort inserts a negative `REFUNDED` Payment without RevenuePosting reversal or invoice reconciliation. The Stripe refund webhook dedupes by the same refund id and can skip the repair path.
 
-Posting preserves currency on transactions/entries, but LedgerBalance aggregates by account without currency separation or FX valuation.
+```text
+WEBHOOK EVENT SEEN
+!= WEBHOOK CONSEQUENCES COMPLETE
+```
 
-### F187 / C137
+`WebhookEvent` stores receipt identity/time and is written before downstream consequences. Its schema has no processing/completion lifecycle. Provider redelivery is ignored once receipt identity exists.
 
-`PayrollRun.markRunPaid()` marks a run PAID with no Payment, Expense, FinancialTransaction or LedgerEntry created by that path.
+### Recovery pressure
 
-Canonical homes:
-- `08Y-FINDING-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md`
-- `09Y-CONTRADICTION-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md`
-- `10K-RECOMMENDATION-REGISTER-FINANCIAL-TRUTH-CONTINUATION.md`
+`PostingService.reverse()` correctly blocks reversal of reconciliation-locked entries. `ReconciliationService` seals entries at completion; repository search has not yet found the admin unlock/reopen path mentioned in comments.
 
-## Positive finance seams
+Potential chain to prove/falsify:
 
-Preserve:
-- PostingService single sanctioned ledger writer;
-- Decimal balanced postings;
-- deterministic business-scoped externalRef idempotency;
-- transactional payment/source + ledger posting where implemented;
-- history-preserving reversals;
-- reconciliation locks;
-- provider event + Payment dedupe;
-- invoice state recomputed from all Payment rows;
-- ledger-native reporting;
-- AR invoice-vs-ledger drift visibility.
+```text
+provider refund real
+→ webhook receipt durable
+→ ledger reversal blocked by reconciliation lock
+→ same provider event retried
+→ receipt dedupe suppresses retry
+→ ? independent repair/reopen mechanism ?
+```
+
+Do not universalize until the final `?` is traced.
 
 ## Exact next work
 
 ```text
-1. trace Invoice → provider payment → verified occurrence → Payment → RevenuePosting
-   → PostingService → LedgerEntry → reconcileFromPayments;
-2. trace refund/reversal + reconciliation-lock interaction;
-3. map all currentBalance / safe-to-spend / runway / cash consumers;
-4. trace currency/FX end-to-end and determine single-currency vs multi-currency target;
-5. trace PAID/REFUNDED/SETTLED claims in payroll/AP/credit-note/change-order paths;
-6. load 04A/04B before any new ID;
-7. research accounting/payment/FX/reconciliation standards and frontier designs;
-8. backward-re-audit J3/J4/J17/J18/J23 plus K8/K9/K10/K11/K3.
+1. reconcile payment-consequence candidate against F145–F160 / J18 / J23 / K8 / K9 / K11;
+2. prove provider-handler error propagation after posting/reversal failure;
+3. search for independent Payment/WebhookEvent repair workers;
+4. prove or reject reconciliation unlock/reopen/re-drive path;
+5. trace reconcileFromPayments on every payment/refund entry path;
+6. trace onPaymentRefunded when original posting is missing/already reversed;
+7. decide REUSE / REFINE / NEW only after duplicate check;
+8. then continue currentBalance consumers, FX/valuation and strong financial-status convergence.
 ```
-
-## Mature pools retained
-
-- J16/K4: F161–F178 / C111–C128 / KF-REC-049.
-- J17: F179–F184 / C129–C134 / KF-REC-051.
-- J23/J18: 39 proof obligations / 16 deterministic fault points; no runtime proof executed.
-- historical reconciliation: F167–F174 / C117–C124 / KF-REC-050.
 
 ## KF-EXEC boundary
 
@@ -150,4 +169,4 @@ IMPLEMENTED = NO
 TESTED = NO
 ```
 
-> If this chat disappears, resume at the J7 payment/ledger/refund microscopic trace. Do not implement production code.
+> If this chat disappears, resume at the J7 payment/Webhook consequence-completion taxonomy + recovery trace. Do not implement production code.
