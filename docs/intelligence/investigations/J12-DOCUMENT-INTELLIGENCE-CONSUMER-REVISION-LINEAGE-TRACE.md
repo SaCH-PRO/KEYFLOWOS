@@ -1,6 +1,6 @@
 # J12 — DocumentIntelligence Consumer / Revision Lineage Trace
 
-Status: ACTIVE INVESTIGATION — CONSUMER TRANCHE CHECKPOINT
+Status: ACTIVE INVESTIGATION — CONSUMER TRANCHE CHECKPOINT THROUGH F220/C170
 Last updated: 2026-09-07
 Implementation evidence: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2`
 Production implementation: READ-ONLY / UNAUTHORIZED
@@ -140,7 +140,7 @@ Drive external file id + modifiedTime
 → otherwise treat as new revision/change
 ```
 
-However the changed Drive revision is materialized by updating the same `DriveIntakeFile` row keyed by `(businessId, driveFileId)`:
+The changed Drive revision is materialized by updating the same `DriveIntakeFile` row keyed by `(businessId, driveFileId)`:
 
 ```text
 same DriveIntakeFile
@@ -166,48 +166,92 @@ download current Drive bytes
 → emit ingestion.item.received
 ```
 
-The downstream event payload carries the stable `driveFileId` / `externalId`, extraction result and intakeId, but the inspected event payload does not carry the Drive `modifiedTime` that distinguished the source revision.
+The event payload carries stable `driveFileId` / `externalId`, extraction result and intakeId, but not the `modifiedTime` revision coordinate that distinguished the source revision.
 
-### Current risk
+### Downstream closure
 
-```text
-SOURCE IDENTITY recognized
-+ SOURCE REVISION change detected
-→ current mutable intake row overwritten
-→ downstream payload keyed by same externalId without observed revision coordinate
-```
+`IngestionListener` forwards `ingestion.item.received` into `IngestionOrchestrator.receive()`.
 
-This can collapse:
+When `externalId` exists, the orchestrator deduplicates by:
 
 ```text
-Drive file identity
-!= Drive file revision
-!= extraction occurrence
+businessId + sourceType + externalId
 ```
 
-and can make later consumers unable to prove which Drive revision produced an ingestion decision/action.
-
-### Anti-duplication verdict — not yet a new F220
-
-KF-REC-049 already requires:
-
-- knowledge/evidence to evolve by revision rather than overwrite alone;
-- revision-specific provenance and verification;
-- material change bound to current/base revision;
-- downstream recommendations/analytics linked to producing revision.
-
-Therefore current classification is:
+For Drive:
 
 ```text
-STRONG SPECIALIZATION PRESSURE → KF-REC-049
-F220 NOT ALLOCATED YET
+businessId + google_drive + driveFileId
 ```
 
-Before any new root, trace `ingestion.item.received` consumers and determine whether source revision loss becomes a distinct external-evidence occurrence defect owned by J12/K8/K9 rather than generic K4 revision lineage.
+If an existing ingestion item is found, the orchestrator logs it as duplicate and returns the existing item without rebuilding the plan.
+
+Therefore:
+
+```text
+R1: driveFileId D + modifiedTime T1
+→ extraction E1
+→ IngestionItem I1 / Plan P1
+
+R2: same D + newer T2
+→ connector recognizes changed revision
+→ re-extracts E2
+→ emits same externalId D
+→ ingestion dedupe finds I1
+→ "Duplicate ingestion item skipped"
+→ no distinct I2 / refreshed plan for R2
+```
+
+### Canonical allocation
+
+```text
+F220/C170
+```
+
+Home:
+
+```text
+08AW-FINDING-REGISTER-DOCUMENT-SOURCE-REVISION-OCCURRENCE-SUPPLEMENT.md
+09AW-CONTRADICTION-REGISTER-DOCUMENT-SOURCE-REVISION-OCCURRENCE-SUPPLEMENT.md
+```
+
+Canonical distinction:
+
+```text
+ExternalObjectId
+!= ExternalSourceRevisionId
+!= ExtractionOccurrenceId
+!= IngestionOccurrenceId
+```
+
+### Anti-duplication verdict
+
+`RELATED DISTINCT` from F127/C080.
+
+F127/C080:
+
+```text
+same occurrence
+→ claimed/seen
+→ processing later fails
+→ replay cannot resume
+```
+
+F220/C170:
+
+```text
+distinct source revision R2
+→ same external object id
+→ R2 incorrectly classified as duplicate R1
+```
+
+J14/KF-REC-035 already supplies the mature ingress-occurrence target direction and must be reused. KF-REC-049 supplies revision/provenance semantics. F220 does not authorize a second ingress engine.
+
+Positive seam to preserve: Drive sync already detects `modifiedTime` changes. The repair direction is to propagate that revision/occurrence identity through ingestion rather than replace the connector.
 
 ## 5. Payment evidence reference point
 
-Already canonical:
+Canonical:
 
 ```text
 F219/C169 → document assertion admitted as successful payment evidence without explicit evidence-admission decision
@@ -217,10 +261,8 @@ Replay/double application remains:
 
 ```text
 SPECIALIZATION → KF-REC-048
-NO F220 from replay seam
+NO new root from payment replay
 ```
-
-This consumer trace must not duplicate that allocation.
 
 ## 6. Current consumer matrix
 
@@ -230,17 +272,26 @@ This consumer trace must not duplicate that allocation.
 | Expenses extract-receipt | extraction response | URL/filename | not proven | not proven | caller-side/open | advisory/extraction-only so far |
 | Flow attachment | prompt/model context | URL/objectPath | not proven | not proven | model context only | KF-REC-049 prompt epistemics |
 | Device intake | MediaAsset + VisualIntake | yes | not explicit revision object | not observed | PROPOSED/ACCEPTED seams exist | KF-REC-049 pressure; positive seam |
-| Google Drive intake | driveFileId | modifiedTime detected | detected but overwritten | not observed | reviewing/extracted + downstream ingestion | KF-REC-049 pressure; trace downstream |
+| Google Drive intake | driveFileId | modifiedTime detected | detected upstream but omitted from ingestion identity | not distinct downstream | reviewing/extracted + ingestion plan | F220/C170 |
 | Contracts | Contract target/source request | domain-specific | incomplete | incomplete | unsafe contract promotion already known | F216/C166 + KF-REC-055 |
 
-## 7. Immediate next trace
+## 7. Current ranges
 
 ```text
-1. follow ingestion.item.received / file.uploaded consumers from Drive and test whether modifiedTime/revision identity is recoverable downstream;
-2. inspect Device controller guards/reprocess reachability, especially reprocess after ACCEPTED/REJECTED states;
-3. trace Expense frontend/client flow from extract-receipt result into createExpense;
-4. inspect direct AI upload endpoint as extraction-only vs downstream side-effect surface;
-5. close generated Document tweak crash boundary against F164;
-6. only then decide whether source-revision collapse earns F220/C170 or remains KF-REC-049 specialization;
-7. no KF-REC-056 until J12 roots are pooled and pressure-tested.
+F001–F220
+C001–C170
+KF-REC-001–KF-REC-055
+next free F221 / C171 / KF-REC-056
+```
+
+## 8. Immediate next trace
+
+```text
+1. inspect Device controller guards/reprocess reachability, especially after ACCEPTED/REJECTED;
+2. trace Expense frontend/client flow from extract-receipt result into createExpense;
+3. inspect direct AI upload endpoint as extraction-only vs downstream side-effect surface;
+4. close generated Document tweak crash boundary against F164;
+5. trace correction/replacement/supersession/deletion lineage across accepted evidence;
+6. classify any new seam against F219/F220 + KF-REC-049/035/048 before F221/C171;
+7. pool stable J12 roots before considering KF-REC-056.
 ```
