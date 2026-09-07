@@ -19,7 +19,7 @@ F161–F166 initial J16/K4 epistemic-integrity findings
 F167–F174 recovered historical collision-band findings
 F175–F178 J16/K4 knowledge-consumption/learning/correction findings
 F179–F184 J17 Command Center / operator-control findings
-F185–F191 J7 Financial Truth findings
+F185–F192 J7 Financial Truth findings
 ```
 
 ```text
@@ -28,7 +28,7 @@ C111–C116 initial J16/K4 contradictions
 C117–C124 recovered historical collision-band contradictions
 C125–C128 J16/K4 knowledge-consumption/learning/correction contradictions
 C129–C134 J17 Command Center / operator-control contradictions
-C135–C141 J7 Financial Truth contradictions
+C135–C142 J7 Financial Truth contradictions
 ```
 
 ```text
@@ -94,7 +94,7 @@ currency-specific LedgerEntry amounts
 != directly additive account/report values without valuation
 ```
 
-Posting preserves currency, while LedgerBalance groups/sums by account without currency separation or FX conversion.
+Posting preserves currency, while LedgerBalance groups/sums by account without currency separation or FX conversion. `ExchangeRateService` exists but repository search found no accounting/reporting consumer that makes rates load-bearing in ledger valuation.
 
 ### F187 / C137 — payroll financial outcome
 Home: same `08Y` / `09Y` pair.
@@ -164,7 +164,21 @@ original reconciled LedgerEntry locked
 != later current-period reversal must be prohibited
 ```
 
-`PostingService.reverse()` intends to create a new reversal dated now, but first rejects any original transaction containing reconciliation-locked entries. `ReconciliationService` states admin override is required, while repository search found no unlock/reopen operation or separate current-period adjustment path.
+`PostingService.reverse()` intends to create a new reversal dated now, but first rejects any original transaction containing reconciliation-locked entries. `ReconciliationService` states admin override is required, while repository search found no reconciliation unlock/reopen operation or separate current-period adjustment path. `AccountingPeriodService.reopen()` only clears its own `lockedByPeriod` metadata and does not clear `lockedByReconciliationId`, so it does not repair this path.
+
+### F192 / C142 — AccountingPeriod closure is not load-bearing at the ledger write door
+Home:
+- `08AB-FINDING-REGISTER-ACCOUNTING-PERIOD-ENFORCEMENT-SUPPLEMENT.md`
+- `09AB-CONTRADICTION-REGISTER-ACCOUNTING-PERIOD-ENFORCEMENT-SUPPLEMENT.md`
+
+Distinct root:
+
+```text
+AccountingPeriod.status = CLOSED
+!= canonical posting path rejects new in-period postings
+```
+
+`AccountingPeriodService.close()` stamps transactions that already exist and exposes `checkClosed()`, but repository search found no caller of `checkClosed()` outside the service. `PostingService.post()` accepts caller-supplied dates without consulting AccountingPeriod closure, so new back-dated entries can alter a closed period.
 
 ### Reused J7 recovery root — F155
 
@@ -192,13 +206,13 @@ commercial/operational financial state
 → derived financial/operator projection
 ```
 
-Target preserves the strong PostingService/reversal/reconciliation seams while preventing stored balances, operational statuses, raw heterogeneous currencies, receipt-only idempotency and closed-period policy gaps from silently competing with reconciled financial truth.
+Target preserves the strong PostingService/reversal/reconciliation seams while preventing stored balances, operational statuses, raw heterogeneous currencies, receipt-only idempotency and inconsistent period-closure controls from silently competing with reconciled financial truth.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F191
-Contradictions:  C001–C141
+Findings:        F001–F192
+Contradictions:  C001–C142
 Recommendations: KF-REC-001–KF-REC-052
 ```
 
