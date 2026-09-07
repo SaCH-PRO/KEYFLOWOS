@@ -1,11 +1,11 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-06
-Status: CURRENT — J10 COMMERCE/FULFILMENT ACTIVE AFTER J3/J4 KF-REC-053 CONVERGENCE
+Status: CURRENT — J10 COMMERCE/FULFILMENT ACTIVE THROUGH F207/C157
 
 ## Programme identity
 
-Repository-backed architecture forensics and recursive convergence remain active. Production code is read-only. The destination remains whole-system target architecture + migration architecture + proof architecture + dependency-ordered repository transformation programme before implementation.
+Repository-backed architecture forensics and recursive convergence remain active. Production code is read-only. Destination remains whole-system target architecture + migration architecture + proof architecture + dependency-ordered repository transformation programme before implementation.
 
 ## Context integrity
 
@@ -22,8 +22,8 @@ context integrity:     PASS
 ## Canonical ranges
 
 ```text
-Findings:        F206
-Contradictions:  C156
+Findings:        F207
+Contradictions:  C157
 Recommendations: KF-REC-053
 Concepts:        KF-CONCEPT-042
 ```
@@ -36,86 +36,91 @@ Load `04-CONCEPT-REGISTRY.md` + `04A` + `04B` before allocating anything new.
 - J17 Operator Attention: F179–F184 / C129–C134 / KF-REC-051.
 - J23/J18 temporal/recovery: 39 proof obligations / 16 deterministic fault points; runtime proof not executed.
 - J7 Financial Truth: F185–F196 / C135–C146 / KF-REC-052.
-- J3/J4 Commercial Relationship & Obligation: F197–F205 / C147–C155 / KF-REC-053; canonical J3/J4 dossiers ingrained; pressure test + backward re-audits complete for current tranche.
+- J3/J4 Commercial Relationship & Obligation: F197–F205 / C147–C155 / KF-REC-053; canonical J3/J4 dossiers ingrained; current-tranche pressure test and backward re-audits complete.
 
 ## Active frontier — J10 Commerce / Fulfilment
 
 Canonical dossier:
 `docs/intelligence/journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
 
-Initial native-storefront chain:
+Native checkout positive seam:
 
 ```text
-public checkout
-→ MarketplaceOrder PENDING
-→ external/manual payment path
-→ StoreOrderService.completeCheckout()
+StoreOrderService.completeCheckout()
 → one transaction:
    Invoice DRAFT→SENT→PAID
    + Payment SUCCESSFUL
    + ledger posting
    + tracked inventory decrement / StockMovement
    + RevenueAttribution ORDER
-   + MarketplaceOrder PAID/CONFIRMED
+   + MarketplaceOrder paymentStatus=PAID/status=CONFIRMED
 → commit
 → buffered invoice events
 → store_order.paid
-→ async integrations / fulfilment routing
 ```
 
-This transaction boundary is an architectural asset to preserve.
+Preserve this strong transaction boundary.
 
-## New canonical J10 root
+## F206 / C156 — duplicate paid-Invoice descendant ownership
 
-### F206 / C156 — duplicate paid-Invoice descendant ownership
+`completeCheckout()` already creates paid Invoice A. After commit it emits `store_order.paid`. Mounted `CommerceIntegrationService.handleOrderPaid()` calls `createRevenueRecord()`, whose duplicate check searches Invoice notes for `order:{order.id}`. Invoice A's notes contain only `Storefront order {orderNumber}`. The listener can therefore create Invoice B (`INV-ORD-{orderNumber}`), also PAID, for the same order.
 
-`completeCheckout()` creates paid Invoice A, then emits `store_order.paid`.
+Target reuse: KF-REC-053 semantic commercial-effect identity + KF-REC-052 financial truth. Do not use free-form notes as canonical effect identity.
 
-Mounted `CommerceIntegrationService.handleOrderPaid()` calls `createRevenueRecord()`, whose dedupe predicate searches Invoice notes for `order:{order.id}`. Invoice A's notes contain only `Storefront order {orderNumber}` and its number is `INV-{orderNumber}`. The listener can therefore create Invoice B as `INV-ORD-{orderNumber}`, also PAID, for the same order.
+## F207 / C157 — operational CONFIRMED emits financial paid semantics
 
-Canonical homes:
-- `08AK-FINDING-REGISTER-STOREFRONT-PAID-INVOICE-DUPLICATION-SUPPLEMENT.md`
-- `09AK-CONTRADICTION-REGISTER-STOREFRONT-PAID-INVOICE-DUPLICATION-SUPPLEMENT.md`
-
-Target law reuses KF-REC-053:
+Native order creation can yield:
 
 ```text
-one commercial order obligation
-→ one semantic paid-Invoice effect identity
-→ all retries/producers/listeners converge on the same descendant
+status=PENDING
+paymentStatus=PENDING (cash) or UNPAID
 ```
 
-Do not fix conceptually by making free-form notes the idempotency key.
+The authenticated orders UI exposes `pending → confirmed` as an ordinary order-status step. `updateOrderStatus(CONFIRMED)` updates only `status` but maps `CONFIRMED → store_order.paid`.
 
-## Reused existing roots — do not duplicate
+Reachable contradiction:
 
-- order/refund financial truth pressure → F193/F194/F196 + KF-REC-052 as applicable;
-- mixed commercial value stages → F202/C152;
-- Shopify CUSTOMER/LEAD lifecycle drift → F205/C155 + KF-REC-053;
-- provider paid/refunded import evidence vs local Payment/ledger truth → J7/K9/K10 roots;
-- temporal/recovery visibility → KF-REC-047/048.
+```text
+Order status = CONFIRMED
+Order paymentStatus = PENDING/UNPAID
+store_order.paid emitted
+→ mounted consumers can create PAID Invoice semantics and start fulfilment routing
+```
 
-## Current trace pressure
+Target law:
 
-1. `StoreOrderService.updateOrderStatus(CONFIRMED)` emits `store_order.paid`; authenticated UI exposes pending→confirmed. Determine whether manual confirmation can manufacture paid-event descendants without payment evidence and classify against existing roots before allocating.
-2. `refundOrder()` sets order status/paymentStatus REFUNDED and emits `store_order.refunded`; method itself does not perform provider refund, negative Payment, invoice reconciliation, ledger reversal or stock restore. Listener can create a refund Expense. Trace full correction graph and reuse J7 roots where appropriate.
-3. `ShopifyService.syncOrders()` maps external financial status directly to `MarketplaceOrder.paymentStatus`; treat as external evidence until local financial convergence.
-4. `ShopifyService.syncProducts()` lookup uses synthetic `shopify:{variantId}` SKU while persistence prefers a provider real SKU. Confirm DB/catalog uniqueness and repeat-sync behavior before any new ID.
-5. `StoreOrderRoutingListener` asynchronously routes fulfilment after `store_order.paid` and emits `routing_failed`; determine whether required routing failure becomes durable recoverable work/operator attention.
+```text
+OrderFulfilmentState != PaymentCompletionEvidence
+store_order.paid requires a payment transition/evidence, not generic order confirmation
+```
+
+If cash/manual confirmation is meant to record payment, it needs an explicit payment capability that records financial evidence.
+
+## Refund classification — reuse, not new ID yet
+
+Store Orders `refundOrder()` sets order `status/paymentStatus=REFUNDED` and emits `store_order.refunded`; that entry surface itself does not invoke provider refund, negative Payment, invoice reconciliation, ledger reversal or stock restore. Its listener can create a refund Expense.
+
+However `PaymentsService` already has a stronger `createRefundWithPosting()` primitive that creates a negative Payment and reverses the original ledger posting transactionally. Therefore current refund pressure is classified as an **entry-surface convergence/bypass problem under mature J7/KF-REC-052 roots**, not F208 unless a distinct semantic defect is proven.
+
+## Other active J10 pressure
+
+- Shopify order `financial_status` maps directly to `MarketplaceOrder.paymentStatus`; treat this as external/provider evidence, not automatically local Payment/ledger truth.
+- Shopify customer sync writes `CUSTOMER|LEAD` directly to Contact and reuses F205/C155.
+- Shopify product sync looks up by synthetic `shopify:{variantId}` SKU while persistence prefers a provider real SKU; repeat-sync identity behavior still needs DB/catalog verification.
+- `StoreOrderRoutingListener` routes fulfilment asynchronously from `store_order.paid` and emits either `store_order.fulfillment_routed` or `store_order.routing_failed`; durable recovery/operator visibility remains unclassified.
 
 ## Exact next action
 
 ```text
-Continue J10 microscopic forensics:
-1. finish order status/payment-status writer + event-consumer matrix;
-2. classify CONFIRMED→store_order.paid reachability and effects;
-3. trace refund/cancel/return through provider, Payment, Invoice, ledger, attribution and inventory;
-4. trace fulfilment routing state/idempotency/failure visibility;
-5. prove Shopify product/order/customer external identity and repeat-sync semantics;
-6. trace J10 events into CRM/calendar/webhooks/KEY/temporal jobs;
-7. search/reuse F001–F206, C001–C156, KF-REC-001–053 before new allocation;
+1. trace FulfillmentRoutingService state machine, route idempotency, required-route completeness and failure persistence;
+2. determine whether store_order.routing_failed becomes durable recoverable/projectable/operator work or only event/log signal;
+3. verify Shopify product external identity + SKU uniqueness/catalog behavior under repeated sync;
+4. trace Shopify order/customer external identities and correction semantics;
+5. trace order events into CRM/calendar/webhook/KEY/temporal consumers;
+6. continue refund/cancel/return only where evidence exceeds existing J7 roots;
+7. reuse F001–F207 / C001–C157 / KF-REC-001–053 before new allocation;
 8. pressure-test KF-REC-053 across product-order obligation lineage;
-9. persist every material tranche; production code remains untouched.
+9. persist each material tranche; do not modify production code.
 ```
 
-If this chat disappears, resume **J10 after F206/C156**, starting with `CONFIRMED → store_order.paid`, refund/correction convergence, fulfilment-routing recovery, and Shopify identity/idempotency.
+If this chat disappears, resume **J10 after F207/C157**, starting with FulfillmentRoutingService recovery/completeness and Shopify repeat-sync identity.
