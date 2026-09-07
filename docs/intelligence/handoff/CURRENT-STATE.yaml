@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 24
+analysis_version: 25
 last_updated: 2026-09-06
-phase: whole-system-virtual-model-expansion-j17-command-center-priority-action
-status: CONTINUE_J17_MICROSCOPIC_FORENSICS
+phase: whole-system-virtual-model-expansion-j17-operator-attention-priority
+status: PRESSURE_TEST_AND_BACKWARD_REAUDIT_J17_TARGET
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -18,43 +18,58 @@ taxonomy_integrity:
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   create_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F180
-  contradictions_through: C130
-  recommendations_through: KF-REC-050
+  findings_through: F184
+  contradictions_through: C134
+  recommendations_through: KF-REC-051
   concepts_through: KF-CONCEPT-042
 active_mesh:
-  journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16,J19,J17]
+  journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16,J19,J17,J7]
   kernels: [K2,K3,K4,K5,K6,K7,K8,K9,K10,K11]
 active_frontier:
   journey: J17
   name: Command_Center_to_Priority_to_Action
-  stage: DUAL_CONTROL_SURFACE_AND_COMMAND_SPINE_SEMANTICS_TRACE
+  stage: OPERATOR_ATTENTION_PRIORITY_TARGET_SYNTHESIS_AND_PRESSURE_TEST
   dossier: docs/intelligence/journeys/KF-JOURNEY-017-COMMAND-CENTER-PRIORITY-ACTION.md
-  primary_kernels: [K3,K4,K5,K6,K7,K8,K11]
-  current_topology:
-    - BusinessCommandCenter_snapshot_aggregates_source_services_into_transient_CommandCenterItems
-    - persistent_CommandItem_queue_exists_with_priority_urgency_obligation_disposition_and_execution_metadata
-    - both_surfaces_are_rendered_on_same_Command_Center_page
-    - synthesized_top_priorities_do_not_read_persistent_CommandItem_queue
-    - persistent_queue_user_mutations_refresh_queue_not_snapshot
-  findings: [F179,F180]
-  contradictions: [C129,C130]
-  F179: source_failure_can_be_substituted_with_empty_zero_fallback_without_projection_degradation_semantics
-  F180: CommandItem_approve_execute_can_mark_projection_EXECUTED_without_resolving_source_or_performing_declared_effect
-  verified_positive_seams:
-    - KeyActionProposal_execute_revalidates_current_AutonomyOrchestrator_and_Genome_policy_before_effect
-    - CommandItem_obligation_vs_suggestion_semantics_are_being_strengthened
-    - obligation_raise_uses_upsert_and_settlement_preserves_disposition_semantics
-    - due_overdue_snooze_and_discharge_are_distinguished_for_obligations
-  current_uncertainty:
-    dual_projection_same_condition_overlap: PARTIALLY_PROVEN_NOT_CANONICALIZED
-    detail: invoice_status_OVERDUE_feeds_CommandGenerator_and_invoice_overdue_event_exists_for_TemporalFlow_analysis_but_runtime_bridge_to_source_APP_TemporalFlowEvent_not_yet_proven
-  target_pressure:
-    - CommandItem_may_be_durable_operator_attention_work_projection_but_not_execution_truth_by_default
-    - operator_disposition_control_decision_Clearance_effect_and_outcome_must_remain_distinct
-    - terminal_projection_state_must_derive_from_authoritative_source_effect_evidence_when_claiming_execution
-    - source_health_freshness_and_projection_completeness_must_be_explicit
-    - multiple_display_projections_must_converge_or_explain_disposition_differences
+  recommendation: KF-REC-051
+  primary_kernels: [K3,K4,K5,K6,K7,K8,K10,K11]
+  findings: [F179,F180,F181,F182,F183,F184]
+  contradictions: [C129,C130,C131,C132,C133,C134]
+  topology:
+    - synthesized_BusinessCommandCenter_snapshot_and_persistent_CommandItem_queue_coexist_on_same_page
+    - snapshot_Top_Priorities_rank_priority_class_then_static_type_weight_then_recency
+    - persistent_CommandItem_findMany_ranks_numeric_priority_then_urgency_then_recency
+    - rich_GenomeRecommendationRanker_exists_but_global_Top_Priorities_bypasses_its_rank_semantics
+    - CommandItem_obligation_contract_has_strong_bidirectional_positive_seams_for_some_producers
+  finding_summaries:
+    F179: fail_soft_source_unavailability_can_look_like_healthy_zero_and_improve_projection_health
+    F180: CommandItem_approve_execute_can_claim_EXECUTED_without_source_resolution_or_effect_proof
+    F181: Temporal_invoice_overdue_priority_logic_has_no_observed_standard_invoice_to_TemporalFlow_materialization_path
+    F182: source_derived_CommandItem_creation_can_lack_reverse_convergence_after_source_resolution
+    F183: multi_status_queue_UI_operates_over_OPEN_only_server_dataset
+    F184: global_priority_compresses_or_discards_richer_source_ranking_semantics
+  target_laws:
+    - source_truth_operator_projection_priority_user_disposition_Clearance_effect_outcome_are_distinct
+    - projection_adapter_requires_both_admission_and_reverse_convergence
+    - source_health_freshness_and_materialization_completeness_are_explicit
+    - PriorityAssessment_is_multidimensional_before_question_specific_ordering
+    - risk_priority_urgency_expected_value_and_actionability_are_not_synonyms
+    - operator_disposition_does_not_claim_business_effect_without_evidence
+    - material_action_returns_to_canonical_current_governance_and_effect_owner
+    - CommandItem_can_own_operator_work_state_without_owning_business_or_effect_truth
+    - Temporal_Work_Projection_is_a_source_into_operator_attention_not_all_priority_truth
+  positive_seams:
+    - KeyActionProposal_execute_revalidates_AutonomyOrchestrator_and_Genome_policy_before_effect
+    - CommandItem_SUGGESTION_vs_OBLIGATION
+    - work_obligation_raise_settle_bidirectional_contract
+    - obligation_stable_five_tuple_upsert
+    - due_overdue_snooze_and_discharge_semantics
+    - FinanceIntelligence_paired_CommandItem_mirror_and_dismiss_for_its_FIN8_family
+  rejected_or_narrowed_hypotheses:
+    same_invoice_dual_projection_is_primary_root: rejected
+    reason: normal_invoice_overdue_to_TemporalFlow_materialization_not_load_bearing_in_observed_wiring
+    universal_CommandItem_as_all_business_truth: rejected
+    universal_single_scalar_priority_score: rejected
+    opaque_ML_priority_ranker_by_default: rejected
 latest_converged_pool:
   name: business_knowledge_genome_evolution_epistemic_integrity
   primary_journey: J16
@@ -88,14 +103,14 @@ continuity:
   taxonomy_check_after_major_tranche: true
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 exact_next_action:
-  title: prove_or_reject_J17_dual_projection_disposition_drift_then_trace_priority_contract
-  instruction: Prove the runtime materialization bridge for at least one same business condition into both persistent CommandItem and synthesized CommandCenterItem/Temporal priority surfaces. Start with invoice.overdue: trace the producer from Invoice OVERDUE transition through EventEmitter/FlowSignal/TemporalFlow persistence and compare CommandItem identity/disposition. If same-condition overlap is not load-bearing, reject F181. Then trace priority dimensions, deadlines, freshness, recovery state and user dispositions across both surfaces. Reuse F120/F141-F144/F179/F180 where roots overlap; load 04A/04B before any new allocation.
+  title: pressure_test_KF_REC_051_then_backward_reaudit
+  instruction: Use current standards/frontier research on alarm/incident attention management, SRE alert quality, human oversight and explainable decision support to pressure-test KF-REC-051. Separate floor, frontier and KeyFlow synthesis; preserve question-specific priority lenses and scarce-attention principles without importing generic alarm-management infrastructure. Persist research, update J17, then backward-reaudit J6/J7/J15/J17/J18/J23 plus K3/K4/K7/K8/K11. Load 04A/04B before any new ID.
 constraints:
   - do_not_modify_production_code
   - do_not_treat_Command_Center_projection_as_authoritative_truth
   - do_not_treat_CommandItem_EXECUTED_as_effect_truth_without_evidence
   - priority_or_recommended_action_is_not_Clearance
-  - fail_soft_projection_must_not_hide_unknown_as_healthy_absence_in_target
+  - do_not_create_one_universal_priority_scalar_as_semantic_truth
   - do_not_create_duplicate_canonical_concepts_or_ids
   - preserve_anti_normalization_method
   - continuously_refresh_cross_thread_continuity
