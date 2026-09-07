@@ -41,8 +41,8 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Journeys: `J1 ... J25` — `03-ANALYSIS-MAP.md`.
 - Kernels: `K1 ... K12` — `12-KERNEL-PROGRAMME.md`.
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042` — `04-CONCEPT-REGISTRY.md`.
-- Findings: `F001–F214` — `08*`; allocator 04B.
-- Contradictions: `C001–C164` — `09*`; allocator 04B.
+- Findings: `F001–F216` — `08*`; allocator 04B.
+- Contradictions: `C001–C166` — `09*`; allocator 04B.
 - Recommendations: `KF-REC-001–KF-REC-054` — `10*`; allocator 04B.
 
 Latest roots:
@@ -58,6 +58,8 @@ F211/C161 — partial fulfilment route set can block recovery because any existi
 F212/C162 — Shopify order/customer sync writers disagree on Contact identity resolution
 F213/C163 — Shopify order enters native MarketplaceOrder without native relational item descendants
 F214/C164 — strategy-specific PurchaseOrder/PreOrder can commit before FulfillmentRoute, so route-based retry can duplicate the same fulfilment obligation
+F215/C165 — ContractVersion is not a complete reconstructable authoritative Contract revision history
+F216/C166 — uncertain AI contract extraction can be promoted into authoritative Contract/renewal truth without epistemic/governance promotion evidence
 ```
 
 Current major pooled targets:
@@ -94,6 +96,11 @@ Mutable customer email != immutable provider customer identity
 Provider metadata line items != native operational OrderItem descendants
 External provider paid/refunded label != local Payment/ledger convergence
 Plan-step/process idempotency != semantic effect idempotency
+Document extraction assertion != authoritative Contract truth
+Contract current projection != ContractRevision evidence/history
+Contract definition/source identity != renewal WorkOccurrence identity
+Derived alert fact != durable operator disposition
+Contract deletion != obligation settlement/cancellation by implication
 ```
 
 ---
@@ -112,6 +119,10 @@ Plan-step/process idempotency != semantic effect idempotency
 | Financial Truth & Valuation Contract | KF-REC-052 |
 | Commercial Relationship & Obligation Contract | KF-REC-053 |
 | Commerce & Fulfilment Contract | KF-REC-054 |
+| ContractRevision | J11 target vocabulary under F215/C165; exact persistence shape not frozen |
+| ContractAssertion / extraction evidence | J11 specialization of K4/KF-REC-049; not authoritative by default |
+| Renewal WorkOccurrence | J11 specialization of J23/KF-REC-047; one cycle != Contract definition identity |
+| Contract renewal operator disposition | J11 specialization of J17/KF-REC-051; recomputation must preserve disposition |
 | CustomerLifecycleState | KF-REC-053 target vocabulary; exact enum not frozen |
 | RelationshipHealthState | KF-REC-053; orthogonal to lifecycle |
 | CommercialObligationLineage | KF-REC-053; origin/descendant lineage |
@@ -143,6 +154,7 @@ Plan-step/process idempotency != semantic effect idempotency
 10. CURRENT/HANDOFF/ROLLOVER carry current ranges/frontier.
 11. A stale or duplicate canonical range is an intelligence-integrity defect and is repaired before broad analysis continues.
 12. Search/reuse is mandatory across ChatGPT, Claude Code and Kimi Code sessions.
+13. A domain-specific recurrence, projection-disposition or epistemic manifestation reuses the mature kernel root unless it proves a genuinely distinct semantic owner.
 
 ---
 
@@ -151,14 +163,15 @@ Plan-step/process idempotency != semantic effect idempotency
 ```text
 Journey namespace:       J1–J25 fixed
 Kernel namespace:        K1–K12 fixed
-Finding range:           through F214
-Contradiction range:     through C164
+Finding range:           through F216
+Contradiction range:     through C166
 Recommendation range:    through KF-REC-054
 Concept range:           through KF-CONCEPT-042
 Allocator:               04B-CANONICAL-ID-ALLOCATION-LEDGER.md
+Next free:               F217 / C167 / KF-REC-055 — UNALLOCATED
 ```
 
-J3/J4 are provisionally converged and target-aligned through KF-REC-053. J10 is provisionally converged and target-aligned through KF-REC-054 after its standards/frontier pressure test and backward re-audit.
+J3/J4 are provisionally converged and target-aligned through KF-REC-053. J10 is provisionally converged and target-aligned through KF-REC-054 after its standards/frontier pressure test and backward re-audit. J11 is active through F216/C166 with no recommendation yet allocated.
 
 Current J10 homes:
 - `journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md`
@@ -171,9 +184,16 @@ Current J10 homes:
 - F213/C163 — `08AQ` / `09AQ`
 - F214/C164 — `08AR` / `09AR`
 - `KF-REC-054` — `10M`
-- pressure test — `investigations/J10-COMMERCE-FULFILMENT-STANDARDS-FRONTIER-PRESSURE-TEST.md`
-- backward re-audit — `investigations/J10-J7-J3-J4-J18-J23-K9-J17-COMMERCE-FULFILMENT-BACKWARD-REAUDIT.md`
 
-Do not allocate new refund/provider/lifecycle/recovery roots where mature KF-REC-035–037/047/048/051/052/053/054 and existing findings already own the semantic defect. The next journey frontier must be revalidated against the journey inventory before activation.
+Current J11 homes / reuse decisions:
+- `journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md`
+- F215–F216 — `08AS`
+- C165–C166 — `09AS`
+- renewal-cycle identity → reuse J23 / KF-REC-047
+- ContractAlert disposition resurrection → reuse F182 / KF-REC-051
+- Contract deletion orphaning renewal work → reuse F182 / KF-REC-051
+- hard deletion of Contract history → strengthen F215/C165
+
+Do not allocate new recurrence/operator-projection/knowledge roots where mature KF-REC-047/049/051 already own the semantic defect. Do not allocate a J11 recommendation until irreducible contract-domain semantics remain after delegation.
 
 No production implementation is authorized by this taxonomy artifact.
