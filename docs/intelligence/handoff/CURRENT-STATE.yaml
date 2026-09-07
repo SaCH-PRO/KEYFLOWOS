@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 47
+analysis_version: 48
 last_updated: 2026-09-07
-phase: whole_system_virtual_model_j11_microscopic_trace
-status: J11_CONTRACT_OBLIGATION_RENEWAL_ACTIVE
+phase: whole_system_virtual_model_j11_standards_frontier_pressure_test
+status: J11_CODE_POOL_STABLE_THROUGH_F218_C168
 canonical_branch: docs/keyflow-intelligence-foundation
 context_integrity: PASS
 implementation_authorized: false
@@ -15,16 +15,15 @@ implementation_evidence:
   current_head: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   head_revalidated: true
 canonical_ranges:
-  findings_through: F216
-  contradictions_through: C166
+  findings_through: F218
+  contradictions_through: C168
   recommendations_through: KF-REC-054
   concepts_through: KF-CONCEPT-042
 next_free_ids:
-  finding: F217
-  contradiction: C167
+  finding: F219
+  contradiction: C169
   recommendation: KF-REC-055
   allocation_status: UNALLOCATED
-
 mature_pools:
   J16_K4: { recommendation: KF-REC-049, findings: F161-F178, contradictions: C111-C128 }
   J17: { recommendation: KF-REC-051, findings: F179-F184, contradictions: C129-C134 }
@@ -32,56 +31,57 @@ mature_pools:
   J7: { recommendation: KF-REC-052, findings: F185-F196, contradictions: C135-C146 }
   J3_J4: { recommendation: KF-REC-053, findings: F197-F205, contradictions: C147-C155, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
   J10: { recommendation: KF-REC-054, findings: F206-F214, contradictions: C156-C164, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
-
 j11:
-  status: ACTIVE_MICROSCOPIC_TRACE
+  status: CODE_POOL_STABLE_PRESSURE_TEST_NEXT
   dossier: docs/intelligence/journeys/KF-JOURNEY-011-CONTRACT-OBLIGATION-RENEWAL.md
-  latest_trace: docs/intelligence/investigations/J11-CONTRACT-RENEWAL-PROJECTION-OCCURRENCE-CONVERGENCE-TRACE.md
+  trace: docs/intelligence/investigations/J11-CONTRACT-RENEWAL-PROJECTION-OCCURRENCE-CONVERGENCE-TRACE.md
   allocated_findings:
     F215: ContractVersion is not a complete reconstructable authoritative Contract revision history.
-    F216: AI contract extraction can promote uncertain inferred values into authoritative Contract and renewal state without epistemic/governance promotion evidence.
+    F216: Uncertain AI contract extraction can become authoritative Contract and renewal truth without promotion evidence.
+    F217: Generic Contract edits can falsely discharge renewal work because lifecycle status presence is treated as decision evidence.
+    F218: Contract retention state does not constrain hard deletion, which cascades Contract-owned evidence/history.
   allocated_contradictions:
-    C165: ContractVersion implies revision history while mutations can bypass it and records cannot reconstruct state.
-    C166: Contract extraction carries uncertainty while registry consumption treats promoted values as current truth.
+    C165: Revision-history representation conflicts with mutation/reconstruction behavior.
+    C166: Probabilistic extraction evidence conflicts with authoritative registry consumption.
+    C167: ACTIVE is both renewal-work eligible and treated as renewal-resolved depending on path.
+    C168: Declared retention state conflicts with unconditional destructive deletion.
   reuse_verdicts:
     renewal_occurrence_identity: J23_KF_REC_047_SPECIALIZATION
     contract_alert_ack_regeneration: F182_KF_REC_051_SPECIALIZATION
+    alert_threshold_time_progression: J23_KF_REC_047_SPECIALIZATION
     delete_source_orphans_obligation: F182_KF_REC_051_SPECIALIZATION
-    hard_delete_destroys_history: F215_C165_STRENGTHENING
-    ai_fact_drives_work: F216_C166_KF_REC_049_COMPOSITION
-
-confirmed_dynamic_breaks:
-  - ContractAlert delete/recreate can erase acknowledgement disposition.
-  - Contract hard delete emits no obligation settlement and can leave independently persisted renewal work orphaned.
-  - Contract-owned version/alert descendants cascade on hard delete, strengthening the revision-history defect.
-  - The renewal five-tuple correctly dedupes repeat emissions for one occurrence but cannot distinguish a later renewal cycle; a terminal CommandItem can therefore suppress a genuinely new occurrence.
-
+    renewal_date_correction_stale_work: F182_KF_REC_051_SPECIALIZATION
+    local_alert_vs_obligation_actionability: KF_REC_047_051_PRESSURE_NO_NEW_ROOT
+    clause_analysis: DERIVED_ADVISORY_VALUE_DENSITY_REVIEW
+  emerging_target_semantics:
+    - ContractRevision
+    - RenewalOccurrence
+    - RenewalDecisionEvidence
+    - RetentionDeletionDecision
+  delegations:
+    epistemic_provenance: KF-REC-049
+    temporal_recurrence: KF-REC-047
+    operator_attention: KF-REC-051
+    recovery_certainty: KF-REC-048
+    financial_valuation: KF-REC-052
+    commercial_obligation_discipline: KF-REC-053
 positive_seams:
-  - ObligationListener upsert preserves disposition while refreshing facts.
-  - Contract status update has explicit WORK_OBLIGATION_SETTLED path for ACTIVE EXPIRED TERMINATED ARCHIVED.
-  - Repeated sweep emission is safe under the obligation five-tuple for the same occurrence.
-
+  - ContractRenewalSweep emits canonical work.obligation.raised instead of writing CommandItem directly.
+  - ObligationListener repeat upsert refreshes facts while preserving user disposition for the same occurrence.
+  - Authoritative Contract writers are concentrated around ContractsService; derived clause analysis is separable.
 active_frontier:
-  stage: J11_MICROSCOPIC_TRACE
+  stage: J11_STANDARDS_OSS_FRONTIER_PRESSURE_TEST
   primary_journey: J11
-  focus:
-    - CLASSIFY_CONTRACT_ALERT_TYPES_VS_OPERATOR_OBLIGATION_AND_TEMPORAL_PROJECTION
-    - TEST_ACTIVE_STATUS_AS_RENEWAL_SETTLEMENT_SEMANTICS
-    - TRACE_RETENTION_POLICY_VS_HARD_DELETE
-    - TRACE_MUTATION_AUTHORIZATION_AUDIT_AND_REEVALUATION_SYMMETRY
-  instruction: Determine whether ContractAlert and CommandItem are intentionally distinct projections or redundant durable attention systems. Classify each ContractAlertType. Trace whether ACTIVE can prematurely or ambiguously discharge renewal work, retentionPolicy/retentionUntil versus hard delete, and every material mutation/delete door for audit/revision/renewal re-evaluation. Reuse mature J17/J23/K4 roots before any new allocation.
-
+  instruction: Pressure-test the four J11 roots and emerging bounded target semantics against current records/revision provenance, contract lifecycle/renewal, temporal occurrence/work, retention/deletion and auditability practices. Reject enterprise bulk and universal runtimes. Decide whether KF-REC-055 is genuinely required.
 exact_next_action:
-  title: classify_attention_roles_then_retention_and_settlement_semantics
-  instruction: Trace ContractAlertType EXPIRY_30 EXPIRY_7 EXPIRY_1 RENEWAL_DUE EXPIRED through UI and consumers and compare with CommandItem CONTRACT_RENEWAL/Temporal Work. Then trace status ACTIVE settlement meaning across renewal-date changes and next-cycle recurrence. Trace retentionPolicy/retentionUntil against deleteContract and authorization/audit evidence. Allocate nothing unless a genuinely distinct semantic owner survives anti-duplication. Keep production code read-only.
-
+  title: pressure_test_j11_then_decide_target_contract
+  instruction: Research current authoritative standards and useful OSS patterns for records integrity/revision provenance, contract lifecycle and renewal decision evidence, occurrence identity, retention/deletion controls and audit evidence. Compare them with F215-F218 without importing irrelevant compliance assumptions. If irreducible Contract-domain semantics remain after delegation to KF-REC-047/048/049/051/052/053, synthesize and allocate the smallest bounded KF-REC-055; otherwise document full delegation. Then backward re-audit adjacent journeys and kernels.
 constraints:
   - production_code_read_only
   - source_documents_do_not_override_repository_behavior
   - anti_duplication_before_allocation
-  - F217_C167_KF_REC_055_remain_unallocated
-  - recurrence_requires_occurrence_identity_not_definition_identity
-  - derived_fact_recomputation_must_preserve_durable_disposition
-  - contract_deletion_not_equal_obligation_cancellation
-  - hard_delete_must_not_silently_erase_required_history
+  - F219_C169_KF_REC_055_are_next_free
+  - no_jurisdiction_specific_retention_claim_without_evidence
+  - no_second_operator_attention_or_temporal_runtime
+  - no_universal_contract_mega_runtime
   - continuously_refresh_cross_agent_continuity
