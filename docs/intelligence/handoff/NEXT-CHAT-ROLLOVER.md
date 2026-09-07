@@ -5,8 +5,6 @@ Last refreshed: 2026-09-07
 Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 Production implementation authorized: **NO**
 
-> Repository continuity is the source of truth for programme state. Source documents preserve product intent/context; repository behaviour remains authoritative for implementation claims.
-
 ## Fresh-chat instruction
 
 ```text
@@ -14,94 +12,86 @@ Continue KEYFLOWOS from canonical repository intelligence. Do not restart.
 Load 04-CONCEPT-REGISTRY.md, 04A, 04B, 07-CURRENT-STATE.md,
 CURRENT-HANDOFF.md, CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first. Production code remains read-only.
-J10 is pooled through F214/C164/KF-REC-054.
 J11 is provisionally converged through F218/C168/KF-REC-055.
-J12 is ACTIVE microscopic forensics through F219/C169.
-Do NOT resume post-J11 frontier selection: that step is obsolete.
-Do NOT allocate F220/C170 without anti-duplication and do NOT allocate KF-REC-056 merely because F219 exists.
-Exact frontier: continue J12 Document/Evidence tracing from the F219/C169 payment-evidence admission checkpoint across remaining DocumentIntelligence consumers, source revisions, correction/reprocessing/supersession/deletion and evidence lineage.
-Payment-evidence replay/fresh random payment identity is a KF-REC-048 specialization, not F220 unless new evidence proves a distinct semantic owner.
+J12 is ACTIVE through F220/C170.
+Do NOT resume post-J11 frontier selection or J11 pressure testing.
+Next free IDs are F221 / C171 / KF-REC-056 and remain UNALLOCATED.
+Exact frontier: direct AI upload → generated Document tweak crash/F164 closure → accepted-evidence correction/replacement/supersession/deletion.
+Device reviewed-state reprocessing is F161/KF-REC-049 reuse, not F221.
+Expense receipt extraction prefills editable fields and requires explicit human submit; provenance remains open pressure, not a new root yet.
 ```
 
-## Evidence baseline / ranges
+## Baseline / ranges
 
 ```text
 repository:        SaCH-PRO/KEYFLOWOS
 main:              8f173bfe79f1418159cf4099ea18b0d60d203ec2
 intelligence:      docs/keyflow-intelligence-foundation
-Findings:          F219
-Contradictions:    C169
+Findings:          F220
+Contradictions:    C170
 Recommendations:  KF-REC-055
 Concepts:          KF-CONCEPT-042
-next free:         F220 / C170 / KF-REC-056
+next free:         F221 / C171 / KF-REC-056
 runtime proof:     NOT EXECUTED
 ```
 
-## Active J12 result
+## J12 canonical roots
 
 ```text
-F219/C169 — transient document extraction/raw-text assertions can become successful payment evidence without an explicit consumer-specific evidence-admission decision
+F219/C169 — transient document assertion can become successful payment evidence without explicit consumer-specific evidence admission
+F220/C170 — a materially new external document revision can be suppressed as the prior ingestion occurrence when stable object identity is used as dedupe identity
+```
+
+Homes:
+
+```text
+F219 → docs/intelligence/08AV-FINDING-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+C169 → docs/intelligence/09AV-CONTRADICTION-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md
+F220 → docs/intelligence/08AW-FINDING-REGISTER-DOCUMENT-SOURCE-REVISION-OCCURRENCE-SUPPLEMENT.md
+C170 → docs/intelligence/09AW-CONTRADICTION-REGISTER-DOCUMENT-SOURCE-REVISION-OCCURRENCE-SUPPLEMENT.md
 ```
 
 Dossier:
 `docs/intelligence/journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md`
 
-Finding:
-`docs/intelligence/08AV-FINDING-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md`
+Consumer trace:
+`docs/intelligence/investigations/J12-DOCUMENT-INTELLIGENCE-CONSUMER-REVISION-LINEAGE-TRACE.md`
 
-Contradiction:
-`docs/intelligence/09AV-CONTRADICTION-REGISTER-DOCUMENT-EVIDENCE-PROMOTION-INTEGRITY-SUPPLEMENT.md`
-
-Reachable chain:
+## Key distinctions / delegations
 
 ```text
-CommerceController
-→ PaymentEvidenceService.processEvidence()
-→ DocumentIntelligence extraction OR raw-text fallback
-→ transient payment-like assertion
-→ no observed evidence-admission / verification gate
-→ CommerceService.recordPayment()
-→ Payment SUCCESSFUL
-→ Invoice state + financial consequences
+Document assertion != qualifying evidence != domain truth
+ExternalObjectId != ExternalSourceRevisionId != ExtractionOccurrenceId != IngestionOccurrenceId
+J12 evidence admission → F219/C169
+J12 source-revision occurrence boundary → F220/C170
+generic revision/provenance → KF-REC-049
+ingress occurrence direction → KF-REC-035
+financial claim strength → KF-REC-052
+same-occurrence replay/effect identity → KF-REC-048
 ```
 
-The raw-text fallback can explicitly carry `confidence: 0.3` and still reach this path without an observed admission threshold.
-
-Ownership/delegation:
+## Reuse checkpoint
 
 ```text
-J12/K8 document-evidence admission         → F219/C169
-generic provenance / epistemic eligibility → KF-REC-049
-financial claim strength                   → KF-REC-052
-retry / replay / effect identity           → KF-REC-048
+manual DocumentSection edit later approved through stale version → F161 / KF-REC-049
+Device ACCEPTED/REJECTED VisualIntake reprocessed in-place → F161 / KF-REC-049; NO F221
+AI tweak partial mutation/version crash → exact F164 check remains open
+contract extraction promotion → F216/C166 + KF-REC-055
+payment evidence replay → KF-REC-048
+Expense extract-receipt → editable human-submit seam; provenance open, no root yet
+Drive R2 suppressed as duplicate R1 → F220/C170
 ```
-
-## J12 anti-duplication checkpoint
-
-```text
-manual inline edit approved through stale version      → F161 / KF-REC-049
-AI tweak partial mutation/version crash boundary       → exact F164 check remains open
-contract extraction promotion                          → F216/C166 + KF-REC-055
-same payment evidence replay / fresh payment identity  → KF-REC-048 specialization; NO F220
-```
-
-## J11 stable result
-
-J11 remains provisionally converged through F218/C168/KF-REC-055 and reopenable if J12/later proof invalidates it. Do not resume J11 pressure testing or convert KF-REC-055 into an implementation packet.
 
 ## Exact next work
 
 ```text
-1. continue all material DocumentIntelligence consumers;
-2. trace stable source document identity + exact revision across upload, Drive, Asset, Device and Expense;
-3. determine whether each consumer persists assertion/evidence/admission lineage or only final state;
-4. trace correction/reprocessing/replacement/supersession/deletion and dependent effects;
-5. close generated-document tweak crash semantics against F164;
-6. test whether new admission failures reuse F219 or prove a different semantic owner;
-7. pool stable roots before considering KF-REC-056;
-8. keep production untouched and do not claim runtime proof.
+1. inspect direct AI upload endpoint: extraction-only vs downstream side effect;
+2. close generated Document tweak crash boundary against F164;
+3. trace correction/replacement/supersession/deletion across accepted evidence;
+4. follow Expense provenance only where materially distinct consequences exist;
+5. classify all seams before F221/C171;
+6. pool stable J12 roots before considering KF-REC-056;
+7. keep production untouched and do not claim runtime proof.
 ```
 
-If continuity is lost, resume from **J12 F219/C169 payment-evidence admission checkpoint**.
-
-No production implementation is authorized.
+If continuity is lost, resume from **J12 F220/C170 source-revision occurrence checkpoint**.
