@@ -1,7 +1,7 @@
 # KeyFlowOS Canonical ID Allocation Ledger
 
 Status: CANONICAL — OVERRIDES LEGACY COLLIDING ALLOCATIONS
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 Purpose: provide one unambiguous allocator for Finding (`F###`), Contradiction (`C###`) and Recommendation (`KF-REC-###`) identities.
 
@@ -20,6 +20,7 @@ F197–F205 J3/J4 commercial-to-cash
 F206–F214 J10 Commerce/Fulfilment
 F215–F218 J11 Contract/Obligation/Renewal
 F219–F221 J12 Document/Evidence Lifecycle
+F222       J5 Conversation → Business Action first-pass lineage
 ```
 
 ```text
@@ -31,6 +32,7 @@ C147–C155 J3/J4 contradictions
 C156–C164 J10 contradictions
 C165–C168 J11 contradictions
 C169–C171 J12 Document/Evidence Lifecycle
+C172       J5 Conversation → Business Action first-pass lineage
 ```
 
 Current recommendation range is through `KF-REC-056`.
@@ -133,18 +135,24 @@ runtime proof executed                           = NO
 production implementation authorized             = NO
 ```
 
+## J5 Conversation → Business Action first-pass allocations
+
+- F222 / C172 — one external conversational occurrence can be processed under contradictory ownership/lifecycle semantics by KeyInbox, MessageIntake and ConversationalAI — `08AY` / `09AY`.
+
+J5 is **ACTIVE / NOT CONVERGED**. No J5 recommendation has been allocated yet. The legacy Meta `aiHandled=false` recurrence is still under anti-duplication review and is not yet a separate canonical finding.
+
 ## Current ranges
 
 ```text
-Findings:         F001–F221
-Contradictions:   C001–C171
+Findings:         F001–F222
+Contradictions:   C001–C172
 Recommendations: KF-REC-001–KF-REC-056
 ```
 
 Next free IDs:
 
 ```text
-F222 / C172 / KF-REC-057
+F223 / C173 / KF-REC-057
 ```
 
 ## Agent pre-allocation gate
