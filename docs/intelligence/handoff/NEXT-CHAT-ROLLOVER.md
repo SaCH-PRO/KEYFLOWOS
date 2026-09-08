@@ -1,7 +1,7 @@
 # KEYFLOWOS — Next Chat Rollover Packet
 
 Status: LIVE CONTINUITY ARTIFACT — CURRENT
-Last refreshed: 2026-09-07
+Last refreshed: 2026-09-08
 Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 Production implementation authorized: **NO**
 
@@ -12,60 +12,85 @@ Continue KEYFLOWOS from canonical repository intelligence. Do not restart.
 Load 04-CONCEPT-REGISTRY.md, 04A, 04B, 07-CURRENT-STATE.md,
 CURRENT-HANDOFF.md, CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first. Production code remains read-only.
-J11 is provisionally converged through F218/C168/KF-REC-055.
-J12 is provisionally converged through F221/C171/KF-REC-056.
-Do NOT resume J12 pressure testing or F219-F221 discovery.
-Next free IDs: F222 / C172 / KF-REC-057 — UNALLOCATED.
-Exact frontier: select the next genuinely under-covered/high-leverage journey from the 25-journey programme, verify reachable native implementation footprint, activate it, and begin microscopic tracing from native write/effect paths.
+J12 remains provisionally converged through F221/C171/KF-REC-056.
+J5 is now ACTIVE through F222/C172; do NOT return to post-J12 frontier selection.
+Next free IDs: F223 / C173 / KF-REC-057 — UNALLOCATED.
+Exact frontier: continue J5 Conversation → Business Action microscopic tracing after F222/C172.
 ```
 
 ## Baseline / ranges
 
 ```text
 repository:        SaCH-PRO/KEYFLOWOS
-main:              8f173bfe79f1418159cf4099ea18b0d60d203ec2
+forensic main:     8f173bfe79f1418159cf4099ea18b0d60d203ec2
 intelligence:      docs/keyflow-intelligence-foundation
-Findings:          F221
-Contradictions:    C171
+Findings:          F222
+Contradictions:    C172
 Recommendations:  KF-REC-056
 Concepts:          KF-CONCEPT-042
-next free:         F222 / C172 / KF-REC-057
+next free:         F223 / C173 / KF-REC-057
 runtime proof:     NOT EXECUTED
 ```
 
-## J12 durable result
+Later main movement through `11fc669...` was inspected when J5 was activated. No deliberate implementation rebaseline was taken for this forensic tranche.
 
-```text
-F219/C169 — evidence admission
-F220/C170 — source-revision / ingestion-occurrence identity
-F221/C171 — destructive document disposition
-KF-REC-056 — Document Evidence & Revision Integrity Contract
-```
+## J5 durable state
 
 Dossier:
-`docs/intelligence/journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md`
+`docs/intelligence/journeys/KF-JOURNEY-005-CONVERSATION-BUSINESS-ACTION.md`
 
-Pressure test:
-`docs/intelligence/investigations/J12-DOCUMENT-EVIDENCE-LIFECYCLE-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+Canonical root:
 
-Backward re-audit:
-`docs/intelligence/investigations/J12-J16-J14-J18-J7-J11-J19-J17-DOCUMENT-EVIDENCE-INTEGRITY-BACKWARD-REAUDIT.md`
+```text
+F222/C172 — one external conversational occurrence can be processed under incompatible ownership/lifecycle semantics by KeyInbox, MessageIntake and legacy-Meta ConversationalAI paths.
+```
 
-Recommendation:
-`docs/intelligence/10O-RECOMMENDATION-REGISTER-DOCUMENT-EVIDENCE-REVISION-INTEGRITY-CONTINUATION.md`
+Homes:
 
-Backward re-audit found no parallel provenance, ingress, recovery, financial, contract, operator-attention, privacy or document runtime; no new F222/C172; universal EDMS not required.
+```text
+docs/intelligence/08AY-FINDING-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
+docs/intelligence/09AY-CONTRADICTION-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
+```
+
+Current narrowed evidence:
+
+```text
+WhatsApp + MessageIntake enabled
+→ emits message.intake.received
+→ still persists/analyzes same message in KeyInbox
+
+MessageIntake approved plan
+→ first action creates KeyInbox thread/message
+→ actions execute sequentially, not transactionally
+→ success marks approved; thrown failure marks error
+
+legacy Meta
+→ provider message already in KeyInbox
+→ SocialEngagement(aiHandled=false)
+→ scanner can emit MessageIntake and call ConversationalAI
+→ ConversationalAI uses SocialEngagement.id as external message identity
+→ first pass can create second KeyInbox representation
+→ later scans hit KeyInbox unique boundary before repeated reasoning
+→ classify as F222 manifestation, not F223 yet
+
+real Meta Graph
+→ no legacy SocialEngagement row
+→ KeyInbox analyze/suggest path
+→ live UI requires human confirmation before KeyInboxActionExecutor executes suggestion
+```
+
+AiOversight `evaluateAutoApproval()` remains a live J5 pressure point. Its confidence/quick-confirm semantics must be compared with existing J2/J6/J15 roots before new allocation.
 
 ## Exact next work
 
 ```text
-1. load 03-ANALYSIS-MAP + journey dossier inventory;
-2. identify genuinely unpooled / under-covered journeys after J12;
-3. compare reachable implementation footprint and cross-kernel leverage;
-4. activate the highest-leverage next frontier;
-5. begin microscopic tracing at native write/effect paths;
-6. reuse F001-F221 / C001-C171 / KF-REC-001-056 before new allocation;
+1. prove MessageIntake approval behavior when the adapter already persisted the same external KeyInbox message, including unique collision, orphan thread and error-state consequences;
+2. compare AiOversight.evaluateAutoApproval high-confidence/quick-confirm semantics against existing J2/J6/J15 findings;
+3. inspect KeyInboxActionExecutor human-confirmed mutations against exact capability/authority semantics;
+4. trace KeyInboxReplySender provider-effect → sendStatus/evidence/retry semantics and reuse F159/F099/F100 where applicable;
+5. trace real Meta Graph + WhatsApp outcome/evidence convergence into CRM/Business Graph;
+6. reuse F001-F222 / C001-C172 / KF-REC-001-056 before allocation;
 7. keep production untouched and do not claim runtime proof.
 ```
 
-If continuity is lost, resume from **next-frontier selection after J12 convergence**.
+If continuity is lost, resume from **J5 microscopic tracing after F222/C172 allocation**.
