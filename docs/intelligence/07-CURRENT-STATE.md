@@ -1,11 +1,11 @@
 # KeyFlowOS Current State
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 Status: CANONICAL CURRENT PROGRAMME STATE
 
 ## Analytical phase
 
-`WHOLE-SYSTEM VIRTUAL MODEL / J12 DOCUMENT-EVIDENCE TARGET SYNTHESIS + BACKWARD RE-AUDIT COMPLETE / NEXT FRONTIER SELECTION`
+`WHOLE-SYSTEM VIRTUAL MODEL / J5 CONVERSATION→BUSINESS-ACTION FIRST-PASS MICROSCOPIC TRACE ACTIVE`
 
 Production implementation remains **READ-ONLY / UNAUTHORIZED**.
 Runtime proof has **NOT** been executed.
@@ -20,14 +20,16 @@ implementation head:   8f173bfe79f1418159cf4099ea18b0d60d203ec2
 intelligence branch:   docs/keyflow-intelligence-foundation
 ```
 
+Later `main` movement through `11fc669...` was checked during frontier activation. The observed movement was architecture/operating-state/documentation material; the implementation forensic baseline for this tranche remains the recorded `8f173b...` snapshot until deliberately rebaselined.
+
 ## Canonical ranges
 
 ```text
-Findings:         F001–F221
-Contradictions:   C001–C171
+Findings:         F001–F222
+Contradictions:   C001–C172
 Recommendations: KF-REC-001–KF-REC-056
 Concepts:         KF-CONCEPT-001–KF-CONCEPT-042
-Next free:        F222 / C172 / KF-REC-057
+Next free:        F223 / C173 / KF-REC-057
 ```
 
 ## Mature / pooled journey state
@@ -43,69 +45,54 @@ J11    → F215–F218 / C165–C168 / KF-REC-055; provisionally converged
 J12    → F219–F221 / C169–C171 / KF-REC-056; provisionally converged
 ```
 
-## J12 durable result
+## J5 active frontier
 
 Dossier:
-`journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md`
+`journeys/KF-JOURNEY-005-CONVERSATION-BUSINESS-ACTION.md`
 
-Canonical roots:
-
-```text
-F219/C169 evidence admission
-F220/C170 source-revision / ingestion-occurrence identity
-F221/C171 destructive disposition of versioned/reviewed document evidence
-```
-
-Recommendation:
-`10O-RECOMMENDATION-REGISTER-DOCUMENT-EVIDENCE-REVISION-INTEGRITY-CONTINUATION.md`
-
-Pressure test:
-`investigations/J12-DOCUMENT-EVIDENCE-LIFECYCLE-STANDARDS-FRONTIER-PRESSURE-TEST.md`
-
-Backward re-audit:
-`investigations/J12-J16-J14-J18-J7-J11-J19-J17-DOCUMENT-EVIDENCE-INTEGRITY-BACKWARD-REAUDIT.md`
-
-KF-REC-056 owns only:
+First canonical root:
 
 ```text
-DocumentEvidenceReference
-EvidenceAdmissionDecision
-SourceRevisionOccurrence boundary binding
-DocumentDispositionDecision
+F222 / C172
+→ one external conversational occurrence can be processed by multiple independent conversation-action fabrics
+→ KeyInbox may already persist/analyze it
+→ MessageIntake may simultaneously model it as awaiting approval before inbox persistence
+→ legacy Meta scanning may independently hand it to ConversationalAI for governed autonomous processing
 ```
 
-It delegates mature provenance, ingress, recovery, operator, financial, contract and privacy semantics to their canonical owners.
-
-Backward re-audit verdict:
+Canonical homes:
 
 ```text
-parallel provenance system      = NO
-parallel ingress runtime        = NO
-parallel recovery runtime       = NO
-parallel financial system       = NO
-parallel contract system        = NO
-parallel operator system        = NO
-parallel privacy rules engine   = NO
-universal EDMS required         = NO
-new F/C from re-audit           = NO
-J12 provisionally converged     = YES
-runtime proof                   = NOT EXECUTED
+F222 → 08AY-FINDING-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
+C172 → 09AY-CONTRADICTION-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
 ```
 
-## Immediate programme frontier
-
-J12 returns to the pooled whole-system model. Do not convert KF-REC-056 into an implementation packet.
-
-Exact next action:
+Working target law:
 
 ```text
-1. load 03-ANALYSIS-MAP + current journey dossier inventory;
-2. identify genuinely unpooled / under-covered journeys after J12 convergence;
-3. compare reachable native implementation footprint and cross-kernel leverage;
-4. activate the highest-leverage next frontier;
-5. begin microscopic tracing from native domain write/effect paths;
-6. reuse F001–F221 / C001–C171 / KF-REC-001–056 before new allocation;
-7. keep production code untouched.
+one external conversational occurrence
+→ one canonical durable message / occurrence identity
+→ one explicit processing-policy decision
+→ consumer-specific durable claims for analysis / approval / autonomous action / reply
+→ projections may multiply; effect ownership may not
 ```
 
-J12 remains reopenable if J19, later journeys, migration design or runtime/concurrency/fault proof falsifies its target semantics.
+No J5 recommendation has been allocated yet. J5 is **ACTIVE / NOT CONVERGED**.
+
+### Reuse boundary
+
+J5 currently reuses rather than duplicates mature roots including F090, F099/F100, F107, F131, F136 and F159, plus J14 ingress, J15 governance/clearance and J18 recovery/outcome-certainty semantics.
+
+### Immediate microscopic questions
+
+```text
+1. finish the legacy-Meta aiHandled=false recurrence trace and classify it as F222 specialization vs genuinely distinct F223;
+2. trace real Meta Graph DM from KeyInbox analysis/suggested actions to any executable action/reply consumer;
+3. trace MessageIntake approval → executePlan when the adapter has already persisted the same KeyInbox occurrence;
+4. inspect AiOversight.evaluateAutoApproval() and bind its authority/control semantics to J2/J6/J15;
+5. trace outbound reply effect identity/provider certainty across Gmail, Resend, WhatsApp and KeyInbox reply sending;
+6. reuse F001–F222 / C001–C172 / KF-REC-001–056 before any allocation;
+7. keep production code untouched and do not claim runtime proof.
+```
+
+J12 remains provisionally converged and reopenable if later work falsifies its target semantics. Do not convert KF-REC-056 into an implementation packet.
