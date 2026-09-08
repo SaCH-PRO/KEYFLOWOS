@@ -1,7 +1,7 @@
 # KeyFlowOS Canonical Taxonomy and Naming Registry
 
 Status: CANONICAL GOVERNANCE ARTIFACT
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 Purpose: prevent semantic duplication, alias drift, repeated indexing, inconsistent naming and multiple canonical entries for the same KeyFlowOS concept.
 
@@ -33,21 +33,42 @@ LOAD 04-CONCEPT-REGISTRY + 04A + 04B
 - Journeys: `J1 ... J25`
 - Kernels: `K1 ... K12`
 - Concepts: `KF-CONCEPT-001–KF-CONCEPT-042`
-- Findings: `F001–F221`
-- Contradictions: `C001–C171`
+- Findings: `F001–F222`
+- Contradictions: `C001–C172`
 - Recommendations: `KF-REC-001–KF-REC-056`
 
-Latest J12 roots:
+## Latest active J5 root
+
+```text
+F222/C172 — parallel conversation-processing ownership / contradictory message lifecycle semantics
+```
+
+Canonical meaning:
+
+```text
+one external conversational occurrence
+→ one canonical durable message / occurrence identity
+→ one explicit processing-policy decision
+→ consumer-specific durable claims
+```
+
+Key distinction:
+
+```text
+multiple projections are permitted
+multiple uncoordinated semantic/effect owners for the same occurrence are not
+```
+
+Current manifestations include KeyInbox persistence/analysis, MessageIntake approval processing and legacy-Meta ConversationalAI processing over one external message occurrence. The legacy `aiHandled=false` scanner recurrence is currently classified as a manifestation/specialization under F222 unless further tracing proves an independently stable root.
+
+No J5 recommendation or new concept ID has been allocated yet.
+
+## Mature J12 roots retained
 
 ```text
 F219/C169 — evidence admission boundary
 F220/C170 — source-revision / ingestion-occurrence identity
 F221/C171 — destructive disposition of versioned/reviewed document evidence
-```
-
-Latest target:
-
-```text
 KF-REC-056 — Document Evidence & Revision Integrity Contract
 ```
 
@@ -125,18 +146,18 @@ backward re-audit: investigations/J12-J16-J14-J18-J7-J11-J19-J17-DOCUMENT-EVIDEN
 recommendation: 10O-RECOMMENDATION-REGISTER-DOCUMENT-EVIDENCE-REVISION-INTEGRITY-CONTINUATION.md
 ```
 
-Backward re-audit found no parallel provenance, ingress, recovery, financial, contract, operator-attention, privacy or document runtime and no new F222/C172 root.
+J12 remains **PROVISIONALLY CONVERGED / TARGET-ALIGNED through F219–F221/C169–C171/KF-REC-056** and reopenable if later evidence falsifies its assumptions.
 
 ## Current ranges
 
 ```text
-Finding range:           through F221
-Contradiction range:     through C171
+Finding range:           through F222
+Contradiction range:     through C172
 Recommendation range:    through KF-REC-056
 Concept range:           through KF-CONCEPT-042
-Next free:               F222 / C172 / KF-REC-057 — UNALLOCATED
+Next free:               F223 / C173 / KF-REC-057 — UNALLOCATED
 ```
 
-J12 is **PROVISIONALLY CONVERGED / TARGET-ALIGNED through F221/C171/KF-REC-056**. It remains reopenable if J19 convergence, later journeys, migration design or runtime/concurrency/fault proof invalidate its assumptions.
+J5 is **ACTIVE / NOT CONVERGED**.
 
 No production implementation is authorized by this taxonomy artifact.
