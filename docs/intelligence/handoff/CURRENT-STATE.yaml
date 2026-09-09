@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 55
+analysis_version: 56
 last_updated: 2026-09-09
-phase: whole_system_virtual_model_j5_conversation_governance_microtrace
-status: J5_ACTIVE_NOT_CONVERGED_THROUGH_F224_C174
+phase: whole_system_virtual_model_j5_conversation_delivery_evidence_microtrace
+status: J5_ACTIVE_NOT_CONVERGED_THROUGH_F225_C175
 canonical_branch: docs/keyflow-intelligence-foundation
 context_integrity: PASS
 implementation_authorized: false
@@ -14,15 +14,21 @@ implementation_evidence:
   later_code_search_head_observed: 96e05439331018b2b2de32e854969e60b515f722
   later_movement_classification: architecture_inventory_journal_state_only_relative_to_forensic_baseline
 canonical_ranges:
-  findings_through: F224
-  contradictions_through: C174
+  findings_through: F225
+  contradictions_through: C175
   recommendations_through: KF-REC-056
   concepts_through: KF-CONCEPT-042
 next_free_ids:
-  finding: F225
-  contradiction: C175
+  finding: F226
+  contradiction: C176
   recommendation: KF-REC-057
   allocation_status: UNALLOCATED
+journey_programme:
+  total_canonical_journeys: 25
+  dossier_count: 18
+  dossier_coverage_percent: 72
+  dossierless: [J8,J9,J13,J20,J21,J22,J24]
+  active: J5
 mature_pools:
   J16_K4: { recommendation: KF-REC-049, findings: F161-F178, contradictions: C111-C128 }
   J17: { recommendation: KF-REC-051, findings: F179-F184, contradictions: C129-C134 }
@@ -34,43 +40,35 @@ mature_pools:
   J12: { recommendation: KF-REC-056, findings: F219-F221, contradictions: C169-C171, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
 j5:
   dossier: docs/intelligence/journeys/KF-JOURNEY-005-CONVERSATION-BUSINESS-ACTION.md
-  finding_homes:
-    - docs/intelligence/08AY-FINDING-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
-    - docs/intelligence/08AZ-FINDING-REGISTER-CONVERSATION-GOVERNANCE-SUPPLEMENT.md
-  contradiction_homes:
-    - docs/intelligence/09AY-CONTRADICTION-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
-    - docs/intelligence/09AZ-CONTRADICTION-REGISTER-CONVERSATION-GOVERNANCE-SUPPLEMENT.md
-  investigations:
-    - docs/intelligence/investigations/J5-CONVERSATION-OWNERSHIP-MICROTRACE-001.md
-    - docs/intelligence/investigations/J5-CONVERSATION-GOVERNANCE-MICROTRACE-002.md
-  roots: [F222_C172, F223_C173, F224_C174]
+  roots: [F222_C172,F223_C173,F224_C174,F225_C175]
   recommendation: null
   status: ACTIVE_NOT_CONVERGED
   working_laws:
     - one_external_conversation_occurrence_to_one_canonical_occurrence_identity_and_explicit_processing_policy_with_consumer_specific_claims
     - model_confidence_is_not_control_evidence
     - approval_authority_and_control_evidence_must_precede_effects
+    - provider_acceptance_is_not_delivery_or_business_outcome
   narrowed:
     legacy_meta_aiHandled_recurrence: F222_C172_MANIFESTATION
     real_meta_graph_path: KEYINBOX_ANALYSIS_PLUS_HUMAN_CONFIRMED_ACTIONS
-    legacy_meta_path: MAY_ALSO_ENTER_CONVERSATIONAL_AI_AUTONOMY
     message_intake_duplicate_collision: F222_C172_PLUS_J18_KF_REC_048_PRESSURE
     conversational_ai_confidence_override: F223_C173
     message_intake_post_effect_authority_resolution: F224_C174
+    message_intake_error_disappears_from_reviewing_queue: J18_KF_REC_048_PRESSURE_NO_NEW_ID
     key_inbox_action_executor_raw_domain_writes: EXISTING_K6_J2_J15_PRESSURE_NO_NEW_ID
-    whatsapp_meta_status_callback_in_inspected_controller: NOT_PARSED_EVIDENCE_TRACE_OPEN_NO_F225_YET
+    whatsapp_meta_status_callback: NOT_PARSED_IN_INSPECTED_CONTROLLER
+    twilio_status_callback: NO_CONSUMER_FOUND_IN_REPOSITORY_SEARCH
+    gmail_delivery_bounce_reconciliation_into_keyinbox: NO_PATH_FOUND_IN_REPOSITORY_SEARCH
+    outbound_sent_semantics: F225_C175
 active_frontier:
-  stage: J5_PROVIDER_EVIDENCE_AND_APPROVAL_RECOVERY_TRACE_AFTER_F224_C174
+  stage: J5_APPROVAL_RECOVERY_AND_OUTCOME_CONVERGENCE_AFTER_F225_C175
   primary_journey: J5
   next_free_allocation_requires_antiduplication: true
 exact_next_action:
-  title: continue_j5_provider_evidence_and_approval_recovery_trace
-  instruction: Complete repository-wide WhatsApp/Twilio/Meta delivery-status callback search; trace Gmail providerMessageId plus delivery/open/bounce evidence; inspect KeyInbox outbound SENT/FAILED versus delivered/read semantics and retry UI; trace MessageIntake error/retry/reject/reconcile behavior when child effects or approval resolution fail. Reuse F001-F224 C001-C174 KF-REC-001-056 before allocating F225/C175/KF-REC-057. Keep production read-only and do not claim runtime proof.
+  title: continue_j5_approval_recovery_and_outcome_convergence
+  instruction: Trace recovery/reconcile semantics for MessageIntake after partial child effects and approval-resolution failure; trace whether failed/error intakes can be safely retried or rejected; trace provider callback/evidence convergence into CRM Business Graph Genome and operator surfaces; pressure-test J5 against J13 and J22 before pooling a J5 recommendation. Reuse F001-F225 C001-C175 KF-REC-001-056 before allocating F226/C176/KF-REC-057. Keep production read-only and do not claim runtime proof.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
-  - do_not_resume_j12_pressure_test
-  - do_not_convert_KF_REC_056_into_implementation_packet
-  - F225_C175_KF_REC_057_are_next_free
   - anti_duplication_before_allocation
   - continuously_refresh_cross_agent_continuity
