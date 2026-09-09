@@ -1,7 +1,7 @@
 ---
 kind: state
 writers: [truth-cycle]           # §Runtime rows: audit-cycle
-derived: 2026-09-08
+derived: 2026-09-09
 baseline: architecture/VERIFIED_STATE_2026-08-11.md
 ---
 
@@ -15,7 +15,7 @@ timestamp.
 
 ## Shape
 
-| Measure | Value | Prev (2026-09-07) | Command |
+| Measure | Value | Prev (2026-09-08) | Command |
 |---|---:|---:|---|
 | Prisma models | 441 | 441 | `grep -c '^model ' packages/db/prisma/schema.prisma` |
 | Server modules | 110 | 110 | `ls apps/server/src/modules \| wc -l` |
@@ -24,7 +24,7 @@ timestamp.
 | Web pages | 251 | 251 | `find apps/web/src/app -name page.tsx \| wc -l` |
 | Migrations | 21 | 21 | `find packages/db/prisma/migrations -name migration.sql \| wc -l` |
 | Spec/test files (server) | 428 | 428 | `find apps/server/src apps/server/test -name '*.spec.ts' -o -name '*.test.ts' \| wc -l` |
-| Server tests passing | **3,658 in 373 files, 0 skipped** (unit config) | 3,658 in 373 files, 0 skipped | `cd apps/server && pnpm test:unit` (= `vitest -c vitest.unit.config.ts`; do NOT run bare `npx vitest run` — needs DB, false-reds as skips, see truth.md); seed `1788851716743` |
+| Server tests passing | **3,658 in 373 files, 0 skipped** (unit config) | 3,658 in 373 files, 0 skipped | `cd apps/server && pnpm test:unit` (= `vitest -c vitest.unit.config.ts`; do NOT run bare `npx vitest run` — needs DB, false-reds as skips, see truth.md); seed `1788938278652` |
 | Web tests passing | **210 in 22 files** | 210 in 22 files | `cd apps/web && npx vitest run` |
 | Tests in `packages/*` | **12 in 2 files** (db 7, api 5) | 12 in 2 files (db 7, api 5) | `pnpm --filter @keyflow/db --filter @keyflow/api test:unit` |
 | Routes mapped at boot | — | — | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` (runtime only; not derivable in this sandbox — no docker) |
@@ -45,7 +45,7 @@ below intentionally does **not** display that reconciled total, since
 |---|---:|---:|---|
 | Scoped (`BUSINESS_ID_MODELS`) | 326 | 326 | `node scripts/os/ledger-sizes.mjs` → `tenant.business_id_models` |
 | Acknowledged unscoped (debt) | 13 | 13 | → `tenant.acknowledged_unscoped` |
-| Never scope (deliberate) | **3** (frozen — actual 10, see issue #71) | 3 | → `tenant.never_scope` |
+| Never scope (deliberate) | **3** (frozen — actual 10, still open in #71) | 3 | → `tenant.never_scope` |
 
 ## Ledger cardinalities (monotonicity — see OS.md §Defense in depth)
 
@@ -57,13 +57,13 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 | Ledger | Gate/source file | Direction | Value | Prev |
 |---|---|---|---:|---:|
 | tenant.acknowledged_unscoped | apps/server/src/core/prisma/tenant-model-list.spec.ts | shrink | 13 | 13 |
-| tenant.never_scope | apps/server/src/core/prisma/tenant-model-list.spec.ts | fixed | **3 (frozen — actual 10)** | 3 |
+| tenant.never_scope | apps/server/src/core/prisma/tenant-model-list.spec.ts | fixed | **3 (frozen — actual 10, #71 open)** | 3 |
 | tenant.business_id_models | packages/db/src/client.ts | grow | 326 | 326 |
 | events.known_dead | apps/server/src/core/event-bus/event-wiring.spec.ts | shrink | 10 | 10 |
 | providers.unreachable | apps/server/src/core/config/unreachable-provider.spec.ts | shrink | 8 | 8 |
 | billing.unpriced | apps/server/src/modules/subscriptions/plans.ts | shrink | 43 | 43 |
 | billing.unenforced_limits | apps/server/src/modules/subscriptions/plan-limit-enforcement.spec.ts | shrink | 19 | 19 |
-| auth.public_handlers | apps/server/src/core/auth/public-surface.spec.ts | shrink | **219 (frozen — actual 223)** | 219 |
+| auth.public_handlers | apps/server/src/core/auth/public-surface.spec.ts | shrink | **219 (frozen — actual 223, #72 open)** | 219 |
 | auth.public_controllers | apps/server/src/core/auth/public-surface.spec.ts | shrink | 53 | 53 |
 | web.known_fabricated | apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts | shrink | 0 | 0 |
 | trpc.unchecked | apps/server/src/trpc.module.spec.ts | shrink | 0 | 0 |
@@ -75,11 +75,11 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 (12 because their real re-derived count matched last cycle exactly; 2 because
 they stay frozen regardless of the real count underneath). **2 rows remain
 frozen** from 2026-08-31 —
-`node scripts/os/ledger-sizes.mjs` (2026-09-08) again reports
+`node scripts/os/ledger-sizes.mjs` (2026-09-09) again reports
 `tenant.never_scope` at 10 (a `fixed` ledger, still diverged from its frozen
 3) and `auth.public_handlers` at 223 (a `shrink` ledger, still diverged from
 its frozen 219) — **identical to last cycle's real values, no further
-movement**. `git diff --name-only b7c2e3a8..HEAD` (last truth commit →
+movement**. `git diff --name-only 11fc6691..HEAD` (last truth commit →
 this run's start) touched zero `*.spec.ts`/`*.test.ts` files, so step 7's
 attribution check has nothing to flag and no gate-integrity issue was opened.
 The existing issues,
@@ -94,10 +94,10 @@ per truth.md step 6.
 
 | Artifact | Generator | Last generated |
 |---|---|---|
-| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-09-08 (no real drift — only `generated:` date changed on all five files; `git diff` confirms zero non-date-line changes) |
-| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-09-08 (byte-identical output to 2026-09-07 — no drift; 286 flowTools, 207 cortexCapabilities, 12 domains, 32 targets (15 active/17 planned) unchanged) |
-| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-09-08 (small, fully-attributable delta: total_files 4303→4308 (+5), total_lines 1,041,661→1,042,075 (+414) — the real accumulated diff since the last truth commit `b7c2e3a8` is exactly 5 new journal files: `2026-09-07-audit-13.md` (72), `2026-09-07-audit-19.md` (71), `2026-09-07-truth.md` (109), `2026-09-08-audit-01.md` (85), `2026-09-08-audit-07.md` (77) = 414 lines / 5 files, verified line-by-line against `b7c2e3a8`'s committed inventory.json; the `.claude/coordination/sessions/<uuid>.json` rename is a net-zero swap (one session file for another, same shape); no unexplained movement) |
-| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-09-08 (byte-identical to the committed 2026-09-07 file — no drift from this run) |
+| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-09-09 (no real drift — only `generated:` date changed on all five files; `git diff` confirms zero non-date-line changes) |
+| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-09-09 (byte-identical output to 2026-09-08 — no drift; 286 flowTools, 207 cortexCapabilities, 12 domains, 32 targets (15 active/17 planned) unchanged) |
+| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-09-09 (small, fully-attributable delta: total_files 4308→4313 (+5), total_lines 1,042,075→1,042,476 (+401) — the real accumulated diff since the last truth commit `11fc6691` is exactly 5 new journal files: `2026-09-08-audit-13.md` (70), `2026-09-08-audit-19.md` (77), `2026-09-08-truth.md` (108), `2026-09-09-audit-01.md` (73), `2026-09-09-audit-07.md` (73) = 401 lines / 5 files, verified line-by-line against `11fc6691`'s committed inventory.json; the `.claude/coordination/sessions/<uuid>.json` rename is a net-zero swap (one session file for another, same shape); no unexplained movement) |
+| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-09-09 (byte-identical to the committed 2026-09-08 file — no drift from this run) |
 
 ## Runtime (written by audit cycle only)
 
