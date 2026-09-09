@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 56
+analysis_version: 57
 last_updated: 2026-09-09
-phase: whole_system_virtual_model_j5_conversation_delivery_evidence_microtrace
-status: J5_ACTIVE_NOT_CONVERGED_THROUGH_F225_C175
+phase: whole_system_virtual_model_j5_voice_ingress_pressure_test
+status: J5_ACTIVE_NOT_CONVERGED_THROUGH_F226_C176
 canonical_branch: docs/keyflow-intelligence-foundation
 context_integrity: PASS
 implementation_authorized: false
@@ -14,13 +14,13 @@ implementation_evidence:
   later_code_search_head_observed: 96e05439331018b2b2de32e854969e60b515f722
   later_movement_classification: architecture_inventory_journal_state_only_relative_to_forensic_baseline
 canonical_ranges:
-  findings_through: F225
-  contradictions_through: C175
+  findings_through: F226
+  contradictions_through: C176
   recommendations_through: KF-REC-056
   concepts_through: KF-CONCEPT-042
 next_free_ids:
-  finding: F226
-  contradiction: C176
+  finding: F227
+  contradiction: C177
   recommendation: KF-REC-057
   allocation_status: UNALLOCATED
 journey_programme:
@@ -40,7 +40,7 @@ mature_pools:
   J12: { recommendation: KF-REC-056, findings: F219-F221, contradictions: C169-C171, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
 j5:
   dossier: docs/intelligence/journeys/KF-JOURNEY-005-CONVERSATION-BUSINESS-ACTION.md
-  roots: [F222_C172,F223_C173,F224_C174,F225_C175]
+  roots: [F222_C172,F223_C173,F224_C174,F225_C175,F226_C176]
   recommendation: null
   status: ACTIVE_NOT_CONVERGED
   working_laws:
@@ -48,25 +48,29 @@ j5:
     - model_confidence_is_not_control_evidence
     - approval_authority_and_control_evidence_must_precede_effects
     - provider_acceptance_is_not_delivery_or_business_outcome
+    - independently_reachable_consequential_transport_requires_authenticated_session_and_trusted_tenant_binding
   narrowed:
     legacy_meta_aiHandled_recurrence: F222_C172_MANIFESTATION
     real_meta_graph_path: KEYINBOX_ANALYSIS_PLUS_HUMAN_CONFIRMED_ACTIONS
     message_intake_duplicate_collision: F222_C172_PLUS_J18_KF_REC_048_PRESSURE
     conversational_ai_confidence_override: F223_C173
     message_intake_post_effect_authority_resolution: F224_C174
+    generalized_ingestion_post_effect_approval_semantics: STRENGTHENS_F224_C174
     message_intake_error_disappears_from_reviewing_queue: J18_KF_REC_048_PRESSURE_NO_NEW_ID
+    generalized_ingestion_error_state_service_retry: FAVORABLE_PARTIAL_RECOVERY_SEAM
+    aggregate_child_failure_parent_success: ANTIDUPLICATION_OPEN_AGAINST_J18_NO_F227_YET
     key_inbox_action_executor_raw_domain_writes: EXISTING_K6_J2_J15_PRESSURE_NO_NEW_ID
-    whatsapp_meta_status_callback: NOT_PARSED_IN_INSPECTED_CONTROLLER
-    twilio_status_callback: NO_CONSUMER_FOUND_IN_REPOSITORY_SEARCH
-    gmail_delivery_bounce_reconciliation_into_keyinbox: NO_PATH_FOUND_IN_REPOSITORY_SEARCH
     outbound_sent_semantics: F225_C175
+    phone_voice_initial_http_webhook: TWILIO_SIGNATURE_FAIL_CLOSED_POSITIVE_SEAM
+    phone_voice_websocket_tenant_binding: F226_C176
+    phone_voice_direct_flow_reachability: REUSE_F043_F054_PLUS_J15_PRESSURE
 active_frontier:
-  stage: J5_APPROVAL_RECOVERY_AND_OUTCOME_CONVERGENCE_AFTER_F225_C175
+  stage: J5_PARTIAL_SUCCESS_OUTCOME_AND_PRE_POOLING_TRACE_AFTER_F226_C176
   primary_journey: J5
   next_free_allocation_requires_antiduplication: true
 exact_next_action:
-  title: continue_j5_approval_recovery_and_outcome_convergence
-  instruction: Trace recovery/reconcile semantics for MessageIntake after partial child effects and approval-resolution failure; trace whether failed/error intakes can be safely retried or rejected; trace provider callback/evidence convergence into CRM Business Graph Genome and operator surfaces; pressure-test J5 against J13 and J22 before pooling a J5 recommendation. Reuse F001-F225 C001-C175 KF-REC-001-056 before allocating F226/C176/KF-REC-057. Keep production read-only and do not claim runtime proof.
+  title: continue_j5_partial_success_outcome_and_pre_pooling_trace
+  instruction: Anti-duplicate aggregate parent success despite failed child actions against J18 findings and consequence-completeness semantics; trace voice session occurrence/transcript/call lifecycle evidence into KeyInbox Timeline Business Graph Genome; inspect J13 connector lifecycle pressure on canonical conversation occurrence and provider callbacks; decide whether J5 has enough stable roots for KF-REC-057 target-contract pooling. Reuse F001-F226 C001-C176 KF-REC-001-056 before allocating F227/C177/KF-REC-057. Keep production read-only and do not claim runtime proof.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
