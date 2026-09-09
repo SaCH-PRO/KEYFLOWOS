@@ -20,7 +20,7 @@ F197–F205 J3/J4 commercial-to-cash
 F206–F214 J10 Commerce/Fulfilment
 F215–F218 J11 Contract/Obligation/Renewal
 F219–F221 J12 Document/Evidence Lifecycle
-F222–F225 J5 Conversation → Business Action lineage
+F222–F226 J5 Conversation → Business Action lineage
 ```
 
 ```text
@@ -32,7 +32,7 @@ C147–C155 J3/J4 contradictions
 C156–C164 J10 contradictions
 C165–C168 J11 contradictions
 C169–C171 J12 Document/Evidence Lifecycle
-C172–C175 J5 Conversation → Business Action contradictions
+C172–C176 J5 Conversation → Business Action contradictions
 ```
 
 Current recommendation range is through `KF-REC-056`.
@@ -141,6 +141,7 @@ production implementation authorized             = NO
 - F223 / C173 — model-supplied confidence can convert a human quick-confirm requirement into autonomous execution; model confidence is incorrectly accepted as control evidence — `08AZ` / `09AZ`.
 - F224 / C174 — MessageIntake executes material child effects before resolving the pending human approval/authority that is supposed to authorize those effects — `08AZ` / `09AZ`.
 - F225 / C175 — outbound conversational state collapses provider acceptance into `SENT` without canonical delivery/read/rejection reconciliation — `08BA` / `09BA`.
+- F226 / C176 — the execution-capable Phone Voice WebSocket accepts query-declared tenant identity without observed stream-level authentication/trusted tenant resolution, even though the initial Twilio HTTP webhook is authenticated — `08BB` / `09BB`.
 
 J5 is **ACTIVE / NOT CONVERGED**. No J5 recommendation has been allocated yet.
 
@@ -149,24 +150,27 @@ Reuse decisions retained:
 ```text
 legacy Meta aiHandled recurrence / second semantic representation → F222/C172
 MessageIntake duplicate KeyInbox collision/orphan thread           → F222/C172 + J18/KF-REC-048 pressure
-MessageIntake error items disappearing from reviewing queue        → J18/KF-REC-048 pressure; no new ID yet
+MessageIntake error items disappearing from reviewing queue        → J18/KF-REC-048 pressure; no new ID
+Generalized Ingestion error-state service retry                    → favorable recovery seam, but UI/governance still inconsistent
+Generalized Ingestion pending approval not resolved before effects → strengthens F224/C174
 provider accepted / local persistence failed                       → F159 + J18/KF-REC-048
 provider rejection vs ambiguous transport outcome                  → F149
 exact-action clearance / approval binding generally                → J15/K3 lineage unless conversation-specific mechanism proven
+generic direct Flow reachability from voice                        → F043/F054; F226 is specifically the unauthenticated tenant-bearing realtime transport boundary
 ```
 
 ## Current ranges
 
 ```text
-Findings:         F001–F225
-Contradictions:   C001–C175
+Findings:         F001–F226
+Contradictions:   C001–C176
 Recommendations: KF-REC-001–KF-REC-056
 ```
 
 Next free IDs:
 
 ```text
-F226 / C176 / KF-REC-057
+F227 / C177 / KF-REC-057
 ```
 
 ## Agent pre-allocation gate
