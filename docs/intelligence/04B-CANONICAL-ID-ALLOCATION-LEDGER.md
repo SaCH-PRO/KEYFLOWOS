@@ -35,7 +35,7 @@ C169–C171 J12 Document/Evidence Lifecycle
 C172–C177 J5 Conversation → Business Action contradictions (C177 also opens J13 Connector Lifecycle pressure)
 ```
 
-Current recommendation range is through `KF-REC-056`.
+Current recommendation range is through `KF-REC-057`.
 
 ## Mature recommendation anchors
 
@@ -51,6 +51,7 @@ KF-REC-053 Commercial Relationship & Obligation Contract
 KF-REC-054 Commerce & Fulfilment Contract
 KF-REC-055 Contract Integrity & Renewal Contract
 KF-REC-056 Document Evidence & Revision Integrity Contract
+KF-REC-057 Conversation Occurrence, Processing & Action Contract
 ```
 
 ## J10 Commerce / Fulfilment allocations
@@ -72,68 +73,10 @@ Target: `KF-REC-055 — Contract Integrity & Renewal Contract`.
 - F220 / C170 — Google Drive recognizes a newer source revision but canonical ingestion dedupes only by stable object identity, suppressing the new revision as the prior occurrence — `08AW` / `09AW`.
 - F221 / C171 — mounted DocumentInstance hard delete can destroy version/approval/review evidence and detach surviving change history without a document-disposition decision — `08AX` / `09AX`.
 
-J12 reuse decisions:
-
-```text
-manual inline edit approved through stale stored version → F161 / KF-REC-049
-Device reviewed-state reprocess                          → F161 / KF-REC-049
-AI tweak mutation before version evidence                → F164 / KF-REC-049
-Drive import replacement without new version             → F161 + F164 pressure
-stale descendants after corrected/withdrawn evidence     → F178/C128 + KF-REC-049
-contract extraction promotion                            → F216/C166 + KF-REC-055
-payment evidence replay                                  → KF-REC-048
-Expense extraction/edit/submit                           → explicit human admission seam; provenance pressure only
-direct AI document processing                            → extraction-only boundary
-Drive new revision suppressed by object-id dedupe        → F220/C170 + reuse KF-REC-035
-DocumentInstance hard-delete proof destruction           → F221/C171 + J19 pressure
-```
-
 ## J12 target allocation
 
 - `KF-REC-056 — Document Evidence & Revision Integrity Contract` — `10O`.
-- Pre-pooling correction/supersession trace: `investigations/J12-CORRECTION-SUPERSESSION-PRE-POOLING-CONVERGENCE-TRACE.md`.
-- Standards/frontier pressure test: `investigations/J12-DOCUMENT-EVIDENCE-LIFECYCLE-STANDARDS-FRONTIER-PRESSURE-TEST.md`.
-- Backward re-audit: `investigations/J12-J16-J14-J18-J7-J11-J19-J17-DOCUMENT-EVIDENCE-INTEGRITY-BACKWARD-REAUDIT.md`.
-
-KF-REC-056 owns only:
-
-```text
-DocumentEvidenceReference
-EvidenceAdmissionDecision
-SourceRevisionOccurrence binding at the document/evidence boundary
-DocumentDispositionDecision
-```
-
-It explicitly delegates:
-
-```text
-generic provenance / revision / verification / correction → KF-REC-049
-ingress occurrence processing                               → KF-REC-035
-same-occurrence retry / recovery / effect identity          → KF-REC-048
-operator review / attention                                 → KF-REC-051
-financial truth / evidence strength                         → KF-REC-052
-contract-specific accepted revision / retention             → KF-REC-055
-privacy / legal retention / erasure policy                  → J19
-```
-
-Backward re-audit verdict:
-
-```text
-KF-REC-056 invalidated                            = NO
-parallel Business Knowledge/provenance system    = NO
-parallel ingress runtime                         = NO
-parallel recovery/idempotency system             = NO
-parallel financial-truth system                  = NO
-parallel contract lifecycle/retention system     = NO
-parallel operator-attention system               = NO
-parallel privacy/legal rules engine               = NO
-universal EDMS required                          = NO
-second document engine required                  = NO
-new finding/contradiction from re-audit          = NO
-J12 provisionally converged                      = YES
-runtime proof executed                           = NO
-production implementation authorized             = NO
-```
+- J12 is provisionally converged / target-aligned, runtime proof not executed.
 
 ## J5 Conversation → Business Action allocations
 
@@ -142,9 +85,39 @@ production implementation authorized             = NO
 - F224 / C174 — MessageIntake executes material child effects before resolving the pending human approval/authority that is supposed to authorize those effects — `08AZ` / `09AZ`.
 - F225 / C175 — outbound conversational state collapses provider acceptance into `SENT` without canonical delivery/read/rejection reconciliation — `08BA` / `09BA`.
 - F226 / C176 — the execution-capable Phone Voice WebSocket accepts query-declared tenant identity without observed stream-level authentication/trusted tenant resolution, even though the initial Twilio HTTP webhook is authenticated — `08BB` / `09BB`.
-- F227 / C177 — connector `disconnected` state is not a load-bearing revocation boundary for external ingress; retained WhatsApp routing/config may continue admitting provider-authenticated occurrences after disconnect — `08BC` / `09BC`. This is the first explicit J5↔J13 Connector Lifecycle pressure-test root.
+- F227 / C177 — connector `disconnected` state is not a load-bearing revocation boundary for external ingress; retained WhatsApp routing/config may continue admitting provider-authenticated occurrences after disconnect — `08BC` / `09BC`.
 
-J5 is **ACTIVE / NOT CONVERGED**. No J5 recommendation has been allocated yet.
+### J5 pooling
+
+- `KF-REC-057 — Conversation Occurrence, Processing & Action Contract` — `10P`.
+- Pre-pooling trace: `investigations/J5-CONVERSATION-PRE-POOLING-CONVERGENCE-TRACE.md`.
+- Status: ALLOCATED TARGET-CONTRACT CANDIDATE / BACKWARD RE-AUDIT REQUIRED BEFORE PROVISIONAL CONVERGENCE.
+
+KF-REC-057 owns only:
+
+```text
+ConversationOccurrence identity at the J5 boundary
+ConversationProcessingPolicyDecision
+consumer-specific occurrence/action claims
+conversation action causal linkage
+conversation-facing provider/delivery evidence vocabulary
+reference to current channel/session binding generation
+```
+
+It explicitly delegates:
+
+```text
+generic ingress authenticity/dedup/replay/ack       → KF-REC-035 / J14
+human authority / action governance / clearance      → J15 / K2 / K3
+capability/state-transition mechanics                → K5 / K6
+temporal primitives                                  → K7
+generic evidence/outcome semantics                   → K8 / KF-CONCEPT-042
+connector lifecycle/runtime                          → J13 / K9
+recovery/idempotency/execution claims                → KF-REC-048 / J18 / K11
+voice transport/session authentication               → J22 / K1 / K9
+Business Graph / Genome resolution                   → KF-REC-049 / K4
+operator attention                                   → KF-REC-051 / J17
+```
 
 Reuse decisions retained:
 
@@ -160,6 +133,7 @@ provider rejection vs ambiguous transport outcome                  → F149
 exact-action clearance / approval binding generally                → J15/K3 lineage unless conversation-specific mechanism proven
 generic direct Flow reachability from voice                        → F043/F054; F226 is specifically the tenant-bearing realtime transport boundary
 connector authentication/tenant routing valid after disconnect     → F227/C177 lifecycle-revocation root
+key_inbox.action_executed emitted with no direct listener           → K8/KF-REC-048 pressure; insufficient for F228 without stronger causal break
 ```
 
 ## Current ranges
@@ -167,13 +141,13 @@ connector authentication/tenant routing valid after disconnect     → F227/C177
 ```text
 Findings:         F001–F227
 Contradictions:   C001–C177
-Recommendations: KF-REC-001–KF-REC-056
+Recommendations: KF-REC-001–KF-REC-057
 ```
 
 Next free IDs:
 
 ```text
-F228 / C178 / KF-REC-057
+F228 / C178 / KF-REC-058
 ```
 
 ## Agent pre-allocation gate
