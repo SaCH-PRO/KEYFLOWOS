@@ -1,7 +1,7 @@
 # KeyFlowOS Canonical ID Allocation Ledger
 
 Status: CANONICAL — OVERRIDES LEGACY COLLIDING ALLOCATIONS
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 Purpose: provide one unambiguous allocator for Finding (`F###`), Contradiction (`C###`) and Recommendation (`KF-REC-###`) identities.
 
@@ -20,7 +20,7 @@ F197–F205 J3/J4 commercial-to-cash
 F206–F214 J10 Commerce/Fulfilment
 F215–F218 J11 Contract/Obligation/Renewal
 F219–F221 J12 Document/Evidence Lifecycle
-F222–F226 J5 Conversation → Business Action lineage
+F222–F227 J5 Conversation → Business Action lineage (F227 also opens J13 Connector Lifecycle pressure)
 ```
 
 ```text
@@ -32,7 +32,7 @@ C147–C155 J3/J4 contradictions
 C156–C164 J10 contradictions
 C165–C168 J11 contradictions
 C169–C171 J12 Document/Evidence Lifecycle
-C172–C176 J5 Conversation → Business Action contradictions
+C172–C177 J5 Conversation → Business Action contradictions (C177 also opens J13 Connector Lifecycle pressure)
 ```
 
 Current recommendation range is through `KF-REC-056`.
@@ -142,6 +142,7 @@ production implementation authorized             = NO
 - F224 / C174 — MessageIntake executes material child effects before resolving the pending human approval/authority that is supposed to authorize those effects — `08AZ` / `09AZ`.
 - F225 / C175 — outbound conversational state collapses provider acceptance into `SENT` without canonical delivery/read/rejection reconciliation — `08BA` / `09BA`.
 - F226 / C176 — the execution-capable Phone Voice WebSocket accepts query-declared tenant identity without observed stream-level authentication/trusted tenant resolution, even though the initial Twilio HTTP webhook is authenticated — `08BB` / `09BB`.
+- F227 / C177 — connector `disconnected` state is not a load-bearing revocation boundary for external ingress; retained WhatsApp routing/config may continue admitting provider-authenticated occurrences after disconnect — `08BC` / `09BC`. This is the first explicit J5↔J13 Connector Lifecycle pressure-test root.
 
 J5 is **ACTIVE / NOT CONVERGED**. No J5 recommendation has been allocated yet.
 
@@ -153,24 +154,26 @@ MessageIntake duplicate KeyInbox collision/orphan thread           → F222/C172
 MessageIntake error items disappearing from reviewing queue        → J18/KF-REC-048 pressure; no new ID
 Generalized Ingestion error-state service retry                    → favorable recovery seam, but UI/governance still inconsistent
 Generalized Ingestion pending approval not resolved before effects → strengthens F224/C174
+non-throwing child success:false followed by parent approved       → F152/KF-REC-048 manifestation; no new ID
 provider accepted / local persistence failed                       → F159 + J18/KF-REC-048
 provider rejection vs ambiguous transport outcome                  → F149
 exact-action clearance / approval binding generally                → J15/K3 lineage unless conversation-specific mechanism proven
-generic direct Flow reachability from voice                        → F043/F054; F226 is specifically the unauthenticated tenant-bearing realtime transport boundary
+generic direct Flow reachability from voice                        → F043/F054; F226 is specifically the tenant-bearing realtime transport boundary
+connector authentication/tenant routing valid after disconnect     → F227/C177 lifecycle-revocation root
 ```
 
 ## Current ranges
 
 ```text
-Findings:         F001–F226
-Contradictions:   C001–C176
+Findings:         F001–F227
+Contradictions:   C001–C177
 Recommendations: KF-REC-001–KF-REC-056
 ```
 
 Next free IDs:
 
 ```text
-F227 / C177 / KF-REC-057
+F228 / C178 / KF-REC-057
 ```
 
 ## Agent pre-allocation gate
