@@ -91,7 +91,9 @@ Target: `KF-REC-055 — Contract Integrity & Renewal Contract`.
 
 - `KF-REC-057 — Conversation Occurrence, Processing & Action Contract` — `10P`.
 - Pre-pooling trace: `investigations/J5-CONVERSATION-PRE-POOLING-CONVERGENCE-TRACE.md`.
-- Status: ALLOCATED TARGET-CONTRACT CANDIDATE / BACKWARD RE-AUDIT REQUIRED BEFORE PROVISIONAL CONVERGENCE.
+- Backward re-audit: `investigations/J5-J14-J15-J18-J13-J22-J2-J16-J17-CONVERSATION-ACTION-BACKWARD-REAUDIT.md`.
+- Status: **PROVISIONALLY CONVERGED / TARGET-ALIGNED** through F222–F227 / C172–C177 / KF-REC-057.
+- Reopen triggers: full J13 Connector Lifecycle dossier, full J22 KEY Voice dossier, runtime proof, or later contradictory implementation evidence.
 
 KF-REC-057 owns only:
 
