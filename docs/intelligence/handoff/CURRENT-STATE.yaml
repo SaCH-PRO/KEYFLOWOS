@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 59
+analysis_version: 60
 last_updated: 2026-09-10
-phase: whole_system_virtual_model_j5_backward_reaudit_after_kf_rec_057
-status: J5_TARGET_CONTRACT_ALLOCATED_BACKWARD_REAUDIT_IN_PROGRESS
+phase: whole_system_virtual_model_j13_connector_lifecycle_activation
+status: J5_PROVISIONALLY_CONVERGED_J13_ACTIVE_FROM_F227_C177
 canonical_branch: docs/keyflow-intelligence-foundation
 context_integrity: PASS
 implementation_authorized: false
@@ -28,7 +28,7 @@ journey_programme:
   dossier_count: 18
   dossier_coverage_percent: 72
   dossierless: [J8,J9,J13,J20,J21,J22,J24]
-  active: J5
+  active: J13
 mature_pools:
   J16_K4: { recommendation: KF-REC-049, findings: F161-F178, contradictions: C111-C128 }
   J17: { recommendation: KF-REC-051, findings: F179-F184, contradictions: C129-C134 }
@@ -38,51 +38,35 @@ mature_pools:
   J10: { recommendation: KF-REC-054, findings: F206-F214, contradictions: C156-C164, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
   J11: { recommendation: KF-REC-055, findings: F215-F218, contradictions: C165-C168, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
   J12: { recommendation: KF-REC-056, findings: F219-F221, contradictions: C169-C171, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
+  J5: { recommendation: KF-REC-057, findings: F222-F227, contradictions: C172-C177, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
 j5:
   dossier: docs/intelligence/journeys/KF-JOURNEY-005-CONVERSATION-BUSINESS-ACTION.md
   roots: [F222_C172,F223_C173,F224_C174,F225_C175,F226_C176,F227_C177]
   recommendation: KF-REC-057
-  recommendation_name: Conversation_Occurrence_Processing_and_Action_Contract
-  status: TARGET_CONTRACT_ALLOCATED_BACKWARD_REAUDIT_REQUIRED
+  status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED
   pre_pooling_trace: docs/intelligence/investigations/J5-CONVERSATION-PRE-POOLING-CONVERGENCE-TRACE.md
-  working_laws:
-    - one_external_conversation_occurrence_to_one_canonical_occurrence_identity_and_explicit_processing_policy_with_consumer_specific_claims
-    - model_confidence_is_not_control_evidence
-    - approval_authority_and_control_evidence_must_precede_effects
-    - provider_acceptance_is_not_delivery_or_business_outcome
-    - independently_reachable_consequential_transport_requires_authenticated_session_and_trusted_tenant_binding
-    - connector_disconnect_or_revocation_must_be_load_bearing_for_new_ingress_and_effect_authority
-  pooling_boundary:
-    owns:
-      - ConversationOccurrence_identity_at_J5_boundary
-      - ConversationProcessingPolicyDecision
-      - consumer_specific_occurrence_and_action_claims
-      - conversation_action_causal_linkage
-      - conversation_facing_provider_delivery_evidence_vocabulary
-      - current_channel_session_binding_reference
-    delegates:
-      - J14_KF_REC_035_generic_ingress
-      - J15_K2_K3_authority_governance_clearance
-      - K5_K6_capability_and_state_transition
-      - K7_temporal_primitives
-      - K8_generic_evidence_outcome
-      - J13_K9_connector_lifecycle
-      - J18_KF_REC_048_recovery_execution_claims
-      - J22_K1_K9_voice_transport_session_security
-      - J16_K4_KF_REC_049_business_knowledge_resolution
-      - J17_KF_REC_051_operator_attention
-  narrowed:
-    aggregate_child_failure_parent_success: F152_KF_REC_048_MANIFESTATION_NO_NEW_ID
-    key_inbox_action_executed_zero_direct_listener: K8_KF_REC_048_PRESSURE_INSUFFICIENT_FOR_F228
-    key_inbox_periodic_genome_signals: POSITIVE_SIGNAL_PATH_NOT_EQUIVALENT_TO_EXACT_ACTION_OUTCOME_CHAIN
-    connector_disconnect_revocation: F227_C177
+  backward_reaudit: docs/intelligence/investigations/J5-J14-J15-J18-J13-J22-J2-J16-J17-CONVERSATION-ACTION-BACKWARD-REAUDIT.md
+  reopen_triggers: [J13_full_dossier,J22_full_dossier,runtime_proof,later_contradictory_implementation_evidence]
+j13:
+  dossier: null
+  status: ACTIVE_INITIAL_MICROTRACE
+  inherited_root: F227_C177
+  primary_question: whether_connector_connection_state_is_one_coherent_load_bearing_authority_lifecycle_across_credentials_provider_binding_ingress_sync_outbound_effects_health_and_disconnect_reconnect
+  immediate_surfaces:
+    - core/connectors/connector-registry.service.ts
+    - core/connectors/connector.controller.ts
+    - core/connectors/connector-credentials.service.ts
+    - core/connectors/connector-health-monitor.service.ts
+    - core/connectors/implementations/whatsapp.connector.ts
+    - modules/whatsapp/whatsapp.controller.ts
+    - modules/whatsapp/whatsapp.service.ts
 active_frontier:
-  stage: J5_KF_REC_057_BACKWARD_REAUDIT
-  primary_journey: J5
+  stage: J13_CONNECTOR_LIFECYCLE_INITIAL_MICROTRACE
+  primary_journey: J13
   next_free_allocation_requires_antiduplication: true
 exact_next_action:
-  title: backward_reaudit_kf_rec_057
-  instruction: Re-audit KF-REC-057 against J14 ingress, J15 governance, J18 recovery, J13 connector lifecycle pressure, J22 voice pressure, J2 governed action, J16/K4 knowledge, J17 operator attention and K1/K3/K5/K7/K8/K9/K11. Verify no duplicated owner or semantic conflict, then either reopen with F228/C178 or mark J5 provisionally converged. Refresh J5 dossier, 04A, 07-CURRENT-STATE, CURRENT-HANDOFF and rollover artifacts after verdict. Keep production read-only and do not claim runtime proof.
+  title: reconstruct_j13_connector_lifecycle
+  instruction: Build J13 from connect/authenticate/credential storage through health, intake configuration, sync/poll/webhook participation, outbound effects, disconnect/revocation, residual callbacks, reconnect and recovery. Start from F227/C177, inspect at least WhatsApp plus OAuth and pull-sync connector examples to separate generic lifecycle roots from provider-specific behavior. Reuse F001-F227 C001-C177 KF-REC-001-057 before allocating F228/C178/KF-REC-058. Keep production read-only and do not claim runtime proof.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
