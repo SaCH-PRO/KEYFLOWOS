@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 58
+analysis_version: 59
 last_updated: 2026-09-10
-phase: whole_system_virtual_model_j5_connector_lifecycle_and_outcome_convergence
-status: J5_ACTIVE_NOT_CONVERGED_THROUGH_F227_C177
+phase: whole_system_virtual_model_j5_backward_reaudit_after_kf_rec_057
+status: J5_TARGET_CONTRACT_ALLOCATED_BACKWARD_REAUDIT_IN_PROGRESS
 canonical_branch: docs/keyflow-intelligence-foundation
 context_integrity: PASS
 implementation_authorized: false
@@ -16,12 +16,12 @@ implementation_evidence:
 canonical_ranges:
   findings_through: F227
   contradictions_through: C177
-  recommendations_through: KF-REC-056
+  recommendations_through: KF-REC-057
   concepts_through: KF-CONCEPT-042
 next_free_ids:
   finding: F228
   contradiction: C178
-  recommendation: KF-REC-057
+  recommendation: KF-REC-058
   allocation_status: UNALLOCATED
 journey_programme:
   total_canonical_journeys: 25
@@ -41,8 +41,10 @@ mature_pools:
 j5:
   dossier: docs/intelligence/journeys/KF-JOURNEY-005-CONVERSATION-BUSINESS-ACTION.md
   roots: [F222_C172,F223_C173,F224_C174,F225_C175,F226_C176,F227_C177]
-  recommendation: null
-  status: ACTIVE_NOT_CONVERGED
+  recommendation: KF-REC-057
+  recommendation_name: Conversation_Occurrence_Processing_and_Action_Contract
+  status: TARGET_CONTRACT_ALLOCATED_BACKWARD_REAUDIT_REQUIRED
+  pre_pooling_trace: docs/intelligence/investigations/J5-CONVERSATION-PRE-POOLING-CONVERGENCE-TRACE.md
   working_laws:
     - one_external_conversation_occurrence_to_one_canonical_occurrence_identity_and_explicit_processing_policy_with_consumer_specific_claims
     - model_confidence_is_not_control_evidence
@@ -50,31 +52,37 @@ j5:
     - provider_acceptance_is_not_delivery_or_business_outcome
     - independently_reachable_consequential_transport_requires_authenticated_session_and_trusted_tenant_binding
     - connector_disconnect_or_revocation_must_be_load_bearing_for_new_ingress_and_effect_authority
+  pooling_boundary:
+    owns:
+      - ConversationOccurrence_identity_at_J5_boundary
+      - ConversationProcessingPolicyDecision
+      - consumer_specific_occurrence_and_action_claims
+      - conversation_action_causal_linkage
+      - conversation_facing_provider_delivery_evidence_vocabulary
+      - current_channel_session_binding_reference
+    delegates:
+      - J14_KF_REC_035_generic_ingress
+      - J15_K2_K3_authority_governance_clearance
+      - K5_K6_capability_and_state_transition
+      - K7_temporal_primitives
+      - K8_generic_evidence_outcome
+      - J13_K9_connector_lifecycle
+      - J18_KF_REC_048_recovery_execution_claims
+      - J22_K1_K9_voice_transport_session_security
+      - J16_K4_KF_REC_049_business_knowledge_resolution
+      - J17_KF_REC_051_operator_attention
   narrowed:
-    legacy_meta_aiHandled_recurrence: F222_C172_MANIFESTATION
-    real_meta_graph_path: KEYINBOX_ANALYSIS_PLUS_HUMAN_CONFIRMED_ACTIONS
-    message_intake_duplicate_collision: F222_C172_PLUS_J18_KF_REC_048_PRESSURE
-    conversational_ai_confidence_override: F223_C173
-    message_intake_post_effect_authority_resolution: F224_C174
-    generalized_ingestion_post_effect_approval_semantics: STRENGTHENS_F224_C174
-    message_intake_error_disappears_from_reviewing_queue: J18_KF_REC_048_PRESSURE_NO_NEW_ID
-    generalized_ingestion_error_state_service_retry: FAVORABLE_PARTIAL_RECOVERY_SEAM
     aggregate_child_failure_parent_success: F152_KF_REC_048_MANIFESTATION_NO_NEW_ID
-    key_inbox_action_executor_raw_domain_writes: EXISTING_K6_J2_J15_PRESSURE_NO_NEW_ID
-    outbound_sent_semantics: F225_C175
-    phone_voice_initial_http_webhook: TWILIO_SIGNATURE_FAIL_CLOSED_POSITIVE_SEAM
-    phone_voice_websocket_tenant_binding: F226_C176
-    phone_voice_direct_flow_reachability: REUSE_F043_F054_PLUS_J15_PRESSURE
+    key_inbox_action_executed_zero_direct_listener: K8_KF_REC_048_PRESSURE_INSUFFICIENT_FOR_F228
+    key_inbox_periodic_genome_signals: POSITIVE_SIGNAL_PATH_NOT_EQUIVALENT_TO_EXACT_ACTION_OUTCOME_CHAIN
     connector_disconnect_revocation: F227_C177
-    whatsapp_disconnect_status_only: F227_C177_MANIFESTATION
-    whatsapp_shared_webhook_after_disconnect: F227_C177_CODE_LEVEL_REACHABILITY
 active_frontier:
-  stage: J5_OUTCOME_EVIDENCE_AND_PRE_POOLING_CONVERGENCE_AFTER_F227_C177
+  stage: J5_KF_REC_057_BACKWARD_REAUDIT
   primary_journey: J5
   next_free_allocation_requires_antiduplication: true
 exact_next_action:
-  title: trace_j5_outcome_evidence_and_pooling_readiness
-  instruction: Trace conversation-derived action outcomes from IngestionOrchestrator MessageIntake KeyInbox ConversationalAI and PhoneVoice into Timeline CRM Business Graph Genome and operator surfaces; determine whether outcome evidence is canonical or merely scattered side effects; pressure-test outbound effects against connector disconnected state as an F227 manifestation; then decide whether stable J5 roots F222-F227 can pool under KF-REC-057 without swallowing J13 J14 J15 J18 J22 kernel ownership. Reuse F001-F227 C001-C177 KF-REC-001-056 before allocating F228/C178/KF-REC-057. Keep production read-only and do not claim runtime proof.
+  title: backward_reaudit_kf_rec_057
+  instruction: Re-audit KF-REC-057 against J14 ingress, J15 governance, J18 recovery, J13 connector lifecycle pressure, J22 voice pressure, J2 governed action, J16/K4 knowledge, J17 operator attention and K1/K3/K5/K7/K8/K9/K11. Verify no duplicated owner or semantic conflict, then either reopen with F228/C178 or mark J5 provisionally converged. Refresh J5 dossier, 04A, 07-CURRENT-STATE, CURRENT-HANDOFF and rollover artifacts after verdict. Keep production read-only and do not claim runtime proof.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
