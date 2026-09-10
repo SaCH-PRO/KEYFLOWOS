@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 60
+analysis_version: 61
 last_updated: 2026-09-10
-phase: whole_system_virtual_model_j13_connector_lifecycle_activation
-status: J5_PROVISIONALLY_CONVERGED_J13_ACTIVE_FROM_F227_C177
+phase: whole_system_virtual_model_j13_connector_lifecycle_microtrace
+status: J5_PROVISIONALLY_CONVERGED_J13_ACTIVE_THROUGH_MICROTRACE_001
 canonical_branch: docs/keyflow-intelligence-foundation
 context_integrity: PASS
 implementation_authorized: false
@@ -25,9 +25,9 @@ next_free_ids:
   allocation_status: UNALLOCATED
 journey_programme:
   total_canonical_journeys: 25
-  dossier_count: 18
-  dossier_coverage_percent: 72
-  dossierless: [J8,J9,J13,J20,J21,J22,J24]
+  dossier_count: 19
+  dossier_coverage_percent: 76
+  dossierless: [J8,J9,J20,J21,J22,J24]
   active: J13
 mature_pools:
   J16_K4: { recommendation: KF-REC-049, findings: F161-F178, contradictions: C111-C128 }
@@ -48,25 +48,27 @@ j5:
   backward_reaudit: docs/intelligence/investigations/J5-J14-J15-J18-J13-J22-J2-J16-J17-CONVERSATION-ACTION-BACKWARD-REAUDIT.md
   reopen_triggers: [J13_full_dossier,J22_full_dossier,runtime_proof,later_contradictory_implementation_evidence]
 j13:
-  dossier: null
-  status: ACTIVE_INITIAL_MICROTRACE
+  dossier: docs/intelligence/journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md
+  status: ACTIVE_MICROTRACE
   inherited_root: F227_C177
+  first_microtrace: docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md
   primary_question: whether_connector_connection_state_is_one_coherent_load_bearing_authority_lifecycle_across_credentials_provider_binding_ingress_sync_outbound_effects_health_and_disconnect_reconnect
-  immediate_surfaces:
-    - core/connectors/connector-registry.service.ts
-    - core/connectors/connector.controller.ts
-    - core/connectors/connector-credentials.service.ts
-    - core/connectors/connector-health-monitor.service.ts
-    - core/connectors/implementations/whatsapp.connector.ts
-    - modules/whatsapp/whatsapp.controller.ts
-    - modules/whatsapp/whatsapp.service.ts
+  current_narrowing:
+    whatsapp_disconnect_revocation: F227_C177
+    google_drive_disconnect: POSITIVE_CREDENTIAL_AND_STATUS_REVOCATION_SEAM
+    quickbooks_disconnect: POSITIVE_CREDENTIAL_CLEAR_PLUS_OUTBOUND_ISCONNECTED_GUARD
+    connector_interface_disconnect_postcondition: ABSENT_BUT_EXPLAINS_F227_NO_NEW_ID
+    legacy_credential_fallback: MIGRATION_RISK_NO_CURRENT_WRITER_PROVEN_NO_NEW_ID
+    health_monitor_disconnected_resurrection: NOT_REACHABLE_MONITOR_SKIPS_DISCONNECTED
+    scheduled_connector_intelligence: SELECTS_STATUS_CONNECTED_ONLY_POSITIVE_SEAM
+    activity_status_resurrection: OPEN_TRACE
 active_frontier:
-  stage: J13_CONNECTOR_LIFECYCLE_INITIAL_MICROTRACE
+  stage: J13_ACTIVITY_RESURRECTION_AND_PROVIDER_CALLBACK_LIFECYCLE_TRACE
   primary_journey: J13
   next_free_allocation_requires_antiduplication: true
 exact_next_action:
-  title: reconstruct_j13_connector_lifecycle
-  instruction: Build J13 from connect/authenticate/credential storage through health, intake configuration, sync/poll/webhook participation, outbound effects, disconnect/revocation, residual callbacks, reconnect and recovery. Start from F227/C177, inspect at least WhatsApp plus OAuth and pull-sync connector examples to separate generic lifecycle roots from provider-specific behavior. Reuse F001-F227 C001-C177 KF-REC-001-057 before allocating F228/C178/KF-REC-058. Keep production read-only and do not claim runtime proof.
+  title: trace_connector_activity_resurrection_and_callback_revocation
+  instruction: Trace per-connector trackActivity and provider callback paths for whether a disconnected/revoked ConnectorStatus can be rewritten to connected without an explicit reconnect grant; prioritize QuickBooks Xero Stripe PayPal Gmail Google Drive and WhatsApp. Then trace Google OAuth refresh/expiry/reconnect and provider subscription cleanup. Reuse F001-F227 C001-C177 KF-REC-001-057 before allocating F228/C178/KF-REC-058. Keep production read-only and do not claim runtime proof.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
