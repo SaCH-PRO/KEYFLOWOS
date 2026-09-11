@@ -1,7 +1,7 @@
 ---
 kind: state
 writers: [truth-cycle]           # §Runtime rows: audit-cycle
-derived: 2026-09-10
+derived: 2026-09-11
 baseline: architecture/VERIFIED_STATE_2026-08-11.md
 ---
 
@@ -15,7 +15,7 @@ timestamp.
 
 ## Shape
 
-| Measure | Value | Prev (2026-09-09) | Command |
+| Measure | Value | Prev (2026-09-10) | Command |
 |---|---:|---:|---|
 | Prisma models | 441 | 441 | `grep -c '^model ' packages/db/prisma/schema.prisma` |
 | Server modules | 110 | 110 | `ls apps/server/src/modules \| wc -l` |
@@ -75,11 +75,11 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 (12 because their real re-derived count matched last cycle exactly; 2 because
 they stay frozen regardless of the real count underneath). **2 rows remain
 frozen** from 2026-08-31 —
-`node scripts/os/ledger-sizes.mjs` (2026-09-10) again reports
+`node scripts/os/ledger-sizes.mjs` (2026-09-11) again reports
 `tenant.never_scope` at 10 (a `fixed` ledger, still diverged from its frozen
 3) and `auth.public_handlers` at 223 (a `shrink` ledger, still diverged from
 its frozen 219) — **identical to last cycle's real values, no further
-movement**. `git diff --name-only 96e05439..HEAD` (last truth commit →
+movement**. `git diff --name-only d3185b0..HEAD` (last truth commit →
 this run's start) touched zero `*.spec.ts`/`*.test.ts` files, so step 7's
 attribution check has nothing to flag and no gate-integrity issue was opened.
 The existing issues,
@@ -94,10 +94,10 @@ per truth.md step 6.
 
 | Artifact | Generator | Last generated |
 |---|---|---|
-| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-09-10 (no real drift — only `generated:` date changed on all five files; `git diff` confirms zero non-date-line changes) |
-| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-09-10 (byte-identical output to 2026-09-09 — no drift; 286 flowTools, 207 cortexCapabilities, 12 domains, 32 targets (15 active/17 planned) unchanged) |
-| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-09-10 (small, fully-attributable delta: total_files 4313→4318 (+5), total_lines 1,042,476→1,042,883 (+407) — the real accumulated diff since the last truth commit `96e05439` is exactly 5 new journal files: `2026-09-09-audit-13.md` (69), `2026-09-09-audit-19.md` (79), `2026-09-09-truth.md` (108, the prior cycle's own journal, written after that cycle's registry regeneration), `2026-09-10-audit-01.md` (77), `2026-09-10-audit-07.md` (74) = 407 lines / 5 files, verified line-by-line against `96e05439`'s committed inventory.json; the `.claude/coordination/sessions/<uuid>.json` rename is a net-zero swap (one session file for another, same shape); no unexplained movement) |
-| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-09-10 (byte-identical to the committed 2026-09-09 file — no drift from this run) |
+| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-09-11 (no real drift — only `generated:` date changed on all five files; `git diff` confirms zero non-date-line changes) |
+| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-09-11 (byte-identical output to 2026-09-10 — no drift; 286 flowTools, 207 cortexCapabilities, 12 domains, 32 targets (15 active/17 planned) unchanged) |
+| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-09-11 (small, fully-attributable delta: total_files 4318→4323 (+5), total_lines 1,042,883→1,043,270 (+387) — the real accumulated diff since the last truth commit `d3185b0` is exactly 5 new journal files: `2026-09-10-audit-13.md` (71), `2026-09-10-audit-19.md` (74), `2026-09-10-truth.md` (102, the prior cycle's own journal, written after that cycle's registry regeneration), `2026-09-11-audit-01.md` (71), `2026-09-11-audit-07.md` (69) = 387 lines / 5 files, verified line-by-line against `d3185b0`'s committed inventory.json; the `.claude/coordination/sessions/<uuid>.json` rename is a net-zero swap (one session file for another, same shape); no unexplained movement) |
+| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-09-11 (byte-identical to the committed 2026-09-10 file — no drift from this run) |
 
 ## Runtime (written by audit cycle only)
 
