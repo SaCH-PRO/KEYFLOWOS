@@ -6,6 +6,10 @@ budget: 2 hours; hard cap 3 entries; if entry 1 exceeds half the budget, ship 1
 rotation_cursor: events.known_dead   # advance after each run: events.known_dead → providers.unreachable → docs.debt → billing.unpriced → billing.unenforced_limits → tenant.acknowledged_unscoped → (repeat)
 ---
 
+> **HALTED 2026-09-12 by the repo owner.** Do not run this playbook.
+> See `architecture/os/OS.md` — stop the run immediately and report
+> `halted by OS.md`. No probes, no gates, no journal, no issues, no commits.
+
 # Burndown cycle — shrink one ledger, prove the gate still bites
 
 **The NEVER list of `architecture/os/OS.md` binds this run. The ONLY

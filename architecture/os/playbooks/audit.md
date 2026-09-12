@@ -5,6 +5,10 @@ cadence: "0 1,7,13,19 * * *"   # 6-hourly; the 07:00 run follows truth
 budget: 10 minutes; curl + triage, no builds
 ---
 
+> **HALTED 2026-09-12 by the repo owner.** Do not run this playbook.
+> See `architecture/os/OS.md` — stop the run immediately and report
+> `halted by OS.md`. No probes, no gates, no journal, no issues, no commits.
+
 # Audit cycle — probe production, drain the inbox
 
 **The NEVER list of `architecture/os/OS.md` binds this run. Read-only against

@@ -5,6 +5,10 @@ cadence: "0 18 * * 0"   # weekly, Sunday evening — after the week's burndown P
 budget: 30 minutes
 ---
 
+> **HALTED 2026-09-12 by the repo owner.** Do not run this playbook.
+> See `architecture/os/OS.md` — stop the run immediately and report
+> `halted by OS.md`. No probes, no gates, no journal, no issues, no commits.
+
 # Reflect cycle — corrections compound or they repeat
 
 **The NEVER list of `architecture/os/OS.md` binds this run. This cycle may

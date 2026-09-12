@@ -5,6 +5,10 @@ cadence: "0 7 * * *"   # nightly, UTC
 budget: 30 minutes; one model-heavy step (drift interpretation) — the rest is running commands
 ---
 
+> **HALTED 2026-09-12 by the repo owner.** Do not run this playbook.
+> See `architecture/os/OS.md` — stop the run immediately and report
+> `halted by OS.md`. No probes, no gates, no journal, no issues, no commits.
+
 # Truth cycle — re-derive everything, trust nothing
 
 **The NEVER list of `architecture/os/OS.md` binds this run. A failing gate is

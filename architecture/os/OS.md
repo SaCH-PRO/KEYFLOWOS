@@ -1,9 +1,35 @@
 ---
 kind: constitution
 writers: [human]
+status: HALTED
+halted_at: 2026-09-12
 # Cycles may propose changes to this file only via a PR labeled os-constitution.
 # They may never edit it directly.
 ---
+
+# ALL CYCLES ARE HALTED
+
+**Stopped by the repo owner on 2026-09-12. This supersedes every playbook and
+every cadence in `architecture/os/playbooks/`.**
+
+If you are a scheduled cycle — truth, audit, burndown or reflect — and you are
+reading this file: **stop now.** Do not probe production, do not run gates, do
+not drain the inbox, do not write a journal entry, do not touch `STATE.md`, do
+not open an issue, do not open a PR, do not commit anything. End the run
+immediately with a single line: `halted by OS.md`. That is the entire run.
+
+A halted run is a success, not a failure. Do not journal the halt, do not file
+it as a finding, and do not escalate it.
+
+This section is constitution, and `writers: [human]` binds here as everywhere
+else: no cycle may edit, soften, expire, scope down, or reinterpret it, and no
+cycle may treat a stale `halted_at` as expiry. Only the repo owner lifts the
+halt, by deleting this section and setting `status: active`.
+
+The schedules themselves live outside this repo (Claude Code cloud routines)
+and are cancelled there. This file is the backstop for any run that fires
+anyway.
+
 
 # KEYFLOWOS Operating System
 
