@@ -1,95 +1,98 @@
 # KeyFlowOS Current Handoff
 
-Last updated: 2026-09-08
-Status: CURRENT — J5 CONVERSATION→BUSINESS-ACTION ACTIVE THROUGH F222/C172
+Last updated: 2026-09-15
+Status: CURRENT — J13 CONNECTOR LIFECYCLE ACTIVE THROUGH MICROTRACE 003
 
 ## Integrity
 
 ```text
 repository:            SaCH-PRO/KEYFLOWOS
 implementation branch: main
-implementation head:   8f173bfe79f1418159cf4099ea18b0d60d203ec2
+forensic baseline:     8f173bfe79f1418159cf4099ea18b0d60d203ec2
 intelligence branch:   docs/keyflow-intelligence-foundation
 production code:       READ-ONLY / UNAUTHORIZED
 context integrity:     PASS
 runtime proof:         NOT EXECUTED
 ```
 
-Later main movement through `11fc669...` was checked at J5 activation; observed movement was architecture/operating-state/documentation material, so this tranche retains the recorded implementation forensic baseline until deliberately rebaselined.
+Later main movement has been observed but no deliberate forensic rebaseline has been taken.
 
 ## Canonical ranges
 
 ```text
-Findings:         F222
-Contradictions:   C172
-Recommendations: KF-REC-056
-Concepts:         KF-CONCEPT-042
-next free:        F223 / C173 / KF-REC-057
+Findings:         F001–F227
+Contradictions:   C001–C177
+Recommendations: KF-REC-001–KF-REC-057
+Concepts:         KF-CONCEPT-001–KF-CONCEPT-042
+Next free:        F228 / C178 / KF-REC-058 — UNALLOCATED
 ```
 
-## Active frontier — J5
+J5 Conversation → Business Action is provisionally converged through F227/C177/KF-REC-057 and remains reopenable if J13/J22/runtime proof falsifies its target semantics.
 
-Dossier:
-`docs/intelligence/journeys/KF-JOURNEY-005-CONVERSATION-BUSINESS-ACTION.md`
+## Active frontier — J13 Connector Lifecycle
 
-Canonical first root:
+Dossier: `docs/intelligence/journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md`
+
+Microtraces:
+
+1. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md`
+2. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md`
+3. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md`
+
+### Canonical root reused
 
 ```text
-F222 / C172 — parallel conversation-processing ownership
-
-same external message occurrence
-├─ KeyInbox: persist + analyze + suggest actions
-├─ MessageIntake: classify + create approval plan + later execute actions
-└─ legacy Meta scanner: may additionally invoke ConversationalAI auto-action path
+F227 / C177
+→ connector "disconnected" is not universally a load-bearing revocation of external participation
 ```
 
-Canonical homes:
+No new J13 root has been allocated yet.
+
+### Microtrace 002 — post-disconnect participation / resurrection
+
+- Stripe and PayPal explicit disconnects are status-only while usable credential material remains.
+- Their payment/callback paths do not require connected ConnectorStatus.
+- Successful provider callback activity can invoke connector activity bookkeeping and rewrite disconnected state to connected/healthy without an explicit reconnect grant.
+- QuickBooks/Xero activity writers can also write connected, but explicit disconnect clears centralized credentials and ordinary post-disconnect reachability was not proved.
+- Gmail/Google Drive clear business-scoped OAuth credentials on explicit disconnect; normal post-disconnect paths are therefore credential-blocked.
+
+Classification: Stripe/PayPal strengthen F227/C177; F228/C178 remain free.
+
+### Microtrace 003 — expiry / revocation / reconnect generation
+
+- Google has actual access/refresh/expiry token mechanics.
+- Shared Google token refresh failure throws but does not clear stale credentials or persist a durable `expired` / `provider_revoked` authority state.
+- Gmail ingestion collapses refresh/acquisition failure into generic ConnectorStatus `error`.
+- Google Drive tells the caller to reconnect after refresh failure, but stale token material remains and connection projection can still be based on token presence.
+- Unified Google Suite OAuth is a strong positive seam: fresh consent and per-service live verification precede connected status.
+- Reconnect overwrites the current credential/status records in place; no binding/grant generation N→N+1 is persisted.
+- QuickBooks/Xero declare OAuth2 but use manually supplied access tokens in the baseline, with no refresh-token lifecycle; health checks infer connectedness from token presence rather than proven current provider usability.
+
+Classification: lifecycle-authority/readiness pressure, but no independent F228/C178 before stale-generation callback lineage is proved and anti-duplicated.
+
+## Working target law
 
 ```text
-F222 → docs/intelligence/08AY-FINDING-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
-C172 → docs/intelligence/09AY-CONTRADICTION-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
+ACTIVE(binding N)
+→ token rollover may rotate credentials while remaining N
+→ permanent provider revoke/invalid_grant durably revokes N
+→ activity/health bookkeeping cannot reactivate N
+→ explicit reconnect creates ACTIVE(binding N+1)
+→ callbacks/effects tied to revoked N cannot authorize current work
 ```
 
-Working law:
-
-```text
-one external conversational occurrence
-→ one canonical durable message / occurrence identity
-→ one explicit processing-policy decision
-→ consumer-specific durable claims
-→ projections may multiply; effect ownership may not
-```
-
-### Important microscopic narrowing already completed
-
-- WhatsApp emits `message.intake.received` when MessageIntake is enabled **and still always persists the same message into KeyInbox**.
-- MessageIntake's documented contract says inbox persistence waits for approval, but its approved plan begins with `create_thread_and_message`; this conflicts with adapter persistence already having occurred.
-- `MessageIntake.executePlan()` executes child actions sequentially without a transaction, then marks the intake approved; on any thrown failure it marks the intake `error`.
-- KeyInbox has a DB uniqueness boundary for `(business_id, channel, external_message_id)`.
-- Legacy Meta ingestion stores the provider external message in KeyInbox and also creates `SocialEngagement(aiHandled=false)` only for the legacy payload shape.
-- The scanner passes `SocialEngagement.id` (not provider external ID) to `ConversationalAI`, allowing a second KeyInbox representation on the first pass. Later scanner passes collide on that internal-ID KeyInbox uniqueness and fail before repeated AI reasoning. Therefore the `aiHandled=false` recurrence is currently treated as an F222 manifestation, **not F223**.
-- Real Meta Graph payloads do not create that legacy SocialEngagement row. They remain on the KeyInbox analysis/suggestion path.
-- KeyInbox suggested actions are operator-confirmed in the live UI before `KeyInboxActionExecutorService` runs them; this differs materially from the legacy Meta ConversationalAI autonomy path and strengthens F222.
-- `AiOversight.evaluateAutoApproval()` is the governance gate used by ConversationalAI. Its high-confidence and quick-confirm override semantics require anti-duplication comparison against J2/J6/J15 before any new allocation.
-
-### Reused owners
-
-Do not duplicate F090, F099/F100, F107, F131, F136, F159, J14 ingress, J15 clearance/governance or J18 recovery/outcome-certainty findings.
+Lifecycle authority, operational health and credential presence are distinct concepts.
 
 ## Exact next action
 
 ```text
-1. trace MessageIntake approval when the adapter already persisted the same external message:
-   - prove exact unique-conflict/orphan-thread/error-state behavior;
-   - classify under F222 vs distinct recovery root only after anti-duplication search.
-2. trace AiOversight.evaluateAutoApproval high-confidence/quick-confirm behavior against J2/J6/J15 existing findings.
-3. trace KeyInboxActionExecutor human-confirmed mutations against exact capability/authority semantics; reuse J2/J15 unless genuinely distinct.
-4. trace KeyInboxReplySender provider-effect → sendStatus/evidence/retry semantics and reuse F159/F099/F100 where applicable.
-5. trace real Meta Graph and WhatsApp end-to-end outcome/evidence convergence into Business Graph/CRM.
-6. reuse F001–F222 / C001–C172 / KF-REC-001–056 before any allocation.
+1. identify provider webhook/watch/subscription registrations and disconnect cleanup;
+2. trace Google, Meta/WhatsApp, Stripe/PayPal and QuickBooks/Xero registrations where present;
+3. model reconnect as generation N+1 and test whether old callbacks/effects from N can still route;
+4. determine whether callbacks contain enough account/grant identity to reject stale generations;
+5. anti-duplicate against F227/C177, J14 ingress, J18 recovery and F149/F159 provider-effect ambiguity;
+6. allocate F228/C178/KF-REC-058 only if a genuinely independent root survives;
 7. keep production code untouched and do not claim runtime proof.
 ```
 
-J12 remains provisionally converged through F221/C171/KF-REC-056. Do not resume J12 discovery or convert KF-REC-056 into an implementation packet.
-
-If continuity is lost, resume from **J5 microscopic tracing after F222/C172 allocation**, not from post-J12 frontier selection.
+If continuity is lost, resume from **J13 provider subscription cleanup + stale-generation callback lineage after Microtrace 003**.
