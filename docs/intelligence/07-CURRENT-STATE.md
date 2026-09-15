@@ -1,11 +1,11 @@
 # KeyFlowOS Current State
 
-Last updated: 2026-09-08
+Last updated: 2026-09-15
 Status: CANONICAL CURRENT PROGRAMME STATE
 
 ## Analytical phase
 
-`WHOLE-SYSTEM VIRTUAL MODEL / J5 CONVERSATION→BUSINESS-ACTION FIRST-PASS MICROSCOPIC TRACE ACTIVE`
+`WHOLE-SYSTEM VIRTUAL MODEL / J13 CONNECTOR LIFECYCLE MICROSCOPIC TRACE ACTIVE THROUGH MICROTRACE 003`
 
 Production implementation remains **READ-ONLY / UNAUTHORIZED**.
 Runtime proof has **NOT** been executed.
@@ -16,20 +16,20 @@ Context integrity: `PASS`.
 ```text
 repository:            SaCH-PRO/KEYFLOWOS
 implementation branch: main
-implementation head:   8f173bfe79f1418159cf4099ea18b0d60d203ec2
+forensic baseline:     8f173bfe79f1418159cf4099ea18b0d60d203ec2
 intelligence branch:   docs/keyflow-intelligence-foundation
 ```
 
-Later `main` movement through `11fc669...` was checked during frontier activation. The observed movement was architecture/operating-state/documentation material; the implementation forensic baseline for this tranche remains the recorded `8f173b...` snapshot until deliberately rebaselined.
+Later main movement has been observed, but this forensic tranche has not deliberately rebaselined.
 
 ## Canonical ranges
 
 ```text
-Findings:         F001–F222
-Contradictions:   C001–C172
-Recommendations: KF-REC-001–KF-REC-056
+Findings:         F001–F227
+Contradictions:   C001–C177
+Recommendations: KF-REC-001–KF-REC-057
 Concepts:         KF-CONCEPT-001–KF-CONCEPT-042
-Next free:        F223 / C173 / KF-REC-057
+Next free:        F228 / C178 / KF-REC-058 — UNALLOCATED
 ```
 
 ## Mature / pooled journey state
@@ -43,56 +43,85 @@ J3/J4  → F197–F205 / C147–C155 / KF-REC-053; provisionally converged
 J10    → F206–F214 / C156–C164 / KF-REC-054; provisionally converged
 J11    → F215–F218 / C165–C168 / KF-REC-055; provisionally converged
 J12    → F219–F221 / C169–C171 / KF-REC-056; provisionally converged
+J5     → F222–F227 / C172–C177 / KF-REC-057; provisionally converged
 ```
 
-## J5 active frontier
+## J13 active frontier
 
 Dossier:
-`journeys/KF-JOURNEY-005-CONVERSATION-BUSINESS-ACTION.md`
+`journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md`
 
-First canonical root:
-
-```text
-F222 / C172
-→ one external conversational occurrence can be processed by multiple independent conversation-action fabrics
-→ KeyInbox may already persist/analyze it
-→ MessageIntake may simultaneously model it as awaiting approval before inbox persistence
-→ legacy Meta scanning may independently hand it to ConversationalAI for governed autonomous processing
-```
-
-Canonical homes:
+Completed microtraces:
 
 ```text
-F222 → 08AY-FINDING-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
-C172 → 09AY-CONTRADICTION-REGISTER-CONVERSATION-OWNERSHIP-SUPPLEMENT.md
+001 — initial cross-provider lifecycle/state model
+002 — post-disconnect participation + activity resurrection
+003 — token expiry / provider revocation / reconnect generation
 ```
 
-Working target law:
+Canonical inherited root remains:
 
 ```text
-one external conversational occurrence
-→ one canonical durable message / occurrence identity
-→ one explicit processing-policy decision
-→ consumer-specific durable claims for analysis / approval / autonomous action / reply
-→ projections may multiply; effect ownership may not
+F227 / C177
+→ displayed disconnected state is not universally a load-bearing revocation of provider participation
 ```
 
-No J5 recommendation has been allocated yet. J5 is **ACTIVE / NOT CONVERGED**.
-
-### Reuse boundary
-
-J5 currently reuses rather than duplicates mature roots including F090, F099/F100, F107, F131, F136 and F159, plus J14 ingress, J15 governance/clearance and J18 recovery/outcome-certainty semantics.
-
-### Immediate microscopic questions
+### Current proved narrowing
 
 ```text
-1. finish the legacy-Meta aiHandled=false recurrence trace and classify it as F222 specialization vs genuinely distinct F223;
-2. trace real Meta Graph DM from KeyInbox analysis/suggested actions to any executable action/reply consumer;
-3. trace MessageIntake approval → executePlan when the adapter has already persisted the same KeyInbox occurrence;
-4. inspect AiOversight.evaluateAutoApproval() and bind its authority/control semantics to J2/J6/J15;
-5. trace outbound reply effect identity/provider certainty across Gmail, Resend, WhatsApp and KeyInbox reply sending;
-6. reuse F001–F222 / C001–C172 / KF-REC-001–056 before any allocation;
-7. keep production code untouched and do not claim runtime proof.
+WhatsApp
+→ disconnected control state does not universally stop retained ingress routing/processing
+
+Stripe / PayPal
+→ disconnect leaves usable credentials
+→ normal payment/callback paths do not load-bear on ConnectorStatus
+→ provider activity can rewrite disconnected status to connected/healthy
+→ classified under F227/C177
+
+QuickBooks / Xero
+→ disconnect clears centralized credentials
+→ activity writers can mark connected, but post-disconnect reachability not proved
+→ baseline "OAuth2" integration is static pasted access-token configuration with no refresh generation lifecycle
+
+Gmail / Google Drive
+→ disconnect clears business-scoped OAuth credentials
+→ token expiry/refresh exists
+→ refresh failure does not durably distinguish provider revocation/expiry from generic operational error
+
+Google Suite reconnect
+→ fresh consent + live verification is a positive seam
+→ credentials/status are overwritten in place
+→ no binding generation N→N+1 lineage exists
 ```
 
-J12 remains provisionally converged and reopenable if later work falsifies its target semantics. Do not convert KF-REC-056 into an implementation packet.
+No F228/C178/KF-REC-058 allocation has been made. The current evidence remains parsimoniously explained by F227/C177 plus existing readiness/honesty and J14/J18/provider-effect concerns.
+
+## Working target law
+
+```text
+one tenant-scoped ConnectorBinding generation is the authority root
+→ lifecycle authority is separate from operational health and credential presence
+→ revoke(N) is monotonic
+→ health/activity cannot reactivate N
+→ provider invalid_grant/revocation creates durable lifecycle evidence
+→ reconnect creates N+1
+→ callbacks/effects from N cannot authorize current work after N is revoked
+```
+
+## Exact next frontier
+
+`J13_PROVIDER_SUBSCRIPTION_CLEANUP_AND_STALE_GENERATION_CALLBACK_LINEAGE`
+
+Trace:
+
+```text
+1. provider webhook/watch/subscription registration ownership;
+2. provider-side cleanup on disconnect;
+3. callback identity after revoke;
+4. reconnect as conceptual generation N+1;
+5. whether stale callbacks from N still route/authorize under current state;
+6. anti-duplicate against F227/C177, J14, J18, F149/F159 and readiness/honesty roots;
+7. allocate F228/C178 only if a genuinely independent root remains.
+```
+
+Keep production untouched and do not claim runtime proof.
