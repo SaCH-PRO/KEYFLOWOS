@@ -1,17 +1,26 @@
 project: KEYFLOWOS
-rollover_version: 39
-last_updated: 2026-09-15
-status: LIVE_CONTINUITY_ARTIFACT_J13_ACTIVE_MICROTRACE_003
+rollover_version: 40
+last_updated: 2026-09-16
+checkpoint_id: J13-ROLLOVER-2026-09-16-M004-PLUS-CALLBACK-SUPPLEMENT
+status: LIVE_CONTINUITY_J13_M004_PLUS_CALLBACK_SUPPLEMENT_NOT_CONVERGED
+repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: false
-context_integrity: PASS
 runtime_proof_executed: false
-repository: SaCH-PRO/KEYFLOWOS
+context_integrity: RESUME_CHECK_REQUIRED
+fresh_chat_context_integrity_check_required: true
+persistence_only_checkpoint: true
+checkpoint_provenance:
+  pre_checkpoint_intelligence_head: 0f7000d6c141e2296ec923f6d9105bd6f7841891
+  supplement_creation_commit: 0e8658d3b598948907c1082291e26ec5c2582eaf
+  final_checkpoint_resolution: resolve_live_intelligence_branch_head_and_matching_checkpoint_id
+  existing_microtrace_004_preserved: true
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  later_main_movement_observed: true
+  later_main_movement_previously_observed: true
   deliberate_rebaseline: false
+  source_reread_in_this_persistence_checkpoint: false
 canonical_ranges:
   findings_through: F227
   contradictions_through: C177
@@ -32,26 +41,66 @@ j13:
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md
+    - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md
+  supplements:
+    - docs/intelligence/investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md
   inherited_root: F227_C177
-  status: ACTIVE_NOT_CONVERGED
+  status: BOUNDED_CONVERGENCE_REVIEW_PREPARATION_NOT_CONVERGED
+  primary_kernels: [K9, K7, K11]
+  secondary_kernels: [K1, K3, K5, K8]
+  adjacent_journeys: [J5, J14, J18, J2, J15, J12]
+  microtrace_004_subject: STALE_OAUTH_CONNECT_INTENT_AND_SPLIT_DRIVE_LIFECYCLE_OWNERSHIP
+  naming_collision_resolution: KEEP_MICROTRACE_004_SAVE_CALLBACK_ANALYSIS_AS_SEPARATE_SUPPLEMENT
   key_narrowing:
-    - stripe_and_paypal_postdisconnect_provider_participation_is_reachable
-    - stripe_and_paypal_activity_can_resurrect_disconnected_status_without_reconnect
-    - quickbooks_xero_disconnect_clears_credentials_but_activity_writer_exists
-    - google_disconnect_clears_business_scoped_credentials
-    - google_refresh_failure_has_no_first_class_provider_revoked_state
-    - google_reconnect_overwrites_current_grant_without_generation_lineage
-    - quickbooks_xero_oauth2_is_static_access_token_configuration_in_baseline
-    - no_new_F228_C178_root_allocated
+    - whatsapp_retained_mapping_allows_conditional_old_first_arrival_processing
+    - meta_shared_absent_mapping_blocks_but_same_page_recreation_restores_lookup
+    - stripe_paypal_activity_can_write_status_connected_without_reconnect
+    - healthy_shorthand_is_not_evidence_of_literal_healthStatus_field_mutation
+    - quickbooks_legacy_token_realm_fallback_allows_conditional_provider_read_and_activity
+    - xero_legacy_token_fallback_allows_conditional_smoke_test_and_activity
+    - xero_central_tenant_id_guard_can_still_block_tenant_specific_writes
+    - accounting_provider_callback_reachability_not_established
+    - gmail_drive_watch_registration_not_established
+    - google_refresh_failure_has_no_distinct_durable_provider_revoked_state_in_recorded_trace
+    - stale_drive_oauth_connect_intent_can_restore_credentials_after_disconnect_statically
+    - drive_service_and_connector_disconnect_have_different_shared_status_effects
+    - historical_reconciliation_is_distinct_from_new_effect_authority
+    - unknown_callback_lineage_must_not_be_relabelled_current_grant
+  allocation_decisions:
+    supplement_mechanisms: REUSE_F227_C177
+    microtrace_004_candidate: OPEN_CANONICAL_REGISTER_ANTIDUPLICATION_REQUIRED
+    new_ids_allocated: false
+  proof_status:
+    supplement_P01_P12: DESIGNED_NOT_EXECUTED
+    microtrace_004_six_cases: DESIGNED_NOT_EXECUTED
+    exhaustive_status_writer_inventory: NOT_COMPLETE
+    full_subscription_inventory: NOT_ESTABLISHED
+    live_provider_teardown: NOT_EXECUTED
 active_frontier:
-  stage: J13_PROVIDER_SUBSCRIPTION_CLEANUP_AND_STALE_GENERATION_CALLBACK_LINEAGE
+  stage: J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION
   primary_journey: J13
 exact_next_action:
-  instruction: Identify provider webhook/watch/subscription registrations and disconnect cleanup for Google Meta/WhatsApp Stripe PayPal and QuickBooks/Xero where present. Then model reconnect as grant generation N+1 and prove whether callbacks/effects associated with revoked generation N can still route and authorize current processing because KeyFlow lacks binding generation lineage. Reuse F001-F227 C001-C177 KF-REC-001-057 plus J14 J18 F149 F159 and readiness/honesty roots before allocating F228/C178/KF-REC-058. Keep production read-only and do not claim runtime proof.
+  planned_artifact: docs/intelligence/investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md
+  planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
+  instruction: >-
+    Run Context Integrity Check and load the J13 dossier, Microtraces 001-004 and
+    the separate callback/legacy-credential supplement. Begin the bounded review
+    candidate with lifecycle ownership and callback-admission tables. Finish named
+    status-writer inventory gaps. Compare Microtrace 004's still-open candidate
+    against canonical registers and J14/J18/readiness roots before allocation.
+    Map legacy-credential/mapping migration and provider-subscription cleanup
+    ownership with explicit unknowns. Backward re-audit J5/J14/J18/J2/J15 and
+    K9/K7/K11. Give analytical closure gates evidence-based pass/defer/reopen
+    dispositions, retaining P01-P12 and Microtrace 004 cases as not executed.
+    Commit the candidate and refresh all continuity artifacts before ending.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
-  - F228_C178_KF_REC_058_are_next_free
+  - F228_C178_KF_REC_058_remain_unallocated
   - anti_duplication_before_allocation
-  - do_not_restart_from_J5
+  - preserve_microtrace_004_do_not_overwrite_with_supplement
+  - supplement_reuse_decision_does_not_close_microtrace_004_candidate
+  - do_not_restart_from_J5_or_generic_provider_scan
+  - no_silent_forensic_rebaseline
+  - do_not_mark_J13_converged_before_gates_are_reviewed
   - continuously_refresh_cross_agent_continuity
