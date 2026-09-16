@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 63
-last_updated: 2026-09-15
+analysis_version: 64
+last_updated: 2026-09-16
 phase: whole_system_virtual_model_j13_connector_lifecycle_microtrace
-status: J5_PROVISIONALLY_CONVERGED_J13_ACTIVE_THROUGH_MICROTRACE_003
+status: J5_PROVISIONALLY_CONVERGED_J13_ACTIVE_THROUGH_MICROTRACE_004
 canonical_branch: docs/keyflow-intelligence-foundation
 context_integrity: PASS
 implementation_authorized: false
@@ -11,7 +11,7 @@ implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   baseline_revalidated: true
-  later_code_search_head_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+  later_main_movement_observed: true
   later_movement_classification: no_deliberate_forensic_rebaseline
 canonical_ranges:
   findings_through: F227
@@ -44,8 +44,6 @@ j5:
   roots: [F222_C172,F223_C173,F224_C174,F225_C175,F226_C176,F227_C177]
   recommendation: KF-REC-057
   status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED
-  pre_pooling_trace: docs/intelligence/investigations/J5-CONVERSATION-PRE-POOLING-CONVERGENCE-TRACE.md
-  backward_reaudit: docs/intelligence/investigations/J5-J14-J15-J18-J13-J22-J2-J16-J17-CONVERSATION-ACTION-BACKWARD-REAUDIT.md
   reopen_triggers: [J13_full_dossier,J22_full_dossier,runtime_proof,later_contradictory_implementation_evidence]
 j13:
   dossier: docs/intelligence/journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md
@@ -55,28 +53,35 @@ j13:
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md
+    - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md
   current_narrowing:
     whatsapp_disconnect_revocation: F227_C177
-    health_monitor_disconnected_resurrection: NOT_REACHABLE_MONITOR_SKIPS_DISCONNECTED
-    scheduled_connector_intelligence: SELECTS_STATUS_CONNECTED_ONLY_POSITIVE_SEAM
     stripe_post_disconnect_participation: PROVED_F227_C177
-    stripe_activity_status_resurrection: PROVED_F227_C177
     paypal_post_disconnect_participation: PROVED_F227_C177
-    paypal_activity_status_resurrection: PROVED_F227_C177
     quickbooks_xero_activity_writer: PRESENT_POSTDISCONNECT_REACHABILITY_NOT_PROVED
     gmail_drive_activity_writer: PRESENT_BUT_NORMAL_POSTDISCONNECT_PATH_CREDENTIAL_BLOCKED
     google_refresh_failure: GENERIC_ERROR_OR_EXCEPTION_NO_DURABLE_PROVIDER_REVOKED_STATE
     google_reconnect_generation: NONE_CREDENTIALS_AND_STATUS_OVERWRITTEN_IN_PLACE
+    google_drive_stale_oauth_connect_intent: STATICALLY_REACHABLE_PRE_DISCONNECT_STATE_CAN_INSTALL_CREDENTIALS_AFTER_DISCONNECT
+    google_drive_split_disconnect_ownership: PROVED_DEDICATED_SERVICE_CLEARS_CREDENTIALS_WITHOUT_SHARED_STATUS_UPDATE
     quickbooks_oauth_reality: STATIC_MANUALLY_SUPPLIED_ACCESS_TOKEN_NO_REFRESH_LIFECYCLE
     xero_oauth_reality: STATIC_MANUALLY_SUPPLIED_ACCESS_TOKEN_NO_REFRESH_LIFECYCLE
     F228_C178: UNALLOCATED_ANTIDUPLICATION_REQUIRED
 active_frontier:
-  stage: J13_PROVIDER_SUBSCRIPTION_CLEANUP_AND_STALE_GENERATION_CALLBACK_LINEAGE
+  stage: J13_PROVIDER_SUBSCRIPTION_CLEANUP_STALE_GENERATION_CALLBACK_LINEAGE_AND_STATUS_WRITER_ENUMERATION
   primary_journey: J13
   next_free_allocation_requires_antiduplication: true
+working_target_law:
+  - credential_possession_is_not_authority
+  - provider_callback_authenticity_is_not_current_connection_authority
+  - activity_is_evidence_not_grant
+  - disconnect_revokes_generation_and_cancels_pending_connect_intents
+  - reconnect_creates_new_generation
+  - stale_generation_callback_cannot_authorize_current_work
+  - reconciliation_authority_is_distinct_from_new_effect_origination
 exact_next_action:
-  title: trace_provider_subscription_cleanup_and_stale_generation_callback_lineage
-  instruction: Identify provider webhook/watch/subscription registrations and their cleanup on disconnect; then trace reconnect as conceptual generation N+1 and prove whether callbacks/effects from revoked generation N can still route and authorize current processing because binding lineage is absent. Prioritize Google watch/subscriptions, Meta/WhatsApp, Stripe/PayPal and any QuickBooks/Xero webhook registration. Reuse F001-F227 C001-C177 KF-REC-001-057 and J14/J18/provider-effect roots before allocating F228/C178/KF-REC-058. Keep production read-only and do not claim runtime proof.
+  title: finish_provider_subscription_cleanup_and_stale_generation_lineage
+  instruction: Enumerate provider webhook/watch/subscription registrations and disconnect cleanup for Google, Meta/WhatsApp, Stripe/PayPal, QuickBooks/Xero; trace whether callbacks/effects from revoked generation N can route after reconnect N+1; enumerate every ConnectorStatus writer and classify it as grant-creating, projection-only, activity-evidence, health-observation or revocation; anti-duplicate the Microtrace 004 stale-connect-intent and split-lifecycle-ownership candidate root against F001-F227/C001-C177/KF-REC-001-057, J14, J18, F149/F159 and readiness/honesty roots before allocating F228/C178/KF-REC-058. Keep production read-only and do not claim runtime proof.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed

@@ -1,7 +1,7 @@
 # KeyFlowOS Current Handoff
 
-Last updated: 2026-09-15
-Status: CURRENT — J13 CONNECTOR LIFECYCLE ACTIVE THROUGH MICROTRACE 003
+Last updated: 2026-09-16
+Status: CURRENT — J13 CONNECTOR LIFECYCLE ACTIVE THROUGH MICROTRACE 004
 
 ## Integrity
 
@@ -27,7 +27,7 @@ Concepts:         KF-CONCEPT-001–KF-CONCEPT-042
 Next free:        F228 / C178 / KF-REC-058 — UNALLOCATED
 ```
 
-J5 Conversation → Business Action is provisionally converged through F227/C177/KF-REC-057 and remains reopenable if J13/J22/runtime proof falsifies its target semantics.
+J5 Conversation → Business Action remains provisionally converged through F227/C177/KF-REC-057 and reopenable if J13/J22/runtime proof falsifies its target semantics.
 
 ## Active frontier — J13 Connector Lifecycle
 
@@ -38,8 +38,9 @@ Microtraces:
 1. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md`
 2. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md`
 3. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md`
+4. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md`
 
-### Canonical root reused
+### Canonical inherited root
 
 ```text
 F227 / C177
@@ -48,51 +49,60 @@ F227 / C177
 
 No new J13 root has been allocated yet.
 
-### Microtrace 002 — post-disconnect participation / resurrection
+## Microtrace 004 — new exact-baseline result
 
-- Stripe and PayPal explicit disconnects are status-only while usable credential material remains.
-- Their payment/callback paths do not require connected ConnectorStatus.
-- Successful provider callback activity can invoke connector activity bookkeeping and rewrite disconnected state to connected/healthy without an explicit reconnect grant.
-- QuickBooks/Xero activity writers can also write connected, but explicit disconnect clears centralized credentials and ordinary post-disconnect reachability was not proved.
-- Gmail/Google Drive clear business-scoped OAuth credentials on explicit disconnect; normal post-disconnect paths are therefore credential-blocked.
+Dedicated Google Drive OAuth state is HMAC-authenticated and time-bounded, but carries no durable connect-intent ID, lifecycle generation or revocation epoch. The callback verifies any still-valid signed state and then saves credentials without checking whether a disconnect occurred after the auth URL was issued.
 
-Classification: Stripe/PayPal strengthen F227/C177; F228/C178 remain free.
+Static reachability therefore supports:
 
-### Microtrace 003 — expiry / revocation / reconnect generation
+```text
+request auth URL
+→ receive signed state S
+→ disconnect Drive
+→ old OAuth flow returns with still-valid code + S
+→ callback accepts S
+→ saveDriveCredentials writes new Drive credentials
+```
 
-- Google has actual access/refresh/expiry token mechanics.
-- Shared Google token refresh failure throws but does not clear stale credentials or persist a durable `expired` / `provider_revoked` authority state.
-- Gmail ingestion collapses refresh/acquisition failure into generic ConnectorStatus `error`.
-- Google Drive tells the caller to reconnect after refresh failure, but stale token material remains and connection projection can still be based on token presence.
-- Unified Google Suite OAuth is a strong positive seam: fresh consent and per-service live verification precede connected status.
-- Reconnect overwrites the current credential/status records in place; no binding/grant generation N→N+1 is persisted.
-- QuickBooks/Xero declare OAuth2 but use manually supplied access tokens in the baseline, with no refresh-token lifecycle; health checks infer connectedness from token presence rather than proven current provider usability.
+Thus an explicit disconnect does not necessarily cancel an already-issued Drive connect intent. Runtime proof has NOT been executed.
 
-Classification: lifecycle-authority/readiness pressure, but no independent F228/C178 before stale-generation callback lineage is proved and anti-duplicated.
+A second exact-baseline issue is split Drive lifecycle ownership:
+
+- `GoogleDriveConnector.disconnect()` clears credentials and updates shared `ConnectorStatus` to disconnected.
+- `GoogleDriveService.disconnect()` clears credentials only.
+- `DELETE /drive/businesses/:businessId/disconnect` calls the service path.
+
+Therefore a legitimate public disconnect route can leave credentials absent while the shared status row remains connected until another writer changes it.
+
+Classification: this may be an independent stale-intent / fragmented-lifecycle root, but F228/C178 remain unallocated until anti-duplication against the canonical registers and J14/J18/readiness roots is complete.
 
 ## Working target law
 
 ```text
-ACTIVE(binding N)
-→ token rollover may rotate credentials while remaining N
-→ permanent provider revoke/invalid_grant durably revokes N
-→ activity/health bookkeeping cannot reactivate N
-→ explicit reconnect creates ACTIVE(binding N+1)
-→ callbacks/effects tied to revoked N cannot authorize current work
+one tenant-scoped ConnectorBinding generation is the authority root
+→ lifecycle authority is separate from operational health and credential presence
+→ OAuth connect intent binds to a proposed generation
+→ disconnect revokes current generation AND cancels pending connect intents
+→ activity/health cannot reactivate a revoked generation
+→ provider invalid_grant/revocation creates durable lifecycle evidence
+→ reconnect creates N+1
+→ callbacks/effects from N cannot authorize current work after N is revoked
+→ reconciliation of known prior effects is distinct from permission to originate new effects
 ```
 
-Lifecycle authority, operational health and credential presence are distinct concepts.
+All public lifecycle entrypoints should delegate to one lifecycle authority that coordinates credential clearing, provider-side subscription teardown, binding revocation, status projection and pending-intent cancellation.
 
 ## Exact next action
 
 ```text
-1. identify provider webhook/watch/subscription registrations and disconnect cleanup;
-2. trace Google, Meta/WhatsApp, Stripe/PayPal and QuickBooks/Xero registrations where present;
-3. model reconnect as generation N+1 and test whether old callbacks/effects from N can still route;
-4. determine whether callbacks contain enough account/grant identity to reject stale generations;
-5. anti-duplicate against F227/C177, J14 ingress, J18 recovery and F149/F159 provider-effect ambiguity;
-6. allocate F228/C178/KF-REC-058 only if a genuinely independent root survives;
-7. keep production code untouched and do not claim runtime proof.
+1. enumerate provider webhook/watch/subscription registrations and disconnect cleanup;
+2. trace Google, Meta/WhatsApp, Stripe/PayPal and QuickBooks/Xero where registrations exist;
+3. reconnect conceptually as generation N+1 and test whether old callbacks/effects from N still route;
+4. determine whether callback identity can bind to provider account + connector generation;
+5. enumerate every ConnectorStatus writer and classify: grant-creating / projection-only / activity-evidence / health-observation / revocation;
+6. anti-duplicate Microtrace 004 candidate root against F001-F227, C001-C177, KF-REC-001-057, J14, J18, F149/F159 and readiness/honesty roots;
+7. allocate F228/C178/KF-REC-058 only if genuinely independent;
+8. keep production untouched and do not claim runtime proof.
 ```
 
-If continuity is lost, resume from **J13 provider subscription cleanup + stale-generation callback lineage after Microtrace 003**.
+If continuity is lost, resume from **J13 provider subscription cleanup + stale-generation callback lineage after Microtrace 004**, with the stale Drive OAuth connect-intent race and split disconnect ownership already proven statically at the fixed baseline.
