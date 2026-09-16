@@ -2,6 +2,31 @@
 
 This directory is the durable source of truth for architectural and product intelligence developed across ChatGPT, Claude Code, Kimi/Gemini Code, repository analysis, source documents and human review.
 
+## Live checkpoint - 2026-09-16
+
+Checkpoint: `J13-ROLLOVER-2026-09-16-M004-PLUS-CALLBACK-SUPPLEMENT`.
+
+```text
+repository:             SaCH-PRO/KEYFLOWOS
+intelligence branch:    docs/keyflow-intelligence-foundation
+forensic main baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+active journey:         J13 Connector Lifecycle
+active stage:           J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION
+J13 convergence:        NOT YET CONVERGED
+production code:        READ-ONLY / UNAUTHORIZED
+runtime/provider tests: NOT EXECUTED
+```
+
+For current continuation, follow `AGENT-CONTINUITY.md`, `07-CURRENT-STATE.md` and all four files under `handoff/` named CURRENT-HANDOFF.md, CURRENT-STATE.yaml, NEXT-CHAT-ROLLOVER.md and NEXT-CHAT-ROLLOVER.yaml. Run the fresh-chat Context Integrity Check. This persistence checkpoint did not repeat the source investigation or complete the remaining anti-duplication.
+
+Load `journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md`, Microtraces 001-004 in `investigations/`, and `investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md`.
+
+**Microtrace 004 is the existing Stale OAuth Connect Intent and Split Drive Lifecycle Ownership trace. Preserve it.** The callback/legacy-credential analysis is a separate supplement, not a replacement Microtrace 004. The supplement's F227/C177 classification does not settle Microtrace 004's still-open candidate-root anti-duplication.
+
+Exact next output: the planned candidate `investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md`, beginning with lifecycle ownership and callback-admission tables. Finish named writer-inventory gaps, candidate-root anti-duplication, migration/teardown ownership, adjacent-journey backward re-audit and evidence-linked closure gates. Do not restart the generic provider scan. All designed runtime/provider cases remain unexecuted.
+
+J5 remains provisionally converged and reopenable. The older J23/J18 material below is retained architectural context, **not the current frontier**. Resolve the live intelligence branch head on resume; do not silently rebaseline source analysis to newer main.
+
 ## Prime directive
 
 Conversations are working memory. This repository is durable memory.
@@ -14,7 +39,9 @@ No materially important conclusion about KeyFlowOS is preserved until written in
 
 Production behavior must not be changed merely because a local problem appears obvious. First determine affected journeys, constellations, kernels, state transitions, authority, capability, evidence, dependencies, contradictions, compatibility surfaces, migration and proof requirements.
 
-## Required load order
+## Required programme load order
+
+Use the continuity contract and live checkpoint above to recover the exact frontier first. Retain the broader programme foundation below for substantive synthesis; do not substitute historical snapshot instructions for the live handoff.
 
 1. `AGENTS.md`
 2. `docs/intelligence/AGENT-CONTINUITY.md`
@@ -40,7 +67,7 @@ Production behavior must not be changed merely because a local problem appears o
 22. `docs/intelligence/handoff/CURRENT-STATE.yaml`
 23. active journey/kernel/investigation files referenced by current state.
 
-Do not continue substantive work until required context is loaded or a missing-file condition is explicitly reported.
+Also load both NEXT-CHAT-ROLLOVER files and the allocation ledgers before new canonical allocations. Do not continue substantive work until required context is loaded or a missing-file condition is explicitly reported.
 
 ## Core operating model
 
@@ -54,7 +81,7 @@ Do not continue substantive work until required context is loaded or a missing-f
 = COMPUTABLE KEYFLOWOS DIGITAL TWIN
 ```
 
-## Active analytical mesh
+## Historical J23/J18 analytical mesh - retained context
 
 ```text
 J1 Business Birth
@@ -67,7 +94,7 @@ J1 Business Birth
 ↕ J18 Failure / Recovery
 ```
 
-Current frontier:
+Historical frontier at that snapshot, NOT the current next action:
 
 ```text
 J23 = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
@@ -79,12 +106,14 @@ Production implementation remains unauthorized.
 ## Current canonical ranges
 
 ```text
-Findings:        F157
-Contradictions:  C107
-Recommendations: KF-REC-048
+Findings:         F001-F227
+Contradictions:   C001-C177
+Recommendations: KF-REC-001-KF-REC-057
+Concepts:         KF-CONCEPT-001-KF-CONCEPT-042
+Next free:        F228 / C178 / KF-REC-058 - UNALLOCATED
 ```
 
-Current `08A` through `08K`, `09A` through `09K`, and `10A` through `10G` are canonical continuations, not optional notes.
+The earlier J18 snapshot ended at F157/C107/KF-REC-048; those are historical counts, not current allocation pointers. At that snapshot `08A` through `08K`, `09A` through `09K`, and `10A` through `10G` were canonical continuations. They remain evidence, but are not an exhaustive list of later supplements. Consult current ledgers and relevant registers rather than allocating from the historical snapshot.
 
 ## Architectural thesis
 
@@ -196,7 +225,7 @@ re-execute parent != resume unresolved children
 failure/time != recovery authority
 ```
 
-Latest J18 findings:
+J18 findings retained from the earlier snapshot:
 
 ```text
 F150 failed ActionDispatcher idempotency tombstone defeats BullMQ retry
@@ -255,7 +284,7 @@ Prefer strengthening rather than replacing:
 
 Adopt properties, not products.
 
-## Exact next work
+## Historical J18 next-work queue - not the live frontier
 
 ```text
 provider-effect-success / local-persistence-failure crash windows beyond refunds
@@ -265,6 +294,8 @@ provider-effect-success / local-persistence-failure crash windows beyond refunds
 → J18 → J23 L6 field/status/migration/proof reinjection
 → decide J18 L5 value-engineering readiness
 ```
+
+Use 07-CURRENT-STATE.md and the live handoff to establish which historical items were subsequently pooled, completed or reopened. Do not restart this queue merely because it appears in this foundation document.
 
 ## Knowledge discipline
 
@@ -292,7 +323,7 @@ mapped
 → execution-ready
 ```
 
-Only then create bounded `KF-EXEC-*` packets for Claude Code; Kimi/Gemini may adversarially review accepted invariants and resulting diffs.
+Only then create bounded `KF-EXEC-*` packets for Claude Code; Kimi/Gemini may adversarially review accepted invariants and resulting diffs. As clarified in AGENT-CONTINUITY.md, earlier packets may be pooled falsification/implementation-shape probes, not implementation authorization or the programme frontier.
 
 ## Do not
 
