@@ -1,56 +1,52 @@
 # KEYFLOWOS - Next Chat Rollover
 
-Checkpoint: `J24-PA-2026-09-16-01`  
+Checkpoint: `J24-SCCR-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **LIVE - PROOF ADMISSION MAPPED; SAFE-CHANGE CONVERGENCE REVIEW NEXT**.
-
-## Resume instruction
+Status: **LIVE - J24 NAMED SAFE-CHANGE CORE ALIGNED; J8 ACTIVATION NEXT**.
 
 ```text
-Continue KEYFLOWOS from committed repository intelligence. Do not restart.
+Continue KEYFLOWOS from committed intelligence. Do not restart.
 Repository: SaCH-PRO/KEYFLOWOS
 Branch: docs/keyflow-intelligence-foundation
-Checkpoint: J24-PA-2026-09-16-01
-Input/provenance: 59c94b381025fd2b35cda8f53283b1c33d22533f
+Checkpoint: J24-SCCR-2026-09-16-01
+Input/provenance: a584da16c09416fd22fe68dedff7efd0411eb07f
 Forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-Resolve the live output head and matching checkpoint; input is not output.
+Resolve the live output head and matching checkpoint.
 
 Read AGENTS.md, AGENT-CONTINUITY.md, START, 07-CURRENT-STATE and all
-CURRENT/ROLLOVER files. Run Context Integrity Check. Read the active J24
-dossier, completed J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md and
-J24-PROOF-ADMISSION-CONTRACT.yaml. Preserve J13 original evidence/LAC/ACM
-and its unchanged 44-case manifest. No runner bindings or app proof were added.
+CURRENT/ROLLOVER files. Run Context Integrity Check.
+Read J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md and the new existing-ID K12 dossier.
+J24's prior proof-admission map/YAML and J13 evidence/44-case inventory remain
+unchanged. J24 named-core target alignment is not enforced control or passing tests.
 
-The prior mapping action is completed; do not repeat it.
-Next: J24_SAFE_CHANGE_CONVERGENCE_REVIEW.
-Produce investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md.
-Resolve independent policy/manifest and required-check ownership, enforceable
-integration through existing CI/provisioning/report mechanisms and safe
-withdrawal, then backward re-audit J13/J18/J23/J2/J15/K8/K12 and decide
-bounded J24 convergence or name the precise remaining invariant.
-Administrative settings that cannot be read remain explicit missing evidence.
+USER OVERRIDE: do not update, regenerate or refresh the programme map until
+explicitly requested. Do not run its generator/check or edit any map output.
+Canonical state advances; map remains intentionally at J24-PA.
 
-CI already provisions PostgreSQL/Redis and rebuilds the server. Do not
-reopen that resolved prerequisite. The actual gap is proof-admission at the
-inspected result boundary, not absence of every test safeguard. Preserve
-source-gate non-vacuity versus runner completeness; cached versus fresh
-results; module screening versus log startup versus HTTP readiness; kill
-request versus confirmed process/resource cleanup. The constitution wins
-over the truth playbook's broader direct-write seed path.
+LIVE OWNER CONTROL: main@88b8016 OS.md halts scheduled truth/audit/burndown/
+reflect cycles from 2026-09-12. Do not restart them or use old playbooks as
+current permission. This does not change the code-forensic baseline.
 
-No weakening assertions/OS, editing workflows/production, deploying or
-running write-capable collection/setup on unverified resources. All 44 cases
-remain designed/unbound/unexecuted. F228/C178/KF-REC-058 remain unallocated.
-Update canonical state/dossier, regenerate the programme map, check freshness,
-and commit matching continuity. No new general provider/configuration scan.
+Next: J8_PROJECT_WORK_DELIVERY_ACTIVATION.
+Planned output: journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md.
+Trace actual project/task and invoice/contract/template-to-work entrypoints,
+tenant/actor authority, assignment/status writers, completion/acceptance evidence,
+and retry/cancellation. Start one concrete commitment-to-delivery path.
+Use existing J11/J8/J12/J23/J7 constellation; anti-duplicate with J10/J11/J12/
+J18/J23 and K6/K7/K8/K11. Do not repeat closed connector or runner scans.
+
+Production/code/settings/workflows/assertions remain unchanged and unauthorized.
+44 designed cases remain unbound/unexecuted. F228/C178/KF-REC-058 unallocated.
+Persist actual evidence and continuity; verify the intelligence-only checkpoint
+without touching the frozen map.
 ```
 
-## Evidence and map boundaries
+## Observations that must survive
 
-Current state is [CURRENT-STATE.yaml](CURRENT-STATE.yaml), not this transport view. The map still has 25 canonical journeys and 20 dossiers; 80% is coverage only. Seven recorded alignments, five mature-pool members, seven other dossiers, active J24 and five missing dossiers remain unchanged. No K12 dossier was added.
+Main's accessible branch summary reports protection/required checks off; the one returned default-branch ruleset is disabled. Its detailed stored zero-review/code-owner/last-push settings are dormant, not target recommendations. Classic protection detail is inaccessible (403); the effective rules endpoint is connector-unsupported. No hosting settings were altered. Do not turn either the successful summary or denied detail into an exhaustive permission audit.
 
-Eight additional pinned sources support the new J24 map. Twelve analytical receipt challenges are design review, not new application tests. The admission YAML is not an installed parser/harness. Native Vitest v2 reporter docs and Turbo caching docs were used only as explicitly labelled external constraints; no installed runner version or cache event was tested.
+Current policy is distinct from the old forensic source. The scheduled-cycle halt remains owner-controlled and does not expire from age. Cloud routine configuration was not inspected. Root ownership/checklist files do not prove approved merges. The pinned CI deploy block is commented out; other deployments were not exhaustively traced.
 
-Map renderer/template byte identities and the prior full source fingerprint were verified before updating the canonical state. Documentation generation/freshness/browser checks are not app tests. HTML/JSON are generated local views and do not fetch private GitHub data automatically. Refresh instructions remain in maps/README.md.
+The selected K12/J24 design separates trusted policy, restricted candidate execution, evidence collection, independent evaluation/publication, human integration authorization and release authorization. Check name/app alone is insufficient workflow provenance; skip/neutral/missing results must not admit required proof. Optional variants may change, but safety/history/effect identity and rollback compatibility stay load-bearing.
 
-J13's mapped-core acceptance, external limits, ED1-ED5 and D01-D10/T01-T13 survive. The next review must preserve current authority despite exposure flags, avoid self-certifying changed gates, isolate resources before dangerous evaluation and retain negative-control/run/cleanup lineage. Optional implementation changes do not erase business history or make external actions inherently reversible.
+CS1-CS5 are explicit readiness debts in CURRENT and review. ED1-ED5 and prior J13 alignment remain. Counts: 20/25 journey dossiers (J8 not yet added), existing K12 now has a dossier, no new F/C/REC/CONCEPT IDs. Map-refresh pause means the displayed map is an older snapshot by instruction, not the current decision authority.

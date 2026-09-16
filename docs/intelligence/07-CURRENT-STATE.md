@@ -1,73 +1,73 @@
 # KeyFlowOS Current State
 
-Checkpoint: `J24-PA-2026-09-16-01`  
+Checkpoint: `J24-SCCR-2026-09-16-01`  
 Updated: 2026-09-16  
 Status: **CANONICAL CURRENT PROGRAMME STATE**.
 
 ## Current position
 
-**Completed:** J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING.
+**Completed:** J24_SAFE_CHANGE_CONVERGENCE_REVIEW. The [review](investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md) closes the three bounded decisions: trusted policy/required-check ownership, existing-tool enforcement and withdrawal design, and cross-kernel convergence review.
 
-**Now:** J24_SAFE_CHANGE_CONVERGENCE_REVIEW. J24 remains ACTIVE / NOT CONVERGED. Planned next artifact: `investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md`; it has not been created by this checkpoint.
+**J24 result:** PROVISIONALLY_TARGET_ALIGNED_NAMED_SAFE_CHANGE_CORE_ONLY. Enforced safety, executable proof and production readiness are not established. [K12](kernels/KF-KERNEL-012-ENGINEERING-CONTROL-PLANE.md) now has a dedicated dossier under its pre-existing canonical identity, referencing J24 rather than copying a new constitution.
 
-New substantive sources are [the J24 proof-admission map](investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md) and [its proposed admission specification](investigations/J24-PROOF-ADMISSION-CONTRACT.yaml). They map source behavior and required controls; they do not install a test harness, change assertions or authorize execution.
+**Next:** J8_PROJECT_WORK_DELIVERY_ACTIVATION. Planned dossier `journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md` has not been created. Begin the existing commitment-to-delivery constellation J11/J8/J12/J23/J7 instead of repeating J13/J24 scans.
 
-[CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml) remains machine authority; [PROGRAMME-MAP.md](maps/PROGRAMME-MAP.md) is regenerated from it. J13's mapped-core alignment and completed Q1-Q4 remain intact.
+**Programme map: paused by explicit user instruction.** Existing generated views stay at J24-PA. No renderer/freshness check is run, no map output/template is changed and no background update exists. CURRENT-STATE.yaml and these handoffs, not the frozen map, carry the latest decisions.
 
-## What advanced
+## New evidence that changed the review
 
-| Result | Evidence-based disposition |
+| Observation | Exact scope |
 |---|---|
-| Eight additional source files inspected | Actual truth/burndown instructions, root command/Turbo behavior, CI workflow, boot test, GrowthBook and gate-vacuity source |
-| CI prerequisites narrowed correctly | PostgreSQL/Redis, migrations and rebuild exist; no claim they were absent or tested here |
-| Proof-admission gap identified | No explicit zero-skip/required-case result consumer invoked at the inspected CI test boundary; written OS rules are not equivalent to enforcement |
-| Cached/fresh and source/runtime evidence separated | Root cached log replay is not a newly executed seed; scanner input non-vacuity is not complete test discovery |
-| Boot/cleanup claims separated | Regex module screen, child log startup, HTTP readiness and confirmed process/resource closure answer different questions |
-| R03/R04/R05/R07 mapped | Existing owners plus necessary reject conditions, resource admission before unsafe collection and current authority independent of flags |
-| Trusted acceptance clarified | Candidate cannot redefine its expected cases/gates then certify itself; constitution overrides conflicting playbook direct-write scope |
+| main branch summary reports protected:false and required-check enforcement off | Live read on 2026-09-16; not a statement about every historic commit or detailed bypass permission |
+| Returned default-branch ruleset is disabled | Its zero-approval/code-owner/last-push settings and check list are dormant, not the accepted target |
+| Classic protection detail was inaccessible; effective-rule endpoint unsupported | Access gaps stay explicit alongside successful summary/ruleset observations |
+| Current main OS halts scheduled cycles from 2026-09-12 | Current owner permission supersedes the older baseline playbook; code baseline stays fixed; no cycle restarted |
+| Existing CODEOWNERS/PR template declare ownership and testing checkboxes | Source declarations are not required approval or executed proof |
+| Named CI deployment block is commented out | This workflow is not assumed to deploy; other paths were not exhaustively audited |
 
-The new specification contains twelve analytical failure challenges. These are not added runner tests or an increase from 44 to 56 executed cases. No historical green run, actual cache hit, leaked child or production test incident is asserted from static code alone.
+The existing CI database/Redis, migrations and server rebuild remain positive mechanisms. PA's source-versus-runtime, cache-versus-fresh, startup-versus-HTTP and cleanup distinctions survive unchanged.
 
-## Programme coverage and proof
+## Selected engineering control
 
-| View | Recorded position |
-|---|---|
-| Canonical journeys / dossiers | 25 / 20; 80% dossier coverage, not programme completion |
-| Provisional alignments | J3/J4/J5/J10/J11/J12/J13; J13 is mapped-core only |
-| Mature-pool members | J7/J16/J17/J18/J23; not newly recertified by the map |
-| Other existing dossiers | J1/J2/J6/J14/J15/J19/J25 |
-| Active | J24 |
-| Missing dedicated dossiers | J8/J9/J20/J21/J22; related work may exist |
-| Kernels | Twelve canonical definitions, eleven existing dedicated files; K12 not created here |
-| Tracked application proof | 44 designed cases, zero runner bindings, NOT_EXECUTED; no installed harness |
+A trusted policy P and exact candidate/target/tested composition govern verification. Restricted candidate execution is separate from privileged policy/evaluation/check publication. Case identity, errors/skips/shards, resource provenance, freshness, negative controls and cleanup feed an independent scope decision.
 
-The current application and historical test reports are not claimed absent. Only this transformation programme's new proof inventory is being described. No honest whole-app completion percentage is established.
+Accepted evidence does not grant a merge; a merge does not grant a deployment or business action. A familiar status-check name or generic publisher alone does not identify the accepted evaluator. Required missing/skipped/cancelled evidence blocks proof rather than disappearing from its denominator. These are selected design requirements, not running mechanisms installed here.
 
-## Fixed baseline, permissions and retained evidence
+Optional variants may be revised and removed through reviewed compatible contracts. The candidate may not weaken its own acceptance rules. Preserve current revocation, one effect owner, business history and the migration rollback floor. The owner's scheduled-cycle halt and the user's map pause are separate explicit controls and remain in force.
+
+## Counts and unchanged proof
+
+Journey dossiers remain 20/25. J8/J9/J20/J21/J22 remain without dedicated dossiers. Eight journeys now have a recorded provisional target-alignment entry, including bounded J13 and bounded J24; this is not eight completed implementations. Earlier mature pools and existing dossiers retain their previous classifications.
+
+Dedicated kernel dossier count is the prior eleven plus the existing-ID K12 file created here. Presence is not a maturity score. The programme map intentionally retains its older display until requested.
+
+J13's 44-case inventory is unchanged: zero new runner bindings, no installed harness, no executed application/provider/boot/concurrency/migration tests. J24 analytical challenges are design reasoning, not extra executed cases. No canonical F/C/REC/CONCEPT IDs were allocated.
+
+## Remaining readiness obligations
+
+ED1 schema/account/claim reuse and migration; ED2 broader adapter/worker/reader coverage; ED3 actual provider registrations; ED4 executable environment/harness/proof; ED5 deliberate later-baseline comparison remain intact.
+
+J24 adds named control debts: CS1 hosting reviewer/check/publisher/bypass enforcement; CS2 trusted controller/evaluator isolation; CS3 case/report/resource/cleanup proof; CS4 integration/release composition and compatibility; CS5 operational control freshness. They refine implementation readiness rather than reopening all completed analysis.
+
+## Coordinates and permissions
 
 ```text
 Repository: SaCH-PRO/KEYFLOWOS
-Intelligence branch: docs/keyflow-intelligence-foundation
-Input/provenance: 59c94b381025fd2b35cda8f53283b1c33d22533f
+Branch: docs/keyflow-intelligence-foundation
+Input/provenance: a584da16c09416fd22fe68dedff7efd0411eb07f
 Forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-Production source/schema/deployment: READ-ONLY / UNAUTHORIZED
-Application/provider/boot/concurrency/migration proof: NOT_EXECUTED
+Live main re-observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+Production/code/workflows/settings/assertions: READ-ONLY / UNAUTHORIZED
+Application/provider/runtime proof: NOT_EXECUTED
+Map refresh: PAUSED UNTIL EXPLICIT USER REQUEST
 ```
 
-Resolve output SHA from live head and checkpoint. No rebaseline, execution-packet promotion, application run or gate edit. Ranges stay F227/C177/KF-REC-057/KF-CONCEPT-042; F228/C178/KF-REC-058 remain unallocated. 04B and later J5 re-audits retain precedence over old snapshots.
+Resolve the output head and matching checkpoint, not the input SHA. Current hosting/owner controls were read as a separate dated axis, not silently substituted for source-forensic truth. All prior J13 investigation artifacts, J24 PA/specification and case manifest remain unchanged.
 
-J13 M001-M004, separate SUP, BCR, LAC, ACM and 44-case manifest are unchanged. Earlier J24 activation content remains in its dossier with the new current-checkpoint overlay. All prior mature pools, J13 scope/limitations and ED1-ED5 remain unchanged in machine state.
+Ranges stay F227/C177/KF-REC-057/KF-CONCEPT-042; next F228/C178/KF-REC-058 unallocated. Canonical 04B and later re-audits remain governing.
 
-ED1 covers schema/claim reuse and migration; ED2 broader adapter/worker/reader conformance; ED3 actual remote registrations; ED4 executable harness/proof; ED5 later-baseline comparison before execution. The new map narrows ED4's required owners and evidence but does not clear it.
+## Next bounded work
 
-## Refresh and actual validation boundary
+Read actual project/task creation and invoice/contract/template consumers. Trace tenant/actor authority, assignment/status mutations, evidence of delivery/acceptance and retry/cancellation along one J8 path. Distinguish a checked task from completed customer obligations and cash consequences. Anti-duplicate against the existing commitment/delivery/recovery contracts before allocation.
 
-The original connector-derived source bundle was reconstructed and matched the prior published map fingerprint before modification. Renderer/template bytes match repository blobs. This supports continuity of the metadata, not product correctness.
-
-Regenerate with `python docs/intelligence/tools/build-programme-map.py`, then use `--check`. Local HTML/JSON remain reproducible views, not an unattended live feed. Checks actually completed for this checkpoint are recorded in [J24-PA-VALIDATION.md](maps/J24-PA-VALIDATION.md); documentation checks must not be described as application tests.
-
-## Exact next review
-
-First establish independent change/policy and required-check ownership using accessible read-only sources. Next specify enforcement and migration through existing CI/provisioning/report mechanisms, including safe rollback and current authority. Finally re-audit J13/J18/J23/J2/J15/K8/K12 and give J24 a declared-scope convergence disposition or precise unresolved invariant.
-
-Do not repeat the completed runner/configuration scan, restart J13 or run tests against unverified resources. Preserve the blueprint's controlled-change intent without weakening the constitution or acceptance rules. Persist substantive results and all CURRENT/ROLLOVER views with the regenerated map.
+Persist the J8 result and handoff; reopen J13/J24 only for concrete counterexamples. Do not regenerate or edit the map, resume halted scheduled cycles, change production or run unsafe tests.
