@@ -1,93 +1,71 @@
 # KeyFlowOS Current State
 
-Checkpoint: `J13-ACM-2026-09-16-01`  
+Checkpoint: `J24-MAP-2026-09-16-01`  
 Updated: 2026-09-16  
 Status: **CANONICAL CURRENT PROGRAMME STATE**.
 
-## Current position
+## Where we are
 
-**Completed:** J13_ADAPTER_CONFORMANCE_AND_MIGRATION_CLOSURE, Q1-Q4, at the scope stated in [the committed conformance map](investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md).
+**Completed this tranche:** J24 activation and source trace 001 (runner and boot admission); a repository-derived programme map with generation/freshness checks and an interactive local viewer.
 
-**Decision:** J13 is **PROVISIONALLY TARGET-ALIGNED FOR THE MAPPED CORE ONLY**. Its named implementation paths now have an explicit owner, data/key boundary, required authority/transaction change, migration slice and proof obligation. This is not a finding that those paths already conform, nor convergence of every provider/worker/schema path.
+**Current frontier:** J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING. J24 is ACTIVE / NOT CONVERGED. Its next artifact is `investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md`, not created in this checkpoint.
 
-**Next frontier:** J24_ENGINEERING_SAFETY_AND_REVERSIBLE_TESTING_ACTIVATION. The J24 dossier has not been created by this checkpoint. Do not repeat the completed J13 queue or write another general lifecycle candidate.
+J13 remains PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY. Its Q1-Q4 loop is completed; the whole provider estate and production conformance are not declared finished. Its contract, source traces, migration slices and ED1-ED5 remain unchanged.
 
-[CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml) owns the machine state. [CURRENT-HANDOFF.md](handoff/CURRENT-HANDOFF.md) and the two rollover files transport the same next action. LAC remains the single D/T contract; the conformance map owns its bounded acceptance and integration consequences.
+The canonical machine state is [CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml). The [living map](maps/PROGRAMME-MAP.md) is derived from it and the actual dossier inventory, not a competing state authority.
 
-## Coordinates and authorization
+## Verified coverage, not completion
+
+| View | Current count / meaning |
+|---|---|
+| Canonical journeys | 25 |
+| Dedicated journey dossiers | 20/25, or 80% coverage; 19 pre-existing files plus new J24 |
+| Explicit provisional target alignment | J3/J4/J5/J10/J11/J12/J13; seven journeys, with J13 limited to mapped core |
+| Mature evidence-pool members | J7/J16/J17/J18/J23; five, without a new closure certification from the viewer |
+| Other existing dossiers | J1/J2/J6/J14/J15/J19/J25; seven, maturity not inferred from file presence |
+| Current investigation | J24 |
+| No dedicated dossier | J8/J9/J20/J21/J22; related work may already exist |
+| Shared kernels | Twelve canonical definitions; eleven dedicated files in the checked inventory; no K12 dossier created here |
+| Tracked J13 integration proof | 44 designed cases, zero runner bindings, no executed application proof |
+
+There is no honest whole-app completion percentage in this checkpoint. The existing app and historical test reports are not claimed absent; the tracked transformation programme has not implemented or executed these new proof obligations.
+
+## Substantive J24 source results
+
+[The J24 dossier](journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md) records the exact files/blobs and observation boundaries.
+
+The server's generic test/test:ci script invokes the default Vitest selection, not the explicit unit config. The unit config enables shuffling while disabling module isolation; its historical timing/pass comments are not current proof. Integration configuration allows no-test success. The inspected database regression test loads root environment configuration and uses fixed-prefix best-effort cleanup, without proving per-run resource ownership.
+
+The dev launcher has a separate reporting gap: its readiness loops break on success, but exhausting them does not block the later stack-is-up banner. It also unsets inherited resource overrides and cleans fixed ports. These are code-level paths, not evidence of an actual failed boot, damaged test environment or production access.
+
+Next work traces enforcement: exact commands, setup, discovery/report receipts, zero-skip/nonempty checks, run-resource admission and cleanup. The existing OS rule against weakening gates remains untouched. No new canonical finding IDs are assigned merely for these local observations.
+
+## The living map
+
+The generator uses CURRENT-STATE for status/frontier/debts, 03-ANALYSIS-MAP for canonical names, journey/kernel directories for presence, and the existing design manifest for cases/slices. It generates Markdown, JSON and self-contained HTML. The map has journey search/filter/details, proof/integration and evidence-debt views, recent milestone history and kernel navigation.
+
+It refreshes on regeneration after canonical inputs change; it is not a deployed live GitHub feed or background automation. Local HTML can import a newer generated JSON. Instructions are in [maps/README.md](maps/README.md).
+
+Generator negative controls and viewer interaction/mobile checks passed at documentation-tool scope; [validation details](maps/MAP-VALIDATION.md) preserve that boundary. No application, provider, database, boot, concurrency or migration test ran.
+
+## Fixed coordinates and retained programme
 
 ```text
 Repository: SaCH-PRO/KEYFLOWOS
 Intelligence branch: docs/keyflow-intelligence-foundation
-Input/provenance commit: 2b177c772036eee83c24b79ee649d99fd3a2dba1
-Implementation forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-Later main previously observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
-Production code/schema/deployment: READ-ONLY / UNAUTHORIZED
-Application/provider/concurrency/migration tests: NOT_EXECUTED
+Input intelligence: 81046dd4c74c55d8d213285a61eb34ca55925704
+Forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+Live main observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+Production implementation: READ-ONLY / UNAUTHORIZED
+Runtime/provider proof for the programme: NOT_EXECUTED
 ```
 
-The result and matching continuity are published together. Resolve the live branch head and matching checkpoint; the input SHA is not the output. No rebaseline or execution-packet promotion occurred. New sessions run Context Integrity Check.
+Resolve output SHA from the live branch and checkpoint ID; input is not output. No rebaseline or execution promotion occurred. Current state retains the earlier mature pools and their recommendations, finding/contradiction ranges and reopen triggers.
 
-## Substantive results
+F228/C178/KF-REC-058 remain unallocated. 04B is numeric authority. J5's later re-audit remains authoritative over its older pending-audit text. J13's microtraces, separate supplement, BCR, LAC, ACM and 44-case manifest are unchanged. ED1 schema/claim reuse and migration, ED2 broader adapters/workers/readers, ED3 actual remote registrations, ED4 executable proof and ED5 later-baseline comparison remain explicit.
 
-| Item | Result |
-|---|---|
-| Q1 | Named consumed entities/keys, business guards, shared DB extensions and missing lifecycle transaction/authority interfaces mapped. Existing encryption and tenant-write hooks are preserved, not mistaken for universal lifecycle proof. |
-| Q2 | Google service/account/client/family and partial-grant relationships mapped. Late refresh does not restore refresh, but a subsequent dedicated Drive operation can consume restored unexpired access without it. Conditional source reachability, not runtime proof. |
-| Q3 | WhatsApp/Meta/payment route and effect ownership mapped. Legacy Stripe directly mutates despite its forwarding comment. Customer-outbound Webhook CRUD is not provider subscription cleanup. Actual registrations remain unestablished. |
-| Q4 | Bounded mapped-core target alignment, with explicit schema, additional-adapter, deployment and runtime evidence debts. No broad correctness/readiness declaration. |
+## Exact continuation
 
-The previous 32 cases remain, joined by 12 reversible integration cases. [J13-INTEGRATION-TEST-MANIFEST.yaml](investigations/J13-INTEGRATION-TEST-MANIFEST.yaml) maps all 44 to six dependency-ordered integration slices I0-I5. Its offline metadata check passed: unique IDs, complete mapping and no dependency cycle. **No application code or provider fixture was executed.** The manifest is not an implemented harness; runner bindings remain empty.
+Read the active J24 dossier and OS truth/burndown playbooks. Map actual proof-admission and environment/run-ownership enforcement to R03/R04/R05/R07 before any write-capable test collection/setup. Keep source facts distinct from runtime claims and written policy distinct from enforcement.
 
-## Flexibility now specified
-
-Optional behavior can be added, disabled, replaced and removed behind explicit contracts and dependencies. The selected design uses the existing GrowthBook exposure seam where appropriate rather than inventing a competing flag SDK. Caller fallbacks, cached values and navigation flags are not lifecycle authority, and instant fleet-wide flag propagation is unproved.
-
-Safety invariants stay active across variants: tenant/account isolation, current authority, revocation, one effect owner, secret protection and truthful retained history. Legitimate requirement/test changes can be reviewed and superseded; a failing safety gate cannot simply be weakened to create green.
-
-Shadow comparison has no live effects. Sandbox resources are unique per run and positively verified before writes/cleanup. A safe reference must actually conform; the unfenced baseline is not automatically safe. Rollback preserves data, grant tombstones and evidence and cannot undo real payments/messages merely by changing code.
-
-Actual test pressure is recorded: the integration config has passWithNoTests:true; an inspected regression test loads root .env and uses fixed-prefix cleanup. These source facts do not prove production was used or that a collision occurred. Assertions and OS.md are unchanged.
-
-## Acceptance scope and outstanding evidence
-
-G07 retains a design pass with external limits. G08 now maps source to migration but does not select final DDL. G13 accepts only the mapped J13 core. G04 exhaustive coverage, G09 actual remote evidence, G12 executed proof and G14 authorization remain unclosed.
-
-| Debt | Required before the corresponding implementation claim |
-|---|---|
-| ED1 | Whole-schema/account/claim reuse, exact constraints/DDL, indexes, backfill and transaction-extension behavior, safe rollback floor |
-| ED2 | Additional adapters/workers/legacy readers and protected-scope cutover inventory |
-| ED3 | Real remote registrations, account/client/project dependencies, verifier contexts and cleanup outcomes |
-| ED4 | Executable case bindings, isolated harness, runtime/provider/migration results and negative controls |
-| ED5 | Deliberate comparison with a later implementation baseline before execution |
-
-These are not reasons to restart closed analysis. Reopen the exact contradicted invariant/path when new evidence appears. The current source remains nonconforming until authorized changes and verification establish otherwise.
-
-## Canonical history retained
-
-No original microtrace, separate supplement, BCR, LAC or register is modified or renumbered. M004 and SUP retain their distinct subjects. F227/C177 remains the root, including the new Drive cross-path manifestation. The engineering-safety observations are J24 inputs, not new canonical findings.
-
-Ranges: F227 / C177 / KF-REC-057 / KF-CONCEPT-042. Next F228 / C178 / KF-REC-058 remain unallocated. 04B remains allocation authority over old 04A snapshots.
-
-Broader pools are unchanged:
-
-```text
-J16/K4 F161-F178 / C111-C128 / KF-REC-049
-J17    F179-F184 / C129-C134 / KF-REC-051
-J23/J18 KF-REC-047/048
-J7     F185-F196 / C135-C146 / KF-REC-052
-J3/J4  F197-F205 / C147-C155 / KF-REC-053; provisionally aligned
-J10    F206-F214 / C156-C164 / KF-REC-054; provisionally aligned
-J11    F215-F218 / C165-C168 / KF-REC-055; provisionally aligned
-J12    F219-F221 / C169-C171 / KF-REC-056; provisionally aligned
-J5     F222-F227 / C172-C177 / KF-REC-057; provisionally aligned
-J13    F227/C177 inherited; mapped-core provisional alignment, no new recommendation
-```
-
-Inherited dossier coverage is 19/25, not recounted. J8/J9/J20/J21/J22/J24 remain dossierless until their own dossiers are created. This is not app or programme completion.
-
-## Exact next work
-
-Activate `journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md` from the actual test/setup/cleanup, build/boot, GrowthBook and OS sources listed in the conformance map. Resolve I0/R01-R12 environment/proof/change-admission ownership using existing mechanisms. Do not weaken OS/test assertions, execute write-capable tests on unverified resources or modify production.
-
-Continue the whole-system method, preserve J13's bounded result and ED1-ED5, then persist the next substantive investigation and all current/rollover pointers. The historical candidate's Q1 instructions have been completed; CURRENT now points to J24 activation, not another orientation exercise.
+Persist that source-backed map, update canonical state and the active dossier, regenerate `maps/PROGRAMME-MAP.md` and its local companions, run `--check`, and refresh all CURRENT/ROLLOVER views. Do not repeat completed J13 Q1-Q4 or restart the provider scan.

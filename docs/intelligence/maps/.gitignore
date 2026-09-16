@@ -1,0 +1,4 @@
+# Local, reproducible interactive views. Markdown and renderer sources are tracked.
+PROGRAMME-MAP.html
+PROGRAMME-MAP.json
+*.tmp

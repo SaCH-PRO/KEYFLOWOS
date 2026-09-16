@@ -1,87 +1,67 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `J13-ACM-2026-09-16-01`  
+Checkpoint: `J24-MAP-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **Q1-Q4 COMPLETED; J13 MAPPED CORE PROVISIONALLY TARGET-ALIGNED; J24 ACTIVATION NEXT**
+Status: **J24 ACTIVE; SOURCE TRACE 001 AND LIVING PROGRAMME MAP COMPLETED**.
 
-## One current state and exact coordinates
-
-[CURRENT-STATE.yaml](CURRENT-STATE.yaml) is the canonical machine state. This handoff and both rollover files are navigation views, not independent architecture definitions.
+## Resume coordinates
 
 ```text
 Repository: SaCH-PRO/KEYFLOWOS
 Intelligence branch: docs/keyflow-intelligence-foundation
-Input/provenance commit: 2b177c772036eee83c24b79ee649d99fd3a2dba1
-Checkpoint: J13-ACM-2026-09-16-01
-Forensic baseline: main@8f173bfe79f1418159cf4099ea18b0d60d203ec2
-Production source/schema/deployment: READ-ONLY / UNAUTHORIZED
-Application/provider/concurrency/migration tests: NOT_EXECUTED
+Input/provenance commit: 81046dd4c74c55d8d213285a61eb34ca55925704
+Forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+Live main observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+Production code/schema/deployment: READ-ONLY / UNAUTHORIZED
+Application/provider/boot/concurrency/migration tests: NOT_EXECUTED
 ```
 
-Resolve the output commit from the live intelligence branch and matching checkpoint ID. The input SHA is not its output SHA. No rebaseline or execution-packet promotion occurred.
+Resolve the output SHA from the live branch and matching checkpoint. No silent rebaseline or execution-packet promotion. [CURRENT-STATE.yaml](CURRENT-STATE.yaml) is the machine authority; this handoff and rollover files convey its current frontier.
 
-## What this tranche actually completed
+## Last completed unit
 
-**J13_ADAPTER_CONFORMANCE_AND_MIGRATION_CLOSURE**, all four named items, at the scope specified in the new [conformance/migration map](../investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md).
+J24_ACTIVATION_SOURCE_TRACE_AND_PROGRAMME_MAP.
 
-Q1 maps current consumed entities/keys, guards and transaction/claim gaps. Q2 maps Google field/account/client/family relationships and the dedicated-Drive cross-path consequence. Q3 maps existing routing/effect/registration responsibilities without inventing remote subscriptions. Q4 accepts provisional target alignment for the **mapped core only**, retaining explicit coverage, DDL, deployment and runtime debts.
+New dossier: [J24 System Change / Engineering Safety](../journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md), ACTIVE / INITIAL SOURCE TRACE / NOT CONVERGED. It consumes J13's bounded alignment and I0/R03/R04/R05/R07 engineering-safety obligations rather than restarting J13.
 
-The map also specifies six integration slices and add/disable/replace/remove testing semantics. The [test-design manifest](../investigations/J13-INTEGRATION-TEST-MANIFEST.yaml) indexes all 32 prior cases plus R01-R12. An offline metadata check verified 44 unique case IDs, complete slice mapping and an acyclic six-slice dependency graph. **That was not an application test.** The manifest has no executable runner bindings and implements no harness.
+New visualisation: [Living Programme Map](../maps/PROGRAMME-MAP.md), with renderer/template and reproducible local HTML/JSON. It derives from canonical state, numbered roster, real directory inventory and the unchanged J13 design manifest. It is not a new authority or a hosted live feed.
 
-## Evidence and contract ownership
+## Facts that must survive continuation
 
-Required J13 inputs, under docs/intelligence/investigations/:
+The map verifies 25 journey identities and 20 dossiers (19 pre-existing plus J24); 80% is dossier coverage, not app completion. Five remain without dedicated dossiers: J8/J9/J20/J21/J22. It distinguishes seven explicit provisional alignments, five mature-pool members, seven other dossiers, one active investigation and five missing dossiers. Raw scope and source are retained; file presence never proves convergence. K12 has a canonical definition but no dedicated kernel dossier created here.
 
-```text
-J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md
-J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md
-J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md
-J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md
-J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md
-J13-BOUNDED-CONVERGENCE-REVIEW.md
-J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
-J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
-J13-INTEGRATION-TEST-MANIFEST.yaml
+J24 source trace establishes command/config distinctions, unit shuffle with isolate:false, integration passWithNoTests:true, and a fixed-prefix/root-env database fixture. Historical comment statistics are not fresh proof. The dev launcher can print stack-is-up after readiness loops expire and unsets inherited resource variables while using fixed ports. No actual boot, database incident or collision was reproduced.
+
+Written OS proof requirements (nonempty input, zero skips, negative controls, seeds and rebuilt dist) remain governing. Their actual end-to-end enforcement in playbooks/reporters/setup is the next trace. Discovery itself must not be presumed harmless if it evaluates test modules before resource admission.
+
+The 44 J13 integration cases remain designed, unbound and unexecuted. Documentation generator negative-control/freshness and HTML interaction/mobile checks passed; those are not KEYFLOWOS app/provider tests. Initial browser checks used Playwright/Chromium in-memory rendering because the agent-browser CLI was unavailable and file URLs were blocked. No app server was started.
+
+## Preserved ownership and evidence
+
+J13 remains PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY, not whole-estate conformance. Its M001-M004, separate callback supplement, BCR, LAC, completed ACM and test manifest are unchanged. LAC remains the one D01-D10/T01-T13 home. Preserve known corrections: shared logger and monitor success nonwriters; conditional legacy fallback with Xero tenant guard; old/unknown event origin distinct from present adoption; historical reconciliation distinct from fresh effects; shared versus dedicated Google token-consumer differences; local revoke not retroactive remote cancellation; remote cleanup scoped to evidenced dependencies.
+
+Broader mature pools and J5 status remain in CURRENT-STATE. ED1-ED5 remain unresolved prerequisites. F228/C178/KF-REC-058 remain unallocated; 04B overrides old numeric snapshots. This tranche has no new canonical finding allocations or implementation authorization.
+
+## Exact next analytical action
+
+Stage: **J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING**.
+
+Planned, not yet created:
+`docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md`.
+
+Read the actual OS truth/burndown playbooks and their selected commands. Follow the runner/configuration, discovered test identity, reporter consumers, skip/setup handling, environment acquisition and per-run resource/cleanup owner. Bind R03/R04/R05/R07 to concrete admission predicates. Carry launcher readiness/resource observations into boot-proof requirements. Do not run write-capable collection/setup on unknown resources, modify OS.md or assertions, deploy, or launch the app to prove a documentation claim.
+
+Start from this source trace, not from another project-status summary. Reopen J13 only for a precise contrary invariant/path.
+
+## Map and persistence routine
+
+After updating state/dossier, use an authoring Python environment with PyYAML:
+
+```bash
+python docs/intelligence/tools/build-programme-map.py
+python docs/intelligence/tools/build-programme-map.py --check
 ```
 
-LAC remains the one home of D01-D10/T01-T13. BCR owns W01-W18 and the original gates. The new map owns source-to-target conformance, integration slices and the bounded Q4 acceptance overlay. The old next-Q1 instructions in historical artifacts are completed; only CURRENT defines the live frontier. Original microtraces, SUP, BCR and LAC remain unchanged. M004 and SUP are distinct evidence strands.
+Regenerate before checking on a fresh checkout: local HTML/JSON are reproducible ignored outputs, while Markdown and source renderer/template are tracked. The initial tranche used an explicitly labelled connector-derived snapshot rather than a repository clone. A local viewer can load new generated JSON, but never writes GitHub or the app.
 
-## New source results to preserve exactly
-
-BusinessGuard supplies broad business access, not a distinct connector-management decision. OAuth start routes pass business/services without actor identity. Reuse K2/K3 authority; do not invent another role system.
-
-The shared Google helper can restore access/expiry after disconnect but does not restore refresh, so its next invocation remains refresh-constrained. **The dedicated Drive service is different:** it can return the restored unexpired access without refresh. A subsequent dedicated Drive operation is therefore a conditional reachable path. This strengthens F227/C177/M004-06, not a runtime incident or universal Google availability claim.
-
-PrismaService wraps the existing extended db client. Current per-model extensions do hook create/createMany/upsert; do not trust the earlier stale comment saying otherwise. Tenant/encryption extensions are valuable, but do not prove every context/raw SQL/nested write or lifecycle transaction is protected. Propagate the same transaction client and explicit tenant/account predicates.
-
-Legacy Stripe's source directly mutates through Commerce and connector activity despite its forwarding comment. Both retained URLs need one canonical processor at cutover. Customer-outbound Webhook CRUD is not a provider subscription registry.
-
-GrowthBook already exists; caller fallbacks and cached definitions are not durable authorization or proof of instant rollback propagation. The integration config permits no-test success; the inspected social regression test loads root .env and uses fixed-prefix cleanup. No .env, real tenant data or live test environment was read; no cleanup or application test ran.
-
-## Integration and testing rules
-
-Use independently testable behavior with early cross-boundary rehearsal in this existing app. This is a current adaptation of the user's blueprint philosophy, not reinstallation of its historical scaffold.
-
-Optional features/variants can be added, disabled, replaced and removed. Mandatory authority, tenant separation, effect uniqueness, secret protection and truthful retained history remain acceptance invariants. Legitimate requirement/test evolution needs reviewed supersession; never weaken a red gate to manufacture success. OS.md and assertions remain unchanged.
-
-Use one effect owner, explicit dependencies, safe reference or DISABLED_SAFE fallback, no live side effects in shadow mode, per-run isolated DB/queues/storage/provider fixtures, and additive/version-compatible migration. Code rollback is not external undo. Do not restore an unfenced baseline or erase a revocation tombstone during withdrawal.
-
-## Status and debts
-
-J13 status: **PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY**. Entire provider estate: **not converged**. Implementation conformance: **not proved**.
-
-G07 remains a design pass with external limits. G08 is a source-to-design migration map, not final DDL. G13 receives bounded acceptance. G04 complete coverage, G09 actual remote evidence, G12 runtime proof and G14 authorization remain unclosed.
-
-ED1 final schema/account/claim reuse and migration design; ED2 additional adapter/worker/legacy coverage; ED3 actual remote configuration/dependencies; ED4 harness bindings and executed evidence; ED5 deliberate later-baseline comparison before execution. All are retained in machine state and the map, not hidden by provisional alignment.
-
-Ranges remain F227/C177/KF-REC-057/KF-CONCEPT-042. F228/C178/KF-REC-058 remain unallocated. 04B overrides old 04A ranges; later J5 re-audit governs its provisional status. Broader pools and inherited 19/25 dossier coverage are unchanged. No J24 dossier was created here.
-
-## Exact next action
-
-**J24_ENGINEERING_SAFETY_AND_REVERSIBLE_TESTING_ACTIVATION.**
-
-Planned, not yet created: `docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md`.
-
-Load AGENTS.md, AGENT-CONTINUITY.md, START/CURRENT/ROLLOVER and the completed J13 map/manifest. Run Context Integrity Check. Read existing OS/assurance/handoff rules; begin the J24 source trace from actual Vitest setup/discovery, root-env/fixed-prefix test cleanup, build/boot and GrowthBook exposure behavior. Identify the exact reusable isolation, proof and change-admission boundaries and missing implementation. Do not modify the constitution, weaken tests, touch production or run a write-capable test before environment authorization/isolation is established.
-
-Do not repeat Q1-Q4 or reopen J13 generally. Reopen a specific invariant only if a concrete source/provider/runtime counterexample falsifies it. Preserve whole-system MAP -> TRACE -> JOURNEY/KERNEL -> RESEARCH -> POOL -> TARGET -> BACKWARD RE-AUDIT -> MIGRATION/PROOF. Persist the next substantive result and matching continuity, then verify the Git checkpoint.
+Refresh START, 07-CURRENT-STATE and all four CURRENT/ROLLOVER files with each material frontier change; persist substantive results and verify the Git diff and head. The map must reflect the same canonical state, not replace it.
