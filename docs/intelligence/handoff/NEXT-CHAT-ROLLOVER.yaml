@@ -1,26 +1,31 @@
 project: KEYFLOWOS
-rollover_version: 40
+rollover_version: 41
 last_updated: 2026-09-16
-checkpoint_id: J13-ROLLOVER-2026-09-16-M004-PLUS-CALLBACK-SUPPLEMENT
-status: LIVE_CONTINUITY_J13_M004_PLUS_CALLBACK_SUPPLEMENT_NOT_CONVERGED
+checkpoint_id: J13-BCR-2026-09-16-01
+status: LIVE_CONTINUITY_J13_BOUNDED_REVIEW_COMPLETE_NOT_CONVERGED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: false
 runtime_proof_executed: false
-context_integrity: RESUME_CHECK_REQUIRED
+context_integrity: PASS_FOR_BOUNDED_CONTINUATION
 fresh_chat_context_integrity_check_required: true
-persistence_only_checkpoint: true
+persistence_only_checkpoint: false
 checkpoint_provenance:
-  pre_checkpoint_intelligence_head: 0f7000d6c141e2296ec923f6d9105bd6f7841891
+  prior_checkpoint_id: J13-ROLLOVER-2026-09-16-M004-PLUS-CALLBACK-SUPPLEMENT
+  prior_pre_checkpoint_intelligence_head: 0f7000d6c141e2296ec923f6d9105bd6f7841891
   supplement_creation_commit: 0e8658d3b598948907c1082291e26ec5c2582eaf
+  review_input_intelligence_head: 4a5e4f47e3903e71f8bb5aa22e843c9d2f3693f6
+  bounded_review_commit: 6dbbdd34489d77ed1fbc26ff5f6bd1968ee2b953
   final_checkpoint_resolution: resolve_live_intelligence_branch_head_and_matching_checkpoint_id
   existing_microtrace_004_preserved: true
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  later_main_movement_previously_observed: true
+  later_main_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
-  source_reread_in_this_persistence_checkpoint: false
+  pinned_sources_reread_in_bounded_review: true
+  fresh_source_file_count: 7
+  scope: REVIEW_SECTION_4_FULL_OR_EXPLICIT_PARTIAL_READS
 canonical_ranges:
   findings_through: F227
   contradictions_through: C177
@@ -35,6 +40,12 @@ pooled_journeys:
   J11: { findings: F215-F218, contradictions: C165-C168, recommendation: KF-REC-055, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
   J12: { findings: F219-F221, contradictions: C169-C171, recommendation: KF-REC-056, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
   J5: { findings: F222-F227, contradictions: C172-C177, recommendation: KF-REC-057, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED }
+journey_coverage:
+  dossier_count: 19
+  total_journeys: 25
+  dossierless: [J8, J9, J20, J21, J22, J24]
+  provenance: INHERITED_NOT_RECOUNTED
+  is_programme_completion: false
 j13:
   dossier: docs/intelligence/journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md
   microtraces:
@@ -44,8 +55,9 @@ j13:
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md
   supplements:
     - docs/intelligence/investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md
+  bounded_review: docs/intelligence/investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md
   inherited_root: F227_C177
-  status: BOUNDED_CONVERGENCE_REVIEW_PREPARATION_NOT_CONVERGED
+  status: BOUNDED_REVIEW_COMPLETE_TARGET_CONTRACT_REVIEW_REQUIRED_NOT_CONVERGED
   primary_kernels: [K9, K7, K11]
   secondary_kernels: [K1, K3, K5, K8]
   adjacent_journeys: [J5, J14, J18, J2, J15, J12]
@@ -66,41 +78,75 @@ j13:
     - drive_service_and_connector_disconnect_have_different_shared_status_effects
     - historical_reconciliation_is_distinct_from_new_effect_authority
     - unknown_callback_lineage_must_not_be_relabelled_current_grant
+    - registry_smoke_success_can_write_connected_after_intervening_disconnect
+    - webhook_info_GET_missing_secret_path_writes_connected_via_credential_storage
+    - health_monitor_late_failure_can_overwrite_disconnect_with_error_or_expired
+    - health_monitor_success_and_shared_activity_logger_are_nonwriters
+    - gmail_completion_connected_and_intake_true_can_coexist_with_individual_message_errors
+    - google_suite_credential_and_status_commits_need_current_intent_fencing
+    - google_suite_forms_verification_is_scope_based_not_live_probe
+    - registry_reconnect_continues_after_caught_disconnect_exception
   allocation_decisions:
     supplement_mechanisms: REUSE_F227_C177
-    microtrace_004_candidate: OPEN_CANONICAL_REGISTER_ANTIDUPLICATION_REQUIRED
+    microtrace_004_candidate: BOUNDED_REGISTER_COMPARISON_COMPLETE_SPECIALIZATION_REFINE_F227_C177
+    distinct_oauth_and_split_owner_obligations_preserved: true
+    exhaustive_historical_register_comparison_claimed: false
     new_ids_allocated: false
+    target_contract_accepted: false
   proof_status:
     supplement_P01_P12: DESIGNED_NOT_EXECUTED
     microtrace_004_six_cases: DESIGNED_NOT_EXECUTED
+    bounded_review_N01_N06: DESIGNED_NOT_EXECUTED
+    named_shared_status_writer_inventory: COMPLETE_BOUNDED_W01_W18
     exhaustive_status_writer_inventory: NOT_COMPLETE
     full_subscription_inventory: NOT_ESTABLISHED
     live_provider_teardown: NOT_EXECUTED
+  closure_gates:
+    G01_checkpoint_scope: PASS
+    G02_evidence_pool: PASS
+    G03_named_writer_inventory: PASS_BOUNDED
+    G04_exhaustive_coverage: DEFER
+    G05_microtrace_004_comparison: PASS_BOUNDED
+    G06_ownership_admission: PASS_CANDIDATE_MODEL
+    G07_transition_fencing_contract: REOPEN
+    G08_migration_ownership: PASS_DESIGN_MAPPING
+    G09_remote_subscription_evidence: DEFER
+    G10_backward_reaudit: PASS_OWNERSHIP_REVIEW
+    G11_case_coverage: PASS_DESIGN_ONLY
+    G12_runtime_proof: DEFER_NOT_EXECUTED
+    G13_j13_convergence: REOPEN_NOT_CONVERGED
+    G14_production_authorization: DEFER_UNAUTHORIZED
 active_frontier:
-  stage: J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION
+  stage: J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW
   primary_journey: J13
+  last_completed_stage: J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION
 exact_next_action:
-  planned_artifact: docs/intelligence/investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md
+  planned_artifact: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
   planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
   instruction: >-
-    Run Context Integrity Check and load the J13 dossier, Microtraces 001-004 and
-    the separate callback/legacy-credential supplement. Begin the bounded review
-    candidate with lifecycle ownership and callback-admission tables. Finish named
-    status-writer inventory gaps. Compare Microtrace 004's still-open candidate
-    against canonical registers and J14/J18/readiness roots before allocation.
-    Map legacy-credential/mapping migration and provider-subscription cleanup
-    ownership with explicit unknowns. Backward re-audit J5/J14/J18/J2/J15 and
-    K9/K7/K11. Give analytical closure gates evidence-based pass/defer/reopen
-    dispositions, retaining P01-P12 and Microtrace 004 cases as not executed.
-    Commit the candidate and refresh all continuity artifacts before ending.
+    Run Context Integrity Check and load the completed J13 bounded review plus
+    preserved Microtraces 001-004 and separate supplement. Do not recreate the
+    review or repeat a generic provider scan. Begin the unallocated lifecycle
+    authority candidate with a transition/write-set table for W01-W18. Separate
+    current grant, credential version, pending intent, health, cursor and intake.
+    Specify mutation-time expected-state checks, partial suite provisioning and
+    in-flight work. Define purpose-specific admission for new processing,
+    historical reconciliation, configuration, probe and cleanup, retaining unknown
+    lineage. Separate local revocation from remote cleanup certainty; preserve
+    shared-registration ownership and N-cleanup/N+1 safety. Analytically pressure-test
+    P01-P12, M004-01-06 and N01-N06 without executing or claiming tests. Re-audit
+    J5/J14/J18/J2/J15 and K9/K7/K11. Resolve G07 and revisit G13 with G04/G09 evidence
+    debts explicit. No allocation or convergence merely because a candidate exists.
+    Commit substantive results and refresh all continuity before ending.
 constraints:
   - production_code_read_only
   - runtime_proof_not_executed
   - F228_C178_KF_REC_058_remain_unallocated
   - anti_duplication_before_allocation
   - preserve_microtrace_004_do_not_overwrite_with_supplement
-  - supplement_reuse_decision_does_not_close_microtrace_004_candidate
+  - bounded_review_compares_microtrace_004_independently_of_supplement_reuse
+  - bounded_comparison_is_not_final_target_acceptance
   - do_not_restart_from_J5_or_generic_provider_scan
   - no_silent_forensic_rebaseline
-  - do_not_mark_J13_converged_before_gates_are_reviewed
+  - do_not_mark_J13_converged_before_target_acceptance
   - continuously_refresh_cross_agent_continuity
