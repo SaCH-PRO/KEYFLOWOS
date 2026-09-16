@@ -1,53 +1,51 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `J8-M001-2026-09-16-01`  
+Checkpoint: `J8-M002-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **J8 ACTIVATED; FIRST CREATION/COMPLETION SOURCE TRACE COMPLETE; NOT CONVERGED**.
+Status: **J8 SECOND NAMED SOURCE TRACE COMPLETED; COMPLETION/SCOPE/BILLING CONTRACT REVIEW NEXT; NOT CONVERGED**.
 
-## Resume coordinates and limits
+## Resume coordinates
 
-Repository SaCH-PRO/KEYFLOWOS. Intelligence branch docs/keyflow-intelligence-foundation. Input/provenance 7df89af749e34e081ea3ce31977f586f7aa4376d. Resolve the live output head and matching checkpoint; input is not output.
+Repository SaCH-PRO/KEYFLOWOS; branch docs/keyflow-intelligence-foundation. Input/provenance 13c1e7e5c43fdef7101e66fb1322288ec0f06c4b. Resolve live output head and matching checkpoint; input is not output. Forensic baseline stays 8f173bfe79f1418159cf4099ea18b0d60d203ec2.
 
-Implementation forensic baseline remains 8f173bfe79f1418159cf4099ea18b0d60d203ec2. Production source/schema/workflows/settings/assertions remain read-only. No application/provider/DB/boot/concurrency/migration tests or execution-packet promotion. Prior live-main owner halt on scheduled truth/audit/burndown/reflect cycles remains in force; this is interactive intelligence work.
+Production/schema/settings/workflows/test assertions are read-only. No application/provider/DB/boot/concurrency/migration tests or implementation-packet promotion. Scheduled cycles remain halted. **Programme map remains paused until an explicit user request**: no output, preview, HTML/JSON, renderer/template, generator or freshness check. The frozen map is not current state.
 
-**Do not update or regenerate the programme map until explicitly requested.** No map generator/check, generated Markdown/HTML/JSON, preview or template change. It remains intentionally at J24-PA while canonical state advances.
+## Completed work and evidence homes
 
-## Completed substantive unit
+[Microtrace 002](../investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md) advances the prior exact action at named scope: evidence/context, assignment, calendar writeback/backfill, time billing and existing obligation ownership. Complete relevant schema constraints and the acceptance/milestone/contract settlement bridge remain explicitly open. The [J8 dossier](../journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md) carries a current overlay; M001 investigation and its historical dossier body are retained.
 
-[J8 Microtrace 001](../investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md) and the new [J8 dossier](../journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md) complete J8_PROJECT_WORK_DELIVERY_ACTIVATION at bounded source scope. Sixteen named implementation files were inspected, including two unexecuted source tests. Full/partial scopes and blobs are in the trace.
+The M002 source manifest has eighteen entries with declared method/range scopes plus discovery-only limitations. It includes one additional source test, not a test run. Do not claim all Evidence/TaskAssignment DDL was extracted; it was not. Search results and module names are not proof a project-to-settlement adapter exists or is globally absent.
 
-The actual chain includes manual/template creation, AutomationExecutorService paid-invoice template creation, project-revenue advancement, plan approval/materialization and OUT_APP completion, EvidenceService, UI checkbox/client/status endpoint and calendar event consumption. Contract-to-work and assignment/settlement/billing are not falsely marked traced.
+## Material results to preserve
 
-## Results that must survive
+**Evidence:** class guards and registered normal HTTP tenant context are real. An ID-only route is not automatically public. Scalar Evidence.businessId scoping does not validate its polymorphic linked target or make row presence/verifiedAt a policy-specific completion decision. No cross-tenant exploit is claimed.
 
-The ordinary project-detail checkbox uses updateProjectTaskStatus -> guarded status endpoint -> updateTaskStatus. That method and reorderTasks can write DONE/isCompleted without the general updateTask evidence check or standard task-change events. OUT_APP completion is another separate writer and does not enforce manualEvidenceRequired/dependencies in the inspected method.
+**Assignment:** the scoped dedicated service checks supported task ownership and User/Staff eligibility and records the caller. Direct project assignment retains its transaction but does not consume all those checks and uses system provenance. Replacement is multi-step at this method boundary; full constraint support remains to inspect. Same-business Project and task references in TimeEntry can still be mutually inconsistent.
 
-General updateTask itself only rejects missing stored evidence when evidenceIds is also empty. A nonempty array is not locally verified/linked, and evidence helper checks existence rather than consumer-specific eligibility. It can change Boolean completion without status synchronization. Preserve exact scope: no tenant disclosure or end-to-end exploit is claimed without the remaining context/route trace.
+**Calendar:** W8-10 is a real additional completion writer after its own mutation permission check. Source and projection writes are separate; task Boolean completion is not task.status synchronization or project evidence admission. A zero-count source update is not currently a required success condition there. Backfill can repair selected dated/nondeleted rows; its no-pagination/1,000-row-cap/deleted-or-hidden-row limits prevent claiming universal repair.
 
-CalendarProjectsListener listens to events these writers do not emit. Automatic template creation also bypasses normal creation emission; revenue emits status_advanced instead. This is a demonstrated event-path gap, not a claim no reconciliation can ever repair it.
+**Time billing:** the loop only looks up the base label. Repeated entries at a different rate overwrite the suffixed group. Same-label 60 minutes at 100 followed by 30 and 45 minutes at 200 yields 105 represented minutes / 250 rather than 135 / 350. All three IDs can still be marked billed and the count check can pass. This is static derivation, not an actual invoice/customer incident. Existing tests cover one entry at each rate, not the repeated alternate-rate case.
 
-Paid-invoice project creation exists in AutomationExecutorService, not the example FlowListener. It reads current templates and creates directly without a local semantic project-effect receipt. Upstream payment dedupe does not settle replay/partial-child repair. Do not add blanket unique(invoiceId); multiple distinct obligations may share one invoice.
+Invoice creation precedes billed marking. Concurrent selection or a later mismatch can leave an invoice before error; preserve that partial outcome instead of blind retry. Keep empty/unrated/count-mismatch safeguards. Count equality is not source-entry revision/value conservation.
 
-Repeated approve rewrites a materialized plan to approved before materialization. Project creation, plan link/status and child links occur separately; the unique pointer is not a stable occurrence claim. Revenue transition filters status before selection but not at its eventual update; newer state can be overwritten conditionally.
+**Obligations:** existing shared work events and CommandItem listener distinguish exact identity from party-wide settlement and preserve prior dispositions. Reuse them; one checkbox must not silently discharge a party's whole work set. CommandItem state is not contract acceptance/payment proof. The required J8 producer/acceptance bridge remains open.
 
-Preserve positives: task/assignment transaction, reorder project-business validation, persisted deliverable ownership checks/tests, named-field plan updater, and IN_APP executor's current honest unavailable/blocked result. Do not repeat historical fake-success or tenant-relocation defects as current.
+## Canonical comparison and proof limits
 
-## Ownership, allocation and proof
+Actual REC056, J7 dossier and 04B were read; M001's J10/J11/J18/J23 comparisons remain inherited. Evidence admission, financial truth and recovery owners are retained. CAND-COMPLETION-BOUNDARY and CAND-BILLING-ALLOCATION are local candidates pending full relevant register comparison. F228/C178/KF-REC-058 remain unallocated. Do not enlarge F219 or F217's proven source scope by analogy.
 
-J8 is in J11/J8/J12/J23/J7. K6/K7/K8/K11 are primary; K1/K2/K3/K5/K10/K12 secondary. Initial comparisons reuse KF-REC-047/048/055/056 and J10's descendant/outcome laws without claiming every Project manifestation is already proved in another finding. Independent J8 completion/lineage candidates remain for actual canonical-register comparison. No F228/C178/KF-REC-058 allocation.
-
-X01-X12 are local J8 designs, all unbound/unexecuted. J13's 44-case manifest and prior investigations are unchanged. J13/J24 bounded alignment, all mature pools, ED1-ED5, CS1-CS5, live-control observations and map-pause metadata are retained. The new dossier increments prior twenty to 21/25 coverage, not app completion. No new kernel is created.
+X01-X12 plus Y01-Y08 are twenty local J8 designed cases; zero bindings, NOT_EXECUTED. The separate J13 44-case manifest is unchanged. No new dossier/kernel: counts remain 21/25 and twelve kernels, not completion percentages. J13/J24 bounded alignments, ED1-ED5, CS1-CS5, operational controls and map pause remain intact.
 
 ## Exact next unit
 
-**J8_COMPLETION_EVIDENCE_ASSIGNMENT_AND_OBLIGATION_TRACE**.
+**J8_COMPLETION_SCOPE_AND_BILLING_CONTRACT_REVIEW**.
 
-Planned, not created: `docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md`.
+Planned, not created: `docs/intelligence/investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md`.
 
-1. Trace EvidenceController, Evidence/TaskAssignment models, TaskAssignmentService and real parent/assignee/tenant-context checks; establish qualifying evidence and current actor authority.
-2. Follow task/project/plan completion into source-obligation settlement, calendar mapper/reconciliation and milestone/time-to-invoice paths; preserve distinct delivered/accepted/billed/settled meanings.
-3. Compare surviving independent completion/lineage candidates against canonical register homes before allocation; refine the smallest completion/scope/receipt contract and required migration.
+First resolve the retained Evidence/TaskAssignment constraint/retention and scoped replacement boundaries plus portal/change-order acceptance, milestone billing and exact obligation producer/consumer identity. Read only what determines current scope, accepting actor and settlement; do not restart a generic source scan.
 
-Do not repeat this creation/UI scan or restart generic J13/J24 analysis. Keep lightweight task policies where appropriate; customer acceptance is not a universal precondition. Required-task removal or test switching must not manufacture completion or erase prior business truth.
+Then complete the canonical comparison for the two candidates and specify the smallest shared completion/scope and source-entry billing-allocation contract over existing services, claims, evidence and financial correction. Keep lightweight internal policies and optional scope change possible without erasing earlier business truth.
 
-Read AGENTS/AGENT-CONTINUITY, current START/STATE and all CURRENT/ROLLOVER files, then the J8 dossier/trace and named comparison owners. Run Context Integrity Check, perform substantive work, refresh canonical continuity and verify the intelligence-only checkpoint, excluding maps.
+Finally backward re-audit J11/J12/J7/J18/J23/J2/J15/J24 and assign evidence-based closure gates. Decide bounded target alignment or name the precise invariant still unresolved. Do not treat designed/unexecuted tests as passing, authorize production edits, restart halted routines or refresh the map.
+
+Read AGENTS/AGENT-CONTINUITY, START/current state and all CURRENT/ROLLOVER files; run Context Integrity Check. Persist the substantive next result and consistent continuity, verify the intelligence-only diff and branch head. Exclude maps and original evidence from mutation.

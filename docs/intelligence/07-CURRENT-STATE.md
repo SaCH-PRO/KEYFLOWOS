@@ -1,61 +1,53 @@
 # KeyFlowOS Current State
 
-Checkpoint: `J8-M001-2026-09-16-01`  
+Checkpoint: `J8-M002-2026-09-16-01`  
 Updated: 2026-09-16  
 Status: **CANONICAL CURRENT PROGRAMME STATE**.
 
 ## Current position
 
-**Completed:** J8_PROJECT_WORK_DELIVERY_ACTIVATION and [Microtrace 001](investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md). The new [J8 dossier](journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md) records its current scope and affected owners.
+[Microtrace 002](investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md) is completed at its named evidence/context, assignment, calendar and time-billing boundaries. The full acceptance/milestone/contract settlement bridge and relevant complete schema constraints are still open. J8 remains ACTIVE / NOT CONVERGED.
 
-**Now:** J8_COMPLETION_EVIDENCE_ASSIGNMENT_AND_OBLIGATION_TRACE. Microtrace 002 is planned, not created. J8 remains ACTIVE / NOT CONVERGED.
+**Next:** J8_COMPLETION_SCOPE_AND_BILLING_CONTRACT_REVIEW. The planned `investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md` is not created by this checkpoint.
 
-**Programme map is frozen by user instruction.** No output, preview, JSON, HTML, renderer or template was changed; generation/freshness repair was not run. It intentionally displays the older J24-PA checkpoint. CURRENT-STATE.yaml and these handoffs, not the frozen map, carry current decisions.
+The programme map remains frozen by the user's instruction. Its J24-PA snapshot is intentionally older; no output, preview, HTML/JSON, generator/template or freshness check changed. [CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml) and the handoffs carry current progress.
 
-## What the first J8 trace established
+## New source results
 
-| Source-supported result | Meaning and boundary |
+| Result | Exact qualification |
 |---|---|
-| Ordinary project checkbox calls updateTaskStatus | The status path can set DONE/isCompleted without the general updateTask evidence gate and without task-change events. Guarded route reachability is source-traced; no HTTP exploit was executed. |
-| Multiple completion writers differ | Reorder and OUT_APP completion also omit that evidence check. General updateTask can accept nonempty evidenceIds without validating them in the method and does not synchronize the separate task status. |
-| Completion can diverge from other business surfaces | The calendar listener consumes events the silent writers do not emit. Reconciliation elsewhere remains to trace; permanent stale state is not claimed. |
-| Project COMPLETED result triggers completion emission | An unrelated edit to an already-completed project can re-emit completion. Required delivered/accepted scope is not evaluated in that update method. |
-| Paid-invoice template creation exists in another owner | AutomationExecutorService directly creates projects/nested tasks without the normal creation event or local per-template receipt. Current templates are reread on re-entry. Upstream payment dedupe is not universal downstream repair proof. |
-| Plan materialization is re-enterable and multi-step | Approve rewrites status before creating/relinking project and children. Existing pointer uniqueness does not make that lifecycle idempotent. Partial writes and repeated approval need explicit reconciliation. |
-| Revenue progression checks fromStatus only at selection | Eventual update by id/businessId can overwrite a newer state. This is a conditional source interleaving, not a reproduced race. |
+| Evidence guards and normal HTTP tenant context exist | Do not claim ID-only routes are automatically unguarded. Scoped evidence rows still need valid target lineage and applicable completion admission. |
+| Dedicated assignment service checks supported tenant/assignee eligibility | Preserve these checks; direct project assignment and optional-context/internal calls need consistent policy and actor provenance. Full replacement constraints are not yet proved. |
+| Calendar directly writes source completion | Its query-layer mutation permission is real. Project/task completion still bypasses the project evidence rule; source and projection writes are separate. |
+| Calendar backfill can repair eligible rows | Not proof of complete repair: dated/nondeleted selection, 1,000-row client cap, no pagination in named methods and absent/deleted/hidden-row semantics remain. |
+| Alternate-rate billing group can overwrite earlier minutes | Static same-label example: 135 minutes / 350 source value becomes 105 represented minutes / 250 line value while all three IDs can be marked billed. No customer incident was reproduced. |
+| Billing count check detects only part of the problem | Invoice creation precedes marking. A later mismatch can leave an invoice; count equality does not prove source-entry revision/value conservation. Existing refusals and test assertions are preserved. |
+| Exact/party-wide work-obligation contract exists | Reuse it, but do not equate CommandItem discharge with delivery acceptance or infer the untraced project/milestone bridge. |
 
-Sixteen named files were inspected with bounded full/partial scope, including two source tests. Existing positives remain: task/assignment transaction, reorder ownership validation, persisted deliverables, protected plan field allowlist and truthful blocked/unavailable IN_APP automation. Historical bugs already corrected in those paths are not reported as current.
+The trace includes an 18-entry source manifest with explicit method/range scope and discovery limits. One additional billing source-test file was read, not executed. The grouping example is an algorithm derivation, not a generated invoice.
 
-## Interpretation and next questions
+## Ownership and remaining decisions
 
-The candidate direction is one logical completion/scope transition over the existing owners, consistently used by UI, plan, listener and reorder paths. Evidence is policy-specific: simple internal work need not always require customer approval. Where acceptance is required, task completion must not stand in for an accepted scope/revision/actor decision. Money, contract, evidence and recovery responsibilities remain with J7/J11/J12/J18/J23 and their kernels.
+REC056's actual evidence-admission boundary, J7's financial-truth dossier and 04B were compared. Existing J11/J18/J23/J10 relationships from M001 remain inherited. No exhaustive financial-register comparison or full DDL absence claim is made. CAND-COMPLETION-BOUNDARY and CAND-BILLING-ALLOCATION remain local candidates; F228/C178/KF-REC-058 remain unallocated.
 
-This is not a final target, physical schema decision or implemented repair. Parent/assignee eligibility, evidence-route authority, actual obligation settlement, calendar reconciliation, time/milestone billing and retention/cancellation require the next bounded trace. Initial anti-duplication comparison reuses existing architectural laws without silently expanding another finding's proof scope.
+The candidate composition separates one policy-specific completion/scope transition from a billing decision over exact eligible entry revisions and line allocations. Existing project/evidence/assignment, calendar, commerce, work-obligation and recovery owners remain. Lightweight internal work need not acquire universal customer approval. Optional changes must not erase historical acceptance or bill omitted work silently.
 
-## Coverage, proof and continuity
+Named next gaps: Evidence/TaskAssignment constraints and retention; current accepting/reviewer actor; portal/change-order and required scope; milestone/project-to-obligation settlement; exact billing allocation/claim and financial correction; full projection reconstruction semantics. Resolve those before the bounded target/backward review rather than repeating already-traced paths.
 
-The previous twenty-dossier inventory plus J8 is **21/25 dossier coverage (84%)**, not app completion. J9/J20/J21/J22 remain without dedicated dossiers. This is an increment from the prior verified inventory, not a new full maturity census. Twelve kernel dossiers remain unchanged; J13/J24 bounded alignments and all broader pools are retained.
+## Unchanged boundaries
 
-J8 X01-X12 are twelve local designed/unbound/unexecuted cases. The J13 manifest remains **44 designed cases, zero runner bindings, NOT_EXECUTED**. No harness, application/provider/DB/boot/concurrency/migration test or production change was made. The offline check of continuity preservation is metadata validation only.
+J8 now has twenty local designed cases: M001 X01-X12 and M002 Y01-Y08, zero bindings, NOT_EXECUTED. J13's 44-case manifest remains unchanged. No application/provider/DB/boot/concurrency/migration test, production patch, settings/workflow/assertion change or routine restart occurred.
 
-Before updating, the original machine-state bytes were verified against Git blob 98babbb052b014cf68b3c147c916097293d18679. Semantic equality checks preserve prior pools, J5/J13/J24 detail, ranges, proof inventory, ED1-ED5, live control observations, map pause and constraints. No old investigation, recommendation, kernel or test file is rewritten.
-
-## Coordinates and permissions
+Coverage remains 21/25 dossiers, an inherited coverage count rather than a new maturity census or app-completion percentage. Twelve kernel dossiers, prior mature pools, J13/J24 bounded alignments, ED1-ED5, CS1-CS5 and live-control observations are retained. No new canonical IDs or kernel/dossier identity is allocated.
 
 ```text
 Repository: SaCH-PRO/KEYFLOWOS
 Branch: docs/keyflow-intelligence-foundation
-Input intelligence: 7df89af749e34e081ea3ce31977f586f7aa4376d
-Forensic implementation baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-Production/schema/workflows/settings/assertions: READ-ONLY / UNAUTHORIZED
-Scheduled cycles: HALTED; owner control unchanged
+Input: 13c1e7e5c43fdef7101e66fb1322288ec0f06c4b
+Forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+Production: READ-ONLY / UNAUTHORIZED
+Scheduled cycles: HALTED
 Map refresh: PAUSED UNTIL EXPLICIT USER REQUEST
 ```
 
-Resolve the live output head and matching checkpoint; input is not output. Hosting/owner observations in prior J24 remain inherited evidence, not a fresh operational-settings audit. No rebaseline or execution-packet promotion. F228/C178/KF-REC-058 remain unallocated; ranges remain F227/C177/REC057/CONCEPT042.
-
-## Exact next action
-
-Produce `investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md`. First resolve eligible evidence and actual actor/parent/assignee authority through the named Evidence/TaskAssignment paths. Then trace completion into source-obligation settlement, calendar reconciliation and milestone/time billing. Compare surviving independent completion/lineage candidates with canonical homes before target synthesis/allocation.
-
-Preserve J13/J24 ED/CS debts and the existing commitment-to-delivery constellation. Do not repeat Microtrace 001, restart a generic scan, resume halted routines, change production or touch the frozen programme map.
+Resolve the verified output head and matching checkpoint; input is not output. The M001 dossier body is retained under a current overlay and the original M001 investigation is unchanged. Git publication checks are not application proof.

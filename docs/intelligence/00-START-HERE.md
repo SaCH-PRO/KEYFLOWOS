@@ -1,56 +1,51 @@
 # KeyFlowOS Intelligence - START HERE
 
-Checkpoint: `J8-M001-2026-09-16-01`  
+Checkpoint: `J8-M002-2026-09-16-01`  
 Updated: 2026-09-16  
-Canonical branch: `docs/keyflow-intelligence-foundation`.
+Branch: `docs/keyflow-intelligence-foundation`.
 
-## Current frontier
+## One current frontier
 
-**Machine authority:** [handoff/CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml).  
-**Human continuation:** [handoff/CURRENT-HANDOFF.md](handoff/CURRENT-HANDOFF.md).  
-**Completed:** J8 activation and Microtrace 001, creation/completion/evidence/calendar source paths.  
-**Next:** J8_COMPLETION_EVIDENCE_ASSIGNMENT_AND_OBLIGATION_TRACE.
+[CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml) owns machine state. [CURRENT-HANDOFF.md](handoff/CURRENT-HANDOFF.md) gives the exact continuation.
 
-**Programme-map updates remain paused until the user explicitly requests them.** Do not regenerate, edit or run freshness repair on map outputs, previews, HTML/JSON, renderer or template. The map intentionally remains at J24-PA; current state and handoffs carry newer work. Scheduled truth/audit/burndown/reflect cycles also remain halted by the owner's separate September 12 control.
+**Completed:** [J8 Microtrace 002](investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md), named evidence/context, assignment, calendar writeback/repair and time-billing analysis; existing obligation owner identified, full acceptance/settlement bridge still open.
+
+**Next:** J8_COMPLETION_SCOPE_AND_BILLING_CONTRACT_REVIEW. J8 remains ACTIVE / NOT CONVERGED.
+
+**Map refresh remains paused until the user explicitly requests it.** No map output, HTML/JSON, preview, renderer/template or generator/freshness check. Current state advances independently; the map intentionally remains at J24-PA. Scheduled truth/audit/burndown/reflect cycles remain halted under the separate owner instruction.
 
 ```text
 Repository: SaCH-PRO/KEYFLOWOS
-Input intelligence: 7df89af749e34e081ea3ce31977f586f7aa4376d
+Input intelligence: 13c1e7e5c43fdef7101e66fb1322288ec0f06c4b
 Forensic implementation baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-J8: ACTIVE / FIRST SOURCE TRACE COMPLETED / NOT CONVERGED
-J13: MAPPED-CORE PROVISIONAL TARGET ALIGNMENT RETAINED
-J24: NAMED SAFE-CHANGE CORE PROVISIONAL ALIGNMENT RETAINED
-Production/code/workflows/settings/assertions: READ-ONLY / UNAUTHORIZED
-Application/provider/boot/concurrency/migration proof: NOT_EXECUTED
+Production/code/schema/workflows/settings/assertions: READ-ONLY / UNAUTHORIZED
+Application/provider/DB/boot/concurrency/migration proof: NOT_EXECUTED
 ```
 
-Resolve the live output head and matching checkpoint; the input SHA is provenance, not output. No rebaseline, routine restart or execution-packet promotion occurred.
+Resolve the live output head and matching checkpoint; input is provenance, not output. No rebaseline or execution-packet promotion.
 
-## Resume load and actual advance
+## Load and continue
 
-Read AGENTS.md, [AGENT-CONTINUITY.md](AGENT-CONTINUITY.md), this file, [07-CURRENT-STATE.md](07-CURRENT-STATE.md) and all four CURRENT/ROLLOVER files. Run Context Integrity Check. Load [J8 dossier](journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md) and [Microtrace 001](investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md), then its named J10/J11/J12/J18/J23 comparison owners as needed. J24/K12 and all J13 evidence remain intact.
+Read AGENTS.md, [AGENT-CONTINUITY.md](AGENT-CONTINUITY.md), this file, [07-CURRENT-STATE.md](07-CURRENT-STATE.md) and all four CURRENT/ROLLOVER files. Run Context Integrity Check. Load the [J8 dossier](journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md), unchanged M001 and new M002. Use their existing J11/J12/J7/J18/J23/J2/J15/J24 comparison owners, not a new subsystem invented from memory.
 
-Sixteen implementation files were examined at full or explicitly partial scope, including two unexecuted source tests. The ordinary project-detail checkbox reaches a task-status writer that omits the general task-update evidence check and events. Reorder and OUT_APP completion are other writers. Calendar consumption, repeated project-completion emission, stale revenue progression and plan/template replay are now source-grounded questions, not merely an abstract completion checklist.
+Key corrections: evidence HTTP guards/context and dedicated assignment eligibility are real; scalar scope is not target/evidence qualification. Calendar has its own source-completion writer and a bounded backfill. Repeated alternate-rate time entries can lose invoice-line value while all selected rows are marked billed. Invoice creation precedes marking, so a mismatch can leave a real partial outcome. Existing exact/party-wide work obligations must be reused, but the J8 acceptance/settlement bridge is not assumed complete.
 
-Payment-to-template project creation exists in AutomationExecutorService; do not report it absent because the blueprint's sample FlowListener differs. Preserve the current unwired IN_APP executor's honest blocked/unavailable result, persisted deliverables/ownership checks, the task/assignment transaction and the named-field plan updater. Twelve J8 cases X01-X12 are design obligations, not test runs or additions to the existing 44-case J13 manifest.
+## Exact next output
 
-## Exact next artifact
+Planned, not created: `investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md`.
 
-Planned, not created:
-`investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md`.
+First close the named schema/constraint and portal/change-order/milestone/obligation producer-consumer gaps that determine required scope and accepting actor. Then complete canonical comparison for CAND-COMPLETION-BOUNDARY and CAND-BILLING-ALLOCATION and specify the minimum shared completion/scope and source-entry billing allocation contracts. Finally backward re-audit affected journeys and decide declared-scope gate dispositions. Do not repeat the completed creation/UI/guard/runner scans.
 
-Trace EvidenceController, Evidence/TaskAssignment models, TaskAssignmentService and actual parent/assignee/tenant-context authority. Follow task/project/plan outcomes into source-obligation settlement, calendar reconciliation and milestone/time billing. Establish eligible evidence, current actor authority and required-versus-optional scope. Compare surviving completion/lineage candidates against actual canonical homes before allocation. Do not repeat the completed creation/UI scan or restart J13/J24.
+## Counts, evidence and invariants
 
-## Governing programme and retained limits
+J8 X01-X12 plus Y01-Y08 are twenty local designs, unbound and unexecuted. J13's separate 44-case manifest remains unchanged. No new dossier/kernel: coverage remains 21/25, not programme completion. J9/J20/J21/J22 remain dossierless; all prior mature pools and twelve kernel dossiers remain intact.
 
-EVIDENCE -> MICROSCOPIC TRACE -> JOURNEY / SHARED KERNEL -> RESEARCH / POOL -> TARGET SYNTHESIS -> BACKWARD RE-AUDIT -> MIGRATION / PROOF -> SEPARATELY AUTHORIZED IMPLEMENTATION -> VERIFIED RESULTS -> MODEL UPDATE.
+Preserve J13/J24 bounded alignment, ED1-ED5 and CS1-CS5. Current operational controls are inherited prior observations, not freshly certified settings. The historical forensic baseline cannot authorize bypassing a current halt or map pause.
 
-Keep the 25 canonical journeys and 12 kernels. The inherited twenty dossiers plus the new J8 dossier gives 21/25 coverage, not app completion or a fresh portfolio maturity audit. J9/J20/J21/J22 remain without dedicated dossiers. All kernel definitions and prior mature pools remain intact; presence is not proof.
+Ranges remain F227/C177/KF-REC-057/KF-CONCEPT-042. F228/C178/KF-REC-058 are unallocated. 04B and later re-audits override older snapshots. Source-specific candidates are not automatic new IDs, and reusing a canonical law does not expand another finding's proven source scope.
 
-J8 uses the existing J11/J8/J12/J23/J7 commitment-to-delivery constellation. Task checkbox, delivered scope, evidence admission, acceptance and settlement are not interchangeable. Lightweight task policies remain possible. Proposed shared completion/scope transitions are not accepted final implementation, new universal engines or permission to rewrite history.
+EVIDENCE -> MICROSCOPIC TRACE -> JOURNEY / KERNEL -> RESEARCH / POOL -> TARGET -> BACKWARD RE-AUDIT -> MIGRATION / PROOF -> EXPLICITLY AUTHORIZED IMPLEMENTATION -> VERIFIED RESULTS -> MODEL UPDATE.
 
-Current operational permission is separate from a historical forensic snapshot. Prior hosting observations, access limitations, ED1-ED5 and CS1-CS5 remain in CURRENT and the J24 review; they were not freshly re-audited here. Do not blindly enable dormant rulesets or use old playbooks to lift a current stop.
+Optional features and scope may change through reviewed policies. Do not erase required work, revoke evidence history, misclassify calendar hiding as domain cancellation, or mark lost invoice allocations billed to manufacture completion. Preserve existing guards, assignment transaction, honest unavailable executor, invoice refusals and financial correction ownership.
 
-Ranges remain F227/C177/KF-REC-057/KF-CONCEPT-042. F228/C178/KF-REC-058 remain unallocated. 04B and later re-audits override old numeric or maturity snapshots. Preserve explicit evidence classes and uncertainty; no passing runtime claim follows from a document, source test or commit.
-
-Persist substantive findings and matching state/handoff/rollover, verify intelligence-only changed paths and the output checkpoint. **Exclude all programme-map files and generation while the pause remains active.**
+Persist substantive intelligence and matching CURRENT/ROLLOVER views, then verify changed paths and the output head. Exclude programme maps, production code and assertions while their respective restrictions remain active.
