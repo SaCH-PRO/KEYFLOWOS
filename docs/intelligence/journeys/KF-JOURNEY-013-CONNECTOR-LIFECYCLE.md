@@ -1,13 +1,48 @@
 # KF-JOURNEY-013 — Connector Lifecycle
 
-Status: ACTIVE FIRST-PASS / MICROSCOPIC TRACE IN PROGRESS
+Status: ACTIVE / BOUNDED CONVERGENCE REVIEW PREPARATION / NOT YET CONVERGED
 Date activated: 2026-09-10
+Checkpoint updated: 2026-09-16
+Checkpoint: `J13-ROLLOVER-2026-09-16-M004-PLUS-CALLBACK-SUPPLEMENT`
 Implementation evidence baseline: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2`
 Primary kernels: K9 Integration & External Reality, K7 Temporal / Event / Workflow, K11 Recovery & Reliability
 Secondary kernels: K1 Tenant Genesis & Identity, K3 KEY Authority & Governance, K5 Capability Fabric, K8 Evidence & Outcome
-Adjacent journeys: J5 Conversation → Business Action, J14 Webhook / External Event Ingress, J18 Failure → Recovery, J2 KEY Request → Governed Action, J12 Document/Evidence Lifecycle
+Adjacent journeys: J5 Conversation → Business Action, J14 Webhook / External Event Ingress, J18 Failure → Recovery, J2 KEY Request → Governed Action, J12 Document/Evidence Lifecycle; J15 for fresh-action governance
 
 > This dossier distinguishes CURRENT REALITY from TARGET KEYFLOWOS. Production implementation remains READ-ONLY / UNAUTHORIZED. Runtime proof has NOT been executed.
+
+## Current checkpoint - takes precedence over the opening sample below
+
+Required evidence pool, relative to `docs/intelligence/`:
+
+```text
+investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md
+investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md
+investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md
+investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md
+investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md
+```
+
+Microtraces 001-003 cover the initial lifecycle/state model, post-disconnect participation/activity resurrection, and expiry/reconnect. The existing Microtrace 004 is **Stale OAuth Connect Intent and Split Drive Lifecycle Ownership**. It is preserved unchanged. A different trace proposed under the same filename in conversation is now the named supplement; do not overwrite or renumber either strand.
+
+Recorded corrections to the first-pass sample and earlier shorthand:
+
+- QuickBooks/Xero central credential clearing is not complete credential removal when usable legacy Business metadata remains. `readCredential` fallback creates conditional QuickBooks provider read/smoke-test and Xero smoke-test participation after disconnect; successful activity can set connected status. Preserve the Xero centralized `tenantId` write guard and central-only blocking behavior. Provider callback reachability and actual tenant possession of legacy tokens are not established.
+- Stripe/PayPal activity writes `status: connected`; earlier `connected/healthy` shorthand does not establish a literal `healthStatus: healthy` mutation.
+- GoogleDriveConnector clears credentials directly. The dedicated Drive service route separately clears credentials without updating shared ConnectorStatus, as recorded in Microtrace 004.
+- A still-valid pre-disconnect Drive OAuth response can statically restore credentials because its connect intent has no revocable generation. Microtrace 004's stale-intent/split-ownership candidate remains open for canonical-register anti-duplication.
+- WhatsApp retained mappings and recreated same-page Meta mappings permit conditional old first-arrival callback processing under still-valid application verification. Meta shared routing without a connection row is a positive blocking seam.
+- Working refinement to the normal-ingress invariants below: known historical payment/refund evidence may require explicitly bounded reconciliation without reactivating a binding or authorizing new effects. Unknown lineage must not be silently assigned to the current grant. This is a target proposal, not implemented policy.
+
+The supplement reuses F227/C177 for its own mechanisms; it does NOT decide Microtrace 004's separate candidate. F228/C178/KF-REC-058 remain unallocated.
+
+### Exact next action
+
+Stage: **J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION**.
+
+Produce the planned candidate `investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md`: start with lifecycle ownership and callback-admission tables; finish named status-writer inventory gaps; compare the Microtrace 004 candidate with canonical registers; map legacy credentials/provider mappings and subscription teardown ownership; backward re-audit J5/J14/J18/J2/J15 and K9/K7/K11; assign evidence-based pass/defer/reopen to each analytical closure gate.
+
+The supplement's P01-P12 and Microtrace 004's six cases remain DESIGNED / NOT_EXECUTED. Exhaustive writer coverage, full subscription inventory, live teardown and pooled target acceptance are unfinished. Do not restart the generic opening scan below or mark J13 converged. This update is a persistence checkpoint, not a new source reread or runtime validation.
 
 ---
 
@@ -92,6 +127,8 @@ This absence is currently classified as the architectural explanation behind F22
 
 ## D. First Cross-Provider Sample
 
+This opening sample is retained as analysis history. Apply the current checkpoint's corrections above before relying on its credential-blocking conclusions.
+
 ### WhatsApp — weak disconnect/revocation seam
 
 Observed in the J5 pressure test:
@@ -132,7 +169,7 @@ QuickBooks uses `ConnectorCredentialsService` for credentials.
 
 `healthCheck()` derives connected state from usable credential presence (with a test-token development path), and material outbound operations such as `pushInvoice()` / `pushCustomer()` explicitly reject when `isConnected()` is false.
 
-This is a positive pattern to preserve, though full webhook/revocation behavior still requires trace.
+This is a positive pattern to preserve, though full webhook/revocation behavior still requires trace. The current checkpoint qualifies this seam: a credential-derived `isConnected()` can succeed through surviving legacy fallback and is not by itself a revocation guard.
 
 ---
 
@@ -245,7 +282,7 @@ connector binding currently active
 
 F227/C177 proves this distinction in WhatsApp.
 
-Residual callbacks after revoke should be auditable/quarantinable but should not silently regain normal processing authority.
+Residual callbacks after revoke should be auditable/quarantinable but should not silently regain normal processing authority. The checkpoint's proposed historical-evidence admission distinction must be retained.
 
 ---
 
@@ -265,7 +302,7 @@ current ConnectorBinding
 
 Connector connectedness is necessary but not sufficient authorization for arbitrary business action.
 
-QuickBooks' explicit `isConnected()` guard on outbound pushes is a favorable local seam. J13 must determine whether comparable guards are universal across outbound connectors.
+QuickBooks' explicit `isConnected()` guard on outbound pushes is a favorable local seam, subject to the legacy-fallback qualification above. J13 must determine whether comparable guards are universal across outbound connectors and whether they enforce authority rather than credential presence alone.
 
 ---
 
@@ -316,7 +353,7 @@ DISCONNECT / REVOKE(binding N)
 → report residual provider-side cleanup uncertainty explicitly
 ```
 
-Disconnect must not mean merely “change the card to grey.”
+Disconnect must not mean merely “change the card to grey.” Microtrace 004 adds pending-connect-intent cancellation as a proposed required lifecycle postcondition.
 
 ---
 
@@ -335,13 +372,13 @@ RECONNECT
 → reconcile pending residual provider state
 ```
 
-Historical occurrences/effects retain their old binding lineage.
+Historical occurrences/effects retain their old binding lineage where established. Where provider-authenticated lineage is unavailable, retain explicit uncertainty rather than assigning the current generation by receipt time.
 
 ---
 
 ## L. Recovery / Token Expiry Questions
 
-Open microscopic questions:
+Opening microscopic questions, now partially answered by Microtraces 001-004 and the supplement; consult those before reopening:
 
 1. Does OAuth refresh failure transition one durable lifecycle owner, or merely produce local provider errors?
 2. Can scheduled sync continue after credentials are expired/revoked?
@@ -360,7 +397,7 @@ Open microscopic questions:
 
 ### F227 / C177 — inherited opening root
 
-Connector disconnected state is not universally load-bearing as revocation of external participation. WhatsApp proves a reachable manifestation.
+Connector disconnected state is not universally load-bearing as revocation of external participation. WhatsApp proves a reachable manifestation. The supplement adds conditional callback/fallback manifestations under this root.
 
 ### Reuse requirements
 
@@ -373,7 +410,7 @@ Do not duplicate:
 - F225 for conversation delivery evidence;
 - J12/F220 for source revision occurrence semantics.
 
-Next free IDs remain F228 / C178 / KF-REC-058.
+Next free IDs remain F228 / C178 / KF-REC-058. Microtrace 004's stale-intent/split-ownership candidate still requires canonical-register comparison; the supplement's reuse decision does not close it.
 
 ---
 
@@ -381,9 +418,9 @@ Next free IDs remain F228 / C178 / KF-REC-058.
 
 - shared `IConnector` vocabulary and registry;
 - `ConnectorCredentialsService` direction for centralized secret handling;
-- Google Drive disconnect clears business-scoped OAuth credentials and status;
-- QuickBooks disconnect clears connector credentials;
-- QuickBooks material push paths call `isConnected()`;
+- Google Drive connector-class disconnect clears business-scoped OAuth credentials and status;
+- QuickBooks disconnect clears centralized connector credentials, subject to the legacy-fallback limitation;
+- QuickBooks material push paths call `isConnected()`, though credential presence alone is insufficient authority;
 - explicit `testConnection` / `smokeTest` concepts distinguish configuration from real provider proof;
 - unsupported sync can return an explicit `PULL_SYNC_NOT_IMPLEMENTED` rather than false success.
 
@@ -391,11 +428,13 @@ Next free IDs remain F228 / C178 / KF-REC-058.
 
 ## O. First Target Invariants
 
+These remain working proposals, with the checkpoint's historical-evidence and connect-intent refinements:
+
 1. One tenant-scoped connector binding/grant is the authority root for active provider participation.
 2. Display status, credential presence and operational health are projections, not competing authority roots.
 3. Disconnect/revoke is monotonic for the old binding generation.
 4. A revoked binding cannot be resurrected by activity bookkeeping.
-5. Provider-authenticated callbacks require a currently valid binding in addition to J14 authentication/tenant routing.
+5. Provider-authenticated callbacks require a currently valid binding for new normal participation in addition to J14 authentication/tenant routing; controlled historical reconciliation requires an explicit separate admission policy.
 6. Polling/sync workers must claim work only for current active bindings.
 7. Outbound provider effects must verify the current binding before effect attempt.
 8. Token/provider revocation must produce explicit lifecycle evidence rather than silently becoming generic error.
@@ -406,9 +445,11 @@ Next free IDs remain F228 / C178 / KF-REC-058.
 
 ---
 
-## P. Immediate Next Trace
+## P. Historical Opening Trace Plan - superseded as next-action instructions
 
-Trace, in order:
+The original opening sequence is retained below as history; do not repeat it wholesale. The current checkpoint at the top defines the exact next bounded review.
+
+Original sequence:
 
 1. `ConnectorCredentialsService` storage/clear/fallback semantics;
 2. `ConnectorHealthMonitorService` and any path that writes ConnectorStatus from health/activity;
@@ -418,4 +459,4 @@ Trace, in order:
 6. provider-specific subscription cleanup on disconnect;
 7. reconnect/callback flows and whether an old binding can be silently reused.
 
-Before F228/C178 allocation, classify each observed discrepancy against F227, J14, J18, F149/F159 and existing connector/security findings.
+Before F228/C178 allocation, classify each observed discrepancy against F227, J14, J18, F149/F159 and existing connector/security findings. Maintain the current/rollover checkpoint after the next material tranche.
