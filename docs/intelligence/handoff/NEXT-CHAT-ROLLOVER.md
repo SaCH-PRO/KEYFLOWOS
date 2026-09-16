@@ -1,58 +1,64 @@
 # KEYFLOWOS - Next Chat Rollover
 
-Checkpoint: `J8-M002-2026-09-16-01`  
+Checkpoint: `J8-CSB-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **LIVE - M002 NAMED TRACE COMPLETE; J8 CONTRACT REVIEW NEXT**.
+Status: **LIVE - J8 NAMED CONTRACT ALIGNED; J9 ACTIVATION NEXT; MAP FROZEN**.
 
 ```text
-Continue KEYFLOWOS from committed intelligence. Do not restart.
+Continue KEYFLOWOS from committed repository intelligence. Do not restart.
 Repository: SaCH-PRO/KEYFLOWOS
 Branch: docs/keyflow-intelligence-foundation
-Checkpoint: J8-M002-2026-09-16-01
-Input/provenance: 13c1e7e5c43fdef7101e66fb1322288ec0f06c4b
+Checkpoint: J8-CSB-2026-09-16-01
+Input/provenance: 54342851973907ce3fd2f0a00928b0cca79288ad
 Forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-Resolve live output head and matching checkpoint, not the input SHA as output.
+Resolve live output head and matching checkpoint; input is not output.
 
 Read AGENTS, AGENT-CONTINUITY, START/current state and all CURRENT/ROLLOVER
-files. Run Context Integrity Check. Load J8 dossier, unchanged M001 and new
-J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md. M002's named evidence/context,
-assignment, calendar and time-billing work is completed. Full schema and the
-acceptance/milestone/contract settlement bridge remain explicitly unresolved.
+files. Run Context Integrity Check. Load the current J8 dossier, unchanged
+M001/M002 and completed J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md.
+J8 is provisionally target-aligned for the named completion/scope/time-billing
+core only. Implementation, public acceptance, deployed constraints and runtime
+proof are NOT established. WC01-WC08/WB01-WB04 live in that review; do not
+invent a replacement contract or repeat the completed schema/guard scans.
 
-Next: J8_COMPLETION_SCOPE_AND_BILLING_CONTRACT_REVIEW.
-Produce investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md.
-Resolve those remaining named constraint/portal/change-order/obligation
-boundaries; complete actual canonical comparison for completion and billing
-allocation; specify the smallest shared contract over existing owners; then
-backward re-audit J11/J12/J7/J18/J23/J2/J15/J24 and assign closure gates.
-No new generic project/guard/calendar scan or replay of M001 discovery.
+ALLOCATION CHANGED: F228/C178 now means source-time value lost from invoice
+lines while selected entries can all be marked billed. 08BD/09BD are the
+canonical homes; 04B is updated. Next free F229/C179/KF-REC-058.
+No new recommendation/concept. Old unallocated-F228 statements are historical.
 
-Preserve positives: evidence guards and mounted context, scoped assignment
-eligibility, calendar mutation permission and partial backfill, invoice
-empty/unrated/count-mismatch refusals, honest unavailable IN_APP executor.
-Calendar direct source writeback is W8-10. Source updates and projection writes
-are separate. Repair exists but is not complete paginated reconciliation.
+New source witnesses: lifetime assignment tuple can conflict on A->B->A after
+B is unassigned; change-order approval actor/date are body input and approved
+terms remain mutable; portal access visibility is not acceptance authority;
+milestone date/invoice scalar and accepted deliverable URL need exact decision
+lineage. Keep actual tenant/invoice checks and do not assert a global missing
+portal route from one unsuccessful lookup. Full public journey is J21 debt.
 
-Time grouping overwrites repeated alternate-rate entries: same-label 60@100,
-30@200,45@200 minutes/rate gives 105 represented minutes/250 value instead of
-135/350 while all IDs can be marked billed. Static counterexample only.
-Invoice creation before marking also leaves possible partial outcomes.
-Existing work-obligation exact/party-wide owner is present; do not invent or
-assume the J8 acceptance-to-settlement bridge or use party-wide discharge for
-one task by accident. No global schema/permission absence or runtime exploit.
+Next: J9_MARKETING_LEAD_GENERATION_ACTIVATION.
+Planned: journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md (not created).
+Trace actual campaign/content publication -> audience response/lead capture
+-> Contact/conversation/source attribution -> commercial outcomes in the
+existing J9/J3/J5/J10/J21/J7 constellation. Separate generation, delivery,
+engagement, qualified lead, attribution and financial revenue. Preserve J5
+occurrence, J13 authority, J7 value-stage, J8 allocation and J24 proof contracts.
 
-J8 is NOT CONVERGED. X01-X12 plus Y01-Y08:20 designs,0bindings,NOT_EXECUTED.
-J13's 44-case manifest, prior alignments and ED/CS debts remain unchanged.
-F228/C178/KF-REC-058 remain unallocated. No production/schema/settings/workflow/
-assertion change, application run or rebaseline. Scheduled cycles stay HALTED.
+J8 X12/Y8/Z4 = 24 designed, unbound, unexecuted cases. J13's separate 44-case
+manifest is unchanged. No app/provider/DB/boot/concurrency/migration tests.
+WD1-WD5, ED1-ED5 and CS1-CS5 remain explicit. Production/schema/workflows/
+settings/assertions stay read-only; fixed forensic baseline; no packet promotion.
+Scheduled truth/audit/burndown/reflect cycles remain HALTED.
 
-USER OVERRIDE: maps stay frozen until explicitly requested. Do not run the
-map generator/check or edit map Markdown/HTML/JSON/preview/template. Update
-actual intelligence and matching continuity only; verify allowed diff/head.
+USER OVERRIDE: do not update or regenerate the programme map until explicitly
+requested. Do not run its generator/check or edit map Markdown/HTML/JSON,
+preview, renderer/template. Persist actual analysis and matching continuity
+only; verify intelligence-only diff and the branch head.
 ```
 
-CURRENT-STATE.yaml is authoritative; this is a transport view. The map intentionally remains at J24-PA. J8's current dossier overlay distinguishes M002 from historical M001 next steps. No original M001/J13/J24 evidence or test source is rewritten.
+CURRENT-STATE.yaml is the single current machine state. This file transports it; the deliberately frozen J24-PA map is not a live status authority.
 
-Coverage remains 21/25 dossiers and twelve kernel dossiers; no new files counted as new journeys. Presence is not maturity or application completion. Hosting observations are inherited from J24, not a fresh settings audit. Current permission cannot be inferred from a historical source snapshot.
+The numerical source counterexample (135 minutes/350 pre-tax units versus represented 105/250) is a static derivation, not a customer incident. F228 does not absorb unrelated assignment/approval/completion defects. Their source witnesses remain in the original microtraces and contract review. Reusing a generic law does not rewrite the source scope of F217/F219 or older financial findings.
 
-The candidate boundary preserves two decisions: policy-specific work completion, and billing allocation over exact source-entry revisions. Optional features/scope can be changed through reviewed contracts; they cannot erase required work/evidence, settle an unrelated obligation or manufacture a billed allocation. Customer approval is required only where the applicable policy actually calls for it.
+The contract permits reviewed scope and implementation changes. Required work is explicitly waived/cancelled/superseded, not deleted to manufacture completion. Current authority and evidence revision must reach actual commit. Billing uses exclusive source allocation and the canonical invoice/financial-correction owner; code rollback cannot erase issued history or silently rebill previously charged work.
+
+J8 readiness debts: WD1 final reuse/DDL/deployed constraints/history; WD2 writer cutover; WD3 actual public acceptance/milestone/exact-obligation adapter; WD4 allocation/transaction context/financial correction; WD5 isolated runtime proof after baseline comparison. J13/J24 acceptance and their ED/CS debts are retained. Later contrary evidence reopens the precise invariant, not the entire programme by default.
+
+Counts remain 21/25 dossiers and twelve kernel dossiers, not an application completion metric or new maturity census. J9/J20/J21/J22 remain dossierless until actually created. Hosting observations remain inherited, not a fresh settings audit. Current permission remains separate from historical source.

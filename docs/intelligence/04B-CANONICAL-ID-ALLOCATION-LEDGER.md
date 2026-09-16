@@ -1,7 +1,7 @@
 # KeyFlowOS Canonical ID Allocation Ledger
 
 Status: CANONICAL — OVERRIDES LEGACY COLLIDING ALLOCATIONS
-Last updated: 2026-09-10
+Last updated: 2026-09-16
 
 Purpose: provide one unambiguous allocator for Finding (`F###`), Contradiction (`C###`) and Recommendation (`KF-REC-###`) identities.
 
@@ -21,6 +21,7 @@ F206–F214 J10 Commerce/Fulfilment
 F215–F218 J11 Contract/Obligation/Renewal
 F219–F221 J12 Document/Evidence Lifecycle
 F222–F227 J5 Conversation → Business Action lineage (F227 also opens J13 Connector Lifecycle pressure)
+F228 J8 source-time-to-invoice allocation / K10 Financial Truth
 ```
 
 ```text
@@ -33,6 +34,7 @@ C156–C164 J10 contradictions
 C165–C168 J11 contradictions
 C169–C171 J12 Document/Evidence Lifecycle
 C172–C177 J5 Conversation → Business Action contradictions (C177 also opens J13 Connector Lifecycle pressure)
+C178 J8 billed-entry completeness versus invoice-line allocation
 ```
 
 Current recommendation range is through `KF-REC-057`.
@@ -138,18 +140,35 @@ connector authentication/tenant routing valid after disconnect     → F227/C177
 key_inbox.action_executed emitted with no direct listener           → K8/KF-REC-048 pressure; insufficient for F228 without stronger causal break
 ```
 
+The final line above is a preserved historical J5 allocation decision. It does not reserve F228 for that subject; the current J8 allocation below uses that formerly free ID for an independently established root.
+
+## J8 source-time allocation allocation
+
+Checkpoint: `J8-CSB-2026-09-16-01`.
+
+- **F228 / C178** — `invoiceUnbilledTime` can overwrite a repeated alternate-rate group while marking every selected source entry billed. Billed ID count and reported source minutes therefore do not establish priced invoice-line allocation conservation.
+- Finding home: `08BD-FINDING-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md`.
+- Contradiction home: `09BD-CONTRADICTION-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md`.
+- Primary kernel K10; primary journey J8; adjacent J7/J3/J18 and K6/K8/K11.
+- Evidence: static code and exact numerical counterexample at `8f173bfe79f1418159cf4099ea18b0d60d203ec2`, first traced in J8 M002. Not a reproduced customer incident or executed application test.
+- Comparison: `investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md`, section 3. Compared actual financial F185–F196 definitions, commercial F200 lineage, F217/F219 boundaries and existing concept/recommendation ownership. `RELATED DISTINCT`; no second ledger or generic recovery engine.
+- Target consumption: existing KF-REC-052/K10 financial truth and KF-REC-048/K11 recovery, with J8 WC/WB scope/allocation contract. **No KF-REC-058 or new concept allocated.**
+- Other J8 completion/assignment/approval witnesses remain explicitly preserved in M001/M002/the review; no omnibus finding is allocated by analogy.
+
+Earlier checkpoints saying F228/C178 were unallocated are historical state. Do not reuse them or regress current ranges from an older handoff.
+
 ## Current ranges
 
 ```text
-Findings:         F001–F227
-Contradictions:   C001–C177
+Findings:         F001–F228
+Contradictions:   C001–C178
 Recommendations: KF-REC-001–KF-REC-057
 ```
 
 Next free IDs:
 
 ```text
-F228 / C178 / KF-REC-058
+F229 / C179 / KF-REC-058
 ```
 
 ## Agent pre-allocation gate

@@ -1,15 +1,15 @@
 project: KEYFLOWOS
-rollover_version: 48
+rollover_version: 49
 last_updated: '2026-09-16'
-checkpoint_id: J8-M002-2026-09-16-01
-status: LIVE_J8_M002_NAMED_TRACE_COMPLETE_NOT_CONVERGED_MAP_PAUSED
+checkpoint_id: J8-CSB-2026-09-16-01
+status: LIVE_J8_NAMED_CORE_ALIGNED_J9_ACTIVATION_NEXT_MAP_PAUSED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-input_intelligence_head: 13c1e7e5c43fdef7101e66fb1322288ec0f06c4b
+input_intelligence_head: 54342851973907ce3fd2f0a00928b0cca79288ad
 canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
 current_handoff: docs/intelligence/handoff/CURRENT-HANDOFF.md
 output_resolution: RESOLVE_LIVE_BRANCH_HEAD_AND_MATCHING_CHECKPOINT_ID
-context_integrity: PASS_BOUNDED_J8_M002_WITH_SCHEMA_ACCEPTANCE_AND_SETTLEMENT_GAPS_EXPLICIT
+context_integrity: PASS_BOUNDED_J8_REVIEW_WITH_IMPLEMENTATION_AND_PUBLIC_COVERAGE_DEBTS_EXPLICIT
 fresh_chat_context_integrity_check_required: true
 implementation_authorized: false
 runtime_proof_executed: false
@@ -19,9 +19,18 @@ implementation_evidence:
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   later_main_observation_inherited: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
-  source_manifest: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md#11-source-manifest-and-evidence-exactness
-canonical_ranges: {findings_through: F227, contradictions_through: C177, recommendations_through: KF-REC-057, concepts_through: KF-CONCEPT-042}
-next_free_ids: {finding: F228, contradiction: C178, recommendation: KF-REC-058, allocation_status: UNALLOCATED}
+  source_manifest: docs/intelligence/investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md#12-reproducible-sources-and-integrity-limits
+canonical_ranges: {findings_through: F228, contradictions_through: C178, recommendations_through: KF-REC-057, concepts_through: KF-CONCEPT-042}
+next_free_ids: {finding: F229, contradiction: C179, recommendation: KF-REC-058, allocation_status: UNALLOCATED}
+allocation_this_checkpoint:
+  findings: [F228]
+  contradictions: [C178]
+  recommendations: []
+  concepts: []
+  finding_home: docs/intelligence/08BD-FINDING-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md
+  contradiction_home: docs/intelligence/09BD-CONTRADICTION-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md
+  authority: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
+  evidence: VERIFIED_STATIC_SOURCE_NOT_RUNTIME_REPRODUCED
 journey_coverage:
   total_canonical_journeys: 25
   dossier_count: 21
@@ -29,8 +38,9 @@ journey_coverage:
   dossierless: [J9, J20, J21, J22]
   provenance: PRIOR_TWENTY_DOSSIER_INVENTORY_PLUS_NEW_J8_NOT_FULL_MATURITY_RECOUNT
   coverage_is_programme_completion: false
-  active: J8
-  active_dossier_created: true
+  active: J9
+  active_dossier_created: false
+  activation_status: NEXT_NOT_STARTED
 kernel_coverage:
   canonical_count: 12
   dossier_count: 12
@@ -38,38 +48,55 @@ kernel_coverage:
   presence_is_maturity: false
 j8:
   dossier: docs/intelligence/journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md
-  status: ACTIVE_M002_NAMED_BOUNDARIES_TRACED_NOT_CONVERGED
-  microtrace: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md
-  previous_microtrace_unchanged: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md
+  status: PROVISIONALLY_TARGET_ALIGNED_NAMED_COMPLETION_BILLING_CORE_ONLY
+  contract_review: docs/intelligence/investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md
+  previous_microtraces_unchanged:
+  - docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md
+  - docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md
   constellation: [J11, J8, J12, J23, J7]
   primary_kernels: [K6, K7, K8, K11]
+  financial_allocation_owner: K10
   secondary_kernels: [K1, K2, K3, K5, K10, K12]
   source_scope_M001: SIXTEEN_NAMED_FILES_FULL_OR_EXPLICIT_PARTIAL_RETAINED
   source_scope_M002: EIGHTEEN_MANIFEST_ENTRIES_NAMED_METHOD_RANGE_SCOPE_PLUS_DISCOVERY_LIMITS
-  M002_source_tests_read_not_executed: 1
+  source_scope_contract_review:
+    fresh_named_implementation_files: 9
+    complete_relevant_declared_schema_read: true
+    deployed_constraint_or_data_proof: false
+    full_public_portal_audit: false
+    implemented_acceptance_or_settlement_adapter: false
   writer_roles: W8_01_W8_10_WITH_CALENDAR_WRITEBACK
-  local_cases: [X01, X02, X03, X04, X05, X06, X07, X08, X09, X10, X11, X12, Y01, Y02, Y03, Y04, Y05, Y06, Y07, Y08]
-  local_case_count: 20
+  selected_contract:
+    completion: [WC01, WC02, WC03, WC04, WC05, WC06, WC07, WC08]
+    billing: [WB01, WB02, WB03, WB04]
+    terms_are_local_not_new_concepts: true
+    implementation_conformance_proven: false
+  local_cases: [X01, X02, X03, X04, X05, X06, X07, X08, X09, X10, X11, X12, Y01, Y02, Y03, Y04, Y05, Y06, Y07, Y08, Z01, Z02, Z03, Z04]
+  local_case_count: 24
   local_case_status: DESIGNED_UNBOUND_NOT_EXECUTED
-  candidates: [CAND_COMPLETION_BOUNDARY, CAND_BILLING_ALLOCATION]
-  full_canonical_financial_comparison: NOT_COMPLETE
-  new_canonical_ids_allocated: false
+  allocated_findings: [F228]
+  allocated_contradictions: [C178]
+  recommendation_allocated: false
+  completion_candidate: COMPOSITE_CONTRACT_OBLIGATION_WITH_DISTINCT_WITNESSES_NO_OMNIBUS_ID
+  billing_candidate: RELATED_DISTINCT_F228_C178
   exactness:
-  - ordinary_evidence_guard_and_tenant_context_positive_no_blanket_cross_tenant_claim
-  - evidence_row_scope_not_polymorphic_target_or_completion_admission
-  - dedicated_assignment_checks_exist_direct_writers_need_same_policy
-  - calendar_mutation_permission_exists_domain_completion_rule_still_bypassed
-  - backfill_repairs_selected_eligible_rows_not_complete_reconciliation
-  - repeated_alternate_rate_group_loses_prior_minutes_while_ID_count_can_match
-  - invoice_creation_precedes_marking_failure_can_leave_real_invoice
-  - work_obligation_exact_party_modes_exist_J8_settlement_bridge_unproven
-  - existing_IN_APP_unavailable_and_billing_refusals_preserved
-  remaining_named_boundaries:
-  - complete_Evidence_TaskAssignment_constraints_retention_and_replacement
-  - portal_change_order_acceptance_and_required_scope_revision
-  - milestone_project_to_exact_obligation_settlement_producers
-  - billing_allocation_claim_revision_financial_correction_contract
-  - final_canonical_comparison_target_and_backward_review
+  - existing_evidence_tenant_assignment_guards_and_transaction_seams_preserved
+  - assignment_lifetime_tuple_conflicts_with_A_B_A_episode_history
+  - change_order_approval_actor_date_are_body_assertions_not_current_decision
+  - approved_scope_or_deliverable_URL_can_change_without_revision_bound_acceptance
+  - portal_access_visibility_not_delivery_acceptance_global_route_absence_not_claimed
+  - milestone_invoice_scalar_not_creation_or_exact_settlement
+  - source_time_group_loss_static_not_runtime_customer_incident
+  - invoice_before_mark_partial_outcome_reuses_REC048_not_blind_retry
+  - calendar_remains_derivative_and_all_named_writers_consume_domain_rule
+  readiness_debts:
+    WD1: final_reuse_DDL_indexes_backfill_deployed_constraints_history
+    WD2: implement_and_characterize_all_named_and_later_discovered_writers
+    WD3: actual_portal_acceptance_milestone_invoice_exact_obligation_adapter
+    WD4: source_allocation_transaction_context_historical_financial_correction
+    WD5: isolated_runtime_concurrency_migration_negative_controls_after_baseline_revalidation
+  implementation_conformance_proven: false
+  full_work_management_estate_converged: false
 j13:
   status: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
   contract: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
@@ -138,28 +165,30 @@ remaining_debts:
   ED5: deliberate_later_implementation_baseline_comparison_before_execution
 broader_pools_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#mature_pools
 active_frontier:
-  stage: J8_COMPLETION_SCOPE_AND_BILLING_CONTRACT_REVIEW
-  primary_journey: J8
-  status: ACTIVE_NOT_CONVERGED
-  last_completed_stage: J8_COMPLETION_EVIDENCE_ASSIGNMENT_AND_OBLIGATION_TRACE_BOUNDED
+  stage: J9_MARKETING_LEAD_GENERATION_ACTIVATION
+  primary_journey: J9
+  status: NEXT_ACTIVATION_NOT_STARTED
+  last_completed_stage: J8_COMPLETION_SCOPE_AND_BILLING_CONTRACT_REVIEW
 exact_next_action:
-  planned_artifact: docs/intelligence/investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md
+  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md
   planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
   instruction: >-
-    Resolve only the retained Evidence/TaskAssignment constraints and actual
-    acceptance/portal/change-order/milestone/obligation source boundaries. Then
-    complete canonical candidate comparison and the minimum shared completion/scope
-    and exact source-entry billing allocation contract. Backward re-audit the
-    affected journeys and assign evidence-based closure dispositions. Do not repeat
-    M001/M002 scans or claim unexecuted tests passed. Preserve existing safeguards,
-    J13/J24 alignments, ED/CS debts, fixed baseline, halted cycles and frozen maps.
-    Persist substantive work and matching continuity on the intelligence branch.
+    Activate J9 in the existing customer-to-revenue constellation. Trace real
+    campaign/content publication, audience response and lead capture,
+    Contact/conversation/source attribution and commercial outcomes. Separate
+    generated, scheduled and published content from engagement, qualified lead,
+    attributed conversion and financial revenue. Preserve J5 occurrence, J13
+    authority, J7 value-stage, J8 scope/allocation and J24 proof contracts.
+    Do not repeat the completed J8 review or reallocate F228/C178. Next free
+    F229/C179/KF-REC-058. Keep maps frozen, cycles halted, production read-only
+    and runtime proof explicitly unexecuted. Persist substantive work and
+    matching continuity, then verify intelligence-only diff and live head.
 constraints:
 - production_source_schema_workflow_settings_deployment_read_only
 - no_runtime_proof_claim
 - no_silent_forensic_rebaseline
-- no_unallocated_ID_use
-- preserve_J13_evidence_and_J24_PA_specification
+- F228_C178_allocated_never_reuse_next_free_F229_C179_KF_REC_058
+- preserve_J8_M001_M002_J13_evidence_and_J24_PA_specification
 - no_gate_weakening_or_history_destruction
 - current_authority_separate_from_historical_source
 - scheduled_cycles_remain_halted
