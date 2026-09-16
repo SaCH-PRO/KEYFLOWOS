@@ -1,108 +1,103 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-16
-Status: CURRENT — J13 CONNECTOR LIFECYCLE ACTIVE THROUGH MICROTRACE 004
+Checkpoint: `J13-ROLLOVER-2026-09-16-M004-PLUS-CALLBACK-SUPPLEMENT`
+Status: CURRENT - J13 MICROTRACES 001-004 PLUS CALLBACK/CREDENTIAL SUPPLEMENT; NOT CONVERGED
 
-## Integrity
-
-```text
-repository:            SaCH-PRO/KEYFLOWOS
-implementation branch: main
-forensic baseline:     8f173bfe79f1418159cf4099ea18b0d60d203ec2
-intelligence branch:   docs/keyflow-intelligence-foundation
-production code:       READ-ONLY / UNAUTHORIZED
-context integrity:     PASS
-runtime proof:         NOT EXECUTED
-```
-
-Later main movement has been observed but no deliberate forensic rebaseline has been taken.
-
-## Canonical ranges
+## Resume coordinates
 
 ```text
-Findings:         F001–F227
-Contradictions:   C001–C177
-Recommendations: KF-REC-001–KF-REC-057
-Concepts:         KF-CONCEPT-001–KF-CONCEPT-042
-Next free:        F228 / C178 / KF-REC-058 — UNALLOCATED
+repository:                 SaCH-PRO/KEYFLOWOS
+intelligence branch:        docs/keyflow-intelligence-foundation
+implementation branch:      main
+forensic baseline:          8f173bfe79f1418159cf4099ea18b0d60d203ec2
+pre-checkpoint branch head: 0f7000d6c141e2296ec923f6d9105bd6f7841891
+supplement creation commit: 0e8658d3b598948907c1082291e26ec5c2582eaf
+production code:            READ-ONLY / UNAUTHORIZED
+runtime/provider proof:     NOT EXECUTED
+fresh-chat integrity check: REQUIRED
 ```
 
-J5 Conversation → Business Action remains provisionally converged through F227/C177/KF-REC-057 and reopenable if J13/J22/runtime proof falsifies its target semantics.
+Resolve the live intelligence branch head at resume. The pre-checkpoint SHA is provenance, not a claim to be the final/current head. Later main movement was previously observed; no deliberate rebaseline is taken here. This is a persistence-only checkpoint, not a new source revalidation or completed architectural re-audit.
 
-## Active frontier — J13 Connector Lifecycle
+## Programme and canonical state
 
-Dossier: `docs/intelligence/journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md`
-
-Microtraces:
-
-1. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md`
-2. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md`
-3. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md`
-4. `docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md`
-
-### Canonical inherited root
+Continue the whole-system architectural-forensics programme, not isolated production fixes. Preserve:
 
 ```text
-F227 / C177
-→ connector "disconnected" is not universally a load-bearing revocation of external participation
+MAP -> MICROSCOPIC TRACE -> JOURNEYS -> CONSTELLATIONS -> KERNELS
+-> DYNAMIC / CAUSAL / FEEDBACK GRAPHS -> STANDARDS / RESEARCH
+-> POOL -> TARGET SYNTHESIS -> BACKWARD RE-AUDIT -> REFINE
 ```
-
-No new J13 root has been allocated yet.
-
-## Microtrace 004 — new exact-baseline result
-
-Dedicated Google Drive OAuth state is HMAC-authenticated and time-bounded, but carries no durable connect-intent ID, lifecycle generation or revocation epoch. The callback verifies any still-valid signed state and then saves credentials without checking whether a disconnect occurred after the auth URL was issued.
-
-Static reachability therefore supports:
 
 ```text
-request auth URL
-→ receive signed state S
-→ disconnect Drive
-→ old OAuth flow returns with still-valid code + S
-→ callback accepts S
-→ saveDriveCredentials writes new Drive credentials
+Findings:         F001-F227
+Contradictions:   C001-C177
+Recommendations: KF-REC-001-KF-REC-057
+Concepts:         KF-CONCEPT-001-KF-CONCEPT-042
+Next free:        F228 / C178 / KF-REC-058 - UNALLOCATED
 ```
 
-Thus an explicit disconnect does not necessarily cancel an already-issued Drive connect intent. Runtime proof has NOT been executed.
+J5 remains provisionally converged through F227/C177/KF-REC-057, and reopenable by J13/J22/runtime or contradictory implementation evidence. Mature pools and broader journey coverage are retained in CURRENT-STATE.yaml. Dossier coverage is not app/programme completion.
 
-A second exact-baseline issue is split Drive lifecycle ownership:
+## Required J13 evidence pool
 
-- `GoogleDriveConnector.disconnect()` clears credentials and updates shared `ConnectorStatus` to disconnected.
-- `GoogleDriveService.disconnect()` clears credentials only.
-- `DELETE /drive/businesses/:businessId/disconnect` calls the service path.
-
-Therefore a legitimate public disconnect route can leave credentials absent while the shared status row remains connected until another writer changes it.
-
-Classification: this may be an independent stale-intent / fragmented-lifecycle root, but F228/C178 remain unallocated until anti-duplication against the canonical registers and J14/J18/readiness roots is complete.
-
-## Working target law
+Dossier: `docs/intelligence/journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md`.
 
 ```text
-one tenant-scoped ConnectorBinding generation is the authority root
-→ lifecycle authority is separate from operational health and credential presence
-→ OAuth connect intent binds to a proposed generation
-→ disconnect revokes current generation AND cancels pending connect intents
-→ activity/health cannot reactivate a revoked generation
-→ provider invalid_grant/revocation creates durable lifecycle evidence
-→ reconnect creates N+1
-→ callbacks/effects from N cannot authorize current work after N is revoked
-→ reconciliation of known prior effects is distinct from permission to originate new effects
+docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md
+docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md
+docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md
+docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md
+docs/intelligence/investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md
 ```
 
-All public lifecycle entrypoints should delegate to one lifecycle authority that coordinates credential clearing, provider-side subscription teardown, binding revocation, status projection and pending-intent cancellation.
+**Do not overwrite Microtrace 004.** It already contains Stale OAuth Connect Intent and Split Drive Lifecycle Ownership. The conversation's differently titled proposed Microtrace 004 was saved as the named supplement instead. Both are required; the numbering collision must not discard either result.
 
-## Exact next action
+## Existing Microtrace 004 - retain separately
 
-```text
-1. enumerate provider webhook/watch/subscription registrations and disconnect cleanup;
-2. trace Google, Meta/WhatsApp, Stripe/PayPal and QuickBooks/Xero where registrations exist;
-3. reconnect conceptually as generation N+1 and test whether old callbacks/effects from N still route;
-4. determine whether callback identity can bind to provider account + connector generation;
-5. enumerate every ConnectorStatus writer and classify: grant-creating / projection-only / activity-evidence / health-observation / revocation;
-6. anti-duplicate Microtrace 004 candidate root against F001-F227, C001-C177, KF-REC-001-057, J14, J18, F149/F159 and readiness/honesty roots;
-7. allocate F228/C178/KF-REC-058 only if genuinely independent;
-8. keep production untouched and do not claim runtime proof.
-```
+Drive's HMAC-authenticated, expiring OAuth state contains no durable connect-intent generation or revocation epoch. The recorded source trace permits a still-valid authorization response started before disconnect to reach `saveDriveCredentials` after disconnect. Authentication/expiry of the OAuth response is not proof that its connect intent is still current.
 
-If continuity is lost, resume from **J13 provider subscription cleanup + stale-generation callback lineage after Microtrace 004**, with the stale Drive OAuth connect-intent race and split disconnect ownership already proven statically at the fixed baseline.
+Drive also has two disconnect surfaces: the connector class clears credentials and shared ConnectorStatus, while the dedicated service/controller route clears credentials without updating shared status. That is a distinct stale-intent/split-ownership candidate. **Canonical-register anti-duplication is still open; no new ID has been allocated.** Its six proposed OAuth/disconnect/refresh cases remain unexecuted.
+
+## Newly persisted supplement - conclusions and corrections
+
+The supplement preserves the preceding conversation's pinned source analysis, without claiming a new source reread in this checkpoint.
+
+- WhatsApp retains the phone mapping on disconnect. Under still-valid application verification, a previously unseen old event can remain routable after disconnect or same-phone reconnect.
+- Meta shared routing is blocked without its connection row. Same-page recreation restores lookup; the scoped callback route has a separate trusted tenant-binding/lifecycle question.
+- Stripe/PayPal activity can write `status: connected` without reconnect. Do not turn earlier `connected/healthy` shorthand into a claim that a literal `healthStatus: healthy` field is mutated.
+- QuickBooks/Xero central credential deletion can leave usable legacy Business metadata. `readCredential` fallback permits conditional QuickBooks provider read/smoke-test and Xero smoke-test participation followed by activity status resurrection. Preserve the Xero centralized `tenantId` write guard and central-only credential-blocking behavior. Actual tenant legacy credentials and accounting-provider callback reachability were not inspected/proved.
+- Gmail/Drive watch registration and live provider teardown were not established. Adapter metadata or an emitter method is not proof of a mounted provider callback.
+- A historical settlement/refund callback may require evidence reconciliation. It must not reconnect an old grant or authorize fresh business effects. Unknown grant lineage must remain explicit rather than being relabelled current by arrival time.
+
+The supplement's mechanisms reuse F227/C177. That decision does **not** settle Microtrace 004's candidate root. The supplement's P01-P12 are designed target cases, all NOT_EXECUTED.
+
+## Target ownership carried forward - proposed, not implemented
+
+Lifecycle authority, operational health and capability readiness are distinct. A binding generation is the proposed authority root; connect intents must be revocable, disconnect must cancel stale intents, and activity cannot reactivate revoked authority. Reconnect creates a fresh generation. Provider authenticity does not imply current local authority or authenticated grant lineage.
+
+J13 supplies lifecycle/admission policy. J14 owns provider authentication, trusted tenant binding and durable ingress. J18 owns recovery/certainty. J2/J15 own fresh-action authority. J5 consumes the admission decision. Primary kernels remain K9/K7/K11; secondary K1/K3/K5/K8.
+
+## Exact next action - produce a bounded review artifact
+
+Stage: **J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION**.
+
+Planned output, not created by this checkpoint:
+`docs/intelligence/investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md`.
+
+Start with the lifecycle ownership and callback-admission tables, pooling Microtraces 001-004 plus the supplement. Then complete or explicitly defer the finite gaps:
+
+1. Finish the named ConnectorStatus-writer inventory; classify each as grant-creating, projection-only, activity-evidence, health-observation or revocation.
+2. Compare Microtrace 004's stale-intent/split-ownership candidate with actual canonical registers and J14/J18/readiness roots; allocate only if genuinely independent.
+3. Map legacy-credential and retained-provider-mapping migration, plus provider-subscription cleanup ownership and uncertain remote cleanup.
+4. Backward re-audit J5/J14/J18/J2/J15 and reinject K9/K7/K11.
+5. Map P01-P12 and Microtrace 004's cases to closure gates with evidence-based pass/defer/reopen decisions. Designed tests remain unexecuted until actually run.
+
+Do not restart a generic provider scan, claim exhaustive subscription/writer coverage, mark J13 converged, or silently rebaseline to newer main. Reopen source only for a named gap, contradictory evidence, a distinct path, provider constraint or failed proof.
+
+## Fresh-chat load and checkpoint discipline
+
+Read AGENTS.md, AGENT-CONTINUITY.md, 00-START-HERE.md, 07-CURRENT-STATE.md, all four CURRENT/ROLLOVER files, the J13 dossier and the full five-artifact evidence pool above. Load the allocation ledgers and relevant canonical finding/contradiction/recommendation supplements before allocation decisions. Run Context Integrity Check; report a specific unresolved context condition rather than pretending it passed.
+
+Persist the next review, update the dossier and all current/rollover files, and verify the resulting Git checkpoint before ending a material tranche. Production implementation remains unauthorized; drafted execution packets are not implementation permission.
