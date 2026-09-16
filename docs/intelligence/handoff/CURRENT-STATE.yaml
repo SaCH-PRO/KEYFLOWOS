@@ -1,42 +1,36 @@
 project: KEYFLOWOS
-analysis_version: 67
+analysis_version: 68
 last_updated: 2026-09-16
-checkpoint_id: J13-LAC-2026-09-16-01
-phase: whole_system_virtual_model_j13_adapter_conformance_and_migration_closure
-status: J5_PROVISIONALLY_CONVERGED_J13_CONTRACT_REVIEW_COMPLETE_NOT_CONVERGED
+checkpoint_id: J13-ACM-2026-09-16-01
+phase: whole_system_virtual_model_j13_bounded_alignment_j24_engineering_safety_next
+status: J13_MAPPED_CORE_PROVISIONALLY_TARGET_ALIGNED_J24_ACTIVATION_NEXT
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-context_integrity: PASS_FOR_BOUNDED_TARGET_CONTRACT_TRANCHE
-context_integrity_evidence: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md#12-evidence-and-context-integrity
-persistence_only_checkpoint: false
+canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
+context_integrity: PASS_FOR_BOUNDED_Q1_Q4_CONTINUATION
 fresh_chat_context_integrity_check_required: true
+persistence_only_checkpoint: false
 implementation_authorized: false
 runtime_proof_executed: false
+publication_mode: SINGLE_COMMIT_ANALYSIS_AND_MATCHING_CONTINUITY
 checkpoint_provenance:
-  input_intelligence_head: a100ec1bc746e0433338e536fe21e05d55f49bb7
-  prior_checkpoint_id: J13-BCR-2026-09-16-01
+  input_intelligence_head: 2b177c772036eee83c24b79ee649d99fd3a2dba1
+  prior_checkpoint_id: J13-LAC-2026-09-16-01
+  prior_bounded_review_checkpoint: J13-BCR-2026-09-16-01
   bounded_review_commit: 6dbbdd34489d77ed1fbc26ff5f6bd1968ee2b953
-  prior_review_input: 4a5e4f47e3903e71f8bb5aa22e843c9d2f3693f6
-  earlier_intelligence_head: 0f7000d6c141e2296ec923f6d9105bd6f7841891
-  supplement_creation_commit: 0e8658d3b598948907c1082291e26ec5c2582eaf
-  publication_mode: SINGLE_COMMIT_CANDIDATE_AND_CONTINUITY
-  final_checkpoint_resolution: resolve_live_branch_head_and_matching_checkpoint_id
-  microtraces_and_separate_supplement_preserved: true
+  bounded_review_continuity_commit: a100ec1bc746e0433338e536fe21e05d55f49bb7
+  earlier_handoff_commit: 4a5e4f47e3903e71f8bb5aa22e843c9d2f3693f6
+  earlier_pre_checkpoint_head: 0f7000d6c141e2296ec923f6d9105bd6f7841891
+  callback_supplement_creation_commit: 0e8658d3b598948907c1082291e26ec5c2582eaf
+  output_resolution: RESOLVE_LIVE_BRANCH_HEAD_AND_MATCHING_CHECKPOINT_ID
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  later_main_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+  later_main_previously_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
-  prior_bounded_review_source_files: 7
-  this_tranche_source_reads:
-    - path: apps/server/src/core/connectors/google-suite.service.ts
-      scope: lines_180_285
-      blob_sha: 1c4a2e43480d8894bc9b26be05cb01d8c6efaf0f
-    - path: apps/server/src/modules/connect/google-token.helper.ts
-      scope: full_file
-      blob_sha: 6087ec1dd1534ab1d5639c7b321b442fa6555bb0
-  new_source_read_count: 2
-  source_count_is_exhaustive_coverage: false
+  fresh_source_manifest: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md#11-evidence-manifest-and-exactness
+  source_scope: NAMED_FULL_OR_PARTIAL_READS_NOT_EXHAUSTIVE
+  tenant_values_or_remote_configuration_inspected: false
 canonical_ranges:
   findings_through: F227
   contradictions_through: C177
@@ -47,14 +41,16 @@ next_free_ids:
   contradiction: C178
   recommendation: KF-REC-058
   allocation_status: UNALLOCATED
+allocation_authority: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 journey_programme:
   total_canonical_journeys: 25
   dossier_count: 19
   dossier_coverage_percent: 76
   dossierless: [J8, J9, J20, J21, J22, J24]
-  coverage_provenance: INHERITED_NOT_RECOUNTED_THIS_CHECKPOINT
+  coverage_provenance: INHERITED_NOT_RECOUNTED
   coverage_is_programme_completion: false
-  active: J13
+  next_activation: J24
+  next_activation_dossier_created: false
 mature_pools:
   J16_K4: {recommendation: KF-REC-049, findings: F161-F178, contradictions: C111-C128}
   J17: {recommendation: KF-REC-051, findings: F179-F184, contradictions: C129-C134}
@@ -65,133 +61,152 @@ mature_pools:
   J11: {recommendation: KF-REC-055, findings: F215-F218, contradictions: C165-C168, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED}
   J12: {recommendation: KF-REC-056, findings: F219-F221, contradictions: C169-C171, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED}
   J5: {recommendation: KF-REC-057, findings: F222-F227, contradictions: C172-C177, status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED}
+  J13:
+    recommendation: null
+    inherited_root: F227_C177
+    status: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
+    acceptance_home: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md#9-q4---bounded-convergence-and-cross-kernel-reinjection
 j5:
   dossier: docs/intelligence/journeys/KF-JOURNEY-005-CONVERSATION-BUSINESS-ACTION.md
-  roots: [F222_C172, F223_C173, F224_C174, F225_C175, F226_C176, F227_C177]
   recommendation: KF-REC-057
   status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED
-  binding_refinement: SEPARATE_OCCURRENCE_ORIGIN_FROM_PRESENT_USE_ADMISSION
-  reopen_triggers: [J13_target_acceptance, J22_full_dossier, runtime_proof, later_contradictory_implementation_evidence]
+  reopen_triggers: [J13_scope_or_admission_counterexample, J22_full_dossier, runtime_proof, later_contradictory_evidence]
 j13:
   dossier: docs/intelligence/journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md
-  status: CONTRACT_SPECIFIED_ADVERSARIALLY_REVIEWED_CONFORMANCE_PENDING_NOT_CONVERGED
+  status: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
+  entire_provider_estate_converged: false
+  implementation_conformance_proven: false
   inherited_root: F227_C177
   primary_kernels: [K9, K7, K11]
   secondary_kernels: [K1, K3, K5, K8]
-  adjacent_journeys: [J5, J14, J18, J2, J15, J12]
+  adjacent_journeys: [J5, J14, J18, J2, J15, J12, J24]
   microtraces:
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md
-  supplements:
-    - docs/intelligence/investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md
+  separate_supplement: docs/intelligence/investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md
   bounded_review: docs/intelligence/investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md
   current_contract: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
-  microtrace_004_subject: STALE_OAUTH_CONNECT_INTENT_AND_SPLIT_DRIVE_LIFECYCLE_OWNERSHIP
-  current_narrowing:
-    whatsapp_disconnect_revocation: CONDITIONAL_STATIC_REACHABILITY_F227_C177
-    meta_shared_route: ABSENT_MAPPING_BLOCKS_SAME_PAGE_RECREATION_RESTORES_LOOKUP
-    meta_scoped_route: INDEPENDENT_TENANT_BINDING_AND_LIFECYCLE_ADMISSION_REQUIRED
-    payment_activity: STATUS_CONNECTED_NOT_LITERAL_HEALTHSTATUS_HEALTHY
-    historical_payment_evidence: BOUNDED_RECONCILIATION_NOT_NEW_EFFECT_OR_GRANT
-    quickbooks_legacy_fallback: CONDITIONAL_READ_SMOKE_ACTIVITY_REACHABILITY
-    xero_legacy_fallback: CONDITIONAL_SMOKE_ACTIVITY_REACHABILITY_CENTRAL_TENANT_ID_WRITE_GUARD_RETAINED
-    actual_legacy_secret_presence: NOT_INSPECTED
-    accounting_callback_reachability: NOT_ESTABLISHED
-    gmail_drive_watch_registration: NOT_ESTABLISHED_NOT_GLOBAL_ABSENCE
-    normal_google_postdisconnect_calls: CREDENTIAL_CONSTRAINED_INFLIGHT_WORK_IS_DISTINCT
-    shared_google_refresh_race: ACCESS_EXPIRY_CAN_BE_REWRITTEN_AFTER_DISCONNECT_REFRESH_FIELD_NOT_RESTORED
-    shared_google_refresh_next_invocation: STILL_REQUIRES_REFRESH_FIELD
-    google_suite_token_sharing: ONE_EXCHANGE_TOKEN_COPIED_TO_ENABLED_SERVICE_FIELDS_IN_SOURCE
-    google_suite_refresh_omission: TARGET_MUST_NOT_INHERIT_UNPROVEN_PRIOR_ACCOUNT_REFRESH_TOKEN
-    google_suite_forms_verification: SCOPE_PREMISE_NOT_LIVE_FORMS_PROBE
-    google_remote_revocation_scope: EXTERNAL_DOC_CONSTRAINT_NOT_OBSERVED_BASELINE_REVOKE
-    named_writer_details: BOUNDED_REVIEW_SECTION_5_W01_W18
+  conformance_and_migration_map: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
+  test_design_manifest: docs/intelligence/investigations/J13-INTEGRATION-TEST-MANIFEST.yaml
+  original_evidence_and_contract_unchanged: true
+  selected_contract: D01_D10_T01_T13
+  acceptance_overlay: ACM_Q4_DECLARED_SCOPE_ONLY
+  scope:
+    includes: [W01_W18_named_boundaries, Google_suite_helper_dedicated_Drive_lifecycle, retained_WhatsApp_Meta_payment_callback_boundaries, named_legacy_credential_and_recovery_dependencies]
+    excludes: [exhaustive_adapter_writer_coverage, whole_schema_reuse_DDL, actual_remote_registration_configuration, runtime_or_migration_proof]
+  q_queue_results:
+    Q1: CLOSED_NAMED_SOURCE_MAP_WITH_EXECUTION_SCHEMA_INTERFACE_PREREQUISITES
+    Q2: CLOSED_SOURCE_DESIGN_REMOTE_CONFIGURATION_DEFERRED
+    Q3: CLOSED_NAMED_BOUNDARY_MAP_ACTUAL_REGISTRATIONS_DEFERRED
+    Q4: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
   allocation_decisions:
-    supplement_mechanisms: REUSE_F227_C177
-    microtrace_004_candidate: BOUNDED_REGISTER_COMPARISON_COMPLETE_SPECIALIZATION_REFINE_F227_C177
-    distinct_oauth_and_split_owner_obligations_preserved: true
+    microtrace_004_candidate: BOUNDED_SPECIALIZATION_REFINE_F227_C177
+    new_drive_cross_path: ADDITIONAL_F227_C177_MANIFESTATION_NO_NEW_ID
+    engineering_safety_observations: J24_INPUT_NOT_NEW_CANONICAL_ALLOCATION
     new_ids_allocated: false
-    target_contract_status: SELECTED_CANDIDATE_NOT_PROGRAMME_CONVERGENCE_OR_IMPLEMENTATION_AUTHORIZATION
-    exhaustive_register_comparison_claimed: false
-  selected_candidate:
-    decision_refs: D01_D10
-    transitions: T01_T13
-    canonical_home: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
-    principles:
-      - local_grant_is_distinct_from_remote_authorization_scope
-      - grant_credential_version_intent_config_cursor_and_health_are_separate
-      - revoke_is_terminal_for_the_old_grant
-      - activation_requires_current_actor_authority_and_current_intent_target
-      - all_named_writers_have_explicit_permitted_write_sets
-      - local_revoke_and_material_local_commits_share_an_enforced_ordering_gate
-      - credential_version_fences_same_grant_refresh_races
-      - origin_lineage_is_not_present_use_admission
-      - historical_adoption_does_not_rewrite_unknown_origin
-      - pre_admitted_remote_attempts_are_not_retroactively_cancelled_by_local_revoke
-      - destructive_cleanup_requires_remote_scope_dependency_and_conflict_barrier
-      - discarded_tokens_are_not_blindly_revoked_when_remote_scope_can_be_shared
-  proof_status:
-    P01_P12: ANALYTICALLY_REVIEWED_NOT_EXECUTED
-    M004_01_06: ANALYTICALLY_REVIEWED_NOT_EXECUTED
-    N01_N06: ANALYTICALLY_REVIEWED_NOT_EXECUTED
-    A01_A08: NEW_DESIGN_COUNTEREXAMPLES_REVIEWED_NOT_EXECUTED
-    case_count: 32
-    named_shared_writer_inventory: COMPLETE_BOUNDED_W01_W18
-    exhaustive_writer_inventory: NOT_COMPLETE
-    full_subscription_inventory: NOT_ESTABLISHED
-    live_provider_teardown: NOT_EXECUTED
+  preserved_exactness:
+    - shared_logger_is_not_ConnectorStatus_writer
+    - monitor_own_success_branch_is_nonwriter_selection_does_not_fence_late_failure
+    - payment_status_connected_not_literal_healthStatus_field_proof
+    - quickbooks_xero_legacy_fallback_conditional_xero_tenantId_guard_retained
+    - unknown_callback_origin_is_not_current_grant
+    - historical_reconciliation_is_not_fresh_effect_permission
+    - gmail_drive_watches_and_accounting_callbacks_not_established
+    - local_revoke_does_not_retroactively_cancel_admitted_remote_attempt
+    - remote_cleanup_requires_scope_and_dependency_proof
+  new_source_refinement:
+    shared_refresh_does_not_restore_refresh_field: true
+    next_shared_helper_requires_refresh: true
+    dedicated_Drive_accepts_restored_unexpired_access_without_refresh: CONDITIONAL_STATIC_CROSS_PATH_NOT_RUNTIME_PROOF
+    BusinessGuard_is_connector_management_authority: false
+    Prisma_extensions_are_universal_lifecycle_or_transaction_proof: false
+    legacy_Stripe_forwarding_comment_matches_direct_mutation_body: false
   closure_gates:
-    G01_checkpoint_scope: PASS
+    G01_context: PASS_BOUNDED
     G02_evidence_pool: PASS
-    G03_named_writer_inventory: RETAIN_PASS_BOUNDED
-    G04_exhaustive_coverage: DEFER_EXPLICIT_SCOPE
-    G05_microtrace_004_comparison: RETAIN_PASS_BOUNDED
-    G06_ownership_admission: PASS_DESIGN_REFINED
-    G07_transition_fencing_contract: PASS_DESIGN_WITH_STATED_GUARANTEE_LIMITS
-    G08_migration_ownership: PASS_DESIGN_ORDERED
-    G09_remote_subscription_evidence: DEFER_NAMED_CONFORMANCE
-    G10_backward_reaudit: PASS_BOUNDED_TARGET_REVIEW
-    G11_case_coverage: PASS_ANALYTICAL_MAPPING
+    G03_named_writers: RETAIN_PASS_BOUNDED
+    G04_exhaustive_coverage: DEFER_OUTSIDE_DECLARED_CORE
+    G05_antiduplication: RETAIN_PASS_BOUNDED
+    G06_ownership_admission: PASS_BOUNDED_TARGET_REVIEW
+    G07_transition_contract: PASS_DESIGN_WITH_EXTERNAL_LIMITS
+    G08_migration: PASS_SOURCE_TO_DESIGN_MAPPING_FINAL_DDL_NOT_DONE
+    G09_remote_registration_evidence: DEFER_DEPLOYMENT_CONFORMANCE
+    G10_backward_reaudit: PASS_BOUNDED_OWNERSHIP_REVIEW
+    G11_case_inventory: DESIGNED_MAPPED_NOT_EXECUTED
     G12_runtime_proof: NOT_EXECUTED
-    G13_j13_convergence: DEFER_CONFORMANCE_AND_MIGRATION_DECISION
-    G14_production_authorization: UNAUTHORIZED
+    G13_convergence: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
+    G14_implementation_authorization: UNAUTHORIZED
+  reopen_triggers:
+    - new_path_bypasses_selected_lifecycle_or_transaction_contract
+    - provider_semantics_falsify_remote_scope_or_cleanup_barrier
+    - schema_or_claim_reuse_cannot_enforce_required_invariant
+    - runtime_or_migration_test_falsifies_selected_contract
+    - later_journey_or_baseline_contradicts_current_scope
+integration_and_testing:
+  design_owner: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
+  machine_inventory: docs/intelligence/investigations/J13-INTEGRATION-TEST-MANIFEST.yaml
+  integration_slices: [I0_environment_proof, I1_compatible_storage, I2_lifecycle_credentials, I3_local_consumers, I4_external_effects_cleanup, I5_ux_rollout]
+  case_sets: [P01_P12, M004_01_06, N01_N06, A01_A08, R01_R12]
+  case_count: 44
+  case_runtime_status: NOT_EXECUTED
+  runner_bindings_created: false
+  harness_implemented: false
+  metadata_consistency_check:
+    executed: true
+    result: PASS
+    scope: OFFLINE_DESIGN_METADATA_ONLY
+    validated_manifest_blob: aa44ed3db5f6e1075b50ef31f64037fdcaeba8f5
+    checks: [44_unique_case_ids, every_case_mapped, six_slices, dependencies_acyclic]
+    application_or_provider_test: false
+  existing_flag_seam: GrowthBookService
+  flags_are_authority_gates: false
+  instant_flag_propagation_proven: false
+  optional_behavior_changes: ADD_DISABLE_REPLACE_REMOVE_WITH_COMPATIBILITY_AND_DEPENDENCY_CHECKS
+  mandatory_safety_invariants_toggleable: false
+  safety_requirement_evolution: EXPLICIT_REVIEW_SUPERSESSION_AND_PRESERVED_REGRESSION
+  shadow_live_effects_allowed: false
+  safe_reference_equals_unfenced_baseline: false
+  production_test_resources_allowed: false
+  source_test_observations:
+    integration_config_passWithNoTests: true
+    social_sync_fixture_uses_root_env_and_fixed_prefix_cleanup: true
+    actual_test_environment_or_collision_observed: false
+remaining_evidence_debts:
+  ED1: whole_schema_account_claim_reuse_exact_DDL_indexes_backfill_transaction_extensions_and_rollback_floor
+  ED2: unmapped_adapter_worker_legacy_reader_conformance_and_protected_scope_cutover
+  ED3: actual_remote_registration_account_client_project_dependencies_and_cleanup_outcomes
+  ED4: executable_case_bindings_isolated_harness_runtime_provider_migration_and_negative_control_results
+  ED5: deliberate_later_implementation_baseline_comparison_before_execution
 active_frontier:
-  stage: J13_ADAPTER_CONFORMANCE_AND_MIGRATION_CLOSURE
-  primary_journey: J13
-  last_completed_stage: J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW
-  immediate_item: Q1_LOCAL_COMMIT_AND_AUTHORITY_MAP
-work_queue:
-  - {id: Q1, title: local_commit_and_authority_map, status: NEXT}
-  - {id: Q2, title: google_remote_dependency_boundary, status: QUEUED}
-  - {id: Q3, title: retained_callback_and_registration_ownership, status: QUEUED}
-  - {id: Q4, title: bounded_j13_closure_decision, status: QUEUED}
+  stage: J24_ENGINEERING_SAFETY_AND_REVERSIBLE_TESTING_ACTIVATION
+  primary_journey: J24
+  status: NEXT_ACTIVATION_NOT_STARTED
+  last_completed_stage: J13_ADAPTER_CONFORMANCE_AND_MIGRATION_CLOSURE
+  completed_items: [Q1, Q2, Q3, Q4]
 exact_next_action:
-  artifact: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
-  artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
+  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md
+  planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
   instruction: >-
-    Continue from the committed lifecycle-authority candidate, beginning with Q1.
-    Map the named controller, registry, credential service, suite/helper and dedicated
-    Drive paths to actual DB entities/keys, current authority consumers, transactions
-    and claim boundaries for T01-T10. Decide which existing seams can be strengthened
-    and name exact schema/interface gaps without implementing them. Then execute Q2,
-    Q3 and Q4 in order under candidate section 11. Each item ends in close/defer/reopen
-    with evidence. Preserve the selected contract unless a concrete counterexample
-    falsifies it. Do not recreate BCR, repeat a generic provider scan or draft another
-    general lifecycle candidate. Keep runtime/provider proof separate from analytical
-    closure and maintain read-only production. Publish substantive results with
-    refreshed CURRENT/ROLLOVER pointers in a coherent checkpoint.
+    Run Context Integrity Check. Preserve J13 bounded mapped-core alignment and
+    the D/T contract; do not repeat Q1-Q4 or restart a generic provider scan.
+    Activate J24 from the concrete test/config/GrowthBook/OS evidence and I0/R01-R12
+    in the conformance map. Trace actual runner/setup/environment/cleanup,
+    build/boot, flag exposure and integration ownership. Specify isolated proof
+    and change-admission boundaries using existing mechanisms. Do not edit OS.md,
+    weaken test assertions, run write-capable tests on unverified resources, modify
+    production code or promote execution packets. Record current reality versus
+    required implementation, persist the J24 result and refresh continuity.
 constraints:
-  - production_code_read_only
-  - implementation_authorized_false
-  - runtime_and_provider_tests_not_executed
-  - F228_C178_KF_REC_058_remain_unallocated
-  - preserve_microtraces_and_separate_callback_supplement
+  - production_code_schema_and_deployment_read_only
+  - no_runtime_provider_or_migration_proof_claim
   - no_silent_forensic_rebaseline
-  - no_unknown_origin_relabelled_current
-  - no_remote_cancellation_guarantee_from_local_database_lock
-  - no_destructive_shared_authorization_cleanup_without_scope_proof
-  - no_generic_provider_rescan_without_named_gap
-  - one_current_contract_one_ordered_work_queue
-  - persist_and_verify_before_ending_tranche
+  - no_canonical_allocation_without_04B_gate
+  - F228_C178_KF_REC_058_remain_unallocated
+  - preserve_microtraces_SUP_BCR_and_LAC
+  - one_current_machine_state_one_contract_one_ordered_frontier
+  - no_feature_flag_rollback_that_reactivates_revoked_authority
+  - no_history_destruction_or_fake_external_undo
+  - no_gate_weakening_to_manufacture_success
+  - publish_and_verify_intelligence_checkpoint

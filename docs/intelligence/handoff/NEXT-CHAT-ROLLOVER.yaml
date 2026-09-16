@@ -1,16 +1,16 @@
 project: KEYFLOWOS
-rollover_version: 42
+rollover_version: 43
 last_updated: 2026-09-16
-checkpoint_id: J13-LAC-2026-09-16-01
-status: LIVE_J13_CONTRACT_REVIEW_COMPLETE_CONFORMANCE_NEXT
+checkpoint_id: J13-ACM-2026-09-16-01
+status: LIVE_J13_MAPPED_CORE_ALIGNMENT_J24_ACTIVATION_NEXT
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-input_intelligence_head: a100ec1bc746e0433338e536fe21e05d55f49bb7
+input_intelligence_head: 2b177c772036eee83c24b79ee649d99fd3a2dba1
 canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
 current_handoff: docs/intelligence/handoff/CURRENT-HANDOFF.md
-publication_mode: SINGLE_COMMIT_CANDIDATE_AND_CONTINUITY
-final_checkpoint_resolution: RESOLVE_LIVE_BRANCH_HEAD_AND_CHECKPOINT_ID
-context_integrity: PASS_FOR_BOUNDED_TARGET_CONTRACT_TRANCHE
+publication_mode: SINGLE_COMMIT_ANALYSIS_AND_MATCHING_CONTINUITY
+output_resolution: RESOLVE_LIVE_BRANCH_HEAD_AND_MATCHING_CHECKPOINT_ID
+context_integrity: PASS_FOR_BOUNDED_Q1_Q4_CONTINUATION
 fresh_chat_context_integrity_check_required: true
 implementation_authorized: false
 runtime_proof_executed: false
@@ -18,10 +18,9 @@ persistence_only_checkpoint: false
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  later_main_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+  later_main_previously_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
-  named_source_reads: 2
-  scope_manifest: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md#12-evidence-and-context-integrity
+  source_manifest: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md#11-evidence-manifest-and-exactness
 canonical_ranges:
   findings_through: F227
   contradictions_through: C177
@@ -36,11 +35,13 @@ journey_coverage:
   is_programme_completion: false
 j13:
   dossier: docs/intelligence/journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md
-  status: CONTRACT_REVIEW_COMPLETE_NOT_CONVERGED
+  status: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
+  whole_provider_estate_converged: false
+  implementation_conformance_proven: false
   inherited_root: F227_C177
-  primary_kernels: [K9, K7, K11]
-  secondary_kernels: [K1, K3, K5, K8]
-  adjacent_journeys: [J5, J14, J18, J2, J15, J12]
+  current_contract: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
+  conformance_map: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
+  test_design_manifest: docs/intelligence/investigations/J13-INTEGRATION-TEST-MANIFEST.yaml
   microtraces:
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md
@@ -48,50 +49,70 @@ j13:
     - docs/intelligence/investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md
   separate_supplement: docs/intelligence/investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md
   bounded_review: docs/intelligence/investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md
-  current_contract: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
-  microtrace_004_and_supplement_preserved: true
-  microtrace_004_classification: BOUNDED_SPECIALIZATION_REFINE_F227_C177
+  old_evidence_and_contract_unchanged: true
   selected_contract: D01_D10_T01_T13
-  case_sets: [P01_P12, M004_01_06, N01_N06, A01_A08]
-  total_designed_cases: 32
-  case_status: ANALYTICALLY_REVIEWED_NOT_EXECUTED
-  G07: PASS_DESIGN_WITH_STATED_GUARANTEE_LIMITS
-  G13: DEFER_CONFORMANCE_AND_MIGRATION_DECISION
-  explicit_debts: [G04_exhaustive_coverage, G09_actual_remote_evidence, G12_runtime_proof, G14_implementation_authorization]
-  limits:
-    - refresh_race_does_not_restore_cleared_refresh_field
-    - unknown_origin_is_not_newest_grant
-    - local_revoke_does_not_retroactively_cancel_pre_admitted_remote_attempt
-    - local_service_disconnect_is_not_automatic_provider_wide_revoke
-    - destructive_cleanup_requires_proven_scope_and_dependency_barrier
-j5_status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED_REOPENABLE
+  completed_queue: [Q1, Q2, Q3, Q4]
+  acceptance_scope: MAP_SECTION_1_AND_9
+  primary_kernels: [K9, K7, K11]
+  secondary_kernels: [K1, K3, K5, K8]
+  adjacent_journeys: [J5, J14, J18, J2, J15, J12, J24]
+  G07: PASS_DESIGN_WITH_EXTERNAL_LIMITS
+  G13: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
+  remaining_debts:
+    ED1: whole_schema_and_claim_reuse_DDL_transaction_extensions_backfill_rollback_floor
+    ED2: broader_adapter_worker_reader_conformance
+    ED3: actual_remote_registration_account_client_dependencies_and_cleanup
+    ED4: case_runner_bindings_harness_and_executed_results
+    ED5: deliberate_later_baseline_comparison_before_execution
+  cross_path_refinement:
+    shared_helper_requires_refresh_on_next_call: true
+    dedicated_Drive_accepts_restored_unexpired_access_without_refresh: CONDITIONAL_STATIC_REACHABILITY
+    refreshed_access_restores_cleared_refresh: false
+integration_testing:
+  integration_slices: [I0, I1, I2, I3, I4, I5]
+  case_sets: [P01_P12, M004_01_06, N01_N06, A01_A08, R01_R12]
+  case_count: 44
+  runtime_status: NOT_EXECUTED
+  executable_bindings: NONE_CREATED
+  harness: NOT_IMPLEMENTED_BY_MANIFEST
+  offline_design_metadata_validation: PASS_44_UNIQUE_ALL_MAPPED_ACYCLIC_NOT_APP_TEST
+  validated_manifest_blob: aa44ed3db5f6e1075b50ef31f64037fdcaeba8f5
+  optional_variants: ADD_DISABLE_REPLACE_REMOVE_WITH_CONTRACTS
+  safety_invariants_toggleable: false
+  legitimate_requirement_change: REVIEWED_SUPERSESSION_WITH_REGRESSION_EVIDENCE
+  shadow_live_effects_allowed: false
+  feature_flags_are_authority: false
+  instant_flag_propagation_proven: false
+  unsafe_baseline_rollback_allowed: false
+  isolated_resources_required: [database, tenant_fixtures, queues, storage, callbacks, provider_sandbox]
+source_test_observations:
+  passWithNoTests_true: true
+  root_env_and_fixed_prefix_cleanup_in_inspected_test: true
+  actual_production_test_or_collision_proven: false
 broader_pools_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#mature_pools
 active_frontier:
-  stage: J13_ADAPTER_CONFORMANCE_AND_MIGRATION_CLOSURE
-  last_completed_stage: J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW
-  immediate_item: Q1_LOCAL_COMMIT_AND_AUTHORITY_MAP
-work_queue:
-  - {id: Q1, title: local_commit_and_authority_map, status: NEXT}
-  - {id: Q2, title: google_remote_dependency_boundary, status: QUEUED}
-  - {id: Q3, title: retained_callback_and_registration_ownership, status: QUEUED}
-  - {id: Q4, title: bounded_j13_closure_decision, status: QUEUED}
+  stage: J24_ENGINEERING_SAFETY_AND_REVERSIBLE_TESTING_ACTIVATION
+  primary_journey: J24
+  status: NEXT_ACTIVATION_NOT_STARTED
+  last_completed_stage: J13_ADAPTER_CONFORMANCE_AND_MIGRATION_CLOSURE
 exact_next_action:
-  artifact: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
-  artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
+  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md
+  planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
   instruction: >-
-    Run Context Integrity Check and continue at Q1 from the completed lifecycle
-    candidate. Map the named controller/registry/credentials, suite/helper and Drive
-    paths to real DB entities/keys, current authority consumers and transaction/claim
-    boundaries for T01-T10. Identify reusable seams and missing interfaces without
-    implementation. Continue Q2-Q4 in candidate section 11. Close/defer/reopen each
-    item with evidence; do not recreate the candidate/BCR or restart a provider scan.
-    Keep actual tests unexecuted unless a later authorized run occurs. Preserve
-    baseline, all evidence strands and unallocated IDs. Publish substantive results
-    and matching continuity, then verify the branch checkpoint.
+    Run Context Integrity Check and preserve completed J13 bounded alignment.
+    Activate J24 from actual runner/setup/environment/cleanup, build/boot,
+    GrowthBook and OS evidence named in the conformance map. Work I0/R01-R12
+    isolation and change-admission ownership using existing mechanisms; keep
+    implementation/runtime authorization separate. Do not recreate Q1-Q4,
+    weaken test assertions or OS.md, modify production or run write-capable
+    tests against unverified resources. Persist results and matching continuity.
 constraints:
-  - production_read_only
-  - no_silent_rebaseline
-  - no_new_canonical_ids_without_allocation_gate
-  - one_current_contract_one_ordered_queue
-  - no_claim_of_runtime_or_provider_proof
-  - no_candidate_document_as_automatic_convergence
+  - production_source_schema_deployment_read_only
+  - no_runtime_or_provider_proof_claim
+  - no_silent_forensic_rebaseline
+  - no_unallocated_ID_use
+  - preserve_M001_M004_SUP_BCR_LAC
+  - no_revoked_authority_restoration_on_feature_rollback
+  - no_history_destruction_or_fake_external_undo
+  - no_weakening_gate_to_manufacture_green
+  - one_state_one_contract_one_ordered_frontier

@@ -1,8 +1,8 @@
 # KEYFLOWOS - Next Chat Rollover
 
-Checkpoint: `J13-LAC-2026-09-16-01`  
+Checkpoint: `J13-ACM-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **LIVE / J13 CONTRACT REVIEW COMPLETED / CONFORMANCE NEXT**
+Status: **LIVE; J13 BOUNDED Q1-Q4 COMPLETED; J24 ACTIVATION NEXT**
 
 ## Resume instruction
 
@@ -10,62 +10,60 @@ Status: **LIVE / J13 CONTRACT REVIEW COMPLETED / CONFORMANCE NEXT**
 Continue KEYFLOWOS from canonical repository intelligence. Do not restart.
 Repository: SaCH-PRO/KEYFLOWOS
 Branch: docs/keyflow-intelligence-foundation
-Checkpoint: J13-LAC-2026-09-16-01
-Input/provenance commit: a100ec1bc746e0433338e536fe21e05d55f49bb7
-Forensic baseline: main@8f173bfe79f1418159cf4099ea18b0d60d203ec2
-Resolve the current branch head and verify matching checkpoint ID.
+Checkpoint: J13-ACM-2026-09-16-01
+Input/provenance commit: 2b177c772036eee83c24b79ee649d99fd3a2dba1
+Forensic implementation baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+Resolve live intelligence head and matching checkpoint ID; input is not output.
 
-Read AGENTS.md and docs/intelligence/AGENT-CONTINUITY.md, then
-00-START-HERE.md, 07-CURRENT-STATE.md and all four CURRENT/ROLLOVER files.
-Read the J13 dossier and retain Microtraces 001-004 plus the separately named
-J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md.
-Load J13-BOUNDED-CONVERGENCE-REVIEW.md and the now COMPLETED
-J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md. Run Context Integrity Check.
+Read AGENTS.md and docs/intelligence/AGENT-CONTINUITY.md, START HERE,
+07-CURRENT-STATE.md and all four CURRENT/ROLLOVER files.
+Load the J13 dossier and preserve Microtraces 001-004 plus the separate SUP.
+Read BCR, LAC, the now completed J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md,
+and J13-INTEGRATION-TEST-MANIFEST.yaml. Run Context Integrity Check.
 
-J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW is completed at design scope.
-Do not recreate the candidate or BCR. Follow the selected D01-D10 / T01-T13
-contract unless a concrete counterexample falsifies it.
+Q1-Q4 are completed at the map's declared analytical scope.
+J13 is provisionally target-aligned for its mapped core ONLY, not every provider
+or production behavior. D01-D10/T01-T13 remain in LAC; the acceptance overlay,
+source mapping and integration slices I0-I5 are in the conformance map.
+Do not recreate these artifacts or restart the provider scan.
 
-Execute J13_ADAPTER_CONFORMANCE_AND_MIGRATION_CLOSURE, beginning Q1.
-Produce docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md.
-Q1 maps the named controller/registry/credentials, Google suite/helper and
-Drive lifecycle paths to real entities/keys, current authority consumers,
-transactions and claims for T01-T10. Identify reusable existing seams and exact
-missing schema/interfaces without implementation. Then proceed through Q2 Google
-remote dependencies, Q3 retained callback/registration ownership, and Q4 bounded
-closure decision, as specified in candidate section 11.
+Next: J24_ENGINEERING_SAFETY_AND_REVERSIBLE_TESTING_ACTIVATION.
+Planned output: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md.
+Start from actual Vitest runner/setup/environment/cleanup, build/boot,
+GrowthBook exposure and OS gate-integrity evidence named in the J13 map.
+Resolve the reusable isolation/proof/change-admission design for I0/R01-R12.
+Do not weaken test assertions or OS.md, run write-capable tests on unverified
+resources, change production code/schema/deployment, or authorize a canary.
 
-All 32 P/M004/N/A cases were analytically reviewed, NOT executed.
-G07 is PASS_DESIGN_WITH_STATED_GUARANTEE_LIMITS, not runtime conformance.
-G13 awaits conformance/migration closure; G04/G09 evidence debts remain explicit.
-No generic provider rescan, no silent rebaseline, no production edits.
-F228/C178/KF-REC-058 remain unallocated. Commit substantive results with matching
-CURRENT/ROLLOVER updates and verify the final checkpoint before ending.
+44 cases are designed/mapped, NOT executed. The manifest is not a test harness.
+Only offline design-metadata consistency was checked, not application behavior.
+ED1-ED5 remain explicit execution-readiness debts. No silent rebaseline.
+F228/C178/KF-REC-058 remain unallocated. Commit substantive work with matching
+CURRENT/ROLLOVER state and verify the checkpoint before ending.
 ```
 
-## Truth ownership and evidence
+## One state, preserved evidence
 
-[CURRENT-STATE.yaml](CURRENT-STATE.yaml) is the current machine state; [CURRENT-HANDOFF.md](CURRENT-HANDOFF.md) is its detailed navigation. The lifecycle candidate is the one home of the current D/T design. Rollover files transport that state; they do not create another architecture.
+[CURRENT-STATE.yaml](CURRENT-STATE.yaml) owns current programme state. [CURRENT-HANDOFF.md](CURRENT-HANDOFF.md) describes the exact continuation. Rollover files transport that state, not another architecture.
 
-Source baseline stays fixed even though main was observed at `88b8016c0ef45e383cc5b0d98c7062151a6a0f27`. Candidate source evidence: suite lines 180-285 and the full shared token helper. Remaining provider-specific source results are inherited BCR/Microtrace/SUP evidence. External primary documentation and target inference are identified separately in candidate section 12.
+The source baseline is fixed. Original microtraces, separate callback/legacy supplement, BCR and LAC are unchanged. M004 remains stale OAuth intent/split Drive ownership; SUP remains provider callback/legacy-credential evidence. BCR's independent bounded anti-duplication refines F227/C177. The new map adds no canonical IDs.
 
-The old Google refresh race can restore access/expiry and return a token but **does not restore the cleared refresh field**. Do not generalize it to every later Google operation. The new cleanup decision is a target correction from shared-scope research, not an observed broad revoke in the baseline.
+## Material refinements
 
-## Decisions that must survive
+The new cross-path trace distinguishes shared Google helper behavior from dedicated Drive: the late refresh does not restore refresh, but dedicated Drive can subsequently consume restored unexpired access without refresh. Preserve the conditional source classification; no live incident or every-provider claim.
 
-One local lifecycle authority, separate credentials/configuration/health/cursor/intent coordinates; mutation-time ordering with revocation; same-grant credential-version fencing; current actor authority at activation; per-service suite target decisions; unknown occurrence origin distinct from present bounded adoption; original historical effects reconciled without fresh-effect permission; pre-admitted remote attempts not retroactively cancelled by local revoke; destructive remote cleanup constrained by scope/dependency barriers.
+BusinessGuard membership/owner access is not a current connector-management grant. Prisma tenant/encryption extensions and current upsert hooks are real seams, not proof of shared transaction/authority enforcement. Legacy Stripe still mutates directly despite a forwarding comment; compatibility URLs need one processor. Actual provider registrations and tenant credentials are not invented.
 
-M004 and the callback supplement remain separate and unchanged. BCR's M004 bounded anti-duplication result reuses F227/C177 while preserving distinct intent/ownership obligations. No canonical IDs were added.
+GrowthBook is the existing exposure seam, not revocation authority. Instant propagation is unproved. The integration config permits empty-suite success; a source test uses root .env and fixed-prefix cleanup. Those are design risks, not proof a test touched production. Keep their useful assertions and add proper isolation/proof ownership through authorized engineering work.
 
-Preserve prior exactness: status connected is not a proved healthStatus field; QB/Xero legacy fallback remains conditional and Xero tenantId restriction persists; provider callbacks/watches and actual tenant secret values are not invented; shared logger and monitor success are not direct lifecycle writers.
+## Reversible testing
 
-## One ordered queue
+Optional behavior can be added/disabled/replaced/removed through declared contracts and dependencies. Preserve safety invariants, data history, revocation, exact effect identity and one writer. Shadow has no live effects; sandbox resources are run-owned; unsafe baseline fallback is prohibited. A code rollback cannot undo a real payment/message or remove evidence of it. Requirement/test evolution is possible through explicit reviewed supersession, not weakening gates to get green.
 
-| Order | Item | Status |
-|---|---|---|
-| 1 | Q1 Local commit/authority map | NEXT |
-| 2 | Q2 Google remote dependency boundary | QUEUED |
-| 3 | Q3 Callback/registration ownership | QUEUED |
-| 4 | Q4 Declared-scope convergence decision | QUEUED |
+The manifest contains P01-P12, M004-01-06, N01-N06, A01-A08 and R01-R12. All 44 are unexecuted; bindings are empty. The offline metadata check only validated unique IDs, mapping and acyclic dependencies.
 
-Do not open another workstream while a named item can be closed or explicitly deferred. Maintain the whole-system method: evidence -> map -> trace -> journey/kernel pool -> target -> backward re-audit -> refinement -> migration/proof. Analytical progress is not app completion. Inherited 19/25 dossier coverage remains a coverage measure only.
+## Closure and next frontier
+
+J13 mapped-core provisional alignment survives with explicit ED1 schema/claim reuse and DDL, ED2 broader adapter/worker coverage, ED3 remote registration/configuration evidence, ED4 harness/runtime evidence, ED5 later-baseline comparison. No broad readiness certificate follows.
+
+J24 activation is next, not already performed. The inherited dossier count stays 19/25 and is not app-completion. J5 and broader pools remain provisionally aligned as recorded in CURRENT. Move the whole-system model forward through engineering safety; reopen J13 only for the precise invariant contradicted by evidence.
