@@ -4,32 +4,35 @@ This directory is the durable source of truth for architectural and product inte
 
 ## Live checkpoint - 2026-09-16
 
-Checkpoint: `J13-BCR-2026-09-16-01`.
+Checkpoint: `J13-LAC-2026-09-16-01`.
 
 ```text
 repository:             SaCH-PRO/KEYFLOWOS
 intelligence branch:    docs/keyflow-intelligence-foundation
 forensic main baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
 active journey:         J13 Connector Lifecycle
-active stage:           J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW
-last completed unit:    J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION
-bounded review commit:  6dbbdd34489d77ed1fbc26ff5f6bd1968ee2b953
+last completed unit:    J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW
+active stage:           J13_ADAPTER_CONFORMANCE_AND_MIGRATION_CLOSURE
+immediate work item:    Q1 Local commit and authority map
+input intelligence:    a100ec1bc746e0433338e536fe21e05d55f49bb7
 J13 convergence:        NOT YET CONVERGED
 production code:        READ-ONLY / UNAUTHORIZED
 runtime/provider tests: NOT EXECUTED
 ```
 
-For current continuation, follow `AGENT-CONTINUITY.md`, `07-CURRENT-STATE.md` and all four files under `handoff/` named CURRENT-HANDOFF.md, CURRENT-STATE.yaml, NEXT-CHAT-ROLLOVER.md and NEXT-CHAT-ROLLOVER.yaml. Context Integrity Check passed for the completed bounded continuation; run it again on fresh-chat resume. Resolve the live intelligence head because continuity commits follow the review's content commit.
+**One current state:** `handoff/CURRENT-STATE.yaml`. **One current J13 contract:** `investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md`. **One ordered queue:** Q1 local commit/authority map -> Q2 Google remote dependencies -> Q3 callback/registration ownership -> Q4 bounded closure decision.
 
-Load `journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md`, Microtraces 001-004 in `investigations/`, `investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md`, and the **completed** `investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md`.
+The candidate and continuity are published together. Resolve the live branch head and checkpoint ID; the input SHA is not its output SHA. Follow `AGENT-CONTINUITY.md`, `07-CURRENT-STATE.md` and all four CURRENT/ROLLOVER files. Run Context Integrity Check on fresh-chat resume.
 
-**Preserve both evidence strands.** Microtrace 004 is Stale OAuth Connect Intent and Split Drive Lifecycle Ownership; callback/legacy-credential analysis is a separate supplement. The bounded review independently completed M004's register comparison: SPECIALIZATION / REFINE F227-C177, with distinct obligations retained and no new canonical IDs. That bounded decision is not final target acceptance or exhaustive historical-register comparison.
+Load the J13 dossier, Microtraces 001-004, `J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md`, `J13-BOUNDED-CONVERGENCE-REVIEW.md`, then the current lifecycle candidate. The original traces, supplement and BCR are preserved unchanged. M004 remains stale OAuth intent/split Drive ownership; the callback supplement is separate. BCR's independent bounded comparison reuses/refines F227-C177 while preserving distinct obligations.
 
-The review adds seven pinned-source file inspections, W01-W18 writer/nonwriter dispositions, six new conditional interleavings, migration/cleanup ownership, backward re-audit and fourteen gates. Shared smoke success, webhook-info secret creation, late monitor failure, Gmail completion and suite callbacks require lifecycle ownership/fencing; scope and evidence are in the review. G07 exact transition/intent/mutation-time fencing and G13 convergence remain REOPEN. G04 exhaustive coverage and G09 actual provider subscription evidence remain DEFER; runtime proof and implementation authorization remain absent.
+The completed candidate maps W01-W18 to permitted writes, specifies T01-T13 transitions, and analytically reviews 32 P/M004/N/A cases. G07 is now **PASS_DESIGN_WITH_STATED_GUARANTEE_LIMITS**; no application/provider tests were run. G13 awaits conformance/migration closure; G04 exhaustive coverage and G09 actual remote evidence remain explicit debts.
 
-Exact next output: the planned, unallocated `investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md`. Start with W01-W18 transition/write sets and purpose-specific admission. Separate current grant, credential version, connect intent, health/cursor/intake projections, historical reconciliation and cleanup authority. Specify mutation-time checks, partial provisioning, unknown lineage, shared-registration ownership and N-cleanup/N+1 safety. Analytically pressure-test P01-P12, M004-01-06 and N01-N06; all remain unexecuted. Re-audit adjacent journeys/kernels and resolve G07 before revisiting G13. Do not recreate the completed review or restart a generic provider scan.
+Important refinements: local grant != remote authorization scope; credential-version and mutation-time checks are required; current actor authority remains necessary at OAuth activation; unknown occurrence origin differs from present bounded admission; local revoke does not retroactively cancel an already-admitted external request; broad cleanup must not destroy sibling or N+1 authority. The Google helper's in-flight access/expiry rewrite does not restore a cleared refresh field. External provider/database references are separated from implementation evidence in the candidate.
 
-J5 remains provisionally converged and reopenable. The older J23/J18 material below is retained architectural context, **not the current frontier**. Do not silently rebaseline source analysis to newer main or treat a candidate document as permission to allocate KF-REC-058 or implement production changes.
+**Exact next output:** `investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md`, starting at Q1. Map actual entities/keys, authority consumers and transaction/claim boundaries for the already-named controller/registry/credentials/suite/helper/Drive paths. Identify existing seams and missing interfaces without implementation. Follow Q2-Q4 only after completing or explicitly deferring the named item. Do not recreate the candidate, repeat BCR or restart a generic provider scan.
+
+J5 remains provisionally aligned and reopenable. F228/C178/KF-REC-058 remain unallocated. The older J23/J18 material below is historical architectural context, not the live frontier. Broader journey and kernel work remains preserved; no app-completion percentage or execution permission is implied by this checkpoint.
 
 ## Prime directive
 

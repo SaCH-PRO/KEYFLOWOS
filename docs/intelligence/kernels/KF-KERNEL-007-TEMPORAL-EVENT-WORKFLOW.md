@@ -6,6 +6,23 @@ Implementation evidence baseline: `main@d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
 
 Production implementation remains unauthorized.
 
+## J13 reinjection - 2026-09-16
+
+Checkpoint: `J13-LAC-2026-09-16-01`. Current J13 candidate: [Lifecycle Authority Contract](../investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md), especially D02/D04-D08, T02-T10 and sections 7-9. Source baseline for this reinjection is `8f173bfe79f1418159cf4099ea18b0d60d203ec2`; the older dossier baseline and original material below retain historical provenance rather than defining a new programme baseline.
+
+K7 coordinates intent supersession, expiry and delayed-work ordering. J13 owns local lifecycle permission; K6 owns valid domain transitions; K11 owns effect/attempt claims. Do not add a parallel workflow runtime to solve these relationships.
+
+Current candidate obligations:
+
+- Bind asynchronous work to the original local grant, credential version and relevant intake/cursor revisions. A scheduler selection or callback-entry check does not protect a later write.
+- Serialize local revocation with credential activation and material local mutation using the same enforceable commit gate. Every participating writer must consume it; a new unused coordinator is not conformance.
+- Superseding/cancelling an OAuth target prevents its later activation even while signed state remains unexpired. Activation also consumes current human/delegation authority. Partial Google-suite service targets must be fenced individually.
+- Within one grant, stale refresh/health results must not overwrite a newer credential version or observation basis. Cursor progress must not erase unresolved consumer work; sync completion cannot reset intake preferences.
+- Order local revoke against exact external-attempt admission, but do not equate a database ordering guarantee with retroactive remote cancellation. Already-admitted/in-flight attempts retain J18/K11 certainty handling.
+- Remote cleanup uncertainty may hold a dependency-scope barrier against conflicting reconnect/registration. Time or an expired local lease alone does not prove a destructive request can no longer affect a new grant.
+
+These are selected candidate semantics, not implemented gates. P01-P12, M004-01-06, N01-N06 and A01-A08 remain NOT_EXECUTED. G07 is now PASS_DESIGN_WITH_STATED_GUARANTEE_LIMITS; G13 awaits conformance/migration closure. The immediate programme frontier is Q1's named real storage/authority/claim map, not the older generic temporal questions below.
+
 ## A. Definition / Scope
 
 K7 owns the semantics that allow business behavior to remain correct across **time, recurrence, asynchronous events, retries, delays and long-running coordination**.

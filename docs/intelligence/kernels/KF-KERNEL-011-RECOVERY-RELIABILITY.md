@@ -2,6 +2,22 @@
 
 Status: ACTIVE / DIRECTIONALLY CONVERGED / NOT FROZEN
 
+## J13 reinjection - 2026-09-16
+
+Checkpoint: `J13-LAC-2026-09-16-01`. Current J13 candidate: [Lifecycle Authority Contract](../investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md), especially D08-D10, T03/T07/T10-T12 and sections 7-9. Source baseline for this supplement: `8f173bfe79f1418159cf4099ea18b0d60d203ec2`; older material below keeps its provenance. No runtime/provider proof or production authorization.
+
+K11 retains ExecutionClaim/attempt/certainty ownership. J13 contributes a purpose- and grant-bound admission requirement; it does not create another claim/recovery engine.
+
+Required refinements:
+
+- Local revoke prevents new dispatch admissions under the targeted old grant. It does not retrospectively prove that a pre-admitted external attempt cannot act. Keep exact admitted/in-flight attempts and original outcomes visible; do not suppress genuine success evidence after local revoke.
+- An admission is single-attempt and exact-action bounded, not a reusable credential lease. A retry requires current-purpose authority and the same appropriate effect identity, not a stale permit or blind reuse of N+1 credentials.
+- Lost OAuth exchange or provider rotation receipts can leave remote state unknown. Transaction retries must not automatically replay provider calls. An expired claimant lease does not establish that a remote effect or cleanup did not occur.
+- Destructive cleanup uses the identified old remote scope and a dependency barrier. A broad revoke or account-based delete can affect sibling/N+1 grants; a local row-ID check alone is insufficient. No automatic broad revoke of a discarded token without scope proof.
+- Local revocation, remote cleanup certainty and original-effect reconciliation are separate outcomes. T11 permits explicit bounded historical reconciliation, not a fresh refund/send/reversal or grant activation.
+
+All prior P/M004/N cases and new A01-A08 are analytically reviewed only. G07 is a bounded design pass; G13 remains pending adapter/migration conformance. The next work is Q1-Q4 in the current candidate, starting at Q1's real transaction/claim map. Existing kernel questions below must not restart that completed contract review.
+
 ## A. Definition / Scope
 
 Owns execution ownership, idempotency, retries, crash recovery, leases, compensation, partial failure, reconciliation and recovery behavior across side-effecting journeys.

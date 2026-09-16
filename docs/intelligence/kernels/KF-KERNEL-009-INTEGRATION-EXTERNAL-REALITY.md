@@ -6,6 +6,31 @@ Implementation evidence baseline: `main@d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
 
 Production implementation remains unauthorized.
 
+## J13 reinjection - 2026-09-16
+
+Checkpoint: `J13-LAC-2026-09-16-01`. Current J13 candidate: [Lifecycle Authority Contract](../investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md), especially D01-D05/D09-D10, T01-T13 and sections 6-9. This reinjection uses fixed source baseline `8f173bfe79f1418159cf4099ea18b0d60d203ec2`; older dossier sections retain their original provenance. Runtime/provider tests remain NOT_EXECUTED; production remains unauthorized.
+
+J13's selected logical authority contract strengthens existing connector/credential/verifier seams. K9 does not become a second domain, governance, ingress or recovery engine.
+
+Current required distinctions:
+
+```text
+local service grant != provider authorization scope != provider subscription
+credential version != connect intent != operational health != readiness
+original occurrence lineage != permission for a present specified use
+local revoke committed != remote cleanup confirmed != provider effect cancelled
+```
+
+The unified Google source copies one exchange token to enabled service columns. Google's separately cited revocation documentation can imply wider associated-user/project scope than one local service. Consequently a Drive-only local disconnect must not automatically revoke shared remote permission. Actual deployment grant sharing remains uninspected; do not group tenants by display email or invent provider grant IDs.
+
+OAuth activation consumes a current authorized intent target, account/scope evidence and current actor authority. A still-signed/unexpired but cancelled intent cannot install live credentials. Partial suite targets and omitted refresh material require explicit lineage/readiness handling.
+
+Provider callbacks keep J14 authenticity, trusted tenant binding and occurrence ownership. Unknown/old origin is not rewritten as the new grant by arrival time; a separate explicit bounded adoption decision may admit a specified present use. Historical payment evidence may reconcile an existing effect without reconnecting or authorizing a fresh action.
+
+Remote cleanup names exact scope/dependencies and reserves a barrier against conflicting registration/activation where destructive effects can overlap. Local old-ID checks alone cannot fence a remote account-wide delete/revoke. Never blindly revoke discarded tokens with uncertain shared scope. K11/J18 retains attempt/certainty and original-outcome ownership.
+
+G07 is now a bounded design pass with explicit external guarantee limits; G13 awaits adapter/migration closure. Next is Q1 actual storage/authority/claim mapping, followed by Q2 remote Google references and Q3 the already-known callback/registration surfaces, then Q4 closure. Preserve F227/C177 refinement and unallocated F228/C178/KF-REC-058. The older generic inventory questions below are not instructions to restart the completed J13 review.
+
 ## A. Definition / Scope
 
 K9 owns the semantic boundary between KEYFLOWOS internal state and **external systems / external reality**.
@@ -117,6 +142,7 @@ Current integration patterns include:
 - synchronous provider calls with inline retry;
 - local notification queues;
 - provider webhook event uniqueness in some payment paths;
+- KeyInbox/MessageIntake external-message identities;
 - outbound delivery records for channel adapters;
 - in-memory outbound webhook delivery logs;
 - signed webhooks;

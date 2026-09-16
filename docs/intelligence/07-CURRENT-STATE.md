@@ -1,168 +1,109 @@
 # KeyFlowOS Current State
 
-Last updated: 2026-09-16
-Status: CANONICAL CURRENT PROGRAMME STATE
-Checkpoint: `J13-BCR-2026-09-16-01`
+Last updated: 2026-09-16  
+Checkpoint: `J13-LAC-2026-09-16-01`  
+Status: **CANONICAL CURRENT PROGRAMME STATE**
 
-## Analytical phase
+## Current position
 
-`WHOLE-SYSTEM VIRTUAL MODEL / J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW`
+**Completed:** `J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW`.
 
-**Completed:** `J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION`, at the scope stated in the committed `investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md`.
+**Now:** `J13_ADAPTER_CONFORMANCE_AND_MIGRATION_CLOSURE`, starting with **Q1 Local commit and authority map**.
 
-**J13 remains NOT CONVERGED.** The review closes named writer and register-comparison gaps, proposes ownership/admission and migration boundaries, and assigns analytical gate dispositions. It does not establish a fully accepted lifecycle target, complete provider inventory or implementation readiness.
+J13 is **not yet provisionally converged**. Its target transitions are now specified and analytically challenged; the next task is to map them to the real storage/authority/adapter boundaries and decide bounded closure, not to write another general target document.
 
-Production remains **READ-ONLY / UNAUTHORIZED**. Runtime/provider tests remain **NOT_EXECUTED**. Context Integrity Check passed for this bounded continuation, with the evidence and historical snapshot discrepancies recorded in review section 3. A new chat must run its own check.
+Current contract: [J13 Lifecycle Authority Contract Candidate](investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md). It is the one current home of D01-D10 and T01-T13.
 
-## Durable baseline and checkpoint provenance
+Working state: [CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml). Human continuation: [CURRENT-HANDOFF.md](handoff/CURRENT-HANDOFF.md). CURRENT and ROLLOVER files carry the same frontier; they do not define separate architectures.
 
-```text
-repository:                 SaCH-PRO/KEYFLOWOS
-implementation branch:      main
-forensic baseline:          8f173bfe79f1418159cf4099ea18b0d60d203ec2
-later main observed:        88b8016c0ef45e383cc5b0d98c7062151a6a0f27
-intelligence branch:        docs/keyflow-intelligence-foundation
-review input checkpoint:    4a5e4f47e3903e71f8bb5aa22e843c9d2f3693f6
-bounded review commit:      6dbbdd34489d77ed1fbc26ff5f6bd1968ee2b953
-prior pre-checkpoint head:  0f7000d6c141e2296ec923f6d9105bd6f7841891
-supplement creation commit: 0e8658d3b598948907c1082291e26ec5c2582eaf
-```
-
-The seven fresh implementation-source reads use the fixed forensic baseline, not later main. Resolve the live intelligence head on resume: continuity commits follow the bounded review's content commit. No deliberate forensic rebaseline occurred.
-
-## Canonical ranges
+## Fixed coordinates
 
 ```text
-Findings:         F001-F227
-Contradictions:   C001-C177
-Recommendations: KF-REC-001-KF-REC-057
-Concepts:         KF-CONCEPT-001-KF-CONCEPT-042
-Next free:        F228 / C178 / KF-REC-058 - UNALLOCATED
+repository:              SaCH-PRO/KEYFLOWOS
+intelligence branch:     docs/keyflow-intelligence-foundation
+input intelligence:      a100ec1bc746e0433338e536fe21e05d55f49bb7
+implementation baseline: main@8f173bfe79f1418159cf4099ea18b0d60d203ec2
+later main observed:     88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+production changes:      READ-ONLY / UNAUTHORIZED
+runtime/provider proof:  NOT_EXECUTED
 ```
 
-No canonical IDs were allocated. 04B remains the numeric authority over older snapshot ranges in 04A. The later J5 backward re-audit and current state govern J5's provisional status rather than 10P's original pending-audit ending.
+The candidate and continuity are published together in one commit. Resolve that commit from the live branch and checkpoint ID; do not mistake the input SHA for its output SHA. No forensic rebaseline or execution-packet promotion occurred. Context Integrity Check passed for this bounded tranche; new sessions run their own check.
 
-## Mature / pooled journey state carried forward
+## Completed analytical advance
 
-```text
-J16/K4 -> F161-F178 / C111-C128 / KF-REC-049
-J17    -> F179-F184 / C129-C134 / KF-REC-051
-J23/J18-> KF-REC-047/048
-J7     -> F185-F196 / C135-C146 / KF-REC-052
-J3/J4  -> F197-F205 / C147-C155 / KF-REC-053; provisionally converged
-J10    -> F206-F214 / C156-C164 / KF-REC-054; provisionally converged
-J11    -> F215-F218 / C165-C168 / KF-REC-055; provisionally converged
-J12    -> F219-F221 / C169-C171 / KF-REC-056; provisionally converged
-J5     -> F222-F227 / C172-C177 / KF-REC-057; provisionally converged
-```
+The new candidate assigns explicit permitted writes to **W01-W18**, defines **13 transitions** with conditions/write sets/failure/replay outcomes, and reviews **32 cases**: the prior P01-P12, M004-01-06 and N01-N06 plus A01-A08. These are source/design analyses, not executed tests.
 
-These inherited analytical statuses are not executed proof. The inherited coverage is 19 dossiers across 25 canonical journeys, with J8/J9/J20/J21/J22/J24 dossierless. This tranche did not recount dossiers. Dossier coverage is not app/programme completion.
+Two named implementation reads strengthen the contract: Google-suite provisioning lines 180-285 and the full shared Google token helper, both at the fixed baseline. A refresh begun before disconnect can conditionally restore access/expiry and return the token afterward; it does **not** restore the cleared refresh field, and the helper's next invocation still needs that field. This is not universal post-disconnect usability or a reproduced incident.
 
-## J13 durable evidence pool
+Primary external documentation was checked for database ordering, Google revocation scope and OAuth revocation certainty. The candidate distinguishes those external constraints from source facts and design inference. The baseline is not claimed to perform a broad remote revoke.
 
-Dossier: `journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md`.
+## Selected design, not implementation
 
-```text
-investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-001.md
-  initial cross-provider lifecycle/state model
-investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-002.md
-  post-disconnect participation and activity resurrection
-investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-003.md
-  token expiry, provider revocation and reconnect generation
-investigations/J13-CONNECTOR-LIFECYCLE-MICROTRACE-004.md
-  stale OAuth connect intent and split Google Drive lifecycle ownership
-investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md
-  provider callback lineage, bounded teardown inventory and legacy credential correction
-investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md
-  new shared writer forensics, independent canonical comparison, migration ownership,
-  backward re-audit, closure gates and exact target-contract review frontier
-```
-
-Microtrace 004 and the separate supplement are preserved. The prior filename collision must not erase or renumber either strand. The new review pools both without replacing their original source/proof detail.
-
-## New forensic work in the bounded review
-
-The review freshly inspects seven pinned files: connector credentials, health monitor, registry, activity logger, controller, Google-suite callback and Gmail ingestion. The source manifest gives blob identities and distinguishes full from partial reads. Its W01-W18 inventory separates direct writers, indirect writers, nonwriters and inherited concrete-provider evidence; it does not claim exhaustive repository coverage.
-
-| Mechanism established in inspected source | Analytical consequence |
+| Decision | Architectural consequence |
 |---|---|
-| Registry smoke success upserts connected after awaiting the result, without current-state/generation comparison | An old successful result can overwrite a later disconnect; invocation-time checks alone are insufficient. |
-| Monitor selection excludes disconnected, but a later failure upserts error/expired by business/type | A result from before disconnect can still overwrite the current state. The monitor's own success branch is a nonwriter. |
-| Guarded webhook-info GET creates a missing secret via setCredentials, which writes connected | A read-looking configuration path is an implicit connected writer, not proof of remote subscription or capability health. |
-| Gmail ingestion completion persists connected, intakeEnabled=true and cursor even with individual-message errors | Lifecycle, intake preference and work/cursor outcomes need separate ownership; returned success can be false while status is connected. |
-| Suite callback installs Business credentials, then awaits verification and upserts per-service status | Both commits need a still-current intent/grant rule; partial provisioning and cancellation during waits remain explicit. Forms verification is scope-based in the inspected branch, not a live Forms probe. |
-| Registry reconnect catches disconnect errors and still authenticates | Local revoke, remote cleanup certainty and new-grant authorization cannot be treated as one boolean operation. No actual remote-cleanup attempt is proved merely by this orchestration. |
+| Grant, intent, credential version, intake policy, cursor and health are distinct | Credential/configuration/probe/activity success cannot grant permission. |
+| Current intent and actor authority are checked at activation | An authentic unexpired OAuth response cannot by itself restore a cancelled connection. Suite service targets are individually fenced. |
+| Local revoke and material local mutation share an enforced commit order | Checks at scheduling/callback entrance alone are insufficient. Same-generation refresh needs credential-version protection too. |
+| Original occurrence lineage differs from present use permission | Unknown or old origin is preserved; explicit adoption grants a specified use without relabelling the origin. |
+| Local revoke differs from remote cancellation | Already-admitted provider attempts retain truthful in-flight/unknown/outcome evidence. New admissions are blocked; retroactive no-effect guarantees are not fabricated. |
+| Local service permission differs from remote authorization scope | Cleanup cannot blindly revoke shared Google authorization or destroy a sibling/N+1 registration. Scope/dependency barriers are explicit. |
 
-Six new local proof designs N01-N06 accompany these conditional interleavings. None were executed. Shared ConnectorActivityService is a ConnectorActivityLog writer, not a ConnectorStatus writer; concrete adapter activity helpers remain separate.
+Prefer a shared logical lifecycle contract across existing registry, credential, verifier, domain and execution seams. A universal new connector/workflow engine is not justified by this tranche.
 
-## Preserved provider narrowing and corrections
+## Gate changes
 
-The inherited root remains **F227/C177**: disconnected control state is not universally effective revocation of provider participation.
+**G07: PASS_DESIGN_WITH_STATED_GUARANTEE_LIMITS.** It is no longer an unspecified transition contract. T01-T13 and the D decisions define its bounded semantics; source conformance remains to be mapped.
 
-**WhatsApp / Meta:** retained WhatsApp phone mappings allow conditional old first arrivals under still-valid application verification. Meta shared routing blocks without a connection row; same-page recreation restores lookup. The scoped route has an independent tenant-binding/lifecycle question. These are code-level paths, not live incidents.
+**G13: DEFER_CONFORMANCE_AND_MIGRATION_DECISION.** The design's existence is not J13 convergence.
 
-**Stripe / PayPal:** configuration can survive status-only disconnect and activity can write `status: connected`. Earlier shorthand does not prove a literal `healthStatus: healthy` field mutation. Historical payment/refund outcomes may need bounded reconciliation, which cannot reconnect or authorize fresh effects.
+G04 exhaustive coverage and G09 actual subscription/dependency/deployment evidence remain deferred. G12 application/provider/migration proof remains NOT_EXECUTED. G14 production authorization remains UNAUTHORIZED. Other bounded analytical gate passes are retained with scope in the YAML and candidate section 11.
 
-**QuickBooks / Xero:** central clear does not remove all possible legacy Business metadata. Usable fallback credentials can support conditional QuickBooks read/smoke and Xero smoke participation; preserve the central Xero tenantId guard for tenant-specific writes and central-only blocking. Tenant secret presence and accounting-provider callback reachability remain unestablished.
-
-**Gmail / Drive:** effective credential removal constrains new calls without other usable paths, but does not recall credentials already loaded by in-flight work. Google refresh failure lacks a distinct durable provider-revoked authority transition in the recorded trace. Provider watch registration was not established, not globally disproved.
-
-**Microtrace 004:** stale pre-disconnect Drive OAuth state can reach credential installation; dedicated Drive disconnect and connector-class disconnect have differing shared-status effects. Those obligations remain distinct from ordinary provider-event callback processing.
-
-## Allocation result - bounded comparison completed
-
-Review section 7 independently compares M004 against actual F227/C177, J14/KF-REC-035, J18/KF-REC-048, J5/KF-REC-057 and relevant readiness/CAS wording. The result is **SPECIALIZATION / REFINE F227-C177**, retaining stale intent and split ownership as separately named obligations.
-
-This is not merely repeating the supplement's prior reuse decision. It closes the specified register-comparison gap without allocating F228/C178/KF-REC-058. It is not final target acceptance or a claim of exhaustive comparison against every historical register. The canonical home definitions remain in 08BC/09BC; the review is supporting evidence and refinement. Reopen allocation only for an independently stated violated invariant that existing owner contracts cannot absorb.
-
-## Working target law - proposal, not implemented
+## Canonical ranges and prior work
 
 ```text
-one tenant-scoped binding/grant is the lifecycle authority root
--> grant != credential version != pending connect intent
--> lifecycle authority != operational health != capability readiness
--> disconnect revokes the targeted generation and cancels pending stale intents
--> compare expected state/generation at material or result commit, not only selection
--> configuration, activity, health, cursor and intake projections cannot regrant authority
--> reconnect creates a new grant, not silent reuse of an old one
--> authenticity and trusted tenant routing do not alone prove current authority
--> unknown lineage is not assigned to the newest grant by receipt time
--> known historical effects may be reconciled under explicit bounded authority
--> reconciliation is not permission for fresh effects
--> local revocation remains effective when remote cleanup is pending/unknown
--> cleanup for N cannot remove N+1 or another tenant's shared registration
--> all lifecycle entrypoints share authoritative transitions
+Findings:       F001-F227
+Contradictions: C001-C177
+Recommendations:KF-REC-001-KF-REC-057
+Concepts:       KF-CONCEPT-001-KF-CONCEPT-042
+Next free:      F228 / C178 / KF-REC-058 - UNALLOCATED
 ```
 
-J13 owns lifecycle/intents/admission. J14 retains authentication, tenant binding and durable ingress; J18 retains recovery/certainty; J2/J15 retain action governance; J5 consumes admission. J12 source revision identity is not a connector generation. The review maps migration and backward re-audit into K9/K7/K11, with K1/K3/K5/K8 dependencies and J17 attention projections.
+BCR independently compared M004 with the actual canonical wording and classified it SPECIALIZATION / REFINE F227-C177. The current candidate retains that result and its distinct stale-intent/split-owner obligations. No finding, contradiction, recommendation or concept was allocated. 04B overrides stale numeric snapshots in 04A; the later J5 re-audit governs over 10P's original pending-audit ending.
 
-## Analytical closure gates
+Broader pools remain unchanged:
 
-| Gate | Disposition |
-|---|---|
-| G01 checkpoint/baseline/scope; G02 preserved evidence pool | PASS |
-| G03 named shared writer gaps; G05 M004 canonical comparison | PASS - BOUNDED |
-| G06 ownership/admission; G08 migration ownership; G10 backward re-audit; G11 case coverage | PASS - CANDIDATE/DESIGN/OWNERSHIP SCOPE ONLY |
-| G07 exact lifecycle/intent transitions and mutation-time fencing | REOPEN |
-| G13 J13 provisional convergence | REOPEN / NOT CONVERGED |
-| G04 exhaustive writer/provider coverage; G09 actual subscription identities/shared ownership/teardown | DEFER |
-| G12 runtime proof; G14 production authorization | DEFER / NOT_EXECUTED / UNAUTHORIZED |
+```text
+J16/K4: F161-F178 / C111-C128 / KF-REC-049
+J17:    F179-F184 / C129-C134 / KF-REC-051
+J23/J18: KF-REC-047/048
+J7:     F185-F196 / C135-C146 / KF-REC-052
+J3/J4:  F197-F205 / C147-C155 / KF-REC-053; provisionally aligned
+J10:    F206-F214 / C156-C164 / KF-REC-054; provisionally aligned
+J11:    F215-F218 / C165-C168 / KF-REC-055; provisionally aligned
+J12:    F219-F221 / C169-C171 / KF-REC-056; provisionally aligned
+J5:     F222-F227 / C172-C177 / KF-REC-057; provisionally aligned
+```
 
-Every gate has evidence and a scope boundary in review section 10. P01-P12, M004-01-06 and N01-N06 are all DESIGNED / NOT_EXECUTED. No percentage derived from these mixed gates is a completion metric.
+Inherited 19/25 journey dossier coverage, with J8/J9/J20/J21/J22/J24 dossierless, was not recounted. It is not a project-completion percentage. Existing convergence remains reopenable under the programme's backward-re-audit method.
 
-## Exact next action
+## Evidence continuity
 
-Stage: **`J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW`**.
+The J13 dossier indexes Microtraces 001-004, the separate subscription/callback/legacy-credential supplement, BCR and this candidate. The original traces and BCR are unchanged. M004 is not overwritten by the callback supplement.
 
-Planned output, not created in this checkpoint:
-`investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md`.
+Retain the exact provider qualifications: conditional WhatsApp/Meta first arrivals; payment status writers not a literal healthStatus claim; QB/Xero legacy fallback with Xero tenantId guard; no actual tenant secret inspection or established accounting callback route; Gmail/Drive watches not established, not globally absent; ordinary new post-disconnect calls differ from in-flight credential use. Shared activity logging and monitor-success nonwriter distinctions remain intact.
 
-Start with the W01-W18 transition/write-set table and distinguish current grant, credential version, pending intent, health, cursor and intake policy. Define mutation-time expected-state checks for credential installation, work/effect claims and results, including partial suite provisioning and in-flight cancellation.
+K9/K7/K11 receive the local authority, ordering/version and remote certainty refinements. J14 keeps authentication/tenant/occurrence ownership; J2/J15 keep action/control authority; J18 keeps recovery; J5 consumes purpose admission. J12/K4/K8 preserve source-revision and truth provenance; J17 consumes attention evidence rather than owning lifecycle.
 
-Specify purpose-specific admission for new work, historical reconciliation, configuration, probe and cleanup. Keep unknown callback and legacy lineage explicit; separate local revocation from remote-cleanup certainty; preserve shared registrations and N-cleanup/N+1 safety.
+## Exact ordered queue
 
-Use the P/M004/N cases as analytical counterexamples, not executed tests. Backward re-audit J5/J14/J18/J2/J15 and K9/K7/K11. Resolve G07 and revisit G13 with G04/G09 evidence debts explicit. Do not allocate a recommendation or declare convergence because the candidate exists. Do not restart the generic provider scan or recreate the completed bounded review.
+Planned output: `investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md` (not created by this checkpoint).
 
-## Fresh-chat handoff
+| Order | Work item | Completion boundary |
+|---|---|---|
+| Q1 | Local commit/authority map | Actual named DB entities/keys, guards, current authority consumers and transaction/claim boundaries mapped to T01-T10; reusable seams versus missing interfaces identified. |
+| Q2 | Google remote dependency boundary | Existing service/account/client/credential references mapped to shared cleanup scope, partial activation and refresh lineage, with missing evidence explicit. |
+| Q3 | Callback and registration ownership | Retained WhatsApp/Meta/payment routes mapped to T09/T11/T12; actual provider registration distinguished from local routes/outbound customer webhooks. |
+| Q4 | Bounded closure decision | Conformance/migration gaps reconciled against all 32 cases; declared-scope provisional alignment or exact remaining invariant stated. |
 
-Load AGENTS.md, AGENT-CONTINUITY.md, 00-START-HERE.md, this file, all four CURRENT/ROLLOVER files, the J13 dossier and the complete evidence pool including the new review. Run Context Integrity Check; preserve the fixed baseline, unallocated IDs and read-only production boundary. Persist the next substantive result into the shared journey/kernel model and refresh continuity before ending the tranche.
+**Start Q1, not another plan.** Close/defer/reopen each item with evidence. Reopen the selected contract only for a concrete counterexample. Do not silently broaden into another provider scan, change the forensic baseline, allocate IDs from old ranges or call designed cases executed proof.
