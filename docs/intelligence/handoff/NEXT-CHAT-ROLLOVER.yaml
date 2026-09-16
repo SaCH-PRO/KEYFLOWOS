@@ -1,15 +1,15 @@
 project: KEYFLOWOS
-rollover_version: 46
+rollover_version: 47
 last_updated: '2026-09-16'
-checkpoint_id: J24-SCCR-2026-09-16-01
-status: LIVE_J24_NAMED_CORE_ALIGNMENT_J8_ACTIVATION_NEXT_MAP_PAUSED
+checkpoint_id: J8-M001-2026-09-16-01
+status: LIVE_J8_FIRST_SOURCE_TRACE_COMPLETE_NOT_CONVERGED_MAP_PAUSED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-input_intelligence_head: a584da16c09416fd22fe68dedff7efd0411eb07f
+input_intelligence_head: 7df89af749e34e081ea3ce31977f586f7aa4376d
 canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
 current_handoff: docs/intelligence/handoff/CURRENT-HANDOFF.md
 output_resolution: RESOLVE_LIVE_BRANCH_HEAD_AND_MATCHING_CHECKPOINT_ID
-context_integrity: PASS_BOUNDED_REVIEW_WITH_LIVE_HALT_AND_USER_MAP_PAUSE_RECONCILED
+context_integrity: PASS_BOUNDED_J8_CONTINUATION_MAP_PAUSE_AND_OWNER_HALT_PRESERVED
 fresh_chat_context_integrity_check_required: true
 implementation_authorized: false
 runtime_proof_executed: false
@@ -17,24 +17,50 @@ persistence_only_checkpoint: false
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  later_main_reconfirmed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+  later_main_observation_inherited: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
-  source_manifest: docs/intelligence/investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md#10-evidence-manifest-and-integrity
+  source_manifest: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md#10-reproducible-source-manifest
 canonical_ranges: {findings_through: F227, contradictions_through: C177, recommendations_through: KF-REC-057, concepts_through: KF-CONCEPT-042}
 next_free_ids: {finding: F228, contradiction: C178, recommendation: KF-REC-058, allocation_status: UNALLOCATED}
 journey_coverage:
   total_canonical_journeys: 25
-  dossier_count: 20
-  dossier_coverage_percent: 80
-  dossierless: [J8, J9, J20, J21, J22]
+  dossier_count: 21
+  dossier_coverage_percent: 84
+  dossierless: [J9, J20, J21, J22]
+  provenance: PRIOR_TWENTY_DOSSIER_INVENTORY_PLUS_NEW_J8_NOT_FULL_MATURITY_RECOUNT
   coverage_is_programme_completion: false
-  next_activation: J8
-  next_dossier_created: false
+  active: J8
+  active_dossier_created: true
 kernel_coverage:
   canonical_count: 12
   dossier_count: 12
-  provenance: PRIOR_ELEVEN_PLUS_NEW_EXISTING_ID_K12
+  provenance: RETAINED_PRIOR_K12_CHECKPOINT
   presence_is_maturity: false
+j8:
+  dossier: docs/intelligence/journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md
+  status: ACTIVE_INITIAL_SOURCE_TRACE_NOT_CONVERGED
+  microtrace: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md
+  constellation: [J11, J8, J12, J23, J7]
+  primary_kernels: [K6, K7, K8, K11]
+  secondary_kernels: [K1, K2, K3, K5, K10, K12]
+  source_scope: SIXTEEN_NAMED_FILES_FULL_OR_EXPLICIT_PARTIAL
+  source_tests_read_not_executed: 2
+  writer_roles: W8_01_W8_09
+  local_cases: [X01, X02, X03, X04, X05, X06, X07, X08, X09, X10, X11, X12]
+  local_case_status: DESIGNED_UNBOUND_NOT_EXECUTED
+  independent_completion_candidate: RETAINED_FOR_CANONICAL_COMPARISON
+  new_canonical_ids_allocated: false
+  exactness:
+  - UI_checkbox_uses_status_route_without_general_evidence_gate_or_events
+  - reorder_and_OUT_APP_are_additional_completion_writers
+  - evidenceIds_not_validated_in_general_updateTask
+  - evidence_existence_not_consumer_specific_acceptance
+  - paid_invoice_template_creation_exists_in_AutomationExecutor
+  - template_creation_bypasses_normal_creation_event
+  - repeated_plan_approval_can_reenter_materialization
+  - revenue_expected_status_not_in_update_predicate
+  - calendar_listener_does_not_receive_named_silent_path_events
+  - honest_unwired_IN_APP_block_preserved
 j13:
   status: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
   contract: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
@@ -60,6 +86,7 @@ j24:
     CS4: integration_release_composition_and_rollback_compatibility
     CS5: current_halt_policy_and_external_control_freshness
 live_control_observations:
+  provenance: INHERITED_J24_SETTINGS_READ_NOT_REREAD_THIS_TRANCHE
   observed_on: '2026-09-16'
   main_summary_protected: false
   main_summary_protection_enabled: false
@@ -92,6 +119,7 @@ integration_testing:
   runner_bindings: 0
   runtime_status: NOT_EXECUTED
   harness_implemented: false
+  J13_manifest_changed_by_J8: false
 remaining_debts_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#remaining_evidence_debts
 remaining_debts:
   ED1: whole_schema_account_claim_reuse_exact_DDL_indexes_backfill_transaction_extensions_and_rollback_floor
@@ -101,21 +129,23 @@ remaining_debts:
   ED5: deliberate_later_implementation_baseline_comparison_before_execution
 broader_pools_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#mature_pools
 active_frontier:
-  stage: J8_PROJECT_WORK_DELIVERY_ACTIVATION
+  stage: J8_COMPLETION_EVIDENCE_ASSIGNMENT_AND_OBLIGATION_TRACE
   primary_journey: J8
-  status: NEXT_ACTIVATION_NOT_STARTED
-  last_completed_stage: J24_SAFE_CHANGE_CONVERGENCE_REVIEW
+  status: ACTIVE_NOT_CONVERGED
+  last_completed_stage: J8_PROJECT_WORK_DELIVERY_ACTIVATION
 exact_next_action:
-  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md
+  planned_artifact: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md
   planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
   instruction: >-
-    Begin J8 in the existing J11/J8/J12/J23/J7 constellation from actual project/task
-    and invoice/contract/template-to-work entrypoints at the fixed baseline. Trace
-    tenant/actor authority, assignment/status writers, delivered/accepted work evidence
-    and retry/cancellation. Anti-duplicate before allocation; preserve bounded J13/J24
-    alignment and ED/CS debts. Do not restart generic scans, run unsafe tests, modify
-    production/settings/assertions or resume scheduled cycles. Update canonical state
-    and handoffs but keep the programme map frozen until explicitly requested.
+    Trace the named EvidenceController, Evidence/TaskAssignment models,
+    TaskAssignmentService and parent/assignee/tenant-context authority. Follow
+    completion into obligation settlement, calendar reconciliation and milestone/time
+    billing. Compare independent completion/lineage candidates with canonical homes
+    before allocation. Preserve lightweight task policies, existing safeguards,
+    J13/J24 alignments and ED/CS debts. Do not repeat the creation/UI scan or
+    infer template creation is absent. Keep maps frozen, routines halted,
+    production read-only and all runtime proof explicitly unexecuted. Persist
+    substantive results and matching continuity on the intelligence branch.
 constraints:
 - production_source_schema_workflow_settings_deployment_read_only
 - no_runtime_proof_claim

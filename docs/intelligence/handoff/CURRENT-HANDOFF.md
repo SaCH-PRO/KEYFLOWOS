@@ -1,55 +1,53 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `J24-SCCR-2026-09-16-01`  
+Checkpoint: `J8-M001-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **J24 SAFE-CHANGE REVIEW COMPLETED; NAMED CORE PROVISIONALLY TARGET-ALIGNED; J8 ACTIVATION NEXT**.
+Status: **J8 ACTIVATED; FIRST CREATION/COMPLETION SOURCE TRACE COMPLETE; NOT CONVERGED**.
 
-## Current coordinates and user restriction
+## Resume coordinates and limits
 
-Repository: SaCH-PRO/KEYFLOWOS. Branch: docs/keyflow-intelligence-foundation. Input/provenance: a584da16c09416fd22fe68dedff7efd0411eb07f. Resolve the live output head and matching checkpoint; input is not output.
+Repository SaCH-PRO/KEYFLOWOS. Intelligence branch docs/keyflow-intelligence-foundation. Input/provenance 7df89af749e34e081ea3ce31977f586f7aa4376d. Resolve the live output head and matching checkpoint; input is not output.
 
-Implementation forensic baseline remains `8f173bfe79f1418159cf4099ea18b0d60d203ec2`. Production source/schema/deployment, workflows, test assertions and hosting settings remain unchanged. No application/provider/boot/concurrency/migration tests executed; no execution packet promoted.
+Implementation forensic baseline remains 8f173bfe79f1418159cf4099ea18b0d60d203ec2. Production source/schema/workflows/settings/assertions remain read-only. No application/provider/DB/boot/concurrency/migration tests or execution-packet promotion. Prior live-main owner halt on scheduled truth/audit/burndown/reflect cycles remains in force; this is interactive intelligence work.
 
-**Do not update or regenerate the programme map until the user explicitly requests it.** This overrides earlier regenerate-after-every-tranche instructions. Do not run the renderer or its freshness check to repair intentional staleness. Map files and local views stay at J24-PA; current state/handoffs advance. The pause is persisted in CURRENT-STATE.yaml and rollover. No background refresh is installed.
+**Do not update or regenerate the programme map until explicitly requested.** No map generator/check, generated Markdown/HTML/JSON, preview or template change. It remains intentionally at J24-PA while canonical state advances.
 
-## Completed work
+## Completed substantive unit
 
-[J24 Safe-Change Convergence Review](../investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md) completes the three decisions: independent policy/required-check ownership, existing-tool enforcement and withdrawal design, and backward convergence review. [K12 Engineering Control Plane](../kernels/KF-KERNEL-012-ENGINEERING-CONTROL-PLANE.md) materializes the already canonical K12 identity and references the detailed J24 evidence instead of creating another constitution.
+[J8 Microtrace 001](../investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md) and the new [J8 dossier](../journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md) complete J8_PROJECT_WORK_DELIVERY_ACTIVATION at bounded source scope. Sixteen named implementation files were inspected, including two unexecuted source tests. Full/partial scopes and blobs are in the trace.
 
-J24 is provisionally target-aligned for its **named safe-change core only**. This is design/source-and-settings alignment, not proof that the controls operate. J13's bounded alignment, original evidence and ED1-ED5 remain unchanged. J24's PA map/admission YAML and the J13 44-case manifest remain unchanged and unexecuted. Zero runner bindings were added.
+The actual chain includes manual/template creation, AutomationExecutorService paid-invoice template creation, project-revenue advancement, plan approval/materialization and OUT_APP completion, EvidenceService, UI checkbox/client/status endpoint and calendar event consumption. Contract-to-work and assignment/settlement/billing are not falsely marked traced.
 
-## New evidence and corrections to retain
+## Results that must survive
 
-Live main summary reports protected:false, protection.enabled:false and required-check enforcement off. The returned ruleset claurecommend (20622003), targeting the default branch, is disabled. Its dormant configuration also has zero approving reviews and no required code-owner/last-push approval. These are observed fields, not claims about every possible repository permission.
+The ordinary project-detail checkbox uses updateProjectTaskStatus -> guarded status endpoint -> updateTaskStatus. That method and reorderTasks can write DONE/isCompleted without the general updateTask evidence check or standard task-change events. OUT_APP completion is another separate writer and does not enforce manualEvidenceRequired/dependencies in the inspected method.
 
-Classic branch-protection detail returned 403; the effective-branch-rules URL was rejected by the connector allowlist. Preserve those limits independently of the successful summary/ruleset reads. No settings were changed and no bypass attempted. Required names/producers and reviewer scope must be reconciled before any later authorized activation; do not blindly enable the dormant ruleset.
+General updateTask itself only rejects missing stored evidence when evidenceIds is also empty. A nonempty array is not locally verified/linked, and evidence helper checks existence rather than consumer-specific eligibility. It can change Boolean completion without status synchronization. Preserve exact scope: no tenant disclosure or end-to-end exploit is claimed without the remaining context/route trace.
 
-**Current operational halt:** main@88b8016 contains OS.md status HALTED, owner-stopped 2026-09-12 for scheduled truth/audit/burndown/reflect cycles. Older pinned playbooks remain historical evidence, not current permission. The code forensic baseline is unchanged. This interactive intelligence work is not a scheduled cycle; nothing restarts or weakens the halt. Cloud routine settings were not inspected.
+CalendarProjectsListener listens to events these writers do not emit. Automatic template creation also bypasses normal creation emission; revenue emits status_advanced instead. This is a demonstrated event-path gap, not a claim no reconciliation can ever repair it.
 
-Root CODEOWNERS and PR checkboxes provide useful source ownership/submission information, not required-review or execution proof. The named CI deployment block is commented out; no universal deployment-path audit is claimed.
+Paid-invoice project creation exists in AutomationExecutorService, not the example FlowListener. It reads current templates and creates directly without a local semantic project-effect receipt. Upstream payment dedupe does not settle replay/partial-child repair. Do not add blanket unique(invoiceId); multiple distinct obligations may share one invoice.
 
-## Selected engineering contract
+Repeated approve rewrites a materialized plan to approved before materialization. Project creation, plan link/status and child links occur separately; the unique pointer is not a stable occurrence claim. Revenue transition filters status before selection but not at its eventual update; newer state can be overwritten conditionally.
 
-Accepted proof, permission to merge and permission to release are separate. Bind accepted policy P, candidate H, target B and actual tested composition M. A candidate cannot select its own acceptance manifest/evaluator, forge the trusted check or execute an uploaded helper inside a privileged approval job.
+Preserve positives: task/assignment transaction, reorder project-business validation, persisted deliverable ownership checks/tests, named-field plan updater, and IN_APP executor's current honest unavailable/blocked result. Do not repeat historical fake-success or tenant-relocation defects as current.
 
-Keep candidate code in restricted run-owned resources; native reports feed a trusted bounded evaluator and independent review. A familiar check name or generic Actions app identity is not complete trusted workflow provenance. GitHub skipped/neutral success semantics require an explicit fail-closed KEYFLOWOS aggregate for required evidence; missing/cancelled/skip states never silently count as satisfied. Exact tool/settings enforcement is still to implement and prove.
+## Ownership, allocation and proof
 
-Optional variants stay replaceable under compatibility/dependency rules. Preserve exact effect ownership, revocation, business history, migration rollback floor and cleanup uncertainty. Test-policy evolution requires reviewed supersession, not deleting a red obligation. Reused output is not a fresh seed/control run. No new platform or parallel runtime is selected.
+J8 is in J11/J8/J12/J23/J7. K6/K7/K8/K11 are primary; K1/K2/K3/K5/K10/K12 secondary. Initial comparisons reuse KF-REC-047/048/055/056 and J10's descendant/outcome laws without claiming every Project manifestation is already proved in another finding. Independent J8 completion/lineage candidates remain for actual canonical-register comparison. No F228/C178/KF-REC-058 allocation.
 
-## Readiness debts and counts
+X01-X12 are local J8 designs, all unbound/unexecuted. J13's 44-case manifest and prior investigations are unchanged. J13/J24 bounded alignment, all mature pools, ED1-ED5, CS1-CS5, live-control observations and map-pause metadata are retained. The new dossier increments prior twenty to 21/25 coverage, not app completion. No new kernel is created.
 
-CS1 hosting enforcement; CS2 trusted controller/evaluator isolation; CS3 executable case/run-resource proof; CS4 integration/release compatibility; CS5 current operational controls. They refine J24 readiness and remain open alongside ED1-ED5. No evidence debt is turned into an operational pass.
+## Exact next unit
 
-Journey count stays 20/25, with J8/J9/J20/J21/J22 still dossierless. K12 now joins the prior eleven kernel dossiers; file presence is not maturity. No F228/C178/KF-REC-058 allocation. The frozen programme map intentionally does not reflect these latest changes.
+**J8_COMPLETION_EVIDENCE_ASSIGNMENT_AND_OBLIGATION_TRACE**.
 
-## Exact next action
+Planned, not created: `docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md`.
 
-**J8_PROJECT_WORK_DELIVERY_ACTIVATION**.
+1. Trace EvidenceController, Evidence/TaskAssignment models, TaskAssignmentService and real parent/assignee/tenant-context checks; establish qualifying evidence and current actor authority.
+2. Follow task/project/plan completion into source-obligation settlement, calendar mapper/reconciliation and milestone/time-to-invoice paths; preserve distinct delivered/accepted/billed/settled meanings.
+3. Compare surviving independent completion/lineage candidates against canonical register homes before allocation; refine the smallest completion/scope/receipt contract and required migration.
 
-Planned, not created: `docs/intelligence/journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md`.
+Do not repeat this creation/UI scan or restart generic J13/J24 analysis. Keep lightweight task policies where appropriate; customer acceptance is not a universal precondition. Required-task removal or test switching must not manufacture completion or erase prior business truth.
 
-The existing kernel programme names the commitment-to-delivery constellation J11 -> J8 -> J12 -> J23 -> J7. Begin actual project/task entrypoints and invoice/contract/template-to-work consumers at the fixed baseline. Trace one concrete path through tenant/actor authority, assignment, status mutation, completion/acceptance evidence, retry/cancellation and financial consequences. Task checkbox completion, delivered obligation and customer acceptance are not automatically the same fact.
-
-Anti-duplicate against existing J10/J11/J12/J18/J23 and K6/K7/K8/K11 before allocating. Do not restart completed generic connector/runner scans. Reopen only specific assumptions contradicted by new evidence.
-
-Read AGENTS/AGENT-CONTINUITY, START/CURRENT/ROLLOVER and the completed review/K12; run Context Integrity Check. Persist substantive work and matching handoffs on the intelligence branch, keeping map generation paused and scheduled cycles halted. Verify the allowed changed paths and final checkpoint.
+Read AGENTS/AGENT-CONTINUITY, current START/STATE and all CURRENT/ROLLOVER files, then the J8 dossier/trace and named comparison owners. Run Context Integrity Check, perform substantive work, refresh canonical continuity and verify the intelligence-only checkpoint, excluding maps.

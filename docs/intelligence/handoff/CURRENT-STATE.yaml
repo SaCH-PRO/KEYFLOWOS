@@ -1,21 +1,21 @@
 project: KEYFLOWOS
-analysis_version: 71
+analysis_version: 72
 last_updated: '2026-09-16'
-checkpoint_id: J24-SCCR-2026-09-16-01
-phase: whole_system_virtual_model_j24_bounded_alignment_j8_activation_next
-status: J24_NAMED_SAFE_CHANGE_CORE_PROVISIONALLY_TARGET_ALIGNED_J8_NEXT
+checkpoint_id: J8-M001-2026-09-16-01
+phase: whole_system_virtual_model_j8_completion_evidence_and_obligation_trace
+status: J8_ACTIVE_FIRST_CREATION_COMPLETION_TRACE_COMPLETE_NOT_CONVERGED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
-context_integrity: PASS_BOUNDED_REVIEW_WITH_LIVE_HALT_AND_USER_MAP_PAUSE_RECONCILED
+context_integrity: PASS_BOUNDED_J8_CONTINUATION_MAP_PAUSE_AND_OWNER_HALT_PRESERVED
 fresh_chat_context_integrity_check_required: true
 persistence_only_checkpoint: false
 implementation_authorized: false
 runtime_proof_executed: false
 publication_mode: SINGLE_COMMIT_ANALYSIS_AND_MATCHING_CONTINUITY_MAP_EXCLUDED_BY_USER
 checkpoint_provenance:
-  input_intelligence_head: a584da16c09416fd22fe68dedff7efd0411eb07f
-  prior_checkpoint_id: J24-PA-2026-09-16-01
+  input_intelligence_head: 7df89af749e34e081ea3ce31977f586f7aa4376d
+  prior_checkpoint_id: J24-SCCR-2026-09-16-01
   prior_bounded_review_checkpoint: J13-BCR-2026-09-16-01
   bounded_review_commit: 6dbbdd34489d77ed1fbc26ff5f6bd1968ee2b953
   bounded_review_continuity_commit: a100ec1bc746e0433338e536fe21e05d55f49bb7
@@ -26,16 +26,17 @@ checkpoint_provenance:
   completed_conformance_commit: 81046dd4c74c55d8d213285a61eb34ca55925704
   completed_programme_map_activation_commit: 59c94b381025fd2b35cda8f53283b1c33d22533f
   completed_proof_admission_commit: a584da16c09416fd22fe68dedff7efd0411eb07f
+  completed_safe_change_review_commit: 7df89af749e34e081ea3ce31977f586f7aa4376d
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   later_main_previously_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
-  later_main_reconfirmed_this_review: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+  later_main_reconfirmed_in_prior_J24_review: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
-  fresh_source_manifest: docs/intelligence/investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md#10-evidence-manifest-and-integrity
+  fresh_source_manifest: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md#10-reproducible-source-manifest
   source_scope: NAMED_FULL_OR_PARTIAL_READS_NOT_EXHAUSTIVE
   tenant_values_or_remote_configuration_inspected: false
-  live_GitHub_control_settings_read_separately: true
+  live_GitHub_control_settings_provenance: PRIOR_J24_READ_RETAINED_NOT_REREAD_THIS_TRANCHE
 canonical_ranges:
   findings_through: F227
   contradictions_through: C177
@@ -49,14 +50,13 @@ next_free_ids:
 allocation_authority: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
 journey_programme:
   total_canonical_journeys: 25
-  dossier_count: 20
-  dossier_coverage_percent: 80
-  dossierless: [J8, J9, J20, J21, J22]
-  coverage_provenance: PRIOR_PINNED_DIRECTORY_COUNT_NO_JOURNEY_ADDED_THIS_REVIEW
+  dossier_count: 21
+  dossier_coverage_percent: 84
+  dossierless: [J9, J20, J21, J22]
+  coverage_provenance: PRIOR_TWENTY_DOSSIER_INVENTORY_PLUS_NEW_J8_NOT_FULL_MATURITY_RECOUNT
   coverage_is_programme_completion: false
   active: J8
-  active_dossier_created: false
-  next_activation: J8
+  active_dossier_created: true
 kernel_programme:
   total_canonical_kernels: 12
   dossier_count: 12
@@ -197,27 +197,27 @@ remaining_evidence_debts:
   ED4: executable_case_bindings_isolated_harness_runtime_provider_migration_and_negative_control_results
   ED5: deliberate_later_implementation_baseline_comparison_before_execution
 active_frontier:
-  stage: J8_PROJECT_WORK_DELIVERY_ACTIVATION
+  stage: J8_COMPLETION_EVIDENCE_ASSIGNMENT_AND_OBLIGATION_TRACE
   primary_journey: J8
-  status: NEXT_ACTIVATION_NOT_STARTED
-  last_completed_stage: J24_SAFE_CHANGE_CONVERGENCE_REVIEW
-  completed_items: [J13_Q1_Q4, J24_SOURCE_TRACE_001, J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAP, J24_SAFE_CHANGE_REVIEW, K12_EXISTING_ID_DOSSIER]
+  status: ACTIVE_NOT_CONVERGED
+  last_completed_stage: J8_PROJECT_WORK_DELIVERY_ACTIVATION
+  completed_items: [J13_Q1_Q4, J24_SOURCE_TRACE_001, J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAP, J24_SAFE_CHANGE_REVIEW, K12_EXISTING_ID_DOSSIER, J8_MICROTRACE_001]
 exact_next_action:
-  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md
+  planned_artifact: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-002.md
   planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
   instruction: >-
-    Run Context Integrity Check. Begin J8 in the existing commitment-to-delivery
-    constellation J11/J8/J12/J23/J7. Read actual project/task entrypoints and
-    invoice/contract/template-to-work consumers at the fixed forensic baseline.
-    Trace the first concrete path through tenant/actor authority, assignment,
-    task status writers, delivery/acceptance evidence and cancellation/retry.
-    Distinguish task checkbox completion, delivered obligation, customer acceptance
-    and financial consequence. Anti-duplicate against existing J10/J11/J12/J18/J23
-    and K6/K7/K8/K11 before allocation. Preserve bounded J13/J24 alignment and
-    their readiness debts. Do not restart closed generic connector or runner scans.
-    Update canonical state and handoffs, but do not regenerate, edit or refresh
-    the programme map until explicitly requested. Keep scheduled cycles halted,
-    production and settings read-only, and designed tests distinct from executed proof.
+    Continue the completed J8 creation/completion trace, not another generic scan.
+    Trace EvidenceController, Evidence/TaskAssignment models, TaskAssignmentService
+    and actual parent/assignee/tenant-context authority. Follow task/project/plan
+    outcomes into obligation settlement, calendar reconciliation and milestone/time
+    billing. Establish qualifying evidence, current actor authority, required scope
+    and consequence ownership. Compare independent completion/lineage candidates
+    against actual canonical register homes before allocation. Preserve existing
+    tenant checks, transactional assignment, plan update allowlist and honest
+    unavailable IN_APP executor. J8 is not converged. Keep J13/J24 alignments,
+    ED1-ED5, CS1-CS5, fixed forensic baseline and scheduled-cycle halt intact.
+    Persist substantive evidence and matching continuity only; leave programme-map
+    files, renderer, previews, JSON and HTML unchanged until explicitly requested.
 constraints:
 - production_code_schema_and_deployment_read_only
 - no_runtime_provider_or_migration_proof_claim
@@ -234,6 +234,58 @@ constraints:
 - do_not_update_or_regenerate_programme_map_until_explicit_user_request
 - preserve_live_owner_halt_on_scheduled_cycles
 - current_permission_is_separate_from_historical_forensic_baseline
+j8:
+  dossier: docs/intelligence/journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md
+  status: ACTIVE_INITIAL_SOURCE_TRACE_NOT_CONVERGED
+  microtrace: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md
+  last_completed_unit: J8_MICROTRACE_001_CREATION_COMPLETION_AND_CALENDAR_CONSEQUENCES
+  constellation: [J11, J8, J12, J23, J7]
+  primary_kernels: [K6, K7, K8, K11]
+  secondary_kernels: [K1, K2, K3, K5, K10, K12]
+  adjacent_journeys: [J2, J15, J17, J18, J24]
+  source_scope:
+    named_files: 16
+    declaration: FULL_OR_EXPLICIT_PARTIAL_SCOPE_IN_MICROTRACE_MANIFEST
+    source_tests_read: 2
+    application_tests_executed: 0
+    exhaustive_writer_inventory: false
+  named_roles: W8_01_W8_09
+  source_observations:
+  - UI_checkbox_calls_status_endpoint_without_general_task_evidence_check_or_events
+  - reorder_and_OUT_APP_completion_are_additional_evidence_bypassing_writers
+  - nonempty_evidenceIds_not_validated_or_linked_in_general_updateTask
+  - evidence_helper_checks_row_presence_not_consumer_specific_admission
+  - task_status_boolean_and_plan_event_can_diverge
+  - repeated_project_COMPLETED_result_reemits_completion_on_unrelated_edits
+  - paid_invoice_templates_create_projects_directly_in_AutomationExecutor
+  - direct_template_block_has_no_normal_project_created_event_or_local_effect_receipt
+  - revenue_selection_fromStatus_not_repeated_in_update_predicate
+  - repeated_approve_can_reopen_materialization_and_create_relink_another_project
+  - materialization_partial_child_writes_need_required_set_reconciliation
+  - calendar_event_consumer_not_notified_by_named_silent_writers
+  positive_seams:
+  - task_and_assignment_transaction
+  - reorder_project_business_validation
+  - persisted_deliverables_and_ownership_tests
+  - named_allowlist_in_plan_update
+  - unwired_IN_APP_execution_stays_blocked_unavailable
+  allocation:
+    new_canonical_ids: false
+    initial_comparison: EXISTING_J10_J11_J12_J18_J23_OWNERS_REUSED_NO_EXHAUSTIVE_REGISTER_CLOSURE
+    independent_completion_candidate: RETAINED_FOR_MICROTRACE_002_COMPARISON
+  proof_design:
+    cases: [X01, X02, X03, X04, X05, X06, X07, X08, X09, X10, X11, X12]
+    count: 12
+    status: DESIGNED_NOT_EXECUTED
+    runner_bindings: 0
+    changes_J13_44_case_manifest: false
+  unresolved:
+  - evidence_reference_and_actor_authority_at_all_completion_boundaries
+  - parent_assignee_eligibility_and_context_extension_guarantees
+  - source_obligation_scope_revision_and_customer_acceptance_where_required
+  - calendar_reconciliation_and_financial_consequence_owners
+  - deletion_cancellation_retention_and_partial_materialization_recovery
+  - canonical_comparison_target_synthesis_and_backward_review
 j24:
   dossier: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md
   status: PROVISIONALLY_TARGET_ALIGNED_NAMED_SAFE_CHANGE_CORE_ONLY
@@ -379,6 +431,11 @@ programme_history:
   artifact: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md
   detail: Eight pinned source files; CI/runner/boot/cache distinctions; R03/R04/R05/R07 owners and admission rules. No app tests executed.
 - label: Completed J24 safe-change review and materialized K12
-  commit: null
+  commit: 7df89af749e34e081ea3ce31977f586f7aa4376d
   artifact: docs/intelligence/investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md
   detail: Named-core target alignment with observed hosting gap and preserved owner halt; enforcement remains unproven. Programme map intentionally not refreshed.
+
+- label: Activated J8 and traced creation-to-completion divergence
+  commit: null
+  artifact: docs/intelligence/investigations/J8-PROJECT-WORK-DELIVERY-MICROTRACE-001.md
+  detail: Sixteen named sources; UI evidence bypass, alternate writers, template/materialization replay and calendar consequence gaps. Twelve local designs, no executed tests; map frozen.
