@@ -4,28 +4,32 @@ This directory is the durable source of truth for architectural and product inte
 
 ## Live checkpoint - 2026-09-16
 
-Checkpoint: `J13-ROLLOVER-2026-09-16-M004-PLUS-CALLBACK-SUPPLEMENT`.
+Checkpoint: `J13-BCR-2026-09-16-01`.
 
 ```text
 repository:             SaCH-PRO/KEYFLOWOS
 intelligence branch:    docs/keyflow-intelligence-foundation
 forensic main baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
 active journey:         J13 Connector Lifecycle
-active stage:           J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION
+active stage:           J13_TARGET_CONTRACT_ADVERSARIAL_REVIEW
+last completed unit:    J13_BOUNDED_CONVERGENCE_REVIEW_PREPARATION
+bounded review commit:  6dbbdd34489d77ed1fbc26ff5f6bd1968ee2b953
 J13 convergence:        NOT YET CONVERGED
 production code:        READ-ONLY / UNAUTHORIZED
 runtime/provider tests: NOT EXECUTED
 ```
 
-For current continuation, follow `AGENT-CONTINUITY.md`, `07-CURRENT-STATE.md` and all four files under `handoff/` named CURRENT-HANDOFF.md, CURRENT-STATE.yaml, NEXT-CHAT-ROLLOVER.md and NEXT-CHAT-ROLLOVER.yaml. Run the fresh-chat Context Integrity Check. This persistence checkpoint did not repeat the source investigation or complete the remaining anti-duplication.
+For current continuation, follow `AGENT-CONTINUITY.md`, `07-CURRENT-STATE.md` and all four files under `handoff/` named CURRENT-HANDOFF.md, CURRENT-STATE.yaml, NEXT-CHAT-ROLLOVER.md and NEXT-CHAT-ROLLOVER.yaml. Context Integrity Check passed for the completed bounded continuation; run it again on fresh-chat resume. Resolve the live intelligence head because continuity commits follow the review's content commit.
 
-Load `journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md`, Microtraces 001-004 in `investigations/`, and `investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md`.
+Load `journeys/KF-JOURNEY-013-CONNECTOR-LIFECYCLE.md`, Microtraces 001-004 in `investigations/`, `investigations/J13-SUBSCRIPTION-CALLBACK-LINEAGE-AND-LEGACY-CREDENTIAL-SUPPLEMENT.md`, and the **completed** `investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md`.
 
-**Microtrace 004 is the existing Stale OAuth Connect Intent and Split Drive Lifecycle Ownership trace. Preserve it.** The callback/legacy-credential analysis is a separate supplement, not a replacement Microtrace 004. The supplement's F227/C177 classification does not settle Microtrace 004's still-open candidate-root anti-duplication.
+**Preserve both evidence strands.** Microtrace 004 is Stale OAuth Connect Intent and Split Drive Lifecycle Ownership; callback/legacy-credential analysis is a separate supplement. The bounded review independently completed M004's register comparison: SPECIALIZATION / REFINE F227-C177, with distinct obligations retained and no new canonical IDs. That bounded decision is not final target acceptance or exhaustive historical-register comparison.
 
-Exact next output: the planned candidate `investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md`, beginning with lifecycle ownership and callback-admission tables. Finish named writer-inventory gaps, candidate-root anti-duplication, migration/teardown ownership, adjacent-journey backward re-audit and evidence-linked closure gates. Do not restart the generic provider scan. All designed runtime/provider cases remain unexecuted.
+The review adds seven pinned-source file inspections, W01-W18 writer/nonwriter dispositions, six new conditional interleavings, migration/cleanup ownership, backward re-audit and fourteen gates. Shared smoke success, webhook-info secret creation, late monitor failure, Gmail completion and suite callbacks require lifecycle ownership/fencing; scope and evidence are in the review. G07 exact transition/intent/mutation-time fencing and G13 convergence remain REOPEN. G04 exhaustive coverage and G09 actual provider subscription evidence remain DEFER; runtime proof and implementation authorization remain absent.
 
-J5 remains provisionally converged and reopenable. The older J23/J18 material below is retained architectural context, **not the current frontier**. Resolve the live intelligence branch head on resume; do not silently rebaseline source analysis to newer main.
+Exact next output: the planned, unallocated `investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md`. Start with W01-W18 transition/write sets and purpose-specific admission. Separate current grant, credential version, connect intent, health/cursor/intake projections, historical reconciliation and cleanup authority. Specify mutation-time checks, partial provisioning, unknown lineage, shared-registration ownership and N-cleanup/N+1 safety. Analytically pressure-test P01-P12, M004-01-06 and N01-N06; all remain unexecuted. Re-audit adjacent journeys/kernels and resolve G07 before revisiting G13. Do not recreate the completed review or restart a generic provider scan.
+
+J5 remains provisionally converged and reopenable. The older J23/J18 material below is retained architectural context, **not the current frontier**. Do not silently rebaseline source analysis to newer main or treat a candidate document as permission to allocate KF-REC-058 or implement production changes.
 
 ## Prime directive
 
