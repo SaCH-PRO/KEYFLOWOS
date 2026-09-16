@@ -1,21 +1,21 @@
 project: KEYFLOWOS
-analysis_version: 69
-last_updated: 2026-09-16
-checkpoint_id: J24-MAP-2026-09-16-01
-phase: whole_system_virtual_model_j24_engineering_safety_source_trace
-status: J24_ACTIVE_INITIAL_SOURCE_TRACE_WITH_DERIVED_PROGRAMME_MAP
+analysis_version: 70
+last_updated: '2026-09-16'
+checkpoint_id: J24-PA-2026-09-16-01
+phase: whole_system_virtual_model_j24_safe_change_convergence_review
+status: J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPED_NOT_CONVERGED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
-context_integrity: PASS_FOR_BOUNDED_J24_ACTIVATION_AND_MAP
+context_integrity: PASS_FOR_BOUNDED_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING
 fresh_chat_context_integrity_check_required: true
 persistence_only_checkpoint: false
 implementation_authorized: false
 runtime_proof_executed: false
 publication_mode: SINGLE_COMMIT_ANALYSIS_AND_MATCHING_CONTINUITY
 checkpoint_provenance:
-  input_intelligence_head: 81046dd4c74c55d8d213285a61eb34ca55925704
-  prior_checkpoint_id: J13-ACM-2026-09-16-01
+  input_intelligence_head: 59c94b381025fd2b35cda8f53283b1c33d22533f
+  prior_checkpoint_id: J24-MAP-2026-09-16-01
   prior_bounded_review_checkpoint: J13-BCR-2026-09-16-01
   bounded_review_commit: 6dbbdd34489d77ed1fbc26ff5f6bd1968ee2b953
   bounded_review_continuity_commit: a100ec1bc746e0433338e536fe21e05d55f49bb7
@@ -24,12 +24,13 @@ checkpoint_provenance:
   callback_supplement_creation_commit: 0e8658d3b598948907c1082291e26ec5c2582eaf
   output_resolution: RESOLVE_LIVE_BRANCH_HEAD_AND_MATCHING_CHECKPOINT_ID
   completed_conformance_commit: 81046dd4c74c55d8d213285a61eb34ca55925704
+  completed_programme_map_activation_commit: 59c94b381025fd2b35cda8f53283b1c33d22533f
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   later_main_previously_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
-  fresh_source_manifest: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md#source-manifest
+  fresh_source_manifest: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md#9-source-manifest-external-constraints-and-integrity
   source_scope: NAMED_FULL_OR_PARTIAL_READS_NOT_EXHAUSTIVE
   tenant_values_or_remote_configuration_inspected: false
 canonical_ranges:
@@ -260,23 +261,24 @@ remaining_evidence_debts:
   ED4: executable_case_bindings_isolated_harness_runtime_provider_migration_and_negative_control_results
   ED5: deliberate_later_implementation_baseline_comparison_before_execution
 active_frontier:
-  stage: J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING
+  stage: J24_SAFE_CHANGE_CONVERGENCE_REVIEW
   primary_journey: J24
-  status: ACTIVE_SOURCE_TRACE_NOT_CONVERGED
-  last_completed_stage: J24_ACTIVATION_SOURCE_TRACE_AND_PROGRAMME_MAP
+  status: ACTIVE_SYNTHESIS_NOT_CONVERGED
+  last_completed_stage: J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING
   completed_items:
   - J13_Q1_Q4
   - J24_SOURCE_TRACE_001
+  - J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAP
 exact_next_action:
-  planned_artifact: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md
+  planned_artifact: docs/intelligence/investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md
   planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
-  instruction: Continue J24 from its committed runner/boot source trace. Map the actual gate command, setup, reporter,
-    discovered-test identity, environment admission, per-run resource ownership and cleanup boundaries. Inspect
-    the OS truth/burndown playbooks and named harness setup only; do not rerun J13 or start another generic scan.
-    Bind R03/R04/R05/R07 to concrete owners and fail-closed conditions, preserving shuffle seeds and negative controls.
-    Do not change OS.md or gate assertions, execute application tests on unverified resources, or deploy. Update
-    canonical state and dossier first, regenerate the programme map, run its freshness check, and publish matching
-    continuity.
+  instruction: 'Continue from the completed J24 proof-admission/run-isolation map and its design contract. Do not
+    repeat the command/config scan or J13 Q1-Q4. Resolve three decisions: trusted change/policy and required-check
+    ownership using available read-only evidence; how existing CI/provisioning/report mechanisms enforce admission,
+    freshness, negative controls and safe withdrawal; then backward re-audit J13/J18/J23/J2/J15/K8/K12 and make
+    a declared-scope J24 convergence disposition. Keep inaccessible settings and unexecuted runtime proof explicit.
+    Do not change OS.md, assertions, workflows, production or run write-capable tests on unverified resources. Update
+    state/dossier, regenerate the programme map, check freshness and publish matching continuity.'
 constraints:
 - production_code_schema_and_deployment_read_only
 - no_runtime_provider_or_migration_proof_claim
@@ -292,7 +294,7 @@ constraints:
 - regenerate_programme_map_after_source_state_changes_no_independent_status_edits
 j24:
   dossier: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md
-  status: ACTIVE_INITIAL_SOURCE_TRACE_NOT_CONVERGED
+  status: ACTIVE_PROOF_ADMISSION_MAPPED_NOT_CONVERGED
   primary_kernels:
   - K12
   secondary_kernels:
@@ -307,16 +309,42 @@ j24:
   - J23
   - J2
   - J15
-  last_completed_unit: J24_SOURCE_TRACE_001_RUNNER_AND_BOOT_ADMISSION
+  last_completed_unit: J24_SOURCE_TRACE_002_PROOF_ADMISSION_AND_RUN_ISOLATION
   source_observations:
   - unit_config_isolate_false_and_shuffle_true_not_generic_test_ci_config
   - integration_config_passWithNoTests_true
   - social_integration_fixture_fixed_prefix_cleanup_and_root_env
   - dev_launcher_readiness_exhaustion_does_not_block_up_banner
   - dev_launcher_unsets_resource_overrides_and_uses_fixed_ports_not_run_isolation
+  - CI_declares_PostgreSQL_Redis_migrations_and_server_rebuild_positive_seams
+  - CI_test_step_uses_default_test_ci_no_explicit_zero_skip_required_case_report_consumer_at_inspected_boundary
+  - source_gate_vacuity_check_not_runtime_discovery_completeness
+  - root_Turbo_unit_outputs_empty_does_not_disable_log_cache_freshness_must_be_distinct
+  - CI_module_error_regex_screen_not_positive_HTTP_boot_proof
+  - boot_test_observes_child_startup_logs_no_HTTP_request_no_awaited_termination
+  - boot_test_stale_build_diagnostic_does_not_override_current_CI_rebuild
+  - truth_playbook_seed_direct_write_list_exceeds_OS_allowlist_constitution_prevails
+  - GrowthBook_fallback_and_cached_evaluation_not_current_authority_or_runtime_mode_validation
   runtime_proof_executed: false
   new_canonical_ids_allocated: false
   reversible_testing_case_home: docs/intelligence/investigations/J13-INTEGRATION-TEST-MANIFEST.yaml
+  proof_admission_map: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md
+  proof_admission_contract: docs/intelligence/investigations/J24-PROOF-ADMISSION-CONTRACT.yaml
+  proof_admission_results:
+    named_fresh_source_files: 8
+    R03_R04_R05_R07: EXISTING_OWNER_AND_REQUIRED_PREDICATE_MAPPING_COMPLETE_NOT_IMPLEMENTED
+    analytical_receipt_challenges: 12
+    challenges_are_added_runtime_tests: false
+    native_report_consumer_installed: false
+    run_resource_allocator_installed: false
+    protected_settings_or_workflow_runs_inspected: false
+    production_or_external_proof: false
+    new_runner_bindings: 0
+  scope_disposition: NAMED_MAPPING_COMPLETE_TARGET_CONVERGENCE_AND_ENFORCEMENT_NOT_PROVEN
+  remaining_review_items:
+  - independent_policy_manifest_and_required_check_trust_boundary
+  - enforceable_CI_provisioning_report_integration_and_safe_withdrawal_design
+  - backward_reaudit_and_declared_scope_J24_convergence_decision
 programme_map:
   kind: DERIVED_READ_ONLY_VIEW_NOT_STATUS_AUTHORITY
   markdown: docs/intelligence/maps/PROGRAMME-MAP.md
@@ -350,6 +378,11 @@ programme_history:
   artifact: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
   detail: Q1-Q4 closed at bounded scope; 44 designed cases and six integration slices.
 - label: Activated J24 and added the living programme map
-  commit: null
+  commit: 59c94b381025fd2b35cda8f53283b1c33d22533f
   artifact: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md
   detail: Runner and boot evidence traced. 20 journey dossiers now exist; 80% is coverage only.
+- label: Mapped J24 proof admission and run isolation
+  commit: null
+  artifact: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md
+  detail: Eight pinned source files; CI/runner/boot/cache distinctions; R03/R04/R05/R07 owners and admission rules.
+    No app tests executed.

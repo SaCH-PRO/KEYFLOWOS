@@ -1,11 +1,11 @@
 # KEYFLOWOS - Living Programme Map
 
 > GENERATED VIEW, not another status authority.
-> Checkpoint: `J24-MAP-2026-09-16-01` | As of: 2026-09-16
+> Checkpoint: `J24-PA-2026-09-16-01` | As of: 2026-09-16
 > Regenerate: `python docs/intelligence/tools/build-programme-map.py`
 > Verify freshness: append `--check`. Source: `handoff/CURRENT-STATE.yaml`.
 
-**Current: J24 - J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING**
+**Current: J24 - J24_SAFE_CHANGE_CONVERGENCE_REVIEW**
 
 Dossiers: **20/25 (80%)**. This is coverage, not app completion.
 Tracked proof: **44 designed cases; 0 runner bindings; NOT_EXECUTED**.
@@ -100,15 +100,16 @@ Kernel maturity is not independently reassessed by this generated view.
 - Completed the bounded connector review - `a100ec1bc746e0433338e536fe21e05d55f49bb7`; `docs/intelligence/investigations/J13-BOUNDED-CONVERGENCE-REVIEW.md`
 - Specified and challenged the lifecycle contract - `2b177c772036eee83c24b79ee649d99fd3a2dba1`; `docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md`
 - Aligned the mapped J13 core - `81046dd4c74c55d8d213285a61eb34ca55925704`; `docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md`
-- Activated J24 and added the living programme map - `this checkpoint`; `docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md`
+- Activated J24 and added the living programme map - `59c94b381025fd2b35cda8f53283b1c33d22533f`; `docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md`
+- Mapped J24 proof admission and run isolation - `this checkpoint`; `docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md`
 
 ## Exact next action
 
-Continue J24 from its committed runner/boot source trace. Map the actual gate command, setup, reporter, discovered-test identity, environment admission, per-run resource ownership and cleanup boundaries. Inspect the OS truth/burndown playbooks and named harness setup only; do not rerun J13 or start another generic scan. Bind R03/R04/R05/R07 to concrete owners and fail-closed conditions, preserving shuffle seeds and negative controls. Do not change OS.md or gate assertions, execute application tests on unverified resources, or deploy. Update canonical state and dossier first, regenerate the programme map, run its freshness check, and publish matching continuity.
+Continue from the completed J24 proof-admission/run-isolation map and its design contract. Do not repeat the command/config scan or J13 Q1-Q4. Resolve three decisions: trusted change/policy and required-check ownership using available read-only evidence; how existing CI/provisioning/report mechanisms enforce admission, freshness, negative controls and safe withdrawal; then backward re-audit J13/J18/J23/J2/J15/K8/K12 and make a declared-scope J24 convergence disposition. Keep inaccessible settings and unexecuted runtime proof explicit. Do not change OS.md, assertions, workflows, production or run write-capable tests on unverified resources. Update state/dossier, regenerate the programme map, check freshness and publish matching continuity.
 
 ## Refresh and evidence rules
 
 Update authoritative state/dossiers first. Regenerate this Markdown, JSON and HTML together. The offline HTML can load a newer generated JSON; it does not fetch private GitHub data or change the app.
-Source fingerprint: `9b30e6fd1628c4c1efed709435190827d4d25202f04461dae46bfbe3f6e39e0e`.
-Forensic baseline: `8f173bfe79f1418159cf4099ea18b0d60d203ec2`. Input intelligence: `81046dd4c74c55d8d213285a61eb34ca55925704`.
+Source fingerprint: `285a952f28e36d2930db093e153df1ebaa41a0d03d4ea76069268da6f91244a5`.
+Forensic baseline: `8f173bfe79f1418159cf4099ea18b0d60d203ec2`. Input intelligence: `59c94b381025fd2b35cda8f53283b1c33d22533f`.
 Generated map correctness/visual checks are documentation-tool checks, not KEYFLOWOS application or provider tests.

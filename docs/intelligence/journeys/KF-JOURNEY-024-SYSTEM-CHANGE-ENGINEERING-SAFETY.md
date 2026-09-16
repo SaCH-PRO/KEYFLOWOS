@@ -1,14 +1,28 @@
 # KF-JOURNEY-024 - System Change / Engineering Safety
 
-Checkpoint: `J24-MAP-2026-09-16-01`  
-Status: **ACTIVE / INITIAL SOURCE TRACE / NOT CONVERGED**  
+Checkpoint: `J24-PA-2026-09-16-01`  
+Status: **ACTIVE / PROOF-ADMISSION MAP COMPLETED / NOT CONVERGED**  
 Activated: 2026-09-16  
-Intelligence input: `81046dd4c74c55d8d213285a61eb34ca55925704`  
+Current intelligence input: `59c94b381025fd2b35cda8f53283b1c33d22533f`  
 Implementation forensic baseline: `8f173bfe79f1418159cf4099ea18b0d60d203ec2`  
 Primary kernel: K12 Engineering Control Plane. Secondary: K1/K3/K7/K8/K11.  
 Adjacent journeys: J13, J18, J23, J2, J15; safe change ultimately affects all journeys.
 
 Production source, schema, deployment, OS constitution and test assertions remain unchanged. No KEYFLOWOS application, provider, concurrency, boot or migration tests were executed. Verification of the new programme-map utility is documentation tooling evidence only.
+
+## Current checkpoint - proof admission and run isolation
+
+**Completed:** [J24 Proof Admission and Run Isolation Map](../investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md), plus its [machine-readable design specification](../investigations/J24-PROOF-ADMISSION-CONTRACT.yaml). Neither installs a harness or changes assertions.
+
+Eight further pinned sources now connect the actual truth/burndown instructions, root Turbo tasks, CI test job, boot test, GrowthBook wrapper and source-vacuity gate. CI's PostgreSQL/Redis provisioning and server rebuild are positive seams, not missing infrastructure. At the inspected test-step/config boundary no explicit zero-skip/required-case report consumer is invoked. The integration-only passWithNoTests setting must not be misattributed to default test:ci.
+
+Freshness, scope and identity remain separate: a root Turbo unit-task cache can replay logs; source-gate input non-vacuity is not proof of runtime discovery; a module-error signature screen is not positive HTTP readiness; the boot test uses child startup logs and does not await confirmed child termination after kill. These are static conclusions, not observed runtime incidents. The constitution prevails over the truth playbook's broader direct-write list; neither is changed.
+
+R03/R04/R05/R07 now have named existing seams and required rejection predicates. Admission belongs before dangerous module/config collection; case identity sets, setup/skips/shards, negative-control lineage, current safety and run-owned cleanup cannot be replaced by one exit code. Twelve local analytical counterexamples are not new runtime cases. The J13 manifest remains 44 designed, zero bindings, NOT_EXECUTED.
+
+**Exact next unit:** J24_SAFE_CHANGE_CONVERGENCE_REVIEW, producing `investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md`. Resolve the trusted change/policy boundary, enforceable existing-tool integration/withdrawal design, then the backward re-audit and declared-scope convergence decision. No generic scan, no application run, no gate weakening and no production edits. J24 remains ACTIVE / NOT CONVERGED; no K12 dossier or new canonical IDs are created.
+
+The activation trace below is preserved as historical source evidence. Its former next-action references to creating the proof-admission map are completed by this checkpoint; they do not override the current continuation above. The initial trace's source labels remain local to that trace; the new map has its own full source manifest.
 
 ## Definition and accepted input
 
@@ -109,7 +123,7 @@ Seven journeys have explicit provisional target-alignment status in current stat
 
 Generator checks fail on inconsistent dossier counts, unknown/duplicate identities, inconsistent case counts, missing case coverage and cyclic slice dependencies. Regeneration and a freshness check are part of the documentation handoff. This is not a deployed live dashboard, background job, new CI gate or application module.
 
-## Disposition and exact next action
+## Historical activation disposition and next action - completed
 
 J24 activation and source trace 001: **completed at named source scope**. J24 overall: **ACTIVE / NOT CONVERGED**. J13 bounded alignment, D01-D10/T01-T13, ED1-ED5 and all 44 unexecuted design cases are preserved. No F228/C178/KF-REC-058 allocation, no execution packet promotion, no gate edit and no production change.
 

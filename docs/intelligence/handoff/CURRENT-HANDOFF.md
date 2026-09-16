@@ -1,67 +1,67 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `J24-MAP-2026-09-16-01`  
+Checkpoint: `J24-PA-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **J24 ACTIVE; SOURCE TRACE 001 AND LIVING PROGRAMME MAP COMPLETED**.
+Status: **J24 PROOF-ADMISSION AND RUN-ISOLATION MAP COMPLETED; SAFE-CHANGE CONVERGENCE REVIEW NEXT**.
 
 ## Resume coordinates
 
 ```text
 Repository: SaCH-PRO/KEYFLOWOS
 Intelligence branch: docs/keyflow-intelligence-foundation
-Input/provenance commit: 81046dd4c74c55d8d213285a61eb34ca55925704
-Forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-Live main observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
-Production code/schema/deployment: READ-ONLY / UNAUTHORIZED
-Application/provider/boot/concurrency/migration tests: NOT_EXECUTED
+Input/provenance: 59c94b381025fd2b35cda8f53283b1c33d22533f
+Forensic implementation baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+Production source/schema/deployment: READ-ONLY / UNAUTHORIZED
+Application/provider/boot/concurrency/migration proof: NOT_EXECUTED
 ```
 
-Resolve the output SHA from the live branch and matching checkpoint. No silent rebaseline or execution-packet promotion. [CURRENT-STATE.yaml](CURRENT-STATE.yaml) is the machine authority; this handoff and rollover files convey its current frontier.
+Resolve output SHA from the live branch and matching checkpoint, not the input SHA. No rebaseline or execution-packet promotion. [CURRENT-STATE.yaml](CURRENT-STATE.yaml) remains authoritative; map and handoffs are its views.
 
-## Last completed unit
+## Completed substantive work
 
-J24_ACTIVATION_SOURCE_TRACE_AND_PROGRAMME_MAP.
+[J24 Proof Admission and Run Isolation Map](../investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md) completes the prior exact next action. It traces eight additional pinned sources: truth/burndown playbooks, root package/Turbo, CI workflow, actual boot test, GrowthBook wrapper and source gate-vacuity check. Source identities and scope limits are in its section 9.
 
-New dossier: [J24 System Change / Engineering Safety](../journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md), ACTIVE / INITIAL SOURCE TRACE / NOT CONVERGED. It consumes J13's bounded alignment and I0/R03/R04/R05/R07 engineering-safety obligations rather than restarting J13.
+[J24 Proof Admission Contract](../investigations/J24-PROOF-ADMISSION-CONTRACT.yaml) records the proposed receipt dimensions, admission predicates, rejection/incomplete/scope-satisfied decisions and R03/R04/R05/R07 owner mappings. It is a design specification; it installs no runner, validator or CI gate and adds no executable bindings. Twelve local analytical challenges do not enlarge the 44-case application manifest.
 
-New visualisation: [Living Programme Map](../maps/PROGRAMME-MAP.md), with renderer/template and reproducible local HTML/JSON. It derives from canonical state, numbered roster, real directory inventory and the unchanged J13 design manifest. It is not a new authority or a hosted live feed.
+## Findings and positive seams to retain
 
-## Facts that must survive continuation
+CI already declares PostgreSQL/Redis, migrations, workspace builds and a server rebuild. Do not repeat a resolved claim that CI lacks those prerequisites. At the inspected test command/config/step boundary, no explicit zero-skip/required-case report consumer is invoked. The operating playbooks require those conditions; written policy is not equivalent to end-to-end enforcement. No historical green run is claimed false merely from this gap.
 
-The map verifies 25 journey identities and 20 dossiers (19 pre-existing plus J24); 80% is dossier coverage, not app completion. Five remain without dedicated dossiers: J8/J9/J20/J21/J22. It distinguishes seven explicit provisional alignments, five mature-pool members, seven other dossiers, one active investigation and five missing dossiers. Raw scope and source are retained; file presence never proves convergence. K12 has a canonical definition but no dedicated kernel dossier created here.
+Default test:ci is distinct from explicit unit or integration config. The integration passWithNoTests flag is not attributed to default CI. Root Turbo unit tasks can retain cached log semantics despite outputs:[]; do not present reused output as a newly executed shuffle/negative-control run. Direct server pnpm test:unit is not the same wrapper.
 
-J24 source trace establishes command/config distinctions, unit shuffle with isolate:false, integration passWithNoTests:true, and a fixed-prefix/root-env database fixture. Historical comment statistics are not fresh proof. The dev launcher can print stack-is-up after readiness loops expire and unsets inherited resource variables while using fixed ports. No actual boot, database incident or collision was reproduced.
+The existing gate-vacuity test checks source-reader nonempty inputs; it does not certify runtime discovery, zero skips or environment identity. Preserve it and all meaningful assertions.
 
-Written OS proof requirements (nonempty input, zero skips, negative controls, seeds and rebuilt dist) remain governing. Their actual end-to-end enforcement in playbooks/reporters/setup is the next trace. Discovery itself must not be presumed harmless if it evaluates test modules before resource admission.
+The CI module-loading check filters known error strings without making command success a positive condition. The actual integration boot test is stronger: it spawns rebuilt dist and observes child startup/DI output. It makes no HTTP request and resolves after requesting child.kill without awaiting confirmed termination. Keep module screen, startup observation, HTTP readiness and cleanup as distinct claims. Its stale missing-build diagnostic does not override the current CI rebuild.
 
-The 44 J13 integration cases remain designed, unbound and unexecuted. Documentation generator negative-control/freshness and HTML interaction/mobile checks passed; those are not KEYFLOWOS app/provider tests. Initial browser checks used Playwright/Chromium in-memory rendering because the agent-browser CLI was unavailable and file URLs were blocked. No app server was started.
+Truth's direct-write list includes a seed application path outside the OS truth allowlist. The constitution prevails; do not widen it or perform that write here. A candidate must not certify itself by changing its own expected tests, gate, report adapter or admission policy.
 
-## Preserved ownership and evidence
+## Run isolation and reversible testing
 
-J13 remains PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY, not whole-estate conformance. Its M001-M004, separate callback supplement, BCR, LAC, completed ACM and test manifest are unchanged. LAC remains the one D01-D10/T01-T13 home. Preserve known corrections: shared logger and monitor success nonwriters; conditional legacy fallback with Xero tenant guard; old/unknown event origin distinct from present adoption; historical reconciliation distinct from fresh effects; shared versus dedicated Google token-consumer differences; local revoke not retroactive remote cancellation; remote cleanup scoped to evidenced dependencies.
+Admission must precede unsafe config/module collection or setup. Positively verify least-privilege, run-owned DB/schema, queues, storage, callbacks, provider sandbox, ports/processes; worktrees and NODE_ENV alone do not prove isolation. Passing assertions, correct environment and successful cleanup are different evidence dimensions. Failed cleanup or uncertain child termination retains an obligation and blocks unsafe resource reuse.
 
-Broader mature pools and J5 status remain in CURRENT-STATE. ED1-ED5 remain unresolved prerequisites. F228/C178/KF-REC-058 remain unallocated; 04B overrides old numeric snapshots. This tranche has no new canonical finding allocations or implementation authorization.
+GrowthBook selects exposure/implementation; current authority/revocation still gates use. Unknown/stale/cached/invalid values must not create unsafe fallback. Source wrapper behavior is rechecked, but exhaustive callers and update freshness are not certified.
 
-## Exact next analytical action
+The blueprint's controlled-change and isolation/integration intent remains product context, not a certificate that the proposed controls already run. J13 alignment, D/T contract, ED1-ED5, I0-I5 and the 44-case manifest are unchanged. F228/C178/KF-REC-058 remain unallocated. No K12 dossier or new journey is created; coverage remains 20/25, not app completion.
 
-Stage: **J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING**.
+## Exact next unit
 
-Planned, not yet created:
-`docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md`.
+**J24_SAFE_CHANGE_CONVERGENCE_REVIEW**.
 
-Read the actual OS truth/burndown playbooks and their selected commands. Follow the runner/configuration, discovered test identity, reporter consumers, skip/setup handling, environment acquisition and per-run resource/cleanup owner. Bind R03/R04/R05/R07 to concrete admission predicates. Carry launcher readiness/resource observations into boot-proof requirements. Do not run write-capable collection/setup on unknown resources, modify OS.md or assertions, deploy, or launch the app to prove a documentation claim.
+Planned, not created: `docs/intelligence/investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md`.
 
-Start from this source trace, not from another project-status summary. Reopen J13 only for a precise contrary invariant/path.
+Resolve the trusted change/policy and required-check boundary using accessible read-only evidence; specify enforcement through existing CI/provisioning/report tools plus safe migration/withdrawal; then backward re-audit J13/J18/J23/J2/J15/K8/K12 and make a declared-scope J24 convergence disposition. Keep inaccessible administrative settings and unexecuted proof explicit. Do not repeat this command/config scan or restart J13.
 
-## Map and persistence routine
+No application launch, write-capable test collection, OS/assertion/workflow change, production edit or deployment is authorized by this continuation. Read AGENTS/AGENT-CONTINUITY, current state/handoff/rollover and the completed J24 map/contract; run Context Integrity Check before the next major cycle.
 
-After updating state/dossier, use an authoring Python environment with PyYAML:
+## Programme map and persistence
+
+After canonical updates:
 
 ```bash
 python docs/intelligence/tools/build-programme-map.py
 python docs/intelligence/tools/build-programme-map.py --check
 ```
 
-Regenerate before checking on a fresh checkout: local HTML/JSON are reproducible ignored outputs, while Markdown and source renderer/template are tracked. The initial tranche used an explicitly labelled connector-derived snapshot rather than a repository clone. A local viewer can load new generated JSON, but never writes GitHub or the app.
+This tranche uses the unchanged renderer/template, whose bytes match their repository blobs. The reconstructed prior connector-input bundle matches the previous published map's source fingerprint, preventing silent loss of prior machine state. Local generation uses the supported --snapshot mode, not a fake repository checkout. The state retains earlier pools, ranges, J13 evidence and history.
 
-Refresh START, 07-CURRENT-STATE and all four CURRENT/ROLLOVER files with each material frontier change; persist substantive results and verify the Git diff and head. The map must reflect the same canonical state, not replace it.
+Map generation, freshness, negative metadata and browser checks are documentation-tool evidence only. See `maps/J24-PA-VALIDATION.md` for checks actually completed. Commit the substantive result, state/dossier, generated Markdown and all CURRENT/ROLLOVER views together; verify allowed changed paths and branch head.

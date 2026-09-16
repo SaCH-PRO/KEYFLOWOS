@@ -1,0 +1,99 @@
+schema_version: 1
+kind: proof_admission_design_specification
+project: KEYFLOWOS
+checkpoint_id: J24-PA-2026-09-16-01
+status: PROPOSED_NOT_IMPLEMENTED_NOT_EXECUTED
+canonical_home: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md
+forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+implementation_authorized: false
+installs_runner_or_gate: false
+executes_or_validates_tests: false
+tracked_case_home: docs/intelligence/investigations/J13-INTEGRATION-TEST-MANIFEST.yaml
+tracked_case_count: 44
+runner_bindings_created: false
+rules_are_proposed_not_enforced: true
+source_scope: NAMED_EIGHT_FILE_TRACE_PLUS_RETAINED_J24_SOURCE_001
+verdicts:
+  rejected: REJECTED
+  insufficient_evidence: INCOMPLETE
+  eligible_evidence: SATISFIED_AT_DECLARED_SCOPE
+  eligible_evidence_is_deployment_permission: false
+policy_authority:
+  governing_constitution: architecture/os/OS.md
+  independent_accepted_manifest_and_gate_versions_required: true
+  candidate_may_choose_its_own_acceptance_rules: false
+  code_changes_require_separate_authorization_and_review: true
+  same_run_candidate_report_authenticates_itself: false
+receipt_dimensions:
+  scope: [journey_or_invariant, claim_type, accepted_required_case_selection]
+  source: [commit_tree, authorized_diff_if_any, gate_version, manifest_version, build_artifact, toolchain]
+  run: [run_id, attempt_id, command_arguments, working_directory, effective_config, runner_version, shard_plan, seed_clock_policy, resource_owner]
+  collection: [bindings, discovered_case_identities, rejected_missing_or_duplicate_identities]
+  execution: [per_case_outcomes, suite_collection_setup_errors, skipped_pending_todo, unhandled_errors, exit_signal_timeout_cancellation]
+  provenance: [fresh_or_reused, original_receipt_if_reused, accepted_matching_inputs, artifact_hashes]
+  isolation: [precollection_admission, verified_nonproduction_resources, restricted_capabilities, ownership_lease, allowed_destinations]
+  cleanup: [owned_child_termination, resource_cleanup_results, residual_obligations]
+  review: [independent_evaluation, redacted_evidence_references, declared_promotion_scope]
+positive_admission:
+  - accepted_policy_and_required_selection_are_independent_of_candidate
+  - expected_population_is_nonempty
+  - every_required_case_has_exact_binding
+  - discovered_identity_set_matches_accepted_selection
+  - all_required_shards_and_attempt_records_are_present
+  - all_required_case_outcomes_are_terminal_passed
+  - no_skipped_pending_todo_required_cases
+  - no_collection_setup_suite_or_unhandled_error
+  - process_outcome_and_report_agree
+  - environment_and_capability_admission_precedes_unsafe_collection
+  - required_negative_controls_fail_for_the_named_intended_reason
+  - requested_freshness_class_matches_fresh_or_reused_evidence
+  - cleanup_claim_is_supported_or_remains_explicitly_incomplete
+  - independent_review_accepts_only_the_measured_scope
+native_report_adapter:
+  candidate_family: vitest_v2_json_or_junit
+  exact_resolved_version_characterized: false
+  native_status_to_normalized_mapping_implemented: false
+  unknown_schema_or_status: REJECT
+  missing_raw_results: INCOMPLETE
+  aggregate_counters_replace_case_identity_checks: false
+  no_new_reporter_dependency_selected: true
+existing_case_owner_map:
+  R03: [package_scripts, runner_configuration, CI_test_steps, native_reporter, independent_proof_consumer, truth_burndown_negative_control_review]
+  R04: [outer_run_controller, CI_service_provisioning, fixture_environment_and_DB_acquisition, child_environment_restriction]
+  R05: [run_resource_allocator, fixture_cleanup_owner, child_process_and_port_owner, resource_reclaimer]
+  R07: [GrowthBookService, trusted_mode_and_context_callers, current_J13_admission, K3_authority]
+resource_requirements:
+  boundaries: [database_or_schema, queues, storage, callback_destinations, provider_sandbox, ports_and_processes]
+  git_worktree_implies_resource_isolation: false
+  NODE_ENV_or_resource_name_is_sufficient_identity: false
+  inherited_environment_is_automatically_trusted: false
+  fixed_prefix_cleanup_is_run_owned_proof: false
+  admission_before_module_evaluation_when_capabilities_are_acquired: true
+  secrets_in_receipts_or_intelligence_documents: PROHIBITED
+  uncertain_cleanup_permits_namespace_reuse: false
+boot_evidence_classes: [artifact_built, child_spawned, module_or_DI_observed, HTTP_identity_observed, required_scope_ready, owned_child_and_resources_closed]
+boot_constraints:
+  startup_log_is_HTTP_proof: false
+  module_error_regex_absence_is_full_boot_proof: false
+  child_kill_request_is_confirmed_termination: false
+  fixed_port_identifies_this_run: false
+cache_constraints:
+  replayed_green_logs_are_new_execution: false
+  reuse_requires_original_receipt_and_input_match: true
+  shuffle_exploration_or_negative_control_requires_declared_fresh_run: true
+  outputs_empty_means_no_log_cache: false
+analytical_challenges_not_executed:
+  PA01: unbound_required_case_with_green_report
+  PA02: duplicate_identity_substituted_for_missing_case
+  PA03: setup_error_hidden_as_pending_or_skipped
+  PA04: missing_or_cancelled_shard
+  PA05: cached_logs_claimed_as_fresh_seed
+  PA06: mock_or_unit_proof_claimed_as_real_DB_proof
+  PA07: candidate_weakens_its_own_gate_or_manifest
+  PA08: negative_control_fails_for_unrelated_environment_reason
+  PA09: different_branches_share_cleanup_resources
+  PA10: startup_log_without_HTTP_or_exit_evidence
+  PA11: cached_flag_ON_after_current_revocation
+  PA12: passing_assertions_with_failed_cleanup
+runtime_status: NOT_EXECUTED
+next_stage: J24_SAFE_CHANGE_CONVERGENCE_REVIEW

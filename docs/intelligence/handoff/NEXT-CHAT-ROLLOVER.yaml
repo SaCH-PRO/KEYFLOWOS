@@ -1,15 +1,15 @@
 project: KEYFLOWOS
-rollover_version: 44
-last_updated: 2026-09-16
-checkpoint_id: J24-MAP-2026-09-16-01
-status: LIVE_J24_ACTIVE_SOURCE_TRACE_WITH_DERIVED_PROGRAMME_MAP
+rollover_version: 45
+last_updated: '2026-09-16'
+checkpoint_id: J24-PA-2026-09-16-01
+status: LIVE_J24_PROOF_ADMISSION_MAPPED_SAFE_CHANGE_REVIEW_NEXT
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-input_intelligence_head: 81046dd4c74c55d8d213285a61eb34ca55925704
+input_intelligence_head: 59c94b381025fd2b35cda8f53283b1c33d22533f
 canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
 current_handoff: docs/intelligence/handoff/CURRENT-HANDOFF.md
 output_resolution: RESOLVE_LIVE_BRANCH_HEAD_AND_MATCHING_CHECKPOINT_ID
-context_integrity: PASS_FOR_BOUNDED_J24_ACTIVATION_AND_MAP
+context_integrity: PASS_FOR_BOUNDED_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING
 fresh_chat_context_integrity_check_required: true
 implementation_authorized: false
 runtime_proof_executed: false
@@ -17,95 +17,151 @@ persistence_only_checkpoint: false
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  later_main_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+  later_main_previously_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
-  source_manifest: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md#source-manifest
+  fresh_source_manifest: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md#9-source-manifest-external-constraints-and-integrity
+  source_scope: NAMED_FULL_OR_PARTIAL_READS_NOT_EXHAUSTIVE
+  tenant_values_or_remote_configuration_inspected: false
 canonical_ranges:
   findings_through: F227
   contradictions_through: C177
   recommendations_through: KF-REC-057
   concepts_through: KF-CONCEPT-042
-next_free_ids: {finding: F228, contradiction: C178, recommendation: KF-REC-058, status: UNALLOCATED}
+next_free_ids:
+  finding: F228
+  contradiction: C178
+  recommendation: KF-REC-058
+  allocation_status: UNALLOCATED
 journey_coverage:
+  total_canonical_journeys: 25
   dossier_count: 20
-  total_journeys: 25
-  coverage_percent: 80
-  dossierless: [J8, J9, J20, J21, J22]
-  provenance: RECOUNTED_PINNED_DIRECTORY_19_PLUS_NEW_J24_DOSSIER
-  is_programme_completion: false
+  dossier_coverage_percent: 80
+  dossierless:
+  - J8
+  - J9
+  - J20
+  - J21
+  - J22
+  coverage_provenance: RECOUNTED_PINNED_DIRECTORY_19_PLUS_NEW_J24_DOSSIER
+  coverage_is_programme_completion: false
+  active: J24
+  active_dossier_created: true
 j13:
   status: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
-  entire_provider_estate_converged: false
-  implementation_conformance_proven: false
-  completed_queue: [Q1, Q2, Q3, Q4]
-  inherited_root: F227_C177
   contract: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
   conformance_map: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
-  test_manifest: docs/intelligence/investigations/J13-INTEGRATION-TEST-MANIFEST.yaml
-  original_microtraces_SUP_BCR_LAC_ACM_unchanged: true
+  original_evidence_and_contract_unchanged: true
+  implementation_conformance_proven: false
 j24:
   dossier: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md
-  status: ACTIVE_INITIAL_SOURCE_TRACE_NOT_CONVERGED
-  primary_kernel: K12
-  secondary_kernels: [K1, K3, K7, K8, K11]
-  adjacent_journeys: [J13, J18, J23, J2, J15]
-  completed_unit: J24_SOURCE_TRACE_001_RUNNER_AND_BOOT_ADMISSION
-  observations:
-    - generic_test_ci_is_not_explicit_unit_config
-    - unit_shuffle_true_isolate_false_historical_comments_not_fresh_proof
-    - integration_passWithNoTests_true
-    - fixed_prefix_root_env_fixture_cleanup_needs_run_ownership
-    - launcher_readiness_exhaustion_does_not_prevent_up_banner
-    - launcher_unsets_resource_overrides_and_uses_fixed_ports
-    - written_OS_proof_rules_not_yet_end_to_end_enforcement_trace
+  status: ACTIVE_PROOF_ADMISSION_MAPPED_NOT_CONVERGED
+  primary_kernels:
+  - K12
+  secondary_kernels:
+  - K1
+  - K3
+  - K7
+  - K8
+  - K11
+  adjacent_journeys:
+  - J13
+  - J18
+  - J23
+  - J2
+  - J15
+  last_completed_unit: J24_SOURCE_TRACE_002_PROOF_ADMISSION_AND_RUN_ISOLATION
+  source_observations:
+  - unit_config_isolate_false_and_shuffle_true_not_generic_test_ci_config
+  - integration_config_passWithNoTests_true
+  - social_integration_fixture_fixed_prefix_cleanup_and_root_env
+  - dev_launcher_readiness_exhaustion_does_not_block_up_banner
+  - dev_launcher_unsets_resource_overrides_and_uses_fixed_ports_not_run_isolation
+  - CI_declares_PostgreSQL_Redis_migrations_and_server_rebuild_positive_seams
+  - CI_test_step_uses_default_test_ci_no_explicit_zero_skip_required_case_report_consumer_at_inspected_boundary
+  - source_gate_vacuity_check_not_runtime_discovery_completeness
+  - root_Turbo_unit_outputs_empty_does_not_disable_log_cache_freshness_must_be_distinct
+  - CI_module_error_regex_screen_not_positive_HTTP_boot_proof
+  - boot_test_observes_child_startup_logs_no_HTTP_request_no_awaited_termination
+  - boot_test_stale_build_diagnostic_does_not_override_current_CI_rebuild
+  - truth_playbook_seed_direct_write_list_exceeds_OS_allowlist_constitution_prevails
+  - GrowthBook_fallback_and_cached_evaluation_not_current_authority_or_runtime_mode_validation
   runtime_proof_executed: false
   new_canonical_ids_allocated: false
+  reversible_testing_case_home: docs/intelligence/investigations/J13-INTEGRATION-TEST-MANIFEST.yaml
+  proof_admission_map: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md
+  proof_admission_contract: docs/intelligence/investigations/J24-PROOF-ADMISSION-CONTRACT.yaml
+  proof_admission_results:
+    named_fresh_source_files: 8
+    R03_R04_R05_R07: EXISTING_OWNER_AND_REQUIRED_PREDICATE_MAPPING_COMPLETE_NOT_IMPLEMENTED
+    analytical_receipt_challenges: 12
+    challenges_are_added_runtime_tests: false
+    native_report_consumer_installed: false
+    run_resource_allocator_installed: false
+    protected_settings_or_workflow_runs_inspected: false
+    production_or_external_proof: false
+    new_runner_bindings: 0
+  scope_disposition: NAMED_MAPPING_COMPLETE_TARGET_CONVERGENCE_AND_ENFORCEMENT_NOT_PROVEN
+  remaining_review_items:
+  - independent_policy_manifest_and_required_check_trust_boundary
+  - enforceable_CI_provisioning_report_integration_and_safe_withdrawal_design
+  - backward_reaudit_and_declared_scope_J24_convergence_decision
 programme_map:
-  kind: DERIVED_READ_ONLY_VIEW_NOT_AUTHORITY
+  kind: DERIVED_READ_ONLY_VIEW_NOT_STATUS_AUTHORITY
   markdown: docs/intelligence/maps/PROGRAMME-MAP.md
-  readme: docs/intelligence/maps/README.md
   generator: docs/intelligence/tools/build-programme-map.py
   template: docs/intelligence/tools/programme-map.template.html
-  local_generated_views: [PROGRAMME-MAP.json, PROGRAMME-MAP.html]
+  generated_local_views:
+  - PROGRAMME-MAP.json
+  - PROGRAMME-MAP.html
   refresh_command: python docs/intelligence/tools/build-programme-map.py
   freshness_command: python docs/intelligence/tools/build-programme-map.py --check
-  refresh_after_each_material_state_or_inventory_change: true
-  live_background_github_sync: false
+  refresh_policy: REGENERATE_AFTER_CANONICAL_STATE_OR_DOSSIER_INVENTORY_CHANGE
+  background_or_live_github_sync: false
   overall_completion_percent: null
-  validation_home: docs/intelligence/maps/MAP-VALIDATION.md
-  map_tool_QA_is_application_proof: false
+  status_policy: CURRENT_STATE_ONLY_DOSSIER_EXISTENCE_NEVER_IMPLIES_CONVERGENCE
+  tool_checks_are_application_tests: false
 integration_testing:
   designed_cases: 44
   runner_bindings: 0
-  application_runtime_status: NOT_EXECUTED
+  runtime_status: NOT_EXECUTED
   harness_implemented: false
-  case_groups: [P01_P12, M004_01_06, N01_N06, A01_A08, R01_R12]
 remaining_debts_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#remaining_evidence_debts
-remaining_debts: [ED1_schema_claim_reuse_migration, ED2_broader_adapter_worker_coverage, ED3_actual_remote_registration, ED4_harness_and_executed_proof, ED5_later_baseline_comparison]
+remaining_debts:
+  ED1: whole_schema_account_claim_reuse_exact_DDL_indexes_backfill_transaction_extensions_and_rollback_floor
+  ED2: unmapped_adapter_worker_legacy_reader_conformance_and_protected_scope_cutover
+  ED3: actual_remote_registration_account_client_project_dependencies_and_cleanup_outcomes
+  ED4: executable_case_bindings_isolated_harness_runtime_provider_migration_and_negative_control_results
+  ED5: deliberate_later_implementation_baseline_comparison_before_execution
 broader_pools_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#mature_pools
 active_frontier:
-  stage: J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING
+  stage: J24_SAFE_CHANGE_CONVERGENCE_REVIEW
   primary_journey: J24
-  status: ACTIVE_SOURCE_TRACE_NOT_CONVERGED
-  last_completed_stage: J24_ACTIVATION_SOURCE_TRACE_AND_PROGRAMME_MAP
+  status: ACTIVE_SYNTHESIS_NOT_CONVERGED
+  last_completed_stage: J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAPPING
+  completed_items:
+  - J13_Q1_Q4
+  - J24_SOURCE_TRACE_001
+  - J24_PROOF_ADMISSION_AND_RUN_ISOLATION_MAP
 exact_next_action:
-  planned_artifact: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md
+  planned_artifact: docs/intelligence/investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md
   planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
-  instruction: >-
-    Continue from J24 source trace 001. Map actual OS truth/burndown commands,
-    runner/configuration, discovered-test identity, reporter/skip/setup admission,
-    environment acquisition, per-run ownership and cleanup. Bind R03/R04/R05/R07
-    to concrete enforced owners; do not treat written policy as proof. Preserve
-    seeds, negative controls, OS.md and assertions. Do not run application tests
-    on unverified resources or deploy. Update canonical state/dossier, regenerate
-    the map and run its freshness check, refresh continuity and verify persistence.
+  instruction: 'Continue from the completed J24 proof-admission/run-isolation map and its design contract. Do not
+    repeat the command/config scan or J13 Q1-Q4. Resolve three decisions: trusted change/policy and required-check
+    ownership using available read-only evidence; how existing CI/provisioning/report mechanisms enforce admission,
+    freshness, negative controls and safe withdrawal; then backward re-audit J13/J18/J23/J2/J15/K8/K12 and make
+    a declared-scope J24 convergence disposition. Keep inaccessible settings and unexecuted runtime proof explicit.
+    Do not change OS.md, assertions, workflows, production or run write-capable tests on unverified resources. Update
+    state/dossier, regenerate the programme map, check freshness and publish matching continuity.'
 constraints:
-  - production_source_schema_deployment_read_only
-  - no_runtime_provider_boot_or_migration_proof_claim
-  - no_silent_forensic_rebaseline
-  - no_unallocated_ID_use
-  - preserve_J13_original_evidence_and_contract
-  - no_revocation_resurrection_or_history_destruction_on_rollback
-  - no_weakening_gate_to_manufacture_green
-  - one_state_one_contract_one_ordered_frontier
-  - map_is_derived_regenerate_after_source_changes
+- production_code_schema_and_deployment_read_only
+- no_runtime_provider_or_migration_proof_claim
+- no_silent_forensic_rebaseline
+- no_canonical_allocation_without_04B_gate
+- F228_C178_KF_REC_058_remain_unallocated
+- preserve_microtraces_SUP_BCR_and_LAC
+- one_current_machine_state_one_contract_one_ordered_frontier
+- no_feature_flag_rollback_that_reactivates_revoked_authority
+- no_history_destruction_or_fake_external_undo
+- no_gate_weakening_to_manufacture_success
+- publish_and_verify_intelligence_checkpoint
+- regenerate_programme_map_after_source_state_changes_no_independent_status_edits
