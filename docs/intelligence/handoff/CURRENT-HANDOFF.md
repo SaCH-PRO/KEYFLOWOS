@@ -1,13 +1,13 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `J21-CONV-2026-09-17-01`.
+Checkpoint: J22-CONV-2026-09-17-01.
 
-J21 is provisionally target-aligned at the named public-boundary core under KF-REC-059. F232/C182 covers PortalAccess tenant/contact binding; F233/C183 covers concurrent booking slot ownership.
+All 25 canonical journeys now have dedicated dossiers. J22 is provisionally target-aligned at its named voice-session/modality core under KF-REC-060.
 
-Coverage: 24/25 journey dossiers. J22 is the final dossierless journey.
+J22 reused F226/C176, F224/C174, F222/C172, F225/C175 and F231/C181; no new F/C allocation.
 
-Next: J22 KEY Voice. Load existing F226/C176 voice ingress/governance evidence and J20 F231 metering/admission pressure. Trace Phone Voice WebSocket, provider webhook, LiveKit/browser voice, KeyCortex voice/TTS/realtime, conversation identity, exact-action governance, metering and recovery.
+Current ranges: F233/C183/KF-REC-060. Next free F234/C184/KF-REC-061.
 
-Then execute whole-OS convergence closure.
+Next exact unit: WHOLE_OS_CONVERGENCE_CLOSURE. Produce investigations/WHOLE-OS-CONVERGENCE-CLOSURE-2026-09-17.md, reconcile all journeys/kernels/constellations, define target/migration/proof architecture and the implementation-readiness boundary.
 
-Production remains read-only. Runtime proof false. Programme map paused. Scheduled cycles halted. Baseline fixed. Current ranges F233/C183/KF-REC-059; next F234/C184/KF-REC-060.
+Production remains read-only. Runtime proof false. Programme map paused. Scheduled cycles halted. Baseline fixed.

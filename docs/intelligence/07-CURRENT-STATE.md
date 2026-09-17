@@ -1,35 +1,33 @@
 # KeyFlowOS Current State
 
-Checkpoint: `J21-CONV-2026-09-17-01`  
-Status: **24/25 JOURNEY DOSSIERS; J21 NAMED PUBLIC CORE TARGET-ALIGNED; J22 NEXT**.
+Checkpoint: J22-CONV-2026-09-17-01
+Status: ALL 25 JOURNEYS DOSSIERED; J22 NAMED CORE TARGET-ALIGNED; WHOLE-OS CLOSURE NEXT.
 
-## Latest completed
+J22 traced Phone Voice, LiveKit/in-app voice, realtime bridge, voice-agent worker and TTS/STT modalities.
 
-J21 public-customer end-to-end trace covered storefront/checkout, booking, forms, quote, invoice/payment link and portal boundaries.
+Selected target: KF-REC-060 Voice Session & Modality Contract.
 
-Selected target: KF-REC-059.
+No new finding/contradiction IDs were required. J22 reuses canonical voice/conversation/governance/metering roots.
 
-New canonical roots:
-- F232/C182 portal grant tenant/subject mismatch possibility;
-- F233/C183 booking concurrent slot race.
-
-Storefront payment retry/order identity reuses J10/J18. Lead-form duplicate occurrence reuses J9. Financial/commercial effects reuse J4/J7/J10.
-
-## Programme position
-
-- journeys: 25
-- dossiers: 24
-- dossierless: J22 only
-- kernels: 12/12 dossiers
+Coverage:
+- canonical journeys: 25
+- dedicated journey dossiers: 25
+- canonical kernels: 12
+- kernel dossiers: 12
 - runtime proof: false
 - implementation authorized: false
 
-## Current frontier
+Coverage does not mean application completion.
 
-**J22_KEY_VOICE_ACTIVATION**
+Current frontier: WHOLE_OS_CONVERGENCE_CLOSURE.
 
-Trace independently reachable voice transports, provider/session authenticity, tenant binding, conversation occurrence identity, realtime model/tool governance, human/control semantics, metering/cost and recovery. Start from existing F226/C176 and F231 pressure.
+Reconcile all journeys/kernels/constellations into:
+1. accepted whole-system target architecture;
+2. unresolved foundational invariants;
+3. migration waves and compatibility floors;
+4. proof architecture;
+5. implementation-readiness boundary and exact next packets.
 
-Then perform the whole-OS convergence closure.
+Production remains read-only, map refresh paused, scheduled cycles halted, baseline fixed.
 
-Map refresh remains paused; scheduled cycles remain halted; baseline fixed.
+Canonical ranges: F233/C183/KF-REC-060; next F234/C184/KF-REC-061.

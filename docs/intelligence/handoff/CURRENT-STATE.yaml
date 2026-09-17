@@ -1,23 +1,35 @@
 project: KEYFLOWOS
-analysis_version: 80
+analysis_version: 81
 last_updated: '2026-09-17'
-checkpoint_id: J21-CONV-2026-09-17-01
-status: J21_NAMED_PUBLIC_BOUNDARY_CORE_TARGET_ALIGNED_J22_NEXT
+checkpoint_id: J22-CONV-2026-09-17-01
+status: ALL_25_JOURNEYS_DOSSIERED_WHOLE_OS_CONVERGENCE_CLOSURE_NEXT
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-implementation_evidence: {branch: main, forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2, deliberate_rebaseline: false}
+implementation_evidence:
+  branch: main
+  forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+  deliberate_rebaseline: false
 implementation_authorized: false
 runtime_proof_executed: false
 production_read_only: true
 scheduled_cycles: HALTED
-programme_map: {refresh_authorized: false, refresh_policy: PAUSED_BY_USER_UNTIL_EXPLICIT_REQUEST}
-canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-059, concepts_through: KF-CONCEPT-042}
-next_free_ids: {finding: F234, contradiction: C184, recommendation: KF-REC-060}
+programme_map:
+  refresh_authorized: false
+  refresh_policy: PAUSED_BY_USER_UNTIL_EXPLICIT_REQUEST
+canonical_ranges:
+  findings_through: F233
+  contradictions_through: C183
+  recommendations_through: KF-REC-060
+  concepts_through: KF-CONCEPT-042
+next_free_ids:
+  finding: F234
+  contradiction: C184
+  recommendation: KF-REC-061
 coverage:
   canonical_journeys: 25
-  journey_dossiers: 24
-  dossier_coverage_percent: 96
-  dossierless: [J22]
+  journey_dossiers: 25
+  dossier_coverage_percent: 100
+  dossierless: []
   canonical_kernels: 12
   kernel_dossiers: 12
   coverage_is_application_completion: false
@@ -25,30 +37,27 @@ j20:
   status: PROVISIONALLY_TARGET_ALIGNED_NAMED_ENTITLEMENT_METERING_CORE_ONLY
   recommendation: KF-REC-058
 j21:
-  dossier: docs/intelligence/journeys/KF-JOURNEY-021-PUBLIC-CUSTOMER-EXPERIENCE.md
-  microtrace: docs/intelligence/investigations/J21-PUBLIC-CUSTOMER-EXPERIENCE-MICROTRACE-001.md
   status: PROVISIONALLY_TARGET_ALIGNED_NAMED_PUBLIC_BOUNDARY_CORE_ONLY
   recommendation: KF-REC-059
-  findings: [F232, F233]
-  contradictions: [C182, C183]
-  cases: 16
+j22:
+  dossier: docs/intelligence/journeys/KF-JOURNEY-022-KEY-VOICE.md
+  microtrace: docs/intelligence/investigations/J22-KEY-VOICE-MICROTRACE-001.md
+  status: PROVISIONALLY_TARGET_ALIGNED_NAMED_VOICE_SESSION_MODALITY_CORE_ONLY
+  recommendation: KF-REC-060
+  new_findings: []
+  new_contradictions: []
+  cases: 18
   bindings: 0
   runtime_status: NOT_EXECUTED
 active_frontier:
-  stage: J22_KEY_VOICE_ACTIVATION
-  primary_journey: J22
-  status: NEXT_ACTIVATION
+  stage: WHOLE_OS_CONVERGENCE_CLOSURE
+  status: ACTIVE_SYNTHESIS
 exact_next_action:
-  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-022-KEY-VOICE.md
-  instruction: >-
-    Trace Phone Voice, LiveKit/browser voice, KeyCortex voice, realtime provider
-    transports, session identity/tenant binding, conversation occurrence,
-    exact tool governance, metering/cost and recovery. Reuse F226/C176, F231 and
-    J5/J14/J20 contracts before new allocation. Then close whole-OS convergence.
+  planned_artifact: docs/intelligence/investigations/WHOLE-OS-CONVERGENCE-CLOSURE-2026-09-17.md
+  instruction: reconcile all journeys, kernels and constellations into target, migration, proof and implementation-readiness architecture
 constraints:
 - production_read_only
 - no_runtime_proof_claim
 - no_rebaseline
 - map_refresh_paused
 - scheduled_cycles_halted
-- J22_then_whole_OS_closure

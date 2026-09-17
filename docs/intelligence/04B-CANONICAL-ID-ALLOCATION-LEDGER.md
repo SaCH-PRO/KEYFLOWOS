@@ -226,3 +226,22 @@ Checkpoint: `J21-CONV-2026-09-17-01`.
 - Comparison owner: `J21-PUBLIC-CUSTOMER-EXPERIENCE-MICROTRACE-001.md`.
 
 Current ranges: F233 / C183 / KF-REC-059. Next free F234 / C184 / KF-REC-060.
+
+
+## J22 KEY Voice allocation
+
+Checkpoint: J22-CONV-2026-09-17-01.
+
+Anti-duplication review found no genuinely new finding/contradiction root beyond F226/C176, F224/C174, F222/C172, F225/C175 and F231/C181.
+
+Allocated:
+- KF-REC-060 — Voice Session & Modality Contract
+- home: 10S-RECOMMENDATION-REGISTER-VOICE-SESSION-MODALITY-CONTINUATION.md
+- evidence: KF-JOURNEY-022-KEY-VOICE.md and J22-KEY-VOICE-MICROTRACE-001.md
+
+Canonical ranges after J22:
+- findings through F233;
+- contradictions through C183;
+- recommendations through KF-REC-060.
+
+Next free: F234 / C184 / KF-REC-061.
