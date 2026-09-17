@@ -185,3 +185,31 @@ LOAD 04A + 04B
 ```
 
 No production implementation is authorized by this ledger.
+
+
+## J20 Plan / Subscription / AI Cost allocations
+
+Checkpoint: `J20-CONV-2026-09-17-01`.
+
+- **F229 / C179** — customer AI allowance and customer overage use different frozen billable populations.
+- **F230 / C180** — AI allowance/overage/provider-budget windows use calendar month rather than the declared subscription-period identity.
+- **F231 / C181** — direct ModelGateway/modality paths can bypass AiUsageService admission/metering while ModelGateway budget spend reads AiUsageLog instead of the complete provider-cost evidence population.
+- Finding home: `08BE-FINDING-REGISTER-PLAN-SUBSCRIPTION-AI-METERING-SUPPLEMENT.md`.
+- Contradiction home: `09BE-CONTRADICTION-REGISTER-PLAN-SUBSCRIPTION-AI-METERING-SUPPLEMENT.md`.
+- Target: **KF-REC-058 — Subscription Entitlement, Metering & Cost Reconciliation Contract**, home `10Q-RECOMMENDATION-REGISTER-ENTITLEMENT-METERING-CONTINUATION.md`.
+- Comparison: `investigations/J20-ENTITLEMENT-METERING-CONVERGENCE-REVIEW.md`.
+- Evidence: fixed-baseline static source; no runtime billing incident or executed provider/model test claimed.
+
+Current ranges after J20:
+
+```text
+Findings:         F001–F231
+Contradictions:   C001–C181
+Recommendations: KF-REC-001–KF-REC-058
+```
+
+Next free IDs:
+
+```text
+F232 / C182 / KF-REC-059
+```

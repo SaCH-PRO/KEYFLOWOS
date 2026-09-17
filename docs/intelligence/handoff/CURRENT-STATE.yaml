@@ -1,158 +1,94 @@
 project: KEYFLOWOS
-analysis_version: 78
+analysis_version: 79
 last_updated: '2026-09-17'
-checkpoint_id: WSR-2026-09-17-01
-status: WHOLE_SYSTEM_REAUDIT_COMPLETE_J20_LINEAGE_NEXT_MAP_PAUSED
+checkpoint_id: J20-CONV-2026-09-17-01
+status: J20_NAMED_ENTITLEMENT_METERING_CORE_TARGET_ALIGNED_J21_NEXT
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
-reaudit: docs/intelligence/investigations/WHOLE-SYSTEM-REAUDIT-2026-09-17.md
-input_intelligence_head: 153a078b06c7e2f188e9d46ebba5d484cf6ddb8f
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  later_main_previously_observed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
 implementation_authorized: false
 runtime_proof_executed: false
 production_read_only: true
 scheduled_cycles: HALTED
 programme_map:
-  refresh_policy: PAUSED_BY_USER_UNTIL_EXPLICIT_REQUEST
   refresh_authorized: false
+  refresh_policy: PAUSED_BY_USER_UNTIL_EXPLICIT_REQUEST
   last_generated_checkpoint: J24-PA-2026-09-16-01
-  intentionally_stale_relative_to_current_state: true
 canonical_ranges:
-  findings_through: F228
-  contradictions_through: C178
-  recommendations_through: KF-REC-057
+  findings_through: F231
+  contradictions_through: C181
+  recommendations_through: KF-REC-058
   concepts_through: KF-CONCEPT-042
-next_free_ids:
-  finding: F229
-  contradiction: C179
-  recommendation: KF-REC-058
-  allocation_status: UNALLOCATED
-allocation_this_checkpoint: {findings: [], contradictions: [], recommendations: [], concepts: []}
+next_free_ids: {finding: F232, contradiction: C182, recommendation: KF-REC-059, allocation_status: UNALLOCATED}
 coverage:
   canonical_journeys: 25
   journey_dossiers: 23
   dossier_coverage_percent: 92
   dossierless: [J21, J22]
-  coverage_is_application_completion: false
   canonical_kernels: 12
   kernel_dossiers: 12
-  kernel_presence_is_maturity: false
+  coverage_is_application_completion: false
+whole_system_reaudit: docs/intelligence/investigations/WHOLE-SYSTEM-REAUDIT-2026-09-17.md
+j20:
+  dossier: docs/intelligence/journeys/KF-JOURNEY-020-PLAN-SUBSCRIPTION-AI-COST.md
+  m001: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-001.md
+  m002: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-002.md
+  convergence_review: docs/intelligence/investigations/J20-ENTITLEMENT-METERING-CONVERGENCE-REVIEW.md
+  recommendation: KF-REC-058
+  status: PROVISIONALLY_TARGET_ALIGNED_NAMED_ENTITLEMENT_METERING_CORE_ONLY
+  implementation_conformance_proven: false
+  runtime_proof_executed: false
+  local_case_count: 20
+  runner_bindings: 0
+  findings: [F229, F230, F231]
+  contradictions: [C179, C180, C181]
+  selected_laws:
+  - customer_allowance_and_overage_share_frozen_billable_population
+  - entitlement_period_is_explicit
+  - provider_budget_and_customer_allowance_are_distinct
+  - hard_budget_requires_pre_effect_concurrency_safe_admission
+  - direct_AI_modalities_must_not_bypass_selected_admission
+  - model_effect_usage_and_provider_cost_have_stable_correlation
+  - missing_metering_evidence_is_repaired_without_replaying_model_effect
+  reopen_triggers:
+  - provider_subscription_lifecycle_falsifies_entitlement_period
+  - J22_modality_cannot_fit_effect_admission_metering_identity
+  - migration_cannot_preserve_historical_billable_charge_semantics
+  - later_direct_AI_path_bypasses_required_admission
+  - runtime_or_concurrency_proof_falsifies_contract
 journey_maturity:
   explicit_bounded_target_aligned:
-    count: 10
-    journeys: [J3, J4, J5, J8, J9, J10, J11, J12, J13, J24]
+    count: 11
+    journeys: [J3, J4, J5, J8, J9, J10, J11, J12, J13, J20, J24]
   advanced_semantic_pools:
     count: 6
     journeys: [J7, J15, J16, J17, J18, J23]
   active_foundational_or_partial:
-    count: 7
-    journeys: [J1, J2, J6, J14, J19, J20, J25]
-  dossierless:
-    count: 2
-    journeys: [J21, J22]
-  classification_is_implementation_completion: false
-kernel_reaudit:
-  foundational_blockers: [K1, K2, K3]
-  useful_but_not_universal_load_bearing: [K5, K6, K8]
-  strongest_convergence_pools: [K4, K7, K9, K10, K11, K12]
-  note: classification_is_programme_reaudit_not_new_canonical_kernel_status
-constellations:
-  A_birth_authority_governance_action:
-    journeys: [J1, J25, J15, J2, J6]
-    status: NOT_FULLY_CONVERGED_HIGHEST_PRIORITY_FOUNDATION
-  B_knowledge_intelligence_action:
-    journeys: [J1, J16, J17, J2, J6]
-    status: STRONG_SEMANTIC_ARCHITECTURE_IMPLEMENTATION_INCOMPLETE
-  C_customer_revenue:
-    journeys: [J9, J3, J4, J10, J21, J7]
-    status: STRONG_DOMAIN_CONVERGENCE_PUBLIC_J21_MISSING
-  D_commitment_delivery:
-    journeys: [J11, J8, J12, J23, J7]
-    status: MATURE_CONCEPTUAL_CONSTELLATION_RUNTIME_PROOF_OPEN
-  E_external_reality:
-    journeys: [J13, J14, J18]
-    status: TARGET_SEMANTICS_STRONG_PROVIDER_DEPLOYMENT_CONFORMANCE_OPEN
-  F_platform_survival:
-    journeys: [J18, J19, J20, J24]
-    status: MIXED_RECOVERY_AND_ENGINEERING_STRONG_PRIVACY_COMMERCIAL_OPEN
-layer_reaudit:
-  backend_data_source_understanding: STRONG
-  api_authority_understanding: MEDIUM_HIGH_FRAGMENTED_IMPLEMENTATION
-  frontend_operator_convergence: UNEVEN_BACKEND_AHEAD
-  runtime_proof: EARLY_DESIGNED_MOSTLY_UNEXECUTED
-proof_inventories:
-  J13: {designed_cases: 44, runner_bindings: 0, status: NOT_EXECUTED}
-  J8: {designed_cases: 24, runner_bindings: 0, status: NOT_EXECUTED}
-  J9: {designed_cases: 26, runner_bindings: 0, status: NOT_EXECUTED}
-  J20: {designed_cases: 10, runner_bindings: 0, status: NOT_EXECUTED}
-whole_os_target_laws:
-- Membership_or_equivalent_current_tenant_relationship_is_not_browser_selection
-- EffectiveAuthority_precedes_material_control_or_mutation
-- exact_versioned_Capability_and_ActionEnvelope_bind_governance_to_execution
-- ControlEvidence_is_not_Clearance_and_Clearance_is_not_ExecutionClaim
-- Definition_Occurrence_Claim_Attempt_Effect_Outcome_are_distinct
-- provider_authenticity_is_not_local_authority_and_credentials_are_not_permission
-- received_attempted_accepted_confirmed_unknown_and_consequence_complete_are_distinct
-- financial_document_external_money_payment_ledger_reconciliation_valuation_and_projection_are_distinct
-- Observation_KnowledgeRevision_Materialization_and_LearningEligibility_preserve_lineage
-- optional_change_variants_can_add_disable_replace_remove_without_weakening_mandatory_invariants
-- rollback_does_not_undo_external_effects_or_revive_revoked_authority
-primary_blockers:
-  B1: effective_authority_foundation_K1_K2_K3
-  B2: exact_action_clearance_execution_claim_outcome_spine
-  B3: external_occurrence_temporal_recovery_conformance
-  B4: physical_schema_migration_legacy_reuse_and_compatibility
-  B5: public_and_voice_coverage_J21_J22
-  B6: executable_isolated_runtime_and_migration_proof
-continuity_repair:
-  defect: PREVIOUS_CURRENT_STATE_YAML_LAGGED_AT_J9_WHILE_START_07_HANDOFF_ROLLOVER_ADVANCED_TO_J20
-  action: CONSOLIDATED_CURRENT_MACHINE_STATE_REPLACED_STALE_ACCUMULATED_SNAPSHOT
-  historical_detail_preserved_in_git_and_owning_artifacts: true
-  context_integrity: PASS_WITH_REPAIRED_INTELLIGENCE_STATE_DRIFT
-j20:
-  dossier: docs/intelligence/journeys/KF-JOURNEY-020-PLAN-SUBSCRIPTION-AI-COST.md
-  microtrace_001: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-001.md
-  status: ACTIVE_FIRST_TRACE_COMPLETE_NOT_CONVERGED
-  local_cases: 10
-  runner_bindings: 0
-  next_artifact: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-002.md
+    count: 6
+    journeys: [J1, J2, J6, J14, J19, J25]
+  dossierless: [J21, J22]
 active_frontier:
-  stage: J20_SUBSCRIPTION_PAYMENT_ENTITLEMENT_AND_USAGE_LINEAGE_TRACE
-  primary_journey: J20
-  status: ACTIVE_NOT_CONVERGED
-optimised_programme_sequence:
-- J20_M002_AND_BOUNDED_CONVERGENCE
-- J21_PUBLIC_CUSTOMER_EXPERIENCE
-- J22_KEY_VOICE
-- WHOLE_OS_CONVERGENCE_CLOSURE
-- MIGRATION_AND_PROOF_ARCHITECTURE
-- IMPLEMENTATION_WAVE_A_FOUNDATIONS
-- IMPLEMENTATION_WAVE_B_TIME_EXTERNAL_RECOVERY
-- IMPLEMENTATION_WAVE_C_COMMERCIAL_FINANCIAL
-- IMPLEMENTATION_WAVE_D_KNOWLEDGE_INTELLIGENCE_UX
-- IMPLEMENTATION_WAVE_E_INTEGRATED_ROLLOUT_PROOF
+  stage: J21_PUBLIC_CUSTOMER_EXPERIENCE_ACTIVATION
+  primary_journey: J21
+  status: NEXT_ACTIVATION
 exact_next_action:
-  planned_artifact: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-002.md
+  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-021-PUBLIC-CUSTOMER-EXPERIENCE.md
   instruction: >-
-    Continue J20 by tracing Subscription/SubscriptionPayment/AiUsageLog/LLMCost
-    identities, period/currency semantics, provider subscription lifecycle writers,
-    actual AI wrapper bypass/reuse and plan entitlement callers. Run bounded
-    canonical comparison before allocating any ID. Then complete a bounded J20
-    target review. Preserve whole-system re-audit findings; do not repeat broad
-    J1-J20 scans without a concrete reopen trigger.
+    Activate J21 from actual public storefront, booking, form, quote/payment and
+    portal surfaces. Trace public identity/tenant binding, offer and availability
+    truth, pricing/payment/acceptance, source occurrence identity, public-to-domain
+    state transitions, projection consistency, privacy and recovery. Reuse existing
+    J3/J4/J7/J8/J9/J10/J13/J14/J18/J20 contracts and allocate only genuinely new
+    public-boundary roots. Keep production read-only, baseline fixed, map paused,
+    scheduled cycles halted and runtime proof unexecuted.
 constraints:
 - production_source_schema_workflow_settings_deployment_read_only
 - no_runtime_proof_claim
 - no_silent_forensic_rebaseline
 - no_canonical_allocation_without_04B_gate
-- F228_C178_never_reuse
 - no_programme_map_refresh_until_explicit_user_request
 - scheduled_cycles_remain_halted
-- finish_J20_then_J21_J22_before_whole_OS_closure
-- preserve_existing_domain_seams_unless_evidence_justifies_replacement
-- implementation_requires_explicit_authorization
+- J21_then_J22_before_whole_OS_closure
