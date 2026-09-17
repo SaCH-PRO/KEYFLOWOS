@@ -213,3 +213,16 @@ Next free IDs:
 ```text
 F232 / C182 / KF-REC-059
 ```
+
+
+## J21 Public Customer Experience allocations
+
+Checkpoint: `J21-CONV-2026-09-17-01`.
+
+- F232 / C182 — PortalAccess business/contact co-membership is not established before bearer token issuance.
+- F233 / C183 — public booking slot availability is not atomically owned across concurrent read-before-create requests.
+- Recommendation: KF-REC-059 — Public Customer Boundary & Journey Receipt Contract.
+- Homes: `08BF-...`, `09BF-...`, `10R-...`.
+- Comparison owner: `J21-PUBLIC-CUSTOMER-EXPERIENCE-MICROTRACE-001.md`.
+
+Current ranges: F233 / C183 / KF-REC-059. Next free F234 / C184 / KF-REC-060.

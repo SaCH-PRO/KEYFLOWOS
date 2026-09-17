@@ -1,94 +1,54 @@
 project: KEYFLOWOS
-analysis_version: 79
+analysis_version: 80
 last_updated: '2026-09-17'
-checkpoint_id: J20-CONV-2026-09-17-01
-status: J20_NAMED_ENTITLEMENT_METERING_CORE_TARGET_ALIGNED_J21_NEXT
+checkpoint_id: J21-CONV-2026-09-17-01
+status: J21_NAMED_PUBLIC_BOUNDARY_CORE_TARGET_ALIGNED_J22_NEXT
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-implementation_evidence:
-  branch: main
-  forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  deliberate_rebaseline: false
+implementation_evidence: {branch: main, forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2, deliberate_rebaseline: false}
 implementation_authorized: false
 runtime_proof_executed: false
 production_read_only: true
 scheduled_cycles: HALTED
-programme_map:
-  refresh_authorized: false
-  refresh_policy: PAUSED_BY_USER_UNTIL_EXPLICIT_REQUEST
-  last_generated_checkpoint: J24-PA-2026-09-16-01
-canonical_ranges:
-  findings_through: F231
-  contradictions_through: C181
-  recommendations_through: KF-REC-058
-  concepts_through: KF-CONCEPT-042
-next_free_ids: {finding: F232, contradiction: C182, recommendation: KF-REC-059, allocation_status: UNALLOCATED}
+programme_map: {refresh_authorized: false, refresh_policy: PAUSED_BY_USER_UNTIL_EXPLICIT_REQUEST}
+canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-059, concepts_through: KF-CONCEPT-042}
+next_free_ids: {finding: F234, contradiction: C184, recommendation: KF-REC-060}
 coverage:
   canonical_journeys: 25
-  journey_dossiers: 23
-  dossier_coverage_percent: 92
-  dossierless: [J21, J22]
+  journey_dossiers: 24
+  dossier_coverage_percent: 96
+  dossierless: [J22]
   canonical_kernels: 12
   kernel_dossiers: 12
   coverage_is_application_completion: false
-whole_system_reaudit: docs/intelligence/investigations/WHOLE-SYSTEM-REAUDIT-2026-09-17.md
 j20:
-  dossier: docs/intelligence/journeys/KF-JOURNEY-020-PLAN-SUBSCRIPTION-AI-COST.md
-  m001: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-001.md
-  m002: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-002.md
-  convergence_review: docs/intelligence/investigations/J20-ENTITLEMENT-METERING-CONVERGENCE-REVIEW.md
-  recommendation: KF-REC-058
   status: PROVISIONALLY_TARGET_ALIGNED_NAMED_ENTITLEMENT_METERING_CORE_ONLY
-  implementation_conformance_proven: false
-  runtime_proof_executed: false
-  local_case_count: 20
-  runner_bindings: 0
-  findings: [F229, F230, F231]
-  contradictions: [C179, C180, C181]
-  selected_laws:
-  - customer_allowance_and_overage_share_frozen_billable_population
-  - entitlement_period_is_explicit
-  - provider_budget_and_customer_allowance_are_distinct
-  - hard_budget_requires_pre_effect_concurrency_safe_admission
-  - direct_AI_modalities_must_not_bypass_selected_admission
-  - model_effect_usage_and_provider_cost_have_stable_correlation
-  - missing_metering_evidence_is_repaired_without_replaying_model_effect
-  reopen_triggers:
-  - provider_subscription_lifecycle_falsifies_entitlement_period
-  - J22_modality_cannot_fit_effect_admission_metering_identity
-  - migration_cannot_preserve_historical_billable_charge_semantics
-  - later_direct_AI_path_bypasses_required_admission
-  - runtime_or_concurrency_proof_falsifies_contract
-journey_maturity:
-  explicit_bounded_target_aligned:
-    count: 11
-    journeys: [J3, J4, J5, J8, J9, J10, J11, J12, J13, J20, J24]
-  advanced_semantic_pools:
-    count: 6
-    journeys: [J7, J15, J16, J17, J18, J23]
-  active_foundational_or_partial:
-    count: 6
-    journeys: [J1, J2, J6, J14, J19, J25]
-  dossierless: [J21, J22]
+  recommendation: KF-REC-058
+j21:
+  dossier: docs/intelligence/journeys/KF-JOURNEY-021-PUBLIC-CUSTOMER-EXPERIENCE.md
+  microtrace: docs/intelligence/investigations/J21-PUBLIC-CUSTOMER-EXPERIENCE-MICROTRACE-001.md
+  status: PROVISIONALLY_TARGET_ALIGNED_NAMED_PUBLIC_BOUNDARY_CORE_ONLY
+  recommendation: KF-REC-059
+  findings: [F232, F233]
+  contradictions: [C182, C183]
+  cases: 16
+  bindings: 0
+  runtime_status: NOT_EXECUTED
 active_frontier:
-  stage: J21_PUBLIC_CUSTOMER_EXPERIENCE_ACTIVATION
-  primary_journey: J21
+  stage: J22_KEY_VOICE_ACTIVATION
+  primary_journey: J22
   status: NEXT_ACTIVATION
 exact_next_action:
-  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-021-PUBLIC-CUSTOMER-EXPERIENCE.md
+  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-022-KEY-VOICE.md
   instruction: >-
-    Activate J21 from actual public storefront, booking, form, quote/payment and
-    portal surfaces. Trace public identity/tenant binding, offer and availability
-    truth, pricing/payment/acceptance, source occurrence identity, public-to-domain
-    state transitions, projection consistency, privacy and recovery. Reuse existing
-    J3/J4/J7/J8/J9/J10/J13/J14/J18/J20 contracts and allocate only genuinely new
-    public-boundary roots. Keep production read-only, baseline fixed, map paused,
-    scheduled cycles halted and runtime proof unexecuted.
+    Trace Phone Voice, LiveKit/browser voice, KeyCortex voice, realtime provider
+    transports, session identity/tenant binding, conversation occurrence,
+    exact tool governance, metering/cost and recovery. Reuse F226/C176, F231 and
+    J5/J14/J20 contracts before new allocation. Then close whole-OS convergence.
 constraints:
-- production_source_schema_workflow_settings_deployment_read_only
+- production_read_only
 - no_runtime_proof_claim
-- no_silent_forensic_rebaseline
-- no_canonical_allocation_without_04B_gate
-- no_programme_map_refresh_until_explicit_user_request
-- scheduled_cycles_remain_halted
-- J21_then_J22_before_whole_OS_closure
+- no_rebaseline
+- map_refresh_paused
+- scheduled_cycles_halted
+- J22_then_whole_OS_closure

@@ -1,46 +1,35 @@
 # KeyFlowOS Current State
 
-Checkpoint: `J20-CONV-2026-09-17-01`  
-Updated: 2026-09-17  
-Status: **J20 NAMED ENTITLEMENT/METERING CORE TARGET-ALIGNED; J21 NEXT**.
+Checkpoint: `J21-CONV-2026-09-17-01`  
+Status: **24/25 JOURNEY DOSSIERS; J21 NAMED PUBLIC CORE TARGET-ALIGNED; J22 NEXT**.
 
-## Completed
+## Latest completed
 
-Whole-system re-audit remains the programme-level synthesis.
+J21 public-customer end-to-end trace covered storefront/checkout, booking, forms, quote, invoice/payment link and portal boundaries.
 
-J20 has now completed M001, M002 and bounded convergence. The selected target is KF-REC-058 — Subscription Entitlement, Metering & Cost Reconciliation Contract.
+Selected target: KF-REC-059.
 
 New canonical roots:
+- F232/C182 portal grant tenant/subject mismatch possibility;
+- F233/C183 booking concurrent slot race.
 
-- F229/C179 — allowance vs overage billable-population mismatch;
-- F230/C180 — subscription period vs calendar-month metering/budget mismatch;
-- F231/C181 — direct AI gateway/modality admission+metering bypass and incomplete ModelGateway budget population.
+Storefront payment retry/order identity reuses J10/J18. Lead-form duplicate occurrence reuses J9. Financial/commercial effects reuse J4/J7/J10.
 
-J20 has 20 designed cases, zero bindings, NOT_EXECUTED.
+## Programme position
 
-## Current programme position
-
-Journey dossiers: 23/25. J21/J22 remain dossierless at this checkpoint.
-
-J20 is now classified with the bounded target-aligned journeys, but implementation conformance and runtime proof remain false.
-
-The dominant whole-system blockers remain:
-
-1. K1/K2/K3 effective authority;
-2. exact action -> control -> clearance -> execution claim -> outcome adoption;
-3. external occurrence / temporal / recovery conformance;
-4. physical schema and compatibility migration;
-5. J21/J22 public/voice completion;
-6. executable isolated proof.
+- journeys: 25
+- dossiers: 24
+- dossierless: J22 only
+- kernels: 12/12 dossiers
+- runtime proof: false
+- implementation authorized: false
 
 ## Current frontier
 
-**J21_PUBLIC_CUSTOMER_EXPERIENCE_ACTIVATION**
+**J22_KEY_VOICE_ACTIVATION**
 
-Trace public storefront, booking, forms, quote/payment and portal experiences from frontend/public request through internal truth/effects and recovery. Reuse J3/J4/J7/J8/J9/J10/J13/J14/J18/J20 laws; reopen them only with a concrete contradiction.
+Trace independently reachable voice transports, provider/session authenticity, tenant binding, conversation occurrence identity, realtime model/tool governance, human/control semantics, metering/cost and recovery. Start from existing F226/C176 and F231 pressure.
 
-## Constraints
+Then perform the whole-OS convergence closure.
 
-Production remains read-only / unauthorized. No runtime/provider/model/database/migration proof has been executed. The programme map remains deliberately frozen by user instruction. Scheduled cycles remain halted.
-
-Canonical ranges: through F231 / C181 / KF-REC-058. Next free F232 / C182 / KF-REC-059.
+Map refresh remains paused; scheduled cycles remain halted; baseline fixed.

@@ -1,39 +1,9 @@
 project: KEYFLOWOS
-rollover_version: 55
-last_updated: '2026-09-17'
-checkpoint_id: J20-CONV-2026-09-17-01
-status: J20_CONVERGED_NAMED_CORE_J21_NEXT_MAP_PAUSED
-repository: SaCH-PRO/KEYFLOWOS
-canonical_branch: docs/keyflow-intelligence-foundation
-implementation_evidence:
-  forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  deliberate_rebaseline: false
-implementation_authorized: false
-runtime_proof_executed: false
-canonical_ranges: {findings_through: F231, contradictions_through: C181, recommendations_through: KF-REC-058, concepts_through: KF-CONCEPT-042}
-next_free_ids: {finding: F232, contradiction: C182, recommendation: KF-REC-059}
-journey_coverage: {total: 25, dossiers: 23, percent: 92, dossierless: [J21, J22]}
-j20:
-  status: PROVISIONALLY_TARGET_ALIGNED_NAMED_ENTITLEMENT_METERING_CORE_ONLY
-  recommendation: KF-REC-058
-  findings: [F229, F230, F231]
-  contradictions: [C179, C180, C181]
-  cases: 20
-  bindings: 0
-  executed: false
-active_frontier:
-  stage: J21_PUBLIC_CUSTOMER_EXPERIENCE_ACTIVATION
-  primary_journey: J21
-exact_next_action: >-
-  Create the J21 dossier and first bounded public-customer microtrace over real
-  storefront, booking, forms, quote/payment and portal paths; trace tenant/public
-  identity, offer/availability/pricing, payment/acceptance, occurrence identity,
-  domain transitions, projection consistency, privacy and recovery; compare against
-  existing contracts before allocation.
-constraints:
-- production_read_only
-- no_runtime_proof_claim
-- no_rebaseline
-- map_refresh_paused_until_explicit_user_request
-- scheduled_cycles_halted
-- J21_then_J22_then_whole_OS_closure
+rollover_version: 56
+checkpoint_id: J21-CONV-2026-09-17-01
+status: J21_CONVERGED_NAMED_CORE_J22_NEXT
+canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-059}
+next_free_ids: {finding: F234, contradiction: C184, recommendation: KF-REC-060}
+coverage: {journeys: 25, dossiers: 24, dossierless: [J22]}
+active_frontier: J22_KEY_VOICE_ACTIVATION
+constraints: [production_read_only, runtime_proof_false, fixed_baseline, map_refresh_paused, scheduled_cycles_halted]
