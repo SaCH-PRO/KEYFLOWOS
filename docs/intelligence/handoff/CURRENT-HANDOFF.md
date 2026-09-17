@@ -1,74 +1,63 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `J8-CSB-2026-09-16-01`  
+Checkpoint: `J9-M001-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **J8 NAMED COMPLETION / SCOPE / TIME-BILLING CORE PROVISIONALLY TARGET-ALIGNED; J9 ACTIVATION NEXT**.
+Status: **J9 ACTIVATED; FIRST PUBLICATION / CAPTURE / ATTRIBUTION TRACE COMPLETED; NOT CONVERGED**.
 
-## Coordinates and control boundaries
+## Coordinates and control boundary
 
-Repository: SaCH-PRO/KEYFLOWOS. Branch: docs/keyflow-intelligence-foundation. Input/provenance: 54342851973907ce3fd2f0a00928b0cca79288ad. Resolve live output head and matching checkpoint; input is not output.
+Repository SaCH-PRO/KEYFLOWOS; branch docs/keyflow-intelligence-foundation. Input/provenance c8d1b24f655956615f0d197d9068a2df24f20200. Resolve live output head and matching checkpoint; input is not output. Implementation forensic baseline remains 8f173bfe79f1418159cf4099ea18b0d60d203ec2. Main head was separately reconfirmed at 88b8016c0ef45e383cc5b0d98c7062151a6a0f27; no forensic rebaseline.
 
-Implementation forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2. No rebaseline, application/provider/DB/boot/concurrency/migration test or execution-packet promotion. Production source/schema/settings/workflows/assertions remain read-only. Scheduled truth/audit/burndown/reflect cycles remain halted; this interactive intelligence work does not lift that instruction.
+Production source/schema/settings/workflows/assertions are read-only. No application/provider/DB/boot/concurrency/migration test or execution-packet promotion occurred. The owner-halted scheduled cycles remain halted; interactive source review does not restart them.
 
-**Map updates remain paused until the user explicitly requests them.** Do not run the generator/freshness check or modify map Markdown, JSON/HTML, preview, renderer or template. The map intentionally remains at J24-PA. CURRENT-STATE.yaml is the current machine authority, not the frozen presentation.
+**Do not update the programme map until explicitly asked.** No generator/freshness check or map Markdown/HTML/JSON/preview/renderer/template edits. It intentionally remains at J24-PA. CURRENT-STATE.yaml, not the frozen presentation, owns current programme state.
 
-## Completed analytical unit
+## Completed substantive unit
 
-[J8 Completion Scope and Billing Contract Review](../investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md) completes the prior exact next action. It resolves the named declared schema, assignment-replacement, change-order/portal and milestone meaning questions; completes bounded canonical comparison; specifies WC01-WC08 and WB01-WB04; and records migration/withdrawal, backward review and closure gates.
+[J9 Microtrace 001](../investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-001.md) and the new [J9 dossier](../journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md) complete J9_MARKETING_LEAD_GENERATION_ACTIVATION at named scope.
 
-[J8 dossier](../journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md) is consolidated navigation to the current result. M001 and M002 are unchanged and retain all source witnesses. The prior dossier is preserved in Git at the input checkpoint; its old next-action instructions are not the new frontier.
+Nineteen source files were inspected with explicit method/range scopes: campaign CRUD; social service/publishing/scheduler/routes; native forms; live journey listeners and backfill; attribution/dashboard/UI; module registrations; one source-test file; actual gamification consumer. Source declarations are not successful app boot, provider calls or a full campaign/portal/adapter audit.
 
-Result: **PROVISIONALLY_TARGET_ALIGNED_NAMED_COMPLETION_BILLING_CORE_ONLY**. This is not a claim of implemented acceptance, atomic billing, complete public-portal coverage, deployed constraint validation or passing runtime tests. WD1-WD5 remain explicit.
+## Exact findings to retain
 
-## New source facts that must survive
+Manual SocialService.publishPost correctly refuses when no account and no explicit IDs exist. Preserve that already-fixed path. With explicit IDs or any connected account, a normal returned result triggers post.published regardless of success. SocialPublishingService can return all failures, or NONE/false before changing the post when no channel matches. Gamification's named consumer trusts the event and can set firstPostPublished. A thrown error does not take this path; actual provider/customer outcomes were not observed.
 
-The full Evidence and TaskAssignment model blocks were read through native schema ranges. Evidence has polymorphic linkedType/linkedId and submission/verification fields, not an exact target/revision/admission contract. Normal HTTP evidence guards/context remain real and must not be replaced with unsupported global access claims.
+Detailed publishResults are retained. anySuccess nevertheless maps the parent to POSTED and the first success's external reference. Manual default does not consume the post's saved target IDs; scheduler does. After an attempt, used platform names replace channelIds. Retry/account identity and successful-child exclusion need the next trace. Do not claim all detailed failures are deleted.
 
-TaskAssignment's unique key spans taskType/taskId/assignableType/assignableId for the lifetime of a row. The assign method checks an ACTIVE identical row, otherwise unassigns current rows then creates. A -> B -> A can therefore collide with A's retained history after B is unassigned. This is conditional source/schema composition, not an observed deployed failure. The target keeps history and transitions active assignment/episodes atomically; deleting history is not an acceptable repair.
+Scheduler selection and status compare-and-set are real positive controls. The claim does not bind the previously selected due time/content revision, and manual publishing does not share its status gate. Rescheduling a selected post while it remains SCHEDULED can leave a stale dispatch claim. Scheduler emits social.scheduled.dispatched rather than the wrapper's post.published; named gamification only subscribes to the latter. Wider bridging/lease recovery is not declared absent globally.
 
-Change-order update receives approvedBy/approvedAt/status from the validated body and can change scope/price while prior approval metadata remains. Existing project/business and supplied-invoice validation is preserved. It does not establish an authenticated revision-bound acceptance decision. Deliverable accepted-looking state can likewise survive URL/content changes. Milestone date/invoice scalar editing is not invoice generation or settlement.
+Native lead forms use guarded/sanitized public intake, an active form-derived business and a contact/submission transaction. Normalized-email Contact reuse is not submission dedupe or qualification. No recognized email can legitimately leave contactId null. The live growth listener omits submission ID/original source and typed campaign/content references; anonymous social response is deliberately not attributed to an invented contact. P2002 fallback runtime correctness is not certified.
 
-The inspected portal service/controller/web client administer access and validate token enabled/expiry. They do not execute delivery acceptance. A literal public-route lookup returned 404, but route groups/other implementations were not exhausted; do not claim all portal routes broken. A visibility grant may supply context but not blanket approval authority. J21 remains the separate full public-experience journey.
+Live booking_created/confirmed/cancelled/rescheduled uses consideration, while backfill records generic booking regardless of status and recompute counts it as conversion. Cancelled booking can therefore become CONVERSION with zero revenue. Attribution skips nonpositive-value journeys; do not claim this alone invents positive money. quote_converted can set a conversion stage without a matching convertedAt definition.
 
-## Canonical allocation - changed
+Backfill deletes touchpoints and rebuilds selected sources one-by-one with different mappings, not an atomic equivalent snapshot. Original-only lineage, partial failures and concurrent arrivals need ownership. It does not delete original Contact/Invoice/Submission business records. Live record uses processing time because source occurredAt is not forwarded; exact producer identity and schema constraints remain next work.
 
-**F228/C178 is now allocated** to the time-to-invoice source-allocation loss, not a generic completion or portal issue.
+Attribution selects by first convertedAt but allocates lifetime totalRevenue using all touchpoints. Day10 value100 plus day40 value200 can allocate300 into a days1-30 report. An explicit cohort-lifetime report could choose that basis, but cannot silently substitute for per-conversion period reporting. Later touches can rewrite last-touch credit under the current all-history weights.
 
-- Finding home: `08BD-FINDING-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md`.
-- Contradiction home: `09BD-CONTRADICTION-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md`.
-- Comparison: review section 3; actual financial F185-F196, commercial F200, F217/F219 and existing concept/REC052 boundaries.
-- Evidence: M002's exact static example, 135 source minutes/350 pre-tax units versus 105 represented minutes/250 while all three IDs can be billed. No customer incident or application test is asserted.
+Attribution upserts only existing buckets, leaving vanished ones unretired. Model comparison filters periodEnd, not periodStart. UI Backfill reloads the dashboard without computing attribution, so fresh journey data can coexist with older stored allocation. No actual inconsistent screen was rendered here.
 
-Current ranges: F228/C178/KF-REC-057/KF-CONCEPT-042. **Next free F229/C179/KF-REC-058.** No recommendation or concept allocated. 04B is updated; old microtrace/04A/hand-off ranges are historical. Do not reuse F228 or assign its meaning to all completion defects.
+Live invoice-paid hardcodes TTD; aggregate sums values without currency separation. Channel mix sums all values including quote_created as revenue: quote500 plus payment500 can yield channel revenue1000 while journey conversion total is500. This is value-stage conflation, not evidence two payments moved. Whether payment.received/invoice.paid/order-paid events overlap for a real transaction must be proved from producers before declaring duplicate financial effects.
 
-CAND-COMPLETION-BOUNDARY is resolved as a composite contract obligation under existing scope/evidence/authority owners; all distinct witnesses are retained. Invoice-before-mark partial outcome reuses REC048/K11 and K10 correction; it is not silently folded into F228's numerical root.
+## Existing contracts, allocation and proof
 
-## Selected contract and existing machinery
+REC052/J7/K10 owns financial value layers/currency; REC057/J5 and J14 own original occurrences and consumer claims. J13 owns current provider participation; J18/J23 own attempts, partial effects and temporal recovery; K4/K8 own evidence/learning admission; J8/J24 preserve source history and independent safe experimentation. No second CRM, analytics vendor, conversation runtime, ledger or generic workflow engine is selected.
 
-WC01-WC08 bind accepted scope revision, assignment episode/current slot, evidence admission, task/work-event completion, delivery acceptance, reopen/cancel/withdraw, aggregate completion and exact consequence settlement. All named writers W8-01-W8-10 consume the same applicable domain policy, including status/reorder/calendar/OUT_APP paths. Current actor, tenant/parent, scope/evidence revision and expected state matter at commit, not only at a pre-read.
+Actual REC052, REC057 and 04B were read; prior J8/J13/J24 and recovery relationships are retained. Full J9 candidate-to-register comparison is pending. No new canonical allocation. F228/C178 retains its source-time billing meaning; next free **F229/C179/KF-REC-058**. Do not reuse F228 from an older unallocated handoff.
 
-Required work can be explicitly satisfied, waived, cancelled or superseded according to policy. Deleting it or leaving an empty query cannot manufacture completion. Customer acceptance is required only by the applicable policy; lightweight internal tasks remain possible. Historical completion belongs to its revision and is not erased or automatically applied to new required work.
+J9-X01-X12: twelve local designs, zero bindings, NOT_EXECUTED. The SocialService source test protects no-account refusal; its mock delegation success is not real-provider evidence. J13's 44-case manifest and J8's 24 designs remain unchanged. No application test/harness/isolated resource was created or run.
 
-WB01-WB04 retain exact entry revisions and pricing basis, conserve source-to-line quantity/value, claim the same logical source allocation once, and compose with the actual canonical invoice writer through the same transaction context. Different request IDs can still target the same time; a callback using a separate global client does not become atomic merely because its caller has a transaction. Unknown or partial invoice outcomes require reconciliation, not blind retry or resetting billed flags.
-
-Keep existing assignment/tenant checks and transaction seams, calendar permissions/partial backfill, plan updater allowlists, honest unavailable IN_APP behavior, invoice empty/unrated/mismatch refusals, financial correction/ledger owners and work-obligation exact/party-wide distinctions. No new universal task, approval, evidence, pricing or financial runtime is selected.
-
-## Proof, migration and outstanding evidence
-
-J8 has **24 local designs**: X01-X12, Y01-Y08, Z01-Z04. All are unbound/NOT_EXECUTED. J13's 44-case manifest remains unchanged. These are separate inventories, not a combined count of passing tests. No runtime/harness/assertion changes or new isolated environment were created.
-
-WD1 final record reuse/DDL/index/backfill/deployed constraints/history; WD2 all named writer implementation and additional consumer coverage; WD3 actual portal acceptance/milestone invoice/exact-obligation adapter conformance; WD4 source allocation/shared transaction and historic financial correction; WD5 authorized isolated runtime/concurrency/migration/negative controls after baseline revalidation.
-
-Prior J13 ED1-ED5, J24 CS1-CS5, mature pools and live operational observations are retained. The J7 pool receives F228/C178 as financial-input refinement, not a new claim its prior defects are fixed. Source-schema clarity is not deployed migration proof. Optional test variants must preserve accepted scope, current authority, episodes, source allocation and one effect owner; no unsafe baseline fallback or real effects in shadow comparison.
-
-Coverage remains 21/25 dedicated journey dossiers and twelve kernel dossiers. J9/J20/J21/J22 remain without dedicated dossiers. No map refresh or completion-percentage claim follows.
+The new dossier increments prior21 to22/25 coverage, not app completion or a fresh maturity audit. J20/J21/J22 remain dossierless; twelve kernels and prior bounded alignments survive. WD1-WD5, ED1-ED5 and CS1-CS5 remain in the canonical state.
 
 ## Exact next unit
 
-**J9_MARKETING_LEAD_GENERATION_ACTIVATION**.
+**J9_OCCURRENCE_ATTRIBUTION_AND_CHANNEL_CONSEQUENCE_TRACE**.
 
-Planned, not created: `docs/intelligence/journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md`.
+Planned, not created: `docs/intelligence/investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md`.
 
-Activate the existing J9/J3/J5/J10/J21/J7 customer-to-revenue constellation. Follow actual campaign/content publication -> audience response/lead capture -> Contact/conversation/source attribution -> commercial outcomes. Distinguish generated content, scheduled/published delivery, engagement, qualified lead, attributed conversion and financial revenue. Preserve J5 occurrence ownership, J13 current provider authority, J7 value-stage semantics, J8 source scope/allocation and J24 proof integrity.
+1. Establish source event/schema IDs, economic overlap, source time/currency and actual consumer dedupe for lead_form.submitted, payment.received, invoice.paid, store_order.paid and identified social response.
+2. Trace per-target publisher claims/receipts and consumers of post.published versus social.scheduled.dispatched, plus actual campaign/content/form bindings. Read adapters/callers only for these named questions; preserve existing refusal and scheduler CAS.
+3. Compare surviving publication/attribution candidates against actual canonical finding homes, then refine source/conversion/model/window/computation-generation ownership and migration. J9 remains not converged until its later target/backward review.
 
-Do not recreate the J8 review or restart its schema/guard scan. J9 is not already analysed by this checkpoint. Read AGENTS/AGENT-CONTINUITY, START/current state and all CURRENT/ROLLOVER files; run Context Integrity Check and continue source-grounded work. Commit substantive analysis with matching continuity and verify allowed paths/head, excluding all programme-map artifacts.
+Do not repeat campaign CRUD/default guards, restart J8/J13/J24 or claim broad absence from search alone. Keep full source-versus-target-versus-runtime distinctions. Optional model/channel experiments do not send live effects, rewrite raw history or bypass current permission.
+
+Load governing AGENTS/AGENT-CONTINUITY, START/current state and all CURRENT/ROLLOVER files; run Context Integrity Check. Persist substantive analysis and matching handoffs, verify intelligence-only changed paths and branch head, excluding map artifacts and original evidence.

@@ -1,60 +1,59 @@
 # KeyFlowOS Intelligence - START HERE
 
-Checkpoint: `J8-CSB-2026-09-16-01`  
+Checkpoint: `J9-M001-2026-09-16-01`  
 Updated: 2026-09-16  
-Branch: `docs/keyflow-intelligence-foundation`.
+Canonical branch: `docs/keyflow-intelligence-foundation`.
 
 ## One current frontier
 
 [CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml) owns machine state; [CURRENT-HANDOFF.md](handoff/CURRENT-HANDOFF.md) carries the exact continuation.
 
-**Completed:** [J8 Completion Scope and Billing Contract Review](investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md). J8's named completion/scope/time-billing core is **PROVISIONALLY TARGET-ALIGNED**, not implemented or proven.
+**Completed:** J9 activation and [Microtrace 001](investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-001.md), the first named campaign/publication/lead-capture/live-versus-backfill/attribution trace.
 
-**Next:** J9_MARKETING_LEAD_GENERATION_ACTIVATION. Its dedicated dossier has not been created by this checkpoint.
+**Now:** J9_OCCURRENCE_ATTRIBUTION_AND_CHANNEL_CONSEQUENCE_TRACE. J9 is ACTIVE / NOT CONVERGED.
 
-**Programme-map updates remain paused until the user explicitly requests them.** Do not regenerate, edit or run freshness repair on map outputs, previews, HTML/JSON or renderer/template. The map intentionally remains at J24-PA; current state and handoffs carry newer progress. Scheduled truth/audit/burndown/reflect cycles remain halted under the owner's separate control.
+**Programme-map refresh remains paused until the user explicitly requests it.** Do not regenerate, edit or run freshness repair on map Markdown, HTML/JSON, previews, renderer or template. The map intentionally remains at J24-PA; canonical state and handoffs carry newer progress. Scheduled truth/audit/burndown/reflect cycles remain halted under the separate owner control.
 
 ```text
 Repository: SaCH-PRO/KEYFLOWOS
-Input intelligence: 54342851973907ce3fd2f0a00928b0cca79288ad
-Forensic implementation baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+Input intelligence: c8d1b24f655956615f0d197d9068a2df24f20200
+Implementation forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+Main head separately reconfirmed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
 Production/source/schema/settings/workflows/assertions: READ-ONLY / UNAUTHORIZED
 Application/provider/DB/boot/concurrency/migration proof: NOT_EXECUTED
 ```
 
-Resolve the live output commit and matching checkpoint; input is provenance, not output. No rebaseline, routine restart or implementation-packet promotion occurred.
+Resolve the live output commit and matching checkpoint. Input is provenance, not output. Reconfirming main did not change the forensic baseline or lift any stop instruction.
 
 ## Resume load
 
-Read AGENTS.md, [AGENT-CONTINUITY.md](AGENT-CONTINUITY.md), this file, [07-CURRENT-STATE.md](07-CURRENT-STATE.md) and all four CURRENT/ROLLOVER files. Run Context Integrity Check. Load the J8 review/current dossier and preserve M001/M002. Read relevant canonical owners for the next J9 customer-to-revenue trace; do not reconstruct completed J13/J24/J8 work from chat summaries.
+Read AGENTS.md, [AGENT-CONTINUITY.md](AGENT-CONTINUITY.md), this file, [07-CURRENT-STATE.md](07-CURRENT-STATE.md) and all four CURRENT/ROLLOVER files. Run Context Integrity Check. Load [J9 dossier](journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md) and its completed M001. Preserve prior J8/J13/J24 contracts and their explicitly unclosed WD/ED/CS debts.
 
-The review now supplies WC01-WC08 completion/scope and WB01-WB04 billing allocation contracts. These are local labels under existing owners, not new canonical concepts or implemented database tables. Full relevant declared Evidence/TaskAssignment and portal/change-order/milestone blocks were read; deployed constraints remain unverified. The portal methods inspected administer access, not acceptance. Mutable approval fields are not authenticated revision-bound decisions. The assignment lifetime tuple produces a specific A -> B -> A history conflict. All source witnesses and caveats remain in the review.
+M001 has nineteen named implementation sources with declared full/partial scope, including one unexecuted source-test file. Campaign-plan CRUD, actual social dispatch, transactional lead capture and attribution all exist. Their existence is not proof that their identities or outcome classifications agree.
 
-## Allocation changed at this checkpoint
-
-**F228/C178 is now allocated** to source-time-to-invoice allocation loss. Same-label repeated alternate-rate entries can disappear from priced lines while all source IDs are marked billed. Canonical homes: [08BD](08BD-FINDING-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md) and [09BD](09BD-CONTRADICTION-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md). The exact example and comparison are documented; no customer incident or runtime test is claimed.
-
-Ranges: F228/C178/KF-REC-057/KF-CONCEPT-042. **Next free: F229/C179/KF-REC-058.** No recommendation or concept was allocated. 04B wins over older 04A and previous handoff statements. Do not reuse F228 or broaden it into a catch-all completion finding.
+Important results: the manual publisher can emit post.published on returned all-failed/unmatched-channel results, and gamification can consume it as firstPostPublished. The already-fixed no-account refusal remains correct. Scheduler status CAS and detailed channel results remain useful, but manual/scheduled target and consequence semantics differ. Live booking types and backfill's generic booking can classify the same cancelled booking differently. Attribution selects first-conversion cohorts yet uses lifetime values and all touchpoint weights. Native currency, quoted value and collected revenue are not consistently separated in the inspected projections.
 
 ## Exact next output
 
 Planned, not created:
-`journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md`.
+`investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md`.
 
-Trace the actual campaign/content publication -> audience response/lead capture -> Contact/conversation/source attribution -> commercial-outcome path in the J9/J3/J5/J10/J21/J7 constellation. Separate content generation, actual delivery, engagement, qualified lead, attribution and financial value. Preserve J5 occurrence ownership, J13 current provider authority, J7 value-stage semantics, J8 accepted scope/allocation and J24 trustworthy proof. Begin from real route/service/consumer evidence, not a new stack-selection exercise.
+First establish exact source event/schema occurrence identity, time/currency and economic overlap for the named form/payment/invoice/order/identified-social producers. Then inspect per-target publication claim/receipt and post.published versus scheduled-dispatched consumers, plus actual campaign-to-content/form bindings. Finally compare surviving publication and attribution candidates with canonical homes and refine source/conversion/model/window/computation-generation ownership and migration requirements.
 
-## Proof, coverage and retained debts
+Do not repeat campaign CRUD or the default guard scan. Do not claim actual payment double-counting before tracing overlapping producers and constraints. Preserve no-account refusal, scheduler compare-and-set, lead-form safeguards, anonymous response handling and existing occurrence/recovery/financial owners. This first trace is not J9 convergence.
 
-J8 has 24 local designed cases (X12/Y8/Z4), zero bindings, NOT_EXECUTED. J13's 44-case manifest is unchanged. No app test, harness, database repair, schema change or deployment is hidden inside the word review.
+## Allocation and evidence discipline
 
-Coverage remains 21/25 dedicated journey dossiers and twelve kernel dossiers, inherited inventory rather than a fresh maturity census. J9/J20/J21/J22 remain without dedicated dossiers. J8 alignment is limited to its named core; public-portal and broader work-management conformance remain explicit.
+No new canonical IDs were allocated. F228/C178 remains the J8 source-time-to-invoice allocation loss, with canonical homes 08BD/09BD. Current ranges: F228/C178/KF-REC-057/KF-CONCEPT-042. Next free: **F229/C179/KF-REC-058**. 04B remains numeric authority; older unallocated-F228 statements are historical.
 
-Retain J8 WD1-WD5 (deployed constraints/migration, writer cutover, acceptance/settlement adapters, allocation/financial correction, runtime proof), J13 ED1-ED5 and J24 CS1-CS5. Retain prior mature pools and live-control observations as their stated historical read, not a fresh settings audit. Current permission is separate from a historical forensic snapshot.
+J9-X01-X12 are twelve local designs, zero bindings, NOT_EXECUTED. J13's separate 44-case manifest and J8's 24-case designs remain unchanged. A mock test title, source derivation, generated document or commit is not provider/runtime proof. Cohort-lifetime attribution is a possible explicit reporting choice; the defect pressure is undeclared/inconsistent basis, not a rule that every cohort model is invalid.
+
+Creating J9 increments the prior 21-dossier inventory to 22/25 coverage, not app completion or a fresh maturity census. J20/J21/J22 remain without dedicated dossiers; twelve kernel dossiers and all prior bounded alignments remain intact.
 
 ## Programme and persistence
 
 EVIDENCE -> MICROSCOPIC TRACE -> JOURNEY / KERNEL -> RESEARCH / POOL -> TARGET -> BACKWARD RE-AUDIT -> MIGRATION / PROOF -> SEPARATELY AUTHORIZED IMPLEMENTATION -> VERIFIED RESULTS -> MODEL UPDATE.
 
-Keep existing shared ownership rather than parallel approval/evidence/workflow/finance systems. Optional behavior and required scope can change through reviewed revisions; they cannot erase prior outcomes, revive revoked authority or convert omitted source value into billed work. A failing gate is information, not permission to weaken the assertion.
+Keep campaign intent, publication outcome, observed engagement, contact identity, qualification, conversion, model attribution and financial truth distinct. The supplied blueprint provides product intent and controlled-change guidance, not proof that current source already fulfills it. Optional variants may change under reviewed policy; shadow comparison cannot send real posts/messages or rewrite source conversion history.
 
-Persist substantive intelligence and matching CURRENT/ROLLOVER navigation, verify the intended intelligence-only diff and branch head, and leave map artifacts and original microtraces unchanged while their restrictions remain active.
+Persist substantive analysis and matching CURRENT/ROLLOVER views, verify intelligence-only changed paths and branch head, and exclude map artifacts, original investigations and production source while their restrictions remain active.

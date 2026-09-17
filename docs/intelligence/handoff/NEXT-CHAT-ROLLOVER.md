@@ -1,64 +1,64 @@
 # KEYFLOWOS - Next Chat Rollover
 
-Checkpoint: `J8-CSB-2026-09-16-01`  
+Checkpoint: `J9-M001-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **LIVE - J8 NAMED CONTRACT ALIGNED; J9 ACTIVATION NEXT; MAP FROZEN**.
+Status: **LIVE - J9 FIRST NAMED TRACE COMPLETE; OCCURRENCE / ATTRIBUTION / CHANNEL CONSEQUENCES NEXT; MAP FROZEN**.
 
 ```text
-Continue KEYFLOWOS from committed repository intelligence. Do not restart.
+Continue KEYFLOWOS from committed intelligence. Do not restart.
 Repository: SaCH-PRO/KEYFLOWOS
 Branch: docs/keyflow-intelligence-foundation
-Checkpoint: J8-CSB-2026-09-16-01
-Input/provenance: 54342851973907ce3fd2f0a00928b0cca79288ad
+Checkpoint: J9-M001-2026-09-16-01
+Input/provenance: c8d1b24f655956615f0d197d9068a2df24f20200
 Forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+Main separately reconfirmed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
 Resolve live output head and matching checkpoint; input is not output.
 
 Read AGENTS, AGENT-CONTINUITY, START/current state and all CURRENT/ROLLOVER
-files. Run Context Integrity Check. Load the current J8 dossier, unchanged
-M001/M002 and completed J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md.
-J8 is provisionally target-aligned for the named completion/scope/time-billing
-core only. Implementation, public acceptance, deployed constraints and runtime
-proof are NOT established. WC01-WC08/WB01-WB04 live in that review; do not
-invent a replacement contract or repeat the completed schema/guard scans.
+files. Run Context Integrity Check. Load new J9 dossier and completed
+J9-MARKETING-LEAD-GENERATION-MICROTRACE-001.md. Preserve J8/J13/J24 accepted
+contracts, original evidence and WD/ED/CS debts. J9 is NOT CONVERGED.
 
-ALLOCATION CHANGED: F228/C178 now means source-time value lost from invoice
-lines while selected entries can all be marked billed. 08BD/09BD are the
-canonical homes; 04B is updated. Next free F229/C179/KF-REC-058.
-No new recommendation/concept. Old unallocated-F228 statements are historical.
+Next: J9_OCCURRENCE_ATTRIBUTION_AND_CHANNEL_CONSEQUENCE_TRACE.
+Produce investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md.
+First trace exact form/payment/invoice/order/social source occurrence IDs,
+time/currency, economic overlap and schema/consumer dedupe. Then per-target
+publication claims/receipts and post.published versus scheduled-dispatched
+consumers, plus actual campaign-to-content/form binding. Compare surviving
+candidates with canonical homes and refine source/conversion/model/window/
+computation-generation ownership. Do not repeat campaign CRUD or guard scans.
 
-New source witnesses: lifetime assignment tuple can conflict on A->B->A after
-B is unassigned; change-order approval actor/date are body input and approved
-terms remain mutable; portal access visibility is not acceptance authority;
-milestone date/invoice scalar and accepted deliverable URL need exact decision
-lineage. Keep actual tenant/invoice checks and do not assert a global missing
-portal route from one unsuccessful lookup. Full public journey is J21 debt.
+Preserve positives: no-account/no-explicit-target refusal is already fixed;
+detailed channel results remain; scheduler CAS exists; public form controls
+and tenant-derived contact/submission transaction exist; anonymous social
+responses are not fabricated contacts. New issue is wrapper success event on
+returned failure/unmatched targets, reaching firstPostPublished gamification.
+Do not call every provider thrown error that same path.
 
-Next: J9_MARKETING_LEAD_GENERATION_ACTIVATION.
-Planned: journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md (not created).
-Trace actual campaign/content publication -> audience response/lead capture
--> Contact/conversation/source attribution -> commercial outcomes in the
-existing J9/J3/J5/J10/J21/J7 constellation. Separate generation, delivery,
-engagement, qualified lead, attribution and financial revenue. Preserve J5
-occurrence, J13 authority, J7 value-stage, J8 allocation and J24 proof contracts.
+Live booking_cancelled is consideration, but generic booking backfill counts
+conversion with zero revenue. Attribution skips zero revenue; do not invent
+positive money from that example. Historical-window computation selects first
+conversion yet allocates lifetime value/all touchpoints. Quote values also
+enter channel revenue, currencies are not consistently separated, stale
+buckets can survive, and backfill/reload does not itself refresh attribution.
+All are static source conclusions, not observed customer/runtime incidents.
+Do not assert actual payment double-counting until producer overlap is traced.
 
-J8 X12/Y8/Z4 = 24 designed, unbound, unexecuted cases. J13's separate 44-case
-manifest is unchanged. No app/provider/DB/boot/concurrency/migration tests.
-WD1-WD5, ED1-ED5 and CS1-CS5 remain explicit. Production/schema/workflows/
-settings/assertions stay read-only; fixed forensic baseline; no packet promotion.
-Scheduled truth/audit/burndown/reflect cycles remain HALTED.
+No new canonical allocation. F228/C178 still means J8 time-billing allocation
+loss. Next free F229/C179/KF-REC-058. J9-X01-X12 are12 local designs,0bindings,
+NOT_EXECUTED; separate J13(44) and J8(24) inventories are unchanged.
+Production/source/schema/workflows/settings/assertions remain read-only;
+no app/provider/DB/boot/concurrency/migration tests or packet promotion.
+Owner-halted scheduled cycles remain HALTED; no forensic rebaseline.
 
-USER OVERRIDE: do not update or regenerate the programme map until explicitly
-requested. Do not run its generator/check or edit map Markdown/HTML/JSON,
-preview, renderer/template. Persist actual analysis and matching continuity
-only; verify intelligence-only diff and the branch head.
+USER OVERRIDE: map refresh remains paused until explicitly requested.
+Do not run generator/check or edit map Markdown/HTML/JSON/preview/renderer/
+template. Persist actual analysis and matching continuity only; verify the
+intelligence-only diff and live head. Frozen map is not current state.
 ```
 
-CURRENT-STATE.yaml is the single current machine state. This file transports it; the deliberately frozen J24-PA map is not a live status authority.
+CURRENT-STATE.yaml is the single machine authority. This file is a transport view. The prior21 dossiers plus new J9 gives22/25 coverage, not app completion or a fresh maturity census. J20/J21/J22 remain without dedicated dossiers; twelve kernel dossiers are unchanged.
 
-The numerical source counterexample (135 minutes/350 pre-tax units versus represented 105/250) is a static derivation, not a customer incident. F228 does not absorb unrelated assignment/approval/completion defects. Their source witnesses remain in the original microtraces and contract review. Reusing a generic law does not rewrite the source scope of F217/F219 or older financial findings.
+The trace's nineteen-source manifest, actual dashboard/gamification consumers and one unexecuted source-test file are documented. Source tests and proof designs are not executed results. A cohort-lifetime model can be a legitimate declared view; do not equate it with event-period conversion revenue or causal proof of marketing effectiveness.
 
-The contract permits reviewed scope and implementation changes. Required work is explicitly waived/cancelled/superseded, not deleted to manufacture completion. Current authority and evidence revision must reach actual commit. Billing uses exclusive source allocation and the canonical invoice/financial-correction owner; code rollback cannot erase issued history or silently rebill previously charged work.
-
-J8 readiness debts: WD1 final reuse/DDL/deployed constraints/history; WD2 writer cutover; WD3 actual public acceptance/milestone/exact-obligation adapter; WD4 allocation/transaction context/financial correction; WD5 isolated runtime proof after baseline comparison. J13/J24 acceptance and their ED/CS debts are retained. Later contrary evidence reopens the precise invariant, not the entire programme by default.
-
-Counts remain 21/25 dossiers and twelve kernel dossiers, not an application completion metric or new maturity census. J9/J20/J21/J22 remain dossierless until actually created. Hosting observations remain inherited, not a fresh settings audit. Current permission remains separate from historical source.
+Keep one occurrence and financial history across consumers and experimental variants. Contact dedupe is not submission dedupe; stored plan budget is not spend; a post event is not a provider receipt; quoted/invoiced/received/attributed values are not interchangeable. The supplied blueprint is product intent, not a certificate that current code already satisfies it. Reopen earlier contracts only on a precise contradiction, not because a new chat starts.
