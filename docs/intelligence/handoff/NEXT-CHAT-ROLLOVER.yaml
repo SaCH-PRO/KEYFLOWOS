@@ -1,206 +1,66 @@
 project: KEYFLOWOS
-rollover_version: 52
-last_updated: '2026-09-16'
-checkpoint_id: J9-POA-2026-09-16-01
-status: LIVE_J9_NAMED_CORE_ALIGNED_J20_ACTIVATION_NEXT_MAP_PAUSED
+rollover_version: 53
+last_updated: '2026-09-17'
+checkpoint_id: J20-M001-2026-09-17-01
+status: LIVE_J20_FIRST_TRACE_COMPLETE_LINEAGE_NEXT_MAP_PAUSED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-input_intelligence_head: 20e7501f562a1456190d26ddc3abd1aaae9a2601
-canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
-current_handoff: docs/intelligence/handoff/CURRENT-HANDOFF.md
-output_resolution: RESOLVE_LIVE_BRANCH_HEAD_AND_MATCHING_CHECKPOINT_ID
-context_integrity: PASS_BOUNDED_J9_REVIEW_WITH_IMPLEMENTATION_PROVIDER_AND_PUBLIC_COVERAGE_DEBTS_EXPLICIT
-fresh_chat_context_integrity_check_required: true
-implementation_authorized: false
-runtime_proof_executed: false
-persistence_only_checkpoint: false
+input_intelligence_head: 2bc1bf52ca13c0fd4a64375295c783649db9092c
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  main_head_observation_inherited: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
-  main_head_reread_this_checkpoint: false
   deliberate_rebaseline: false
-  source_manifest: docs/intelligence/investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md#12-source-manifest-and-context-integrity
+implementation_authorized: false
+runtime_proof_executed: false
 canonical_ranges: {findings_through: F228, contradictions_through: C178, recommendations_through: KF-REC-057, concepts_through: KF-CONCEPT-042}
 next_free_ids: {finding: F229, contradiction: C179, recommendation: KF-REC-058, allocation_status: UNALLOCATED}
-allocation_this_checkpoint: {findings: [], contradictions: [], recommendations: [], concepts: []}
-last_canonical_allocation:
-  checkpoint_id: J8-CSB-2026-09-16-01
-  findings: [F228]
-  contradictions: [C178]
-  finding_home: docs/intelligence/08BD-FINDING-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md
-  contradiction_home: docs/intelligence/09BD-CONTRADICTION-REGISTER-TIME-BILLING-ALLOCATION-SUPPLEMENT.md
-  authority: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-  evidence: VERIFIED_STATIC_SOURCE_NOT_RUNTIME_REPRODUCED
 journey_coverage:
   total_canonical_journeys: 25
-  dossier_count: 22
-  dossier_coverage_percent: 88
-  dossierless: [J20, J21, J22]
-  provenance: PRIOR_TWENTY_ONE_DOSSIER_INVENTORY_PLUS_NEW_J9_NOT_FULL_MATURITY_RECOUNT
+  dossier_count: 23
+  dossier_coverage_percent: 92
+  dossierless: [J21, J22]
   coverage_is_programme_completion: false
   active: J20
-  active_dossier_created: false
-  activation_status: NEXT_ACTIVATION_NOT_STARTED
-kernel_coverage: {canonical_count: 12, dossier_count: 12, provenance: RETAINED_PRIOR_K12_CHECKPOINT, presence_is_maturity: false}
-j9:
-  dossier: docs/intelligence/journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md
-  contract_review: docs/intelligence/investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md
-  original_microtraces_unchanged:
-  - docs/intelligence/investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-001.md
-  - docs/intelligence/investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md
-  status: PROVISIONALLY_TARGET_ALIGNED_NAMED_PUBLICATION_ATTRIBUTION_CORE_ONLY
-  constellation: [J9, J3, J5, J10, J21, J7]
-  primary_kernels: [K7, K8, K9, K10]
-  secondary_kernels: [K1, K3, K4, K5, K6, K11, K12]
-  source_scope_M001: NINETEEN_NAMED_FULL_OR_PARTIAL_FILES_RETAINED
-  source_scope_M002: SEVENTEEN_NAMED_PRIMARY_FILES_AND_EXPLICIT_LIMITS_RETAINED
-  source_scope_contract_review:
-    named_implementation_files: 11
-    full_declared_communications_model_blocks_read: true
-    queue_claim_and_post_success_local_failure_traced: true
-    guarded_execute_and_query_dispatch_traced: true
-    queue_time_eligibility_and_Gmail_send_boundary_traced: true
-    deployed_or_all_provider_conformance: NOT_PROVEN
-  selected_contract:
-    publication: [PC01, PC02, PC03, PC04, PC05, PC06, PC07, PC08]
-    recognition_attribution: [AC01, AC02, AC03, AC04, AC05, AC06, AC07, AC08]
-    labels_are_local_not_new_canonical_concepts: true
-    implementation_conformance_proven: false
-  exactness:
-  - existing_queue_destination_event_CAS_and_queued_result_positive_seams
-  - known_send_can_be_demoted_by_later_local_bookkeeping_catch
-  - stored_audience_filter_not_current_send_permission_on_named_Gmail_path
-  - guarded_query_not_read_only_enforced_and_bypasses_execute_decision_path
-  - execute_autonomy_approval_and_gate_error_denial_remain_real
-  - platform_variant_selection_not_exact_destination_metadata_binding
-  - typed_OutboundCampaign_not_JSON_EmailCampaign_namespace
-  - PayPal_duplicate_analytics_conditional_not_second_provider_charge
-  - immutable_source_basis_complete_generations_and_zero_bucket_retirement_required
-  - no_current_provider_API_or_legal_consent_certification
-  local_cases: [J9-X01, J9-X02, J9-X03, J9-X04, J9-X05, J9-X06, J9-X07, J9-X08, J9-X09, J9-X10, J9-X11, J9-X12, J9-Y01, J9-Y02, J9-Y03, J9-Y04, J9-Y05, J9-Y06, J9-Y07, J9-Y08, J9-Z01, J9-Z02, J9-Z03, J9-Z04, J9-Z05, J9-Z06]
-  local_case_count: 26
+j20:
+  dossier: docs/intelligence/journeys/KF-JOURNEY-020-PLAN-SUBSCRIPTION-AI-COST.md
+  microtrace: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-001.md
+  status: ACTIVE_FIRST_SUBSCRIPTION_ENTITLEMENT_AI_COST_TRACE_COMPLETE_NOT_CONVERGED
+  source_scope:
+    primary_files: [subscriptions.service.ts, subscriptions.controller.ts, plans.ts, plan-limit-enforcement.spec.ts, ai-usage.service.ts, model-gateway.service.ts, key-connector_ai-gateway.service.ts]
+    source_test_read_not_executed: plan-limit-enforcement.spec.ts
+    provider_or_customer_data_inspected: false
+  source_exactness:
+  - activation_and_manual_payment_are_distinct_from_provider_settlement
+  - mutation_routes_have_business_membership_guards_not_separate_billing_authority_gate
+  - declared_plan_limits_not_equivalent_to_operation_enforcement
+  - credit_admission_counts_billable_only_but_overage_summaries_count_all_usage
+  - successful_AI_effect_can_outlive_failed_AiUsageLog_persistence
+  - provider_cost_trace_and_customer_usage_ledgers_are_not_automatically_reconciled
+  - budget_caps_degrade_and_continue_when_all_candidates_over_cap
+  - feature_credits_provider_cost_customer_overage_and_settlement_are_distinct_units
+  local_case_count: 10
   local_case_status: DESIGNED_UNBOUND_NOT_EXECUTED
   new_canonical_ids_allocated: false
-  comparison: BOUNDED_REUSE_REC048_REC049_REC052_REC057_WITH_DISTINCT_SOURCE_WITNESSES
-  historical_colliding_numbers_override_04B: false
-  implementation_conformance_proven: false
-  entire_marketing_or_public_estate_converged: false
-  readiness_debts:
-    MD1: existing_record_reuse_namespace_DDL_indexes_constraints_legacy_source_receipt_reconstruction
-    MD2: named_query_dispatch_adapter_and_reader_cutover_plus_later_discovered_writer_coverage
-    MD3: actual_provider_receipts_idempotency_sender_recipient_eligibility_and_public_deployment_conformance
-    MD4: recognition_economic_refund_currency_generation_implementation_and_historical_reconciliation
-    MD5: isolated_runtime_concurrency_negative_control_migration_proof_after_baseline_comparison
-  detailed_gates_and_state: docs/intelligence/handoff/CURRENT-STATE.yaml#j9
-j8:
-  dossier: docs/intelligence/journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md
-  status: PROVISIONALLY_TARGET_ALIGNED_NAMED_COMPLETION_BILLING_CORE_ONLY
-  contract_review: docs/intelligence/investigations/J8-COMPLETION-SCOPE-AND-BILLING-CONTRACT-REVIEW.md
-  original_microtraces_unchanged: true
-  selected_contract: WC01_WC08_AND_WB01_WB04
-  local_case_count: 24
-  local_case_status: DESIGNED_UNBOUND_NOT_EXECUTED
-  allocated_findings: [F228]
-  allocated_contradictions: [C178]
-  implementation_conformance_proven: false
-  full_work_management_estate_converged: false
-  detailed_state_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#j8
-  readiness_debts:
-    WD1: final_reuse_DDL_indexes_backfill_deployed_constraints_history
-    WD2: implement_and_characterize_all_named_and_later_discovered_writers
-    WD3: actual_portal_acceptance_milestone_invoice_exact_obligation_adapter
-    WD4: source_allocation_transaction_context_historical_financial_correction
-    WD5: isolated_runtime_concurrency_migration_negative_controls_after_baseline_revalidation
-j13:
-  status: PROVISIONALLY_TARGET_ALIGNED_MAPPED_CORE_ONLY
-  contract: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
-  conformance_map: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
-  original_evidence_and_contract_unchanged: true
-  implementation_conformance_proven: false
-j24:
-  status: PROVISIONALLY_TARGET_ALIGNED_NAMED_SAFE_CHANGE_CORE_ONLY
-  dossier: docs/intelligence/journeys/KF-JOURNEY-024-SYSTEM-CHANGE-ENGINEERING-SAFETY.md
-  completed_review: docs/intelligence/investigations/J24-SAFE-CHANGE-CONVERGENCE-REVIEW.md
-  prior_proof_map: docs/intelligence/investigations/J24-PROOF-ADMISSION-AND-RUN-ISOLATION-MAP.md
-  prior_admission_spec: docs/intelligence/investigations/J24-PROOF-ADMISSION-CONTRACT.yaml
-  kernel_dossier: docs/intelligence/kernels/KF-KERNEL-012-ENGINEERING-CONTROL-PLANE.md
-  operational_enforcement_verified: false
-  new_runner_bindings: 0
-  readiness_debts:
-    CS1: hosting_required_check_reviewer_publisher_bypass_enforcement
-    CS2: trusted_controller_collector_evaluator_isolation
-    CS3: executable_cases_run_resource_cleanup_and_report_proof
-    CS4: integration_release_composition_and_rollback_compatibility
-    CS5: current_halt_policy_and_external_control_freshness
-live_control_observations:
-  provenance: PRIOR_J24_DETAILS_AND_J9_M002_HEAD_SUMMARY_RETAINED_NOT_REREAD
-  observed_on: '2026-09-16'
-  main_summary_protected: false
-  main_summary_protection_enabled: false
-  main_summary_required_checks: off
-  returned_ruleset: {id: 20622003, name: claurecommend, enforcement: disabled, target: default_branch}
-  classic_protection_detail: INACCESSIBLE_403
-  effective_branch_rules: CONNECTOR_ALLOWLIST_REJECTED
-  exhaustive_audit: false
-  settings_changed: false
-  owner_halt:
-    scheduled_cycles: HALTED
-    from: '2026-09-12'
-    source: architecture/os/OS.md
-    ref: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
-    source_blob: 10772e85fb0c979175540f0123c7160333181b15
-    external_routine_configuration_inspected: false
-    halt_lifted_or_cycles_restarted: false
-programme_map:
-  kind: DERIVED_READ_ONLY_VIEW_NOT_STATUS_AUTHORITY
-  refresh_policy: PAUSED_BY_USER_UNTIL_EXPLICIT_REQUEST
-  refresh_authorized: false
-  last_generated_checkpoint: J24-PA-2026-09-16-01
-  last_generated_intelligence_commit: a584da16c09416fd22fe68dedff7efd0411eb07f
-  intentionally_stale_relative_to_canonical_state: true
-  map_artifacts_modified_this_tranche: false
-  generator_or_check_run: false
-  instruction: DO_NOT_UPDATE_REGENERATE_OR_REFRESH_UNTIL_USER_EXPLICITLY_REQUESTS
-integration_testing:
-  designed_cases: 44
-  runner_bindings: 0
-  runtime_status: NOT_EXECUTED
-  harness_implemented: false
-  J13_manifest_changed_by_J9: false
-  J8_24_case_inventory_changed_by_J9: false
-remaining_debts_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#remaining_evidence_debts
-remaining_debts:
-  ED1: whole_schema_account_claim_reuse_exact_DDL_indexes_backfill_transaction_extensions_and_rollback_floor
-  ED2: unmapped_adapter_worker_legacy_reader_conformance_and_protected_scope_cutover
-  ED3: actual_remote_registration_account_client_project_dependencies_and_cleanup_outcomes
-  ED4: executable_case_bindings_isolated_harness_runtime_provider_migration_and_negative_control_results
-  ED5: deliberate_later_implementation_baseline_comparison_before_execution
-broader_pools_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#mature_pools
 active_frontier:
-  stage: J20_PLAN_SUBSCRIPTION_AI_COST_ACTIVATION
+  stage: J20_SUBSCRIPTION_PAYMENT_ENTITLEMENT_AND_USAGE_LINEAGE_TRACE
   primary_journey: J20
-  status: NEXT_ACTIVATION_NOT_STARTED
-  last_completed_stage: J9_PUBLICATION_OCCURRENCE_AND_ATTRIBUTION_CONTRACT_REVIEW
+  status: ACTIVE_NOT_CONVERGED
 exact_next_action:
-  planned_artifact: docs/intelligence/journeys/KF-JOURNEY-020-PLAN-SUBSCRIPTION-AI-COST.md
-  planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
+  planned_artifact: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-002.md
   instruction: >-
-    Activate J20 from actual plan/subscription/payment, feature entitlement,
-    AI allowance/admission/budget, model attempt/usage and billable cost/credit/
-    overage/reconciliation paths. Keep displayed plan, current permission and
-    settled cost distinct. Reuse authority, financial and recovery owners. Do
-    not repeat J9 queue/command/contract scans or invoke live models/billing.
-    Preserve PC/AC contracts with MD debts, prior WD/ED/CS debts and F228/C178.
-    Keep maps frozen, owner cycles halted, production read-only, baseline fixed
-    and runtime proof unexecuted. Persist substantive work and matching continuity.
+    Trace exact Subscription/SubscriptionPayment/AiUsageLog/LLMCost identity,
+    period/currency fields and provider subscription lifecycle writers. Enumerate
+    AI call paths that bypass/reuse AiUsageService and actual plan entitlement
+    callers. Compare surviving authority, billable-basis, missing-usage and hard
+    budget candidates against canonical homes before allocation. Keep production
+    read-only, baseline fixed, runtime proof unexecuted, owner cycles halted and
+    programme map frozen until explicitly requested.
 constraints:
 - production_source_schema_workflow_settings_deployment_read_only
 - no_runtime_proof_claim
 - no_silent_forensic_rebaseline
 - F228_C178_allocated_never_reuse_next_free_F229_C179_KF_REC_058
-- preserve_J9_M001_M002_J8_J13_J24_evidence_and_proof_inventory
-- no_gate_weakening_or_history_destruction
-- current_authority_separate_from_historical_source
+- preserve_prior_J9_J8_J13_J24_contracts_and_debts
+- no_model_subscription_provider_or_customer_billing_execution
 - scheduled_cycles_remain_halted
 - programme_map_refresh_paused_until_explicit_user_request
