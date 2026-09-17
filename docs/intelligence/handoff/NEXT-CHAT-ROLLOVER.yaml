@@ -1,15 +1,15 @@
 project: KEYFLOWOS
-rollover_version: 50
+rollover_version: 51
 last_updated: '2026-09-16'
-checkpoint_id: J9-M001-2026-09-16-01
-status: LIVE_J9_FIRST_NAMED_TRACE_COMPLETE_NOT_CONVERGED_MAP_PAUSED
+checkpoint_id: J9-M002-2026-09-16-01
+status: LIVE_J9_SECOND_TRACE_COMPLETE_CONTRACT_REVIEW_NEXT_MAP_PAUSED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-input_intelligence_head: c8d1b24f655956615f0d197d9068a2df24f20200
+input_intelligence_head: a7129baef03d2f94f027803a76483868f86fe930
 canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
 current_handoff: docs/intelligence/handoff/CURRENT-HANDOFF.md
 output_resolution: RESOLVE_LIVE_BRANCH_HEAD_AND_MATCHING_CHECKPOINT_ID
-context_integrity: PASS_BOUNDED_J9_ACTIVATION_FIXED_BASELINE_MAP_PAUSE_AND_OWNER_HALT_PRESERVED
+context_integrity: PASS_BOUNDED_J9_M002_WITH_RUNTIME_AND_ALTERNATE_DISPATCH_GAPS_EXPLICIT
 fresh_chat_context_integrity_check_required: true
 implementation_authorized: false
 runtime_proof_executed: false
@@ -19,7 +19,7 @@ implementation_evidence:
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   main_head_reconfirmed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
   deliberate_rebaseline: false
-  source_manifest: docs/intelligence/investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-001.md#11-reproducible-source-manifest
+  source_manifest: docs/intelligence/investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md#10-reproducible-source-manifest-and-context-integrity
 canonical_ranges: {findings_through: F228, contradictions_through: C178, recommendations_through: KF-REC-057, concepts_through: KF-CONCEPT-042}
 next_free_ids: {finding: F229, contradiction: C179, recommendation: KF-REC-058, allocation_status: UNALLOCATED}
 allocation_this_checkpoint: {findings: [], contradictions: [], recommendations: [], concepts: []}
@@ -47,14 +47,22 @@ kernel_coverage:
   presence_is_maturity: false
 j9:
   dossier: docs/intelligence/journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md
-  microtrace: docs/intelligence/investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-001.md
-  status: ACTIVE_FIRST_NAMED_TRACE_COMPLETE_NOT_CONVERGED
+  microtrace: docs/intelligence/investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md
+  previous_microtrace_unchanged: docs/intelligence/investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-001.md
+  status: ACTIVE_M002_PRODUCER_IDENTITY_AND_RECEIPT_TRACE_COMPLETE_NOT_CONVERGED
   constellation: [J9, J3, J5, J10, J21, J7]
   primary_kernels: [K7, K8, K9, K10]
   secondary_kernels: [K1, K3, K4, K5, K6, K11, K12]
   adjacent_journeys: [J13, J14, J16, J17, J18, J23, J24, J8]
-  source_scope: NINETEEN_NAMED_FULL_OR_PARTIAL_FILES
-  source_test_files_read_not_executed: 1
+  source_scope_M001: NINETEEN_NAMED_FULL_OR_PARTIAL_FILES_RETAINED
+  source_test_files_read_not_executed_M001: 1
+  source_scope_M002:
+    primary_manifest_files: 17
+    declaration: NAMED_METHOD_MODEL_RANGES_AND_EXPLICIT_DISCOVERY_LIMITS
+    complete_growth_model_blocks_read: true
+    full_alternative_outbound_dispatch_constraints: NOT_READ
+    runtime_optional_connector_and_outer_command_conformance: NOT_PROVEN
+    provider_API_version_compatibility: NOT_VERIFIED
   application_tests_executed: 0
   exhaustive_campaign_provider_schema_inventory: false
   source_exactness:
@@ -62,28 +70,33 @@ j9:
   - returned_failure_or_unmatched_targets_can_emit_post_published_and_set_gamification_milestone
   - per_channel_details_retained_parent_anySuccess_not_all_targets
   - scheduler_CAS_exists_not_common_manual_effect_claim_or_due_revision_fence
-  - manual_default_and_scheduled_stored_target_semantics_differ
-  - form_contact_submission_transaction_not_occurrence_dedupe_or_qualification
-  - live_form_and_social_mapping_narrows_source_campaign_content_identity
-  - cancelled_generic_backfill_booking_can_convert_with_zero_revenue
-  - attribution_first_conversion_cohort_uses_lifetime_value_and_all_touchpoints
-  - quoted_values_can_enter_channel_revenue_and_currency_is_not_consistently_valued
-  - disappearing_attribution_buckets_not_retired_periodStart_not_in_comparison_filter
-  - backfill_and_attribution_freshness_are_separate
-  local_cases: [J9-X01, J9-X02, J9-X03, J9-X04, J9-X05, J9-X06, J9-X07, J9-X08, J9-X09, J9-X10, J9-X11, J9-X12]
-  local_case_count: 12
+  - form_transaction_not_occurrence_dedupe_or_qualification
+  - one_PayPal_capture_can_cause_two_valued_growth_rows_with_explicit_contact_dependency_conditions
+  - derived_numeric_double_count_and_RETENTION_not_second_external_capture
+  - main_Stripe_and_storefront_event_contact_paths_are_distinct_no_universal_overlap_claim
+  - declared_touchpoint_ID_not_source_occurrence_consumer_key
+  - available_form_and_social_origin_IDs_dropped_by_growth_mapping
+  - PublishResult_platform_not_connection_revision_attempt_identity
+  - results_persist_after_loop_and_replace_prior_array
+  - Instagram_local_container_and_boolean_uncertain_errors_optional_permalink_success_preserved
+  - automation_activity_trusts_post_published_but_does_not_execute_arbitrary_playbooks_in_handler
+  - ContentAdapter_publish_send_are_status_only_source_paths_wrapped_success_outer_route_unproven
+  - existing_outbound_campaign_delivery_and_commercial_RevenueAttribution_reuse_seams
+  - M001_window_stage_currency_rebuild_findings_retained
+  local_cases: [J9-X01, J9-X02, J9-X03, J9-X04, J9-X05, J9-X06, J9-X07, J9-X08, J9-X09, J9-X10, J9-X11, J9-X12, J9-Y01, J9-Y02, J9-Y03, J9-Y04, J9-Y05, J9-Y06, J9-Y07, J9-Y08]
+  local_case_count: 20
   local_case_status: DESIGNED_UNBOUND_NOT_EXECUTED
   new_canonical_ids_allocated: false
-  candidate_to_finding_comparison_complete: false
-  candidates: [publication_outcome_propagation, occurrence_window_value_lineage_integrity]
+  comparison_status: BOUNDED_M002_ACTUAL_HOMES_READ_NOT_FINAL_J9_ALLOCATION
+  actual_homes_compared: [08AF_F197_F198, 08AJ_F205, 08AI_F204, 08K_F152_F156, 10G_REC048]
+  economic_overlap_disposition: REUSE_REFINE_EXISTING_VALUE_LINEAGE_LAW_RETAIN_J9_SOURCE_WITNESS
+  candidates: [publication_outcome_and_target_receipt, observation_conversion_economic_identity, attribution_computation_generation]
   remaining_named_questions:
-  - exact_event_schema_identity_and_economic_overlap
-  - per_target_claim_receipt_retry_and_event_consequence_bridge
-  - campaign_content_form_source_binding
-  - live_rebuild_classification_time_currency_parity
-  - consent_qualification_and_public_capture_context
-  - conversion_or_cohort_model_window_and_complete_computation_generation
-  - bounded_canonical_comparison_target_and_backward_review
+  - actual_outbound_queue_claim_delivery_event_and_campaign_binding_conformance
+  - outer_ContentAdapter_invocation_authority_and_recipient_eligibility_suppression
+  - full_provider_observation_recognition_refund_and_public_capture_coverage
+  - final_conversion_model_window_currency_generation_and_publication_contract
+  - bounded_candidate_decision_target_and_backward_review
 j8:
   dossier: docs/intelligence/journeys/KF-JOURNEY-008-PROJECT-WORK-DELIVERY.md
   status: PROVISIONALLY_TARGET_ALIGNED_NAMED_COMPLETION_BILLING_CORE_ONLY
@@ -169,29 +182,29 @@ remaining_debts:
   ED5: deliberate_later_implementation_baseline_comparison_before_execution
 broader_pools_authority: docs/intelligence/handoff/CURRENT-STATE.yaml#mature_pools
 active_frontier:
-  stage: J9_OCCURRENCE_ATTRIBUTION_AND_CHANNEL_CONSEQUENCE_TRACE
+  stage: J9_PUBLICATION_OCCURRENCE_AND_ATTRIBUTION_CONTRACT_REVIEW
   primary_journey: J9
   status: ACTIVE_NOT_CONVERGED
-  last_completed_stage: J9_MARKETING_LEAD_GENERATION_ACTIVATION
+  last_completed_stage: J9_OCCURRENCE_ATTRIBUTION_AND_CHANNEL_CONSEQUENCE_TRACE
 exact_next_action:
-  planned_artifact: docs/intelligence/investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md
+  planned_artifact: docs/intelligence/investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md
   planned_artifact_status: NOT_CREATED_BY_THIS_CHECKPOINT
   instruction: >-
-    Establish exact source event/schema occurrence identity, economic overlap,
-    time/currency and dedupe for named form/payment/invoice/order/social producers.
-    Trace per-target publication claims/receipts, post.published versus scheduled
-    consequences and campaign-to-content/form bindings. Compare surviving candidates
-    with actual canonical homes before allocation and refine source/conversion/model/
-    window/computation-generation ownership. Do not repeat campaign CRUD or guard
-    scans. Preserve existing safeguards, prior contracts/debts and F228/C178 meaning.
-    Keep maps frozen, cycles halted, production read-only, baseline fixed and all
-    runtime proof unexecuted. Persist substantive work and matching continuity.
+    Resolve the named existing outbound queue/receipt and campaign binding,
+    outer ContentAdapter invocation and recipient eligibility/suppression seams.
+    Specify minimal publication target/revision/claim/outcome and distinct
+    observation/conversion/economic/model/window/currency generation contracts.
+    Complete bounded canonical comparison and backward review with declared-scope
+    gates. Do not repeat M001/M002 scans or assume every payment path double-counts.
+    Preserve prior contracts/debts and F228/C178 meaning. Keep maps frozen, cycles
+    halted, production read-only, baseline fixed and application proof unexecuted.
+    Persist substantive work and matching continuity, then verify diff and live head.
 constraints:
 - production_source_schema_workflow_settings_deployment_read_only
 - no_runtime_proof_claim
 - no_silent_forensic_rebaseline
 - F228_C178_allocated_never_reuse_next_free_F229_C179_KF_REC_058
-- preserve_J8_J13_J24_evidence_and_proof_inventory
+- preserve_J9_M001_J8_J13_J24_evidence_and_proof_inventory
 - no_gate_weakening_or_history_destruction
 - current_authority_separate_from_historical_source
 - scheduled_cycles_remain_halted
