@@ -1,107 +1,106 @@
 # KF-JOURNEY-009 - Marketing / Lead Generation
 
-Checkpoint: `J9-M002-2026-09-16-01`  
+Checkpoint: `J9-POA-2026-09-16-01`  
 Activated: 2026-09-16  
-Status: **ACTIVE / SECOND NAMED SOURCE TRACE COMPLETED / NOT CONVERGED**  
-Current intelligence input: `a7129baef03d2f94f027803a76483868f86fe930`  
+Status: **PROVISIONALLY TARGET-ALIGNED - NAMED PUBLICATION / RECOGNITION / ATTRIBUTION CORE ONLY**  
+Intelligence input: `20e7501f562a1456190d26ddc3abd1aaae9a2601`  
 Implementation forensic baseline: `8f173bfe79f1418159cf4099ea18b0d60d203ec2`.
 
-Existing customer-to-revenue constellation: J9/J3/J5/J10/J21/J7. Primary kernels: K7 Temporal/Event/Workflow, K8 Evidence/Outcome, K9 Integration/External Reality, K10 Financial Truth. Secondary: K1/K3/K4/K5/K6/K11/K12. Adjacent J13/J14/J16/J17/J18/J23/J24/J8.
+Primary kernels K7/K8/K9/K10; secondary K1/K3/K4/K5/K6/K11/K12. Existing customer-to-revenue constellation J9/J3/J5/J10/J21/J7. Adjacent J13/J14/J16/J17/J18/J23/J24/J8 and governance J2/J15.
 
-Production source/schema/settings/workflows/assertions remain read-only. No app/provider/database/boot/concurrency/migration tests ran. Scheduled owner-halted cycles stay halted. The programme map remains frozen at J24-PA; no renderer/check/output modification.
+Production source/schema/settings/workflows/assertions remain read-only. No application/provider/DB/boot/concurrency/migration test ran. The programme map remains frozen at J24-PA by the user; its generator/check and outputs are unchanged. Scheduled cycles remain halted. Design alignment does not establish implementation conformance.
 
-## Current result - Microtrace 002
+## 1. Purpose and selected scope
 
-[Microtrace 002](../investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md) completes the named source-occurrence, economic-overlap and publication-receipt trace. Its seventeen-entry primary source manifest distinguishes full models/methods from excerpts, discovery and unproved runtime wiring. M001 remains unchanged.
-
-The PayPal capture path can create one Payment, reconcile the invoice to PAID and then emit connector payment.received. Both growth handlers append valued payment touchpoints. If the optional connector exists, payer email resolves to the same invoice contact, both writes succeed and a recomputation sees them, a capture100/invoice100 can produce numeric growth value200 and RETENTION from two conversion rows. This is not a second external capture, not a runtime customer incident and not a claim every PayPal resource resolves a payer. Missing/different contacts change the result.
-
-The main Stripe handler does not invoke that connector emitter in its inspected success body. Storefront checkout has useful transactional financial/inventory composition and post-commit invoice events; its separately resolved contact is not explicitly added to the emitted order-paid payload required by the growth listener. Do not generalize the PayPal duplicate aggregate to every provider or assert a complete MarketplaceOrder schema audit.
-
-Declared JourneyTouchpoint constraints do not supply source-occurrence dedupe: each create can receive a new row ID, while CustomerJourney.contactId uniqueness only identifies the aggregate. Native form events contain the persisted submission and identified social events can carry externalId, but growth mapping drops those identities and source times. Observation identity, economic correlation and conversion recognition must remain separate; invoiceId-only dedupe would lose legitimate installments.
-
-Per-platform PublishResult lacks connection/revision/attempt identity. SocialPublishingService persists results only after all targets and replaces the earlier array. Instagram keeps its container locally and reports outer network/JSON exceptions as success:false even where the external effect is uncertain. Its optional permalink failure correctly does not erase a confirmed publish. These are source-level recovery boundaries, not current API compatibility or live provider claims.
-
-The automation post.published listener adds a success-toned activity without rechecking results, strengthening M001's gamification consequence. Its body does not execute arbitrary playbooks. The named scheduler emits a different event; absence of a returned bridge is not a universal subscriber-absence proof.
-
-Existing OutboundCampaign/OutboundContent/OutboundDelivery relationships and a separate RevenueAttribution model were identified. They are reuse candidates, not a new platform to replace. The inspected ContentAdapter delegates publish_post/send_campaign to ContentService methods that only change local status, then returns success:true through connectorOk. The outer authorized entrypoint and complete delivery queue conformance remain to inspect before a broad runtime claim.
-
-Actual F197/F198/F204/F205/F152/F156 and REC048 wording were compared. Reuse economic-lineage, typed adapter and outcome/recovery laws, while retaining these new source witnesses. The independent attribution-generation candidate remains for final review. **No canonical IDs were allocated.** F228/C178 remains J8 billing allocation; next free F229/C179/KF-REC-058.
-
-J9 now has **20 local designs**: M001 J9-X01-X12 plus M002 J9-Y01-Y08, zero bindings and NOT_EXECUTED. J8's 24 designs and J13's 44-case manifest are separate and unchanged. No new dossier/kernel count: coverage stays 22/25 and twelve kernels, not app completion.
-
-**Next:** J9_PUBLICATION_OCCURRENCE_AND_ATTRIBUTION_CONTRACT_REVIEW, producing `investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md`. Resolve the named existing outbound queue/campaign binding and outer command/recipient eligibility boundaries; specify minimal publication and observation/recognition/computation contracts; finish bounded candidate comparison and backward re-audit with explicit closure gates. J9 is not converged. Do not repeat the payment producer or campaign CRUD scan, run product tests or refresh the frozen map.
-
-The M001 sections below are retained as historical analysis. Their former next-M002 action and twelve-case count describe that checkpoint; the current overlay and CURRENT-STATE.yaml govern continuation.
-
-## 1. Definition and product intent
-
-J9 follows campaign intent into content and authorized publication, audience response, identifiable capture, qualification, conversation/commercial outcomes and evidence-based attribution/learning.
+J9 carries campaign intent into authorized content delivery, audience observation, identity/qualification, economic conversion recognition, model attribution and learning without letting one layer fabricate evidence for another.
 
 ```text
-campaign plan != generated content != scheduled intent != actual publication
-!= observed engagement != identified lead != qualified lead
-!= conversion occurrence != model attribution != collected/reconciled revenue
+plan != draft != queued intent != provider outcome != recipient evidence
+!= identified lead != qualified lead != conversion != attribution != cash
 ```
 
-The supplied blueprint intends real SocialPost publication and a post.published event as an input to seamless business Flow. The current source contains useful campaign, social, form and growth components, but their classifications and evidence must agree. Historical sample services and claimed flawless outcomes are not current implementation proof.
+The [Publication, Occurrence and Attribution Contract Review](../investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md) is the current target and acceptance home. PC01-PC08 govern publication; AC01-AC08 govern observations, recognition and report generations. They are document-local responsibilities over existing mechanisms, not new canonical concepts or mandated new tables.
 
-## 2. Completed source trace
+The accepted scope covers the named social/manual/scheduler/content-command/communications paths, growth adapters and model-result generation, not the complete marketing/public/provider estate. All actual provider capabilities, consent integrations, legacy migrations and runtime correctness remain subject to MD1-MD5.
 
-[Microtrace 001](../investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-001.md) is the evidence home: nineteen named source files with explicit scopes, including one unexecuted source-test file and a concrete dashboard UI/consumer trace. It covers MarketingCampaignPlan CRUD, manual/scheduled social publishing, gamification, native lead forms, live and backfilled journeys, attribution and the Growth Intelligence display.
+## 2. Preserved investigation chain
 
-Not fully traced: email/paid-ad/campaign variants, publisher internals, all response producers, exact schema occurrence constraints, consent/qualification, complete campaign joins, reporting-generation recovery and every downstream learning consumer. No whole-funnel absence or convergence claim is made.
-
-## 3. Actual source chain and consequences
-
-| Boundary | Evidence-supported result |
+| Evidence home | Responsibility |
 |---|---|
-| Campaign planning | Scoped CRUD stores plan/status/budget/expectedRevenue; these writes do not themselves publish or establish observed revenue. No global absence of campaign executors is asserted. |
-| Manual publication | No account/no explicit target correctly refuses. A different branch emits post.published after returned all-failed or unmatched-target results. A thrown publisher error is not that branch. |
-| Per-channel result | Detailed publishResults survive, but anySuccess maps the whole post to POSTED and first-success external reference. Aggregate success is not proof every intended target completed. |
-| Target identity | Manual publish without request IDs uses connected channels rather than stored post IDs; scheduler forwards stored IDs. The publisher later writes used platform names into channelIds. Account-specific retry identity needs review. |
-| Scheduler | Due selection and status CAS are real. Claim does not bind selected due time/content revision; rescheduling while still SCHEDULED can leave a stale claim. Manual publish does not share that status gate. |
-| Downstream consequence | Gamification trusts post.published and can set firstPostPublished after the failed manual path. Scheduled dispatch emits a different event, so that named listener is not notified by the shown scheduled path. |
-| Native lead form | Public guards/sanitization, active-form-derived tenant and contact/submission transaction exist. Contact reuse is not submission dedupe; no-email capture may remain unlinked. |
-| Live journey input | Form/source/submission/campaign/content identity narrows; anonymous social engagement is intentionally skipped. Identified response is not automatically a qualified lead. |
-| Live versus backfill | Live booking_created/cancelled uses consideration; backfill's generic booking is counted as conversion even when cancelled. Quote conversion can set a stage without convertedAt. |
-| Reconstruction | Backfill deletes touchpoints and rebuilds selected sources nonatomically; source mappings differ and typed campaign/content linkage is not preserved by the shown mappers. Original business records are not deleted by that touchpoint reset. |
-| Attribution | First convertedAt selects the cohort, while lifetime totalRevenue and all touchpoint weights supply allocation. Historical periods can include later value and omit repeat conversions from older contacts. |
-| Stored reporting | Upsert-only recompute leaves vanished buckets; model comparison filters periodEnd but not periodStart. Backfill then dashboard reload can combine fresh journeys and older attribution. |
-| Financial labels | Invoice-paid live listener hardcodes TTD; aggregate ignores native currency. Channel mix sums quote values as revenue along with payment values, while journey total uses a different type filter. |
+| [M001](../investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-001.md) | Nineteen named source files: false publication event reaching gamification, lead capture, live/backfill disagreement, time-window/value-stage/currency and result freshness. Twelve X designs. |
+| [M002](../investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md) | Seventeen primary files: conditional PayPal duplicate recognition, actual source schema/IDs, per-target receipt loss and status-only content commands. Eight Y designs. |
+| [Contract review](../investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md) | Eleven named files: existing queue and declared models, post-success catch, suppression timing, sender/variant/campaign relationships, guarded query dispatch, PC/AC target, migration and backward review. Six Z designs. |
 
-All conditional failure sequences remain static source analysis, not customer incidents or executed tests. The detailed trace separates known inputs, missing deployment/producer evidence and target implications.
+M001 and M002 are unchanged. The prior dossier and its historical overlays remain in Git at the input commit. This live dossier consolidates navigation and accepted scope rather than repeating superseded next actions. No source witness is discarded because the related contract is reused rather than assigned a new finding ID.
 
-## 4. Concrete analytical examples
+## 3. Material source facts and qualifications
 
-An unpaid cancelled booking rebuilt as generic booking can become CONVERSION with zero revenue; attribution.compute skips nonpositive-revenue journeys, so the example does not invent positive money.
+Manual SocialService publishing correctly refuses no-account/no-explicit-target requests. A different path emits post.published on normally returned all-failed or unmatched results. Gamification and automation activity trust that event; automation's inspected handler logs activity, not arbitrary playbook execution. Scheduler claim and detailed channel results are real, but manual/scheduled target and consequence semantics differ.
 
-A first conversion of 100 on day 10 and another of 200 on day 40 gives lifetime value 300. A days-1-to-30 attribution computation can select that journey by day 10 yet attribute 300 using all touchpoints. A cohort-lifetime report could deliberately choose that basis, but it must not silently present it as event-period conversion revenue.
+M002's PayPal path can record invoice-paid and payment-received as two valued growth observations for one capture. Optional connector availability, same resolved payer/invoice contact, successful consumer writes and recomputation are required. Capture100/invoice100 can yield numeric growth200 and RETENTION; this does not create a second provider charge. Main Stripe and storefront have distinct emission/contact paths. Do not generalize the example to all payments.
 
-A quote_created touchpoint valued 500 plus one payment valued 500 can sum to channelMix.revenue=1000 while journey.totalRevenue is 500. That is incompatible value-stage projection, not a second actual payment. These examples use one currency to isolate the classification/window issue from the additional FX problem.
+Native form and identified social events can contain source IDs and times which growth mapping discards. Contact-aggregate uniqueness does not supply occurrence dedupe. Live typed booking/cancellation and rebuilt generic booking have different conversion meaning. Quote values, invoice-state totals, receipts, native currencies and model allocation are not interchangeable financial bases.
 
-## 5. Existing strengths and shared owners
+Attribution selects first-conversion cohorts but consumes lifetime value and all touches; explicit cohort-lifetime reporting is possible, but not equivalent to event-period reporting. Upsert-only generation leaves vanished buckets; readers can mix periods/freshness. Backfill deletes/recreates selected touchpoints without preserving all observation semantics. These are source-derived examples, not executed customer incidents.
 
-Keep no-account refusal/tests, connected-channel filtering, detailed publication results, bounded scheduler selection and compare-and-set, public form guards, tenant-derived contact/submission transaction, anonymous-response non-attribution, explicit attribution model names and authenticated growth routes. Do not reintroduce false success or replace existing components because their composition needs stronger contracts.
+## 4. Newly resolved outbound and command boundaries
 
-KF-REC-057/J5 and J14 retain canonical response occurrence and consumer ownership. J13 supplies current provider-use authority. J18/REC048 and J23 own attempt/recovery/temporal semantics, including partial channel success. J7/REC052/K10 requires amount stage, currency and valuation evidence. K4/K8 own evidence and learning admission. J8 and J24 preserve exact source history and reversible, independently evaluated experimentation.
+The communications engine already has destination-specific deliveries, events, status claims, retry scheduling and parent aggregation. Queue requests return queued work rather than asserting completed delivery. Strengthen these instead of installing a second sender.
 
-Preliminary integration requirements: exact campaign/content/target and occurrence identity; one common publication outcome consumed by all entrypoints; live/replay classification parity; explicit per-conversion or labelled cohort windows; preserved raw evidence plus atomic/versioned derived computation generations; no monetary label stronger than its basis. This is not yet a final J9 contract, physical schema, new analytics vendor or parallel conversation/workflow/ledger engine.
+The queue's try/catch covers the remote publish plus local success/history/parent writes. A provider success followed by local bookkeeping failure can be marked RetryPending/Failed. Known external outcome must survive that error, with only missing local consequences repaired. Retry allowance and successful catch writes are conditional; no duplicate email was reproduced.
 
-## 6. Allocation, proof and status at M001
+Audience filtering uses doNotContact/marketingOptIn predicates during expansion. The inspected queue/Gmail path does not recheck a later Contact suppression before sending to the saved address. This establishes a named current-permission gap, not a legal-consent conclusion or exhaustive every-provider audit. Sender fallback based on token presence must also consume current purpose/authority, not infer permission from missing credentials.
 
-No new F/C/REC/concept allocation. F228/C178 still means the J8 source-time billing loss; next free F229/C179/KF-REC-058. Actual REC052/REC057 and 04B were checked; full source-candidate-to-register comparison is next, not falsely declared complete.
+OutboundContentService stores destination-specific variant metadata, but queue selection uses platform matching. Mutable variantId is not an immutable rendition. Typed OutboundContent.campaignId refers to OutboundCampaign, while queue bookkeeping stores an EmailCampaign ID in contentMeta.campaignId. MarketingCampaignPlan is another intent namespace. Same field spelling cannot substitute for a valid cross-record association.
 
-J9-X01-X12 are twelve local designed cases, zero runner bindings, NOT_EXECUTED. J13's 44-case manifest and J8's 24 designs remain separate and unchanged. The SocialService test file was read, not run; its mock delegation success is not provider evidence.
+The Cortex controller has AuthGuard/BusinessGuard. The execute route enters real autonomy/approval/error-denial controls. The query route, however, passes a string action to the same mutable dispatcher without an operation-class allowlist and without the executor. ContentAdapter supports mutating publish/send methods on that dispatcher. This is an authenticated source path, not a public exploit claim or actual HTTP test. Read-only enforcement must precede attaching real sends to a currently status-only command.
 
-J9 activation/first trace is complete; J9 convergence remains open. Creating this dossier increments prior 21 to 22/25 dossier coverage, not app completion or a new portfolio maturity census. J20/J21/J22 remain without dedicated dossiers. Twelve kernel dossiers and all prior bounded alignments/debts are retained.
+## 5. Selected publication contract
 
-## 7. Historical M001 next action - completed by M002 at named scope
+PC01 freezes the intent, rendition and exact target/audience manifest with explicit exclusions. PC02 resolves current actor, operation class, provider grant and recipient eligibility. PC03 claims one logical effect independently of fresh request/attempt IDs. PC04 records durable attempt and provider-stage evidence. PC05 preserves known outcome while repairing local consequences. PC06 derives parent state and consumer effects from the required manifest. PC07 admits later provider/recipient observations without pretending send acceptance proves delivery. PC08 handles revisions, cancellation, uncertainty-aware retry and safe withdrawal.
 
-**J9_OCCURRENCE_ATTRIBUTION_AND_CHANNEL_CONSEQUENCE_TRACE**.
+All named entrypoints participate: manual social, scheduled social, communications, ContentAdapter, and purported queries. A partial cutover is not full conformance. Queue-time permission cannot authorize a send after current revocation. A local stop cannot promise retroactive cancellation of a remote request already admitted; such uncertainty remains a recovery obligation.
 
-Planned, not created at M001: `investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md`.
+Existing DeliveryEvent/OutboundDelivery are reusable evidence/claim seams, but their present fields and state CAS are not the entire target. Exact DDL and transaction composition must be characterized. Intermediate media/container references and successful child outcomes cannot remain only in memory until the last channel finishes.
 
-First establish exact event/schema occurrence identity, economic overlap and source time/currency for the named form/payment/order/social producers. Then trace per-target publication claim/receipt and post.published versus scheduled-dispatched consequences plus actual campaign-to-content bindings. Finally compare surviving publication/attribution candidates with canonical homes and refine source/model/window/computation ownership and migration. No repeat of the campaign CRUD/guard scan and no premature J9 convergence or F-number allocation.
+## 6. Selected recognition and generation contract
 
-Keep the fixed baseline, production read-only boundary, current owner halt and map pause. Persist substantive results and matching CURRENT/ROLLOVER navigation without modifying the frozen map or earlier evidence.
+AC01 preserves source observations, identities and time provenance. AC02 correlates economics without collapsing genuine installments or distinct submissions. AC03 applies a versioned conversion and value-stage policy consistently to live and replay. AC04 identifies a complete report basis: per-conversion or explicit cohort, both time boundaries/cutoff, model, currency/valuation and lookback. AC05 builds a complete staged generation. AC06 validates and atomically activates it. AC07 corrects/rebuilds with source lineage. AC08 supplies honest reader freshness and safe model comparison/withdrawal.
+
+One economic capture is not counted again merely because the invoice becomes paid. Attribution shares plus an explicit unattributed residual conserve the admitted same-basis value. Quotes, cash, margin and FX remain separate financial policies. Model allocation is not causal proof that marketing produced the sale.
+
+A complete zero-result generation replaces stale prior buckets. An interrupted or missing-source run stays incomplete. A slower older computation cannot overwrite a newer correction; reader projections do not silently combine incompatible generations. Raw source history is preserved according to J19 disposition, not destroyed to recompute a dashboard. A rollback cannot re-expose disallowed evidence merely because the old report looked better.
+
+## 7. Canonical reuse and backward review
+
+No new F/C/REC/concept ID is allocated. REC048 supplies effect/attempt/consequence recovery; REC049 supplies revision-bound analytics and eligibility; F178's derivative-invalidation law is specialized without claiming its original Genome source trace proved these growth methods. Existing F198 economic-lineage and J5/J14 occurrence contracts remain. Historical provider-recovery numeric collisions do not override 04B.
+
+F228/C178 remains the J8 time-billing loss. Next free F229/C179/KF-REC-058. The publication, query, recipient and attribution witnesses remain concrete obligations in this review without an omnibus new finding or duplicate authority/analytics engine.
+
+Backward review retains J3 relationship/qualification, J5/J14 occurrence ownership, J7/J8 financial source truth, J13 grants, J18 certainty-aware repair, J23 definition/occurrence/attempt, J2/J15 current authority, J16/J17 qualified derived knowledge, J24 independent proof and J19/J21 public/disposition interfaces. Full runtime/provider/public coverage is not imported by reference.
+
+## 8. Integration, proof and remaining debts
+
+P0 operation/environment admission precedes P1 compatible storage, P2 common publication ownership, P3 shadow recognition/generation, P4 reader/consequence cutover and P5 controlled activation/withdrawal. These are review slices, not promoted execution packets. No unsafe reference fallback when the old implementation violates the same invariant; disable affected new effects instead.
+
+Optional models, channels and implementations can be added, compared, disabled and removed under reviewed policy. They must retain current permission, effect identity, source observation and economic history. A shadow model cannot send messages, create invoices or replay conversions as new facts. This applies the blueprint's controlled flexibility and seamless-flow objective; it does not certify its historical examples or this design as executed software.
+
+J9 has **26 local designs**: 12 X, 8 Y and 6 Z. All are unbound/NOT_EXECUTED. J8's 24 and J13's 44-case inventory remain separate and unchanged. No application/harness/provider test ran.
+
+| Debt | Required readiness work |
+|---|---|
+| MD1 | Existing-record reuse, namespace/DDL/index migration and legacy source/receipt reconstruction |
+| MD2 | All named query/dispatch/adapter/reader cutover and later-discovered writer coverage |
+| MD3 | Actual provider receipts/idempotency, current sender/recipient eligibility and public/deployment conformance |
+| MD4 | Economic/refund/currency recognition and atomic generations, with historical reconciliation |
+| MD5 | Authorized isolated runtime/concurrency/negative-control/migration proof after baseline comparison |
+
+G9-01 through G9-08 pass only at their named context/source/design/review scopes. Wider conformance is deferred; runtime proof is not executed; implementation and release remain unauthorized. G9-11 grants only named-core provisional target alignment. J13 ED1-ED5, J8 WD1-WD5 and J24 CS1-CS5 remain intact.
+
+## 9. Exact next programme action
+
+**J20_PLAN_SUBSCRIPTION_AI_COST_ACTIVATION**. Planned, not created: `journeys/KF-JOURNEY-020-PLAN-SUBSCRIPTION-AI-COST.md`.
+
+Trace actual subscription/plan/payment state into feature entitlement, AI allowance/admission, budget reservation, model attempts, usage recording, billable classification and cost reconciliation. Keep displayed plan, current permission, consumed resource and settled cost separate. Do not run model calls or subscription writes during the forensic trace.
+
+No new journey was created by this review: 22/25 dossier coverage and twelve kernel dossiers remain, not app completion. J20/J21/J22 are still dossierless. Preserve the map freeze, owner halt, fixed implementation baseline and intelligence-only publication boundary.

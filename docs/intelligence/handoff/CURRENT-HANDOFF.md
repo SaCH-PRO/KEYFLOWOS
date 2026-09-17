@@ -1,55 +1,75 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `J9-M002-2026-09-16-01`  
+Checkpoint: `J9-POA-2026-09-16-01`  
 Updated: 2026-09-16  
-Status: **J9 PRODUCER / IDENTITY / RECEIPT TRACE COMPLETED; CONTRACT REVIEW NEXT; NOT CONVERGED**.
+Status: **J9 NAMED PUBLICATION / RECOGNITION / ATTRIBUTION CORE PROVISIONALLY TARGET-ALIGNED; J20 ACTIVATION NEXT**.
 
 ## Coordinates and restrictions
 
-Repository SaCH-PRO/KEYFLOWOS; branch docs/keyflow-intelligence-foundation. Input/provenance a7129baef03d2f94f027803a76483868f86fe930. Resolve live output head and matching checkpoint; input is not output. Forensic implementation baseline stays 8f173bfe79f1418159cf4099ea18b0d60d203ec2. Main was separately reconfirmed at 88b8016c0ef45e383cc5b0d98c7062151a6a0f27; no rebaseline.
+Repository SaCH-PRO/KEYFLOWOS; branch docs/keyflow-intelligence-foundation. Input/provenance 20e7501f562a1456190d26ddc3abd1aaae9a2601. Resolve live output head and matching checkpoint; input is not output. Implementation forensic baseline remains 8f173bfe79f1418159cf4099ea18b0d60d203ec2.
 
-Production source/schema/settings/workflows/assertions remain read-only. No app/provider/DB/boot/concurrency/migration tests or execution-packet promotion. Scheduled truth/audit/burndown/reflect cycles remain halted; this is interactive intelligence analysis.
+Production source/schema/settings/workflows/assertions remain read-only. No application/provider/database/boot/concurrency/migration test or execution-packet promotion. Main/hosting control observations are inherited prior reads, not a fresh administration audit. Scheduled truth/audit/burndown/reflect cycles remain halted.
 
-**The user's map pause persists.** Do not run map generation/freshness checks or modify map Markdown, HTML/JSON, previews, renderer or template. Its J24-PA view is intentionally old. CURRENT-STATE.yaml owns current state, not the frozen map.
+**The user's map pause is still binding.** No generator/freshness check or map Markdown/HTML/JSON/preview/renderer/template edits. Its J24-PA checkpoint is intentionally old. CURRENT-STATE.yaml owns current programme state.
 
-## Completed unit
+## Completed substantive work
 
-[J9 Microtrace 002](../investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md) completes the prior named occurrence/attribution/channel-consequence trace. The [J9 dossier](../journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md) has a current overlay while retaining the initial trace sections. M001 is unchanged.
+[J9 Publication, Occurrence and Attribution Contract Review](../investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md) completes the previous exact action. It reads eleven named implementation files, resolves the existing outbound queue/model and outer command boundaries, selects publication and recognition/report-generation contracts, and records cutover, backward re-audit and closure gates.
 
-Seventeen primary source files have explicit method/model/range scopes. Additional directory/raw-schema searches are discovery, not exhaustive coverage. Relevant growth model blocks were read; complete alternative delivery-queue constraints and runtime conformance were not. No provider-version compatibility or customer incident is asserted.
+[J9 dossier](../journeys/KF-JOURNEY-009-MARKETING-LEAD-GENERATION.md) now consolidates current scope/navigation. Original M001 and M002 are unchanged. Earlier dossier overlays remain in Git at the input checkpoint; their old next actions do not override the new frontier.
 
-## Source conclusions and narrowing
+Result: **PROVISIONALLY_TARGET_ALIGNED_NAMED_PUBLICATION_ATTRIBUTION_CORE_ONLY**. This is not actual provider conformance, implemented read-only dispatch, enforced recipient permission, complete public-marketing coverage, migrated data or runtime proof.
 
-PayPal processPaypalCaptureCompleted can create a Payment/posting, reconcile the invoice to PAID (emitting invoice.paid), then invoke the optional connector's payment.received. Both growth handlers create type payment with a value. If the optional connector is available, payer email resolves to the invoice contact, both writes succeed and recomputation sees them, one numeric capture100/invoice100 can produce growth total200 and RETENTION from two rows. **No second provider capture is implied.** Missing/different payer contacts and unsuccessful reconciliation change the result. Do not hide those conditions.
+## New source witnesses and positives to retain
 
-Main Stripe's inspected success body does not make that connector emission. Storefront has a transaction and post-commit invoice event buffer; it resolves contact separately but does not explicitly add that identity to the order-paid payload required by the growth handler. Do not universally assert all payment paths double-count or fix the missing store contact without correlating the already-emitted invoice event.
+DeliveryQueueService already has per-destination records/events, status CAS, retry counters, queued responses and parent aggregation. The problem is not absent infrastructure. Its broad try/catch spans adapter.publish and later local success/history/aggregate writes. A provider success followed by a local error can become RetryPending/Failed and later eligible for resend. Keep known provider evidence and repair only missing local consequences. This is a conditional source sequence, not an observed duplicate email; receipt fields/history can survive and contradict the status.
 
-CustomerJourney.contactId uniqueness is aggregate identity. JourneyTouchpoint has no declared source-occurrence/consumer unique key beyond row ID. Native form event includes the persisted submission, and identified social/PayPal events can carry externalId, yet the growth mapping drops these IDs and time provenance. Identical contact/amount/payload is not a safe economic dedupe key; legitimate installments and new submissions must remain distinct.
+Audience expansion filters doNotContact/marketingOptIn at queue time. The inspected executeDelivery/Gmail path does not recheck a later Contact suppression before using the stored recipient. No nullable-query or legal-consent conclusion is inferred, and SystemEmailService/every-provider internals were not audited. Current sender fallback is also a purpose/grant decision, not authorization created by a missing merchant token. Preserve existing fallback off control and token/recipient validation.
 
-PublishResult retains platform/outcome/provider post reference but not local account/revision/attempt. SocialPublishingService saves results after the complete loop and replaces the old array; early successful children can lack current durable receipt if the process fails before persistence. Instagram stores its intermediate container only locally and returns Boolean failure for uncertain outer network/parse errors. Preserve its useful behavior that optional permalink failure does not erase an already-confirmed publish.
+OutboundContentService supports destination-specific variant metadata, while queue variant selection matches platform. Multiple same-platform account renditions therefore require an explicit destination binding. Variant IDs refer to mutable content, not an immutable approved payload. The typed OutboundContent.campaignId references OutboundCampaign; queue bookkeeping separately stores an EmailCampaign ID in JSON contentMeta.campaignId. These IDs and MarketingCampaignPlan intent are not interchangeable.
 
-AutomationExecutor.onPostPublished writes a success-toned publication activity without rechecking results, reinforcing M001's gamification consequence. Its body does not execute arbitrary playbooks. The named scheduler uses social.scheduled.dispatched; returned searches do not prove universal absence of a bridge/wildcard listener.
+Cortex has class authentication/business guards and an execute route with real autonomy/approval and gate-error denial. A different guarded query route builds action from its query string and invokes the same mutable ContentAdapter dispatcher without that executor or a read-only allowlist. This source path is now traced, not a public exploit or executed HTTP request. Enforce operation class/current principal before wiring real sending behind the status-only content command. Do not erase existing working execute safeguards.
 
-OutboundCampaign/content/delivery relations and separate RevenueAttribution exist. Do not create a duplicate campaign/receipt/financial engine by assuming those records are absent. The inspected ContentAdapter does delegate publish_post/send_campaign to local status-only ContentService methods, then wraps success:true. The complete outer authorized command path and real outbound dispatch reuse are not proved by this trace. That is now a named next-review seam, not another generic search invitation.
+Tracking signs/verifies its bounded request and fails closed without configured secret. A signed open/click request is not proof of a specific human, permission or financial conversion. Current campaign-contact labels and generic bounce mapping need stage-correct projection, not fabricated delivery metrics.
 
-## Canonical comparison and proof
+## Contracts and ownership
 
-Actual 08AF F197/F198, 08AJ F205, 08AI F204, 08K F152/F156 and 10G REC048 were compared. Reuse economic-lineage, typed adapter and outcome/certainty laws; retain distinct J9 source witnesses. An older F-number is not retroactively proof of newly inspected methods. The independent attribution-generation candidate remains for final review.
+The review is the single home of PC01-PC08 and AC01-AC08. These are local responsibilities, not new canonical concepts or table mandates.
 
-No canonical ID allocation: F228/C178 keeps the J8 time-billing meaning; ranges F228/C178/REC057/CONCEPT042 and next free F229/C179/KF-REC-058 remain. Original registers and prior investigations are unchanged.
+Publication: exact intent/rendition/target manifest; current principal and operation/provider/recipient admission; exclusive logical effect owner; durable attempt/provider evidence; immutable known outcome plus local repair; complete child-derived consequences; later authenticated evidence; revision/cancel/retry/withdrawal. All named manual/scheduled/communications/content/query paths consume this contract.
 
-J9 now has 20 local designs (J9-X01-X12 plus J9-Y01-Y08), zero bindings and NOT_EXECUTED. J8's 24 and J13's 44 remain separate, unchanged inventories. No new application tests or harness. Coverage stays22/25 dossiers and twelve kernels, not app completion. Prior bounded alignments and WD1-WD5/ED1-ED5/CS1-CS5 survive.
+Attribution: original observations; economic correlation separately from replay dedupe; versioned conversion recognition; complete model/window/cutoff/value/currency basis; staged generation; validation and atomic activation; correction/invalidation; honest reader/model withdrawal. A complete zero set retires old buckets, whereas incomplete collection is not measured zero. An older late job cannot replace a newer correction.
 
-## Exact next review
+Keep partial captures distinct and correlate invoice-state evidence instead of counting another sale. Preserve M002's explicit PayPal connector/contact/write/recompute conditions; no universal provider duplicate-charge claim. Typed booking goals can be nonmonetary but must be declared and replay-consistent. Attribution is allocation, not causal proof of marketing impact.
 
-**J9_PUBLICATION_OCCURRENCE_AND_ATTRIBUTION_CONTRACT_REVIEW**.
+PC/AC compose existing registry/authority, OutboundDelivery/DeliveryEvent, SocialPost, campaign, source/evidence, financial and growth owners. They do not install a second sender, CRM, approval, consent or analytics engine. Existing records are reused only after their keys/interfaces meet the required guarantees.
 
-Planned, not created: `docs/intelligence/investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md`.
+## Canonical decision and proof
 
-1. Resolve the named OutboundContent/OutboundDelivery/DeliveryEvent queue/claim and campaign-binding seams, the outer ContentAdapter invocation and relevant recipient eligibility/suppression ownership. Reuse existing machinery where it satisfies the required contract. Do not repeat campaign CRUD or the completed payment producer scan.
-2. Specify minimal publication target/content/grant/attempt and outcome semantics; separate source observations, conversion recognition, economic identity, valuation and complete model/window/currency generations. Complete bounded candidate allocation review without allocating by resemblance.
-3. Backward re-audit J3/J5/J7/J13/J14/J18/J23/J24 with J8 source-value and J21 public boundaries. Assign pass/defer/reopen gates and decide declared-scope alignment or state the precise unresolved invariant. J9 is not already converged.
+No F/C/REC/concept allocation. The review applies REC048 recovery, REC049 revision-aware analytics, F178 derivative-invalidation law and M001/M002's actual economic/occurrence comparisons. This preserves distinct source witnesses without pretending an old finding's proof includes the newly read methods. The provider-recovery supplement's historical colliding numbers do not override 04B.
 
-Preserve raw evidence and financial history during rebuild/model changes. No live posts/messages/invoices in shadow comparison. Missing history remains uncertain, not synthesized into proof. Current permission and the map pause override historical snapshot instructions.
+Current ranges F228/C178/REC057/CONCEPT042; next free **F229/C179/KF-REC-058**. F228/C178 retains its J8 time-billing meaning. Original numeric registers remain unchanged.
 
-Read AGENTS/AGENT-CONTINUITY, START/current state and all CURRENT/ROLLOVER files; run Context Integrity Check. Publish substantive analysis and matching continuity in an intelligence-only checkpoint, then verify the diff/ref. Exclude maps and original evidence.
+J9 has **26 local designs** (12 X + 8 Y + 6 Z), zero bindings and NOT_EXECUTED. The six new cases cover local failure after known send, later suppression, mutating query rejection, exact destination/rendition, fallback/effect ownership and corrected/zero-generation replacement. These are not application test results. J8's 24 and J13's 44-case manifest remain separate and unchanged.
+
+## Migration and remaining readiness
+
+P0 operation/environment admission -> P1 compatible storage -> P2 common publication -> P3 shadow recognition -> P4 reader/consequence cutover -> P5 controlled activation/withdrawal. These are design slices, not promoted execution packets.
+
+MD1 final record reuse/namespace/DDL/index/legacy source reconstruction; MD2 implement all named entrypoints/readers and later-discovered writers before expanding coverage; MD3 actual provider receipts/idempotency, current sender/recipient eligibility and public/deployment conformance; MD4 recognition/refund/currency/atomic generation and historical reconciliation; MD5 authorized isolated runtime/concurrency/migration/negative controls after deliberate baseline comparison.
+
+J13 ED1-ED5, J8 WD1-WD5, J24 CS1-CS5, all mature pools and prior controls survive. Gates pass only at their recorded analytical scopes; implementation remains unauthorized and wider conformance is deferred. Reopen the exact contradicted invariant, not the whole programme on every new chat.
+
+Optional variants remain addable/removable through reviewed changes, but a model switch cannot send real messages or alter original payments. Known success and current revocation survive withdrawal. A rollback to a historical report cannot expose source material now disallowed by J19. No conforming reference means safely disable affected new actions, not restore unsafe behavior.
+
+Coverage remains22/25 dossiers and twelve kernel dossiers, not application completion. J20/J21/J22 remain dossierless. No map refresh is warranted by new analytical status.
+
+## Exact next unit
+
+**J20_PLAN_SUBSCRIPTION_AI_COST_ACTIVATION**.
+
+Planned, not created: `docs/intelligence/journeys/KF-JOURNEY-020-PLAN-SUBSCRIPTION-AI-COST.md`.
+
+Trace actual plan/subscription/payment state -> feature entitlement -> AI budget/allowance/admission -> model attempt/usage -> billable classification/credits/overage/reconciliation. Distinguish displayed plan, paid subscription, effective permission, reserved budget, outcome, recorded usage and settled cost. Reuse current authority, K10 financial policy, K11 partial-outcome recovery and J24 proof admission. Do not call models, change subscriptions or run billing/provider tests in this analytical stage.
+
+Read AGENTS/AGENT-CONTINUITY, START/07 and all CURRENT/ROLLOVER files; run Context Integrity Check. Continue from the completed J9 review rather than repeating its queue/command scan. Persist substantive J20 evidence and matching continuity, then verify the intelligence-only checkpoint, excluding maps and original investigations.

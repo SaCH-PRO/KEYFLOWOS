@@ -1,52 +1,58 @@
 # KeyFlowOS Intelligence - START HERE
 
-Checkpoint: `J9-M002-2026-09-16-01`  
+Checkpoint: `J9-POA-2026-09-16-01`  
 Updated: 2026-09-16  
-Branch: `docs/keyflow-intelligence-foundation`.
+Canonical branch: `docs/keyflow-intelligence-foundation`.
 
-## Current frontier
+## One current frontier
 
-[CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml) is machine authority. [CURRENT-HANDOFF.md](handoff/CURRENT-HANDOFF.md) supplies detailed continuation.
+[CURRENT-STATE.yaml](handoff/CURRENT-STATE.yaml) owns current machine state. [CURRENT-HANDOFF.md](handoff/CURRENT-HANDOFF.md) carries detailed continuation.
 
-**Completed:** [J9 Microtrace 002](investigations/J9-MARKETING-LEAD-GENERATION-MICROTRACE-002.md), the named occurrence, economic-overlap, schema, per-target receipt and alternative content-command trace.
+**Completed:** [J9 Publication, Occurrence and Attribution Contract Review](investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md). J9 is **PROVISIONALLY TARGET-ALIGNED FOR THE NAMED CORE ONLY**, not implemented or runtime-proven.
 
-**Next:** J9_PUBLICATION_OCCURRENCE_AND_ATTRIBUTION_CONTRACT_REVIEW. J9 remains ACTIVE / NOT CONVERGED. Planned artifact `investigations/J9-PUBLICATION-OCCURRENCE-AND-ATTRIBUTION-CONTRACT-REVIEW.md` does not yet exist.
+**Next:** J20_PLAN_SUBSCRIPTION_AI_COST_ACTIVATION. Its dossier has not been created by this checkpoint.
 
-**The map remains frozen until the user explicitly requests an update.** Do not run its generator/freshness check or edit map Markdown, HTML/JSON, previews, renderer or template. The older J24-PA display is intentionally not current analysis. Scheduled truth/audit/burndown/reflect cycles remain halted under the separate owner instruction.
+**User override persists: do not update the programme map until explicitly asked.** No generator/check or map Markdown/HTML/JSON/preview/renderer/template changes. The J24-PA display is intentionally older than current state. Scheduled truth/audit/burndown/reflect cycles also remain halted under the separate owner instruction.
 
 ```text
 Repository: SaCH-PRO/KEYFLOWOS
-Input intelligence: a7129baef03d2f94f027803a76483868f86fe930
+Input intelligence: 20e7501f562a1456190d26ddc3abd1aaae9a2601
 Forensic baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-Main head separately reconfirmed: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
 Production/source/schema/settings/workflows/assertions: READ-ONLY / UNAUTHORIZED
 Application/provider/DB/boot/concurrency/migration proof: NOT_EXECUTED
 ```
 
-Resolve output from the live branch and matching checkpoint; input is not output. No rebaseline or execution-packet promotion.
+Resolve the live output head and matching checkpoint; input is provenance, not output. Main/hosting observations in machine state are inherited prior reads, not a new control audit. No rebaseline or execution-packet promotion occurred.
 
-## Load and continue
+## Resume load
 
-Read AGENTS.md, [AGENT-CONTINUITY.md](AGENT-CONTINUITY.md), this file, [07-CURRENT-STATE.md](07-CURRENT-STATE.md) and all four CURRENT/ROLLOVER files. Run Context Integrity Check. Load the J9 dossier and unchanged M001 plus new M002. Do not repeat campaign CRUD, default guards or the now-traced PayPal/invoice producer chain.
+Read AGENTS.md, [AGENT-CONTINUITY.md](AGENT-CONTINUITY.md), this file, [07-CURRENT-STATE.md](07-CURRENT-STATE.md) and all four CURRENT/ROLLOVER files. Run Context Integrity Check. Load the completed J9 review and current dossier; preserve original M001/M002 and J8/J13/J24 contracts.
 
-M002 proves a conditional source chain in which one capture yields invoice-paid and payment-received observations for the same contact, doubling the numeric growth value and enabling RETENTION from two rows. This is not a duplicate external capture. Optional connector availability, payer/contact resolution and successful recomputation matter. Main Stripe and storefront differ; no every-provider double-count claim.
+The new review traces eleven named source files. The existing queue has destination/delivery/event records and real status claims, but a post-send local error can enter its broad catch and relabel known success as failure/retry. Queue-time audience filtering is not current send-time permission. The guarded Cortex query path dispatches mutable content actions without the execute route's decision layer. Existing execute guards/gate-error denial remain positive controls.
 
-Actual growth model blocks show no source-occurrence key on JourneyTouchpoint; aggregate contact uniqueness is not event dedupe. Native form/social IDs are available upstream but dropped by growth mapping. Publication results identify platform rather than account/attempt/revision and are written after the loop; Instagram exceptions do not distinguish all uncertain effects from confirmed refusal. Existing outbound campaign/content/delivery records and monetary RevenueAttribution are reuse seams, not absent infrastructure.
+PC01-PC08 specify common publication intent, current admission, exact effect/attempt identity, provider evidence, local repair and withdrawal. AC01-AC08 specify source observations, economic correlation, recognition, report basis, complete generation and atomic activation/correction. Labels are local responsibilities, not new canonical concepts or required tables.
 
-## Exact next review
+## Exact next output
 
-First inspect the named existing outbound queue/receipt/campaign binding and outer ContentAdapter/recipient eligibility boundaries. Then specify a minimal publication target/revision/claim/outcome contract and a distinct observation/conversion/economic identity/model/window/currency computation contract. Complete bounded canonical candidate classification and backward re-audit J3/J5/J7/J13/J14/J18/J23/J24, retaining J8/J21 boundaries. Assign declared-scope gates and state remaining conformance debts rather than launching another generic scan.
+Planned, not created:
+`journeys/KF-JOURNEY-020-PLAN-SUBSCRIPTION-AI-COST.md`.
 
-ContentAdapter's publish/send source path currently delegates to local status writes and connectorOk success. Its outer authorized entrypoint and full delivery reuse are not established by a method name. Keep that distinction; preserve the real social publisher and earlier no-account refusal rather than conflating them.
+Start from actual plan/subscription/payment state, entitlement evaluation, AI allowance/reservation, model-attempt usage, billable classification, credits/overage and reconciliation. Distinguish a displayed plan, paid subscription, effective capability, reserved budget, model result, recorded usage and invoiced/settled cost. Use existing authority, financial and recovery owners. No model calls, billing changes or resource mutations are authorized by this analysis.
 
-## Allocation, proof and preservation
+Do not repeat J9 queue/command/contract scans or reopen every prior journey. Reopen only an invariant contradicted by new evidence. Keep J9's required cutover obligations, including operation-class enforcement before status-only commands gain real sending capability.
 
-No new F/C/REC/concept was allocated. M002 compared actual F197/F198/F204/F205/F152/F156 and REC048, reusing their laws while retaining distinct J9 source witnesses. Final independent attribution-generation allocation is not decided. Current F228/C178/REC057/CONCEPT042 and next free **F229/C179/KF-REC-058** remain unchanged; 04B is authority.
+## Allocation, proof and debts
 
-J9 has 20 local designs (12 X + 8 Y), zero bindings, NOT_EXECUTED. J13's 44-case manifest and J8's 24 designs remain separate and unchanged. Seventeen primary source files in M002 have explicit read scopes; extra discovery does not become an exhaustive audit. No provider API compatibility or live customer incident was verified.
+No canonical ID allocation this tranche. Current ranges F228/C178/KF-REC-057/KF-CONCEPT-042; next free **F229/C179/KF-REC-058**. 04B wins over colliding historical headings. F228/C178 is still the J8 time-billing source-allocation loss, not a publication or attribution catch-all.
 
-Coverage remains 22/25 dossiers and twelve kernel dossiers; J20/J21/J22 remain dossierless. No application-completion percentage is established. Retain J13 ED1-ED5, J24 CS1-CS5, J8 WD1-WD5 and every prior bounded alignment/source artifact. Current permission is independent of an old forensic snapshot.
+J9 has 26 local designs (12 X + 8 Y + 6 Z), zero bindings, NOT_EXECUTED. J8's 24 and J13's 44-case manifest are separate and unchanged. No harness, app/provider test or final DDL was implemented. Review slices/gates are analytical, not executed evidence.
 
-EVIDENCE -> TRACE -> JOURNEY/KERNEL -> RESEARCH/POOL -> TARGET -> BACKWARD RE-AUDIT -> MIGRATION/PROOF -> EXPLICITLY AUTHORIZED IMPLEMENTATION -> VERIFIED RESULTS. The supplied blueprint remains product intent and controlled-change guidance, not evidence that these controls already run.
+Retain J9 MD1-MD5 (record reuse/migration, named writer cutover, provider/recipient/public conformance, recognition/generation reconciliation, isolated proof), J8 WD1-WD5, J13 ED1-ED5 and J24 CS1-CS5. Coverage remains22/25 dossiers and twelve kernels; J20/J21/J22 remain dossierless. This is not an app-completion percentage.
 
-Persist substantive intelligence and matching CURRENT/ROLLOVER views; verify allowed changed paths and output head. Exclude maps, original investigations, production source and assertions. Shadow/model comparison must not publish real content or rewrite source financial history to make metrics look successful.
+## Programme and persistence
+
+EVIDENCE -> TRACE -> JOURNEY/KERNEL -> RESEARCH/POOL -> TARGET -> BACKWARD RE-AUDIT -> MIGRATION/PROOF -> AUTHORIZED IMPLEMENTATION -> VERIFIED RESULTS -> MODEL UPDATE.
+
+Reuse existing senders, evidence, registry, commerce, claims and analytics owners. Source/model correction must not resend messages or rewrite payments. Known provider success survives local consequence failure. Current recipient/grant permission survives code/model rollback. A complete zero-result generation retires stale buckets; an incomplete run cannot manufacture measured zero.
+
+The supplied blueprint provides product intent and controlled-change guidance, not proof of current implementation. Persist substantive work and matching CURRENT/ROLLOVER navigation, verify the intelligence-only diff/head, and exclude maps, original investigations and production source while their restrictions remain active.
