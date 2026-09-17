@@ -1,10 +1,12 @@
 project: KEYFLOWOS
-rollover_version: 59
-checkpoint_id: IRP-2026-09-17-01
-status: IMPLEMENTATION_AUTHORIZATION_GATE
+rollover_version: 58
+checkpoint_id: IRP-100-2026-09-17-01
+status: NONCODING_READINESS_100_READY_HOLD
+execution_packets: 30
+coverage: {journeys: 25, journey_dossiers: 25, kernels: 12, kernel_dossiers: 12}
 implementation_authorized: false
 runtime_proof_executed: false
-packets: [KF-EXEC-K12-001, KF-EXEC-EXTFX-001, KF-EXEC-TENANT-001, KF-EXEC-AUTH-001, KF-EXEC-ACTION-001]
-canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-060}
-active_frontier: IMPLEMENTATION_AUTHORIZATION_GATE
-constraints: [production_read_only_until_authorized, fixed_forensic_baseline_until_deliberate_compare, map_refresh_paused, scheduled_cycles_halted]
+active_frontier: READY_HOLD_NO_CODE_CHANGES
+authoritative_manifest: docs/intelligence/execution/IMPLEMENTATION-READINESS-MANIFEST-ALL-WAVES.md
+future_start: [current_main_revalidation, KF-EXEC-K12-001]
+constraints: [production_read_only, no_schema_mutation, no_provider_mutation, no_deployment_change, no_map_refresh, scheduled_cycles_halted]

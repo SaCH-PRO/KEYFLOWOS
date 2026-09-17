@@ -1,25 +1,25 @@
 # KEYFLOWOS — Next Chat Rollover
 
-Checkpoint: IRP-2026-09-17-01
+Checkpoint: `IRP-100-2026-09-17-01`.
 
-Architecture programme is complete through implementation-readiness packetization.
+```text
+100% NON-CODING IMPLEMENTATION READINESS COMPLETE
+30 bounded execution packets
+25/25 journeys
+12/12 kernels
+whole-OS target/migration/proof/waves complete
 
-Ready draft packets:
-- K12 proof admission/isolation
-- existing external-effect certainty slice
-- tenant genesis compatibility
-- effective authority resolver
-- capability/control/clearance bounded adoption
+DO NOT modify production code/schema/workflows/providers/deployment.
+DO NOT claim runtime/provider/migration proof.
+DO NOT refresh programme map.
+Scheduled cycles remain halted.
 
-Production implementation remains NOT AUTHORIZED.
+AUTHORITATIVE:
+execution/IMPLEMENTATION-READINESS-MANIFEST-ALL-WAVES.md
+execution/READINESS-100-PERCENT-DEFINITION.md
+execution/MULTI-AGENT-EXECUTION-PROTOCOL.md
+execution/PREIMPLEMENTATION-GATE-MATRIX.md
 
-Next after explicit authorization:
-1. deliberately resolve current main vs fixed forensic baseline;
-2. execute KF-EXEC-K12-001;
-3. return exact changed files/tests/results/resources;
-4. architecture re-audit;
-5. proceed to bounded falsification + Wave A.
-
-No map refresh.
-No silent rebaseline.
-Scheduled cycles halted.
+FUTURE AFTER EXPLICIT CODE AUTHORIZATION:
+current-main revalidation → KF-EXEC-K12-001 → dependency-driven packets.
+```

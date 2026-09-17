@@ -1,26 +1,13 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: IRP-2026-09-17-01.
+Checkpoint: `IRP-100-2026-09-17-01`.
 
-The architecture/design programme is now at the explicit implementation authorization boundary.
+Non-coding readiness is complete: 30 execution packets across Wave 0/A/B/C/D/E, each with bounded objective, dependencies, invariants, characterization, migration/cutover, proof, negative controls, rollback and agent contract.
 
-Completed:
-- 25/25 journey coverage;
-- 12/12 kernel coverage;
-- whole-OS semantic convergence;
-- migration/proof architecture;
-- implementation wave plan;
-- Wave 0/A draft execution packets.
+Authoritative readiness files are the all-waves manifest, 100% definition, multi-agent protocol and gate matrix under `docs/intelligence/execution/`.
 
-Packets:
-KF-EXEC-K12-001
-KF-EXEC-EXTFX-001
-KF-EXEC-TENANT-001
-KF-EXEC-AUTH-001
-KF-EXEC-ACTION-001
+No production code/schema/workflow/provider/deployment mutation is authorized.
 
-No production implementation authorization has been granted by the canonical programme, so no source/schema/settings/workflow production edits should begin yet.
+Only execution evidence remains unknown. Future authorized start is current-main revalidation then KF-EXEC-K12-001.
 
-When authorized: compare current main deliberately, start KF-EXEC-K12-001, return exact evidence, re-audit, then continue boundedly.
-
-Map remains paused. Scheduled cycles halted. Current ranges F233/C183/KF-REC-060.
+Map refresh remains paused. Scheduled cycles remain halted.
