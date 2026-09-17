@@ -1,22 +1,22 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `J20-M001-2026-09-17-01`  
-Status: **J20 FIRST SUBSCRIPTION / ENTITLEMENT / AI COST TRACE COMPLETE; NOT CONVERGED**.
+Checkpoint: `WSR-2026-09-17-01`  
+Status: **WHOLE-SYSTEM RE-AUDIT COMPLETE; J20 M002 NEXT; MAP FROZEN**.
 
-Repository: SaCH-PRO/KEYFLOWOS. Branch: docs/keyflow-intelligence-foundation. Input/provenance: 2bc1bf52ca13c0fd4a64375295c783649db9092c. Forensic implementation baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2. Resolve the live output head and matching checkpoint; input is not output.
+Repository `SaCH-PRO/KEYFLOWOS`, branch `docs/keyflow-intelligence-foundation`. Input intelligence `153a078b06c7e2f188e9d46ebba5d484cf6ddb8f`; fixed forensic implementation baseline `8f173bfe79f1418159cf4099ea18b0d60d203ec2`. Production remains read-only and no silent rebaseline is allowed.
 
-Production remains read-only. No subscription/model/provider/DB/boot/concurrency/migration execution occurred. The programme map remains frozen until explicitly requested; scheduled cycles remain halted.
+Read `investigations/WHOLE-SYSTEM-REAUDIT-2026-09-17.md`. It is the current synthesis of the accumulated programme, not a replacement for source evidence.
 
-Completed substantive unit: `J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-001.md` plus the new J20 dossier. Preserve J9/J8/J13/J24 accepted contracts and MD/WD/ED/CS debts.
+Current classification: 23/25 journey dossiers and 12/12 kernels; 10 explicit bounded target-aligned journeys (J3,J4,J5,J8,J9,J10,J11,J12,J13,J24); 6 advanced semantic pools (J7,J15,J16,J17,J18,J23); 7 active foundational/partial (J1,J2,J6,J14,J19,J20,J25); J21/J22 dossierless. These buckets are analysis maturity, not software-completion percentages.
 
-Exact facts to retain: active/trial rows drive effective plan and absence falls back FREE; trial expiry mutates state during the read. `activateSubscription` can cancel old state and create caller-specified ACTIVE state without inspected provider verification. `recordManualPayment` activates first and persists the COMPLETED payment second. Subscription mutation routes use AuthGuard + BusinessGuard but no separate billing/owner gate at the inspected boundary. `createCheckout` is preparation, not provider acceptance.
+Constellation A (J1/J25/J15/J2/J6) remains the largest horizontal blocker because effective human authority, standing KEY authority, control evidence, clearance and exact execution ownership are not yet one universally load-bearing path. Constellations C/D have the strongest business-domain semantics but J21 remains missing. External-reality semantics are strong but provider/deployment conformance remains open.
 
-AI credit admission counts billable usage only, while current overage/credits-remaining billing views aggregate all usage. System AI remains visible as platform cost but must not become customer overage merely because both share AiUsageLog. Successful model results can survive failed fire-and-forget AiUsageLog persistence. Provider cost/trace writes are independent evidence and require reconciliation, not model replay. ModelGateway budget caps are soft routing preferences when all candidates are over cap; a hard spend maximum needs reservation/fencing and truthful labeling.
+Backend/data/event analysis is substantially ahead of frontend/public/voice convergence. Runtime proof is the weakest layer: J13(44), J8(24), J9(26), J20(10) designed cases have zero established passing bindings in this programme. Do not convert those counts into a completion percentage.
 
-The source-level plan-limit enforcement spec documents acknowledged unenforced plan promises at the baseline; it was not run here. Do not blindly switch every advertised limit on against legacy accounts. Migration/grandfather/transition policy is part of J20.
+Optimised programme order: finish J20 M002 and bounded target review; activate J21; activate J22; perform one whole-OS convergence closure; then produce migration/proof architecture and implement in dependency waves A foundations, B time/external/recovery, C commercial/financial, D knowledge/intelligence/UX, E integrated rollout/proof.
 
-No canonical IDs allocated. F228/C178 remains J8; next free F229/C179/KF-REC-058. J20 has 10 local designs, zero bindings, NOT_EXECUTED. Coverage is 23/25 dossiers, not application completion.
+A continuity defect was repaired here: prior `CURRENT-STATE.yaml` still described J9/22 dossiers while the human continuity had advanced to J20/23. The current YAML is intentionally consolidated; old fine-grained state remains in Git and owning artifacts.
 
-Next exact unit: **J20_SUBSCRIPTION_PAYMENT_ENTITLEMENT_AND_USAGE_LINEAGE_TRACE** -> `docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-002.md`.
+Exact next unit remains **J20_SUBSCRIPTION_PAYMENT_ENTITLEMENT_AND_USAGE_LINEAGE_TRACE** → `docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-002.md`. Trace schema identity and provider lifecycle writers, AI wrapper bypass/reuse and entitlement callers, then canonical comparison. Do not execute model/provider/billing operations.
 
-Trace declared Subscription/SubscriptionPayment/AiUsageLog/LLMCost identity/index/period/currency semantics and payment-provider subscription lifecycle writers. Enumerate AI call paths that bypass/reuse AiUsageService, including failure/fallback/stream behavior, and actual plan-feature enforcement callers. Then compare subscription-authority, billable-basis, missing-usage and hard-budget candidates against canonical registers before allocating anything. Do not execute models or billing.
+No new IDs: F228/C178/REC057/CONCEPT042 remain current, next free F229/C179/KF-REC-058. Programme map remains paused by user; scheduled cycles remain halted.

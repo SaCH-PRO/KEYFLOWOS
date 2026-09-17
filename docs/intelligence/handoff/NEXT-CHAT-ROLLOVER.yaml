@@ -1,11 +1,13 @@
 project: KEYFLOWOS
-rollover_version: 53
+rollover_version: 54
 last_updated: '2026-09-17'
-checkpoint_id: J20-M001-2026-09-17-01
-status: LIVE_J20_FIRST_TRACE_COMPLETE_LINEAGE_NEXT_MAP_PAUSED
+checkpoint_id: WSR-2026-09-17-01
+status: LIVE_WHOLE_SYSTEM_REAUDIT_COMPLETE_J20_M002_NEXT_MAP_PAUSED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-input_intelligence_head: 2bc1bf52ca13c0fd4a64375295c783649db9092c
+input_intelligence_head: 153a078b06c7e2f188e9d46ebba5d484cf6ddb8f
+canonical_machine_state: docs/intelligence/handoff/CURRENT-STATE.yaml
+reaudit: docs/intelligence/investigations/WHOLE-SYSTEM-REAUDIT-2026-09-17.md
 implementation_evidence:
   branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
@@ -14,33 +16,21 @@ implementation_authorized: false
 runtime_proof_executed: false
 canonical_ranges: {findings_through: F228, contradictions_through: C178, recommendations_through: KF-REC-057, concepts_through: KF-CONCEPT-042}
 next_free_ids: {finding: F229, contradiction: C179, recommendation: KF-REC-058, allocation_status: UNALLOCATED}
-journey_coverage:
-  total_canonical_journeys: 25
-  dossier_count: 23
-  dossier_coverage_percent: 92
-  dossierless: [J21, J22]
-  coverage_is_programme_completion: false
-  active: J20
-j20:
-  dossier: docs/intelligence/journeys/KF-JOURNEY-020-PLAN-SUBSCRIPTION-AI-COST.md
-  microtrace: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-001.md
-  status: ACTIVE_FIRST_SUBSCRIPTION_ENTITLEMENT_AI_COST_TRACE_COMPLETE_NOT_CONVERGED
-  source_scope:
-    primary_files: [subscriptions.service.ts, subscriptions.controller.ts, plans.ts, plan-limit-enforcement.spec.ts, ai-usage.service.ts, model-gateway.service.ts, key-connector_ai-gateway.service.ts]
-    source_test_read_not_executed: plan-limit-enforcement.spec.ts
-    provider_or_customer_data_inspected: false
-  source_exactness:
-  - activation_and_manual_payment_are_distinct_from_provider_settlement
-  - mutation_routes_have_business_membership_guards_not_separate_billing_authority_gate
-  - declared_plan_limits_not_equivalent_to_operation_enforcement
-  - credit_admission_counts_billable_only_but_overage_summaries_count_all_usage
-  - successful_AI_effect_can_outlive_failed_AiUsageLog_persistence
-  - provider_cost_trace_and_customer_usage_ledgers_are_not_automatically_reconciled
-  - budget_caps_degrade_and_continue_when_all_candidates_over_cap
-  - feature_credits_provider_cost_customer_overage_and_settlement_are_distinct_units
-  local_case_count: 10
-  local_case_status: DESIGNED_UNBOUND_NOT_EXECUTED
-  new_canonical_ids_allocated: false
+coverage:
+  journeys: {canonical: 25, dossiers: 23, percent: 92, dossierless: [J21, J22], is_app_completion: false}
+  kernels: {canonical: 12, dossiers: 12, is_maturity: false}
+journey_maturity:
+  target_aligned: [J3, J4, J5, J8, J9, J10, J11, J12, J13, J24]
+  advanced_pools: [J7, J15, J16, J17, J18, J23]
+  active_partial: [J1, J2, J6, J14, J19, J20, J25]
+  missing: [J21, J22]
+primary_blockers:
+- K1_K2_K3_effective_authority_and_governance
+- exact_action_clearance_execution_claim_outcome
+- external_occurrence_time_recovery_conformance
+- physical_schema_migration_compatibility
+- J21_public_and_J22_voice_coverage
+- executable_isolated_runtime_proof
 active_frontier:
   stage: J20_SUBSCRIPTION_PAYMENT_ENTITLEMENT_AND_USAGE_LINEAGE_TRACE
   primary_journey: J20
@@ -48,19 +38,23 @@ active_frontier:
 exact_next_action:
   planned_artifact: docs/intelligence/investigations/J20-PLAN-SUBSCRIPTION-AI-COST-MICROTRACE-002.md
   instruction: >-
-    Trace exact Subscription/SubscriptionPayment/AiUsageLog/LLMCost identity,
-    period/currency fields and provider subscription lifecycle writers. Enumerate
-    AI call paths that bypass/reuse AiUsageService and actual plan entitlement
-    callers. Compare surviving authority, billable-basis, missing-usage and hard
-    budget candidates against canonical homes before allocation. Keep production
-    read-only, baseline fixed, runtime proof unexecuted, owner cycles halted and
-    programme map frozen until explicitly requested.
+    Trace Subscription/SubscriptionPayment/AiUsageLog/LLMCost identity,
+    period/currency semantics and provider subscription lifecycle writers;
+    enumerate AI wrapper bypass/reuse and actual entitlement callers; perform
+    bounded canonical comparison before allocation; then complete J20 target review.
+optimised_sequence:
+- J20_M002_AND_TARGET_REVIEW
+- J21_PUBLIC_CUSTOMER_EXPERIENCE
+- J22_KEY_VOICE
+- WHOLE_OS_CONVERGENCE_CLOSURE
+- MIGRATION_AND_PROOF_ARCHITECTURE
+- IMPLEMENTATION_WAVES_A_TO_E
 constraints:
-- production_source_schema_workflow_settings_deployment_read_only
+- production_source_schema_settings_workflows_deployment_read_only
 - no_runtime_proof_claim
 - no_silent_forensic_rebaseline
-- F228_C178_allocated_never_reuse_next_free_F229_C179_KF_REC_058
-- preserve_prior_J9_J8_J13_J24_contracts_and_debts
-- no_model_subscription_provider_or_customer_billing_execution
+- no_canonical_allocation_without_04B_gate
+- no_programme_map_refresh_until_explicit_user_request
 - scheduled_cycles_remain_halted
-- programme_map_refresh_paused_until_explicit_user_request
+- preserve_external_effect_and_source_history_across_reversible_changes
+- implementation_requires_explicit_authorization
