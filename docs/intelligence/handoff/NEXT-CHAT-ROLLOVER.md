@@ -1,26 +1,25 @@
 # KEYFLOWOS — Next Chat Rollover
 
-Checkpoint: WOC-2026-09-17-01
+Checkpoint: IRP-2026-09-17-01
 
-Whole-system semantic architecture is converged enough to leave broad forensics.
+Architecture programme is complete through implementation-readiness packetization.
 
-Artifacts:
-- WHOLE-OS-CONVERGENCE-CLOSURE-2026-09-17.md
-- WHOLE-OS-MIGRATION-ARCHITECTURE-2026-09-17.md
-- WHOLE-OS-PROOF-ARCHITECTURE-2026-09-17.md
-- WHOLE-OS-IMPLEMENTATION-WAVES-2026-09-17.md
+Ready draft packets:
+- K12 proof admission/isolation
+- existing external-effect certainty slice
+- tenant genesis compatibility
+- effective authority resolver
+- capability/control/clearance bounded adoption
 
-Coverage 25/25 journeys, 12/12 kernels.
-Implementation/runtime proof remain false.
-Current ranges F233/C183/KF-REC-060.
+Production implementation remains NOT AUTHORIZED.
 
-Next:
-IMPLEMENTATION_READINESS_PACKETIZATION
-→ Wave 0 proof substrate + bounded external-effect falsification packet
-→ Wave A tenant/authority/governed-action foundation packets
-→ explicit implementation authorization before source/schema changes
+Next after explicit authorization:
+1. deliberately resolve current main vs fixed forensic baseline;
+2. execute KF-EXEC-K12-001;
+3. return exact changed files/tests/results/resources;
+4. architecture re-audit;
+5. proceed to bounded falsification + Wave A.
 
-No rebaseline.
 No map refresh.
-Production read-only.
+No silent rebaseline.
 Scheduled cycles halted.

@@ -1,30 +1,26 @@
 # KeyFlowOS Intelligence — START HERE
 
-Checkpoint: WOC-2026-09-17-01
+Checkpoint: IRP-2026-09-17-01
 Updated: 2026-09-17
 Canonical branch: docs/keyflow-intelligence-foundation.
 
-The whole-system semantic architecture programme has reached convergence closure.
+Whole-OS semantic convergence, migration architecture and proof architecture are complete at the design level.
 
-Coverage:
-- journeys: 25/25 dossiers
-- kernels: 12/12 dossiers
-- constellations: six reconciled
-- application implementation: NOT COMPLETE / NOT AUTHORIZED
-- runtime/provider/migration proof: NOT EXECUTED
+Implementation-readiness packets now exist for:
+- KF-EXEC-K12-001 Proof Admission & Isolation;
+- existing KF-EXEC-EXTFX-001 external-effect certainty falsification;
+- KF-EXEC-TENANT-001 Membership-First Tenant Genesis;
+- KF-EXEC-AUTH-001 Effective Authority Resolver;
+- KF-EXEC-ACTION-001 Capability → Control → Clearance boundary.
 
-Primary closure artifacts:
-- investigations/WHOLE-OS-CONVERGENCE-CLOSURE-2026-09-17.md
-- investigations/WHOLE-OS-MIGRATION-ARCHITECTURE-2026-09-17.md
-- investigations/WHOLE-OS-PROOF-ARCHITECTURE-2026-09-17.md
-- investigations/WHOLE-OS-IMPLEMENTATION-WAVES-2026-09-17.md
+Manifest: execution/IMPLEMENTATION-READINESS-MANIFEST-WAVE0-A.md.
 
-Current programme phase: IMPLEMENTATION_READINESS_PACKETIZATION.
+Current programme status: PRE-IMPLEMENTATION READY AT WAVE 0/A PACKET LEVEL.
 
-The semantic target is sufficiently stable that broad forensics should no longer be the default. New analysis must close a migration/proof decision or respond to evidence that falsifies an accepted invariant.
+Production implementation is still explicitly unauthorized. No source/schema/settings/workflow production changes have been made by this programme. Runtime proof is still unexecuted.
 
-Production/source/schema/settings/workflows/assertions remain READ-ONLY / UNAUTHORIZED. No rebaseline. Programme map refresh remains paused. Scheduled cycles remain halted.
+Programme map remains paused. Scheduled cycles remain halted. Forensic baseline remains fixed until an authorized packet begins with an explicit current-main comparison.
 
-Canonical ranges remain F233 / C183 / KF-REC-060. No new IDs were allocated by whole-OS closure. Next free F234 / C184 / KF-REC-061.
+Canonical ranges remain F233/C183/KF-REC-060. Next free F234/C184/KF-REC-061.
 
-Exact next: draft the Wave 0 and Wave A implementation packets under the canonical implementation-handoff protocol, without modifying production code.
+Next action is no longer more broad architecture analysis. It is explicit authorization and execution of one bounded packet, beginning with KF-EXEC-K12-001, followed by returned-evidence re-audit.

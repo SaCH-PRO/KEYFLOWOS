@@ -1,11 +1,10 @@
 project: KEYFLOWOS
-rollover_version: 58
-checkpoint_id: WOC-2026-09-17-01
-status: WHOLE_OS_CONVERGED_IMPLEMENTATION_READINESS_PACKETIZATION
-coverage: {journeys: 25, journey_dossiers: 25, kernels: 12, kernel_dossiers: 12}
-canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-060}
-next_free_ids: {finding: F234, contradiction: C184, recommendation: KF-REC-061}
-active_frontier: IMPLEMENTATION_READINESS_PACKETIZATION
+rollover_version: 59
+checkpoint_id: IRP-2026-09-17-01
+status: IMPLEMENTATION_AUTHORIZATION_GATE
 implementation_authorized: false
 runtime_proof_executed: false
-constraints: [production_read_only, fixed_baseline, map_refresh_paused, scheduled_cycles_halted]
+packets: [KF-EXEC-K12-001, KF-EXEC-EXTFX-001, KF-EXEC-TENANT-001, KF-EXEC-AUTH-001, KF-EXEC-ACTION-001]
+canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-060}
+active_frontier: IMPLEMENTATION_AUTHORIZATION_GATE
+constraints: [production_read_only_until_authorized, fixed_forensic_baseline_until_deliberate_compare, map_refresh_paused, scheduled_cycles_halted]

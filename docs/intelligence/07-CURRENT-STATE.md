@@ -1,26 +1,31 @@
 # KeyFlowOS Current State
 
-Checkpoint: WOC-2026-09-17-01
-Status: WHOLE-OS SEMANTIC TARGET CONVERGED; IMPLEMENTATION-READINESS PACKETIZATION NEXT.
+Checkpoint: IRP-2026-09-17-01
+Status: WHOLE-OS SEMANTIC TARGET CONVERGED; WAVE 0/A EXECUTION PACKETS DRAFTED; IMPLEMENTATION AUTHORIZATION REQUIRED.
 
-All 25 journey dossiers and all 12 kernel dossiers exist.
+Completed design-level programme:
+- 25/25 journey dossiers;
+- 12/12 kernel dossiers;
+- whole-OS convergence closure;
+- migration architecture;
+- proof architecture;
+- implementation waves;
+- Wave 0/A bounded packet set.
 
-The closure accepts one whole-system semantic spine across tenant identity, authority, capabilities, governance, temporal work, execution ownership, domain transitions, external effects, outcome evidence, finance, knowledge, public/voice experience and engineering proof.
+Draft packets:
+- KF-EXEC-K12-001;
+- existing KF-EXEC-EXTFX-001;
+- KF-EXEC-TENANT-001;
+- KF-EXEC-AUTH-001;
+- KF-EXEC-ACTION-001.
 
-Remaining open work is classified as migration / physical adoption / executable proof:
-- effective authority storage/precedence and migration;
-- governed-action adoption across direct execution paths;
-- per-fabric occurrence/attempt/effect ownership;
-- Blueprint/Genome revision/materialization migration;
-- provider/deployed conformance;
-- fine-grained privacy lineage;
-- public/voice physical conformance;
-- isolated proof/control-plane implementation.
+These satisfy the pre-implementation handoff shape. They do not authorize production edits.
 
-Migration and proof architectures are now durable artifacts.
+Current hard boundary:
+PRODUCTION IMPLEMENTATION AUTHORIZATION = FALSE.
 
-Current phase: IMPLEMENTATION_READINESS_PACKETIZATION.
+Therefore the analysis/design programme has reached the furthest safe point available without promoting a packet into implementation.
 
-Production remains read-only/unauthorized. Runtime proof false. Map refresh paused. Scheduled cycles halted. Baseline fixed.
+Runtime/provider/migration proof remains false. Map refresh remains paused. Scheduled cycles halted.
 
 Canonical ranges F233/C183/KF-REC-060; next free F234/C184/KF-REC-061.

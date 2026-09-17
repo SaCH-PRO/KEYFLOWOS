@@ -1,60 +1,41 @@
 project: KEYFLOWOS
-analysis_version: 82
+analysis_version: 83
 last_updated: '2026-09-17'
-checkpoint_id: WOC-2026-09-17-01
-status: WHOLE_OS_SEMANTIC_TARGET_CONVERGED_IMPLEMENTATION_READINESS_PACKETIZATION
+checkpoint_id: IRP-2026-09-17-01
+status: PRE_IMPLEMENTATION_READY_WAVE0_A_PACKETS_DRAFTED_AUTHORIZATION_REQUIRED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
-  branch: main
   forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   deliberate_rebaseline: false
 implementation_authorized: false
 runtime_proof_executed: false
 production_read_only: true
-scheduled_cycles: HALTED
-programme_map:
-  refresh_authorized: false
-  refresh_policy: PAUSED_BY_USER_UNTIL_EXPLICIT_REQUEST
-canonical_ranges:
-  findings_through: F233
-  contradictions_through: C183
-  recommendations_through: KF-REC-060
-  concepts_through: KF-CONCEPT-042
+canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-060, concepts_through: KF-CONCEPT-042}
 next_free_ids: {finding: F234, contradiction: C184, recommendation: KF-REC-061}
-coverage:
-  canonical_journeys: 25
-  journey_dossiers: 25
-  dossier_coverage_percent: 100
-  canonical_kernels: 12
-  kernel_dossiers: 12
-  semantic_target_closure: COMPLETE_BOUNDED_REOPENABLE
-  implementation_completion: false
-  runtime_proof: false
-whole_os_closure:
+coverage: {journeys: 25, journey_dossiers: 25, kernels: 12, kernel_dossiers: 12, semantic_target_closure: COMPLETE_BOUNDED_REOPENABLE}
+whole_os:
   target: docs/intelligence/investigations/WHOLE-OS-CONVERGENCE-CLOSURE-2026-09-17.md
   migration: docs/intelligence/investigations/WHOLE-OS-MIGRATION-ARCHITECTURE-2026-09-17.md
   proof: docs/intelligence/investigations/WHOLE-OS-PROOF-ARCHITECTURE-2026-09-17.md
   waves: docs/intelligence/investigations/WHOLE-OS-IMPLEMENTATION-WAVES-2026-09-17.md
-  new_canonical_ids: false
-unresolved_invariants:
-- U1_effective_authority_physical_algebra
-- U2_governed_action_adoption
-- U3_execution_occurrence_ownership_per_fabric
-- U4_business_knowledge_revision_materialization
-- U5_provider_deployed_conformance
-- U6_fine_grained_privacy_lineage
-- U7_public_voice_physical_conformance
-- U8_executable_proof_control_plane
+implementation_readiness:
+  manifest: docs/intelligence/execution/IMPLEMENTATION-READINESS-MANIFEST-WAVE0-A.md
+  packets:
+  - KF-EXEC-K12-001
+  - KF-EXEC-EXTFX-001
+  - KF-EXEC-TENANT-001
+  - KF-EXEC-AUTH-001
+  - KF-EXEC-ACTION-001
+  packet_status: DRAFT_NO_IMPLEMENTATION_AUTHORIZATION
 active_frontier:
-  stage: IMPLEMENTATION_READINESS_PACKETIZATION
-  status: ACTIVE_PRE_IMPLEMENTATION
+  stage: IMPLEMENTATION_AUTHORIZATION_GATE
+  status: BLOCKED_BY_EXPLICIT_AUTHORIZATION_REQUIREMENT
 exact_next_action:
-  instruction: draft Wave0 proof/falsification and WaveA foundation KF-EXEC packets under 13-IMPLEMENTATION-HANDOFF-PROTOCOL; no production edits until explicit authorization
+  instruction: upon explicit authorization, revalidate current main and execute KF-EXEC-K12-001 first; return proof/evidence for architecture re-audit before broader waves
 constraints:
-- production_read_only
-- implementation_not_authorized
+- production_read_only_until_authorized
 - no_runtime_proof_claim
-- no_rebaseline
+- no_silent_rebaseline
 - map_refresh_paused
 - scheduled_cycles_halted

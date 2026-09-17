@@ -1,21 +1,26 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: WOC-2026-09-17-01.
+Checkpoint: IRP-2026-09-17-01.
 
-Whole-OS semantic convergence closure is complete and reopenable by contradictory implementation/runtime evidence.
+The architecture/design programme is now at the explicit implementation authorization boundary.
 
-Durable outputs:
-- whole-OS target closure;
-- migration architecture;
-- proof architecture;
-- implementation wave programme.
+Completed:
+- 25/25 journey coverage;
+- 12/12 kernel coverage;
+- whole-OS semantic convergence;
+- migration/proof architecture;
+- implementation wave plan;
+- Wave 0/A draft execution packets.
 
-25/25 journeys and 12/12 kernels are covered. This is not production implementation or runtime proof.
+Packets:
+KF-EXEC-K12-001
+KF-EXEC-EXTFX-001
+KF-EXEC-TENANT-001
+KF-EXEC-AUTH-001
+KF-EXEC-ACTION-001
 
-No new canonical IDs. Current ranges F233/C183/KF-REC-060; next free F234/C184/KF-REC-061.
+No production implementation authorization has been granted by the canonical programme, so no source/schema/settings/workflow production edits should begin yet.
 
-Current frontier: IMPLEMENTATION_READINESS_PACKETIZATION.
+When authorized: compare current main deliberately, start KF-EXEC-K12-001, return exact evidence, re-audit, then continue boundedly.
 
-Next: draft Wave 0 proof/falsification and Wave A foundations KF-EXEC packets according to 13-IMPLEMENTATION-HANDOFF-PROTOCOL. Do not modify production code until explicitly promoted/authorized.
-
-Map remains paused, scheduled cycles halted, fixed forensic baseline retained.
+Map remains paused. Scheduled cycles halted. Current ranges F233/C183/KF-REC-060.
