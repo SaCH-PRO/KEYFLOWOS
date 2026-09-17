@@ -1,24 +1,11 @@
 project: KEYFLOWOS
-rollover_version: 57
-checkpoint_id: J22-CONV-2026-09-17-01
-status: ALL_JOURNEYS_DOSSIERED_WHOLE_OS_CLOSURE_NEXT
-canonical_ranges:
-  findings_through: F233
-  contradictions_through: C183
-  recommendations_through: KF-REC-060
-next_free_ids:
-  finding: F234
-  contradiction: C184
-  recommendation: KF-REC-061
-coverage:
-  journeys: 25
-  dossiers: 25
-  percent: 100
-  dossierless: []
-active_frontier: WHOLE_OS_CONVERGENCE_CLOSURE
-constraints:
-- production_read_only
-- runtime_proof_false
-- fixed_baseline
-- map_refresh_paused
-- scheduled_cycles_halted
+rollover_version: 58
+checkpoint_id: WOC-2026-09-17-01
+status: WHOLE_OS_CONVERGED_IMPLEMENTATION_READINESS_PACKETIZATION
+coverage: {journeys: 25, journey_dossiers: 25, kernels: 12, kernel_dossiers: 12}
+canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-060}
+next_free_ids: {finding: F234, contradiction: C184, recommendation: KF-REC-061}
+active_frontier: IMPLEMENTATION_READINESS_PACKETIZATION
+implementation_authorized: false
+runtime_proof_executed: false
+constraints: [production_read_only, fixed_baseline, map_refresh_paused, scheduled_cycles_halted]

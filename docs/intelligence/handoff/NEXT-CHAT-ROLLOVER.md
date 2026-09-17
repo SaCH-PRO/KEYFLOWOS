@@ -1,30 +1,26 @@
 # KEYFLOWOS — Next Chat Rollover
 
-Checkpoint: J22-CONV-2026-09-17-01
+Checkpoint: WOC-2026-09-17-01
 
-All 25 canonical journey dossiers now exist.
+Whole-system semantic architecture is converged enough to leave broad forensics.
 
-J20 → KF-REC-058
-J21 → KF-REC-059
-J22 → KF-REC-060
+Artifacts:
+- WHOLE-OS-CONVERGENCE-CLOSURE-2026-09-17.md
+- WHOLE-OS-MIGRATION-ARCHITECTURE-2026-09-17.md
+- WHOLE-OS-PROOF-ARCHITECTURE-2026-09-17.md
+- WHOLE-OS-IMPLEMENTATION-WAVES-2026-09-17.md
 
-J22 allocated no new F/C IDs.
+Coverage 25/25 journeys, 12/12 kernels.
+Implementation/runtime proof remain false.
 Current ranges F233/C183/KF-REC-060.
-Next free F234/C184/KF-REC-061.
 
 Next:
-WHOLE_OS_CONVERGENCE_CLOSURE
-→ all 25 journeys
-→ 12 kernels
-→ six constellations
-→ accepted target architecture
-→ unresolved foundational invariants
-→ migration architecture
-→ proof architecture
-→ implementation-readiness boundary / execution waves
+IMPLEMENTATION_READINESS_PACKETIZATION
+→ Wave 0 proof substrate + bounded external-effect falsification packet
+→ Wave A tenant/authority/governed-action foundation packets
+→ explicit implementation authorization before source/schema changes
 
-Production remains read-only.
-No runtime proof claim.
 No rebaseline.
 No map refresh.
+Production read-only.
 Scheduled cycles halted.

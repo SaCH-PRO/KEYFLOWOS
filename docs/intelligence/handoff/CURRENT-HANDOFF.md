@@ -1,13 +1,21 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: J22-CONV-2026-09-17-01.
+Checkpoint: WOC-2026-09-17-01.
 
-All 25 canonical journeys now have dedicated dossiers. J22 is provisionally target-aligned at its named voice-session/modality core under KF-REC-060.
+Whole-OS semantic convergence closure is complete and reopenable by contradictory implementation/runtime evidence.
 
-J22 reused F226/C176, F224/C174, F222/C172, F225/C175 and F231/C181; no new F/C allocation.
+Durable outputs:
+- whole-OS target closure;
+- migration architecture;
+- proof architecture;
+- implementation wave programme.
 
-Current ranges: F233/C183/KF-REC-060. Next free F234/C184/KF-REC-061.
+25/25 journeys and 12/12 kernels are covered. This is not production implementation or runtime proof.
 
-Next exact unit: WHOLE_OS_CONVERGENCE_CLOSURE. Produce investigations/WHOLE-OS-CONVERGENCE-CLOSURE-2026-09-17.md, reconcile all journeys/kernels/constellations, define target/migration/proof architecture and the implementation-readiness boundary.
+No new canonical IDs. Current ranges F233/C183/KF-REC-060; next free F234/C184/KF-REC-061.
 
-Production remains read-only. Runtime proof false. Programme map paused. Scheduled cycles halted. Baseline fixed.
+Current frontier: IMPLEMENTATION_READINESS_PACKETIZATION.
+
+Next: draft Wave 0 proof/falsification and Wave A foundations KF-EXEC packets according to 13-IMPLEMENTATION-HANDOFF-PROTOCOL. Do not modify production code until explicitly promoted/authorized.
+
+Map remains paused, scheduled cycles halted, fixed forensic baseline retained.

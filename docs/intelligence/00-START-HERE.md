@@ -1,24 +1,30 @@
 # KeyFlowOS Intelligence — START HERE
 
-Checkpoint: J22-CONV-2026-09-17-01
+Checkpoint: WOC-2026-09-17-01
 Updated: 2026-09-17
 Canonical branch: docs/keyflow-intelligence-foundation.
 
-All 25 canonical journeys now have dedicated dossiers.
+The whole-system semantic architecture programme has reached convergence closure.
 
-Latest:
-- J20 → KF-REC-058 entitlement/metering;
-- J21 → KF-REC-059 public customer boundary;
-- J22 → KF-REC-060 voice session/modality.
+Coverage:
+- journeys: 25/25 dossiers
+- kernels: 12/12 dossiers
+- constellations: six reconciled
+- application implementation: NOT COMPLETE / NOT AUTHORIZED
+- runtime/provider/migration proof: NOT EXECUTED
 
-J22 allocates no new F/C roots; it composes F226/C176, F224/C174, F222/C172, F225/C175 and F231/C181.
+Primary closure artifacts:
+- investigations/WHOLE-OS-CONVERGENCE-CLOSURE-2026-09-17.md
+- investigations/WHOLE-OS-MIGRATION-ARCHITECTURE-2026-09-17.md
+- investigations/WHOLE-OS-PROOF-ARCHITECTURE-2026-09-17.md
+- investigations/WHOLE-OS-IMPLEMENTATION-WAVES-2026-09-17.md
 
-Journey dossier coverage is 25/25 = 100%. This is coverage, not application completion.
+Current programme phase: IMPLEMENTATION_READINESS_PACKETIZATION.
 
-Now: WHOLE_OS_CONVERGENCE_CLOSURE.
+The semantic target is sufficiently stable that broad forensics should no longer be the default. New analysis must close a migration/proof decision or respond to evidence that falsifies an accepted invariant.
 
-Forensic baseline remains 8f173bfe79f1418159cf4099ea18b0d60d203ec2; no rebaseline. Production remains read-only / unauthorized. Runtime proof is unexecuted. Scheduled cycles remain halted. Programme map refresh remains paused by user instruction.
+Production/source/schema/settings/workflows/assertions remain READ-ONLY / UNAUTHORIZED. No rebaseline. Programme map refresh remains paused. Scheduled cycles remain halted.
 
-Current ranges: F233 / C183 / KF-REC-060. Next free F234 / C184 / KF-REC-061.
+Canonical ranges remain F233 / C183 / KF-REC-060. No new IDs were allocated by whole-OS closure. Next free F234 / C184 / KF-REC-061.
 
-Next: reconcile all 25 journeys, 12 kernels and six constellations into one target/migration/proof architecture and define the implementation-readiness boundary without changing production code.
+Exact next: draft the Wave 0 and Wave A implementation packets under the canonical implementation-handoff protocol, without modifying production code.
