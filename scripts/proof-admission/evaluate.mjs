@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 const EXIT = Object.freeze({
   SATISFIED: 0,
@@ -200,6 +201,6 @@ function main() {
   process.exit(result.status === 'SATISFIED_AT_DECLARED_SCOPE' ? EXIT.SATISFIED : EXIT.REJECTED);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }

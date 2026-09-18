@@ -1,10 +1,10 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const EVALUATOR = resolve(__dirname, '../../../../scripts/proof-admission/evaluate.mjs');
+const EVALUATOR = resolve(process.cwd(), '../../scripts/proof-admission/evaluate.mjs');
 
 type AssertionStatus = 'passed' | 'failed' | 'pending' | 'todo' | 'skipped';
 
