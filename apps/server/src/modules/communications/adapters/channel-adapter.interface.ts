@@ -7,6 +7,16 @@ export interface PublishPayload {
   meta?: Record<string, unknown>;
 }
 
+export type ProviderOutcomeCertainty = 'FAILED_CONFIRMED' | 'OUTCOME_UNKNOWN';
+
+export interface ProviderEffectContext {
+  effectId: string;
+  attemptId: string;
+  effectFingerprint: string;
+  providerIdempotencyKey?: string;
+  providerPayloadSnapshot?: Record<string, unknown>;
+}
+
 export interface PublishResponse {
   success: boolean;
   externalPostId?: string;
@@ -14,6 +24,7 @@ export interface PublishResponse {
   errorCode?: string;
   errorMessage?: string;
   isTransient?: boolean;
+  outcomeCertainty?: ProviderOutcomeCertainty;
   raw?: Record<string, unknown>;
 }
 
@@ -34,7 +45,12 @@ export interface NormalizedError {
 
 export interface ChannelAdapter {
   readonly provider: string;
-  publish(connection: any, destination: any, payload: PublishPayload): Promise<PublishResponse>;
+  publish(
+    connection: any,
+    destination: any,
+    payload: PublishPayload,
+    effectContext?: ProviderEffectContext,
+  ): Promise<PublishResponse>;
   normalizeError(error: unknown): NormalizedError;
   getCapabilities(platform: string): AdapterCapabilities;
 }
