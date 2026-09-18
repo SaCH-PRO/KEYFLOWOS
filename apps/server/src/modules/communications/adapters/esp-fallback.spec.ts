@@ -53,7 +53,7 @@ describe('the fallback can be turned off', () => {
 });
 
 describe('the fallback adapter sends', () => {
-  it('passes recipient, subject and body through on the legacy path', async () => {
+  it('[EXTFX-P16] passes recipient, subject and body through on the legacy path', async () => {
     const sendTransactional = vi.fn(async () => ({ id: 'msg_1' }));
     const adapter = new ResendEmailAdapter({ sendTransactional } as never);
 
@@ -70,7 +70,7 @@ describe('the fallback adapter sends', () => {
     );
   });
 
-  it('uses immutable effect material and the stable provider idempotency key when supplied', async () => {
+  it('[EXTFX-P15] uses immutable effect material and the stable provider idempotency key when supplied', async () => {
     const sendTransactional = vi.fn(async () => ({ id: 'msg_2' }));
     const adapter = new ResendEmailAdapter({ sendTransactional } as never);
 

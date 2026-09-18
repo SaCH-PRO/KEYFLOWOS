@@ -450,6 +450,9 @@ jobs:
       - name: Admit K12 proof evaluator self-test
         run: pnpm --filter server proof:k12
 
+      - name: Admit EXTFX Resend effect-certainty proof
+        run: pnpm --filter server proof:extfx
+
       # THE WEB SUITE HAD NEVER RUN IN CI. Not once, on any branch.
       #
       # 16 files, and 12 of them are structural gates rather than unit tests:
