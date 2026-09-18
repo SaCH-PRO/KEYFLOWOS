@@ -4082,6 +4082,7 @@ model DeliveryEvent {
   @@index([deliveryId])
   @@index([deliveryId, eventType])
   @@index([deliveryId, attemptId])
+  @@unique([deliveryId, eventType, attemptId])
   @@map("delivery_events")
 }
 
