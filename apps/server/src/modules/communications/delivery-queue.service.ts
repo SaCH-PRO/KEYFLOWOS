@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AdapterRegistryService } from './adapters/adapter-registry.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { Prisma } from '@prisma/client';
+import { createHmac } from 'node:crypto';
 import type {
   ChannelAdapter,
   ProviderEffectMaterial,
@@ -266,7 +267,6 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     const trackingSecret = process.env.TRACKING_HMAC_SECRET;
     if (trackingSecret && content?.contentType === 'campaign_email') {
       // Tracking identity is delivery-bound and therefore stable for retries.
-      const { createHmac } = require('node:crypto') as typeof import('node:crypto');
       const token = createHmac('sha256', trackingSecret).update(delivery.id).digest('hex').slice(0, 16);
       mergedMeta.deliveryId = delivery.id;
       mergedMeta.trackingToken = token;
