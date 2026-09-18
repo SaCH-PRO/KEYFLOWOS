@@ -18,6 +18,7 @@
     "Resend outbound effect certainty [EXTFX-P11] ambiguous provider outcome becomes bounded safe replay state",
     "Resend outbound effect certainty [EXTFX-P14] blocks legacy RetryPending Resend rows with no provider evidence",
     "Resend outbound effect certainty [EXTFX-P05] a lost attempt CAS prevents a second provider invocation",
-    "Resend outbound effect certainty [EXTFX-P02] reuses a bound immutable snapshot even if source content changes"
+    "Resend outbound effect certainty [EXTFX-P02] reuses a bound immutable snapshot even if source content changes",
+    "Resend outbound effect certainty [EXTFX-P08] confirmed success persistence is effect-level and not tied to stale attempt ownership"
   ]
 }

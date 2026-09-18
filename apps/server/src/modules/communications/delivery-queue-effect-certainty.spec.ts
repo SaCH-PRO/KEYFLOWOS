@@ -204,6 +204,19 @@ describe('Resend outbound effect certainty', () => {
     );
   });
 
+  it('[EXTFX-P08] confirmed success persistence is effect-level and not tied to stale attempt ownership', async () => {
+    const h = harness({ success: true, externalPostId: 'email_late_success' });
+    await h.privateService.executeDelivery(baseDelivery());
+
+    const successCall = h.outboundUpdateMany.mock.calls.find(([arg]) => {
+      const data = (arg as { data?: Record<string, unknown> }).data;
+      return data?.providerOutcome === 'SUCCEEDED_CONFIRMED';
+    });
+    expect(successCall).toBeDefined();
+    const where = (successCall?.[0] as { where?: Record<string, unknown> }).where;
+    expect(where).not.toHaveProperty('currentAttemptId');
+  });
+
   it('[EXTFX-P11] ambiguous provider outcome becomes bounded safe replay state', async () => {
     const h = harness({
       success: false,
@@ -226,6 +239,25 @@ describe('Resend outbound effect certainty', () => {
     );
   });
 
+  it('confirmed/unknown failure writes are conditional on ATTEMPT_IN_FLIGHT so late success cannot regress', async () => {
+    const h = harness({
+      success: false,
+      errorCode: 'OUTCOME_UNKNOWN',
+      errorMessage: 'connection dropped',
+      isTransient: true,
+      outcomeCertainty: 'OUTCOME_UNKNOWN',
+    });
+    await h.privateService.executeDelivery(baseDelivery());
+
+    const unknownCall = h.outboundUpdateMany.mock.calls.find(([arg]) => {
+      const data = (arg as { data?: Record<string, unknown> }).data;
+      return data?.providerOutcome === 'OUTCOME_UNKNOWN';
+    });
+    expect(unknownCall).toBeDefined();
+    expect((unknownCall?.[0] as { where?: Record<string, unknown> }).where)
+      .toEqual(expect.objectContaining({ providerOutcome: 'ATTEMPT_IN_FLIGHT' }));
+  });
+
   it('[EXTFX-P14] blocks legacy RetryPending Resend rows with no provider evidence', async () => {
     const h = harness({ success: true, externalPostId: 'should_not_send' });
 
@@ -239,6 +271,26 @@ describe('Resend outbound effect certainty', () => {
         data: expect.objectContaining({
           status: 'Failed',
           errorCode: 'LEGACY_PROVIDER_OUTCOME_AMBIGUOUS',
+        }),
+      }),
+    );
+  });
+
+  it('materialization failure is a confirmed pre-provider failure and never invokes Resend', async () => {
+    const h = harness({ success: true, externalPostId: 'should_not_send' });
+    h.provider.prepareEffectMaterial.mockImplementationOnce(() => {
+      throw new Error('System email sender is not configured');
+    });
+
+    await h.privateService.executeDelivery(baseDelivery());
+
+    expect(h.provider.publish).not.toHaveBeenCalled();
+    expect(h.outboundUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'Failed',
+          providerOutcome: 'FAILED_CONFIRMED',
+          consequenceState: 'NOT_STARTED',
         }),
       }),
     );

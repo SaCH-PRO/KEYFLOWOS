@@ -339,12 +339,38 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
         return;
       }
     } else {
-      material = await adapter.prepareEffectMaterial(
-        delivery.destination.connection,
-        delivery.destination,
-        payload,
-      );
-      fingerprint = effectFingerprint(material);
+      try {
+        material = await adapter.prepareEffectMaterial(
+          delivery.destination.connection,
+          delivery.destination,
+          payload,
+        );
+        fingerprint = effectFingerprint(material);
+      } catch (error) {
+        const normalized = adapter.normalizeError(error);
+        await this.prisma.client.outboundDelivery.updateMany({
+          where: { id: delivery.id, businessId: delivery.businessId, status: 'Sending' },
+          data: {
+            status: 'Failed',
+            providerOutcome: 'FAILED_CONFIRMED',
+            consequenceState: 'NOT_STARTED',
+            nextRetryAt: null,
+            errorCode: normalized.code,
+            errorMessage: normalized.message,
+          },
+        });
+        await this.recordEvent(
+          delivery.id,
+          'failure',
+          'Sending',
+          'Failed',
+          undefined,
+          normalized.code,
+          normalized.message,
+          { phase: 'PRE_PROVIDER_MATERIALIZATION' },
+        );
+        return;
+      }
     }
 
     const attemptNumber = (delivery.attemptSequence ?? 0) + 1;
@@ -457,7 +483,6 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
         where: {
           id: delivery.id,
           businessId: delivery.businessId,
-          currentAttemptId: attemptId,
         },
         data: {
           status: 'Published',
@@ -514,7 +539,12 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
         : null;
 
       await this.prisma.client.outboundDelivery.updateMany({
-        where: { id: delivery.id, businessId: delivery.businessId, currentAttemptId: attemptId },
+        where: {
+          id: delivery.id,
+          businessId: delivery.businessId,
+          currentAttemptId: attemptId,
+          providerOutcome: 'ATTEMPT_IN_FLIGHT',
+        },
         data: {
           status: safeReplay ? 'RetryPending' : 'Failed',
           providerOutcome: 'OUTCOME_UNKNOWN',
@@ -547,7 +577,12 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       : null;
 
     await this.prisma.client.outboundDelivery.updateMany({
-      where: { id: delivery.id, businessId: delivery.businessId, currentAttemptId: attemptId },
+      where: {
+        id: delivery.id,
+        businessId: delivery.businessId,
+        currentAttemptId: attemptId,
+        providerOutcome: 'ATTEMPT_IN_FLIGHT',
+      },
       data: {
         status: retryable ? 'RetryPending' : 'Failed',
         providerOutcome: 'FAILED_CONFIRMED',

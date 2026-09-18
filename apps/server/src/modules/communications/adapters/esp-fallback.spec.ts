@@ -44,7 +44,7 @@ describe('the fallback can be turned off', () => {
 
   it('refuses to send when disabled', async () => {
     process.env.MARKETING_ESP_FALLBACK = 'off';
-    const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn() } as never);
+    const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn(), getSenderIdentity: () => 'Keyflow <no-reply@keyflow.test>' } as never);
     const res = await adapter.publish(null, { platformId: 'a@b.test' }, { subject: 'x', textBody: 'y' });
     expect(res.success).toBe(false);
     expect(res.errorCode).toBe('ESP_FALLBACK_DISABLED');
@@ -115,7 +115,7 @@ describe('the fallback adapter sends', () => {
   });
 
   it('refuses with no recipient rather than throwing', async () => {
-    const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn() } as never);
+    const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn(), getSenderIdentity: () => 'Keyflow <no-reply@keyflow.test>' } as never);
     const res = await adapter.publish(null, {}, { subject: 'x' });
     expect(res.success).toBe(false);
     expect(res.errorCode).toBe('EMAIL_ERROR');
@@ -123,14 +123,14 @@ describe('the fallback adapter sends', () => {
   });
 
   it('classifies an ambiguous network/provider exception as outcome unknown', () => {
-    const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn() } as never);
+    const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn(), getSenderIdentity: () => 'Keyflow <no-reply@keyflow.test>' } as never);
     const n = adapter.normalizeError(new SystemEmailSendError('socket closed', 'OUTCOME_UNKNOWN'));
     expect(n.outcomeCertainty).toBe('OUTCOME_UNKNOWN');
     expect(n.isTransient).toBe(true);
   });
 
   it('treats rate limits as transient confirmed failures', () => {
-    const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn() } as never);
+    const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn(), getSenderIdentity: () => 'Keyflow <no-reply@keyflow.test>' } as never);
     const n = adapter.normalizeError(new Error('rate limit exceeded'));
     expect(n.isTransient).toBe(true);
     expect(n.outcomeCertainty).toBe('FAILED_CONFIRMED');
