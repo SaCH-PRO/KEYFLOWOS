@@ -1443,8 +1443,13 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   async retry(businessId: string, deliveryId: string) {
     const delivery = await this.prisma.client.outboundDelivery.findFirst({
       where: { id: deliveryId, businessId, status: 'Failed' },
+      include: { destination: { include: { connection: true } } },
     });
     if (!delivery) throw new NotFoundException('Failed delivery not found');
+
+    const resendDelivery = this.resolveDeliveryAdapter(
+      delivery as unknown as ResendDeliveryRecord,
+    )?.provider === 'RESEND';
 
     if (delivery.providerOutcome === 'SUCCEEDED_CONFIRMED') {
       throw new BadRequestException('Provider already confirmed this delivery; only consequence repair is allowed');
@@ -1455,8 +1460,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     ) {
       throw new BadRequestException('Provider outcome is unknown outside the safe replay window; reconciliation is required');
     }
-    if (!delivery.providerOutcome && delivery.attemptSequence > 0) {
-      throw new BadRequestException('Legacy provider outcome is ambiguous; automatic resend is not safe');
+    if (resendDelivery && !delivery.providerOutcome) {
+      throw new BadRequestException(
+        'Legacy Resend provider outcome is ambiguous; automatic resend is not safe',
+      );
     }
 
     const updated = await this.prisma.client.outboundDelivery.update({
@@ -1576,12 +1583,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   async retryAllFailed(businessId: string, contentId: string) {
     const failed = await this.prisma.client.outboundDelivery.findMany({
       where: { businessId, contentId, status: 'Failed' },
-      select: {
-        id: true,
-        providerOutcome: true,
-        providerFirstAttemptAt: true,
-        attemptSequence: true,
-      },
+      include: { destination: { include: { connection: true } } },
     });
 
     const eligible = failed.filter((delivery) => {
@@ -1589,7 +1591,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       if (delivery.providerOutcome === 'OUTCOME_UNKNOWN') {
         return isInsideResendIdempotencyWindow(delivery.providerFirstAttemptAt);
       }
-      if (!delivery.providerOutcome && delivery.attemptSequence > 0) return false;
+      const isResend = this.resolveDeliveryAdapter(
+        delivery as unknown as ResendDeliveryRecord,
+      )?.provider === 'RESEND';
+      if (isResend && !delivery.providerOutcome) return false;
       return true;
     });
 
