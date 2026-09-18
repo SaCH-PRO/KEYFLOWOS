@@ -13,6 +13,14 @@
     "proof admission evaluator [K12-P06] rejects malformed report structure",
     "proof admission evaluator [K12-P07] rejects unsuccessful aggregate reports",
     "proof admission evaluator [K12-P08] reports a missing runner report as incomplete",
-    "proof admission evaluator [K12-P09] rejects duplicate required identities in the accepted manifest"
-  ]
+    "proof admission evaluator [K12-P09] rejects duplicate required identities in the accepted manifest",
+    "proof admission evaluator [K12-P10] rejects a stale runner report",
+    "proof resource admission [K12-P11] admits explicit local CI postgres and redis resources",
+    "proof resource admission [K12-P12] rejects a nonlocal database host",
+    "proof resource admission [K12-P13] rejects an unexpected database name",
+    "proof resource admission [K12-P14] rejects a nonlocal redis host",
+    "proof resource admission [K12-P15] rejects an untrusted execution environment",
+    "proof resource admission [K12-P16] never emits resource credentials in its receipt"
+  ],
+  "maxReportAgeSeconds": 600
 }

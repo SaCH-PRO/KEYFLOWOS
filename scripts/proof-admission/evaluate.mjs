@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const EXIT = Object.freeze({
@@ -31,6 +32,12 @@ function validateManifest(manifest) {
     return ['KF_PROOF_MANIFEST_UNTRUSTED'];
   }
   if (!Array.isArray(manifest.requiredCases) || manifest.requiredCases.length === 0) {
+    return ['KF_PROOF_MANIFEST_UNTRUSTED'];
+  }
+  if (
+    manifest.maxReportAgeSeconds !== undefined &&
+    (!Number.isFinite(manifest.maxReportAgeSeconds) || manifest.maxReportAgeSeconds <= 0)
+  ) {
     return ['KF_PROOF_MANIFEST_UNTRUSTED'];
   }
 
@@ -82,6 +89,20 @@ export function evaluateProof(manifest, report) {
   const collected = collectAssertions(report);
   if (collected.error) {
     return verdict('REJECTED', [collected.error]);
+  }
+
+  let reportAgeMs = null;
+  if (manifest.maxReportAgeSeconds !== undefined) {
+    if (!Number.isFinite(report.startTime)) {
+      return verdict('REJECTED', ['KF_PROOF_REPORT_MALFORMED']);
+    }
+    reportAgeMs = Date.now() - report.startTime;
+    if (reportAgeMs < -60_000 || reportAgeMs > manifest.maxReportAgeSeconds * 1000) {
+      return verdict('REJECTED', ['KF_PROOF_REPORT_STALE'], {
+        reportAgeMs,
+        maxReportAgeSeconds: manifest.maxReportAgeSeconds,
+      });
+    }
   }
 
   const assertions = collected.assertions;
@@ -137,6 +158,7 @@ export function evaluateProof(manifest, report) {
     proofScope: manifest.proofScope ?? null,
     requiredCaseCount: requiredCases.length,
     discoveredCaseCount: assertions.length,
+    reportAgeMs,
   });
 }
 
@@ -158,6 +180,17 @@ function parseArgs(argv) {
 
 function loadJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+function currentSourceSha() {
+  if (process.env.GITHUB_SHA && /^[0-9a-f]{40}$/i.test(process.env.GITHUB_SHA)) {
+    return process.env.GITHUB_SHA;
+  }
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
 }
 
 function main() {
@@ -197,7 +230,13 @@ function main() {
   }
 
   const result = evaluateProof(manifest, report);
-  console.log(JSON.stringify(result));
+  const receipt = {
+    ...result,
+    sourceSha: currentSourceSha(),
+    runId: process.env.GITHUB_RUN_ID ?? null,
+    reportStartTime: Number.isFinite(report.startTime) ? report.startTime : null,
+  };
+  console.log(JSON.stringify(receipt));
   process.exit(result.status === 'SATISFIED_AT_DECLARED_SCOPE' ? EXIT.SATISFIED : EXIT.REJECTED);
 }
 

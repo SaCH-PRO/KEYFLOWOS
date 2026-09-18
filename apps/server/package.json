@@ -14,7 +14,7 @@
     "test:smoke": "vitest run -c vitest.smoke.config.ts",
     "test:integration": "vitest run -c vitest.integration.config.ts",
     "test:ci": "vitest run",
-    "proof:k12": "node -e \"require('fs').mkdirSync('.proof',{recursive:true})\" && vitest run src/core/config/proof-admission.spec.ts --reporter=json --outputFile=.proof/k12-vitest.json && node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/k12-self.json --report .proof/k12-vitest.json"
+    "proof:k12": "node -e \"require('fs').mkdirSync('.proof',{recursive:true})\" && vitest run src/core/config/proof-admission.spec.ts src/core/config/proof-resource-admission.spec.ts --reporter=json --outputFile=.proof/k12-vitest.json && node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/k12-self.json --report .proof/k12-vitest.json"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",

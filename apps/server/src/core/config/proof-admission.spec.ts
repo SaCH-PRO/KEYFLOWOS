@@ -15,6 +15,7 @@ function makeManifest(requiredCases: string[]) {
     proofScope: 'fixture',
     requireReportSuccess: true,
     allowAdditionalCases: true,
+    maxReportAgeSeconds: 600,
     requiredCases,
   };
 }
@@ -136,5 +137,13 @@ describe('proof admission evaluator', () => {
     const result = runEvaluator(makeManifest(['case A', 'case A']), makeReport([{ fullName: 'case A', status: 'passed' }]));
     expect(result.status).toBe(2);
     expect(result.result.reasons).toContain('KF_PROOF_MANIFEST_DUPLICATE_CASE_ID');
+  });
+
+  it('[K12-P10] rejects a stale runner report', () => {
+    const report = makeReport([{ fullName: 'case A', status: 'passed' }]);
+    report.startTime = Date.now() - 20 * 60 * 1000;
+    const result = runEvaluator(makeManifest(['case A']), report);
+    expect(result.status).toBe(2);
+    expect(result.result.reasons).toContain('KF_PROOF_REPORT_STALE');
   });
 });

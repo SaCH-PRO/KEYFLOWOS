@@ -1,0 +1,66 @@
+{
+  "manifestVersion": 1,
+  "environment": "github-actions-ci-test",
+  "requiredEnv": {
+    "CI": "true",
+    "GITHUB_ACTIONS": "true"
+  },
+  "resources": [
+    {
+      "env": "DATABASE_URL",
+      "kind": "postgres",
+      "allowedProtocols": [
+        "postgresql:",
+        "postgres:"
+      ],
+      "allowedHosts": [
+        "localhost",
+        "127.0.0.1"
+      ],
+      "allowedPorts": [
+        5432
+      ],
+      "allowedUsernames": [
+        "keyflow"
+      ],
+      "allowedDatabaseNames": [
+        "keyflowos"
+      ]
+    },
+    {
+      "env": "DIRECT_URL",
+      "kind": "postgres",
+      "allowedProtocols": [
+        "postgresql:",
+        "postgres:"
+      ],
+      "allowedHosts": [
+        "localhost",
+        "127.0.0.1"
+      ],
+      "allowedPorts": [
+        5432
+      ],
+      "allowedUsernames": [
+        "keyflow"
+      ],
+      "allowedDatabaseNames": [
+        "keyflowos"
+      ]
+    },
+    {
+      "env": "REDIS_URL",
+      "kind": "redis",
+      "allowedProtocols": [
+        "redis:"
+      ],
+      "allowedHosts": [
+        "localhost",
+        "127.0.0.1"
+      ],
+      "allowedPorts": [
+        6379
+      ]
+    }
+  ]
+}
