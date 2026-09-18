@@ -20,11 +20,11 @@ packages:
       status: MERGED_PROVEN_DECLARED_SCOPE
   - id: KF-EXEC-EXTFX-001
     title: OutboundDelivery + Resend Effect Certainty
-    level: L2
+    level: L3
     owner: J23/J18
     path: docs/intelligence/packages/KF-EXEC-EXTFX-001
     dependencies: [KF-EXEC-K12-001]
-    status: AUTHORIZED_L3_CHARACTERIZATION_ACTIVE
+    status: L3_CHARACTERIZED_IMPLEMENTATION_ACTIVE
 remaining:
   count: 33
   sequencing_rule: dependency_order_then_risk

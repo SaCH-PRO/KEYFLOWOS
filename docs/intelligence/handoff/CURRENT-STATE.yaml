@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 90
+analysis_version: 91
 last_updated: '2026-09-18'
-checkpoint_id: PKG-EXTFX-2026-09-18-01
-status: IMPLEMENTATION_ACTIVE_K12_MERGED_EXTFX_L3_CHARACTERIZATION
+checkpoint_id: PKG-EXTFX-2026-09-18-02
+status: IMPLEMENTATION_ACTIVE_EXTFX_L3_CHARACTERIZED_COMMIT_A_CI
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: true
@@ -22,8 +22,8 @@ package_hardening:
     proof_cases: 16
     proof_verdict: SATISFIED_AT_DECLARED_SCOPE
   extfx:
-    level: L2
+    level: L3
     characterized_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
-    status: L3_CHARACTERIZATION_ACTIVE
+    status: IMPLEMENTATION_ACTIVE_COMMIT_A_CI
 active_frontier: {stage: BOUNDED_IMPLEMENTATION_AND_PROOF, status: EXTFX_CHARACTERIZATION_THEN_IMPLEMENTATION}
 constraints: [no_production_provider_effects, no_production_data_mutations, no_production_deployment, no_silent_rebaseline, programme_map_refresh_paused, scheduled_cycles_halted]

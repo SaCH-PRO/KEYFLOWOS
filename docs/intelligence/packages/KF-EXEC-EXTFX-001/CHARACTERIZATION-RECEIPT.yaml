@@ -1,0 +1,98 @@
+package_id: KF-EXEC-EXTFX-001
+characterization_level: L3
+characterized_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
+characterized_at: '2026-09-18'
+implementation_branch: impl/kf-exec-extfx-001-resend-certainty
+implementation_pr: 76
+current_defect:
+  summary: provider call and post-provider local consequences share one broad catch
+  failure_sequence:
+    - Resend accepts email
+    - local provider-success persistence or later consequence throws
+    - catch normalizes error as provider failure
+    - delivery may become RetryPending or Failed
+    - retry can call Resend again
+writers:
+  outbound_delivery_mutation:
+    - apps/server/src/modules/communications/delivery-queue.service.ts
+  outbound_delivery_creation:
+    - apps/server/src/modules/communications/delivery-queue.service.ts
+    - apps/server/src/modules/flow/automation-executor.service.ts
+    - apps/server/src/modules/crm/crm-sequence-scheduler.service.ts
+  delivery_event_writer:
+    - apps/server/src/modules/communications/delivery-queue.service.ts
+readers:
+  delivery_events:
+    - apps/server/src/modules/communications/communications.controller.ts
+  external_post_and_status:
+    - apps/server/src/modules/communications/delivery-queue.service.ts
+  result_snapshot_engagement:
+    - apps/server/src/modules/crm/crm-sequence-scheduler.service.ts
+system_email_callers:
+  - apps/server/src/modules/ai/approval-routing.service.ts
+  - apps/server/src/modules/ai/ai-message-sender.service.ts
+  - apps/server/src/modules/ai/ai-usage-alert-scheduler.service.ts
+  - apps/server/src/modules/communications/adapters/resend-email-adapter.ts
+  - apps/server/src/modules/finance/accountant-export-email.service.ts
+  - apps/server/src/modules/identity/identity-signup.service.ts
+  - apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts
+provider_contract:
+  provider: Resend
+  node_signature: "resend.emails.send(payload, { idempotencyKey })"
+  key_retention_hours: 24
+  same_key_same_payload: returns_same_email_id
+  same_key_different_payload: rejected_409_invalid_idempotent_request
+  concurrent_same_key: retryable_409_concurrent_idempotent_requests
+schema_decision:
+  strategy: additive_nullable_then_cutover
+  outbound_delivery_fields:
+    - effectFingerprint
+    - effectSnapshot
+    - attemptSequence
+    - currentAttemptId
+    - attemptStartedAt
+    - attemptLeaseExpiresAt
+    - providerOutcome
+    - providerFirstAttemptAt
+    - providerIdempotencyKey
+    - consequenceState
+  delivery_event_fields:
+    - attemptId
+effect_snapshot_material:
+  - businessId
+  - destinationId
+  - connectionId
+  - recipient
+  - exact_sender_identity
+  - subject
+  - html
+  - text
+manual_retry_finding:
+  current_behavior: every Failed row is requeueable
+  target_behavior:
+    - FAILED_CONFIRMED may be retried by policy
+    - OUTCOME_UNKNOWN may only same-key replay inside provider safe window
+    - legacy ambiguous Resend rows are not assumed resend-safe
+event_consumer_characterization:
+  content_published: AI listener observation
+  delivery_completed: AI listener observation
+  material_hidden_side_effect_found: false
+stop_condition_triggered: false
+implementation_slices:
+  commit_a:
+    status: IN_CI
+    scope:
+      - additive schema
+      - effect fingerprint/snapshot helper
+      - optional ProviderEffectContext
+      - SystemEmailService idempotency support
+      - adapter outcome certainty
+  commit_b:
+    status: PENDING_COMMIT_A_ADMISSION
+    scope:
+      - provider/local phase split
+      - pre-provider durable attempt
+      - monotonic provider outcome
+      - consequence repair
+      - bounded unknown replay
+      - manual retry guard
