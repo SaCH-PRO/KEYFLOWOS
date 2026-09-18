@@ -32,10 +32,14 @@ export class ResendEmailAdapter implements ChannelAdapter {
 
   prepareEffectMaterial(
     _connection: unknown,
-    destination: { platformId?: string | null },
+    destination: unknown,
     payload: PublishPayload,
   ): ProviderEffectMaterial {
-    const to = payload.recipientEmail ?? destination?.platformId ?? '';
+    const platformId =
+      destination && typeof destination === 'object' && 'platformId' in destination
+        ? (destination as { platformId?: string | null }).platformId
+        : undefined;
+    const to = payload.recipientEmail ?? platformId ?? '';
     if (!to) {
       throw new SystemEmailSendError('No recipient address on the delivery', 'FAILED_CONFIRMED');
     }

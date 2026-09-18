@@ -54,8 +54,8 @@ export interface NormalizedError {
 export interface ChannelAdapter {
   readonly provider: string;
   prepareEffectMaterial?(
-    connection: any,
-    destination: any,
+    connection: unknown,
+    destination: unknown,
     payload: PublishPayload,
   ): Promise<ProviderEffectMaterial> | ProviderEffectMaterial;
   publish(
