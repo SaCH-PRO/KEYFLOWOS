@@ -1,0 +1,24 @@
+{
+  "manifestVersion": 1,
+  "packageId": "KF-EXEC-EXTFX-001",
+  "proofScope": "resend-effect-certainty-contract",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": true,
+  "maxReportAgeSeconds": 600,
+  "requiredCases": [
+    "outbound delivery effect certainty helpers [EXTFX-P02] canonicalization is key-order stable",
+    "outbound delivery effect certainty helpers [EXTFX-P02] same provider material has the same fingerprint",
+    "outbound delivery effect certainty helpers [EXTFX-P03] material recipient/subject/body/sender changes alter the fingerprint",
+    "outbound delivery effect certainty helpers [EXTFX-P06] same effect and fingerprint produce the same provider key",
+    "outbound delivery effect certainty helpers [EXTFX-P07] a different effect produces a different provider key",
+    "the fallback adapter sends [EXTFX-P15] uses immutable effect material and the stable provider idempotency key when supplied",
+    "the fallback adapter sends [EXTFX-P16] passes recipient, subject and body through on the legacy path",
+    "Resend outbound effect certainty [EXTFX-P04] persists attempt ownership before invoking the provider",
+    "Resend outbound effect certainty [EXTFX-P08/P09] confirmed provider success survives local consequence failure without resend",
+    "Resend outbound effect certainty [EXTFX-P11] ambiguous provider outcome becomes bounded safe replay state",
+    "Resend outbound effect certainty [EXTFX-P14] blocks legacy RetryPending Resend rows with no provider evidence",
+    "Resend outbound effect certainty [EXTFX-P05] a lost attempt CAS prevents a second provider invocation",
+    "Resend outbound effect certainty [EXTFX-P02] reuses a bound immutable snapshot even if source content changes",
+    "Resend outbound effect certainty [EXTFX-P08] confirmed success persistence is effect-level and not tied to stale attempt ownership"
+  ]
+}

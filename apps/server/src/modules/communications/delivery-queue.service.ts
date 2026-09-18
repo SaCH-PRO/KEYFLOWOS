@@ -3,11 +3,86 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AdapterRegistryService } from './adapters/adapter-registry.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { Prisma } from '@prisma/client';
+import { createHmac } from 'node:crypto';
+import type {
+  ChannelAdapter,
+  ProviderEffectMaterial,
+  PublishPayload,
+  PublishResponse,
+} from './adapters/channel-adapter.interface';
+import {
+  effectFingerprint,
+  isInsideResendIdempotencyWindow,
+  resendIdempotencyKey,
+} from './effect-certainty';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_BATCH_SIZE = 20;
 const BACKOFF_BASE_MS = 60_000;
 const DEFAULT_TIMEZONE = 'America/Port_of_Spain';
+const RESEND_ATTEMPT_LEASE_MS = 5 * 60_000;
+
+interface ResendVariantRecord {
+  platform?: string;
+  textBody?: string | null;
+  htmlBody?: string | null;
+  mediaUrls?: string[];
+  variantMeta?: unknown;
+}
+
+interface ResendDeliveryRecord {
+  id: string;
+  contentId: string;
+  destinationId: string;
+  businessId: string;
+  contactId?: string | null;
+  recipientEmail?: string | null;
+  recipientPhone?: string | null;
+  status: string;
+  retryCount: number;
+  maxRetries: number;
+  effectFingerprint?: string | null;
+  effectSnapshot?: unknown;
+  attemptSequence?: number;
+  currentAttemptId?: string | null;
+  attemptStartedAt?: Date | null;
+  attemptLeaseExpiresAt?: Date | null;
+  providerOutcome?: string | null;
+  providerFirstAttemptAt?: Date | null;
+  consequenceState?: string | null;
+  externalPostId?: string | null;
+  externalUrl?: string | null;
+  resultSnapshot?: unknown;
+  claimedFromStatus?: string;
+  destination?: {
+    platform?: string;
+    platformId?: string | null;
+    destinationMeta?: unknown;
+    connection?: unknown;
+  } | null;
+  content?: {
+    body?: string | null;
+    subject?: string | null;
+    contentType?: string | null;
+    contentMeta?: unknown;
+    variants?: ResendVariantRecord[];
+  } | null;
+  variant?: ResendVariantRecord | null;
+}
+
+function isProviderEffectMaterial(value: unknown): value is ProviderEffectMaterial {
+  if (!value || typeof value !== 'object') return false;
+  const material = value as Partial<ProviderEffectMaterial>;
+  return (
+    typeof material.provider === 'string'
+    && typeof material.recipient === 'string'
+    && typeof material.subject === 'string'
+    && typeof material.html === 'string'
+    && (material.sender === undefined || typeof material.sender === 'string')
+    && (material.text === undefined || typeof material.text === 'string')
+  );
+}
 
 function resolveScheduledAtUtc(scheduledAt: string, timezone?: string): Date {
   const tz = timezone || DEFAULT_TIMEZONE;
@@ -77,6 +152,8 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     if (this.processing) return;
     this.processing = true;
     try {
+      await this.processResendConsequenceRepairs();
+      await this.recoverStaleResendAttempts();
       await this.processScheduledDeliveries();
       await this.processRetryDeliveries();
     } catch (err: any) {
@@ -109,7 +186,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
             variant: true,
           },
         });
-        if (full) claimed.push(full);
+        if (full) claimed.push({ ...full, claimedFromStatus: c.status });
       }
     }
     return claimed;
@@ -137,7 +214,644 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async executeDelivery(delivery: any) {
+  private resolveDeliveryAdapter(delivery: ResendDeliveryRecord): ChannelAdapter | null {
+    const destination = delivery.destination;
+    if (!destination?.connection) return null;
+    const isEmailPlatform = destination.platform === 'EMAIL' || destination.platform === 'GOOGLE';
+    return isEmailPlatform
+      ? this.adapters.resolveEmailFor(destination.connection as { provider?: string | null; token?: string | null })
+      : this.adapters.resolveByPlatform(destination.platform ?? '');
+  }
+
+  private async executeDelivery(delivery: unknown) {
+    const candidate = delivery as ResendDeliveryRecord;
+    const adapter = this.resolveDeliveryAdapter(candidate);
+    if (adapter?.provider === 'RESEND') {
+      await this.executeResendDelivery(candidate, adapter);
+      return;
+    }
+    await this.executeLegacyDelivery(delivery as never);
+  }
+
+  private buildResendPublishPayload(delivery: ResendDeliveryRecord): PublishPayload {
+    const destination = delivery.destination;
+    const content = delivery.content;
+    const variant =
+      delivery.variant
+      ?? content?.variants?.find((v) => v.platform === destination?.platform)
+      ?? content?.variants?.find((v) => v.platform === 'DEFAULT');
+
+    const destMeta = (destination?.destinationMeta ?? null) as Record<string, unknown> | null;
+    const contentMeta = (content?.contentMeta ?? null) as Record<string, unknown> | null;
+    const variantMeta = (variant?.variantMeta ?? null) as Record<string, unknown> | null;
+
+    const recipientEmail =
+      delivery.recipientEmail
+      ?? (variantMeta?.recipientEmail as string | undefined)
+      ?? (contentMeta?.recipientEmail as string | undefined)
+      ?? (destMeta?.recipientEmail as string | undefined);
+
+    const recipientPhone =
+      delivery.recipientPhone
+      ?? (variantMeta?.recipientPhone as string | undefined);
+
+    const mergedMeta: Record<string, unknown> = { ...(variantMeta ?? {}) };
+    if (recipientPhone) mergedMeta.recipientPhone = recipientPhone;
+    if (delivery.contactId) mergedMeta.contactId = delivery.contactId;
+
+    const previewText = variantMeta?.previewText as string | undefined;
+    const senderName = variantMeta?.senderName as string | undefined;
+    if (previewText) mergedMeta.previewText = previewText;
+    if (senderName) mergedMeta.senderName = senderName;
+
+    const trackingSecret = process.env.TRACKING_HMAC_SECRET;
+    if (trackingSecret && content?.contentType === 'campaign_email') {
+      // Tracking identity is delivery-bound and therefore stable for retries.
+      const token = createHmac('sha256', trackingSecret).update(delivery.id).digest('hex').slice(0, 16);
+      mergedMeta.deliveryId = delivery.id;
+      mergedMeta.trackingToken = token;
+    }
+
+    return {
+      textBody: variant?.textBody ?? content?.body ?? '',
+      htmlBody: variant?.htmlBody ?? undefined,
+      mediaUrls: variant?.mediaUrls ?? [],
+      subject: (variantMeta?.subject as string | undefined) ?? content?.subject ?? undefined,
+      recipientEmail: recipientEmail ?? undefined,
+      meta: Object.keys(mergedMeta).length > 0 ? mergedMeta : undefined,
+    };
+  }
+
+  private async executeResendDelivery(delivery: ResendDeliveryRecord, adapter: ChannelAdapter) {
+    if (!delivery.destination?.connection) {
+      await this.failDelivery(
+        delivery.id,
+        delivery.contentId,
+        delivery.businessId,
+        'NO_CONNECTION',
+        'Destination has no active connection',
+        'Sending',
+      );
+      return;
+    }
+
+    if (delivery.providerOutcome === 'SUCCEEDED_CONFIRMED') {
+      await this.repairResendConsequences(delivery);
+      return;
+    }
+
+    if (
+      delivery.providerOutcome === 'OUTCOME_UNKNOWN'
+      && !isInsideResendIdempotencyWindow(delivery.providerFirstAttemptAt)
+    ) {
+      await this.blockUnknownOutsideReplayWindow(delivery);
+      return;
+    }
+
+    if (
+      !delivery.providerOutcome
+      && delivery.claimedFromStatus === 'RetryPending'
+    ) {
+      await this.markLegacyAmbiguousResend(delivery);
+      return;
+    }
+
+    const payload = this.buildResendPublishPayload(delivery);
+    if (!adapter.prepareEffectMaterial) {
+      throw new Error('RESEND adapter must expose prepareEffectMaterial for effect certainty');
+    }
+
+    let material: ProviderEffectMaterial;
+    let fingerprint: string;
+
+    if (isProviderEffectMaterial(delivery.effectSnapshot)) {
+      material = delivery.effectSnapshot;
+      fingerprint = effectFingerprint(material);
+      if (delivery.effectFingerprint && delivery.effectFingerprint !== fingerprint) {
+        await this.prisma.client.outboundDelivery.updateMany({
+          where: { id: delivery.id, businessId: delivery.businessId },
+          data: {
+            status: 'Failed',
+            errorCode: 'EFFECT_SNAPSHOT_FINGERPRINT_MISMATCH',
+            errorMessage: 'Stored outbound effect snapshot does not match its fingerprint',
+          },
+        });
+        return;
+      }
+    } else {
+      try {
+        material = await adapter.prepareEffectMaterial(
+          delivery.destination.connection,
+          delivery.destination,
+          payload,
+        );
+        fingerprint = effectFingerprint(material);
+      } catch (error) {
+        const normalized = adapter.normalizeError(error);
+        await this.prisma.client.outboundDelivery.updateMany({
+          where: { id: delivery.id, businessId: delivery.businessId, status: 'Sending' },
+          data: {
+            status: 'Failed',
+            providerOutcome: 'FAILED_CONFIRMED',
+            consequenceState: 'NOT_STARTED',
+            nextRetryAt: null,
+            errorCode: normalized.code,
+            errorMessage: normalized.message,
+          },
+        });
+        await this.recordEvent(
+          delivery.id,
+          'failure',
+          'Sending',
+          'Failed',
+          undefined,
+          normalized.code,
+          normalized.message,
+          { phase: 'PRE_PROVIDER_MATERIALIZATION' },
+        );
+        return;
+      }
+    }
+
+    const attemptNumber = (delivery.attemptSequence ?? 0) + 1;
+    const attemptId = `${delivery.id}:${attemptNumber}`;
+    const attemptStartedAt = new Date();
+    const firstAttemptAt = delivery.providerFirstAttemptAt ?? attemptStartedAt;
+    const leaseExpiresAt = new Date(attemptStartedAt.getTime() + RESEND_ATTEMPT_LEASE_MS);
+    const providerIdempotencyKey = resendIdempotencyKey(delivery.id, fingerprint);
+
+    const allocated = await this.prisma.client.$transaction(async (tx) => {
+      const claimed = await tx.outboundDelivery.updateMany({
+        where: {
+          id: delivery.id,
+          businessId: delivery.businessId,
+          status: 'Sending',
+          attemptSequence: delivery.attemptSequence ?? 0,
+        },
+        data: {
+          effectFingerprint: fingerprint,
+          effectSnapshot: material as unknown as Prisma.InputJsonValue,
+          attemptSequence: attemptNumber,
+          currentAttemptId: attemptId,
+          attemptStartedAt,
+          attemptLeaseExpiresAt: leaseExpiresAt,
+          providerOutcome: 'ATTEMPT_IN_FLIGHT',
+          providerFirstAttemptAt: firstAttemptAt,
+          consequenceState: delivery.consequenceState ?? 'NOT_STARTED',
+        },
+      });
+      if (claimed.count !== 1) return false;
+
+      await tx.deliveryEvent.create({
+        data: {
+          deliveryId: delivery.id,
+          eventType: 'attempt_started',
+          statusBefore: 'Sending',
+          statusAfter: 'Sending',
+          attemptNumber,
+          attemptId,
+          resultData: {
+            effectFingerprint: fingerprint,
+            provider: 'RESEND',
+          },
+        },
+      });
+      return true;
+    });
+
+    if (!allocated) {
+      this.logger.warn(`delivery.attempt.ownership_lost deliveryId=${delivery.id}`);
+      return;
+    }
+
+    this.logger.log(
+      `delivery.provider.dispatching ${JSON.stringify({
+        deliveryId: delivery.id,
+        businessId: delivery.businessId,
+        effectId: delivery.id,
+        attemptId,
+        attemptNumber,
+        provider: 'RESEND',
+      })}`,
+    );
+
+    let result: PublishResponse;
+    try {
+      result = await adapter.publish(
+        delivery.destination.connection,
+        delivery.destination,
+        payload,
+        {
+          effectId: delivery.id,
+          attemptId,
+          effectFingerprint: fingerprint,
+          providerIdempotencyKey,
+          material,
+        },
+      );
+    } catch (error) {
+      const normalized = adapter.normalizeError(error);
+      result = {
+        success: false,
+        errorCode: normalized.code,
+        errorMessage: normalized.message,
+        isTransient: normalized.isTransient,
+        outcomeCertainty: normalized.outcomeCertainty,
+      };
+    }
+
+    await this.applyResendProviderResult(
+      delivery,
+      result,
+      attemptId,
+      attemptNumber,
+      firstAttemptAt,
+    );
+  }
+
+  private async applyResendProviderResult(
+    delivery: ResendDeliveryRecord,
+    result: PublishResponse,
+    attemptId: string,
+    attemptNumber: number,
+    firstAttemptAt: Date,
+  ) {
+    const resultSnapshot = result.raw as Prisma.InputJsonValue | undefined;
+
+    if (result.success) {
+      await this.prisma.client.outboundDelivery.updateMany({
+        where: {
+          id: delivery.id,
+          businessId: delivery.businessId,
+        },
+        data: {
+          status: 'Published',
+          sentAt: new Date(),
+          externalPostId: result.externalPostId,
+          externalUrl: result.externalUrl,
+          resultSnapshot,
+          providerOutcome: 'SUCCEEDED_CONFIRMED',
+          consequenceState: 'INCOMPLETE',
+          attemptLeaseExpiresAt: null,
+          errorCode: null,
+          errorMessage: null,
+          nextRetryAt: null,
+        },
+      });
+
+      this.logger.log(
+        `delivery.provider.confirmed ${JSON.stringify({
+          deliveryId: delivery.id,
+          businessId: delivery.businessId,
+          effectId: delivery.id,
+          attemptId,
+          externalPostId: result.externalPostId ?? null,
+        })}`,
+      );
+
+      await this.repairResendConsequences({
+        ...delivery,
+        status: 'Published',
+        currentAttemptId: attemptId,
+        attemptSequence: attemptNumber,
+        providerOutcome: 'SUCCEEDED_CONFIRMED',
+        consequenceState: 'INCOMPLETE',
+        externalPostId: result.externalPostId ?? null,
+      });
+      return;
+    }
+
+    const newRetryCount = delivery.retryCount + 1;
+    const errorCode = result.errorCode ?? 'EMAIL_ERROR';
+    const errorMessage = result.errorMessage ?? 'Email provider rejected the request';
+    const errorSnapshot = {
+      errorCode,
+      errorMessage,
+      outcomeCertainty: result.outcomeCertainty ?? 'FAILED_CONFIRMED',
+    };
+
+    if (result.outcomeCertainty === 'OUTCOME_UNKNOWN') {
+      const safeReplay =
+        isInsideResendIdempotencyWindow(firstAttemptAt)
+        && newRetryCount < delivery.maxRetries;
+      const nextRetryAt = safeReplay
+        ? new Date(Date.now() + BACKOFF_BASE_MS * Math.pow(2, delivery.retryCount))
+        : null;
+
+      await this.prisma.client.outboundDelivery.updateMany({
+        where: {
+          id: delivery.id,
+          businessId: delivery.businessId,
+          currentAttemptId: attemptId,
+          providerOutcome: 'ATTEMPT_IN_FLIGHT',
+        },
+        data: {
+          status: safeReplay ? 'RetryPending' : 'Failed',
+          providerOutcome: 'OUTCOME_UNKNOWN',
+          retryCount: newRetryCount,
+          nextRetryAt,
+          attemptLeaseExpiresAt: null,
+          errorCode: safeReplay ? 'OUTCOME_UNKNOWN_SAFE_REPLAY' : 'OUTCOME_RECONCILIATION_REQUIRED',
+          errorMessage,
+          resultSnapshot: errorSnapshot as Prisma.InputJsonValue,
+        },
+      });
+
+      await this.ensureAttemptEvent(
+        delivery.id,
+        attemptId,
+        'outcome_unknown',
+        'Sending',
+        safeReplay ? 'RetryPending' : 'Failed',
+        attemptNumber,
+        errorCode,
+        errorMessage,
+        errorSnapshot,
+      );
+      return;
+    }
+
+    const retryable = (result.isTransient ?? false) && newRetryCount < delivery.maxRetries;
+    const nextRetryAt = retryable
+      ? new Date(Date.now() + BACKOFF_BASE_MS * Math.pow(2, delivery.retryCount))
+      : null;
+
+    await this.prisma.client.outboundDelivery.updateMany({
+      where: {
+        id: delivery.id,
+        businessId: delivery.businessId,
+        currentAttemptId: attemptId,
+        providerOutcome: 'ATTEMPT_IN_FLIGHT',
+      },
+      data: {
+        status: retryable ? 'RetryPending' : 'Failed',
+        providerOutcome: 'FAILED_CONFIRMED',
+        retryCount: newRetryCount,
+        nextRetryAt,
+        attemptLeaseExpiresAt: null,
+        errorCode,
+        errorMessage,
+        resultSnapshot: errorSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.ensureAttemptEvent(
+      delivery.id,
+      attemptId,
+      retryable ? 'retry_scheduled' : 'failure',
+      'Sending',
+      retryable ? 'RetryPending' : 'Failed',
+      attemptNumber,
+      errorCode,
+      errorMessage,
+      errorSnapshot,
+    );
+
+    if (!retryable) {
+      if (delivery.contactId) {
+        await this.updateCampaignContactStatus(delivery.contentId, delivery.contactId, 'BOUNCED');
+      }
+      this.events.emit('content.failed', {
+        deliveryId: delivery.id,
+        contentId: delivery.contentId,
+        businessId: delivery.businessId,
+        errorCode,
+      });
+      this.events.emit('delivery.failed', {
+        deliveryId: delivery.id,
+        contentId: delivery.contentId,
+        businessId: delivery.businessId,
+      });
+      await this.updateContentStatus(delivery.contentId);
+    }
+  }
+
+  private async repairResendConsequences(delivery: ResendDeliveryRecord) {
+    if (delivery.providerOutcome !== 'SUCCEEDED_CONFIRMED') return;
+
+    const attemptId =
+      delivery.currentAttemptId
+      ?? `${delivery.id}:${Math.max(delivery.attemptSequence ?? 1, 1)}`;
+    const attemptNumber = Math.max(delivery.attemptSequence ?? 1, 1);
+
+    await this.prisma.client.outboundDelivery.updateMany({
+      where: {
+        id: delivery.id,
+        businessId: delivery.businessId,
+        providerOutcome: 'SUCCEEDED_CONFIRMED',
+      },
+      data: { consequenceState: 'REPAIRING' },
+    });
+
+    try {
+      await this.ensureAttemptEvent(
+        delivery.id,
+        attemptId,
+        'success',
+        'Sending',
+        'Published',
+        attemptNumber,
+        undefined,
+        undefined,
+        delivery.externalPostId ? { externalPostId: delivery.externalPostId } : undefined,
+      );
+
+      if (delivery.contactId && delivery.recipientEmail) {
+        await this.updateCampaignContactStatus(
+          delivery.contentId,
+          delivery.contactId,
+          'SENT',
+          true,
+        );
+      }
+
+      await this.updateContentStatus(delivery.contentId);
+
+      try {
+        this.events.emit('content.published', {
+          deliveryId: delivery.id,
+          contentId: delivery.contentId,
+          businessId: delivery.businessId,
+          destinationId: delivery.destinationId,
+        });
+        this.events.emit('delivery.completed', {
+          deliveryId: delivery.id,
+          contentId: delivery.contentId,
+          businessId: delivery.businessId,
+        });
+      } catch (eventError) {
+        this.logger.warn(
+          `delivery.derivative_notification.failed deliveryId=${delivery.id} error=${
+            eventError instanceof Error ? eventError.message : String(eventError)
+          }`,
+        );
+      }
+
+      await this.prisma.client.outboundDelivery.updateMany({
+        where: {
+          id: delivery.id,
+          businessId: delivery.businessId,
+          providerOutcome: 'SUCCEEDED_CONFIRMED',
+        },
+        data: {
+          consequenceState: 'COMPLETE',
+          status: 'Published',
+          errorCode: null,
+          errorMessage: null,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.prisma.client.outboundDelivery.updateMany({
+        where: {
+          id: delivery.id,
+          businessId: delivery.businessId,
+          providerOutcome: 'SUCCEEDED_CONFIRMED',
+        },
+        data: {
+          consequenceState: 'INCOMPLETE',
+          status: 'Published',
+          errorCode: 'CONSEQUENCE_REPAIR_REQUIRED',
+          errorMessage: message,
+        },
+      });
+      this.logger.error(
+        `delivery.consequence.repair_failed deliveryId=${delivery.id} error=${message}`,
+      );
+    }
+  }
+
+  private async processResendConsequenceRepairs() {
+    const rows = await this.prisma.client.outboundDelivery.findMany({
+      where: {
+        providerOutcome: 'SUCCEEDED_CONFIRMED',
+        consequenceState: { in: ['INCOMPLETE', 'REPAIRING'] },
+      },
+      include: {
+        destination: { include: { connection: true } },
+        content: { include: { variants: true } },
+        variant: true,
+      },
+      take: MAX_BATCH_SIZE,
+      orderBy: { updatedAt: 'asc' },
+    });
+
+    for (const row of rows) {
+      const delivery = row as unknown as ResendDeliveryRecord;
+      if (this.resolveDeliveryAdapter(delivery)?.provider === 'RESEND') {
+        await this.repairResendConsequences(delivery);
+      }
+    }
+  }
+
+  private async recoverStaleResendAttempts() {
+    const now = new Date();
+    const rows = await this.prisma.client.outboundDelivery.findMany({
+      where: {
+        status: 'Sending',
+        providerOutcome: 'ATTEMPT_IN_FLIGHT',
+        attemptLeaseExpiresAt: { lte: now },
+      },
+      include: {
+        destination: { include: { connection: true } },
+        content: { include: { variants: true } },
+        variant: true,
+      },
+      take: MAX_BATCH_SIZE,
+      orderBy: { attemptLeaseExpiresAt: 'asc' },
+    });
+
+    for (const row of rows) {
+      const delivery = row as unknown as ResendDeliveryRecord;
+      if (this.resolveDeliveryAdapter(delivery)?.provider !== 'RESEND') continue;
+
+      const newRetryCount = delivery.retryCount + 1;
+      const safeReplay =
+        isInsideResendIdempotencyWindow(delivery.providerFirstAttemptAt, now)
+        && newRetryCount < delivery.maxRetries;
+
+      await this.prisma.client.outboundDelivery.updateMany({
+        where: {
+          id: delivery.id,
+          businessId: delivery.businessId,
+          providerOutcome: 'ATTEMPT_IN_FLIGHT',
+          currentAttemptId: delivery.currentAttemptId ?? undefined,
+        },
+        data: {
+          status: safeReplay ? 'RetryPending' : 'Failed',
+          providerOutcome: 'OUTCOME_UNKNOWN',
+          retryCount: newRetryCount,
+          nextRetryAt: safeReplay ? now : null,
+          attemptLeaseExpiresAt: null,
+          errorCode: safeReplay
+            ? 'STALE_ATTEMPT_OUTCOME_UNKNOWN'
+            : 'OUTCOME_RECONCILIATION_REQUIRED',
+          errorMessage: safeReplay
+            ? 'Attempt lease expired; same-effect replay is permitted inside Resend idempotency window'
+            : 'Attempt outcome is unknown outside safe provider replay policy',
+        },
+      });
+    }
+  }
+
+  private async blockUnknownOutsideReplayWindow(delivery: ResendDeliveryRecord) {
+    await this.prisma.client.outboundDelivery.updateMany({
+      where: { id: delivery.id, businessId: delivery.businessId },
+      data: {
+        status: 'Failed',
+        nextRetryAt: null,
+        errorCode: 'OUTCOME_RECONCILIATION_REQUIRED',
+        errorMessage: 'Provider outcome is unknown outside the Resend idempotency replay window',
+      },
+    });
+  }
+
+  private async markLegacyAmbiguousResend(delivery: ResendDeliveryRecord) {
+    await this.prisma.client.outboundDelivery.updateMany({
+      where: { id: delivery.id, businessId: delivery.businessId },
+      data: {
+        status: 'Failed',
+        providerOutcome: null,
+        nextRetryAt: null,
+        errorCode: 'LEGACY_PROVIDER_OUTCOME_AMBIGUOUS',
+        errorMessage: 'Legacy retry state has no provider outcome evidence and cannot be auto-resent safely',
+      },
+    });
+  }
+
+  private async ensureAttemptEvent(
+    deliveryId: string,
+    attemptId: string,
+    eventType: string,
+    statusBefore: string,
+    statusAfter: string,
+    attemptNumber: number,
+    errorCode?: string,
+    errorMessage?: string,
+    resultData?: Record<string, unknown>,
+  ) {
+    const existing = await this.prisma.client.deliveryEvent.findFirst({
+      where: { deliveryId, eventType, attemptId },
+      select: { id: true },
+    });
+    if (existing) return;
+
+    await this.prisma.client.deliveryEvent.create({
+      data: {
+        deliveryId,
+        eventType,
+        statusBefore,
+        statusAfter,
+        attemptNumber,
+        attemptId,
+        errorCode,
+        errorMessage,
+        resultData: resultData as Prisma.InputJsonValue | undefined,
+      },
+    });
+  }
+
+  private async executeLegacyDelivery(delivery: any) {
     const { destination, content, variant } = delivery;
     if (!destination?.connection) {
       await this.failDelivery(delivery.id, delivery.contentId, delivery.businessId, 'NO_CONNECTION', 'Destination has no active connection', 'Sending');
@@ -320,9 +1034,29 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     await this.updateContentStatus(contentId);
   }
 
-  private async recordEvent(deliveryId: string, eventType: string, statusBefore: string, statusAfter: string, attemptNumber?: number, errorCode?: string, errorMessage?: string, resultData?: Record<string, unknown>) {
+  private async recordEvent(
+    deliveryId: string,
+    eventType: string,
+    statusBefore: string,
+    statusAfter: string,
+    attemptNumber?: number,
+    errorCode?: string,
+    errorMessage?: string,
+    resultData?: Record<string, unknown>,
+    attemptId?: string,
+  ) {
     await this.prisma.client.deliveryEvent.create({
-      data: { deliveryId, eventType, statusBefore, statusAfter, attemptNumber, errorCode, errorMessage, resultData: resultData ?? undefined },
+      data: {
+        deliveryId,
+        eventType,
+        statusBefore,
+        statusAfter,
+        attemptNumber,
+        attemptId,
+        errorCode,
+        errorMessage,
+        resultData: resultData as Prisma.InputJsonValue | undefined,
+      },
     });
   }
 
@@ -579,7 +1313,12 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     this.events.emit('delivery.clicked', { deliveryId, contentId: delivery.contentId, businessId: delivery.businessId });
   }
 
-  private async updateCampaignContactStatus(contentId: string, contactId: string, status: string) {
+  private async updateCampaignContactStatus(
+    contentId: string,
+    contactId: string,
+    status: string,
+    throwOnError = false,
+  ) {
     try {
       const contentMeta = (await this.prisma.client.outboundContent.findUnique({
         where: { id: contentId },
@@ -600,6 +1339,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
         data: updateData,
       });
     } catch (err: any) {
+      if (throwOnError) throw err;
       this.logger.warn(`Failed to update campaign contact status: ${(err as Error).message}`);
     }
   }
@@ -738,18 +1478,42 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   async retry(businessId: string, deliveryId: string) {
     const delivery = await this.prisma.client.outboundDelivery.findFirst({
       where: { id: deliveryId, businessId, status: 'Failed' },
+      include: { destination: { include: { connection: true } } },
     });
     if (!delivery) throw new NotFoundException('Failed delivery not found');
 
+    const resendDelivery = this.resolveDeliveryAdapter(
+      delivery as unknown as ResendDeliveryRecord,
+    )?.provider === 'RESEND';
+
+    if (delivery.providerOutcome === 'SUCCEEDED_CONFIRMED') {
+      throw new BadRequestException('Provider already confirmed this delivery; only consequence repair is allowed');
+    }
+    if (
+      delivery.providerOutcome === 'OUTCOME_UNKNOWN'
+      && !isInsideResendIdempotencyWindow(delivery.providerFirstAttemptAt)
+    ) {
+      throw new BadRequestException('Provider outcome is unknown outside the safe replay window; reconciliation is required');
+    }
+    if (resendDelivery && !delivery.providerOutcome) {
+      throw new BadRequestException(
+        'Legacy Resend provider outcome is ambiguous; automatic resend is not safe',
+      );
+    }
+
     const updated = await this.prisma.client.outboundDelivery.update({
       where: { id: deliveryId },
-      data: { status: 'Queued', scheduledAt: new Date(), errorCode: null, errorMessage: null, nextRetryAt: null },
+      data: {
+        status: 'Queued',
+        scheduledAt: new Date(),
+        errorCode: null,
+        errorMessage: null,
+        nextRetryAt: null,
+      },
     });
 
     await this.recordEvent(deliveryId, 'manual_retry', 'Failed', 'Queued');
-
     setTimeout(() => this.tick(), 500);
-
     return updated;
   }
 
@@ -854,22 +1618,39 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   async retryAllFailed(businessId: string, contentId: string) {
     const failed = await this.prisma.client.outboundDelivery.findMany({
       where: { businessId, contentId, status: 'Failed' },
-      select: { id: true },
+      include: { destination: { include: { connection: true } } },
     });
 
-    if (failed.length === 0) return { retried: 0 };
+    const eligible = failed.filter((delivery) => {
+      if (delivery.providerOutcome === 'SUCCEEDED_CONFIRMED') return false;
+      if (delivery.providerOutcome === 'OUTCOME_UNKNOWN') {
+        return isInsideResendIdempotencyWindow(delivery.providerFirstAttemptAt);
+      }
+      const isResend = this.resolveDeliveryAdapter(
+        delivery as unknown as ResendDeliveryRecord,
+      )?.provider === 'RESEND';
+      if (isResend && !delivery.providerOutcome) return false;
+      return true;
+    });
+
+    if (eligible.length === 0) return { retried: 0, blocked: failed.length };
 
     await this.prisma.client.outboundDelivery.updateMany({
-      where: { id: { in: failed.map(f => f.id) }, status: 'Failed' },
-      data: { status: 'Queued', scheduledAt: new Date(), errorCode: null, errorMessage: null, nextRetryAt: null },
+      where: { id: { in: eligible.map((f) => f.id) }, status: 'Failed' },
+      data: {
+        status: 'Queued',
+        scheduledAt: new Date(),
+        errorCode: null,
+        errorMessage: null,
+        nextRetryAt: null,
+      },
     });
 
-    for (const f of failed) {
-      await this.recordEvent(f.id, 'manual_retry', 'Failed', 'Queued');
+    for (const delivery of eligible) {
+      await this.recordEvent(delivery.id, 'manual_retry', 'Failed', 'Queued');
     }
 
     setTimeout(() => this.tick(), 500);
-
-    return { retried: failed.length };
+    return { retried: eligible.length, blocked: failed.length - eligible.length };
   }
 }
