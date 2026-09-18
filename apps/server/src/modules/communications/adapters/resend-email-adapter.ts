@@ -4,33 +4,20 @@ import {
   PublishResponse,
   AdapterCapabilities,
   NormalizedError,
+  ProviderEffectContext,
+  ProviderEffectMaterial,
 } from './channel-adapter.interface';
-import { SystemEmailService } from '../../notifications/system-email.service';
+import {
+  SystemEmailSendError,
+  SystemEmailService,
+} from '../../notifications/system-email.service';
 
 /**
  * Send campaign and sequence email without a connected Gmail account.
  *
- * EmailAdapter is Gmail — `provider = 'GOOGLE'`, and it needs
- * `connection.token` (an OAuth access token) and a sender address from the
- * destination. The registry maps EMAIL straight onto it. So a business that
- * never connected Gmail had no way to send marketing or sequence email at all:
- * campaigns had nothing to dispatch through, and the CRM sequence dispatch
- * added earlier today correctly refused every step with "no active email
- * channel is connected".
- *
- * Resend is already in the stack and already sends this product's
- * transactional mail (signup verification and the rest) through
- * SystemEmailService. Nothing new is being introduced; it just was not
- * reachable from the outbound queue.
- *
- * WHAT THE TRADE IS, SO NOBODY DISCOVERS IT LATER. Mail sent this way leaves
- * the platform's own domain, not the merchant's. That is materially worse for
- * deliverability than sending from their own Gmail — SPF and DKIM belong to
- * us, replies land wherever EMAIL_FROM_ADDRESS points, and recipients see our
- * sending domain. It is a fallback for people who have not connected an
- * account, not a replacement for connecting one, and
- * MARKETING_ESP_FALLBACK=off turns it off entirely for anyone who would rather
- * send nothing than send from a shared domain.
+ * Resend is the platform fallback when no usable Gmail connection exists.
+ * Effect certainty is supplied by DeliveryQueueService through the optional
+ * ProviderEffectContext; legacy/system callers remain backward compatible.
  */
 export class ResendEmailAdapter implements ChannelAdapter {
   readonly provider = 'RESEND';
@@ -43,10 +30,42 @@ export class ResendEmailAdapter implements ChannelAdapter {
     return flag !== 'off' && flag !== 'false' && flag !== '0';
   }
 
+  prepareEffectMaterial(
+    _connection: unknown,
+    destination: { platformId?: string | null },
+    payload: PublishPayload,
+  ): ProviderEffectMaterial {
+    const to = payload.recipientEmail ?? destination?.platformId ?? '';
+    if (!to) {
+      throw new SystemEmailSendError('No recipient address on the delivery', 'FAILED_CONFIRMED');
+    }
+
+    const sender = this.systemEmail.getSenderIdentity();
+    if (!sender) {
+      throw new SystemEmailSendError(
+        'System email sender is not configured. Set RESEND_API_KEY and EMAIL_FROM_ADDRESS.',
+        'FAILED_CONFIRMED',
+      );
+    }
+
+    const html = payload.htmlBody
+      ?? `<pre style="font:inherit;white-space:pre-wrap">${escapeHtml(payload.textBody ?? '')}</pre>`;
+
+    return {
+      provider: this.provider,
+      recipient: to,
+      sender,
+      subject: payload.subject ?? '(no subject)',
+      html,
+      text: payload.textBody,
+    };
+  }
+
   async publish(
     _connection: unknown,
     destination: { platformId?: string | null },
     payload: PublishPayload,
+    effectContext?: ProviderEffectContext,
   ): Promise<PublishResponse> {
     if (!ResendEmailAdapter.isEnabled()) {
       return {
@@ -54,30 +73,32 @@ export class ResendEmailAdapter implements ChannelAdapter {
         errorCode: 'ESP_FALLBACK_DISABLED',
         errorMessage: 'MARKETING_ESP_FALLBACK is off and no email account is connected.',
         isTransient: false,
+        outcomeCertainty: 'FAILED_CONFIRMED',
       };
     }
 
-    const to = payload.recipientEmail ?? destination?.platformId ?? '';
-    if (!to) {
+    let material: ProviderEffectMaterial;
+    try {
+      material = effectContext?.material ?? this.prepareEffectMaterial(_connection, destination, payload);
+    } catch (err) {
+      const normalized = this.normalizeError(err);
       return {
         success: false,
-        errorCode: 'MISSING_RECIPIENT',
-        errorMessage: 'No recipient address on the delivery',
-        isTransient: false,
+        errorCode: normalized.code,
+        errorMessage: normalized.message,
+        isTransient: normalized.isTransient,
+        outcomeCertainty: normalized.outcomeCertainty,
       };
     }
-
-    // The queue stores a text body; a campaign may also carry html. Sending
-    // text as html would render markup as literal characters, so it is wrapped
-    // only when there is no html to use.
-    const html = payload.htmlBody ?? `<pre style="font:inherit;white-space:pre-wrap">${escapeHtml(payload.textBody ?? '')}</pre>`;
 
     try {
       const { id } = await this.systemEmail.sendTransactional({
-        to,
-        subject: payload.subject ?? '(no subject)',
-        html,
-        text: payload.textBody,
+        to: material.recipient,
+        from: material.sender,
+        subject: material.subject,
+        html: material.html,
+        text: material.text,
+        idempotencyKey: effectContext?.providerIdempotencyKey,
       });
       return { success: true, externalPostId: id };
     } catch (err) {
@@ -87,27 +108,56 @@ export class ResendEmailAdapter implements ChannelAdapter {
         errorCode: normalized.code,
         errorMessage: normalized.message,
         isTransient: normalized.isTransient,
+        outcomeCertainty: normalized.outcomeCertainty,
       };
     }
   }
 
   normalizeError(error: unknown): NormalizedError {
+    if (error instanceof SystemEmailSendError) {
+      const msg = error.message.toLowerCase();
+      const isTransient =
+        error.outcomeCertainty === 'OUTCOME_UNKNOWN'
+        || msg.includes('rate limit')
+        || msg.includes('429');
+      return {
+        code: error.outcomeCertainty === 'OUTCOME_UNKNOWN' ? 'OUTCOME_UNKNOWN' : 'EMAIL_ERROR',
+        message: error.message,
+        isTransient,
+        outcomeCertainty: error.outcomeCertainty,
+      };
+    }
+
     if (error instanceof Error) {
       const msg = error.message.toLowerCase();
-      // "not configured" is a deployment state, not a transient fault — retrying
-      // it would burn the delivery's retries against something only a human can
-      // change.
       if (msg.includes('not configured')) {
-        return { code: 'ESP_NOT_CONFIGURED', message: error.message, isTransient: false };
+        return {
+          code: 'ESP_NOT_CONFIGURED',
+          message: error.message,
+          isTransient: false,
+          outcomeCertainty: 'FAILED_CONFIRMED',
+        };
       }
-      const isTransient =
-        msg.includes('timeout') ||
-        msg.includes('econnreset') ||
-        msg.includes('rate limit') ||
-        msg.includes('429');
-      return { code: isTransient ? 'TRANSIENT' : 'EMAIL_ERROR', message: error.message, isTransient };
+      const ambiguous =
+        msg.includes('timeout')
+        || msg.includes('econnreset')
+        || msg.includes('socket hang up')
+        || msg.includes('fetch failed');
+      const transient = ambiguous || msg.includes('rate limit') || msg.includes('429');
+      return {
+        code: ambiguous ? 'OUTCOME_UNKNOWN' : transient ? 'TRANSIENT' : 'EMAIL_ERROR',
+        message: error.message,
+        isTransient: transient,
+        outcomeCertainty: ambiguous ? 'OUTCOME_UNKNOWN' : 'FAILED_CONFIRMED',
+      };
     }
-    return { code: 'UNKNOWN', message: String(error), isTransient: false };
+
+    return {
+      code: 'UNKNOWN',
+      message: String(error),
+      isTransient: false,
+      outcomeCertainty: 'FAILED_CONFIRMED',
+    };
   }
 
   getCapabilities(_platform: string): AdapterCapabilities {

@@ -1,19 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Resend } from 'resend';
 
+export type SystemEmailOutcomeCertainty = 'FAILED_CONFIRMED' | 'OUTCOME_UNKNOWN';
+
+export class SystemEmailSendError extends Error {
+  constructor(
+    message: string,
+    readonly outcomeCertainty: SystemEmailOutcomeCertainty,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = 'SystemEmailSendError';
+  }
+}
+
 /**
  * System-level transactional email sender.
- *
- * Distinct from the per-business `TransactionalEmailService`/`GmailService`
- * (which sends business-flavored notifications using each business's own
- * Gmail integration). This service sends platform-level transactional mail
- * (signup verification, password reset, system alerts) from Keyflow's own
- * "from" address via Resend, completely separately from any tenant's mailbox.
- *
- * Reads:
- *   - RESEND_API_KEY        (required to actually send)
- *   - EMAIL_FROM_ADDRESS    (e.g. "no-reply@keyflow.os")
- *   - EMAIL_FROM_NAME       (defaults to "Keyflow")
  */
 @Injectable()
 export class SystemEmailService {
@@ -25,10 +27,6 @@ export class SystemEmailService {
     return Boolean(this.getApiKey() && this.getFromAddress());
   }
 
-  /**
-   * Returns a human-readable description of which env vars are missing,
-   * or `null` when fully configured. Used by the bootstrap guardrail.
-   */
   describeMissingConfig(): string | null {
     const missing: string[] = [];
     if (!this.getApiKey()) missing.push('RESEND_API_KEY');
@@ -58,6 +56,11 @@ export class SystemEmailService {
     return `${name} <${addr}>`;
   }
 
+  getSenderIdentity(): string | null {
+    const from = this.formatFrom();
+    return from || null;
+  }
+
   private getClient(): Resend | null {
     const key = this.getApiKey();
     if (!key) {
@@ -75,52 +78,75 @@ export class SystemEmailService {
     return this.resend;
   }
 
-  /**
-   * Send a single transactional email from Keyflow's own from-address.
-   * Returns the provider message id on success or throws on failure.
-   */
   async sendTransactional(args: {
     to: string;
+    from?: string;
     subject: string;
     html: string;
     text?: string;
     replyTo?: string;
+    idempotencyKey?: string;
     attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }>;
   }): Promise<{ id: string }> {
     if (!args.to || !args.subject || !args.html) {
-      throw new Error('sendTransactional requires to, subject and html');
-    }
-    const client = this.getClient();
-    const from = this.formatFrom();
-    if (!client || !from) {
-      throw new Error(
-        'System email sender is not configured. Set RESEND_API_KEY and EMAIL_FROM_ADDRESS.',
+      throw new SystemEmailSendError(
+        'sendTransactional requires to, subject and html',
+        'FAILED_CONFIRMED',
       );
     }
+
+    const client = this.getClient();
+    const from = args.from ?? this.formatFrom();
+    if (!client || !from) {
+      throw new SystemEmailSendError(
+        'System email sender is not configured. Set RESEND_API_KEY and EMAIL_FROM_ADDRESS.',
+        'FAILED_CONFIRMED',
+      );
+    }
+
+    const email = {
+      from,
+      to: args.to,
+      subject: args.subject,
+      html: args.html,
+      text: args.text,
+      replyTo: args.replyTo,
+      attachments: args.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
+    };
+
     try {
-      const result = await client.emails.send({
-        from,
-        to: args.to,
-        subject: args.subject,
-        html: args.html,
-        text: args.text,
-        replyTo: args.replyTo,
-        attachments: args.attachments?.map((a) => ({
-          filename: a.filename,
-          content: a.content,
-          contentType: a.contentType,
-        })),
-      });
+      const result = args.idempotencyKey
+        ? await client.emails.send(email, { idempotencyKey: args.idempotencyKey })
+        : await client.emails.send(email);
+
       if (result.error) {
-        throw new Error(result.error.message || 'Resend send failed');
+        throw new SystemEmailSendError(
+          result.error.message || 'Resend send failed',
+          'FAILED_CONFIRMED',
+          { cause: result.error },
+        );
       }
+
       const id = result.data?.id ?? '';
       this.logger.log(`Sent transactional email to ${args.to} (id=${id})`);
       return { id };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      if (err instanceof SystemEmailSendError) {
+        this.logger.error(`Resend send failed for ${args.to}: ${err.message}`);
+        throw err;
+      }
+
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Resend send failed for ${args.to}: ${message}`);
-      throw new Error(`Failed to send email: ${message}`, { cause: err });
+      this.logger.error(`Resend send outcome unknown for ${args.to}: ${message}`);
+      throw new SystemEmailSendError(
+        `Failed to send email: ${message}`,
+        'OUTCOME_UNKNOWN',
+        { cause: err },
+      );
     }
   }
 }

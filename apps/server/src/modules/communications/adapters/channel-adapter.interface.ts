@@ -14,7 +14,25 @@ export interface PublishResponse {
   errorCode?: string;
   errorMessage?: string;
   isTransient?: boolean;
+  outcomeCertainty?: 'FAILED_CONFIRMED' | 'OUTCOME_UNKNOWN';
   raw?: Record<string, unknown>;
+}
+
+export interface ProviderEffectMaterial {
+  provider: string;
+  recipient: string;
+  sender?: string;
+  subject: string;
+  html: string;
+  text?: string;
+}
+
+export interface ProviderEffectContext {
+  effectId: string;
+  attemptId: string;
+  effectFingerprint: string;
+  providerIdempotencyKey?: string;
+  material?: ProviderEffectMaterial;
 }
 
 export interface AdapterCapabilities {
@@ -30,11 +48,22 @@ export interface NormalizedError {
   code: string;
   message: string;
   isTransient: boolean;
+  outcomeCertainty?: 'FAILED_CONFIRMED' | 'OUTCOME_UNKNOWN';
 }
 
 export interface ChannelAdapter {
   readonly provider: string;
-  publish(connection: any, destination: any, payload: PublishPayload): Promise<PublishResponse>;
+  prepareEffectMaterial?(
+    connection: any,
+    destination: any,
+    payload: PublishPayload,
+  ): Promise<ProviderEffectMaterial> | ProviderEffectMaterial;
+  publish(
+    connection: any,
+    destination: any,
+    payload: PublishPayload,
+    effectContext?: ProviderEffectContext,
+  ): Promise<PublishResponse>;
   normalizeError(error: unknown): NormalizedError;
   getCapabilities(platform: string): AdapterCapabilities;
 }
