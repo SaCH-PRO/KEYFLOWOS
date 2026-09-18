@@ -24,3 +24,6 @@ CREATE INDEX "outbound_deliveries_current_attempt_id_idx"
 
 CREATE INDEX "delivery_events_delivery_id_attempt_id_idx"
   ON "delivery_events"("delivery_id", "attempt_id");
+
+CREATE UNIQUE INDEX "delivery_events_delivery_id_event_type_attempt_id_key"
+  ON "delivery_events"("delivery_id", "event_type", "attempt_id");
