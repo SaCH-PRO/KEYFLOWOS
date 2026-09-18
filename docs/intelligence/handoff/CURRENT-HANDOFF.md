@@ -1,13 +1,17 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `IRP-100-2026-09-17-01`.
+Checkpoint: `KFS-2026-09-17-01`.
 
-Non-coding readiness is complete: 30 execution packets across Wave 0/A/B/C/D/E, each with bounded objective, dependencies, invariants, characterization, migration/cutover, proof, negative controls, rollback and agent contract.
+KeyFlow Space has been accepted into the canonical product plan.
 
-Authoritative readiness files are the all-waves manifest, 100% definition, multi-agent protocol and gate matrix under `docs/intelligence/execution/`.
+Authority:
+- `docs/intelligence/product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md`
+- `docs/intelligence/execution/KF-EXEC-SPACE-001-KEYFLOW-SPACE-EVENTS-REGISTRATION-TICKETING.md`
 
-No production code/schema/workflow/provider/deployment mutation is authorized.
+J21 remains primary owner. Space composes website/presence, storefront, bookings, events, registration/ticketing, forms, public quote/payment and portal entry.
 
-Only execution evidence remains unknown. Future authorized start is current-main revalidation then KF-EXEC-K12-001.
+Total execution packets: 31.
 
-Map refresh remains paused. Scheduled cycles remain halted.
+Next non-coding frontier: Capability & Workforce Replacement Blueprint. New user ideas should be classified into existing capabilities/journeys/kernels and used to refine packets; create new primitives only if existing architecture cannot express them.
+
+No code/schema/provider/deployment mutation. Map paused. Scheduled cycles halted.

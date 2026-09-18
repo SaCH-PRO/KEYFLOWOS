@@ -51,6 +51,7 @@ D1 KnowledgeRevision + Blueprint/Genome materialization
 D2 correction/withdrawal/learning eligibility
 D3 Command Center completeness/priority projection
 D4 public customer boundary, portal grant, booking concurrency
+D4b KeyFlow Space + events + registration + ticketing
 D5 voice session/transport/action/metering
 D6 privacy/derived-state deletion and retention
 D7 frontend projection convergence

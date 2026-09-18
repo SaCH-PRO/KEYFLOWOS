@@ -315,3 +315,50 @@ J21 = PROVISIONALLY_TARGET_ALIGNED_NAMED_PUBLIC_BOUNDARY_CORE_ONLY
 ```
 
 This closes the named public-customer architecture sufficiently to activate J22. Reopen on runtime evidence, untraced public routes, or J22 cross-channel counterexamples.
+
+
+## O. KeyFlow Space product expansion — accepted 2026-09-17
+
+J21 is now also the primary journey owner for **KeyFlow Space**, the unified public platform available to every KeyFlow business or organization.
+
+A Space may serve simultaneously as:
+
+```text
+website / public presence
++ storefront
++ service booking
++ events
++ registration
++ ticketing
++ lead/forms
++ quote/payment surface
++ portal entry
+```
+
+This is a product-surface composition over the existing journey/kernel owners, not a new canonical journey.
+
+### Event public journey
+
+```text
+published Event
+→ registration intent
+→ attendee/contact resolution
+→ capacity/ticket claim
+→ optional order/payment
+→ registration/ticket confirmation
+→ reminders
+→ check-in / attendance evidence
+→ follow-up / CRM / attribution
+```
+
+Free registration and paid ticketing are both first-class paths.
+
+Attendee registration may collect business-defined information such as name, email, company, position/job title, industry and custom questions. Marketing consent remains separate from event registration.
+
+Detailed product authority:
+`docs/intelligence/product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md`.
+
+Dedicated execution packet:
+`KF-EXEC-SPACE-001 — KeyFlow Space, Events, Registration & Ticketing`.
+
+J21's existing public-boundary laws remain load-bearing for all Space modules.

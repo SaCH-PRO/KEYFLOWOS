@@ -1,25 +1,39 @@
 # KEYFLOWOS — Next Chat Rollover
 
-Checkpoint: `IRP-100-2026-09-17-01`.
+Checkpoint: `KFS-2026-09-17-01`.
 
 ```text
-100% NON-CODING IMPLEMENTATION READINESS COMPLETE
-30 bounded execution packets
+100% NON-CODING READINESS RETAINED
 25/25 journeys
 12/12 kernels
-whole-OS target/migration/proof/waves complete
+31 execution packets
 
-DO NOT modify production code/schema/workflows/providers/deployment.
-DO NOT claim runtime/provider/migration proof.
-DO NOT refresh programme map.
-Scheduled cycles remain halted.
+NEW ACCEPTED PRODUCT CAPABILITY:
+KEYFLOW SPACE
+→ website/public presence
+→ storefront
+→ bookings
+→ events
+→ free registration
+→ paid ticketing
+→ forms
+→ quote/payment
+→ portal entry
 
-AUTHORITATIVE:
-execution/IMPLEMENTATION-READINESS-MANIFEST-ALL-WAVES.md
-execution/READINESS-100-PERCENT-DEFINITION.md
-execution/MULTI-AGENT-EXECUTION-PROTOCOL.md
-execution/PREIMPLEMENTATION-GATE-MATRIX.md
+Product blueprint:
+docs/intelligence/product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md
 
-FUTURE AFTER EXPLICIT CODE AUTHORIZATION:
-current-main revalidation → KF-EXEC-K12-001 → dependency-driven packets.
+Packet:
+KF-EXEC-SPACE-001
+
+No new journey/kernel.
+Primary journey J21.
+
+NEXT:
+Capability & Workforce Replacement Blueprint
++ continue user idea intake/refinement.
+
+NO production code/schema/provider/deployment changes.
+NO map refresh.
+Scheduled cycles halted.
 ```

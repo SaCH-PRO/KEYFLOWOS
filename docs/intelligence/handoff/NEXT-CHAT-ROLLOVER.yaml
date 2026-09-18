@@ -1,12 +1,14 @@
 project: KEYFLOWOS
-rollover_version: 58
-checkpoint_id: IRP-100-2026-09-17-01
-status: NONCODING_READINESS_100_READY_HOLD
-execution_packets: 30
+rollover_version: 59
+checkpoint_id: KFS-2026-09-17-01
+status: KEYFLOW_SPACE_ACCEPTED_CAPABILITY_WORKFORCE_BLUEPRINT_NEXT
+execution_packets: 31
 coverage: {journeys: 25, journey_dossiers: 25, kernels: 12, kernel_dossiers: 12}
 implementation_authorized: false
-runtime_proof_executed: false
-active_frontier: READY_HOLD_NO_CODE_CHANGES
-authoritative_manifest: docs/intelligence/execution/IMPLEMENTATION-READINESS-MANIFEST-ALL-WAVES.md
-future_start: [current_main_revalidation, KF-EXEC-K12-001]
+product_expansions:
+  keyflow_space:
+    accepted: true
+    primary_journey: J21
+    packet: KF-EXEC-SPACE-001
+active_frontier: CAPABILITY_AND_WORKFORCE_REPLACEMENT_BLUEPRINT
 constraints: [production_read_only, no_schema_mutation, no_provider_mutation, no_deployment_change, no_map_refresh, scheduled_cycles_halted]
