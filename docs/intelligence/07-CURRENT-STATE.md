@@ -1,19 +1,28 @@
 # KeyFlowOS Current State
 
-Checkpoint: `KFP-2026-09-17-01`.
+Checkpoint: `KFG-2026-09-17-01`.
 
-A full product incorporation audit has reconciled the original KEYFLOW blueprint with the refined 26-journey / 12-kernel architecture.
+KeyFlow Growth Engine is accepted as a flagship canonical product layer.
 
-The audit found and fixed one planning-layer gap: original product promises for Studio/Cockpit/Flow Feed/Flow Graph, pre-opinionated Playbooks/Flow Marketplace, zero-friction onboarding, gamification and explicit workforce replacement had not yet been named as canonical product-layer artifacts in the intelligence programme.
+J9 remains the primary journey because its existing publication, occurrence, conversion, attribution and learning contract is the correct semantic spine.
 
-They now are.
+The expansion adds explicit product coverage for:
+- market and customer intelligence;
+- brand/offer/audience strategy;
+- organic social;
+- content creation/repurposing;
+- email/lifecycle growth;
+- SEO;
+- paid advertising/provider control;
+- creative/audience/landing revision identity;
+- lead capture and CRM handoff;
+- financial attribution;
+- experiments;
+- governed spend optimization;
+- Growth Cockpit/autopilot.
 
-Execution packet count is now 34, adding:
-- KF-EXEC-PLAYBOOK-001
-- KF-EXEC-EXPERIENCE-001
+The repository already contains partial marketing/social/email/SEO/attribution/growth intelligence implementations; future work converges them rather than rebuilding blindly.
 
-Canonical product master and workforce blueprint now sit above the journey/kernel/execution architecture.
+Architecture remains 26 journeys / 12 kernels. Execution packets now 35.
 
-Current frontier remains capability/workforce refinement and user idea intake, with settled architecture reopened only when an idea genuinely needs a new journey/kernel/invariant.
-
-No production code changes have begun.
+No production implementation has begun.

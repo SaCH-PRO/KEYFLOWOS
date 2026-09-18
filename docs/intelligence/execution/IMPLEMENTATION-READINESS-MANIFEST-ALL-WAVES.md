@@ -24,24 +24,25 @@ Status: **100% NON-CODING / PRE-IMPLEMENTATION PACKET COVERAGE COMPLETE**
 11. C — KF-EXEC-DELIVERYBILL-001 — Work Contract Document Acceptance & Billing
 12. C — KF-EXEC-COMMERCE-001 — Commerce Order Fulfilment Effect Identity
 13. C — KF-EXEC-ENTITLE-001 — Subscription Entitlement Metering & Provider Cost Reconciliation
-14. D — KF-EXEC-KNOWLEDGE-001 — KnowledgeRevision & Blueprint Genome Materialization
-15. D — KF-EXEC-KNOWLEDGE-002 — Correction Withdrawal & Learning Eligibility
-16. D — KF-EXEC-COMMAND-001 — Command Center Completeness & Priority Projection
-17. D — KF-EXEC-PUBLIC-001 — Public Customer Boundary Portal & Booking Concurrency
-18. D — KF-EXEC-SPACE-001 — KeyFlow Space, Events, Registration & Ticketing
-19. D — KF-EXEC-VOICE-001 — Voice Session Transport Action & Metering Convergence
-20. D — KF-EXEC-PRIVACY-001 — Privacy Derived-State Deletion & Retention
-21. D — KF-EXEC-NETWORK-001 — KeyFlow Network, Index, Map & B2B Orchestration
-22. D — KF-EXEC-UX-001 — Frontend Projection Convergence
-23. D — KF-EXEC-EXPERIENCE-001 — Studio, Cockpit, Flow Feed/Graph, Onboarding & Virality
-24. E — KF-EXEC-WITHDRAW-001 — Legacy Writer Shutdown by Domain
-25. E — KF-EXEC-WITHDRAW-002 — Compatibility Reader Retirement
-26. E — KF-EXEC-MIGRATE-001 — Migration Reconciliation & Legacy Ambiguity Closure
-27. E — KF-EXEC-INTEGRATED-001 — Integrated End-to-End Proof
-28. E — KF-EXEC-OPS-001 — Performance & Operability Qualification
-29. E — KF-EXEC-RELEASE-001 — Controlled Canary & Release Evidence
+14. C/D — KF-EXEC-GROWTH-001 — Closed-Loop Marketing, Advertising & Social Growth Engine
+15. D — KF-EXEC-KNOWLEDGE-001 — KnowledgeRevision & Blueprint Genome Materialization
+16. D — KF-EXEC-KNOWLEDGE-002 — Correction Withdrawal & Learning Eligibility
+17. D — KF-EXEC-COMMAND-001 — Command Center Completeness & Priority Projection
+18. D — KF-EXEC-PUBLIC-001 — Public Customer Boundary Portal & Booking Concurrency
+19. D — KF-EXEC-SPACE-001 — KeyFlow Space, Events, Registration & Ticketing
+20. D — KF-EXEC-VOICE-001 — Voice Session Transport Action & Metering Convergence
+21. D — KF-EXEC-PRIVACY-001 — Privacy Derived-State Deletion & Retention
+22. D — KF-EXEC-NETWORK-001 — KeyFlow Network, Index, Map & B2B Orchestration
+23. D — KF-EXEC-UX-001 — Frontend Projection Convergence
+24. D — KF-EXEC-EXPERIENCE-001 — Studio, Cockpit, Flow Feed/Graph, Onboarding & Virality
+25. E — KF-EXEC-WITHDRAW-001 — Legacy Writer Shutdown by Domain
+26. E — KF-EXEC-WITHDRAW-002 — Compatibility Reader Retirement
+27. E — KF-EXEC-MIGRATE-001 — Migration Reconciliation & Legacy Ambiguity Closure
+28. E — KF-EXEC-INTEGRATED-001 — Integrated End-to-End Proof
+29. E — KF-EXEC-OPS-001 — Performance & Operability Qualification
+30. E — KF-EXEC-RELEASE-001 — Controlled Canary & Release Evidence
 
-Total bounded execution packets: **34**.
+Total bounded execution packets: **35**.
 
 ## Dependency spine
 ```text
@@ -51,8 +52,8 @@ K12-001
 
 ACTION-001
 → Wave B temporal/ingress/connector/recovery/conversation + Playbook platform
-→ Wave C commercial/finance/delivery/entitlement
-→ Wave D knowledge/command/public/Space+events/network+Index+B2B/voice/privacy/UX + Studio/Cockpit/Flow experience
+→ Wave C commercial/finance/delivery/entitlement + Growth Engine foundation
+→ Wave D knowledge/command/public/Space+events/network+Index+B2B/voice/privacy/UX + Growth Engine optimization + Studio/Cockpit/Flow experience
 → Wave E writer withdrawal/reader retirement/reconciliation/integrated proof/ops/release plan
 ```
 

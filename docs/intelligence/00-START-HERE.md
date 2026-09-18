@@ -1,38 +1,35 @@
 # KeyFlowOS Intelligence — START HERE
 
-Checkpoint: `KFP-2026-09-17-01`  
-Status: **FULL PRODUCT INCORPORATION AUDIT COMPLETE**
+Checkpoint: `KFG-2026-09-17-01`  
+Status: **KEYFLOW GROWTH ENGINE ACCEPTED**
 
-The project now explicitly carries the original blueprint promises plus the refined architecture/product expansions:
+Canonical product now includes a flagship **KeyFlow Growth Engine** under J9.
 
-- AI operational partner / KEY;
-- Business Graph;
-- Studio;
-- Cockpit;
-- Flow Feed;
-- Flow Graph;
-- Command;
-- zero-friction onboarding;
-- pre-opinionated Playbook Library;
-- safe Playbook customization/versioning;
-- Flow Marketplace;
-- lightweight evidence-based gamification;
-- public/creator/network virality loops;
-- KeyFlow Space;
-- events/registration/ticketing;
-- KeyFlow Network;
-- community/directory/map;
-- KeyFlow Index;
-- B2B sourcing/procurement/logistics;
-- capability/workforce replacement model.
+Growth Engine covers:
+- market/customer intelligence;
+- brand/positioning;
+- audience/segmentation;
+- content/creative;
+- organic social;
+- email/lifecycle;
+- SEO/discoverability;
+- paid advertising;
+- KeyFlow Space landing coordination;
+- lead capture;
+- attribution;
+- experiments;
+- budget/channel/creative optimization;
+- Growth Cockpit;
+- policy-bounded growth autopilot.
 
-Canonical product docs:
-- `product/KEYFLOWOS-CANONICAL-PRODUCT-CAPABILITY-MASTER.md`
-- `product/KEYFLOWOS-CAPABILITY-WORKFORCE-REPLACEMENT-BLUEPRINT.md`
-- `product/KEYFLOW-EXPERIENCE-PLAYBOOKS-PLATFORM-BLUEPRINT.md`
-- `product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md`
-- `product/KEYFLOW-NETWORK-CAPABILITY-BLUEPRINT.md`
+Blueprint:
+`docs/intelligence/product/KEYFLOW-GROWTH-ENGINE-BLUEPRINT.md`
 
-Architecture: 26 journeys / 12 kernels. Execution packets: 34.
+Packet:
+`KF-EXEC-GROWTH-001`
 
-No production implementation is authorized. Programme map remains frozen. Scheduled cycles remain halted.
+J9 remains the journey owner; no new journey/kernel required.
+
+Architecture: 26 journeys / 12 kernels / 35 execution packets.
+
+No production implementation is authorized. Map remains frozen. Scheduled cycles remain halted.

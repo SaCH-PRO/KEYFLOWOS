@@ -1,14 +1,12 @@
 project: KEYFLOWOS
-rollover_version: 61
-checkpoint_id: KFP-2026-09-17-01
-status: FULL_PRODUCT_INCORPORATION_AUDIT_COMPLETE
-coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 34}
+rollover_version: 62
+checkpoint_id: KFG-2026-09-17-01
+status: KEYFLOW_GROWTH_ENGINE_ACCEPTED
+coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 35}
 implementation_authorized: false
-canonical_product_docs:
-- docs/intelligence/product/KEYFLOWOS-CANONICAL-PRODUCT-CAPABILITY-MASTER.md
-- docs/intelligence/product/KEYFLOWOS-CAPABILITY-WORKFORCE-REPLACEMENT-BLUEPRINT.md
-- docs/intelligence/product/KEYFLOW-EXPERIENCE-PLAYBOOKS-PLATFORM-BLUEPRINT.md
-- docs/intelligence/product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md
-- docs/intelligence/product/KEYFLOW-NETWORK-CAPABILITY-BLUEPRINT.md
+product_expansions:
+  keyflow_space: {accepted: true, primary_journey: J21, packet: KF-EXEC-SPACE-001}
+  keyflow_network: {accepted: true, primary_journey: J26, packet: KF-EXEC-NETWORK-001}
+  keyflow_growth: {accepted: true, primary_journey: J9, packet: KF-EXEC-GROWTH-001}
 active_frontier: CAPABILITY_AND_WORKFORCE_REPLACEMENT_BLUEPRINT
 constraints: [production_read_only, no_schema_mutation, no_provider_mutation, no_deployment_change, no_map_refresh, scheduled_cycles_halted]

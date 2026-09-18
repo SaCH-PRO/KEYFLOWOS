@@ -1,19 +1,21 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `KFP-2026-09-17-01`.
+Checkpoint: `KFG-2026-09-17-01`.
 
-Full incorporation audit complete.
+Accepted flagship product layers:
+- KeyFlow Space
+- KeyFlow Network
+- KeyFlow Growth Engine
 
-Canonical product layer now explicitly includes original blueprint promises plus Space/Network:
-KEY, Business Graph, Studio, Cockpit, Flow Feed, Flow Graph, Command, zero-friction onboarding, Playbooks, Flow Marketplace, gamification/virality, KeyFlow Space, events/ticketing, KeyFlow Network, KeyFlow Index and workforce replacement.
+Growth Engine primary owner: J9.
+Execution packet: KF-EXEC-GROWTH-001.
+Blueprint: product/KEYFLOW-GROWTH-ENGINE-BLUEPRINT.md.
 
-Authority docs:
-- KEYFLOWOS-CANONICAL-PRODUCT-CAPABILITY-MASTER.md
-- KEYFLOWOS-CAPABILITY-WORKFORCE-REPLACEMENT-BLUEPRINT.md
-- KEYFLOW-EXPERIENCE-PLAYBOOKS-PLATFORM-BLUEPRINT.md
-- KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md
-- KEYFLOW-NETWORK-CAPABILITY-BLUEPRINT.md
+Target loop:
+market/customer intelligence → strategy → creative → organic/paid distribution → lead capture → conversion → attribution → experiment learning → governed optimization.
 
-Architecture: 26 journeys, 12 kernels, 34 execution packets.
+Paid media spend remains governed financial authority. Organic/publication/attribution laws from J9 remain load-bearing.
+
+Architecture: 26 journeys, 12 kernels, 35 execution packets.
 
 No production mutations. Map paused. Scheduled cycles halted.

@@ -1,42 +1,39 @@
 # KEYFLOWOS — Next Chat Rollover
 
-Checkpoint: `KFP-2026-09-17-01`.
+Checkpoint: `KFG-2026-09-17-01`.
 
 ```text
-FULL PRODUCT INCORPORATION AUDIT COMPLETE
-
 26 journeys
 12 kernels
-34 execution packets
+35 execution packets
 
-EXPLICIT CANONICAL PRODUCT PROMISES:
-KEY / AI operator
-Business Graph
-Studio
-Cockpit
-Flow Feed
-Flow Graph
-Command
-Zero-friction onboarding
-Playbook Library
-Flow Marketplace
-Gamification/virality
+FLAGSHIP PRODUCT LAYERS:
 KeyFlow Space
-Events/registration/ticketing
 KeyFlow Network
-Community/directory/map
-KeyFlow Index
-B2B sourcing/procurement/logistics
-Workforce replacement blueprint
+KeyFlow Growth Engine
 
-NEW PACKETS:
-KF-EXEC-PLAYBOOK-001
-KF-EXEC-EXPERIENCE-001
+GROWTH ENGINE:
+market intelligence
+brand/audience strategy
+content/creative
+organic social
+email/lifecycle
+SEO
+paid advertising
+lead capture
+attribution
+experimentation
+budget/channel/creative optimization
+Growth Cockpit/autopilot
+
+Primary journey: J9
+Packet: KF-EXEC-GROWTH-001
+Blueprint: product/KEYFLOW-GROWTH-ENGINE-BLUEPRINT.md
+
+No new journey/kernel.
 
 NEXT:
-Continue capability/workforce blueprint refinement and user idea intake.
-Only reopen architecture for real new capability/invariant.
-
+Continue capability/workforce blueprint and idea intake.
 No production changes.
 No map refresh.
 Scheduled cycles halted.

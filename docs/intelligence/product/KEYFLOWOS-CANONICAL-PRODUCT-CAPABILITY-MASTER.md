@@ -34,6 +34,9 @@ Unified public business platform: website/presence, storefront, booking, events,
 ### KeyFlow Network
 Cross-business layer: community, directory, interactive map, entity profiles, KeyFlow Index, matching, sourcing, procurement, B2B fulfilment/logistics and network intelligence.
 
+### KeyFlow Growth Engine
+Closed-loop growth layer: market intelligence, brand/audience strategy, content, organic social, email/lifecycle, SEO, paid advertising, lead capture, attribution, experimentation and governed optimization.
+
 ## 3. Capability domains
 
 ### Business formation & organization

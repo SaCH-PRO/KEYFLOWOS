@@ -43,7 +43,12 @@ A role may contain tasks across several classes.
 | Reconciliation clerk | A3 | matching, discrepancy surfacing, repair proposals |
 | Bookkeeping admin | A2/A3 | routine posting/reconciliation/report prep |
 | Financial analyst routine | A1/A2 | reporting, variance, scenarios; interpretation retained |
-| Marketing assistant | A3 | calendar, drafts, scheduling, campaign ops |
+| Marketing assistant | A3/A4 | calendar, drafts, scheduling, campaign ops |
+| Marketing coordinator | A3 | campaign planning/execution, reporting, cross-channel coordination |
+| Junior media buyer | A2/A3 | campaign setup, pacing, routine budget optimization within policy |
+| Email marketing operator | A3/A4 | segmentation, sequences, sends, health, re-engagement |
+| Growth analyst | A2/A3 | attribution, funnel analysis, experiment reporting, recommendations |
+| SEO reporting/admin | A3 | search data, audits, content opportunity tracking |
 | Social media coordinator | A2/A3 | publishing, routine engagement, reporting |
 | Junior copywriter | A1/A2 | drafts/variants; brand judgment retained |
 | Campaign operator | A3 | segmentation, execution, monitoring |
@@ -88,7 +93,7 @@ KEY can absorb coordination, task chasing, dependency tracking, exception monito
 KEY can absorb invoice/payment/reconciliation/report-prep workload while preserving expert accounting authority.
 
 ### Marketing operations
-KEY can absorb production scheduling, publishing, segmentation, reporting and routine lifecycle campaigns.
+KEY Growth Engine can absorb market/segment analysis, content calendars, content production support, social publishing, email/lifecycle operations, routine paid-media management, experiment monitoring, SEO operations, attribution/reporting, review/referral loops and bounded budget optimization.
 
 ### Procurement / network operations
 KEY Network can absorb supplier research, RFQs, comparison, procurement admin, logistics monitoring and partner discovery.

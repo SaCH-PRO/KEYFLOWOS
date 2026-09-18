@@ -44,6 +44,7 @@ C3 ledger/cash/valuation convergence
 C4 work/contract/document billing/acceptance
 C5 commerce order/fulfilment effect identity
 C6 subscription entitlement/metering/provider-cost reconciliation
+C7 Growth Engine foundation: campaign/creative/audience/organic/email/SEO/attribution/paid-media control plane
 
 ## Wave D — knowledge / Command Center / public / voice / privacy
 
@@ -58,6 +59,7 @@ D5 voice session/transport/action/metering
 D6 privacy/derived-state deletion and retention
 D7 frontend projection convergence
 D8 Studio/Cockpit/Flow Feed/Flow Graph/onboarding/virality experience convergence
+D9 Growth Engine optimization/autopilot: experiments, budget/channel/creative reallocation, Growth Cockpit
 
 ## Wave E — withdrawal + integrated release proof
 

@@ -104,3 +104,49 @@ G9-01 through G9-08 pass only at their named context/source/design/review scopes
 Trace actual subscription/plan/payment state into feature entitlement, AI allowance/admission, budget reservation, model attempts, usage recording, billable classification and cost reconciliation. Keep displayed plan, current permission, consumed resource and settled cost separate. Do not run model calls or subscription writes during the forensic trace.
 
 No new journey was created by this review: 22/25 dossier coverage and twelve kernel dossiers remain, not app completion. J20/J21/J22 are still dossierless. Preserve the map freeze, owner halt, fixed implementation baseline and intelligence-only publication boundary.
+
+
+## 10. Product expansion — KeyFlow Growth Engine (accepted 2026-09-17)
+
+J9 remains the canonical journey owner for the expanded **KeyFlow Growth Engine**.
+
+The product boundary now explicitly includes:
+
+```text
+market / customer intelligence
+→ positioning / offer
+→ audience strategy
+→ content / creative
+→ organic social
+→ email / lifecycle
+→ SEO / discoverability
+→ paid advertising
+→ landing / KeyFlow Space destination
+→ lead capture
+→ CRM qualification / follow-up
+→ economic conversion
+→ attribution
+→ experimentation
+→ learning
+→ budget/channel/creative reallocation
+```
+
+This does not change the selected J9 publication/occurrence/attribution laws. It makes them load-bearing for a larger product surface.
+
+Paid media adds explicit governance pressure:
+- ad account/provider binding;
+- campaign/ad-set/ad external identities;
+- spend/budget authority;
+- current spend evidence;
+- pause/resume;
+- uncertain provider outcomes;
+- creative/audience/landing revision identity;
+- paid/organic outcome comparison.
+
+Canonical product authority:
+`docs/intelligence/product/KEYFLOW-GROWTH-ENGINE-BLUEPRINT.md`.
+
+Dedicated execution packet:
+`KF-EXEC-GROWTH-001 — Closed-Loop Marketing, Advertising & Social Growth Engine`.
+
+No new journey or kernel is required.
