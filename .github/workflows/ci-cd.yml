@@ -437,6 +437,13 @@ jobs:
       - name: Run server tests
         run: cd apps/server && pnpm test:ci
 
+      # K12 proof admission is deliberately separate from the main Vitest exit
+      # code. It consumes a native JSON report and an accepted case manifest so
+      # missing/skipped/duplicated required cases cannot hide behind a green
+      # aggregate run.
+      - name: Admit K12 proof evaluator self-test
+        run: pnpm --filter server proof:k12
+
       # THE WEB SUITE HAD NEVER RUN IN CI. Not once, on any branch.
       #
       # 16 files, and 12 of them are structural gates rather than unit tests:

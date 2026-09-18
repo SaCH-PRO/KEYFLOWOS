@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "packageId": "KF-EXEC-K12-001",
+  "proofScope": "proof-admission-evaluator-self-test",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": false,
+  "requiredCases": [
+    "proof admission evaluator [K12-P01] accepts exact passing required cases",
+    "proof admission evaluator [K12-P02] rejects a missing required case",
+    "proof admission evaluator [K12-P03] rejects duplicate case identities",
+    "proof admission evaluator [K12-P04] rejects skipped required cases",
+    "proof admission evaluator [K12-P05] rejects failed required cases",
+    "proof admission evaluator [K12-P06] rejects malformed report structure",
+    "proof admission evaluator [K12-P07] rejects unsuccessful aggregate reports",
+    "proof admission evaluator [K12-P08] reports a missing runner report as incomplete",
+    "proof admission evaluator [K12-P09] rejects duplicate required identities in the accepted manifest"
+  ]
+}
