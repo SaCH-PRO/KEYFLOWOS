@@ -416,6 +416,12 @@ jobs:
       - name: Build workspace packages
         run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
+      # K12 resource admission runs before the first write-capable database
+      # operation. It verifies exact CI identity plus local-only Postgres/Redis
+      # endpoints and emits only redacted resource identities.
+      - name: Admit K12 test resources
+        run: node scripts/proof-admission/admit-resources.mjs --manifest scripts/proof-admission/manifests/ci-resources.json
+
       - name: Apply migrations to the test database
         run: pnpm db:deploy
 
@@ -436,6 +442,13 @@ jobs:
 
       - name: Run server tests
         run: cd apps/server && pnpm test:ci
+
+      # K12 proof admission is deliberately separate from the main Vitest exit
+      # code. It consumes a native JSON report and an accepted case manifest so
+      # missing/skipped/duplicated required cases cannot hide behind a green
+      # aggregate run.
+      - name: Admit K12 proof evaluator self-test
+        run: pnpm --filter server proof:k12
 
       # THE WEB SUITE HAD NEVER RUN IN CI. Not once, on any branch.
       #

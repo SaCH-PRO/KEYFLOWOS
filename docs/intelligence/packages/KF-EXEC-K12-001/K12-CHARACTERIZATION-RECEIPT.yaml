@@ -1,0 +1,30 @@
+package_id: KF-EXEC-K12-001
+characterized_main_sha: 88b8016c0ef45e383cc5b0d98c7062151a6a0f27
+forensic_baseline_sha: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+characterized_at: '2026-09-17'
+runtime:
+  node: 20.18.1
+  pnpm: 9.15.0
+  vitest: 2.1.1
+  turbo: 2.5.2
+observations:
+  - server test:ci is a bare vitest run
+  - unit suite uses isolate:false and shuffled sequence
+  - integration config still sets passWithNoTests:true
+  - CI runs real PostgreSQL and Redis in the server test job
+  - CI builds the server before the boot integration test
+  - no independent exact-required-case JSON report evaluator exists at the characterized boundary
+  - Turbo unit task has no cache:false while smoke/integration/e2e do
+implementation_slice:
+  id: K12-C-EVALUATOR-001
+  scope:
+    - native Vitest JSON report consumption
+    - reviewed required-case manifest
+    - missing/duplicate/skipped/failed/malformed rejection
+    - CI self-test binding
+  explicitly_deferred:
+    - run-owned database/redis resource allocator
+    - cleanup lease quarantine
+    - source/build receipt binding
+    - Turbo cache freshness receipt
+    - cross-package proof manifests
