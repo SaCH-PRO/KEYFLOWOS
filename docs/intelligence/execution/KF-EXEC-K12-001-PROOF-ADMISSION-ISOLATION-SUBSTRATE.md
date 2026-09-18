@@ -156,3 +156,11 @@ At minimum:
 
 Tooling can be disabled only to the last safe proof mode; do not revert to treating missing evidence as success.
 Historical receipts remain immutable.
+
+
+## 14. Surgical package authority
+
+This execution packet is now hardened to L2 under:
+`docs/intelligence/packages/KF-EXEC-K12-001/`.
+
+The package folder is authoritative for traceability, debug vocabulary, failure/proof matrices, rollback and agent handoffs. The packet remains the semantic scope owner.

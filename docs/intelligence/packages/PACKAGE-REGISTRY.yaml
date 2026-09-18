@@ -1,0 +1,17 @@
+version: 1
+checkpoint: PKGSTD-2026-09-17-01
+target_hardening_level: L2
+total_execution_packets: 35
+hardened_packages: 1
+packages:
+  - id: KF-EXEC-K12-001
+    title: Proof Admission & Isolation Substrate
+    level: L2
+    owner: K12
+    path: docs/intelligence/packages/KF-EXEC-K12-001
+    dependencies: []
+    blocks:
+      - all_other_execution_packages
+remaining:
+  count: 34
+  sequencing_rule: dependency_order_then_risk

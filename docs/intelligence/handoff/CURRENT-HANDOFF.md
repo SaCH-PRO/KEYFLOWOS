@@ -1,21 +1,29 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `KFG-2026-09-17-01`.
+Checkpoint: `PKG-K12-2026-09-17-01`.
 
-Accepted flagship product layers:
-- KeyFlow Space
-- KeyFlow Network
-- KeyFlow Growth Engine
+The programme has entered **surgical package hardening**.
 
-Growth Engine primary owner: J9.
-Execution packet: KF-EXEC-GROWTH-001.
-Blueprint: product/KEYFLOW-GROWTH-ENGINE-BLUEPRINT.md.
+Goal before any code mutation: upgrade all 35 execution packets from L1 execution packets to L2 surgical packages.
 
-Target loop:
-market/customer intelligence → strategy → creative → organic/paid distribution → lead capture → conversion → attribution → experiment learning → governed optimization.
+L2 adds:
+- SCOPE.yaml;
+- source/invariant/proof traceability;
+- ordered reversible change plan;
+- universal + package-specific debug contract;
+- failure matrix;
+- proof matrix;
+- rollback/disable contract;
+- Claude implementer handoff;
+- Kimi adversarial review handoff;
+- acceptance checklist.
 
-Paid media spend remains governed financial authority. Organic/publication/attribution laws from J9 remain load-bearing.
+First hardened package complete:
+`docs/intelligence/packages/KF-EXEC-K12-001/`.
 
-Architecture: 26 journeys, 12 kernels, 35 execution packets.
+This is the proof/isolation root, so downstream packages inherit its proof/debug discipline.
 
-No production mutations. Map paused. Scheduled cycles halted.
+Next hardening order:
+KF-EXEC-EXTFX-001 → TENANT-001 → AUTH-001 → ACTION-001, then dependency/risk order through all remaining packets.
+
+No production code/schema/provider/deployment changes. Map paused. Scheduled cycles halted.
