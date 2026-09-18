@@ -90,6 +90,15 @@ export class ResendEmailAdapter implements ChannelAdapter {
           ? { idempotencyKey: effectContext.providerIdempotencyKey }
           : {}),
       });
+      if (!id) {
+        return {
+          success: false,
+          errorCode: 'MISSING_PROVIDER_ID',
+          errorMessage: 'Resend returned no provider message id; outcome cannot be proven.',
+          isTransient: true,
+          outcomeCertainty: 'OUTCOME_UNKNOWN',
+        };
+      }
       return { success: true, externalPostId: id };
     } catch (err) {
       const normalized = this.normalizeError(err);
@@ -108,8 +117,10 @@ export class ResendEmailAdapter implements ChannelAdapter {
   normalizeError(error: unknown): NormalizedError {
     if (error instanceof SystemEmailSendError) {
       const msg = error.message.toLowerCase();
+      const providerCode = error.providerCode?.toLowerCase() ?? '';
       const isTransient =
         error.outcome === 'OUTCOME_UNKNOWN' ||
+        providerCode.includes('concurrent_idempotent_requests') ||
         msg.includes('rate limit') ||
         msg.includes('429') ||
         msg.includes('timeout') ||

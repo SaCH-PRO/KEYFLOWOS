@@ -21,6 +21,37 @@ const DEFAULT_TIMEZONE = 'America/Port_of_Spain';
 const RESEND_IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const RESEND_ATTEMPT_LEASE_MS = 10 * 60 * 1000;
 
+type ResendDeliveryRuntime = {
+  id: string;
+  businessId: string;
+  contentId: string;
+  destinationId: string;
+  contactId?: string | null;
+  recipientEmail?: string | null;
+  status?: string;
+  retryCount?: number;
+  maxRetries: number;
+  resultSnapshot?: unknown;
+  effectSnapshot?: unknown;
+  effectFingerprint?: string | null;
+  providerIdempotencyKey?: string | null;
+  attemptSequence?: number;
+  currentAttemptId?: string | null;
+  attemptStartedAt?: Date | string | null;
+  attemptLeaseExpiresAt?: Date | string | null;
+  providerOutcome?: string | null;
+  providerFirstAttemptAt?: Date | string | null;
+  consequenceState?: string | null;
+  destination: {
+    platform: string;
+    platformId?: string | null;
+    connection?: { id: string; provider?: string; token?: string | null } | null;
+  };
+  content?: unknown;
+  variant?: unknown;
+};
+
+
 function resolveScheduledAtUtc(scheduledAt: string, timezone?: string): Date {
   const tz = timezone || DEFAULT_TIMEZONE;
   try {
@@ -151,7 +182,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async executeDelivery(delivery: any) {
+  private async executeDelivery(delivery: ResendDeliveryRuntime) {
     const { destination, content, variant } = delivery;
     if (!destination?.connection) {
       await this.failDelivery(delivery.id, delivery.contentId, delivery.businessId, 'NO_CONNECTION', 'Destination has no active connection', 'Sending');
@@ -329,14 +360,15 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   private isResendReplayWindowOpen(firstAttemptAt: Date | string | null | undefined, now = new Date()): boolean {
     if (!firstAttemptAt) return false;
     const started = new Date(firstAttemptAt).getTime();
-    return Number.isFinite(started) && now.getTime() - started <= RESEND_IDEMPOTENCY_WINDOW_MS;
+    const age = now.getTime() - started;
+    return Number.isFinite(started) && age >= -60_000 && age <= RESEND_IDEMPOTENCY_WINDOW_MS;
   }
 
-  private async bindResendEffect(delivery: any, payload: PublishPayload): Promise<{
+  private async bindResendEffect(delivery: ResendDeliveryRuntime, payload: PublishPayload): Promise<{
     snapshot: ResendEffectSnapshot;
     fingerprint: string;
     idempotencyKey: string;
-    delivery: any;
+    delivery: ResendDeliveryRuntime;
   }> {
     const existingSnapshot = delivery.effectSnapshot;
     const existingFingerprint = delivery.effectFingerprint as string | null | undefined;
@@ -391,10 +423,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     this.logger.debug(
       `delivery.effect.bound deliveryId=${delivery.id} effectId=${delivery.id} fingerprint=${fingerprint.slice(0, 12)}`,
     );
-    return { snapshot, fingerprint, idempotencyKey, delivery: { ...delivery, ...updated } };
+    return { snapshot, fingerprint, idempotencyKey, delivery: { ...delivery, ...updated } as ResendDeliveryRuntime };
   }
 
-  private async allocateResendAttempt(delivery: any): Promise<{
+  private async allocateResendAttempt(delivery: ResendDeliveryRuntime): Promise<{
     attemptId: string;
     attemptNumber: number;
     providerFirstAttemptAt: Date;
@@ -438,7 +470,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async executeResendDelivery(
-    delivery: any,
+    delivery: ResendDeliveryRuntime,
     adapter: ChannelAdapter,
     payload: PublishPayload,
   ): Promise<void> {
@@ -459,7 +491,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       snapshot: ResendEffectSnapshot;
       fingerprint: string;
       idempotencyKey: string;
-      delivery: any;
+      delivery: ResendDeliveryRuntime;
     };
     try {
       binding = await this.bindResendEffect(delivery, payload);
@@ -596,7 +628,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async markResendBindingAmbiguous(delivery: any, reason: string): Promise<void> {
+  private async markResendBindingAmbiguous(delivery: ResendDeliveryRuntime, reason: string): Promise<void> {
     await this.prisma.client.outboundDelivery.update({
       where: { id: delivery.id },
       data: {
@@ -622,7 +654,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async markResendConfirmedFailure(
-    delivery: any,
+    delivery: ResendDeliveryRuntime,
     attemptId: string | undefined,
     attemptNumber: number | undefined,
     errorCode: string,
@@ -684,7 +716,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async markResendUnknownOutcome(
-    delivery: any,
+    delivery: ResendDeliveryRuntime,
     attempt: { attemptId: string; attemptNumber: number; providerFirstAttemptAt: Date },
     errorCode: string,
     errorMessage: string,
@@ -731,7 +763,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async blockUnsafeUnknownReplay(delivery: any): Promise<void> {
+  private async blockUnsafeUnknownReplay(delivery: ResendDeliveryRuntime): Promise<void> {
     await this.prisma.client.outboundDelivery.update({
       where: { id: delivery.id },
       data: {
@@ -756,7 +788,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async tryRepairResendConsequences(delivery: any): Promise<void> {
+  private async tryRepairResendConsequences(delivery: ResendDeliveryRuntime): Promise<void> {
     try {
       await this.repairResendConsequences(delivery);
     } catch (err) {
@@ -774,7 +806,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async repairResendConsequences(delivery: any): Promise<void> {
+  private async repairResendConsequences(delivery: ResendDeliveryRuntime): Promise<void> {
     const current = await this.prisma.client.outboundDelivery.findUnique({
       where: { id: delivery.id },
     });
@@ -931,7 +963,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async isResendManualRetrySafe(delivery: any): Promise<boolean> {
+  private async isResendManualRetrySafe(delivery: ResendDeliveryRuntime): Promise<boolean> {
     const destination = delivery.destination;
     if (!destination?.connection) return true;
     const isEmailPlatform = destination.platform === 'EMAIL' || destination.platform === 'GOOGLE';
@@ -1518,7 +1550,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     if (failed.length === 0) return { retried: 0, blocked: 0 };
 
-    const safe: any[] = [];
+    const safe: typeof failed = [];
     for (const delivery of failed) {
       if (await this.isResendManualRetrySafe(delivery)) safe.push(delivery);
     }

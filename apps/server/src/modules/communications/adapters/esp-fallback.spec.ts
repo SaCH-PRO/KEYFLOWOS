@@ -159,6 +159,33 @@ describe('the fallback adapter sends', () => {
     });
   });
 
+  it('treats a concurrent idempotency collision as retryable without changing effect identity', () => {
+    const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn() } as never);
+    const normalized = adapter.normalizeError(
+      new SystemEmailSendError(
+        'Concurrent request with the same idempotency key',
+        'FAILED_CONFIRMED',
+        'concurrent_idempotent_requests',
+      ),
+    );
+    expect(normalized.isTransient).toBe(true);
+    expect(normalized.code).toBe('concurrent_idempotent_requests');
+  });
+
+  it('treats provider success without a message id as OUTCOME_UNKNOWN', async () => {
+    const adapter = new ResendEmailAdapter({
+      sendTransactional: vi.fn(async () => ({ id: '' })),
+    } as never);
+    const result = await adapter.publish(
+      null,
+      {},
+      { recipientEmail: 'a@b.test', subject: 'x', textBody: 'y' },
+    );
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('MISSING_PROVIDER_ID');
+    expect(result.outcomeCertainty).toBe('OUTCOME_UNKNOWN');
+  });
+
   it('marks a transport exception from SystemEmailService as OUTCOME_UNKNOWN', async () => {
     const sendTransactional = vi.fn(async () => {
       throw new SystemEmailSendError('socket closed after request', 'OUTCOME_UNKNOWN');
