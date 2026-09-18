@@ -21,6 +21,24 @@ const DEFAULT_TIMEZONE = 'America/Port_of_Spain';
 const RESEND_IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const RESEND_ATTEMPT_LEASE_MS = 10 * 60 * 1000;
 
+type DeliveryVariantRuntime = {
+  id?: string;
+  platform: string;
+  textBody?: string | null;
+  htmlBody?: string | null;
+  mediaUrls?: string[];
+  variantMeta?: unknown;
+};
+
+type DeliveryContentRuntime = {
+  id?: string;
+  subject?: string | null;
+  body?: string | null;
+  contentType?: string;
+  contentMeta?: unknown;
+  variants?: DeliveryVariantRuntime[];
+};
+
 type ResendDeliveryRuntime = {
   id: string;
   businessId: string;
@@ -28,6 +46,7 @@ type ResendDeliveryRuntime = {
   destinationId: string;
   contactId?: string | null;
   recipientEmail?: string | null;
+  recipientPhone?: string | null;
   status?: string;
   retryCount?: number;
   maxRetries: number;
@@ -43,14 +62,21 @@ type ResendDeliveryRuntime = {
   providerFirstAttemptAt?: Date | string | null;
   consequenceState?: string | null;
   destination: {
+    id?: string;
     platform: string;
     platformId?: string | null;
-    connection?: { id: string; provider?: string; token?: string | null } | null;
+    destinationMeta?: unknown;
+    connection?: {
+      id: string;
+      provider?: string;
+      token?: string | null;
+      healthState?: string | null;
+      accountEmail?: string | null;
+    } | null;
   };
-  content?: unknown;
-  variant?: unknown;
+  content?: DeliveryContentRuntime | null;
+  variant?: DeliveryVariantRuntime | null;
 };
-
 
 function resolveScheduledAtUtc(scheduledAt: string, timezone?: string): Date {
   const tz = timezone || DEFAULT_TIMEZONE;
@@ -203,7 +229,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const effectiveVariant = variant || content?.variants?.find((v: any) => v.platform === destination.platform) || content?.variants?.find((v: any) => v.platform === 'DEFAULT');
+    const effectiveVariant = variant || content?.variants?.find(v => v.platform === destination.platform) || content?.variants?.find(v => v.platform === 'DEFAULT');
 
     const destMeta = destination.destinationMeta as Record<string, unknown> | null;
     const contentMeta = content?.contentMeta as Record<string, unknown> | null;
