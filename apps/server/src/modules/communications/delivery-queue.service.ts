@@ -423,11 +423,13 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const from = resolveSystemEmailFrom();
     if (!from) throw new Error('ESP_NOT_CONFIGURED');
+    const connectionId = delivery.destination.connection?.id;
+    if (!connectionId) throw new Error('NO_CONNECTION');
 
     const snapshot = buildResendEffectSnapshot({
       businessId: delivery.businessId,
       destinationId: delivery.destinationId,
-      connectionId: delivery.destination.connection.id,
+      connectionId,
       from,
       payload,
       fallbackRecipient: delivery.destination.platformId,
