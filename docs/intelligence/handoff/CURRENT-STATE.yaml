@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 85
+analysis_version: 86
 last_updated: '2026-09-17'
-checkpoint_id: KFS-2026-09-17-01
-status: NONCODING_READINESS_100_KEYFLOW_SPACE_INCORPORATED_CAPABILITY_BLUEPRINT_NEXT
+checkpoint_id: KFN-2026-09-17-01
+status: KEYFLOW_NETWORK_J26_ACCEPTED_CAPABILITY_WORKFORCE_BLUEPRINT_ACTIVE
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: false
@@ -11,28 +11,24 @@ runtime_proof_executed: false
 provider_proof_executed: false
 migration_proof_executed: false
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-coverage: {journeys: 25, journey_dossiers: 25, kernels: 12, kernel_dossiers: 12, semantic_target_closure: COMPLETE_BOUNDED_REOPENABLE}
+coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, semantic_target_closure: EXPANDED_WITH_J26_BOUNDED_REOPENABLE}
 readiness:
   definition: docs/intelligence/execution/READINESS-100-PERCENT-DEFINITION.md
   manifest: docs/intelligence/execution/IMPLEMENTATION-READINESS-MANIFEST-ALL-WAVES.md
-  agent_protocol: docs/intelligence/execution/MULTI-AGENT-EXECUTION-PROTOCOL.md
-  gate_matrix: docs/intelligence/execution/PREIMPLEMENTATION-GATE-MATRIX.md
-  total_execution_packets: 31
-  keyflow_space_blueprint: docs/intelligence/product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md
-  keyflow_space_packet: KF-EXEC-SPACE-001
+  total_execution_packets: 32
   architecture_questions_required_before_current_main_characterization: 0
   remaining_unknown_class: EXECUTION_EVIDENCE_ONLY
+product_expansions:
+  keyflow_space: {status: ACCEPTED_INTO_PLAN, primary_journey: J21, packet: KF-EXEC-SPACE-001}
+  keyflow_network:
+    status: ACCEPTED_INTO_PLAN
+    primary_journey: J26
+    creates_new_journey: true
+    creates_new_kernel: false
+    blueprint: docs/intelligence/product/KEYFLOW-NETWORK-CAPABILITY-BLUEPRINT.md
+    packet: KF-EXEC-NETWORK-001
+    components: [community, directory, map, entity_profiles, keyflow_index, matching, sourcing_pathways, rfq, procurement, b2b_fulfilment, logistics, network_intelligence]
 canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-060, concepts_through: KF-CONCEPT-042}
 next_free_ids: {finding: F234, contradiction: C184, recommendation: KF-REC-061}
-active_frontier:
-  stage: CAPABILITY_AND_WORKFORCE_REPLACEMENT_BLUEPRINT
-  status: PRODUCT_CAPABILITY_SYNTHESIS_WITH_IDEA_INTAKE
-product_expansions:
-  keyflow_space:
-    status: ACCEPTED_INTO_PLAN
-    primary_journey: J21
-    creates_new_journey_or_kernel: false
-    modules: [presence, website, storefront, booking, events, registration, ticketing, forms, quotes_payments, portal]
-    execution_packet: KF-EXEC-SPACE-001
-    event_modes: [IN_PERSON, VIRTUAL, HYBRID]
+active_frontier: {stage: CAPABILITY_AND_WORKFORCE_REPLACEMENT_BLUEPRINT, status: PRODUCT_CAPABILITY_SYNTHESIS_WITH_IDEA_INTAKE}
 constraints: [no_production_code_changes, no_schema_migration_execution, no_provider_mutations, no_deployment_changes, no_runtime_proof_claim, no_silent_rebaseline, programme_map_refresh_paused, scheduled_cycles_halted]

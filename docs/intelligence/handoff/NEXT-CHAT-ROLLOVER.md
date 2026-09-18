@@ -1,39 +1,38 @@
 # KEYFLOWOS — Next Chat Rollover
 
-Checkpoint: `KFS-2026-09-17-01`.
+Checkpoint: `KFN-2026-09-17-01`.
 
 ```text
-100% NON-CODING READINESS RETAINED
-25/25 journeys
+26/26 journeys
 12/12 kernels
-31 execution packets
+32 execution packets
 
-NEW ACCEPTED PRODUCT CAPABILITY:
-KEYFLOW SPACE
-→ website/public presence
-→ storefront
-→ bookings
-→ events
-→ free registration
-→ paid ticketing
-→ forms
-→ quote/payment
-→ portal entry
+NEW:
+J26 Business Network → Sourcing → B2B Fulfilment
+KeyFlow Network
+KeyFlow Index
+Interactive network map
+Community/directory
+Entity passports
+Provider matching
+Sourcing pathways
+RFQ/procurement
+B2B fulfilment/logistics
+Network intelligence
 
-Product blueprint:
-docs/intelligence/product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md
+Blueprint:
+docs/intelligence/product/KEYFLOW-NETWORK-CAPABILITY-BLUEPRINT.md
 
 Packet:
-KF-EXEC-SPACE-001
+KF-EXEC-NETWORK-001
 
-No new journey/kernel.
-Primary journey J21.
+Existing source already contains partial community/reputation/matching/supplier/procurement seams; converge them.
 
 NEXT:
 Capability & Workforce Replacement Blueprint
-+ continue user idea intake/refinement.
++ continue user idea intake.
 
-NO production code/schema/provider/deployment changes.
-NO map refresh.
+No production changes.
+No map refresh.
 Scheduled cycles halted.
 ```

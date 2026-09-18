@@ -30,15 +30,16 @@ Status: **100% NON-CODING / PRE-IMPLEMENTATION PACKET COVERAGE COMPLETE**
 17. D — KF-EXEC-SPACE-001 — KeyFlow Space, Events, Registration & Ticketing
 18. D — KF-EXEC-VOICE-001 — Voice Session Transport Action & Metering Convergence
 19. D — KF-EXEC-PRIVACY-001 — Privacy Derived-State Deletion & Retention
-20. D — KF-EXEC-UX-001 — Frontend Projection Convergence
-21. E — KF-EXEC-WITHDRAW-001 — Legacy Writer Shutdown by Domain
-22. E — KF-EXEC-WITHDRAW-002 — Compatibility Reader Retirement
-23. E — KF-EXEC-MIGRATE-001 — Migration Reconciliation & Legacy Ambiguity Closure
-24. E — KF-EXEC-INTEGRATED-001 — Integrated End-to-End Proof
-25. E — KF-EXEC-OPS-001 — Performance & Operability Qualification
-26. E — KF-EXEC-RELEASE-001 — Controlled Canary & Release Evidence
+20. D — KF-EXEC-NETWORK-001 — KeyFlow Network, Index, Map & B2B Orchestration
+21. D — KF-EXEC-UX-001 — Frontend Projection Convergence
+22. E — KF-EXEC-WITHDRAW-001 — Legacy Writer Shutdown by Domain
+23. E — KF-EXEC-WITHDRAW-002 — Compatibility Reader Retirement
+24. E — KF-EXEC-MIGRATE-001 — Migration Reconciliation & Legacy Ambiguity Closure
+25. E — KF-EXEC-INTEGRATED-001 — Integrated End-to-End Proof
+26. E — KF-EXEC-OPS-001 — Performance & Operability Qualification
+27. E — KF-EXEC-RELEASE-001 — Controlled Canary & Release Evidence
 
-Total bounded execution packets: **31**.
+Total bounded execution packets: **32**.
 
 ## Dependency spine
 ```text
@@ -49,7 +50,7 @@ K12-001
 ACTION-001
 → Wave B temporal/ingress/connector/recovery/conversation
 → Wave C commercial/finance/delivery/entitlement
-→ Wave D knowledge/command/public/Space+events/voice/privacy/UX
+→ Wave D knowledge/command/public/Space+events/network+Index+B2B/voice/privacy/UX
 → Wave E writer withdrawal/reader retirement/reconciliation/integrated proof/ops/release plan
 ```
 

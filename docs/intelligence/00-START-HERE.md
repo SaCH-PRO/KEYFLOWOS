@@ -1,29 +1,27 @@
 # KeyFlowOS Intelligence — START HERE
 
-Checkpoint: `KFS-2026-09-17-01`  
-Status: **100% NON-CODING IMPLEMENTATION READINESS RETAINED; KEYFLOW SPACE INCORPORATED**
+Checkpoint: `KFN-2026-09-17-01`  
+Status: **KEYFLOW NETWORK + J26 ACCEPTED; CAPABILITY/WORKFORCE BLUEPRINT ACTIVE**
 
-The accepted plan now includes **KeyFlow Space** as the unified public platform for every KeyFlow business or organization.
+Current architecture:
+- 26/26 journey dossiers;
+- 12/12 kernel dossiers;
+- 32 execution packets;
+- KeyFlow Space accepted under J21;
+- KeyFlow Network accepted under new J26.
 
-Space can compose:
-- website/public presence;
-- storefront;
-- bookings;
-- events;
-- free registration;
-- paid ticketing;
-- forms;
-- quotes/payments;
-- portal entry.
+**KeyFlow Network** converges the app's existing partial community, directory, reputation, matching, supplier and procurement capabilities into one network layer with:
+community, directory, interactive map, entity profiles, KeyFlow Index, provider matching, sourcing pathways, RFQ/procurement, B2B fulfilment/logistics and network intelligence.
 
-Product blueprint:
-`docs/intelligence/product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md`.
+Blueprint:
+`docs/intelligence/product/KEYFLOW-NETWORK-CAPABILITY-BLUEPRINT.md`
 
-Execution packet:
-`KF-EXEC-SPACE-001 — KeyFlow Space, Events, Registration & Ticketing`.
+Journey:
+`docs/intelligence/journeys/KF-JOURNEY-026-BUSINESS-NETWORK-SOURCING-B2B-FULFILMENT.md`
 
-J21 remains the journey owner; no new kernel/journey was required. Total bounded execution packets: **31**.
+Packet:
+`KF-EXEC-NETWORK-001`
 
-The active non-coding frontier is now the **Capability & Workforce Replacement Blueprint**, with user idea intake allowed to refine capabilities and packets.
+No new kernel is required.
 
-Production code/schema/provider/deployment changes remain unauthorized. Runtime proof remains unexecuted. Programme-map refresh remains paused. Scheduled cycles remain halted.
+Production code/schema/provider/deployment changes remain unauthorized. Programme map remains frozen by user instruction. Scheduled cycles remain halted.

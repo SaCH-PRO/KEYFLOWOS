@@ -1,17 +1,18 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `KFS-2026-09-17-01`.
+Checkpoint: `KFN-2026-09-17-01`.
 
-KeyFlow Space has been accepted into the canonical product plan.
+Accepted product expansions:
+1. KeyFlow Space (J21 / KF-EXEC-SPACE-001)
+2. KeyFlow Network (new J26 / KF-EXEC-NETWORK-001)
 
-Authority:
-- `docs/intelligence/product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md`
-- `docs/intelligence/execution/KF-EXEC-SPACE-001-KEYFLOW-SPACE-EVENTS-REGISTRATION-TICKETING.md`
+J26 owns:
+Need/Opportunity → discovery/map/community → Index/matching → RFQ/quote comparison → governed provider selection → PO/order/contract → fulfilment/logistics → evidence → relationship/reputation learning.
 
-J21 remains primary owner. Space composes website/presence, storefront, bookings, events, registration/ticketing, forms, public quote/payment and portal entry.
+KeyFlow Index is multidimensional and evidence/provenance/freshness backed; no opaque popularity score or hidden paid-ranking contamination.
 
-Total execution packets: 31.
+Architecture now has 26 journey dossiers, 12 kernel dossiers and 32 execution packets.
 
-Next non-coding frontier: Capability & Workforce Replacement Blueprint. New user ideas should be classified into existing capabilities/journeys/kernels and used to refine packets; create new primitives only if existing architecture cannot express them.
+Active frontier remains Capability & Workforce Replacement Blueprint + idea intake.
 
-No code/schema/provider/deployment mutation. Map paused. Scheduled cycles halted.
+No production code/schema/provider/deployment changes. Map paused. Scheduled cycles halted.
