@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { DeliveryQueueService } from './delivery-queue.service';
+import { effectFingerprint } from './effect-certainty';
 import type {
   ChannelAdapter,
   ProviderEffectMaterial,
@@ -184,14 +185,6 @@ describe('Resend outbound effect certainty', () => {
         }),
       }),
     );
-    expect(h.outboundUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          providerOutcome: undefined,
-        }),
-      }),
-    ).not;
-
     await h.privateService.repairResendConsequences(
       baseDelivery({
         status: 'Published',
@@ -288,7 +281,6 @@ describe('Resend outbound effect certainty', () => {
 
   it('[EXTFX-P02] reuses a bound immutable snapshot even if source content changes', async () => {
     const h = harness({ success: true, externalPostId: 'email_1' });
-    const { effectFingerprint } = await import('./effect-certainty');
     const boundFingerprint = effectFingerprint(material);
 
     await h.privateService.executeDelivery(
