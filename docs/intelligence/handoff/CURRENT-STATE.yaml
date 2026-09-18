@@ -1,27 +1,29 @@
 project: KEYFLOWOS
-analysis_version: 89
-last_updated: '2026-09-17'
-checkpoint_id: PKG-K12-2026-09-17-01
-status: SURGICAL_PACKAGE_HARDENING_ACTIVE_K12_L2_COMPLETE
+analysis_version: 90
+last_updated: '2026-09-18'
+checkpoint_id: PKG-EXTFX-2026-09-18-01
+status: IMPLEMENTATION_ACTIVE_K12_MERGED_EXTFX_L3_CHARACTERIZATION
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-implementation_authorized: false
-production_read_only: true
-runtime_proof_executed: false
+implementation_authorized: true
+production_release_authorized: false
+production_mutations_authorized: false
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+current_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
 coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 35}
 package_hardening:
-  target_level_before_code: L2
   total_packets: 35
-  hardened_L2: 1
-  current_completed: KF-EXEC-K12-001
-  standard: docs/intelligence/packages/PACKAGE-STANDARD.md
-  debug_contract: docs/intelligence/packages/DEBUGGABILITY-CONTRACT.md
-  registry: docs/intelligence/packages/PACKAGE-REGISTRY.yaml
-  next_sequence:
-  - KF-EXEC-EXTFX-001
-  - KF-EXEC-TENANT-001
-  - KF-EXEC-AUTH-001
-  - KF-EXEC-ACTION-001
-active_frontier: {stage: SURGICAL_PACKAGE_HARDENING, status: K12_L2_COMPLETE_CONTINUE_DEPENDENCY_ORDER}
-constraints: [no_production_code_changes, no_schema_migration_execution, no_provider_mutations, no_deployment_changes, no_runtime_proof_claim, no_silent_rebaseline, programme_map_refresh_paused, scheduled_cycles_halted]
+  hardened_L2: 2
+  current: KF-EXEC-EXTFX-001
+  k12:
+    merged_main_sha: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
+    ci_run: 35295140078
+    server_tests: 4009
+    proof_cases: 16
+    proof_verdict: SATISFIED_AT_DECLARED_SCOPE
+  extfx:
+    level: L2
+    characterized_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
+    status: L3_CHARACTERIZATION_ACTIVE
+active_frontier: {stage: BOUNDED_IMPLEMENTATION_AND_PROOF, status: EXTFX_CHARACTERIZATION_THEN_IMPLEMENTATION}
+constraints: [no_production_provider_effects, no_production_data_mutations, no_production_deployment, no_silent_rebaseline, programme_map_refresh_paused, scheduled_cycles_halted]

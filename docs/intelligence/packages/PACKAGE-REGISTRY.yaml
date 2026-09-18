@@ -2,7 +2,7 @@ version: 1
 checkpoint: PKGSTD-2026-09-17-01
 target_hardening_level: L2
 total_execution_packets: 35
-hardened_packages: 1
+hardened_packages: 2
 packages:
   - id: KF-EXEC-K12-001
     title: Proof Admission & Isolation Substrate
@@ -12,6 +12,19 @@ packages:
     dependencies: []
     blocks:
       - all_other_execution_packages
+    implementation:
+      merged_main_sha: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
+      proof_scope: evaluator_and_ci_resource_admission
+      ci_run: 35295140078
+      proof_cases: 16
+      status: MERGED_PROVEN_DECLARED_SCOPE
+  - id: KF-EXEC-EXTFX-001
+    title: OutboundDelivery + Resend Effect Certainty
+    level: L2
+    owner: J23/J18
+    path: docs/intelligence/packages/KF-EXEC-EXTFX-001
+    dependencies: [KF-EXEC-K12-001]
+    status: AUTHORIZED_L3_CHARACTERIZATION_ACTIVE
 remaining:
-  count: 34
+  count: 33
   sequencing_rule: dependency_order_then_risk

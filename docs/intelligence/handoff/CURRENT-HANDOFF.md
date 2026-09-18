@@ -1,29 +1,37 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `PKG-K12-2026-09-17-01`.
+Checkpoint: `PKG-EXTFX-2026-09-18-01`.
 
-The programme has entered **surgical package hardening**.
+Implementation is explicitly authorized in bounded packages.
 
-Goal before any code mutation: upgrade all 35 execution packets from L1 execution packets to L2 surgical packages.
+## K12
+Merged to main:
+`ebbe8862fa4b7e6ec968db193620ac53f38cd5ff`
 
-L2 adds:
-- SCOPE.yaml;
-- source/invariant/proof traceability;
-- ordered reversible change plan;
-- universal + package-specific debug contract;
-- failure matrix;
-- proof matrix;
-- rollback/disable contract;
-- Claude implementer handoff;
-- Kimi adversarial review handoff;
-- acceptance checklist.
+Evidence:
+- CI run 35295140078 green;
+- 430 server files / 4009 tests green;
+- K12 exact proof manifest 16/16;
+- verdict SATISFIED_AT_DECLARED_SCOPE;
+- CI Postgres/Redis admitted before migrations;
+- lint/typecheck/build/web/security/DAST/divergence green.
 
-First hardened package complete:
-`docs/intelligence/packages/KF-EXEC-K12-001/`.
+## Current package
+`KF-EXEC-EXTFX-001 — OutboundDelivery + Resend Effect Certainty`
 
-This is the proof/isolation root, so downstream packages inherit its proof/debug discipline.
+L2 surgical package:
+`docs/intelligence/packages/KF-EXEC-EXTFX-001/`
 
-Next hardening order:
-KF-EXEC-EXTFX-001 → TENANT-001 → AUTH-001 → ACTION-001, then dependency/risk order through all remaining packets.
+Current-main characterization:
+`main@ebbe8862...`
 
-No production code/schema/provider/deployment changes. Map paused. Scheduled cycles halted.
+Confirmed current defect:
+provider call + local consequences share one broad catch, so local post-provider failure can still become provider retry.
+
+Provider contract:
+Resend Node SDK supports stable idempotency keys; same key+same payload is deduplicated for 24 hours.
+
+Next:
+complete exhaustive current-main writer/reader characterization, finalize additive migration, implement on dedicated branch, then run deterministic provider/concurrency/failure-injection proof.
+
+No production provider sends, production data changes, or deployment are authorized.

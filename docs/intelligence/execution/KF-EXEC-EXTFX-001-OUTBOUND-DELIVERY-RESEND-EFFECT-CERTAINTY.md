@@ -1052,3 +1052,16 @@ IMPLEMENTATION STATUS: UNAUTHORIZED
 ```
 
 The packet is intentionally narrow but nontrivial. If it cannot prove provider-effect certainty without a universal workflow/recovery framework, that failure is useful architecture evidence and should reopen the target before KeyFlow expands the pattern to AI plans, webhooks or money.
+
+
+## 22. Authorization and surgical-package status — 2026-09-18
+
+Human implementation authorization is now ACTIVE for bounded package execution.
+
+Surgical package authority:
+`docs/intelligence/packages/KF-EXEC-EXTFX-001/`.
+
+Current characterized main:
+`ebbe8862fa4b7e6ec968db193620ac53f38cd5ff`.
+
+Current official Resend contract verified: Node SDK accepts an `idempotencyKey` option; same key + same payload is deduplicated for 24 hours. This limits safe unknown-outcome replay to the provider retention window and does not replace durable KeyFlow effect identity.
