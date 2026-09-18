@@ -7,7 +7,7 @@ Checkpoint: IRP-100-2026-09-17-01
 Satisfied when:
 1. 25/25 journeys and 12/12 kernels have durable owners;
 2. whole-OS target, migration, proof and wave architecture exist;
-3. every Wave 0/A/B/C/D/E item, including KeyFlow Space/events and KeyFlow Network/J26, has a bounded packet;
+3. every Wave 0/A/B/C/D/E item, including KeyFlow Space/events, KeyFlow Network/J26, Playbooks/Flow Marketplace, and Studio/Cockpit experience, has a bounded packet;
 4. packets state dependencies, invariants, characterization, migration/cutover, proof, negative controls, rollback and non-goals;
 5. known semantic roots have canonical ownership;
 6. multi-agent handoff and evidence-return rules are explicit;

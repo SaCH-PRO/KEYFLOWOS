@@ -1,34 +1,42 @@
 project: KEYFLOWOS
-analysis_version: 86
+analysis_version: 87
 last_updated: '2026-09-17'
-checkpoint_id: KFN-2026-09-17-01
-status: KEYFLOW_NETWORK_J26_ACCEPTED_CAPABILITY_WORKFORCE_BLUEPRINT_ACTIVE
+checkpoint_id: KFP-2026-09-17-01
+status: FULL_PRODUCT_INCORPORATION_AUDIT_COMPLETE_CAPABILITY_WORKFORCE_BLUEPRINT_CANONICAL
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: false
 production_read_only: true
 runtime_proof_executed: false
-provider_proof_executed: false
-migration_proof_executed: false
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, semantic_target_closure: EXPANDED_WITH_J26_BOUNDED_REOPENABLE}
+coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12}
 readiness:
-  definition: docs/intelligence/execution/READINESS-100-PERCENT-DEFINITION.md
-  manifest: docs/intelligence/execution/IMPLEMENTATION-READINESS-MANIFEST-ALL-WAVES.md
-  total_execution_packets: 32
+  total_execution_packets: 34
   architecture_questions_required_before_current_main_characterization: 0
   remaining_unknown_class: EXECUTION_EVIDENCE_ONLY
-product_expansions:
-  keyflow_space: {status: ACCEPTED_INTO_PLAN, primary_journey: J21, packet: KF-EXEC-SPACE-001}
-  keyflow_network:
-    status: ACCEPTED_INTO_PLAN
-    primary_journey: J26
-    creates_new_journey: true
-    creates_new_kernel: false
-    blueprint: docs/intelligence/product/KEYFLOW-NETWORK-CAPABILITY-BLUEPRINT.md
-    packet: KF-EXEC-NETWORK-001
-    components: [community, directory, map, entity_profiles, keyflow_index, matching, sourcing_pathways, rfq, procurement, b2b_fulfilment, logistics, network_intelligence]
+canonical_product:
+  master: docs/intelligence/product/KEYFLOWOS-CANONICAL-PRODUCT-CAPABILITY-MASTER.md
+  workforce: docs/intelligence/product/KEYFLOWOS-CAPABILITY-WORKFORCE-REPLACEMENT-BLUEPRINT.md
+  experience_playbooks: docs/intelligence/product/KEYFLOW-EXPERIENCE-PLAYBOOKS-PLATFORM-BLUEPRINT.md
+  space: docs/intelligence/product/KEYFLOW-SPACE-CAPABILITY-BLUEPRINT.md
+  network: docs/intelligence/product/KEYFLOW-NETWORK-CAPABILITY-BLUEPRINT.md
+product_promises_explicit:
+- KEY operational partner
+- Business Graph
+- Studio
+- Cockpit
+- Flow Feed
+- Flow Graph
+- Command
+- zero_friction_onboarding
+- Playbook Library
+- Flow Marketplace
+- gamification
+- virality
+- KeyFlow Space
+- KeyFlow Network
+- KeyFlow Index
+- workforce_replacement
 canonical_ranges: {findings_through: F233, contradictions_through: C183, recommendations_through: KF-REC-060, concepts_through: KF-CONCEPT-042}
-next_free_ids: {finding: F234, contradiction: C184, recommendation: KF-REC-061}
-active_frontier: {stage: CAPABILITY_AND_WORKFORCE_REPLACEMENT_BLUEPRINT, status: PRODUCT_CAPABILITY_SYNTHESIS_WITH_IDEA_INTAKE}
+active_frontier: {stage: CAPABILITY_AND_WORKFORCE_REPLACEMENT_BLUEPRINT, status: CANONICAL_BASELINE_ESTABLISHED_IDEA_INTAKE_CONTINUES}
 constraints: [no_production_code_changes, no_schema_migration_execution, no_provider_mutations, no_deployment_changes, no_runtime_proof_claim, no_silent_rebaseline, programme_map_refresh_paused, scheduled_cycles_halted]

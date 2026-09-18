@@ -33,6 +33,7 @@ B3 connector lifecycle grant-generation fencing
 B4 cancellation/supersession/waits
 B5 recovery/reconciliation operator projection
 B6 conversation occurrence/claim adoption
+B7 Playbook library/versioning/Flow Marketplace
 
 ## Wave C — commercial / finance / subscription
 
@@ -56,6 +57,7 @@ D4c KeyFlow Network + Index + map + B2B sourcing/orchestration
 D5 voice session/transport/action/metering
 D6 privacy/derived-state deletion and retention
 D7 frontend projection convergence
+D8 Studio/Cockpit/Flow Feed/Flow Graph/onboarding/virality experience convergence
 
 ## Wave E — withdrawal + integrated release proof
 

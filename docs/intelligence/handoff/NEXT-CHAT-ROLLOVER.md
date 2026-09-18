@@ -1,36 +1,41 @@
 # KEYFLOWOS — Next Chat Rollover
 
-Checkpoint: `KFN-2026-09-17-01`.
+Checkpoint: `KFP-2026-09-17-01`.
 
 ```text
-26/26 journeys
-12/12 kernels
-32 execution packets
+FULL PRODUCT INCORPORATION AUDIT COMPLETE
 
-NEW:
-J26 Business Network → Sourcing → B2B Fulfilment
+26 journeys
+12 kernels
+34 execution packets
+
+EXPLICIT CANONICAL PRODUCT PROMISES:
+KEY / AI operator
+Business Graph
+Studio
+Cockpit
+Flow Feed
+Flow Graph
+Command
+Zero-friction onboarding
+Playbook Library
+Flow Marketplace
+Gamification/virality
+KeyFlow Space
+Events/registration/ticketing
 KeyFlow Network
+Community/directory/map
 KeyFlow Index
-Interactive network map
-Community/directory
-Entity passports
-Provider matching
-Sourcing pathways
-RFQ/procurement
-B2B fulfilment/logistics
-Network intelligence
+B2B sourcing/procurement/logistics
+Workforce replacement blueprint
 
-Blueprint:
-docs/intelligence/product/KEYFLOW-NETWORK-CAPABILITY-BLUEPRINT.md
-
-Packet:
-KF-EXEC-NETWORK-001
-
-Existing source already contains partial community/reputation/matching/supplier/procurement seams; converge them.
+NEW PACKETS:
+KF-EXEC-PLAYBOOK-001
+KF-EXEC-EXPERIENCE-001
 
 NEXT:
-Capability & Workforce Replacement Blueprint
-+ continue user idea intake.
+Continue capability/workforce blueprint refinement and user idea intake.
+Only reopen architecture for real new capability/invariant.
 
 No production changes.
 No map refresh.

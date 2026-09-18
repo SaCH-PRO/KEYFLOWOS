@@ -1,30 +1,19 @@
 # KeyFlowOS Current State
 
-Checkpoint: `KFN-2026-09-17-01`.
+Checkpoint: `KFP-2026-09-17-01`.
 
-The canonical product has expanded from 25 to **26 journeys** with J26:
+A full product incorporation audit has reconciled the original KEYFLOW blueprint with the refined 26-journey / 12-kernel architecture.
 
-**Business Network → Sourcing → B2B Fulfilment**
+The audit found and fixed one planning-layer gap: original product promises for Studio/Cockpit/Flow Feed/Flow Graph, pre-opinionated Playbooks/Flow Marketplace, zero-friction onboarding, gamification and explicit workforce replacement had not yet been named as canonical product-layer artifacts in the intelligence programme.
 
-The expansion is justified because cross-business network discovery, trust/indexing, sourcing, procurement and multi-provider logistics were not previously owned as one end-to-end causal journey.
+They now are.
 
-KeyFlow Network now includes:
-- business/organization/supplier directory;
-- claimed/unclaimed entity profiles;
-- business social community;
-- interactive geographic map;
-- evidence-backed multidimensional KeyFlow Index;
-- referrals/collaborations/relationships;
-- AI business/provider matching;
-- natural-language sourcing pathways;
-- RFQ/quote comparison;
-- procurement/PO integration;
-- supplier fulfilment/logistics;
-- multi-provider orchestration;
-- network learning/opportunity/risk intelligence.
+Execution packet count is now 34, adding:
+- KF-EXEC-PLAYBOOK-001
+- KF-EXEC-EXPERIENCE-001
 
-The fixed-baseline repository already has partial community, reputation, matching, supplier and procurement implementations; the plan is convergence/refinement rather than rebuilding blindly.
+Canonical product master and workforce blueprint now sit above the journey/kernel/execution architecture.
 
-Architecture: 26/26 journeys, 12/12 kernels. Execution packets: 32.
+Current frontier remains capability/workforce refinement and user idea intake, with settled architecture reopened only when an idea genuinely needs a new journey/kernel/invariant.
 
-No production implementation has begun.
+No production code changes have begun.
