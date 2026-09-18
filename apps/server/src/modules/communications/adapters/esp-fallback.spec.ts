@@ -18,6 +18,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { AdapterRegistryService } from './adapter-registry.service';
 import { ResendEmailAdapter } from './resend-email-adapter';
+import { SystemEmailSendError } from '../../notifications/system-email.service';
 
 const registry = () => new AdapterRegistryService();
 
@@ -117,5 +118,59 @@ describe('the fallback adapter sends', () => {
   it('treats rate limits as transient, so they retry', () => {
     const adapter = new ResendEmailAdapter({ sendTransactional: vi.fn() } as never);
     expect(adapter.normalizeError(new Error('rate limit exceeded')).isTransient).toBe(true);
+  });
+
+  it('passes a bound snapshot and stable idempotency key to SystemEmailService', async () => {
+    const sendTransactional = vi.fn(async () => ({ id: 'msg_bound' }));
+    const adapter = new ResendEmailAdapter({ sendTransactional } as never);
+
+    const res = await adapter.publish(
+      null,
+      { platformId: 'mutable@example.test' },
+      { recipientEmail: 'mutable@example.test', subject: 'mutable', textBody: 'mutable' },
+      {
+        effectId: 'delivery_1',
+        attemptId: 'attempt_1',
+        effectFingerprint: 'abc123',
+        providerIdempotencyKey: 'keyflow/resend/delivery_1/abc123',
+        providerPayloadSnapshot: {
+          version: 1,
+          provider: 'RESEND',
+          businessId: 'biz_1',
+          destinationId: 'dest_1',
+          connectionId: 'conn_1',
+          to: 'bound@example.test',
+          from: 'Keyflow <no-reply@example.test>',
+          subject: 'Bound subject',
+          html: '<p>Bound</p>',
+          text: 'Bound',
+        },
+      },
+    );
+
+    expect(res).toEqual(expect.objectContaining({ success: true, externalPostId: 'msg_bound' }));
+    expect(sendTransactional).toHaveBeenCalledWith({
+      to: 'bound@example.test',
+      from: 'Keyflow <no-reply@example.test>',
+      subject: 'Bound subject',
+      html: '<p>Bound</p>',
+      text: 'Bound',
+      idempotencyKey: 'keyflow/resend/delivery_1/abc123',
+    });
+  });
+
+  it('marks a transport exception from SystemEmailService as OUTCOME_UNKNOWN', async () => {
+    const sendTransactional = vi.fn(async () => {
+      throw new SystemEmailSendError('socket closed after request', 'OUTCOME_UNKNOWN');
+    });
+    const adapter = new ResendEmailAdapter({ sendTransactional } as never);
+    const result = await adapter.publish(
+      null,
+      {},
+      { recipientEmail: 'a@b.test', subject: 'x', textBody: 'y' },
+    );
+    expect(result.success).toBe(false);
+    expect(result.outcomeCertainty).toBe('OUTCOME_UNKNOWN');
+    expect(result.isTransient).toBe(true);
   });
 });
