@@ -55,7 +55,7 @@ describe('the fallback can be turned off', () => {
 describe('the fallback adapter sends', () => {
   it('[EXTFX-P16] passes recipient, subject and body through on the legacy path', async () => {
     const sendTransactional = vi.fn(async () => ({ id: 'msg_1' }));
-    const adapter = new ResendEmailAdapter({ sendTransactional } as never);
+    const adapter = new ResendEmailAdapter({ sendTransactional, getSenderIdentity: () => 'Keyflow <no-reply@keyflow.test>' } as never);
 
     const res = await adapter.publish(null, { platformId: null }, {
       recipientEmail: 'customer@example.test',
@@ -72,7 +72,7 @@ describe('the fallback adapter sends', () => {
 
   it('[EXTFX-P15] uses immutable effect material and the stable provider idempotency key when supplied', async () => {
     const sendTransactional = vi.fn(async () => ({ id: 'msg_2' }));
-    const adapter = new ResendEmailAdapter({ sendTransactional } as never);
+    const adapter = new ResendEmailAdapter({ sendTransactional, getSenderIdentity: () => 'Keyflow <no-reply@keyflow.test>' } as never);
 
     const res = await adapter.publish(
       null,
@@ -107,7 +107,7 @@ describe('the fallback adapter sends', () => {
 
   it('does not render a text body as raw markup', async () => {
     const sendTransactional = vi.fn(async () => ({ id: 'm' }));
-    const adapter = new ResendEmailAdapter({ sendTransactional } as never);
+    const adapter = new ResendEmailAdapter({ sendTransactional, getSenderIdentity: () => 'Keyflow <no-reply@keyflow.test>' } as never);
     await adapter.publish(null, {}, { recipientEmail: 'a@b.test', textBody: '5 < 6 & <b>bold</b>' });
     const html = sendTransactional.mock.calls[0][0].html as string;
     expect(html).toContain('&lt;b&gt;');
