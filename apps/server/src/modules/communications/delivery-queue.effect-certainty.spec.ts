@@ -194,6 +194,36 @@ describe('Resend effect certainty in DeliveryQueueService', () => {
     vi.restoreAllMocks();
   });
 
+  it('[EXTFX-P01/P06] keeps the delivery effect id and provider key stable across attempts', async () => {
+    const contexts: Array<{ effectId: string; attemptId: string; providerIdempotencyKey?: string }> = [];
+    const h = makeHarness({
+      publish: vi.fn(async (_connection, _destination, _payload, context) => {
+        if (context) contexts.push({
+          effectId: context.effectId,
+          attemptId: context.attemptId,
+          providerIdempotencyKey: context.providerIdempotencyKey,
+        });
+        return {
+          success: false,
+          isTransient: true,
+          errorCode: 'NETWORK_UNKNOWN',
+          errorMessage: 'response lost',
+          outcomeCertainty: 'OUTCOME_UNKNOWN',
+        };
+      }),
+    });
+
+    await (h.service as any).executeDelivery(invocationRow(h.row));
+    h.row.status = 'Sending';
+    await (h.service as any).executeDelivery(invocationRow(h.row));
+
+    expect(contexts).toHaveLength(2);
+    expect(contexts[0].effectId).toBe(h.row.id);
+    expect(contexts[1].effectId).toBe(h.row.id);
+    expect(contexts[0].attemptId).not.toBe(contexts[1].attemptId);
+    expect(contexts[0].providerIdempotencyKey).toBe(contexts[1].providerIdempotencyKey);
+  });
+
   it('[EXTFX-P04] durably allocates an attempt before provider invocation', async () => {
     const h = makeHarness();
     h.adapter.publish = vi.fn(async () => {
