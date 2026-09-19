@@ -4033,6 +4033,19 @@ model OutboundDelivery {
   nextRetryAt    DateTime?          @map("next_retry_at")
   resultSnapshot Json?              @map("result_snapshot")
 
+  // EXTFX-001: durable effect / provider certainty axes.
+  // Nullable for legacy rows; new executions bind these before provider PONR.
+  effectFingerprint       String?   @map("effect_fingerprint")
+  effectSnapshot          Json?     @map("effect_snapshot")
+  attemptSequence         Int       @default(0) @map("attempt_sequence")
+  currentAttemptId        String?   @map("current_attempt_id")
+  attemptStartedAt        DateTime? @map("attempt_started_at")
+  attemptLeaseExpiresAt   DateTime? @map("attempt_lease_expires_at")
+  providerOutcome         String?   @map("provider_outcome")
+  providerFirstAttemptAt  DateTime? @map("provider_first_attempt_at")
+  providerIdempotencyKey  String?   @map("provider_idempotency_key")
+  consequenceState        String?   @map("consequence_state")
+
   businessId String @map("business_id")
 
   events DeliveryEvent[]
@@ -4047,6 +4060,8 @@ model OutboundDelivery {
   @@index([contactId])
   @@index([status, scheduledAt])
   @@index([status, nextRetryAt])
+  @@index([businessId, providerOutcome, consequenceState])
+  @@index([currentAttemptId])
   @@map("outbound_deliveries")
 }
 
@@ -4061,11 +4076,14 @@ model DeliveryEvent {
   errorMessage  String?          @map("error_message")
   resultData    Json?            @map("result_data")
   attemptNumber Int?             @map("attempt_number")
+  attemptId     String?           @map("attempt_id")
 
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([deliveryId])
   @@index([deliveryId, eventType])
+  @@index([deliveryId, attemptId])
+  @@unique([deliveryId, eventType, attemptId], map: "delivery_events_delivery_id_event_type_attempt_id_key")
   @@map("delivery_events")
 }
 
