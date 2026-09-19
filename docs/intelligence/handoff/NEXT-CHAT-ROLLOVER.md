@@ -1,36 +1,33 @@
 # KEYFLOWOS — Next Chat Rollover
 
-Checkpoint: `PKG-EXTFX-2026-09-19-01`
+Checkpoint: `PKG-EXTFX-2026-09-19-02`
 
 Paste the following into the new chat:
 
-> Continue KEYFLOWOS from the durable repository state. Do not restart, re-plan from scratch, or recreate EXTFX.
+> Continue KEYFLOWOS from the durable repository state. Do not restart or reconstruct K12/EXTFX.
 >
 > Repository: `SaCH-PRO/KEYFLOWOS`
 > Forensic baseline: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2`
-> Current main at handoff: `ebbe8862fa4b7e6ec968db193620ac53f38cd5ff`
+> Current main at handoff: `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`
 > Intelligence branch: `docs/keyflow-intelligence-foundation`
-> Active package: `KF-EXEC-EXTFX-001`
-> Implementation branch: `impl/kf-exec-extfx-001-resend-certainty`
-> Implementation head at handoff: `302ed9fe388ead2a0d7e40f10b82b849b13bb39e`
-> Draft PR: `#76`
 >
-> First read `docs/intelligence/handoff/CURRENT-STATE.yaml`, `CURRENT-HANDOFF.md`, this rollover, and `docs/intelligence/packages/KF-EXEC-EXTFX-001/CHARACTERIZATION-RECEIPT.yaml`. Re-resolve all live heads before editing.
+> K12 is already merged/proven. KF-EXEC-EXTFX-001 is now admitted and merged via PR #76. Its admitted implementation head is `42177f5639345d29448c50375c0c05b133c076b5`; merge commit is `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`.
 >
-> K12 is already merged/proven on main. EXTFX implementation exists in 5 commits; do not recreate it.
+> Final EXTFX CI run `35469579096` is green: migrations, 4033 server tests, K12 resource/proof admission (16/16 SATISFIED_AT_DECLARED_SCOPE), 210 web tests, server/web builds, server/web typecheck, lint, and security. Branch divergence run `35469579079` is green. DAST workflow run `35469579109` is green at its configuration guard, but HawkScan itself was skipped because DAST is not configured.
 >
-> The immediate blocker is CI run `35333169059`: security/lint/DAST/divergence are green, but server typecheck fails with nine errors in `delivery-queue.service.ts`; builds/tests were skipped. Fix those exact typing/runtime-boundary errors with the smallest change, preserving EXTFX invariants.
+> Adversarial EXTFX review is admitted at declared scope. The proof set now explicitly covers P01–P16 and the five required deterministic provider-simulator cases. No real provider traffic was sent.
 >
-> Then rerun full CI. Require migration application, server regression, K12 proof admission, web tests, builds, typecheck, lint, security, DAST and divergence to be green. After green CI, adversarially review EXTFX against its failure/proof matrices before changing PR #76 from draft or merging.
+> First read `docs/intelligence/handoff/CURRENT-STATE.yaml`, `CURRENT-HANDOFF.md`, this rollover, and the EXTFX characterization receipt. Re-resolve live heads before editing.
+>
+> Do not reopen or reconstruct EXTFX unless new evidence invalidates its proof. No next bounded package is selected at this checkpoint; select from durable intelligence when continuation is authorized.
 >
 > Do not send real provider traffic, mutate production data, deploy production, refresh the programme map, restart scheduled architecture cycles, or silently rebaseline the forensic baseline.
 
-## Current red CI details
+## Current state
 
-`delivery-queue.service.ts` errors:
-- nullable `htmlBody` passed to non-nullable optional `PublishPayload.htmlBody` (2 sites);
-- several `retryCount` / attempt-number values possibly undefined;
-- `ResendDeliveryRuntime` missing `externalPostId`;
-- a row lacking included `destination` passed where `ResendDeliveryRuntime` requires it.
-
-PR #76 must remain draft until full proof is green.
+- PR #76: merged.
+- Current main: `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`.
+- Forensic baseline remains `8f173bfe79f1418159cf4099ea18b0d60d203ec2`.
+- Programme map remains frozen.
+- Scheduled architecture cycles remain halted.
+- Next package: not selected.
