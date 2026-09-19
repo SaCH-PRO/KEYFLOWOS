@@ -1,21 +1,20 @@
 project: KEYFLOWOS
-analysis_version: 92
+analysis_version: 93
 last_updated: '2026-09-19'
-checkpoint_id: PKG-EXTFX-2026-09-19-01
-status: IMPLEMENTATION_PAUSED_HANDOFF_EXTFX_PR76_TYPECHECK_RED
+checkpoint_id: PKG-EXTFX-2026-09-19-02
+status: EXTFX_ADMITTED_MERGED_CHECKPOINTED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
-canonical_intelligence_head_before_this_commit: ebfa60dad6635f15d5422307a9ef142e9a621645
 implementation_authorized: true
 production_release_authorized: false
 production_mutations_authorized: false
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-current_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
+current_main: dc913c3942c3a2899b31fbbbf7cc7a7da5f78316
 coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 35}
 package_hardening:
   total_packets: 35
   hardened_L2: 2
-  current: KF-EXEC-EXTFX-001
+  current: null
   k12:
     merged_main_sha: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
     ci_run: 35295140078
@@ -26,24 +25,41 @@ package_hardening:
     level: L3
     characterized_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
     implementation_branch: impl/kf-exec-extfx-001-resend-certainty
-    implementation_head: 302ed9fe388ead2a0d7e40f10b82b849b13bb39e
+    admitted_implementation_head: 42177f5639345d29448c50375c0c05b133c076b5
     pull_request: 76
-    pull_request_state: OPEN_DRAFT
-    branch_delta_vs_main: {ahead: 5, behind: 0}
-    changed_files: 10
+    pull_request_state: MERGED
+    merged_main_sha: dc913c3942c3a2899b31fbbbf7cc7a7da5f78316
+    final_branch_delta_vs_premerge_main: {ahead: 9, behind: 0}
+    changed_files: 11
     ci:
-      run: 35333169059
-      conclusion: failure
+      run: 35469579096
+      conclusion: success
       security: success
       lint: success
-      typecheck_server: failure
-      build_server: skipped
-      build_web: skipped
-      tests: skipped
-    status: IMPLEMENTATION_EXISTS_NOT_ADMITTED_TYPECHECK_RED
+      typecheck_server: success
+      typecheck_web: success
+      build_server: success
+      build_web: success
+      migration_application: success
+      server_tests: 4033
+      server_test_files: 433
+      k12_resource_admission: success
+      k12_proof_verdict: SATISFIED_AT_DECLARED_SCOPE
+      k12_proof_cases: 16
+      web_tests: 210
+      web_test_files: 22
+      branch_divergence: success
+      dast_workflow: success
+      dast_scan_configured: false
+    proof_review:
+      verdict: ADMITTED_AT_DECLARED_SCOPE
+      proof_obligations: P01-P16
+      deterministic_provider_simulator_cases: 5
+      provider_traffic_used: false
+    status: ADMITTED_AND_MERGED
 active_frontier:
-  stage: BOUNDED_IMPLEMENTATION_AND_PROOF
-  status: FIX_EXTFX_PR76_TYPECHECK_THEN_REENTER_FULL_PROOF
+  stage: POST_EXTFX_CHECKPOINT
+  status: NEXT_PACKAGE_NOT_SELECTED
 constraints:
   - no_production_provider_effects
   - no_production_data_mutations
@@ -52,9 +68,8 @@ constraints:
   - programme_map_refresh_paused
   - scheduled_cycles_halted
 next_actions:
-  - inspect PR 76 head 302ed9fe without recreating from scratch
-  - fix nine server TypeScript errors in delivery-queue.service.ts only as needed
-  - rerun full CI
-  - require migration + server tests + K12 admission + web tests + builds + security + DAST + divergence green
-  - adversarially review EXTFX semantics before ready-for-review
-  - keep PR draft until proof is admitted
+  - re-resolve main and canonical intelligence heads before new work
+  - preserve forensic baseline 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+  - do not reopen or reconstruct KF-EXEC-EXTFX-001 unless a regression invalidates admitted proof
+  - select the next bounded package from durable intelligence only when continuation is authorized
+  - keep programme map refresh and scheduled architecture cycles paused
