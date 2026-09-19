@@ -1,5 +1,5 @@
 version: 1
-checkpoint: PKGSTD-2026-09-17-01
+checkpoint: PKG-EXTFX-2026-09-19-01
 target_hardening_level: L2
 total_execution_packets: 35
 hardened_packages: 2
@@ -24,7 +24,14 @@ packages:
     owner: J23/J18
     path: docs/intelligence/packages/KF-EXEC-EXTFX-001
     dependencies: [KF-EXEC-K12-001]
-    status: L3_CHARACTERIZED_IMPLEMENTATION_ACTIVE
+    implementation:
+      branch: impl/kf-exec-extfx-001-resend-certainty
+      head: 302ed9fe388ead2a0d7e40f10b82b849b13bb39e
+      pull_request: 76
+      latest_ci_run: 35333169059
+      latest_ci_conclusion: failure
+      blocker: server_typecheck
+    status: IMPLEMENTED_NOT_ADMITTED_TYPECHECK_RED
 remaining:
   count: 33
   sequencing_rule: dependency_order_then_risk

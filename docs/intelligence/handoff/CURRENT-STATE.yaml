@@ -1,10 +1,11 @@
 project: KEYFLOWOS
-analysis_version: 91
-last_updated: '2026-09-18'
-checkpoint_id: PKG-EXTFX-2026-09-18-02
-status: IMPLEMENTATION_ACTIVE_EXTFX_L3_CHARACTERIZED_COMMIT_A_CI
+analysis_version: 92
+last_updated: '2026-09-19'
+checkpoint_id: PKG-EXTFX-2026-09-19-01
+status: IMPLEMENTATION_PAUSED_HANDOFF_EXTFX_PR76_TYPECHECK_RED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
+canonical_intelligence_head_before_this_commit: ebfa60dad6635f15d5422307a9ef142e9a621645
 implementation_authorized: true
 production_release_authorized: false
 production_mutations_authorized: false
@@ -24,6 +25,36 @@ package_hardening:
   extfx:
     level: L3
     characterized_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
-    status: IMPLEMENTATION_ACTIVE_COMMIT_A_CI
-active_frontier: {stage: BOUNDED_IMPLEMENTATION_AND_PROOF, status: EXTFX_CHARACTERIZATION_THEN_IMPLEMENTATION}
-constraints: [no_production_provider_effects, no_production_data_mutations, no_production_deployment, no_silent_rebaseline, programme_map_refresh_paused, scheduled_cycles_halted]
+    implementation_branch: impl/kf-exec-extfx-001-resend-certainty
+    implementation_head: 302ed9fe388ead2a0d7e40f10b82b849b13bb39e
+    pull_request: 76
+    pull_request_state: OPEN_DRAFT
+    branch_delta_vs_main: {ahead: 5, behind: 0}
+    changed_files: 10
+    ci:
+      run: 35333169059
+      conclusion: failure
+      security: success
+      lint: success
+      typecheck_server: failure
+      build_server: skipped
+      build_web: skipped
+      tests: skipped
+    status: IMPLEMENTATION_EXISTS_NOT_ADMITTED_TYPECHECK_RED
+active_frontier:
+  stage: BOUNDED_IMPLEMENTATION_AND_PROOF
+  status: FIX_EXTFX_PR76_TYPECHECK_THEN_REENTER_FULL_PROOF
+constraints:
+  - no_production_provider_effects
+  - no_production_data_mutations
+  - no_production_deployment
+  - no_silent_rebaseline
+  - programme_map_refresh_paused
+  - scheduled_cycles_halted
+next_actions:
+  - inspect PR 76 head 302ed9fe without recreating from scratch
+  - fix nine server TypeScript errors in delivery-queue.service.ts only as needed
+  - rerun full CI
+  - require migration + server tests + K12 admission + web tests + builds + security + DAST + divergence green
+  - adversarially review EXTFX semantics before ready-for-review
+  - keep PR draft until proof is admitted

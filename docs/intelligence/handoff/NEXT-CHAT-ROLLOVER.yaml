@@ -1,12 +1,49 @@
 project: KEYFLOWOS
-rollover_version: 62
-checkpoint_id: KFG-2026-09-17-01
-status: KEYFLOW_GROWTH_ENGINE_ACCEPTED
-coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 35}
-implementation_authorized: false
-product_expansions:
-  keyflow_space: {accepted: true, primary_journey: J21, packet: KF-EXEC-SPACE-001}
-  keyflow_network: {accepted: true, primary_journey: J26, packet: KF-EXEC-NETWORK-001}
-  keyflow_growth: {accepted: true, primary_journey: J9, packet: KF-EXEC-GROWTH-001}
-active_frontier: CAPABILITY_AND_WORKFORCE_REPLACEMENT_BLUEPRINT
-constraints: [production_read_only, no_schema_mutation, no_provider_mutation, no_deployment_change, no_map_refresh, scheduled_cycles_halted]
+rollover_version: 63
+checkpoint_id: PKG-EXTFX-2026-09-19-01
+status: EXTFX_PR76_TYPECHECK_RED_HANDOFF
+repository: SaCH-PRO/KEYFLOWOS
+forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+main_at_handoff: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
+intelligence_branch: docs/keyflow-intelligence-foundation
+implementation_authorized: true
+production_release_authorized: false
+production_mutations_authorized: false
+active_package: KF-EXEC-EXTFX-001
+implementation:
+  branch: impl/kf-exec-extfx-001-resend-certainty
+  head: 302ed9fe388ead2a0d7e40f10b82b849b13bb39e
+  pull_request: 76
+  pull_request_draft: true
+  commits_ahead_of_main: 5
+  behind_main: 0
+  latest_ci:
+    run: 35333169059
+    conclusion: failure
+    security: success
+    lint: success
+    server_typecheck: failure
+    server_build: skipped
+    web_build: skipped
+    tests: skipped
+blocker:
+  file: apps/server/src/modules/communications/delivery-queue.service.ts
+  error_count: 9
+  classes:
+    - nullable_publish_payload_html_body
+    - optional_retry_count_attempt_numbers
+    - missing_external_post_id_on_runtime_type
+    - runtime_type_requires_destination_but_query_does_not_include_it
+next:
+  - re_resolve_live_heads
+  - fix_typecheck_without_semantic_scope_expansion
+  - run_full_ci
+  - adversarial_extfx_review
+  - keep_pr_draft_until_proof_green
+constraints:
+  - no_production_provider_effects
+  - no_production_data_mutations
+  - no_production_deployment
+  - no_silent_rebaseline
+  - programme_map_refresh_paused
+  - scheduled_cycles_halted
