@@ -97,25 +97,57 @@ implementation_slices:
       - bounded unknown replay
       - manual retry guard
 
-implementation_current:
-  branch_head: 302ed9fe388ead2a0d7e40f10b82b849b13bb39e
+implementation_admission:
+  branch_head: 42177f5639345d29448c50375c0c05b133c076b5
   pull_request: 76
-  pull_request_state: OPEN_DRAFT_UNMERGED
-  commits:
-    - ff412c5e938c011a0950fb9db607c15ea0869f6f
-    - 116fd5c5c23f60e719a84b6610f69df3658f4dfc
-    - dd64ca7de581f3cbd1f31e52d2ab5a94a661626b
-    - 375ee3f31365e1c62adff5c233c1e889cad14258
-    - 302ed9fe388ead2a0d7e40f10b82b849b13bb39e
-  latest_ci_run: 35333169059
-  latest_ci_status: FAILED_SERVER_TYPECHECK
-  green_checks:
-    - security
-    - lint
-    - branch_divergence
-    - dast
-  blockers:
-    - nullable htmlBody/subject not normalized to PublishPayload
-    - optional retryCount/attempt number used without default
-    - ResendDeliveryRuntime mixes provider-execution joins with repair-only persisted rows
-  merge_allowed: false
+  pull_request_state: MERGED
+  merge_commit: dc913c3942c3a2899b31fbbbf7cc7a7da5f78316
+  final_ci_run: 35469579096
+  final_ci_status: SUCCESS
+  server_test_files: 433
+  server_tests: 4033
+  web_test_files: 22
+  web_tests: 210
+  migration_application: SUCCESS
+  build_server: SUCCESS
+  build_web: SUCCESS
+  typecheck_server: SUCCESS
+  typecheck_web: SUCCESS
+  lint: SUCCESS
+  security: SUCCESS
+  branch_divergence_run: 35469579079
+  branch_divergence: SUCCESS
+  dast_run: 35469579109
+  dast_workflow: SUCCESS
+  dast_scan_configured: false
+  k12_proof:
+    verdict: SATISFIED_AT_DECLARED_SCOPE
+    required_cases: 16
+    discovered_cases: 16
+  extfx_proof_review:
+    verdict: ADMITTED_AT_DECLARED_SCOPE
+    obligations_reviewed: P01-P16
+    deterministic_provider_simulator:
+      cases: 5
+      result: PASS
+      real_provider_traffic: false
+    explicit_additions:
+      - P01 stable delivery effect identity across attempts
+      - P16 historical one-argument SystemEmailService call remains supported
+      - accept + provider id
+      - reject before effect
+      - accept with response lost
+      - same key + same payload returns same provider object
+      - same key + different payload is conflict
+  typecheck_fix:
+    commit: 87d1014cbf7adfbeac6040a9bed422c4c3eb4a1c
+    semantics:
+      - normalize nullable PublishPayload fields to undefined
+      - default optional legacy retryCount to zero on non-Resend execution path
+      - narrow consequence repair input to delivery id only
+  proof_completion_commits:
+    - 4eef7972be91979ea7a5ff0d3ea476cf9a194045
+    - 29b0189e917342e3dd3dcee47f3c6de3bbf8d089
+    - 42177f5639345d29448c50375c0c05b133c076b5
+  merge_allowed: true
+  merged: true
