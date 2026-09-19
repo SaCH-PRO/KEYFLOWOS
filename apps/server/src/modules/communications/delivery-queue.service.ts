@@ -270,9 +270,9 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const payload = {
       textBody: effectiveVariant?.textBody ?? content?.body ?? '',
-      htmlBody: effectiveVariant?.htmlBody,
+      htmlBody: effectiveVariant?.htmlBody ?? undefined,
       mediaUrls: effectiveVariant?.mediaUrls ?? [],
-      subject: effectiveSubject,
+      subject: effectiveSubject ?? undefined,
       recipientEmail,
       meta: Object.keys(mergedMeta).length > 0 ? mergedMeta : undefined,
     };
@@ -282,9 +282,11 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    const retryCount = delivery.retryCount ?? 0;
+
     try {
       const result = await adapter.publish(destination.connection, destination, payload);
-      const attemptNumber = delivery.retryCount + 1;
+      const attemptNumber = retryCount + 1;
       const resultSnapshot = result.raw ?? undefined;
 
       if (result.success) {
@@ -313,11 +315,11 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
         await this.updateContentStatus(delivery.contentId);
       } else {
         const isTransient = result.isTransient ?? false;
-        const newRetryCount = delivery.retryCount + 1;
+        const newRetryCount = retryCount + 1;
         const errorSnapshot = { errorCode: result.errorCode, errorMessage: result.errorMessage, raw: resultSnapshot };
 
         if (isTransient && newRetryCount < delivery.maxRetries) {
-          const backoffMs = BACKOFF_BASE_MS * Math.pow(2, delivery.retryCount);
+          const backoffMs = BACKOFF_BASE_MS * Math.pow(2, retryCount);
           const nextRetryAt = new Date(Date.now() + backoffMs);
 
           await this.prisma.client.outboundDelivery.update({
@@ -358,11 +360,11 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (err: any) {
       const normalized = adapter.normalizeError(err);
-      const newRetryCount = delivery.retryCount + 1;
+      const newRetryCount = retryCount + 1;
       const errorSnapshot = { errorCode: normalized.code, errorMessage: normalized.message };
 
       if (normalized.isTransient && newRetryCount < delivery.maxRetries) {
-        const backoffMs = BACKOFF_BASE_MS * Math.pow(2, delivery.retryCount);
+        const backoffMs = BACKOFF_BASE_MS * Math.pow(2, retryCount);
         await this.prisma.client.outboundDelivery.update({
           where: { id: delivery.id },
           data: { status: 'RetryPending', retryCount: newRetryCount, nextRetryAt: new Date(Date.now() + backoffMs), errorCode: normalized.code, errorMessage: normalized.message },
@@ -622,16 +624,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       this.logger.debug(
         `delivery.provider.confirmed deliveryId=${delivery.id} attemptId=${attempt.attemptId} externalPostId=${result.externalPostId ?? ''}`,
       );
-      await this.tryRepairResendConsequences({
-        ...delivery,
-        status: 'Published',
-        externalPostId: result.externalPostId,
-        resultSnapshot,
-        providerOutcome: 'SUCCEEDED_CONFIRMED',
-        consequenceState: 'INCOMPLETE',
-        currentAttemptId: attempt.attemptId,
-        attemptSequence: attempt.attemptNumber,
-      });
+      await this.tryRepairResendConsequences({ id: delivery.id });
       return;
     }
 
@@ -816,7 +809,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async tryRepairResendConsequences(delivery: ResendDeliveryRuntime): Promise<void> {
+  private async tryRepairResendConsequences(delivery: { id: string }): Promise<void> {
     try {
       await this.repairResendConsequences(delivery);
     } catch (err) {
@@ -834,7 +827,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async repairResendConsequences(delivery: ResendDeliveryRuntime): Promise<void> {
+  private async repairResendConsequences(delivery: { id: string }): Promise<void> {
     const current = await this.prisma.client.outboundDelivery.findUnique({
       where: { id: delivery.id },
     });
