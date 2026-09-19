@@ -213,9 +213,10 @@ describe('Resend effect certainty in DeliveryQueueService', () => {
       }),
     });
 
-    await (h.service as any).executeDelivery(invocationRow(h.row));
+    const execute = Reflect.get(h.service, 'executeDelivery') as (delivery: Row) => Promise<void>;
+    await execute.call(h.service, invocationRow(h.row));
     h.row.status = 'Sending';
-    await (h.service as any).executeDelivery(invocationRow(h.row));
+    await execute.call(h.service, invocationRow(h.row));
 
     expect(contexts).toHaveLength(2);
     expect(contexts[0].effectId).toBe(h.row.id);
