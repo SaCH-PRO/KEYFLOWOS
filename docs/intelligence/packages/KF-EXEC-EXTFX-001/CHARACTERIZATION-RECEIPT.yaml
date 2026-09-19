@@ -80,7 +80,7 @@ event_consumer_characterization:
 stop_condition_triggered: false
 implementation_slices:
   commit_a:
-    status: IN_CI
+    status: ADMITTED_FULL_CI_RUN_35331516602
     scope:
       - additive schema
       - effect fingerprint/snapshot helper
@@ -88,7 +88,7 @@ implementation_slices:
       - SystemEmailService idempotency support
       - adapter outcome certainty
   commit_b:
-    status: PENDING_COMMIT_A_ADMISSION
+    status: IMPLEMENTED_ON_PR76_UNPROVEN_TYPECHECK_RED
     scope:
       - provider/local phase split
       - pre-provider durable attempt
@@ -96,3 +96,26 @@ implementation_slices:
       - consequence repair
       - bounded unknown replay
       - manual retry guard
+
+implementation_current:
+  branch_head: 302ed9fe388ead2a0d7e40f10b82b849b13bb39e
+  pull_request: 76
+  pull_request_state: OPEN_DRAFT_UNMERGED
+  commits:
+    - ff412c5e938c011a0950fb9db607c15ea0869f6f
+    - 116fd5c5c23f60e719a84b6610f69df3658f4dfc
+    - dd64ca7de581f3cbd1f31e52d2ab5a94a661626b
+    - 375ee3f31365e1c62adff5c233c1e889cad14258
+    - 302ed9fe388ead2a0d7e40f10b82b849b13bb39e
+  latest_ci_run: 35333169059
+  latest_ci_status: FAILED_SERVER_TYPECHECK
+  green_checks:
+    - security
+    - lint
+    - branch_divergence
+    - dast
+  blockers:
+    - nullable htmlBody/subject not normalized to PublishPayload
+    - optional retryCount/attempt number used without default
+    - ResendDeliveryRuntime mixes provider-execution joins with repair-only persisted rows
+  merge_allowed: false
