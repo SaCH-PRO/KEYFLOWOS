@@ -11,3 +11,8 @@ For `impl/*` pull requests:
 These files are not substitutes for the canonical packet or PR. They are compact admission artifacts that allow repository gates to reject silent scope drift and unreviewed merge readiness.
 
 Do not place secrets, provider credentials, production data or large logs here.
+
+
+## source_head
+
+`source_head` is the final semantic implementation commit, not necessarily the branch tip. Commits after it are permitted only for `.agent-control/**` metadata. Any later code/schema/migration/test change invalidates the return and requires a new semantic head plus refreshed proof evidence.
