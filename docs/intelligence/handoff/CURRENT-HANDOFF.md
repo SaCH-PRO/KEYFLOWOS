@@ -8,7 +8,7 @@ This is the canonical continuation point. Do **not** restart the programme, reco
 
 - Repository: `SaCH-PRO/KEYFLOWOS`
 - Forensic baseline: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2` — unchanged
-- Current main: `cee4ea937eb451d8e2d8207bfe271c1e6684c7e8`
+- Current main: `cf3962a1245259dcbc6df18a8aeee481c34e50fe`
 - Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 - K12 admitted main checkpoint: `ebbe8862fa4b7e6ec968db193620ac53f38cd5ff`
 - EXTFX implementation branch: `impl/kf-exec-extfx-001-resend-certainty`
@@ -59,11 +59,11 @@ EXTFX remains closed and merged. **KF-EXEC-TENANT-001 is the authoritative activ
 
 Current active implementation:
 - Wave: A
-- State: CHARACTERIZING
-- Health: YELLOW
+- State: IMPLEMENTING
+- Health: GREEN
 - Replacement branch: `impl/kf-exec-tenant-001-isolation-final`
-- Draft PR: #81
-- Base: `main@cee4ea937eb451d8e2d8207bfe271c1e6684c7e8`
+- Supporting slice PR #81: MERGED with zero canonical TENANT completion credit
+- Implementation source main: `cf3962a1245259dcbc6df18a8aeee481c34e50fe`
 - Semantic implementation head: `c9f8e72df1a47b228cde191f9e77909123bcb0f2`
 - Control-artifact head at checkpoint: `0e9512fa13adce5dae0aaa4d4bd65597e6a6831e`
 - Prior PR #78 is superseded due branch-hygiene pressure and main drift; do not merge it.
@@ -72,7 +72,7 @@ Current active implementation:
 
 Before successor implementation work:
 1. Re-resolve `main`, PR #81 head and the canonical intelligence head.
-2. Complete the read-only canonical TENANT recharacterization and map every packet invariant/acceptance proof against current main and PR #81.
+2. Execute the released canonical TENANT implementation directive against current main.
 3. Preserve the forensic baseline `8f173bfe...`.
 4. Do not reopen K12 or EXTFX unless new evidence invalidates admitted proof.
 5. Do not admit PR #81 as full TENANT unless the canonical Membership-First Tenant Genesis obligations are satisfied.
