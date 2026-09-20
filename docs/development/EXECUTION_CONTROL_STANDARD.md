@@ -263,3 +263,107 @@ This is required for long-running convergence programmes so the supervising oper
 ## 15. Authority
 
 If another ad-hoc agent instruction conflicts with this standard, the stricter observability, scope-accounting, and proof requirement wins unless the repository owner explicitly overrides it for a named packet.
+
+
+## 16. Programme completion is not packet completion
+
+For the 35-packet KEYFLOWOS convergence programme, 35/35 packet completion is necessary but not sufficient.
+
+The programme MUST NOT be declared complete until a final whole-application reassessment proves that the converged repository behaves as one coherent system and reflects the accepted intelligence work.
+
+Required final acceptance layers:
+
+1. **Packet reassessment**
+   - re-open every admitted packet against final `main`;
+   - confirm later packets did not invalidate earlier invariants or proof;
+   - rerun any proof whose substrate materially changed.
+
+2. **Journey reassessment**
+   - reassess all 26 canonical journeys end to end;
+   - prove happy path, rejection path, retry/restart path, cancellation/supersession where applicable, and cross-domain handoffs;
+   - no journey may rely on a retired writer, stale compatibility reader, or contradictory state source.
+
+3. **Kernel reassessment**
+   - reassess all 12 kernels against final code;
+   - verify each kernel has one explainable authority/truth model at its declared boundary;
+   - verify cross-kernel contracts do not contradict each other.
+
+4. **Constellation and graph reassessment**
+   - re-run cross-journey constellation, causal, dynamic and feedback reasoning against implemented behavior;
+   - identify emergent contradictions introduced by individually correct packet changes.
+
+5. **Whole-repository regression**
+   - server tests;
+   - web tests;
+   - integration tests;
+   - real-database tests where declared;
+   - migration application from supported predecessor state;
+   - server/web typecheck;
+   - server/web builds;
+   - lint/security gates;
+   - branch/admission policy gates.
+
+6. **End-to-end product proof**
+   - authenticated tenant flows;
+   - public/customer flows;
+   - authority/approval/action execution;
+   - temporal/retry/recovery behavior;
+   - finance/commerce/commercial truth propagation;
+   - connector/provider simulation or authorized sandbox proof;
+   - browser/UI projections of canonical backend truth;
+   - voice/runtime paths where applicable.
+
+7. **Adversarial/failure proof**
+   - wrong tenant;
+   - stale authority;
+   - duplicate/replayed ingress;
+   - concurrent claims;
+   - process crash/restart;
+   - provider timeout/unknown outcome;
+   - partial migration/legacy ambiguity;
+   - stale worker/generation;
+   - cancellation/supersession;
+   - rollback/repair behavior;
+   - negative controls proving tests cannot pass vacuously.
+
+8. **Data and migration reconciliation**
+   - deterministic backfills proved;
+   - ambiguous historical rows classified, not guessed;
+   - no destructive migration without explicit evidence;
+   - compatibility layers retired only after consumer proof.
+
+9. **Architecture-to-code reconciliation**
+   - final code is re-compared to the accepted journeys, kernels, constellations, findings, contradictions, recommendations and packet contracts;
+   - every surfaced implementation-relevant finding has a recorded disposition: implemented, already satisfied, superseded, proof-only, or explicitly deferred with owner/reason.
+
+10. **Operational qualification**
+    - observability and failure visibility;
+    - performance/operability thresholds;
+    - no hidden production-only prerequisites;
+    - release evidence separate from implementation proof.
+
+### Final programme completion contract
+
+The programme may be reported as complete only when all applicable statements are YES:
+
+- 35/35 execution packets dispositioned and checkpointed
+- 26/26 journeys reassessed
+- 12/12 kernels reassessed
+- cross-constellation contradictions reassessed
+- all implementation-relevant findings dispositioned
+- full regression suite green
+- migration path green
+- end-to-end acceptance suite green
+- adversarial/failure suite green
+- security/tenant/authority negative controls green
+- browser/runtime/voice checks green where applicable
+- no unexplained skipped/todo proof cases
+- no unexplained deferrals
+- no active legacy writer contradicting canonical truth
+- no compatibility reader retained without explicit evidence
+- final `main` revalidated after the last merge
+- durable intelligence/handoff reconciled to final code
+
+If any item is NO, UNKNOWN, SKIPPED, or UNPROVEN, the programme is not complete.
+
+This contract supports a high-confidence claim that the repository reflects the declared KEYFLOWOS programme scope. It does not justify claiming that software can never contain an undiscovered defect or that production behavior has been proven where production execution was not authorized.
