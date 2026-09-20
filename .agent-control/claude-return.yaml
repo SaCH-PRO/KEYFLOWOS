@@ -3,11 +3,11 @@ directive_message_id: CG-DIRECTIVE-TENANT-IMPL-001
 source_main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
 source_head: 2bb3c748e2335cf20c887dc8f1be5ddc2222a430
 implementation_branch: impl/kf-exec-tenant-001-membership-genesis
-state: PROVING
+state: READY_TO_MERGE
 health: GREEN
 scope_changed: false
 production_touched: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: READY_TO_MERGE
 summary: >
   Canonical Membership-First Tenant Genesis implemented against main@cf3962a1.
   All three production Business constructors now establish exactly one founding
