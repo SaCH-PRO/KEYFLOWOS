@@ -1,6 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
+import { skipTenantIsolation } from '@keyflow/db';
 import { z } from 'zod';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../core/prisma/prisma.service';
@@ -322,13 +323,15 @@ export class PresenceService {
   }
 
   async getByPreviewToken(token: string) {
-    const draft = await this.prisma.client.sitePageDraft.findUnique({
-      where: { previewToken: token },
-      include: { business: { select: {
-        id: true, name: true, slug: true, logoUrl: true, tagline: true, description: true,
-        address: true, city: true, country: true, phone: true, email: true, whatsapp: true,
-      } } },
-    });
+    const draft = await this.prisma.client.sitePageDraft.findUnique(
+      skipTenantIsolation({
+        where: { previewToken: token },
+        include: { business: { select: {
+          id: true, name: true, slug: true, logoUrl: true, tagline: true, description: true,
+          address: true, city: true, country: true, phone: true, email: true, whatsapp: true,
+        } } },
+      }),
+    );
     if (!draft) throw new NotFoundException('Preview not found');
     if (draft.previewExpiresAt && draft.previewExpiresAt < new Date()) {
       throw new NotFoundException('Preview link expired');
