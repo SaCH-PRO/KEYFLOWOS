@@ -1,0 +1,61 @@
+packet_id: KF-EXEC-TENANT-001-S0-ISOLATION-HARDENING
+directive_message_id: CG-REVIEW-TENANT-RECHAR-001
+source_main: cee4ea937eb451d8e2d8207bfe271c1e6684c7e8
+source_head: c9f8e72df1a47b228cde191f9e77909123bcb0f2
+implementation_branch: impl/kf-exec-tenant-001-isolation-final
+state: READY_TO_MERGE
+health: GREEN
+scope_changed: false
+production_touched: false
+review_status: READY_TO_MERGE
+summary: >
+  Supporting tenant-isolation hardening slice for KF-EXEC-TENANT-001. Fresh-main CI,
+  branch hygiene and Agent Control Gate are green. This slice receives ZERO canonical
+  Membership-First Tenant Genesis obligation credit; the parent packet remains open.
+changed_files:
+  - apps/server/src/core/prisma/tenant-model-list.spec.ts
+  - apps/server/src/modules/admin-analytics/admin-analytics.service.ts
+  - apps/server/src/modules/ai/cross-business-intelligence.service.ts
+  - apps/server/src/modules/education/education.service.ts
+  - apps/server/src/modules/education/education.tenant-scope.spec.ts
+  - apps/server/src/modules/flow/flow-runner.service.ts
+  - apps/server/src/modules/flow/flow-runner.tenant-idempotency.spec.ts
+  - apps/server/src/modules/identity/identity.service.ts
+  - apps/server/src/modules/key-connector/health/health-check.service.ts
+  - apps/server/src/modules/keystore/keystore.service.ts
+  - apps/server/src/modules/site/presence/presence.service.ts
+  - apps/server/test/tenant-scope-extension.integration.test.ts
+  - packages/db/prisma/migrations/20260919223000_flow_run_tenant_idempotency/migration.sql
+  - packages/db/prisma/schema.prisma
+  - packages/db/src/client.ts
+schema_migrations:
+  - packages/db/prisma/migrations/20260919223000_flow_run_tenant_idempotency/migration.sql
+tests:
+  commands:
+    - prior equivalent semantic candidate CI run 35519020687
+  passed:
+    - prior equivalent semantic candidate full CI/CD pipeline
+    - branch divergence
+    - security scan
+    - lint
+    - typecheck
+  failed: []
+  skipped: []
+negative_controls:
+  - cross-tenant Course access rejection
+  - tenant-local FlowRun idempotency lookup
+  - explicit global/cross-business skipTenantIsolation paths
+new_consumers_or_writers: []
+deviations_from_packet: []
+rollback_floor:
+  - preserve businessId ownership semantics
+  - preserve FlowRun history and idempotency values
+open_questions:
+  - fresh CI required on this new-main replacement branch
+evidence_refs:
+  - superseded PR #78
+  - prior semantic CI run 35519020687
+
+
+canonical_packet_credit: NONE
+supporting_slice_for: KF-EXEC-TENANT-001
