@@ -1619,6 +1619,76 @@
     },
     {
       "resolved": false,
+      "source": "apps/server/src/core/config/proof-admission.spec.ts",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/proof-admission.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/proof-admission.spec.ts",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/proof-admission.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/proof-admission.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/proof-resource-admission.spec.ts",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/proof-resource-admission.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/proof-resource-admission.spec.ts",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/proof-resource-admission.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/proof-resource-admission.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/server/src/core/config/route-parity-ledger.spec.ts",
       "specifier": "node:fs",
       "target": "node:fs",
@@ -7503,6 +7573,13 @@
       "specifier": "./queue.service",
       "target": "apps/server/src/modules/ai/queue.service.ts",
       "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/cross-business-intelligence.service.ts",
+      "specifier": "@keyflow/db",
+      "target": "@keyflow/db",
+      "type": "workspace"
     },
     {
       "resolved": false,
@@ -23220,6 +23297,13 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/communications/adapters/esp-fallback.spec.ts",
+      "specifier": "../../notifications/system-email.service",
+      "target": "apps/server/src/modules/notifications/system-email.service.ts",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/communications/adapters/esp-fallback.spec.ts",
       "specifier": "vitest",
@@ -23235,9 +23319,44 @@
     },
     {
       "resolved": true,
+      "source": "apps/server/src/modules/communications/adapters/resend-effect.spec.ts",
+      "specifier": "./resend-effect",
+      "target": "apps/server/src/modules/communications/adapters/resend-effect.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/communications/adapters/resend-effect.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/communications/adapters/resend-effect.ts",
+      "specifier": "./channel-adapter.interface",
+      "target": "apps/server/src/modules/communications/adapters/channel-adapter.interface.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/communications/adapters/resend-effect.ts",
+      "specifier": "node:crypto",
+      "target": "node:crypto",
+      "type": "external"
+    },
+    {
+      "resolved": true,
       "source": "apps/server/src/modules/communications/adapters/resend-email-adapter.ts",
       "specifier": "./channel-adapter.interface",
       "target": "apps/server/src/modules/communications/adapters/channel-adapter.interface.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/communications/adapters/resend-email-adapter.ts",
+      "specifier": "./resend-effect",
+      "target": "apps/server/src/modules/communications/adapters/resend-effect.ts",
       "type": "relative"
     },
     {
@@ -23648,6 +23767,34 @@
     },
     {
       "resolved": false,
+      "source": "apps/server/src/modules/communications/delivery-queue.effect-certainty.spec.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/communications/delivery-queue.effect-certainty.spec.ts",
+      "specifier": "./adapters/channel-adapter.interface",
+      "target": "apps/server/src/modules/communications/adapters/channel-adapter.interface.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/communications/delivery-queue.effect-certainty.spec.ts",
+      "specifier": "./delivery-queue.service",
+      "target": "apps/server/src/modules/communications/delivery-queue.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/communications/delivery-queue.effect-certainty.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/server/src/modules/communications/delivery-queue.service.ts",
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
@@ -23680,6 +23827,34 @@
       "specifier": "./adapters/adapter-registry.service",
       "target": "apps/server/src/modules/communications/adapters/adapter-registry.service.ts",
       "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/communications/delivery-queue.service.ts",
+      "specifier": "./adapters/channel-adapter.interface",
+      "target": "apps/server/src/modules/communications/adapters/channel-adapter.interface.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/communications/delivery-queue.service.ts",
+      "specifier": "./adapters/resend-effect",
+      "target": "apps/server/src/modules/communications/adapters/resend-effect.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/communications/delivery-queue.service.ts",
+      "specifier": "../notifications/system-email.service",
+      "target": "apps/server/src/modules/notifications/system-email.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/communications/delivery-queue.service.ts",
+      "specifier": "node:crypto",
+      "target": "node:crypto",
+      "type": "external"
     },
     {
       "resolved": false,
@@ -29961,6 +30136,13 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/education/education.service.ts",
+      "specifier": "@keyflow/db",
+      "target": "@keyflow/db",
+      "type": "workspace"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/education/education.service.ts",
       "specifier": "@nestjs/common",
@@ -29979,6 +30161,27 @@
       "source": "apps/server/src/modules/education/education.service.ts",
       "specifier": "crypto",
       "target": "crypto",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/education/education.tenant-scope.spec.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/education/education.tenant-scope.spec.ts",
+      "specifier": "./education.service",
+      "target": "apps/server/src/modules/education/education.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/education/education.tenant-scope.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
       "type": "external"
     },
     {
@@ -33741,6 +33944,20 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/flow/flow-runner.tenant-idempotency.spec.ts",
+      "specifier": "./flow-runner.service",
+      "target": "apps/server/src/modules/flow/flow-runner.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/flow/flow-runner.tenant-idempotency.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/flow/flow-template.service.ts",
       "specifier": "@nestjs/common",
@@ -34861,6 +35078,27 @@
       "type": "external"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/founding-membership.service.ts",
+      "specifier": "@keyflow/db",
+      "target": "@keyflow/db",
+      "type": "workspace"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/identity/founding-membership.service.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/founding-membership.service.ts",
+      "specifier": "../../core/prisma/prisma.service",
+      "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/identity/identity-password.service.spec.ts",
       "specifier": "@nestjs/common",
@@ -35213,6 +35451,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/identity/identity.module.ts",
+      "specifier": "./founding-membership.service",
+      "target": "apps/server/src/modules/identity/founding-membership.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/identity.module.ts",
       "specifier": "./identity-password.service",
       "target": "apps/server/src/modules/identity/identity-password.service.ts",
       "type": "relative"
@@ -35251,6 +35496,13 @@
       "specifier": "../notifications/notifications.module",
       "target": "apps/server/src/modules/notifications/notifications.module.ts",
       "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/identity.service.ts",
+      "specifier": "@keyflow/db",
+      "target": "@keyflow/db",
+      "type": "workspace"
     },
     {
       "resolved": false,
@@ -35332,6 +35584,34 @@
     {
       "resolved": false,
       "source": "apps/server/src/modules/identity/refresh-session.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/identity/tenant-genesis.spec.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/tenant-genesis.spec.ts",
+      "specifier": "./founding-membership.service",
+      "target": "apps/server/src/modules/identity/founding-membership.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/tenant-genesis.spec.ts",
+      "specifier": "./identity.service",
+      "target": "apps/server/src/modules/identity/identity.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/identity/tenant-genesis.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -37945,6 +38225,13 @@
       "source": "apps/server/src/modules/key-connector/health/health-check.service.ts",
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-connector/health/health-check.service.ts",
+      "specifier": "@prisma/client",
+      "target": "@prisma/client",
       "type": "external"
     },
     {
@@ -49694,6 +49981,20 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/notifications/system-email.effect-certainty.spec.ts",
+      "specifier": "./system-email.service",
+      "target": "apps/server/src/modules/notifications/system-email.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/notifications/system-email.effect-certainty.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/notifications/system-email.service.ts",
       "specifier": "@nestjs/common",
@@ -53353,6 +53654,13 @@
       "specifier": "./storefront-intelligence.service",
       "target": "apps/server/src/modules/site/presence/storefront-intelligence.service.ts",
       "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/site/presence/presence.service.ts",
+      "specifier": "@keyflow/db",
+      "target": "@keyflow/db",
+      "type": "workspace"
     },
     {
       "resolved": false,
@@ -59223,6 +59531,27 @@
     {
       "resolved": false,
       "source": "apps/server/test/task-assignment-tenant.integration.test.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/tenant-founding-membership.integration.test.ts",
+      "specifier": "dotenv",
+      "target": "dotenv",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/tenant-founding-membership.integration.test.ts",
+      "specifier": "path",
+      "target": "path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/tenant-founding-membership.integration.test.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -107374,6 +107703,13 @@
       "type": "external"
     },
     {
+      "resolved": true,
+      "source": "scripts/backfill-founding-memberships.ts",
+      "specifier": "@keyflow/db",
+      "target": "@keyflow/db",
+      "type": "workspace"
+    },
+    {
       "resolved": false,
       "source": "scripts/backfill-genome-integrity.ts",
       "specifier": "@nestjs/common",
@@ -107732,6 +108068,41 @@
     },
     {
       "resolved": false,
+      "source": "scripts/proof-admission/admit-resources.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/proof-admission/admit-resources.mjs",
+      "specifier": "node:url",
+      "target": "node:url",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/proof-admission/evaluate.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/proof-admission/evaluate.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/proof-admission/evaluate.mjs",
+      "specifier": "node:url",
+      "target": "node:url",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "scripts/revert-problematic-renames.mjs",
       "specifier": "fs",
       "target": "fs",
@@ -107893,8 +108264,8 @@
     }
   ],
   "meta": {
-    "edges": 15413,
-    "nodes": 3769,
+    "edges": 15466,
+    "nodes": 3783,
     "root": "/home/user/KEYFLOWOS",
     "scanner": "codebase-architect/dependency_scan.py"
   },
@@ -109316,6 +109687,16 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/core/config/local-service-urls.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/config/proof-admission.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/config/proof-resource-admission.spec.ts",
       "type": "file"
     },
     {
@@ -112445,6 +112826,16 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/communications/adapters/resend-effect.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/communications/adapters/resend-effect.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/communications/adapters/resend-email-adapter.ts",
       "type": "file"
     },
@@ -112491,6 +112882,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/communications/content-ai.service.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/communications/delivery-queue.effect-certainty.spec.ts",
       "type": "file"
     },
     {
@@ -113450,6 +113846,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/education/education.tenant-scope.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/email-marketing/campaign-intelligence.service.ts",
       "type": "file"
     },
@@ -114035,6 +114436,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/flow/flow-runner.tenant-idempotency.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/flow/flow-template.service.ts",
       "type": "file"
     },
@@ -114250,6 +114656,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/identity/founding-membership.service.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/identity/identity-password.service.spec.ts",
       "type": "file"
     },
@@ -114291,6 +114702,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/identity/refresh-session.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/identity/tenant-genesis.spec.ts",
       "type": "file"
     },
     {
@@ -116300,6 +116716,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/notifications/system-email.effect-certainty.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/notifications/system-email.service.ts",
       "type": "file"
     },
@@ -117831,6 +118252,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/test/task-assignment-tenant.integration.test.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/test/tenant-founding-membership.integration.test.ts",
       "type": "file"
     },
     {
@@ -126106,6 +126532,11 @@
     },
     {
       "extension": ".ts",
+      "id": "scripts/backfill-founding-memberships.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "scripts/backfill-genome-integrity.ts",
       "type": "file"
     },
@@ -126222,6 +126653,16 @@
     {
       "extension": ".mjs",
       "id": "scripts/os/probe-routes.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/proof-admission/admit-resources.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/proof-admission/evaluate.mjs",
       "type": "file"
     },
     {
