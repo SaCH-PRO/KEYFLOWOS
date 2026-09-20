@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
-import { db } from '@keyflow/db';
+import { db, skipTenantIsolation } from '@keyflow/db';
 import {
   HealthCheckResult,
   KeyConnectorConnection,
@@ -147,10 +147,12 @@ export class HealthCheckService {
 
     try {
       // Find all distinct business IDs that have at least one connection
-      const connections = await db.integrationConnection.findMany({
-        select: { businessId: true },
-        distinct: ['businessId'],
-      });
+      const connections = await db.integrationConnection.findMany(
+        skipTenantIsolation({
+          select: { businessId: true },
+          distinct: ['businessId'],
+        }),
+      );
 
       for (const { businessId } of connections) {
         try {
