@@ -59,24 +59,25 @@ EXTFX remains closed and merged. **KF-EXEC-TENANT-001 is the authoritative activ
 
 Current active implementation:
 - Wave: A
-- State: PROVING
-- Health: GREEN
+- State: CHARACTERIZING
+- Health: YELLOW
 - Replacement branch: `impl/kf-exec-tenant-001-isolation-final`
 - Draft PR: #81
 - Base: `main@cee4ea937eb451d8e2d8207bfe271c1e6684c7e8`
 - Semantic implementation head: `c9f8e72df1a47b228cde191f9e77909123bcb0f2`
 - Control-artifact head at checkpoint: `0e9512fa13adce5dae0aaa4d4bd65597e6a6831e`
 - Prior PR #78 is superseded due branch-hygiene pressure and main drift; do not merge it.
-- Declared semantic scope is unchanged from the stabilized candidate that previously passed full CI.
+- PR #81 is a tenant-isolation hardening candidate that previously proved green at equivalent semantic scope, but it is not currently accepted as complete canonical TENANT because the canonical packet is Membership-First Tenant Genesis Compatibility.
 - Production remains untouched.
 
 Before successor implementation work:
 1. Re-resolve `main`, PR #81 head and the canonical intelligence head.
-2. Complete PR #81 proof/admission, adversarial review, merge and post-merge verification.
+2. Complete the read-only canonical TENANT recharacterization and map every packet invariant/acceptance proof against current main and PR #81.
 3. Preserve the forensic baseline `8f173bfe...`.
 4. Do not reopen K12 or EXTFX unless new evidence invalidates admitted proof.
-5. Do not release AUTH-001 until TENANT is checkpointed.
-6. Keep the programme map frozen and scheduled architecture cycles halted unless the user explicitly lifts those constraints.
+5. Do not admit PR #81 as full TENANT unless the canonical Membership-First Tenant Genesis obligations are satisfied.
+6. Do not release AUTH-001 until the full canonical TENANT packet is checkpointed.
+7. Keep the programme map frozen and scheduled architecture cycles halted unless the user explicitly lifts those constraints.
 
 ## Active safety constraints
 
