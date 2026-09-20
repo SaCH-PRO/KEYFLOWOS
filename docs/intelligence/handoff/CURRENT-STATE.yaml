@@ -1,20 +1,20 @@
 project: KEYFLOWOS
-analysis_version: 93
-last_updated: '2026-09-19'
-checkpoint_id: PKG-EXTFX-2026-09-19-02
-status: EXTFX_ADMITTED_MERGED_CHECKPOINTED
+analysis_version: 94
+last_updated: '2026-09-20'
+checkpoint_id: TENANT-ACTIVE-2026-09-20-01
+status: TENANT_ACTIVE_PROVING
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: true
 production_release_authorized: false
 production_mutations_authorized: false
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-current_main: dc913c3942c3a2899b31fbbbf7cc7a7da5f78316
+current_main: cee4ea937eb451d8e2d8207bfe271c1e6684c7e8
 coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 35}
 package_hardening:
   total_packets: 35
   hardened_L2: 2
-  current: null
+  current: KF-EXEC-TENANT-001
   k12:
     merged_main_sha: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
     ci_run: 35295140078
@@ -58,8 +58,16 @@ package_hardening:
       provider_traffic_used: false
     status: ADMITTED_AND_MERGED
 active_frontier:
-  stage: POST_EXTFX_CHECKPOINT
-  status: NEXT_PACKAGE_NOT_SELECTED
+  stage: WAVE_A_TENANT
+  status: ACTIVE_PROVING
+  packet: KF-EXEC-TENANT-001
+  implementation_branch: impl/kf-exec-tenant-001-isolation-final
+  pull_request: 81
+  semantic_head: c9f8e72df1a47b228cde191f9e77909123bcb0f2
+  control_head: 0e9512fa13adce5dae0aaa4d4bd65597e6a6831e
+  prior_pr: 78
+  prior_pr_disposition: SUPERSEDED_BRANCH_HYGIENE
+  health: GREEN
 constraints:
   - no_production_provider_effects
   - no_production_data_mutations
@@ -68,8 +76,9 @@ constraints:
   - programme_map_refresh_paused
   - scheduled_cycles_halted
 next_actions:
-  - re-resolve main and canonical intelligence heads before new work
+  - validate PR 81 against current main and agent-control gates
   - preserve forensic baseline 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  - do not reopen or reconstruct KF-EXEC-EXTFX-001 unless a regression invalidates admitted proof
-  - select the next bounded package from durable intelligence only when continuation is authorized
+  - keep production read-only and release unauthorized
+  - do not reopen K12 or EXTFX unless regression invalidates admitted proof
+  - admit, merge, post-merge verify and checkpoint TENANT before releasing AUTH-001
   - keep programme map refresh and scheduled architecture cycles paused
