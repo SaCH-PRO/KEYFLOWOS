@@ -2,8 +2,8 @@ packet_id: KF-EXEC-TENANT-001
 directive_message_id: PRE_CONTROL_PLANE_PACKET
 source_main: cee4ea937eb451d8e2d8207bfe271c1e6684c7e8
 implementation_branch: impl/kf-exec-tenant-001-isolation-final
-state: PROVING
-health: GREEN
+state: CHARACTERIZING
+health: YELLOW
 scope_changed: false
 production_touched: false
 allowed_scope:
@@ -34,3 +34,9 @@ stop_conditions:
   - current-main drift changes any affected production path or schema assumption
   - proof reveals unresolved cross-tenant behavior
 merge_authority: false
+
+
+recharacterization_reason: >
+  Canonical KF-EXEC-TENANT-001 is Membership-First Tenant Genesis Compatibility.
+  This branch currently implements a tenant-isolation hardening slice. Admission is
+  paused until canonical obligations are mapped against current main and this PR.
