@@ -79,6 +79,10 @@ describe('tenant isolation extension (real database)', () => {
     // with deleted_at set. Raw SQL runs underneath the extension, which is what
     // the other integration suites here already do.
     for (const sql of [
+      `DELETE FROM flow_runs WHERE id LIKE '${P}%'`,
+      `DELETE FROM flow_versions WHERE id LIKE '${P}%'`,
+      `DELETE FROM automation_flows WHERE id LIKE '${P}%'`,
+      `DELETE FROM courses WHERE id LIKE '${P}%'`,
       `DELETE FROM flow_sessions WHERE id LIKE '${P}%'`,
       `DELETE FROM tax_rates WHERE id LIKE '${P}%'`,
       `DELETE FROM businesses WHERE id LIKE '${P}%'`,
@@ -451,6 +455,80 @@ describe('tenant isolation extension (real database)', () => {
       ]) {
         expect(set, `${m} left BUSINESS_ID_MODELS`).toContain(`'${m}'`);
       }
+    });
+  });
+
+  describe('KF-EXEC-TENANT-001 hard cases', () => {
+    const FLOW_A = `${P}flowA`;
+    const FLOW_B = `${P}flowB`;
+    const VERSION_A = `${P}versionA`;
+    const VERSION_B = `${P}versionB`;
+    const RUN_A = `${P}runA`;
+    const RUN_B = `${P}runB`;
+    const COURSE_A = `${P}courseA`;
+    const COURSE_B = `${P}courseB`;
+    const SHARED_KEY = `${P}shared-idempotency`;
+
+    beforeAll(async () => {
+      ambient = undefined;
+      await db.automationFlow.create({
+        data: { id: FLOW_A, businessId: BIZ_A, name: 'Tenant flow A', category: 'test', status: 'ACTIVE' },
+      });
+      await db.automationFlow.create({
+        data: { id: FLOW_B, businessId: BIZ_B, name: 'Tenant flow B', category: 'test', status: 'ACTIVE' },
+      });
+      await db.flowVersion.create({
+        data: { id: VERSION_A, flowId: FLOW_A, version: 1, nodes: [], edges: [], status: 'PUBLISHED' },
+      });
+      await db.flowVersion.create({
+        data: { id: VERSION_B, flowId: FLOW_B, version: 1, nodes: [], edges: [], status: 'PUBLISHED' },
+      });
+
+      // The same key must be legal in two tenants after the composite-unique migration.
+      await db.flowRun.create({
+        data: { id: RUN_A, businessId: BIZ_A, flowId: FLOW_A, flowVersionId: VERSION_A, idempotencyKey: SHARED_KEY },
+      });
+      await db.flowRun.create({
+        data: { id: RUN_B, businessId: BIZ_B, flowId: FLOW_B, flowVersionId: VERSION_B, idempotencyKey: SHARED_KEY },
+      });
+
+      await db.course.create({
+        data: { id: COURSE_A, businessId: BIZ_A, title: 'Tenant A course', category: 'test', lessons: [], isPublished: true },
+      });
+      await db.course.create({
+        data: { id: COURSE_B, businessId: BIZ_B, title: 'Tenant B course', category: 'test', lessons: [], isPublished: true },
+      });
+    });
+
+    it('allows the same FlowRun idempotency key in different businesses', async () => {
+      const a = await asTenant(undefined, () =>
+        db.flowRun.findUnique({
+          where: { businessId_idempotencyKey: { businessId: BIZ_A, idempotencyKey: SHARED_KEY } },
+        }),
+      );
+      const b = await asTenant(undefined, () =>
+        db.flowRun.findUnique({
+          where: { businessId_idempotencyKey: { businessId: BIZ_B, idempotencyKey: SHARED_KEY } },
+        }),
+      );
+      expect(a?.id).toBe(RUN_A);
+      expect(b?.id).toBe(RUN_B);
+    });
+
+    it("prevents A from reading B's FlowRun by bare id", async () => {
+      const control = await asTenant(undefined, () => db.flowRun.findUnique({ where: { id: RUN_B } }));
+      expect(control?.businessId).toBe(BIZ_B);
+      const scoped = await asTenant(BIZ_A, () => db.flowRun.findUnique({ where: { id: RUN_B } }));
+      expect(scoped).toBeNull();
+    });
+
+    it("prevents A from reading B's tenant-owned Course by bare id", async () => {
+      const control = await asTenant(undefined, () => db.course.findUnique({ where: { id: COURSE_B } }));
+      expect(control?.businessId).toBe(BIZ_B);
+      const scoped = await asTenant(BIZ_A, () => db.course.findUnique({ where: { id: COURSE_B } }));
+      expect(scoped).toBeNull();
+      const own = await asTenant(BIZ_A, () => db.course.findUnique({ where: { id: COURSE_A } }));
+      expect(own?.businessId).toBe(BIZ_A);
     });
   });
 });
