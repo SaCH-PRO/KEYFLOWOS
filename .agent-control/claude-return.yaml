@@ -1,13 +1,13 @@
 packet_id: KF-EXEC-TENANT-001
 directive_message_id: CG-DIRECTIVE-TENANT-IMPL-001
 source_main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
-source_head: 30a6c44be3e405992aefc48206303dfe4f0ca2a1
+source_head: 2bb3c748e2335cf20c887dc8f1be5ddc2222a430
 implementation_branch: impl/kf-exec-tenant-001-membership-genesis
-state: READY_TO_MERGE
+state: PROVING
 health: GREEN
 scope_changed: false
 production_touched: false
-review_status: READY_TO_MERGE
+review_status: PENDING_CHATGPT_REVIEW
 summary: >
   Canonical Membership-First Tenant Genesis implemented against main@cf3962a1.
   All three production Business constructors now establish exactly one founding
@@ -43,8 +43,8 @@ tests:
     - "npx prisma migrate deploy --schema packages/db/prisma/schema.prisma"
     - "tsc --noEmit (apps/server); pnpm build (apps/server, @keyflow/api, @keyflow/db, @keyflow/shared)"
     - "pnpm lint (apps/server, packages/api)"
-  discovered: 4079
-  passed: 4079
+  discovered: 4082
+  passed: 4082
   failed: 0
   skipped: 0
 negative_controls:
@@ -62,6 +62,14 @@ new_consumers_or_writers:
   - scripts/backfill-founding-memberships.ts (new operator entrypoint)
 deviations_from_packet: []
 rollback_floor: cf3962a1245259dcbc6df18a8aeee481c34e50fe
+post_admission_note: >
+  ChatGPT set review_status READY_TO_MERGE on 23486b7. Two P1 review findings then
+  landed and both were real, so this branch now carries semantic commits that the
+  admission did not cover. I have reset review_status to PENDING_CHATGPT_REVIEW
+  rather than leave unreviewed code presented as admitted — that is the one thing
+  the gate exists to prevent. This is ChatGPT's field, not mine; flip it straight
+  back if the re-review is satisfied.
+
 open_questions:
   - trpc.module.spec.ts flagged the new tRPC constructor on a comment containing
     the token businessId. The gate was not edited and no acknowledgement entry was
