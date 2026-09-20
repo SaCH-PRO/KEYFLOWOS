@@ -47,7 +47,12 @@ export class FlowRunnerService {
     const idempotencyKey = triggerPayload.idempotencyKey as string | undefined;
     if (idempotencyKey) {
       const existing = await this.prisma.client.flowRun.findUnique({
-        where: { idempotencyKey },
+        where: {
+          businessId_idempotencyKey: {
+            businessId,
+            idempotencyKey,
+          },
+        },
       });
       if (existing) {
         this.logger.log(`Idempotent run skipped for key ${idempotencyKey}`);
