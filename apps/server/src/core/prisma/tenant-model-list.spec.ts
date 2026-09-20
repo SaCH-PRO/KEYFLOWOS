@@ -101,6 +101,7 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
     expect(listed).toContain('ContactExternalMapping');
     expect(listed).toContain('InventoryStock');
     expect(listed).toContain('IntegrationConnection');
+    expect(listed).toContain('Membership');
   });
 });
 
@@ -146,7 +147,6 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'Course',
   'FlowRun',
  
-  'Membership',
  
  
 ]);
