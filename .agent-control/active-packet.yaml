@@ -1,0 +1,36 @@
+packet_id: KF-EXEC-TENANT-001
+directive_message_id: PRE_CONTROL_PLANE_PACKET
+source_main: dc913c3942c3a2899b31fbbbf7cc7a7da5f78316
+implementation_branch: impl/kf-exec-tenant-001-isolation-compact
+state: PROVING
+health: GREEN
+scope_changed: false
+production_touched: false
+allowed_scope:
+  - retire acknowledged tenant-isolation debt for the 13 characterized models
+  - add explicit skipTenantIsolation only for intentional cross-tenant/global reads
+  - make Course public/platform visibility explicit
+  - scope FlowRun idempotency by business
+  - add focused and real-database tenant proofs
+prohibited_scope:
+  - production deployment
+  - production mutation
+  - real provider traffic
+  - forensic rebaseline
+  - programme-map refresh
+invariants:
+  - tenant-context operations cannot cross business boundaries by bare id
+  - intentional cross-business reads are explicit
+  - public Course reads expose only platform-public courses
+  - FlowRun idempotency is tenant-local
+proof_obligations:
+  - acknowledged-unscoped ledger reaches zero
+  - all 13 models are dispositioned
+  - focused Course and FlowRun proofs pass
+  - real-database tenant-extension proof passes
+  - migration applies
+  - full CI passes
+stop_conditions:
+  - current-main drift changes any affected production path or schema assumption
+  - proof reveals unresolved cross-tenant behavior
+merge_authority: false
