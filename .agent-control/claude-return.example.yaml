@@ -1,0 +1,24 @@
+packet_id: ""
+directive_message_id: ""
+source_main: ""
+source_head: ""
+implementation_branch: ""
+state: CHARACTERIZING
+health: GREEN
+scope_changed: false
+production_touched: false
+review_status: PENDING_CHATGPT_REVIEW
+summary: ""
+changed_files: []
+schema_migrations: []
+tests:
+  commands: []
+  passed: []
+  failed: []
+  skipped: []
+negative_controls: []
+new_consumers_or_writers: []
+deviations_from_packet: []
+rollback_floor: []
+open_questions: []
+evidence_refs: []

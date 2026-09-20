@@ -1,0 +1,102 @@
+name: Agent Control Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  agent-control:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether packet controls apply
+        id: scope
+        shell: bash
+        run: |
+          case "${{ github.head_ref }}" in
+            impl/*)
+              echo "required=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "required=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Validate control artifacts
+        if: steps.scope.outputs.required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ACTIVE=".agent-control/active-packet.yaml"
+          RETURN=".agent-control/claude-return.yaml"
+
+          test -f "$ACTIVE" || { echo "::error::$ACTIVE is required for impl/* PRs"; exit 1; }
+          test -f "$RETURN" || { echo "::error::$RETURN is required for impl/* PRs"; exit 1; }
+
+          require_key() {
+            local file="$1"
+            local key="$2"
+            grep -Eq "^$key:" "$file" || {
+              echo "::error::$file missing required key: $key"
+              exit 1
+            }
+          }
+
+          for key in packet_id source_main implementation_branch state health scope_changed production_touched; do
+            require_key "$ACTIVE" "$key"
+          done
+
+          for key in packet_id source_head implementation_branch state health scope_changed production_touched review_status; do
+            require_key "$RETURN" "$key"
+          done
+
+          declared_branch="$(sed -n 's/^implementation_branch:[[:space:]]*//p' "$ACTIVE" | head -n1 | tr -d '"')"
+          if [ "$declared_branch" != "${{ github.head_ref }}" ]; then
+            echo "::error::active-packet.yaml implementation_branch does not match PR head"
+            exit 1
+          fi
+
+          return_branch="$(sed -n 's/^implementation_branch:[[:space:]]*//p' "$RETURN" | head -n1 | tr -d '"')"
+          if [ "$return_branch" != "${{ github.head_ref }}" ]; then
+            echo "::error::claude-return.yaml implementation_branch does not match PR head"
+            exit 1
+          fi
+
+          if grep -Eq '^production_touched:[[:space:]]*true([[:space:]]|$)' "$ACTIVE" "$RETURN"; then
+            echo "::error::production_touched=true requires explicit out-of-band authorization; packet PR cannot self-admit"
+            exit 1
+          fi
+
+      - name: Require ChatGPT admission before non-draft merge readiness
+        if: steps.scope.outputs.required == 'true' && github.event.pull_request.draft == false
+        shell: bash
+        run: |
+          set -euo pipefail
+          RETURN=".agent-control/claude-return.yaml"
+          status="$(sed -n 's/^review_status:[[:space:]]*//p' "$RETURN" | head -n1 | tr -d '"')"
+          case "$status" in
+            READY_TO_MERGE|ACCEPT_FOR_ADMISSION)
+              ;;
+            *)
+              echo "::error::Non-draft impl/* PR requires ChatGPT review_status READY_TO_MERGE or ACCEPT_FOR_ADMISSION; found: $status"
+              exit 1
+              ;;
+          esac
+
+      - name: Summary
+        shell: bash
+        run: |
+          if [ "${{ steps.scope.outputs.required }}" = "true" ]; then
+            echo "Agent control gate applies to this implementation PR."
+          else
+            echo "Non-implementation PR: agent control artifacts are not required."
+          fi

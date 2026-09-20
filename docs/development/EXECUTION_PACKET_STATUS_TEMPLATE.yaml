@@ -1,0 +1,53 @@
+packet: ""
+state: CHARACTERIZING
+health: GREEN
+current_main: ""
+forensic_baseline: ""
+
+scope:
+  declared_obligations: 0
+  resolved: 0
+  remaining: 0
+  deferred: 0
+  dropped: 0
+  superseded: 0
+  notes: []
+
+completion_contract:
+  scope_accounted_for: false
+  architecture_invariant_satisfied: false
+  implementation_complete: false
+  proof_obligations_passed: false
+  known_failure_cases_tested: false
+  regression_green: false
+  ci_admission_green: false
+  no_unexplained_deferrals: false
+  merged_to_main: false
+  post_merge_verified: false
+  durable_checkpoint_updated: false
+
+admission:
+  branch_hygiene: PENDING
+  migration_application: PENDING
+  typecheck: PENDING
+  tests: PENDING
+  build: PENDING
+  security: PENDING
+  adversarial_review: PENDING
+
+momentum:
+  substantive_operations_since_state_change: 0
+  repeated_same_cause_failures: 0
+  consecutive_ci_failures_without_new_root_cause: 0
+  alarm: false
+  blocker: null
+  attempts: []
+  evidence_change: null
+  next_action: null
+
+safety:
+  production_touched: false
+  production_deployment_authorized: false
+  production_mutation_authorized: false
+  real_provider_traffic_authorized: false
+  forensic_baseline_preserved: true

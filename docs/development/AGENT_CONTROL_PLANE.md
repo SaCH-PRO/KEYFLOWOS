@@ -1,0 +1,191 @@
+# KEYFLOWOS Agent Control Plane
+
+Status: CANONICAL CONTROL SYSTEM DESIGN
+
+## Goal
+
+Make ChatGPT the programme command center and human-facing interface while Claude Code performs bounded implementation work under repository-enforced gates.
+
+The repository is the durable message bus and evidence store.
+
+## Control topology
+
+```text
+Human
+  |
+  v
+ChatGPT programme command center
+  |
+  | DIRECTIVE / REVIEW
+  v
+GitHub Agent Control Room (#80)
+  |
+  v
+Claude Code local worker
+  |
+  | commits + PR + packet status artifact + RETURN
+  v
+GitHub repository gates
+  |
+  | validated evidence available
+  v
+ChatGPT integration review
+  |
+  | ACCEPT / CORRECT / BLOCK
+  v
+GitHub Control Room + PR
+  |
+  v
+Claude correction loop or merge/checkpoint
+```
+
+## Non-negotiable principle
+
+Claude cannot advance a packet merely because local tests pass.
+
+Advancement requires:
+1. a durable implementation branch;
+2. a machine-readable packet return artifact committed to that branch;
+3. an updated PR;
+4. a RETURN message in control-room issue #80;
+5. repository gate validation;
+6. ChatGPT integration review against the packet, wave dependencies, architecture, proof obligations, and programme acceptance contract.
+
+## Packet control artifacts
+
+Every Claude-owned implementation branch must maintain:
+
+```text
+.agent-control/
+  active-packet.yaml
+  claude-return.yaml
+```
+
+`active-packet.yaml` is issued from the accepted ChatGPT DIRECTIVE.
+`claude-return.yaml` is written/updated by Claude.
+
+Claude must not edit directive-owned fields to widen scope.
+
+## Ownership boundary
+
+ChatGPT owns:
+- packet selection;
+- source-main release;
+- dependency release;
+- allowed/prohibited scope;
+- invariants;
+- proof obligations;
+- stop conditions;
+- merge authority;
+- acceptance/rejection.
+
+Claude owns:
+- local characterization;
+- bounded code edits;
+- migrations within released scope;
+- local test/debug loops;
+- discovered evidence;
+- RETURN production.
+
+GitHub owns:
+- structural enforcement;
+- artifact validation;
+- CI;
+- branch/PR checks;
+- audit history.
+
+Human owns:
+- ultimate supervision;
+- production authorization;
+- exceptions to programme policy.
+
+## Claude event rule
+
+Claude must publish a durable control event when any of these occurs:
+- ACK before first mutation;
+- packet state transition;
+- material architectural discovery;
+- newly discovered writer/consumer;
+- scope pressure;
+- momentum alarm;
+- contradiction;
+- local proof completion;
+- PR opened/updated;
+- RETURN ready.
+
+Low-level edits do not need one comment each; they must be represented in the next durable state/RETURN artifact.
+
+## ChatGPT review rule
+
+ChatGPT reviews:
+- packet return artifact;
+- PR diff;
+- current main drift;
+- CI results;
+- scope ledger;
+- proof/failure matrix;
+- new consumers/writers;
+- wave dependencies;
+- previously admitted packet invariants that the diff may touch.
+
+ChatGPT then posts one control decision:
+- ACCEPT_FOR_ADMISSION
+- CORRECTION_REQUIRED
+- BLOCKED_CONTRADICTION
+- RECHARACTERIZE
+- READY_TO_MERGE
+- CLOSE_CHECKPOINTED
+
+## No direct merge by Claude
+
+Default merge authority is false.
+Claude may not mark a packet complete, merge, or release the next packet unless the current DIRECTIVE explicitly grants that right.
+
+## Automation layers
+
+### Layer 1 — Claude local automation
+Claude reads the latest directive, works, updates return artifact, pushes branch, updates PR, posts control-room RETURN.
+
+### Layer 2 — GitHub structural gate
+GitHub Actions validate:
+- active packet metadata exists;
+- source main and implementation branch are declared;
+- scope ledger fields exist;
+- return artifact is parseable;
+- tests/failed/skipped sections exist;
+- scope-changed and production-touched are explicit;
+- no RETURN claims completion while failed/skipped proof is unexplained;
+- ChatGPT admission marker exists before merge-ready state.
+
+### Layer 3 — ChatGPT review
+ChatGPT reads the durable artifacts and PR/CI, evaluates whole-programme integration, and writes REVIEW.
+
+### Layer 4 — programme checkpoint
+Only after merge + post-merge verification does ChatGPT update the wave board and durable handoff.
+
+## Wake-up model
+
+Repository and Claude automation can be event-driven immediately.
+
+This exact ChatGPT conversation cannot currently be guaranteed to receive an instantaneous GitHub webhook on every repository event. Therefore:
+- GitHub remains authoritative even while ChatGPT is not actively running;
+- ChatGPT must consume all unseen control messages before issuing a new directive;
+- a recurring ChatGPT condition-watch may poll issue #80 for actionable Claude events;
+- the human may also wake ChatGPT immediately by messaging here;
+- if a future connected GitHub webhook can invoke the command center directly, it replaces polling without changing the protocol.
+
+No work is lost or silently admitted while ChatGPT is offline because the repo gates prevent advancement without ChatGPT admission.
+
+## Required merge protection concept
+
+A packet PR is merge-eligible only when:
+- ordinary CI is green;
+- agent-control structural gate is green;
+- packet-specific proof is green;
+- branch hygiene is green;
+- ChatGPT review status in `.agent-control/claude-return.yaml` or accepted control artifact is `READY_TO_MERGE`;
+- no unresolved contradiction or unexplained defer/drop remains.
+
+## Safety
+
+Production deployment, production mutation, real provider traffic, forensic rebaseline, and programme-map refresh remain independently controlled and cannot be granted implicitly by an agent-control state.

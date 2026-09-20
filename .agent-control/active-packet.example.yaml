@@ -1,0 +1,14 @@
+packet_id: ""
+directive_message_id: ""
+source_main: ""
+implementation_branch: ""
+state: CHARACTERIZING
+health: GREEN
+scope_changed: false
+production_touched: false
+allowed_scope: []
+prohibited_scope: []
+invariants: []
+proof_obligations: []
+stop_conditions: []
+merge_authority: false
