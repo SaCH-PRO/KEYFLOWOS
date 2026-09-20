@@ -87,7 +87,119 @@ const EMPTY_COUNTS = (): Record<FoundingMembershipClass, number> => ({
 export class FoundingMembershipService {
   private readonly logger = new Logger(FoundingMembershipService.name);
 
+  /**
+   * Rows per page, and the ceiling on any `in` list.
+   *
+   * `defaultTakeExtension` in packages/db/src/client.ts silently caps EVERY
+   * unbounded `findMany` at 1000 rows. An inventory that ignores that does not
+   * fail — it quietly reports on the first 1000 businesses and calls the estate
+   * scanned. Worse, a truncated Membership read can hide the conflicting OWNER
+   * row that makes a business ambiguous, which would let `repairDeterministic`
+   * classify it as safely missing and write a SECOND owner. That is exactly the
+   * guess this packet forbids, so every read here is paged on a stable cursor
+   * and every `in` list is chunked below the cap.
+   *
+   * Each loop stops on an EMPTY page rather than on a short one. A short page
+   * looks like the end only if the server honoured the requested `take`; if the
+   * cap is ever lowered below PAGE, "short" becomes the normal case and a
+   * length-based loop silently truncates again. Costs one extra round trip at
+   * the end and is correct whatever the cap is.
+   */
+  private static readonly PAGE = 500;
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private static chunk<T>(items: T[], size: number): T[][] {
+    const out: T[][] = [];
+    for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+    return out;
+  }
+
+  /** Every non-deleted Business, paged by id so the cursor is stable under concurrent writes. */
+  private async allBusinesses(): Promise<{ id: string; name: string; ownerId: string }[]> {
+    const out: { id: string; name: string; ownerId: string }[] = [];
+    let cursor: string | undefined;
+
+    for (;;) {
+      const page = await this.prisma.client.business.findMany({
+        where: { deletedAt: null },
+        select: { id: true, name: true, ownerId: true },
+        orderBy: { id: 'asc' },
+        take: FoundingMembershipService.PAGE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (page.length === 0) break;
+      out.push(...page);
+      cursor = page[page.length - 1].id;
+    }
+
+    return out;
+  }
+
+  /**
+   * Every Membership on the given businesses.
+   *
+   * Chunked over the business ids AND paged within each chunk: either dimension
+   * alone can exceed the cap. `skipTenantIsolation` because this reads across
+   * every business by design — see the note on `classify`.
+   */
+  private async allMemberships(
+    businessIds: string[],
+  ): Promise<{ businessId: string; userId: string; role: string }[]> {
+    const out: { businessId: string; userId: string; role: string }[] = [];
+
+    for (const ids of FoundingMembershipService.chunk(businessIds, FoundingMembershipService.PAGE)) {
+      let cursor: string | undefined;
+      for (;;) {
+        const page: { id: string; businessId: string; userId: string; role: string }[] =
+          await this.prisma.client.membership.findMany(
+            skipTenantIsolation({
+              where: { businessId: { in: ids } },
+              select: { id: true, businessId: true, userId: true, role: true },
+              // `as const` because skipTenantIsolation's generic widens the
+              // literal to `string`, which Prisma's SortOrder rejects.
+              orderBy: { id: 'asc' as const },
+              take: FoundingMembershipService.PAGE,
+              ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+            }),
+          );
+        if (page.length === 0) break;
+        out.push(...page.map(({ businessId, userId, role }) => ({ businessId, userId, role })));
+        cursor = page[page.length - 1].id;
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * Which of these owner ids resolve to a real User.
+   *
+   * Chunked for the same reason. Truncation here fails in the safe direction —
+   * a resolvable owner would be reported as unresolvable rather than repaired —
+   * but a misclassification is still a wrong answer, so it is not left to luck.
+   */
+  private async resolvableUserIds(ownerIds: string[]): Promise<Set<string>> {
+    const known = new Set<string>();
+
+    for (const ids of FoundingMembershipService.chunk(ownerIds, FoundingMembershipService.PAGE)) {
+      let cursor: string | undefined;
+      for (;;) {
+        const found = await this.prisma.client.user.findMany({
+          where: { id: { in: ids } },
+          select: { id: true },
+          orderBy: { id: 'asc' },
+          take: FoundingMembershipService.PAGE,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        if (found.length === 0) break;
+        for (const u of found) known.add(u.id);
+        cursor = found[found.length - 1].id;
+      }
+    }
+
+    return known;
+  }
 
   /**
    * Classify every non-deleted Business. Read-only.
@@ -99,11 +211,7 @@ export class FoundingMembershipService {
    * inventory reports "nothing missing" rather than failing.
    */
   async classify(): Promise<FoundingMembershipInventory> {
-    const businesses = await this.prisma.client.business.findMany({
-      where: { deletedAt: null },
-      select: { id: true, name: true, ownerId: true },
-      orderBy: { createdAt: 'asc' },
-    });
+    const businesses = await this.allBusinesses();
 
     if (businesses.length === 0) {
       return { scanned: 0, counts: EMPTY_COUNTS(), rows: [] };
@@ -112,21 +220,8 @@ export class FoundingMembershipService {
     const businessIds = businesses.map((b) => b.id);
     const ownerIds = [...new Set(businesses.map((b) => b.ownerId).filter((id) => !!id))];
 
-    const memberships = await this.prisma.client.membership.findMany(
-      skipTenantIsolation({
-        where: { businessId: { in: businessIds } },
-        select: { businessId: true, userId: true, role: true },
-      }),
-    );
-
-    const knownUsers = new Set(
-      (
-        await this.prisma.client.user.findMany({
-          where: { id: { in: ownerIds } },
-          select: { id: true },
-        })
-      ).map((u) => u.id),
-    );
+    const memberships = await this.allMemberships(businessIds);
+    const knownUsers = await this.resolvableUserIds(ownerIds);
 
     const byBusiness = new Map<string, { userId: string; role: string }[]>();
     for (const m of memberships) {

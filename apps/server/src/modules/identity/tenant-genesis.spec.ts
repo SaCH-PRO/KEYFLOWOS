@@ -232,13 +232,12 @@ describe('IdentityService.listBusinesses — Membership-first discovery', () => 
 // ── Migration classification ───────────────────────────────────────────────
 
 describe('FoundingMembershipService.classify', () => {
+  // A paging fake, not a constant one: the service walks a cursor until a page
+  // comes back empty, so a fake that returns the same rows every call would
+  // never terminate.
   function build(businesses: any[], memberships: any[], users: string[]) {
     return new FoundingMembershipService({
-      client: {
-        business: { findMany: vi.fn(async () => businesses) },
-        membership: { findMany: vi.fn(async () => memberships), upsert: vi.fn() },
-        user: { findMany: vi.fn(async () => users.map((id) => ({ id }))) },
-      },
+      client: cappedClient(businesses, memberships, users),
     } as never);
   }
 
@@ -293,17 +292,128 @@ describe('FoundingMembershipService.classify', () => {
   });
 });
 
+/**
+ * A fake that behaves like the real client under `defaultTakeExtension`: every
+ * findMany is capped, and the only way past the cap is a cursor. A classifier
+ * that does not page sees the first page and nothing else.
+ */
+function cappedClient(
+  businesses: any[],
+  memberships: any[],
+  users: string[],
+  cap = 500,
+  upsert: any = vi.fn(async () => ({ id: 'm' })),
+) {
+  // Ids are what the cursor walks; synthesise stable ones where a case did not
+  // care to supply them.
+  memberships = memberships.map((m, i) => ({ id: m.id ?? `m${String(i).padStart(5, '0')}`, ...m }));
+  const page = (rows: any[], args: any) => {
+    const sorted = [...rows].sort((a, b) => (a.id < b.id ? -1 : 1));
+    const start = args?.cursor?.id
+      ? sorted.findIndex((r) => r.id === args.cursor.id) + (args.skip ?? 0)
+      : 0;
+    return sorted.slice(start, start + Math.min(args?.take ?? cap, cap));
+  };
+  return {
+    business: { findMany: vi.fn(async (args: any) => page(businesses, args)) },
+    membership: {
+      findMany: vi.fn(async (args: any) => {
+        const ids: string[] = args.where.businessId.in;
+        return page(
+          memberships.filter((m) => ids.includes(m.businessId)),
+          args,
+        );
+      }),
+      upsert,
+    },
+    user: {
+      // Honours the cursor like the others. A fake that ignores it would spin
+      // forever against an empty-page-terminated loop — which is itself the
+      // point: the loop only terminates on a server that pages honestly.
+      findMany: vi.fn(async (args: any) =>
+        page(
+          users.filter((u) => args.where.id.in.includes(u)).map((id) => ({ id })),
+          args,
+        ),
+      ),
+    },
+  };
+}
+
+describe('FoundingMembershipService pagination', () => {
+  it('scans past the 1000-row default take cap', async () => {
+    // 1200 businesses against a cap of 500. Unpaged, this reported 500 and
+    // called the estate scanned.
+    const businesses = Array.from({ length: 1200 }, (_, i) => ({
+      id: `b${String(i).padStart(5, '0')}`,
+      name: `biz ${i}`,
+      ownerId: 'u1',
+    }));
+    const svc = new FoundingMembershipService({
+      client: cappedClient(businesses, [], ['u1']),
+    } as never);
+
+    const out = await svc.classify();
+
+    expect(out.scanned).toBe(1200);
+    expect(out.counts.missing_founding_membership_with_resolvable_owner).toBe(1200);
+  });
+
+  it('does not mistake a truncated Membership read for a missing founding membership', async () => {
+    // THE dangerous case. The conflicting OWNER row sorts after a full page of
+    // other memberships on the same business. If the read stops at the cap, the
+    // business looks deterministically repairable and --apply writes a SECOND
+    // owner — the exact guess this packet forbids.
+    const cap = 10;
+    const memberships = [
+      ...Array.from({ length: cap }, (_, i) => ({
+        id: `m${String(i).padStart(3, '0')}`,
+        businessId: 'b1',
+        userId: `staff${i}`,
+        role: 'STAFF',
+      })),
+      { id: 'm999', businessId: 'b1', userId: 'rival', role: 'OWNER' },
+    ];
+    const svc = new FoundingMembershipService({
+      client: cappedClient([{ id: 'b1', name: 'one', ownerId: 'u1' }], memberships, ['u1'], cap),
+    } as never);
+
+    const out = await svc.repairDeterministic({ apply: true });
+
+    expect(out.inventory.rows[0].classification).toBe('conflicting_owner_membership');
+    expect(out.repaired).toEqual([]);
+  });
+
+  it('chunks the owner lookup rather than truncating it', async () => {
+    const businesses = Array.from({ length: 900 }, (_, i) => ({
+      id: `b${String(i).padStart(5, '0')}`,
+      name: `biz ${i}`,
+      ownerId: `u${i}`,
+    }));
+    const users = businesses.map((b) => b.ownerId);
+    const client = cappedClient(businesses, [], users);
+    const svc = new FoundingMembershipService({ client } as never);
+
+    const out = await svc.classify();
+
+    // Every owner resolves, so none may be reported unresolvable.
+    expect(out.counts.ownerId_unresolvable_to_User).toBe(0);
+    // And every owner id was actually asked about — asserting the union rather
+    // than a call count, which changes with the paging shape without meaning
+    // anything.
+    const asked = new Set<string>();
+    for (const call of client.user.findMany.mock.calls) {
+      for (const id of (call[0] as any).where.id.in) asked.add(id);
+    }
+    expect(asked.size).toBe(900);
+  });
+});
+
 describe('FoundingMembershipService.repairDeterministic', () => {
   function build(businesses: any[], memberships: any[], users: string[]) {
-    const upsert = vi.fn(async () => ({ id: 'm' }));
-    const svc = new FoundingMembershipService({
-      client: {
-        business: { findMany: vi.fn(async () => businesses) },
-        membership: { findMany: vi.fn(async () => memberships), upsert },
-        user: { findMany: vi.fn(async () => users.map((id) => ({ id }))) },
-      },
-    } as never);
-    return { svc, upsert };
+    const client = cappedClient(businesses, memberships, users);
+    const svc = new FoundingMembershipService({ client } as never);
+    return { svc, upsert: client.membership.upsert };
   }
 
   const rows = () => [
@@ -353,11 +463,7 @@ describe('FoundingMembershipService.repairDeterministic', () => {
       .mockRejectedValueOnce(new Error('FK violation: user was deleted'))
       .mockResolvedValueOnce({ id: 'm' });
     const svc = new FoundingMembershipService({
-      client: {
-        business: { findMany: vi.fn(async () => twoSafe) },
-        membership: { findMany: vi.fn(async () => []), upsert },
-        user: { findMany: vi.fn(async () => [{ id: 'u1' }, { id: 'u2' }]) },
-      },
+      client: cappedClient(twoSafe, [], ['u1', 'u2'], 500, upsert),
     } as never);
 
     const out = await svc.repairDeterministic({ apply: true });

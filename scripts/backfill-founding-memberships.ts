@@ -72,25 +72,78 @@ interface Row {
  * mirrors it, and `apps/server/src/modules/identity/tenant-genesis.spec.ts` is what proves
  * the classification rules.
  */
+/**
+ * Page size, and the ceiling on any `in` list.
+ *
+ * `defaultTakeExtension` caps every unbounded `findMany` at 1000 rows. An
+ * inventory that ignores that reports on the first 1000 businesses and calls
+ * the estate scanned; worse, a truncated Membership read can hide the
+ * conflicting OWNER row that makes a business ambiguous and let --apply write a
+ * SECOND owner. Every read below is paged on a stable id cursor.
+ */
+const PAGE = 500;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 async function classify(): Promise<Row[]> {
-  const businesses = await db.business.findMany({
-    where: { deletedAt: null },
-    select: { id: true, name: true, ownerId: true },
-    orderBy: { createdAt: 'asc' },
-  });
+  const businesses: { id: string; name: string; ownerId: string }[] = [];
+  {
+    let cursor: string | undefined;
+    for (;;) {
+      const page = await db.business.findMany({
+        where: { deletedAt: null },
+        select: { id: true, name: true, ownerId: true },
+        orderBy: { id: 'asc' },
+        take: PAGE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (page.length === 0) break;
+      businesses.push(...page);
+      cursor = page[page.length - 1].id;
+    }
+  }
   if (businesses.length === 0) return [];
 
-  const memberships = await db.membership.findMany(
-    skipTenantIsolation({
-      where: { businessId: { in: businesses.map((b) => b.id) } },
-      select: { businessId: true, userId: true, role: true },
-    }),
-  );
+  const memberships: { businessId: string; userId: string; role: string }[] = [];
+  for (const ids of chunk(businesses.map((b) => b.id), PAGE)) {
+    let cursor: string | undefined;
+    for (;;) {
+      const page = await db.membership.findMany(
+        skipTenantIsolation({
+          where: { businessId: { in: ids } },
+          select: { id: true, businessId: true, userId: true, role: true },
+          orderBy: { id: 'asc' as const },
+          take: PAGE,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        }),
+      );
+      if (page.length === 0) break;
+      memberships.push(...page.map(({ businessId, userId, role }) => ({ businessId, userId, role })));
+      cursor = page[page.length - 1].id;
+    }
+  }
 
   const ownerIds = [...new Set(businesses.map((b) => b.ownerId).filter(Boolean))];
-  const knownUsers = new Set(
-    (await db.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true } })).map((u) => u.id),
-  );
+  const knownUsers = new Set<string>();
+  for (const ids of chunk(ownerIds, PAGE)) {
+    let cursor: string | undefined;
+    for (;;) {
+      const found = await db.user.findMany({
+        where: { id: { in: ids } },
+        select: { id: true },
+        orderBy: { id: 'asc' },
+        take: PAGE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (found.length === 0) break;
+      for (const u of found) knownUsers.add(u.id);
+      cursor = found[found.length - 1].id;
+    }
+  }
 
   const byBusiness = new Map<string, { userId: string; role: string }[]>();
   for (const m of memberships) {
