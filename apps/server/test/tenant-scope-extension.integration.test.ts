@@ -446,7 +446,7 @@ describe('tenant isolation extension (real database)', () => {
         'FinanceActionItem', 'SocialConnection',
         // KF-EXEC-TENANT-001
         'ContactExternalMapping', 'DriveIntakeFile', 'IngestionItem',
-        'IntegrationConnection', 'InventoryStock', 'KeyCallSession',
+        'IntegrationConnection', 'InventoryStock', 'KeyCallSession', 'Membership',
         'MessageIntake', 'SitePageDraft', 'SyncJob', 'WhatsAppMessage',
       ]) {
         expect(set, `${m} left BUSINESS_ID_MODELS`).toContain(`'${m}'`);
