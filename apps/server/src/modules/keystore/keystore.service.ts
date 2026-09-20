@@ -8,7 +8,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { db } from '@keyflow/db';
+import { db, skipTenantIsolation } from '@keyflow/db';
 import type {
   KeystoreDeliveryFile,
   KeystoreOrderStatus,
@@ -36,10 +36,12 @@ export class KeystoreService {
    * caller's membership — never from self-asserted input.
    */
   async businessIdForUser(userId: string): Promise<string> {
-    const membership = await db.membership.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'asc' },
-    });
+    const membership = await db.membership.findFirst(
+      skipTenantIsolation({
+        where: { userId },
+        orderBy: { createdAt: 'asc' as const },
+      }),
+    );
     if (!membership) {
       throw new ForbiddenException('No business membership for this account');
     }
