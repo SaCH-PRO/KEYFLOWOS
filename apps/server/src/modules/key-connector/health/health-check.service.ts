@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
-import { db } from '@keyflow/db';
+import { Prisma } from '@prisma/client';
+import { db, skipTenantIsolation } from '@keyflow/db';
 import {
   HealthCheckResult,
   KeyConnectorConnection,
@@ -147,10 +148,13 @@ export class HealthCheckService {
 
     try {
       // Find all distinct business IDs that have at least one connection
-      const connections = await db.integrationConnection.findMany({
+      const distinctBusinessQuery: Prisma.IntegrationConnectionFindManyArgs = {
         select: { businessId: true },
         distinct: ['businessId'],
-      });
+      };
+      const connections = await db.integrationConnection.findMany(
+        skipTenantIsolation(distinctBusinessQuery),
+      );
 
       for (const { businessId } of connections) {
         try {
