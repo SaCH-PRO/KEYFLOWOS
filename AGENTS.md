@@ -136,6 +136,25 @@ derived numbers live in `architecture/os/state/STATE.md`; re-derive rather
 than quote. Ad-hoc sessions are welcome to update `STATE.md` and append a
 journal entry, but the ledgers under `architecture/os/state/` shrink only.
 
+
+# Execution Control Standard
+
+All bounded implementation, forensic-convergence, and execution-packet work MUST follow `docs/development/EXECUTION_CONTROL_STANDARD.md`.
+
+Required rules:
+- Every active packet has an explicit state: `CHARACTERIZING | IMPLEMENTING | PROVING | FIXING_PROOF_FAILURES | READY_TO_MERGE | MERGED | CHECKPOINTED | BLOCKED`.
+- Every meaningful update reports health as `GREEN / PROGRESSING`, `YELLOW / FRICTION`, or `RED / BLOCKED`.
+- Trigger a momentum report after 6 substantive operations without a state transition, after 2 materially identical failed attempts, after 2 CI failures without a new root cause, or whenever activity could be mistaken for progress.
+- Maintain an explicit scope ledger: declared, resolved, remaining, deferred, dropped, superseded. Nothing may silently disappear because tests pass.
+- A packet is not complete until its completion contract is satisfied: scope accounted for, invariant satisfied, implementation complete or N/A, proof passed, failure cases tested, regressions/CI green, no unexplained deferrals, merged, post-merge verified, and durable handoff updated.
+- Separate code/architecture health from process/admission health.
+- A failing gate is information. Do not weaken tests, gates, branch thresholds, or proof obligations merely to obtain green status.
+- For file-by-file connected writers, anticipate commit inflation and compact onto a fresh branch before violating branch-hygiene policy.
+- ChatGPT, Claude Code, Kimi Code, and other agents share one canonical packet contract and may not independently redefine architecture.
+- Preserve active safety constraints: no unauthorized production deploys, mutations, real provider traffic, silent forensic rebaseline, or silent programme-map refresh.
+
+Use `docs/development/EXECUTION_PACKET_STATUS_TEMPLATE.yaml` for durable packet/handoff status.
+
 # Codebase Architect Policy
 
 This repository uses the `codebase-architect` agent skill. The skill lives in `.agents/skills/codebase-architect/` and the canonical architecture memory lives in `/architecture/`.
