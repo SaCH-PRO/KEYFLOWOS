@@ -11508,7 +11508,7 @@ model FlowRun {
   output         Json      @default("{}")
   error          String?
   metrics        Json      @default("{}")
-  idempotencyKey String?   @unique @map("idempotency_key")
+  idempotencyKey String?   @map("idempotency_key")
 
   steps   FlowRunStep[]
   version FlowVersion    @relation(fields: [flowVersionId], references: [id], onDelete: Cascade)
@@ -11517,6 +11517,7 @@ model FlowRun {
   @@index([businessId, flowId, status, startedAt])
   @@index([businessId, status, startedAt])
   @@index([businessId, contactId])
+  @@unique([businessId, idempotencyKey])
   @@index([idempotencyKey])
   @@map("flow_runs")
 }
