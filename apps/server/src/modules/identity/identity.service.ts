@@ -29,6 +29,31 @@ const BUSINESS_FIELD_TO_BLUEPRINT_ANSWER: Record<string, string> = {
 @Injectable()
 export class IdentityService {
   private readonly logger = new Logger(IdentityService.name);
+
+  /**
+   * Retries allowed when a concurrent bootstrap loses the Serializable race.
+   *
+   * Bounded on purpose: a persistent failure must surface, not spin forever.
+   *
+   * Five rather than one. A two-way race needs a single retry, but the losers of
+   * a wider pile-up retry at the same instant and collide with each other, so a
+   * tight budget exhausts on contention that would have resolved. Measured
+   * against real Postgres with six simultaneous bootstraps, three retries
+   * without backoff still failed.
+   */
+  private static readonly BOOTSTRAP_CONFLICT_RETRIES = 5;
+
+  /**
+   * Base backoff between bootstrap retries, in milliseconds.
+   *
+   * Doubling per attempt with jitter on top. The jitter is the part that
+   * matters: every loser of a given round aborts at the same moment, so a fixed
+   * delay just reschedules the same collision. Staggering them lets one through
+   * at a time, and each one that gets through finds the winner's business and
+   * takes the cheap read path.
+   */
+  private static readonly BOOTSTRAP_RETRY_BASE_MS = 15;
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
@@ -37,10 +62,40 @@ export class IdentityService {
     @Inject(DefaultTriggersService) private readonly defaultTriggers: DefaultTriggersService,
   ) {}
 
+  /**
+   * Ordinary workspace discovery, Membership-first.
+   *
+   * KF-EXEC-TENANT-001. This used to filter on `ownerId` alone, which meant a
+   * legitimate STAFF or ADMIN member — a row `inviteTeamMember` had already
+   * written — saw an empty workspace list and could not reach a business they
+   * were plainly a member of. Membership is the ordinary authenticated-human to
+   * Business relationship, so it leads the predicate.
+   *
+   * `ownerId` stays as the second arm on purpose. It is distinguished-owner
+   * compatibility metadata, and until the founding-Membership backfill has run
+   * everywhere it is the only thing keeping pre-existing legitimate owners
+   * discoverable. It is a compatibility fallback, not a second source of truth,
+   * and it is not removed by this packet.
+   *
+   * Tenant scoping: `Business` is the tenant root and carries no businessId, so
+   * it is absent from BUSINESS_ID_MODELS and the S0 isolation extension injects
+   * nothing here. The nested `members` filter is a relation predicate on
+   * Business, not a Membership operation, so S0's default Membership scoping
+   * does not reach it either. This route also carries no `:businessId`, so no
+   * ambient tenant context exists to truncate the result. All three have to stay
+   * true together; if a future route ever lists workspaces from inside a tenant
+   * context, this query needs an explicit `skipTenantIsolation`.
+   */
   async listBusinesses(userId: string) {
     if (!userId) throw new UnauthorizedException('User ID is required to list businesses');
     const items = await this.prisma.client.business.findMany({
-      where: { ownerId: userId, deletedAt: null },
+      where: {
+        deletedAt: null,
+        OR: [
+          { members: { some: { userId } } },
+          { ownerId: userId },
+        ],
+      },
     });
     return items.map((b) => sanitizeBusiness(b));
   }
@@ -141,10 +196,33 @@ export class IdentityService {
     if (!input.ownerId) {
       throw new UnauthorizedException('Owner ID is required to create a business');
     }
+    // KF-EXEC-TENANT-001: one transaction, or neither row.
+    //
+    // This path used to write the Business and stop. The owner ended up with
+    // `ownerId` set and no Membership, which BusinessGuard tolerates (it accepts
+    // ownerId OR Membership) but ModuleScopeGuard does not — it reads
+    // `membership.findUnique` and throws 'Not a member of this business'. The
+    // result was an owner who could open their own business and then be refused
+    // by every `@RequireModuleScope` route in the app.
+    //
+    // Explicit creation stays non-idempotent by design: asking for another
+    // business is a request for another business, not a bootstrap retry. What
+    // must hold is that each one arrives with exactly one founding OWNER
+    // Membership, or not at all.
+    //
+    // Membership.userId is a real foreign key to User, so an ownerId that names
+    // no user now fails the transaction and creates nothing, where before it
+    // silently produced an orphan Business. That is the invariant's
+    // "fails atomically" arm doing its job, not a regression.
+    // A nested relation write, not an explicit transaction. Prisma runs a
+    // nested create in one implicit transaction, so the atomicity is identical
+    // while the business id never has to be read back and carried to a second
+    // statement.
     const business = await this.prisma.client.business.create({
       data: {
         name: input.name.trim(),
         ownerId: input.ownerId,
+        members: { create: { userId: input.ownerId, role: 'OWNER' } },
       },
     });
 
@@ -937,39 +1015,122 @@ export class IdentityService {
     // Cross-Account Protection (RISC) events can be mapped back to this user.
     await this.persistUserIdentities(user.id, input.identities);
 
-    const existingBusiness = await this.prisma.client.business.findFirst({
-      where: { ownerId: user.id, deletedAt: null },
-      orderBy: { createdAt: 'asc' },
-    });
-
     const businessName = (input.company || `${input.firstName || desiredName}'s Workspace`).trim();
 
-    const business =
-      existingBusiness ||
-      (await this.prisma.client.business.create({
-        data: {
-          name: businessName,
-          ownerId: user.id,
-          onboardingStep: 'welcome',
-          onboardingStartedAt: new Date(),
-        },
-      }));
+    const { business, isNewBusiness } = await this.ensureBootstrapWorkspace(user.id, businessName);
 
-    await this.prisma.client.membership.upsert({
-      where: {
-        userId_businessId: { userId: user.id, businessId: business.id },
-      },
-      create: {
-        userId: user.id,
-        businessId: business.id,
-        role: 'OWNER',
-      },
-      update: {
-        role: 'OWNER',
-      },
-    });
+    return { user, business, isNewBusiness };
+  }
 
-    return { user, business, isNewBusiness: !existingBusiness };
+  /**
+   * Find-or-create the bootstrap workspace for a user, atomically, and converge
+   * when two bootstraps for the same user run at once.
+   *
+   * KF-EXEC-TENANT-001. Two separate defects lived in the old inline version:
+   *
+   *   1. `business.create` and `membership.upsert` were consecutive awaits with
+   *      no transaction. A failure in the gap left a Business with no founding
+   *      Membership and no repair path.
+   *   2. The find-then-create was unsynchronised. Two concurrent bootstraps for
+   *      one user both read "no business", both created one, and the user ended
+   *      up with two workspaces. The `@@unique([userId, businessId])` key on
+   *      Membership cannot catch this — the two founding relationships are on
+   *      two *different* businesses, so both are perfectly legal rows.
+   *
+   * The fix is a Serializable transaction, which is the pattern this repository
+   * already uses for exactly this find-then-create shape (see
+   * `CrmService.findOrCreateContact`, `{ isolationLevel: 'Serializable' }`).
+   * Under Postgres SSI the losing transaction aborts with a serialization
+   * failure rather than committing a duplicate, so the retry below re-reads and
+   * finds the winner's business. Convergence, not exclusion.
+   *
+   * Deliberately NOT solved with a unique constraint on `ownerId`: the packet
+   * allows one owner to hold many businesses, and a global uniqueness rule would
+   * forbid the explicit multi-create that `createBusiness` is required to keep
+   * supporting. The constraint would be wrong, not merely heavy-handed.
+   *
+   * "The bootstrap business" keeps its existing definition — the oldest
+   * non-deleted business owned by the user. That is unchanged from main, and it
+   * is what lets a user bootstrap once and then explicitly create as many more
+   * businesses as they like without a later bootstrap adopting one of them.
+   */
+  private async ensureBootstrapWorkspace(userId: string, businessName: string) {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= IdentityService.BOOTSTRAP_CONFLICT_RETRIES; attempt++) {
+      try {
+        return await this.prisma.client.$transaction(
+          async (tx) => {
+            const existingBusiness = await tx.business.findFirst({
+              where: { ownerId: userId, deletedAt: null },
+              orderBy: { createdAt: 'asc' },
+            });
+
+            const business =
+              existingBusiness ||
+              (await tx.business.create({
+                data: {
+                  name: businessName,
+                  ownerId: userId,
+                  onboardingStep: 'welcome',
+                  onboardingStartedAt: new Date(),
+                },
+              }));
+
+            await tx.membership.upsert({
+              where: {
+                userId_businessId: { userId, businessId: business.id },
+              },
+              create: {
+                userId,
+                businessId: business.id,
+                role: 'OWNER',
+              },
+              update: {
+                role: 'OWNER',
+              },
+            });
+
+            return { business, isNewBusiness: !existingBusiness };
+          },
+          { isolationLevel: 'Serializable' },
+        );
+      } catch (err: unknown) {
+        if (!IdentityService.isWriteConflict(err)) throw err;
+        lastError = err;
+        this.logger.warn(
+          `[bootstrap] write conflict resolving workspace for user ${userId} ` +
+            `(attempt ${attempt + 1}/${IdentityService.BOOTSTRAP_CONFLICT_RETRIES + 1})`,
+        );
+        if (attempt < IdentityService.BOOTSTRAP_CONFLICT_RETRIES) {
+          await IdentityService.backoff(attempt);
+        }
+      }
+    }
+
+    // Exhausting the retries is a real failure, not something to paper over with
+    // a non-transactional fallback — that would reintroduce the duplicate the
+    // Serializable transaction exists to prevent.
+    throw lastError;
+  }
+
+  /** Exponential backoff with full jitter, so simultaneous losers do not retry in lockstep. */
+  private static backoff(attempt: number): Promise<void> {
+    const ceiling = IdentityService.BOOTSTRAP_RETRY_BASE_MS * 2 ** attempt;
+    return new Promise((resolve) => setTimeout(resolve, Math.random() * ceiling));
+  }
+
+  /**
+   * A Postgres serialization failure surfaced through Prisma.
+   *
+   * P2034 is Prisma's "transaction failed due to a write conflict or a
+   * deadlock". SQLSTATE 40001 is the underlying serialization_failure and 40P01
+   * is deadlock_detected; the driver adapter does not always map them, so both
+   * shapes are matched rather than trusting one.
+   */
+  private static isWriteConflict(err: unknown): boolean {
+    const code = (err as { code?: unknown })?.code;
+    return code === 'P2034' || code === '40001' || code === '40P01';
   }
 
   /**
