@@ -1,7 +1,7 @@
 packet_id: KF-EXEC-TENANT-001
 directive_message_id: CG-DIRECTIVE-TENANT-IMPL-001
 source_main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
-source_head: 1b196d1c74c808baaf0606b608e7fa23da571054
+source_head: 30a6c44be3e405992aefc48206303dfe4f0ca2a1
 implementation_branch: impl/kf-exec-tenant-001-membership-genesis
 state: PROVING
 health: GREEN
@@ -43,8 +43,8 @@ tests:
     - "npx prisma migrate deploy --schema packages/db/prisma/schema.prisma"
     - "tsc --noEmit (apps/server); pnpm build (apps/server, @keyflow/api, @keyflow/db, @keyflow/shared)"
     - "pnpm lint (apps/server, packages/api)"
-  discovered: 3895
-  passed: 3895
+  discovered: 4079
+  passed: 4079
   failed: 0
   skipped: 0
 negative_controls:
