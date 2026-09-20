@@ -1,0 +1,58 @@
+packet_id: KF-EXEC-TENANT-001
+directive_message_id: PRE_CONTROL_PLANE_PACKET
+source_main: dc913c3942c3a2899b31fbbbf7cc7a7da5f78316
+source_head: 3102acebcc896e57b62006841fa8b0939636deac
+implementation_branch: impl/kf-exec-tenant-001-isolation-compact
+state: PROVING
+health: GREEN
+scope_changed: false
+production_touched: false
+review_status: PENDING_CHATGPT_REVIEW
+summary: >
+  Pre-control-plane TENANT implementation candidate. Original 13-model
+  acknowledged-unscoped debt is dispositioned to zero with explicit global
+  exceptions, Course visibility semantics, and tenant-local FlowRun idempotency.
+changed_files:
+  - apps/server/src/core/prisma/tenant-model-list.spec.ts
+  - apps/server/src/modules/admin-analytics/admin-analytics.service.ts
+  - apps/server/src/modules/ai/cross-business-intelligence.service.ts
+  - apps/server/src/modules/education/education.service.ts
+  - apps/server/src/modules/education/education.tenant-scope.spec.ts
+  - apps/server/src/modules/flow/flow-runner.service.ts
+  - apps/server/src/modules/flow/flow-runner.tenant-idempotency.spec.ts
+  - apps/server/src/modules/identity/identity.service.ts
+  - apps/server/src/modules/key-connector/health/health-check.service.ts
+  - apps/server/src/modules/keystore/keystore.service.ts
+  - apps/server/src/modules/site/presence/presence.service.ts
+  - apps/server/test/tenant-scope-extension.integration.test.ts
+  - packages/db/prisma/migrations/20260919223000_flow_run_tenant_idempotency/migration.sql
+  - packages/db/prisma/schema.prisma
+  - packages/db/src/client.ts
+schema_migrations:
+  - packages/db/prisma/migrations/20260919223000_flow_run_tenant_idempotency/migration.sql
+tests:
+  commands:
+    - GitHub CI/CD Pipeline run 522
+  passed:
+    - full CI/CD pipeline
+    - branch divergence
+    - security scan
+    - lint
+    - typecheck after Prisma query typing repair
+  failed: []
+  skipped: []
+negative_controls:
+  - cross-tenant Course access rejection
+  - tenant-local FlowRun idempotency lookup
+  - explicit global/cross-business skipTenantIsolation paths
+new_consumers_or_writers: []
+deviations_from_packet: []
+rollback_floor:
+  - preserve businessId ownership semantics
+  - preserve FlowRun history and idempotency values
+open_questions:
+  - re-resolve diff against current main after control-plane merge
+evidence_refs:
+  - PR #78
+  - CI run 35519020687
+  - branch divergence run 35519020710
