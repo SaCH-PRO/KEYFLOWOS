@@ -1,0 +1,46 @@
+message_id: ""
+message_type: DIRECTIVE
+packet_id: ""
+sender: chatgpt
+in_reply_to: null
+
+source_main: ""
+source_head: ""
+implementation_branch: ""
+
+state: CHARACTERIZING
+health: GREEN
+scope_changed: false
+production_touched: false
+
+summary: ""
+evidence_refs: []
+next_action: ""
+
+directive:
+  objective: ""
+  allowed_scope: []
+  prohibited_scope: []
+  invariants: []
+  proof_obligations: []
+  stop_conditions: []
+  merge_authority: false
+
+return_envelope:
+  source_drift: null
+  characterization: null
+  changed_files: []
+  schema_migrations: []
+  tests:
+    commands: []
+    discovered: []
+    passed: []
+    failed: []
+    skipped: []
+  negative_controls: []
+  provider_or_external_runs: []
+  cleanup: []
+  new_consumers_or_writers: []
+  deviations_from_packet: []
+  rollback_floor: []
+  open_questions: []
