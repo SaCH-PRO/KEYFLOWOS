@@ -2,14 +2,14 @@ project: KEYFLOWOS
 analysis_version: 94
 last_updated: '2026-09-20'
 checkpoint_id: TENANT-ACTIVE-2026-09-20-01
-status: TENANT_RECHARACTERIZING
+status: TENANT_IMPLEMENTATION_RELEASED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: true
 production_release_authorized: false
 production_mutations_authorized: false
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-current_main: cee4ea937eb451d8e2d8207bfe271c1e6684c7e8
+current_main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
 coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 35}
 package_hardening:
   total_packets: 35
@@ -59,7 +59,7 @@ package_hardening:
     status: ADMITTED_AND_MERGED
 active_frontier:
   stage: WAVE_A_TENANT
-  status: RECHARACTERIZING
+  status: IMPLEMENTING
   packet: KF-EXEC-TENANT-001
   implementation_branch: impl/kf-exec-tenant-001-isolation-final
   pull_request: 81
@@ -67,7 +67,7 @@ active_frontier:
   control_head: 0e9512fa13adce5dae0aaa4d4bd65597e6a6831e
   prior_pr: 78
   prior_pr_disposition: SUPERSEDED_BRANCH_HYGIENE
-  health: YELLOW
+  health: GREEN
 constraints:
   - no_production_provider_effects
   - no_production_data_mutations
@@ -76,11 +76,11 @@ constraints:
   - programme_map_refresh_paused
   - scheduled_cycles_halted
 next_actions:
-  - complete read-only canonical TENANT recharacterization against current main and PR 81
+  - execute CG-DIRECTIVE-TENANT-IMPL-001 against current main
   - preserve forensic baseline 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   - keep production read-only and release unauthorized
   - do not reopen K12 or EXTFX unless regression invalidates admitted proof
-  - do not admit PR 81 as full TENANT until canonical Membership-First Tenant Genesis obligations are accounted for
-  - after recharacterization, either expand/reshape TENANT implementation or classify PR 81 as a safe bounded sub-slice
+  - preserve TENANT S0 as zero-credit supporting hardening already merged
+  - implement and prove the canonical Membership-First Tenant Genesis packet
   - checkpoint full TENANT before releasing AUTH-001
   - keep programme map refresh and scheduled architecture cycles paused
