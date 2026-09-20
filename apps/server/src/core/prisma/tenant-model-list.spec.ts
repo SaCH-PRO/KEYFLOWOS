@@ -94,6 +94,10 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
     expect(listed).toContain('KeyCallSession');
     expect(listed).toContain('SitePageDraft');
     expect(listed).toContain('SyncJob');
+    expect(listed).toContain('DriveIntakeFile');
+    expect(listed).toContain('IngestionItem');
+    expect(listed).toContain('MessageIntake');
+    expect(listed).toContain('WhatsAppMessage');
   });
 });
 
@@ -138,17 +142,13 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'ContactExternalMapping',
  
   'Course',
-  'DriveIntakeFile',
   'FlowRun',
  
-  'IngestionItem',
   'IntegrationConnection',
   'InventoryStock',
   'Membership',
-  'MessageIntake',
  
  
-  'WhatsAppMessage',
 ]);
 
 /** Models whose businessId column exists but which must never be scoped. */
