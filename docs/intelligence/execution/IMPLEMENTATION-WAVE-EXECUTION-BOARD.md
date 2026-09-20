@@ -43,10 +43,14 @@ Order is load-bearing:
 TENANT-001 -> AUTH-001 -> ACTION-001
 
 3. KF-EXEC-TENANT-001 — Membership-First Tenant Genesis Compatibility
-   - status: FIXING_PROOF_FAILURES
-   - health: YELLOW
-   - active implementation PR: #78
-   - current work: CI type-boundary repair after semantic candidate stabilized
+   - status: PROVING
+   - health: GREEN
+   - active implementation PR: #81
+   - branch: impl/kf-exec-tenant-001-isolation-final
+   - base: main@cee4ea937eb451d8e2d8207bfe271c1e6684c7e8
+   - semantic implementation head: c9f8e72df1a47b228cde191f9e77909123bcb0f2
+   - prior PR #78: superseded for branch-hygiene/main-drift reasons; do not merge
+   - current work: fresh-main CI/admission + adversarial review
    - scope ledger: acknowledged-unscoped tenant model debt reduced 13 -> 0 in candidate
    - production touched: no
 
@@ -223,8 +227,8 @@ Waiting/unstarted: 32
 
 Active packet: KF-EXEC-TENANT-001
 Wave: A
-State: FIXING_PROOF_FAILURES
-Health: YELLOW
+State: PROVING
+Health: GREEN
 Scope drift: none declared
 Production touched: no
 Forensic baseline preserved: yes
