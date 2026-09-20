@@ -86,7 +86,7 @@ const BUSINESS_ID_MODELS = new Set([
   'Asset', 'Contact', 'Account', 'Deal', 'Invoice', 'Quote', 'Product',
   'Service', 'Booking', 'BookingWaitlistEntry', 'StaffMember', 'Project', 'ProjectTask', 'Expense',
   'SocialPost', 'EmailCampaign', 'DocumentInstance', 'Site', 'CalendarEvent',
-  'ConnectorStatus', 'Automation', 
+  'ConnectorStatus', 'Automation',
   'OutboundDelivery', 'CommandItem',
   'BusinessEntityLink', 'BusinessRisk', 'CashReserveBucket',
   'WorkflowTemplate', 'WorkflowRun', 'SopDocument',
@@ -313,10 +313,11 @@ const BUSINESS_ID_MODELS = new Set([
   //                          skipTenantIsolation rather than depending on
   //                          happening to run without a tenant context.
   //
-  // SitePageDraft was reviewed in the same pass and deliberately NOT moved:
-  // `getByPreviewToken` keys on previewToken, a GLOBAL @unique with no
-  // businessId, which is the exact shape that returns a silent null. It stays
-  // in the ledger.
+  // SitePageDraft was held back in this pass because `getByPreviewToken`
+  // keys on previewToken, a GLOBAL @unique with no businessId. KF-EXEC-TENANT-001
+  // later moved it only after that public lookup was made explicitly
+  // skipTenantIsolation(...), preserving token resolution while default-scoping
+  // every tenant-context operation.
   'AuthorityGrant', 'CampaignBriefing', 'CognitionSession',
   'ContactInsightSnapshot', 'FlowSession', 'PresenceInsightSnapshot',
   'ValueConstraint',
@@ -417,6 +418,18 @@ const BUSINESS_ID_MODELS = new Set([
   // sibling ProjectMilestone does not, and is therefore unscoped debt. A new
   // model arriving on the ledger is a choice, and this one chose otherwise.
   'ProjectDeliverable',
+
+  // ── KF-EXEC-TENANT-001, 2026-09-19 ────────────────────────────────────────
+  // Final shrink-only debt pass. These thirteen were not bulk-added. Every
+  // production call site was reviewed, and the cases that intentionally cross
+  // businesses were made explicit with skipTenantIsolation before default
+  // scoping was enabled. Course also received platform-vs-tenant visibility
+  // semantics; FlowRun idempotency became unique per business rather than
+  // globally unique. The accompanying tenant-model-list gate now has zero
+  // acknowledged-unscoped debt.
+  'ContactExternalMapping', 'Course', 'DriveIntakeFile', 'FlowRun',
+  'IngestionItem', 'IntegrationConnection', 'InventoryStock', 'KeyCallSession',
+  'Membership', 'MessageIntake', 'SitePageDraft', 'SyncJob', 'WhatsAppMessage',
 ]);
 
 
