@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { randomUUID } from 'crypto';
 
@@ -92,14 +93,16 @@ export class EducationService {
   }
 
   async enrollInCourse(businessId: string, courseId: string) {
-    const course = await this.prisma.client.course.findFirst({
-      where: {
-        id: courseId,
-        isPublished: true,
-        OR: [{ businessId: null }, { businessId }],
-      },
-      select: { id: true },
-    });
+    const course = await this.prisma.client.course.findFirst(
+      skipTenantIsolation({
+        where: {
+          id: courseId,
+          isPublished: true,
+          OR: [{ businessId: null }, { businessId }],
+        },
+        select: { id: true },
+      }),
+    );
     if (!course) throw new NotFoundException('Course not found');
 
     return this.prisma.client.courseEnrollment.create({
