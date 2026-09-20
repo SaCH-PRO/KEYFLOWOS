@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { randomUUID } from 'crypto';
 
@@ -100,7 +100,7 @@ export class EducationService {
       },
       select: { id: true },
     });
-    if (!course) return null;
+    if (!course) throw new NotFoundException('Course not found');
 
     return this.prisma.client.courseEnrollment.create({
       data: {
