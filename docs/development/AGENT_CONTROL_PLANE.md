@@ -189,3 +189,18 @@ A packet PR is merge-eligible only when:
 ## Safety
 
 Production deployment, production mutation, real provider traffic, forensic rebaseline, and programme-map refresh remain independently controlled and cannot be granted implicitly by an agent-control state.
+
+
+## Semantic head rule
+
+`.agent-control/claude-return.yaml.source_head` identifies the last commit that changes packet semantics (application code, schema, migration, tests or other non-control files).
+
+Control metadata may be committed after that semantic head. Therefore the final PR head may be newer than `source_head`.
+
+The repository gate enforces:
+- `source_head` exists;
+- `source_head` is an ancestor of the current PR head;
+- every file changed after `source_head` is under `.agent-control/**`;
+- before a non-draft implementation PR can advance, both control artifacts' `source_main` values must equal the current PR base SHA.
+
+If any non-control file changes after a RETURN is prepared, the implementer must advance `source_head`, refresh the return evidence, rerun required proof, and return to `PENDING_CHATGPT_REVIEW`.
