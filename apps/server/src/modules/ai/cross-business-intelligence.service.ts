@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface BusinessMetricSnapshot {
@@ -59,10 +60,12 @@ export class CrossBusinessIntelligenceService {
   constructor(private readonly prisma: PrismaService) {}
 
   async aggregateForUser(userId: string): Promise<CrossBusinessIntelligenceResult> {
-    const memberships = await this.prisma.client.membership.findMany({
-      where: { userId },
-      include: { business: { select: { id: true, name: true } } },
-    });
+    const memberships = await this.prisma.client.membership.findMany(
+      skipTenantIsolation({
+        where: { userId },
+        include: { business: { select: { id: true, name: true } } },
+      }),
+    );
 
     const businessIds = memberships.map((m) => m.businessId);
     const snapshots: BusinessMetricSnapshot[] = [];
