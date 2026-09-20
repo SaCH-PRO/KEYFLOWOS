@@ -1,6 +1,6 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `PKG-EXTFX-2026-09-19-02`
+Checkpoint: `TENANT-ACTIVE-2026-09-20-01`
 
 This is the canonical continuation point. Do **not** restart the programme, reconstruct K12, or recreate EXTFX.
 
@@ -8,7 +8,7 @@ This is the canonical continuation point. Do **not** restart the programme, reco
 
 - Repository: `SaCH-PRO/KEYFLOWOS`
 - Forensic baseline: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2` — unchanged
-- Current main: `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`
+- Current main: `cee4ea937eb451d8e2d8207bfe271c1e6684c7e8`
 - Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 - K12 admitted main checkpoint: `ebbe8862fa4b7e6ec968db193620ac53f38cd5ff`
 - EXTFX implementation branch: `impl/kf-exec-extfx-001-resend-certainty`
@@ -55,14 +55,27 @@ Proof/failure-matrix review verdict: **ADMITTED_AT_DECLARED_SCOPE**. The impleme
 
 ## Current frontier
 
-EXTFX is closed and merged. No next execution package has been selected in this checkpoint.
+EXTFX remains closed and merged. **KF-EXEC-TENANT-001 is the authoritative active packet.**
 
-Before new implementation work:
-1. Re-resolve `main` and the canonical intelligence head.
-2. Read `CURRENT-STATE.yaml`, this file, and `NEXT-CHAT-ROLLOVER.md`.
+Current active implementation:
+- Wave: A
+- State: PROVING
+- Health: GREEN
+- Replacement branch: `impl/kf-exec-tenant-001-isolation-final`
+- Draft PR: #81
+- Base: `main@cee4ea937eb451d8e2d8207bfe271c1e6684c7e8`
+- Semantic implementation head: `c9f8e72df1a47b228cde191f9e77909123bcb0f2`
+- Control-artifact head at checkpoint: `0e9512fa13adce5dae0aaa4d4bd65597e6a6831e`
+- Prior PR #78 is superseded due branch-hygiene pressure and main drift; do not merge it.
+- Declared semantic scope is unchanged from the stabilized candidate that previously passed full CI.
+- Production remains untouched.
+
+Before successor implementation work:
+1. Re-resolve `main`, PR #81 head and the canonical intelligence head.
+2. Complete PR #81 proof/admission, adversarial review, merge and post-merge verification.
 3. Preserve the forensic baseline `8f173bfe...`.
 4. Do not reopen K12 or EXTFX unless new evidence invalidates admitted proof.
-5. Select the next bounded package from durable intelligence when continuation is authorized.
+5. Do not release AUTH-001 until TENANT is checkpointed.
 6. Keep the programme map frozen and scheduled architecture cycles halted unless the user explicitly lifts those constraints.
 
 ## Active safety constraints
