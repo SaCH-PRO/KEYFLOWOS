@@ -246,4 +246,22 @@ For each packet:
 10. update durable handoff/board;
 11. select the next dependency-safe packet.
 
-After all 35 packets are checkpointed, perform one final 26-journey / 12-kernel / cross-constellation convergence re-audit before declaring the forensic implementation programme complete.
+After all 35 packets are checkpointed, the programme enters FINAL WHOLE-APP ACCEPTANCE. Packet completion alone is not sufficient.
+
+The final gate is the completion contract in `docs/development/EXECUTION_CONTROL_STANDARD.md` §16 and requires, at minimum:
+- 35/35 packets dispositioned and checkpointed;
+- 26/26 canonical journeys reassessed end to end;
+- 12/12 kernels reassessed;
+- cross-constellation / causal / dynamic / feedback contradictions reassessed;
+- all implementation-relevant findings given an explicit disposition;
+- full server/web/integration/real-DB regression as applicable;
+- supported migration path proved;
+- concurrency, replay, retry, restart, cancellation, recovery and negative controls proved;
+- tenant/security/authority boundaries proved;
+- browser/UI/runtime and voice paths proved where applicable;
+- legacy writers/readers retired only after replacement/consumer proof;
+- final architecture-to-code reconciliation against the accepted intelligence work;
+- final `main` revalidated after the last merge;
+- no unexplained skips, TODO proof cases, deferrals or unknowns.
+
+If any required final item is NO, UNKNOWN, SKIPPED or UNPROVEN, the programme remains incomplete.
