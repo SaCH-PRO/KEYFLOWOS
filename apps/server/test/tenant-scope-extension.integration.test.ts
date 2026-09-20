@@ -445,7 +445,7 @@ describe('tenant isolation extension (real database)', () => {
         'ChannelConnection', 'ChannelDestination',
         'FinanceActionItem', 'SocialConnection',
         // KF-EXEC-TENANT-001
-        'ContactExternalMapping', 'DriveIntakeFile', 'IngestionItem',
+        'ContactExternalMapping', 'Course', 'DriveIntakeFile', 'FlowRun', 'IngestionItem',
         'IntegrationConnection', 'InventoryStock', 'KeyCallSession', 'Membership',
         'MessageIntake', 'SitePageDraft', 'SyncJob', 'WhatsAppMessage',
       ]) {
