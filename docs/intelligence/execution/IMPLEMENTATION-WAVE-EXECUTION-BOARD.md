@@ -43,15 +43,13 @@ Order is load-bearing:
 TENANT-001 -> AUTH-001 -> ACTION-001
 
 3. KF-EXEC-TENANT-001 — Membership-First Tenant Genesis Compatibility
-   - status: CHARACTERIZING
-   - health: YELLOW
-   - active implementation PR: #81
-   - branch: impl/kf-exec-tenant-001-isolation-final
-   - base: main@cee4ea937eb451d8e2d8207bfe271c1e6684c7e8
-   - semantic implementation head: c9f8e72df1a47b228cde191f9e77909123bcb0f2
-   - prior PR #78: superseded for branch-hygiene/main-drift reasons; do not merge
-   - current work: canonical Membership-First Tenant Genesis recharacterization; PR #81 is paused as a tenant-isolation hardening candidate pending obligation mapping
-   - scope ledger: acknowledged-unscoped tenant model debt reduced 13 -> 0 in candidate
+   - status: IMPLEMENTING
+   - health: GREEN
+   - status note: canonical Membership-First Tenant Genesis implementation released to Claude
+   - source main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
+   - supporting slice PR #81: merged, zero canonical completion credit
+   - current work: constructor parity, founding OWNER Membership atomicity, membership-first discovery, bootstrap concurrency, safe migration classification
+   - scope ledger: canonical obligations from CG-REVIEW-TENANT-RECHAR-001
    - production touched: no
 
 4. KF-EXEC-AUTH-001 — Effective Authority Resolver Foundation
@@ -227,8 +225,8 @@ Waiting/unstarted: 32
 
 Active packet: KF-EXEC-TENANT-001
 Wave: A
-State: CHARACTERIZING
-Health: YELLOW
+State: IMPLEMENTING
+Health: GREEN
 Scope drift: none declared
 Production touched: no
 Forensic baseline preserved: yes
