@@ -91,6 +91,19 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
     // description back in the response.
     expect(listed).toContain('AiGoal');
     expect(listed).toContain('AiPlan');
+    expect(listed).toContain('KeyCallSession');
+    expect(listed).toContain('SitePageDraft');
+    expect(listed).toContain('SyncJob');
+    expect(listed).toContain('DriveIntakeFile');
+    expect(listed).toContain('IngestionItem');
+    expect(listed).toContain('MessageIntake');
+    expect(listed).toContain('WhatsAppMessage');
+    expect(listed).toContain('ContactExternalMapping');
+    expect(listed).toContain('InventoryStock');
+    expect(listed).toContain('IntegrationConnection');
+    expect(listed).toContain('Membership');
+    expect(listed).toContain('Course');
+    expect(listed).toContain('FlowRun');
   });
 });
 
@@ -102,10 +115,11 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * with a businessId is unscoped by default and nothing fails. Verified on
  * 2026-08-09 by adding one and watching this file pass.
  *
- * When this was written: 347 models carry a businessId, 77 were scoped, 270
- * were these. Now: 348 carry one, 325 scoped, 13 here, 10 in NEVER_SCOPE. The
- * three numbers sum to 348 exactly, and the assertions below are what keep them
- * summing — a model has one status, never two and never none.
+ * When this was written: 347 models carried a businessId, 77 were scoped, 270
+ * were here. KF-EXEC-TENANT-001 completed the shrink-only review of the final
+ * acknowledged debt: the ledger is now empty. Models that are deliberately
+ * cross-tenant by design remain in NEVER_SCOPE; every other tenant-bearing
+ * model must be present in BUSINESS_ID_MODELS.
  *
  * WHY IT IS NOT SIMPLY EMPTIED. Adding a model here injects businessId into
  * findUnique, and Prisma 6.19 ACCEPTS an extra scalar in a WhereUniqueInput
@@ -115,7 +129,9 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * return null SILENTLY: no error, no log, no provider retry. Emptying this list
  * in one commit would create 270 chances of that, and every test would pass.
  *
- * SO: this list may only SHRINK, one reviewed model at a time.
+ * SO: this list was allowed only to SHRINK, one reviewed model at a time.
+ * It must now remain empty unless a newly introduced model is explicitly
+ * acknowledged here during review before it is made safe to scope.
  *
  * AND THE TEST FOR "REVIEWED" IS NOT THE OBVIOUS ONE. The natural question is
  * "does any findUnique key on a global unique". That is necessary and it is not
@@ -128,28 +144,7 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * injection re-states a predicate the caller already wrote and can change
  * nothing. Where it does not, a human reads it before it moves.
  */
-const ACKNOWLEDGED_UNSCOPED = new Set([
- 
- 
- 
-  'ContactExternalMapping',
- 
-  'Course',
-  'DriveIntakeFile',
-  'FlowRun',
- 
-  'IngestionItem',
-  'IntegrationConnection',
-  'InventoryStock',
-  'KeyCallSession',
-  'Membership',
-  'MessageIntake',
- 
-  'SitePageDraft',
-  'SyncJob',
- 
-  'WhatsAppMessage',
-]);
+const ACKNOWLEDGED_UNSCOPED = new Set<string>();
 
 /** Models whose businessId column exists but which must never be scoped. */
 const NEVER_SCOPE = new Set([
