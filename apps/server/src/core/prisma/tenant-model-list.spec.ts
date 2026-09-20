@@ -92,6 +92,8 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
     expect(listed).toContain('AiGoal');
     expect(listed).toContain('AiPlan');
     expect(listed).toContain('KeyCallSession');
+    expect(listed).toContain('SitePageDraft');
+    expect(listed).toContain('SyncJob');
   });
 });
 
@@ -145,8 +147,6 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'Membership',
   'MessageIntake',
  
-  'SitePageDraft',
-  'SyncJob',
  
   'WhatsAppMessage',
 ]);
