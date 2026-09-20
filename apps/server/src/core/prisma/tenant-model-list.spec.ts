@@ -91,6 +91,7 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
     // description back in the response.
     expect(listed).toContain('AiGoal');
     expect(listed).toContain('AiPlan');
+    expect(listed).toContain('KeyCallSession');
   });
 });
 
@@ -141,7 +142,6 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'IngestionItem',
   'IntegrationConnection',
   'InventoryStock',
-  'KeyCallSession',
   'Membership',
   'MessageIntake',
  
