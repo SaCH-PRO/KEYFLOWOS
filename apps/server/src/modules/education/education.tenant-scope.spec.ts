@@ -61,14 +61,17 @@ describe('EducationService tenant visibility', () => {
 
     await service.enrollInCourse('biz_a', 'course_1');
 
-    expect(prisma.client.course.findFirst).toHaveBeenCalledWith({
-      where: {
-        id: 'course_1',
-        isPublished: true,
-        OR: [{ businessId: null }, { businessId: 'biz_a' }],
-      },
-      select: { id: true },
-    });
+    expect(prisma.client.course.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'course_1',
+          isPublished: true,
+          OR: [{ businessId: null }, { businessId: 'biz_a' }],
+        },
+        select: { id: true },
+        __skipTenantIsolation: true,
+      }),
+    );
     expect(prisma.client.courseEnrollment.create).toHaveBeenCalled();
   });
 
