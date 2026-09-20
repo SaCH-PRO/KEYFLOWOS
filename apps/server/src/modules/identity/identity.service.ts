@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { DefaultTriggersService } from '../ai/default-triggers.service';
@@ -766,7 +767,9 @@ export class IdentityService {
         // These match the relations declared in packages/db/prisma/schema.prisma:
         // Membership.userId, Session.userId, AiExecutionLog.userId,
         // AiApprovalItem.userId, AiApprovalItem.resolvedByUserId, AiPlan.userId.
-        await tx.membership.updateMany({ where: { userId: oldId }, data: { userId: newId } });
+        await tx.membership.updateMany(
+          skipTenantIsolation({ where: { userId: oldId }, data: { userId: newId } }),
+        );
         await tx.session.updateMany({ where: { userId: oldId }, data: { userId: newId } });
         await tx.aiExecutionLog.updateMany({ where: { userId: oldId }, data: { userId: newId } });
         await tx.aiApprovalItem.updateMany({ where: { userId: oldId }, data: { userId: newId } });
