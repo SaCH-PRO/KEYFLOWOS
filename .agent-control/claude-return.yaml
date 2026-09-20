@@ -3,15 +3,17 @@ directive_message_id: PRE_CONTROL_PLANE_PACKET
 source_main: cee4ea937eb451d8e2d8207bfe271c1e6684c7e8
 source_head: c9f8e72df1a47b228cde191f9e77909123bcb0f2
 implementation_branch: impl/kf-exec-tenant-001-isolation-final
-state: PROVING
-health: GREEN
+state: CHARACTERIZING
+health: YELLOW
 scope_changed: false
 production_touched: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: RECHARACTERIZE
 summary: >
-  Stabilized TENANT semantic candidate transplanted unchanged onto the control-plane
-  main. source_head identifies the final semantic implementation commit; later commits
-  on this branch are control-artifact-only.
+  Tenant-isolation hardening candidate transplanted unchanged onto the control-plane
+  main. This is NOT currently accepted as complete KF-EXEC-TENANT-001 because the
+  canonical packet is Membership-First Tenant Genesis Compatibility. Admission is
+  paused pending read-only canonical recharacterization. source_head identifies the
+  final semantic implementation commit; later commits are control-artifact-only.
 changed_files:
   - apps/server/src/core/prisma/tenant-model-list.spec.ts
   - apps/server/src/modules/admin-analytics/admin-analytics.service.ts
