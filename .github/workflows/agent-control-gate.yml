@@ -71,6 +71,29 @@ jobs:
             exit 1
           fi
 
+          source_head="$(sed -n 's/^source_head:[[:space:]]*//p' "$RETURN" | head -n1 | tr -d '"')"
+          if [ -z "$source_head" ]; then
+            echo "::error::claude-return.yaml source_head must not be empty"
+            exit 1
+          fi
+
+          git cat-file -e "$source_head^{commit}" 2>/dev/null || {
+            echo "::error::claude-return.yaml source_head is not a commit available in this PR history: $source_head"
+            exit 1
+          }
+
+          git merge-base --is-ancestor "$source_head" HEAD || {
+            echo "::error::claude-return.yaml source_head is not an ancestor of the PR head"
+            exit 1
+          }
+
+          non_control_tail="$(git diff --name-only "$source_head"..HEAD -- . ':(exclude).agent-control/**')"
+          if [ -n "$non_control_tail" ]; then
+            echo "::error::Commits after source_head must be control-artifact-only. Non-control files changed:"
+            echo "$non_control_tail"
+            exit 1
+          fi
+
           if grep -Eq '^production_touched:[[:space:]]*true([[:space:]]|$)' "$ACTIVE" "$RETURN"; then
             echo "::error::production_touched=true requires explicit out-of-band authorization; packet PR cannot self-admit"
             exit 1
@@ -83,6 +106,16 @@ jobs:
           set -euo pipefail
           RETURN=".agent-control/claude-return.yaml"
           status="$(sed -n 's/^review_status:[[:space:]]*//p' "$RETURN" | head -n1 | tr -d '"')"
+
+          active_source_main="$(sed -n 's/^source_main:[[:space:]]*//p' ".agent-control/active-packet.yaml" | head -n1 | tr -d '"')"
+          return_source_main="$(sed -n 's/^source_main:[[:space:]]*//p' "$RETURN" | head -n1 | tr -d '"')"
+          expected_base="${{ github.event.pull_request.base.sha }}"
+          if [ "$active_source_main" != "$expected_base" ] || [ "$return_source_main" != "$expected_base" ]; then
+            echo "::error::Non-draft impl/* PR must be revalidated against the current PR base SHA $expected_base"
+            echo "::error::active source_main=$active_source_main return source_main=$return_source_main"
+            exit 1
+          fi
+
           case "$status" in
             READY_TO_MERGE|ACCEPT_FOR_ADMISSION)
               ;;
