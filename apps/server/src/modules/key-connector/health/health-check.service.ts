@@ -150,7 +150,7 @@ export class HealthCheckService {
       const connections = await db.integrationConnection.findMany(
         skipTenantIsolation({
           select: { businessId: true },
-          distinct: ['businessId'],
+          distinct: ['businessId'] as const,
         }),
       );
 
