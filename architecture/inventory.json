@@ -1,5 +1,6 @@
 {
   "directories": [
+    ".agent-control",
     ".agents",
     ".agents/skills",
     ".agents/skills/agent-tools",
@@ -715,6 +716,9 @@
     "docs/build-specs",
     "docs/development",
     "docs/development/deploy-notes",
+    "docs/intelligence",
+    "docs/intelligence/packages",
+    "docs/intelligence/packages/KF-EXEC-K12-001",
     "docs/key-genome",
     "docs/keyportal-issues",
     "docs/migrations",
@@ -874,6 +878,8 @@
     "packages/db/prisma/migrations/20260811040000_add_booking_waitlist",
     "packages/db/prisma/migrations/20260823170000_business_id_indexes",
     "packages/db/prisma/migrations/20260830220000_add_project_deliverables",
+    "packages/db/prisma/migrations/20260918060000_outbound_delivery_effect_certainty",
+    "packages/db/prisma/migrations/20260919223000_flow_run_tenant_idempotency",
     "packages/db/src",
     "packages/db/src/middleware",
     "packages/db/src/types",
@@ -894,9 +900,41 @@
     "scripts/dev",
     "scripts/env-audit",
     "scripts/os",
+    "scripts/proof-admission",
+    "scripts/proof-admission/manifests",
     "scripts/system-map"
   ],
   "files": [
+    {
+      "extension": ".md",
+      "lines": 18,
+      "path": ".agent-control/README.md",
+      "size_bytes": 1116
+    },
+    {
+      "extension": ".yaml",
+      "lines": 14,
+      "path": ".agent-control/active-packet.example.yaml",
+      "size_bytes": 283
+    },
+    {
+      "extension": ".yaml",
+      "lines": 71,
+      "path": ".agent-control/active-packet.yaml",
+      "size_bytes": 4044
+    },
+    {
+      "extension": ".yaml",
+      "lines": 24,
+      "path": ".agent-control/claude-return.example.yaml",
+      "size_bytes": 466
+    },
+    {
+      "extension": ".yaml",
+      "lines": 74,
+      "path": ".agent-control/claude-return.yaml",
+      "size_bytes": 3938
+    },
     {
       "extension": ".toml",
       "lines": 8,
@@ -3162,9 +3200,9 @@
     },
     {
       "extension": ".json",
-      "lines": 7,
-      "path": ".claude/coordination/sessions/0a974f22-189c-51c7-bf2a-b6ac354817de.json",
-      "size_bytes": 173
+      "lines": 9,
+      "path": ".claude/coordination/sessions/1066c27f-9957-5a23-96f6-18e326aada97.json",
+      "size_bytes": 274
     },
     {
       "extension": ".md",
@@ -3196,6 +3234,12 @@
       "lines": 44,
       "path": ".dockerignore",
       "size_bytes": 934
+    },
+    {
+      "extension": "",
+      "lines": 1,
+      "path": ".env",
+      "size_bytes": 83
     },
     {
       "extension": ".example",
@@ -3235,15 +3279,21 @@
     },
     {
       "extension": ".yml",
+      "lines": 135,
+      "path": ".github/workflows/agent-control-gate.yml",
+      "size_bytes": 5280
+    },
+    {
+      "extension": ".yml",
       "lines": 313,
       "path": ".github/workflows/branch-divergence.yml",
       "size_bytes": 12089
     },
     {
       "extension": ".yml",
-      "lines": 472,
+      "lines": 485,
       "path": ".github/workflows/ci-cd.yml",
-      "size_bytes": 20393
+      "size_bytes": 21131
     },
     {
       "extension": ".yml",
@@ -3361,9 +3411,15 @@
     },
     {
       "extension": ".md",
-      "lines": 172,
+      "lines": 193,
       "path": "AGENTS.md",
-      "size_bytes": 11701
+      "size_bytes": 13942
+    },
+    {
+      "extension": ".md",
+      "lines": 73,
+      "path": "CLAUDE.md",
+      "size_bytes": 2703
     },
     {
       "extension": "",
@@ -3478,9 +3534,9 @@
     },
     {
       "extension": ".json",
-      "lines": 94,
+      "lines": 95,
       "path": "apps/server/package.json",
-      "size_bytes": 2843
+      "size_bytes": 3229
     },
     {
       "extension": ".sql",
@@ -4027,6 +4083,34 @@
       "lines": 92,
       "path": "apps/server/src/core/config/local-service-urls.spec.ts",
       "size_bytes": 3916
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 149,
+      "path": "apps/server/src/core/config/proof-admission.spec.ts",
+      "size_bytes": 5824
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 103,
+      "path": "apps/server/src/core/config/proof-resource-admission.spec.ts",
+      "size_bytes": 3632
     },
     {
       "exports": [],
@@ -5461,9 +5545,9 @@
         "node:path",
         "vitest"
       ],
-      "lines": 286,
+      "lines": 281,
       "path": "apps/server/src/core/prisma/tenant-model-list.spec.ts",
-      "size_bytes": 12769
+      "size_bytes": 13333
     },
     {
       "exports": [],
@@ -5845,9 +5929,9 @@
         "@keyflow/db",
         "@nestjs/common"
       ],
-      "lines": 179,
+      "lines": 183,
       "path": "apps/server/src/modules/admin-analytics/admin-analytics.service.ts",
-      "size_bytes": 5884
+      "size_bytes": 5966
     },
     {
       "exports": [
@@ -7002,11 +7086,12 @@
       "extension": ".ts",
       "imports": [
         "../../core/prisma/prisma.service",
+        "@keyflow/db",
         "@nestjs/common"
       ],
-      "lines": 244,
+      "lines": 247,
       "path": "apps/server/src/modules/ai/cross-business-intelligence.service.ts",
-      "size_bytes": 9441
+      "size_bytes": 9532
     },
     {
       "exports": [],
@@ -14420,14 +14505,16 @@
         "AdapterCapabilities",
         "ChannelAdapter",
         "NormalizedError",
+        "ProviderEffectContext",
+        "ProviderOutcomeCertainty",
         "PublishPayload",
         "PublishResponse"
       ],
       "extension": ".ts",
       "imports": [],
-      "lines": 40,
+      "lines": 56,
       "path": "apps/server/src/modules/communications/adapters/channel-adapter.interface.ts",
-      "size_bytes": 1013
+      "size_bytes": 1402
     },
     {
       "exports": [
@@ -14446,13 +14533,14 @@
       "exports": [],
       "extension": ".ts",
       "imports": [
+        "../../notifications/system-email.service",
         "./adapter-registry.service",
         "./resend-email-adapter",
         "vitest"
       ],
-      "lines": 121,
+      "lines": 203,
       "path": "apps/server/src/modules/communications/adapters/esp-fallback.spec.ts",
-      "size_bytes": 5137
+      "size_bytes": 8256
     },
     {
       "exports": [
@@ -14467,17 +14555,47 @@
       "size_bytes": 7178
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./resend-effect",
+        "vitest"
+      ],
+      "lines": 53,
+      "path": "apps/server/src/modules/communications/adapters/resend-effect.spec.ts",
+      "size_bytes": 2102
+    },
+    {
+      "exports": [
+        "ResendEffectSnapshot",
+        "buildResendEffectSnapshot",
+        "fingerprintResendEffect",
+        "parseResendEffectSnapshot",
+        "renderResendHtml",
+        "resendProviderIdempotencyKey"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "./channel-adapter.interface",
+        "node:crypto"
+      ],
+      "lines": 88,
+      "path": "apps/server/src/modules/communications/adapters/resend-effect.ts",
+      "size_bytes": 2929
+    },
+    {
       "exports": [
         "ResendEmailAdapter"
       ],
       "extension": ".ts",
       "imports": [
         "../../notifications/system-email.service",
-        "./channel-adapter.interface"
+        "./channel-adapter.interface",
+        "./resend-effect"
       ],
-      "lines": 130,
+      "lines": 160,
       "path": "apps/server/src/modules/communications/adapters/resend-email-adapter.ts",
-      "size_bytes": 4770
+      "size_bytes": 4948
     },
     {
       "exports": [
@@ -14642,6 +14760,19 @@
       "size_bytes": 22968
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./adapters/channel-adapter.interface",
+        "./delivery-queue.service",
+        "@nestjs/common",
+        "vitest"
+      ],
+      "lines": 358,
+      "path": "apps/server/src/modules/communications/delivery-queue.effect-certainty.spec.ts",
+      "size_bytes": 12996
+    },
+    {
       "exports": [
         "DeliveryQueueService"
       ],
@@ -14649,13 +14780,17 @@
       "imports": [
         "../../core/prisma/prisma.service",
         "../../core/scheduling/safe-interval",
+        "../notifications/system-email.service",
         "./adapters/adapter-registry.service",
+        "./adapters/channel-adapter.interface",
+        "./adapters/resend-effect",
         "@nestjs/common",
-        "@nestjs/event-emitter"
+        "@nestjs/event-emitter",
+        "node:crypto"
       ],
-      "lines": 875,
+      "lines": 1592,
       "path": "apps/server/src/modules/communications/delivery-queue.service.ts",
-      "size_bytes": 37041
+      "size_bytes": 60994
     },
     {
       "exports": [
@@ -17795,12 +17930,25 @@
       "extension": ".ts",
       "imports": [
         "../../core/prisma/prisma.service",
+        "@keyflow/db",
         "@nestjs/common",
         "crypto"
       ],
-      "lines": 253,
+      "lines": 266,
       "path": "apps/server/src/modules/education/education.service.ts",
-      "size_bytes": 13225
+      "size_bytes": 13719
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./education.service",
+        "@nestjs/common",
+        "vitest"
+      ],
+      "lines": 85,
+      "path": "apps/server/src/modules/education/education.tenant-scope.spec.ts",
+      "size_bytes": 2700
     },
     {
       "exports": [
@@ -19689,9 +19837,20 @@
         "./flow-action.registry",
         "@nestjs/common"
       ],
-      "lines": 449,
+      "lines": 454,
       "path": "apps/server/src/modules/flow/flow-runner.service.ts",
-      "size_bytes": 14204
+      "size_bytes": 14301
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./flow-runner.service",
+        "vitest"
+      ],
+      "lines": 74,
+      "path": "apps/server/src/modules/flow/flow-runner.tenant-idempotency.spec.ts",
+      "size_bytes": 2248
     },
     {
       "exports": [
@@ -20345,6 +20504,24 @@
       "size_bytes": 584
     },
     {
+      "exports": [
+        "FoundingMembershipClass",
+        "FoundingMembershipInventory",
+        "FoundingMembershipRepairResult",
+        "FoundingMembershipRow",
+        "FoundingMembershipService"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "../../core/prisma/prisma.service",
+        "@keyflow/db",
+        "@nestjs/common"
+      ],
+      "lines": 354,
+      "path": "apps/server/src/modules/identity/founding-membership.service.ts",
+      "size_bytes": 14188
+    },
+    {
       "exports": [],
       "extension": ".ts",
       "imports": [
@@ -20444,6 +20621,7 @@
         "../notifications/notifications.module",
         "./auth-security.service",
         "./business-context.service",
+        "./founding-membership.service",
         "./identity-password.service",
         "./identity-signup.service",
         "./identity.controller",
@@ -20451,9 +20629,9 @@
         "./password-policy.service",
         "@nestjs/common"
       ],
-      "lines": 20,
+      "lines": 21,
       "path": "apps/server/src/modules/identity/identity.module.ts",
-      "size_bytes": 1168
+      "size_bytes": 1297
     },
     {
       "exports": [
@@ -20467,11 +20645,12 @@
         "../blueprint/blueprint.service",
         "./dto/bootstrap.dto",
         "./profile-completeness.constants",
+        "@keyflow/db",
         "@nestjs/common"
       ],
-      "lines": 1280,
+      "lines": 1444,
       "path": "apps/server/src/modules/identity/identity.service.ts",
-      "size_bytes": 51159
+      "size_bytes": 59415
     },
     {
       "exports": [
@@ -20516,6 +20695,19 @@
       "lines": 89,
       "path": "apps/server/src/modules/identity/refresh-session.spec.ts",
       "size_bytes": 3676
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./founding-membership.service",
+        "./identity.service",
+        "@nestjs/common",
+        "vitest"
+      ],
+      "lines": 477,
+      "path": "apps/server/src/modules/identity/tenant-genesis.spec.ts",
+      "size_bytes": 19573
     },
     {
       "exports": [
@@ -21709,11 +21901,12 @@
         "@keyflow/db",
         "@nestjs/axios",
         "@nestjs/common",
+        "@prisma/client",
         "rxjs"
       ],
-      "lines": 641,
+      "lines": 645,
       "path": "apps/server/src/modules/key-connector/health/health-check.service.ts",
-      "size_bytes": 23898
+      "size_bytes": 24099
     },
     {
       "exports": [],
@@ -26654,9 +26847,9 @@
         "@keyflow/db",
         "@nestjs/common"
       ],
-      "lines": 599,
+      "lines": 601,
       "path": "apps/server/src/modules/keystore/keystore.service.ts",
-      "size_bytes": 20664
+      "size_bytes": 20734
     },
     {
       "exports": [
@@ -27210,17 +27403,31 @@
       "size_bytes": 1481
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./system-email.service",
+        "vitest"
+      ],
+      "lines": 175,
+      "path": "apps/server/src/modules/notifications/system-email.effect-certainty.spec.ts",
+      "size_bytes": 5544
+    },
+    {
       "exports": [
-        "SystemEmailService"
+        "SystemEmailProviderOutcome",
+        "SystemEmailSendError",
+        "SystemEmailService",
+        "resolveSystemEmailFrom"
       ],
       "extension": ".ts",
       "imports": [
         "@nestjs/common",
         "resend"
       ],
-      "lines": 126,
+      "lines": 147,
       "path": "apps/server/src/modules/notifications/system-email.service.ts",
-      "size_bytes": 4086
+      "size_bytes": 4739
     },
     {
       "exports": [
@@ -29114,15 +29321,16 @@
       "extension": ".ts",
       "imports": [
         "../../../core/prisma/prisma.service",
+        "@keyflow/db",
         "@nestjs/common",
         "@nestjs/event-emitter",
         "@prisma/client",
         "crypto",
         "zod"
       ],
-      "lines": 653,
+      "lines": 656,
       "path": "apps/server/src/modules/site/presence/presence.service.ts",
-      "size_bytes": 26664
+      "size_bytes": 26761
     },
     {
       "exports": [
@@ -31739,9 +31947,9 @@
         "../src/modules/identity/identity.service",
         "vitest"
       ],
-      "lines": 45,
+      "lines": 112,
       "path": "apps/server/test/identity.service.test.ts",
-      "size_bytes": 1663
+      "size_bytes": 4529
     },
     {
       "exports": [],
@@ -31927,6 +32135,18 @@
         "path",
         "vitest"
       ],
+      "lines": 421,
+      "path": "apps/server/test/tenant-founding-membership.integration.test.ts",
+      "size_bytes": 18570
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "dotenv",
+        "path",
+        "vitest"
+      ],
       "lines": 147,
       "path": "apps/server/test/tenant-membership-boundary.integration.test.ts",
       "size_bytes": 6622
@@ -31939,9 +32159,9 @@
         "node:path",
         "vitest"
       ],
-      "lines": 452,
+      "lines": 534,
       "path": "apps/server/test/tenant-scope-extension.integration.test.ts",
-      "size_bytes": 19657
+      "size_bytes": 23405
     },
     {
       "exports": [],
@@ -32040,9 +32260,9 @@
       "imports": [
         "vitest/config"
       ],
-      "lines": 10,
+      "lines": 9,
       "path": "apps/server/vitest.integration.config.ts",
-      "size_bytes": 215
+      "size_bytes": 188
     },
     {
       "exports": [],
@@ -57199,9 +57419,9 @@
     },
     {
       "extension": ".md",
-      "lines": 124,
+      "lines": 150,
       "path": "architecture/os/OS.md",
-      "size_bytes": 6542
+      "size_bytes": 7700
     },
     {
       "extension": ".md",
@@ -57805,27 +58025,33 @@
     },
     {
       "extension": ".md",
-      "lines": 123,
+      "lines": 112,
+      "path": "architecture/os/journal/2026-09-12-truth.md",
+      "size_bytes": 6281
+    },
+    {
+      "extension": ".md",
+      "lines": 127,
       "path": "architecture/os/playbooks/audit.md",
-      "size_bytes": 7371
+      "size_bytes": 7588
     },
     {
       "extension": ".md",
-      "lines": 44,
+      "lines": 48,
       "path": "architecture/os/playbooks/burndown.md",
-      "size_bytes": 2287
+      "size_bytes": 2504
     },
     {
       "extension": ".md",
-      "lines": 45,
+      "lines": 49,
       "path": "architecture/os/playbooks/reflect.md",
-      "size_bytes": 2071
+      "size_bytes": 2288
     },
     {
       "extension": ".md",
-      "lines": 89,
+      "lines": 93,
       "path": "architecture/os/playbooks/truth.md",
-      "size_bytes": 5238
+      "size_bytes": 5455
     },
     {
       "extension": ".md",
@@ -57843,7 +58069,7 @@
       "extension": ".md",
       "lines": 109,
       "path": "architecture/os/state/STATE.md",
-      "size_bytes": 9800
+      "size_bytes": 9948
     },
     {
       "extension": ".md",
@@ -58443,6 +58669,24 @@
     },
     {
       "extension": ".md",
+      "lines": 206,
+      "path": "docs/development/AGENT_CONTROL_PLANE.md",
+      "size_bytes": 6358
+    },
+    {
+      "extension": ".md",
+      "lines": 369,
+      "path": "docs/development/EXECUTION_CONTROL_STANDARD.md",
+      "size_bytes": 12691
+    },
+    {
+      "extension": ".yaml",
+      "lines": 53,
+      "path": "docs/development/EXECUTION_PACKET_STATUS_TEMPLATE.yaml",
+      "size_bytes": 1184
+    },
+    {
+      "extension": ".md",
       "lines": 274,
       "path": "docs/development/KEY_10_10_ROADMAP.md",
       "size_bytes": 16268
@@ -58500,6 +58744,12 @@
       "lines": 109,
       "path": "docs/development/risc-setup.md",
       "size_bytes": 5746
+    },
+    {
+      "extension": ".yaml",
+      "lines": 30,
+      "path": "docs/intelligence/packages/KF-EXEC-K12-001/K12-CHARACTERIZATION-RECEIPT.yaml",
+      "size_bytes": 1147
     },
     {
       "extension": ".md",
@@ -59146,9 +59396,9 @@
         "node:path",
         "vitest"
       ],
-      "lines": 208,
+      "lines": 207,
       "path": "packages/api/src/no-raw-records.spec.ts",
-      "size_bytes": 9132
+      "size_bytes": 9137
     },
     {
       "exports": [
@@ -59296,9 +59546,9 @@
         "@trpc/server",
         "zod"
       ],
-      "lines": 25,
+      "lines": 100,
       "path": "packages/api/src/routers/identity.ts",
-      "size_bytes": 782
+      "size_bytes": 3866
     },
     {
       "exports": [
@@ -60309,6 +60559,18 @@
       "size_bytes": 1329
     },
     {
+      "extension": ".sql",
+      "lines": 29,
+      "path": "packages/db/prisma/migrations/20260918060000_outbound_delivery_effect_certainty/migration.sql",
+      "size_bytes": 1232
+    },
+    {
+      "extension": ".sql",
+      "lines": 7,
+      "path": "packages/db/prisma/migrations/20260919223000_flow_run_tenant_idempotency/migration.sql",
+      "size_bytes": 351
+    },
+    {
       "extension": ".toml",
       "lines": 3,
       "path": "packages/db/prisma/migrations/migration_lock.toml",
@@ -60316,9 +60578,9 @@
     },
     {
       "extension": ".prisma",
-      "lines": 12826,
+      "lines": 12845,
       "path": "packages/db/prisma/schema.prisma",
-      "size_bytes": 501630
+      "size_bytes": 502740
     },
     {
       "exports": [],
@@ -60354,9 +60616,9 @@
         "@prisma/client",
         "pg"
       ],
-      "lines": 710,
+      "lines": 723,
       "path": "packages/db/src/client.ts",
-      "size_bytes": 38421
+      "size_bytes": 39400
     },
     {
       "exports": [],
@@ -61084,6 +61346,16 @@
       "exports": [],
       "extension": ".ts",
       "imports": [
+        "@keyflow/db"
+      ],
+      "lines": 254,
+      "path": "scripts/backfill-founding-memberships.ts",
+      "size_bytes": 10363
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
         "../apps/server/src/app.module",
         "../apps/server/src/core/prisma/prisma.service",
         "../apps/server/src/modules/blueprint/blueprint.service",
@@ -61448,6 +61720,45 @@
       "size_bytes": 10147
     },
     {
+      "exports": [
+        "admitResources"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "node:fs",
+        "node:url"
+      ],
+      "lines": 139,
+      "path": "scripts/proof-admission/admit-resources.mjs",
+      "size_bytes": 4407
+    },
+    {
+      "exports": [
+        "evaluateProof"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "node:child_process",
+        "node:fs",
+        "node:url"
+      ],
+      "lines": 245,
+      "path": "scripts/proof-admission/evaluate.mjs",
+      "size_bytes": 7440
+    },
+    {
+      "extension": ".json",
+      "lines": 66,
+      "path": "scripts/proof-admission/manifests/ci-resources.json",
+      "size_bytes": 1161
+    },
+    {
+      "extension": ".json",
+      "lines": 26,
+      "path": "scripts/proof-admission/manifests/k12-self.json",
+      "size_bytes": 1539
+    },
+    {
       "extension": ".sh",
       "lines": 61,
       "path": "scripts/repo-health-audit.sh",
@@ -61709,16 +62020,16 @@
   ],
   "meta": {
     "extensions": {
-      "": 14,
+      "": 15,
       ".css": 2,
       ".csv": 23,
       ".example": 1,
       ".html": 8,
       ".ico": 1,
       ".js": 10,
-      ".json": 35,
-      ".md": 555,
-      ".mjs": 24,
+      ".json": 37,
+      ".md": 560,
+      ".mjs": 26,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
@@ -61728,24 +62039,24 @@
       ".py": 43,
       ".pyc": 2,
       ".sh": 28,
-      ".sql": 142,
+      ".sql": 144,
       ".svg": 6,
       ".template": 1,
       ".toml": 2,
-      ".ts": 2106,
+      ".ts": 2118,
       ".tsbuildinfo": 1,
       ".tsv": 1,
       ".tsx": 1233,
       ".txt": 7,
       ".xlsx": 1,
       ".xsd": 39,
-      ".yaml": 10,
-      ".yml": 12
+      ".yaml": 16,
+      ".yml": 13
     },
     "root": "/home/user/KEYFLOWOS",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3373,
-    "total_files": 4328,
-    "total_lines": 1043769
+    "source_files": 3387,
+    "total_files": 4359,
+    "total_lines": 1049445
   }
 }

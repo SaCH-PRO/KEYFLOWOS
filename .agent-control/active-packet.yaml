@@ -1,50 +1,71 @@
-packet_id: KF-EXEC-TENANT-001-S0-ISOLATION-HARDENING
-directive_message_id: CG-REVIEW-TENANT-RECHAR-001
-source_main: cee4ea937eb451d8e2d8207bfe271c1e6684c7e8
-implementation_branch: impl/kf-exec-tenant-001-isolation-final
-state: READY_TO_MERGE
+packet_id: KF-EXEC-TENANT-001
+directive_message_id: CG-DIRECTIVE-TENANT-IMPL-001
+source_main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
+implementation_branch: impl/kf-exec-tenant-001-membership-genesis
+state: IMPLEMENTING
 health: GREEN
 scope_changed: false
 production_touched: false
 allowed_scope:
-  - retire acknowledged tenant-isolation debt for the 13 characterized models
-  - add explicit skipTenantIsolation only for intentional cross-tenant/global reads
-  - make Course public/platform visibility explicit
-  - scope FlowRun idempotency by business
-  - add focused and real-database tenant proofs
+  - bring IdentityService.createBusiness to founding OWNER Membership parity
+  - make bootstrapUser business creation + founding OWNER Membership atomic
+  - make sequential and concurrent bootstrap retries converge on one bootstrap Business
+    and one founding OWNER Membership without preventing explicit multi-Business ownership
+  - bring live tRPC identity.createBusiness to the same founding postcondition
+  - reject tRPC business creation before mutation if authenticated user id is absent
+  - make workspace discovery Membership-first while preserving legitimate ownerId compatibility
+  - preserve BusinessGuard compatibility behavior during migration
+  - add inventory/classification for founding OWNER Membership state
+  - backfill only deterministic missing founding Memberships
+  - report conflicting, unresolvable-owner and ambiguous rows without guessing
+  - add focused, concurrency, migration and rollback proof for the canonical acceptance matrix
 prohibited_scope:
-  - production deployment
-  - production mutation
-  - real provider traffic
-  - forensic rebaseline
-  - programme-map refresh
+  - no ownerId global uniqueness constraint
+  - no removal of Business.ownerId
+  - no weakening of ModuleScopeGuard into ownerId-only authorization
+  - no full AUTH-001 / role algebra / delegation implementation
+  - no invitation-claim redesign
+  - no owner-transfer redesign
+  - no weakening authorization gates to make tests pass
+  - no production data access
+  - no production mutation, deployment or provider traffic
+  - no architecture/os scheduled-cycle work
+  - no silent scope expansion
+  - no merge by Claude
 invariants:
-  - tenant-context operations cannot cross business boundaries by bare id
-  - intentional cross-business reads are explicit
-  - public Course reads expose only platform-public courses
-  - FlowRun idempotency is tenant-local
+  - explicit Business creation may create multiple Businesses for one owner
+  - every successful Business constructor atomically establishes exactly one founding OWNER Membership
+  - bootstrap is idempotent and concurrent bootstrap for one user converges
+  - bootstrap concurrency must not be solved by ownerId @unique
+  - Membership is the ordinary authenticated-human to Business relationship
+  - legitimate non-owner Membership users are discoverable
+  - ownerId remains distinguished-owner/compatibility metadata
+  - browser workspace selection never grants authorization
+  - ModuleScopeGuard remains Membership-based
+  - deterministic migration repair only; ambiguous ownership is never guessed
+  - TENANT S0 default Membership scoping is respected; cross-workspace discovery is not
+    silently truncated by ambient tenant context
 proof_obligations:
-  - acknowledged-unscoped ledger reaches zero
-  - all 13 models are dispositioned
-  - focused Course and FlowRun proofs pass
-  - real-database tenant-extension proof passes
-  - migration applies
-  - full CI passes
+  - explicit IdentityService create yields founding OWNER Membership atomically
+  - bootstrap retry does not duplicate
+  - concurrent bootstrap converges to one bootstrap Business and one OWNER Membership
+  - tRPC create yields equivalent founding postcondition
+  - tRPC create rejects missing authenticated user id before mutation
+  - owner with Membership discoverable
+  - non-owner legitimate member discoverable
+  - unrelated user cannot discover or access
+  - workspace cookie cannot grant access
+  - migration inventory detects missing/conflicting/unresolvable/ambiguous states
+  - deterministic missing case is backfilled
+  - ambiguous/conflicting/unresolvable cases are not auto-assigned
+  - rollback preserves ownerId and legitimate Membership history
+  - existing S0 tenant-isolation proofs remain green
 stop_conditions:
-  - current-main drift changes any affected production path or schema assumption
-  - proof reveals unresolved cross-tenant behavior
+  - current main drifts before the implementation branch is cut
+  - safe bootstrap concurrency unachievable without an uncovered schema primitive
+  - migration ambiguity requiring production data to classify
+  - satisfying an invariant would weaken tenant/security/authority boundaries
+  - scope pressure reaching AUTH-001, invitation redesign, owner transfer or unrelated domains
+  - two materially identical failed proof attempts without new evidence
+  - branch hygiene approaching threshold without a clean compaction path
 merge_authority: false
-
-
-recharacterization_reason: >
-  Canonical KF-EXEC-TENANT-001 is Membership-First Tenant Genesis Compatibility.
-  This branch currently implements a tenant-isolation hardening slice. Admission is
-  paused until canonical obligations are mapped against current main and this PR.
-
-
-canonical_packet_credit: NONE
-supporting_slice_for: KF-EXEC-TENANT-001
-admission_note: >
-  This supporting slice is admitted only as tenant-isolation hardening. It satisfies
-  zero canonical Membership-First Tenant Genesis obligations and does not advance
-  KF-EXEC-TENANT-001 completion state.

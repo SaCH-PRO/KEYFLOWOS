@@ -43,10 +43,9 @@ const RAW_RECORD_DEBT = new Set<string>([
   // assertBusinessAccess returns the full Business (16 token columns,
   // decrypted) to callers that only need to know "yes/no".
   'lib/access.ts#business.findFirst#0',
-  // listBusinesses ships every OAuth token the owner has connected to the
-  // browser; createBusiness echoes the created row the same way.
-  'routers/identity.ts#business.findMany#0',
-  'routers/identity.ts#business.create#0',
+  // KF-EXEC-TENANT-001 retired both identity.ts entries: listBusinesses and
+  // createBusiness now carry an explicit BUSINESS_SUMMARY_SELECT, so neither
+  // ships a decrypted token column any more. Shrink-only ledger, duly shrunk.
 ]);
 
 interface CallSite {
