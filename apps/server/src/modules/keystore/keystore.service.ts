@@ -39,7 +39,7 @@ export class KeystoreService {
     const membership = await db.membership.findFirst(
       skipTenantIsolation({
         where: { userId },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { createdAt: 'asc' as const },
       }),
     );
     if (!membership) {
