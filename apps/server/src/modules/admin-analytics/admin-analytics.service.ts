@@ -86,10 +86,14 @@ export class AdminAnalyticsService {
 
   async getIntegrationHealth() {
     const [connections, needsAttention, recentSyncs, providers] = await Promise.all([
-      this.prisma.client.integrationConnection.count(),
-      this.prisma.client.integrationConnection.count({
-        where: { status: { in: ['ERROR', 'NEEDS_ATTENTION'] } },
-      }),
+      this.prisma.client.integrationConnection.count(
+        skipTenantIsolation({}),
+      ),
+      this.prisma.client.integrationConnection.count(
+        skipTenantIsolation({
+          where: { status: { in: ['ERROR', 'NEEDS_ATTENTION'] } },
+        }),
+      ),
       // Every tenant's recent syncs — that is what an admin health view is.
       // IntegrationSyncRun became tenant-scoped on 2026-08-30; this route
       // carries no businessId so the interceptor never activates and nothing
