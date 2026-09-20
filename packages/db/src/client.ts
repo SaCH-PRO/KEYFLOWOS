@@ -87,7 +87,7 @@ const BUSINESS_ID_MODELS = new Set([
   'Service', 'Booking', 'BookingWaitlistEntry', 'StaffMember', 'Project', 'ProjectTask', 'Expense',
   'SocialPost', 'EmailCampaign', 'DocumentInstance', 'Site', 'CalendarEvent',
   'ConnectorStatus', 'Automation', 'ContactExternalMapping', 'DriveIntakeFile', 'IngestionItem',
-  'InventoryStock', 'KeyCallSession',
+  'IntegrationConnection', 'InventoryStock', 'KeyCallSession',
   'MessageIntake', 'SitePageDraft', 'SyncJob', 'WhatsAppMessage',
   'OutboundDelivery', 'CommandItem',
   'BusinessEntityLink', 'BusinessRisk', 'CashReserveBucket',
