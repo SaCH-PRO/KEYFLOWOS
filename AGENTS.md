@@ -155,6 +155,8 @@ Required rules:
 
 Use `docs/development/EXECUTION_PACKET_STATUS_TEMPLATE.yaml` for durable packet/handoff status.
 
+All Claude-driven implementation work must also follow `docs/development/AGENT_CONTROL_PLANE.md`. Implementation branches under `impl/*` are expected to carry `.agent-control/active-packet.yaml` and `.agent-control/claude-return.yaml`; the repository control gate validates them and requires ChatGPT admission before a non-draft implementation PR can advance toward merge.
+
 # Codebase Architect Policy
 
 This repository uses the `codebase-architect` agent skill. The skill lives in `.agents/skills/codebase-architect/` and the canonical architecture memory lives in `/architecture/`.
