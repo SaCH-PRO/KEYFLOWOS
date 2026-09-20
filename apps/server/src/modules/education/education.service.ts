@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { randomUUID } from 'crypto';
 
@@ -9,7 +10,7 @@ export class EducationService {
   ) {}
 
   async listCourses(filters?: { category?: string; difficulty?: string }) {
-    const where: any = { isPublished: true };
+    const where: any = { isPublished: true, businessId: null };
     if (filters?.category) where.category = filters.category;
     if (filters?.difficulty) where.difficulty = filters.difficulty;
 
@@ -23,8 +24,8 @@ export class EducationService {
   }
 
   async getCourse(id: string) {
-    return this.prisma.client.course.findUnique({
-      where: { id },
+    return this.prisma.client.course.findFirst({
+      where: { id, businessId: null, isPublished: true },
       include: {
         _count: { select: { enrollments: true } },
       },
@@ -92,6 +93,18 @@ export class EducationService {
   }
 
   async enrollInCourse(businessId: string, courseId: string) {
+    const course = await this.prisma.client.course.findFirst(
+      skipTenantIsolation({
+        where: {
+          id: courseId,
+          isPublished: true,
+          OR: [{ businessId: null }, { businessId }],
+        },
+        select: { id: true },
+      }),
+    );
+    if (!course) throw new NotFoundException('Course not found');
+
     return this.prisma.client.courseEnrollment.create({
       data: {
         businessId,
@@ -159,7 +172,7 @@ export class EducationService {
   }
 
   async seedDefaultCourses() {
-    const count = await this.prisma.client.course.count();
+    const count = await this.prisma.client.course.count({ where: { businessId: null } });
     if (count > 0) return { seeded: false, message: 'Courses already exist' };
 
     const courses = [
