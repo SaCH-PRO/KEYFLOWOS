@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { EffectiveAuthorityResolver } from './effective-authority.resolver';
+import { AUTHORITY_PAGE_SIZE, DEFAULT_AUTHORITY_PAGE_SIZE, EffectiveAuthorityResolver } from './effective-authority.resolver';
 
 /**
  * Global, for the same reason PrismaModule is.
@@ -14,7 +14,13 @@ import { EffectiveAuthorityResolver } from './effective-authority.resolver';
  */
 @Global()
 @Module({
-  providers: [EffectiveAuthorityResolver],
+  providers: [
+    // Registered with its default rather than left unbound. An @Optional() injection
+    // of a token no module provides is always undefined — wired in appearance only,
+    // which `optional-injection-unregistered.spec.ts` correctly refuses to allow.
+    { provide: AUTHORITY_PAGE_SIZE, useValue: DEFAULT_AUTHORITY_PAGE_SIZE },
+    EffectiveAuthorityResolver,
+  ],
   exports: [EffectiveAuthorityResolver],
 })
 export class AuthorityModule {}

@@ -6,6 +6,12 @@
  * KF-EXEC-AUTH-001 makes the resolver refuse two classes of existing row, and refusing
  * them silently would be its own problem. Nobody could previously count either one:
  *
+ *   grantor_no_longer_grantable   The grantor Membership still exists but has since
+ *                                 dropped below the tier the grant conveys. The grant
+ *                                 was valid when made and is not valid now, so the
+ *                                 resolver stops honouring it — without touching the
+ *                                 row, because it is the record of a real decision.
+ *
  *   legacy_unresolvable_grantor   AuthorityGrant.grantorId is documented as a
  *                                 Membership id, but the old controller wrote
  *                                 `body.grantorId ?? req.user?.id ?? 'system'` — so
@@ -52,7 +58,7 @@ async function main() {
   console.log(`\nAuthorityGrant grantors — ${grants.length} non-revoked grant(s) scanned\n`);
   for (const [cls, n] of tally(grants)) console.log(`  ${String(n).padStart(6)}  ${cls}`);
 
-  const orphaned = grants.filter((g) => g.classification !== 'grantor_resolves_to_active_membership');
+  const orphaned = grants.filter((g) => g.classification !== 'active_grantor');
   if (orphaned.length > 0) {
     console.log(`\nThese grants contribute NOTHING to the resolver and need a human decision:\n`);
     for (const g of orphaned) {

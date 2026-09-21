@@ -69,7 +69,7 @@ describe('grantor classifier', () => {
     const findings = await service.classifyGrantors();
     const mine = new Map(findings.filter((f) => f.businessId === businessId).map((f) => [f.grantId, f]));
 
-    expect(mine.get(good.id)?.classification).toBe('grantor_resolves_to_active_membership');
+    expect(mine.get(good.id)?.classification).toBe('active_grantor');
     expect(mine.get(legacyUserId.id)?.classification).toBe('legacy_unresolvable_grantor');
     expect(mine.get(legacySystem.id)?.classification).toBe('legacy_unresolvable_grantor');
   });
@@ -170,5 +170,52 @@ describe('classifiers page past the default take cap', () => {
     const again = await service.classifyStaleCopies();
     expect(again.length).toBe(before); // stable, not cursor-drifting
     expect(new Set(again.map((f) => f.membershipId)).size).toBe(again.length); // no dupes
+  });
+});
+
+/**
+ * AUTH-P1-GRANTOR-CURRENT-BOUND (CG-REVIEW-AUTH-001).
+ *
+ * The inventory has to tell the two non-contributing classes apart, because they need
+ * different remedies: an unresolvable grantor is a row nobody can interpret, while a
+ * demoted grantor is a decision that has since been overtaken by a real org change.
+ */
+describe('grantor classifier — current grantable authority', () => {
+  it('separates a demoted grantor from an unresolvable one', async () => {
+    const demotedUser = await db.user.create({ data: { email: `${P}demoted@test.local`, name: `${P}demoted`, role: 'USER' } });
+    // A grantor who WAS tier 4 when they granted and is STAFF/tier 0 now.
+    const demoted = await db.membership.create(
+      skipTenantIsolation({ data: { userId: demotedUser.id, businessId, role: 'STAFF', permissionScopes: {}, maxApprovalTier: 0 } }),
+    );
+    const granteeUser = await db.user.create({ data: { email: `${P}grantee@test.local`, name: `${P}grantee`, role: 'USER' } });
+
+    const fromDemoted = await db.authorityGrant.create({
+      data: { businessId, grantorId: demoted.id, granteeType: 'USER', granteeId: granteeUser.id, scope: 'tier4_financial' },
+    });
+    const fromOwner = await db.authorityGrant.create({
+      data: { businessId, grantorId: ownerMembershipId, granteeType: 'USER', granteeId: granteeUser.id, scope: 'tier4_operations' },
+    });
+
+    const findings = await service.classifyGrantors();
+    const mine = new Map(findings.filter((f) => f.businessId === businessId).map((f) => [f.grantId, f]));
+
+    expect(mine.get(fromDemoted.id)?.classification).toBe('grantor_no_longer_grantable');
+    expect(mine.get(fromDemoted.id)?.detail).toMatch(/now tier 0/);
+    expect(mine.get(fromOwner.id)?.classification).toBe('active_grantor');
+  });
+
+  it('does not apply the tier-4 bound to KEY grants', async () => {
+    // KEY reader semantics are outside the AUTH-001 cutover, so flagging a KEY grant
+    // on a bound nothing enforces would be reporting a problem that does not exist.
+    const u = await db.user.create({ data: { email: `${P}keygrantor@test.local`, name: `${P}kg`, role: 'USER' } });
+    const lowTier = await db.membership.create(
+      skipTenantIsolation({ data: { userId: u.id, businessId, role: 'STAFF', permissionScopes: {}, maxApprovalTier: 0 } }),
+    );
+    const keyGrant = await db.authorityGrant.create({
+      data: { businessId, grantorId: lowTier.id, granteeType: 'KEY', granteeId: 'key_ai', scope: 'tier4_financial' },
+    });
+
+    const findings = await service.classifyGrantors();
+    expect(findings.find((f) => f.grantId === keyGrant.id)?.classification).toBe('active_grantor');
   });
 });

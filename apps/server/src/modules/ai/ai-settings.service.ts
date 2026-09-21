@@ -1,5 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EffectiveAuthorityResolver } from '../../core/authority/effective-authority.resolver';
+// The same constant the resolver enforces at decision time. A grant bounded on the way
+// in and unbounded on the way out is not bounded, so both ends read one number.
+import { TIER4_GRANT_MIN_TIER } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface TeamCapacityMember {
@@ -257,17 +260,6 @@ export class AiSettingsService {
   }
 
   /**
-   * The minimum approval tier a grantor must hold to hand out a `tier4_*` scope.
-   *
-   * Read off the scope names themselves, which is the only bound the existing data
-   * supports: a grant literally named `tier4_financial` confers tier-4 authority, and
-   * `DEFAULT_APPROVAL_TIERS` puts tier 4 at OWNER. No finer bound is invented here —
-   * nothing in the repository maps a grant scope onto a module, and doing so would be
-   * the alias invention this packet prohibits.
-   */
-  private static readonly TIER4_GRANT_MIN_TIER = 4;
-
-  /**
    * KF-EXEC-AUTH-001. Two things changed, both of them authority-bearing.
    *
    * 1. The grantor is SERVER-DERIVED. It was `body.grantorId ?? req.user?.id ?? 'system'`,
@@ -310,9 +302,9 @@ export class AiSettingsService {
 
     if (data.granteeType === 'USER') {
       const authority = await this.authority.resolve(businessId, data.callerUserId);
-      if (authority.approvalTier.effective < AiSettingsService.TIER4_GRANT_MIN_TIER) {
+      if (authority.approvalTier.effective < TIER4_GRANT_MIN_TIER) {
         throw new ForbiddenException(
-          `Granting "${data.scope}" requires approval tier ${AiSettingsService.TIER4_GRANT_MIN_TIER}; ` +
+          `Granting "${data.scope}" requires approval tier ${TIER4_GRANT_MIN_TIER}; ` +
             `you have tier ${authority.approvalTier.effective}`,
         );
       }

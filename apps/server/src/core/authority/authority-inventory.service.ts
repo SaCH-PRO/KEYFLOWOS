@@ -1,4 +1,5 @@
-import { isAccessLevel, isCanonicalModule } from './module-vocabulary';
+import { isAccessLevel, isCanonicalModule, isTier4Scope, TIER4_GRANT_MIN_TIER } from './module-vocabulary';
+import { resolveMembershipApprovalTier } from './approval-tier';
 
 /**
  * Read-only inventories of the two things AUTH-001 found but is not allowed to repair.
@@ -30,8 +31,17 @@ import { isAccessLevel, isCanonicalModule } from './module-vocabulary';
  */
 
 export type GrantorClass =
-  | 'grantor_resolves_to_active_membership'
+  | 'active_grantor'
   | 'legacy_unresolvable_grantor'
+  /**
+   * The grantor Membership still exists but its CURRENT approval tier is below the
+   * tier-4 bound, so the resolver no longer lets the grant contribute. A separate class
+   * from `legacy_unresolvable_grantor` on purpose: one is a row nobody can interpret,
+   * the other is a decision that has since been overtaken, and they need different
+   * remedies. USER grants only — KEY readers are outside the AUTH-001 cutover, so a
+   * KEY grant is never classified this way.
+   */
+  | 'grantor_no_longer_grantable'
   | 'grantor_is_empty';
 
 export interface GrantorFinding {
@@ -104,19 +114,20 @@ export class AuthorityInventoryService {
       byBusiness.set(g.businessId, set);
     }
 
-    const resolvable = new Set<string>();
+    // The grantor's CURRENT tier, not merely their existence. Mirrors the resolver.
+    const grantorTiers = new Map<string, number>();
     for (const [businessId, ids] of byBusiness) {
       for (const batch of chunk([...ids], AuthorityInventoryService.PAGE)) {
         const found = await this.pageAll((cursor) =>
           this.db.membership.findMany({
             where: { id: { in: batch }, businessId },
-            select: { id: true },
+            select: { id: true, role: true, permissionScopes: true, maxApprovalTier: true },
             orderBy: { id: 'asc' },
             take: AuthorityInventoryService.PAGE,
             ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
           }),
         );
-        for (const m of found) resolvable.add(`${businessId}:${m.id}`);
+        for (const m of found) grantorTiers.set(`${businessId}:${m.id}`, resolveMembershipApprovalTier(m).tier);
       }
     }
 
@@ -131,11 +142,20 @@ export class AuthorityInventoryService {
       if (!g.grantorId) {
         return { ...base, classification: 'grantor_is_empty' as const, detail: 'grantorId is empty' };
       }
-      if (resolvable.has(`${g.businessId}:${g.grantorId}`)) {
+      const tier = grantorTiers.get(`${g.businessId}:${g.grantorId}`);
+      if (tier !== undefined) {
+        // The bound applies to the tier-4 family and to USER grants only.
+        if (g.granteeType === 'USER' && isTier4Scope(g.scope) && tier < TIER4_GRANT_MIN_TIER) {
+          return {
+            ...base,
+            classification: 'grantor_no_longer_grantable' as const,
+            detail: `grantor ${g.grantorId} is now tier ${tier}, below the tier ${TIER4_GRANT_MIN_TIER} this grant conveys — contributes nothing`,
+          };
+        }
         return {
           ...base,
-          classification: 'grantor_resolves_to_active_membership' as const,
-          detail: `grantor ${g.grantorId} is a Membership in this business`,
+          classification: 'active_grantor' as const,
+          detail: `grantor ${g.grantorId} is a Membership in this business at tier ${tier}`,
         };
       }
       return {

@@ -20,15 +20,30 @@ interface Fixture {
   membership?: { id: string; role: string; permissionScopes: unknown; maxApprovalTier: number } | null;
   assignments?: any[];
   grants?: any[];
-  grantorMemberships?: { id: string }[];
+  grantorMemberships?: any[];
   delegations?: any[];
 }
 
 /**
- * A fake that honours the predicates the resolver relies on for freshness, rather than
- * returning whatever it was seeded with. A fake that ignores `revokedAt` would pass the
- * expiry tests while proving nothing — the filtering IS the behaviour under test.
+ * A fake that PAGES, and that honours the predicates the resolver relies on for
+ * freshness, rather than returning whatever it was seeded with.
+ *
+ * Both properties are load-bearing. A fake that ignores `revokedAt` would pass the
+ * expiry tests while proving nothing, because the filtering IS the behaviour under
+ * test. And a fake that ignores `cursor`/`take` would hand the same page back forever:
+ * the resolver pages to exhaustion now, so a constant-returning fake either spins or
+ * hides the very truncation these tests exist to rule out. This one slices on the id
+ * cursor exactly as Prisma does.
  */
+function page<T extends { id: string }>(rows: T[], args: any): T[] {
+  const sorted = [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const from = args?.cursor?.id
+    ? sorted.findIndex((r) => r.id === args.cursor.id) + (args.skip ?? 0)
+    : 0;
+  const take = args?.take ?? sorted.length;
+  return sorted.slice(from, from + take);
+}
+
 function fakePrisma(f: Fixture): PrismaService {
   const matchesValidity = (row: any, now: Date) => {
     if (row.revokedAt) return false;
@@ -52,30 +67,39 @@ function fakePrisma(f: Fixture): PrismaService {
           if (!key || !f.membership) return null;
           return key.businessId === 'biz_1' ? f.membership : null;
         },
-        findMany: async ({ where }: any) => {
-          const ids: string[] = where?.id?.in ?? [];
-          return (f.grantorMemberships ?? []).filter((m) => ids.includes(m.id));
+        findMany: async (args: any) => {
+          const ids: string[] = args?.where?.id?.in ?? [];
+          return page((f.grantorMemberships ?? []).filter((m) => ids.includes(m.id)), args);
         },
       },
       orgAssignment: {
-        findMany: async ({ where }: any) =>
-          (f.assignments ?? []).filter(
-            (a) => a.membershipId === where.membershipId && a.endedAt === null,
+        findMany: async (args: any) =>
+          page(
+            (f.assignments ?? []).filter(
+              (a) => a.membershipId === args.where.membershipId && a.endedAt === null,
+            ),
+            args,
           ),
       },
       authorityGrant: {
-        findMany: async ({ where }: any) => {
-          const now: Date = where.validFrom.lte;
-          return (f.grants ?? []).filter(
-            (g) => g.granteeType === 'USER' && g.granteeId === where.granteeId && matchesValidity(g, now),
+        findMany: async (args: any) => {
+          const now: Date = args.where.validFrom.lte;
+          return page(
+            (f.grants ?? []).filter(
+              (g) => g.granteeType === 'USER' && g.granteeId === args.where.granteeId && matchesValidity(g, now),
+            ),
+            args,
           );
         },
       },
       delegationRule: {
-        findMany: async ({ where }: any) => {
-          const now: Date = where.activeFrom.lte;
-          const ids: string[] = where.delegateId.in;
-          return (f.delegations ?? []).filter((d) => ids.includes(d.delegateId) && matchesDelegation(d, now));
+        findMany: async (args: any) => {
+          const now: Date = args.where.activeFrom.lte;
+          const ids: string[] = args.where.delegateId.in;
+          return page(
+            (f.delegations ?? []).filter((d) => ids.includes(d.delegateId) && matchesDelegation(d, now)),
+            args,
+          );
         },
       },
     },
@@ -85,6 +109,8 @@ function fakePrisma(f: Fixture): PrismaService {
 const resolverFor = (f: Fixture) => new EffectiveAuthorityResolver(fakePrisma(f));
 
 const OWNER_NO_MAP = { id: 'mem_1', role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 };
+/** A grantor who still holds the tier-4 authority their grants convey. */
+const TIER4_GRANTOR = { id: 'mem_grantor', role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 };
 const USER = { id: 'user_1', role: 'USER' };
 
 function position(over: Partial<{ id: string; permissions: unknown; tier: number }> = {}) {
@@ -263,12 +289,12 @@ describe('EffectiveAuthorityResolver — grants', () => {
       user: USER,
       membership: OWNER_NO_MAP,
       grants: [grant()],
-      grantorMemberships: [{ id: 'mem_grantor' }],
+      grantorMemberships: [TIER4_GRANTOR],
     }).resolve('biz_1', 'user_1');
 
     expect(r.tier4Scopes).toEqual(['tier4_financial']);
     // tier4_operations is NOT the `operations` module; nothing aliases across.
-    expect(r.grants[0].grantorStatus).toBe('active');
+    expect(r.grants[0].grantorStatus).toBe('active_grantor');
   });
 
   it('drops a revoked grant at the resolver read', async () => {
@@ -276,7 +302,7 @@ describe('EffectiveAuthorityResolver — grants', () => {
       user: USER,
       membership: OWNER_NO_MAP,
       grants: [grant({ revokedAt: new Date('2021-01-01') })],
-      grantorMemberships: [{ id: 'mem_grantor' }],
+      grantorMemberships: [TIER4_GRANTOR],
     }).resolve('biz_1', 'user_1');
     expect(r.grants).toHaveLength(0);
     expect(r.tier4Scopes).toEqual([]);
@@ -287,7 +313,7 @@ describe('EffectiveAuthorityResolver — grants', () => {
       user: USER,
       membership: OWNER_NO_MAP,
       grants: [grant({ validUntil: new Date('2021-01-01') })],
-      grantorMemberships: [{ id: 'mem_grantor' }],
+      grantorMemberships: [TIER4_GRANTOR],
     }).resolve('biz_1', 'user_1');
     expect(r.grants).toHaveLength(0);
   });
@@ -298,7 +324,7 @@ describe('EffectiveAuthorityResolver — grants', () => {
       user: USER,
       membership: OWNER_NO_MAP,
       grants: [grant({ validFrom: future })],
-      grantorMemberships: [{ id: 'mem_grantor' }],
+      grantorMemberships: [TIER4_GRANTOR],
     }).resolve('biz_1', 'user_1');
     expect(r.grants).toHaveLength(0);
   });
@@ -312,7 +338,7 @@ describe('EffectiveAuthorityResolver — grants', () => {
       grantorMemberships: [],
     }).resolve('biz_1', 'user_1');
 
-    expect(r.grants[0].grantorStatus).toBe('legacy_unresolvable');
+    expect(r.grants[0].grantorStatus).toBe('legacy_unresolvable_grantor');
     expect(r.tier4Scopes).toEqual([]);
     expect(r.provenance.join(' ')).toMatch(/legacy_unresolvable_grantor/);
   });
@@ -443,5 +469,247 @@ describe('EffectiveAuthorityResolver — never laxer than the live guard', () =>
       }).resolve('biz_1', 'user_1');
       expect(r.modules.crm.level).toBe('admin');
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTH-P1-READ-COMPLETENESS (CG-REVIEW-AUTH-001)
+//
+// The first version bounded these reads at 200 rows and set a `truncated` flag.
+// Positions NARROW the Membership envelope, so a narrowing position past row 200 was
+// silently dropped and the broader permission stood — an overgrant with a note
+// attached. These tests fail against that design and pass against exhaustive paging.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** N assignments, all inert except the last, which is the only one naming `crm`. */
+function manyAssignments(n: number, narrowAt: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    // Zero-padded so the id sort order matches insertion order, as a cuid would not.
+    id: `asg_${String(i).padStart(4, '0')}`,
+    membershipId: 'mem_1',
+    endedAt: null,
+    jobRoleId: `jr_${i}`,
+    jobRole: {
+      id: `jr_${i}`,
+      name: `role ${i}`,
+      permissions: i === narrowAt ? { crm: 'read' } : { bookings: 'admin' },
+      defaultApprovalTier: 0,
+    },
+  }));
+}
+
+describe('AUTH-P1-READ-COMPLETENESS — authority reads are complete, not bounded', () => {
+  it('sees a narrowing position that falls far past the first page', async () => {
+    // 260 active positions; the ONLY one that mentions crm is #255, past a 200 ceiling.
+    // Under the old ceiling the resolver never saw it and crm stayed at OWNER admin.
+    const r = await resolverFor({
+      user: USER,
+      membership: OWNER_NO_MAP,
+      assignments: manyAssignments(260, 255),
+    }).resolve('biz_1', 'user_1');
+
+    expect(r.positions).toHaveLength(260);
+    expect(r.modules.crm.level).toBe('read');
+    expect(r.modules.crm.reason).toBe('position_narrowed');
+    expect(r.validity.truncated).toBe(false);
+  });
+
+  it('applies the cap from a position past the first page', async () => {
+    const assignments = manyAssignments(260, 259);
+    assignments[259].jobRole.permissions = { crm: 'admin' };
+    const r = await resolverFor({
+      user: USER,
+      membership: { ...OWNER_NO_MAP, role: 'STAFF', permissionScopes: { crm: 'read' } },
+      assignments,
+    }).resolve('biz_1', 'user_1');
+
+    expect(r.modules.crm.level).toBe('read');
+    expect(r.modules.crm.reason).toBe('position_capped_at_membership');
+  });
+
+  it('does not lose grants or delegations past the first page', async () => {
+    const grants = Array.from({ length: 250 }, (_, i) => ({
+      id: `grant_${String(i).padStart(4, '0')}`,
+      granteeType: 'USER',
+      granteeId: 'user_1',
+      scope: i === 249 ? 'tier4_operations' : 'tier4_financial',
+      maxAmount: null,
+      grantorId: 'mem_grantor',
+      validFrom: new Date('2020-01-01'),
+      validUntil: null,
+      revokedAt: null,
+    }));
+    const delegations = Array.from({ length: 250 }, (_, i) => ({
+      id: `rule_${String(i).padStart(4, '0')}`,
+      scope: 'ALL',
+      maxTier: 4,
+      delegateId: 'asg_0000',
+      isActive: true,
+      activeFrom: new Date('2020-01-01'),
+      activeUntil: null,
+    }));
+
+    const r = await resolverFor({
+      user: USER,
+      membership: OWNER_NO_MAP,
+      assignments: manyAssignments(1, 0),
+      grants,
+      grantorMemberships: [TIER4_GRANTOR],
+      delegations,
+    }).resolve('biz_1', 'user_1');
+
+    expect(r.grants).toHaveLength(250);
+    expect(r.delegations).toHaveLength(250);
+    // The scope carried only by the last grant survives the paging.
+    expect(r.tier4Scopes.sort()).toEqual(['tier4_financial', 'tier4_operations']);
+  });
+
+  it('gives the identical answer at every internal page size', async () => {
+    // Page size is a performance knob. If it changes the answer, the paging is wrong —
+    // which is precisely the bug a 200-row ceiling was.
+    const fixture = {
+      user: USER,
+      membership: OWNER_NO_MAP,
+      assignments: manyAssignments(260, 255),
+      grants: [
+        {
+          id: 'grant_0001', granteeType: 'USER', granteeId: 'user_1', scope: 'tier4_financial',
+          maxAmount: null, grantorId: 'mem_grantor', validFrom: new Date('2020-01-01'),
+          validUntil: null, revokedAt: null,
+        },
+      ],
+      grantorMemberships: [TIER4_GRANTOR],
+    };
+
+    const results = [];
+    for (const size of [1, 3, 7, 200, 10_000]) {
+      const r = await new EffectiveAuthorityResolver(fakePrisma(fixture), size).resolve('biz_1', 'user_1');
+      results.push({
+        crm: r.modules.crm.level,
+        bookings: r.modules.bookings.level,
+        positions: r.positions.length,
+        tier4: r.tier4Scopes,
+        tier: r.approvalTier.effective,
+        truncated: r.validity.truncated,
+      });
+    }
+
+    for (const r of results) expect(r).toEqual(results[0]);
+    expect(results[0].crm).toBe('read');
+    expect(results[0].positions).toBe(260);
+  });
+
+  it('FAILS CLOSED when a read cannot be completed', async () => {
+    // A cursor that never advances — a fake that ignores it, or a real client that
+    // stops honouring `take`. The old design would have returned the permissive answer
+    // with a flag set; an incomplete read of narrowing sources must deny instead.
+    const stuck = {
+      client: {
+        user: { findUnique: async () => USER },
+        membership: {
+          findUnique: async () => OWNER_NO_MAP,
+          findMany: async () => [],
+        },
+        // Always returns the same row, so the cursor cannot move.
+        orgAssignment: { findMany: async () => [{ id: 'asg_same', jobRoleId: null, jobRole: null }] },
+        authorityGrant: { findMany: async () => [] },
+        delegationRule: { findMany: async () => [] },
+      },
+    } as unknown as PrismaService;
+
+    const r = await new EffectiveAuthorityResolver(stuck).resolve('biz_1', 'user_1');
+
+    expect(r.validity.truncated).toBe(true);
+    expect(r.modules.crm.level).toBe('none'); // OWNER would otherwise be admin
+    expect(r.modules.operations.level).toBe('none');
+    expect(r.approvalTier.effective).toBe(0);
+    expect(r.provenance.join(' ')).toMatch(/INCOMPLETE READ — failing closed/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTH-P1-GRANTOR-CURRENT-BOUND (CG-REVIEW-AUTH-001)
+//
+// A grant bounded when it was written and trusted forever is not bounded. The binding
+// law is about the grantor's CURRENT grantable authority.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const userGrant = {
+  id: 'grant_1',
+  granteeType: 'USER',
+  granteeId: 'user_1',
+  scope: 'tier4_financial',
+  maxAmount: null,
+  grantorId: 'mem_grantor',
+  validFrom: new Date('2020-01-01'),
+  validUntil: null,
+  revokedAt: null,
+};
+
+async function resolveWithGrantor(grantor: any) {
+  return resolverFor({
+    user: USER,
+    membership: OWNER_NO_MAP,
+    grants: [userGrant],
+    grantorMemberships: grantor ? [grantor] : [],
+  }).resolve('biz_1', 'user_1');
+}
+
+describe('AUTH-P1-GRANTOR-CURRENT-BOUND — a grant never outlives its grantor authority', () => {
+  it('contributes while the grantor still holds tier 4', async () => {
+    const r = await resolveWithGrantor(TIER4_GRANTOR);
+    expect(r.grants[0].grantorStatus).toBe('active_grantor');
+    expect(r.grants[0].grantorTier).toBe(4);
+    expect(r.tier4Scopes).toEqual(['tier4_financial']);
+  });
+
+  it('stops contributing on the next resolve once the grantor is demoted', async () => {
+    // Same grant row, untouched. Only the grantor's Membership changed.
+    const demoted = { id: 'mem_grantor', role: 'STAFF', permissionScopes: {}, maxApprovalTier: 2 };
+    const r = await resolveWithGrantor(demoted);
+
+    expect(r.grants[0].grantorStatus).toBe('grantor_no_longer_grantable');
+    expect(r.grants[0].grantorTier).toBe(2);
+    expect(r.tier4Scopes).toEqual([]);
+    expect(r.provenance.join(' ')).toMatch(/grantor_no_longer_grantable/);
+  });
+
+  it('becomes eligible again when the grantor tier is restored', async () => {
+    // Not a one-way door: the grant was never invalidated, only its grantor's standing
+    // changed. Restoring it restores the grant, without rewriting any row.
+    const restored = { id: 'mem_grantor', role: 'ADMIN', permissionScopes: {}, maxApprovalTier: 4 };
+    const r = await resolveWithGrantor(restored);
+
+    expect(r.grants[0].grantorStatus).toBe('active_grantor');
+    expect(r.tier4Scopes).toEqual(['tier4_financial']);
+  });
+
+  it('keeps an unresolvable historical grantor non-contributing', async () => {
+    const r = await resolveWithGrantor(null);
+    expect(r.grants[0].grantorStatus).toBe('legacy_unresolvable_grantor');
+    expect(r.grants[0].grantorTier).toBeNull();
+    expect(r.tier4Scopes).toEqual([]);
+  });
+
+  it('distinguishes the two non-contributing classes rather than collapsing them', async () => {
+    // One is a row nobody can interpret; the other is a decision that has since been
+    // overtaken. They need different remedies, so they need different names.
+    const gone = await resolveWithGrantor(null);
+    const demoted = await resolveWithGrantor({ id: 'mem_grantor', role: 'STAFF', permissionScopes: {}, maxApprovalTier: 0 });
+    expect(gone.grants[0].grantorStatus).not.toBe(demoted.grants[0].grantorStatus);
+  });
+
+  it('does not derive the grantor tier from grants — no bootstrap', async () => {
+    // If a grant could raise its own grantor's tier, any grant would validate itself.
+    // The grantor tier comes from the Membership rule alone.
+    const selfGranted = { id: 'mem_grantor', role: 'STAFF', permissionScopes: {}, maxApprovalTier: 0 };
+    const r = await resolverFor({
+      user: USER,
+      membership: OWNER_NO_MAP,
+      grants: [userGrant, { ...userGrant, id: 'grant_2', scope: 'tier4_operations' }],
+      grantorMemberships: [selfGranted],
+    }).resolve('biz_1', 'user_1');
+
+    expect(r.tier4Scopes).toEqual([]);
   });
 });

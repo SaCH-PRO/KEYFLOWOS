@@ -159,6 +159,22 @@ export const DEFAULT_APPROVAL_TIERS: Readonly<Record<string, number>> = {
 export const MAX_APPROVAL_TIER = 4;
 
 /**
+ * The approval tier a grantor must hold to confer a `tier4_*` AuthorityGrant.
+ *
+ * Read off the scope names themselves, which is the only bound the existing data
+ * supports: a grant named `tier4_financial` confers tier-4 authority, and
+ * `DEFAULT_APPROVAL_TIERS` puts tier 4 at OWNER. Shared by the creation-time check in
+ * `AiSettingsService` and the decision-time check in `EffectiveAuthorityResolver`,
+ * because a grant bounded on the way in and unbounded on the way out is not bounded.
+ */
+export const TIER4_GRANT_MIN_TIER = MAX_APPROVAL_TIER;
+
+/** Whether a grant scope is one of the tier-4 family the bound above applies to. */
+export function isTier4Scope(scope: string): boolean {
+  return scope.startsWith('tier4_');
+}
+
+/**
  * CRM ownership sub-permission keys that may appear alongside module keys in a scope
  * map. They are NOT module keys — `resolveCrmAccess` reads them as sub-flags on top of
  * the `crm` level — but `validateScopesPayload` has always accepted them and the

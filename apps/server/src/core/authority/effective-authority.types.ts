@@ -65,12 +65,21 @@ export interface GrantContribution {
   maxAmount: number | null;
   validUntil: Date | null;
   /**
-   * 'active'              — grantor resolves to a live Membership in this Business
-   * 'legacy_unresolvable' — grantorId names no active Membership here; contributes
-   *                         NOTHING (CG-REVIEW C3). Never guessed, never rewritten.
+   * 'active_grantor'            — grantor is a live Membership here AND still holds
+   *                               tier-4 grantable authority right now.
+   * 'legacy_unresolvable_grantor' — grantorId names no Membership in this Business.
+   * 'grantor_no_longer_grantable' — the Membership exists but its CURRENT approval
+   *                               tier is below the tier-4 bound. The grant was valid
+   *                               when it was made and is not valid now.
+   *
+   * Only `active_grantor` contributes. The other two are reportable, never
+   * auto-repaired: a grant is evidence of a decision somebody made, and rewriting it
+   * would destroy the record of that decision on no evidence.
    */
-  grantorStatus: 'active' | 'legacy_unresolvable';
+  grantorStatus: 'active_grantor' | 'legacy_unresolvable_grantor' | 'grantor_no_longer_grantable';
   grantorMembershipId: string | null;
+  /** The grantor's approval tier at this read, when the Membership resolved. */
+  grantorTier: number | null;
 }
 
 export interface DelegationContribution {
@@ -145,9 +154,16 @@ export interface EffectiveAuthorityResult {
     /** The instant every expiry and revocation predicate was evaluated against. */
     resolvedAt: Date;
     /**
-     * A bounded read hit its ceiling, so this result may be incomplete. Never silently
-     * true: a truncated authority read is a wrong authority answer, and the caller is
-     * told rather than left to assume the set was whole.
+     * An authority-source read could not be completed.
+     *
+     * When this is true the result FAILS CLOSED — every module denies and the approval
+     * tier is 0 — because an incomplete read of sources that can NARROW authority is
+     * indistinguishable from an overgrant. Positions narrow the Membership envelope, so
+     * a missed position leaves the broader permission standing; a flag on a permissive
+     * answer is not a safeguard, it is a note attached to the wrong decision.
+     *
+     * Normal reads page to exhaustion and never set this. It exists for the runaway
+     * guard only.
      */
     truncated: boolean;
     /**

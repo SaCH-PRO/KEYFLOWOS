@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CANONICAL_MODULES,
@@ -9,6 +9,8 @@ import {
   isCanonicalModule,
   strongest,
   weakest,
+  TIER4_GRANT_MIN_TIER,
+  isTier4Scope,
   type AccessLevel,
   type CanonicalModule,
 } from './module-vocabulary';
@@ -21,6 +23,22 @@ import type {
   ModuleDecision,
   PositionContribution,
 } from './effective-authority.types';
+
+/**
+ * Injection token letting a test shrink the resolver's page size. Never provided in
+ * production — the default applies — and the semantic result must not depend on it.
+ */
+export const AUTHORITY_PAGE_SIZE = 'AUTHORITY_PAGE_SIZE';
+
+/** The value AuthorityModule binds to that token. */
+export const DEFAULT_AUTHORITY_PAGE_SIZE = 200;
+
+/**
+ * An authority-source read could not be completed. Never surfaced to a caller as an
+ * error: `resolve()` catches it and returns a fail-closed denial, because the one thing
+ * an authority resolver must not do with an incomplete read is answer permissively.
+ */
+export class AuthorityReadIncompleteError extends Error {}
 
 /**
  * One explainable decision-time authority answer over the rows that already exist.
@@ -56,19 +74,59 @@ import type {
 @Injectable()
 export class EffectiveAuthorityResolver {
   /**
-   * Per-read ceiling. `defaultTakeExtension` caps unbounded findMany at 1000 rows, so
-   * an unbounded read here would truncate SILENTLY and answer "no such position" for a
-   * position that exists. These reads are per-principal and small; the ceiling exists
-   * to make a surprise visible through `validity.truncated`, not to page a hot path.
+   * Rows per page. NOT a ceiling — every read below pages to exhaustion.
+   *
+   * The first version of this file used a 200-row ceiling and set a `truncated` flag.
+   * CG-REVIEW-AUTH-001 rejected that as unsafe, correctly: active positions NARROW the
+   * Membership envelope, so if the only narrowing position for a module sits past row
+   * 200, a ceiling-bounded read silently leaves the broader permission in place and
+   * `allows()` returns true. A flag on a permissive answer does not stop the overgrant;
+   * it annotates it. `defaultTakeExtension` caps unbounded findMany at 1000 rows, so
+   * "just read them all" is not available either — the cap would truncate silently.
+   *
+   * Page size is a performance knob and nothing else: `AUTHORITY_PAGE_SIZE` is bound by
+   * AuthorityModule to `DEFAULT_AUTHORITY_PAGE_SIZE`, and a test may construct the
+   * resolver with a different size. The semantic result must be identical at every
+   * size — that invariance is asserted, because a page size that changes the answer
+   * means the paging is wrong.
    */
-  private static readonly READ_CEILING = 200;
+  /**
+   * Runaway guard, not a data bound. At the default page size this is 200k rows for a
+   * single principal — far past anything real, so reaching it means a cursor that is
+   * not advancing rather than a genuinely large estate. Hitting it FAILS CLOSED.
+   */
+  private static readonly MAX_PAGES = 1000;
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readonly pageSize: number;
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Optional() @Inject(AUTHORITY_PAGE_SIZE) pageSize?: number,
+  ) {
+    this.pageSize = pageSize && pageSize > 0 ? pageSize : DEFAULT_AUTHORITY_PAGE_SIZE;
+  }
 
   async resolve(businessId: string, userId: string): Promise<EffectiveAuthorityResult> {
     const resolvedAt = new Date();
     const provenance: string[] = [];
-    let truncated = false;
+    try {
+      return await this.resolveComplete(businessId, userId, resolvedAt, provenance);
+    } catch (err) {
+      if (!(err instanceof AuthorityReadIncompleteError)) throw err;
+      // FAIL CLOSED. An incomplete read of narrowing sources cannot be answered
+      // permissively, so it is not answered at all.
+      provenance.push(`INCOMPLETE READ — failing closed: ${err.message}`);
+      const denied = this.noRelationshipResult(businessId, userId, null, resolvedAt, provenance);
+      return { ...denied, validity: { ...denied.validity, truncated: true } };
+    }
+  }
+
+  private async resolveComplete(
+    businessId: string,
+    userId: string,
+    resolvedAt: Date,
+    provenance: string[],
+  ): Promise<EffectiveAuthorityResult> {
 
     const user = await this.prisma.client.user.findUnique({
       where: { id: userId },
@@ -119,17 +177,19 @@ export class EffectiveAuthorityResolver {
     }
 
     // ── active positions ─────────────────────────────────────────────────────
-    const assignments = await this.prisma.client.orgAssignment.findMany({
-      where: { businessId, membershipId: membership.id, endedAt: null },
-      select: {
-        id: true,
-        jobRoleId: true,
-        jobRole: { select: { id: true, name: true, permissions: true, defaultApprovalTier: true } },
-      },
-      orderBy: { id: 'asc' },
-      take: EffectiveAuthorityResolver.READ_CEILING,
-    });
-    truncated ||= assignments.length === EffectiveAuthorityResolver.READ_CEILING;
+    const assignments = await this.pageAll('orgAssignment', (cursor) =>
+      this.prisma.client.orgAssignment.findMany({
+        where: { businessId, membershipId: membership.id, endedAt: null },
+        select: {
+          id: true,
+          jobRoleId: true,
+          jobRole: { select: { id: true, name: true, permissions: true, defaultApprovalTier: true } },
+        },
+        orderBy: { id: 'asc' },
+        take: this.pageSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      }),
+    );
 
     const positions = assignments.map((a) => toPositionContribution(a));
     if (positions.length > 0) {
@@ -138,27 +198,25 @@ export class EffectiveAuthorityResolver {
     this.applyPositions(base, positions, provenance);
 
     // ── USER grants ──────────────────────────────────────────────────────────
+    const membershipTier = resolveMembershipApprovalTier(membership);
     const grants = await this.loadUserGrants(businessId, userId, resolvedAt);
-    truncated ||= grants.truncated;
-    this.applyGrants(base, grants.contributions, provenance);
+    this.applyGrants(base, grants, provenance);
 
     // ── delegations ──────────────────────────────────────────────────────────
-    const membershipTier = resolveMembershipApprovalTier(membership);
     const delegations = await this.loadDelegations(
       businessId,
       positions.map((p) => p.assignmentId),
       resolvedAt,
       membershipTier.tier,
     );
-    truncated ||= delegations.truncated;
 
     // ── approval tier ────────────────────────────────────────────────────────
     const positionTiers = positions
       .map((p) => p.defaultApprovalTier)
       .filter((t): t is number => typeof t === 'number');
     const positionTierCapped = positionTiers.length > 0 ? Math.min(Math.max(...positionTiers), membershipTier.tier) : null;
-    const delegationTierCapped = delegations.contributions.length > 0
-      ? Math.max(...delegations.contributions.map((d) => d.cappedTier))
+    const delegationTierCapped = delegations.length > 0
+      ? Math.max(...delegations.map((d) => d.cappedTier))
       : null;
 
     provenance.push(
@@ -167,10 +225,6 @@ export class EffectiveAuthorityResolver {
         (delegationTierCapped !== null ? `; strongest delegation tier capped to ${delegationTierCapped}` : '') +
         (membershipTier.tierZeroAmbiguity ? '; tier_zero_ambiguity — stored 0 discarded for the role default' : ''),
     );
-
-    if (truncated) {
-      provenance.push('TRUNCATED — a bounded read hit its ceiling; this result may be incomplete');
-    }
 
     return {
       principal: { userId, userRole: user?.role ?? null },
@@ -183,8 +237,8 @@ export class EffectiveAuthorityResolver {
       },
       modules: Object.fromEntries(base) as Record<CanonicalModule, ModuleDecision>,
       positions,
-      grants: grants.contributions,
-      delegations: delegations.contributions,
+      grants,
+      delegations,
       approvalTier: {
         effective: membershipTier.tier,
         membershipTier: membershipTier.tier,
@@ -195,12 +249,10 @@ export class EffectiveAuthorityResolver {
       },
       tier4Scopes: [
         ...new Set(
-          grants.contributions
-            .filter((g) => g.grantorStatus === 'active' && g.scope.startsWith('tier4_'))
-            .map((g) => g.scope),
+          grants.filter((g) => g.grantorStatus === 'active_grantor' && isTier4Scope(g.scope)).map((g) => g.scope),
         ),
       ],
-      validity: { resolvedAt, truncated, membershipFreshnessUnprovable: true },
+      validity: { resolvedAt, truncated: false, membershipFreshnessUnprovable: true },
       provenance,
     };
   }
@@ -342,8 +394,8 @@ export class EffectiveAuthorityResolver {
     provenance: string[],
   ): void {
     for (const grant of grants) {
-      if (grant.grantorStatus !== 'active') {
-        provenance.push(`grant ${grant.grantId} (${grant.scope}) ignored — legacy_unresolvable_grantor`);
+      if (grant.grantorStatus !== 'active_grantor') {
+        provenance.push(`grant ${grant.grantId} (${grant.scope}) ignored — ${grant.grantorStatus}`);
         continue;
       }
       // Generic on purpose. No AuthorityGrant.scope value is a canonical module key
@@ -372,51 +424,86 @@ export class EffectiveAuthorityResolver {
     businessId: string,
     userId: string,
     now: Date,
-  ): Promise<{ contributions: GrantContribution[]; truncated: boolean }> {
-    const rows = await this.prisma.client.authorityGrant.findMany({
-      where: {
-        businessId,
-        granteeType: 'USER',
-        granteeId: userId,
-        // Expired or revoked sources contribute nothing. All three predicates are
-        // evaluated against the single `now` captured at the top of resolve().
-        revokedAt: null,
-        validFrom: { lte: now },
-        OR: [{ validUntil: null }, { validUntil: { gte: now } }],
-      },
-      select: { id: true, scope: true, maxAmount: true, validUntil: true, grantorId: true },
-      orderBy: { id: 'asc' },
-      take: EffectiveAuthorityResolver.READ_CEILING,
-    });
-
-    if (rows.length === 0) return { contributions: [], truncated: false };
-
-    // CG-REVIEW C3: a grant whose grantorId does not resolve to an active Membership in
-    // THIS Business is legacy_unresolvable_grantor and contributes nothing. It is never
-    // guessed at and never rewritten — the classifier reports it for a human instead.
-    const grantorIds = [...new Set(rows.map((r) => r.grantorId).filter(Boolean))];
-    const resolvable = new Set<string>();
-    if (grantorIds.length > 0) {
-      const found = await this.prisma.client.membership.findMany({
-        where: { id: { in: grantorIds }, businessId },
-        select: { id: true },
+  ): Promise<GrantContribution[]> {
+    const rows = await this.pageAll('authorityGrant', (cursor) =>
+      this.prisma.client.authorityGrant.findMany({
+        where: {
+          businessId,
+          granteeType: 'USER',
+          granteeId: userId,
+          // Expired or revoked sources contribute nothing. All three predicates are
+          // evaluated against the single `now` captured at the top of resolve().
+          revokedAt: null,
+          validFrom: { lte: now },
+          OR: [{ validUntil: null }, { validUntil: { gte: now } }],
+        },
+        select: { id: true, scope: true, maxAmount: true, validUntil: true, grantorId: true },
         orderBy: { id: 'asc' },
-        take: EffectiveAuthorityResolver.READ_CEILING,
-      });
-      for (const m of found) resolvable.add(m.id);
+        take: this.pageSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      }),
+    );
+
+    if (rows.length === 0) return [];
+
+    // The grantor bound, applied at DECISION time and not only at creation.
+    //
+    // CG-REVIEW-AUTH-001: bounding a grant when it is written and then trusting it
+    // forever is not bounding it. A grantor demoted below tier 4 after issuing a grant
+    // no longer has the authority the grant conveys, and the binding law is about the
+    // grantor's CURRENT grantable authority. So the grantor's tier is recomputed here,
+    // through the same frozen Membership rule every other tier decision uses.
+    //
+    // Not recursive: the grantor's tier comes from their Membership alone. It is never
+    // derived from grants, so no grant can bootstrap the authority that validates it.
+    const grantorIds = [...new Set(rows.map((r) => r.grantorId).filter(Boolean))];
+    const grantors = new Map<string, number>();
+    for (const batch of chunk(grantorIds, this.pageSize)) {
+      // Paged like everything else: a truncated grantor lookup would silently
+      // reclassify a live grant as unresolvable, which is the same class of wrong
+      // answer in the opposite direction.
+      const found = await this.pageAll('membership', (cursor) =>
+        this.prisma.client.membership.findMany({
+          where: { id: { in: batch }, businessId },
+          select: { id: true, role: true, permissionScopes: true, maxApprovalTier: true },
+          orderBy: { id: 'asc' },
+          take: this.pageSize,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        }),
+      );
+      for (const m of found) grantors.set(m.id, resolveMembershipApprovalTier(m).tier);
     }
 
-    return {
-      contributions: rows.map((r) => ({
+    return rows.map((r) => {
+      const grantorTier = grantors.get(r.grantorId);
+
+      if (grantorTier === undefined) {
+        return {
+          grantId: r.id,
+          scope: r.scope,
+          maxAmount: r.maxAmount ?? null,
+          validUntil: r.validUntil ?? null,
+          grantorStatus: 'legacy_unresolvable_grantor' as const,
+          grantorMembershipId: null,
+          grantorTier: null,
+        };
+      }
+
+      // The bound applies to the tier-4 family. A scope outside it has no stated
+      // threshold in the data, and inventing one would be the alias invention this
+      // packet prohibits — so it is left to the Membership envelope alone.
+      const bounded = !isTier4Scope(r.scope) || grantorTier >= TIER4_GRANT_MIN_TIER;
+
+      return {
         grantId: r.id,
         scope: r.scope,
         maxAmount: r.maxAmount ?? null,
         validUntil: r.validUntil ?? null,
-        grantorStatus: resolvable.has(r.grantorId) ? ('active' as const) : ('legacy_unresolvable' as const),
-        grantorMembershipId: resolvable.has(r.grantorId) ? r.grantorId : null,
-      })),
-      truncated: rows.length === EffectiveAuthorityResolver.READ_CEILING,
-    };
+        grantorStatus: bounded ? ('active_grantor' as const) : ('grantor_no_longer_grantable' as const),
+        grantorMembershipId: r.grantorId,
+        grantorTier,
+      };
+    });
   }
 
   private async loadDelegations(
@@ -424,35 +511,72 @@ export class EffectiveAuthorityResolver {
     assignmentIds: string[],
     now: Date,
     membershipTier: number,
-  ): Promise<{ contributions: DelegationContribution[]; truncated: boolean }> {
-    if (assignmentIds.length === 0) return { contributions: [], truncated: false };
+  ): Promise<DelegationContribution[]> {
+    if (assignmentIds.length === 0) return [];
 
-    const rows = await this.prisma.client.delegationRule.findMany({
-      where: {
-        businessId,
-        delegateId: { in: assignmentIds },
-        isActive: true,
-        activeFrom: { lte: now },
-        OR: [{ activeUntil: null }, { activeUntil: { gte: now } }],
-      },
-      select: { id: true, scope: true, maxTier: true, delegateId: true, activeUntil: true },
-      orderBy: { id: 'asc' },
-      take: EffectiveAuthorityResolver.READ_CEILING,
-    });
+    const rows: { id: string; scope: string; maxTier: number; delegateId: string; activeUntil: Date | null }[] = [];
+    // Chunked because `delegateId: { in: [...] }` grows with the principal's positions,
+    // and paged within each chunk because the matching rules can outnumber them.
+    for (const batch of chunk(assignmentIds, this.pageSize)) {
+      const page = await this.pageAll('delegationRule', (cursor) =>
+        this.prisma.client.delegationRule.findMany({
+          where: {
+            businessId,
+            delegateId: { in: batch },
+            isActive: true,
+            activeFrom: { lte: now },
+            OR: [{ activeUntil: null }, { activeUntil: { gte: now } }],
+          },
+          select: { id: true, scope: true, maxTier: true, delegateId: true, activeUntil: true },
+          orderBy: { id: 'asc' },
+          take: this.pageSize,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        }),
+      );
+      rows.push(...page);
+    }
 
-    return {
-      contributions: rows.map((r) => ({
-        ruleId: r.id,
-        scope: r.scope,
-        maxTier: r.maxTier,
-        viaAssignmentId: r.delegateId,
-        activeUntil: r.activeUntil ?? null,
-        // A delegation reaches the principal through one of their own assignments, so
-        // it is assignment-derived and capped by the Membership tier (CG-REVIEW C4).
-        cappedTier: Math.min(r.maxTier, membershipTier),
-      })),
-      truncated: rows.length === EffectiveAuthorityResolver.READ_CEILING,
-    };
+    return rows.map((r) => ({
+      ruleId: r.id,
+      scope: r.scope,
+      maxTier: r.maxTier,
+      viaAssignmentId: r.delegateId,
+      activeUntil: r.activeUntil ?? null,
+      // A delegation reaches the principal through one of their own assignments, so
+      // it is assignment-derived and capped by the Membership tier (CG-REVIEW C4).
+      cappedTier: Math.min(r.maxTier, membershipTier),
+    }));
+  }
+
+  /**
+   * Pages a read to EXHAUSTION on a stable id cursor, stopping on an EMPTY page.
+   *
+   * Not a short page. `defaultTakeExtension` can return fewer rows than `take` asked
+   * for, so treating a short page as the end is exactly how a narrowing position goes
+   * missing. Follows the KF-EXEC-TENANT-001 inventory precedent.
+   */
+  private async pageAll<T extends { id: string }>(
+    source: string,
+    fetch: (cursor: string | undefined) => Promise<T[]>,
+  ): Promise<T[]> {
+    const out: T[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; ; page += 1) {
+      if (page >= EffectiveAuthorityResolver.MAX_PAGES) {
+        throw new AuthorityReadIncompleteError(
+          `${source} exceeded ${EffectiveAuthorityResolver.MAX_PAGES} pages — cursor is not advancing`,
+        );
+      }
+      const rows = await fetch(cursor);
+      if (rows.length === 0) break;
+      out.push(...rows);
+      const next = rows[rows.length - 1]?.id;
+      if (!next || next === cursor) {
+        throw new AuthorityReadIncompleteError(`${source} returned a non-advancing cursor`);
+      }
+      cursor = next;
+    }
+    return out;
   }
 
   private superAdminResult(
@@ -579,4 +703,10 @@ function toPositionContribution(assignment: {
     matchedModules,
     unmatchedKeys,
   };
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
