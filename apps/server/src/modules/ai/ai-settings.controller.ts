@@ -1,5 +1,6 @@
 import {
   Body,
+  ForbiddenException,
   Controller,
   Delete,
   Get,
@@ -15,6 +16,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import {
   ModuleScopeGuard,
   RequireModuleScope,
+  ShadowEffectiveAuthority,
 } from '../../core/auth/module-scope.guard';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
@@ -31,6 +33,7 @@ export class AiSettingsController {
   @Get('businesses/:businessId/ai/settings/workload-config')
   @RateLimit(60, 60_000)
   @RequireModuleScope('operations', 'read')
+  @ShadowEffectiveAuthority()
   async getWorkloadConfig(@Param('businessId') businessId: string) {
     return this.aiSettings.getWorkloadConfig(businessId);
   }
@@ -38,6 +41,7 @@ export class AiSettingsController {
   @Patch('businesses/:businessId/ai/settings/workload-config/:membershipId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async updateWorkloadConfig(
     @Param('businessId') businessId: string,
     @Param('membershipId') membershipId: string,
@@ -52,6 +56,7 @@ export class AiSettingsController {
   @Patch('businesses/:businessId/ai/settings/staff-workload-config/:staffId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async updateStaffWorkloadConfig(
     @Param('businessId') businessId: string,
     @Param('staffId') staffId: string,
@@ -66,6 +71,7 @@ export class AiSettingsController {
   @Get('businesses/:businessId/ai/settings/skills')
   @RateLimit(60, 60_000)
   @RequireModuleScope('operations', 'read')
+  @ShadowEffectiveAuthority()
   async listSkills() {
     return this.aiSettings.listSkills();
   }
@@ -73,6 +79,7 @@ export class AiSettingsController {
   @Post('businesses/:businessId/ai/settings/skills')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async createSkill(@Body() body: CreateSkillDto) {
     return this.aiSettings.createSkill(body);
   }
@@ -80,6 +87,7 @@ export class AiSettingsController {
   @Delete('businesses/:businessId/ai/settings/skills/:id')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async deleteSkill(
     @Param('businessId') businessId: string,
     @Param('id') id: string,
@@ -90,6 +98,7 @@ export class AiSettingsController {
   @Post('businesses/:businessId/ai/settings/memberships/:membershipId/skills/:skillId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async assignSkillToMembership(
     @Param('businessId') businessId: string,
     @Param('membershipId') membershipId: string,
@@ -103,6 +112,7 @@ export class AiSettingsController {
   @Delete('businesses/:businessId/ai/settings/memberships/:membershipId/skills/:skillId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async removeSkillFromMembership(
     @Param('businessId') businessId: string,
     @Param('membershipId') membershipId: string,
@@ -114,6 +124,7 @@ export class AiSettingsController {
   @Post('businesses/:businessId/ai/settings/staff/:staffId/skills/:skillId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async assignSkillToStaff(
     @Param('businessId') businessId: string,
     @Param('staffId') staffId: string,
@@ -125,6 +136,7 @@ export class AiSettingsController {
   @Delete('businesses/:businessId/ai/settings/staff/:staffId/skills/:skillId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async removeSkillFromStaff(
     @Param('businessId') businessId: string,
     @Param('staffId') staffId: string,
@@ -136,6 +148,7 @@ export class AiSettingsController {
   @Get('businesses/:businessId/ai/settings/authority-grants')
   @RateLimit(60, 60_000)
   @RequireModuleScope('operations', 'read')
+  @ShadowEffectiveAuthority()
   async listAuthorityGrants(@Param('businessId') businessId: string) {
     return this.aiSettings.listAuthorityGrants(businessId);
   }
@@ -143,13 +156,23 @@ export class AiSettingsController {
   @Post('businesses/:businessId/ai/settings/authority-grants')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async createAuthorityGrant(
     @Param('businessId') businessId: string,
     @Body() body: CreateAuthorityGrantDto,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
+    // KF-EXEC-AUTH-001: `body.grantorId` is no longer read. It used to win over the
+    // authenticated caller, so the client chose who was recorded as having granted the
+    // authority — and `?? 'system'` meant an unauthenticated-looking request still
+    // produced a grant attributed to nobody. The service derives the caller's active
+    // Membership and refuses when there is none.
+    const callerUserId = req.user?.id;
+    if (!callerUserId) {
+      throw new ForbiddenException('Authenticated user id is required to grant authority');
+    }
     return this.aiSettings.createAuthorityGrant(businessId, {
-      grantorId: body.grantorId ?? req.user?.id ?? 'system',
+      callerUserId,
       granteeType: body.granteeType,
       granteeId: body.granteeId,
       scope: body.scope,
@@ -162,6 +185,7 @@ export class AiSettingsController {
   @Delete('businesses/:businessId/ai/settings/authority-grants/:id')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
+  @ShadowEffectiveAuthority()
   async revokeAuthorityGrant(
     @Param('businessId') businessId: string,
     @Param('id') id: string,
@@ -172,6 +196,7 @@ export class AiSettingsController {
   @Get('businesses/:businessId/ai/settings/team-capacity')
   @RateLimit(60, 60_000)
   @RequireModuleScope('operations', 'read')
+  @ShadowEffectiveAuthority()
   async getTeamCapacity(@Param('businessId') businessId: string) {
     return this.aiSettings.getTeamCapacity(businessId);
   }

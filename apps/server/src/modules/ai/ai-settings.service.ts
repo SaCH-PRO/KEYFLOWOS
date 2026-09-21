@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { EffectiveAuthorityResolver } from '../../core/authority/effective-authority.resolver';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface TeamCapacityMember {
@@ -15,7 +16,10 @@ export interface TeamCapacityMember {
 
 @Injectable()
 export class AiSettingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authority: EffectiveAuthorityResolver,
+  ) {}
 
   async getWorkloadConfig(businessId: string) {
     const [memberships, staffMembers, skills, authorityGrants] = await Promise.all([
@@ -252,8 +256,39 @@ export class AiSettingsService {
     });
   }
 
+  /**
+   * The minimum approval tier a grantor must hold to hand out a `tier4_*` scope.
+   *
+   * Read off the scope names themselves, which is the only bound the existing data
+   * supports: a grant literally named `tier4_financial` confers tier-4 authority, and
+   * `DEFAULT_APPROVAL_TIERS` puts tier 4 at OWNER. No finer bound is invented here —
+   * nothing in the repository maps a grant scope onto a module, and doing so would be
+   * the alias invention this packet prohibits.
+   */
+  private static readonly TIER4_GRANT_MIN_TIER = 4;
+
+  /**
+   * KF-EXEC-AUTH-001. Two things changed, both of them authority-bearing.
+   *
+   * 1. The grantor is SERVER-DERIVED. It was `body.grantorId ?? req.user?.id ?? 'system'`,
+   *    so the client's value won over the authenticated caller and the stored id was a
+   *    User id or a sentinel rather than the Membership id the column documents. The
+   *    caller's active Membership in this Business is now resolved and used, and a
+   *    caller without one is refused outright.
+   *
+   * 2. A USER grant is BOUNDED by the grantor's own authority. There was no check of
+   *    any kind: a caller who could reach this route could mint tier-4 authority for
+   *    anyone, themselves included, regardless of what they held. The bound is
+   *    evaluated through EffectiveAuthorityResolver so it follows the same precedence
+   *    as every other decision instead of a second opinion invented here.
+   *
+   * KEY grants keep their existing reader semantics untouched — `granteeType: 'KEY'`
+   * paths are outside this cutover — but they get the server-derived grantor too,
+   * because no reader has ever looked at `grantorId`, so nothing can break and the
+   * client loses the field either way.
+   */
   async createAuthorityGrant(businessId: string, data: {
-    grantorId: string;
+    callerUserId: string;
     granteeType: 'KEY' | 'USER';
     granteeId: string;
     scope: 'tier4_financial' | 'tier4_publishing' | 'tier4_operations';
@@ -261,10 +296,32 @@ export class AiSettingsService {
     validFrom?: Date;
     validUntil?: Date | null;
   }) {
+    const grantor = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: data.callerUserId, businessId } },
+      select: { id: true },
+    });
+    if (!grantor) {
+      // No self-asserted grantor, and no 'system' sentinel. If we cannot name who
+      // granted this, we do not record that it was granted.
+      throw new ForbiddenException(
+        'An active Membership in this business is required to grant authority',
+      );
+    }
+
+    if (data.granteeType === 'USER') {
+      const authority = await this.authority.resolve(businessId, data.callerUserId);
+      if (authority.approvalTier.effective < AiSettingsService.TIER4_GRANT_MIN_TIER) {
+        throw new ForbiddenException(
+          `Granting "${data.scope}" requires approval tier ${AiSettingsService.TIER4_GRANT_MIN_TIER}; ` +
+            `you have tier ${authority.approvalTier.effective}`,
+        );
+      }
+    }
+
     return this.prisma.client.authorityGrant.create({
       data: {
         businessId,
-        grantorId: data.grantorId,
+        grantorId: grantor.id,
         granteeType: data.granteeType,
         granteeId: data.granteeId,
         scope: data.scope,
