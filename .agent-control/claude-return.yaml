@@ -1,7 +1,7 @@
 packet_id: KF-EXEC-AUTH-001
 directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
 source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-source_head: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+source_head: 1bccecbab7916236f4bef783d994b1a275d371da
 implementation_branch: impl/kf-exec-auth-001-effective-authority
 state: PROVING
 health: GREEN
