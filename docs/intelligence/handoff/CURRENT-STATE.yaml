@@ -1,26 +1,39 @@
 project: KEYFLOWOS
-analysis_version: 94
-last_updated: '2026-09-20'
-checkpoint_id: TENANT-ACTIVE-2026-09-20-01
-status: TENANT_IMPLEMENTATION_RELEASED
+analysis_version: 95
+last_updated: '2026-09-21'
+checkpoint_id: AUTH-ACTIVE-2026-09-21-01
+status: AUTH_IMPLEMENTATION_RELEASED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: true
 production_release_authorized: false
 production_mutations_authorized: false
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-current_main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
+current_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
 coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 35}
 package_hardening:
   total_packets: 35
-  hardened_L2: 2
-  current: KF-EXEC-TENANT-001
+  hardened_L2: 3
+  current: KF-EXEC-AUTH-001
   k12:
     merged_main_sha: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
     ci_run: 35295140078
     server_tests: 4009
     proof_cases: 16
     proof_verdict: SATISFIED_AT_DECLARED_SCOPE
+  tenant:
+    level: L3
+    implementation_branch: impl/kf-exec-tenant-001-membership-genesis
+    pull_request: 84
+    pull_request_state: MERGED
+    merged_main_sha: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+    final_semantic_head: 2bb3c748e2335cf20c887dc8f1be5ddc2222a430
+    final_control_head: 11ea3ffb094308e8c97ccd14648fd6e9c0c05370
+    ci_run: 35533874555
+    ci_conclusion: success
+    proof_verdict: ADMITTED_AT_DECLARED_SCOPE
+    production_touched: false
+    status: CHECKPOINTED
   extfx:
     level: L3
     characterized_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
@@ -58,15 +71,11 @@ package_hardening:
       provider_traffic_used: false
     status: ADMITTED_AND_MERGED
 active_frontier:
-  stage: WAVE_A_TENANT
-  status: IMPLEMENTING
-  packet: KF-EXEC-TENANT-001
-  implementation_branch: impl/kf-exec-tenant-001-isolation-final
-  pull_request: 81
-  semantic_head: c9f8e72df1a47b228cde191f9e77909123bcb0f2
-  control_head: 0e9512fa13adce5dae0aaa4d4bd65597e6a6831e
-  prior_pr: 78
-  prior_pr_disposition: SUPERSEDED_BRANCH_HYGIENE
+  stage: WAVE_A_AUTH
+  status: CHARACTERIZING
+  packet: KF-EXEC-AUTH-001
+  implementation_branch: null
+  pull_request: null
   health: GREEN
 constraints:
   - no_production_provider_effects
@@ -76,11 +85,10 @@ constraints:
   - programme_map_refresh_paused
   - scheduled_cycles_halted
 next_actions:
-  - execute CG-DIRECTIVE-TENANT-IMPL-001 against current main
+  - execute CG-DIRECTIVE-AUTH-IMPL-001 against current main
+  - characterize all current authority sources and copied projections before semantic edits
   - preserve forensic baseline 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   - keep production read-only and release unauthorized
-  - do not reopen K12 or EXTFX unless regression invalidates admitted proof
-  - preserve TENANT S0 as zero-credit supporting hardening already merged
-  - implement and prove the canonical Membership-First Tenant Genesis packet
-  - checkpoint full TENANT before releasing AUTH-001
+  - do not reopen K12, EXTFX, or TENANT unless regression invalidates admitted proof
+  - checkpoint AUTH-001 before releasing ACTION-001
   - keep programme map refresh and scheduled architecture cycles paused
