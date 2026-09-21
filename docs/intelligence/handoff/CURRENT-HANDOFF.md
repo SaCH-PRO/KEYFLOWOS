@@ -1,89 +1,77 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `TENANT-ACTIVE-2026-09-20-01`
+Checkpoint: `AUTH-ACTIVE-2026-09-21-01`
 
-This is the canonical continuation point. Do **not** restart the programme, reconstruct K12, or recreate EXTFX.
+This is the canonical continuation point. Do **not** restart the programme or reconstruct completed packets.
 
 ## Fixed references
 
 - Repository: `SaCH-PRO/KEYFLOWOS`
 - Forensic baseline: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2` — unchanged
-- Current main: `cf3962a1245259dcbc6df18a8aeee481c34e50fe`
+- Current main: `e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a`
 - Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
-- K12 admitted main checkpoint: `ebbe8862fa4b7e6ec968db193620ac53f38cd5ff`
-- EXTFX implementation branch: `impl/kf-exec-extfx-001-resend-certainty`
-- EXTFX admitted branch head: `42177f5639345d29448c50375c0c05b133c076b5`
-- PR #76: **MERGED**
-- Merge commit: `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`
+- K12: CHECKPOINTED
+- EXTFX: CHECKPOINTED
+- TENANT: CHECKPOINTED
+- Production release authorized: **false**
+- Production mutations authorized: **false**
 
-## EXTFX admission
+## TENANT checkpoint
 
-The original CI blocker in `delivery-queue.service.ts` was repaired with the smallest runtime-typing change:
-- nullable payload fields normalized to `undefined`;
-- optional legacy retry count normalized to zero on the non-Resend path;
-- consequence repair narrowed to its actual `{ id }` boundary rather than requiring provider-execution joins.
+KF-EXEC-TENANT-001 is admitted and merged through PR #84.
 
-Adversarial review then found one **proof-coverage** gap, not a semantic defect: the package required a deterministic provider simulator for five Resend outcome/idempotency cases. That proof was added without real provider traffic, together with explicit P01 effect-identity and P16 backward-compatibility coverage.
+Evidence:
+- merge/main: `e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a`
+- semantic head: `2bb3c748e2335cf20c887dc8f1be5ddc2222a430`
+- final control head: `11ea3ffb094308e8c97ccd14648fd6e9c0c05370`
+- final CI run: `35533874555` — success
+- Agent Control Gate: success
+- Branch divergence: success
+- DAST workflow: success; do not infer live HawkScan execution beyond workflow evidence
+- production touched: no
+- founding OWNER Membership parity: admitted
+- concurrent bootstrap convergence: admitted
+- Membership-first discovery: admitted
+- deterministic-only founding Membership repair classification: admitted
+- post-admission P1 fixes for secret-field projection and pagination truncation: admitted
+- deterministic architecture scanner outputs refreshed as required by repository discipline
 
-Final admitted head `42177f56...` passed:
-- CI/CD run `35469579096`;
-- 433 server test files / 4033 tests;
-- EXTFX delivery effect-certainty tests: 9/9;
-- deterministic Resend simulator tests: 6/6, covering all five required simulator cases plus P16;
-- K12 resources admitted;
-- migration application green;
-- K12 evaluator 16/16, `SATISFIED_AT_DECLARED_SCOPE`;
-- 22 web test files / 210 tests;
-- server build green;
-- web build green;
-- server and web typecheck green;
-- lint green;
-- security green;
-- branch divergence run `35469579079` green;
-- DAST workflow run `35469579109` green. Its configuration guard reports DAST is not configured, so the HawkScan execution steps were skipped; do not misstate this as an executed scan.
-
-Proof/failure-matrix review verdict: **ADMITTED_AT_DECLARED_SCOPE**. The implementation preserves the required invariants:
-- one stable effect identity per delivery;
-- immutable material snapshot/fingerprint;
-- pre-provider durable attempt ownership;
-- exact same-key replay for bounded unknown outcomes;
-- provider success monotonicity;
-- local consequence repair without provider resend;
-- unsafe/legacy ambiguous manual retries blocked;
-- business scoping preserved;
-- legacy `SystemEmailService` callers remain backward compatible.
+No production backfill was run or authorized.
 
 ## Current frontier
 
-EXTFX remains closed and merged. **KF-EXEC-TENANT-001 is the authoritative active packet.**
+**KF-EXEC-AUTH-001 — Effective Authority Resolver Foundation**
 
-Current active implementation:
-- Wave: A
-- State: IMPLEMENTING
-- Health: GREEN
-- Replacement branch: `impl/kf-exec-tenant-001-isolation-final`
-- Supporting slice PR #81: MERGED with zero canonical TENANT completion credit
-- Implementation source main: `cf3962a1245259dcbc6df18a8aeee481c34e50fe`
-- Semantic implementation head: `c9f8e72df1a47b228cde191f9e77909123bcb0f2`
-- Control-artifact head at checkpoint: `0e9512fa13adce5dae0aaa4d4bd65597e6a6831e`
-- Prior PR #78 is superseded due branch-hygiene pressure and main drift; do not merge it.
-- PR #81 is a tenant-isolation hardening candidate that previously proved green at equivalent semantic scope, but it is not currently accepted as complete canonical TENANT because the canonical packet is Membership-First Tenant Genesis Compatibility.
-- Production remains untouched.
+Wave: A  
+State: CHARACTERIZING  
+Health: GREEN  
+Dependency: TENANT-001 — satisfied
 
-Before successor implementation work:
-1. Re-resolve `main`, PR #81 head and the canonical intelligence head.
-2. Execute the released canonical TENANT implementation directive against current main.
-3. Preserve the forensic baseline `8f173bfe...`.
-4. Do not reopen K12 or EXTFX unless new evidence invalidates admitted proof.
-5. Do not admit PR #81 as full TENANT unless the canonical Membership-First Tenant Genesis obligations are satisfied.
-6. Do not release AUTH-001 until the full canonical TENANT packet is checkpointed.
-7. Keep the programme map frozen and scheduled architecture cycles halted unless the user explicitly lifts those constraints.
+AUTH must characterize the real current authority source families before semantic coding:
+- Membership
+- JobRole / OrgAssignment
+- AuthorityGrant / delegation / override / deny sources
+- approval-tier sources
+- BusinessGuard / ModuleScopeGuard
+- copied permissionScopes / maxApprovalTier projections
+- relevant structure and AI approval/control-plane writers
+
+Target result is one explainable decision-time EffectiveAuthorityResult while preserving compatibility during migration.
+
+Do not:
+- invent precedence casually;
+- add a second role system;
+- flatten scopes in a way that can escalate authority;
+- trust client-supplied grantor identity;
+- weaken existing tenant/security gates to force convergence;
+- perform production mutations or deployment;
+- enter ACTION-001 before AUTH is checkpointed.
 
 ## Active safety constraints
 
 - No production provider sends.
 - No production data mutation.
 - No production deployment.
-- No silent rebaseline.
+- No silent forensic rebaseline.
 - No programme-map refresh.
 - No restart of scheduled architecture cycles.
