@@ -43,18 +43,18 @@ Order is load-bearing:
 TENANT-001 -> AUTH-001 -> ACTION-001
 
 3. KF-EXEC-TENANT-001 — Membership-First Tenant Genesis Compatibility
-   - status: IMPLEMENTING
-   - health: GREEN
-   - status note: canonical Membership-First Tenant Genesis implementation released to Claude
-   - source main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
-   - supporting slice PR #81: merged, zero canonical completion credit
-   - current work: constructor parity, founding OWNER Membership atomicity, membership-first discovery, bootstrap concurrency, safe migration classification
-   - scope ledger: canonical obligations from CG-REVIEW-TENANT-RECHAR-001
+   - status: CHECKPOINTED
+   - admitted main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+   - PR: 84
+   - final CI: 35533874555
    - production touched: no
 
 4. KF-EXEC-AUTH-001 — Effective Authority Resolver Foundation
-   - status: WAITING_ON_DEPENDENCY
-   - dependency: TENANT-001
+   - status: CHARACTERIZING
+   - health: GREEN
+   - dependency: TENANT-001 SATISFIED
+   - source main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+   - current work: authority-source inventory, precedence contradictions, effective-authority resolver seam selection
 
 5. KF-EXEC-ACTION-001 — Capability -> Control -> Clearance Boundary
    - status: WAITING_ON_DEPENDENCY
@@ -219,13 +219,13 @@ Wave E exit proof:
 ## Current programme scoreboard
 
 Total packets: 35
-Checkpointed: 2
+Checkpointed: 3
 Active: 1
-Waiting/unstarted: 32
+Waiting/unstarted: 31
 
-Active packet: KF-EXEC-TENANT-001
+Active packet: KF-EXEC-AUTH-001
 Wave: A
-State: IMPLEMENTING
+State: CHARACTERIZING
 Health: GREEN
 Scope drift: none declared
 Production touched: no
