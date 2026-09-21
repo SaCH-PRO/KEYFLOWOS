@@ -1,7 +1,7 @@
 packet_id: KF-EXEC-AUTH-001
 directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
 source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-source_head: 1bccecbab7916236f4bef783d994b1a275d371da
+source_head: 2918c093477a6143b86ef41f182fb44f7749633c
 implementation_branch: impl/kf-exec-auth-001-effective-authority
 state: PROVING
 health: GREEN
@@ -10,9 +10,11 @@ production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 summary: >
   CG-REVIEW-AUTH-PRECEDENCE-001 resolved C1-C5; AUTH-001 resumed on the same branch.
-  All released scope is implemented and proved: resolver precedence core, C1 vocabulary
-  convergence, C3 server-derived grantor with the grant bound, the two read-only
-  classifiers, and central shadow/compare. No new precedence contradiction appeared.
+  Both CG-REVIEW-AUTH-001 corrections are implemented and proved:
+  AUTH-P1-READ-COMPLETENESS (authority reads page to exhaustion and fail closed) and
+  AUTH-P1-GRANTOR-CURRENT-BOUND (a USER grant contributes only while its grantor still
+  holds tier-4 grantable authority). No new precedence contradiction appeared. PR #85
+  stays draft.
 characterization: COMPLETE — all 13 directive obligations reported in CC-PROGRESS-AUTH-CHAR-001
 contradiction_status: RESOLVED by CG-REVIEW-AUTH-PRECEDENCE-001; no new contradiction found
 contradictions:
@@ -64,17 +66,37 @@ tests:
     - "pnpm lint"
     - "npx prisma migrate deploy (local Postgres 16 + pgvector, proof only)"
   discovered: 443
-  passed: 4148
+  passed: 4161
   failed: 0
   skipped: 135
-  new_tests: 66
+  new_tests: 79
   packages_api: 5 passed
   lint: 6/6 tasks, 0 errors
   known_environment_failure: >
     web:typecheck fails with TS2688 "Cannot find type definition file for 'next'".
     Reproduced identically with these changes stashed, so it is pre-existing in this
     container and not caused by AUTH-001. No web file is touched by this packet.
+corrections_applied:
+  AUTH-P1-READ-COMPLETENESS:
+    change: >
+      Every authority-source read pages to exhaustion on a stable id cursor and
+      terminates on an EMPTY page, including the grantor-membership lookup. The 200-row
+      ceiling is gone; the remaining runaway guard FAILS CLOSED, returning a
+      deny-everything result rather than a permissive one.
+    page_size: bound by AuthorityModule; semantic result asserted identical at 1/3/7/200/10000
+  AUTH-P1-GRANTOR-CURRENT-BOUND:
+    change: >
+      The grantor's tier is recomputed at every resolve through the frozen Membership
+      rule. Only a grantor still at the tier-4 bound lets a USER grant contribute. Not
+      recursive: grantor tier derives from Membership alone, so no grant can bootstrap
+      the authority that validates it.
+    classes: active_grantor | legacy_unresolvable_grantor | grantor_no_longer_grantable
+    scope: USER grants and tier4_* only; KEY readers untouched; no auto-repair
+
 gates_that_failed_first_and_were_fixed_not_amended:
+  - optional-injection gate flagged AUTHORITY_PAGE_SIZE as @Optional()-injected but
+    registered in no module, so Nest bound undefined and the injection read as wired
+    while never being. AuthorityModule now binds it to its default.
   - unreachable-provider.spec.ts flagged AuthorityInventoryService as constructed on
     every boot and reachable by nothing. Fixed by making it a plain class with a
     structural client and a script entrypoint — the FoundingMembershipService
@@ -83,6 +105,10 @@ gates_that_failed_first_and_were_fixed_not_amended:
     new integration teardown. Those are soft-deleted models, so the extension rewrites
     it into an UPDATE and the rows survive. Fixed with raw SQL, as the other suites do.
 negative_controls:
+  - restored the single-page ceiling -> all 5 AUTH-P1-READ-COMPLETENESS cases fail,
+    including the narrowing position at row 255 that the ceiling silently dropped
+  - restored existence-only grantor validation -> the demotion case and the
+    no-bootstrap case fail
   - removed 'connect' from CANONICAL_MODULES -> route-coverage gate and the connect
     default test both fail, proving the C1 gate detects exactly this defect class
   - reverted IdentityService to the pre-AUTH-001 11-key table -> three writer-to-
