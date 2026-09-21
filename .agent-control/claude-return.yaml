@@ -3,17 +3,35 @@ directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
 source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
 source_head: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
 implementation_branch: impl/kf-exec-auth-001-effective-authority
-state: CHARACTERIZING
-health: GREEN
+state: BLOCKED
+health: RED
 scope_changed: false
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 summary: >
-  Characterization in progress. No semantic authority change has been made. source_head
-  is updated to the final semantic implementation commit before RETURN; any commit after
-  it is .agent-control/** only.
-characterization: pending — authority-source matrix follows in PROGRESS
-changed_files: []
+  Read-only authority-source characterization complete and reported in full
+  (CC-PROGRESS-AUTH-CHAR-001). Five precedence questions cannot be resolved from
+  existing evidence; filed as CC-CONTRADICTION-AUTH-PRECEDENCE-001 and semantic
+  authority work is stopped pending ChatGPT decisions. No semantic authority change
+  has been made. Only control artifacts are committed.
+characterization: COMPLETE — all 13 directive obligations reported in CC-PROGRESS-AUTH-CHAR-001
+contradictions:
+  - C1 three incompatible module vocabularies share Membership.permissionScopes;
+    also a live defect — invited members incl. ADMIN denied on 58 operations + 14
+    analytics routes; 7 'connect' routes unreachable by anyone
+  - C2 no per-principal explicit-deny source exists; the binding law has nothing to
+    be explicit in
+  - C3 AuthorityGrant.grantorId is client-supplied, wins over req.user, and is
+    typed as a Membership id while every writer supplies a User id or 'system';
+    grantor authority cannot be bounded
+  - C4 maxApprovalTier Int @default(0) NOT NULL cannot express "deliberately zero";
+    the three-copy workaround disambiguates via a different column
+  - C5 no commit boundary spans guard and handler, and Membership revocation is a
+    hard delete with no tombstone, so the revoke-vs-action proof has nothing to
+    assert against
+changed_files:
+  - .agent-control/active-packet.yaml
+  - .agent-control/claude-return.yaml
 schema_migrations: []
 tests:
   commands: []
@@ -21,11 +39,24 @@ tests:
   passed: 0
   failed: 0
   skipped: 0
+  note: no tests run — characterization was read-only and no code changed
 negative_controls: []
 provider_or_external_runs: NONE
 cleanup: none required
-new_consumers_or_writers: []
+new_consumers_or_writers:
+  - 9 Membership authority writers enumerated (2 unvalidated, in structure.service)
+  - 2 AuthorityGrant readers, both hardcoding granteeType KEY / granteeId key_ai
+  - 1 DelegationRule reader (approval routing only, not permission)
+  - 4 independent untraced SUPER_ADMIN bypasses
 deviations_from_packet: []
 rollback_floor: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-open_questions: []
-evidence_refs: []
+open_questions:
+  - C1 canonical module vocabulary, and whether the live outage is fixed in-packet
+  - C2 deny primitive R1/R2/R3
+  - C3 may grantorId become server-derived here; what historical rows resolve to
+  - C4 nullable migration vs freeze the existing three-copy rule
+  - C5 commit-boundary option R1/R2/R3
+  - shadow/compare family: ModuleScopeGuard-wide vs 6-route AiSettings operations
+evidence_refs:
+  - "issue #80 CC-PROGRESS-AUTH-CHAR-001 (comment 5760691716)"
+  - "issue #80 CC-CONTRADICTION-AUTH-PRECEDENCE-001 (comment 5760708790)"
