@@ -3,18 +3,18 @@ directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
 source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
 source_head: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
 implementation_branch: impl/kf-exec-auth-001-effective-authority
-state: BLOCKED
-health: RED
+state: IMPLEMENTING
+health: GREEN
 scope_changed: false
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 summary: >
-  Read-only authority-source characterization complete and reported in full
-  (CC-PROGRESS-AUTH-CHAR-001). Five precedence questions cannot be resolved from
-  existing evidence; filed as CC-CONTRADICTION-AUTH-PRECEDENCE-001 and semantic
-  authority work is stopped pending ChatGPT decisions. No semantic authority change
-  has been made. Only control artifacts are committed.
+  CG-REVIEW-AUTH-PRECEDENCE-001 resolved C1-C5; AUTH-001 resumed on the same branch.
+  Resolver precedence core and C1 vocabulary convergence are implemented and proved.
+  No new precedence contradiction appeared. Remaining released scope (C3 server-derived
+  grantor, read-only classifiers, central shadow/compare) is in progress.
 characterization: COMPLETE — all 13 directive obligations reported in CC-PROGRESS-AUTH-CHAR-001
+contradiction_status: RESOLVED by CG-REVIEW-AUTH-PRECEDENCE-001; no new contradiction found
 contradictions:
   - C1 three incompatible module vocabularies share Membership.permissionScopes;
     also a live defect — invited members incl. ADMIN denied on 58 operations + 14
@@ -32,15 +32,42 @@ contradictions:
 changed_files:
   - .agent-control/active-packet.yaml
   - .agent-control/claude-return.yaml
-schema_migrations: []
+  - apps/server/src/core/authority/module-vocabulary.ts (new — the one canonical table)
+  - apps/server/src/core/authority/approval-tier.ts (new — frozen rule, one copy)
+  - apps/server/src/core/authority/effective-authority.types.ts (new)
+  - apps/server/src/core/authority/effective-authority.resolver.ts (new)
+  - apps/server/src/core/authority/module-vocabulary.spec.ts (new — C1 gate)
+  - apps/server/src/core/authority/effective-authority.resolver.spec.ts (new)
+  - apps/server/src/modules/identity/team-scope-convergence.spec.ts (new — round trip)
+  - apps/server/src/core/auth/module-scope.guard.ts (consumes the canonical table)
+  - apps/server/src/modules/identity/identity.service.ts (consumes it; tier helper)
+  - apps/server/src/modules/ai/ai-oversight.service.ts (tier helper)
+  - apps/server/src/modules/ai/ai.controller.ts (tier helper)
+schema_migrations: []  # none — no schema change is in scope for AUTH-001
 tests:
-  commands: []
-  discovered: 0
-  passed: 0
+  commands:
+    - "npx vitest run (apps/server, CI default config)"
+    - "npx vitest run --root packages/api"
+    - "npx tsc --noEmit -p apps/server/tsconfig.json"
+    - "pnpm lint"
+    - "npx prisma migrate deploy (local Postgres 16 + pgvector, proof only)"
+  discovered: 440
+  passed: 4125
   failed: 0
-  skipped: 0
-  note: no tests run — characterization was read-only and no code changed
-negative_controls: []
+  skipped: 135
+  new_tests: 43
+  packages_api: 5 passed
+  lint: 6/6 tasks, 0 errors
+  known_environment_failure: >
+    web:typecheck fails with TS2688 "Cannot find type definition file for 'next'".
+    Reproduced identically with these changes stashed, so it is pre-existing in this
+    container and not caused by AUTH-001. No web file is touched by this packet.
+negative_controls:
+  - removed 'connect' from CANONICAL_MODULES -> route-coverage gate and the connect
+    default test both fail, proving the C1 gate detects exactly this defect class
+  - reverted IdentityService to the pre-AUTH-001 11-key table -> three writer-to-
+    enforcer round-trip tests and the single-table assertion fail, reproducing the
+    live outage rather than merely describing it
 provider_or_external_runs: NONE
 cleanup: none required
 new_consumers_or_writers:
