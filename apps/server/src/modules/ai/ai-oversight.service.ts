@@ -6,6 +6,7 @@ import { getToolByName } from './flow-tool-registry';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
 import { ApprovalRoutingService } from './approval-routing.service';
 import { JobRolePolicyService, JobRoleEnvelope } from '../structure/job-role-policy.service';
+import { membershipApprovalTier } from '../../core/authority/approval-tier';
 
 export type RiskTier = 1 | 2 | 3 | 4;
 
@@ -551,11 +552,10 @@ export class AiOversightService {
     if (!membership && !isSuperAdmin) throw new NotFoundException('User is not a member of this business');
 
     if (!isSuperAdmin) {
-      const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };
-      const hasCustomScopes = membership!.permissionScopes !== null && membership!.permissionScopes !== undefined;
-      const memberTier = (membership!.maxApprovalTier !== null && membership!.maxApprovalTier !== undefined && (hasCustomScopes || membership!.maxApprovalTier !== 0))
-        ? membership!.maxApprovalTier
-        : (DEFAULT_TIERS[membership!.role] ?? 0);
+      // KF-EXEC-AUTH-001: was the second of three identical copies of this rule.
+      // The canonical helper is a transcription — CG-REVIEW froze the semantics, so
+      // this must keep returning what the inline version returned.
+      const memberTier = membershipApprovalTier(membership!);
       if (item.riskTier > memberTier) {
         throw new ForbiddenException(`Tier ${item.riskTier} approvals require approval tier ${item.riskTier} or higher (you have tier ${memberTier})`);
       }

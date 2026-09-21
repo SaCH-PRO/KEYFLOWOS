@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, ForbiddenException, Logger, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../authority/module-vocabulary';
 
 export const MODULE_SCOPE_KEY = 'module_scope';
 
@@ -12,30 +13,18 @@ export interface ModuleScopeRequirement {
 export const RequireModuleScope = (module: string, minLevel: 'read' | 'write' | 'admin' = 'read') =>
   SetMetadata(MODULE_SCOPE_KEY, { module, minLevel } as ModuleScopeRequirement);
 
-const LEVEL_HIERARCHY: Record<string, number> = {
-  none: 0,
-  read: 1,
-  write: 2,
-  admin: 3,
-};
-
-const DEFAULT_SCOPES: Record<string, Record<string, string>> = {
-  OWNER: Object.fromEntries([
-    'crm', 'revenue', 'bookings', 'projects', 'content', 'expenses',
-    'automations', 'storefront', 'settings', 'ai', 'team', 'analytics',
-    'operations',
-  ].map((m) => [m, 'admin'])),
-  ADMIN: Object.fromEntries([
-    'crm', 'revenue', 'bookings', 'projects', 'content', 'expenses',
-    'automations', 'storefront', 'settings', 'ai', 'team', 'analytics',
-    'operations',
-  ].map((m) => [m, m === 'team' ? 'write' : 'admin'])),
-  STAFF: Object.fromEntries([
-    'crm', 'revenue', 'bookings', 'projects', 'content', 'expenses',
-    'automations', 'storefront', 'settings', 'ai', 'team', 'analytics',
-    'operations',
-  ].map((m) => [m, ['settings', 'team', 'ai'].includes(m) ? 'none' : 'read'])),
-};
+/**
+ * KF-EXEC-AUTH-001: the role-default table moved to `core/authority/module-vocabulary`
+ * and this guard now consumes it, because IdentityService kept a SECOND copy that was
+ * two keys short. Every member invited through `inviteTeamMember` was written a scope
+ * map without `operations` or `analytics`, and step 6 below reads an explicit map
+ * INSTEAD of these defaults — so those two keys evaluated to 'none' and 58 operations
+ * routes plus 14 analytics routes refused every invited member, ADMIN included.
+ *
+ * The values are unchanged for the 13 keys this guard already had. `connect` is new to
+ * the vocabulary and defaults to 'none' for every role, which is what it already
+ * effectively was here.
+ */
 
 @Injectable()
 export class ModuleScopeGuard implements CanActivate {
@@ -69,12 +58,12 @@ export class ModuleScopeGuard implements CanActivate {
     if (membership.permissionScopes && typeof membership.permissionScopes === 'object') {
       scopes = membership.permissionScopes as Record<string, string>;
     } else {
-      scopes = DEFAULT_SCOPES[membership.role] ?? DEFAULT_SCOPES.STAFF;
+      scopes = defaultScopesForRole(membership.role);
     }
 
     const memberLevel = scopes[requirement.module] || 'none';
-    const memberRank = LEVEL_HIERARCHY[memberLevel] ?? 0;
-    const requiredRank = LEVEL_HIERARCHY[requirement.minLevel] ?? 1;
+    const memberRank = rankOf(memberLevel);
+    const requiredRank = LEVEL_RANK[requirement.minLevel] ?? 1;
 
     if (memberRank < requiredRank) {
       throw new ForbiddenException(
