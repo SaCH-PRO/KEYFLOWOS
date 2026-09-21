@@ -3,16 +3,16 @@ directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
 source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
 source_head: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
 implementation_branch: impl/kf-exec-auth-001-effective-authority
-state: IMPLEMENTING
+state: PROVING
 health: GREEN
 scope_changed: false
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 summary: >
   CG-REVIEW-AUTH-PRECEDENCE-001 resolved C1-C5; AUTH-001 resumed on the same branch.
-  Resolver precedence core and C1 vocabulary convergence are implemented and proved.
-  No new precedence contradiction appeared. Remaining released scope (C3 server-derived
-  grantor, read-only classifiers, central shadow/compare) is in progress.
+  All released scope is implemented and proved: resolver precedence core, C1 vocabulary
+  convergence, C3 server-derived grantor with the grant bound, the two read-only
+  classifiers, and central shadow/compare. No new precedence contradiction appeared.
 characterization: COMPLETE — all 13 directive obligations reported in CC-PROGRESS-AUTH-CHAR-001
 contradiction_status: RESOLVED by CG-REVIEW-AUTH-PRECEDENCE-001; no new contradiction found
 contradictions:
@@ -43,6 +43,18 @@ changed_files:
   - apps/server/src/modules/identity/identity.service.ts (consumes it; tier helper)
   - apps/server/src/modules/ai/ai-oversight.service.ts (tier helper)
   - apps/server/src/modules/ai/ai.controller.ts (tier helper)
+  - apps/server/src/core/authority/authority.module.ts (new, @Global)
+  - apps/server/src/core/authority/authority-inventory.service.ts (new, plain class)
+  - apps/server/src/core/authority/authority-shadow.spec.ts (new)
+  - apps/server/src/modules/ai/authority-grant-grantor.spec.ts (new)
+  - apps/server/test/authority-inventory.integration.test.ts (new)
+  - scripts/authority-inventory.ts (new, report-only operator entrypoint)
+  - apps/server/src/core/auth/module-scope.guard.ts (central shadow/compare)
+  - apps/server/src/modules/ai/ai-settings.service.ts (C3 grantor + grant bound)
+  - apps/server/src/modules/ai/ai-settings.controller.ts (C3; shadow decorators)
+  - apps/server/src/modules/ai/dto/create-authority-grant.dto.ts (grantorId removed)
+  - apps/server/src/app.module.ts (AuthorityModule)
+  - architecture/*.yaml (deterministic scanner refresh)
 schema_migrations: []  # none — no schema change is in scope for AUTH-001
 tests:
   commands:
@@ -51,17 +63,25 @@ tests:
     - "npx tsc --noEmit -p apps/server/tsconfig.json"
     - "pnpm lint"
     - "npx prisma migrate deploy (local Postgres 16 + pgvector, proof only)"
-  discovered: 440
-  passed: 4125
+  discovered: 443
+  passed: 4148
   failed: 0
   skipped: 135
-  new_tests: 43
+  new_tests: 66
   packages_api: 5 passed
   lint: 6/6 tasks, 0 errors
   known_environment_failure: >
     web:typecheck fails with TS2688 "Cannot find type definition file for 'next'".
     Reproduced identically with these changes stashed, so it is pre-existing in this
     container and not caused by AUTH-001. No web file is touched by this packet.
+gates_that_failed_first_and_were_fixed_not_amended:
+  - unreachable-provider.spec.ts flagged AuthorityInventoryService as constructed on
+    every boot and reachable by nothing. Fixed by making it a plain class with a
+    structural client and a script entrypoint — the FoundingMembershipService
+    arrangement — rather than adding it to UNREACHABLE_ACKNOWLEDGED.
+  - fixture-cleanup-integrity.spec.ts flagged deleteMany on Business and User in the
+    new integration teardown. Those are soft-deleted models, so the extension rewrites
+    it into an UPDATE and the rows survive. Fixed with raw SQL, as the other suites do.
 negative_controls:
   - removed 'connect' from CANONICAL_MODULES -> route-coverage gate and the connect
     default test both fail, proving the C1 gate detects exactly this defect class
@@ -77,13 +97,21 @@ new_consumers_or_writers:
   - 4 independent untraced SUPER_ADMIN bypasses
 deviations_from_packet: []
 rollback_floor: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-open_questions:
-  - C1 canonical module vocabulary, and whether the live outage is fixed in-packet
-  - C2 deny primitive R1/R2/R3
-  - C3 may grantorId become server-derived here; what historical rows resolve to
-  - C4 nullable migration vs freeze the existing three-copy rule
-  - C5 commit-boundary option R1/R2/R3
-  - shadow/compare family: ModuleScopeGuard-wide vs 6-route AiSettings operations
+open_questions: []
+disclosures:
+  - >
+    I reported the AiSettingsController operations family as 6 routes in
+    CC-PROGRESS-AUTH-CHAR-001 and the review adopted that number into its label. The
+    controller has 14. The selected family is unchanged — still exactly that one
+    controller — and the count was my error. All 14 are shadowed rather than an
+    arbitrary 6, and a test pins the family to the single controller.
+  - >
+    The backfill from KF-EXEC-TENANT-001 has still never been run anywhere, so the
+    BusinessGuard ownerId compatibility arm still covers owners with no Membership.
+    Out of scope here; unchanged by this packet.
+  - >
+    scripts/authority-inventory.ts has not been run against any real data. It is
+    report-only and has no --apply, but it has only been exercised by its tests.
 evidence_refs:
   - "issue #80 CC-PROGRESS-AUTH-CHAR-001 (comment 5760691716)"
   - "issue #80 CC-CONTRADICTION-AUTH-PRECEDENCE-001 (comment 5760708790)"
