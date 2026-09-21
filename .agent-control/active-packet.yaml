@@ -1,71 +1,66 @@
-packet_id: KF-EXEC-TENANT-001
-directive_message_id: CG-DIRECTIVE-TENANT-IMPL-001
-source_main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
-implementation_branch: impl/kf-exec-tenant-001-membership-genesis
-state: IMPLEMENTING
+packet_id: KF-EXEC-AUTH-001
+directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
+source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+implementation_branch: impl/kf-exec-auth-001-effective-authority
+state: CHARACTERIZING
 health: GREEN
 scope_changed: false
 production_touched: false
 allowed_scope:
-  - bring IdentityService.createBusiness to founding OWNER Membership parity
-  - make bootstrapUser business creation + founding OWNER Membership atomic
-  - make sequential and concurrent bootstrap retries converge on one bootstrap Business
-    and one founding OWNER Membership without preventing explicit multi-Business ownership
-  - bring live tRPC identity.createBusiness to the same founding postcondition
-  - reject tRPC business creation before mutation if authenticated user id is absent
-  - make workspace discovery Membership-first while preserving legitimate ownerId compatibility
-  - preserve BusinessGuard compatibility behavior during migration
-  - add inventory/classification for founding OWNER Membership state
-  - backfill only deterministic missing founding Memberships
-  - report conflicting, unresolvable-owner and ambiguous rows without guessing
-  - add focused, concurrency, migration and rollback proof for the canonical acceptance matrix
+  - define resolver input adapter over existing rows
+  - implement bounded EffectiveAuthorityResult resolver
+  - add explicit precedence rules only where existing evidence supports them
+  - add focused resolver tests and provenance traces
+  - add shadow/compare on a small selected guarded-operation family
+  - record mismatches without changing behavior until mismatch evidence is understood
+  - migrate only the selected gates whose semantics are fully characterized
+  - add reconciliation support for stale copied authority where safely bounded
 prohibited_scope:
-  - no ownerId global uniqueness constraint
-  - no removal of Business.ownerId
-  - no weakening of ModuleScopeGuard into ownerId-only authorization
-  - no full AUTH-001 / role algebra / delegation implementation
-  - no invitation-claim redesign
-  - no owner-transfer redesign
-  - no weakening authorization gates to make tests pass
-  - no production data access
-  - no production mutation, deployment or provider traffic
-  - no architecture/os scheduled-cycle work
-  - no silent scope expansion
+  - no ACTION-001 clearance/execution implementation
+  - no KEY autonomy redesign
+  - no universal route cutover
+  - no invitation or tenant-genesis redesign
+  - no production mutations or deployment
+  - no production provider traffic
+  - no architecture/os cycle work
+  - no programme-map refresh
+  - no silent schema or precedence invention
   - no merge by Claude
 invariants:
-  - explicit Business creation may create multiple Businesses for one owner
-  - every successful Business constructor atomically establishes exactly one founding OWNER Membership
-  - bootstrap is idempotent and concurrent bootstrap for one user converges
-  - bootstrap concurrency must not be solved by ownerId @unique
-  - Membership is the ordinary authenticated-human to Business relationship
-  - legitimate non-owner Membership users are discoverable
-  - ownerId remains distinguished-owner/compatibility metadata
-  - browser workspace selection never grants authorization
-  - ModuleScopeGuard remains Membership-based
-  - deterministic migration repair only; ambiguous ownership is never guessed
-  - TENANT S0 default Membership scoping is respected; cross-workspace discovery is not
-    silently truncated by ambient tenant context
+  - active Membership is required for ordinary authenticated-human authority
+  - active position/JobRole may contribute bounded current authority
+  - explicit deny must remain explicit, not merely absence
+  - granted authority must never exceed grantor grantable authority
+  - expired or revoked sources contribute nothing
+  - approval tier is distinct from execution permission
+  - source provenance must remain explainable
+  - do not add a second role system
+  - do not flatten all scopes into a union if that can escalate authority
+  - do not copy new role state into Membership as sole truth
+  - do not trust client-supplied grantor identity
+  - do not create route-local bespoke resolvers per controller
+  - do not add silent owner/admin superuser exceptions without policy trace
+  - do not implement denial as ad-hoc string subtraction
 proof_obligations:
-  - explicit IdentityService create yields founding OWNER Membership atomically
-  - bootstrap retry does not duplicate
-  - concurrent bootstrap converges to one bootstrap Business and one OWNER Membership
-  - tRPC create yields equivalent founding postcondition
-  - tRPC create rejects missing authenticated user id before mutation
-  - owner with Membership discoverable
-  - non-owner legitimate member discoverable
-  - unrelated user cannot discover or access
-  - workspace cookie cannot grant access
-  - migration inventory detects missing/conflicting/unresolvable/ambiguous states
-  - deterministic missing case is backfilled
-  - ambiguous/conflicting/unresolvable cases are not auto-assigned
-  - rollback preserves ownerId and legitimate Membership history
-  - existing S0 tenant-isolation proofs remain green
+  - role assignment/revocation affects the next decision
+  - expired delegation is rejected
+  - grant cannot exceed grantor grantable authority
+  - explicit deny narrows otherwise granted capability
+  - multiple positions compose without accidental escalation
+  - approval tier and execution permission remain distinct
+  - wrong Business relationship rejects
+  - result explains every contributing authority source
+  - concurrent revoke vs action admission cannot consume stale authority after the chosen commit boundary
+  - legacy/shadow compare records mismatches before cutover
+  - TENANT relationship invariants remain green
+  - full CI/build/typecheck/lint/security/migration proof passes
 stop_conditions:
-  - current main drifts before the implementation branch is cut
-  - safe bootstrap concurrency unachievable without an uncovered schema primitive
-  - migration ambiguity requiring production data to classify
-  - satisfying an invariant would weaken tenant/security/authority boundaries
-  - scope pressure reaching AUTH-001, invitation redesign, owner transfer or unrelated domains
-  - two materially identical failed proof attempts without new evidence
-  - branch hygiene approaching threshold without a clean compaction path
+  - current main drifts before implementation branch is cut
+  - current fields imply contradictory precedence that cannot be resolved from existing evidence
+  - safe grantor-authority bounding needs a new unapproved identity primitive
+  - concurrency safety requires a new schema/locking primitive not covered here
+  - a selected gate cannot migrate without entering ACTION-001 semantics
+  - any fix would weaken tenant/security boundaries
+  - two materially identical failed proof attempts without new root cause
+  - branch hygiene approaches threshold without a compaction path
 merge_authority: false

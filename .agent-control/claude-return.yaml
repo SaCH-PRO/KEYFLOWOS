@@ -1,82 +1,31 @@
-packet_id: KF-EXEC-TENANT-001
-directive_message_id: CG-DIRECTIVE-TENANT-IMPL-001
-source_main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
-source_head: 2bb3c748e2335cf20c887dc8f1be5ddc2222a430
-implementation_branch: impl/kf-exec-tenant-001-membership-genesis
-state: READY_TO_MERGE
+packet_id: KF-EXEC-AUTH-001
+directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
+source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+source_head: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+implementation_branch: impl/kf-exec-auth-001-effective-authority
+state: CHARACTERIZING
 health: GREEN
 scope_changed: false
 production_touched: false
-review_status: READY_TO_MERGE
+review_status: PENDING_CHATGPT_REVIEW
 summary: >
-  Canonical Membership-First Tenant Genesis implemented against main@cf3962a1.
-  All three production Business constructors now establish exactly one founding
-  OWNER Membership atomically, bootstrap converges under concurrency without
-  ownerId uniqueness, discovery is Membership-first with an ownerId compatibility
-  arm, and founding state is inventoried and deterministically repairable. No
-  schema change, no new constraint, no gate edits.
-characterization: >
-  Carried forward from CC-RETURN-TENANT-RECHAR-001 and re-resolved against
-  cf3962a1 after TENANT S0 merged. The three constructors, two discovery readers,
-  both guards and the absence of any founding-membership migration were all
-  re-confirmed on this base before editing.
-changed_files:
-  - apps/server/src/modules/identity/identity.service.ts
-  - apps/server/src/modules/identity/founding-membership.service.ts
-  - apps/server/src/modules/identity/identity.module.ts
-  - apps/server/src/modules/identity/tenant-genesis.spec.ts
-  - apps/server/test/tenant-founding-membership.integration.test.ts
-  - packages/api/src/routers/identity.ts
-  - scripts/backfill-founding-memberships.ts
+  Characterization in progress. No semantic authority change has been made. source_head
+  is updated to the final semantic implementation commit before RETURN; any commit after
+  it is .agent-control/** only.
+characterization: pending — authority-source matrix follows in PROGRESS
+changed_files: []
 schema_migrations: []
-bootstrap_concurrency_mechanism:
-  chosen: Serializable transaction with bounded jittered retry
-  existing_precedent: apps/server/src/modules/crm/crm.service.ts:593 uses
-    "{ isolationLevel: 'Serializable' }" for the same find-then-create shape
-  new_local_code: the bounded retry wrapper and backoff helper; no new schema
-    primitive, no new infrastructure, no advisory locks
-  rejected: ownerId @unique, prohibited by the directive and wrong on the merits
 tests:
-  commands:
-    - "npx vitest run -c vitest.unit.config.ts (apps/server)"
-    - "npx vitest run -c vitest.integration.config.ts (apps/server, real PostgreSQL 16)"
-    - "npx prisma migrate deploy --schema packages/db/prisma/schema.prisma"
-    - "tsc --noEmit (apps/server); pnpm build (apps/server, @keyflow/api, @keyflow/db, @keyflow/shared)"
-    - "pnpm lint (apps/server, packages/api)"
-  discovered: 4082
-  passed: 4082
+  commands: []
+  discovered: 0
+  passed: 0
   failed: 0
   skipped: 0
-negative_controls:
-  - bootstrap race rerun with isolationLevel ReadCommitted produced 6 duplicate
-    businesses, confirming the convergence test is not vacuous; Serializable restored
-  - createBusiness asserted to create nothing when the owner does not exist
-  - retry exhaustion asserted to throw rather than fall back to a racy write
-  - discovery asserted to no longer filter on ownerId alone
+negative_controls: []
 provider_or_external_runs: NONE
-cleanup: >
-  A local PostgreSQL 16 cluster was created under /tmp for proof only and is not
-  part of the repository. No .env or local artifact is committed.
-new_consumers_or_writers:
-  - FoundingMembershipService (new, identity module)
-  - scripts/backfill-founding-memberships.ts (new operator entrypoint)
+cleanup: none required
+new_consumers_or_writers: []
 deviations_from_packet: []
-rollback_floor: cf3962a1245259dcbc6df18a8aeee481c34e50fe
-post_admission_note: >
-  ChatGPT set review_status READY_TO_MERGE on 23486b7. Two P1 review findings then
-  landed and both were real, so this branch now carries semantic commits that the
-  admission did not cover. I have reset review_status to PENDING_CHATGPT_REVIEW
-  rather than leave unreviewed code presented as admitted — that is the one thing
-  the gate exists to prevent. This is ChatGPT's field, not mine; flip it straight
-  back if the re-review is satisfied.
-
-open_questions:
-  - trpc.module.spec.ts flagged the new tRPC constructor on a comment containing
-    the token businessId. The gate was not edited and no acknowledgement entry was
-    added; the prose was reworded and the code genuinely handles no tenant id.
-  - key-inbox-intelligence.integration.test.ts fails without an exported
-    DATABASE_URL because it does not load repo-root .env; pre-existing, unrelated.
-evidence_refs:
-  - origin/main@cf3962a1245259dcbc6df18a8aeee481c34e50fe
-  - origin/docs/keyflow-intelligence-foundation@a45cb15759a239c0c3fedf56bf46bc1c009f07be
-  - canonical packet blob cd82e51a88dc3042bb72555d1ff8cf811f785593
+rollback_floor: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+open_questions: []
+evidence_refs: []
