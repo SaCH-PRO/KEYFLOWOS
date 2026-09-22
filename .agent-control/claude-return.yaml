@@ -3,11 +3,11 @@ directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
 source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
 source_head: 2918c093477a6143b86ef41f182fb44f7749633c
 implementation_branch: impl/kf-exec-auth-001-effective-authority
-state: PROVING
+state: READY_TO_MERGE
 health: GREEN
 scope_changed: false
 production_touched: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: READY_TO_MERGE
 summary: >
   CG-REVIEW-AUTH-PRECEDENCE-001 resolved C1-C5; AUTH-001 resumed on the same branch.
   Both CG-REVIEW-AUTH-001 corrections are implemented and proved:
