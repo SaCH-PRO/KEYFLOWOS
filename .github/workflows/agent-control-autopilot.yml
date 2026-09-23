@@ -29,18 +29,32 @@ on:
         type: string
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  actions: read
+  contents: read
 
 concurrency:
   group: keyflow-agent-autopilot-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.run_id }}
   cancel-in-progress: false
 
 jobs:
+  self-test:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout proposed autopilot
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Verify event normalizer
+        run: node --test scripts/agent-control/normalize-event.spec.mjs
+
   normalize-event:
-    if: github.event_name != 'issue_comment' || github.event.issue.number == 80
+    if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.number == 80)
+    permissions:
+      contents: read
+      issues: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted main
@@ -88,6 +102,11 @@ jobs:
             await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: 80, body });
 
   exact-head-auto-merge:
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
     if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.pr_number != '')
     runs-on: ubuntu-latest
     steps:
@@ -151,6 +170,11 @@ jobs:
             await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: 80, body });
 
   hourly-reconcile-open-prs:
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
