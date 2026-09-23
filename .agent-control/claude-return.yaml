@@ -5,6 +5,7 @@ return_message_id: CC-RETURN-META-AUTO-001
 source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
 source_head: e7773c64c64417f4f447a4c4f3fa8b29288b6885
 implementation_branch: impl/kf-meta-auto-001-orchestrator
+pr_number: 87
 state: PROVING
 health: GREEN
 scope_changed: false
