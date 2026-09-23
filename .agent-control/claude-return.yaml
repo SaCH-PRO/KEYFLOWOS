@@ -3,7 +3,7 @@ directive_message_id: CG-DIRECTIVE-META-AUTO-001
 review_message_id: CG-REVIEW-META-AUTO-001
 return_message_id: CC-RETURN-META-AUTO-001
 source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
-source_head: e7773c64c64417f4f447a4c4f3fa8b29288b6885
+source_head: 6de1f49e77f6b9921a10be140cd3ad1b20cf374c
 implementation_branch: impl/kf-meta-auto-001-orchestrator
 pr_number: 87
 state: PROVING
@@ -150,10 +150,15 @@ tests:
     - node --test scripts/agent-control/tests/*.spec.mjs
     - node scripts/agent-control/validate-dag.mjs
     - node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
-  discovered: 114
-  passed: 114
+  discovered: 116
+  passed: 116
   failed: 0
   skipped: 0
+  skipped_justification: >
+    Zero skips locally. On a runner without an authenticated gh, the worker
+    cursor proof skips by design: without a readable control channel "no
+    directive was processed" would be true for the wrong reason. It is declared
+    here rather than left to look like a silent gap.
 
 negative_controls:
   total: 10
@@ -220,6 +225,22 @@ defects_found_and_fixed_during_implementation:
       that Node cannot spawn without a shell (ENOENT). This would have silently
       stalled the loop. Fixed; the prompt now goes on stdin, which also keeps
       arbitrary prompt text away from the shell.
+  - id: D4
+    found_by: CI on PR #87, not by the local run
+    detail: >
+      The YAML parser could not read a block scalar used as a sequence item
+      (`- >`), which this very return artifact uses for its long prose entries.
+      A control artifact the codec must read was unparseable by it. It escaped
+      locally because the artifact was rewritten after the last local suite --
+      a file changed after its last verification. Fixed and pinned by two
+      regression tests; source_head advanced accordingly.
+  - id: D5
+    found_by: CI on PR #87
+    detail: >
+      The worker cursor proof assumed an authenticated gh. On a runner there is
+      none, so the tick errored rather than reporting no pending directive. It
+      now skips when the control channel is unreadable instead of passing for
+      the wrong reason.
 
 architecture_changes: >
   One addition, made under explicit authority: programme-state.yaml as the
