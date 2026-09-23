@@ -1,26 +1,41 @@
 project: KEYFLOWOS
-analysis_version: 95
-last_updated: '2026-09-21'
-checkpoint_id: AUTH-ACTIVE-2026-09-21-01
-status: AUTH_IMPLEMENTATION_RELEASED
+analysis_version: 96
+last_updated: '2026-09-22'
+checkpoint_id: ACTION-ACTIVE-2026-09-22-01
+status: ACTION_CHARACTERIZATION_RELEASED
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: true
 production_release_authorized: false
 production_mutations_authorized: false
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-current_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+current_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
 coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 35}
 package_hardening:
   total_packets: 35
-  hardened_L2: 3
-  current: KF-EXEC-AUTH-001
+  hardened_L2: 4
+  current: KF-EXEC-ACTION-001
   k12:
     merged_main_sha: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
     ci_run: 35295140078
     server_tests: 4009
     proof_cases: 16
     proof_verdict: SATISFIED_AT_DECLARED_SCOPE
+  auth:
+    level: L3
+    implementation_branch: impl/kf-exec-auth-001-effective-authority
+    pull_request: 85
+    pull_request_state: MERGED
+    merged_main_sha: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+    final_semantic_head: 2918c093477a6143b86ef41f182fb44f7749633c
+    final_control_head: 41cf1dddeed09a7ff8515189ea6d8b92249f9980
+    final_ci_run: 35763481266
+    final_ci_conclusion: success
+    proof_verdict: ADMITTED_AT_DECLARED_SCOPE
+    production_touched: false
+    status: CHECKPOINTED
+    transferred_to_action:
+      - membership_guard_to_handler_revocation_boundary
   tenant:
     level: L3
     implementation_branch: impl/kf-exec-tenant-001-membership-genesis
@@ -71,9 +86,9 @@ package_hardening:
       provider_traffic_used: false
     status: ADMITTED_AND_MERGED
 active_frontier:
-  stage: WAVE_A_AUTH
+  stage: WAVE_A_ACTION
   status: CHARACTERIZING
-  packet: KF-EXEC-AUTH-001
+  packet: KF-EXEC-ACTION-001
   implementation_branch: null
   pull_request: null
   health: GREEN
@@ -85,10 +100,11 @@ constraints:
   - programme_map_refresh_paused
   - scheduled_cycles_halted
 next_actions:
-  - execute CG-DIRECTIVE-AUTH-IMPL-001 against current main
-  - characterize all current authority sources and copied projections before semantic edits
+  - resolve and read the exact canonical KF-EXEC-ACTION-001 packet before semantic edits
+  - characterize current capability/control/clearance execution seams against current main
+  - carry forward AUTH-001 transfer: define and prove the action-admission commit boundary for membership revocation freshness
   - preserve forensic baseline 8f173bfe79f1418159cf4099ea18b0d60d203ec2
   - keep production read-only and release unauthorized
-  - do not reopen K12, EXTFX, or TENANT unless regression invalidates admitted proof
-  - checkpoint AUTH-001 before releasing ACTION-001
+  - do not reopen K12, EXTFX, TENANT, or AUTH unless regression invalidates admitted proof
+  - checkpoint ACTION-001 before Wave B release
   - keep programme map refresh and scheduled architecture cycles paused
