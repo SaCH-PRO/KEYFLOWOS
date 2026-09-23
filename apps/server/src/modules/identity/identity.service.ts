@@ -6,6 +6,14 @@ import { DefaultTriggersService } from '../ai/default-triggers.service';
 import { sanitizeBusiness } from '../../core/security/sanitize-business';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
 import type { UserIdentityDataDto } from './dto/bootstrap.dto';
+import {
+  ACCESS_LEVELS,
+  CANONICAL_MODULES,
+  CRM_SUBPERMISSION_VALUES,
+  DEFAULT_APPROVAL_TIERS as CANONICAL_APPROVAL_TIERS,
+  ROLE_DEFAULT_SCOPES,
+} from '../../core/authority/module-vocabulary';
+import { membershipApprovalTier } from '../../core/authority/approval-tier';
 
 /**
  * Map a Business profile field to the onboarding-answer key that
@@ -487,21 +495,28 @@ export class IdentityService {
     return business;
   }
 
-  static readonly PERMISSION_MODULES = [
-    'crm', 'revenue', 'bookings', 'projects', 'content', 'expenses', 'automations', 'storefront', 'settings', 'ai', 'team',
-  ] as const;
+  /**
+   * KF-EXEC-AUTH-001: these were a SECOND, divergent copy of ModuleScopeGuard's tables.
+   *
+   * This list held 11 keys; the guard enforces 14. The two missing ones were
+   * `operations` and `analytics`, and because every writer below persists an explicit
+   * scope map — which the guard reads INSTEAD of its own defaults — every member
+   * invited here was denied on all 58 `operations` routes and all 14 `analytics`
+   * routes. `validateScopesPayload` then rejected both names as `Invalid module`, so
+   * an admin could not grant them back either. Only the founding owner escaped it,
+   * because the TENANT-001 constructor writes no scope map at all.
+   *
+   * Both now come from `core/authority/module-vocabulary`, the single table the guard
+   * also reads. The role defaults are the guard's pre-existing values, so this
+   * converges the writer on semantics that were already declared rather than minting
+   * a new role policy. `connect` joins the vocabulary at 'none' for every role and is
+   * reachable only through an explicit validated grant.
+   */
+  static readonly PERMISSION_MODULES = CANONICAL_MODULES;
 
-  static readonly DEFAULT_SCOPES: Record<string, Record<string, string>> = {
-    OWNER: Object.fromEntries(IdentityService.PERMISSION_MODULES.map((m) => [m, 'admin'])),
-    ADMIN: Object.fromEntries(IdentityService.PERMISSION_MODULES.map((m) => [m, m === 'team' ? 'write' : 'admin'])),
-    STAFF: Object.fromEntries(IdentityService.PERMISSION_MODULES.map((m) => [m, ['settings', 'team', 'ai'].includes(m) ? 'none' : 'read'])),
-  };
+  static readonly DEFAULT_SCOPES: Record<string, Record<string, string>> = ROLE_DEFAULT_SCOPES;
 
-  static readonly DEFAULT_APPROVAL_TIERS: Record<string, number> = {
-    OWNER: 4,
-    ADMIN: 3,
-    STAFF: 0,
-  };
+  static readonly DEFAULT_APPROVAL_TIERS: Record<string, number> = CANONICAL_APPROVAL_TIERS;
 
   private resolveScopes(membership: { role: string; permissionScopes: unknown }): Record<string, string> {
     if (membership.permissionScopes && typeof membership.permissionScopes === 'object') {
@@ -510,14 +525,13 @@ export class IdentityService {
     return IdentityService.DEFAULT_SCOPES[membership.role] ?? IdentityService.DEFAULT_SCOPES.STAFF;
   }
 
+  /**
+   * One of three identical copies of this rule before KF-EXEC-AUTH-001. Now delegates
+   * to the canonical helper, which is a transcription of this exact logic — CG-REVIEW
+   * chose R2_FREEZE_EXISTING_RULE, so the result must not change for any input.
+   */
   private resolveApprovalTier(membership: { role: string; maxApprovalTier: number | null; permissionScopes?: unknown }): number {
-    const hasCustomScopes = membership.permissionScopes !== null && membership.permissionScopes !== undefined;
-    if (membership.maxApprovalTier !== null && membership.maxApprovalTier !== undefined) {
-      if (hasCustomScopes || membership.maxApprovalTier !== 0) {
-        return membership.maxApprovalTier;
-      }
-    }
-    return IdentityService.DEFAULT_APPROVAL_TIERS[membership.role] ?? 0;
+    return membershipApprovalTier(membership);
   }
 
   private async assertTeamAdmin(businessId: string, requesterId: string): Promise<void> {
@@ -644,15 +658,12 @@ export class IdentityService {
   }
 
   private validateScopesPayload(scopes: Record<string, string>, tier: number): void {
-    const validLevels = new Set(['none', 'read', 'write', 'admin']);
-    const validModules = new Set(IdentityService.PERMISSION_MODULES as readonly string[]);
+    const validLevels = new Set(ACCESS_LEVELS as readonly string[]);
+    // The canonical vocabulary, so what this accepts and what the guard enforces can
+    // no longer drift apart — that divergence is what closed 72 routes.
+    const validModules = new Set(CANONICAL_MODULES as readonly string[]);
     // M7 CRM ownership sub-permissions layered on top of the per-module level.
-    const crmExtraKeys: Record<string, Set<string>> = {
-      crm_view: new Set(['all', 'owned']),
-      crm_edit: new Set(['any', 'owned', 'none']),
-      crm_reassign: new Set(['true', 'false', 'yes', 'no']),
-      crm_delete: new Set(['any', 'owned', 'none']),
-    };
+    const crmExtraKeys: Record<string, ReadonlySet<string>> = CRM_SUBPERMISSION_VALUES;
     for (const [key, value] of Object.entries(scopes)) {
       if (validModules.has(key)) {
         if (!validLevels.has(value)) throw new BadRequestException(`Invalid permission level: ${value} for module ${key}`);

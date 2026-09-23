@@ -1,71 +1,127 @@
-packet_id: KF-EXEC-TENANT-001
-directive_message_id: CG-DIRECTIVE-TENANT-IMPL-001
-source_main: cf3962a1245259dcbc6df18a8aeee481c34e50fe
-implementation_branch: impl/kf-exec-tenant-001-membership-genesis
+packet_id: KF-EXEC-AUTH-001
+directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
+review_message_id: CG-REVIEW-AUTH-PRECEDENCE-001
+source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+implementation_branch: impl/kf-exec-auth-001-effective-authority
 state: IMPLEMENTING
 health: GREEN
-scope_changed: false
+scope_changed: true
+scope_change_authority: CG-REVIEW-AUTH-PRECEDENCE-001
 production_touched: false
+
+# Released by CG-REVIEW-AUTH-PRECEDENCE-001. Supersedes the pre-review allowed_scope.
 allowed_scope:
-  - bring IdentityService.createBusiness to founding OWNER Membership parity
-  - make bootstrapUser business creation + founding OWNER Membership atomic
-  - make sequential and concurrent bootstrap retries converge on one bootstrap Business
-    and one founding OWNER Membership without preventing explicit multi-Business ownership
-  - bring live tRPC identity.createBusiness to the same founding postcondition
-  - reject tRPC business creation before mutation if authenticated user id is absent
-  - make workspace discovery Membership-first while preserving legitimate ownerId compatibility
-  - preserve BusinessGuard compatibility behavior during migration
-  - add inventory/classification for founding OWNER Membership state
-  - backfill only deterministic missing founding Memberships
-  - report conflicting, unresolvable-owner and ambiguous rows without guessing
-  - add focused, concurrency, migration and rollback proof for the canonical acceptance matrix
+  - EffectiveAuthorityResult shape and provenance trace
+  - one canonical human module vocabulary constant consumed by guard/identity/resolver
+  - C1 writer/validator convergence including operations/analytics and connect:none default
+  - explicit-none deny semantics in resolver
+  - server-derived Membership grantor for new USER grants and grant-bound validation
+  - read-only historical-grant and stale-copy classifiers
+  - live active JobRole/OrgAssignment adapter with capped exact-key contribution
+  - canonical Membership approval-tier helper preserving current results
+  - resolver scaffolding and focused proof
+  - central shadow/compare for the six AiSettingsController operations routes
+  - architecture scanner refresh if repository rules require it
+
 prohibited_scope:
-  - no ownerId global uniqueness constraint
-  - no removal of Business.ownerId
-  - no weakening of ModuleScopeGuard into ownerId-only authorization
-  - no full AUTH-001 / role algebra / delegation implementation
-  - no invitation-claim redesign
-  - no owner-transfer redesign
-  - no weakening authorization gates to make tests pass
-  - no production data access
-  - no production mutation, deployment or provider traffic
-  - no architecture/os scheduled-cycle work
-  - no silent scope expansion
+  - no JobRole-key alias invention
+  - no union of incompatible module vocabularies
+  - no connect role-default grant
+  - no deny schema/model
+  - no nullable maxApprovalTier migration
+  - no Membership tombstone/version in AUTH-001
+  - no framework transaction spanning all guards/handlers
+  - no KEY autonomy redesign
+  - no ACTION-001 clearance/execution implementation
+  - no production mutation/backfill/deployment
+  - no architecture/os cycle work
   - no merge by Claude
+
+resolved_precedence:
+  C1_vocabulary: >
+    Canonical 14-key human module universe = the enforcer's existing 13 keys plus
+    'connect'. A KEY UNIVERSE, not an authority union. Role defaults preserve
+    ModuleScopeGuard's existing 13; connect defaults to NONE for OWNER, ADMIN and
+    STAFF and is reachable only by explicit validated grant.
+  C1_jobrole: >
+    MODULE_TOOL_FAMILIES is a separate namespace, not an alias table. A JobRole
+    permission contributes to human module authority only on an EXACT canonical key
+    match, capped by the Membership envelope. Non-matching keys are provenance only.
+  C2_deny: >
+    In an explicit permissionScopes object, a present canonical key with value 'none'
+    is an EXPLICIT DENY. An absent key stays denied_by_absence (legacy behaviour
+    preserved; missing keys are NOT role-defaulted inside an explicit map).
+    Precedence: explicit deny > assignment allow > grant allow > base role default.
+  C3_grantor: >
+    Server-derive the caller's active Membership id as grantorId; reject when none
+    resolves. USER grants are bounded by the grantor's current grantable authority.
+    Historical rows whose grantorId does not resolve are legacy_unresolvable_grantor
+    and contribute nothing. No automatic repair. KEY reader paths untouched.
+  C4_tier: >
+    Freeze the existing three-copy rule exactly; consolidate behind one helper without
+    changing any result. Assignment-derived tier is capped by the Membership tier.
+    tier_zero_ambiguity is surfaced in provenance, not fixed. No migration.
+  C5_boundary: >
+    AUTH-001 freshness boundary is the resolver read; revoked/expired grants and
+    delegations must not contribute at that read. The Membership hard-delete
+    guard-to-handler race is explicitly TRANSFERRED to KF-EXEC-ACTION-001 and is not
+    claimed proved here.
+  composition: >
+    Active positions compose by strongest level on exact key match, then cap at the
+    Membership envelope. Positions narrow or select within Membership authority; they
+    never create it. Explicit deny still wins.
+  super_admin: compatibility preserved, represented as an explicit traced source
+  shadow_compare: >
+    The six AiSettingsController operations routes, shadowed through the central
+    ModuleScopeGuard/resolver machinery. Legacy guard answer stays authoritative;
+    mismatches are recorded, never acted on.
+
 invariants:
-  - explicit Business creation may create multiple Businesses for one owner
-  - every successful Business constructor atomically establishes exactly one founding OWNER Membership
-  - bootstrap is idempotent and concurrent bootstrap for one user converges
-  - bootstrap concurrency must not be solved by ownerId @unique
-  - Membership is the ordinary authenticated-human to Business relationship
-  - legitimate non-owner Membership users are discoverable
-  - ownerId remains distinguished-owner/compatibility metadata
-  - browser workspace selection never grants authorization
-  - ModuleScopeGuard remains Membership-based
-  - deterministic migration repair only; ambiguous ownership is never guessed
-  - TENANT S0 default Membership scoping is respected; cross-workspace discovery is not
-    silently truncated by ambient tenant context
+  - active Membership is required for ordinary authenticated-human authority
+  - active position/JobRole may contribute bounded current authority
+  - explicit deny must remain explicit, not merely absence
+  - granted authority must never exceed grantor grantable authority
+  - expired or revoked sources contribute nothing
+  - approval tier is distinct from execution permission
+  - source provenance must remain explainable
+  - do not add a second role system
+  - do not flatten all scopes into a union if that can escalate authority
+  - do not copy new role state into Membership as sole truth
+  - do not trust client-supplied grantor identity
+  - do not create route-local bespoke resolvers per controller
+  - do not add silent owner/admin superuser exceptions without policy trace
+  - do not implement denial as ad-hoc string subtraction
+
 proof_obligations:
-  - explicit IdentityService create yields founding OWNER Membership atomically
-  - bootstrap retry does not duplicate
-  - concurrent bootstrap converges to one bootstrap Business and one OWNER Membership
-  - tRPC create yields equivalent founding postcondition
-  - tRPC create rejects missing authenticated user id before mutation
-  - owner with Membership discoverable
-  - non-owner legitimate member discoverable
-  - unrelated user cannot discover or access
-  - workspace cookie cannot grant access
-  - migration inventory detects missing/conflicting/unresolvable/ambiguous states
-  - deterministic missing case is backfilled
-  - ambiguous/conflicting/unresolvable cases are not auto-assigned
-  - rollback preserves ownerId and legitimate Membership history
-  - existing S0 tenant-isolation proofs remain green
+  - invited OWNER/ADMIN/STAFF receive the operations/analytics defaults the guard already defines
+  - role change does not strip operations/analytics
+  - explicit scope update accepts operations/analytics
+  - connect remains denied unless explicitly granted
+  - explicit none narrows an otherwise granted module
+  - absent key remains denied_by_absence under explicit-map compatibility
+  - role assignment/revocation affects the next decision
+  - expired delegation is rejected
+  - grant cannot exceed grantor grantable authority
+  - multiple positions compose without accidental escalation
+  - approval tier and execution permission remain distinct
+  - wrong Business relationship rejects
+  - result explains every contributing authority source
+  - revoked/expired grant and delegation rows do not contribute at the resolver read
+  - legacy/shadow compare records mismatches before cutover
+  - TENANT relationship invariants remain green
+  - full CI/build/typecheck/lint/security/migration proof passes
+
+superseded_proof_obligations:
+  - obligation: concurrent revoke vs action admission cannot consume stale authority
+    superseded_by: CG-REVIEW-AUTH-PRECEDENCE-001 C5_revoke_vs_action_boundary
+    transferred_to: KF-EXEC-ACTION-001
+
 stop_conditions:
-  - current main drifts before the implementation branch is cut
-  - safe bootstrap concurrency unachievable without an uncovered schema primitive
-  - migration ambiguity requiring production data to classify
-  - satisfying an invariant would weaken tenant/security/authority boundaries
-  - scope pressure reaching AUTH-001, invitation redesign, owner transfer or unrelated domains
-  - two materially identical failed proof attempts without new evidence
-  - branch hygiene approaching threshold without a clean compaction path
+  - a NEW precedence issue appears that the review does not resolve
+  - safe grantor-authority bounding needs a new unapproved identity primitive
+  - a selected gate cannot migrate without entering ACTION-001 semantics
+  - any fix would weaken tenant/security boundaries
+  - two materially identical failed proof attempts without new root cause
+  - branch hygiene approaches threshold without a compaction path
+
 merge_authority: false

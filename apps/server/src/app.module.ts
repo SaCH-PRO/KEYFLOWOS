@@ -5,6 +5,7 @@ import { TenantInterceptor } from './core/tenant/tenant.interceptor';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './core/prisma/prisma.module';
+import { AuthorityModule } from './core/authority/authority.module';
 import { BusinessEventModule } from './modules/business-events/business-event.module';
 import { BusinessEventInterceptor } from './modules/business-events/business-event.interceptor';
 import { EvidenceModule } from './modules/evidence/evidence.module';
@@ -130,6 +131,7 @@ import { RiscModule } from './modules/risc/risc.module';
     // Core Modules
     ScheduleModule.forRoot(),
     PrismaModule,
+    AuthorityModule,
     EventBusModule,
     AuthModule,
     TrpcModule,

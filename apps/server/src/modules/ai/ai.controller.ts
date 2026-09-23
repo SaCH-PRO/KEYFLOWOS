@@ -39,6 +39,7 @@ import { UndoService } from './undo.service';
 import { ProactiveSuggestionService } from './proactive-suggestion.service';
 import { WorkflowTemplateService } from './workflow-template.service';
 import { KeyAgentConfigService } from './key-agent-config.service';
+import { membershipApprovalTier } from '../../core/authority/approval-tier';
 
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
@@ -649,12 +650,8 @@ export class AiController {
     });
     if (!membership) throw new NotFoundException('User is not a member of this business');
 
-    const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };
-    const hasCustomScopes = membership.permissionScopes !== null && membership.permissionScopes !== undefined;
-    const memberTier =
-      membership.maxApprovalTier !== null && membership.maxApprovalTier !== undefined && (hasCustomScopes || membership.maxApprovalTier !== 0)
-        ? membership.maxApprovalTier
-        : (DEFAULT_TIERS[membership.role] ?? 0);
+    // KF-EXEC-AUTH-001: was the third of three identical copies of this rule.
+    const memberTier = membershipApprovalTier(membership);
 
     if (riskTier > memberTier) {
       throw new ForbiddenException(`Tier ${riskTier} approvals require approval tier ${riskTier} or higher (you have tier ${memberTier})`);
