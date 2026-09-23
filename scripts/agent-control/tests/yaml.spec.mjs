@@ -146,3 +146,31 @@ test('a "#" after whitespace in a plain scalar is a comment, per YAML', () => {
   assert.equal(parseYaml('a: "applies to PR #86"\n').a, 'applies to PR #86');
   assert.equal(parseYaml('a: refs/heads#86\n').a, 'refs/heads#86');
 });
+
+test('REGRESSION: a block scalar as a sequence item is read', () => {
+  // The real claude-return.yaml uses `- >` for long prose entries. The parser
+  // rejected it, which meant a control artifact this codec must read was
+  // unparseable by it. Caught in CI, not locally, because the artifact was
+  // rewritten after the last local run.
+  const doc = parseYaml(`
+known_gaps:
+  - >
+    The reviewer adapters are configuration hooks: they report WAITING
+    until credentials are supplied.
+  - >
+    A hosted runner cannot impersonate the interactive session.
+  - a plain short entry
+after: tail
+`);
+  assert.equal(doc.known_gaps.length, 3);
+  assert.equal(doc.known_gaps[0], 'The reviewer adapters are configuration hooks: they report WAITING until credentials are supplied.');
+  assert.equal(doc.known_gaps[1], 'A hosted runner cannot impersonate the interactive session.');
+  assert.equal(doc.known_gaps[2], 'a plain short entry');
+  assert.equal(doc.after, 'tail');
+});
+
+test('a literal block scalar as a sequence item keeps its newlines', () => {
+  const doc = parseYaml('steps:\n  - |\n    one\n    two\n  - three\n');
+  assert.equal(doc.steps[0], 'one\ntwo');
+  assert.equal(doc.steps[1], 'three');
+});

@@ -179,6 +179,14 @@ function parseSequence(lines, start, indent) {
       continue;
     }
 
+    // "- >" / "- |" open a block scalar as the sequence item itself.
+    if (rest === '>' || rest === '|' || rest === '>-' || rest === '|-') {
+      const [value, next] = readBlockScalar(lines, i, indent, rest[0]);
+      out.push(value);
+      i = next;
+      continue;
+    }
+
     // "- key: value" opens a mapping whose first key sits at indent + 2.
     const kv = matchKey(rest);
     if (kv) {

@@ -111,7 +111,19 @@ test('a stale lock from a dead process is reclaimed', { skip: PS ? false : 'no P
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('the cursor makes directive processing idempotent', { skip: PS ? false : 'no PowerShell available' }, () => {
+/**
+ * Reading the control issue needs an authenticated `gh`. On a CI runner there
+ * is none, so this proof is skipped rather than passed vacuously: without a
+ * readable channel "no directive was processed" is true for the wrong reason.
+ */
+function ghAuthenticated() {
+  const probe = spawnSync('gh', ['auth', 'status'], { encoding: 'utf8', shell: process.platform === 'win32' });
+  return probe.status === 0;
+}
+
+const CHANNEL_READY = PS && ghAuthenticated();
+
+test('the cursor makes directive processing idempotent', { skip: CHANNEL_READY ? false : 'needs PowerShell and an authenticated gh' }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-worker-'));
   const stateDir = path.join(root, '.agent-control', '.worker');
   fs.mkdirSync(stateDir, { recursive: true });
