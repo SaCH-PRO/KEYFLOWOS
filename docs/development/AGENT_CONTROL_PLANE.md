@@ -204,3 +204,17 @@ The repository gate enforces:
 - before a non-draft implementation PR can advance, both control artifacts' `source_main` values must equal the current PR base SHA.
 
 If any non-control file changes after a RETURN is prepared, the implementer must advance `source_head`, refresh the return evidence, rerun required proof, and return to `PENDING_CHATGPT_REVIEW`.
+
+## Layer 5 — unattended event orchestration
+
+The repository now has an event-driven automation layer defined by `docs/development/AGENT_AUTOPILOT.md` and `docs/development/AGENT_AUTOPILOT_POLICY.yaml`.
+
+It may automatically:
+- normalize actionable issue #80 / PR / CI events into durable AUTO_EVENT records;
+- reconcile admitted implementation PRs;
+- squash-merge an exact implementation head only after ChatGPT has already set `review_status: READY_TO_MERGE` and all required exact-head workflows are green;
+- emit a durable AUTO_MERGE event for post-merge verification/checkpoint.
+
+It may not create architectural admission, resolve contradictions, widen scope, weaken proof, or authorize production effects. Those remain under the ownership rules above.
+
+The machine-readable programme dependency graph is `docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml`. Packet selection must satisfy that DAG plus the wave-gate rules in the canonical intelligence board.
