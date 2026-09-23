@@ -25,7 +25,7 @@ programme:
     - KF-EXEC-AUTH-001
   active_packet: KF-META-AUTO-001
   active_phase: null
-  state: IMPLEMENTING
+  state: PROVING
   health: GREEN
   source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
   implementation_branch: impl/kf-meta-auto-001-orchestrator
@@ -105,6 +105,6 @@ processed_event_keys: []
 event_journal: []
 
 next_legal_action:
-  action: DISPATCH_BUILDER
-  reason: packet is IMPLEMENTING; builder work is the next legal step
+  action: REQUEST_REVIEW
+  reason: local proof complete; adversarial review is required before merge readiness
   derived_at: 2026-09-23T21:30:00Z
