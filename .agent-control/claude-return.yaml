@@ -1,143 +1,48 @@
-packet_id: KF-EXEC-AUTH-001
-directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
-source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-source_head: 2918c093477a6143b86ef41f182fb44f7749633c
-implementation_branch: impl/kf-exec-auth-001-effective-authority
-state: READY_TO_MERGE
+packet_id: KF-META-AUTO-001
+directive_message_id: CG-DIRECTIVE-META-AUTO-001
+source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+source_head: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+implementation_branch: impl/kf-meta-auto-001-orchestrator
+state: CHARACTERIZING
 health: GREEN
 scope_changed: false
 production_touched: false
-review_status: READY_TO_MERGE
+review_status: PENDING_CHATGPT_REVIEW
+programme_credit: ZERO
+merge_authority: false
 summary: >
-  CG-REVIEW-AUTH-PRECEDENCE-001 resolved C1-C5; AUTH-001 resumed on the same branch.
-  Both CG-REVIEW-AUTH-001 corrections are implemented and proved:
-  AUTH-P1-READ-COMPLETENESS (authority reads page to exhaustion and fail closed) and
-  AUTH-P1-GRANTOR-CURRENT-BOUND (a USER grant contributes only while its grantor still
-  holds tier-4 grantable authority). No new precedence contradiction appeared. PR #85
-  stays draft.
-characterization: COMPLETE — all 13 directive obligations reported in CC-PROGRESS-AUTH-CHAR-001
-contradiction_status: RESOLVED by CG-REVIEW-AUTH-PRECEDENCE-001; no new contradiction found
-contradictions:
-  - C1 three incompatible module vocabularies share Membership.permissionScopes;
-    also a live defect — invited members incl. ADMIN denied on 58 operations + 14
-    analytics routes; 7 'connect' routes unreachable by anyone
-  - C2 no per-principal explicit-deny source exists; the binding law has nothing to
-    be explicit in
-  - C3 AuthorityGrant.grantorId is client-supplied, wins over req.user, and is
-    typed as a Membership id while every writer supplies a User id or 'system';
-    grantor authority cannot be bounded
-  - C4 maxApprovalTier Int @default(0) NOT NULL cannot express "deliberately zero";
-    the three-copy workaround disambiguates via a different column
-  - C5 no commit boundary spans guard and handler, and Membership revocation is a
-    hard delete with no tombstone, so the revoke-vs-action proof has nothing to
-    assert against
-changed_files:
-  - .agent-control/active-packet.yaml
-  - .agent-control/claude-return.yaml
-  - apps/server/src/core/authority/module-vocabulary.ts (new — the one canonical table)
-  - apps/server/src/core/authority/approval-tier.ts (new — frozen rule, one copy)
-  - apps/server/src/core/authority/effective-authority.types.ts (new)
-  - apps/server/src/core/authority/effective-authority.resolver.ts (new)
-  - apps/server/src/core/authority/module-vocabulary.spec.ts (new — C1 gate)
-  - apps/server/src/core/authority/effective-authority.resolver.spec.ts (new)
-  - apps/server/src/modules/identity/team-scope-convergence.spec.ts (new — round trip)
-  - apps/server/src/core/auth/module-scope.guard.ts (consumes the canonical table)
-  - apps/server/src/modules/identity/identity.service.ts (consumes it; tier helper)
-  - apps/server/src/modules/ai/ai-oversight.service.ts (tier helper)
-  - apps/server/src/modules/ai/ai.controller.ts (tier helper)
-  - apps/server/src/core/authority/authority.module.ts (new, @Global)
-  - apps/server/src/core/authority/authority-inventory.service.ts (new, plain class)
-  - apps/server/src/core/authority/authority-shadow.spec.ts (new)
-  - apps/server/src/modules/ai/authority-grant-grantor.spec.ts (new)
-  - apps/server/test/authority-inventory.integration.test.ts (new)
-  - scripts/authority-inventory.ts (new, report-only operator entrypoint)
-  - apps/server/src/core/auth/module-scope.guard.ts (central shadow/compare)
-  - apps/server/src/modules/ai/ai-settings.service.ts (C3 grantor + grant bound)
-  - apps/server/src/modules/ai/ai-settings.controller.ts (C3; shadow decorators)
-  - apps/server/src/modules/ai/dto/create-authority-grant.dto.ts (grantorId removed)
-  - apps/server/src/app.module.ts (AuthorityModule)
-  - architecture/*.yaml (deterministic scanner refresh)
-schema_migrations: []  # none — no schema change is in scope for AUTH-001
+  Characterization in progress. No semantic change has been made. source_head is
+  updated to the final semantic implementation commit before RETURN; any commit after
+  it touches .agent-control/** only.
+characterization: pending — inventory, schema and contradictions follow in
+  CC-PROGRESS-META-AUTO-CHAR-001
+scope_ledger:
+  declared: 15 deliverables (AUTO-DAG .. AUTO-DOCS)
+  resolved: []
+  remaining: all
+  deferred: []
+  dropped: []
+  superseded: []
+changed_files: []
+schema_migrations: []
 tests:
-  commands:
-    - "npx vitest run (apps/server, CI default config)"
-    - "npx vitest run --root packages/api"
-    - "npx tsc --noEmit -p apps/server/tsconfig.json"
-    - "pnpm lint"
-    - "npx prisma migrate deploy (local Postgres 16 + pgvector, proof only)"
-  discovered: 443
-  passed: 4161
+  commands: []
+  discovered: 0
+  passed: 0
   failed: 0
-  skipped: 135
-  new_tests: 79
-  packages_api: 5 passed
-  lint: 6/6 tasks, 0 errors
-  known_environment_failure: >
-    web:typecheck fails with TS2688 "Cannot find type definition file for 'next'".
-    Reproduced identically with these changes stashed, so it is pre-existing in this
-    container and not caused by AUTH-001. No web file is touched by this packet.
-corrections_applied:
-  AUTH-P1-READ-COMPLETENESS:
-    change: >
-      Every authority-source read pages to exhaustion on a stable id cursor and
-      terminates on an EMPTY page, including the grantor-membership lookup. The 200-row
-      ceiling is gone; the remaining runaway guard FAILS CLOSED, returning a
-      deny-everything result rather than a permissive one.
-    page_size: bound by AuthorityModule; semantic result asserted identical at 1/3/7/200/10000
-  AUTH-P1-GRANTOR-CURRENT-BOUND:
-    change: >
-      The grantor's tier is recomputed at every resolve through the frozen Membership
-      rule. Only a grantor still at the tier-4 bound lets a USER grant contribute. Not
-      recursive: grantor tier derives from Membership alone, so no grant can bootstrap
-      the authority that validates it.
-    classes: active_grantor | legacy_unresolvable_grantor | grantor_no_longer_grantable
-    scope: USER grants and tier4_* only; KEY readers untouched; no auto-repair
-
-gates_that_failed_first_and_were_fixed_not_amended:
-  - optional-injection gate flagged AUTHORITY_PAGE_SIZE as @Optional()-injected but
-    registered in no module, so Nest bound undefined and the injection read as wired
-    while never being. AuthorityModule now binds it to its default.
-  - unreachable-provider.spec.ts flagged AuthorityInventoryService as constructed on
-    every boot and reachable by nothing. Fixed by making it a plain class with a
-    structural client and a script entrypoint — the FoundingMembershipService
-    arrangement — rather than adding it to UNREACHABLE_ACKNOWLEDGED.
-  - fixture-cleanup-integrity.spec.ts flagged deleteMany on Business and User in the
-    new integration teardown. Those are soft-deleted models, so the extension rewrites
-    it into an UPDATE and the rows survive. Fixed with raw SQL, as the other suites do.
-negative_controls:
-  - restored the single-page ceiling -> all 5 AUTH-P1-READ-COMPLETENESS cases fail,
-    including the narrowing position at row 255 that the ceiling silently dropped
-  - restored existence-only grantor validation -> the demotion case and the
-    no-bootstrap case fail
-  - removed 'connect' from CANONICAL_MODULES -> route-coverage gate and the connect
-    default test both fail, proving the C1 gate detects exactly this defect class
-  - reverted IdentityService to the pre-AUTH-001 11-key table -> three writer-to-
-    enforcer round-trip tests and the single-table assertion fail, reproducing the
-    live outage rather than merely describing it
+  skipped: 0
+negative_controls: []
+real_db_evidence: none yet
+concurrency_retry_evidence: none yet
 provider_or_external_runs: NONE
-cleanup: none required
-new_consumers_or_writers:
-  - 9 Membership authority writers enumerated (2 unvalidated, in structure.service)
-  - 2 AuthorityGrant readers, both hardcoding granteeType KEY / granteeId key_ai
-  - 1 DelegationRule reader (approval routing only, not permission)
-  - 4 independent untraced SUPER_ADMIN bypasses
+new_consumers_or_writers: []
+architecture_changes: none yet
 deviations_from_packet: []
-rollback_floor: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-open_questions: []
-disclosures:
-  - >
-    I reported the AiSettingsController operations family as 6 routes in
-    CC-PROGRESS-AUTH-CHAR-001 and the review adopted that number into its label. The
-    controller has 14. The selected family is unchanged — still exactly that one
-    controller — and the count was my error. All 14 are shadowed rather than an
-    arbitrary 6, and a test pins the family to the single controller.
-  - >
-    The backfill from KF-EXEC-TENANT-001 has still never been run anywhere, so the
-    BusinessGuard ownerId compatibility arm still covers owners with no Membership.
-    Out of scope here; unchanged by this packet.
-  - >
-    scripts/authority-inventory.ts has not been run against any real data. It is
-    report-only and has no --apply, but it has only been exercised by its tests.
+known_gaps: []
+rollback_floor: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+open_questions:
+  - canonical dynamic-state store — named by the directive, not decided by it
+unresolved_contradictions: []
 evidence_refs:
-  - "issue #80 CC-PROGRESS-AUTH-CHAR-001 (comment 5760691716)"
-  - "issue #80 CC-CONTRADICTION-AUTH-PRECEDENCE-001 (comment 5760708790)"
+  - "issue #80 CG-DIRECTIVE-META-AUTO-001 (comment 5799972338)"
+  - "issue #80 CC-ACK-META-AUTO-001 (comment 5800940321)"

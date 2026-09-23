@@ -1,127 +1,116 @@
-packet_id: KF-EXEC-AUTH-001
-directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
-review_message_id: CG-REVIEW-AUTH-PRECEDENCE-001
-source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-implementation_branch: impl/kf-exec-auth-001-effective-authority
-state: IMPLEMENTING
+packet_id: KF-META-AUTO-001
+directive_message_id: CG-DIRECTIVE-META-AUTO-001
+ack_message_id: CC-ACK-META-AUTO-001
+source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+implementation_branch: impl/kf-meta-auto-001-orchestrator
+state: CHARACTERIZING
 health: GREEN
-scope_changed: true
-scope_change_authority: CG-REVIEW-AUTH-PRECEDENCE-001
+scope_changed: false
 production_touched: false
+programme_credit: ZERO
+merge_authority: false
 
-# Released by CG-REVIEW-AUTH-PRECEDENCE-001. Supersedes the pre-review allowed_scope.
-allowed_scope:
-  - EffectiveAuthorityResult shape and provenance trace
-  - one canonical human module vocabulary constant consumed by guard/identity/resolver
-  - C1 writer/validator convergence including operations/analytics and connect:none default
-  - explicit-none deny semantics in resolver
-  - server-derived Membership grantor for new USER grants and grant-bound validation
-  - read-only historical-grant and stale-copy classifiers
-  - live active JobRole/OrgAssignment adapter with capped exact-key contribution
-  - canonical Membership approval-tier helper preserving current results
-  - resolver scaffolding and focused proof
-  - central shadow/compare for the six AiSettingsController operations routes
-  - architecture scanner refresh if repository rules require it
+objective: >
+  Turn the existing KEYFLOWOS agent-control protocol into executable unattended
+  orchestration so the human is no longer the message relay between ChatGPT, Claude,
+  reviewers, GitHub and CI. The 35-packet programme and every safety boundary are
+  preserved; this meta-package earns zero packet credit.
 
-prohibited_scope:
-  - no JobRole-key alias invention
-  - no union of incompatible module vocabularies
-  - no connect role-default grant
-  - no deny schema/model
-  - no nullable maxApprovalTier migration
-  - no Membership tombstone/version in AUTH-001
-  - no framework transaction spanning all guards/handlers
-  - no KEY autonomy redesign
-  - no ACTION-001 clearance/execution implementation
-  - no production mutation/backfill/deployment
-  - no architecture/os cycle work
-  - no merge by Claude
+design_principle: >
+  Maximum autonomous throughput SUBJECT TO invariant preservation. The orchestrator
+  must know when it is allowed to move, and must fail closed on ambiguity.
 
-resolved_precedence:
-  C1_vocabulary: >
-    Canonical 14-key human module universe = the enforcer's existing 13 keys plus
-    'connect'. A KEY UNIVERSE, not an authority union. Role defaults preserve
-    ModuleScopeGuard's existing 13; connect defaults to NONE for OWNER, ADMIN and
-    STAFF and is reachable only by explicit validated grant.
-  C1_jobrole: >
-    MODULE_TOOL_FAMILIES is a separate namespace, not an alias table. A JobRole
-    permission contributes to human module authority only on an EXACT canonical key
-    match, capped by the Membership envelope. Non-matching keys are provenance only.
-  C2_deny: >
-    In an explicit permissionScopes object, a present canonical key with value 'none'
-    is an EXPLICIT DENY. An absent key stays denied_by_absence (legacy behaviour
-    preserved; missing keys are NOT role-defaulted inside an explicit map).
-    Precedence: explicit deny > assignment allow > grant allow > base role default.
-  C3_grantor: >
-    Server-derive the caller's active Membership id as grantorId; reject when none
-    resolves. USER grants are bounded by the grantor's current grantable authority.
-    Historical rows whose grantorId does not resolve are legacy_unresolvable_grantor
-    and contribute nothing. No automatic repair. KEY reader paths untouched.
-  C4_tier: >
-    Freeze the existing three-copy rule exactly; consolidate behind one helper without
-    changing any result. Assignment-derived tier is capped by the Membership tier.
-    tier_zero_ambiguity is surfaced in provenance, not fixed. No migration.
-  C5_boundary: >
-    AUTH-001 freshness boundary is the resolver read; revoked/expired grants and
-    delegations must not contribute at that read. The Membership hard-delete
-    guard-to-handler race is explicitly TRANSFERRED to KF-EXEC-ACTION-001 and is not
-    claimed proved here.
-  composition: >
-    Active positions compose by strongest level on exact key match, then cap at the
-    Membership envelope. Positions narrow or select within Membership authority; they
-    never create it. Explicit deny still wins.
-  super_admin: compatibility preserved, represented as an explicit traced source
-  shadow_compare: >
-    The six AiSettingsController operations routes, shadowed through the central
-    ModuleScopeGuard/resolver machinery. Legacy guard answer stays authoritative;
-    mismatches are recorded, never acted on.
+deliverables:
+  - id: AUTO-DAG
+    status: DECLARED
+  - id: AUTO-STATE-MACHINE
+    status: DECLARED
+  - id: AUTO-EVENTS
+    status: DECLARED
+  - id: AUTO-ORCHESTRATOR
+    status: DECLARED
+  - id: AUTO-ADMISSION
+    status: DECLARED
+  - id: AUTO-MOMENTUM
+    status: DECLARED
+  - id: AUTO-PROOF-MUTATION
+    status: DECLARED
+  - id: AUTO-STATUS
+    status: DECLARED
+  - id: AUTO-AGENT-ADAPTERS
+    status: DECLARED
+  - id: AUTO-GITHUB-WORKFLOW
+    status: DECLARED
+  - id: AUTO-CORRECTION-LOOP
+    status: DECLARED
+  - id: AUTO-MERGE-CHECKPOINT
+    status: DECLARED
+  - id: AUTO-RECOVERY
+    status: DECLARED
+  - id: AUTO-TESTS
+    status: DECLARED
+  - id: AUTO-DOCS
+    status: DECLARED
 
-invariants:
-  - active Membership is required for ordinary authenticated-human authority
-  - active position/JobRole may contribute bounded current authority
-  - explicit deny must remain explicit, not merely absence
-  - granted authority must never exceed grantor grantable authority
-  - expired or revoked sources contribute nothing
-  - approval tier is distinct from execution permission
-  - source provenance must remain explainable
-  - do not add a second role system
-  - do not flatten all scopes into a union if that can escalate authority
-  - do not copy new role state into Membership as sole truth
-  - do not trust client-supplied grantor identity
-  - do not create route-local bespoke resolvers per controller
-  - do not add silent owner/admin superuser exceptions without policy trace
-  - do not implement denial as ad-hoc string subtraction
+mandatory_characterization_before_edits:
+  - docs/development/AGENT_CONTROL_PLANE.md
+  - docs/development/EXECUTION_CONTROL_STANDARD.md
+  - CLAUDE.md and root AGENTS.md
+  - .agent-control schemas/examples and agent-control-gate.yml
+  - branch-divergence and ordinary CI workflows
+  - issue #80 message protocol and current control artifact shapes
+  - architecture/os/OS.md — HALTED constraints ONLY, no cycle resumed
+  - GitHub-native triggers for PR, workflow, issue-comment and scheduled events
+  - deterministic in-repo vs external model/credential boundary
+  - Claude / ChatGPT-OpenAI / Kimi-Codex adapter invocation without a canonical vendor
+  - surface contradictions before semantic implementation
 
-proof_obligations:
-  - invited OWNER/ADMIN/STAFF receive the operations/analytics defaults the guard already defines
-  - role change does not strip operations/analytics
-  - explicit scope update accepts operations/analytics
-  - connect remains denied unless explicitly granted
-  - explicit none narrows an otherwise granted module
-  - absent key remains denied_by_absence under explicit-map compatibility
-  - role assignment/revocation affects the next decision
-  - expired delegation is rejected
-  - grant cannot exceed grantor grantable authority
-  - multiple positions compose without accidental escalation
-  - approval tier and execution permission remain distinct
-  - wrong Business relationship rejects
-  - result explains every contributing authority source
-  - revoked/expired grant and delegation rows do not contribute at the resolver read
-  - legacy/shadow compare records mismatches before cutover
-  - TENANT relationship invariants remain green
-  - full CI/build/typecheck/lint/security/migration proof passes
+architecture_constraints:
+  - repository remains the durable source of control evidence
+  - one canonical packet contract across all agents
+  - no agent self-approval
+  - deterministic code decides mechanical transitions; models decide bounded semantic roles only
+  - architecture contradictions stop advancement
+  - external research/innovation suggestions become proposals, never silent code changes
+  - no competing dynamic programme state stores
+  - event handling must be idempotent and concurrency-safe
+  - exact PR/head/main identities carried through every admission action
+  - all automatic actions auditable back to event + rule + evidence
+  - automation failure must not weaken existing manual gates
 
-superseded_proof_obligations:
-  - obligation: concurrent revoke vs action admission cannot consume stale authority
-    superseded_by: CG-REVIEW-AUTH-PRECEDENCE-001 C5_revoke_vs_action_boundary
-    transferred_to: KF-EXEC-ACTION-001
+safety:
+  production_release_authorized: false
+  production_mutations_authorized: false
+  real_provider_traffic_authorized: false
+  forensic_rebaseline_authorized: false
+  programme_map_refresh_authorized: false
+  architecture_os_cycles_authorized: false
+  secrets_committed: false
+  destructive_github_admin_changes: false
+  auto_deploy: false
+  self_merge: false
+  forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+
+required_progress_before_implementation:
+  - exact file/workflow inventory
+  - proposed state/event schema
+  - canonical dynamic-state decision
+  - agent adapter plan and credential requirements
+  - concurrency/idempotency design
+  - any contradiction or platform limitation
 
 stop_conditions:
-  - a NEW precedence issue appears that the review does not resolve
-  - safe grantor-authority bounding needs a new unapproved identity primitive
-  - a selected gate cannot migrate without entering ACTION-001 semantics
-  - any fix would weaken tenant/security boundaries
-  - two materially identical failed proof attempts without new root cause
-  - branch hygiene approaches threshold without a compaction path
+  - requires making issue #80 non-auditable or replacing repository evidence with ephemeral state
+  - requires an agent to approve its own semantic work
+  - requires production credentials/data
+  - requires weakening branch/CI/agent-control gates
+  - GitHub event model cannot support a required invariant without a new approved service
+  - external agent invocation requires an unapproved credential or paid service
+  - any ambiguity over who owns architecture/admission decisions
 
-merge_authority: false
+held_packets:
+  - packet_id: KF-EXEC-ACTION-001
+    hold_message_id: CG-HOLD-ACTION-AUTO-001
+    branch_cut: false
+    local_work: none
+    resume_condition: explicit CG-RESUME-ACTION-* after KF-META-AUTO-001 is merged and verified
