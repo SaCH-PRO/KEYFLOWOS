@@ -1,6 +1,13 @@
 name: KEYFLOWOS Agent Autopilot
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/agent-control-autopilot.yml'
+      - 'scripts/agent-control/**'
+      - 'docs/development/AGENT_AUTOPILOT*'
+      - 'docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml'
   issue_comment:
     types: [created]
   pull_request_target:
