@@ -1,0 +1,56 @@
+version: 1
+status: ACTIVE
+purpose: unattended packet progression without silent architectural decisions
+
+control_issue: 80
+canonical_intelligence_branch: docs/keyflow-intelligence-foundation
+forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+
+required_pr_workflows:
+  - CI/CD Pipeline
+  - Agent Control Gate
+  - Branch divergence
+  - DAST (HawkScan)
+
+automatic_actions:
+  normalize_control_events: true
+  notify_command_center_on_return: true
+  notify_command_center_on_contradiction: true
+  notify_command_center_on_momentum_alarm: true
+  merge_exact_admitted_head: true
+  post_merge_event: true
+
+automatic_merge_contract:
+  branch_prefix: impl/
+  require_non_draft: true
+  require_review_status: READY_TO_MERGE
+  require_source_main_matches_pr_base: true
+  require_source_head_ancestor_of_head: true
+  require_control_only_tail: true
+  require_all_workflows_green: true
+  require_production_touched_false: true
+  merge_method: squash
+
+never_automatic:
+  - architecture_precedence_decision
+  - scope_widening
+  - production_deployment
+  - production_data_mutation
+  - real_provider_traffic
+  - forensic_rebaseline
+  - programme_map_refresh
+  - architecture_os_cycle_resume
+  - gate_weakening
+  - proof_obligation_reduction
+  - contradiction_resolution_without_recorded_authority
+
+escalate_on:
+  - CONTRADICTION
+  - production_touched_true
+  - unresolved_scope_change
+  - missing_canonical_packet
+  - source_main_drift
+  - two_materially_identical_failed_attempts
+  - two_ci_failures_without_new_root_cause
+  - branch_hygiene_threshold_pressure
+  - proof_unknown_skipped_or_unexplained
