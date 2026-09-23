@@ -1,0 +1,84 @@
+version: 1
+programme: KEYFLOWOS
+packets_total: 35
+waves:
+  "0":
+    - id: KF-EXEC-K12-001
+      depends_on: []
+    - id: KF-EXEC-EXTFX-001
+      depends_on: [KF-EXEC-K12-001]
+  A:
+    - id: KF-EXEC-TENANT-001
+      depends_on: [KF-EXEC-K12-001]
+    - id: KF-EXEC-AUTH-001
+      depends_on: [KF-EXEC-TENANT-001]
+    - id: KF-EXEC-ACTION-001
+      depends_on: [KF-EXEC-AUTH-001]
+  B:
+    - id: KF-EXEC-TIME-001
+      depends_on: [KF-EXEC-K12-001, KF-EXEC-ACTION-001]
+    - id: KF-EXEC-INGRESS-001
+      depends_on: [KF-EXEC-K12-001, KF-EXEC-TIME-001]
+    - id: KF-EXEC-CONNECTOR-001
+      depends_on: [KF-EXEC-K12-001, KF-EXEC-INGRESS-001]
+    - id: KF-EXEC-TEMPORAL-002
+      depends_on: [KF-EXEC-TIME-001]
+    - id: KF-EXEC-RECOVERY-001
+      depends_on: [KF-EXEC-TIME-001, KF-EXEC-INGRESS-001, KF-EXEC-CONNECTOR-001]
+    - id: KF-EXEC-CONVO-001
+      depends_on: [KF-EXEC-TIME-001, KF-EXEC-ACTION-001]
+    - id: KF-EXEC-PLAYBOOK-001
+      depends_on: [KF-EXEC-ACTION-001, KF-EXEC-TIME-001, KF-EXEC-RECOVERY-001]
+  C:
+    - id: KF-EXEC-COMMERCIAL-001
+      depends_on: [KF-EXEC-ACTION-001, KF-EXEC-TIME-001]
+    - id: KF-EXEC-BOOKING-001
+      depends_on: [KF-EXEC-COMMERCIAL-001]
+    - id: KF-EXEC-FINANCE-001
+      depends_on: [KF-EXEC-COMMERCIAL-001, KF-EXEC-K12-001]
+    - id: KF-EXEC-DELIVERYBILL-001
+      depends_on: [KF-EXEC-FINANCE-001, KF-EXEC-ACTION-001]
+    - id: KF-EXEC-COMMERCE-001
+      depends_on: [KF-EXEC-FINANCE-001, KF-EXEC-TIME-001]
+    - id: KF-EXEC-ENTITLE-001
+      depends_on: [KF-EXEC-FINANCE-001, KF-EXEC-AUTH-001]
+    - id: KF-EXEC-GROWTH-001
+      depends_on: [KF-EXEC-ACTION-001, KF-EXEC-COMMERCIAL-001, KF-EXEC-FINANCE-001, KF-EXEC-PLAYBOOK-001, KF-EXEC-PUBLIC-001, KF-EXEC-SPACE-001, KF-EXEC-CONNECTOR-001]
+  D:
+    - id: KF-EXEC-KNOWLEDGE-001
+      depends_on: [KF-EXEC-K12-001]
+    - id: KF-EXEC-KNOWLEDGE-002
+      depends_on: [KF-EXEC-KNOWLEDGE-001]
+    - id: KF-EXEC-COMMAND-001
+      depends_on: [KF-EXEC-KNOWLEDGE-001, KF-EXEC-RECOVERY-001]
+    - id: KF-EXEC-PUBLIC-001
+      depends_on: [KF-EXEC-BOOKING-001, KF-EXEC-COMMERCE-001]
+    - id: KF-EXEC-SPACE-001
+      depends_on: [KF-EXEC-PUBLIC-001, KF-EXEC-COMMERCE-001, KF-EXEC-FINANCE-001, KF-EXEC-TIME-001, KF-EXEC-UX-001]
+    - id: KF-EXEC-VOICE-001
+      depends_on: [KF-EXEC-CONVO-001, KF-EXEC-ENTITLE-001, KF-EXEC-ACTION-001]
+    - id: KF-EXEC-PRIVACY-001
+      depends_on: [KF-EXEC-KNOWLEDGE-002]
+    - id: KF-EXEC-NETWORK-001
+      depends_on: [KF-EXEC-KNOWLEDGE-001, KF-EXEC-PUBLIC-001, KF-EXEC-COMMERCIAL-001, KF-EXEC-FINANCE-001, KF-EXEC-CONNECTOR-001, KF-EXEC-RECOVERY-001]
+    - id: KF-EXEC-UX-001
+      depends_on: [KF-EXEC-COMMAND-001, KF-EXEC-PUBLIC-001, KF-EXEC-VOICE-001]
+    - id: KF-EXEC-EXPERIENCE-001
+      depends_on: [KF-EXEC-COMMAND-001, KF-EXEC-UX-001, KF-EXEC-PUBLIC-001, KF-EXEC-SPACE-001, KF-EXEC-PLAYBOOK-001]
+  E:
+    - id: KF-EXEC-WITHDRAW-001
+      depends_on: [ALL_MIGRATED_DOMAIN_PACKETS]
+    - id: KF-EXEC-WITHDRAW-002
+      depends_on: [KF-EXEC-WITHDRAW-001]
+    - id: KF-EXEC-MIGRATE-001
+      depends_on: [PRIOR_PACKET_RESULTS]
+    - id: KF-EXEC-INTEGRATED-001
+      depends_on: [KF-EXEC-MIGRATE-001]
+    - id: KF-EXEC-OPS-001
+      depends_on: [KF-EXEC-INTEGRATED-001]
+    - id: KF-EXEC-RELEASE-001
+      depends_on: [KF-EXEC-OPS-001]
+selection_policy:
+  wave_order: ["0", A, B, C, D, E]
+  do_not_leapfrog_wave_gate: true
+  characterize_ahead_only_when_non_mutating: true
