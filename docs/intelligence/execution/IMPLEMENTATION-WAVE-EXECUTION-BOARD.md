@@ -50,16 +50,19 @@ TENANT-001 -> AUTH-001 -> ACTION-001
    - production touched: no
 
 4. KF-EXEC-AUTH-001 — Effective Authority Resolver Foundation
-   - status: CHARACTERIZING
-   - health: GREEN
-   - dependency: TENANT-001 SATISFIED
-   - source main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-   - current work: authority-source inventory, precedence contradictions, effective-authority resolver seam selection
+   - status: CHECKPOINTED
+   - admitted main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+   - PR: 85
+   - final CI: 35763481266
+   - production touched: no
+   - transferred obligation: Membership revoke-vs-action admission boundary -> ACTION-001
 
 5. KF-EXEC-ACTION-001 — Capability -> Control -> Clearance Boundary
-   - status: WAITING_ON_DEPENDENCY
-   - dependency: AUTH-001
-   - note: EXTFX remains the already-admitted external-effect falsification slice
+   - status: CHARACTERIZING
+   - health: GREEN
+   - dependency: AUTH-001 SATISFIED
+   - source main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+   - current work: resolve canonical packet; characterize capability/control/clearance seams; define selected-family admission boundary
 
 Wave gate:
 - TENANT admitted + checkpointed
@@ -219,11 +222,11 @@ Wave E exit proof:
 ## Current programme scoreboard
 
 Total packets: 35
-Checkpointed: 3
+Checkpointed: 4
 Active: 1
-Waiting/unstarted: 31
+Waiting/unstarted: 30
 
-Active packet: KF-EXEC-AUTH-001
+Active packet: KF-EXEC-ACTION-001
 Wave: A
 State: CHARACTERIZING
 Health: GREEN
