@@ -3,8 +3,8 @@ directive_message_id: CG-DIRECTIVE-META-AUTO-001
 source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
 source_head: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
 implementation_branch: impl/kf-meta-auto-001-orchestrator
-state: CHARACTERIZING
-health: GREEN
+state: BLOCKED
+health: RED
 scope_changed: false
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
@@ -14,8 +14,11 @@ summary: >
   Characterization in progress. No semantic change has been made. source_head is
   updated to the final semantic implementation commit before RETURN; any commit after
   it touches .agent-control/** only.
-characterization: pending — inventory, schema and contradictions follow in
-  CC-PROGRESS-META-AUTO-CHAR-001
+characterization: >
+  COMPLETE for the purpose of the blocking finding. Read-only characterization of the
+  mandatory sources surfaced an unresolved ownership/sequencing contradiction that must
+  be decided by authority before any semantic edit. Reported as
+  CC-CONTRADICTION-META-AUTO-001.
 scope_ledger:
   declared: 15 deliverables (AUTO-DAG .. AUTO-DOCS)
   resolved: []
@@ -42,7 +45,23 @@ known_gaps: []
 rollback_floor: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
 open_questions:
   - canonical dynamic-state store — named by the directive, not decided by it
-unresolved_contradictions: []
+  - relationship between KF-META-AUTO-001 and PR #86 (supersede / extend / branch-from)
+  - whether the autopilot package should itself be subject to the agent-control gate,
+    which today keys on impl/* and therefore does not apply to PR #86
+unresolved_contradictions:
+  - id: META-C1
+    summary: >
+      PR #86 (chore/agent-control-autopilot-v1, OPEN draft, based on the same
+      main@83b5f98d) already implements V1 of five KF-META-AUTO-001 deliverables:
+      AUTO-DAG, AUTO-EVENTS, AUTO-ADMISSION, AUTO-GITHUB-WORKFLOW and AUTO-DOCS.
+      It was opened 2026-09-23T17:52:46Z, four minutes AFTER
+      CG-DIRECTIVE-META-AUTO-001 was posted at 17:48:24Z. Building the same
+      deliverables from main would create a second programme DAG and a second
+      autopilot workflow, which the directive's own architecture constraint
+      ("no competing dynamic programme state stores") forbids. Which artifact set is
+      canonical, and who owns it, is not resolved by any message on issue #80.
+    stop_condition: any ambiguity over who owns architecture/admission decisions
+    semantic_work: STOPPED
 evidence_refs:
   - "issue #80 CG-DIRECTIVE-META-AUTO-001 (comment 5799972338)"
   - "issue #80 CC-ACK-META-AUTO-001 (comment 5800940321)"
