@@ -1,0 +1,154 @@
+# Machine-readable safety policy for the KEYFLOWOS agent autopilot.
+# Read by operators and by review; the deterministic guarantees are enforced in
+# scripts/agent-control/lib/ and proved in scripts/agent-control/tests/.
+version: 2
+status: ACTIVE
+purpose: unattended packet progression without silent architectural decisions
+
+control_issue: 80
+canonical_live_state: .agent-control/programme-state.yaml
+canonical_intelligence_branch: docs/keyflow-intelligence-foundation
+programme_dag: docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml
+forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+
+state_authority:
+  live_control_state: .agent-control/programme-state.yaml
+  event_and_audit_log: github_issue_80
+  architecture_and_checkpoints: docs/keyflow-intelligence-foundation
+  packet_admission_artifacts:
+    - .agent-control/active-packet.yaml
+    - .agent-control/claude-return.yaml
+  rules:
+    - live state is advanced through the state machine, never by editing a projection
+    - issue 80 is append-only; it is not a second mutable state database
+    - a stale projection must never advance work
+    - projection drift must be detected and reported, not silently followed
+
+required_pr_workflows:
+  - CI/CD Pipeline
+  - Agent Control Gate
+  - Branch divergence
+  - DAST (HawkScan)
+
+concurrency:
+  mutual_exclusion_key: pr_number_or_programme_constant
+  run_id_as_identity_forbidden: true
+  reason: >
+    a run id is unique per run, so a group keyed on it collides with nothing and
+    allows two orchestrators to advance one packet simultaneously
+
+idempotency:
+  event_identity_source: underlying_event
+  run_id_as_event_identity_forbidden: true
+  keys:
+    issue_comment: "issue_comment:<comment_id>:<action>"
+    workflow_run: "workflow_run:<run_id>:<run_attempt>"
+    pr_merged: "pr_merged:<number>:<merge_commit_sha>"
+    schedule: "schedule:<utc_hour_bucket>"
+    workflow_dispatch: "manual:<run_id>"
+  journal: .agent-control/programme-state.yaml#event_journal
+  guarantees:
+    - a replayed event produces no second effect
+    - no duplicate directive, merge, checkpoint or state transition
+
+automatic_actions:
+  normalize_control_events: true
+  derive_next_legal_action: true
+  notify_command_center_on_return: true
+  notify_command_center_on_contradiction: true
+  notify_command_center_on_momentum_alarm: true
+  merge_exact_admitted_head: true
+  post_merge_event: true
+  wake_local_builder_for_unprocessed_directive: true
+
+automatic_merge_contract:
+  branch_prefix: impl/
+  require_non_draft: true
+  require_review_status: [READY_TO_MERGE, ACCEPT_FOR_ADMISSION]
+  require_source_main_matches_pr_base: true
+  require_source_head_ancestor_of_head: true
+  require_control_only_tail: true
+  require_all_workflows_green_at_exact_head: true
+  require_production_touched_false: true
+  require_no_unresolved_contradiction: true
+  require_no_unexplained_failed_or_skipped_proof: true
+  merge_method: squash
+  merge_pinned_to_head_sha: true
+
+agent_roles:
+  builder: may implement within released scope
+  adversarial_reviewer: must not share an adapter id with the builder
+  architecture_authority: releases packets, grants admission, resolves contradictions
+  missing_credential_behavior: WAITING_EXTERNAL_AGENT
+  false_success_forbidden: true
+  self_approval_forbidden: true
+
+correction_loop:
+  max_identical_attempts: 2
+  on_exhaustion: BLOCKED + MOMENTUM
+  auto_correctable:
+    - TYPECHECK_FAILURE
+    - LINT_FAILURE
+    - UNIT_TEST_FAILURE
+    - BUILD_FAILURE
+    - CONTROL_ARTIFACT_INVALID
+    - SOURCE_MAIN_STALE
+    - MISSING_NEGATIVE_CONTROL
+  unknown_class_behavior: escalate (fail closed)
+
+momentum_thresholds:
+  operations_without_transition: 6
+  identical_failures: 2
+  ci_failures_without_new_root_cause: 2
+  branch_commit_warn: 40
+
+never_automatic:
+  - architecture_precedence_decision
+  - scope_widening
+  - production_deployment
+  - production_data_mutation
+  - real_provider_traffic
+  - forensic_rebaseline
+  - programme_map_refresh
+  - architecture_os_cycle_resume
+  - gate_weakening
+  - proof_obligation_reduction
+  - contradiction_resolution_without_recorded_authority
+  - schema_primitive_choice
+  - migration_strategy
+  - agent_self_approval
+
+escalate_on:
+  - CONTRADICTION
+  - production_touched_true
+  - unresolved_scope_change
+  - missing_canonical_packet
+  - source_main_drift
+  - two_materially_identical_failed_attempts
+  - two_ci_failures_without_new_root_cause
+  - branch_hygiene_threshold_pressure
+  - proof_unknown_skipped_or_unexplained
+  - projection_drift
+  - missing_or_expired_agent_credential
+
+worker:
+  script: scripts/agent-control/claude-worker.ps1
+  install: scripts/agent-control/install-claude-worker.ps1
+  uninstall: scripts/agent-control/uninstall-claude-worker.ps1
+  credentials_committed: false
+  reuses_existing_sessions: true
+  duplicate_instance_protection: pid_lock
+  durable_cursor: .agent-control/.worker/cursor.json
+  cursor_committed: false
+  installation_explicit_and_reversible: true
+
+disable_autonomous_advancement:
+  keep_observation: true
+  methods:
+    - uninstall the worker scheduled task (autonomous waking stops)
+    - set KEYFLOW_AGENT_CLAUDE_DISABLED=1 (builder reports DISABLED)
+    - set automatic_merge_contract.require_review_status to an unreachable value
+    - disable the agent-control-autopilot workflow in the Actions tab
+  note: >
+    disabling automation never weakens a gate; the manual admission contract is
+    unchanged and remains fully enforced

@@ -1,0 +1,110 @@
+# CANONICAL LIVE PROGRAMME CONTROL STATE
+#
+# This file is the single machine-readable authority for LIVE control state.
+# See docs/development/AGENT_CONTROL_PLANE.md "Canonical state authority".
+#
+# Do not hand-edit while the orchestrator is running. It is advanced from valid
+# events through the state machine (scripts/agent-control/lib/state-machine.mjs)
+# so that every change is traceable to an event, a rule and its evidence.
+#
+# Issue #80 is the append-only event log, not a second copy of this state.
+# The intelligence board is a durable projection, not live state.
+version: 1
+schema: keyflowos.programme-state/v1
+authority: canonical-live-programme-state
+updated_at: 2026-09-23T21:30:00Z
+
+programme:
+  packets_total: 35
+  # Checkpointed per the canonical intelligence board
+  # (docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md).
+  checkpointed:
+    - KF-EXEC-K12-001
+    - KF-EXEC-EXTFX-001
+    - KF-EXEC-TENANT-001
+    - KF-EXEC-AUTH-001
+  active_packet: KF-META-AUTO-001
+  active_phase: null
+  state: IMPLEMENTING
+  health: GREEN
+  source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+  implementation_branch: impl/kf-meta-auto-001-orchestrator
+  pr_number: null
+  merge_authority: false
+  production_touched: false
+
+# KF-META-AUTO-001 is a meta-package: it earns zero packet credit and is not a
+# member of the 35-packet DAG. It does not appear in `checkpointed`.
+meta_package:
+  packet_id: KF-META-AUTO-001
+  programme_credit: ZERO
+  directive: CG-DIRECTIVE-META-AUTO-001
+  review: CG-REVIEW-META-AUTO-001
+
+hold:
+  active: true
+  packet_id: KF-EXEC-ACTION-001
+  reason: >
+    ACTION-001 is held by CG-HOLD-ACTION-AUTO-001 until KF-META-AUTO-001 is
+    admitted, merged, post-merge verified and its control loop is operational.
+  hold_message_id: CG-HOLD-ACTION-AUTO-001
+  branch_cut: false
+  local_work: none
+  resume_condition: >
+    ChatGPT posts a fresh, complete CG-DIRECTIVE-ACTION-CHAR-* against the
+    then-current main. Per CG-REVIEW-META-AUTO-001 that new directive, not the
+    non-existent message referenced by the hold, is the durable seed.
+
+unresolved_contradictions: []
+
+resolved_contradictions:
+  - id: META-C1
+    resolved_by: CG-REVIEW-META-AUTO-001
+    decision: R1_ADOPT_ON_GATED_CANONICAL_BRANCH
+    detail: >
+      PR #86 is prototype input only. Its useful content is adopted onto the
+      gated impl/* branch. One canonical autopilot package; #86 is not merged.
+
+momentum:
+  operations_since_transition: 0
+  consecutive_identical_failures: 0
+  consecutive_ci_failures_without_new_root_cause: 0
+  last_failure_signature: null
+  last_transition_at: 2026-09-23T21:05:38Z
+  alarm_active: false
+
+correction:
+  attempts: 0
+  last_signature: null
+
+agents:
+  claude-code-local:
+    role: builder
+    status: READY
+    detail: headless invocation proven (claude 2.1.247, -p --output-format json)
+  openai-reviewer:
+    role: adversarial_reviewer
+    status: WAITING_EXTERNAL_AGENT
+    detail: KEYFLOW_AGENT_OPENAI_API_KEY is not set
+  secondary-reviewer:
+    role: adversarial_reviewer
+    status: WAITING_EXTERNAL_AGENT
+    detail: KEYFLOW_AGENT_SECONDARY_API_KEY is not set
+
+safety:
+  production_release_authorized: false
+  production_mutations_authorized: false
+  real_provider_traffic_authorized: false
+  forensic_rebaseline_authorized: false
+  programme_map_refresh_authorized: false
+  architecture_os_cycles_authorized: false
+  forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+
+last_processed_event_key: null
+processed_event_keys: []
+event_journal: []
+
+next_legal_action:
+  action: DISPATCH_BUILDER
+  reason: packet is IMPLEMENTING; builder work is the next legal step
+  derived_at: 2026-09-23T21:30:00Z
