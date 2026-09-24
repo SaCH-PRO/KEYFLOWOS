@@ -84,10 +84,30 @@ contract. This package lives on `impl/*` and is therefore subject to it.
 
 ## Concurrency
 
-All orchestration paths capable of advancing the same packet serialize on a
-stable key: the PR number when the event names one, otherwise a single
-programme-wide constant. A workflow run id is never the mutual-exclusion
-identity — it is unique per run and would collide with nothing.
+Observation and mutation are separated deliberately.
+
+**Observation** uses a workflow-level group keyed per PR/event
+(`keyflow-autopilot-observe-*`), so read-only handling for different PRs runs in
+parallel.
+
+**Mutation** — merge, checkpoint, state advancement — serializes on ONE constant
+job-level group, `keyflow-agent-control-mutation`, declared by every mutating
+job and matching `MUTATION_LOCK` in `lib/events.mjs`.
+
+The lock is a global constant on purpose. Any event-derived key re-partitions
+the mutating paths, which is the defect itself: the scheduled reconcile
+iterates every open `impl/*` PR, so on a per-PR key it would sit in the
+`programme` group while an event-driven job for one of those PRs sat in group
+`<N>` — different groups, no exclusion, both merging. Exact-head guards stop a
+wrong tree being merged; they do not serialize two orchestrators.
+
+The cost is that programme advancement is globally serialized. That is the
+intended trade: the programme advances one packet at a time by design, so there
+is nothing to gain from parallel mutation and a correctness invariant to lose.
+
+`tests/events.spec.mjs` proves this by parsing the workflow file itself and
+asserting every mutating job declares the same constant group — not by
+exercising a helper, which is how the earlier partition passed review locally.
 
 ## Idempotency and recovery
 

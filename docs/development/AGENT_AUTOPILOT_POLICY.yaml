@@ -31,11 +31,18 @@ required_pr_workflows:
   - DAST (HawkScan)
 
 concurrency:
-  mutual_exclusion_key: pr_number_or_programme_constant
+  mutation_lock: keyflow-agent-control-mutation
+  mutation_lock_scope: job-level, declared by EVERY mutating job
+  mutation_lock_must_be_constant: true
+  observation_group: workflow-level, keyed per PR/event, parallelism intended
+  event_derived_mutation_key_forbidden: true
   run_id_as_identity_forbidden: true
   reason: >
-    a run id is unique per run, so a group keyed on it collides with nothing and
-    allows two orchestrators to advance one packet simultaneously
+    any key that varies by event partitions the mutating paths. The scheduled
+    reconcile sweeps every open impl/* PR, so a per-PR key would place it in a
+    different group from an event-driven merge for one of those same PRs --
+    different groups, no exclusion, both merging. Exact-head guards prevent a
+    wrong tree being merged; they do not create mutual exclusion.
 
 idempotency:
   event_identity_source: underlying_event
