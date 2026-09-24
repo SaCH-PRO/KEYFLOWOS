@@ -12,14 +12,31 @@
 version: 1
 
 negative_controls:
-  - id: NC-F1-CONCURRENCY-KEY
+  - id: NC-F1-MUTATION-LOCK-MISMATCH
     claim: >
-      Every orchestration path that can advance the same packet serializes on a
-      stable packet key; a run id may never be the mutual-exclusion identity.
+      Every mutating orchestration path serializes on ONE constant mutation
+      lock. A lock identity that drifts from what the workflow declares -- or
+      that varies by event -- re-partitions the mutating paths and is rejected.
     mutation:
       file: scripts/agent-control/lib/events.mjs
-      find: "  if (packet) return `packet:${packet}`;"
-      replace: "  if (packet) return `run:${process.env.GITHUB_RUN_ID || Math.random()}`;"
+      find: "export const MUTATION_LOCK = 'keyflow-agent-control-mutation';"
+      replace: "export const MUTATION_LOCK = `keyflow-autopilot-${process.env.GITHUB_RUN_ID || 'programme'}`;"
+    proof_command: node --test scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F1-MUTATION-LOCK-REMOVED-FROM-JOB
+    claim: >
+      A mutating job with no job-level mutation lock is rejected. This is the
+      exact shape that shipped and was caught by review as
+      META-P1-CONCURRENCY-CROSS-PATH-001.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: |-
+        # run beside a per-PR event-driven merge.
+            concurrency:
+              group: keyflow-agent-control-mutation
+              cancel-in-progress: false
+      replace: "# run beside a per-PR event-driven merge."
     proof_command: node --test scripts/agent-control/tests/events.spec.mjs
     timeout_ms: 120000
 

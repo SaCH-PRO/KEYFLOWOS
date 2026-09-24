@@ -16,7 +16,7 @@
 
 import fs from 'node:fs';
 import { loadState, saveState, recordEvent, hasProcessed } from './lib/state.mjs';
-import { normalizeEvent, concurrencyKey } from './lib/events.mjs';
+import { normalizeEvent, mutationLockKey, observationKey } from './lib/events.mjs';
 import { loadDag } from './lib/dag.mjs';
 import { decide } from './lib/orchestrator.mjs';
 import { defaultRegistry } from './lib/adapters.mjs';
@@ -42,7 +42,8 @@ function main() {
 
   const output = {
     event: event ? { kind: event.kind, key: event.idempotency_key, actionable: event.actionable } : null,
-    concurrency_key: concurrencyKey(event, state.programme?.active_packet),
+    mutation_lock: mutationLockKey(),
+    observation_key: observationKey(event, state.programme?.active_packet),
     duplicate,
     decision,
   };
@@ -66,7 +67,8 @@ try {
   } else {
     process.stdout.write(`ACTION : ${output.decision.action}\n`);
     process.stdout.write(`REASON : ${output.decision.reason}\n`);
-    process.stdout.write(`LOCK   : ${output.concurrency_key}\n`);
+    process.stdout.write(`LOCK   : ${output.mutation_lock} (mutation)\n`);
+    process.stdout.write(`OBSERVE: ${output.observation_key}\n`);
     if (output.duplicate) process.stdout.write('NOTE   : duplicate event; no second effect\n');
   }
 } catch (error) {

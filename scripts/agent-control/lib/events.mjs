@@ -167,18 +167,41 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
 }
 
 /**
- * Mutual-exclusion identity. (F1)
+ * THE MUTATION LOCK. (F1, META-P1-CONCURRENCY-CROSS-PATH-001)
  *
- * Every path that can advance the same packet must serialize on the same key.
- * A workflow run id is never acceptable here because it is unique per run and
- * would make the group collide with nothing.
+ * Every path that can MUTATE programme state — merge, checkpoint, state
+ * advancement — serializes on this one constant identity, whatever event
+ * triggered it.
+ *
+ * It is deliberately a single global constant rather than a per-packet or
+ * per-PR key. Any key that varies by event partitions the mutating paths, and
+ * a partition is exactly the defect: a scheduled sweep iterating every open
+ * impl/* PR and an event-driven job for one of those PRs would land in
+ * different groups and run at the same time. Exact-head merge guards stop a
+ * wrong tree being merged; they do not create mutual exclusion.
+ *
+ * The cost is that programme advancement is globally serialized. That is the
+ * intended trade: the programme advances one packet at a time by design, so
+ * there is nothing to gain from parallel mutation and a correctness invariant
+ * to lose.
  */
-export function concurrencyKey(event, activePacketId) {
+export const MUTATION_LOCK = 'keyflow-agent-control-mutation';
+
+export function mutationLockKey() {
+  return MUTATION_LOCK;
+}
+
+/**
+ * OBSERVATION grouping only — never a mutual-exclusion identity for mutation.
+ *
+ * Used to label and de-duplicate read-only event handling, where running two
+ * observers for different PRs concurrently is fine and desirable. Callers that
+ * are about to mutate must use mutationLockKey() instead.
+ */
+export function observationKey(event, activePacketId) {
   const packet = activePacketId || event?.packet_id || null;
   if (packet) return `packet:${packet}`;
   if (event?.pr_number) return `pr:${event.pr_number}`;
-  // Schedule and manual reconcile sweep every open packet, so they take the
-  // programme-wide lock rather than a per-run one.
   return 'programme:KEYFLOWOS';
 }
 
@@ -186,7 +209,9 @@ export default {
   normalizeEvent,
   parseControlMessage,
   readField,
-  concurrencyKey,
+  mutationLockKey,
+  observationKey,
+  MUTATION_LOCK,
   CONTROL_ISSUE,
   ACTIONABLE_MESSAGE_TYPES,
   REQUIRED_WORKFLOWS,

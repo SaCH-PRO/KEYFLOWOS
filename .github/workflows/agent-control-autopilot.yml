@@ -35,20 +35,26 @@ on:
 permissions:
   contents: read
 
-# F1 -- mutual exclusion.
+# Mutual exclusion is split in two, deliberately.
 #
-# Every path that can advance the same packet must serialize on the SAME key.
-# The prototype fell through to github.run_id on schedule events, which is
-# unique per run and therefore collided with nothing: a scheduled sweep could
-# merge a PR while a workflow_run job merged the same PR.
+# This WORKFLOW-level group is OBSERVATION only. Keying it per PR/event lets
+# read-only handling for different PRs proceed in parallel, which is safe and
+# useful.
 #
-# Here the group is the PR number when the event names one, and a single
-# programme-wide constant otherwise (schedule and manual reconcile both sweep
-# every open PR, so they must exclude each other and the per-PR jobs are
-# additionally guarded by the exact-head merge contract).
+# It is NOT the mutual-exclusion identity for mutation. Every mutating job
+# additionally declares the single constant group `keyflow-agent-control-mutation`
+# at JOB level (see exact-head-auto-merge and hourly-reconcile-open-prs).
+#
+# Why a constant rather than a per-PR key (META-P1-CONCURRENCY-CROSS-PATH-001):
+# the scheduled reconcile iterates EVERY open impl/* PR, so on a per-PR key it
+# would sit in the `programme` group while an event-driven job for one of those
+# same PRs sat in group `<N>` -- different groups, no exclusion, both merging.
+# Exact-head guards stop the wrong tree being merged; they do not serialize two
+# orchestrators. Any event-derived key re-partitions the mutating paths, so the
+# mutation lock must not vary by event.
 concurrency:
   group: >-
-    keyflow-autopilot-${{
+    keyflow-autopilot-observe-${{
       github.event.workflow_run.pull_requests[0].number
       || github.event.pull_request.number
       || github.event.issue.number
@@ -167,6 +173,13 @@ jobs:
       actions: read
     if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.pr_number != '')
     runs-on: ubuntu-latest
+    # THE MUTATION LOCK. A single constant shared with every other mutating job,
+    # so no two orchestrators can advance the programme at once regardless of
+    # which event woke them. Must stay identical to
+    # hourly-reconcile-open-prs and to MUTATION_LOCK in lib/events.mjs.
+    concurrency:
+      group: keyflow-agent-control-mutation
+      cancel-in-progress: false
     steps:
       - name: Checkout trusted main
         uses: actions/checkout@v4
@@ -251,6 +264,12 @@ jobs:
       actions: read
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    # THE MUTATION LOCK -- identical constant to exact-head-auto-merge. This
+    # job sweeps every open impl/* PR, so it is precisely the path that must not
+    # run beside a per-PR event-driven merge.
+    concurrency:
+      group: keyflow-agent-control-mutation
+      cancel-in-progress: false
     steps:
       - name: Checkout trusted main
         uses: actions/checkout@v4
