@@ -3,7 +3,7 @@ correction_id: KF-META-AUTO-001-WORKER-HARDENING
 directive_message_id: CG-RESUME-META-AUTO-WORKER-001
 review_message_id: CG-REVIEW-META-AUTO-WORKER-002
 source_main: 403881dc9b9d99f698a4670c75e0fd6bc5225159
-source_head: 671a6d82d2c0a12a49831914351e76fdd5491c1f
+source_head: 75073453e6e76c4ccd9c288ea5f1f71e85639263
 implementation_branch: impl/kf-meta-auto-001-worker-hardening
 pr_number: null
 superseded_pr: 88
