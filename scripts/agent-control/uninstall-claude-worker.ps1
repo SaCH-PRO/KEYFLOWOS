@@ -12,14 +12,17 @@
 [CmdletBinding()]
 param(
   [string]$TaskName = 'KEYFLOWOS-Claude-Worker',
-  [switch]$Purge
+  [switch]$Purge,
+  [string]$StartupDir,
+  [string]$RepoRoot
 )
 
 $ErrorActionPreference = 'Stop'
 
-$RepoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
-$StateDir = Join-Path $RepoRoot '.agent-control/.worker'
-$LockFile = Join-Path $StateDir 'worker.lock'
+if (-not $RepoRoot) { $RepoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path }
+$StateDir    = Join-Path $RepoRoot '.agent-control/.worker'
+$LockFile    = Join-Path $StateDir 'worker.lock'
+$InstallFile = Join-Path $StateDir 'install.json'
 
 # Remove whichever autostart mechanism install chose. Both are checked, so an
 # uninstall is complete regardless of which one was used.
@@ -35,7 +38,8 @@ if ($task) {
   Write-Host ('No scheduled task named {0}.' -f $TaskName)
 }
 
-$startupLauncher = Join-Path ([Environment]::GetFolderPath('Startup')) 'KEYFLOWOS-Claude-Worker.vbs'
+$startup = if ($StartupDir) { $StartupDir } else { [Environment]::GetFolderPath('Startup') }
+$startupLauncher = Join-Path $startup 'KEYFLOWOS-Claude-Worker.vbs'
 if (Test-Path $startupLauncher) {
   Remove-Item -Path $startupLauncher -Force
   Write-Host ('Removed the Startup entry {0}.' -f $startupLauncher)
@@ -54,6 +58,12 @@ if (Test-Path $LockFile) {
   }
   Remove-Item -Path $LockFile -Force
   Write-Host 'Released the worker lock.'
+}
+
+# Without autostart there is no install; a stale record must not vouch for one.
+if (Test-Path $InstallFile) {
+  Remove-Item -Path $InstallFile -Force
+  Write-Host 'Removed the worker install record.'
 }
 
 if ($Purge -and (Test-Path $StateDir)) {

@@ -13,18 +13,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { PS } from './helpers/powershell.mjs';
 
 const EVALUATOR = 'scripts/agent-control/evaluate-run.ps1';
 const MSG = 'CG-DIRECTIVE-TEST-001';
 
-function powershell() {
-  for (const bin of ['pwsh', 'powershell']) {
-    const probe = spawnSync(bin, ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' });
-    if (probe.status === 0) return bin;
-  }
-  return null;
-}
-const PS = powershell();
 
 /** Run the evaluator against a synthetic transcript. */
 function evaluate(transcript, messageId = MSG) {

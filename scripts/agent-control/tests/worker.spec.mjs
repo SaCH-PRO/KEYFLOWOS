@@ -1,9 +1,15 @@
 /**
- * Worker proofs.
+ * Portable worker proofs.
  *
  * These exercise the PowerShell worker's real behaviour where PowerShell is
- * available, and its parseable structure everywhere else. A worker that cannot
- * be verified is a worker that can silently stop waking Claude.
+ * available (pwsh on Linux included), and its parseable structure everywhere
+ * else. A worker that cannot be verified is a worker that can silently stop
+ * waking Claude.
+ *
+ * Proofs that need Windows itself -- ScheduledTasks cmdlet resolution, the
+ * install/uninstall round trip, and the real worker tick with its worktree,
+ * retry bound and authority filter -- live in tests/windows/, which FAILS off
+ * Windows instead of skipping (WORKER-CI-PLATFORM-001).
  */
 
 import test from 'node:test';
@@ -12,20 +18,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { PS } from './helpers/powershell.mjs';
 
 const WORKER = 'scripts/agent-control/claude-worker.ps1';
 const INSTALL = 'scripts/agent-control/install-claude-worker.ps1';
 const UNINSTALL = 'scripts/agent-control/uninstall-claude-worker.ps1';
-
-function powershell() {
-  for (const bin of ['pwsh', 'powershell']) {
-    const probe = spawnSync(bin, ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' });
-    if (probe.status === 0) return bin;
-  }
-  return null;
-}
-
-const PS = powershell();
 
 test('all worker scripts exist', () => {
   for (const file of [WORKER, INSTALL, UNINSTALL]) {
@@ -39,7 +36,7 @@ test('the worker never embeds a credential', () => {
   assert.ok(!/gh(p|o|u|s|r)_[A-Za-z0-9]{20,}/.test(text), 'no GitHub token may appear');
   assert.ok(!/sk-[A-Za-z0-9]{20,}/.test(text), 'no API key may appear');
   assert.ok(!/ANTHROPIC_API_KEY\s*=/.test(text), 'the worker must not set an API key');
-  assert.match(text, /gh auth status/, 'it must probe the existing gh session instead');
+  assert.match(text, /'auth', 'status'/, 'it must probe the existing gh session instead');
 });
 
 test('the worker declares the constraints it must not relax', () => {
@@ -61,7 +58,7 @@ test('install and uninstall are a matched, reversible pair', () => {
 // ------------------------------------------------------- live PowerShell
 
 test('every worker script parses with zero errors', { skip: PS ? false : 'no PowerShell available' }, () => {
-  for (const file of [WORKER, INSTALL, UNINSTALL]) {
+  for (const file of [WORKER, INSTALL, UNINSTALL, 'scripts/agent-control/select-directive.ps1', 'scripts/agent-control/evaluate-run.ps1']) {
     const script = `$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '${file}').Path,[ref]$null,[ref]$e); if($e -and $e.Count){ exit 1 } else { exit 0 }`;
     const run = spawnSync(PS, ['-NoProfile', '-Command', script], { encoding: 'utf8' });
     assert.equal(run.status, 0, `${file} has parse errors`);
@@ -166,47 +163,15 @@ test('the cursor makes directive processing idempotent', { skip: CHANNEL_READY ?
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('every cmdlet the worker scripts invoke actually exists', { skip: PS ? false : 'no PowerShell available' }, () => {
-  // The install script shipped calling New-ScheduledTaskSettings, which is not
-  // a cmdlet (the real one is New-ScheduledTaskSettingsSet). It parsed fine and
-  // -WhatIfOnly exits before reaching it, and the earlier test only string-
-  // matched "Register-ScheduledTask" -- so a broken install path passed review
-  // and merged. Resolve every invoked command instead of trusting the parse.
-  const script = `
-    $ErrorActionPreference = 'Stop'
-    $missing = @()
-    foreach ($file in @(${[WORKER, INSTALL, UNINSTALL].map((f) => `'${f}'`).join(',')})) {
-      $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$null, [ref]$null)
-      # Functions the file defines itself are resolvable at runtime.
-      $defined = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name }
-      $cmds = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)
-      foreach ($c in $cmds) {
-        $name = $c.GetCommandName()
-        if (-not $name) { continue }
-        if ($defined -contains $name) { continue }
-        # Skip native executables and this repo's own scripts.
-        if ($name -match '^(gh|claude|git|node|powershell|pwsh)$') { continue }
-        if ($name -match '\.ps1$') { continue }
-        if (-not (Get-Command $name -ErrorAction SilentlyContinue)) { $missing += "$file : $name" }
-      }
-    }
-    if ($missing.Count) { $missing -join "; "; exit 1 } else { exit 0 }
-  `;
-  const run = spawnSync(PS, ['-NoProfile', '-Command', script], { encoding: 'utf8' });
-  assert.equal(run.status, 0, `unresolvable commands: ${run.stdout.trim()}`);
-});
-
-test('the worker delegates the run verdict to the shared evaluator', () => {
-  // The verdict logic itself is proved behaviourally in evaluate-run.spec.mjs,
-  // against recorded transcripts. Here we only assert the worker actually uses
-  // it and still gates the cursor on the result -- an earlier version of this
-  // test grepped the worker for strings and kept passing after the check it
-  // claimed to cover had moved out of the file.
+test('the worker delegates authority and verdict to the shared scripts', () => {
+  // Both decisions are proved behaviourally: select-directive.spec.mjs and
+  // evaluate-run.spec.mjs against fixtures, and tests/windows/worker-*.spec.mjs
+  // through the real tick. This only pins that the worker calls those scripts
+  // rather than growing a second, untested copy of either rule.
   const text = fs.readFileSync(WORKER, 'utf8');
+  assert.match(text, /select-directive\.ps1/, 'the worker must call the shared selector');
   assert.match(text, /evaluate-run\.ps1/, 'the worker must call the shared evaluator');
-  assert.match(text, /stays retryable/, 'a failed verdict must leave the directive retryable');
-  assert.match(text, /if \(\$ok -and -not \$DryRun\) \{ Save-Cursor/, 'cursor is recorded only on a successful verdict');
-  assert.ok(fs.existsSync('scripts/agent-control/evaluate-run.ps1'), 'the evaluator must exist');
+  assert.ok(!/function Get-ControlField/.test(text), 'the worker must not parse authority itself');
 });
 
 test('the woken session gets a bounded allowlist, not a permission bypass', () => {
