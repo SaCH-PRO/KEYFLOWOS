@@ -1,0 +1,309 @@
+name: KEYFLOWOS Agent Autopilot
+
+# Deterministic control-plane orchestration. This workflow can observe, report
+# and execute an admission that AUTHORITY has already granted. It cannot create
+# admission, resolve a contradiction, widen scope or touch production.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/agent-control-autopilot.yml'
+      - 'scripts/agent-control/**'
+      - 'docs/development/AGENT_AUTOPILOT*'
+      - 'docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml'
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [closed]
+  workflow_run:
+    workflows:
+      - "CI/CD Pipeline"
+      - "Agent Control Gate"
+      - "Branch divergence"
+      - "DAST (HawkScan)"
+    types: [completed]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Optional implementation PR to reconcile/merge if fully admitted"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# Mutual exclusion is split in two, deliberately.
+#
+# This WORKFLOW-level group is OBSERVATION only. Keying it per PR/event lets
+# read-only handling for different PRs proceed in parallel, which is safe and
+# useful.
+#
+# It is NOT the mutual-exclusion identity for mutation. Every mutating job
+# additionally declares the single constant group `keyflow-agent-control-mutation`
+# at JOB level (see exact-head-auto-merge and hourly-reconcile-open-prs).
+#
+# Why a constant rather than a per-PR key (META-P1-CONCURRENCY-CROSS-PATH-001):
+# the scheduled reconcile iterates EVERY open impl/* PR, so on a per-PR key it
+# would sit in the `programme` group while an event-driven job for one of those
+# same PRs sat in group `<N>` -- different groups, no exclusion, both merging.
+# Exact-head guards stop the wrong tree being merged; they do not serialize two
+# orchestrators. Any event-derived key re-partitions the mutating paths, so the
+# mutation lock must not vary by event.
+concurrency:
+  group: >-
+    keyflow-autopilot-observe-${{
+      github.event.workflow_run.pull_requests[0].number
+      || github.event.pull_request.number
+      || github.event.issue.number
+      || inputs.pr_number
+      || 'programme'
+    }}
+  cancel-in-progress: false
+
+jobs:
+  # Self-test runs on the package's own PRs so the control plane cannot merge
+  # a version of itself whose proofs do not pass.
+  self-test:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+      - name: Run control-plane proofs
+        run: node --test scripts/agent-control/tests/*.spec.mjs
+      - name: Prove the programme DAG is executable
+        run: node scripts/agent-control/validate-dag.mjs
+
+  normalize-event:
+    if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.number == 80)
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+
+      - name: Run control-plane proofs
+        run: node --test scripts/agent-control/tests/*.spec.mjs
+
+      - name: Normalize event
+        id: event
+        shell: bash
+        run: |
+          set -euo pipefail
+          json="$(node scripts/agent-control/normalize-event.mjs)"
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+          echo "$json"
+
+      - name: Derive next legal action
+        id: decide
+        shell: bash
+        run: |
+          set -euo pipefail
+          json="$(node scripts/agent-control/orchestrate.mjs --json)"
+          {
+            echo "json<<KFEOF"
+            echo "$json"
+            echo "KFEOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "$json"
+
+      - name: Publish actionable wake event
+        if: fromJSON(steps.event.outputs.json).actionable == true
+        uses: actions/github-script@v7
+        env:
+          EVENT_JSON: ${{ steps.event.outputs.json }}
+          DECISION_JSON: ${{ steps.decide.outputs.json }}
+        with:
+          script: |
+            const event = JSON.parse(process.env.EVENT_JSON);
+            const decision = JSON.parse(process.env.DECISION_JSON);
+
+            // Dedupe on the UNDERLYING event key, not the run id, so a re-run
+            // of this workflow cannot post the same wake event twice. (F3)
+            const marker = `<!-- keyflow-autopilot-event:${event.idempotency_key} -->`;
+            const existing = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: 80, per_page: 100,
+            });
+            if (existing.some((c) => c.body && c.body.includes(marker))) {
+              core.info('duplicate event; wake comment already present');
+              return;
+            }
+
+            const body = [
+              marker,
+              '```yaml',
+              'message_id: AUTO-EVENT-' + event.idempotency_key,
+              'message_type: AUTO_EVENT',
+              'sender: github-autopilot',
+              'kind: ' + event.kind,
+              'idempotency_key: ' + event.idempotency_key,
+              'packet_id: ' + (event.packet_id || 'null'),
+              'pr_number: ' + (event.pr_number ?? 'null'),
+              'workflow: ' + (event.workflow || 'null'),
+              'conclusion: ' + (event.conclusion || 'null'),
+              'head_sha: ' + (event.head_sha || 'null'),
+              'source_ref: ' + (event.ref || 'null'),
+              'derived_action: ' + decision.decision.action,
+              'derived_reason: ' + JSON.stringify(decision.decision.reason),
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: 80, body });
+
+  exact-head-auto-merge:
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
+    if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.pr_number != '')
+    runs-on: ubuntu-latest
+    # THE MUTATION LOCK. A single constant shared with every other mutating job,
+    # so no two orchestrators can advance the programme at once regardless of
+    # which event woke them. Must stay identical to
+    # hourly-reconcile-open-prs and to MUTATION_LOCK in lib/events.mjs.
+    concurrency:
+      group: keyflow-agent-control-mutation
+      cancel-in-progress: false
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+
+      - name: Resolve PR number
+        id: pr
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          MANUAL_PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_run" ]; then pr="$WORKFLOW_PR"; else pr="$MANUAL_PR"; fi
+          echo "number=${pr:-}" >> "$GITHUB_OUTPUT"
+
+      - name: Merge only an exactly admitted head
+        if: steps.pr.outputs.number != ''
+        id: merge
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -uo pipefail
+          json="$(node scripts/agent-control/auto-merge-admitted.mjs --merge)"; status=$?
+          echo "$json"
+          {
+            echo "json<<KFEOF"
+            echo "$json"
+            echo "KFEOF"
+          } >> "$GITHUB_OUTPUT"
+          # 0 merged, 3 not eligible (an ordinary, expected outcome), 2 error.
+          # F5: an evaluator error must fail the job, never look like a no-op.
+          if [ "$status" = "2" ]; then
+            echo "::error::admission evaluator failed"
+            exit 1
+          fi
+          exit 0
+
+      - name: Record automatic merge
+        if: steps.pr.outputs.number != '' && fromJSON(steps.merge.outputs.json).eligible == true
+        uses: actions/github-script@v7
+        env:
+          MERGE_JSON: ${{ steps.merge.outputs.json }}
+        with:
+          script: |
+            const result = JSON.parse(process.env.MERGE_JSON);
+            if (!result.merge || result.merge.merged !== true) { core.info('eligible but not merged'); return; }
+            // Merge identity dedupe, so a replay cannot double-post. (F3)
+            const marker = `<!-- keyflow-autopilot-merge:${result.merge.sha} -->`;
+            const existing = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: 80, per_page: 100,
+            });
+            if (existing.some((c) => c.body && c.body.includes(marker))) return;
+            const body = [
+              marker,
+              '```yaml',
+              'message_id: AUTO-MERGE-' + result.merge.sha,
+              'message_type: AUTO_MERGE',
+              'sender: github-autopilot',
+              'pr_number: ' + result.pr,
+              'admitted_head: ' + result.head_sha,
+              'merged: true',
+              'merge_sha: ' + result.merge.sha,
+              'next_action: post_merge_verify_and_checkpoint',
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: 80, body });
+
+  hourly-reconcile-open-prs:
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    # THE MUTATION LOCK -- identical constant to exact-head-auto-merge. This
+    # job sweeps every open impl/* PR, so it is precisely the path that must not
+    # run beside a per-PR event-driven merge.
+    concurrency:
+      group: keyflow-agent-control-mutation
+      cancel-in-progress: false
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+
+      - name: Reconcile every open implementation PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          mapfile -t prs < <(gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("impl/")) | .number')
+          failures=0
+          for pr in "${prs[@]:-}"; do
+            [ -z "$pr" ] && continue
+            echo "::group::Reconciling PR #$pr"
+            PR_NUMBER="$pr" node scripts/agent-control/auto-merge-admitted.mjs --merge
+            status=$?
+            case "$status" in
+              0) echo "PR #$pr merged at its admitted head" ;;
+              3) echo "PR #$pr not eligible (expected, no action)" ;;
+              # F5: an unexpected error is surfaced and fails the job rather
+              # than being discarded by `|| true` as the prototype did.
+              *) echo "::error::PR #$pr evaluator failed with status $status"; failures=$((failures+1)) ;;
+            esac
+            echo "::endgroup::"
+          done
+          if [ "$failures" -gt 0 ]; then
+            echo "::error::$failures reconciliation(s) failed unexpectedly"
+            exit 1
+          fi

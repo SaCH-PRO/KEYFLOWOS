@@ -1,0 +1,147 @@
+# Agent Autopilot — Operator Runbook
+
+Everything an operator needs to install, inspect, disable and recover the
+KEYFLOWOS control-plane automation. Nothing here requires a credential to be
+committed, and nothing here can weaken an existing gate.
+
+## 1. Inspect before installing anything
+
+```bash
+# Programme status: packets, active packet, agents, next dependency-safe work
+node scripts/agent-control/status.mjs
+
+# Same, machine readable
+node scripts/agent-control/status.mjs --json
+
+# Prove the dependency graph is executable (no deadlock, no cycle)
+node scripts/agent-control/validate-dag.mjs --print-order
+
+# Run every control-plane proof
+node --test scripts/agent-control/tests/*.spec.mjs
+
+# Prove the proofs are not vacuous (restores each defect in a throwaway worktree)
+node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
+```
+
+None of these mutate the repository. `proof-mutation.mjs` works inside a
+temporary `git worktree` and removes it afterwards.
+
+## 2. Required GitHub permissions
+
+The workflow requests the minimum per job:
+
+| Job | Permissions | Why |
+|---|---|---|
+| `self-test` | `contents: read` | run proofs on the package's own PR |
+| `normalize-event` | `contents: read`, `issues: write` | read the event, post the AUTO_EVENT record |
+| `exact-head-auto-merge` | `contents: write`, `pull-requests: write`, `issues: write`, `actions: read` | merge an admitted head, record it, read run conclusions |
+| `hourly-reconcile-open-prs` | same as above | sweep open implementation PRs |
+
+No repository secret is required for the deterministic layer. Optional agent
+adapters read these environment variables if you choose to enable them:
+
+| Variable | Effect when absent |
+|---|---|
+| `KEYFLOW_AGENT_OPENAI_API_KEY` | reviewer reports `WAITING_EXTERNAL_AGENT` |
+| `KEYFLOW_AGENT_SECONDARY_API_KEY` | secondary reviewer reports `WAITING_EXTERNAL_AGENT` |
+| `KEYFLOW_CLAUDE_BIN` | defaults to `claude` on PATH |
+
+Absent credentials never produce a false success.
+
+## 3. The local Claude worker (Windows)
+
+The worker removes the human from the relay role: it watches issue #80 and
+wakes Claude Code for an unprocessed DIRECTIVE or REVIEW.
+
+```powershell
+# Check auth and lock state — no side effects
+powershell -File scripts/agent-control/claude-worker.ps1 -Status
+
+# See what it WOULD process, without invoking Claude
+powershell -File scripts/agent-control/claude-worker.ps1 -DryRun
+
+# Run it in the foreground
+powershell -File scripts/agent-control/claude-worker.ps1
+
+# Install as a scheduled task that starts at logon
+powershell -File scripts/agent-control/install-claude-worker.ps1
+
+# Preview the installation without creating anything
+powershell -File scripts/agent-control/install-claude-worker.ps1 -WhatIfOnly
+
+# Remove it (keeps the processed-directive cursor)
+powershell -File scripts/agent-control/uninstall-claude-worker.ps1
+
+# Remove it and purge durable worker state
+powershell -File scripts/agent-control/uninstall-claude-worker.ps1 -Purge
+```
+
+The worker runs as the current user at logon so it inherits the existing
+authenticated `gh` and Claude sessions. It stores no credential.
+
+### Worker safety properties
+
+- **Single instance.** A PID lock prevents two workers driving one packet. A
+  lock whose owner has died is reclaimed automatically.
+- **Idempotent.** Processed `message_id`s are recorded in
+  `.agent-control/.worker/cursor.json`. A directive is never processed twice.
+  A *failed* run is not recorded, so it stays retryable.
+- **Fails visibly.** Missing `gh` or `claude` auth logs
+  `WAITING_EXTERNAL_AGENT` and does nothing else.
+- **Bounded.** The prompt forbids merging, scope widening, architecture change,
+  production access, gate weakening and independent contradiction resolution.
+- **Untracked runtime state.** `.agent-control/.worker/` is git-ignored: locks,
+  logs and cursors are local to the machine.
+
+## 4. Turning autonomy off while keeping observation
+
+Any one of these stops autonomous advancement. None weakens a gate.
+
+| Goal | Action |
+|---|---|
+| Stop waking Claude | `uninstall-claude-worker.ps1` |
+| Keep the worker but disable the builder | set `KEYFLOW_AGENT_CLAUDE_DISABLED=1` |
+| Stop all repository automation | disable **KEYFLOWOS Agent Autopilot** in the Actions tab |
+| Stop automatic merge only | remove `contents: write` from `exact-head-auto-merge`, or keep every PR draft |
+| Full manual mode | all of the above; the manual admission contract is unchanged |
+
+The manual path always remains: ChatGPT reviews, sets `review_status`, and the
+Agent Control Gate enforces the same contract with or without automation.
+
+## 5. Failure recovery
+
+| Symptom | Cause | Recovery |
+|---|---|---|
+| Worker will not start, "another worker is already running" | a live worker holds the lock | `-Status` to see it; stop that process or `uninstall-claude-worker.ps1` |
+| Worker idle with `WAITING_EXTERNAL_AGENT` | `gh` or `claude` session expired | `gh auth login`, or open Claude Code once to refresh; the worker resumes on the next tick |
+| Same directive processed twice | cursor lost or purged | ids live in `.agent-control/.worker/cursor.json`; restore it or accept one replay — the repository gates still apply |
+| Autopilot posted no AUTO_EVENT | event was not actionable, or was a duplicate | duplicates are suppressed by idempotency key; check the workflow log |
+| `auto-merge-admitted` exits 3 | PR is not eligible — an ordinary outcome | the JSON `reason` names the exact unmet contract |
+| `auto-merge-admitted` exits 2 | evaluator error (auth, API, parse) | the job fails loudly by design; read stderr, fix, re-run |
+| DAG validation fails | a packet edit introduced a deadlock or cycle | `validate-dag.mjs` prints the structured problem codes |
+| Status shows `PROJECTION DRIFT` | the intelligence board disagrees with live state | live state is authoritative; reconcile the board at a checkpoint — never the reverse |
+| State file looks wrong | hand-edited while running | stop the worker, correct it, re-run `status.mjs`; `validateState` rejects impossible values on save |
+
+## 6. Human override
+
+The operator can always:
+
+- edit `.agent-control/programme-state.yaml` with the worker stopped;
+- set `hold.active: true` to freeze advancement with a recorded reason;
+- add an entry to `unresolved_contradictions` to stop the orchestrator dead;
+- close or draft a PR to remove it from reconciliation;
+- disable the workflow.
+
+`hold` and `unresolved_contradictions` both outrank every mechanical rule in
+the orchestrator, so either is a hard stop.
+
+## 7. What automation can never do
+
+Encoded in `AGENT_AUTOPILOT_POLICY.yaml#never_automatic` and proved in
+`tests/orchestration.spec.mjs`:
+
+architecture precedence decisions · scope widening · production deployment,
+mutation or provider traffic · forensic rebaseline · programme-map refresh ·
+OS cycle resume · gate weakening · proof-obligation reduction · contradiction
+resolution without recorded authority · schema primitive choices · migration
+strategy · agent self-approval.

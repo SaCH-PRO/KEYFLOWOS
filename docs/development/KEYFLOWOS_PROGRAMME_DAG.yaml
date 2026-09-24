@@ -1,0 +1,267 @@
+# KEYFLOWOS programme dependency graph (AUTO-DAG)
+#
+# Canonical source of packet topology:
+#   docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md
+#   on branch docs/keyflow-intelligence-foundation
+#
+# This file is the EXECUTABLE projection of that board. It is static topology
+# only. It holds no live packet state -- live state is owned solely by
+# .agent-control/programme-state.yaml (see AGENT_CONTROL_PLANE.md).
+#
+# ---------------------------------------------------------------------------
+# Phase model (resolves the wave-gate deadlock, F2)
+# ---------------------------------------------------------------------------
+# The canonical board declares two packets that deliberately SPAN waves:
+#
+#   PLAYBOOK-001  "span: B -> D; foundation starts here, product/library
+#                  convergence finishes in Wave D"
+#   GROWTH-001    "span: C -> D; foundation can begin in C, closed-loop/product
+#                  optimization completes only after Wave D dependencies exist"
+#
+# and names the later dependency set under "Cross-wave completions":
+#
+#   "GROWTH-001 closed-loop optimization after PUBLIC/SPACE/PLAYBOOK/CONNECTOR
+#    dependencies"
+#
+# A single-node model must therefore place GROWTH-001 in wave C while it
+# depends on wave-D packets, which deadlocks any selector that honours
+# do_not_leapfrog_wave_gate. The board is NOT ambiguous about this -- it states
+# the span and enumerates the late dependencies -- so the faithful executable
+# model is one node per declared phase, each with its own wave and its own
+# dependency subset. No product dependency has been invented, removed, or
+# reordered; the union of a packet's phase dependencies equals the board's
+# packet dependency list.
+#
+# Reference resolution:
+#   - "KF-EXEC-X-001"          -> that packet's TERMINAL phase (strictest reading)
+#   - "KF-EXEC-X-001#phase"    -> that exact phase
+# Terminal is the default because a dependant naming a packet plainly means the
+# packet, and the stricter reading can only delay work, never leapfrog it. The
+# validator proves this choice introduces no backward wave edge.
+version: 2
+programme: KEYFLOWOS
+packets_total: 35
+phases_total: 37
+canonical_board: docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md
+canonical_board_branch: docs/keyflow-intelligence-foundation
+forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+
+# Named dependency groups. The board expresses two Wave E dependencies as prose
+# sets rather than packet lists. They are enumerated here so the selector
+# resolves them deterministically instead of silently matching nothing.
+groups:
+  ALL_DOMAIN_PACKETS:
+    description: every packet in waves 0, A, B, C and D (board: "all migrated domain packets")
+    resolves_to: waves
+    waves: ["0", A, B, C, D]
+  PRIOR_PACKET_RESULTS:
+    description: every packet preceding MIGRATE-001 (board: "prior packet results / migration evidence")
+    resolves_to: waves
+    waves: ["0", A, B, C, D]
+    plus: [KF-EXEC-WITHDRAW-001, KF-EXEC-WITHDRAW-002]
+
+selection_policy:
+  wave_order: ["0", A, B, C, D, E]
+  do_not_leapfrog_wave_gate: true
+  characterize_ahead_only_when_non_mutating: true
+  bare_reference_resolves_to: terminal_phase
+
+packets:
+  # ---------------------------------------------------------------- Wave 0
+  - id: KF-EXEC-K12-001
+    title: Proof Admission & Isolation Substrate
+    wave: "0"
+    depends_on: []
+  - id: KF-EXEC-EXTFX-001
+    title: OutboundDelivery -> Resend Effect Certainty
+    wave: "0"
+    depends_on: [KF-EXEC-K12-001]
+
+  # ---------------------------------------------------------------- Wave A
+  - id: KF-EXEC-TENANT-001
+    title: Membership-First Tenant Genesis Compatibility
+    wave: A
+    depends_on: [KF-EXEC-K12-001]
+  - id: KF-EXEC-AUTH-001
+    title: Effective Authority Resolver Foundation
+    wave: A
+    depends_on: [KF-EXEC-TENANT-001]
+  - id: KF-EXEC-ACTION-001
+    title: Capability -> Control -> Clearance Boundary
+    wave: A
+    depends_on: [KF-EXEC-AUTH-001]
+
+  # ---------------------------------------------------------------- Wave B
+  - id: KF-EXEC-TIME-001
+    title: Work Occurrence Adoption
+    wave: B
+    depends_on: [KF-EXEC-K12-001, KF-EXEC-ACTION-001]
+  - id: KF-EXEC-INGRESS-001
+    title: Webhook Occurrence Processing Lifecycle
+    wave: B
+    depends_on: [KF-EXEC-K12-001, KF-EXEC-TIME-001]
+  - id: KF-EXEC-CONNECTOR-001
+    title: Connector Grant-Generation Fencing
+    wave: B
+    depends_on: [KF-EXEC-K12-001, KF-EXEC-INGRESS-001]
+  - id: KF-EXEC-TEMPORAL-002
+    title: Cancellation Supersession Wait Semantics
+    wave: B
+    depends_on: [KF-EXEC-TIME-001]
+  - id: KF-EXEC-RECOVERY-001
+    title: Recovery & Reconciliation Operator Projection
+    wave: B
+    depends_on: [KF-EXEC-TIME-001, KF-EXEC-INGRESS-001, KF-EXEC-CONNECTOR-001]
+  - id: KF-EXEC-CONVO-001
+    title: Conversation Occurrence & Consumer Claims
+    wave: B
+    depends_on: [KF-EXEC-TIME-001, KF-EXEC-ACTION-001]
+  - id: KF-EXEC-PLAYBOOK-001
+    title: Playbook Library, Versioning & Flow Marketplace
+    board_span: B -> D
+    phases:
+      - name: foundation
+        wave: B
+        depends_on: [KF-EXEC-ACTION-001, KF-EXEC-TIME-001, KF-EXEC-RECOVERY-001]
+        note: board dependency list; all three resolve at or before wave B
+      - name: convergence
+        wave: D
+        depends_on: [KF-EXEC-PLAYBOOK-001#foundation]
+        note: >
+          board "Cross-wave completions: PLAYBOOK-001 final product/library
+          convergence". The board declares no additional dependency for this
+          phase, so it gates on its own foundation and the Wave D gate only.
+
+  # ---------------------------------------------------------------- Wave C
+  - id: KF-EXEC-COMMERCIAL-001
+    title: Commercial Lifecycle & Value-Stage Adapters
+    wave: C
+    depends_on: [KF-EXEC-ACTION-001, KF-EXEC-TIME-001]
+  - id: KF-EXEC-BOOKING-001
+    title: Booking Obligation Deposit & Final Settlement
+    wave: C
+    depends_on: [KF-EXEC-COMMERCIAL-001]
+  - id: KF-EXEC-FINANCE-001
+    title: Ledger Cash Valuation Convergence
+    wave: C
+    depends_on: [KF-EXEC-COMMERCIAL-001, KF-EXEC-K12-001]
+  - id: KF-EXEC-DELIVERYBILL-001
+    title: Work Contract Document Acceptance & Billing
+    wave: C
+    depends_on: [KF-EXEC-FINANCE-001, KF-EXEC-ACTION-001]
+  - id: KF-EXEC-COMMERCE-001
+    title: Commerce Order Fulfilment Effect Identity
+    wave: C
+    depends_on: [KF-EXEC-FINANCE-001, KF-EXEC-TIME-001]
+  - id: KF-EXEC-ENTITLE-001
+    title: Subscription Entitlement Metering & Provider Cost Reconciliation
+    wave: C
+    depends_on: [KF-EXEC-FINANCE-001, KF-EXEC-AUTH-001]
+  - id: KF-EXEC-GROWTH-001
+    title: Closed-Loop Marketing, Advertising & Social Growth Engine
+    board_span: C -> D
+    phases:
+      - name: foundation
+        wave: C
+        depends_on: [KF-EXEC-ACTION-001, KF-EXEC-COMMERCIAL-001, KF-EXEC-FINANCE-001]
+        note: >
+          board "foundation can begin in C". These are exactly the board
+          dependencies that are not named in the cross-wave completion line.
+      - name: closed_loop
+        wave: D
+        depends_on:
+          - KF-EXEC-GROWTH-001#foundation
+          - KF-EXEC-PUBLIC-001
+          - KF-EXEC-SPACE-001
+          - KF-EXEC-PLAYBOOK-001
+          - KF-EXEC-CONNECTOR-001
+        note: >
+          board "Cross-wave completions: GROWTH-001 closed-loop optimization
+          after PUBLIC/SPACE/PLAYBOOK/CONNECTOR dependencies" -- the late set is
+          enumerated by the board itself, not inferred.
+
+  # ---------------------------------------------------------------- Wave D
+  - id: KF-EXEC-KNOWLEDGE-001
+    title: KnowledgeRevision & Blueprint Genome Materialization
+    wave: D
+    depends_on: [KF-EXEC-K12-001]
+  - id: KF-EXEC-KNOWLEDGE-002
+    title: Correction Withdrawal & Learning Eligibility
+    wave: D
+    depends_on: [KF-EXEC-KNOWLEDGE-001]
+  - id: KF-EXEC-COMMAND-001
+    title: Command Center Completeness & Priority Projection
+    wave: D
+    depends_on: [KF-EXEC-KNOWLEDGE-001, KF-EXEC-RECOVERY-001]
+  - id: KF-EXEC-PUBLIC-001
+    title: Public Customer Boundary Portal & Booking Concurrency
+    wave: D
+    depends_on: [KF-EXEC-BOOKING-001, KF-EXEC-COMMERCE-001]
+  - id: KF-EXEC-SPACE-001
+    title: KeyFlow Space, Events, Registration & Ticketing
+    wave: D
+    depends_on: [KF-EXEC-PUBLIC-001, KF-EXEC-COMMERCE-001, KF-EXEC-FINANCE-001, KF-EXEC-TIME-001]
+    coordinates_with: [KF-EXEC-UX-001]
+    coordination_note: >
+      The board writes "UX-001 coordination", not a dependency. It is modelled
+      as a non-blocking coordination edge so the selector neither invents a hard
+      gate nor loses the relationship. Promote it to depends_on only on an
+      explicit authority decision.
+  - id: KF-EXEC-VOICE-001
+    title: Voice Session Transport Action & Metering Convergence
+    wave: D
+    depends_on: [KF-EXEC-CONVO-001, KF-EXEC-ENTITLE-001, KF-EXEC-ACTION-001]
+  - id: KF-EXEC-PRIVACY-001
+    title: Privacy Derived-State Deletion & Retention
+    wave: D
+    depends_on: [KF-EXEC-KNOWLEDGE-002]
+  - id: KF-EXEC-NETWORK-001
+    title: KeyFlow Network, Index, Map & B2B Orchestration
+    wave: D
+    depends_on:
+      - KF-EXEC-KNOWLEDGE-001
+      - KF-EXEC-PUBLIC-001
+      - KF-EXEC-COMMERCIAL-001
+      - KF-EXEC-FINANCE-001
+      - KF-EXEC-CONNECTOR-001
+      - KF-EXEC-RECOVERY-001
+  - id: KF-EXEC-UX-001
+    title: Frontend Projection Convergence
+    wave: D
+    depends_on: [KF-EXEC-COMMAND-001, KF-EXEC-PUBLIC-001, KF-EXEC-VOICE-001]
+  - id: KF-EXEC-EXPERIENCE-001
+    title: Studio, Cockpit, Flow Feed/Graph, Onboarding & Virality
+    wave: D
+    depends_on:
+      - KF-EXEC-COMMAND-001
+      - KF-EXEC-UX-001
+      - KF-EXEC-PUBLIC-001
+      - KF-EXEC-SPACE-001
+      - KF-EXEC-PLAYBOOK-001
+
+  # ---------------------------------------------------------------- Wave E
+  - id: KF-EXEC-WITHDRAW-001
+    title: Legacy Writer Shutdown by Domain
+    wave: E
+    depends_on_groups: [ALL_DOMAIN_PACKETS]
+  - id: KF-EXEC-WITHDRAW-002
+    title: Compatibility Reader Retirement
+    wave: E
+    depends_on: [KF-EXEC-WITHDRAW-001]
+  - id: KF-EXEC-MIGRATE-001
+    title: Migration Reconciliation & Legacy Ambiguity Closure
+    wave: E
+    depends_on_groups: [PRIOR_PACKET_RESULTS]
+  - id: KF-EXEC-INTEGRATED-001
+    title: Integrated End-to-End Proof
+    wave: E
+    depends_on: [KF-EXEC-MIGRATE-001]
+  - id: KF-EXEC-OPS-001
+    title: Performance & Operability Qualification
+    wave: E
+    depends_on: [KF-EXEC-INTEGRATED-001]
+  - id: KF-EXEC-RELEASE-001
+    title: Controlled Canary & Release Evidence
+    wave: E
+    depends_on: [KF-EXEC-OPS-001]
+    note: packet completion does not itself authorize production release

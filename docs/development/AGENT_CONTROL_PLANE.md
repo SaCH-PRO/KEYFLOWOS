@@ -204,3 +204,51 @@ The repository gate enforces:
 - before a non-draft implementation PR can advance, both control artifacts' `source_main` values must equal the current PR base SHA.
 
 If any non-control file changes after a RETURN is prepared, the implementer must advance `source_head`, refresh the return evidence, rerun required proof, and return to `PENDING_CHATGPT_REVIEW`.
+
+## Layer 5 — unattended event orchestration
+
+The repository has an event-driven automation layer defined by
+`docs/development/AGENT_AUTOPILOT.md` and `docs/development/AGENT_AUTOPILOT_POLICY.yaml`.
+
+It may automatically:
+- normalize actionable issue #80 / PR / CI events into durable AUTO_EVENT records;
+- derive and publish the next legal control action from durable state;
+- reconcile admitted implementation PRs;
+- squash-merge an exact implementation head only after ChatGPT has already set
+  `review_status: READY_TO_MERGE` and all required exact-head workflows are green;
+- emit a durable AUTO_MERGE event for post-merge verification/checkpoint;
+- wake a local builder agent for an unprocessed directive.
+
+It may not create architectural admission, resolve contradictions, widen scope,
+weaken proof, or authorize production effects. Those remain under the ownership
+rules above.
+
+The machine-readable programme dependency graph is
+`docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml`. Packet selection must satisfy
+that DAG plus the wave-gate rules in the canonical intelligence board.
+
+## Canonical state authority
+
+Four stores exist. Exactly one is authoritative for live control state, and
+automation must never decide state by comparing them.
+
+| Store | Role | Authoritative for |
+|---|---|---|
+| `.agent-control/programme-state.yaml` | **canonical live control state** | active packet/phase, state, health, source_main, branch/PR, hold, unresolved contradictions, last processed event key, next legal action |
+| GitHub issue #80 | append-only event/audit log and inter-agent message bus | who said what, when, and why |
+| `docs/keyflow-intelligence-foundation` | architecture, checkpoint, handoff and topology history | packet topology, admitted evidence, durable checkpoints |
+| `.agent-control/active-packet.yaml`, `.agent-control/claude-return.yaml` | per-packet PR admission artifacts | this packet's scope, proof and review status |
+
+Rules:
+
+- Live state is advanced from valid events through the state machine, never by
+  editing a projection.
+- Issue #80 is a log, not a second mutable state database. It preserves
+  authorship and reasoning; it does not hold current state.
+- The intelligence board is a durable projection. Its CURRENT handoff/status may
+  be refreshed at a checkpoint or an explicit hold so humans are not misled, but
+  a stale projection must never advance work. No broad programme-map refresh is
+  authorized by this layer.
+- The orchestrator MUST detect and report projection drift
+  (`scripts/agent-control/status.mjs` renders it) and MUST NOT follow the
+  projection when it disagrees with live state.

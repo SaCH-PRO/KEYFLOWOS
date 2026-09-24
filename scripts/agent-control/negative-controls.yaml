@@ -1,0 +1,143 @@
+# AUTO-PROOF-MUTATION manifest.
+#
+# Each entry names a critical claim, the defect that would violate it, and the
+# proof that MUST fail once that defect is restored. The runner verifies both
+# halves: the proof passes clean, and fails mutated. A proof that survives its
+# own defect is reported VACUOUS.
+#
+# Run: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
+#
+# Mutations are applied inside a throwaway `git worktree`; the working tree,
+# the branch and main are never modified.
+version: 1
+
+negative_controls:
+  - id: NC-F1-MUTATION-LOCK-MISMATCH
+    claim: >
+      Every mutating orchestration path serializes on ONE constant mutation
+      lock. A lock identity that drifts from what the workflow declares -- or
+      that varies by event -- re-partitions the mutating paths and is rejected.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "export const MUTATION_LOCK = 'keyflow-agent-control-mutation';"
+      replace: "export const MUTATION_LOCK = `keyflow-autopilot-${process.env.GITHUB_RUN_ID || 'programme'}`;"
+    proof_command: node --test scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F1-MUTATION-LOCK-REMOVED-FROM-JOB
+    claim: >
+      A mutating job with no job-level mutation lock is rejected. This is the
+      exact shape that shipped and was caught by review as
+      META-P1-CONCURRENCY-CROSS-PATH-001.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: |-
+        # run beside a per-PR event-driven merge.
+            concurrency:
+              group: keyflow-agent-control-mutation
+              cancel-in-progress: false
+      replace: "# run beside a per-PR event-driven merge."
+    proof_command: node --test scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F2-WAVE-GATE-DEADLOCK
+    claim: >
+      The DAG validator rejects a graph in which a packet depends on a later
+      wave, which is the deadlock the prototype encoded.
+    mutation:
+      file: scripts/agent-control/lib/dag.mjs
+      find: "      if (dag.waveIndex.get(dep.wave) > dag.waveIndex.get(node.wave)) {"
+      replace: "      if (false) {"
+    proof_command: node --test scripts/agent-control/tests/dag.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F3-EVENT-IDEMPOTENCY
+    claim: >
+      A replayed event converges to one journal entry and one effect, so a
+      crashed workflow cannot double-merge or double-checkpoint.
+    mutation:
+      file: scripts/agent-control/lib/state.mjs
+      find: "  if (hasProcessed(state, key)) return { state, duplicate: true, recorded: false, reason: 'already processed' };"
+      replace: "  // defect restored: duplicate detection removed"
+    proof_command: node --test scripts/agent-control/tests/recovery.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-EXACT-HEAD
+    claim: >
+      Workflow conclusions are only accepted at the exact PR head; green runs at
+      another sha cannot admit this tree.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  const atHead = runs.filter((r) => String(r.head_sha) === String(pr.head_sha));"
+      replace: "  const atHead = runs;"
+    proof_command: node --test scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-REVIEW-REQUIRED
+    claim: >
+      No admission without a recorded authority review marker; an agent can
+      never self-approve.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  if (!READY_STATUSES.has(String(ret.review_status))) {"
+      replace: "  if (false) {"
+    proof_command: node --test scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STATE-MACHINE-FAILS-CLOSED
+    claim: >
+      Illegal state transitions fail closed; a packet cannot jump from
+      CHARACTERIZING to merge readiness.
+    mutation:
+      file: scripts/agent-control/lib/state-machine.mjs
+      find: "  if (!TRANSITIONS[from].includes(to)) {"
+      replace: "  if (false) {"
+    proof_command: node --test scripts/agent-control/tests/state-machine.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CORRECTION-BOUNDED
+    claim: >
+      Two materially identical failed corrections force a block rather than an
+      unbounded retry loop.
+    mutation:
+      file: scripts/agent-control/lib/correction.mjs
+      find: "  if (prior >= MAX_IDENTICAL_ATTEMPTS) {"
+      replace: "  if (false) {"
+    proof_command: node --test scripts/agent-control/tests/orchestration.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CONTRADICTION-STOPS-ADVANCE
+    claim: >
+      An unresolved contradiction stops advancement and is never resolved
+      automatically.
+    mutation:
+      file: scripts/agent-control/lib/orchestrator.mjs
+      find: "  if ((state.unresolved_contradictions || []).length) {"
+      replace: "  if (false) {"
+    proof_command: node --test scripts/agent-control/tests/orchestration.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MISSING-AUTH-IS-WAITING
+    claim: >
+      A missing agent credential produces WAITING_EXTERNAL_AGENT, never a false
+      success.
+    mutation:
+      file: scripts/agent-control/lib/adapters.mjs
+      find: "      if (!process.env[envVar]) {"
+      replace: "      if (false) {"
+      # Both credentialed adapters carry this guard and the claim covers both,
+      # so the defect is restored in every occurrence rather than one at random.
+      replace_all: true
+    proof_command: node --test scripts/agent-control/tests/orchestration.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-ROUND-TRIP
+    claim: >
+      The control-state codec can read back everything it writes; a writer/reader
+      asymmetry corrupts state on the first save.
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: "  if (text === '{}') return {};"
+      replace: "  // defect restored: empty flow mapping no longer readable"
+    proof_command: node --test scripts/agent-control/tests/yaml.spec.mjs
+    timeout_ms: 120000

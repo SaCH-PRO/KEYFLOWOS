@@ -53,3 +53,6 @@ screenshot-home.png
 # Cross-session guard runtime state (machine-local; see .claude/hooks/README.md)
 .claude/coordination/
 .claude/settings.local.json
+
+# agent-control worker runtime state (locks, logs, processed-directive cursor)
+.agent-control/.worker/

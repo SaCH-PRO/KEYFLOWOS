@@ -1,143 +1,329 @@
-packet_id: KF-EXEC-AUTH-001
-directive_message_id: CG-DIRECTIVE-AUTH-IMPL-001
-source_main: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-source_head: 2918c093477a6143b86ef41f182fb44f7749633c
-implementation_branch: impl/kf-exec-auth-001-effective-authority
+packet_id: KF-META-AUTO-001
+directive_message_id: CG-DIRECTIVE-META-AUTO-001
+review_message_id: CG-REVIEW-META-AUTO-003
+return_message_id: CC-RETURN-META-AUTO-002
+prior_return: CC-RETURN-META-AUTO-001
+correction_of: CG-REVIEW-META-AUTO-002
+source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+source_head: 7fb163839c7f183a31014f9fe715e9da8d04da74
+implementation_branch: impl/kf-meta-auto-001-orchestrator
+pr_number: 87
 state: READY_TO_MERGE
 health: GREEN
 scope_changed: false
 production_touched: false
 review_status: READY_TO_MERGE
+programme_credit: ZERO
+merge_authority: true
+
 summary: >
-  CG-REVIEW-AUTH-PRECEDENCE-001 resolved C1-C5; AUTH-001 resumed on the same branch.
-  Both CG-REVIEW-AUTH-001 corrections are implemented and proved:
-  AUTH-P1-READ-COMPLETENESS (authority reads page to exhaustion and fail closed) and
-  AUTH-P1-GRANTOR-CURRENT-BOUND (a USER grant contributes only while its grantor still
-  holds tier-4 grantable authority). No new precedence contradiction appeared. PR #85
-  stays draft.
-characterization: COMPLETE — all 13 directive obligations reported in CC-PROGRESS-AUTH-CHAR-001
-contradiction_status: RESOLVED by CG-REVIEW-AUTH-PRECEDENCE-001; no new contradiction found
-contradictions:
-  - C1 three incompatible module vocabularies share Membership.permissionScopes;
-    also a live defect — invited members incl. ADMIN denied on 58 operations + 14
-    analytics routes; 7 'connect' routes unreachable by anyone
-  - C2 no per-principal explicit-deny source exists; the binding law has nothing to
-    be explicit in
-  - C3 AuthorityGrant.grantorId is client-supplied, wins over req.user, and is
-    typed as a Membership id while every writer supplies a User id or 'system';
-    grantor authority cannot be bounded
-  - C4 maxApprovalTier Int @default(0) NOT NULL cannot express "deliberately zero";
-    the three-copy workaround disambiguates via a different column
-  - C5 no commit boundary spans guard and handler, and Membership revocation is a
-    hard delete with no tombstone, so the revoke-vs-action proof has nothing to
-    assert against
-changed_files:
-  - .agent-control/active-packet.yaml
-  - .agent-control/claude-return.yaml
-  - apps/server/src/core/authority/module-vocabulary.ts (new — the one canonical table)
-  - apps/server/src/core/authority/approval-tier.ts (new — frozen rule, one copy)
-  - apps/server/src/core/authority/effective-authority.types.ts (new)
-  - apps/server/src/core/authority/effective-authority.resolver.ts (new)
-  - apps/server/src/core/authority/module-vocabulary.spec.ts (new — C1 gate)
-  - apps/server/src/core/authority/effective-authority.resolver.spec.ts (new)
-  - apps/server/src/modules/identity/team-scope-convergence.spec.ts (new — round trip)
-  - apps/server/src/core/auth/module-scope.guard.ts (consumes the canonical table)
-  - apps/server/src/modules/identity/identity.service.ts (consumes it; tier helper)
-  - apps/server/src/modules/ai/ai-oversight.service.ts (tier helper)
-  - apps/server/src/modules/ai/ai.controller.ts (tier helper)
-  - apps/server/src/core/authority/authority.module.ts (new, @Global)
-  - apps/server/src/core/authority/authority-inventory.service.ts (new, plain class)
-  - apps/server/src/core/authority/authority-shadow.spec.ts (new)
-  - apps/server/src/modules/ai/authority-grant-grantor.spec.ts (new)
-  - apps/server/test/authority-inventory.integration.test.ts (new)
-  - scripts/authority-inventory.ts (new, report-only operator entrypoint)
-  - apps/server/src/core/auth/module-scope.guard.ts (central shadow/compare)
-  - apps/server/src/modules/ai/ai-settings.service.ts (C3 grantor + grant bound)
-  - apps/server/src/modules/ai/ai-settings.controller.ts (C3; shadow decorators)
-  - apps/server/src/modules/ai/dto/create-authority-grant.dto.ts (grantorId removed)
-  - apps/server/src/app.module.ts (AuthorityModule)
-  - architecture/*.yaml (deterministic scanner refresh)
-schema_migrations: []  # none — no schema change is in scope for AUTH-001
+  All 15 declared deliverables are implemented on the gated impl/* branch with
+  F1-F5 corrected. META-C1 is resolved as directed: PR #86 is prototype input,
+  adopted and corrected here, not merged. 114 focused tests pass and 10/10
+  negative controls are live -- each restores its defect and the corresponding
+  proof fails. Headless Claude invocation is proven on this environment, so the
+  local worker is real rather than a contract stub.
+
+characterization: >
+  COMPLETE. Mandatory sources read before any semantic edit, including the
+  prototype branch. The canonical intelligence board was read directly for the
+  F2 decision rather than inferred from the prototype's flattened graph.
+
+meta_c1_disposition:
+  decision: R1_ADOPT_ON_GATED_CANONICAL_BRANCH
+  authority: CG-REVIEW-META-AUTO-001
+  pr_86: left open and unmerged; superseded in content by this branch
+  canonical_package: impl/kf-meta-auto-001-orchestrator
+  duplicate_dag_or_workflow_created: false
+
+adoption_ledger:
+  adopted_and_corrected:
+    - file: scripts/agent-control/normalize-event.mjs
+      from: PR #86
+      change: >
+        reduced to a thin CLI over lib/events.mjs; identity now derives from the
+        underlying event instead of the observing run id (F3); malformed events
+        are named rather than silently keyed
+    - file: scripts/agent-control/auto-merge-admitted.mjs
+      from: PR #86
+      change: >
+        evaluation extracted into the pure lib/admission.mjs; workflow runs are
+        now verified at the EXACT head; source_head/control-tail contract is
+        evaluated here too; exits 0/3/2 so an error cannot read as a no-op (F5)
+    - file: docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml
+      from: PR #86
+      change: >
+        re-derived from the canonical board with per-phase modelling for the two
+        packets the board declares as spanning; Wave E prose dependencies
+        enumerated as named groups instead of unresolvable pseudo-ids (F2)
+    - file: .github/workflows/agent-control-autopilot.yml
+      from: PR #86
+      change: >
+        concurrency group no longer falls through to run_id (F1); wake and merge
+        comments deduplicate on event/merge identity (F3); reconcile loop
+        distinguishes ineligible from error and fails loudly (F5); self-test and
+        DAG proof added
+    - file: docs/development/AGENT_AUTOPILOT.md
+      from: PR #86
+      change: extended with state authority, phase model, concurrency, idempotency, worker and provenance
+    - file: docs/development/AGENT_AUTOPILOT_POLICY.yaml
+      from: PR #86
+      change: extended with state authority, idempotency keys, correction bounds, momentum thresholds, disable paths
+  superseded:
+    - file: scripts/agent-control/normalize-event.spec.mjs
+      reason: replaced by tests/events.spec.mjs, which covers the same cases plus idempotency and concurrency
+  written_new:
+    - scripts/agent-control/lib/{yaml,dag,state,state-machine,events,admission,momentum,correction,adapters,orchestrator}.mjs
+    - scripts/agent-control/{orchestrate,status,validate-dag,proof-mutation}.mjs
+    - scripts/agent-control/negative-controls.yaml
+    - scripts/agent-control/{claude-worker,install-claude-worker,uninstall-claude-worker}.ps1
+    - scripts/agent-control/tests/{yaml,dag,events,state-machine,admission,recovery,orchestration,worker}.spec.mjs
+    - .agent-control/programme-state.yaml
+    - docs/development/AGENT_AUTOPILOT_OPERATIONS.md
+
+canonical_dynamic_state:
+  authoritative_file: .agent-control/programme-state.yaml
+  issue_80_role: append-only event and audit log
+  intelligence_branch_role: architecture, checkpoint and topology projection
+  drift_handling: detected and reported by status.mjs; never followed
+  obs_3_status: RESOLVED by separation of log, live state and projection
+
+deliverables:
+  - id: AUTO-DAG
+    status: COMPLETE
+    evidence: 35 packets / 37 phases; validate-dag.mjs proves full drain
+  - id: AUTO-STATE-MACHINE
+    status: COMPLETE
+    evidence: 8 states, typed reason codes, 14 tests incl. terminal/unknown/authority
+  - id: AUTO-EVENTS
+    status: COMPLETE
+    evidence: idempotency keys from event identity; 15 tests
+  - id: AUTO-ORCHESTRATOR
+    status: COMPLETE
+    evidence: deterministic decide(); hold and contradiction outrank mechanics
+  - id: AUTO-ADMISSION
+    status: COMPLETE
+    evidence: exact-head evaluator; 15 tests incl. stale-head and self-approval
+  - id: AUTO-MOMENTUM
+    status: COMPLETE
+    evidence: standard thresholds 6/2/2 + hygiene; 4 tests
+  - id: AUTO-PROOF-MUTATION
+    status: COMPLETE
+    evidence: worktree-isolated runner; 10/10 controls live
+  - id: AUTO-STATUS
+    status: COMPLETE
+    evidence: machine and human renderers incl. drift section
+  - id: AUTO-AGENT-ADAPTERS
+    status: COMPLETE
+    evidence: vendor-neutral roles; missing auth is WAITING_EXTERNAL_AGENT; no self-review
+  - id: AUTO-GITHUB-WORKFLOW
+    status: COMPLETE
+    evidence: 4 jobs, stable concurrency identity, hourly fallback
+  - id: AUTO-CORRECTION-LOOP
+    status: COMPLETE
+    evidence: bounded at 2 identical attempts; unknown class fails closed
+  - id: AUTO-MERGE-CHECKPOINT
+    status: COMPLETE
+    evidence: merge pinned to head sha; PR_MERGED routes to post-merge verify
+  - id: AUTO-RECOVERY
+    status: COMPLETE
+    evidence: journal + processed keys; replay produces one effect
+  - id: AUTO-TESTS
+    status: COMPLETE
+    evidence: 114 passing, 0 failed, 0 skipped
+  - id: AUTO-DOCS
+    status: COMPLETE
+    evidence: AUTOPILOT, POLICY, OPERATIONS runbook, control-plane state authority
+
+scope_ledger:
+  declared: 15 deliverables
+  resolved: 15
+  remaining: 0
+  deferred: 0
+  dropped: 0
+  superseded:
+    - normalize-event.spec.mjs superseded by tests/events.spec.mjs (coverage strictly increased)
+
+changed_files: 39 vs main; deletions confined to the two control artifacts
+schema_migrations: []
+
 tests:
   commands:
-    - "npx vitest run (apps/server, CI default config)"
-    - "npx vitest run --root packages/api"
-    - "npx tsc --noEmit -p apps/server/tsconfig.json"
-    - "pnpm lint"
-    - "npx prisma migrate deploy (local Postgres 16 + pgvector, proof only)"
-  discovered: 443
-  passed: 4161
+    - node --test scripts/agent-control/tests/*.spec.mjs
+    - node scripts/agent-control/validate-dag.mjs
+    - node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
+  discovered: 121
+  passed: 121
   failed: 0
-  skipped: 135
-  new_tests: 79
-  packages_api: 5 passed
-  lint: 6/6 tasks, 0 errors
-  known_environment_failure: >
-    web:typecheck fails with TS2688 "Cannot find type definition file for 'next'".
-    Reproduced identically with these changes stashed, so it is pre-existing in this
-    container and not caused by AUTH-001. No web file is touched by this packet.
-corrections_applied:
-  AUTH-P1-READ-COMPLETENESS:
-    change: >
-      Every authority-source read pages to exhaustion on a stable id cursor and
-      terminates on an EMPTY page, including the grantor-membership lookup. The 200-row
-      ceiling is gone; the remaining runaway guard FAILS CLOSED, returning a
-      deny-everything result rather than a permissive one.
-    page_size: bound by AuthorityModule; semantic result asserted identical at 1/3/7/200/10000
-  AUTH-P1-GRANTOR-CURRENT-BOUND:
-    change: >
-      The grantor's tier is recomputed at every resolve through the frozen Membership
-      rule. Only a grantor still at the tier-4 bound lets a USER grant contribute. Not
-      recursive: grantor tier derives from Membership alone, so no grant can bootstrap
-      the authority that validates it.
-    classes: active_grantor | legacy_unresolvable_grantor | grantor_no_longer_grantable
-    scope: USER grants and tier4_* only; KEY readers untouched; no auto-repair
+  skipped: 0
+  skipped_justification: >
+    Zero skips locally. On a runner without an authenticated gh, the worker
+    cursor proof skips by design: without a readable control channel "no
+    directive was processed" would be true for the wrong reason. It is declared
+    here rather than left to look like a silent gap.
 
-gates_that_failed_first_and_were_fixed_not_amended:
-  - optional-injection gate flagged AUTHORITY_PAGE_SIZE as @Optional()-injected but
-    registered in no module, so Nest bound undefined and the injection read as wired
-    while never being. AuthorityModule now binds it to its default.
-  - unreachable-provider.spec.ts flagged AuthorityInventoryService as constructed on
-    every boot and reachable by nothing. Fixed by making it a plain class with a
-    structural client and a script entrypoint — the FoundingMembershipService
-    arrangement — rather than adding it to UNREACHABLE_ACKNOWLEDGED.
-  - fixture-cleanup-integrity.spec.ts flagged deleteMany on Business and User in the
-    new integration teardown. Those are soft-deleted models, so the extension rewrites
-    it into an UPDATE and the rows survive. Fixed with raw SQL, as the other suites do.
 negative_controls:
-  - restored the single-page ceiling -> all 5 AUTH-P1-READ-COMPLETENESS cases fail,
-    including the narrowing position at row 255 that the ceiling silently dropped
-  - restored existence-only grantor validation -> the demotion case and the
-    no-bootstrap case fail
-  - removed 'connect' from CANONICAL_MODULES -> route-coverage gate and the connect
-    default test both fail, proving the C1 gate detects exactly this defect class
-  - reverted IdentityService to the pre-AUTH-001 11-key table -> three writer-to-
-    enforcer round-trip tests and the single-table assertion fail, reproducing the
-    live outage rather than merely describing it
-provider_or_external_runs: NONE
-cleanup: none required
+  total: 11
+  live: 11
+  vacuous: 0
+  method: each defect is restored in an isolated git worktree; the proof must then fail
+  controls:
+    - NC-F1-MUTATION-LOCK-MISMATCH
+    - NC-F1-MUTATION-LOCK-REMOVED-FROM-JOB
+    - NC-F2-WAVE-GATE-DEADLOCK
+    - NC-F3-EVENT-IDEMPOTENCY
+    - NC-ADMISSION-EXACT-HEAD
+    - NC-ADMISSION-REVIEW-REQUIRED
+    - NC-STATE-MACHINE-FAILS-CLOSED
+    - NC-CORRECTION-BOUNDED
+    - NC-CONTRADICTION-STOPS-ADVANCE
+    - NC-MISSING-AUTH-IS-WAITING
+    - NC-YAML-ROUND-TRIP
+
+proof_matrix:
+  f1_all_mutating_paths_share_one_mutation_lock: PASS — proved against the workflow file
+  f2_selector_no_deadlock_no_leapfrog: PASS
+  f3_duplicate_events_one_effect: PASS
+  illegal_transitions_fail_closed: PASS
+  stale_main_or_head_cannot_admit: PASS
+  unresolved_contradiction_cannot_advance: PASS
+  two_identical_repair_failures_force_block: PASS
+  missing_auth_becomes_waiting_external_agent: PASS
+  worker_duplicate_instance_protection: PASS
+  merge_checkpoint_replay_idempotent: PASS
+  next_packet_selection_respects_dependencies: PASS
+  negative_controls_fail_when_defects_restored: PASS
+  production_touched_false: PASS
+
+worker_feasibility:
+  noninteractive_claude_invocation: PROVEN
+  evidence: >
+    claude -p --output-format json returned {"result":"HEADLESS_OK",
+    "is_error":false,"subtype":"success"} at exit 0 using the existing
+    authenticated session, with no credential passed. Claude Code 2.1.247.
+  install_model: >
+    Windows Scheduled Task at logon under the current user, so the worker
+    inherits the existing gh and Claude sessions. install/uninstall are a
+    matched reversible pair; -WhatIfOnly previews without creating anything.
+  duplicate_instance_protection: PID lock, verified live in worker.spec.mjs
+  idempotency: durable processed-directive cursor, verified live
+  credentials_committed: false
+  runtime_state_committed: false (.agent-control/.worker/ is git-ignored)
+
+defects_found_and_fixed_during_implementation:
+  - id: D1
+    detail: >
+      The YAML serializer emitted `{}` for an empty map while the parser
+      rejected flow mappings, so the state file would fail to reload after its
+      first save. Caught by the round-trip test, fixed, and pinned by
+      NC-YAML-ROUND-TRIP.
+  - id: D2
+    detail: >
+      The parser could not read multi-line plain scalars, which the real
+      claude-return.yaml already contains. Fixed rather than weakening the test.
+  - id: D3
+    detail: >
+      The builder adapter reported WAITING_EXTERNAL_AGENT for an installed and
+      authenticated Claude CLI: on Windows the entry point is a .ps1/.cmd shim
+      that Node cannot spawn without a shell (ENOENT). This would have silently
+      stalled the loop. Fixed; the prompt now goes on stdin, which also keeps
+      arbitrary prompt text away from the shell.
+  - id: D4
+    found_by: CI on PR #87, not by the local run
+    detail: >
+      The YAML parser could not read a block scalar used as a sequence item
+      (`- >`), which this very return artifact uses for its long prose entries.
+      A control artifact the codec must read was unparseable by it. It escaped
+      locally because the artifact was rewritten after the last local suite --
+      a file changed after its last verification. Fixed and pinned by two
+      regression tests; source_head advanced accordingly.
+  - id: D5
+    found_by: CI on PR #87
+    detail: >
+      The worker cursor proof assumed an authenticated gh. On a runner there is
+      none, so the tick errored rather than reporting no pending directive. It
+      now skips when the control channel is unreadable instead of passing for
+      the wrong reason.
+  - id: D6
+    found_by: CG-REVIEW-META-AUTO-002 (independent admission review)
+    severity: P1
+    id_upstream: META-P1-CONCURRENCY-CROSS-PATH-001
+    detail: >
+      The workflow-level concurrency group keyed on PR number for workflow_run
+      and on a programme constant for schedule, while the scheduled reconcile
+      iterates EVERY open impl/* PR. A sweep merging PR #N and an event-driven
+      job merging PR #N therefore sat in different groups with no exclusion.
+    why_my_proof_missed_it: >
+      The F1 test asserted concurrencyKey(scheduled, packet) ===
+      concurrencyKey(workflow, packet). That exercised a library helper with an
+      explicitly-passed packet id, not what the workflow computes -- it checked
+      the shape and not the referent. It was green while the shipped workflow
+      was partitioned. The replacement tests parse the workflow file itself.
+    fix: >
+      Observation and mutation separated. Workflow-level group renamed
+      *-observe-* and kept per-event for read-only parallelism; every mutating
+      job declares one constant job-level group, keyflow-agent-control-mutation.
+  - id: D7
+    found_by: the negative-control run, while proving D6
+    detail: >
+      proof-mutation builds a throwaway git worktree, and on Windows that
+      checkout rewrites LF to CRLF. A multi-line `find` written with LF never
+      matched, so a control reported VACUOUS for a bookkeeping reason rather
+      than a real one -- the worst kind of negative-control failure, because it
+      is indistinguishable from a genuine finding. Mutations now adopt the
+      file's own line-ending convention.
+
+architecture_changes: >
+  One addition, made under explicit authority: programme-state.yaml as the
+  canonical live-state store, as directed by CG-REVIEW-META-AUTO-001. No other
+  architecture was redefined.
+
 new_consumers_or_writers:
-  - 9 Membership authority writers enumerated (2 unvalidated, in structure.service)
-  - 2 AuthorityGrant readers, both hardcoding granteeType KEY / granteeId key_ai
-  - 1 DelegationRule reader (approval routing only, not permission)
-  - 4 independent untraced SUPER_ADMIN bypasses
+  - scripts/agent-control/** reads and writes .agent-control/programme-state.yaml
+  - .github/workflows/agent-control-autopilot.yml posts to issue 80 and may merge admitted heads
+
 deviations_from_packet: []
-rollback_floor: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-open_questions: []
-disclosures:
+
+modelling_decisions_for_review:
+  - id: M1
+    subject: SPACE-001 / UX-001
+    detail: >
+      The board writes "UX-001 coordination", not a dependency. It is modelled as
+      a non-blocking `coordinates_with` edge so the selector neither invents a
+      hard gate nor loses the relationship. Promote it to depends_on on an
+      explicit decision. Topologically either choice is acyclic; this one is the
+      literal reading.
+  - id: M2
+    subject: bare packet references
+    detail: >
+      A bare reference to a spanning packet resolves to its TERMINAL phase --
+      the stricter reading, which can only delay work, never leapfrog it. The
+      validator proves this introduces no backward wave edge.
+
+known_gaps:
   - >
-    I reported the AiSettingsController operations family as 6 routes in
-    CC-PROGRESS-AUTH-CHAR-001 and the review adopted that number into its label. The
-    controller has 14. The selected family is unchanged — still exactly that one
-    controller — and the count was my error. All 14 are shadowed rather than an
-    arbitrary 6, and a test pins the family to the single controller.
+    The OpenAI and secondary reviewer adapters are configuration hooks: they
+    report WAITING_EXTERNAL_AGENT until credentials are supplied out of band.
+    Live review invocation is deliberately not enabled here, since wiring a
+    credentialed reviewer is a separate authorized decision.
   - >
-    The backfill from KF-EXEC-TENANT-001 has still never been run anywhere, so the
-    BusinessGuard ownerId compatibility arm still covers owners with no Membership.
-    Out of scope here; unchanged by this packet.
-  - >
-    scripts/authority-inventory.ts has not been run against any real data. It is
-    report-only and has no --apply, but it has only been exercised by its tests.
-evidence_refs:
-  - "issue #80 CC-PROGRESS-AUTH-CHAR-001 (comment 5760691716)"
-  - "issue #80 CC-CONTRADICTION-AUTH-PRECEDENCE-001 (comment 5760708790)"
+    The GitHub-hosted runner cannot impersonate the interactive Claude session.
+    The worker therefore runs on the developer machine, exactly as
+    AGENT_AUTOPILOT documents. No cloud worker is claimed.
+
+real_db_evidence: N/A -- this packet touches no schema or database
+concurrency_retry_evidence: >
+  Replay, duplicate-instance and stale-lock behaviour are proved by executable
+  tests rather than asserted.
+provider_or_external_runs: NONE
+rollback_floor: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
+
+open_questions:
+  - M1 SPACE/UX coordination edge: confirm non-blocking, or direct promotion
+  - whether to enable a credentialed adversarial reviewer now or after first auto-merge
+
+unresolved_contradictions: []
+
+next_action: >
+  Exact-head admission is authorized by CG-REVIEW-META-AUTO-003. Keep ACTION-001 held
+  until merge, post-merge verification, checkpoint, and worker installation proof.
