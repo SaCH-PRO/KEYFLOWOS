@@ -1,9 +1,11 @@
 packet_id: KF-META-AUTO-001
 directive_message_id: CG-DIRECTIVE-META-AUTO-001
-review_message_id: CG-REVIEW-META-AUTO-001
-return_message_id: CC-RETURN-META-AUTO-001
+review_message_id: CG-REVIEW-META-AUTO-002
+return_message_id: CC-RETURN-META-AUTO-002
+prior_return: CC-RETURN-META-AUTO-001
+correction_of: CG-REVIEW-META-AUTO-002
 source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
-source_head: 6de1f49e77f6b9921a10be140cd3ad1b20cf374c
+source_head: 7fb163839c7f183a31014f9fe715e9da8d04da74
 implementation_branch: impl/kf-meta-auto-001-orchestrator
 pr_number: 87
 state: PROVING
@@ -150,8 +152,8 @@ tests:
     - node --test scripts/agent-control/tests/*.spec.mjs
     - node scripts/agent-control/validate-dag.mjs
     - node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
-  discovered: 116
-  passed: 116
+  discovered: 121
+  passed: 121
   failed: 0
   skipped: 0
   skipped_justification: >
@@ -161,12 +163,13 @@ tests:
     here rather than left to look like a silent gap.
 
 negative_controls:
-  total: 10
-  live: 10
+  total: 11
+  live: 11
   vacuous: 0
   method: each defect is restored in an isolated git worktree; the proof must then fail
   controls:
-    - NC-F1-CONCURRENCY-KEY
+    - NC-F1-MUTATION-LOCK-MISMATCH
+    - NC-F1-MUTATION-LOCK-REMOVED-FROM-JOB
     - NC-F2-WAVE-GATE-DEADLOCK
     - NC-F3-EVENT-IDEMPOTENCY
     - NC-ADMISSION-EXACT-HEAD
@@ -178,7 +181,7 @@ negative_controls:
     - NC-YAML-ROUND-TRIP
 
 proof_matrix:
-  f1_concurrent_paths_prove_one_advancement: PASS
+  f1_all_mutating_paths_share_one_mutation_lock: PASS — proved against the workflow file
   f2_selector_no_deadlock_no_leapfrog: PASS
   f3_duplicate_events_one_effect: PASS
   illegal_transitions_fail_closed: PASS
@@ -241,6 +244,34 @@ defects_found_and_fixed_during_implementation:
       none, so the tick errored rather than reporting no pending directive. It
       now skips when the control channel is unreadable instead of passing for
       the wrong reason.
+  - id: D6
+    found_by: CG-REVIEW-META-AUTO-002 (independent admission review)
+    severity: P1
+    id_upstream: META-P1-CONCURRENCY-CROSS-PATH-001
+    detail: >
+      The workflow-level concurrency group keyed on PR number for workflow_run
+      and on a programme constant for schedule, while the scheduled reconcile
+      iterates EVERY open impl/* PR. A sweep merging PR #N and an event-driven
+      job merging PR #N therefore sat in different groups with no exclusion.
+    why_my_proof_missed_it: >
+      The F1 test asserted concurrencyKey(scheduled, packet) ===
+      concurrencyKey(workflow, packet). That exercised a library helper with an
+      explicitly-passed packet id, not what the workflow computes -- it checked
+      the shape and not the referent. It was green while the shipped workflow
+      was partitioned. The replacement tests parse the workflow file itself.
+    fix: >
+      Observation and mutation separated. Workflow-level group renamed
+      *-observe-* and kept per-event for read-only parallelism; every mutating
+      job declares one constant job-level group, keyflow-agent-control-mutation.
+  - id: D7
+    found_by: the negative-control run, while proving D6
+    detail: >
+      proof-mutation builds a throwaway git worktree, and on Windows that
+      checkout rewrites LF to CRLF. A multi-line `find` written with LF never
+      matched, so a control reported VACUOUS for a bookkeeping reason rather
+      than a real one -- the worst kind of negative-control failure, because it
+      is indistinguishable from a genuine finding. Mutations now adopt the
+      file's own line-ending convention.
 
 architecture_changes: >
   One addition, made under explicit authority: programme-state.yaml as the

@@ -39,7 +39,8 @@ meta_package:
   packet_id: KF-META-AUTO-001
   programme_credit: ZERO
   directive: CG-DIRECTIVE-META-AUTO-001
-  review: CG-REVIEW-META-AUTO-001
+  review: CG-REVIEW-META-AUTO-002
+  correction_applied: META-P1-CONCURRENCY-CROSS-PATH-001
 
 hold:
   active: true
