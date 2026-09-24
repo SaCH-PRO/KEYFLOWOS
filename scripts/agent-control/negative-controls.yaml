@@ -155,3 +155,16 @@ negative_controls:
       replace: "New-ScheduledTaskSettings -AllowStartIfOnBatteries"
     proof_command: node --test scripts/agent-control/tests/worker.spec.mjs
     timeout_ms: 180000
+
+  - id: NC-WORKER-COMPLETION-MARKER
+    claim: >
+      The worker records a directive as processed only when the woken session
+      emits an explicit completion marker. Exit code alone is not evidence: a
+      fully permission-blocked session exits 0 with is_error false, and
+      recording that as success silently skips the directive forever.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "        } elseif ($text -notlike \"*$doneMarker*\") {"
+      replace: "        } elseif ($false) {"
+    proof_command: node --test scripts/agent-control/tests/worker.spec.mjs
+    timeout_ms: 180000

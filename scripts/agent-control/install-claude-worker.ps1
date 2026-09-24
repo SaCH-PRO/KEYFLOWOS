@@ -53,21 +53,71 @@ if ($WhatIfOnly) {
   exit 0
 }
 
-$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($existing) {
-  Write-Host ('Task {0} already exists; removing it first so install is idempotent.' -f $TaskName)
-  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+$argument = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -IntervalSeconds {1} -RepoRoot "{2}"' -f $WorkerPath, $IntervalSeconds, $RepoRoot
+
+# ---------------------------------------------------------------- autostart
+#
+# Preferred mechanism is a Scheduled Task. Registering one writes to the
+# machine task store and therefore requires elevation; on a developer machine
+# where the operator is not an administrator that is a human-only
+# authorization, not something this script may work around silently.
+#
+# The fallback is a per-user Startup entry, which lives entirely in the
+# operator's own profile, needs no elevation, and gives the same property the
+# directive actually requires: the worker starts at logon with nobody typing
+# anything. Both are explicit and reversible; uninstall removes either.
+
+function Install-ScheduledTaskMethod {
+  $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  if ($existing) {
+    Write-Host ('Task {0} already exists; removing it first so install is idempotent.' -f $TaskName)
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+  }
+  $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument -WorkingDirectory $RepoRoot
+  $trigger  = New-ScheduledTaskTrigger -AtLogOn
+  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description 'KEYFLOWOS agent-control worker: wakes Claude Code for unprocessed control directives on issue #80.' -ErrorAction Stop | Out-Null
 }
 
-$argument = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -IntervalSeconds {1} -RepoRoot "{2}"' -f $WorkerPath, $IntervalSeconds, $RepoRoot
-$action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument -WorkingDirectory $RepoRoot
-$trigger  = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
+function Install-StartupMethod {
+  $startup = [Environment]::GetFolderPath('Startup')
+  if (-not (Test-Path $startup)) { throw "Startup folder not found: $startup" }
+  $launcher = Join-Path $startup 'KEYFLOWOS-Claude-Worker.vbs'
+  # A .vbs shim so the worker starts with no console window flashing at logon.
+  $vbs = @"
+' KEYFLOWOS agent-control worker autostart.
+' Created by scripts/agent-control/install-claude-worker.ps1
+' Remove with scripts/agent-control/uninstall-claude-worker.ps1, or just delete this file.
+CreateObject("WScript.Shell").Run "powershell.exe $($argument -replace '"', '""')", 0, False
+"@
+  Set-Content -Path $launcher -Value $vbs -Encoding ASCII
+  return $launcher
+}
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description 'KEYFLOWOS agent-control worker: wakes Claude Code for unprocessed control directives on issue #80.' | Out-Null
+$method = $null
+$detail = $null
+try {
+  Install-ScheduledTaskMethod
+  $method = 'ScheduledTask'
+  $detail = $TaskName
+} catch {
+  Write-Host ''
+  Write-Host 'Scheduled Task registration was denied (this shell is not elevated).'
+  Write-Host 'Falling back to a per-user Startup entry, which needs no administrator rights.'
+  $detail = Install-StartupMethod
+  $method = 'Startup'
+}
 
 Write-Host ''
-Write-Host ('Installed. The worker starts at your next logon.' )
-Write-Host ('Start it now with : Start-ScheduledTask -TaskName "{0}"' -f $TaskName)
-Write-Host ('Check status with : pwsh -File scripts/agent-control/claude-worker.ps1 -Status')
-Write-Host ('Remove it with    : pwsh -File scripts/agent-control/uninstall-claude-worker.ps1')
+Write-Host ('Installed via : {0}' -f $method)
+Write-Host ('  location    : {0}' -f $detail)
+Write-Host ('The worker starts automatically at your next logon.')
+Write-Host ''
+if ($method -eq 'ScheduledTask') {
+  Write-Host ('Start it now now : Start-ScheduledTask -TaskName "{0}"' -f $TaskName)
+} else {
+  Write-Host  'Start it now     : powershell -NoProfile -ExecutionPolicy Bypass -File scripts/agent-control/claude-worker.ps1'
+  Write-Host  '                   (or run the .vbs above)'
+}
+Write-Host ('Check status with : powershell -File scripts/agent-control/claude-worker.ps1 -Status')
+Write-Host ('Remove it with    : powershell -File scripts/agent-control/uninstall-claude-worker.ps1')

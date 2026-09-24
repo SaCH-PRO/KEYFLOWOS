@@ -74,7 +74,12 @@ test('-Status reports auth without side effects', { skip: PS ? false : 'no Power
   assert.match(run.stdout, /KEYFLOWOS Claude worker status/);
   assert.match(run.stdout, /gh\s+:\s+(READY|WAITING_EXTERNAL_AGENT)/);
   assert.match(run.stdout, /claude\s+:\s+(READY|WAITING_EXTERNAL_AGENT)/);
-  assert.match(run.stdout, /lock\s+:\s+free/, '-Status must not take the lock');
+  // Assert -Status does not CHANGE the lock, not that the lock happens to be
+  // free: a worker installed by this very directive legitimately holds it.
+  assert.match(run.stdout, /lock\s+:\s+(free|held)/, '-Status must report the lock');
+  const after = spawnSync(PS, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', WORKER, '-Status'], { encoding: 'utf8' });
+  const lockLine = (out) => (out.match(/lock\s+:\s+\S+/) || [''])[0];
+  assert.equal(lockLine(run.stdout), lockLine(after.stdout), '-Status must not mutate the lock');
 });
 
 test('a held lock stops a second worker from starting', { skip: PS ? false : 'no PowerShell available' }, () => {
@@ -189,4 +194,45 @@ test('every cmdlet the worker scripts invoke actually exists', { skip: PS ? fals
   `;
   const run = spawnSync(PS, ['-NoProfile', '-Command', script], { encoding: 'utf8' });
   assert.equal(run.status, 0, `unresolvable commands: ${run.stdout.trim()}`);
+});
+
+test('a permission-blocked session is a FAILURE, not a recorded success', () => {
+  // The worker woke Claude, every gh/git call was denied, `claude -p` still
+  // exited 0 with is_error=false, and the worker recorded the directive as
+  // processed. A real directive would have been silently skipped forever.
+  const text = fs.readFileSync(WORKER, 'utf8');
+  assert.match(text, /permission_denials/, 'the worker must inspect permission denials');
+  assert.match(text, /stays retryable/, 'a blocked run must leave the directive retryable');
+  // Success is decided by an explicit marker, not by exit code and not by the
+  // mere absence of denials.
+  assert.match(text, /KEYFLOW-WORKER-DONE/, 'the worker must require a completion marker');
+  assert.match(text, /KEYFLOW-WORKER-BLOCKED/, 'the worker must honour an explicit blocked report');
+  // A denial alone must NOT fail the run: a session can work around one and
+  // still complete, and failing it there makes the worker re-wake forever.
+  assert.match(text, /'WARN' "claude hit/, 'denials are warnings, not automatic failure');
+  // The success path must not be exit-code-only.
+  assert.ok(
+    !/\$ok = \$LASTEXITCODE -eq 0\s*\}\s*catch/.test(text),
+    'exit code alone must not decide success',
+  );
+  // And the cursor must only be written on a genuine success.
+  assert.match(text, /if \(\$ok -and -not \$DryRun\) \{ Save-Cursor/, 'cursor is recorded only on success');
+});
+
+test('the woken session gets a bounded allowlist, not a permission bypass', () => {
+  const text = fs.readFileSync(WORKER, 'utf8');
+  assert.match(text, /--allowedTools/, 'the non-interactive session needs an explicit allowlist');
+  // Look for real usage, not the comment that explains why it is not used:
+  // scan only non-comment lines.
+  const code = text
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('#'))
+    .join('\n');
+  assert.ok(
+    !/--dangerously-skip-permissions/.test(code),
+    'the worker must not bypass all permission checks',
+  );
+  for (const allowed of ["Bash(gh *)", "Bash(git *)", "Bash(node *)"]) {
+    assert.ok(text.includes(allowed), `allowlist must cover ${allowed}`);
+  }
 });

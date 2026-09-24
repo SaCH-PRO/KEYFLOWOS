@@ -208,6 +208,20 @@ Constraints that are not yours to relax:
   - do not weaken any proof obligation or gate;
   - do not resolve a contradiction independently -- post CONTRADICTION and stop;
   - if there is no valid actionable directive, remain idle and say so.
+
+REQUIRED COMPLETION MARKER. The worker cannot see what you did, only what you
+report, and it must not record a directive as processed unless it really was.
+End your final message with exactly one of these lines:
+
+  KEYFLOW-WORKER-DONE: $($Directive.message_id)
+    -- you finished processing this message under the protocol. Remaining
+       deliberately idle because there was nothing valid to act on counts as
+       done; say why.
+
+  KEYFLOW-WORKER-BLOCKED: <one-line reason>
+    -- you could not process it (a tool you needed was unavailable, the control
+       channel was unreadable, authority is required). The worker will leave the
+       message unprocessed so it can be retried. Never claim DONE to end a run.
 "@
 
   if ($DryRun) {
@@ -215,13 +229,73 @@ Constraints that are not yours to relax:
     return $true
   }
 
+  # The woken session is non-interactive: nobody can answer a permission
+  # prompt, so anything not allowed here is silently unusable. The allowlist is
+  # deliberately narrow -- gh, git and node plus the file tools, which is what
+  # the control protocol needs and what CG-DIRECTIVE-META-AUTO-WORKER-INSTALL-001
+  # authorizes ("lets Claude use authenticated gh + git for work/RETURN").
+  # It is NOT --dangerously-skip-permissions: arbitrary shell stays unavailable.
+  $allowedTools = @(
+    'Bash(gh *)',
+    'Bash(git *)',
+    'Bash(node *)',
+    'Read', 'Write', 'Edit', 'Glob', 'Grep'
+  )
+
   Write-WorkerLog 'INFO' "invoking claude for $($Directive.message_id) ($($Directive.packet_id))"
+  $runFile = Join-Path $StateDir "run-$($Directive.message_id).json"
   Push-Location $RepoRoot
   try {
-    & claude -p $prompt --output-format json | Out-File -FilePath (Join-Path $StateDir "run-$($Directive.message_id).json") -Encoding utf8
+    & claude -p $prompt --output-format json --allowedTools $allowedTools |
+      Out-File -FilePath $runFile -Encoding utf8
     $ok = $LASTEXITCODE -eq 0
   } finally {
     Pop-Location
+  }
+
+  # A zero exit code is NOT sufficient evidence that the session did anything.
+  # `claude -p` exits 0 with is_error=false even when every tool call it needed
+  # was denied, which would let the worker record the directive as processed
+  # while nothing happened -- a false success, and the one failure mode the
+  # adapter contract forbids outright.
+  #
+  # Nor is "any permission was denied" the right failure signal: a session can
+  # be denied one incidental call, work around it and still complete. Treating
+  # that as failure leaves the message unprocessed and the worker re-wakes on it
+  # every poll, which is its own defect.
+  #
+  # So success is decided by an explicit completion marker the woken session
+  # must emit. Denials are recorded as warnings either way, because a session
+  # that had to work around a missing tool is worth seeing.
+  if ($ok -and (Test-Path $runFile)) {
+    try {
+      $raw = (Get-Content -Path $runFile -Raw) -replace "^\xEF\xBB\xBF", ''
+      $result = $raw | ConvertFrom-Json
+
+      $denied = @($result.permission_denials)
+      if ($denied.Count -gt 0) {
+        $tools = (($denied | ForEach-Object { $_.tool_name }) | Sort-Object -Unique) -join ', '
+        Write-WorkerLog 'WARN' "claude hit $($denied.Count) permission denial(s) [$tools] for $($Directive.message_id)"
+      }
+
+      if ($result.is_error) {
+        Write-WorkerLog 'ERROR' "claude reported is_error for $($Directive.message_id)"
+        $ok = $false
+      } else {
+        $text = [string]$result.result
+        $doneMarker = "KEYFLOW-WORKER-DONE: $($Directive.message_id)"
+        if ($text -match 'KEYFLOW-WORKER-BLOCKED:\s*(.+)') {
+          Write-WorkerLog 'ERROR' "claude reported BLOCKED for $($Directive.message_id): $($Matches[1].Trim()); leaving it unprocessed for retry"
+          $ok = $false
+        } elseif ($text -notlike "*$doneMarker*") {
+          Write-WorkerLog 'ERROR' "claude did not emit the completion marker for $($Directive.message_id); treating as FAILED so the directive stays retryable"
+          $ok = $false
+        }
+      }
+    } catch {
+      Write-WorkerLog 'ERROR' "could not parse the claude transcript for $($Directive.message_id): $($_.Exception.Message)"
+      $ok = $false
+    }
   }
 
   if ($ok) { Write-WorkerLog 'INFO' "claude completed for $($Directive.message_id)" }
