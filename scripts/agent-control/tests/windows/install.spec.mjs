@@ -32,7 +32,7 @@ function ps(file, ...args) {
 }
 
 function sandbox() {
-  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kf-install-')));
+  const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kf-install-')));
   const root = path.join(tmp, 'repo');
   const startup = path.join(tmp, 'Startup');
   fs.mkdirSync(root);

@@ -32,7 +32,10 @@ export function samePath(a, b) {
 
 /** origin (bare) + an interactive clone + a worktree root outside it. */
 export function makeWorld() {
-  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kf-tick-')));
+  // realpathSync.native, not realpathSync: a CI runner's temp dir is an 8.3
+  // short path (RUNNER~1) that only the native call expands, while PowerShell
+  // reports the long form. Mixed forms make one directory look like two.
+  const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kf-tick-')));
   const origin = path.join(tmp, 'origin.git');
   const seed = path.join(tmp, 'seed');
   const root = path.join(tmp, 'checkout');
