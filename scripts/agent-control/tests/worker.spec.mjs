@@ -196,27 +196,17 @@ test('every cmdlet the worker scripts invoke actually exists', { skip: PS ? fals
   assert.equal(run.status, 0, `unresolvable commands: ${run.stdout.trim()}`);
 });
 
-test('a permission-blocked session is a FAILURE, not a recorded success', () => {
-  // The worker woke Claude, every gh/git call was denied, `claude -p` still
-  // exited 0 with is_error=false, and the worker recorded the directive as
-  // processed. A real directive would have been silently skipped forever.
+test('the worker delegates the run verdict to the shared evaluator', () => {
+  // The verdict logic itself is proved behaviourally in evaluate-run.spec.mjs,
+  // against recorded transcripts. Here we only assert the worker actually uses
+  // it and still gates the cursor on the result -- an earlier version of this
+  // test grepped the worker for strings and kept passing after the check it
+  // claimed to cover had moved out of the file.
   const text = fs.readFileSync(WORKER, 'utf8');
-  assert.match(text, /permission_denials/, 'the worker must inspect permission denials');
-  assert.match(text, /stays retryable/, 'a blocked run must leave the directive retryable');
-  // Success is decided by an explicit marker, not by exit code and not by the
-  // mere absence of denials.
-  assert.match(text, /KEYFLOW-WORKER-DONE/, 'the worker must require a completion marker');
-  assert.match(text, /KEYFLOW-WORKER-BLOCKED/, 'the worker must honour an explicit blocked report');
-  // A denial alone must NOT fail the run: a session can work around one and
-  // still complete, and failing it there makes the worker re-wake forever.
-  assert.match(text, /'WARN' "claude hit/, 'denials are warnings, not automatic failure');
-  // The success path must not be exit-code-only.
-  assert.ok(
-    !/\$ok = \$LASTEXITCODE -eq 0\s*\}\s*catch/.test(text),
-    'exit code alone must not decide success',
-  );
-  // And the cursor must only be written on a genuine success.
-  assert.match(text, /if \(\$ok -and -not \$DryRun\) \{ Save-Cursor/, 'cursor is recorded only on success');
+  assert.match(text, /evaluate-run\.ps1/, 'the worker must call the shared evaluator');
+  assert.match(text, /stays retryable/, 'a failed verdict must leave the directive retryable');
+  assert.match(text, /if \(\$ok -and -not \$DryRun\) \{ Save-Cursor/, 'cursor is recorded only on a successful verdict');
+  assert.ok(fs.existsSync('scripts/agent-control/evaluate-run.ps1'), 'the evaluator must exist');
 });
 
 test('the woken session gets a bounded allowlist, not a permission bypass', () => {

@@ -159,12 +159,24 @@ negative_controls:
   - id: NC-WORKER-COMPLETION-MARKER
     claim: >
       The worker records a directive as processed only when the woken session
-      emits an explicit completion marker. Exit code alone is not evidence: a
-      fully permission-blocked session exits 0 with is_error false, and
-      recording that as success silently skips the directive forever.
+      emits an explicit completion marker naming that message. Exit code alone
+      is not evidence: a fully permission-blocked session exits 0 with is_error
+      false, and recording that as success silently skips the directive forever.
     mutation:
-      file: scripts/agent-control/claude-worker.ps1
-      find: "        } elseif ($text -notlike \"*$doneMarker*\") {"
-      replace: "        } elseif ($false) {"
-    proof_command: node --test scripts/agent-control/tests/worker.spec.mjs
+      file: scripts/agent-control/evaluate-run.ps1
+      find: "if ($text -notlike \"*$doneMarker*\") {"
+      replace: "if ($false) {"
+    proof_command: node --test scripts/agent-control/tests/evaluate-run.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-WORKER-DENIAL-NOT-FATAL
+    claim: >
+      A permission denial that did not stop the session is a warning, not a
+      failure. Failing there leaves the message unprocessed and makes the worker
+      re-wake on it every poll.
+    mutation:
+      file: scripts/agent-control/evaluate-run.ps1
+      find: "if ($result.is_error) {"
+      replace: "if ($result.is_error -or $denialCount -gt 0) {"
+    proof_command: node --test scripts/agent-control/tests/evaluate-run.spec.mjs
     timeout_ms: 180000

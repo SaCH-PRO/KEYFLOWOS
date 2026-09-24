@@ -45,11 +45,24 @@ function parseScalar(raw) {
   if (text === '' || text === '~' || text === 'null') return null;
   if (text === 'true') return true;
   if (text === 'false') return false;
-  if (
-    (text.startsWith('"') && text.endsWith('"') && text.length >= 2) ||
-    (text.startsWith("'") && text.endsWith("'") && text.length >= 2)
-  ) {
-    return text.slice(1, -1);
+  // Double-quoted scalars process escapes; single-quoted ones are literal
+  // except for a doubled ''. Stripping the quotes without decoding would leave
+  // a literal backslash in the value, which silently corrupts anything matched
+  // against real file text.
+  if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
+    return text.slice(1, -1).replace(/\\(["\\/nrt0]|u[0-9a-fA-F]{4})/g, (_, esc) => {
+      switch (esc[0]) {
+        case 'n': return '\n';
+        case 'r': return '\r';
+        case 't': return '\t';
+        case '0': return '\0';
+        case 'u': return String.fromCharCode(parseInt(esc.slice(1), 16));
+        default: return esc; // " \ /
+      }
+    });
+  }
+  if (text.startsWith("'") && text.endsWith("'") && text.length >= 2) {
+    return text.slice(1, -1).replace(/''/g, "'");
   }
   if (text.startsWith('[')) {
     if (!text.endsWith(']')) throw new Error(`yaml: unterminated flow sequence: ${text}`);

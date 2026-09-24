@@ -267,33 +267,23 @@ End your final message with exactly one of these lines:
   # So success is decided by an explicit completion marker the woken session
   # must emit. Denials are recorded as warnings either way, because a session
   # that had to work around a missing tool is worth seeing.
-  if ($ok -and (Test-Path $runFile)) {
+  # The verdict lives in evaluate-run.ps1 so the same code the worker trusts can
+  # be exercised directly against recorded transcripts. See that script for why
+  # exit status alone is not evidence.
+  if ($ok) {
+    $evaluator = Join-Path $PSScriptRoot 'evaluate-run.ps1'
+    $verdictJson = & powershell -NoProfile -ExecutionPolicy Bypass -File $evaluator -RunFile $runFile -MessageId $Directive.message_id
+    $ok = $LASTEXITCODE -eq 0
     try {
-      $raw = (Get-Content -Path $runFile -Raw) -replace "^\xEF\xBB\xBF", ''
-      $result = $raw | ConvertFrom-Json
-
-      $denied = @($result.permission_denials)
-      if ($denied.Count -gt 0) {
-        $tools = (($denied | ForEach-Object { $_.tool_name }) | Sort-Object -Unique) -join ', '
-        Write-WorkerLog 'WARN' "claude hit $($denied.Count) permission denial(s) [$tools] for $($Directive.message_id)"
+      $verdict = $verdictJson | ConvertFrom-Json
+      if ($verdict.denial_count -gt 0) {
+        Write-WorkerLog 'WARN' "claude hit $($verdict.denial_count) permission denial(s) [$($verdict.denied_tools -join ', ')] for $($Directive.message_id)"
       }
-
-      if ($result.is_error) {
-        Write-WorkerLog 'ERROR' "claude reported is_error for $($Directive.message_id)"
-        $ok = $false
-      } else {
-        $text = [string]$result.result
-        $doneMarker = "KEYFLOW-WORKER-DONE: $($Directive.message_id)"
-        if ($text -match 'KEYFLOW-WORKER-BLOCKED:\s*(.+)') {
-          Write-WorkerLog 'ERROR' "claude reported BLOCKED for $($Directive.message_id): $($Matches[1].Trim()); leaving it unprocessed for retry"
-          $ok = $false
-        } elseif ($text -notlike "*$doneMarker*") {
-          Write-WorkerLog 'ERROR' "claude did not emit the completion marker for $($Directive.message_id); treating as FAILED so the directive stays retryable"
-          $ok = $false
-        }
+      if (-not $ok) {
+        Write-WorkerLog 'ERROR' "run verdict for $($Directive.message_id): $($verdict.reason); leaving it unprocessed so it stays retryable"
       }
     } catch {
-      Write-WorkerLog 'ERROR' "could not parse the claude transcript for $($Directive.message_id): $($_.Exception.Message)"
+      Write-WorkerLog 'ERROR' "could not read the run verdict for $($Directive.message_id)"
       $ok = $false
     }
   }
