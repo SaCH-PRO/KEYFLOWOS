@@ -1,6 +1,6 @@
 packet_id: KF-META-AUTO-001
 directive_message_id: CG-DIRECTIVE-META-AUTO-001
-review_message_id: CG-REVIEW-META-AUTO-002
+review_message_id: CG-REVIEW-META-AUTO-003
 return_message_id: CC-RETURN-META-AUTO-002
 prior_return: CC-RETURN-META-AUTO-001
 correction_of: CG-REVIEW-META-AUTO-002
@@ -8,13 +8,13 @@ source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
 source_head: 7fb163839c7f183a31014f9fe715e9da8d04da74
 implementation_branch: impl/kf-meta-auto-001-orchestrator
 pr_number: 87
-state: PROVING
+state: READY_TO_MERGE
 health: GREEN
 scope_changed: false
 production_touched: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: READY_TO_MERGE
 programme_credit: ZERO
-merge_authority: false
+merge_authority: true
 
 summary: >
   All 15 declared deliverables are implemented on the gated impl/* branch with
@@ -325,5 +325,5 @@ open_questions:
 unresolved_contradictions: []
 
 next_action: >
-  Awaiting ChatGPT adversarial and integration review. Not merging. ACTION-001
-  remains held and untouched; no branch was cut for it.
+  Exact-head admission is authorized by CG-REVIEW-META-AUTO-003. Keep ACTION-001 held
+  until merge, post-merge verification, checkpoint, and worker installation proof.
