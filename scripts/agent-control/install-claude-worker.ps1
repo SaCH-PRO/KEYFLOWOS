@@ -62,7 +62,7 @@ if ($existing) {
 $argument = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -IntervalSeconds {1} -RepoRoot "{2}"' -f $WorkerPath, $IntervalSeconds, $RepoRoot
 $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument -WorkingDirectory $RepoRoot
 $trigger  = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettings -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description 'KEYFLOWOS agent-control worker: wakes Claude Code for unprocessed control directives on issue #80.' | Out-Null
 

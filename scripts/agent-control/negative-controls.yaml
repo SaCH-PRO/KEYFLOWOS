@@ -141,3 +141,17 @@ negative_controls:
       replace: "  // defect restored: empty flow mapping no longer readable"
     proof_command: node --test scripts/agent-control/tests/yaml.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-WORKER-CMDLET-EXISTS
+    claim: >
+      Every cmdlet the worker scripts invoke actually resolves. The install
+      script shipped calling New-ScheduledTaskSettings (the real cmdlet is
+      New-ScheduledTaskSettingsSet); it parsed cleanly, -WhatIfOnly exits before
+      reaching it, and the old test only string-matched Register-ScheduledTask,
+      so a broken install path merged.
+    mutation:
+      file: scripts/agent-control/install-claude-worker.ps1
+      find: "New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries"
+      replace: "New-ScheduledTaskSettings -AllowStartIfOnBatteries"
+    proof_command: node --test scripts/agent-control/tests/worker.spec.mjs
+    timeout_ms: 180000

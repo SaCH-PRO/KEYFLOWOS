@@ -160,3 +160,33 @@ test('the cursor makes directive processing idempotent', { skip: CHANNEL_READY ?
   assert.ok(!/would invoke claude/.test(run.stdout), 'no invocation may be planned for a processed directive');
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('every cmdlet the worker scripts invoke actually exists', { skip: PS ? false : 'no PowerShell available' }, () => {
+  // The install script shipped calling New-ScheduledTaskSettings, which is not
+  // a cmdlet (the real one is New-ScheduledTaskSettingsSet). It parsed fine and
+  // -WhatIfOnly exits before reaching it, and the earlier test only string-
+  // matched "Register-ScheduledTask" -- so a broken install path passed review
+  // and merged. Resolve every invoked command instead of trusting the parse.
+  const script = `
+    $ErrorActionPreference = 'Stop'
+    $missing = @()
+    foreach ($file in @(${[WORKER, INSTALL, UNINSTALL].map((f) => `'${f}'`).join(',')})) {
+      $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$null, [ref]$null)
+      # Functions the file defines itself are resolvable at runtime.
+      $defined = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name }
+      $cmds = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)
+      foreach ($c in $cmds) {
+        $name = $c.GetCommandName()
+        if (-not $name) { continue }
+        if ($defined -contains $name) { continue }
+        # Skip native executables and this repo's own scripts.
+        if ($name -match '^(gh|claude|git|node|powershell|pwsh)$') { continue }
+        if ($name -match '\.ps1$') { continue }
+        if (-not (Get-Command $name -ErrorAction SilentlyContinue)) { $missing += "$file : $name" }
+      }
+    }
+    if ($missing.Count) { $missing -join "; "; exit 1 } else { exit 0 }
+  `;
+  const run = spawnSync(PS, ['-NoProfile', '-Command', script], { encoding: 'utf8' });
+  assert.equal(run.status, 0, `unresolvable commands: ${run.stdout.trim()}`);
+});
