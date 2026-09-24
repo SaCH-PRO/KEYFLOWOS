@@ -2,13 +2,14 @@ packet_id: KF-META-AUTO-001
 correction_id: KF-META-AUTO-001-WORKER-HARDENING
 directive_message_id: CG-RESUME-META-AUTO-WORKER-001
 review_message_id: CG-REVIEW-META-AUTO-WORKER-002
+return_message_id: CC-RETURN-META-AUTO-WORKER-001
 source_main: 403881dc9b9d99f698a4670c75e0fd6bc5225159
 source_head: 75073453e6e76c4ccd9c288ea5f1f71e85639263
 implementation_branch: impl/kf-meta-auto-001-worker-hardening
-pr_number: null
+pr_number: 89
 superseded_pr: 88
 state: PROVING
-health: YELLOW
+health: GREEN
 scope_changed: false
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
@@ -16,5 +17,150 @@ programme_credit: ZERO
 merge_authority: false
 
 summary: >
-  Implementation complete at source_head; exact-head proof in progress.
-  Filled in at RETURN.
+  The worker that merged in PR #87 is hardened on the canonical impl/* branch.
+  Dispatch now requires sender chatgpt plus an allowlisted GitHub author. Two
+  identical failures hold a directive and escalate once, with no third Claude
+  invocation. Every wake runs in its own worktree, and cleanup never deletes
+  unsaved work. The worker stays a no-op until the hardened install is made.
+  Proof is platform-correct: Ubuntu portable plus a required Windows job. All
+  25 negative controls are live in CI at the exact head. Proof is complete;
+  state stays PROVING until ChatGPT review, since READY_TO_MERGE is authority's
+  to grant.
+
+commits:
+  carried_from_pr_88:
+    - 2cd4c1a9 W0 install cmdlet name
+    - 453e291a W1-W3 allowlist, completion marker, denials not fatal
+    - 08732052 verdict testable, YAML escape decoding
+  this_correction:
+    - cd3cdafe WORKER-DIRECTIVE-AUTHORITY-001
+    - 1f06955a W6 bounded retry, W7 worktree isolation, install contract, pause
+    - 671a6d82 WORKER-CI-PLATFORM-001 workflow, required list, 11 negative controls
+    - 75073453 test-fixture fix for the runner's 8.3 temp path (source_head)
+  control_only_tail: commits after source_head touch .agent-control/ only
+
+scope_ledger:
+  declared:
+    - WORKER-CI-PLATFORM-001
+    - WORKER-DIRECTIVE-AUTHORITY-001
+    - W6 bounded retry
+    - W7 workspace isolation
+    - PR88-CARRY (W0-W3 + YAML escapes)
+    - proof, negative controls, docs, control artifacts
+  resolved: all six
+  remaining: []
+  deferred: []
+  dropped: []
+  superseded:
+    - PR 88, closed with pointer to 89; its commits carried unchanged
+  discovered_inside_boundary:
+    - install-contract gate + -Pause, for the proof "worker remains paused/no-op when hardening is not installed"
+    - 5-attempt total backstop, stricter than the two-identical rule (declared in ACK)
+    - case-sensitive sender/type comparison (draft selector used case-insensitive -ne)
+    - native tools judged by exit code (PS 5.1 stderr-as-error made git worktree add throw)
+
+proof_matrix:
+  exact_head_ci_cd: PASS
+  exact_head_branch_divergence: PASS
+  exact_head_dast_workflow: PASS (workflow success only; no live scan claimed, HAWK_API_KEY absent)
+  exact_head_agent_control_gate: PASS (required=true on impl/*; Validate control artifacts executed)
+  exact_head_autopilot_self_test: PASS
+  exact_head_portable_ubuntu: PASS
+  exact_head_windows_worker: PASS
+  blocked_false_success_is_retryable: PASS (evaluate-run.spec)
+  incidental_denial_plus_done_is_success_no_rewake: PASS (evaluate-run.spec)
+  senderless_claude_other_sender_do_not_wake: PASS (select-directive.spec; worker-authority.spec through the real tick)
+  forged_sender_non_allowlisted_author_rejected: PASS (same)
+  chatgpt_plus_sach_pro_wakes_exactly_once: PASS (worker-authority.spec; stub invocation count 1 across two ticks)
+  two_identical_blocked_then_held_one_escalation_no_third_invocation: PASS (worker-retry.spec)
+  changed_signature_permits_new_bounded_attempt: PASS (worker-retry.spec)
+  worktree_distinct_from_interactive_checkout: PASS (worker-worktree.spec; cwd recorded by the stub)
+  cleanup_never_deletes_uncommitted_or_unpushed_work: PASS (worker-worktree.spec)
+  worker_noop_without_hardened_install_or_when_paused: PASS (worker-authority.spec)
+  scheduledtask_cmdlets_resolve_on_windows: PASS (install.spec)
+  non_elevated_fallback_explicit_and_reversible: PASS (install.spec; Auto asserts whichever branch occurs)
+  negative_controls: PASS 25/25 live, 0 vacuous
+  production_touched_false: PASS
+  live_authority_wake_reproof: PENDING (needs a ChatGPT-authored directive after the hardened install)
+
+tests:
+  commands:
+    - node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
+    - node scripts/agent-control/validate-dag.mjs
+    - node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
+  discovered: 172
+  passed: 172
+  failed: 0
+  skipped: 0
+  skipped_justification: >
+    Locally 0 skips. In CI exactly one test skips on each runner: "the cursor
+    makes directive processing idempotent", which reads the LIVE control issue
+    and needs an authenticated gh that a runner does not have. The same property
+    is proved offline in CI by worker-authority.spec ("wakes the worker exactly
+    once"), which runs the real tick twice against a stub channel.
+
+negative_controls:
+  total: 25
+  live: 25
+  vacuous: 0
+  new:
+    - NC-WORKER-SENDERLESS-REJECTED
+    - NC-WORKER-SENDER-EXACT
+    - NC-WORKER-AUTHOR-ALLOWLIST
+    - NC-WORKER-RETRY-BOUNDED
+    - NC-WORKER-HELD-IS-NOT-RETRIED
+    - NC-WORKER-WORKTREE-ISOLATION
+    - NC-WORKER-WORKTREE-ROOT-GUARD
+    - NC-WORKER-CLEANUP-KEEPS-UNPUSHED
+    - NC-WORKER-CLEANUP-KEEPS-UNCOMMITTED
+    - NC-WORKER-INSTALL-CONTRACT
+    - NC-WORKER-PAUSE
+  moved: NC-WORKER-CMDLET-EXISTS now proves against tests/windows/install.spec.mjs
+
+defects_found_during_this_correction:
+  - id: WORKER-PS51-STDERR-001
+    detail: >
+      Under Windows PowerShell 5.1 with ErrorActionPreference Stop, native
+      stderr becomes a terminating error; `git worktree add` prints progress on
+      stderr, so the first worktree attempt threw before Claude ran. Caught by
+      the Windows tick proofs.
+  - id: WORKER-SELECTOR-CASE-001
+    detail: >
+      The draft selector used -ne / -notin, which ignore case, so
+      `sender: ChatGPT` would have been accepted. Now -cne / -cnotin, pinned by
+      NC-WORKER-SENDER-EXACT.
+  - id: WORKER-CI-SHORTPATH-001
+    found_by: exact-head CI (windows-latest), not locally
+    detail: >
+      The runner's temp dir is an 8.3 short path; fs.realpathSync does not
+      expand it but PowerShell reports the long form, so a correct worktree
+      looked outside its root. Test-fixture fix (realpathSync.native).
+
+residual_limitations:
+  - >
+    The author allowlist is an owner-account boundary, not ChatGPT provenance.
+    Claude also posts as SaCH-PRO, and only the sender field separates them, so
+    a woken session holding gh could technically post `sender: chatgpt`.
+    Accepted by CG-REVIEW-META-AUTO-WORKER-002.
+  - >
+    The worktree-root-inside-checkout guard compares normalized path strings.
+    An explicit -WorktreeRoot in 8.3 short form against a long-form checkout
+    could evade it. The default root (%LOCALAPPDATA%) cannot nest in a checkout.
+  - >
+    Old worker code is not covered by the new pause/install gates. The Startup
+    launcher from the first install is still present and will start whatever
+    claude-worker.ps1 is on disk at next logon.
+  - >
+    Branch protection is absent on main (an admin decision kept out of scope by
+    CG-REVIEW-META-AUTO-WORKER-002).
+
+operator_steps_after_admission:
+  - merge 89 (authority), fast-forward local main
+  - run install-claude-worker.ps1 from merged main (writes the contract-2 install record)
+  - claude-worker.ps1 -Resume (a pause marker is set locally), then start the worker
+  - post a fresh ChatGPT-authored directive for the live authority re-proof; the
+    newest actionable message is what wakes it
+
+unresolved_contradictions: []
+next_action: >
+  Awaiting ChatGPT REVIEW of PR 89. No merge, no worker restart, ACTION-001 held.
