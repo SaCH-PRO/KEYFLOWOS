@@ -42,6 +42,18 @@ export function applyMutation(root, mutation) {
   const file = path.join(root, mutation.file);
   if (!fs.existsSync(file)) return { ok: false, reason: `file not found: ${mutation.file}` };
   const before = fs.readFileSync(file, 'utf8');
+
+  // The worktree is a fresh checkout, so on Windows git rewrites LF to CRLF.
+  // A multi-line `find` written with LF would then never match and the control
+  // would report VACUOUS for a bookkeeping reason rather than a real one.
+  // Match the file's own convention instead of assuming either.
+  const fileUsesCrlf = before.includes('\r\n');
+  const toFileEol = (text) => {
+    const lf = String(text).replace(/\r\n/g, '\n');
+    return fileUsesCrlf ? lf.replace(/\n/g, '\r\n') : lf;
+  };
+  mutation = { ...mutation, find: toFileEol(mutation.find), replace: toFileEol(mutation.replace) };
+
   const occurrences = before.split(mutation.find).length - 1;
   if (occurrences === 0) return { ok: false, reason: `mutation target not found in ${mutation.file}` };
   if (occurrences > 1 && !mutation.replace_all) {
