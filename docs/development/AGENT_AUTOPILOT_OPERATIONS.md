@@ -63,8 +63,16 @@ powershell -File scripts/agent-control/claude-worker.ps1 -DryRun
 # Run it in the foreground
 powershell -File scripts/agent-control/claude-worker.ps1
 
-# Install as a scheduled task that starts at logon
+# Install as a scheduled task that starts at logon (falls back to a per-user
+# Startup entry when task registration is denied; -Method forces one)
 powershell -File scripts/agent-control/install-claude-worker.ps1
+
+# Pause / resume without uninstalling (every tick becomes a no-op)
+powershell -File scripts/agent-control/claude-worker.ps1 -Pause
+powershell -File scripts/agent-control/claude-worker.ps1 -Resume
+
+# Release a HELD_RETRYABLE directive for another bounded attempt
+powershell -File scripts/agent-control/claude-worker.ps1 -ReleaseHold <message_id>
 
 # Preview the installation without creating anything
 powershell -File scripts/agent-control/install-claude-worker.ps1 -WhatIfOnly
@@ -92,6 +100,21 @@ authenticated `gh` and Claude sessions. It stores no credential.
   production access, gate weakening and independent contradiction resolution.
 - **Untracked runtime state.** `.agent-control/.worker/` is git-ignored: locks,
   logs and cursors are local to the machine.
+- **Authenticated dispatch.** Only `DIRECTIVE`/`REVIEW` with `sender: chatgpt`
+  from an allowlisted GitHub author (`-AuthorizedAuthors`, default `SaCH-PRO`)
+  can wake Claude. Rejected messages are logged as `not actionable`.
+- **Bounded retry.** Two identical failures hold the directive
+  (`HELD_RETRYABLE`, shown by `-Status`) and post one MOMENTUM. It stays
+  unprocessed. A newer directive or `-ReleaseHold` moves it on.
+- **Own worktree per wake.** Claude never runs in this checkout. Worktrees
+  live under `%LOCALAPPDATA%\KEYFLOWOS\worker-worktrees\<message_id>`
+  (`-WorktreeRoot` to change it; it may not be inside the checkout). The worker
+  keeps a worktree that has uncommitted changes or commits on no remote. It
+  logs `kept worktree` and never deletes that work.
+- **Install contract.** The worker wakes Claude only when
+  `.agent-control/.worker/install.json` matches its contract version. An
+  autostart left from an older worker stays a no-op (`WAITING_OPERATOR`) until
+  `install-claude-worker.ps1` is re-run from admitted code.
 
 ## 4. Turning autonomy off while keeping observation
 
@@ -100,6 +123,7 @@ Any one of these stops autonomous advancement. None weakens a gate.
 | Goal | Action |
 |---|---|
 | Stop waking Claude | `uninstall-claude-worker.ps1` |
+| Pause waking without uninstalling | `claude-worker.ps1 -Pause` (undo: `-Resume`) |
 | Keep the worker but disable the builder | set `KEYFLOW_AGENT_CLAUDE_DISABLED=1` |
 | Stop all repository automation | disable **KEYFLOWOS Agent Autopilot** in the Actions tab |
 | Stop automatic merge only | remove `contents: write` from `exact-head-auto-merge`, or keep every PR draft |
@@ -114,6 +138,9 @@ Agent Control Gate enforces the same contract with or without automation.
 |---|---|---|
 | Worker will not start, "another worker is already running" | a live worker holds the lock | `-Status` to see it; stop that process or `uninstall-claude-worker.ps1` |
 | Worker idle with `WAITING_EXTERNAL_AGENT` | `gh` or `claude` session expired | `gh auth login`, or open Claude Code once to refresh; the worker resumes on the next tick |
+| Worker logs `WAITING_OPERATOR` | no install record for this worker contract | re-run `install-claude-worker.ps1` from the admitted code |
+| Worker logs `HELD_RETRYABLE` | two identical failures on one directive | read the MOMENTUM it posted; fix the blocker, then post a newer directive or run `-ReleaseHold <id>` |
+| Worker logs `kept worktree` | the wake left uncommitted or unpushed work | inspect it under the worktree root; push or discard it, then `git worktree remove <path>` |
 | Same directive processed twice | cursor lost or purged | ids live in `.agent-control/.worker/cursor.json`; restore it or accept one replay — the repository gates still apply |
 | Autopilot posted no AUTO_EVENT | event was not actionable, or was a duplicate | duplicates are suppressed by idempotency key; check the workflow log |
 | `auto-merge-admitted` exits 3 | PR is not eligible — an ordinary outcome | the JSON `reason` names the exact unmet contract |

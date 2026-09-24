@@ -153,7 +153,9 @@ negative_controls:
       file: scripts/agent-control/install-claude-worker.ps1
       find: "New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries"
       replace: "New-ScheduledTaskSettings -AllowStartIfOnBatteries"
-    proof_command: node --test scripts/agent-control/tests/worker.spec.mjs
+    # Windows-only since WORKER-CI-PLATFORM-001: the ScheduledTasks module
+    # exists only there, so only there can this proof fail for the right reason.
+    proof_command: node --test --test-name-pattern="every cmdlet" scripts/agent-control/tests/windows/install.spec.mjs
     timeout_ms: 180000
 
   - id: NC-WORKER-COMPLETION-MARKER
@@ -180,3 +182,134 @@ negative_controls:
       replace: "if ($result.is_error -or $denialCount -gt 0) {"
     proof_command: node --test scripts/agent-control/tests/evaluate-run.spec.mjs
     timeout_ms: 180000
+
+  # ---------------------------------------------------------------------------
+  # Worker hardening (CG-REVIEW-META-AUTO-WORKER-001 / -002). The worker
+  # proofs are Windows-only and run the real worker against stub gh/claude.
+  # ---------------------------------------------------------------------------
+
+  - id: NC-WORKER-SENDERLESS-REJECTED
+    claim: >
+      A DIRECTIVE with no sender field is not actionable. The live wake harness
+      proved a senderless comment could wake the worker
+      (WORKER-DIRECTIVE-AUTHORITY-001); this restores exactly that acceptance.
+    mutation:
+      file: scripts/agent-control/select-directive.ps1
+      find: "  if ($senderField -cne 'chatgpt') {"
+      replace: "  if ($senderField -and $senderField -cne 'chatgpt') {"
+    proof_command: node --test --test-name-pattern="NO sender" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-WORKER-SENDER-EXACT
+    claim: >
+      The sender must be exactly `chatgpt`. PowerShell's -ne ignores case, so
+      the draft selector would have accepted `sender: ChatGPT`.
+    mutation:
+      file: scripts/agent-control/select-directive.ps1
+      find: "  if ($senderField -cne 'chatgpt') {"
+      replace: "  if ($senderField -ne 'chatgpt') {"
+    proof_command: node --test --test-name-pattern="any other sender" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-WORKER-AUTHOR-ALLOWLIST
+    claim: >
+      A `sender: chatgpt` comment from a GitHub account outside the allowlist
+      is rejected. The repository is public and the sender field is text anyone
+      can type (WORKER-AUTHORITY-PUBLIC-REPO-001).
+    mutation:
+      file: scripts/agent-control/select-directive.ps1
+      find: "  if (-not $author -or $allowed -notcontains $author.ToLowerInvariant()) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="FORGED" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-WORKER-RETRY-BOUNDED
+    claim: >
+      Two materially identical failed attempts hold the directive; there is no
+      third Claude invocation (W6). Without the rule the worker retried every
+      poll, each retry a full Claude session.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($consecutive -ge $MaxIdenticalAttempts) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="two identical blocked runs" scripts/agent-control/tests/windows/worker-retry.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-HELD-IS-NOT-RETRIED
+    claim: >
+      A held directive is not handed to Claude again. Recording the hold is
+      worthless if the tick ignores it.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($entry -and $entry.held) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="two identical blocked runs" scripts/agent-control/tests/windows/worker-retry.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-ISOLATION
+    claim: >
+      A woken session runs in its dedicated worktree, never in the interactive
+      checkout (W7). Two agents in one checkout is what produced the edit-lock
+      collision.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  Push-Location $Worktree.path"
+      replace: "  Push-Location $RepoRoot"
+    proof_command: node --test --test-name-pattern="dedicated worktree" scripts/agent-control/tests/windows/worker-worktree.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-ROOT-GUARD
+    claim: >
+      The worker refuses a worktree root inside the interactive checkout rather
+      than nesting background work in the human's tree.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($root -ieq $RepoRoot -or $root.StartsWith($RepoRoot + $sep, [System.StringComparison]::OrdinalIgnoreCase)) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="inside the checkout" scripts/agent-control/tests/windows/worker-worktree.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-CLEANUP-KEEPS-UNPUSHED
+    claim: >
+      Cleanup never removes a worktree holding commits that exist on no remote.
+      git itself would allow that removal (the tree is clean), so only the
+      worker's own check stands between it and lost work.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if (@($unpushed.out | Where-Object { $_ }).Count) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="on no remote" scripts/agent-control/tests/windows/worker-worktree.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-CLEANUP-KEEPS-UNCOMMITTED
+    claim: >
+      Cleanup identifies uncommitted work itself and keeps the worktree, rather
+      than relying on git refusing the removal.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if (@($status.out | Where-Object { $_ }).Count) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="never deletes uncommitted" scripts/agent-control/tests/windows/worker-worktree.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-INSTALL-CONTRACT
+    claim: >
+      The worker wakes Claude only under the install record for its own
+      contract version, so an autostart left over from an older worker stays a
+      no-op until the hardened install is made.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if (-not $DryRun -and -not (Test-InstallContract)) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="install record" scripts/agent-control/tests/windows/worker-authority.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-PAUSE
+    claim: >
+      A paused worker does not wake Claude until resumed.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if (Test-Path $PauseFile) { Write-WorkerLog 'PAUSED'"
+      replace: "  if ($false) { Write-WorkerLog 'PAUSED'"
+    proof_command: node --test --test-name-pattern="paused worker" scripts/agent-control/tests/windows/worker-authority.spec.mjs
+    timeout_ms: 300000

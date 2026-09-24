@@ -19,6 +19,11 @@ export const REQUIRED_WORKFLOWS = Object.freeze([
   'Agent Control Gate',
   'Branch divergence',
   'DAST (HawkScan)',
+  // Portable Ubuntu + Windows proof of the control plane and local worker
+  // (WORKER-CI-PLATFORM-001). Deliberately NOT "KEYFLOWOS Agent Autopilot":
+  // its workflow_run-triggered runs share the PR head sha but skip self-test,
+  // so a latest-run-by-name lookup would count a run that proved nothing.
+  'Agent Control Worker Proof',
 ]);
 
 /**

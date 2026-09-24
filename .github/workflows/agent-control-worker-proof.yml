@@ -1,0 +1,68 @@
+name: Agent Control Worker Proof
+
+# Platform-correct proof of the agent-control plane and the local Claude worker
+# (WORKER-CI-PLATFORM-001).
+#
+#   portable -- the control-plane suite on Ubuntu. PowerShell is REQUIRED
+#               (KF_REQUIRE_POWERSHELL=1), so the authority and verdict proofs
+#               cannot silently skip.
+#   windows  -- the portable suite plus tests/windows/ on windows-latest: the
+#               worker's real tick (authority, bounded retry, worktree
+#               isolation), install/uninstall, and ScheduledTasks cmdlet
+#               resolution run where the worker actually runs. Those suites
+#               fail, never skip, off Windows. The negative controls run here
+#               too, because half of them restore defects only a Windows run
+#               can observe.
+#
+# No path filter: admission requires this workflow at the exact head of every
+# impl/* PR (REQUIRED_WORKFLOWS in scripts/agent-control/lib/events.mjs), so it
+# must exist there whatever the PR touches.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-control-worker-proof-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Portable proof (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+      - name: Portable control-plane proofs
+        env:
+          KF_REQUIRE_POWERSHELL: '1'
+        run: node --test scripts/agent-control/tests/*.spec.mjs
+      - name: Prove the programme DAG is executable
+        run: node scripts/agent-control/validate-dag.mjs
+
+  windows:
+    name: Windows worker proof
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+      - name: Portable and Windows proofs
+        shell: bash
+        env:
+          KF_REQUIRE_POWERSHELL: '1'
+        run: node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
+      - name: Negative controls (every proof must fail with its defect restored)
+        shell: bash
+        run: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
