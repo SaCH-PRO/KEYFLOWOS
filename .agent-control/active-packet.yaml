@@ -2,17 +2,17 @@ packet_id: KF-META-AUTO-001
 correction_id: KF-META-AUTO-001-WORKER-HARDENING
 directive_message_id: CG-RESUME-META-AUTO-WORKER-001
 ack_message_id: CC-ACK-META-AUTO-WORKER-RESUME-001
-review_message_id: CG-REVIEW-META-AUTO-WORKER-002
+review_message_id: CG-REVIEW-META-AUTO-WORKER-003
 prior_review_message_id: CG-REVIEW-META-AUTO-WORKER-001
 source_main: 403881dc9b9d99f698a4670c75e0fd6bc5225159
 implementation_branch: impl/kf-meta-auto-001-worker-hardening
 superseded_pr: 88
-state: PROVING
-health: YELLOW
+state: READY_TO_MERGE
+health: GREEN
 scope_changed: false
 production_touched: false
 programme_credit: ZERO
-merge_authority: false
+merge_authority: true
 
 objective: >
   Harden the local Claude worker that merged in PR #87 so it can be restarted
