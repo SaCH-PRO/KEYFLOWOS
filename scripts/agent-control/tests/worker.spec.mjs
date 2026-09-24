@@ -123,23 +123,40 @@ function ghAuthenticated() {
 
 const CHANNEL_READY = PS && ghAuthenticated();
 
-test('the cursor makes directive processing idempotent', { skip: CHANNEL_READY ? false : 'needs PowerShell and an authenticated gh' }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-worker-'));
-  const stateDir = path.join(root, '.agent-control', '.worker');
-  fs.mkdirSync(stateDir, { recursive: true });
-  // Pre-record the newest directive as already processed.
-  fs.writeFileSync(
-    path.join(stateDir, 'cursor.json'),
-    JSON.stringify({ processed_message_ids: ['CG-REVIEW-META-AUTO-001'], last_processed_at: '2026-09-23T21:00:00Z' }),
-  );
-
-  const run = spawnSync(
+function runWorker(root) {
+  return spawnSync(
     PS,
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.resolve(WORKER), '-DryRun', '-RepoRoot', root],
     { encoding: 'utf8', timeout: 180000 },
   );
+}
+
+test('the cursor makes directive processing idempotent', { skip: CHANNEL_READY ? false : 'needs PowerShell and an authenticated gh' }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-worker-'));
+  const stateDir = path.join(root, '.agent-control', '.worker');
+  fs.mkdirSync(stateDir, { recursive: true });
+
+  // Discover whatever directive is actually newest on the channel rather than
+  // hardcoding one: a hardcoded id silently stops testing the claim the moment
+  // a newer directive is posted, which is exactly how this test broke once.
+  const first = runWorker(root);
+  assert.equal(first.status, 0, first.stderr);
+  const pending = first.stdout.match(/unprocessed (?:REVIEW|DIRECTIVE): (\S+)/);
+  if (!pending) {
+    assert.match(first.stdout, /no unprocessed directive/, 'a clean channel must say so explicitly');
+    fs.rmSync(root, { recursive: true, force: true });
+    return;
+  }
+
+  // Record exactly that id as processed, then ask again.
+  fs.writeFileSync(
+    path.join(stateDir, 'cursor.json'),
+    JSON.stringify({ processed_message_ids: [pending[1]], last_processed_at: new Date().toISOString() }),
+  );
+
+  const run = runWorker(root);
   assert.equal(run.status, 0, run.stderr);
-  assert.match(run.stdout, /no unprocessed directive/, 'an already-processed directive must not wake Claude again');
+  assert.match(run.stdout, /no unprocessed directive/, `${pending[1]} was recorded as processed and must not wake Claude again`);
   assert.ok(!/would invoke claude/.test(run.stdout), 'no invocation may be planned for a processed directive');
   fs.rmSync(root, { recursive: true, force: true });
 });
