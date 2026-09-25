@@ -202,7 +202,14 @@ export function missingEnvelopeFields(body) {
  * @returns {{state: string, reason: string, decided_by: object|null}}
  */
 export function platformProgrammeState(comments, doc, policy) {
-  const problems = validatePlatformContract(doc || {}, policy);
+  // A malformed shape (e.g. `gates: {}`) can throw inside validation. That is
+  // an invalid contract too, and must fail closed rather than crash.
+  let problems;
+  try {
+    problems = validatePlatformContract(doc || {}, policy);
+  } catch (error) {
+    problems = [{ code: 'CONTRACT_SHAPE_INVALID', detail: error.message }];
+  }
   if (problems.length) {
     return {
       state: PLATFORM_STATES.INACTIVE,

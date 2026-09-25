@@ -342,6 +342,27 @@ test('NEGATIVE CONTROL: an edited contract cannot widen who may activate', () =>
   assert.equal(stateOf([comment(activateFields())], noEnvelope), PLATFORM_STATES.INACTIVE);
 });
 
+test('NEGATIVE CONTROL: a malformed contract shape fails closed instead of throwing', () => {
+  const policy = loadAutopilotPolicy(repoRoot);
+  const activate = [comment(activateFields())];
+  const shapes = [
+    (d) => { d.human_gates.gates = {}; },
+    (d) => { d.human_gates.inherited_never_automatic = 'production_deployment'; },
+    (d) => { d.packets = {}; },
+    (d) => { d.activation.activate.author_allowlist = 'SaCH-PRO'; },
+    (d) => { d.activation = null; },
+  ];
+  for (const mutate of shapes) {
+    const doc = clone(loadPlatformDag(repoRoot).doc);
+    mutate(doc);
+    let result;
+    assert.doesNotThrow(() => { result = platformProgrammeState(activate, doc, policy); });
+    assert.equal(result.state, PLATFORM_STATES.INACTIVE, `malformed shape must be INACTIVE: ${mutate}`);
+  }
+  assert.equal(platformProgrammeState(activate, null, policy).state, PLATFORM_STATES.INACTIVE);
+  assert.equal(platformProgrammeState(activate, loadPlatformDag(repoRoot).doc, null).state, PLATFORM_STATES.INACTIVE);
+});
+
 test('the committed DAG file is the one under test', () => {
   assert.ok(fs.existsSync(PLATFORM_DAG_PATH));
 });
