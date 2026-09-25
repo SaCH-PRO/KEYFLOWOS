@@ -11,12 +11,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Must match the exact versions in the root package.json `engines` field.
-# Major-only ranges ('20'/'9') resolve to the latest patch, which
-# `pnpm install --frozen-lockfile` then rejects with ERR_PNPM_UNSUPPORTED_ENGINE,
-# failing every job before any code runs.
+# Node follows the supported Node 24 major so CI matches Vercel's managed runtime.
+# pnpm stays exact because the repository packageManager/engine contract pins 9.15.0.
 env:
-  NODE_VERSION: '20.18.1'
+  NODE_VERSION: '24.x'
   PNPM_VERSION: '9.15.0'
 
 jobs:
