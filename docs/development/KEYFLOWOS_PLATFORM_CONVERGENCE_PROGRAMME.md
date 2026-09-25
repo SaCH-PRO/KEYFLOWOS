@@ -18,6 +18,33 @@ It MUST NOT supersede an active hold or packet merely because this file exists.
 Activation requires an explicit ChatGPT authority message on issue #80 after the
 current programme/hold permits advancement.
 
+## Activation contract
+
+Activation is decided by fields, never by prose. The machine-readable contract is
+`activation` in `KEYFLOWOS_PLATFORM_DAG.yaml`:
+
+| Transition | Message on issue #80 |
+|---|---|
+| INACTIVE_SUCCESSOR or HELD -> ACTIVE | `message_type: DIRECTIVE`, `sender: chatgpt`, author `SaCH-PRO`, `programme: KEYFLOWOS_PLATFORM_CONVERGENCE`, `programme_action: ACTIVATE` |
+| ACTIVE -> HELD | `message_type: DIRECTIVE` or `HOLD`, same sender/author, same `programme`, `programme_action: HOLD` |
+
+- Only valid authority messages whose `programme` field names this programme are
+  considered. The newest one (created_at, then comment id) decides.
+- With no such message, or when #80 cannot be read, the programme stays
+  INACTIVE_SUCCESSOR. A message naming the programme with any other action, or with
+  a REVIEW/RESUME type, fails closed to HELD.
+- Never an activation: this file's presence or merge, prose or objective text,
+  message or packet ids (including `KEYFLOWOS_PLATFORM_CONVERGENCE_PREACTIVATION`),
+  REVIEW/RESUME, AUTO_EVENT, derived programme-state, or any other sender/author.
+- Activating this programme releases no other hold. ACTIVE is necessary, never
+  sufficient: packet advancement still passes `reconcile.mjs`, where any newer
+  authority message makes derived state stale.
+
+`scripts/agent-control/lib/platform-dag.mjs` implements the contract as a pure
+function (`platformProgrammeState`) and a structural validator. It is not wired
+into the orchestrator or worker; teaching the dispatcher about this programme is
+KF-PLAT-AUTO-001.
+
 ## Target operating model
 
 - **Web:** Next.js on Vercel is the single canonical production frontend.
@@ -71,20 +98,38 @@ old semantic head is stale and must be refreshed.
 
 ## Human-only gates
 
+The machine-readable list is `human_gates` in `KEYFLOWOS_PLATFORM_DAG.yaml`.
 Autonomy stops for:
-- production DNS/domain cutover;
-- destructive production data/schema action;
-- creation of paid infrastructure/resources;
-- entry/rotation of secrets or OAuth credentials when no safe connected writer exists;
-- real provider traffic not already authorized;
-- major architecture override;
-- lowering/weakening a security, tenancy, branch, proof or admission gate;
-- triggering or promoting a production deployment/release;
-- any production data mutation that is not already covered by a separately admitted, reversible operational runbook.
+- triggering, promoting or releasing a production deployment (`production_deployment_or_release`);
+- any production runtime/config/infrastructure/state change not covered by a separately admitted, reversible operational runbook (`production_mutation`);
+- any production application data write (`production_data_mutation`);
+- production DNS/domain cutover (`production_dns_or_domain_cutover`);
+- destructive production data/schema action (`destructive_production_data_or_schema_action`);
+- creation of paid infrastructure/resources (`paid_resource_creation`);
+- entry/rotation/connection of secrets or OAuth credentials when no safe connected writer exists (`secret_or_oauth_entry_without_safe_connected_writer`);
+- real provider traffic not already authorized (`unauthorized_real_provider_traffic`);
+- major architecture override (`major_architecture_override`);
+- lowering/weakening a security, tenancy, branch, CI, proof, review or admission gate (`weakening_security_tenancy_branch_ci_proof_review_or_admission_gate`).
+
+Inherited, unchanged: every `never_automatic` effect in
+`docs/development/AGENT_AUTOPILOT_POLICY.yaml` (including forensic rebaseline,
+programme-map refresh, scope widening, schema-primitive and migration-strategy
+choice, and agent self-approval) stays outside automation and keeps its existing
+owner. This programme may add gates, never remove one; the validator fails if any
+policy effect is not inherited.
+
+Gates apply to every packet. The per-packet `human_gates` annotations in the DAG
+mark where a gate is expected; they are hints, not an exhaustive list.
 
 Everything else should be driven through the control loop. Human gates are conservative ceilings: a packet may characterize, test, or prepare a production-affecting change autonomously, but the actual production deployment, release, DNS switch, data mutation, destructive schema action, paid-resource creation, credential entry, or other listed effect cannot occur without the corresponding explicit human authority.
 
 ## Phases
+
+Phases group packets for reading; they do not order them. Every packet has explicit
+`depends_on` edges in `KEYFLOWOS_PLATFORM_DAG.yaml`, which uses the same schema and
+YAML subset as `KEYFLOWOS_PROGRAMME_DAG.yaml`. `node scripts/agent-control/validate-platform-dag.mjs`
+proves it parses with the repository codec, has no cycle or backward edge, drains
+completely, and satisfies the gate and activation contract.
 
 ### Phase 0 — Activate the successor programme safely
 - KF-PLAT-AUTO-001: teach the dispatcher to recognize this successor programme
@@ -153,7 +198,7 @@ Everything else should be driven through the control loop. Human gates are conse
 ### Phase 8 — Environment and secrets convergence
 - KF-CONFIG-001: canonical development/test/staging/production env schema.
 - KF-CONFIG-002: secret classification/inventory.
-- KF-CONFIG-003: select one secrets platform. **Human cost/connection gate if needed.**
+- KF-CONFIG-003: select one secrets platform. **Human paid-resource gate if it costs money; human secret/OAuth gate if connecting it needs a credential.**
 - KF-CONFIG-004: project config safely into GitHub/Vercel/Hetzner/Supabase.
 - KF-CONFIG-005: CI drift proof for required/public/server-only variables.
 

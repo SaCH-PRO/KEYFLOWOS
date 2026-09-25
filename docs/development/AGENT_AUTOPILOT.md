@@ -251,8 +251,14 @@ A second machine-readable DAG now exists at
 `docs/development/KEYFLOWOS_PLATFORM_DAG.yaml`. It is intentionally marked
 `INACTIVE_SUCCESSOR`. The current orchestrator must not infer activation from file
 presence. A future admitted packet (`KF-PLAT-AUTO-001`) may add multi-programme selection,
-but only an explicit valid ChatGPT authority message on issue #80 may activate the
-successor programme. Existing holds remain authoritative until explicitly released.
+but only an explicit valid ChatGPT `DIRECTIVE` on issue #80 carrying
+`programme: KEYFLOWOS_PLATFORM_CONVERGENCE` and `programme_action: ACTIVATE` may activate
+the successor programme (contract: `activation` in the platform DAG). Existing holds remain
+authoritative until explicitly released; activation releases none of them.
+
+The platform DAG uses the same schema and YAML subset as the application DAG, and is
+proved by `node scripts/agent-control/validate-platform-dag.mjs`. The orchestrator does
+not load it: `lib/platform-dag.mjs` is a validator, not a selector input.
 
 GitHub Copilot review is part of the successor admission model: substantive findings must
 be exact-head dispositioned before Claude RETURN/ChatGPT admission. Copilot does not gain

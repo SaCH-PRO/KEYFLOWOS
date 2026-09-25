@@ -12,6 +12,8 @@ Kimi may independently challenge/prove work, but no required path depends on Kim
 ## ChatGPT
 - owns architecture and canonical boundary decisions;
 - chooses/authorizes packets through issue #80;
+- activates or holds this programme only with the explicit `programme` and
+  `programme_action` fields defined in the DAG's `activation` contract;
 - resolves contradictions and scope changes;
 - reviews exact-head RETURN evidence;
 - alone grants READY_TO_MERGE under the agent-control protocol;
@@ -48,9 +50,12 @@ Kimi may independently challenge/prove work, but no required path depends on Kim
 - cannot redefine architecture or self-approve semantic work.
 
 ## Human owner
-Required only for the explicit human gates recorded in
-KEYFLOWOS_PLATFORM_DAG.yaml. Ordinary implementation/review/merge mechanics
-should proceed unattended once the relevant authority exists.
+Required for every gate in `human_gates.gates` of KEYFLOWOS_PLATFORM_DAG.yaml,
+for every packet, whenever that effect would occur. The per-packet gate
+annotations are hints, not an exhaustive list. Every `never_automatic` effect of
+AGENT_AUTOPILOT_POLICY.yaml is inherited unchanged and keeps its existing owner.
+Ordinary implementation/review/merge mechanics should proceed unattended once the
+relevant authority exists.
 
 ## Copilot disposition schema
 

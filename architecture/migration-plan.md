@@ -125,7 +125,54 @@ This document tracks the planned migration from the current architecture to the 
 
 **Verification:** Each deliverable in `docs/development/e2e-hardening-plan.md` has explicit acceptance criteria and file references.
 
+### Platform & Workflow Convergence — successor programme (INACTIVE)
+
+**Goal:** Reach the "Platform, Data-Plane and Delivery Target" in `target-architecture.md`.
+
+**Source documents:** `docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md`
+(narrative, gates, completion contract) and `docs/development/KEYFLOWOS_PLATFORM_DAG.yaml`
+(63 packets with explicit dependency edges; the executable order). This section is a
+summary; the DAG is authoritative for ordering.
+
+**Status:** not started and not authorized. It activates only on a ChatGPT `DIRECTIVE` on
+issue #80 carrying `programme: KEYFLOWOS_PLATFORM_CONVERGENCE` and
+`programme_action: ACTIVATE`, and it does not displace the application convergence
+programme or any hold on it.
+
+| Group | Scope | Packets |
+|---|---|---|
+| P0 | activate the successor safely; Copilot disposition as admission input | KF-PLAT-AUTO-001..003 |
+| P1 | canonical Vercel frontend, domain cutover, Hetzner web retirement | KF-INFRA-001..005 |
+| P2 | Supabase lineage, identity boundary, one application database | KF-DATA-001..005 |
+| P3 | isolated staging; previews cannot mutate production | KF-STAGE-001..006 |
+| P4 | GHCR images, pull-by-SHA deploy, rollback, promotion | KF-DEPLOY-001..006 |
+| P5 | backups, PITR, object storage, restore drill | KF-RESILIENCE-001..005 |
+| P6 | Sentry, release identity, logs, OpenTelemetry, alerting | KF-OBS-001..006 |
+| P7 | rulesets, CODEOWNERS, merge queue, CI, supply-chain security | KF-GOV-001..003, KF-CI-001..002, KF-SEC-001..003 |
+| P8 | env schema, secret inventory, secrets platform, drift proof | KF-CONFIG-001..005 |
+| P9 | worktree isolation, claims, conflict admission, unattended launch | KF-AGENT-001..007 |
+| P10 | infrastructure as code and clean-machine rebuild | KF-IAC-001..004 |
+| P11 | whole-stack reassessment, failure matrix, final checkpoint | KF-QUAL-001..003 |
+
+**Human gates:** production deploy/release, production mutation, production data
+mutation, DNS/domain cutover, destructive data/schema action, paid resources,
+secret/OAuth entry without a safe connected writer, unauthorized provider traffic,
+major architecture override, and any gate weakening; plus every `never_automatic`
+effect of `AGENT_AUTOPILOT_POLICY.yaml`, inherited unchanged.
+
+**Verification:** `node scripts/agent-control/validate-platform-dag.mjs` and
+`scripts/agent-control/tests/platform-dag.spec.mjs`; per packet, the programme's
+completion contract.
+
 ## Changelog
+
+### 2026-09-25 — Successor platform programme recorded (inactive)
+
+- Recorded the platform/workflow convergence successor programme (PR #93) in
+  `target-architecture.md` and this plan so the architecture memory has one target.
+- No code, runtime or production change; the programme is inactive.
+- Re-ran `inventory.py` and `dependency_scan.py` so the new documents and validator
+  appear in `architecture/inventory.json` and `architecture/dependencies.json`.
 
 ### 2026-08-30 — Deep scan and E2E hardening plan
 
