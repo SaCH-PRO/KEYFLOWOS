@@ -57565,9 +57565,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1484,
+      "lines": 1535,
       "path": "architecture/architecture.json",
-      "size_bytes": 46876
+      "size_bytes": 48688
     },
     {
       "extension": ".yaml",
@@ -57613,9 +57613,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63015,
+      "lines": 63017,
       "path": "architecture/inventory.json",
-      "size_bytes": 1631209
+      "size_bytes": 1631271
     },
     {
       "extension": ".md",
@@ -61730,9 +61730,9 @@
         "node:fs",
         "node:path"
       ],
-      "lines": 279,
+      "lines": 299,
       "path": "scripts/agent-control/lib/platform-dag.mjs",
-      "size_bytes": 12702
+      "size_bytes": 13941
     },
     {
       "exports": [
@@ -61999,9 +61999,9 @@
         "node:fs",
         "node:test"
       ],
-      "lines": 329,
+      "lines": 347,
       "path": "scripts/agent-control/tests/platform-dag.spec.mjs",
-      "size_bytes": 16069
+      "size_bytes": 17234
     },
     {
       "exports": [],
@@ -63012,6 +63012,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3439,
     "total_files": 4427,
-    "total_lines": 1126532
+    "total_lines": 1126623
   }
 }
