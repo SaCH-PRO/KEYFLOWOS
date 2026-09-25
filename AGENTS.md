@@ -80,7 +80,7 @@ git commit --amend --no-edit
 
 ## Environment
 
-- **Node:** 20.x (see `.nvmrc`)
+- **Node:** 24.x (see `.nvmrc`)
 - **Package Manager:** pnpm 9.15.0
 - **Monorepo:** pnpm workspaces with Turborepo
 

@@ -392,7 +392,7 @@
 
 | Feature | Sub-feature | Tier | Status | Evidence / Blocker |
 |---------|-------------|------|--------|--------------------|
-| pnpm workspace / engines | Node 20.18.1 / pnpm 9.15.0 | P0 | ✅ Working | `.nvmrc`, `package.json` |
+| pnpm workspace / engines | Node 24.x / pnpm 9.15.0 | P0 | ✅ Working | `.nvmrc`, `package.json` |
 | Root turbo pipeline | `typecheck`/`build`/`test:*` | P3 | ✅ Working | Works when dev server is not holding the Prisma engine DLL; EPERM is an operational note, not a blocker |
 | Per-app builds | server/web/voice-agent/packages | P0 | ✅ Working | All compile cleanly |
 | Dev launcher | `scripts/launch-dev.sh` | P0 | ✅ Working | |
