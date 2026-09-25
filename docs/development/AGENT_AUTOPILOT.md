@@ -155,6 +155,30 @@ It holds an exclusive PID lock so two workers can never drive one packet, and
 records processed message ids in a durable cursor so a directive is never
 processed twice. Missing or expired auth reports `WAITING_EXTERNAL_AGENT`.
 
+Hardening (CG-REVIEW-META-AUTO-WORKER-001/-002, worker contract 2):
+
+- **Authority.** A comment wakes the worker only if it is a `DIRECTIVE` or
+  `REVIEW` with `sender: chatgpt` exactly, and its GitHub author is in the
+  allowlist (default `SaCH-PRO`). The repository is public, so `sender:` alone
+  proves nothing. Claude's own messages come from the same account and are
+  excluded by their sender. This is an owner-account boundary, not proof that
+  a message came from ChatGPT (`select-directive.ps1`).
+- **Completion.** A run counts as processed only when the session ends with
+  `KEYFLOW-WORKER-DONE: <message_id>`. Exit status alone proves nothing
+  (`evaluate-run.ps1`).
+- **Bounded retry.** Two consecutive failures with the same verdict mark the
+  directive `HELD_RETRYABLE`. It is not processed, Claude is not invoked for it
+  again, and one MOMENTUM escalation is posted. A newer directive supersedes
+  it, or the operator releases it with `-ReleaseHold`. A 5-attempt backstop
+  catches a blocker whose wording keeps changing.
+- **Isolation.** Every wake runs in its own git worktree outside the checkout,
+  keyed by message id. The worktree is detached at
+  `origin/<implementation_branch>`, the directive's `source_main`, or
+  `origin/main`, in that order of preference. It is reused on retry, and
+  removed only when it is clean and fully pushed.
+- **Install contract.** The worker wakes Claude only under an install record
+  for its own contract version, and never while paused (`-Pause`).
+
 See `AGENT_AUTOPILOT_OPERATIONS.md` for installation, status, disabling and
 recovery.
 
@@ -173,8 +197,12 @@ recovery.
 - `scripts/agent-control/validate-dag.mjs` — DAG executability proof.
 - `scripts/agent-control/proof-mutation.mjs` + `negative-controls.yaml` — negative controls.
 - `scripts/agent-control/claude-worker.ps1` (+ install/uninstall) — local worker.
-- `scripts/agent-control/tests/*.spec.mjs` — proofs and negative controls.
+- `scripts/agent-control/select-directive.ps1` — the worker's command-authority rule.
+- `scripts/agent-control/evaluate-run.ps1` — the worker's run verdict.
+- `scripts/agent-control/tests/*.spec.mjs` — portable proofs.
+- `scripts/agent-control/tests/windows/*.spec.mjs` — Windows worker/install proofs (fail off Windows).
 - `.github/workflows/agent-control-autopilot.yml` — event/wake/merge automation.
+- `.github/workflows/agent-control-worker-proof.yml` — required Ubuntu + Windows proof.
 
 ## Provenance
 

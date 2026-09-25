@@ -22,6 +22,7 @@ on:
       - "Agent Control Gate"
       - "Branch divergence"
       - "DAST (HawkScan)"
+      - "Agent Control Worker Proof"
     types: [completed]
   schedule:
     - cron: "17 * * * *"
@@ -79,6 +80,9 @@ jobs:
         with:
           node-version: '20.18.1'
       - name: Run control-plane proofs
+        env:
+          # PowerShell-backed proofs fail rather than skip when it is missing.
+          KF_REQUIRE_POWERSHELL: '1'
         run: node --test scripts/agent-control/tests/*.spec.mjs
       - name: Prove the programme DAG is executable
         run: node scripts/agent-control/validate-dag.mjs

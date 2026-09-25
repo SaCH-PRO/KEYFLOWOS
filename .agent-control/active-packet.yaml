@@ -1,9 +1,12 @@
 packet_id: KF-META-AUTO-001
-directive_message_id: CG-DIRECTIVE-META-AUTO-001
-ack_message_id: CC-ACK-META-AUTO-001
-review_message_id: CG-REVIEW-META-AUTO-003
-source_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
-implementation_branch: impl/kf-meta-auto-001-orchestrator
+correction_id: KF-META-AUTO-001-WORKER-HARDENING
+directive_message_id: CG-RESUME-META-AUTO-WORKER-001
+ack_message_id: CC-ACK-META-AUTO-WORKER-RESUME-001
+review_message_id: CG-REVIEW-META-AUTO-WORKER-003
+prior_review_message_id: CG-REVIEW-META-AUTO-WORKER-001
+source_main: 403881dc9b9d99f698a4670c75e0fd6bc5225159
+implementation_branch: impl/kf-meta-auto-001-worker-hardening
+superseded_pr: 88
 state: READY_TO_MERGE
 health: GREEN
 scope_changed: false
@@ -12,106 +15,76 @@ programme_credit: ZERO
 merge_authority: true
 
 objective: >
-  Turn the existing KEYFLOWOS agent-control protocol into executable unattended
-  orchestration so the human is no longer the message relay between ChatGPT, Claude,
-  reviewers, GitHub and CI. The 35-packet programme and every safety boundary are
-  preserved; this meta-package earns zero packet credit.
+  Harden the local Claude worker that merged in PR #87 so it can be restarted
+  safely: platform-correct Linux + Windows proof, authenticated directive
+  dispatch, bounded retry, and a dedicated worktree per wake. Carries the
+  W0-W3 fixes and the YAML escape correction from PR #88 with their
+  provenance intact.
 
-design_principle: >
-  Maximum autonomous throughput SUBJECT TO invariant preservation. The orchestrator
-  must know when it is allowed to move, and must fail closed on ambiguity.
+authorized_scope:
+  - id: WORKER-CI-PLATFORM-001
+    obligation: >
+      Portable control-plane proofs on Ubuntu; Windows-only worker, install and
+      uninstall proofs on windows-latest, failing rather than skipping off
+      Windows. The Windows job is required admission evidence.
+  - id: WORKER-DIRECTIVE-AUTHORITY-001
+    obligation: >
+      A DIRECTIVE or REVIEW is actionable only with sender exactly chatgpt AND a
+      GitHub comment author in the allowlist [SaCH-PRO]. Missing, claude, other
+      and forged senders, AUTO_EVENT and plain text are rejected.
+  - id: W6
+    obligation: >
+      Two materially identical failed attempts on one directive stop automatic
+      retries, hold the directive as HELD_RETRYABLE (not processed), escalate
+      once, and need a new directive or an explicit operator release.
+  - id: W7
+    obligation: >
+      Every wake runs in a dedicated git worktree keyed by directive, never in
+      the interactive checkout. Cleanup never deletes uncommitted or unpushed
+      work.
+  - id: PR88-CARRY
+    obligation: W0-W3 worker fixes and the YAML escape correction, provenance kept
+  - id: PROOF-AND-CONTROLS
+    obligation: tests, negative controls, docs and control artifacts needed to prove the above
 
-deliverables:
-  - id: AUTO-DAG
-    status: RESOLVED
-  - id: AUTO-STATE-MACHINE
-    status: RESOLVED
-  - id: AUTO-EVENTS
-    status: RESOLVED
-  - id: AUTO-ORCHESTRATOR
-    status: RESOLVED
-  - id: AUTO-ADMISSION
-    status: RESOLVED
-  - id: AUTO-MOMENTUM
-    status: RESOLVED
-  - id: AUTO-PROOF-MUTATION
-    status: RESOLVED
-  - id: AUTO-STATUS
-    status: RESOLVED
-  - id: AUTO-AGENT-ADAPTERS
-    status: RESOLVED
-  - id: AUTO-GITHUB-WORKFLOW
-    status: RESOLVED
-  - id: AUTO-CORRECTION-LOOP
-    status: RESOLVED
-  - id: AUTO-MERGE-CHECKPOINT
-    status: RESOLVED
-  - id: AUTO-RECOVERY
-    status: RESOLVED
-  - id: AUTO-TESTS
-    status: RESOLVED
-  - id: AUTO-DOCS
-    status: RESOLVED
+prohibited:
+  - merge of this PR or of PR 88
+  - restarting the autonomous worker
+  - ACTION-001 work of any kind
+  - repository admin settings (branch protection, rulesets)
+  - production mutation or provider traffic
+  - weakening any gate, proof or negative control
 
-mandatory_characterization_before_edits:
-  - docs/development/AGENT_CONTROL_PLANE.md
-  - docs/development/EXECUTION_CONTROL_STANDARD.md
-  - CLAUDE.md and root AGENTS.md
-  - .agent-control schemas/examples and agent-control-gate.yml
-  - branch-divergence and ordinary CI workflows
-  - issue #80 message protocol and current control artifact shapes
-  - architecture/os/OS.md — HALTED constraints ONLY, no cycle resumed
-  - GitHub-native triggers for PR, workflow, issue-comment and scheduled events
-  - deterministic in-repo vs external model/credential boundary
-  - Claude / ChatGPT-OpenAI / Kimi-Codex adapter invocation without a canonical vendor
-  - surface contradictions before semantic implementation
+invariants:
+  - no worker-actionable message without sender chatgpt and an allowlisted GitHub author
+  - a directive is recorded as processed only on an explicit completion marker
+  - no third Claude invocation after two identical failed attempts on one directive
+  - a woken session never runs in the interactive checkout
+  - worker cleanup never removes uncommitted or unpushed work
 
-architecture_constraints:
-  - repository remains the durable source of control evidence
-  - one canonical packet contract across all agents
-  - no agent self-approval
-  - deterministic code decides mechanical transitions; models decide bounded semantic roles only
-  - architecture contradictions stop advancement
-  - external research/innovation suggestions become proposals, never silent code changes
-  - no competing dynamic programme state stores
-  - event handling must be idempotent and concurrency-safe
-  - exact PR/head/main identities carried through every admission action
-  - all automatic actions auditable back to event + rule + evidence
-  - automation failure must not weaken existing manual gates
-
-safety:
-  production_release_authorized: false
-  production_mutations_authorized: false
-  real_provider_traffic_authorized: false
-  forensic_rebaseline_authorized: false
-  programme_map_refresh_authorized: false
-  architecture_os_cycles_authorized: false
-  secrets_committed: false
-  destructive_github_admin_changes: false
-  auto_deploy: false
-  self_merge: false
-  forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-
-required_progress_before_implementation:
-  - exact file/workflow inventory
-  - proposed state/event schema
-  - canonical dynamic-state decision
-  - agent adapter plan and credential requirements
-  - concurrency/idempotency design
-  - any contradiction or platform limitation
+proof_obligations:
+  - exact-head CI/CD Pipeline, Branch divergence, DAST (HawkScan) green
+  - exact-head Agent Control Gate required and green
+  - exact-head portable Ubuntu proof and Windows worker proof green
+  - senderless, claude-authored and forged non-allowlisted directives rejected
+  - sender chatgpt from SaCH-PRO accepted and wakes exactly once
+  - two identical blocked attempts, then held, one escalation, no third invocation
+  - a changed blocker signature permits a new bounded attempt
+  - worktree path distinct from the interactive checkout
+  - cleanup never deletes uncommitted work
+  - worker is a no-op unless the hardened install is in place
+  - installer ScheduledTask path resolvable on Windows; non-elevated fallback explicit and reversible
+  - 14+ negative controls live, none vacuous
 
 stop_conditions:
-  - requires making issue #80 non-auditable or replacing repository evidence with ephemeral state
-  - requires an agent to approve its own semantic work
-  - requires production credentials/data
-  - requires weakening branch/CI/agent-control gates
-  - GitHub event model cannot support a required invariant without a new approved service
-  - external agent invocation requires an unapproved credential or paid service
-  - any ambiguity over who owns architecture/admission decisions
+  - any new architecture ambiguity
+  - inability to isolate background work safely on Windows
+  - any required permission outside the bounded gh/git/node/file-tool allowance
+  - any production or provider action
 
 held_packets:
   - packet_id: KF-EXEC-ACTION-001
     hold_message_id: CG-HOLD-ACTION-AUTO-001
     branch_cut: false
     local_work: none
-    resume_condition: explicit CG-RESUME-ACTION-* after KF-META-AUTO-001 is merged and verified
+    resume_condition: explicit CG-RESUME-ACTION-* after KF-META-AUTO-001 is checkpointed

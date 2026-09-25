@@ -1,9 +1,15 @@
 /**
- * Worker proofs.
+ * Portable worker proofs.
  *
  * These exercise the PowerShell worker's real behaviour where PowerShell is
- * available, and its parseable structure everywhere else. A worker that cannot
- * be verified is a worker that can silently stop waking Claude.
+ * available (pwsh on Linux included), and its parseable structure everywhere
+ * else. A worker that cannot be verified is a worker that can silently stop
+ * waking Claude.
+ *
+ * Proofs that need Windows itself -- ScheduledTasks cmdlet resolution, the
+ * install/uninstall round trip, and the real worker tick with its worktree,
+ * retry bound and authority filter -- live in tests/windows/, which FAILS off
+ * Windows instead of skipping (WORKER-CI-PLATFORM-001).
  */
 
 import test from 'node:test';
@@ -12,20 +18,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { PS } from './helpers/powershell.mjs';
 
 const WORKER = 'scripts/agent-control/claude-worker.ps1';
 const INSTALL = 'scripts/agent-control/install-claude-worker.ps1';
 const UNINSTALL = 'scripts/agent-control/uninstall-claude-worker.ps1';
-
-function powershell() {
-  for (const bin of ['pwsh', 'powershell']) {
-    const probe = spawnSync(bin, ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' });
-    if (probe.status === 0) return bin;
-  }
-  return null;
-}
-
-const PS = powershell();
 
 test('all worker scripts exist', () => {
   for (const file of [WORKER, INSTALL, UNINSTALL]) {
@@ -39,7 +36,7 @@ test('the worker never embeds a credential', () => {
   assert.ok(!/gh(p|o|u|s|r)_[A-Za-z0-9]{20,}/.test(text), 'no GitHub token may appear');
   assert.ok(!/sk-[A-Za-z0-9]{20,}/.test(text), 'no API key may appear');
   assert.ok(!/ANTHROPIC_API_KEY\s*=/.test(text), 'the worker must not set an API key');
-  assert.match(text, /gh auth status/, 'it must probe the existing gh session instead');
+  assert.match(text, /'auth', 'status'/, 'it must probe the existing gh session instead');
 });
 
 test('the worker declares the constraints it must not relax', () => {
@@ -61,7 +58,7 @@ test('install and uninstall are a matched, reversible pair', () => {
 // ------------------------------------------------------- live PowerShell
 
 test('every worker script parses with zero errors', { skip: PS ? false : 'no PowerShell available' }, () => {
-  for (const file of [WORKER, INSTALL, UNINSTALL]) {
+  for (const file of [WORKER, INSTALL, UNINSTALL, 'scripts/agent-control/select-directive.ps1', 'scripts/agent-control/evaluate-run.ps1']) {
     const script = `$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '${file}').Path,[ref]$null,[ref]$e); if($e -and $e.Count){ exit 1 } else { exit 0 }`;
     const run = spawnSync(PS, ['-NoProfile', '-Command', script], { encoding: 'utf8' });
     assert.equal(run.status, 0, `${file} has parse errors`);
@@ -74,7 +71,12 @@ test('-Status reports auth without side effects', { skip: PS ? false : 'no Power
   assert.match(run.stdout, /KEYFLOWOS Claude worker status/);
   assert.match(run.stdout, /gh\s+:\s+(READY|WAITING_EXTERNAL_AGENT)/);
   assert.match(run.stdout, /claude\s+:\s+(READY|WAITING_EXTERNAL_AGENT)/);
-  assert.match(run.stdout, /lock\s+:\s+free/, '-Status must not take the lock');
+  // Assert -Status does not CHANGE the lock, not that the lock happens to be
+  // free: a worker installed by this very directive legitimately holds it.
+  assert.match(run.stdout, /lock\s+:\s+(free|held)/, '-Status must report the lock');
+  const after = spawnSync(PS, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', WORKER, '-Status'], { encoding: 'utf8' });
+  const lockLine = (out) => (out.match(/lock\s+:\s+\S+/) || [''])[0];
+  assert.equal(lockLine(run.stdout), lockLine(after.stdout), '-Status must not mutate the lock');
 });
 
 test('a held lock stops a second worker from starting', { skip: PS ? false : 'no PowerShell available' }, () => {
@@ -159,4 +161,33 @@ test('the cursor makes directive processing idempotent', { skip: CHANNEL_READY ?
   assert.match(run.stdout, /no unprocessed directive/, `${pending[1]} was recorded as processed and must not wake Claude again`);
   assert.ok(!/would invoke claude/.test(run.stdout), 'no invocation may be planned for a processed directive');
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the worker delegates authority and verdict to the shared scripts', () => {
+  // Both decisions are proved behaviourally: select-directive.spec.mjs and
+  // evaluate-run.spec.mjs against fixtures, and tests/windows/worker-*.spec.mjs
+  // through the real tick. This only pins that the worker calls those scripts
+  // rather than growing a second, untested copy of either rule.
+  const text = fs.readFileSync(WORKER, 'utf8');
+  assert.match(text, /select-directive\.ps1/, 'the worker must call the shared selector');
+  assert.match(text, /evaluate-run\.ps1/, 'the worker must call the shared evaluator');
+  assert.ok(!/function Get-ControlField/.test(text), 'the worker must not parse authority itself');
+});
+
+test('the woken session gets a bounded allowlist, not a permission bypass', () => {
+  const text = fs.readFileSync(WORKER, 'utf8');
+  assert.match(text, /--allowedTools/, 'the non-interactive session needs an explicit allowlist');
+  // Look for real usage, not the comment that explains why it is not used:
+  // scan only non-comment lines.
+  const code = text
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('#'))
+    .join('\n');
+  assert.ok(
+    !/--dangerously-skip-permissions/.test(code),
+    'the worker must not bypass all permission checks',
+  );
+  for (const allowed of ["Bash(gh *)", "Bash(git *)", "Bash(node *)"]) {
+    assert.ok(text.includes(allowed), `allowlist must cover ${allowed}`);
+  }
 });

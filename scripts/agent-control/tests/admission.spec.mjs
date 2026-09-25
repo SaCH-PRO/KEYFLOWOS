@@ -1,13 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { evaluateAdmission, ADMISSION_REASONS } from '../lib/admission.mjs';
+import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
+import { parseYaml } from '../lib/yaml.mjs';
 
 const HEAD = 'a'.repeat(40);
 const BASE = 'b'.repeat(40);
 const SEMANTIC = 'c'.repeat(40);
 
 const greenRuns = (sha = HEAD) =>
-  ['CI/CD Pipeline', 'Agent Control Gate', 'Branch divergence', 'DAST (HawkScan)'].map((name, i) => ({
+  REQUIRED_WORKFLOWS.map((name, i) => ({
     id: 100 + i,
     name,
     head_sha: sha,
@@ -146,4 +150,45 @@ test('NEGATIVE CONTROL: the prototype head filter would have admitted a stale tr
   );
   assert.equal(prototypeVerdict, true, 'the old check passes on stale runs');
   assert.equal(evaluateAdmission(admissible({ workflow_runs: mixed })).eligible, false, 'the new check rejects them');
+});
+
+test('the Windows worker proof is required: an impl PR without it is not admissible', () => {
+  // WORKER-CI-PLATFORM-001: the Windows job is required evidence, not advisory.
+  assert.ok(REQUIRED_WORKFLOWS.includes('Agent Control Worker Proof'));
+  const withoutWorkerProof = greenRuns().filter((r) => r.name !== 'Agent Control Worker Proof');
+  const verdict = evaluateAdmission(admissible({ workflow_runs: withoutWorkerProof }));
+  assert.equal(verdict.eligible, false);
+  assert.equal(verdict.reason, ADMISSION_REASONS.MISSING_WORKFLOWS);
+  assert.deepEqual(verdict.detail, ['Agent Control Worker Proof']);
+
+  const red = greenRuns().map((r) => (r.name === 'Agent Control Worker Proof' ? { ...r, conclusion: 'failure' } : r));
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: red })).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
+});
+
+test('every required workflow exists, runs on every PR, and wakes the autopilot', () => {
+  // A required name that no workflow file declares -- or one behind a path
+  // filter -- would make every other impl/* PR permanently inadmissible, or
+  // silently unrequired. Check the referent, not the list.
+  const dir = '.github/workflows';
+  const declared = new Map();
+  for (const file of fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f))) {
+    const text = fs.readFileSync(path.join(dir, file), 'utf8');
+    const name = (text.match(/^name:\s*(.+?)\s*$/m) || [])[1];
+    if (name) declared.set(name.replace(/^["']|["']$/g, ''), text);
+  }
+  const autopilot = fs.readFileSync(path.join(dir, 'agent-control-autopilot.yml'), 'utf8');
+  for (const name of REQUIRED_WORKFLOWS) {
+    const text = declared.get(name);
+    assert.ok(text, `no workflow file declares required workflow "${name}"`);
+    assert.match(text, /^\s*pull_request:/m, `"${name}" must run on pull_request`);
+    assert.ok(autopilot.includes(`- "${name}"`), `the autopilot must wake on "${name}" completing`);
+  }
+  const worker = declared.get('Agent Control Worker Proof');
+  const trigger = worker.slice(worker.indexOf('on:'), worker.indexOf('jobs:'));
+  assert.ok(!/paths(-ignore)?:/.test(trigger), 'the worker proof must not be path-filtered');
+  assert.match(worker, /runs-on:\s*windows-latest/);
+  assert.match(worker, /tests\/windows\//, 'the Windows job must run the Windows suite');
+
+  const policy = parseYaml(fs.readFileSync('docs/development/AGENT_AUTOPILOT_POLICY.yaml', 'utf8'));
+  assert.deepEqual([...policy.required_pr_workflows].sort(), [...REQUIRED_WORKFLOWS].sort(), 'policy and code must agree');
 });

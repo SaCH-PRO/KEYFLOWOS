@@ -29,6 +29,7 @@ required_pr_workflows:
   - Agent Control Gate
   - Branch divergence
   - DAST (HawkScan)
+  - Agent Control Worker Proof
 
 concurrency:
   mutation_lock: keyflow-agent-control-mutation
@@ -148,11 +149,30 @@ worker:
   durable_cursor: .agent-control/.worker/cursor.json
   cursor_committed: false
   installation_explicit_and_reversible: true
+  contract_version: 2
+  install_record: .agent-control/.worker/install.json
+  dispatch_authority:
+    selector: scripts/agent-control/select-directive.ps1
+    message_types: [DIRECTIVE, REVIEW]
+    sender_exact: chatgpt
+    author_allowlist: [SaCH-PRO]
+  completion_marker: KEYFLOW-WORKER-DONE
+  retry:
+    max_identical_consecutive_failures: 2
+    max_total_attempts: 5
+    on_exhaustion: HELD_RETRYABLE plus one MOMENTUM escalation
+    release: newer directive, or claude-worker.ps1 -ReleaseHold
+  isolation:
+    mode: dedicated git worktree per wake, keyed by message_id
+    default_root: "%LOCALAPPDATA%/KEYFLOWOS/worker-worktrees"
+    cleanup: only when clean and fully pushed
+  pause: claude-worker.ps1 -Pause / -Resume
 
 disable_autonomous_advancement:
   keep_observation: true
   methods:
     - uninstall the worker scheduled task (autonomous waking stops)
+    - claude-worker.ps1 -Pause (every tick becomes a no-op until -Resume)
     - set KEYFLOW_AGENT_CLAUDE_DISABLED=1 (builder reports DISABLED)
     - set automatic_merge_contract.require_review_status to an unreachable value
     - disable the agent-control-autopilot workflow in the Actions tab
