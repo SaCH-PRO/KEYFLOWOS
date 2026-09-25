@@ -170,7 +170,12 @@ completion contract.
 
 - Recorded the platform/workflow convergence successor programme (PR #93) in
   `target-architecture.md` and this plan so the architecture memory has one target.
-- No code, runtime or production change; the programme is inactive.
+- Added validation-only control-plane code: `scripts/agent-control/lib/platform-dag.mjs`
+  (DAG gate/activation contract validator and a pure activation-state evaluator), the
+  `validate-platform-dag.mjs` CLI and `tests/platform-dag.spec.mjs`. None of it is wired
+  into the orchestrator, worker or selector.
+- No application runtime, schema, deployment or production change; the programme is
+  inactive.
 - Re-ran `inventory.py` and `dependency_scan.py` so the new documents and validator
   appear in `architecture/inventory.json` and `architecture/dependencies.json`.
 

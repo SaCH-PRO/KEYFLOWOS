@@ -194,12 +194,25 @@ function comment(fields, { author = 'SaCH-PRO', at } = {}) {
 const activateFields = (extra = {}) => ({
   message_id: `CG-DIRECTIVE-TEST-${nextId}`,
   message_type: 'DIRECTIVE',
+  packet_id: 'KF-PLAT-AUTO-001',
   sender: 'chatgpt',
+  source_main: 'ad97ea48841a0a4acb13f9a170bae0e07159d6f4',
+  implementation_branch: 'impl/kf-plat-auto-001',
+  state: 'CHARACTERIZING',
+  health: 'GREEN',
+  scope_changed: 'false',
+  production_touched: 'false',
   programme: 'KEYFLOWOS_PLATFORM_CONVERGENCE',
   programme_action: 'ACTIVATE',
   ...extra,
 });
-const stateOf = (comments) => platformProgrammeState(comments, loadPlatformDag(repoRoot).doc).state;
+const without = (fields, key) => {
+  const copy = { ...fields };
+  delete copy[key];
+  return copy;
+};
+const stateOf = (comments, doc = loadPlatformDag(repoRoot).doc) =>
+  platformProgrammeState(comments, doc, loadAutopilotPolicy(repoRoot)).state;
 
 test('the real correction directive does not activate the programme', () => {
   // Names the programme in packet_id and prose and talks about activation, but
@@ -225,7 +238,7 @@ test('the real correction directive does not activate the programme', () => {
 });
 
 test('an explicit ACTIVATE DIRECTIVE from the authority activates the programme', () => {
-  const result = platformProgrammeState([comment(activateFields())], loadPlatformDag(repoRoot).doc);
+  const result = platformProgrammeState([comment(activateFields())], loadPlatformDag(repoRoot).doc, loadAutopilotPolicy(repoRoot));
   assert.equal(result.state, PLATFORM_STATES.ACTIVE);
   assert.equal(result.decided_by.programme_action, 'ACTIVATE');
 });
@@ -273,6 +286,42 @@ test('a newer authority message about something else does not change programme s
     { at: '2026-09-26T11:00:00Z' },
   );
   assert.equal(stateOf([activate, other]), PLATFORM_STATES.ACTIVE);
+});
+
+test('NEGATIVE CONTROL: an ACTIVATE missing any envelope field cannot activate; it holds', () => {
+  for (const key of ['packet_id', 'source_main', 'implementation_branch', 'state', 'health', 'scope_changed', 'production_touched']) {
+    assert.equal(stateOf([comment(without(activateFields(), key))]), PLATFORM_STATES.HELD, `missing ${key} must not activate`);
+  }
+  // A malformed message cannot activate even after an earlier valid ACTIVATE.
+  const good = comment(activateFields(), { at: '2026-09-26T10:00:00Z' });
+  const malformed = comment(without(activateFields(), 'health'), { at: '2026-09-26T11:00:00Z' });
+  assert.equal(stateOf([good, malformed]), PLATFORM_STATES.HELD);
+});
+
+test('source_head satisfies the source_main/source_head envelope slot', () => {
+  const fields = without(activateFields({ source_head: '98ee0e0db5b4bb080941138b9edfcd4f52092cd7' }), 'source_main');
+  assert.equal(stateOf([comment(fields)]), PLATFORM_STATES.ACTIVE);
+  assert.equal(stateOf([comment(without(activateFields(), 'source_main'))]), PLATFORM_STATES.HELD);
+});
+
+test('NEGATIVE CONTROL: an edited fallback cannot make unreadable #80 activate', () => {
+  const tampered = clone(loadPlatformDag(repoRoot).doc);
+  tampered.activation.evaluation.authority_unverifiable = 'ACTIVE';
+  tampered.activation.evaluation.no_matching_message = 'ACTIVE';
+  tampered.activation.evaluation.unrecognized_programme_action = 'ACTIVE';
+  assert.equal(stateOf(null, tampered), PLATFORM_STATES.INACTIVE);
+  assert.equal(stateOf([], tampered), PLATFORM_STATES.INACTIVE);
+  assert.equal(stateOf([comment(activateFields({ programme_action: 'RESUME' }))], tampered), PLATFORM_STATES.INACTIVE);
+});
+
+test('NEGATIVE CONTROL: an edited contract cannot widen who may activate', () => {
+  const tampered = clone(loadPlatformDag(repoRoot).doc);
+  tampered.activation.activate.message_type = 'REVIEW';
+  assert.equal(stateOf([comment(activateFields({ message_type: 'REVIEW' }))], tampered), PLATFORM_STATES.INACTIVE);
+  const noEnvelope = clone(loadPlatformDag(repoRoot).doc);
+  noEnvelope.activation.required_envelope = ['message_id'];
+  assert.ok(codes(validatePlatformContract(noEnvelope, loadAutopilotPolicy(repoRoot))).includes('ACTIVATION_ENVELOPE_MISMATCH'));
+  assert.equal(stateOf([comment(activateFields())], noEnvelope), PLATFORM_STATES.INACTIVE);
 });
 
 test('the committed DAG file is the one under test', () => {

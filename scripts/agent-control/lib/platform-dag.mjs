@@ -92,11 +92,23 @@ export function validatePlatformContract(doc, policy) {
   if (activation.activate?.message_type && activation.activate.message_type !== 'DIRECTIVE') {
     add('ACTIVATION_TYPE_NOT_DIRECTIVE', 'only a DIRECTIVE may activate the successor programme');
   }
+  if (activation.hold && !sameSet(activation.hold.message_types, ['DIRECTIVE', 'HOLD'])) {
+    add('HOLD_TYPES_MISMATCH', 'activation.hold.message_types must be exactly [DIRECTIVE, HOLD], as the evaluator enforces');
+  }
+  if (!sameSet(activation.required_envelope, REQUIRED_ENVELOPE)) {
+    add('ACTIVATION_ENVELOPE_MISMATCH', `activation.required_envelope must equal the issue #80 envelope ${JSON.stringify(REQUIRED_ENVELOPE)}`);
+  }
   if (activation.evaluation?.no_matching_message !== PLATFORM_STATES.INACTIVE) {
     add('ACTIVATION_FAILS_OPEN', 'with no matching message the programme must stay INACTIVE_SUCCESSOR');
   }
   if (activation.evaluation?.authority_unverifiable !== PLATFORM_STATES.INACTIVE) {
     add('ACTIVATION_FAILS_OPEN', 'unverifiable authority must leave the programme INACTIVE_SUCCESSOR');
+  }
+  if (activation.evaluation?.invalid_contract !== PLATFORM_STATES.INACTIVE) {
+    add('ACTIVATION_FAILS_OPEN', 'an invalid contract must leave the programme INACTIVE_SUCCESSOR');
+  }
+  if (activation.evaluation?.malformed_envelope !== PLATFORM_STATES.HELD) {
+    add('ACTIVATION_FAILS_OPEN', 'a malformed message naming the programme must hold it');
   }
   if (activation.evaluation?.unrecognized_programme_action !== PLATFORM_STATES.HELD) {
     add('ACTIVATION_FAILS_OPEN', 'an unrecognized programme_action must hold the programme');
@@ -151,33 +163,74 @@ export function validatePlatformContract(doc, policy) {
 }
 
 /**
+ * Fields every issue #80 control message must carry (issue #80 body, "Every
+ * message must include"). `source_main/source_head` is satisfied by either.
+ * An authority message missing any of them is malformed and cannot activate.
+ */
+export const REQUIRED_ENVELOPE = Object.freeze([
+  'message_id',
+  'packet_id',
+  'sender',
+  'source_main|source_head',
+  'implementation_branch',
+  'state',
+  'health',
+  'scope_changed',
+  'production_touched',
+]);
+
+export function missingEnvelopeFields(body) {
+  return REQUIRED_ENVELOPE.filter((spec) => spec.split('|').every((key) => readField(body, key) === null));
+}
+
+/**
  * Derive the successor programme's state from raw issue #80 comments.
  *
  * Only valid authority messages (collectAuthority) that carry an explicit
  * `programme:` field equal to this programme are considered; the newest one
- * decides. Prose, ids and packet ids are never read. Fails closed.
+ * decides. Prose, ids and packet ids are never read.
+ *
+ * Fail-closed outcomes are fixed here, not read from the DAG, and the DAG's
+ * contract is validated before any comment is evaluated, so an edited file
+ * cannot turn an unreadable #80 or a malformed message into ACTIVE:
+ *   invalid contract / #80 unverifiable / nothing names this programme -> INACTIVE_SUCCESSOR
+ *   newest naming message malformed or neither ACTIVATE nor HOLD          -> HELD
  *
  * @param {Array|null} comments GitHub issue comments ({id, created_at, user:{login}, body})
  * @param {object} doc parsed platform DAG
+ * @param {object} policy parsed AGENT_AUTOPILOT_POLICY.yaml
  * @returns {{state: string, reason: string, decided_by: object|null}}
  */
-export function platformProgrammeState(comments, doc, options = {}) {
-  const activation = doc.activation || {};
+export function platformProgrammeState(comments, doc, policy, options = {}) {
+  const problems = validatePlatformContract(doc || {}, policy);
+  if (problems.length) {
+    return {
+      state: PLATFORM_STATES.INACTIVE,
+      reason: `activation contract invalid: ${problems.map((p) => p.code).join(', ')}`,
+      decided_by: null,
+    };
+  }
+
   const authority = collectAuthority(comments, options);
   if (!authority.verified) {
-    return { state: activation.evaluation?.authority_unverifiable || PLATFORM_STATES.INACTIVE, reason: authority.reason, decided_by: null };
+    return { state: PLATFORM_STATES.INACTIVE, reason: authority.reason, decided_by: null };
   }
 
   const bodies = new Map((comments || []).map((c) => [String(c.id), c.body || '']));
   const naming = authority.messages
     .map((m) => {
       const body = bodies.get(String(m.comment_id)) || '';
-      return { ...m, programme: readField(body, 'programme'), programme_action: readField(body, 'programme_action') };
+      return {
+        ...m,
+        programme: readField(body, 'programme'),
+        programme_action: readField(body, 'programme_action'),
+        missing_envelope: missingEnvelopeFields(body),
+      };
     })
     .filter((m) => m.programme === doc.programme);
 
   if (!naming.length) {
-    return { state: activation.evaluation?.no_matching_message || PLATFORM_STATES.INACTIVE, reason: 'no valid authority message names this programme', decided_by: null };
+    return { state: PLATFORM_STATES.INACTIVE, reason: 'no valid authority message names this programme', decided_by: null };
   }
 
   const newest = naming[naming.length - 1];
@@ -188,19 +241,26 @@ export function platformProgrammeState(comments, doc, options = {}) {
     programme_action: newest.programme_action,
   };
 
-  const matches = (block, types) =>
-    block &&
-    types.includes(newest.message_type) &&
-    newest.programme_action === block.required_fields?.programme_action;
+  // A malformed message naming the programme can never activate it, but it
+  // is still a signal from the authority about this programme: hold.
+  if (newest.missing_envelope.length) {
+    return {
+      state: PLATFORM_STATES.HELD,
+      reason: `newest message naming this programme lacks envelope fields ${newest.missing_envelope.join(', ')}; failing closed`,
+      decided_by,
+    };
+  }
 
-  if (matches(activation.activate, [activation.activate?.message_type])) {
+  // The contract validator has already pinned these to DIRECTIVE/ACTIVATE and
+  // DIRECTIVE|HOLD/HOLD; they are restated so the outcome never depends on it.
+  if (newest.message_type === 'DIRECTIVE' && newest.programme_action === 'ACTIVATE') {
     return { state: PLATFORM_STATES.ACTIVE, reason: 'newest message naming this programme is an ACTIVATE DIRECTIVE', decided_by };
   }
-  if (matches(activation.hold, activation.hold?.message_types || [])) {
+  if (['DIRECTIVE', 'HOLD'].includes(newest.message_type) && newest.programme_action === 'HOLD') {
     return { state: PLATFORM_STATES.HELD, reason: 'newest message naming this programme is a HOLD', decided_by };
   }
   return {
-    state: activation.evaluation?.unrecognized_programme_action || PLATFORM_STATES.HELD,
+    state: PLATFORM_STATES.HELD,
     reason: `newest message naming this programme (${newest.message_type}, programme_action ${newest.programme_action}) is neither ACTIVATE nor HOLD; failing closed`,
     decided_by,
   };
@@ -210,6 +270,8 @@ export default {
   PLATFORM_DAG_PATH,
   AUTOPILOT_POLICY_PATH,
   PLATFORM_STATES,
+  REQUIRED_ENVELOPE,
+  missingEnvelopeFields,
   loadPlatformDag,
   loadAutopilotPolicy,
   validatePlatformContract,

@@ -43,10 +43,26 @@ activation:
     required_fields:
       programme: KEYFLOWOS_PLATFORM_CONVERGENCE
       programme_action: HOLD
+  # Envelope every #80 message must carry (issue #80 body). A message naming
+  # this programme without all of it cannot activate; it holds.
+  required_envelope:
+    - message_id
+    - packet_id
+    - sender
+    - source_main|source_head
+    - implementation_branch
+    - state
+    - health
+    - scope_changed
+    - production_touched
   evaluation:
     # Of all valid authority messages on #80 whose programme field equals this
     # programme, the newest (created_at, then comment id) decides the state.
+    # These outcomes are fixed in lib/platform-dag.mjs, which also refuses to
+    # evaluate a contract that fails validation; the values here must match.
     decided_by: newest_valid_authority_message_naming_this_programme
+    invalid_contract: INACTIVE_SUCCESSOR
+    malformed_envelope: HELD
     no_matching_message: INACTIVE_SUCCESSOR
     unrecognized_programme_action: HELD
     authority_unverifiable: INACTIVE_SUCCESSOR

@@ -30,9 +30,14 @@ Activation is decided by fields, never by prose. The machine-readable contract i
 
 - Only valid authority messages whose `programme` field names this programme are
   considered. The newest one (created_at, then comment id) decides.
-- With no such message, or when #80 cannot be read, the programme stays
-  INACTIVE_SUCCESSOR. A message naming the programme with any other action, or with
-  a REVIEW/RESUME type, fails closed to HELD.
+- The message must also carry the full issue #80 envelope (`message_id`, `packet_id`,
+  `sender`, `source_main` or `source_head`, `implementation_branch`, `state`, `health`,
+  `scope_changed`, `production_touched`). A message naming the programme without it
+  cannot activate; it holds.
+- With no such message, when #80 cannot be read, or when the DAG's contract fails
+  validation, the programme stays INACTIVE_SUCCESSOR. A message naming the programme
+  with any other action, or with a REVIEW/RESUME type, fails closed to HELD. These
+  outcomes are fixed in code; editing the DAG cannot change them.
 - Never an activation: this file's presence or merge, prose or objective text,
   message or packet ids (including `KEYFLOWOS_PLATFORM_CONVERGENCE_PREACTIVATION`),
   REVIEW/RESUME, AUTO_EVENT, derived programme-state, or any other sender/author.
