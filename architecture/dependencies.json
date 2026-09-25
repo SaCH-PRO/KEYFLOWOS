@@ -290,6 +290,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/app.module.ts",
+      "specifier": "./core/authority/authority.module",
+      "target": "apps/server/src/core/authority/authority.module.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/app.module.ts",
       "specifier": "./core/connectors/connector.module",
       "target": "apps/server/src/core/connectors/connector.module.ts",
       "type": "relative"
@@ -1382,6 +1389,20 @@
     {
       "resolved": true,
       "source": "apps/server/src/core/auth/module-scope.guard.ts",
+      "specifier": "../authority/effective-authority.resolver",
+      "target": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/auth/module-scope.guard.ts",
+      "specifier": "../authority/module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/auth/module-scope.guard.ts",
       "specifier": "../prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
       "type": "relative"
@@ -1466,6 +1487,181 @@
     {
       "resolved": false,
       "source": "apps/server/src/core/auth/tenant-body-override.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/approval-tier.ts",
+      "specifier": "./module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/authority-inventory.service.ts",
+      "specifier": "./approval-tier",
+      "target": "apps/server/src/core/authority/approval-tier.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/authority-inventory.service.ts",
+      "specifier": "./module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/authority/authority-shadow.spec.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/authority/authority-shadow.spec.ts",
+      "specifier": "@nestjs/core",
+      "target": "@nestjs/core",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/authority-shadow.spec.ts",
+      "specifier": "../auth/module-scope.guard",
+      "target": "apps/server/src/core/auth/module-scope.guard.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/authority-shadow.spec.ts",
+      "specifier": "./effective-authority.resolver",
+      "target": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/authority-shadow.spec.ts",
+      "specifier": "../prisma/prisma.service",
+      "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/authority/authority-shadow.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/authority/authority.module.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/authority.module.ts",
+      "specifier": "./effective-authority.resolver",
+      "target": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/effective-authority.resolver.spec.ts",
+      "specifier": "./effective-authority.resolver",
+      "target": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/effective-authority.resolver.spec.ts",
+      "specifier": "../prisma/prisma.service",
+      "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/authority/effective-authority.resolver.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "specifier": "./approval-tier",
+      "target": "apps/server/src/core/authority/approval-tier.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "specifier": "./effective-authority.types",
+      "target": "apps/server/src/core/authority/effective-authority.types.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "specifier": "./module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "specifier": "../prisma/prisma.service",
+      "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/effective-authority.types.ts",
+      "specifier": "./module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/module-vocabulary.spec.ts",
+      "specifier": "./module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/authority/module-vocabulary.spec.ts",
+      "specifier": "../../modules/identity/identity.service",
+      "target": "apps/server/src/modules/identity/identity.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/authority/module-vocabulary.spec.ts",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/authority/module-vocabulary.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/authority/module-vocabulary.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -5561,6 +5757,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/ai/ai-oversight.service.ts",
+      "specifier": "../../core/authority/approval-tier",
+      "target": "apps/server/src/core/authority/approval-tier.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/ai-oversight.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
       "type": "relative"
@@ -5690,6 +5893,20 @@
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
       "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/ai-settings.service.ts",
+      "specifier": "../../core/authority/effective-authority.resolver",
+      "target": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/ai-settings.service.ts",
+      "specifier": "../../core/authority/module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
     },
     {
       "resolved": true,
@@ -5948,6 +6165,13 @@
       "source": "apps/server/src/modules/ai/ai.controller.ts",
       "specifier": "../../core/auth/business.guard",
       "target": "apps/server/src/core/auth/business.guard.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/ai.controller.ts",
+      "specifier": "../../core/authority/approval-tier",
+      "target": "apps/server/src/core/authority/approval-tier.ts",
       "type": "relative"
     },
     {
@@ -6954,6 +7178,41 @@
     {
       "resolved": false,
       "source": "apps/server/src/modules/ai/asset-tools.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/authority-grant-grantor.spec.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/authority-grant-grantor.spec.ts",
+      "specifier": "../../core/authority/effective-authority.resolver",
+      "target": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/authority-grant-grantor.spec.ts",
+      "specifier": "../../core/prisma/prisma.service",
+      "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/authority-grant-grantor.spec.ts",
+      "specifier": "./ai-settings.service",
+      "target": "apps/server/src/modules/ai/ai-settings.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/authority-grant-grantor.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -35514,6 +35773,20 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/identity/identity.service.ts",
+      "specifier": "../../core/authority/approval-tier",
+      "target": "apps/server/src/core/authority/approval-tier.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/identity.service.ts",
+      "specifier": "../../core/authority/module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/identity.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
       "type": "relative"
@@ -35584,6 +35857,55 @@
     {
       "resolved": false,
       "source": "apps/server/src/modules/identity/refresh-session.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/identity/team-scope-convergence.spec.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/identity/team-scope-convergence.spec.ts",
+      "specifier": "@nestjs/core",
+      "target": "@nestjs/core",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/team-scope-convergence.spec.ts",
+      "specifier": "../../core/auth/module-scope.guard",
+      "target": "apps/server/src/core/auth/module-scope.guard.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/team-scope-convergence.spec.ts",
+      "specifier": "../../core/prisma/prisma.service",
+      "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/team-scope-convergence.spec.ts",
+      "specifier": "../blueprint/blueprint.service",
+      "target": "apps/server/src/modules/blueprint/blueprint.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/identity/team-scope-convergence.spec.ts",
+      "specifier": "./identity.service",
+      "target": "apps/server/src/modules/identity/identity.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/identity/team-scope-convergence.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -57760,6 +58082,27 @@
     {
       "resolved": false,
       "source": "apps/server/test/auth-callback-bootstrap.e2e.test.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/test/authority-inventory.integration.test.ts",
+      "specifier": "@keyflow/db",
+      "target": "@keyflow/db",
+      "type": "workspace"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/test/authority-inventory.integration.test.ts",
+      "specifier": "../src/core/authority/authority-inventory.service",
+      "target": "apps/server/src/core/authority/authority-inventory.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/authority-inventory.integration.test.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -107661,6 +108004,1161 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "scripts/agent-control/auto-merge-admitted.mjs",
+      "specifier": "./lib/admission.mjs",
+      "target": "scripts/agent-control/lib/admission.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/auto-merge-admitted.mjs",
+      "specifier": "./lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/lib/adapters.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/admission.mjs",
+      "specifier": "./events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/correction.mjs",
+      "specifier": "./momentum.mjs",
+      "target": "scripts/agent-control/lib/momentum.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/lib/dag.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/lib/dag.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/dag.mjs",
+      "specifier": "./yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/orchestrator.mjs",
+      "specifier": "./adapters.mjs",
+      "target": "scripts/agent-control/lib/adapters.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/orchestrator.mjs",
+      "specifier": "./correction.mjs",
+      "target": "scripts/agent-control/lib/correction.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/orchestrator.mjs",
+      "specifier": "./dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/orchestrator.mjs",
+      "specifier": "./momentum.mjs",
+      "target": "scripts/agent-control/lib/momentum.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/orchestrator.mjs",
+      "specifier": "./reconcile.mjs",
+      "target": "scripts/agent-control/lib/reconcile.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/orchestrator.mjs",
+      "specifier": "./state-machine.mjs",
+      "target": "scripts/agent-control/lib/state-machine.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "specifier": "./dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "specifier": "./events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "specifier": "./reconcile.mjs",
+      "target": "scripts/agent-control/lib/reconcile.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "specifier": "./yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/reconcile.mjs",
+      "specifier": "./events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/lib/state.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/lib/state.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/state.mjs",
+      "specifier": "./state-machine.mjs",
+      "target": "scripts/agent-control/lib/state-machine.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/state.mjs",
+      "specifier": "./yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/lib/truth.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/lib/truth.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/truth.mjs",
+      "specifier": "./events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/truth.mjs",
+      "specifier": "./reconcile.mjs",
+      "target": "scripts/agent-control/lib/reconcile.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/normalize-event.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/normalize-event.mjs",
+      "specifier": "./lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/orchestrate.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/orchestrate.mjs",
+      "specifier": "./lib/adapters.mjs",
+      "target": "scripts/agent-control/lib/adapters.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/orchestrate.mjs",
+      "specifier": "./lib/dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/orchestrate.mjs",
+      "specifier": "./lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/orchestrate.mjs",
+      "specifier": "./lib/orchestrator.mjs",
+      "target": "scripts/agent-control/lib/orchestrator.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/orchestrate.mjs",
+      "specifier": "./lib/state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/orchestrate.mjs",
+      "specifier": "./lib/truth.mjs",
+      "target": "scripts/agent-control/lib/truth.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/proof-mutation.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/proof-mutation.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/proof-mutation.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/proof-mutation.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/proof-mutation.mjs",
+      "specifier": "./lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/status.mjs",
+      "specifier": "./lib/adapters.mjs",
+      "target": "scripts/agent-control/lib/adapters.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/status.mjs",
+      "specifier": "./lib/dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/status.mjs",
+      "specifier": "./lib/momentum.mjs",
+      "target": "scripts/agent-control/lib/momentum.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/status.mjs",
+      "specifier": "./lib/state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/status.mjs",
+      "specifier": "./lib/truth.mjs",
+      "target": "scripts/agent-control/lib/truth.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "../lib/admission.mjs",
+      "target": "scripts/agent-control/lib/admission.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "../lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/dag.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/dag.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/dag.spec.mjs",
+      "specifier": "../lib/dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/dag.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/evaluate-run.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/evaluate-run.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/evaluate-run.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/evaluate-run.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/evaluate-run.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/evaluate-run.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/evaluate-run.spec.mjs",
+      "specifier": "./helpers/powershell.mjs",
+      "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/events.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/events.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/events.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/events.spec.mjs",
+      "specifier": "../lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/events.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "specifier": "../lib/adapters.mjs",
+      "target": "scripts/agent-control/lib/adapters.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "specifier": "../lib/correction.mjs",
+      "target": "scripts/agent-control/lib/correction.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "specifier": "../lib/dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "specifier": "../lib/momentum.mjs",
+      "target": "scripts/agent-control/lib/momentum.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "specifier": "../lib/orchestrator.mjs",
+      "target": "scripts/agent-control/lib/orchestrator.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "specifier": "../lib/state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/platform-dag.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/platform-dag.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/platform-dag.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/platform-dag.spec.mjs",
+      "specifier": "../lib/dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/platform-dag.spec.mjs",
+      "specifier": "../lib/platform-dag.mjs",
+      "target": "scripts/agent-control/lib/platform-dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/platform-dag.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "../lib/adapters.mjs",
+      "target": "scripts/agent-control/lib/adapters.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "../lib/admission.mjs",
+      "target": "scripts/agent-control/lib/admission.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "../lib/dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "../lib/orchestrator.mjs",
+      "target": "scripts/agent-control/lib/orchestrator.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "../lib/reconcile.mjs",
+      "target": "scripts/agent-control/lib/reconcile.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "../lib/state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "../lib/truth.mjs",
+      "target": "scripts/agent-control/lib/truth.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/recovery.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/recovery.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/recovery.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/recovery.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/recovery.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/recovery.spec.mjs",
+      "specifier": "../lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/recovery.spec.mjs",
+      "specifier": "../lib/state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "specifier": "./helpers/powershell.mjs",
+      "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/state-machine.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/state-machine.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/state-machine.spec.mjs",
+      "specifier": "../lib/state-machine.mjs",
+      "target": "scripts/agent-control/lib/state-machine.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/harness.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/harness.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/harness.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/harness.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/harness.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/install.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/install.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/install.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/install.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/install.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/install.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/install.spec.mjs",
+      "specifier": "../helpers/powershell.mjs",
+      "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "specifier": "../helpers/powershell.mjs",
+      "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "specifier": "./harness.mjs",
+      "target": "scripts/agent-control/tests/windows/harness.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-retry.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-retry.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-retry.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-retry.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-retry.spec.mjs",
+      "specifier": "../helpers/powershell.mjs",
+      "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-retry.spec.mjs",
+      "specifier": "./harness.mjs",
+      "target": "scripts/agent-control/tests/windows/harness.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-worktree.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-worktree.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-worktree.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-worktree.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-worktree.spec.mjs",
+      "specifier": "../helpers/powershell.mjs",
+      "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-worktree.spec.mjs",
+      "specifier": "./harness.mjs",
+      "target": "scripts/agent-control/tests/windows/harness.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/worker.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/worker.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/worker.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/worker.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/worker.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/worker.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/worker.spec.mjs",
+      "specifier": "./helpers/powershell.mjs",
+      "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/yaml-escapes.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/yaml-escapes.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/yaml-escapes.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/yaml.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/yaml.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/yaml.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/yaml.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/validate-dag.mjs",
+      "specifier": "./lib/dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/validate-platform-dag.mjs",
+      "specifier": "./lib/dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/validate-platform-dag.mjs",
+      "specifier": "./lib/platform-dag.mjs",
+      "target": "scripts/agent-control/lib/platform-dag.mjs",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "scripts/auth-audit/verify-supabase-keys.mjs",
       "specifier": "node:crypto",
@@ -107673,6 +109171,20 @@
       "specifier": "node:fs",
       "target": "node:fs",
       "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/authority-inventory.ts",
+      "specifier": "@keyflow/db",
+      "target": "@keyflow/db",
+      "type": "workspace"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/authority-inventory.ts",
+      "specifier": "../apps/server/src/core/authority/authority-inventory.service",
+      "target": "apps/server/src/core/authority/authority-inventory.service.ts",
+      "type": "relative"
     },
     {
       "resolved": false,
@@ -108264,9 +109776,9 @@
     }
   ],
   "meta": {
-    "edges": 15466,
-    "nodes": 3783,
-    "root": "/home/user/KEYFLOWOS",
+    "edges": 15682,
+    "nodes": 3837,
+    "root": "C:/Users/Public/kfw-architecture-scan/KEYFLOWOS",
     "scanner": "codebase-architect/dependency_scan.py"
   },
   "nodes": [
@@ -109651,6 +111163,51 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/core/authority/approval-tier.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/authority/authority-inventory.service.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/authority/authority-shadow.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/authority/authority.module.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/authority/effective-authority.resolver.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/authority/effective-authority.types.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/authority/module-vocabulary.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/core/config/cast-call-integrity.spec.ts",
       "type": "file"
     },
@@ -110482,6 +112039,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/ai/asset-tools.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/ai/authority-grant-grantor.spec.ts",
       "type": "file"
     },
     {
@@ -114706,6 +116268,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/identity/team-scope-convergence.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/identity/tenant-genesis.spec.ts",
       "type": "file"
     },
@@ -118037,6 +119604,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/test/auth-callback-bootstrap.e2e.test.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/test/authority-inventory.integration.test.ts",
       "type": "file"
     },
     {
@@ -126013,6 +127585,10 @@
       "type": "external"
     },
     {
+      "id": "node:assert/strict",
+      "type": "external"
+    },
+    {
       "id": "node:buffer",
       "type": "external"
     },
@@ -126042,6 +127618,10 @@
     },
     {
       "id": "node:stream",
+      "type": "external"
+    },
+    {
+      "id": "node:test",
       "type": "external"
     },
     {
@@ -126506,6 +128086,201 @@
       "type": "external"
     },
     {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/auto-merge-admitted.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/adapters.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/admission.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/correction.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/dag.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/events.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/momentum.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/orchestrator.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/platform-dag.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/reconcile.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/state-machine.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/state.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/truth.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/yaml.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/normalize-event.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/orchestrate.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/proof-mutation.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/status.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/admission.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/dag.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/evaluate-run.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/events.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/platform-dag.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/recovery.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/state-machine.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/windows/harness.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/windows/install.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/windows/worker-retry.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/windows/worker-worktree.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/worker.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/yaml-escapes.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/yaml.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/validate-dag.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/validate-platform-dag.mjs",
+      "type": "file"
+    },
+    {
       "extension": ".js",
       "id": "scripts/architecture/generate-registries.js",
       "type": "file"
@@ -126513,6 +128288,11 @@
     {
       "extension": ".mjs",
       "id": "scripts/auth-audit/verify-supabase-keys.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "scripts/authority-inventory.ts",
       "type": "file"
     },
     {
