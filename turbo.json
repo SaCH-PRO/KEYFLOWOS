@@ -34,8 +34,7 @@
     },
     "build": {
       "dependsOn": [
-        "^build",
-        "@keyflow/db#db:generate"
+        "^build"
       ],
       "outputs": [
         "dist/**",
@@ -122,6 +121,14 @@
       "outputs": [
         ".next/**",
         "!.next/cache/**"
+      ]
+    },
+    "@keyflow/db#build": {
+      "dependsOn": [
+        "@keyflow/db#db:generate"
+      ],
+      "outputs": [
+        "dist/**"
       ]
     }
   },
