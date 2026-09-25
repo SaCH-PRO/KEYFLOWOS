@@ -78,9 +78,11 @@ Autonomy stops for:
 - entry/rotation of secrets or OAuth credentials when no safe connected writer exists;
 - real provider traffic not already authorized;
 - major architecture override;
-- lowering/weaking a security, tenancy, branch, proof or admission gate.
+- lowering/weakening a security, tenancy, branch, proof or admission gate;
+- triggering or promoting a production deployment/release;
+- any production data mutation that is not already covered by a separately admitted, reversible operational runbook.
 
-Everything else should be driven through the control loop.
+Everything else should be driven through the control loop. Human gates are conservative ceilings: a packet may characterize, test, or prepare a production-affecting change autonomously, but the actual production deployment, release, DNS switch, data mutation, destructive schema action, paid-resource creation, credential entry, or other listed effect cannot occur without the corresponding explicit human authority.
 
 ## Phases
 
@@ -93,8 +95,8 @@ Everything else should be driven through the control loop.
   -> ChatGPT review on a non-production control packet.
 
 ### Phase 1 — Canonical frontend/runtime topology
-- KF-INFRA-001: finish Vercel compatibility/current PR and verify preview.
-- KF-INFRA-002: verify fresh Vercel production deployment from main.
+- KF-INFRA-001: complete PR #91 (`chore/node24-vercel-compat`) and verify its exact-head Vercel Preview is READY, Node 24/pnpm 9.15 are active, browser Supabase variables and API base URL are present in Preview, backend-only Prisma generation is removed from the web build path, and every substantive Copilot finding is exact-head dispositioned.
+- KF-INFRA-002: verify a fresh Vercel Production deployment from the admitted #91 result on current `main`; observing an already-created automatic production deployment is read-only, but manually triggering/promoting a production deployment requires the `production_deployment_or_release` human gate.
 - KF-INFRA-003: characterize DNS/Caddy/cookies/CORS/auth redirects/API proxy.
 - KF-INFRA-004: cut canonical web domain to Vercel. **Human production gate.**
 - KF-INFRA-005: retire duplicate Hetzner web runtime after production proof.
