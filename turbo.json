@@ -83,8 +83,7 @@
     },
     "web#build": {
       "dependsOn": [
-        "^build",
-        "@keyflow/db#db:generate"
+        "^build"
       ],
       "env": [
         "NEXT_PUBLIC_AI_SUGGEST_URL",
