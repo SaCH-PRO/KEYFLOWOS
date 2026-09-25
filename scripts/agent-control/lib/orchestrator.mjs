@@ -1,13 +1,18 @@
 /**
- * AUTO-ORCHESTRATOR — derive the next legal control action from durable state.
+ * AUTO-ORCHESTRATOR — derive the next legal control action.
  *
- * Deterministic. Given the same state and event it returns the same action.
- * It decides MECHANICS only: which legal transition, which dispatch, which
- * escalation. It never invents architecture, never resolves a contradiction,
- * and never grants its own admission.
+ * Deterministic. Given the same state, reconciliation and event it returns the
+ * same action. It decides MECHANICS only: which legal transition, which
+ * dispatch, which escalation. It never invents architecture, never resolves a
+ * contradiction, and never grants its own admission.
+ *
+ * programme-state.yaml is a derived projection (lib/reconcile.mjs). Its rules
+ * are only consulted once a reconciliation shows it agrees with the newest #80
+ * authority and with repository truth; otherwise the answer is REPORT_DRIFT.
  */
 
 import { canTransition } from './state-machine.mjs';
+import { FINDINGS } from './reconcile.mjs';
 import { evaluateMomentum } from './momentum.mjs';
 import { planCorrection, DECISIONS as CORRECTION } from './correction.mjs';
 import { selectNext } from './dag.mjs';
@@ -36,15 +41,16 @@ function action(type, reason, detail = {}) {
 
 /**
  * @param {object} input
- *   state    programme state (canonical live state)
+ *   state    programme state (derived projection)
+ *   reconciliation  reconcile() verdict for this state; REQUIRED. Missing or
+ *            inconsistent means the projection may not drive any decision.
  *   event    normalized event (may be null for a plain reconcile)
  *   dag      built DAG
  *   registry agent adapter registry
  *   duplicate  true when the journal already holds this event key
  */
 export function decide(input) {
-  const { state, event = null, dag = null, registry = [], duplicate = false } = input;
-  const p = state.programme || {};
+  const { event = null, duplicate = false } = input;
 
   // 1. Replay safety comes first: a duplicate never produces a second effect.
   if (duplicate) {
@@ -53,7 +59,34 @@ export function decide(input) {
     });
   }
 
-  // 2. A hold outranks everything except reporting.
+  // 2. Source precedence. A projection that disagrees with newer authority or
+  //    with repository truth -- or that nobody checked -- advances nothing.
+  const rec = input.reconciliation;
+  if (!rec || rec.consistent !== true) {
+    const findings = rec?.findings?.length
+      ? rec.findings
+      : [{ code: FINDINGS.RECONCILIATION_NOT_PERFORMED, detail: 'decide() was called without a consistent reconciliation' }];
+    return action(
+      ACTIONS.REPORT_DRIFT,
+      `derived programme-state is not usable: ${findings.map((f) => f.code).join(', ')}; failing closed until it is re-derived from current authority and repository truth`,
+      { findings, authority_newest: rec?.authority_newest || null, advancement: 'NONE' },
+    );
+  }
+
+  return derivedDecision(input);
+}
+
+/**
+ * The rule table over the projection. It trusts programme-state completely, so
+ * it is only correct behind decide()'s reconciliation gate. Exported for the
+ * positive control that proves the gate changes nothing for consistent input;
+ * production callers use decide().
+ */
+export function derivedDecision(input) {
+  const { state, event = null, dag = null, registry = [] } = input;
+  const p = state.programme || {};
+
+  // A hold outranks everything except reporting.
   if (state.hold && state.hold.active !== false) {
     return action(ACTIONS.WAIT_AUTHORITY, `programme is held: ${state.hold.reason || 'no reason recorded'}`, {
       hold: state.hold,
@@ -179,4 +212,4 @@ function reviewerAvailability(registry) {
   };
 }
 
-export default { decide, ACTIONS };
+export default { decide, derivedDecision, ACTIONS };

@@ -6,23 +6,37 @@ status: ACTIVE
 purpose: unattended packet progression without silent architectural decisions
 
 control_issue: 80
-canonical_live_state: .agent-control/programme-state.yaml
+derived_programme_state: .agent-control/programme-state.yaml
 canonical_intelligence_branch: docs/keyflow-intelligence-foundation
 programme_dag: docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
 
+# Set by CG-DIRECTIVE-META-STATE-RECONCILE-001; supersedes the
+# canonical-live-state model of CG-REVIEW-META-AUTO-001.
 state_authority:
-  live_control_state: .agent-control/programme-state.yaml
-  event_and_audit_log: github_issue_80
-  architecture_and_checkpoints: docs/keyflow-intelligence-foundation
+  implementation_truth: repository, PR and CI evidence
+  execution_authority: newest valid ChatGPT DIRECTIVE, REVIEW, HOLD or RESUME on github_issue_80
+  derived_projection: .agent-control/programme-state.yaml
+  intent_and_checkpoint_history: docs/keyflow-intelligence-foundation
   packet_admission_artifacts:
     - .agent-control/active-packet.yaml
     - .agent-control/claude-return.yaml
+  valid_authority_message:
+    message_types: [DIRECTIVE, REVIEW, HOLD, RESUME]
+    sender_exact: chatgpt
+    author_allowlist: [SaCH-PRO]
+    ordering: created_at, then comment id
+  projection_anchor: programme-state.yaml#authority_basis
+  reconciler: scripts/agent-control/lib/reconcile.mjs
+  on_disagreement: REPORT_DRIFT (fail closed; every finding surfaced)
   rules:
-    - live state is advanced through the state machine, never by editing a projection
-    - issue 80 is append-only; it is not a second mutable state database
-    - a stale projection must never advance work
-    - projection drift must be detected and reported, not silently followed
+    - the derived projection may summarize or accelerate a decision, never override newer authority or repository truth
+    - any valid authority message newer than the projection anchor makes the projection stale
+    - hold and release meaning is never inferred from message ids or prose; automation never applies a release
+    - a projection that is unanchored, contradicted by the repository, or unverifiable advances nothing
+    - the projection is re-derived in a reviewed commit, never repaired by automation
+    - issue 80 is append-only; its history is the authority record
+    - board drift is detected and reported, never followed
 
 required_pr_workflows:
   - CI/CD Pipeline
@@ -137,6 +151,7 @@ escalate_on:
   - branch_hygiene_threshold_pressure
   - proof_unknown_skipped_or_unexplained
   - projection_drift
+  - derived_state_stale_or_contradicted
   - missing_or_expired_agent_credential
 
 worker:

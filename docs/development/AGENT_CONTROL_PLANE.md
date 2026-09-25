@@ -212,7 +212,9 @@ The repository has an event-driven automation layer defined by
 
 It may automatically:
 - normalize actionable issue #80 / PR / CI events into durable AUTO_EVENT records;
-- derive and publish the next legal control action from durable state;
+- derive and publish the next legal control action from the derived state once
+  it reconciles with #80 authority and repository truth (see "Control-state
+  precedence"), or publish REPORT_DRIFT when it does not;
 - reconcile admitted implementation PRs;
 - squash-merge an exact implementation head only after ChatGPT has already set
   `review_status: READY_TO_MERGE` and all required exact-head workflows are green;
@@ -227,28 +229,52 @@ The machine-readable programme dependency graph is
 `docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml`. Packet selection must satisfy
 that DAG plus the wave-gate rules in the canonical intelligence board.
 
-## Canonical state authority
+## Control-state precedence
 
-Four stores exist. Exactly one is authoritative for live control state, and
-automation must never decide state by comparing them.
+Set by CG-DIRECTIVE-META-STATE-RECONCILE-001. It supersedes the earlier
+"canonical live state" model (CG-REVIEW-META-AUTO-001), which let a
+programme-state.yaml last written in PR #87 keep projecting PR #87
+READY_TO_MERGE after #87 and #89 had merged.
 
-| Store | Role | Authoritative for |
+| Store | Role | Establishes |
 |---|---|---|
-| `.agent-control/programme-state.yaml` | **canonical live control state** | active packet/phase, state, health, source_main, branch/PR, hold, unresolved contradictions, last processed event key, next legal action |
-| GitHub issue #80 | append-only event/audit log and inter-agent message bus | who said what, when, and why |
-| `docs/keyflow-intelligence-foundation` | architecture, checkpoint, handoff and topology history | packet topology, admitted evidence, durable checkpoints |
+| repository, PR and CI evidence | **implementation truth** | what actually exists: merged or open PRs, branches, main, exact-head CI |
+| newest valid ChatGPT `DIRECTIVE` / `REVIEW` / `HOLD` / `RESUME` on issue #80 | **execution authority** | what may happen now. #80 is append-only; its history is the authority record |
+| `.agent-control/programme-state.yaml` | **derived machine projection** | a summary of the two above that may be stale; it may accelerate a decision, never override one |
+| `docs/keyflow-intelligence-foundation` | durable intent and checkpoint history | packet topology, admitted evidence, durable checkpoints |
 | `.agent-control/active-packet.yaml`, `.agent-control/claude-return.yaml` | per-packet PR admission artifacts | this packet's scope, proof and review status |
+
+A valid authority message has `sender: chatgpt` exactly, a GitHub author in
+the allowlist (`SaCH-PRO`, the same rule the local worker uses), and a
+`message_type` of DIRECTIVE, REVIEW, HOLD or RESUME. Newest means latest
+`created_at`, ties broken by comment id.
 
 Rules:
 
-- Live state is advanced from valid events through the state machine, never by
-  editing a projection.
-- Issue #80 is a log, not a second mutable state database. It preserves
-  authorship and reasoning; it does not hold current state.
-- The intelligence board is a durable projection. Its CURRENT handoff/status may
-  be refreshed at a checkpoint or an explicit hold so humans are not misled, but
-  a stale projection must never advance work. No broad programme-map refresh is
-  authorized by this layer.
-- The orchestrator MUST detect and report projection drift
-  (`scripts/agent-control/status.mjs` renders it) and MUST NOT follow the
-  projection when it disagrees with live state.
+- programme-state.yaml records `authority_basis {message_id, comment_id}`: the
+  newest authority message it incorporates.
+- Before any automated decision, `scripts/agent-control/lib/reconcile.mjs`
+  compares the projection with #80 and the repository. The orchestrator
+  (`decide()`) uses the projection only when that comparison is consistent.
+- Disagreement fails closed as `REPORT_DRIFT` and names every finding: a newer
+  authority message than the anchor, a PR whose real state contradicts the
+  projected state, a branch mismatch, a `source_main` not on main, a missing
+  anchor, or anything that could not be read.
+- Hold and release meaning is never inferred. So far holds and resumes on #80
+  have been typed DIRECTIVE and distinguished only by id and prose. Any newer
+  authority message therefore makes the projection stale. A newer hold always
+  beats an older derived "advance", and automation never applies a release.
+- The projection is re-derived in a reviewed commit and re-anchored to the
+  newest authority. It is never repaired by automation. There is no automated
+  writer: `orchestrate.mjs --apply` only journals events. The projection is
+  expected to be stale between re-derivations, and the orchestrator waits
+  while it is.
+- The intelligence board is a durable projection too. Its CURRENT
+  handoff/status may be refreshed at a checkpoint or an explicit hold so
+  humans are not misled. `status.mjs` reports board drift, and neither
+  projection advances work. No broad programme-map refresh is authorized by
+  this layer.
+- The exact-head merge path (`auto-merge-admitted.mjs`) does not read
+  programme-state. It gates on the PR's own control artifacts and live PR/CI
+  state, so a stale projection cannot cause a merge, and a merged PR cannot be
+  merged twice (`pr_not_open`).
