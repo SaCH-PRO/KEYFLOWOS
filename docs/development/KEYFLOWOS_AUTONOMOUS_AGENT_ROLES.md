@@ -54,19 +54,37 @@ should proceed unattended once the relevant authority exists.
 
 ## Copilot disposition schema
 
-Every semantic RETURN should be able to report:
+Every semantic RETURN should be able to report an auditable per-finding ledger:
 
 ```yaml
 copilot_review:
   reviewed_head: <sha>
-  findings_total: 0
-  resolved: 0
-  rejected_with_evidence: 0
-  unresolved_substantive: 0
   stale_review_detected: false
+  findings:
+    - id: discussion_r123456789
+      severity: medium
+      disposition: RESOLVED
+      evidence:
+        - type: commit
+          ref: <sha>
+        - type: test
+          ref: <workflow/job/url-or-test-name>
+    - id: discussion_r987654321
+      severity: low
+      disposition: REJECTED_WITH_EVIDENCE
+      evidence:
+        - type: rationale
+          ref: <RETURN section or review-thread reply>
+  summary:
+    findings_total: <derived from findings[]>
+    resolved: <derived from findings[]>
+    rejected_with_evidence: <derived from findings[]>
+    unresolved_substantive: <derived from findings[]>
 ```
 
-A semantic push after `reviewed_head` invalidates the disposition until a new
+The per-finding `id`, disposition, and evidence pointers are authoritative. Summary
+counts are derived outputs and MUST NOT be treated as independent evidence. A semantic
+push after `reviewed_head` invalidates the entire disposition until a fresh Copilot
 review/reconciliation is obtained.
 
 ## Safety
