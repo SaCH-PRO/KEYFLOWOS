@@ -58905,9 +58905,9 @@
     },
     {
       "extension": ".md",
-      "lines": 298,
+      "lines": 299,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 11833
+      "size_bytes": 11905
     },
     {
       "extension": ".md",
@@ -58929,15 +58929,15 @@
     },
     {
       "extension": ".md",
-      "lines": 250,
+      "lines": 252,
       "path": "docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md",
-      "size_bytes": 14118
+      "size_bytes": 14403
     },
     {
       "extension": ".yaml",
-      "lines": 488,
+      "lines": 492,
       "path": "docs/development/KEYFLOWOS_PLATFORM_DAG.yaml",
-      "size_bytes": 15868
+      "size_bytes": 16186
     },
     {
       "extension": ".yaml",
@@ -61714,7 +61714,9 @@
         "AUTOPILOT_POLICY_PATH",
         "PLATFORM_DAG_PATH",
         "PLATFORM_STATES",
+        "PROGRAMME_CONTROL_MESSAGE_TYPE",
         "REQUIRED_ENVELOPE",
+        "REQUIRED_HUMAN_GATES",
         "loadAutopilotPolicy",
         "loadPlatformDag",
         "missingEnvelopeFields",
@@ -61726,13 +61728,14 @@
         "./dag.mjs",
         "./events.mjs",
         "./reconcile.mjs",
+        "./state-machine.mjs",
         "./yaml.mjs",
         "node:fs",
         "node:path"
       ],
-      "lines": 306,
+      "lines": 361,
       "path": "scripts/agent-control/lib/platform-dag.mjs",
-      "size_bytes": 14210
+      "size_bytes": 17081
     },
     {
       "exports": [
@@ -61999,9 +62002,9 @@
         "node:fs",
         "node:test"
       ],
-      "lines": 368,
+      "lines": 409,
       "path": "scripts/agent-control/tests/platform-dag.spec.mjs",
-      "size_bytes": 18252
+      "size_bytes": 20468
     },
     {
       "exports": [],
@@ -63012,6 +63015,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3439,
     "total_files": 4427,
-    "total_lines": 1126651
+    "total_lines": 1126754
   }
 }

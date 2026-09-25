@@ -108139,6 +108139,13 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "specifier": "./state-machine.mjs",
+      "target": "scripts/agent-control/lib/state-machine.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
       "specifier": "./yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
       "type": "relative"
@@ -109776,7 +109783,7 @@
     }
   ],
   "meta": {
-    "edges": 15682,
+    "edges": 15683,
     "nodes": 3837,
     "root": "C:/Users/Public/kfw-architecture-scan/KEYFLOWOS",
     "scanner": "codebase-architect/dependency_scan.py"
