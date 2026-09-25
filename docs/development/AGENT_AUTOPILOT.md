@@ -243,3 +243,17 @@ gate deadlock, F3 event idempotency, F4 gate scope, F5 error visibility.
    increasing automatic correction-loop depth.
 
 Production release authorization remains separate throughout.
+
+
+## Successor programme activation boundary
+
+A second machine-readable DAG now exists at
+`docs/development/KEYFLOWOS_PLATFORM_DAG.yaml`. It is intentionally marked
+`INACTIVE_SUCCESSOR`. The current orchestrator must not infer activation from file
+presence. A future admitted packet (`KF-PLAT-AUTO-001`) may add multi-programme selection,
+but only an explicit valid ChatGPT authority message on issue #80 may activate the
+successor programme. Existing holds remain authoritative until explicitly released.
+
+GitHub Copilot review is part of the successor admission model: substantive findings must
+be exact-head dispositioned before Claude RETURN/ChatGPT admission. Copilot does not gain
+architecture or merge authority.
