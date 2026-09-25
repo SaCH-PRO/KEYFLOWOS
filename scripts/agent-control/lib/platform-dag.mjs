@@ -186,9 +186,9 @@ export function missingEnvelopeFields(body) {
 /**
  * Derive the successor programme's state from raw issue #80 comments.
  *
- * Only valid authority messages (collectAuthority) that carry an explicit
- * `programme:` field equal to this programme are considered; the newest one
- * decides. Prose, ids and packet ids are never read.
+ * Only authority-typed messages from an allowlisted author that carry an
+ * explicit `programme:` field equal to this programme are considered; the
+ * newest one decides. Prose, ids and packet ids are never read.
  *
  * Fail-closed outcomes are fixed here, not read from the DAG, and the DAG's
  * contract is validated before any comment is evaluated, so an edited file
@@ -201,7 +201,7 @@ export function missingEnvelopeFields(body) {
  * @param {object} policy parsed AGENT_AUTOPILOT_POLICY.yaml
  * @returns {{state: string, reason: string, decided_by: object|null}}
  */
-export function platformProgrammeState(comments, doc, policy, options = {}) {
+export function platformProgrammeState(comments, doc, policy) {
   const problems = validatePlatformContract(doc || {}, policy);
   if (problems.length) {
     return {
@@ -211,23 +211,43 @@ export function platformProgrammeState(comments, doc, policy, options = {}) {
     };
   }
 
-  const authority = collectAuthority(comments, options);
+  // Always the fixed authority constants: no caller override of the allowlist.
+  const authority = collectAuthority(comments);
   if (!authority.verified) {
     return { state: PLATFORM_STATES.INACTIVE, reason: authority.reason, decided_by: null };
   }
 
-  const bodies = new Map((comments || []).map((c) => [String(c.id), c.body || '']));
-  const naming = authority.messages
-    .map((m) => {
-      const body = bodies.get(String(m.comment_id)) || '';
-      return {
-        ...m,
-        programme: readField(body, 'programme'),
-        programme_action: readField(body, 'programme_action'),
-        missing_envelope: missingEnvelopeFields(body),
-      };
-    })
-    .filter((m) => m.programme === doc.programme);
+  // collectAuthority drops a comment without message_id or with a sender other
+  // than exactly `chatgpt`. From an allowlisted author, with an authority type
+  // and naming this programme, such a comment is a malformed message about
+  // this programme: it must hold, not vanish. Other authors stay ignored.
+  const authors = AUTHORIZED_AUTHORS.map((a) => a.toLowerCase());
+  const naming = [];
+  for (const comment of comments) {
+    const body = comment?.body || '';
+    if (readField(body, 'programme') !== doc.programme) continue;
+    const messageType = readField(body, 'message_type');
+    if (!AUTHORITY_MESSAGE_TYPES.includes(messageType)) continue;
+    if (!authors.includes(String(comment?.user?.login || '').toLowerCase())) continue;
+    if (comment.id === undefined || comment.id === null || !comment.created_at) {
+      return { state: PLATFORM_STATES.INACTIVE, reason: 'a comment naming this programme has no id or timestamp', decided_by: null };
+    }
+    const missing = missingEnvelopeFields(body);
+    const sender = readField(body, 'sender');
+    if (sender !== null && sender !== AUTHORITY_SENDER) missing.push(`sender (${sender} is not exactly ${AUTHORITY_SENDER})`);
+    naming.push({
+      message_id: readField(body, 'message_id'),
+      message_type: messageType,
+      comment_id: comment.id,
+      created_at: comment.created_at,
+      programme_action: readField(body, 'programme_action'),
+      missing_envelope: missing,
+    });
+  }
+  naming.sort((a, b) => {
+    const t = Date.parse(a.created_at) - Date.parse(b.created_at);
+    return t !== 0 ? t : Number(a.comment_id) - Number(b.comment_id);
+  });
 
   if (!naming.length) {
     return { state: PLATFORM_STATES.INACTIVE, reason: 'no valid authority message names this programme', decided_by: null };

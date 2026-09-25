@@ -248,10 +248,28 @@ test('no comments, or unobservable comments, leave the programme inactive', () =
   assert.equal(stateOf(null), PLATFORM_STATES.INACTIVE);
 });
 
-test('NEGATIVE CONTROL: activation fields from an unauthorized author or sender are ignored', () => {
+test('NEGATIVE CONTROL: an unauthorized author is ignored; a wrong sender never activates', () => {
   assert.equal(stateOf([comment(activateFields(), { author: 'someone-else' })]), PLATFORM_STATES.INACTIVE);
-  assert.equal(stateOf([comment(activateFields({ sender: 'claude-code' }))]), PLATFORM_STATES.INACTIVE);
-  assert.equal(stateOf([comment(activateFields({ sender: 'ChatGPT' }))]), PLATFORM_STATES.INACTIVE);
+  // From the allowlisted account, a non-exact sender is a malformed message about this programme.
+  assert.equal(stateOf([comment(activateFields({ sender: 'claude-code' }))]), PLATFORM_STATES.HELD);
+  assert.equal(stateOf([comment(activateFields({ sender: 'ChatGPT' }))]), PLATFORM_STATES.HELD);
+});
+
+test('NEGATIVE CONTROL: a caller cannot widen the author allowlist', () => {
+  const doc = loadPlatformDag(repoRoot).doc;
+  const policy = loadAutopilotPolicy(repoRoot);
+  const outsider = [comment(activateFields(), { author: 'someone-else' })];
+  assert.equal(platformProgrammeState(outsider, doc, policy, { authors: ['someone-else'] }).state, PLATFORM_STATES.INACTIVE);
+});
+
+test('NEGATIVE CONTROL: a newer message without message_id or sender holds an active programme', () => {
+  const good = comment(activateFields(), { at: '2026-09-26T10:00:00Z' });
+  for (const key of ['message_id', 'sender']) {
+    const malformed = comment(without(activateFields({ programme_action: 'ACTIVATE' }), key), { at: '2026-09-26T11:00:00Z' });
+    assert.equal(stateOf([good, malformed]), PLATFORM_STATES.HELD, `a newer message missing ${key} must not leave the programme ACTIVE`);
+  }
+  const wrongSender = comment(activateFields({ sender: 'claude-code' }), { at: '2026-09-26T11:00:00Z' });
+  assert.equal(stateOf([good, wrongSender]), PLATFORM_STATES.HELD);
 });
 
 test('NEGATIVE CONTROL: REVIEW, RESUME and AUTO_EVENT never activate', () => {
@@ -289,7 +307,7 @@ test('a newer authority message about something else does not change programme s
 });
 
 test('NEGATIVE CONTROL: an ACTIVATE missing any envelope field cannot activate; it holds', () => {
-  for (const key of ['packet_id', 'source_main', 'implementation_branch', 'state', 'health', 'scope_changed', 'production_touched']) {
+  for (const key of ['message_id', 'packet_id', 'sender', 'source_main', 'implementation_branch', 'state', 'health', 'scope_changed', 'production_touched']) {
     assert.equal(stateOf([comment(without(activateFields(), key))]), PLATFORM_STATES.HELD, `missing ${key} must not activate`);
   }
   // A malformed message cannot activate even after an earlier valid ACTIVATE.
