@@ -1,6 +1,7 @@
-version: 1
+version: 2
 programme: KEYFLOWOS_PLATFORM_CONVERGENCE
 status: INACTIVE_SUCCESSOR
+
 activation:
   authority_channel: github_issue_80
   requires_explicit_chatgpt_authority: true
@@ -20,10 +21,15 @@ copilot:
   review_on_semantic_push: true
   exact_head_disposition_required: true
   allowed_dispositions: [RESOLVED, REJECTED_WITH_EVIDENCE]
+  per_finding_id_and_evidence_required: true
+  summary_counts_are_derived_only: true
   unresolved_substantive_findings_block_return: true
   architecture_authority: false
 
 human_gates:
+  - production_deployment_or_release
+  - production_mutation
+  - production_data_mutation
   - production_dns_or_domain_cutover
   - destructive_production_data_or_schema_action
   - paid_resource_creation
@@ -32,58 +38,156 @@ human_gates:
   - major_architecture_override
   - weakening_security_tenancy_branch_or_proof_gate
 
-phases:
-  - id: P0
-    name: autonomous_programme_activation
-    packets: [KF-PLAT-AUTO-001, KF-PLAT-AUTO-002, KF-PLAT-AUTO-003]
-  - id: P1
-    name: canonical_frontend_runtime
-    depends_on: [P0]
-    packets: [KF-INFRA-001, KF-INFRA-002, KF-INFRA-003, KF-INFRA-004, KF-INFRA-005]
-  - id: P2
-    name: supabase_and_data_plane
-    depends_on: [P1]
-    packets: [KF-DATA-001, KF-DATA-002, KF-DATA-003, KF-DATA-004, KF-DATA-005]
-  - id: P3
-    name: isolated_staging
-    depends_on: [P1, P2]
-    packets: [KF-STAGE-001, KF-STAGE-002, KF-STAGE-003, KF-STAGE-004, KF-STAGE-005, KF-STAGE-006]
-  - id: P4
-    name: immutable_backend_delivery
-    depends_on: [P3]
-    packets: [KF-DEPLOY-001, KF-DEPLOY-002, KF-DEPLOY-003, KF-DEPLOY-004, KF-DEPLOY-005, KF-DEPLOY-006]
-  - id: P5
-    name: data_resilience
-    depends_on: [P4]
-    packets: [KF-RESILIENCE-001, KF-RESILIENCE-002, KF-RESILIENCE-003, KF-RESILIENCE-004, KF-RESILIENCE-005]
-  - id: P6
-    name: observability
-    depends_on: [P4]
-    packets: [KF-OBS-001, KF-OBS-002, KF-OBS-003, KF-OBS-004, KF-OBS-005, KF-OBS-006]
-  - id: P7
-    name: github_ci_security
-    depends_on: [P0]
-    packets: [KF-GOV-001, KF-GOV-002, KF-GOV-003, KF-CI-001, KF-CI-002, KF-SEC-001, KF-SEC-002, KF-SEC-003]
-  - id: P8
-    name: configuration_and_secrets
-    depends_on: [P3, P4, P7]
-    packets: [KF-CONFIG-001, KF-CONFIG-002, KF-CONFIG-003, KF-CONFIG-004, KF-CONFIG-005]
-  - id: P9
-    name: multi_agent_scale
-    depends_on: [P0, P7]
-    packets: [KF-AGENT-001, KF-AGENT-002, KF-AGENT-003, KF-AGENT-004, KF-AGENT-005, KF-AGENT-006, KF-AGENT-007]
-  - id: P10
-    name: infrastructure_as_code
-    depends_on: [P4, P5, P8]
-    packets: [KF-IAC-001, KF-IAC-002, KF-IAC-003, KF-IAC-004]
-  - id: P11
-    name: final_qualification
-    depends_on: [P2, P3, P4, P5, P6, P7, P8, P9, P10]
-    packets: [KF-QUAL-001, KF-QUAL-002, KF-QUAL-003]
+phase_groups:
+  P0: autonomous_programme_activation
+  P1: canonical_frontend_runtime
+  P2: supabase_and_data_plane
+  P3: isolated_staging
+  P4: immutable_backend_delivery
+  P5: data_resilience
+  P6: observability
+  P7: github_ci_security
+  P8: configuration_and_secrets
+  P9: multi_agent_scale
+  P10: infrastructure_as_code
+  P11: final_qualification
+
+packets:
+  KF-PLAT-AUTO-001: { phase: P0, depends_on: [] }
+  KF-PLAT-AUTO-002: { phase: P0, depends_on: [KF-PLAT-AUTO-001] }
+  KF-PLAT-AUTO-003: { phase: P0, depends_on: [KF-PLAT-AUTO-002] }
+
+  KF-INFRA-001:
+    phase: P1
+    depends_on: [KF-PLAT-AUTO-003]
+    durable_target:
+      pr: 91
+      branch: chore/node24-vercel-compat
+      acceptance: exact_head_preview_and_copilot_disposition
+  KF-INFRA-002:
+    phase: P1
+    depends_on: [KF-INFRA-001]
+    human_gate_if_triggering_or_promoting: production_deployment_or_release
+  KF-INFRA-003: { phase: P1, depends_on: [KF-INFRA-002] }
+  KF-INFRA-004:
+    phase: P1
+    depends_on: [KF-INFRA-003]
+    human_gate: production_dns_or_domain_cutover
+  KF-INFRA-005:
+    phase: P1
+    depends_on: [KF-INFRA-004]
+    human_gate_if_production_mutation: production_mutation
+
+  KF-DATA-001: { phase: P2, depends_on: [KF-INFRA-005] }
+  KF-DATA-002: { phase: P2, depends_on: [KF-DATA-001] }
+  KF-DATA-003:
+    phase: P2
+    depends_on: [KF-DATA-002]
+    human_gate_if_destructive: destructive_production_data_or_schema_action
+  KF-DATA-004:
+    phase: P2
+    depends_on: [KF-DATA-003]
+    human_gate_if_production_data_changes: production_data_mutation
+  KF-DATA-005: { phase: P2, depends_on: [KF-DATA-004] }
+
+  KF-STAGE-001: { phase: P3, depends_on: [KF-INFRA-005, KF-DATA-005] }
+  KF-STAGE-002: { phase: P3, depends_on: [KF-STAGE-001] }
+  KF-STAGE-003: { phase: P3, depends_on: [KF-STAGE-002] }
+  KF-STAGE-004: { phase: P3, depends_on: [KF-STAGE-003] }
+  KF-STAGE-005: { phase: P3, depends_on: [KF-STAGE-004] }
+  KF-STAGE-006: { phase: P3, depends_on: [KF-STAGE-005] }
+
+  KF-DEPLOY-001: { phase: P4, depends_on: [KF-STAGE-006] }
+  KF-DEPLOY-002: { phase: P4, depends_on: [KF-DEPLOY-001] }
+  KF-DEPLOY-003:
+    phase: P4
+    depends_on: [KF-DEPLOY-002]
+    human_gate_if_production_mutation: production_mutation
+  KF-DEPLOY-004:
+    phase: P4
+    depends_on: [KF-DEPLOY-003]
+    human_gate_if_production_mutation: production_mutation
+  KF-DEPLOY-005: { phase: P4, depends_on: [KF-DEPLOY-004] }
+  KF-DEPLOY-006:
+    phase: P4
+    depends_on: [KF-DEPLOY-005]
+    human_gate: production_deployment_or_release
+
+  KF-RESILIENCE-001: { phase: P5, depends_on: [KF-DEPLOY-006] }
+  KF-RESILIENCE-002:
+    phase: P5
+    depends_on: [KF-RESILIENCE-001]
+    human_gate_if_production_mutation: production_mutation
+  KF-RESILIENCE-003:
+    phase: P5
+    depends_on: [KF-RESILIENCE-002]
+    human_gate_if_production_mutation: production_mutation
+  KF-RESILIENCE-004:
+    phase: P5
+    depends_on: [KF-RESILIENCE-003]
+    human_gate_if_production_mutation: production_mutation
+  KF-RESILIENCE-005: { phase: P5, depends_on: [KF-RESILIENCE-004] }
+
+  KF-OBS-001: { phase: P6, depends_on: [KF-DEPLOY-006] }
+  KF-OBS-002: { phase: P6, depends_on: [KF-OBS-001] }
+  KF-OBS-003: { phase: P6, depends_on: [KF-OBS-002] }
+  KF-OBS-004: { phase: P6, depends_on: [KF-OBS-003] }
+  KF-OBS-005: { phase: P6, depends_on: [KF-OBS-004] }
+  KF-OBS-006: { phase: P6, depends_on: [KF-OBS-005] }
+
+  KF-GOV-001: { phase: P7, depends_on: [KF-PLAT-AUTO-003] }
+  KF-GOV-002: { phase: P7, depends_on: [KF-GOV-001] }
+  KF-GOV-003: { phase: P7, depends_on: [KF-GOV-002] }
+  KF-CI-001: { phase: P7, depends_on: [KF-GOV-003] }
+  KF-CI-002: { phase: P7, depends_on: [KF-CI-001] }
+  KF-SEC-001: { phase: P7, depends_on: [KF-CI-002] }
+  KF-SEC-002: { phase: P7, depends_on: [KF-SEC-001] }
+  KF-SEC-003: { phase: P7, depends_on: [KF-SEC-002] }
+
+  KF-CONFIG-001: { phase: P8, depends_on: [KF-STAGE-006, KF-DEPLOY-006, KF-SEC-003] }
+  KF-CONFIG-002: { phase: P8, depends_on: [KF-CONFIG-001] }
+  KF-CONFIG-003:
+    phase: P8
+    depends_on: [KF-CONFIG-002]
+    human_gate_if_paid_or_secret_connection: paid_resource_creation
+  KF-CONFIG-004:
+    phase: P8
+    depends_on: [KF-CONFIG-003]
+    human_gate_if_secret_entry_required: secret_or_oauth_entry_without_safe_connected_writer
+  KF-CONFIG-005: { phase: P8, depends_on: [KF-CONFIG-004] }
+
+  KF-AGENT-001: { phase: P9, depends_on: [KF-PLAT-AUTO-003, KF-SEC-003] }
+  KF-AGENT-002: { phase: P9, depends_on: [KF-AGENT-001] }
+  KF-AGENT-003: { phase: P9, depends_on: [KF-AGENT-002] }
+  KF-AGENT-004: { phase: P9, depends_on: [KF-AGENT-003] }
+  KF-AGENT-005: { phase: P9, depends_on: [KF-AGENT-004] }
+  KF-AGENT-006: { phase: P9, depends_on: [KF-AGENT-005] }
+  KF-AGENT-007: { phase: P9, depends_on: [KF-AGENT-006] }
+
+  KF-IAC-001: { phase: P10, depends_on: [KF-DEPLOY-006, KF-RESILIENCE-005, KF-CONFIG-005] }
+  KF-IAC-002: { phase: P10, depends_on: [KF-IAC-001] }
+  KF-IAC-003: { phase: P10, depends_on: [KF-IAC-002] }
+  KF-IAC-004: { phase: P10, depends_on: [KF-IAC-003] }
+
+  KF-QUAL-001:
+    phase: P11
+    depends_on:
+      - KF-DATA-005
+      - KF-STAGE-006
+      - KF-DEPLOY-006
+      - KF-RESILIENCE-005
+      - KF-OBS-006
+      - KF-SEC-003
+      - KF-CONFIG-005
+      - KF-AGENT-007
+      - KF-IAC-004
+  KF-QUAL-002: { phase: P11, depends_on: [KF-QUAL-001] }
+  KF-QUAL-003: { phase: P11, depends_on: [KF-QUAL-002] }
 
 selection:
   re_resolve_main_before_every_packet: true
   no_parallel_semantic_conflicts: true
+  ready_packet_requires_all_packet_dependencies_complete: true
   prefer_lowest_ready_phase: true
-  packet_completion_required_before_dependents: true
-  production_effects_require_human_gate: true
+  production_effects_require_matching_human_gate: true
+  file_presence_never_activates_successor: true
