@@ -290,8 +290,9 @@ The durable successor programme is defined by:
 Its presence does **not** activate it or override an existing hold. Activation requires a
 new valid ChatGPT `DIRECTIVE` on issue #80, after the currently authoritative
 programme permits advancement, carrying `programme: KEYFLOWOS_PLATFORM_CONVERGENCE`
-and `programme_action: ACTIVATE`. A newer `DIRECTIVE` or `HOLD` with
-`programme_action: HOLD` holds it again. Activation is never inferred from prose, ids or
+and `programme_action: ACTIVATE`. A newer `DIRECTIVE` with
+`programme_action: HOLD` holds it again, and so does any other authority-typed message naming
+the programme (fail closed). Activation is never inferred from prose, ids or
 file presence, and it releases no other hold. The contract is `activation` in
 `KEYFLOWOS_PLATFORM_DAG.yaml`, proved by `scripts/agent-control/tests/platform-dag.spec.mjs`. The platform programme makes GitHub Copilot an explicit
 continuous review input while preserving ChatGPT architecture/merge admission and Claude

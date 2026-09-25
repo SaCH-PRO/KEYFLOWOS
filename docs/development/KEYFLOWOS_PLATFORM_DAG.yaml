@@ -36,15 +36,19 @@ activation:
       programme: KEYFLOWOS_PLATFORM_CONVERGENCE
       programme_action: ACTIVATE
   # A newer message matching this block returns the programme to HELD.
+  # DIRECTIVE only: issue #80's canonical type list has no HOLD. Any other
+  # authority-typed message naming this programme also holds (fail closed).
   hold:
-    message_types: [DIRECTIVE, HOLD]
+    message_types: [DIRECTIVE]
     sender_exact: chatgpt
     author_allowlist: [SaCH-PRO]
     required_fields:
       programme: KEYFLOWOS_PLATFORM_CONVERGENCE
       programme_action: HOLD
   # Envelope every #80 message must carry (issue #80 body). A message naming
-  # this programme without all of it cannot activate; it holds.
+  # this programme without all of it cannot activate; it holds. Values are
+  # checked too: state/health from state-machine.mjs (health GREEN/YELLOW/RED,
+  # so AMBER holds), 40-hex SHAs, true/false for scope_changed/production_touched.
   required_envelope:
     - message_id
     - packet_id

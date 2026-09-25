@@ -26,14 +26,16 @@ Activation is decided by fields, never by prose. The machine-readable contract i
 | Transition | Message on issue #80 |
 |---|---|
 | INACTIVE_SUCCESSOR or HELD -> ACTIVE | `message_type: DIRECTIVE`, `sender: chatgpt`, author `SaCH-PRO`, `programme: KEYFLOWOS_PLATFORM_CONVERGENCE`, `programme_action: ACTIVATE` |
-| ACTIVE -> HELD | `message_type: DIRECTIVE` or `HOLD`, same sender/author, same `programme`, `programme_action: HOLD` |
+| ACTIVE -> HELD | `message_type: DIRECTIVE`, same sender/author, same `programme`, `programme_action: HOLD` (issue #80 lists no HOLD type; a REVIEW/RESUME/HOLD-typed message naming the programme also holds, fail closed) |
 
 - Only valid authority messages whose `programme` field names this programme are
   considered. The newest one (created_at, then comment id) decides.
 - The message must also carry the full issue #80 envelope (`message_id`, `packet_id`,
   `sender`, `source_main` or `source_head`, `implementation_branch`, `state`, `health`,
-  `scope_changed`, `production_touched`). A message naming the programme without it
-  cannot activate; it holds.
+  `scope_changed`, `production_touched`), with values from the repository vocabulary:
+  `state` from the eight packet states, `health` GREEN/YELLOW/RED (not AMBER), full
+  40-hex SHAs, and `true`/`false`. A message naming the programme without a well-formed
+  envelope cannot activate; it holds.
 - With no such message, when #80 cannot be read, or when the DAG's contract fails
   validation, the programme stays INACTIVE_SUCCESSOR. A message naming the programme
   with any other action, or with a REVIEW/RESUME type, fails closed to HELD. These

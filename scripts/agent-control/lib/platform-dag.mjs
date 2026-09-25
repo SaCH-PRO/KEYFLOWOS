@@ -17,9 +17,31 @@ import { parseYaml } from './yaml.mjs';
 import { buildDag } from './dag.mjs';
 import { readField } from './events.mjs';
 import { AUTHORITY_MESSAGE_TYPES, AUTHORITY_SENDER, AUTHORIZED_AUTHORS, collectAuthority } from './reconcile.mjs';
+import { HEALTH, STATES } from './state-machine.mjs';
 
 export const PLATFORM_DAG_PATH = 'docs/development/KEYFLOWOS_PLATFORM_DAG.yaml';
 export const AUTOPILOT_POLICY_PATH = 'docs/development/AGENT_AUTOPILOT_POLICY.yaml';
+
+/**
+ * Human gates the DAG must declare, each with the never_automatic effects it
+ * must at least inherit (CG-DIRECTIVE-PLATFORM-PREACTIVATION-CORRECTION-001).
+ * Pinned in code so deleting or loosening one in the file fails validation.
+ */
+export const REQUIRED_HUMAN_GATES = Object.freeze({
+  production_deployment_or_release: ['production_deployment'],
+  production_mutation: ['production_deployment', 'production_data_mutation'],
+  production_data_mutation: ['production_data_mutation'],
+  production_dns_or_domain_cutover: ['production_deployment'],
+  destructive_production_data_or_schema_action: ['production_data_mutation', 'migration_strategy'],
+  paid_resource_creation: [],
+  secret_or_oauth_entry_without_safe_connected_writer: [],
+  unauthorized_real_provider_traffic: ['real_provider_traffic'],
+  major_architecture_override: ['architecture_precedence_decision', 'schema_primitive_choice'],
+  weakening_security_tenancy_branch_ci_proof_review_or_admission_gate: ['gate_weakening', 'proof_obligation_reduction'],
+});
+
+/** The only message type that may activate or hold (issue #80 lists no HOLD type). */
+export const PROGRAMME_CONTROL_MESSAGE_TYPE = 'DIRECTIVE';
 
 export const PLATFORM_STATES = Object.freeze({
   INACTIVE: 'INACTIVE_SUCCESSOR',
@@ -92,8 +114,8 @@ export function validatePlatformContract(doc, policy) {
   if (activation.activate?.message_type && activation.activate.message_type !== 'DIRECTIVE') {
     add('ACTIVATION_TYPE_NOT_DIRECTIVE', 'only a DIRECTIVE may activate the successor programme');
   }
-  if (activation.hold && !sameSet(activation.hold.message_types, ['DIRECTIVE', 'HOLD'])) {
-    add('HOLD_TYPES_MISMATCH', 'activation.hold.message_types must be exactly [DIRECTIVE, HOLD], as the evaluator enforces');
+  if (activation.hold && !sameSet(activation.hold.message_types, [PROGRAMME_CONTROL_MESSAGE_TYPE])) {
+    add('HOLD_TYPES_MISMATCH', `activation.hold.message_types must be exactly [${PROGRAMME_CONTROL_MESSAGE_TYPE}], as the evaluator enforces`);
   }
   if (!sameSet(activation.required_envelope, REQUIRED_ENVELOPE)) {
     add('ACTIVATION_ENVELOPE_MISMATCH', `activation.required_envelope must equal the issue #80 envelope ${JSON.stringify(REQUIRED_ENVELOPE)}`);
@@ -145,6 +167,18 @@ export function validatePlatformContract(doc, policy) {
     }
   }
 
+  const declared = new Map((gatesDoc.gates || []).filter((g) => g?.id).map((g) => [g.id, g]));
+  for (const [id, mustInherit] of Object.entries(REQUIRED_HUMAN_GATES)) {
+    const gate = declared.get(id);
+    if (!gate) {
+      add('REQUIRED_GATE_MISSING', `required human gate ${id} is not declared`);
+      continue;
+    }
+    for (const parent of mustInherit) {
+      if (!(gate.inherits || []).includes(parent)) add('REQUIRED_GATE_WEAKENED', `${id} must inherit ${parent}`);
+    }
+  }
+
   for (const packet of doc.packets || []) {
     for (const annotation of packet.human_gates || []) {
       if (!gateIds.has(annotation?.gate)) add('PACKET_GATE_UNKNOWN', `${packet.id} references undeclared gate ${annotation?.gate}`);
@@ -179,8 +213,26 @@ export const REQUIRED_ENVELOPE = Object.freeze([
   'production_touched',
 ]);
 
+const SHA = /^[0-9a-f]{40}$/;
+const BOOLEAN = ['true', 'false'];
+
+/**
+ * Envelope problems of a raw #80 comment body: absent fields, and present
+ * fields whose value is outside the repository vocabulary (state-machine.mjs
+ * STATES/HEALTH, full 40-hex SHAs, true/false). Empty list = well formed.
+ */
 export function missingEnvelopeFields(body) {
-  return REQUIRED_ENVELOPE.filter((spec) => spec.split('|').every((key) => readField(body, key) === null));
+  const problems = REQUIRED_ENVELOPE.filter((spec) => spec.split('|').every((key) => readField(body, key) === null));
+  const value = (key) => readField(body, key);
+  for (const key of ['source_main', 'source_head']) {
+    if (value(key) !== null && !SHA.test(value(key))) problems.push(`${key} (not a 40-hex SHA)`);
+  }
+  if (value('state') !== null && !STATES.includes(value('state'))) problems.push(`state (${value('state')} is not a packet state)`);
+  if (value('health') !== null && !HEALTH.includes(value('health'))) problems.push(`health (${value('health')} is not ${HEALTH.join('/')})`);
+  for (const key of ['scope_changed', 'production_touched']) {
+    if (value(key) !== null && !BOOLEAN.includes(value(key))) problems.push(`${key} (not true/false)`);
+  }
+  return problems;
 }
 
 /**
@@ -278,12 +330,13 @@ export function platformProgrammeState(comments, doc, policy) {
     };
   }
 
-  // The contract validator has already pinned these to DIRECTIVE/ACTIVATE and
-  // DIRECTIVE|HOLD/HOLD; they are restated so the outcome never depends on it.
-  if (newest.message_type === 'DIRECTIVE' && newest.programme_action === 'ACTIVATE') {
+  // The contract validator has already pinned both to DIRECTIVE; restated so
+  // the outcome never depends on it. Any other authority type naming the
+  // programme (REVIEW, RESUME, HOLD) falls through to HELD below.
+  if (newest.message_type === PROGRAMME_CONTROL_MESSAGE_TYPE && newest.programme_action === 'ACTIVATE') {
     return { state: PLATFORM_STATES.ACTIVE, reason: 'newest message naming this programme is an ACTIVATE DIRECTIVE', decided_by };
   }
-  if (['DIRECTIVE', 'HOLD'].includes(newest.message_type) && newest.programme_action === 'HOLD') {
+  if (newest.message_type === PROGRAMME_CONTROL_MESSAGE_TYPE && newest.programme_action === 'HOLD') {
     return { state: PLATFORM_STATES.HELD, reason: 'newest message naming this programme is a HOLD', decided_by };
   }
   return {
@@ -297,6 +350,8 @@ export default {
   PLATFORM_DAG_PATH,
   AUTOPILOT_POLICY_PATH,
   PLATFORM_STATES,
+  REQUIRED_HUMAN_GATES,
+  PROGRAMME_CONTROL_MESSAGE_TYPE,
   REQUIRED_ENVELOPE,
   missingEnvelopeFields,
   loadPlatformDag,

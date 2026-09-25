@@ -6,6 +6,7 @@ import { buildDag, proveDrainable, selectNext } from '../lib/dag.mjs';
 import {
   PLATFORM_DAG_PATH,
   PLATFORM_STATES,
+  REQUIRED_HUMAN_GATES,
   loadAutopilotPolicy,
   loadPlatformDag,
   platformProgrammeState,
@@ -361,6 +362,46 @@ test('NEGATIVE CONTROL: a malformed contract shape fails closed instead of throw
   }
   assert.equal(platformProgrammeState(activate, null, policy).state, PLATFORM_STATES.INACTIVE);
   assert.equal(platformProgrammeState(activate, loadPlatformDag(repoRoot).doc, null).state, PLATFORM_STATES.INACTIVE);
+});
+
+test('NEGATIVE CONTROL: deleting or loosening any required human gate fails validation and blocks activation', () => {
+  const policy = loadAutopilotPolicy(repoRoot);
+  for (const id of Object.keys(REQUIRED_HUMAN_GATES)) {
+    const doc = clone(loadPlatformDag(repoRoot).doc);
+    doc.human_gates.gates = doc.human_gates.gates.filter((g) => g.id !== id);
+    doc.packets.forEach((p) => { if (p.human_gates) p.human_gates = p.human_gates.filter((g) => g.gate !== id); });
+    const problems = validatePlatformContract(doc, policy);
+    assert.ok(problems.some((p) => p.code === 'REQUIRED_GATE_MISSING' && p.detail.includes(id)), `deleting ${id} must fail`);
+    assert.equal(stateOf([comment(activateFields())], doc), PLATFORM_STATES.INACTIVE, `deleting ${id} must block activation`);
+  }
+  for (const [id, parents] of Object.entries(REQUIRED_HUMAN_GATES)) {
+    if (!parents.length) continue;
+    const doc = clone(loadPlatformDag(repoRoot).doc);
+    doc.human_gates.gates.find((g) => g.id === id).inherits = [];
+    assert.ok(codes(validatePlatformContract(doc, policy)).includes('REQUIRED_GATE_WEAKENED'), `loosening ${id} must fail`);
+  }
+});
+
+test('NEGATIVE CONTROL: envelope values outside the repository vocabulary cannot activate', () => {
+  const bad = {
+    health: 'AMBER',
+    state: 'SUPERSEDED',
+    source_main: 'ad97ea48',
+    scope_changed: 'maybe',
+    production_touched: 'no',
+  };
+  for (const [key, value] of Object.entries(bad)) {
+    assert.equal(stateOf([comment(activateFields({ [key]: value }))]), PLATFORM_STATES.HELD, `${key}: ${value} must not activate`);
+  }
+});
+
+test('hold is DIRECTIVE-only in the contract; a HOLD-typed message still holds', () => {
+  const doc = clone(loadPlatformDag(repoRoot).doc);
+  doc.activation.hold.message_types = ['DIRECTIVE', 'HOLD'];
+  assert.ok(codes(validatePlatformContract(doc, loadAutopilotPolicy(repoRoot))).includes('HOLD_TYPES_MISMATCH'));
+  const activate = comment(activateFields(), { at: '2026-09-26T10:00:00Z' });
+  const holdTyped = comment(activateFields({ message_type: 'HOLD', programme_action: 'HOLD' }), { at: '2026-09-26T11:00:00Z' });
+  assert.equal(stateOf([activate, holdTyped]), PLATFORM_STATES.HELD);
 });
 
 test('the committed DAG file is the one under test', () => {
