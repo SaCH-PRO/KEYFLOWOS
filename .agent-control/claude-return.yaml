@@ -2,12 +2,14 @@ packet_id: KF-META-AUTO-001
 correction_id: KF-META-AUTO-001-STATE-RECONCILE
 directive_message_id: CG-DIRECTIVE-META-STATE-RECONCILE-001
 ack_message_id: CC-ACK-META-STATE-RECONCILE-001
-progress_message_id: CC-PROGRESS-META-STATE-RECONCILE-001
+progress_message_ids:
+  - CC-PROGRESS-META-STATE-RECONCILE-001
+  - CC-PROGRESS-META-STATE-RECONCILE-002
 return_message_id: CC-RETURN-META-STATE-RECONCILE-001
 source_main: 4fafdef635d1f41f287f094370217999e1418041
 source_head: 1139d93b4a215ac223a7108c7d221b97d359c861
 implementation_branch: impl/kf-meta-auto-001-state-reconcile
-pr_number: null
+pr_number: 92
 state: PROVING
 health: GREEN
 scope_changed: false
@@ -87,6 +89,12 @@ commits:
   - sha: 1139d93b4a215ac223a7108c7d221b97d359c861
     subject: "KF-META-AUTO-001: reconcile control-state precedence (fail closed on stale projection)"
     semantic: true
+  - sha: 01e50b75e5847efe451122ed56bc14d15eb14d82
+    subject: "KF-META-AUTO-001: state-reconcile control artifacts"
+    semantic: false
+  - subject: "KF-META-AUTO-001: complete state-reconcile return artifact"
+    semantic: false
+    note: this commit; control artifact only (PR number, mutation result)
 
 scope_ledger:
   declared:
@@ -146,8 +154,8 @@ proof_matrix:
     proof: node --test scripts/agent-control/tests/*.spec.mjs; tests/windows/*.spec.mjs
     result: PASS
   - obligation: existing negative-control mutation suite remains live
-    proof: proof-mutation.mjs at source_head
-    result: PENDING
+    proof: proof-mutation.mjs at source_head -> 32/32 live (25 existing + 7 NC-RECONCILE-*)
+    result: PASS
   - obligation: no weakening/removal of safety gates
     proof: >
       no gate, workflow, admission rule or existing assertion removed or loosened;
@@ -174,7 +182,7 @@ tests:
 negative_controls:
   command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
   baseline_before_change: 25/25 live
-  result: PENDING
+  result: 32/32 live
   added:
     - NC-RECONCILE-GATE-BYPASS
     - NC-RECONCILE-NEWER-AUTHORITY

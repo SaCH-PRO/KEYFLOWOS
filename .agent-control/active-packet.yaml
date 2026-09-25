@@ -6,13 +6,14 @@ in_reply_to: CG-REVIEW-LIVE-AUTHORITY-WAKE-001
 ack_message_id: CC-ACK-META-STATE-RECONCILE-001
 source_main: 4fafdef635d1f41f287f094370217999e1418041
 implementation_branch: impl/kf-meta-auto-001-state-reconcile
-state: CHARACTERIZING
-health: YELLOW
+pr_number: 92
+state: PROVING
+health: GREEN
 scope_changed: false
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
-review_status: AUTHORIZED
+review_status: PENDING_CHATGPT_REVIEW
 
 objective: >
   Reconcile KEYFLOWOS control-state precedence and stale-state handling before
