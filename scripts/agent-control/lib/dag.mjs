@@ -1,8 +1,8 @@
 /**
  * AUTO-DAG — programme dependency graph loader, validator and selector.
  *
- * Static topology only. This module never reads or writes live packet state;
- * callers pass completion facts in from programme-state.yaml.
+ * Static topology only. This module never reads or writes packet state;
+ * callers pass completion facts in from the (reconciled) programme-state.yaml.
  */
 
 import fs from 'node:fs';

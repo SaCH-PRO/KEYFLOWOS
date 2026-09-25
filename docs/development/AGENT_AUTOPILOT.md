@@ -15,13 +15,17 @@ to move, and it must fail closed on ambiguity.
 ## Architecture
 
 ```text
-issue #80 (append-only event log)      .agent-control/programme-state.yaml
-        |                                   (canonical LIVE state)
-        v                                            ^
+issue #80 (append-only;            repository / PR / CI         .agent-control/programme-state.yaml
+ newest valid ChatGPT message       (implementation truth)       (DERIVED projection, may be stale)
+ = execution authority)                     |                              |
+        |                                   |                              |
+        +-----------------> AUTO-RECONCILE <-------------------------------+
+        |                  consistent? else REPORT_DRIFT (fail closed)
+        v                                   |
   AUTO-EVENTS  --normalize + idempotency key-->  AUTO-RECOVERY journal
-        |                                            |
-        v                                            v
-  AUTO-ORCHESTRATOR  --reads state, never compares stores-->  next legal action
+        |                                   |
+        v                                   v
+  AUTO-ORCHESTRATOR  --rule table only behind a consistent reconciliation-->  next legal action
         |
         +--> AUTO-STATE-MACHINE   legal transitions, fail closed
         +--> AUTO-ADMISSION       exact-head evaluation (never grants admission)
@@ -31,15 +35,29 @@ issue #80 (append-only event log)      .agent-control/programme-state.yaml
         +--> AUTO-DAG             static topology + dependency-safe selection
 ```
 
-## Canonical state
+## Control-state precedence
 
-One store is authoritative for live control state:
-`.agent-control/programme-state.yaml`. Issue #80 is the append-only event and
-audit log; the intelligence branch is the durable architecture/checkpoint
-projection. See "Canonical state authority" in `AGENT_CONTROL_PLANE.md`.
+Repository/PR/CI evidence is implementation truth. The newest valid ChatGPT
+DIRECTIVE, REVIEW, HOLD or RESUME on issue #80 is execution authority.
+`.agent-control/programme-state.yaml` is a derived projection that may be
+stale. See "Control-state precedence" in `AGENT_CONTROL_PLANE.md`.
 
-The orchestrator detects projection drift and reports it. It never resolves
-state by comparing stores, and it never lets a stale projection advance work.
+`lib/reconcile.mjs` compares the projection, anchored by `authority_basis`,
+with #80 and the repository. `lib/truth.mjs` gathers both through `gh`, or
+from a recorded `--truth-file` snapshot. `decide()` consults the projection
+only when every check passes. Otherwise it returns `REPORT_DRIFT` with every
+finding, and nothing advances.
+
+The reconciliation never picks a winner or repairs the projection. It does
+not classify holds or releases from message ids or prose either: any newer
+authority message makes the projection stale until someone re-derives it in a
+reviewed commit.
+
+The CI observer passes no token to the decide step
+(`.github/workflows/agent-control-autopilot.yml`), so it cannot read #80 there.
+The published `derived_action` is then `REPORT_DRIFT` (AUTHORITY_UNVERIFIABLE)
+until that step gets a token. That is fail-closed by design; enabling it is a
+workflow change outside CG-DIRECTIVE-META-STATE-RECONCILE-001's scope.
 
 ## Spanning packets and the wave gate
 
@@ -187,11 +205,11 @@ recovery.
 - `docs/development/AGENT_AUTOPILOT_POLICY.yaml` — machine-readable safety policy.
 - `docs/development/AGENT_AUTOPILOT_OPERATIONS.md` — operator runbook.
 - `docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml` — executable dependency graph.
-- `.agent-control/programme-state.yaml` — canonical live control state.
+- `.agent-control/programme-state.yaml` — derived programme projection (anchored by `authority_basis`).
 - `scripts/agent-control/lib/` — yaml, dag, state, state-machine, events,
-  admission, momentum, correction, adapters, orchestrator.
-- `scripts/agent-control/orchestrate.mjs` — next-legal-action entry point.
-- `scripts/agent-control/status.mjs` — machine/human programme status.
+  admission, momentum, correction, adapters, orchestrator, reconcile, truth.
+- `scripts/agent-control/orchestrate.mjs` — next-legal-action entry point (reconciles first).
+- `scripts/agent-control/status.mjs` — machine/human programme status (`--verify` reconciles).
 - `scripts/agent-control/auto-merge-admitted.mjs` — exact-head admission evaluator.
 - `scripts/agent-control/normalize-event.mjs` — event classifier.
 - `scripts/agent-control/validate-dag.mjs` — DAG executability proof.

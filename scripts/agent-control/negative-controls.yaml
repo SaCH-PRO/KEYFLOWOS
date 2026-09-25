@@ -313,3 +313,85 @@ negative_controls:
       replace: "  if ($false) { Write-WorkerLog 'PAUSED'"
     proof_command: node --test --test-name-pattern="paused worker" scripts/agent-control/tests/windows/worker-authority.spec.mjs
     timeout_ms: 300000
+
+  # --- source precedence (CG-DIRECTIVE-META-STATE-RECONCILE-001) ------------
+
+  - id: NC-RECONCILE-GATE-BYPASS
+    claim: >
+      decide() consults the derived programme-state only behind a consistent
+      reconciliation. Without the gate, a stale READY_TO_MERGE for an already
+      merged PR asks for admission again.
+    mutation:
+      file: scripts/agent-control/lib/orchestrator.mjs
+      find: "  if (!rec || rec.consistent !== true) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="stale READY_TO_MERGE for a merged PR" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECONCILE-NEWER-AUTHORITY
+    claim: >
+      Any valid #80 authority message newer than the projection's anchor --
+      including a hold typed DIRECTIVE -- makes the projection stale, so an
+      older derived advance cannot outrun a newer hold.
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: "      } else if (idx < authority.messages.length - 1) {"
+      replace: "      } else if (false) {"
+    proof_command: node --test --test-name-pattern="newer than the projection" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECONCILE-MERGED-PR
+    claim: >
+      A pre-merge projection whose PR has merged is reported as
+      PR_ALREADY_MERGED, not misclassified.
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: "      if (PRE_MERGE_STATES.has(p.state) && merged) {"
+      replace: "      if (false) {"
+    proof_command: node --test --test-name-pattern="stale READY_TO_MERGE for a merged PR" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECONCILE-REPO-CONTRADICTION
+    claim: >
+      A MERGED or CHECKPOINTED projection whose PR never merged fails closed
+      and reports the drift.
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: "      } else if (POST_MERGE_STATES.has(p.state) && !merged) {"
+      replace: "      } else if (false) {"
+    proof_command: node --test --test-name-pattern="repository contradicts projection" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECONCILE-UNVERIFIABLE-AUTHORITY
+    claim: >
+      An unreadable #80 is reported as AUTHORITY_UNVERIFIABLE, never treated as
+      "no newer authority".
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: "  if (!authority?.verified) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="cannot be verified fails closed" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECONCILE-AUTHORITY-SENDER
+    claim: >
+      Only sender chatgpt from an allowlisted GitHub author carries authority;
+      a claude-sent or forged REVIEW does not move the anchor.
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: "    if (msg.sender !== AUTHORITY_SENDER || !authors.includes(author) || !msg.message_id) {"
+      replace: "    if (!msg.message_id) {"
+    proof_command: node --test --test-name-pattern="only chatgpt-sent" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECONCILE-CLI-WIRING
+    claim: >
+      The orchestrator CLI passes the real reconciliation to decide(); a CLI
+      that asserts consistency would publish derived actions from a stale
+      projection.
+    mutation:
+      file: scripts/agent-control/orchestrate.mjs
+      find: "decide({ state, reconciliation, event, dag, registry, duplicate })"
+      replace: "decide({ state, reconciliation: { consistent: true, findings: [] }, event, dag, registry, duplicate })"
+    proof_command: node --test --test-name-pattern="CLI end to end" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000

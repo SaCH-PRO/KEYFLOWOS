@@ -1,18 +1,21 @@
 /**
- * Canonical live programme state + append-only event journal.
+ * Derived programme-state projection + append-only event journal.
  *
- * Authority boundary (CG-REVIEW-META-AUTO-001):
- *   - .agent-control/programme-state.yaml   THIS FILE'S SUBJECT. Single
- *     machine-readable authority for LIVE control state.
- *   - GitHub issue #80                      append-only event/audit log and
- *     inter-agent message bus. Not a second mutable state database.
- *   - docs/keyflow-intelligence-foundation  architecture/checkpoint/handoff
- *     record and topology history. NOT live state.
- *   - active-packet.yaml / claude-return.yaml   per-packet PR admission
- *     artifacts. Not the global programme authority.
+ * Source precedence (CG-DIRECTIVE-META-STATE-RECONCILE-001, supersedes the
+ * "canonical live state" model of CG-REVIEW-META-AUTO-001):
+ *   - repository / PR / CI evidence         implementation truth.
+ *   - newest valid ChatGPT DIRECTIVE, REVIEW, HOLD or RESUME on issue #80
+ *                                           current execution authority. #80
+ *     stays append-only; its history is the authority record.
+ *   - .agent-control/programme-state.yaml   THIS FILE'S SUBJECT. A derived
+ *     machine projection of the two above. It may be stale. `authority_basis`
+ *     names the newest authority message it incorporates.
+ *   - docs/keyflow-intelligence-foundation  durable intent/checkpoint history.
+ *   - active-packet.yaml / claude-return.yaml   per-packet PR admission artifacts.
  *
- * Automation must never decide live state by comparing these stores. It reads
- * this file, and reports drift in the others rather than following them.
+ * The projection may summarize and accelerate a decision; it may never
+ * override newer authority or repository truth. lib/reconcile.mjs performs the
+ * comparison and decide() fails closed on any disagreement.
  */
 
 import fs from 'node:fs';
@@ -30,8 +33,11 @@ export function emptyState() {
   return {
     version: 1,
     schema: 'keyflowos.programme-state/v1',
-    authority: 'canonical-live-programme-state',
+    authority: 'derived-programme-projection',
     updated_at: null,
+    // {message_id, comment_id} of the newest #80 authority message this
+    // projection incorporates. Absent means it cannot be checked, so it is unusable.
+    authority_basis: null,
     programme: {
       packets_total: 35,
       checkpointed: [],
@@ -108,6 +114,11 @@ export function validateState(state) {
   if (p.merge_authority === true && !state.merge_authority_marker) {
     problems.push({ code: 'MERGE_AUTHORITY_WITHOUT_MARKER', detail: 'merge_authority=true requires a recorded authority marker' });
   }
+  const basis = state.authority_basis;
+  if (basis !== null && basis !== undefined
+    && (typeof basis !== 'object' || !basis.message_id || basis.comment_id === undefined || basis.comment_id === null)) {
+    problems.push({ code: 'AUTHORITY_BASIS_INVALID', detail: 'authority_basis must be {message_id, comment_id} or null' });
+  }
   if (new Set(state.processed_event_keys).size !== state.processed_event_keys.length) {
     problems.push({ code: 'DUPLICATE_PROCESSED_KEYS', detail: 'processed_event_keys must be a set' });
   }
@@ -175,8 +186,9 @@ export function recordEvent(state, event, outcome = {}) {
 }
 
 /**
- * Detect projection drift against the durable intelligence board without
- * letting the stale projection advance anything. Reporting only.
+ * Detect drift between programme-state and the durable intelligence board.
+ * Reporting only: neither projection advances anything. (`live` in the result
+ * is the programme-state value, kept for compatibility.)
  */
 export function projectionDrift(state, boardProjection) {
   if (!boardProjection) return { drift: false, details: [] };

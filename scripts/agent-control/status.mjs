@@ -2,17 +2,19 @@
 /**
  * AUTO-STATUS — programme status in machine and human form.
  *
- * Reads the canonical live state and the static DAG. It never derives state by
- * comparing stores; where the durable intelligence projection disagrees it
- * reports DRIFT and keeps the live state authoritative.
+ * Renders the derived programme-state and the static DAG. programme-state is a
+ * projection, not authority: with --verify it is reconciled against the newest
+ * #80 authority and repository truth (lib/reconcile.mjs) and every
+ * disagreement is shown. Without --verify the status is labelled UNVERIFIED.
  *
- * Usage: node scripts/agent-control/status.mjs [--json]
+ * Usage: node scripts/agent-control/status.mjs [--json] [--verify]
  */
 
 import { loadState, projectionDrift } from './lib/state.mjs';
 import { loadDag, selectNext } from './lib/dag.mjs';
 import { evaluateMomentum } from './lib/momentum.mjs';
 import { defaultRegistry, agentStatusReport } from './lib/adapters.mjs';
+import { reconcileWithTruth } from './lib/truth.mjs';
 
 export function buildStatus(repoRoot = process.cwd(), options = {}) {
   const state = options.state || loadState(repoRoot);
@@ -62,6 +64,9 @@ export function buildStatus(repoRoot = process.cwd(), options = {}) {
       : null,
     eligible_count: selection.eligible.length,
     projection_drift: drift,
+    authority_basis: state.authority_basis || null,
+    // null = not checked. The projection is only usable when this is consistent.
+    reconciliation: options.reconciliation || null,
     last_processed_event_key: state.last_processed_event_key || null,
     journal_entries: (state.event_journal || []).length,
   };
@@ -72,8 +77,21 @@ export function renderHuman(status) {
   const pr = status.programme;
   const ap = status.active_packet;
 
-  lines.push('KEYFLOWOS PROGRAMME STATUS');
+  lines.push('KEYFLOWOS PROGRAMME STATUS (derived projection)');
   lines.push('='.repeat(60));
+  const basis = status.authority_basis;
+  lines.push(`Anchored to    : ${basis ? `${basis.message_id} (comment ${basis.comment_id})` : '(none -- unanchored)'}`);
+  if (!status.reconciliation) {
+    lines.push('Reconciliation : UNVERIFIED -- run with --verify; do not act on this projection alone');
+  } else if (status.reconciliation.consistent) {
+    lines.push('Reconciliation : CONSISTENT with newest #80 authority and repository truth');
+  } else {
+    lines.push('Reconciliation : DRIFT -- projection is stale or contradicted; it advances nothing');
+    for (const f of status.reconciliation.findings) {
+      lines.push(`  ${f.code}${f.detail === null ? '' : ' ' + JSON.stringify(f.detail)}`);
+    }
+  }
+  lines.push('');
   lines.push(`Packets        : ${pr.packets_total} total / ${pr.checkpointed} checkpointed / ${pr.active} active / ${pr.waiting} waiting`);
   lines.push(`Phases         : ${pr.phases_total} (spanning packets modelled per phase)`);
   lines.push(`Wave gate      : ${pr.gate_wave}`);
@@ -110,9 +128,9 @@ export function renderHuman(status) {
 
   if (status.projection_drift?.drift) {
     lines.push('');
-    lines.push('PROJECTION DRIFT (live state is authoritative; projection is stale):');
+    lines.push('BOARD DRIFT (intelligence board disagrees with programme-state; neither advances work):');
     for (const d of status.projection_drift.details) {
-      lines.push(`  ${d.field}: live=${d.live} projection=${d.projection}`);
+      lines.push(`  ${d.field}: programme-state=${d.live} board=${d.projection}`);
     }
   }
 
@@ -122,7 +140,9 @@ export function renderHuman(status) {
 const invokedDirectly = process.argv[1] && process.argv[1].endsWith('status.mjs');
 if (invokedDirectly) {
   try {
-    const status = buildStatus(process.cwd());
+    const state = loadState(process.cwd());
+    const reconciliation = process.argv.includes('--verify') ? reconcileWithTruth(state) : null;
+    const status = buildStatus(process.cwd(), { state, reconciliation });
     process.stdout.write(process.argv.includes('--json') ? JSON.stringify(status, null, 2) + '\n' : renderHuman(status) + '\n');
   } catch (error) {
     process.stderr.write(`status failed: ${error.message}\n`);

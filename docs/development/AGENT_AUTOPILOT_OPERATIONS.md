@@ -10,6 +10,9 @@ committed, and nothing here can weaken an existing gate.
 # Programme status: packets, active packet, agents, next dependency-safe work
 node scripts/agent-control/status.mjs
 
+# Same, reconciled against newest #80 authority and repository truth (reads via gh)
+node scripts/agent-control/status.mjs --verify
+
 # Same, machine readable
 node scripts/agent-control/status.mjs --json
 
@@ -146,8 +149,11 @@ Agent Control Gate enforces the same contract with or without automation.
 | `auto-merge-admitted` exits 3 | PR is not eligible — an ordinary outcome | the JSON `reason` names the exact unmet contract |
 | `auto-merge-admitted` exits 2 | evaluator error (auth, API, parse) | the job fails loudly by design; read stderr, fix, re-run |
 | DAG validation fails | a packet edit introduced a deadlock or cycle | `validate-dag.mjs` prints the structured problem codes |
-| Status shows `PROJECTION DRIFT` | the intelligence board disagrees with live state | live state is authoritative; reconcile the board at a checkpoint — never the reverse |
-| State file looks wrong | hand-edited while running | stop the worker, correct it, re-run `status.mjs`; `validateState` rejects impossible values on save |
+| Orchestrator publishes `REPORT_DRIFT` / `DERIVED_STATE_STALE_AUTHORITY` | a ChatGPT DIRECTIVE/REVIEW/HOLD/RESUME is newer than programme-state's `authority_basis` | expected after every new authority message; re-derive programme-state from that message and repository truth in a reviewed commit and re-anchor it. Never edit the anchor alone |
+| `REPORT_DRIFT` / `PR_ALREADY_MERGED`, `PR_NOT_MERGED`, `PR_CLOSED_UNMERGED`, `PR_BRANCH_MISMATCH`, `SOURCE_MAIN_NOT_ON_MAIN` | the repository contradicts the projected packet state | repository truth wins: verify post-merge state, then re-derive the projection |
+| `REPORT_DRIFT` / `AUTHORITY_UNVERIFIABLE` or `REPO_TRUTH_UNVERIFIABLE` | `gh` could not read #80 or the repository (no token on the runner, expired login, API error) | fix access; nothing advances meanwhile, by design |
+| Status shows `BOARD DRIFT` | the intelligence board disagrees with programme-state | neither advances work; reconcile both against #80 and the repository at a checkpoint |
+| State file looks wrong | hand-edited while running | stop the worker, correct it, re-run `status.mjs --verify`; `validateState` rejects impossible values on save |
 
 ## 6. Human override
 
@@ -160,7 +166,11 @@ The operator can always:
 - disable the workflow.
 
 `hold` and `unresolved_contradictions` both outrank every mechanical rule in
-the orchestrator, so either is a hard stop.
+the orchestrator, so either is a hard stop. A projection edit is only
+consulted while it reconciles with the newest #80 authority. To freeze
+advancement durably, post a ChatGPT hold on #80 and re-derive the projection
+from it. Any newer authority message already stops advancement until that
+re-derivation.
 
 ## 7. What automation can never do
 

@@ -116,7 +116,7 @@ test('merge_authority cannot be true without a recorded marker', () => {
 
 // ------------------------------------------------------------- DRIFT
 
-test('projection drift is reported, and the live state stays authoritative', () => {
+test('board drift is reported, and reporting does not rewrite programme-state', () => {
   const state = emptyState();
   state.programme.active_packet = 'KF-META-AUTO-001';
   state.programme.state = 'IMPLEMENTING';
@@ -128,7 +128,7 @@ test('projection drift is reported, and the live state stays authoritative', () 
   const fields = drift.details.map((d) => d.field);
   assert.ok(fields.includes('active_packet'));
   assert.ok(fields.includes('state'));
-  // Reporting must not change the live values.
+  // Reporting must not change the programme-state values.
   assert.equal(state.programme.active_packet, 'KF-META-AUTO-001');
 });
 

@@ -8,6 +8,11 @@ import fs from 'node:fs';
 import { loadDag } from '../lib/dag.mjs';
 import { ROLES, AGENT_STATUS, selectAdapter, claudeLocalAdapter, openAiAdapter } from '../lib/adapters.mjs';
 
+// Verdict for a projection that agrees with authority and repository truth.
+// These tests exercise the rule table behind that gate; tests/reconcile.spec.mjs
+// covers the gate itself.
+const CONSISTENT = Object.freeze({ consistent: true, findings: [], authority_newest: null });
+
 const readyBuilder = {
   id: 'test-builder',
   vendor: 'test',
@@ -126,7 +131,7 @@ test('an active hold outranks ordinary progression', () => {
   const state = emptyState();
   state.programme.state = 'IMPLEMENTING';
   state.hold = { reason: 'ACTION-001 held pending META-AUTO', resume_condition: 'CG-RESUME-ACTION-*' };
-  const out = decide({ state, registry: [readyBuilder] });
+  const out = decide({ state, reconciliation: CONSISTENT,registry: [readyBuilder] });
   assert.equal(out.action, ACTIONS.WAIT_AUTHORITY);
   assert.match(out.reason, /held/);
 });
@@ -135,7 +140,7 @@ test('an unresolved contradiction stops advancement and is never auto-resolved',
   const state = emptyState();
   state.programme.state = 'IMPLEMENTING';
   state.unresolved_contradictions = ['META-C1'];
-  const out = decide({ state, registry: [readyBuilder] });
+  const out = decide({ state, reconciliation: CONSISTENT,registry: [readyBuilder] });
   assert.equal(out.action, ACTIONS.WAIT_AUTHORITY);
   assert.deepEqual(out.contradictions, ['META-C1']);
 });
@@ -144,7 +149,7 @@ test('a momentum alarm is reported before further mechanical work', () => {
   let state = emptyState();
   state.programme.state = 'IMPLEMENTING';
   for (let i = 0; i < 6; i += 1) state = countOperation(state);
-  const out = decide({ state, registry: [readyBuilder] });
+  const out = decide({ state, reconciliation: CONSISTENT,registry: [readyBuilder] });
   assert.equal(out.action, ACTIONS.POST_MOMENTUM);
 });
 
@@ -152,7 +157,7 @@ test('IMPLEMENTING dispatches the builder when one is authenticated', () => {
   const state = emptyState();
   state.programme.state = 'IMPLEMENTING';
   state.programme.active_packet = 'KF-META-AUTO-001';
-  const out = decide({ state, registry: [readyBuilder] });
+  const out = decide({ state, reconciliation: CONSISTENT,registry: [readyBuilder] });
   assert.equal(out.action, ACTIONS.DISPATCH_BUILDER);
   assert.equal(out.adapter, 'test-builder');
 });
@@ -160,7 +165,7 @@ test('IMPLEMENTING dispatches the builder when one is authenticated', () => {
 test('IMPLEMENTING waits rather than pretending when no builder is authenticated', () => {
   const state = emptyState();
   state.programme.state = 'IMPLEMENTING';
-  const out = decide({ state, registry: [unauthedBuilder] });
+  const out = decide({ state, reconciliation: CONSISTENT,registry: [unauthedBuilder] });
   assert.equal(out.action, ACTIONS.WAIT_EXTERNAL_AGENT);
   assert.equal(out.status, AGENT_STATUS.WAITING_EXTERNAL_AGENT);
 });
@@ -168,7 +173,7 @@ test('IMPLEMENTING waits rather than pretending when no builder is authenticated
 test('PROVING requests adversarial review and reports reviewer availability', () => {
   const state = emptyState();
   state.programme.state = 'PROVING';
-  const out = decide({ state, registry: [readyBuilder] });
+  const out = decide({ state, reconciliation: CONSISTENT,registry: [readyBuilder] });
   assert.equal(out.action, ACTIONS.REQUEST_REVIEW);
   assert.equal(out.reviewer_status, AGENT_STATUS.WAITING_EXTERNAL_AGENT);
 });
@@ -176,7 +181,7 @@ test('PROVING requests adversarial review and reports reviewer availability', ()
 test('a merged PR routes to post-merge verification, never straight to checkpoint', () => {
   const state = emptyState();
   state.programme.state = 'READY_TO_MERGE';
-  const out = decide({ state, event: { kind: 'PR_MERGED', pr_number: 87, merge_commit_sha: 'm' }, registry: [] });
+  const out = decide({ state, reconciliation: CONSISTENT,event: { kind: 'PR_MERGED', pr_number: 87, merge_commit_sha: 'm' }, registry: [] });
   assert.equal(out.action, ACTIONS.POST_MERGE_VERIFY);
 });
 
@@ -185,7 +190,7 @@ test('after a checkpoint the next dependency-safe phase is proposed, not release
   const state = emptyState();
   state.programme.state = 'CHECKPOINTED';
   state.programme.checkpointed = ['KF-EXEC-K12-001', 'KF-EXEC-EXTFX-001', 'KF-EXEC-TENANT-001', 'KF-EXEC-AUTH-001'];
-  const out = decide({ state, dag, registry: [readyBuilder] });
+  const out = decide({ state, reconciliation: CONSISTENT,dag, registry: [readyBuilder] });
   assert.equal(out.action, ACTIONS.SELECT_NEXT_PACKET);
   assert.equal(out.selected, 'KF-EXEC-ACTION-001');
   assert.match(out.note, /remains an authority action/);
@@ -194,7 +199,7 @@ test('after a checkpoint the next dependency-safe phase is proposed, not release
 test('a CONTRADICTION event escalates to BLOCKED', () => {
   const state = emptyState();
   state.programme.state = 'IMPLEMENTING';
-  const out = decide({ state, event: { kind: 'CONTRADICTION', packet_id: 'KF-META-AUTO-001' }, registry: [readyBuilder] });
+  const out = decide({ state, reconciliation: CONSISTENT,event: { kind: 'CONTRADICTION', packet_id: 'KF-META-AUTO-001' }, registry: [readyBuilder] });
   assert.equal(out.action, ACTIONS.ESCALATE);
   assert.equal(out.target_state, 'BLOCKED');
 });
@@ -207,7 +212,7 @@ test('the orchestrator is deterministic for the same input', () => {
     s.programme.checkpointed = ['KF-EXEC-K12-001'];
     return s;
   };
-  assert.deepEqual(decide({ state: build(), dag, registry: [readyBuilder] }), decide({ state: build(), dag, registry: [readyBuilder] }));
+  assert.deepEqual(decide({ state: build(), reconciliation: CONSISTENT,dag, registry: [readyBuilder] }), decide({ state: build(), reconciliation: CONSISTENT,dag, registry: [readyBuilder] }));
 });
 
 test('REGRESSION: the local builder adapter detects the real Claude CLI', () => {
