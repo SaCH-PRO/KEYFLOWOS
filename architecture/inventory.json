@@ -57591,7 +57591,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4132158
+      "size_bytes": 4185500
     },
     {
       "extension": ".md",
@@ -57613,15 +57613,15 @@
     },
     {
       "extension": ".json",
-      "lines": 62062,
+      "lines": 63015,
       "path": "architecture/inventory.json",
-      "size_bytes": 1608225
+      "size_bytes": 1631209
     },
     {
       "extension": ".md",
-      "lines": 189,
+      "lines": 194,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 8933
+      "size_bytes": 9270
     },
     {
       "extension": ".md",
@@ -58929,15 +58929,15 @@
     },
     {
       "extension": ".md",
-      "lines": 245,
+      "lines": 250,
       "path": "docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md",
-      "size_bytes": 13717
+      "size_bytes": 14118
     },
     {
       "extension": ".yaml",
-      "lines": 472,
+      "lines": 488,
       "path": "docs/development/KEYFLOWOS_PLATFORM_DAG.yaml",
-      "size_bytes": 15307
+      "size_bytes": 15868
     },
     {
       "extension": ".yaml",
@@ -61714,8 +61714,10 @@
         "AUTOPILOT_POLICY_PATH",
         "PLATFORM_DAG_PATH",
         "PLATFORM_STATES",
+        "REQUIRED_ENVELOPE",
         "loadAutopilotPolicy",
         "loadPlatformDag",
+        "missingEnvelopeFields",
         "platformProgrammeState",
         "validatePlatformContract"
       ],
@@ -61728,9 +61730,9 @@
         "node:fs",
         "node:path"
       ],
-      "lines": 217,
+      "lines": 279,
       "path": "scripts/agent-control/lib/platform-dag.mjs",
-      "size_bytes": 10210
+      "size_bytes": 12702
     },
     {
       "exports": [
@@ -61997,9 +61999,9 @@
         "node:fs",
         "node:test"
       ],
-      "lines": 280,
+      "lines": 329,
       "path": "scripts/agent-control/tests/platform-dag.spec.mjs",
-      "size_bytes": 13318
+      "size_bytes": 16069
     },
     {
       "exports": [],
@@ -63010,6 +63012,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3439,
     "total_files": 4427,
-    "total_lines": 1125442
+    "total_lines": 1126532
   }
 }
