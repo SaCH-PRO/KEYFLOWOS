@@ -1,0 +1,139 @@
+name: AI Review Gate
+
+# Exact-head AI review admission input (KF-AI-PR-REVIEW-GATE-001).
+#
+# Passes only when the CURRENT PR head carries a completed review by a pinned
+# AI reviewer bot at that head (or at an ancestor whose later commits touch
+# .agent-control/** only), and every substantive AI finding has a recorded
+# KF-DISPOSITION. Anything unproven fails. See docs/development/AI_PR_REVIEW_GATE.md.
+#
+# Re-evaluated on every event that can change the answer: a push (the old
+# review goes stale), a review arriving, a disposition reply. Admission reads
+# the newest run at the exact head, so an early "review not posted yet" failure
+# is superseded by the evaluation that follows the review.
+#
+# No path filter: admission requires this workflow on every impl/* PR
+# (ADMISSION_WORKFLOWS in scripts/agent-control/lib/admission.mjs).
+#
+# Deliberately NOT a wake source for the autopilot: every evaluation would
+# post an AUTO_EVENT to #80.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One live evaluation per PR; a newer event supersedes an older one.
+  group: ai-review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verdict:
+    name: ai-review-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      head_sha: ${{ steps.gate.outputs.head_sha }}
+      admissible: ${{ steps.gate.outputs.admissible }}
+      ledger: ${{ steps.gate.outputs.ledger }}
+    steps:
+      # The evaluator comes from the trusted base commit, so a PR cannot change
+      # the rule that judges it. Only while the base predates the gate (its own
+      # introducing PR) does it fall back to the PR's copy, and says so.
+      - name: Checkout trusted evaluator (PR base)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Checkout PR evaluator (bootstrap only)
+        if: hashFiles('trusted/scripts/agent-control/ai-review-gate.mjs') == ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+
+      - name: Evaluate exact-head AI review
+        id: gate
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          source_note="trusted base $BASE_SHA"
+          if ! git -C trusted cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || [ "$(git -C trusted rev-parse HEAD)" != "$BASE_SHA" ]; then
+            source_note="BOOTSTRAP: PR head $EXPECTED_HEAD_SHA (base has no evaluator yet)"
+          fi
+          echo "evaluator source: $source_note"
+          ledger_file="$RUNNER_TEMP/ai-review-ledger.md"
+          json="$(node trusted/scripts/agent-control/ai-review-gate.mjs --ledger "$ledger_file")"
+          code=$?
+          echo "$json"
+          admissible=false
+          [ "$code" -eq 0 ] && admissible=true
+          {
+            echo "head_sha=$EXPECTED_HEAD_SHA"
+            echo "admissible=$admissible"
+            if [ -s "$ledger_file" ]; then
+              echo "ledger<<KFLEDGEREOF"
+              cat "$ledger_file"
+              echo ""
+              echo "_evaluator: ${source_note}_"
+              echo "KFLEDGEREOF"
+            fi
+          } >> "$GITHUB_OUTPUT"
+          if [ -s "$ledger_file" ]; then cat "$ledger_file" >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ "$code" -ne 0 ]; then
+            echo "::error::AI review is not admissible at $EXPECTED_HEAD_SHA (exit $code): $(echo "$json" | head -c 600)"
+          fi
+          exit "$code"
+
+  # Durable per-head ledger on the PR. Separate from the verdict so the verdict
+  # job stays read-only, and best-effort so a fork's read-only token cannot turn
+  # a correct verdict red. The ledger is written by github-actions and is never
+  # accepted as review evidence.
+  ledger:
+    needs: verdict
+    if: always() && needs.verdict.outputs.ledger != ''
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Upsert ledger comment for this head
+        uses: actions/github-script@v7
+        env:
+          LEDGER: ${{ needs.verdict.outputs.ledger }}
+          HEAD_SHA: ${{ needs.verdict.outputs.head_sha }}
+        with:
+          script: |
+            const body = process.env.LEDGER;
+            const marker = `<!-- kf-ai-review-gate:ledger head=${process.env.HEAD_SHA} -->`;
+            if (!body.startsWith(marker)) throw new Error('ledger does not carry the marker for its head');
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const mine = comments.find((c) => c.user?.login === 'github-actions[bot]' && String(c.body || '').startsWith(marker));
+            if (!mine) {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            } else if (mine.body !== body) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            }

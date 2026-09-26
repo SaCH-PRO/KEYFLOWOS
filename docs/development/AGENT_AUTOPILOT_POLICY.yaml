@@ -45,6 +45,12 @@ required_pr_workflows:
   - DAST (HawkScan)
   - Agent Control Worker Proof
 
+# Required at the exact head too (KF-AI-PR-REVIEW-GATE-001), but deliberately
+# NOT a workflow_run wake source: it re-evaluates on every review and reply,
+# and each wake would post an AUTO_EVENT to #80. See docs/development/AI_PR_REVIEW_GATE.md.
+required_pr_review_gates:
+  - AI Review Gate
+
 concurrency:
   mutation_lock: keyflow-agent-control-mutation
   mutation_lock_scope: job-level, declared by EVERY mutating job

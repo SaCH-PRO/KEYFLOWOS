@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { evaluateAdmission, ADMISSION_REASONS } from '../lib/admission.mjs';
+import { evaluateAdmission, ADMISSION_REASONS, ADMISSION_WORKFLOWS } from '../lib/admission.mjs';
+import { AI_REVIEW_GATE_WORKFLOW } from '../lib/ai-review.mjs';
 import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
 import { parseYaml } from '../lib/yaml.mjs';
 
@@ -10,8 +11,9 @@ const HEAD = 'a'.repeat(40);
 const BASE = 'b'.repeat(40);
 const SEMANTIC = 'c'.repeat(40);
 
+// Every workflow admission requires, including the AI Review Gate.
 const greenRuns = (sha = HEAD) =>
-  REQUIRED_WORKFLOWS.map((name, i) => ({
+  ADMISSION_WORKFLOWS.map((name, i) => ({
     id: 100 + i,
     name,
     head_sha: sha,
@@ -191,4 +193,51 @@ test('every required workflow exists, runs on every PR, and wakes the autopilot'
 
   const policy = parseYaml(fs.readFileSync('docs/development/AGENT_AUTOPILOT_POLICY.yaml', 'utf8'));
   assert.deepEqual([...policy.required_pr_workflows].sort(), [...REQUIRED_WORKFLOWS].sort(), 'policy and code must agree');
+});
+
+// ------------------------------------------ AI REVIEW GATE (KF-AI-PR-REVIEW-GATE-001)
+
+test('the AI Review Gate is required at the exact head in addition to every existing workflow', () => {
+  // Existing prerequisites are preserved: every REQUIRED_WORKFLOWS entry is still required.
+  for (const name of REQUIRED_WORKFLOWS) assert.ok(ADMISSION_WORKFLOWS.includes(name), `${name} must stay required`);
+  assert.ok(ADMISSION_WORKFLOWS.includes(AI_REVIEW_GATE_WORKFLOW));
+
+  const withoutGate = greenRuns().filter((r) => r.name !== AI_REVIEW_GATE_WORKFLOW);
+  const missing = evaluateAdmission(admissible({ workflow_runs: withoutGate }));
+  assert.equal(missing.reason, ADMISSION_REASONS.MISSING_WORKFLOWS);
+  assert.deepEqual(missing.detail, [AI_REVIEW_GATE_WORKFLOW]);
+
+  const red = greenRuns().map((r) => (r.name === AI_REVIEW_GATE_WORKFLOW ? { ...r, conclusion: 'failure' } : r));
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: red })).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
+
+  // A green gate at an older head proves nothing about this tree.
+  const staleGate = greenRuns().map((r) => (r.name === AI_REVIEW_GATE_WORKFLOW ? { ...r, head_sha: 'e'.repeat(40) } : r));
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: staleGate })).reason, ADMISSION_REASONS.STALE_WORKFLOW_HEAD);
+
+  // The latest evaluation at the head wins: an early fail (review not posted yet), then a pass, admits.
+  const reevaluated = [
+    ...greenRuns().map((r) =>
+      r.name === AI_REVIEW_GATE_WORKFLOW ? { ...r, conclusion: 'failure', created_at: '2026-09-23T09:00:00Z' } : r,
+    ),
+    { id: 777, name: AI_REVIEW_GATE_WORKFLOW, head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-23T11:00:00Z' },
+  ];
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: reevaluated })).eligible, true);
+});
+
+test('the AI Review Gate runs on every PR event it depends on and never wakes the autopilot', () => {
+  const text = fs.readFileSync('.github/workflows/ai-review-gate.yml', 'utf8');
+  assert.equal((text.match(/^name:\s*(.+?)\s*$/m) || [])[1], AI_REVIEW_GATE_WORKFLOW);
+  const trigger = text.slice(text.indexOf('\non:'), text.indexOf('\njobs:'));
+  for (const event of ['pull_request', 'pull_request_review', 'pull_request_review_comment']) {
+    assert.match(trigger, new RegExp(`^\\s*${event}:`, 'm'), `the gate must run on ${event}`);
+  }
+  assert.ok(!/paths(-ignore)?:/.test(trigger), 'the gate must not be path-filtered: every PR needs it');
+  assert.ok(!/pull_request_target/.test(text), 'the gate must not run as privileged pull_request_target');
+
+  // Waking on it would post one #80 AUTO_EVENT per re-evaluation: a control-channel storm.
+  const autopilot = fs.readFileSync('.github/workflows/agent-control-autopilot.yml', 'utf8');
+  assert.ok(!autopilot.includes(`- "${AI_REVIEW_GATE_WORKFLOW}"`), 'the autopilot must not wake on the AI Review Gate');
+
+  const policy = parseYaml(fs.readFileSync('docs/development/AGENT_AUTOPILOT_POLICY.yaml', 'utf8'));
+  assert.deepEqual(policy.required_pr_review_gates, [AI_REVIEW_GATE_WORKFLOW], 'policy and code must agree');
 });

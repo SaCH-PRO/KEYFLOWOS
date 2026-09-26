@@ -9,6 +9,18 @@
  */
 
 import { REQUIRED_WORKFLOWS } from './events.mjs';
+import { AI_REVIEW_GATE_WORKFLOW } from './ai-review.mjs';
+
+/**
+ * Exact-head workflows admission requires: the CI/control workflows plus the
+ * AI Review Gate (KF-AI-PR-REVIEW-GATE-001). The gate is kept out of
+ * REQUIRED_WORKFLOWS on purpose: that list also wakes the autopilot, and the
+ * gate re-evaluates on every review and reply, so waking on it would post an
+ * AUTO_EVENT to #80 per evaluation. Admission still requires it at the exact
+ * head; it is observed on the next wake (another workflow, a #80 REVIEW, or
+ * the hourly reconcile).
+ */
+export const ADMISSION_WORKFLOWS = Object.freeze([...REQUIRED_WORKFLOWS, AI_REVIEW_GATE_WORKFLOW]);
 
 export const ADMISSION_REASONS = Object.freeze({
   PR_NOT_OPEN: 'pr_not_open',
@@ -93,14 +105,14 @@ export function evaluateAdmission(snapshot) {
   const atHead = runs.filter((r) => String(r.head_sha) === String(pr.head_sha));
   const latest = new Map();
   for (const run of atHead) {
-    if (!REQUIRED_WORKFLOWS.includes(run.name)) continue;
+    if (!ADMISSION_WORKFLOWS.includes(run.name)) continue;
     const prev = latest.get(run.name);
     if (!prev || new Date(run.created_at) > new Date(prev.created_at)) latest.set(run.name, run);
   }
 
-  const missing = REQUIRED_WORKFLOWS.filter((name) => !latest.has(name));
+  const missing = ADMISSION_WORKFLOWS.filter((name) => !latest.has(name));
   if (missing.length) {
-    const elsewhere = runs.filter((r) => REQUIRED_WORKFLOWS.includes(r.name) && String(r.head_sha) !== String(pr.head_sha));
+    const elsewhere = runs.filter((r) => ADMISSION_WORKFLOWS.includes(r.name) && String(r.head_sha) !== String(pr.head_sha));
     if (elsewhere.length) {
       return fail(ADMISSION_REASONS.STALE_WORKFLOW_HEAD, {
         missing_at_head: missing,
@@ -111,7 +123,7 @@ export function evaluateAdmission(snapshot) {
     return fail(ADMISSION_REASONS.MISSING_WORKFLOWS, missing);
   }
 
-  const notGreen = REQUIRED_WORKFLOWS.filter((name) => {
+  const notGreen = ADMISSION_WORKFLOWS.filter((name) => {
     const run = latest.get(name);
     return !(run.status === 'completed' && run.conclusion === 'success');
   });
@@ -127,9 +139,9 @@ export function evaluateAdmission(snapshot) {
     evidence: {
       review_status: ret.review_status,
       source_head: ret.source_head,
-      workflows: REQUIRED_WORKFLOWS.map((n) => ({ workflow: n, run_id: latest.get(n).id ?? null, conclusion: 'success' })),
+      workflows: ADMISSION_WORKFLOWS.map((n) => ({ workflow: n, run_id: latest.get(n).id ?? null, conclusion: 'success' })),
     },
   };
 }
 
-export default { evaluateAdmission, ADMISSION_REASONS };
+export default { evaluateAdmission, ADMISSION_REASONS, ADMISSION_WORKFLOWS };

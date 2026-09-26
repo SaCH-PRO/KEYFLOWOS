@@ -395,3 +395,80 @@ negative_controls:
       replace: "decide({ state, reconciliation: { consistent: true, findings: [] }, event, dag, registry, duplicate })"
     proof_command: node --test --test-name-pattern="CLI end to end" scripts/agent-control/tests/reconcile.spec.mjs
     timeout_ms: 120000
+
+  # ---------------------------------------------------------------- KF-AI-PR-REVIEW-GATE-001
+
+  - id: NC-AIGATE-SEMANTIC-PUSH-INVALIDATES
+    claim: >
+      A review at an older commit stops counting once a non-control file
+      changes after it; a semantic push always needs a fresh exact-head review.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "  if (semantic.length) return { current: false, relation: 'semantic_change_since_review', files: semantic };"
+      replace: "  // defect restored: semantic changes after the review are ignored"
+    proof_command: node --test --test-name-pattern="OLD sha blocks admission" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-UNPROVEN-HEAD-FAILS-CLOSED
+    claim: >
+      A review whose relation to the head cannot be proved is stale, never
+      assumed current.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "  if (!cmp) return { current: false, relation: 'unproven' };"
+      replace: "  if (!cmp) return { current: true, relation: 'unproven' };"
+    proof_command: node --test --test-name-pattern="cannot be proved is stale" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-REVIEWER-IDENTITY-PINNED
+    claim: >
+      Reviewer identity is the pinned bot node id, not a login string; a
+      look-alike account cannot supply a passing review.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "  return Boolean(pinned && author.id === pinned.id);"
+      replace: "  return Boolean(pinned);"
+    proof_command: node --test --test-name-pattern="wrong node id, is refused" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-NO-SILENT-DISAPPEARANCE
+    claim: >
+      Resolving a finding's thread without a KF-DISPOSITION never clears it.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    const blocking = !NON_BLOCKING_SEVERITIES.includes(severity) && !disposition.valid;"
+      replace: "    const blocking = !NON_BLOCKING_SEVERITIES.includes(severity) && !disposition.valid && t.is_resolved !== true;"
+    proof_command: node --test --test-name-pattern="resolving the thread without a disposition" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-UNCLASSIFIED-BLOCKS
+    claim: >
+      A finding the reviewer did not classify is substantive until dispositioned;
+      only an explicit STYLE tag is non-blocking.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    const severity = severityFromComment(first.body) || overview.get(String(first.id)) || 'UNCLASSIFIED';"
+      replace: "    const severity = severityFromComment(first.body) || overview.get(String(first.id)) || 'STYLE';"
+    proof_command: node --test --test-name-pattern="UNCLASSIFIED finding also blocks" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-REQUEST-NO-STORM
+    claim: >
+      A push that only touches .agent-control/** does not request a re-review.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "  if (!semantic.length) return { request: false, reason: 'control_only_update' };"
+      replace: "  // defect restored: control-only pushes request a review"
+    proof_command: node --test --test-name-pattern="NO STORM" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-AI-GATE-REQUIRED
+    claim: >
+      Admission requires the AI Review Gate at the exact head in addition to
+      every existing required workflow.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "export const ADMISSION_WORKFLOWS = Object.freeze([...REQUIRED_WORKFLOWS, AI_REVIEW_GATE_WORKFLOW]);"
+      replace: "export const ADMISSION_WORKFLOWS = Object.freeze([...REQUIRED_WORKFLOWS]);"
+    proof_command: node --test --test-name-pattern="AI Review Gate is required at the exact head" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
