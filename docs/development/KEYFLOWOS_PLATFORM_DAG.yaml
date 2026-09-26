@@ -1,0 +1,521 @@
+# KEYFLOWOS platform/workflow convergence programme -- dependency graph
+#
+# Narrative:  docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md
+# Roles:      docs/development/KEYFLOWOS_AUTONOMOUS_AGENT_ROLES.md
+#
+# INACTIVE SUCCESSOR. This file never activates anything. Programme state is
+# decided only by the activation contract below, evaluated against issue #80.
+#
+# Format: the same schema and YAML subset as KEYFLOWOS_PROGRAMME_DAG.yaml, so
+# the repository's own tooling parses and validates it:
+#   scripts/agent-control/lib/yaml.mjs      parseYaml (no flow mappings, no anchors)
+#   scripts/agent-control/lib/dag.mjs       buildDag / validateDag / proveDrainable
+#   scripts/agent-control/lib/platform-dag.mjs
+#                                           gate and activation contract checks
+# Proof: node scripts/agent-control/validate-platform-dag.mjs
+#        node --test scripts/agent-control/tests/platform-dag.spec.mjs
+#
+# A phase group (P0..P11) is a "wave" in dag.mjs terms. Every packet names its
+# own depends_on edges; phase membership alone never orders anything.
+
+version: 2
+programme: KEYFLOWOS_PLATFORM_CONVERGENCE
+status: INACTIVE_SUCCESSOR
+packets_total: 63
+phases_total: 63
+
+activation:
+  state: INACTIVE_SUCCESSOR
+  authority_channel: github_issue_80
+  # Only a message matching this block moves the programme to ACTIVE.
+  activate:
+    message_type: DIRECTIVE
+    sender_exact: chatgpt
+    author_allowlist: [SaCH-PRO]
+    required_fields:
+      programme: KEYFLOWOS_PLATFORM_CONVERGENCE
+      programme_action: ACTIVATE
+  # A newer message matching this block returns the programme to HELD.
+  # DIRECTIVE only: issue #80's canonical type list has no HOLD. Any other
+  # authority-typed message naming this programme also holds (fail closed).
+  hold:
+    message_types: [DIRECTIVE]
+    sender_exact: chatgpt
+    author_allowlist: [SaCH-PRO]
+    required_fields:
+      programme: KEYFLOWOS_PLATFORM_CONVERGENCE
+      programme_action: HOLD
+  # Envelope every #80 message must carry (issue #80 body). A message naming
+  # this programme without all of it cannot activate; it holds. Values are
+  # checked too: state/health from state-machine.mjs (health GREEN/YELLOW/RED,
+  # so AMBER holds), 40-hex SHAs, true/false for scope_changed/production_touched.
+  required_envelope:
+    - message_id
+    - packet_id
+    - sender
+    - source_main|source_head
+    - implementation_branch
+    - state
+    - health
+    - scope_changed
+    - production_touched
+  evaluation:
+    # Of all valid authority messages on #80 whose programme field equals this
+    # programme, the newest (created_at, then comment id) decides the state.
+    # These outcomes are fixed in lib/platform-dag.mjs, which also refuses to
+    # evaluate a contract that fails validation; the values here must match.
+    decided_by: newest_valid_authority_message_naming_this_programme
+    invalid_contract: INACTIVE_SUCCESSOR
+    malformed_envelope: HELD
+    no_matching_message: INACTIVE_SUCCESSOR
+    unrecognized_programme_action: HELD
+    authority_unverifiable: INACTIVE_SUCCESSOR
+    # ACTIVE is necessary, never sufficient: any packet advance still passes
+    # reconcile.mjs, where ANY newer authority message makes state stale.
+    advancement_still_requires_reconcile: true
+  never_activated_by:
+    - file_presence_or_merge_of_this_file
+    - prose_or_objective_text
+    - message_id_or_packet_id_pattern
+    - REVIEW_or_RESUME_message_type
+    - AUTO_EVENT_or_derived_programme_state
+    - any_sender_other_than_chatgpt_or_author_outside_allowlist
+  activation_releases_no_other_hold: true
+  current_application_programme_remains_authoritative_until_activation: true
+
+# Hard gate set by CG-REVIEW-PLATFORM-PREACTIVATION-PARSER-DECISION-001 (option C).
+# platformProgrammeState reads #80 fields with the same line-regex readField as
+# events.mjs and reconcile.mjs. Copilot finding r4111639398 (inline YAML comments
+# are not stripped) is deferred, not fixed: the fix is one shared #80 envelope
+# parser, which is a separate control-plane packet because it changes admitted
+# KF-META-AUTO-001 code. Until that packet is admitted, nothing that consumes
+# platformProgrammeState may be released, merged or activated.
+blocking_dependencies:
+  - id: KF-META-CONTROL-PARSER-001
+    kind: control_plane_packet_outside_this_dag
+    decided_by: CG-REVIEW-PLATFORM-PREACTIVATION-PARSER-DECISION-001
+    deferred_findings: [r4111639398]
+    finding_disposition: DEFERRED_WITH_BLOCKING_DEPENDENCY
+    required_state: ADMITTED
+    satisfied_when: >
+      KF-META-CONTROL-PARSER-001 is admitted and one shared #80 control-envelope
+      parser, with the repository YAML codec semantics for quoting, inline
+      comments, duplicate or ambiguous fields and fail-closed malformed input, is
+      consumed by events.mjs, reconcile.mjs and platform-dag.mjs with
+      deterministic regression proof.
+    blocks_packets: [KF-PLAT-AUTO-001]
+    blocks_any_path_consuming: platformProgrammeState
+    blocked_effects: [release, merge, activation, wiring]
+    satisfied: false
+
+roles:
+  architecture_authority: chatgpt
+  primary_builder: claude-code
+  continuous_reviewer: github-copilot
+  deterministic_proof: github-actions
+  durable_truth: github
+  optional_secondary_prover: kimi-code
+
+copilot:
+  required_for_semantic_prs: true
+  review_on_semantic_push: true
+  exact_head_disposition_required: true
+  allowed_dispositions: [RESOLVED, REJECTED_WITH_EVIDENCE]
+  per_finding_id_and_evidence_required: true
+  summary_counts_are_derived_only: true
+  unresolved_substantive_findings_block_return: true
+  architecture_authority: false
+
+human_gates:
+  # Every effect the active safety policy forbids automation from performing is
+  # inherited unchanged. This programme may add gates, never remove one.
+  inherits_never_automatic_from: docs/development/AGENT_AUTOPILOT_POLICY.yaml
+  inherited_never_automatic:
+    - architecture_precedence_decision
+    - scope_widening
+    - production_deployment
+    - production_data_mutation
+    - real_provider_traffic
+    - forensic_rebaseline
+    - programme_map_refresh
+    - architecture_os_cycle_resume
+    - gate_weakening
+    - proof_obligation_reduction
+    - contradiction_resolution_without_recorded_authority
+    - schema_primitive_choice
+    - migration_strategy
+    - agent_self_approval
+  # Packet annotations below are non-exhaustive hints. Every gate here applies
+  # to every packet whenever its effect would occur.
+  applies_to_every_packet: true
+  gates:
+    - id: production_deployment_or_release
+      effect: triggering, promoting or releasing any production deployment
+      inherits: [production_deployment]
+    - id: production_mutation
+      effect: >
+        any change to production runtime, configuration, infrastructure or
+        state that no separately admitted, reversible operational runbook covers
+      inherits: [production_deployment, production_data_mutation]
+    - id: production_data_mutation
+      effect: any write to production application data
+      inherits: [production_data_mutation]
+    - id: production_dns_or_domain_cutover
+      effect: changing production DNS records or the canonical domain target
+      inherits: [production_deployment]
+    - id: destructive_production_data_or_schema_action
+      effect: deleting, truncating, dropping or irreversibly migrating production data or schema
+      inherits: [production_data_mutation, migration_strategy]
+    - id: paid_resource_creation
+      effect: creating or upgrading any resource that incurs cost
+      inherits: []
+    - id: secret_or_oauth_entry_without_safe_connected_writer
+      effect: >
+        entering, rotating or connecting a secret or OAuth credential where no
+        already-authorized connected writer can do it without exposing the value
+      inherits: []
+    - id: unauthorized_real_provider_traffic
+      effect: sending traffic to a real external provider that is not already authorized
+      inherits: [real_provider_traffic]
+    - id: major_architecture_override
+      effect: overriding an admitted architectural boundary or canonical truth owner
+      inherits: [architecture_precedence_decision, schema_primitive_choice]
+    - id: weakening_security_tenancy_branch_ci_proof_review_or_admission_gate
+      effect: lowering, bypassing or removing any security, tenancy, branch, CI, proof, review or admission gate
+      inherits: [gate_weakening, proof_obligation_reduction]
+
+selection_policy:
+  wave_order: [P0, P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11]
+  # Lowest ready phase is preferred, not required: a packet whose own
+  # depends_on edges are complete may start before an unrelated earlier phase.
+  do_not_leapfrog_wave_gate: false
+  re_resolve_main_before_every_packet: true
+  no_parallel_semantic_conflicts: true
+  ready_packet_requires_all_packet_dependencies_complete: true
+  production_effects_require_matching_human_gate: true
+  file_presence_never_activates_successor: true
+
+phase_groups:
+  P0: autonomous_programme_activation
+  P1: canonical_frontend_runtime
+  P2: supabase_and_data_plane
+  P3: isolated_staging
+  P4: immutable_backend_delivery
+  P5: data_resilience
+  P6: observability
+  P7: github_ci_security
+  P8: configuration_and_secrets
+  P9: multi_agent_scale
+  P10: infrastructure_as_code
+  P11: final_qualification
+
+packets:
+  # P0 -- activate the successor programme safely
+  - id: KF-PLAT-AUTO-001
+    wave: P0
+    depends_on: []
+    # Not releasable until KF-META-CONTROL-PARSER-001 is admitted; see
+    # blocking_dependencies. That packet is outside this DAG, so it is not a
+    # depends_on edge.
+    blocked_by: [KF-META-CONTROL-PARSER-001]
+  - id: KF-PLAT-AUTO-002
+    wave: P0
+    depends_on: [KF-PLAT-AUTO-001]
+  - id: KF-PLAT-AUTO-003
+    wave: P0
+    depends_on: [KF-PLAT-AUTO-002]
+
+  # P1 -- canonical frontend/runtime topology
+  - id: KF-INFRA-001
+    wave: P1
+    depends_on: [KF-PLAT-AUTO-003]
+    durable_target:
+      pr: 91
+      branch: chore/node24-vercel-compat
+      acceptance: exact_head_preview_and_copilot_disposition
+  - id: KF-INFRA-002
+    wave: P1
+    depends_on: [KF-INFRA-001]
+    human_gates:
+      - gate: production_deployment_or_release
+        when: triggering or promoting a production deployment
+  - id: KF-INFRA-003
+    wave: P1
+    depends_on: [KF-INFRA-002]
+  - id: KF-INFRA-004
+    wave: P1
+    depends_on: [KF-INFRA-003]
+    human_gates:
+      - gate: production_dns_or_domain_cutover
+        when: always
+  - id: KF-INFRA-005
+    wave: P1
+    depends_on: [KF-INFRA-004]
+    human_gates:
+      - gate: production_mutation
+        when: retiring the production Hetzner web runtime
+
+  # P2 -- Supabase/Auth and data-plane convergence
+  - id: KF-DATA-001
+    wave: P2
+    depends_on: [KF-INFRA-005]
+  - id: KF-DATA-002
+    wave: P2
+    depends_on: [KF-DATA-001]
+  - id: KF-DATA-003
+    wave: P2
+    depends_on: [KF-DATA-002]
+    human_gates:
+      - gate: destructive_production_data_or_schema_action
+        when: deletion or irreversible archive is proposed
+  - id: KF-DATA-004
+    wave: P2
+    depends_on: [KF-DATA-003]
+    human_gates:
+      - gate: production_data_mutation
+        when: a remediation writes production data
+      - gate: destructive_production_data_or_schema_action
+        when: a remediation drops or alters production schema irreversibly
+  - id: KF-DATA-005
+    wave: P2
+    depends_on: [KF-DATA-004]
+
+  # P3 -- isolated staging
+  - id: KF-STAGE-001
+    wave: P3
+    depends_on: [KF-INFRA-005, KF-DATA-005]
+  - id: KF-STAGE-002
+    wave: P3
+    depends_on: [KF-STAGE-001]
+  - id: KF-STAGE-003
+    wave: P3
+    depends_on: [KF-STAGE-002]
+    human_gates:
+      - gate: paid_resource_creation
+        when: staging state needs a paid resource
+  - id: KF-STAGE-004
+    wave: P3
+    depends_on: [KF-STAGE-003]
+  - id: KF-STAGE-005
+    wave: P3
+    depends_on: [KF-STAGE-004]
+    human_gates:
+      - gate: unauthorized_real_provider_traffic
+        when: a provider path would reach a real provider
+  - id: KF-STAGE-006
+    wave: P3
+    depends_on: [KF-STAGE-005]
+
+  # P4 -- immutable backend delivery
+  - id: KF-DEPLOY-001
+    wave: P4
+    depends_on: [KF-STAGE-006]
+  - id: KF-DEPLOY-002
+    wave: P4
+    depends_on: [KF-DEPLOY-001]
+  - id: KF-DEPLOY-003
+    wave: P4
+    depends_on: [KF-DEPLOY-002]
+    human_gates:
+      - gate: production_mutation
+        when: changing the production deployment mechanism
+  - id: KF-DEPLOY-004
+    wave: P4
+    depends_on: [KF-DEPLOY-003]
+    human_gates:
+      - gate: production_mutation
+        when: changing the production deployment gate
+  - id: KF-DEPLOY-005
+    wave: P4
+    depends_on: [KF-DEPLOY-004]
+  - id: KF-DEPLOY-006
+    wave: P4
+    depends_on: [KF-DEPLOY-005]
+    human_gates:
+      - gate: production_deployment_or_release
+        when: always
+
+  # P5 -- data resilience
+  - id: KF-RESILIENCE-001
+    wave: P5
+    depends_on: [KF-DEPLOY-006]
+  - id: KF-RESILIENCE-002
+    wave: P5
+    depends_on: [KF-RESILIENCE-001]
+    human_gates:
+      - gate: production_mutation
+        when: changing production backup configuration
+      - gate: paid_resource_creation
+        when: off-site storage incurs cost
+      - gate: secret_or_oauth_entry_without_safe_connected_writer
+        when: backup encryption or storage credentials must be entered
+  - id: KF-RESILIENCE-003
+    wave: P5
+    depends_on: [KF-RESILIENCE-002]
+    human_gates:
+      - gate: production_mutation
+        when: enabling WAL archiving or PITR on production
+  - id: KF-RESILIENCE-004
+    wave: P5
+    depends_on: [KF-RESILIENCE-003]
+    human_gates:
+      - gate: production_mutation
+        when: changing production object storage
+      - gate: paid_resource_creation
+        when: durable object storage incurs cost
+  - id: KF-RESILIENCE-005
+    wave: P5
+    depends_on: [KF-RESILIENCE-004]
+
+  # P6 -- observability
+  - id: KF-OBS-001
+    wave: P6
+    depends_on: [KF-DEPLOY-006]
+    human_gates:
+      - gate: unauthorized_real_provider_traffic
+        when: enabling error egress to Sentry
+  - id: KF-OBS-002
+    wave: P6
+    depends_on: [KF-OBS-001]
+  - id: KF-OBS-003
+    wave: P6
+    depends_on: [KF-OBS-002]
+  - id: KF-OBS-004
+    wave: P6
+    depends_on: [KF-OBS-003]
+  - id: KF-OBS-005
+    wave: P6
+    depends_on: [KF-OBS-004]
+  - id: KF-OBS-006
+    wave: P6
+    depends_on: [KF-OBS-005]
+
+  # P7 -- GitHub, CI and supply-chain hardening
+  - id: KF-GOV-001
+    wave: P7
+    depends_on: [KF-PLAT-AUTO-003]
+    human_gates:
+      - gate: weakening_security_tenancy_branch_ci_proof_review_or_admission_gate
+        when: any existing branch rule would be relaxed or removed
+  - id: KF-GOV-002
+    wave: P7
+    depends_on: [KF-GOV-001]
+  - id: KF-GOV-003
+    wave: P7
+    depends_on: [KF-GOV-002]
+  - id: KF-CI-001
+    wave: P7
+    depends_on: [KF-GOV-003]
+    human_gates:
+      - gate: paid_resource_creation
+        when: a remote cache incurs cost
+  - id: KF-CI-002
+    wave: P7
+    depends_on: [KF-CI-001]
+    human_gates:
+      - gate: weakening_security_tenancy_branch_ci_proof_review_or_admission_gate
+        when: removing a step would drop a required check
+  - id: KF-SEC-001
+    wave: P7
+    depends_on: [KF-CI-002]
+  - id: KF-SEC-002
+    wave: P7
+    depends_on: [KF-SEC-001]
+  - id: KF-SEC-003
+    wave: P7
+    depends_on: [KF-SEC-002]
+
+  # P8 -- environment and secrets convergence
+  - id: KF-CONFIG-001
+    wave: P8
+    depends_on: [KF-STAGE-006, KF-DEPLOY-006, KF-SEC-003]
+  - id: KF-CONFIG-002
+    wave: P8
+    depends_on: [KF-CONFIG-001]
+  - id: KF-CONFIG-003
+    wave: P8
+    depends_on: [KF-CONFIG-002]
+    human_gates:
+      - gate: paid_resource_creation
+        when: the selected secrets platform incurs cost
+      - gate: secret_or_oauth_entry_without_safe_connected_writer
+        when: connecting the secrets platform needs a credential or OAuth grant
+  - id: KF-CONFIG-004
+    wave: P8
+    depends_on: [KF-CONFIG-003]
+    human_gates:
+      - gate: secret_or_oauth_entry_without_safe_connected_writer
+        when: a secret value must be entered by hand
+      - gate: production_mutation
+        when: projecting configuration into a production environment
+  - id: KF-CONFIG-005
+    wave: P8
+    depends_on: [KF-CONFIG-004]
+
+  # P9 -- multi-agent scale
+  - id: KF-AGENT-001
+    wave: P9
+    depends_on: [KF-PLAT-AUTO-003, KF-SEC-003]
+  - id: KF-AGENT-002
+    wave: P9
+    depends_on: [KF-AGENT-001]
+  - id: KF-AGENT-003
+    wave: P9
+    depends_on: [KF-AGENT-002]
+  - id: KF-AGENT-004
+    wave: P9
+    depends_on: [KF-AGENT-003]
+  - id: KF-AGENT-005
+    wave: P9
+    depends_on: [KF-AGENT-004]
+  - id: KF-AGENT-006
+    wave: P9
+    depends_on: [KF-AGENT-005]
+  - id: KF-AGENT-007
+    wave: P9
+    depends_on: [KF-AGENT-006]
+
+  # P10 -- infrastructure as code
+  - id: KF-IAC-001
+    wave: P10
+    depends_on: [KF-DEPLOY-006, KF-RESILIENCE-005, KF-CONFIG-005]
+    human_gates:
+      - gate: production_dns_or_domain_cutover
+        when: applying a DNS specification to production
+      - gate: production_mutation
+        when: applying host, network or firewall changes to production
+  - id: KF-IAC-002
+    wave: P10
+    depends_on: [KF-IAC-001]
+    human_gates:
+      - gate: production_mutation
+        when: applying host configuration to production
+  - id: KF-IAC-003
+    wave: P10
+    depends_on: [KF-IAC-002]
+    human_gates:
+      - gate: paid_resource_creation
+        when: a clean-machine rebuild needs a paid host
+  - id: KF-IAC-004
+    wave: P10
+    depends_on: [KF-IAC-003]
+
+  # P11 -- final qualification
+  - id: KF-QUAL-001
+    wave: P11
+    depends_on:
+      - KF-DATA-005
+      - KF-STAGE-006
+      - KF-DEPLOY-006
+      - KF-RESILIENCE-005
+      - KF-OBS-006
+      - KF-SEC-003
+      - KF-CONFIG-005
+      - KF-AGENT-007
+      - KF-IAC-004
+  - id: KF-QUAL-002
+    wave: P11
+    depends_on: [KF-QUAL-001]
+  - id: KF-QUAL-003
+    wave: P11
+    depends_on: [KF-QUAL-002]

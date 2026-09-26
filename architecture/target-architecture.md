@@ -94,6 +94,41 @@ Keep the package split but tighten responsibilities:
 - Retire `apps/web/src/lib/client.ts`; all new code uses `src/lib/api/<domain>.ts`.
 - Server Components fetch via typed wrappers; Client Components use the same wrappers from event handlers.
 
+## Platform, Data-Plane and Delivery Target
+
+Source: `docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md` and its DAG
+`docs/development/KEYFLOWOS_PLATFORM_DAG.yaml`. This section mirrors that programme so
+the architecture memory holds one target; if they disagree, the programme and its
+admitted packets win and this section must be corrected. The programme is an
+**inactive successor**: nothing below is current state, and none of it is authorized
+until a ChatGPT `DIRECTIVE` on issue #80 activates it (see the activation contract there).
+
+Current production (for contrast): a single Hetzner VPS running Docker Compose, deployed
+with `scripts/deploy.sh`.
+
+Target:
+
+- **Web:** Next.js on Vercel is the single canonical production frontend; the duplicate
+  Hetzner web runtime is retired only after production proof.
+- **API/runtime:** NestJS and long-running workers run outside Vercel, delivered as
+  immutable images pulled by Git SHA, with exact-image rollback.
+- **Application data:** one canonical Prisma/PostgreSQL application data plane; legacy
+  Supabase public application schema quarantined, not silently deleted.
+- **Identity:** Supabase Auth -> local User -> Membership -> Business is the identity and
+  tenant boundary unless an admitted migration changes it.
+- **Queues:** Redis + BullMQ. **Objects:** S3-compatible durable storage (MinIO local/dev).
+- **Voice:** LiveKit + dedicated voice worker.
+- **Environments:** preview -> isolated staging -> production; previews and staging cannot
+  mutate production.
+- **Resilience:** encrypted off-site backups, PITR strategy, automated restore drill.
+- **Observability:** Sentry first, OpenTelemetry for traces/metrics, one Git SHA release
+  identity across GitHub/Vercel/API/workers.
+- **Configuration:** one declared development/test/staging/production env model and one
+  secrets platform.
+- **Reproducibility:** host/network/DNS/firewall as code (OpenTofu/Terraform + Ansible).
+- **Engineering workflow:** Claude builds, GitHub Copilot reviews, CI proves, ChatGPT
+  admits, GitHub records; production effects stay behind the programme's human gates.
+
 ## Non-Goals
 
 - Rewriting the framework (NestJS / Next.js / Prisma) is not required.
