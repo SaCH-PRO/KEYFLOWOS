@@ -57565,9 +57565,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1535,
+      "lines": 1546,
       "path": "architecture/architecture.json",
-      "size_bytes": 48688
+      "size_bytes": 49297
     },
     {
       "extension": ".yaml",
@@ -57591,7 +57591,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4185500
+      "size_bytes": 4185729
     },
     {
       "extension": ".md",
@@ -57613,9 +57613,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63017,
+      "lines": 63020,
       "path": "architecture/inventory.json",
-      "size_bytes": 1631271
+      "size_bytes": 1631376
     },
     {
       "extension": ".md",
@@ -61713,6 +61713,7 @@
       "exports": [
         "AUTOPILOT_POLICY_PATH",
         "PLATFORM_DAG_PATH",
+        "PLATFORM_PROGRAMME_ID",
         "PLATFORM_STATES",
         "PROGRAMME_CONTROL_MESSAGE_TYPE",
         "REQUIRED_ENVELOPE",
@@ -61733,9 +61734,9 @@
         "node:fs",
         "node:path"
       ],
-      "lines": 361,
+      "lines": 374,
       "path": "scripts/agent-control/lib/platform-dag.mjs",
-      "size_bytes": 17081
+      "size_bytes": 17686
     },
     {
       "exports": [
@@ -62002,9 +62003,9 @@
         "node:fs",
         "node:test"
       ],
-      "lines": 409,
+      "lines": 429,
       "path": "scripts/agent-control/tests/platform-dag.spec.mjs",
-      "size_bytes": 20468
+      "size_bytes": 21811
     },
     {
       "exports": [],
@@ -63015,6 +63016,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3439,
     "total_files": 4427,
-    "total_lines": 1126754
+    "total_lines": 1126801
   }
 }
