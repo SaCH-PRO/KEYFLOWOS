@@ -52,6 +52,29 @@ function (`platformProgrammeState`) and a structural validator. It is not wired
 into the orchestrator or worker; teaching the dispatcher about this programme is
 KF-PLAT-AUTO-001.
 
+### Blocking dependency: one shared #80 envelope parser
+
+Decided by `CG-REVIEW-PLATFORM-PREACTIVATION-PARSER-DECISION-001` (option C).
+
+`platformProgrammeState` reads #80 fields with the same line-regex `readField` as
+`events.mjs` and `reconcile.mjs`. Copilot finding r4111639398 is valid: inline YAML
+comments are not stripped, so `programme: KEYFLOWOS_PLATFORM_CONVERGENCE # successor`
+is not recognized as naming this programme. It is **deferred, not fixed**
+(`DEFERRED_WITH_BLOCKING_DEPENDENCY`). The fix is one #80 control-envelope parser
+shared by `events.mjs`, `reconcile.mjs` and `platform-dag.mjs`, using the repository
+YAML codec semantics for quoting, inline comments, duplicate or ambiguous fields and
+fail-closed malformed input. That is packet **KF-META-CONTROL-PARSER-001**, separate
+because it changes admitted KF-META-AUTO-001 code.
+
+Hard gate: **KF-PLAT-AUTO-001, and any other path that wires in or activates
+anything consuming `platformProgrammeState`, must not be released, merged or
+activated until KF-META-CONTROL-PARSER-001 is admitted** and the shared parser is
+consumed by all three modules with deterministic regression proof. The
+machine-readable record is `blocking_dependencies` in `KEYFLOWOS_PLATFORM_DAG.yaml`,
+with `blocked_by` on KF-PLAT-AUTO-001. The evaluator is not wired in today, so the
+deferral carries no execution risk now; the programme stays INACTIVE_SUCCESSOR and
+ACTION-001 stays held.
+
 ## Target operating model
 
 - **Web:** Next.js on Vercel is the single canonical production frontend.
@@ -140,7 +163,8 @@ completely, and satisfies the gate and activation contract.
 
 ### Phase 0 — Activate the successor programme safely
 - KF-PLAT-AUTO-001: teach the dispatcher to recognize this successor programme
-  without disturbing the current application DAG.
+  without disturbing the current application DAG. **Blocked until
+  KF-META-CONTROL-PARSER-001 is admitted** (see "Blocking dependency" above).
 - KF-PLAT-AUTO-002: make Copilot review disposition an explicit exact-head
   admission input.
 - KF-PLAT-AUTO-003: prove unattended SELECT -> Claude -> PR -> Copilot -> RETURN

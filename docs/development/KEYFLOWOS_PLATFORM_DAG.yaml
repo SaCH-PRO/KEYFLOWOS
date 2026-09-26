@@ -83,6 +83,31 @@ activation:
   activation_releases_no_other_hold: true
   current_application_programme_remains_authoritative_until_activation: true
 
+# Hard gate set by CG-REVIEW-PLATFORM-PREACTIVATION-PARSER-DECISION-001 (option C).
+# platformProgrammeState reads #80 fields with the same line-regex readField as
+# events.mjs and reconcile.mjs. Copilot finding r4111639398 (inline YAML comments
+# are not stripped) is deferred, not fixed: the fix is one shared #80 envelope
+# parser, which is a separate control-plane packet because it changes admitted
+# KF-META-AUTO-001 code. Until that packet is admitted, nothing that consumes
+# platformProgrammeState may be released, merged or activated.
+blocking_dependencies:
+  - id: KF-META-CONTROL-PARSER-001
+    kind: control_plane_packet_outside_this_dag
+    decided_by: CG-REVIEW-PLATFORM-PREACTIVATION-PARSER-DECISION-001
+    deferred_findings: [r4111639398]
+    finding_disposition: DEFERRED_WITH_BLOCKING_DEPENDENCY
+    required_state: ADMITTED
+    satisfied_when: >
+      KF-META-CONTROL-PARSER-001 is admitted and one shared #80 control-envelope
+      parser, with the repository YAML codec semantics for quoting, inline
+      comments, duplicate or ambiguous fields and fail-closed malformed input, is
+      consumed by events.mjs, reconcile.mjs and platform-dag.mjs with
+      deterministic regression proof.
+    blocks_packets: [KF-PLAT-AUTO-001]
+    blocks_any_path_consuming: platformProgrammeState
+    blocked_effects: [release, merge, activation, wiring]
+    satisfied: false
+
 roles:
   architecture_authority: chatgpt
   primary_builder: claude-code
@@ -189,6 +214,10 @@ packets:
   - id: KF-PLAT-AUTO-001
     wave: P0
     depends_on: []
+    # Not releasable until KF-META-CONTROL-PARSER-001 is admitted; see
+    # blocking_dependencies. That packet is outside this DAG, so it is not a
+    # depends_on edge.
+    blocked_by: [KF-META-CONTROL-PARSER-001]
   - id: KF-PLAT-AUTO-002
     wave: P0
     depends_on: [KF-PLAT-AUTO-001]
