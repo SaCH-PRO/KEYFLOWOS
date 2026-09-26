@@ -1,15 +1,13 @@
-packet_id: KF-META-AUTO-001
-correction_id: KF-META-AUTO-001-STATE-RECONCILE
-directive_message_id: CG-DIRECTIVE-META-STATE-RECONCILE-001
-ack_message_id: CC-ACK-META-STATE-RECONCILE-001
+packet_id: KF-AI-PR-REVIEW-GATE-001
+directive_message_id: CG-DIRECTIVE-AI-PR-REVIEW-GATE-001
+ack_message_id: CC-ACK-AI-PR-REVIEW-GATE-001
 progress_message_ids:
-  - CC-PROGRESS-META-STATE-RECONCILE-001
-  - CC-PROGRESS-META-STATE-RECONCILE-002
-return_message_id: CC-RETURN-META-STATE-RECONCILE-001
-source_main: 4fafdef635d1f41f287f094370217999e1418041
-source_head: 1139d93b4a215ac223a7108c7d221b97d359c861
-implementation_branch: impl/kf-meta-auto-001-state-reconcile
-pr_number: 92
+  - CC-PROGRESS-AI-PR-REVIEW-GATE-001
+return_message_id: CC-RETURN-AI-PR-REVIEW-GATE-001
+source_main: ad97ea48841a0a4acb13f9a170bae0e07159d6f4
+source_head: 2151be21d437d31b0d4b972eb399c43f4385f567
+implementation_branch: impl/kf-ai-pr-review-gate-001
+pr_number: null
 state: PROVING
 health: GREEN
 scope_changed: false
@@ -19,228 +17,57 @@ programme_credit: ZERO
 merge_authority: false
 
 summary: >
-  Control-state precedence is now enforced in code. Repository/PR/CI evidence
-  is implementation truth; the newest valid ChatGPT DIRECTIVE/REVIEW/HOLD/RESUME
-  on #80 is execution authority; programme-state.yaml is a derived projection
-  anchored by authority_basis. decide() consults the projection only behind a
-  consistent reconciliation and otherwise returns REPORT_DRIFT naming every
-  finding. Consistent input yields exactly the prior rule table. The projection
-  on main (PR #87 READY_TO_MERGE) is re-derived to KF-META-AUTO-001 CHECKPOINTED
-  (credit ZERO, PR #89) with the ACTION-001 hold kept active.
-
-characterization:
-  writers:
-    - lib/state.mjs saveState(), reachable only from orchestrate.mjs --apply
-    - nothing invokes --apply (workflow runs orchestrate --json read-only, contents:read)
-    - effective writer is a hand-edited commit inside an impl/* PR; git history shows one commit (403881dc, PR #87)
-  readers:
-    - orchestrate.mjs -> decide() -> derived_action published in AUTO_EVENT comments on #80
-    - status.mjs
-    - tests/recovery.spec.mjs
-    - not read by auto-merge-admitted.mjs, claude-worker.ps1 or select-directive.ps1
-  event_path: >
-    issue_comment/pull_request_target/workflow_run/schedule -> normalize-event.mjs ->
-    orchestrate.mjs, which saw only the single triggering event plus programme-state
-    and never read #80 history. PR_MERGED produced POST_MERGE_VERIFY advice only.
-  next_legal_action: >
-    Derived by decide() (hold > contradictions > momentum > event kind > projected
-    state). Consumed only as published text and a cached field; never by the merge path.
-  why_main_projected_pr87_ready_to_merge: >
-    The file was written once in PR #87 while #87 was the admitted open PR. There is
-    no automated writer, PR #89 did not refresh it, and the LIVE-AUTHORITY-WAKE
-    acceptance lives on #80, which the orchestrator never read. The derived hold
-    masked it; with the hold lifted, decide() would have published EVALUATE_ADMISSION
-    for merged PR #87 indefinitely.
-  canonical_assumptions_corrected:
-    - AGENT_CONTROL_PLANE.md "Canonical state authority" -> "Control-state precedence"
-    - AGENT_AUTOPILOT.md architecture and "Canonical state"
-    - AGENT_AUTOPILOT_POLICY.yaml canonical_live_state / state_authority
-    - AGENT_AUTOPILOT_OPERATIONS.md recovery table and human override
-    - lib/state.mjs header and authority value; lib/orchestrator.mjs; orchestrate.mjs; status.mjs; lib/dag.mjs comment
-    - programme-state.yaml header and authority field
-    - tests/recovery.spec.mjs test title (assertions unchanged)
-  canonical_assumptions_out_of_scope_not_changed:
-    - .agent-control/README.md (says "canonical live programme control state")
-    - docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml header comment ("live state is owned solely by programme-state")
+  AI review is a required exact-head admission input. The AI Review Gate passes
+  only when the current semantic head carries a completed review by a pinned
+  reviewer bot and every substantive AI finding has a KF-DISPOSITION. Missing,
+  stale, errored, ambiguous or unprovable evidence fails closed. Admission
+  (ADMISSION_WORKFLOWS) requires the gate on top of every existing required
+  workflow. PR #90 is consolidated into the repository-wide Copilot file and
+  AGENTS.md review guidelines with its three findings fixed.
 
 changed_files:
-  semantic:
-    - .agent-control/programme-state.yaml
-    - docs/development/AGENT_AUTOPILOT.md
-    - docs/development/AGENT_AUTOPILOT_OPERATIONS.md
-    - docs/development/AGENT_AUTOPILOT_POLICY.yaml
-    - docs/development/AGENT_CONTROL_PLANE.md
-    - scripts/agent-control/lib/dag.mjs
-    - scripts/agent-control/lib/orchestrator.mjs
-    - scripts/agent-control/lib/reconcile.mjs (new)
-    - scripts/agent-control/lib/state.mjs
-    - scripts/agent-control/lib/truth.mjs (new)
-    - scripts/agent-control/negative-controls.yaml
-    - scripts/agent-control/orchestrate.mjs
-    - scripts/agent-control/status.mjs
-    - scripts/agent-control/tests/orchestration.spec.mjs
-    - scripts/agent-control/tests/reconcile.spec.mjs (new)
-    - scripts/agent-control/tests/recovery.spec.mjs
-  control_only_after_source_head:
-    - .agent-control/active-packet.yaml
-    - .agent-control/claude-return.yaml
+  - .github/copilot-instructions.md (new)
+  - .github/workflows/ai-review-gate.yml (new)
+  - .github/workflows/ai-review-request.yml (new)
+  - AGENTS.md (Review guidelines section appended)
+  - docs/development/AI_PR_REVIEW_GATE.md (new)
+  - docs/development/AGENT_AUTOPILOT_POLICY.yaml (required_pr_review_gates added)
+  - scripts/agent-control/ai-review-gate.mjs (new)
+  - scripts/agent-control/ai-review-request.mjs (new)
+  - scripts/agent-control/lib/ai-review.mjs (new)
+  - scripts/agent-control/lib/admission.mjs (ADMISSION_WORKFLOWS)
+  - scripts/agent-control/negative-controls.yaml (7 controls added)
+  - scripts/agent-control/tests/ai-review.spec.mjs (new)
+  - scripts/agent-control/tests/admission.spec.mjs (fixture uses ADMISSION_WORKFLOWS; 2 tests added)
+  - scripts/agent-control/tests/yaml.spec.mjs (see test_edits)
+  - .agent-control/active-packet.yaml, .agent-control/claude-return.yaml
 
-commits:
-  - sha: 1139d93b4a215ac223a7108c7d221b97d359c861
-    subject: "KF-META-AUTO-001: reconcile control-state precedence (fail closed on stale projection)"
-    semantic: true
-  - sha: 01e50b75e5847efe451122ed56bc14d15eb14d82
-    subject: "KF-META-AUTO-001: state-reconcile control artifacts"
-    semantic: false
-  - subject: "KF-META-AUTO-001: complete state-reconcile return artifact"
-    semantic: false
-    note: this commit; control artifact only (PR number, mutation result)
+not_touched:
+  - scripts/agent-control/lib/events.mjs, reconcile.mjs, platform-dag.* (parser packet)
+  - every file claimed by PR #93
+  - REQUIRED_WORKFLOWS, the autopilot workflow_run list, branch-divergence thresholds, existing workflows
 
-scope_ledger:
-  declared:
-    - characterization (writers, readers, event path, next_legal_action, canonical assumptions, staleness cause)
-    - precedence semantics in code, docs and policy
-    - fail-closed drift detection and explicit reporting
-    - reconcile programme-state to KF-META-AUTO-001 CHECKPOINTED, credit ZERO, ACTION-001 held
-    - focused tests, three negative controls, positive control, suites green, mutation suite live
-  resolved:
-    - all declared items
-  remaining: []
-  deferred:
-    - item: live #80/repository verification inside the CI observer job
-      reason: >
-        needs GH_TOKEN and pull-requests:read on the decide step of
-        .github/workflows/agent-control-autopilot.yml, which is outside the
-        authorized scope. Until then the CI observer fails closed
-        (AUTHORITY_UNVERIFIABLE -> REPORT_DRIFT). Requested, not made.
-    - item: correcting canonical wording in .agent-control/README.md and KEYFLOWOS_PROGRAMME_DAG.yaml header
-      reason: outside the authorized file list; documentation only; no code reads it
-  dropped: []
-  superseded:
-    - item: canonical-live-state model (CG-REVIEW-META-AUTO-001) in AGENT_CONTROL_PLANE.md, AUTOPILOT docs and policy
-      by: CG-DIRECTIVE-META-STATE-RECONCILE-001 required_semantics
-
-proof_matrix:
-  - obligation: focused tests for event/source precedence
-    proof: tests/reconcile.spec.mjs (authority collection, ordering, allowlist parity with policy)
-    result: PASS
-  - obligation: "NC stale READY_TO_MERGE for merged PR: no second merge, no next work"
-    proof: >
-      reconcile.spec "stale READY_TO_MERGE for a merged PR" -- ungated table returns
-      EVALUATE_ADMISSION (referent); gated returns REPORT_DRIFT/PR_ALREADY_MERGED, also on a
-      PR_MERGED event; evaluateAdmission refuses pr_not_open. Live: main's real projection
-      yields findings DERIVED_STATE_UNANCHORED + PR_ALREADY_MERGED.
-    result: PASS
-  - obligation: "NC newer #80 HOLD overrides older derived allow/advance"
-    proof: >
-      reconcile.spec "newer than the projection" for a typed HOLD and for a DIRECTIVE-typed hold
-      (the form actually used on #80) -- ungated SELECT_NEXT_PACKET, gated REPORT_DRIFT /
-      DERIVED_STATE_STALE_AUTHORITY; plus "a newer RESUME cannot release a derived hold"
-    result: PASS
-  - obligation: "NC repository contradicts derived state: fail closed and report drift"
-    proof: >
-      reconcile.spec "repository contradicts projection" x6 (PR_NOT_MERGED x2, PR_CLOSED_UNMERGED,
-      PR_BRANCH_MISMATCH, PR_REFERENCE_MISSING, SOURCE_MAIN_NOT_ON_MAIN), each with the
-      ungated referent action, plus "anything that cannot be verified fails closed" x7
-    result: PASS
-  - obligation: positive control
-    proof: >
-      reconcile.spec positive controls for all 8 packet states: consistent input returns the
-      expected action and deepEquals derivedDecision; non-authority chatter does not stale the
-      anchor; a consistent hold still outranks progression. Live: committed projection
-      reconciles CONSISTENT against real #80 + repo and yields WAIT_AUTHORITY.
-    result: PASS
-  - obligation: existing agent-control test suite green
-    proof: node --test scripts/agent-control/tests/*.spec.mjs; tests/windows/*.spec.mjs
-    result: PASS
-  - obligation: existing negative-control mutation suite remains live
-    proof: proof-mutation.mjs at source_head -> 32/32 live (25 existing + 7 NC-RECONCILE-*)
-    result: PASS
-  - obligation: no weakening/removal of safety gates
-    proof: >
-      no gate, workflow, admission rule or existing assertion removed or loosened;
-      orchestration.spec calls gain a consistent reconciliation input with unchanged
-      expected actions; one test title reworded
-    result: PASS
-  - obligation: no production/provider traffic
-    proof: only gh reads of issue #80, PRs, commits and compare on GitHub; no deploy, no provider call
-    result: PASS
+test_edits:
+  - file: scripts/agent-control/tests/yaml.spec.mjs
+    before: "asserted packet_id == 'KF-META-AUTO-001' in the branch's own control artifacts"
+    after: both artifacts parse to the SAME non-empty KF-* packet_id; production_touched still boolean
+    why: the literal pinned the previous packet, so every later impl/* packet fails it; the new form adds a cross-file consistency check
+  - file: scripts/agent-control/tests/admission.spec.mjs
+    before: greenRuns() built runs for REQUIRED_WORKFLOWS
+    after: greenRuns() builds runs for ADMISSION_WORKFLOWS (REQUIRED_WORKFLOWS + AI Review Gate)
+    why: the positive fixture has to satisfy the stricter admission set; every existing assertion is unchanged
 
 tests:
-  command_portable: node --test scripts/agent-control/tests/*.spec.mjs
-  portable_total: 183
-  portable_passed: 183
-  command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  windows_total: 19
-  windows_passed: 19
-  baseline_before_change: 153 portable, all passing, at 4fafdef6
-  new_tests: 30
+  command: node --test scripts/agent-control/tests/*.spec.mjs
+  total: 228
+  passed: 228
   failed: 0
   skipped: 0
-  dag: validate-dag.mjs OK (35 packets / 37 phases)
-
 negative_controls:
   command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
-  baseline_before_change: 25/25 live
-  result: 32/32 live
-  added:
-    - NC-RECONCILE-GATE-BYPASS
-    - NC-RECONCILE-NEWER-AUTHORITY
-    - NC-RECONCILE-MERGED-PR
-    - NC-RECONCILE-REPO-CONTRADICTION
-    - NC-RECONCILE-UNVERIFIABLE-AUTHORITY
-    - NC-RECONCILE-AUTHORITY-SENDER
-    - NC-RECONCILE-CLI-WIRING
-
-precedence_before_after:
-  before:
-    - programme-state was declared canonical; #80 was "a log, not state"
-    - decide() read only programme-state and the single triggering event
-    - a newer #80 HOLD or REVIEW changed nothing until someone hand-edited programme-state
-    - main's projection (PR #87 READY_TO_MERGE) with the hold lifted -> EVALUATE_ADMISSION forever
-  after:
-    - decide() requires reconcile() to show the projection consistent with the newest valid #80 authority and repository truth
-    - newer authority / repo contradiction / missing anchor / unreadable input -> REPORT_DRIFT with every finding
-    - main's old projection, live -> REPORT_DRIFT (DERIVED_STATE_UNANCHORED, PR_ALREADY_MERGED), with or without its hold
-    - committed projection, live -> CONSISTENT -> WAIT_AUTHORITY (ACTION-001 held)
-    - consistent input -> identical to the prior rule table for all 8 states
-
-discoveries:
-  - id: D1
-    detail: >
-      #80 has no HOLD or RESUME message_type; holds/resumes have been typed DIRECTIVE and
-      distinguished only by id prefix and prose. Not inferred: any newer authority stales the
-      projection. A future typed HOLD/RESUME convention would be a ChatGPT decision.
-  - id: D2
-    detail: >
-      ACTION-001 release wording differs: CG-HOLD-ACTION-AUTO-001 says "CG-RESUME-ACTION-*";
-      the prior projection (citing CG-REVIEW-META-AUTO-001) said a fresh
-      "CG-DIRECTIVE-ACTION-CHAR-*". Both recorded verbatim; not resolved.
-  - id: D3
-    detail: CI observer lacks a token for the decide step (see deferred)
-  - id: D4
-    detail: >
-      auto-merge-admitted.mjs does not consult #80, so a HOLD posted after a PR's
-      review_status became READY_TO_MERGE would not stop an exact-head merge. Fixing it needs
-      D1 decided and changes automatic_merge_contract. Not changed.
-
-residual_risks:
-  - the projection goes stale after every new ChatGPT authority message until re-derived in a reviewed commit; the orchestrator waits (REPORT_DRIFT) meanwhile -- safe, but no automated re-derivation exists
-  - until the workflow step has a token, CI-published derived_action is REPORT_DRIFT (AUTHORITY_UNVERIFIABLE)
-  - the authority allowlist is an owner-account boundary, not proof a message came from ChatGPT (same as the worker)
-  - once this PR merges and ChatGPT posts its review, main's projection is stale relative to that review by design; re-anchoring is a follow-up reviewed commit
-  - D4 merge-path/HOLD gap
-
-rollback_floor:
-  sha: 4fafdef635d1f41f287f094370217999e1418041
-  method: revert the squash commit of this PR
-  effect: restores the prior canonical-state model and the stale PR #87 projection; no data, schema or production state involved
-
-security:
-  local_hawkscan: >
-    not run: HAWK_API_KEY unset and no app running; this change touches no application
-    code. The DAST (HawkScan) workflow is a required exact-head check in CI.
+  result: 39/39 live (7 new NC-AIGATE-* / NC-ADMISSION-AI-GATE-REQUIRED)
 
 unresolved_contradictions: []
 next_action: >
-  ChatGPT review. Do not merge; do not release ACTION-001.
+  Open the PR, run the live trigger proofs on it, disposition review findings,
+  then RETURN for ChatGPT review. Do not merge.
