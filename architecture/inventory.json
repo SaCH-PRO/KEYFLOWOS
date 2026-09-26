@@ -61734,9 +61734,9 @@
         "node:fs",
         "node:path"
       ],
-      "lines": 374,
+      "lines": 404,
       "path": "scripts/agent-control/lib/platform-dag.mjs",
-      "size_bytes": 17686
+      "size_bytes": 18872
     },
     {
       "exports": [
@@ -62003,9 +62003,9 @@
         "node:fs",
         "node:test"
       ],
-      "lines": 429,
+      "lines": 452,
       "path": "scripts/agent-control/tests/platform-dag.spec.mjs",
-      "size_bytes": 21811
+      "size_bytes": 23098
     },
     {
       "exports": [],
@@ -63016,6 +63016,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3439,
     "total_files": 4427,
-    "total_lines": 1126802
+    "total_lines": 1126855
   }
 }
