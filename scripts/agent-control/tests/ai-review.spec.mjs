@@ -422,6 +422,12 @@ test('BODY-ONLY findings (Copilot "Previously missed") block until a PR-level di
   s.comparisons = { [`${HEAD}...${FIX}`]: { status: 'ahead', files: ['x'] } };
   const ok = evaluateAiReview(s);
   assert.equal(ok.admissible, true, JSON.stringify(ok.findings));
+  // One comment may carry several dispositions, one line each.
+  s.pr_dispositions = [disp(`KF-DISPOSITION: RESOLVED finding=F-77-1 fixed_in=${FIX}\nKF-DISPOSITION: REJECTED_WITH_EVIDENCE finding=F-77-2 wording changed in the same commit, see AGENTS.md line 196 now`)];
+  assert.equal(evaluateAiReview(s).admissible, true, 'multi-line PR-level disposition');
+  s.pr_dispositions = [disp('KF-DISPOSITION: REJECTED_WITH_EVIDENCE finding=F-77-2 x\nKF-DISPOSITION: RESOLVED finding=F-77-1 fixed_in=' + FIX)];
+  assert.equal(evaluateAiReview(s).admissible, false, 'each line needs its own evidence');
+  s.pr_dispositions = both;
   // A RESOLVED whose fixed_in is not after the reviewed commit does not clear it.
   s.comparisons = { [`${HEAD}...${FIX}`]: { status: 'behind', files: [] } };
   assert.equal(evaluateAiReview(s).reason, GATE_REASONS.UNDISPOSITIONED);

@@ -70,6 +70,12 @@ This is in addition to every existing prerequisite; nothing existing was relaxed
    events are read too. A remembered finding that no longer exists is `DELETED`
    and blocks until a PR conversation comment
    `KF-DISPOSITION: REJECTED_WITH_EVIDENCE finding=<id> <evidence>` names it.
+   Findings a reviewer states only in its review body (Copilot's
+   "Previously missed" blocks with a `KF-SEVERITY` line) are findings too
+   (`F-<review id>-<n>`). They clear through a PR conversation comment naming
+   the id, with RESOLVED (`fixed_in` verified against the reviewed commit) or
+   REJECTED_WITH_EVIDENCE. One comment may carry several dispositions, one
+   `KF-DISPOSITION` line each, with the evidence on that line.
    A reviewer's comment or review edited by anyone but a reviewer bot is no
    longer the reviewer's statement: an edited finding loses its severity tag
    (so it cannot be downgraded to STYLE) and an edited review does not count.

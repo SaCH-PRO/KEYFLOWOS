@@ -272,12 +272,13 @@ export function requiredComparisons(snapshot) {
   const reviewCommit = new Map((snapshot.reviews || []).filter((r) => isReviewerBot(r.author)).map((r) => [String(r.id), r.commit_sha]));
   for (const c of snapshot.pr_dispositions || []) {
     if (!isDispositioner(c.author)) continue;
-    const d = parseDisposition(c.body);
-    const m = d?.finding?.match(/^F-(\d+)-\d+$/);
-    if (!m || d.state !== 'RESOLVED' || !d.fixed_in || !SHA.test(d.fixed_in)) continue;
-    const origin = reviewCommit.get(m[1]);
-    if (origin && SHA.test(String(origin))) pairs.add(key(origin, d.fixed_in));
-    if (d.fixed_in !== head) pairs.add(key(d.fixed_in, head));
+    for (const d of prLevelDispositions(c.body)) {
+      const m = d.finding?.match(/^F-(\d+)-\d+$/);
+      if (!m || d.state !== 'RESOLVED' || !d.fixed_in || !SHA.test(d.fixed_in)) continue;
+      const origin = reviewCommit.get(m[1]);
+      if (origin && SHA.test(String(origin))) pairs.add(key(origin, d.fixed_in));
+      if (d.fixed_in !== head) pairs.add(key(d.fixed_in, head));
+    }
   }
   return [...pairs].map((p) => {
     const [from, to] = p.split('...');
@@ -338,6 +339,20 @@ function evaluateDisposition(thread, head, comparisons) {
 }
 
 /**
+ * Every disposition in a PR conversation comment. One comment may disposition
+ * several findings, one KF-DISPOSITION line each (evidence on the same line);
+ * a comment with a single line keeps its multi-line evidence.
+ */
+export function prLevelDispositions(body) {
+  const lines = String(body || '').split(/\r?\n/).filter((l) => /^KF-DISPOSITION:/.test(l));
+  if (lines.length <= 1) {
+    const d = parseDisposition(body);
+    return d ? [d] : [];
+  }
+  return lines.map((l) => parseDisposition(l)).filter(Boolean);
+}
+
+/**
  * Disposition recorded in the PR conversation, addressed by finding id. Used
  * for findings that have no thread: deleted ones (REJECTED_WITH_EVIDENCE only,
  * their history is gone) and body-only ones (RESOLVED allowed, verified like a
@@ -347,9 +362,10 @@ function evaluatePrLevelDisposition(findingId, comments, { allowResolved = false
   let latest = null;
   for (const c of comments) {
     if (!isDispositioner(c.author)) continue;
-    const d = parseDisposition(c.body);
-    if (!d || d.finding !== findingId) continue;
-    if (!latest || new Date(c.created_at) >= new Date(latest.at)) latest = { ...d, by: c.author.login, at: c.created_at };
+    for (const d of prLevelDispositions(c.body)) {
+      if (d.finding !== findingId) continue;
+      if (!latest || new Date(c.created_at) >= new Date(latest.at)) latest = { ...d, by: c.author.login, at: c.created_at };
+    }
   }
   const none = allowResolved ? 'NONE' : 'DELETED';
   if (!latest) return { state: none, valid: false, detail: `no PR-level KF-DISPOSITION finding=${findingId}`, by: null, fixed_in: null };
