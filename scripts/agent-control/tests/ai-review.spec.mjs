@@ -10,6 +10,8 @@ import {
   ledgerMarker,
   parseDisposition,
   parseLedgerFindings,
+  renderRegister,
+  GATE_WRITER,
   severityFromComment,
   severitiesFromOverview,
   isReviewerBot,
@@ -351,6 +353,51 @@ test('a DELETED finding keeps blocking until a PR-level disposition names it (Co
   );
 });
 
+const WRITER = { login: 'github-actions', type: 'Bot', id: GATE_WRITER.id };
+const registerReview = (rows, over = {}) => ({
+  id: 500,
+  author: WRITER,
+  state: 'COMMENTED',
+  commit_sha: HEAD,
+  submitted_at: '2026-09-26T10:05:00Z',
+  body: renderRegister(rows, HEAD),
+  ...over,
+});
+
+test('REGISTER: a finding survives deletion of both its thread and every ledger comment (Codex F-4112015177 on #94)', () => {
+  const rows = [{ id: 'F-4100000001', reviewer: 'copilot-pull-request-reviewer', severity: 'HIGH' }];
+  // No threads, no ledger comments, no recorded_findings: only the non-deletable register review remains.
+  const v = evaluateAiReview(snap({ reviews: [review(), registerReview(rows)], threads: [], recorded_findings: [] }));
+  assert.equal(v.reason, GATE_REASONS.UNDISPOSITIONED);
+  assert.equal(v.findings[0].deleted, true);
+  assert.deepEqual(v.register_additions, [], 'already registered, nothing to append');
+});
+
+test('REGISTER: an edit by anyone but the gate writer fails the evaluation closed', () => {
+  const rows = [{ id: 'F-4100000001', reviewer: 'copilot-pull-request-reviewer', severity: 'HIGH' }];
+  const edited = registerReview(rows, { body: renderRegister([], HEAD) || `<!-- kf-ai-review-gate:register head=${HEAD} -->`, editor: OWNER });
+  const v = evaluateAiReview(snap({ reviews: [review(), edited] }));
+  assert.equal(v.admissible, false);
+  assert.equal(v.reason, GATE_REASONS.EVIDENCE_TAMPERED);
+  // A register-looking review by anyone else is ignored, not trusted.
+  const forged = registerReview([], { author: OWNER, body: `<!-- kf-ai-review-gate:register head=${HEAD} -->` });
+  assert.equal(evaluateAiReview(snap({ reviews: [review(), forged] })).admissible, true);
+});
+
+test('REGISTER: new findings are appended once; the reviewer overview records ids the moment it is posted', () => {
+  const v = evaluateAiReview(snap({ threads: [thread(HIGH_FINDING)] }));
+  assert.deepEqual(v.register_additions, [{ id: 'F-4100000001', reviewer: 'copilot-pull-request-reviewer', severity: 'HIGH' }]);
+  const body = renderRegister(v.register_additions, HEAD);
+  assert.deepEqual(parseLedgerFindings(body).map((r) => r.id), ['F-4100000001']);
+  assert.equal(renderRegister([], HEAD), '', 'nothing to append, no review');
+
+  // Copilot's own overview lists the finding: deleting the thread before any gate run still leaves it blocking.
+  const overview = '- <img alt="Medium severity"> [x](#discussion_r4100000042) · New';
+  const gone = evaluateAiReview(snap({ reviews: [review({ body: overview })], threads: [] }));
+  assert.equal(gone.reason, GATE_REASONS.UNDISPOSITIONED);
+  assert.deepEqual(gone.blocking_findings, ['F-4100000042']);
+});
+
 test('a deletion event records the deleted reviewer comment; a deleted human comment is not a finding', () => {
   const fromEvent = { id: 'F-4100000077', reviewer_author: { login: 'Copilot', type: 'Bot', id: REVIEWERS['copilot-pull-request-reviewer'].id }, severity: 'UNCLASSIFIED' };
   assert.equal(evaluateAiReview(snap({ recorded_findings: [fromEvent] })).reason, GATE_REASONS.UNDISPOSITIONED);
@@ -455,8 +502,12 @@ test('the gate re-evaluates on open, ready, push, review and reply; the verdict 
   assert.ok(verdictJob.length > 200, 'verdict job located');
   assert.match(verdictJob, /pull-requests:\s*read/);
   assert.ok(!/:\s*write/.test(verdictJob), 'verdict job must hold no write permission');
-  assert.match(verdictJob, /ref:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}/, 'evaluator comes from the trusted base');
-  assert.match(verdictJob, /EXPECTED_HEAD_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  // The base is resolved live from the PR; the expected head is the event's PR head, or the dispatched commit.
+  assert.match(verdictJob, /EVENT_HEAD:\s*\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(verdictJob, /echo "base=\$\(jq -r \.base\.sha/);
+  assert.match(verdictJob, /ref:\s*\$\{\{ steps\.pr\.outputs\.base \}\}\s*\n\s*path: trusted/, 'evaluator comes from the trusted base');
+  assert.match(verdictJob, /EXPECTED_HEAD_SHA:\s*\$\{\{ steps\.pr\.outputs\.expected_head \}\}/);
+  assert.match(wf, /workflow_dispatch:\s*\n\s*inputs:\s*\n\s*pr_number:/);
   // Regression (first live run on #94): `shell: bash` is -e, so a failing verdict
   // aborted before the ledger and outputs were written.
   const run = verdictJob.slice(verdictJob.indexOf('run: |'));
@@ -465,6 +516,23 @@ test('the gate re-evaluates on open, ready, push, review and reply; the verdict 
   // Copilot F-4111965842 on #94: a failed ledger write must not be masked.
   const ledgerJob = wf.slice(wf.indexOf('\n  ledger:'));
   assert.ok(!/continue-on-error/.test(ledgerJob), 'ledger persistence failures must fail the check');
+});
+
+test('PR conversation comments re-dispatch the gate on the PR head branch (Codex F-4112015186 on #94)', () => {
+  const wf = fs.readFileSync('.github/workflows/ai-review-redispatch.yml', 'utf8');
+  assert.match(wf, /issue_comment:\s*\n\s*types:\s*\[created, edited, deleted\]/);
+  assert.match(wf, /github\.event\.issue\.pull_request/);
+  assert.match(wf, /gh workflow run ai-review-gate\.yml --repo "\$GITHUB_REPOSITORY" --ref "\$ref" -f pr_number="\$NUMBER"/);
+  assert.match(wf, /actions:\s*write/);
+  assert.ok(!/actions\/checkout/.test(wf), 'the dispatcher runs no repository code');
+  assert.ok(!/contents:\s*write|pull-requests:\s*write|issues:\s*write/.test(wf));
+});
+
+test('the finding register is an append-only review pinned to the evaluated head', () => {
+  const wf = fs.readFileSync('.github/workflows/ai-review-gate.yml', 'utf8');
+  const ledgerJob = wf.slice(wf.indexOf('\n  ledger:'));
+  assert.match(ledgerJob, /createReview\(\{ owner, repo, pull_number: number, commit_id: head, event: 'COMMENT', body: register \}\)/);
+  assert.ok(!/updateReview|deletePendingReview|dismissReview/.test(ledgerJob), 'the register is never rewritten');
 });
 
 test('the request workflow only fires on synchronize, never for drafts or forks', () => {

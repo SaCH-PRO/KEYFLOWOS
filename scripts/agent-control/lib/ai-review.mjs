@@ -55,6 +55,7 @@ const RANK = { STYLE: 0, LOW: 1, UNCLASSIFIED: 2, MEDIUM: 3, HIGH: 4, CRITICAL: 
 export const GATE_REASONS = Object.freeze({
   PR_NOT_OPEN: 'pr_not_open',
   HEAD_MOVED: 'head_moved_during_evaluation',
+  EVIDENCE_TAMPERED: 'finding_register_edited',
   EVIDENCE_INCOMPLETE: 'review_evidence_incomplete',
   REVIEW_MISSING: 'required_ai_review_missing',
   REVIEW_STALE: 'ai_review_not_at_semantic_head',
@@ -89,11 +90,21 @@ export function isReviewerBot(author) {
 }
 
 /**
- * A reviewer's review or comment edited by anyone other than a reviewer bot is
- * no longer the reviewer's statement (a repository writer can edit comments).
+ * A review or comment edited by anyone other than its author is no longer the
+ * author's statement (a repository writer can edit any comment).
  */
 export function editedByOther(item) {
-  return Boolean(item?.editor) && !isReviewerBot(item.editor);
+  return Boolean(item?.editor) && String(item.editor.id) !== String(item.author?.id);
+}
+
+/**
+ * The gate's own writer (GITHUB_TOKEN), pinned like the reviewers. Its
+ * register reviews are the gate's durable finding memory; it is never a reviewer.
+ */
+export const GATE_WRITER = Object.freeze({ login: 'github-actions', id: 'MDM6Qm90NDE4OTgyODI=' });
+
+export function isGateWriter(author) {
+  return Boolean(author && author.type === 'Bot' && author.id === GATE_WRITER.id);
 }
 
 export function isDispositioner(author) {
@@ -432,12 +443,36 @@ export function evaluateAiReview(snapshot) {
     });
   }
 
-  // Findings recorded earlier (gate ledgers, deletion events) that no longer
-  // exist were deleted. Deletion is not a disposition: they block until a
-  // PR-level KF-DISPOSITION names them.
+  // Findings recorded earlier that no longer exist were deleted. Deletion is
+  // not a disposition: they block until a PR-level KF-DISPOSITION names them.
+  // Sources, most durable first:
+  //   - the gate's register REVIEWS (a submitted review cannot be deleted;
+  //     an edit by anyone but the gate writer fails the whole evaluation),
+  //   - the reviewer's own overview review, which lists its finding ids,
+  //   - ledger comments and deletion events (snapshot.recorded_findings).
+  const registered = new Set();
+  const recordedAll = [...(snapshot.recorded_findings || [])];
+  for (const r of snapshot.reviews || []) {
+    if (isGateWriter(r.author) && String(r.body || '').includes(`<!-- ${REGISTER_MARKER} `)) {
+      if (editedByOther(r)) {
+        return fail(GATE_REASONS.EVIDENCE_TAMPERED, { review_id: r.id, editor: r.editor?.login ?? null }, {
+          reviews: reviewEvidence, stale_reviews: stale, rejected_reviews: rejected, findings, blocking_findings: findings.map((f) => f.id),
+        });
+      }
+      for (const row of parseLedgerFindings(r.body)) {
+        registered.add(row.id);
+        recordedAll.push({ ...row, source: 'register' });
+      }
+    }
+    if (isReviewerBot(r.author) && !editedByOther(r)) {
+      for (const [id, sev] of severitiesFromOverview(r.body)) {
+        recordedAll.push({ id: `F-${id}`, reviewer: reviewerName(r.author), severity: sev, source: 'reviewer_overview' });
+      }
+    }
+  }
   const present = new Set(findings.map((f) => f.id));
   const deleted = new Map();
-  for (const rec of snapshot.recorded_findings || []) {
+  for (const rec of recordedAll) {
     if (present.has(rec.id)) continue;
     if (rec.reviewer_author && !isReviewerBot(rec.reviewer_author)) continue; // a deleted human comment is not a finding
     const prev = deleted.get(rec.id);
@@ -460,7 +495,18 @@ export function evaluateAiReview(snapshot) {
     });
   }
   const blockingIds = findings.filter((f) => f.blocking).map((f) => f.id);
-  const extra = { reviews: reviewEvidence, stale_reviews: stale, rejected_reviews: rejected, findings, blocking_findings: blockingIds };
+  // Findings the register does not hold yet; the ledger job appends them as a new register review.
+  const registerAdditions = findings
+    .filter((f) => !registered.has(f.id))
+    .map((f) => ({ id: f.id, reviewer: f.reviewer, severity: f.severity }));
+  const extra = {
+    reviews: reviewEvidence,
+    stale_reviews: stale,
+    rejected_reviews: rejected,
+    findings,
+    blocking_findings: blockingIds,
+    register_additions: registerAdditions,
+  };
 
   // --- verdict ---------------------------------------------------------------
   const missing = REQUIRED_REVIEWERS.filter((name) => !current.some((r) => r.reviewer === name));
@@ -481,6 +527,21 @@ export const LEDGER_MARKER = 'kf-ai-review-gate:ledger';
 
 export function ledgerMarker(headSha) {
   return `<!-- ${LEDGER_MARKER} head=${headSha} -->`;
+}
+
+export const REGISTER_MARKER = 'kf-ai-review-gate:register';
+
+/**
+ * Body of an append-only register review: the findings the register did not
+ * hold yet. Same row shape as the ledger so one parser reads both.
+ */
+export function renderRegister(additions, headSha) {
+  if (!additions?.length) return '';
+  const lines = [`<!-- ${REGISTER_MARKER} head=${headSha} -->`];
+  lines.push('AI Review Gate finding register (append-only; a submitted review cannot be deleted, and an edit by anyone but the gate fails the gate).');
+  lines.push('', '| id | reviewer | severity |', '|---|---|---|');
+  for (const a of additions) lines.push(`| ${a.id} | ${a.reviewer} | ${a.severity} |`);
+  return lines.join('\n');
 }
 
 /**

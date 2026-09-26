@@ -505,6 +505,39 @@ negative_controls:
     proof_command: node --test --test-name-pattern="DELETED finding" scripts/agent-control/tests/ai-review.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-AIGATE-REGISTER-TAMPER-FAILS-CLOSED
+    claim: >
+      The finding register (append-only gate reviews) edited by anyone but the
+      gate writer fails the evaluation; its history cannot be rewritten.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "      if (editedByOther(r)) {"
+      replace: "      if (false) {"
+    proof_command: node --test --test-name-pattern="REGISTER: an edit by anyone" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-REGISTER-SURVIVES-DELETION
+    claim: >
+      A registered finding stays blocking after its thread and every ledger
+      comment are deleted.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "        recordedAll.push({ ...row, source: 'register' });"
+      replace: "        // defect restored: register rows ignored"
+    proof_command: node --test --test-name-pattern="REGISTER: a finding survives deletion" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-OVERVIEW-RECORDS-FINDINGS
+    claim: >
+      The reviewer's own overview records its finding ids, so a thread deleted
+      before any gate run still blocks.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    if (isReviewerBot(r.author) && !editedByOther(r)) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="reviewer overview records ids" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-AIGATE-EDITED-FINDING-NOT-DOWNGRADED
     claim: >
       A reviewer finding edited by a non-reviewer loses its severity tag and

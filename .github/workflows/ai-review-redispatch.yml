@@ -1,0 +1,46 @@
+name: AI Review Redispatch
+
+# Re-evaluates the AI Review Gate when the PR conversation changes
+# (KF-AI-PR-REVIEW-GATE-001). A PR-level disposition
+# (`KF-DISPOSITION: ... finding=<id>`) or a deleted gate ledger arrives as an
+# issue_comment event, and an issue_comment run belongs to the default branch,
+# not the PR head, so it cannot carry the PR's check itself. Instead it
+# dispatches the gate on the PR's head branch. workflow_dispatch is the one
+# event GITHUB_TOKEN may trigger, and a dispatched run lands on that branch's
+# head commit. The gate re-checks that the commit is still the PR head.
+
+on:
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-review-redispatch-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  redispatch:
+    # PR conversations only; the gate's own ledger writes never trigger this (GITHUB_TOKEN events do not).
+    if: github.event.issue.pull_request && github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Dispatch the AI Review Gate on the PR head branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${NUMBER}")"
+          if [ "$(jq -r .head.repo.full_name <<<"$pr")" != "$GITHUB_REPOSITORY" ]; then
+            echo "fork PR: a dispatch cannot target its branch; the next pull_request event re-evaluates it"
+            exit 0
+          fi
+          ref="$(jq -r .head.ref <<<"$pr")"
+          gh workflow run ai-review-gate.yml --repo "$GITHUB_REPOSITORY" --ref "$ref" -f pr_number="$NUMBER"
+          echo "dispatched AI Review Gate for #$NUMBER on $ref"

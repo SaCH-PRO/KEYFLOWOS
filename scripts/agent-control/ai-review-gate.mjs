@@ -5,14 +5,16 @@
  *
  * Env: GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, optional EXPECTED_HEAD_SHA,
  *      optional DELETED_COMMENT (JSON of a deleted review comment event).
- * Flags: --ledger <file>  also write the markdown ledger for this head.
+ * Flags: --ledger <file>    also write the markdown ledger for this head.
+ *        --register <file>  also write the register-review body for findings
+ *                           the register does not hold yet (empty if none).
  *
  * Exit codes: 0 admissible, 3 not admissible, 2 evaluator error. An error is
  * never a pass: the caller's check fails either way.
  */
 
 import fs from 'node:fs';
-import { evaluateAiReview, renderLedger } from './lib/ai-review.mjs';
+import { evaluateAiReview, renderLedger, renderRegister } from './lib/ai-review.mjs';
 import { collectAiReviewSnapshot, githubClient } from './lib/ai-review-collect.mjs';
 
 const token = process.env.GITHUB_TOKEN;
@@ -21,6 +23,8 @@ const prNumber = Number(process.env.PR_NUMBER || 0);
 const expectedHead = (process.env.EXPECTED_HEAD_SHA || '').trim() || null;
 const ledgerIdx = process.argv.indexOf('--ledger');
 const ledgerPath = ledgerIdx > -1 ? process.argv[ledgerIdx + 1] : null;
+const registerIdx = process.argv.indexOf('--register');
+const registerPath = registerIdx > -1 ? process.argv[registerIdx + 1] : null;
 
 if (!token || !repo || !prNumber) {
   process.stderr.write('GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER are required\n');
@@ -48,6 +52,7 @@ async function main() {
       : null;
     fs.writeFileSync(ledgerPath, renderLedger(verdict, { prNumber, runUrl }));
   }
+  if (registerPath) fs.writeFileSync(registerPath, renderRegister(verdict.register_additions, verdict.head_sha));
   return { ...verdict, pr: prNumber };
 }
 

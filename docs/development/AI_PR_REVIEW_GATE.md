@@ -56,9 +56,15 @@ This is in addition to every existing prerequisite; nothing existing was relaxed
      characters of evidence.
    The newest disposition wins. Resolving the thread in the UI, or a later
    summary review that no longer lists the finding, never clears it.
-7. **Deletion and editing.** Every ledger records the findings it saw. A finding
-   an earlier ledger recorded (or a comment-deletion event carried) that no
-   longer exists is `DELETED` and blocks until a PR conversation comment
+7. **Deletion and editing.** Findings are remembered in evidence nobody can
+   delete: the gate appends a **register** review (a `github-actions` COMMENT
+   review, marker `kf-ai-review-gate:register`) whenever it sees finding ids the
+   register does not hold yet. A submitted review cannot be deleted, and an edit
+   by anyone but the gate writer fails every later evaluation
+   (`finding_register_edited`). Copilot's own overview review also lists its
+   finding ids the moment it is posted. Ledger comments and comment-deletion
+   events are read too. A remembered finding that no longer exists is `DELETED`
+   and blocks until a PR conversation comment
    `KF-DISPOSITION: REJECTED_WITH_EVIDENCE finding=<id> <evidence>` names it.
    A reviewer's comment or review edited by anyone but a reviewer bot is no
    longer the reviewer's statement: an edited finding loses its severity tag
@@ -74,6 +80,14 @@ ready_for_review), `pull_request_review` (submitted, edited, dismissed) and
 per PR with cancel-in-progress collapses bursts to the newest evaluation, and
 admission reads the newest run at the exact head. The expected sequence after a
 push is: fail (review not posted yet), then pass or fail on the review.
+
+PR conversation comments (a PR-level disposition, a deleted ledger) arrive as
+`issue_comment`, whose runs belong to `main`, not the PR head.
+`.github/workflows/ai-review-redispatch.yml` therefore dispatches the gate
+(`workflow_dispatch`, the one event GITHUB_TOKEN may trigger) on the PR's head
+branch. The gate re-checks that the dispatched commit is still the PR head.
+`issue_comment` and `workflow_dispatch` both run from the default branch's
+workflow definitions, so this path only goes live after merge.
 
 The Codex request fires only on `synchronize`, only for non-draft same-repo PRs,
 only when the push changed a file outside `.agent-control/**`, never for a
@@ -122,10 +136,13 @@ list is reported as unclassified, never as low risk.
   every existing check here, so the **check** can be forged by a PR that edits
   it. Autopilot **admission** cannot: it recomputes the verdict from `main`.
   For human merges the fix is the ruleset below, pinned to `main`.
-- Residual: a repository writer who deletes a finding before any ledger or
-  deletion-event run records it (for example while runs are held) removes it
-  from view. The deletion event itself triggers a recording run, but GitHub's
-  audit log is the only complete record.
+- Residual: a repository writer who deletes a **Codex** finding comment before
+  any gate run registers it removes it from view. Codex's review body does not
+  list ids, unlike Copilot's overview. The Codex review event itself triggers a
+  registering run, which is not held, and the deletion event triggers another.
+  GitHub's audit log is the only complete record.
+- Residual: the high-risk classifier is path/patch based and over-flags (for
+  example, docs that mention `deleteMany`). That is fail-safe, but noisy.
 - The reviewer is independent of the implementer. The implementer can
   disposition a finding but cannot produce a review; REJECTED_WITH_EVIDENCE
   dispositions are visible in the ledger for ChatGPT integration review.

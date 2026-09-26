@@ -1,6 +1,6 @@
 name: AI Review Gate
 
-# Exact-head AI review admission input (KF-AI-PR-REVIEW-GATE-001).
+# Exact-head AI review check (KF-AI-PR-REVIEW-GATE-001).
 #
 # Passes only when the CURRENT PR head carries a completed review by a pinned
 # AI reviewer bot at that head (or at an ancestor whose later commits touch
@@ -8,18 +8,18 @@ name: AI Review Gate
 # KF-DISPOSITION. Anything unproven fails. See docs/development/AI_PR_REVIEW_GATE.md.
 #
 # Re-evaluated on every event that can change the answer: a push (the old
-# review goes stale), a review arriving, a disposition reply. Admission reads
-# the newest run at the exact head, so an early "review not posted yet" failure
-# is superseded by the evaluation that follows the review.
+# review goes stale), a review arriving, a thread reply, and (through
+# ai-review-redispatch.yml -> workflow_dispatch on the PR branch) a PR
+# conversation comment such as a PR-level disposition.
 #
 # No path filter: every PR needs it.
 #
-# This check is PR-visible evidence and writes the ledger. Autopilot admission
-# does NOT trust its conclusion: a pull_request run executes the PR's own copy
-# of this file, and GitHub holds runs triggered by Copilot's review events for
-# approval (action_required). The merge path re-evaluates the same rule itself
-# from trusted main (auto-merge-admitted.mjs). For human merges, require this
-# check through a repository ruleset that pins the workflow to main.
+# This check is PR-visible evidence and keeps the finding register. Autopilot
+# admission does NOT trust its conclusion: a pull_request run executes the PR's
+# own copy of this file, and GitHub holds runs triggered by Copilot's review
+# events for approval (action_required). The merge path re-evaluates the same
+# rule itself from trusted main (auto-merge-admitted.mjs). For human merges,
+# require this workflow through a repository ruleset pinned to main.
 #
 # Deliberately NOT a wake source for the autopilot: every evaluation would
 # post an AUTO_EVENT to #80.
@@ -31,6 +31,12 @@ on:
     types: [submitted, edited, dismissed]
   pull_request_review_comment:
     types: [created, edited, deleted]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR to re-evaluate; the run must be dispatched on that PR's head branch"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -38,8 +44,8 @@ permissions:
 concurrency:
   # One live evaluation per PR; a newer event supersedes an older one. A
   # comment-deletion run is never cancelled: it alone can record the deleted
-  # finding into the ledger, which every later evaluation reads back.
-  group: ai-review-gate-${{ github.event.pull_request.number }}-${{ github.event.action == 'deleted' && github.run_id || 'eval' }}
+  # finding before it is gone from the API.
+  group: ai-review-gate-${{ github.event.pull_request.number || inputs.pr_number }}-${{ github.event.action == 'deleted' && github.run_id || 'eval' }}
   cancel-in-progress: true
 
 jobs:
@@ -50,17 +56,40 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      pr_number: ${{ steps.pr.outputs.number }}
+      same_repo: ${{ steps.pr.outputs.same_repo }}
       head_sha: ${{ steps.gate.outputs.head_sha }}
       admissible: ${{ steps.gate.outputs.admissible }}
       ledger: ${{ steps.gate.outputs.ledger }}
+      register: ${{ steps.gate.outputs.register }}
     steps:
+      # The head this run is about: the event's PR head, or for a dispatch the
+      # commit it was dispatched on (which must still be the PR head).
+      - name: Resolve PR
+        id: pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::pr number '$NUMBER' is not numeric"; exit 1; }
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${NUMBER}")"
+          {
+            echo "number=$NUMBER"
+            echo "expected_head=$EVENT_HEAD"
+            echo "base=$(jq -r .base.sha <<<"$pr")"
+            echo "same_repo=$([ "$(jq -r .head.repo.full_name <<<"$pr")" = "$GITHUB_REPOSITORY" ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+
       # The evaluator comes from the trusted base commit, so a PR cannot change
       # the rule that judges it. Only while the base predates the gate (its own
       # introducing PR) does it fall back to the PR's copy, and says so.
       - name: Checkout trusted evaluator (PR base)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ steps.pr.outputs.base }}
           path: trusted
           persist-credentials: false
 
@@ -68,7 +97,7 @@ jobs:
         if: hashFiles('trusted/scripts/agent-control/ai-review-gate.mjs') == ''
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ steps.pr.outputs.expected_head }}
           path: trusted
           persist-credentials: false
 
@@ -81,9 +110,9 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          EXPECTED_HEAD_SHA: ${{ steps.pr.outputs.expected_head }}
+          BASE_SHA: ${{ steps.pr.outputs.base }}
           # A deleted review comment is gone from the API afterwards; the event
           # payload is the last chance to record it as a finding.
           DELETED_COMMENT: ${{ github.event_name == 'pull_request_review_comment' && github.event.action == 'deleted' && toJSON(github.event.comment) || '' }}
@@ -92,12 +121,13 @@ jobs:
           # abort before the verdict, outputs and ledger are written.
           set +e -uo pipefail
           source_note="trusted base $BASE_SHA"
-          if ! git -C trusted cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || [ "$(git -C trusted rev-parse HEAD)" != "$BASE_SHA" ]; then
+          if [ "$(git -C trusted rev-parse HEAD)" != "$BASE_SHA" ]; then
             source_note="BOOTSTRAP: PR head $EXPECTED_HEAD_SHA (base has no evaluator yet)"
           fi
           echo "evaluator source: $source_note"
           ledger_file="$RUNNER_TEMP/ai-review-ledger.md"
-          json="$(node trusted/scripts/agent-control/ai-review-gate.mjs --ledger "$ledger_file")"
+          register_file="$RUNNER_TEMP/ai-review-register.md"
+          json="$(node trusted/scripts/agent-control/ai-review-gate.mjs --ledger "$ledger_file" --register "$register_file")"
           code=$?
           echo "$json"
           admissible=false
@@ -112,6 +142,12 @@ jobs:
               echo "_evaluator: ${source_note}_"
               echo "KFLEDGEREOF"
             fi
+            if [ -s "$register_file" ]; then
+              echo "register<<KFREGISTEREOF"
+              cat "$register_file"
+              echo ""
+              echo "KFREGISTEREOF"
+            fi
           } >> "$GITHUB_OUTPUT"
           if [ -s "$ledger_file" ]; then cat "$ledger_file" >> "$GITHUB_STEP_SUMMARY"; fi
           if [ "$code" -ne 0 ]; then
@@ -119,34 +155,47 @@ jobs:
           fi
           exit "$code"
 
-  # Durable per-head ledger on the PR. Separate from the verdict so the verdict
-  # job stays read-only. A failed write fails the check: the ledger is evidence
-  # (and the deletion memory later evaluations read back), so losing it must not
+  # Durable evidence on the PR. Separate from the verdict so the verdict job
+  # stays read-only. A failed write fails the check: losing evidence must not
   # look green. Fork PRs cannot write and keep the job-summary ledger only.
-  # The ledger is written by github-actions and is never accepted as review evidence.
+  #   - register: an append-only COMMENT review listing findings the register
+  #     did not hold yet. A submitted review cannot be deleted, and an edit by
+  #     anyone but the gate fails every later evaluation. This is what makes a
+  #     deleted finding stay visible.
+  #   - ledger: one human-readable comment per head.
+  # Both are written by github-actions and never accepted as review evidence.
   ledger:
     needs: verdict
-    if: always() && needs.verdict.outputs.ledger != '' && github.event.pull_request.head.repo.full_name == github.repository
+    if: always() && needs.verdict.outputs.ledger != '' && needs.verdict.outputs.same_repo == 'true'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
     steps:
-      - name: Upsert ledger comment for this head
+      - name: Append finding register and upsert ledger for this head
         uses: actions/github-script@v7
         env:
           LEDGER: ${{ needs.verdict.outputs.ledger }}
+          REGISTER: ${{ needs.verdict.outputs.register }}
           HEAD_SHA: ${{ needs.verdict.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.verdict.outputs.pr_number }}
         with:
           script: |
-            const body = process.env.LEDGER;
-            const marker = `<!-- kf-ai-review-gate:ledger head=${process.env.HEAD_SHA} -->`;
-            if (!body.startsWith(marker)) throw new Error('ledger does not carry the marker for its head');
             const { owner, repo } = context.repo;
-            const issue_number = context.payload.pull_request.number;
-            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const number = Number(process.env.PR_NUMBER);
+            const head = process.env.HEAD_SHA;
+            const register = String(process.env.REGISTER || '').trim();
+            if (register) {
+              if (!register.startsWith(`<!-- kf-ai-review-gate:register head=${head} -->`)) throw new Error('register does not carry the marker for its head');
+              // commit_id pins the review to the evaluated head; a moved head is rejected rather than misattributed.
+              await github.rest.pulls.createReview({ owner, repo, pull_number: number, commit_id: head, event: 'COMMENT', body: register });
+            }
+            const body = process.env.LEDGER;
+            const marker = `<!-- kf-ai-review-gate:ledger head=${head} -->`;
+            if (!body.startsWith(marker)) throw new Error('ledger does not carry the marker for its head');
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 });
             const mine = comments.find((c) => c.user?.login === 'github-actions[bot]' && String(c.body || '').startsWith(marker));
             if (!mine) {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              await github.rest.issues.createComment({ owner, repo, issue_number: number, body });
             } else if (mine.body !== body) {
               await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
             }
