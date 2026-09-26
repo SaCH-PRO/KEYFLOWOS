@@ -461,6 +461,31 @@ test('NEGATIVE CONTROL: activation fields with unmatched quotes cannot activate;
   assert.equal(stateOf([good, unmatched]), PLATFORM_STATES.HELD);
 });
 
+test('NEGATIVE CONTROL: a repeated control field is ambiguous and holds', () => {
+  // r4111544748: readField uses the first occurrence, so ACTIVATE then HOLD
+  // read as ACTIVATE. Referent: the same message without the repeat activates.
+  const withRepeat = (key, value) => {
+    const c = comment(activateFields());
+    c.body = c.body.replace('\n```', `\n${key}: ${value}\n\`\`\``);
+    return c;
+  };
+  assert.equal(stateOf([comment(activateFields())]), PLATFORM_STATES.ACTIVE);
+  for (const [key, value] of [
+    ['programme_action', 'HOLD'],
+    ['programme_action', 'ACTIVATE'],
+    ['programme', 'KEYFLOWOS_PLATFORM_CONVERGENCE'],
+    ['message_type', 'REVIEW'],
+    ['sender', 'claude-code'],
+    ['health', 'GREEN'],
+  ]) {
+    assert.equal(stateOf([withRepeat(key, value)]), PLATFORM_STATES.HELD, `repeated ${key}: ${value} must not activate`);
+  }
+  // A repeat in a second block of the same comment is still a repeat.
+  const twoBlocks = comment(activateFields());
+  twoBlocks.body += '\n\n```yaml\nprogramme_action: HOLD\n```';
+  assert.equal(stateOf([twoBlocks]), PLATFORM_STATES.HELD);
+});
+
 test('hold is DIRECTIVE-only in the contract; a HOLD-typed message still holds', () => {
   const doc = clone(loadPlatformDag(repoRoot).doc);
   doc.activation.hold.message_types = ['DIRECTIVE', 'HOLD'];

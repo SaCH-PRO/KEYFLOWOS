@@ -280,6 +280,12 @@ function rawField(body, key) {
   return m ? m[1].trim() : null;
 }
 
+/** Occurrences of `key:` at a line start; readField silently uses the first. */
+function fieldCount(body, key) {
+  if (typeof body !== 'string') return 0;
+  return (body.match(new RegExp(`^${key}:`, 'gm')) || []).length;
+}
+
 function unbalancedQuote(raw) {
   const opens = /^["']/.test(raw);
   const closes = /["']$/.test(raw);
@@ -291,7 +297,7 @@ function unbalancedQuote(raw) {
  * Envelope problems of a raw #80 comment body: absent fields, present fields
  * whose value is outside the repository vocabulary (state-machine.mjs
  * STATES/HEALTH, full 40-hex SHAs, true/false), and control fields with
- * unbalanced quotes. Empty list = well formed.
+ * unbalanced quotes or more than one occurrence. Empty list = well formed.
  */
 export function missingEnvelopeFields(body) {
   const problems = REQUIRED_ENVELOPE.filter((spec) => spec.split('|').every((key) => readField(body, key) === null));
@@ -307,6 +313,7 @@ export function missingEnvelopeFields(body) {
   for (const key of QUOTE_CHECKED_FIELDS) {
     const raw = rawField(body, key);
     if (raw !== null && unbalancedQuote(raw)) problems.push(`${key} (unmatched quote)`);
+    if (fieldCount(body, key) > 1) problems.push(`${key} (repeated; ambiguous)`);
   }
   return problems;
 }
