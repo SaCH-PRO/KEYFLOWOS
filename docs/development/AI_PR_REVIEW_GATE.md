@@ -23,9 +23,13 @@ This is in addition to every existing prerequisite; nothing existing was relaxed
 ## What passes
 
 1. **Identity.** A review counts only when its author is a pinned reviewer bot:
-   GitHub login **and** GraphQL node id **and** actor type `Bot`
+   GraphQL/REST node id **and** actor type `Bot`
    (`copilot-pull-request-reviewer` `BOT_kgDOCnlnWA`, `chatgpt-codex-connector`
-   `BOT_kgDOC98s_g`). `github-actions`, humans, and look-alike accounts never count.
+   `BOT_kgDOC98s_g`). The login is deliberately **not** part of the predicate:
+   GitHub reports the same Copilot actor as `copilot-pull-request-reviewer`
+   (GraphQL), `copilot-pull-request-reviewer[bot]` (REST reviews) and `Copilot`
+   (REST review comments), while the node id is stable and cannot be claimed by
+   another account. `github-actions`, humans, and look-alike accounts never count.
    The gate's own ledger and the request comment are written by
    `github-actions` and so can never satisfy it.
 2. **Exact head.** The review's commit is the PR head, or an ancestor whose later
