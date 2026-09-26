@@ -229,9 +229,35 @@ const SHA = /^[0-9a-f]{40}$/;
 const BOOLEAN = ['true', 'false'];
 
 /**
- * Envelope problems of a raw #80 comment body: absent fields, and present
- * fields whose value is outside the repository vocabulary (state-machine.mjs
- * STATES/HEALTH, full 40-hex SHAs, true/false). Empty list = well formed.
+ * Fields read from a message naming the programme. readField strips a leading
+ * and a trailing quote independently, so `programme_action: 'ACTIVATE` would
+ * read as ACTIVATE; the raw value is checked for balanced quoting first.
+ */
+const QUOTE_CHECKED_FIELDS = Object.freeze([
+  'message_id', 'message_type', 'packet_id', 'sender', 'source_main', 'source_head',
+  'implementation_branch', 'state', 'health', 'scope_changed', 'production_touched',
+  'programme', 'programme_action',
+]);
+
+/** Same line match as events.mjs readField, without unquoting. */
+function rawField(body, key) {
+  if (typeof body !== 'string') return null;
+  const m = body.match(new RegExp(`^${key}:[ \\t]*([^\\n]*)$`, 'm'));
+  return m ? m[1].trim() : null;
+}
+
+function unbalancedQuote(raw) {
+  const opens = /^["']/.test(raw);
+  const closes = /["']$/.test(raw);
+  if (!opens && !closes) return false;
+  return !(opens && closes && raw.length >= 2 && raw[0] === raw[raw.length - 1]);
+}
+
+/**
+ * Envelope problems of a raw #80 comment body: absent fields, present fields
+ * whose value is outside the repository vocabulary (state-machine.mjs
+ * STATES/HEALTH, full 40-hex SHAs, true/false), and control fields with
+ * unbalanced quotes. Empty list = well formed.
  */
 export function missingEnvelopeFields(body) {
   const problems = REQUIRED_ENVELOPE.filter((spec) => spec.split('|').every((key) => readField(body, key) === null));
@@ -243,6 +269,10 @@ export function missingEnvelopeFields(body) {
   if (value('health') !== null && !HEALTH.includes(value('health'))) problems.push(`health (${value('health')} is not ${HEALTH.join('/')})`);
   for (const key of ['scope_changed', 'production_touched']) {
     if (value(key) !== null && !BOOLEAN.includes(value(key))) problems.push(`${key} (not true/false)`);
+  }
+  for (const key of QUOTE_CHECKED_FIELDS) {
+    const raw = rawField(body, key);
+    if (raw !== null && unbalancedQuote(raw)) problems.push(`${key} (unmatched quote)`);
   }
   return problems;
 }

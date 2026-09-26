@@ -415,6 +415,29 @@ test('NEGATIVE CONTROL: envelope values outside the repository vocabulary cannot
   }
 });
 
+test('NEGATIVE CONTROL: activation fields with unmatched quotes cannot activate; they hold', () => {
+  // r4111466813: readField strips a leading and a trailing quote independently.
+  // Referent: balanced quoting is ordinary YAML and still activates, so HELD
+  // below comes from the unmatched quote, not from quoting as such.
+  assert.equal(stateOf([comment(activateFields({ programme_action: "'ACTIVATE'", programme: '"KEYFLOWOS_PLATFORM_CONVERGENCE"' }))]), PLATFORM_STATES.ACTIVE);
+  const malformed = [
+    { programme_action: "'ACTIVATE", programme: "'KEYFLOWOS_PLATFORM_CONVERGENCE" },
+    { programme_action: "'ACTIVATE" },
+    { programme_action: 'ACTIVATE"' },
+    { programme_action: `'ACTIVATE"` },
+    { programme: "KEYFLOWOS_PLATFORM_CONVERGENCE'" },
+    { message_type: "'DIRECTIVE" },
+    { sender: '"chatgpt' },
+    { health: "GREEN'" },
+  ];
+  for (const extra of malformed) {
+    assert.equal(stateOf([comment(activateFields(extra))]), PLATFORM_STATES.HELD, `${JSON.stringify(extra)} must not activate`);
+  }
+  const good = comment(activateFields(), { at: '2026-09-26T10:00:00Z' });
+  const unmatched = comment(activateFields({ programme_action: "'ACTIVATE" }), { at: '2026-09-26T11:00:00Z' });
+  assert.equal(stateOf([good, unmatched]), PLATFORM_STATES.HELD);
+});
+
 test('hold is DIRECTIVE-only in the contract; a HOLD-typed message still holds', () => {
   const doc = clone(loadPlatformDag(repoRoot).doc);
   doc.activation.hold.message_types = ['DIRECTIVE', 'HOLD'];
