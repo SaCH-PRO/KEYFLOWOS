@@ -447,8 +447,8 @@ negative_controls:
       only an explicit STYLE tag is non-blocking.
     mutation:
       file: scripts/agent-control/lib/ai-review.mjs
-      find: "    const severity = severityFromComment(first.body) || overview.get(String(first.id)) || 'UNCLASSIFIED';"
-      replace: "    const severity = severityFromComment(first.body) || overview.get(String(first.id)) || 'STYLE';"
+      find: "    const severity = tampered ? 'UNCLASSIFIED' : severityFromComment(first.body) || overview.get(String(first.id)) || 'UNCLASSIFIED';"
+      replace: "    const severity = tampered ? 'UNCLASSIFIED' : severityFromComment(first.body) || overview.get(String(first.id)) || 'STYLE';"
     proof_command: node --test --test-name-pattern="UNCLASSIFIED finding also blocks" scripts/agent-control/tests/ai-review.spec.mjs
     timeout_ms: 120000
 
