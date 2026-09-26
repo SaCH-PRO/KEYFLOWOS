@@ -511,8 +511,8 @@ negative_controls:
       gate writer fails the evaluation; its history cannot be rewritten.
     mutation:
       file: scripts/agent-control/lib/ai-review.mjs
-      find: "      if (editedByOther(r)) {"
-      replace: "      if (false) {"
+      find: "      if (r.edited === true || editedByOther(r)) {"
+      replace: "      if (r.edited === true) {"
     proof_command: node --test --test-name-pattern="REGISTER: an edit by anyone" scripts/agent-control/tests/ai-review.spec.mjs
     timeout_ms: 120000
 
