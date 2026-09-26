@@ -1,10 +1,22 @@
 {
   "meta": {
     "schema": "codebase-architect/v1",
-    "generated": "2026-08-30T20:45:00Z",
-    "source": "baseline exploration output + inventory.py + dependency_scan.py + 2026-08-30 full-domain deep scan",
+    "generated": "2026-09-26T00:00:00Z",
+    "baseline_generated": "2026-08-30T20:45:00Z",
+    "source": "baseline exploration output + inventory.py + dependency_scan.py + 2026-08-30 full-domain deep scan; revised 2026-09-25/26 (PR #93) with the INACTIVE platform-convergence successor target and the agent control plane nodes/edges",
+    "revisions": [
+      {
+        "date": "2026-08-30",
+        "change": "full-domain deep scan baseline"
+      },
+      {
+        "date": "2026-09-26",
+        "change": "PR #93: platform_target added; scripts/agent-control, AGENT_AUTOPILOT_POLICY.yaml, KEYFLOWOS_PROGRAMME_DAG.yaml, KEYFLOWOS_PLATFORM_DAG.yaml and lib/platform-dag.mjs nodes and their edges added; application nodes unchanged from the baseline"
+      }
+    ],
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
-    "plan": "docs/development/e2e-hardening-plan.md"
+    "plan": "docs/development/e2e-hardening-plan.md",
+    "platform_target": "docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md (INACTIVE successor; see target-architecture.md)"
   },
   "nodes": [
     {
@@ -437,6 +449,31 @@
       "type": "risk",
       "label": "157 orphaned /app routes",
       "severity": "medium"
+    },
+    {
+      "id": "scripts/agent-control",
+      "type": "module",
+      "label": "Agent control plane: issue #80 authority, reconcile, orchestration, admission gates, local worker"
+    },
+    {
+      "id": "docs/development/AGENT_AUTOPILOT_POLICY.yaml",
+      "type": "file",
+      "label": "Autopilot safety policy (never_automatic effects, authority rules)"
+    },
+    {
+      "id": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "type": "file",
+      "label": "Application convergence programme DAG (active)"
+    },
+    {
+      "id": "docs/development/KEYFLOWOS_PLATFORM_DAG.yaml",
+      "type": "file",
+      "label": "Platform/workflow convergence programme DAG (INACTIVE successor)"
+    },
+    {
+      "id": "scripts/agent-control/lib/platform-dag.mjs",
+      "type": "file",
+      "label": "Platform DAG gate/activation contract validator (validation only; not wired into orchestrator)"
     }
   ],
   "edges": [
@@ -904,6 +941,31 @@
       "source": "risk:R8",
       "target": "apps/web",
       "type": "has_risk"
+    },
+    {
+      "source": "scripts/agent-control",
+      "target": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "type": "depends_on"
+    },
+    {
+      "source": "scripts/agent-control",
+      "target": "docs/development/AGENT_AUTOPILOT_POLICY.yaml",
+      "type": "implements"
+    },
+    {
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "target": "scripts/agent-control",
+      "type": "belongs_to"
+    },
+    {
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "target": "docs/development/KEYFLOWOS_PLATFORM_DAG.yaml",
+      "type": "depends_on"
+    },
+    {
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "target": "docs/development/AGENT_AUTOPILOT_POLICY.yaml",
+      "type": "depends_on"
     }
   ],
   "risks": [
