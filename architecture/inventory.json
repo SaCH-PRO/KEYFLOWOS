@@ -58929,15 +58929,15 @@
     },
     {
       "extension": ".md",
-      "lines": 252,
+      "lines": 276,
       "path": "docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md",
-      "size_bytes": 14403
+      "size_bytes": 15930
     },
     {
       "extension": ".yaml",
-      "lines": 492,
+      "lines": 521,
       "path": "docs/development/KEYFLOWOS_PLATFORM_DAG.yaml",
-      "size_bytes": 16186
+      "size_bytes": 17788
     },
     {
       "extension": ".yaml",
@@ -63019,6 +63019,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3439,
     "total_files": 4427,
-    "total_lines": 1126989
+    "total_lines": 1127042
   }
 }
