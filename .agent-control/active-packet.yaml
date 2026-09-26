@@ -1,99 +1,72 @@
-packet_id: KF-META-AUTO-001
-correction_id: KF-META-AUTO-001-STATE-RECONCILE
-directive_message_id: CG-DIRECTIVE-META-STATE-RECONCILE-001
-directive_comment_id: 5825443535
-in_reply_to: CG-REVIEW-LIVE-AUTHORITY-WAKE-001
-ack_message_id: CC-ACK-META-STATE-RECONCILE-001
-source_main: 4fafdef635d1f41f287f094370217999e1418041
-implementation_branch: impl/kf-meta-auto-001-state-reconcile
-pr_number: 92
-state: PROVING
+packet_id: KF-AI-PR-REVIEW-GATE-001
+directive_message_id: CG-DIRECTIVE-AI-PR-REVIEW-GATE-001
+directive_comment_id: 5847589705
+in_reply_to: USER-TECH-DEBT-REVIEW-GATE-2026-09-26
+ack_message_id: CC-ACK-AI-PR-REVIEW-GATE-001
+source_main: ad97ea48841a0a4acb13f9a170bae0e07159d6f4
+implementation_branch: impl/kf-ai-pr-review-gate-001
+state: IMPLEMENTING
 health: GREEN
-scope_changed: false
+scope_changed: true
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: AUTHORIZED_CHARACTERIZATION_AND_IMPLEMENTATION
 
 objective: >
-  Reconcile KEYFLOWOS control-state precedence and stale-state handling before
-  ACTION-001 is released. Issue #80 is execution authority, repository/PR/CI
-  evidence is implementation truth, programme-state.yaml is derived operational
-  state, and architectural intelligence is durable intent/checkpoint history.
-  A stale derived state must never authorize advancement against newer authority
-  or repository reality.
+  Make AI pull-request review a mandatory exact-head admission input. Every PR
+  and every semantic head change triggers an AI review or a deterministic
+  re-review request, and admission stays blocked until the current semantic
+  head has a completed, machine-attributable AI review with zero undispositioned
+  substantive findings, plus every existing repository prerequisite.
 
-required_characterization:
-  - enumerate every writer and reader of .agent-control/programme-state.yaml
-  - trace how issue #80 DIRECTIVE/REVIEW/HOLD/RESUME/PR_MERGED events reach the orchestrator
-  - trace how next_legal_action is derived and consumed
-  - identify all docs/tests/code that assume programme-state is unquestionable canonical authority
-  - explain why main still projects PR #87 READY_TO_MERGE after PR #87 and #89 merged and LIVE-AUTHORITY-WAKE-001 was accepted
-  - report any contradiction before implementation if the requested precedence cannot be made deterministic
+review_priority:
+  non_blocking: [style, formatting covered by lint/format, cosmetic refactors without production risk]
+  focus: [architecture boundaries, business-logic invariants, security, authn/authz/tenancy/privilege, payments/idempotency/money state, deletion/destructive migration, SQL injection, N+1/unbounded queries, transactions/races/retries, edge cases/partial failure/replay, API/schema drift, secrets/PII/logging, runtime failure modes]
+
+high_risk_surfaces: [auth, authorization, tenancy, payments, billing, refunds, data deletion, destructive migrations, production configuration, deployment/control-plane authority, external provider side effects]
+
+required_behavior:
+  - every opened PR gets AI review automatically
+  - every draft->ready transition gets AI review automatically
+  - every semantic push invalidates prior AI review evidence and triggers a fresh exact-head review
+  - inline comments for actionable findings; durable PR-level summary with exact head SHA, severity, finding ids, disposition
+  - no substantive finding disappears without RESOLVED or REJECTED_WITH_EVIDENCE
+  - fail closed when the reviewer is unavailable, stale, ambiguous or cannot prove the reviewed SHA
+  - reviewer identity machine-verifiable; human prose and github-actions[bot] cannot spoof a passing review
 
 authorized_scope:
-  - docs/development/AGENT_CONTROL_PLANE.md
-  - docs/development/AGENT_AUTOPILOT*.md
-  - docs/development/AGENT_AUTOPILOT_POLICY.yaml
-  - scripts/agent-control/**
-  - .agent-control/programme-state.yaml
-  - .agent-control/active-packet.yaml
-  - .agent-control/claude-return.yaml
-  - tests/fixtures directly required to prove this correction
-  - no application/product code
+  - .github/copilot-instructions.md (consolidated repository-wide reviewer policy; reconciles PR #90)
+  - AGENTS.md review-guidelines section (Codex review surface)
+  - new AI review gate / request workflows under .github/workflows/
+  - scripts/agent-control/** additions for the gate evaluator, request logic and tests
+  - admission wiring (scripts/agent-control/lib/admission.mjs) and AGENT_AUTOPILOT_POLICY.yaml required gate list
+  - new docs/development/AI_PR_REVIEW_GATE.md
+  - .agent-control/active-packet.yaml, .agent-control/claude-return.yaml
 
-required_semantics:
-  - code/repository evidence establishes what actually exists
-  - newest valid ChatGPT DIRECTIVE/REVIEW/HOLD/RESUME on #80 establishes current execution authority
-  - programme-state.yaml is a derived machine projection and may be stale
-  - derived state may summarize/accelerate decisions but may not override newer authority or repository truth
-  - disagreement between implementation truth, execution authority and derived state fails closed and is surfaced explicitly
-  - the orchestrator must not advance from stale READY_TO_MERGE/MERGED/CHECKPOINTED assumptions
-  - ACTION-001 remains held throughout this correction
-  - preserve append-only #80 audit history and existing ACK/RETURN protocol
+prohibited_scope:
+  - files claimed by PR #93 (AGENT_CONTROL_PLANE.md, AGENT_AUTOPILOT.md, KEYFLOWOS_* programme docs, platform-dag.*, architecture/*.json|md edits there)
+  - envelope parsing in events.mjs / reconcile.mjs / platform-dag.mjs (KF-META-CONTROL-PARSER-001)
+  - merge; repository settings/ruleset mutation; production/deployment/provider traffic; secret or OAuth entry; paid resources
+  - weakening any existing check, reviewer, branch rule, security gate or divergence threshold
+  - any review loop that can approve itself; github-actions[bot] impersonating an AI reviewer
 
 proof_obligations:
-  - focused tests for event/source precedence
-  - "negative control: stale programme-state says READY_TO_MERGE while the referenced PR is already merged; automation must not attempt a second merge or release next work"
-  - "negative control: newer #80 HOLD overrides an older derived allow/advance state"
-  - "negative control: repository reality contradicts derived state; system fails closed and reports drift"
-  - "positive control: consistent authority + repository truth + derived state still permits the same legal advancement as before"
-  - existing agent-control test suite green
-  - existing negative-control mutation suite remains live
-  - no weakening/removal of current safety gates
-  - no production/provider traffic
-
-current_reconciliation_target:
-  meta_package: KF-META-AUTO-001
-  admitted_live_proof: CG-REVIEW-LIVE-AUTHORITY-WAKE-001
-  current_main: 4fafdef635d1f41f287f094370217999e1418041
-  desired_meta_state: CHECKPOINTED
-  programme_credit: ZERO
-  action_hold:
-    packet_id: KF-EXEC-ACTION-001
-    active: true
-    release_authority: ChatGPT only after this correction is admitted
-
-prohibited:
-  - merge of this PR
-  - release of ACTION-001 or any ACTION-001 work
-  - application/product code
-  - production mutation or provider traffic
-  - weakening any gate, proof or negative control
-  - independent architecture or precedence decisions beyond the model above
+  - PR open causes review request/trigger
+  - draft->ready causes review request/trigger
+  - semantic push causes fresh exact-head review and stale prior review is rejected
+  - non-semantic/no-op update does not create an uncontrolled review storm
+  - missing reviewer result blocks admission
+  - reviewer result for old SHA blocks admission
+  - unresolved HIGH/MEDIUM or otherwise substantive finding blocks admission
+  - auth/payment/data-deletion fixture surfaced as high-risk
+  - N+1/SQL-injection/business-logic/unhandled-edge fixtures detected by review instructions or recorded reviewer fixtures
+  - style-only issue does not independently block admission
+  - existing required CI/agent-control/security checks remain required
+  - inline finding + PR summary evidence durable and exact-head attributable
+  - code-review mechanism changes receive independent AI review before admission
 
 stop_conditions:
-  - architectural ambiguity that requires a new precedence decision beyond the model above
-  - inability to deterministically verify #80/repository truth
-  - scope pressure into application/product code
-  - any need to weaken a gate or proof
-  - production impact
-
-return_requirements:
-  - ACK before mutation
-  - characterization summary with writers/readers/event path
-  - exact changed files and semantic head
-  - tests and negative controls with results
-  - before/after precedence behavior
-  - residual risks and rollback floor
-  - RETURN on #80 with review_status PENDING_CHATGPT_REVIEW
+  - implementation would touch PR #93 files or parser-packet surfaces -> CONTRADICTION with smallest non-conflicting sequence
+  - enforcement requires repository-settings/ruleset mutation -> record as authority-gated activation step, do not perform
+  - evidence contradicts a packet assumption -> CONTRADICTION and stop affected work

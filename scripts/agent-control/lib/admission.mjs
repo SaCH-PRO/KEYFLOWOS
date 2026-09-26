@@ -26,6 +26,7 @@ export const ADMISSION_REASONS = Object.freeze({
   MISSING_WORKFLOWS: 'missing_workflows',
   WORKFLOWS_NOT_GREEN: 'workflows_not_green',
   STALE_WORKFLOW_HEAD: 'workflow_runs_not_at_exact_head',
+  AI_REVIEW_NOT_ADMISSIBLE: 'ai_review_not_admissible_at_exact_head',
   ELIGIBLE: 'all_admission_contracts_satisfied',
 });
 
@@ -43,6 +44,8 @@ function fail(reason, detail) {
  *   workflow_runs: [{name, head_sha, status, conclusion, created_at}]
  *   ancestry: {source_head_is_ancestor: bool, non_control_files: string[]}
  *   contradictions: string[]
+ *   ai_review: verdict of lib/ai-review.mjs evaluateAiReview, computed by the
+ *              caller from TRUSTED code for this exact head (KF-AI-PR-REVIEW-GATE-001)
  */
 export function evaluateAdmission(snapshot) {
   const { pr = {}, active = {}, ret = {}, ancestry = {}, contradictions = [] } = snapshot;
@@ -119,6 +122,21 @@ export function evaluateAdmission(snapshot) {
     return fail(ADMISSION_REASONS.WORKFLOWS_NOT_GREEN, notGreen.map((n) => ({ workflow: n, conclusion: latest.get(n).conclusion })));
   }
 
+  // --- AI review at the EXACT head (KF-AI-PR-REVIEW-GATE-001) -------------
+  // Deliberately a verdict the merge path computes itself, not the "AI Review
+  // Gate" workflow conclusion: a pull_request run executes the PR's own
+  // workflow file, so a PR could turn that check green; and GitHub holds runs
+  // triggered by Copilot's review events for approval (action_required), so the
+  // newest run at a head can be a stall rather than a verdict.
+  const ai = snapshot.ai_review;
+  if (!ai || ai.admissible !== true || String(ai.head_sha) !== String(pr.head_sha)) {
+    return fail(ADMISSION_REASONS.AI_REVIEW_NOT_ADMISSIBLE, {
+      reason: ai ? ai.reason ?? null : 'ai_review_not_evaluated',
+      head_sha: ai ? ai.head_sha ?? null : null,
+      blocking_findings: ai?.blocking_findings ?? [],
+    });
+  }
+
   return {
     eligible: true,
     reason: ADMISSION_REASONS.ELIGIBLE,
@@ -128,6 +146,7 @@ export function evaluateAdmission(snapshot) {
       review_status: ret.review_status,
       source_head: ret.source_head,
       workflows: REQUIRED_WORKFLOWS.map((n) => ({ workflow: n, run_id: latest.get(n).id ?? null, conclusion: 'success' })),
+      ai_review: { reason: ai.reason, reviews: ai.reviews ?? [] },
     },
   };
 }
