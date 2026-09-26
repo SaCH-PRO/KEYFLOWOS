@@ -280,6 +280,18 @@ function rawField(body, key) {
   return m ? m[1].trim() : null;
 }
 
+/**
+ * Every value of `key:` at a line start, unquoted as readField does. Used by
+ * the naming prefilter so a repeated field cannot hide the programme behind
+ * a first occurrence that fails the filter.
+ */
+function allFieldValues(body, key) {
+  if (typeof body !== 'string') return [];
+  return [...body.matchAll(new RegExp(`^${key}:[ \\t]*([^\\n]*)$`, 'gm'))]
+    .map((m) => m[1].trim().replace(/^["']|["']$/g, ''))
+    .filter((v) => v !== '' && v !== 'null');
+}
+
 /** Occurrences of `key:` at a line start; readField silently uses the first. */
 function fieldCount(body, key) {
   if (typeof body !== 'string') return 0;
@@ -367,9 +379,11 @@ export function platformProgrammeState(comments, doc, policy) {
   const naming = [];
   for (const comment of comments) {
     const body = comment?.body || '';
-    if (readField(body, 'programme') !== PLATFORM_PROGRAMME_ID) continue;
-    const messageType = readField(body, 'message_type');
-    if (!AUTHORITY_MESSAGE_TYPES.includes(messageType)) continue;
+    // Any occurrence qualifies: a repeated field is then rejected as malformed
+    // by missingEnvelopeFields instead of being skipped here.
+    if (!allFieldValues(body, 'programme').includes(PLATFORM_PROGRAMME_ID)) continue;
+    const messageType = allFieldValues(body, 'message_type').find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));
+    if (!messageType) continue;
     if (!authors.includes(String(comment?.user?.login || '').toLowerCase())) continue;
     if (comment.id === undefined || comment.id === null || !comment.created_at) {
       return { state: PLATFORM_STATES.INACTIVE, reason: 'a comment naming this programme has no id or timestamp', decided_by: null };

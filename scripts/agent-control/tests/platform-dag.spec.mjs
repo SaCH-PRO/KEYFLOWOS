@@ -486,6 +486,31 @@ test('NEGATIVE CONTROL: a repeated control field is ambiguous and holds', () => 
   assert.equal(stateOf([twoBlocks]), PLATFORM_STATES.HELD);
 });
 
+test('NEGATIVE CONTROL: a repeat whose first value fails the prefilter still holds an active programme', () => {
+  // r4111585374: with only the first occurrence read, `programme: KEYFLOWOS_OTHER`
+  // then this programme (or a non-authority message_type then DIRECTIVE) was
+  // skipped entirely, leaving an earlier ACTIVATE in force.
+  const good = comment(activateFields(), { at: '2026-09-26T10:00:00Z' });
+  assert.equal(stateOf([good]), PLATFORM_STATES.ACTIVE);
+  const reversed = (key, first) => {
+    const c = comment(activateFields(), { at: '2026-09-26T11:00:00Z' });
+    c.body = c.body.replace(`\n${key}: `, `\n${key}: ${first}\n${key}: `);
+    return c;
+  };
+  for (const [key, first] of [
+    ['programme', 'KEYFLOWOS_OTHER'],
+    ['programme', 'null'],
+    ['message_type', 'AUTO_EVENT'],
+    ['message_type', 'PROGRESS'],
+  ]) {
+    const later = reversed(key, first);
+    assert.equal(fieldLines(later.body, key), 2, `fixture must repeat ${key}`);
+    assert.equal(stateOf([good, later]), PLATFORM_STATES.HELD, `${key}: ${first} first must not leave the programme ACTIVE`);
+  }
+});
+
+const fieldLines = (body, key) => body.split('\n').filter((l) => l.startsWith(`${key}:`)).length;
+
 test('hold is DIRECTIVE-only in the contract; a HOLD-typed message still holds', () => {
   const doc = clone(loadPlatformDag(repoRoot).doc);
   doc.activation.hold.message_types = ['DIRECTIVE', 'HOLD'];
