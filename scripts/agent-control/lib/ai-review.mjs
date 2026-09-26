@@ -10,23 +10,25 @@
  * accepts prose as a review, and anything it cannot prove fails closed.
  *
  * Evidence model:
- *   - a review counts only if its author is a pinned reviewer bot (login AND
- *     node id AND actor type Bot). github-actions and every human are refused,
- *     so neither a workflow comment nor a pasted "LGTM from Copilot" can pass.
+ *   - a review counts only if its author is a pinned reviewer bot: node id AND
+ *     actor type Bot. The login is not part of the predicate (GitHub reports
+ *     one actor under several logins). github-actions and every human are
+ *     refused, so neither a workflow comment nor a pasted "LGTM" can pass.
  *   - a review is current only if its commit IS the head, or is an ancestor
  *     whose diff to the head touches .agent-control/** only (the repository's
  *     semantic-head rule). Any other push makes it stale.
- *   - every inline thread opened by a reviewer bot is a finding. It clears only
- *     through a KF-DISPOSITION reply by an authorized dispositioner. Resolving
- *     the thread in the UI is recorded but never clears it on its own.
+ *   - every inline thread opened by a reviewer bot, and every KF-SEVERITY block
+ *     in a reviewer's review body, is a finding. It clears only through a
+ *     KF-DISPOSITION by an authorized dispositioner. Resolving the thread,
+ *     deleting it, or editing it never clears it.
  */
 
-/** Workflow name admission requires at the exact head (see admission.mjs). */
+/** Name of the PR-visible check workflow (admission re-evaluates the rule itself). */
 export const AI_REVIEW_GATE_WORKFLOW = 'AI Review Gate';
 
 /**
- * Reviewer bots, pinned by GraphQL node id as well as login. A login can in
- * principle be registered by a User; a Bot node id cannot be forged.
+ * Reviewer bots, pinned by node id (identical in GraphQL and REST). The map
+ * key is the canonical reviewer name used in ledgers; it is not matched.
  */
 export const REVIEWERS = Object.freeze({
   'copilot-pull-request-reviewer': Object.freeze({ id: 'BOT_kgDOCnlnWA', name: 'GitHub Copilot code review' }),
@@ -167,14 +169,14 @@ export function parseDisposition(body) {
   const m = text.match(/^KF-DISPOSITION:[ \t]*(RESOLVED|REJECTED_WITH_EVIDENCE)\b([^\n]*)$/m);
   if (!m) return null;
   const state = m[1];
-  const finding = (m[2].match(/\bfinding=(F-\d+)\b/) || [])[1] || null;
+  const finding = (m[2].match(/\bfinding=(F-\d+(?:-\d+)?)\b/) || [])[1] || null;
   if (state === 'RESOLVED') {
     const fixed = m[2].match(/\bfixed_in=([0-9a-fA-F]+)\b/);
     return { state, finding, fixed_in: fixed ? fixed[1].toLowerCase() : null };
   }
   // Evidence may follow on the same line or on the lines after it; the
   // finding= reference is an address, not evidence.
-  const sameLine = m[2].replace(/\bfinding=F-\d+\b/, '');
+  const sameLine = m[2].replace(/\bfinding=F-\d+(?:-\d+)?\b/, '');
   const rest = text.slice(0, m.index) + '\n' + sameLine + '\n' + text.slice(m.index + m[0].length);
   return { state, finding, evidence: rest.replace(/\s+/g, ' ').trim() };
 }
@@ -266,6 +268,17 @@ export function requiredComparisons(snapshot) {
       }
     }
   }
+  // PR-level RESOLVED dispositions of body-only findings (F-<review id>-<n>).
+  const reviewCommit = new Map((snapshot.reviews || []).filter((r) => isReviewerBot(r.author)).map((r) => [String(r.id), r.commit_sha]));
+  for (const c of snapshot.pr_dispositions || []) {
+    if (!isDispositioner(c.author)) continue;
+    const d = parseDisposition(c.body);
+    const m = d?.finding?.match(/^F-(\d+)-\d+$/);
+    if (!m || d.state !== 'RESOLVED' || !d.fixed_in || !SHA.test(d.fixed_in)) continue;
+    const origin = reviewCommit.get(m[1]);
+    if (origin && SHA.test(String(origin))) pairs.add(key(origin, d.fixed_in));
+    if (d.fixed_in !== head) pairs.add(key(d.fixed_in, head));
+  }
   return [...pairs].map((p) => {
     const [from, to] = p.split('...');
     return { from, to };
@@ -321,23 +334,16 @@ function evaluateDisposition(thread, head, comparisons) {
   }
 
   // RESOLVED must name the fixing commit, which must follow the finding and be in the head's history.
-  if (!latest.fixed_in || !SHA.test(latest.fixed_in)) {
-    return { ...latest, valid: false, detail: 'RESOLVED requires fixed_in=<full 40-character sha>' };
-  }
-  if (!origin) return { ...latest, valid: false, detail: 'finding commit unknown' };
-  const after = relation(comparisons, origin, latest.fixed_in);
-  if (!after || after.status !== 'ahead') {
-    return { ...latest, valid: false, detail: `fixed_in is not a descendant of the finding commit (${after ? after.status : 'unproven'})` };
-  }
-  const inHead = relation(comparisons, latest.fixed_in, head);
-  if (!inHead || !['ahead', 'identical'].includes(inHead.status)) {
-    return { ...latest, valid: false, detail: `fixed_in is not in the current head history (${inHead ? inHead.status : 'unproven'})` };
-  }
-  return { ...latest, valid: true, detail: null };
+  return { ...latest, ...verifyFixedIn(latest.fixed_in, origin, head, comparisons) };
 }
 
-/** A deleted finding can only be dispositioned in the PR conversation, by id, with evidence. */
-function evaluatePrLevelDisposition(findingId, comments) {
+/**
+ * Disposition recorded in the PR conversation, addressed by finding id. Used
+ * for findings that have no thread: deleted ones (REJECTED_WITH_EVIDENCE only,
+ * their history is gone) and body-only ones (RESOLVED allowed, verified like a
+ * thread disposition against the reviewed commit).
+ */
+function evaluatePrLevelDisposition(findingId, comments, { allowResolved = false, origin = null, head = null, comparisons = {} } = {}) {
   let latest = null;
   for (const c of comments) {
     if (!isDispositioner(c.author)) continue;
@@ -345,12 +351,48 @@ function evaluatePrLevelDisposition(findingId, comments) {
     if (!d || d.finding !== findingId) continue;
     if (!latest || new Date(c.created_at) >= new Date(latest.at)) latest = { ...d, by: c.author.login, at: c.created_at };
   }
-  if (!latest) return { state: 'DELETED', valid: false, detail: `finding deleted without a PR-level KF-DISPOSITION finding=${findingId}`, by: null, fixed_in: null };
-  if (latest.state !== 'REJECTED_WITH_EVIDENCE') {
+  const none = allowResolved ? 'NONE' : 'DELETED';
+  if (!latest) return { state: none, valid: false, detail: `no PR-level KF-DISPOSITION finding=${findingId}`, by: null, fixed_in: null };
+  if (latest.state === 'REJECTED_WITH_EVIDENCE') {
+    const ok = String(latest.evidence || '').length >= MIN_EVIDENCE_CHARS;
+    return { state: latest.state, valid: ok, detail: ok ? null : `evidence shorter than ${MIN_EVIDENCE_CHARS} characters`, by: latest.by, fixed_in: null };
+  }
+  if (!allowResolved) {
     return { state: latest.state, valid: false, detail: 'a deleted finding needs REJECTED_WITH_EVIDENCE (its thread history is gone)', by: latest.by, fixed_in: null };
   }
-  const ok = String(latest.evidence || '').length >= MIN_EVIDENCE_CHARS;
-  return { state: latest.state, valid: ok, detail: ok ? null : `evidence shorter than ${MIN_EVIDENCE_CHARS} characters`, by: latest.by, fixed_in: null };
+  const checked = verifyFixedIn(latest.fixed_in, origin, head, comparisons);
+  return { state: latest.state, valid: checked.valid, detail: checked.detail, by: latest.by, fixed_in: latest.fixed_in ?? null };
+}
+
+/** RESOLVED fixed_in must be a full sha after the finding's commit and inside the head's history. */
+function verifyFixedIn(fixedIn, origin, head, comparisons) {
+  if (!fixedIn || !SHA.test(fixedIn)) return { valid: false, detail: 'RESOLVED requires fixed_in=<full 40-character sha>' };
+  if (!origin) return { valid: false, detail: 'finding commit unknown' };
+  const after = relation(comparisons, origin, fixedIn);
+  if (!after || after.status !== 'ahead') {
+    return { valid: false, detail: `fixed_in is not a descendant of the finding commit (${after ? after.status : 'unproven'})` };
+  }
+  const inHead = relation(comparisons, fixedIn, head);
+  if (!inHead || !['ahead', 'identical'].includes(inHead.status)) {
+    return { valid: false, detail: `fixed_in is not in the current head history (${inHead ? inHead.status : 'unproven'})` };
+  }
+  return { valid: true, detail: null };
+}
+
+/**
+ * Findings a reviewer states only in its review body: every <details> block
+ * that carries a KF-SEVERITY line. Id F-<review id>-<n>, n counted in order.
+ */
+export function bodyFindings(review) {
+  const out = [];
+  let n = 0;
+  for (const block of String(review.body || '').split('<details>')) {
+    if (!/KF-SEVERITY:/i.test(block)) continue;
+    n += 1;
+    const loc = block.replace(/​/g, '').match(/`([^`\s]+):(\d+)`/);
+    out.push({ id: `F-${review.id}-${n}`, severity: severityFromComment(block) || 'UNCLASSIFIED', path: loc ? loc[1] : null, line: loc ? Number(loc[2]) : null });
+  }
+  return out;
 }
 
 /**
@@ -443,6 +485,34 @@ export function evaluateAiReview(snapshot) {
     });
   }
 
+  // Findings stated only in a reviewer's review body (Copilot's "Previously
+  // missed" blocks carry file, line and KF-SEVERITY but no thread). The body
+  // cannot be deleted; they clear through a PR-level disposition naming the id.
+  for (const r of snapshot.reviews || []) {
+    if (!isReviewerBot(r.author) || editedByOther(r)) continue;
+    bodyFindings(r).forEach((bf) => {
+      const disposition = evaluatePrLevelDisposition(bf.id, snapshot.pr_dispositions || [], {
+        allowResolved: true,
+        origin: r.commit_sha ?? null,
+        head,
+        comparisons,
+      });
+      findings.push({
+        id: bf.id,
+        reviewer: reviewerName(r.author),
+        severity: bf.severity,
+        path: bf.path,
+        line: bf.line,
+        commit_sha: r.commit_sha ?? null,
+        thread_resolved: false,
+        outdated: false,
+        body_only: true,
+        disposition,
+        blocking: !NON_BLOCKING_SEVERITIES.includes(bf.severity) && !disposition.valid,
+      });
+    });
+  }
+
   // Findings recorded earlier that no longer exist were deleted. Deletion is
   // not a disposition: they block until a PR-level KF-DISPOSITION names them.
   // Sources, most durable first:
@@ -454,7 +524,9 @@ export function evaluateAiReview(snapshot) {
   const recordedAll = [...(snapshot.recorded_findings || [])];
   for (const r of snapshot.reviews || []) {
     if (isGateWriter(r.author) && String(r.body || '').includes(`<!-- ${REGISTER_MARKER} `)) {
-      if (editedByOther(r)) {
+      // The gate never edits a register, and a PR's own workflow shares the
+      // github-actions identity, so ANY edit (even "by the author") is tampering.
+      if (r.edited === true || editedByOther(r)) {
         return fail(GATE_REASONS.EVIDENCE_TAMPERED, { review_id: r.id, editor: r.editor?.login ?? null }, {
           reviews: reviewEvidence, stale_reviews: stale, rejected_reviews: rejected, findings, blocking_findings: findings.map((f) => f.id),
         });
@@ -551,7 +623,7 @@ export function renderRegister(additions, headSha) {
  */
 export function parseLedgerFindings(body) {
   const out = [];
-  for (const m of String(body || '').matchAll(/^\| (F-\d+) \| ([a-z0-9-]+) \| ([A-Z]+) \|/gm)) {
+  for (const m of String(body || '').matchAll(/^\| (F-\d+(?:-\d+)?) \| ([a-z0-9-]+) \| ([A-Z]+) \|/gm)) {
     out.push({ id: m[1], reviewer: m[2], severity: m[3], source: 'ledger' });
   }
   return out;

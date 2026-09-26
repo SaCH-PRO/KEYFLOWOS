@@ -20,7 +20,7 @@ query($owner: String!, $name: String!, $number: Int!, $reviewsAfter: String, $th
       state isDraft headRefOid baseRefOid
       reviews(first: 100, after: $reviewsAfter) {
         pageInfo { hasNextPage endCursor }
-        nodes { databaseId state submittedAt body commit { oid } author { ${AUTHOR} } ${EDITOR} }
+        nodes { databaseId state submittedAt lastEditedAt body commit { oid } author { ${AUTHOR} } ${EDITOR} }
       }
       reviewThreads(first: 100, after: $threadsAfter) {
         pageInfo { hasNextPage endCursor }
@@ -97,6 +97,8 @@ export async function collectAiReviewSnapshot({ client, repo, prNumber, expected
           id: r.databaseId,
           author: toActor(r.author),
           editor: toActor(r.editor),
+          // Any edit at all, whoever the API reports as editor.
+          edited: Boolean(r.lastEditedAt),
           state: r.state,
           commit_sha: r.commit?.oid ?? null,
           submitted_at: r.submittedAt,

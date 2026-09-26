@@ -492,3 +492,30 @@ Key files:
 - `apps/server/src/core/connectors/connector.interface.ts`
 - `packages/api/src/routers/key-connector.ts`
 - `packages/db/src/middleware/token-encryption.ts`
+
+## 12. PR Admission: Exact-Head AI Review (control plane, KF-AI-PR-REVIEW-GATE-001)
+
+Not an application runtime path; it governs what reaches `main`.
+
+```
+PR opened / pushed / ready            ruleset "KEYFLOWOS Copilot Review" → Copilot review (every head, drafts)
+                                      Codex native review (open, draft→ready)
+semantic push on a non-draft PR       .github/workflows/ai-review-request.yml → one "@codex review" per head
+push / review / thread reply          .github/workflows/ai-review-gate.yml (PR-visible check)
+PR conversation comment (allowlisted) .github/workflows/ai-review-redispatch.yml → workflow_dispatch of the gate on the PR branch
+  → scripts/agent-control/ai-review-gate.mjs (evaluator checked out from the PR base)
+  → lib/ai-review-collect.mjs (GraphQL reviews/threads, PR comments, files, compares)
+  → lib/ai-review.mjs evaluateAiReview → verdict + ledger comment + append-only register review
+
+Autopilot merge (trusted main checkout)
+  → scripts/agent-control/auto-merge-admitted.mjs
+  → collectAiReviewSnapshot + evaluateAiReview for the exact PR head (never the workflow conclusion)
+  → lib/admission.mjs evaluateAdmission({ …, ai_review }) → AI_REVIEW_NOT_ADMISSIBLE or eligible
+```
+
+Key symbols / files:
+
+- `evaluateAiReview()`, `requiredComparisons()`, `renderLedger()`, `renderRegister()` — `scripts/agent-control/lib/ai-review.mjs`
+- `collectAiReviewSnapshot()` — `scripts/agent-control/lib/ai-review-collect.mjs`
+- `evaluateAdmission()` `ai_review` input — `scripts/agent-control/lib/admission.mjs`
+- Design and trust model — `docs/development/AI_PR_REVIEW_GATE.md`

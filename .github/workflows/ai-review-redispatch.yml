@@ -22,8 +22,16 @@ concurrency:
 
 jobs:
   redispatch:
-    # PR conversations only; the gate's own ledger writes never trigger this (GITHUB_TOKEN events do not).
-    if: github.event.issue.pull_request && github.event.issue.state == 'open'
+    # Only comments that can change the verdict: a dispositioner's comment
+    # (same allowlist as lib/ai-review.mjs DISPOSITIONERS), or the deletion of a
+    # gate ledger. Anyone else's comment cannot move the verdict, so it must not
+    # buy a gate run (Copilot F-4112060350 on #94). The gate's own writes never
+    # trigger this (GITHUB_TOKEN events do not).
+    if: >-
+      github.event.issue.pull_request && github.event.issue.state == 'open' && (
+        (github.event.comment.user.login == 'SaCH-PRO' && github.event.comment.user.type == 'User') ||
+        (github.event.action == 'deleted' && github.event.comment.user.login == 'github-actions[bot]')
+      )
     runs-on: ubuntu-latest
     permissions:
       actions: write

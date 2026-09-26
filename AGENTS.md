@@ -193,7 +193,7 @@ After any architecture-affecting change, re-run the scanners and update the rele
 
 ## Review guidelines
 
-AI pull-request review is a merge input here: the AI Review Gate (`docs/development/AI_PR_REVIEW_GATE.md`) blocks admission until the exact head has a current AI review and every inline finding has a `KF-DISPOSITION`. The full reviewer policy is `.github/copilot-instructions.md`; these are the same priorities for Codex.
+AI pull-request review is a merge input here: the AI Review Gate (`docs/development/AI_PR_REVIEW_GATE.md`) blocks admission until the exact head has a current AI review and every substantive (non-STYLE) finding has a `KF-DISPOSITION`. The full reviewer policy is `.github/copilot-instructions.md`; these are the same priorities for Codex.
 
 - Flag as P0/P1: authentication vs authorization gaps, tenancy leaks (tenant-owned data not scoped by `businessId`, or a request body choosing the tenant), privilege escalation, SQL injection or unsafe raw queries (`$queryRawUnsafe`, string-built SQL), payment/billing/refund idempotency and duplicate side effects, destructive migrations or data deletion without a recovery path, secrets or PII in logs and responses, and production or provider side effects without recorded authority.
 - Flag as P1/P2: business-logic invariant violations, unhandled edge cases and partial failure, races and missing transactions, non-idempotent retries, N+1 queries and unbounded queries or missing pagination, API/schema/event contract drift, runtime failures that pass lint/typecheck, and weakened tests, gates or proof.

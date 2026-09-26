@@ -516,6 +516,28 @@ negative_controls:
     proof_command: node --test --test-name-pattern="REGISTER: an edit by anyone" scripts/agent-control/tests/ai-review.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-AIGATE-REGISTER-ANY-EDIT-FAILS-CLOSED
+    claim: >
+      A register review edited even under the gate writer's own identity (a PR
+      workflow shares it) fails the evaluation.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "      if (r.edited === true || editedByOther(r)) {"
+      replace: "      if (editedByOther(r)) {"
+    proof_command: node --test --test-name-pattern="REGISTER: any edit" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-BODY-ONLY-FINDINGS-BLOCK
+    claim: >
+      Findings stated only in a reviewer's review body block until a PR-level
+      disposition names them.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    if (!/KF-SEVERITY:/i.test(block)) continue;"
+      replace: "    continue;"
+    proof_command: node --test --test-name-pattern="BODY-ONLY findings" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-AIGATE-REGISTER-SURVIVES-DELETION
     claim: >
       A registered finding stays blocking after its thread and every ledger

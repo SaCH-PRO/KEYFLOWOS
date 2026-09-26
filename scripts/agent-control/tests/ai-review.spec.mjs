@@ -12,6 +12,7 @@ import {
   parseLedgerFindings,
   renderRegister,
   GATE_WRITER,
+  DISPOSITIONERS,
   severityFromComment,
   severitiesFromOverview,
   isReviewerBot,
@@ -384,6 +385,48 @@ test('REGISTER: an edit by anyone but the gate writer fails the evaluation close
   assert.equal(evaluateAiReview(snap({ reviews: [review(), forged] })).admissible, true);
 });
 
+test('REGISTER: any edit, even one the API attributes to the gate writer itself, fails closed (Copilot F-4112060325 on #94)', () => {
+  const rows = [{ id: 'F-4100000001', reviewer: 'copilot-pull-request-reviewer', severity: 'HIGH' }];
+  // A PR's own workflow shares the github-actions identity: editor === author.
+  const selfEdited = registerReview(rows, { editor: WRITER, edited: true });
+  assert.equal(evaluateAiReview(snap({ reviews: [review(), selfEdited] })).reason, GATE_REASONS.EVIDENCE_TAMPERED);
+  // A forged ADDITIONAL register row cannot lower an honestly registered severity.
+  const forged = registerReview([{ ...rows[0], severity: 'STYLE' }], { id: 501 });
+  const v = evaluateAiReview(snap({ reviews: [review(), registerReview(rows), forged], threads: [] }));
+  assert.equal(v.findings[0].severity, 'HIGH');
+  assert.equal(v.reason, GATE_REASONS.UNDISPOSITIONED);
+});
+
+const MISSED = [
+  '<details>\n<summary><strong>Previously missed (2)</strong></summary>\n\nIn code that hasn\'t changed since last review\n',
+  '<details>\n<summary> Stale source head</summary>\n\n`.agent-control/​claude-return.yaml:8`\n\nKF-SEVERITY: MEDIUM — source_head predates the fixes.\n</details>\n',
+  '<details>\n<summary> Wording</summary>\n\n`AGENTS.md:196`\n\nKF-SEVERITY: LOW — say substantive.\n</details>\n</details>',
+].join('');
+
+test('BODY-ONLY findings (Copilot "Previously missed") block until a PR-level disposition names them', () => {
+  const r = review({ id: 77, body: `## Copilot review overview\n${MISSED}` });
+  const v = evaluateAiReview(snap({ reviews: [r] }));
+  assert.equal(v.reason, GATE_REASONS.UNDISPOSITIONED);
+  assert.deepEqual(v.findings.map((f) => [f.id, f.severity, f.path, f.line]), [
+    ['F-77-1', 'MEDIUM', '.agent-control/claude-return.yaml', 8],
+    ['F-77-2', 'LOW', 'AGENTS.md', 196],
+  ]);
+  const disp = (body) => ({ id: 9, author: OWNER, body, created_at: '2026-09-26T12:00:00Z' });
+  const both = [
+    disp(`KF-DISPOSITION: RESOLVED finding=F-77-1 fixed_in=${FIX}`),
+    disp('KF-DISPOSITION: REJECTED_WITH_EVIDENCE finding=F-77-2 the wording was changed in the same commit as the register work, see AGENTS.md:196'),
+  ];
+  const s = snap({ reviews: [r], pr_dispositions: both, pr: { ...snap().pr, head_sha: FIX }, expected_head_sha: FIX });
+  s.reviews = [{ ...r, commit_sha: HEAD }, review({ id: 78, commit_sha: FIX })];
+  assert.deepEqual(requiredComparisons(s), [{ from: HEAD, to: FIX }]);
+  s.comparisons = { [`${HEAD}...${FIX}`]: { status: 'ahead', files: ['x'] } };
+  const ok = evaluateAiReview(s);
+  assert.equal(ok.admissible, true, JSON.stringify(ok.findings));
+  // A RESOLVED whose fixed_in is not after the reviewed commit does not clear it.
+  s.comparisons = { [`${HEAD}...${FIX}`]: { status: 'behind', files: [] } };
+  assert.equal(evaluateAiReview(s).reason, GATE_REASONS.UNDISPOSITIONED);
+});
+
 test('REGISTER: new findings are appended once; the reviewer overview records ids the moment it is posted', () => {
   const v = evaluateAiReview(snap({ threads: [thread(HIGH_FINDING)] }));
   assert.deepEqual(v.register_additions, [{ id: 'F-4100000001', reviewer: 'copilot-pull-request-reviewer', severity: 'HIGH' }]);
@@ -525,6 +568,10 @@ test('PR conversation comments re-dispatch the gate on the PR head branch (Codex
   assert.match(wf, /gh workflow run ai-review-gate\.yml --repo "\$GITHUB_REPOSITORY" --ref "\$ref" -f pr_number="\$NUMBER"/);
   assert.match(wf, /actions:\s*write/);
   assert.ok(!/actions\/checkout/.test(wf), 'the dispatcher runs no repository code');
+  // Copilot F-4112060350 on #94: only comments that can move the verdict buy a run.
+  assert.match(wf, /github\.event\.comment\.user\.login == 'SaCH-PRO' && github\.event\.comment\.user\.type == 'User'/);
+  assert.match(wf, /github\.event\.action == 'deleted' && github\.event\.comment\.user\.login == 'github-actions\[bot\]'/);
+  assert.deepEqual(DISPOSITIONERS, ['SaCH-PRO'], 'the workflow allowlist must match DISPOSITIONERS');
   assert.ok(!/contents:\s*write|pull-requests:\s*write|issues:\s*write/.test(wf));
 });
 
