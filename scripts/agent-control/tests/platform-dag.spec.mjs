@@ -5,6 +5,7 @@ import { parseYaml } from '../lib/yaml.mjs';
 import { buildDag, proveDrainable, selectNext } from '../lib/dag.mjs';
 import {
   PLATFORM_DAG_PATH,
+  PLATFORM_PROGRAMME_ID,
   PLATFORM_STATES,
   REQUIRED_HUMAN_GATES,
   loadAutopilotPolicy,
@@ -21,7 +22,8 @@ const codes = (problems) => problems.map((p) => p.code);
 
 test('platform DAG parses with the repository YAML codec and drains completely', () => {
   const { doc, dag } = loadPlatformDag(repoRoot);
-  assert.equal(doc.programme, 'KEYFLOWOS_PLATFORM_CONVERGENCE');
+  assert.equal(doc.programme, PLATFORM_PROGRAMME_ID);
+  assert.equal(PLATFORM_PROGRAMME_ID, 'KEYFLOWOS_PLATFORM_CONVERGENCE');
   assert.equal(dag.packetsTotal, 63);
   const proof = proveDrainable(dag);
   assert.equal(proof.drained, true, `graph stalled after ${proof.stalled_after} of ${dag.phasesTotal}`);
@@ -286,6 +288,24 @@ test('NEGATIVE CONTROL: a DIRECTIVE naming the programme without ACTIVATE fails 
 
 test('NEGATIVE CONTROL: activation for another programme does not activate this one', () => {
   assert.equal(stateOf([comment(activateFields({ programme: 'KEYFLOWOS_OTHER' }))]), PLATFORM_STATES.INACTIVE);
+});
+
+test('NEGATIVE CONTROL: renaming the programme identity together cannot validate or activate', () => {
+  // r4104000182: doc.programme and both required_fields.programme renamed in
+  // step stay mutually consistent, so only a pinned identity catches them.
+  const policy = loadAutopilotPolicy(repoRoot);
+  const renamed = clone(loadPlatformDag(repoRoot).doc);
+  renamed.programme = 'KEYFLOWOS_OTHER';
+  renamed.activation.activate.required_fields.programme = 'KEYFLOWOS_OTHER';
+  renamed.activation.hold.required_fields.programme = 'KEYFLOWOS_OTHER';
+  const problems = codes(validatePlatformContract(renamed, policy));
+  assert.ok(problems.includes('PROGRAMME_IDENTITY_MISMATCH'), `renamed identity must fail validation: ${problems}`);
+  assert.ok(problems.includes('ACTIVATION_PROGRAMME_FIELD'));
+  // Referent: the same message naming the real programme is well formed and
+  // activates against the committed contract, so INACTIVE below is the identity pin.
+  assert.equal(stateOf([comment(activateFields())]), PLATFORM_STATES.ACTIVE);
+  assert.equal(stateOf([comment(activateFields({ programme: 'KEYFLOWOS_OTHER' }))], renamed), PLATFORM_STATES.INACTIVE);
+  assert.equal(stateOf([comment(activateFields())], renamed), PLATFORM_STATES.INACTIVE);
 });
 
 test('the newest message naming the programme decides: HOLD after ACTIVATE holds', () => {

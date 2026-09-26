@@ -40,6 +40,13 @@ export const REQUIRED_HUMAN_GATES = Object.freeze({
   weakening_security_tenancy_branch_ci_proof_review_or_admission_gate: ['gate_weakening', 'proof_obligation_reduction'],
 });
 
+/**
+ * The successor programme's identity, pinned in code. The file's `programme`
+ * and both required_fields.programme values must equal it, so renaming them
+ * together cannot make a different programme's message activate this contract.
+ */
+export const PLATFORM_PROGRAMME_ID = 'KEYFLOWOS_PLATFORM_CONVERGENCE';
+
 /** The only message type that may activate or hold (issue #80 lists no HOLD type). */
 export const PROGRAMME_CONTROL_MESSAGE_TYPE = 'DIRECTIVE';
 
@@ -81,6 +88,11 @@ export function validatePlatformContract(doc, policy) {
     add('FILE_DECLARES_ACTIVATION', `activation.state is ${activation.state}; state lives on issue #80, not in this file`);
   }
 
+  // --- programme identity ---------------------------------------------------
+  if (doc.programme !== PLATFORM_PROGRAMME_ID) {
+    add('PROGRAMME_IDENTITY_MISMATCH', `programme is ${doc.programme}; it must be ${PLATFORM_PROGRAMME_ID}`);
+  }
+
   // --- activation contract ------------------------------------------------
   const policyTypes = policy?.state_authority?.valid_authority_message?.message_types || [];
   const policyAuthors = policy?.state_authority?.valid_authority_message?.author_allowlist || [];
@@ -102,8 +114,8 @@ export function validatePlatformContract(doc, policy) {
       add('ACTIVATION_AUTHOR_MISMATCH', `activation.${name}.author_allowlist is ${JSON.stringify(block.author_allowlist)}`);
     }
     const fields = block.required_fields || {};
-    if (fields.programme !== doc.programme) {
-      add('ACTIVATION_PROGRAMME_FIELD', `activation.${name}.required_fields.programme must equal ${doc.programme}`);
+    if (fields.programme !== PLATFORM_PROGRAMME_ID) {
+      add('ACTIVATION_PROGRAMME_FIELD', `activation.${name}.required_fields.programme must be ${PLATFORM_PROGRAMME_ID}`);
     }
     if (fields.programme_action !== action) {
       add('ACTIVATION_ACTION_FIELD', `activation.${name}.required_fields.programme_action must be ${action}`);
@@ -284,7 +296,7 @@ export function platformProgrammeState(comments, doc, policy) {
   const naming = [];
   for (const comment of comments) {
     const body = comment?.body || '';
-    if (readField(body, 'programme') !== doc.programme) continue;
+    if (readField(body, 'programme') !== PLATFORM_PROGRAMME_ID) continue;
     const messageType = readField(body, 'message_type');
     if (!AUTHORITY_MESSAGE_TYPES.includes(messageType)) continue;
     if (!authors.includes(String(comment?.user?.login || '').toLowerCase())) continue;
@@ -350,6 +362,7 @@ export default {
   PLATFORM_DAG_PATH,
   AUTOPILOT_POLICY_PATH,
   PLATFORM_STATES,
+  PLATFORM_PROGRAMME_ID,
   REQUIRED_HUMAN_GATES,
   PROGRAMME_CONTROL_MESSAGE_TYPE,
   REQUIRED_ENVELOPE,

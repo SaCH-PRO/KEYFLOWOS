@@ -1,8 +1,19 @@
 {
   "meta": {
     "schema": "codebase-architect/v1",
-    "generated": "2026-08-30T20:45:00Z",
-    "source": "baseline exploration output + inventory.py + dependency_scan.py + 2026-08-30 full-domain deep scan",
+    "generated": "2026-09-26T00:00:00Z",
+    "baseline_generated": "2026-08-30T20:45:00Z",
+    "source": "baseline exploration output + inventory.py + dependency_scan.py + 2026-08-30 full-domain deep scan; revised 2026-09-25/26 (PR #93) with the INACTIVE platform-convergence successor target and the agent control plane nodes/edges",
+    "revisions": [
+      {
+        "date": "2026-08-30",
+        "change": "full-domain deep scan baseline"
+      },
+      {
+        "date": "2026-09-26",
+        "change": "PR #93: platform_target added; scripts/agent-control, AGENT_AUTOPILOT_POLICY.yaml, KEYFLOWOS_PROGRAMME_DAG.yaml, KEYFLOWOS_PLATFORM_DAG.yaml and lib/platform-dag.mjs nodes and their edges added; application nodes unchanged from the baseline"
+      }
+    ],
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
     "plan": "docs/development/e2e-hardening-plan.md",
     "platform_target": "docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md (INACTIVE successor; see target-architecture.md)"
