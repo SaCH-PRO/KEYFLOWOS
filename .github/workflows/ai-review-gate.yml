@@ -120,14 +120,14 @@ jobs:
           exit "$code"
 
   # Durable per-head ledger on the PR. Separate from the verdict so the verdict
-  # job stays read-only, and best-effort so a fork's read-only token cannot turn
-  # a correct verdict red. The ledger is written by github-actions and is never
-  # accepted as review evidence.
+  # job stays read-only. A failed write fails the check: the ledger is evidence
+  # (and the deletion memory later evaluations read back), so losing it must not
+  # look green. Fork PRs cannot write and keep the job-summary ledger only.
+  # The ledger is written by github-actions and is never accepted as review evidence.
   ledger:
     needs: verdict
-    if: always() && needs.verdict.outputs.ledger != ''
+    if: always() && needs.verdict.outputs.ledger != '' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    continue-on-error: true
     permissions:
       pull-requests: write
     steps:

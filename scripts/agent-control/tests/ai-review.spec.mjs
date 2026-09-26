@@ -462,6 +462,9 @@ test('the gate re-evaluates on open, ready, push, review and reply; the verdict 
   const run = verdictJob.slice(verdictJob.indexOf('run: |'));
   assert.ok(run.indexOf('set +e') > -1 && run.indexOf('set +e') < run.indexOf('node trusted/'), 'errexit must be off before the evaluator runs');
   assert.match(run, /exit "\$code"/, 'the verdict exit code is still propagated');
+  // Copilot F-4111965842 on #94: a failed ledger write must not be masked.
+  const ledgerJob = wf.slice(wf.indexOf('\n  ledger:'));
+  assert.ok(!/continue-on-error/.test(ledgerJob), 'ledger persistence failures must fail the check');
 });
 
 test('the request workflow only fires on synchronize, never for drafts or forks', () => {
