@@ -15,6 +15,8 @@
 
 import { parseYaml } from './lib/yaml.mjs';
 import { evaluateAdmission } from './lib/admission.mjs';
+import { evaluateAiReview } from './lib/ai-review.mjs';
+import { collectAiReviewSnapshot, githubClient } from './lib/ai-review-collect.mjs';
 
 const token = process.env.GITHUB_TOKEN;
 const repo = process.env.GITHUB_REPOSITORY;
@@ -96,7 +98,14 @@ async function main() {
     created_at: r.created_at,
   }));
 
+  // The AI review verdict is computed HERE, by this trusted checkout of main,
+  // pinned to the head just read. (KF-AI-PR-REVIEW-GATE-001)
+  const ai_review = evaluateAiReview(
+    await collectAiReviewSnapshot({ client: githubClient(token), repo, prNumber, expectedHead: pr.head.sha }),
+  );
+
   const verdict = evaluateAdmission({
+    ai_review,
     pr: {
       number: pr.number,
       state: pr.state,

@@ -426,8 +426,8 @@ negative_controls:
       look-alike account cannot supply a passing review.
     mutation:
       file: scripts/agent-control/lib/ai-review.mjs
-      find: "  return Boolean(pinned && author.id === pinned.id);"
-      replace: "  return Boolean(pinned);"
+      find: "  const hit = Object.entries(REVIEWERS).find(([, pinned]) => author.id === pinned.id);"
+      replace: "  const hit = Object.entries(REVIEWERS).find(([name]) => normalizeLogin(author.login) === name);"
     proof_command: node --test --test-name-pattern="wrong node id, is refused" scripts/agent-control/tests/ai-review.spec.mjs
     timeout_ms: 120000
 
@@ -462,13 +462,56 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NO STORM" scripts/agent-control/tests/ai-review.spec.mjs
     timeout_ms: 120000
 
-  - id: NC-ADMISSION-AI-GATE-REQUIRED
+  - id: NC-ADMISSION-AI-REVIEW-REQUIRED
     claim: >
-      Admission requires the AI Review Gate at the exact head in addition to
-      every existing required workflow.
+      Admission requires an admissible AI review verdict for the exact head,
+      in addition to every existing required workflow.
     mutation:
       file: scripts/agent-control/lib/admission.mjs
-      find: "export const ADMISSION_WORKFLOWS = Object.freeze([...REQUIRED_WORKFLOWS, AI_REVIEW_GATE_WORKFLOW]);"
-      replace: "export const ADMISSION_WORKFLOWS = Object.freeze([...REQUIRED_WORKFLOWS]);"
-    proof_command: node --test --test-name-pattern="AI Review Gate is required at the exact head" scripts/agent-control/tests/admission.spec.mjs
+      find: "  if (!ai || ai.admissible !== true || String(ai.head_sha) !== String(pr.head_sha)) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="admissible AI review verdict for the exact head" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-AI-REVIEW-EXACT-HEAD
+    claim: >
+      An AI review verdict computed for another head cannot admit this tree.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  if (!ai || ai.admissible !== true || String(ai.head_sha) !== String(pr.head_sha)) {"
+      replace: "  if (!ai || ai.admissible !== true) {"
+    proof_command: node --test --test-name-pattern="admissible AI review verdict for the exact head" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGER-COMPUTES-AI-VERDICT
+    claim: >
+      The merge path computes the AI verdict itself from trusted main rather
+      than trusting a PR-authored workflow conclusion.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: "  const verdict = evaluateAdmission({\n    ai_review,"
+      replace: "  const verdict = evaluateAdmission({\n    ai_review: { admissible: true, head_sha: pr.head.sha },"
+    proof_command: node --test --test-name-pattern="computes the AI verdict itself" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-DELETED-FINDING-BLOCKS
+    claim: >
+      A finding recorded earlier and then deleted keeps blocking until a
+      PR-level disposition names it.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    if (present.has(rec.id)) continue;"
+      replace: "    continue;"
+    proof_command: node --test --test-name-pattern="DELETED finding" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-EDITED-FINDING-NOT-DOWNGRADED
+    claim: >
+      A reviewer finding edited by a non-reviewer loses its severity tag and
+      stays blocking.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    const tampered = editedByOther(first);"
+      replace: "    const tampered = false;"
+    proof_command: node --test --test-name-pattern="edited by a repository writer" scripts/agent-control/tests/ai-review.spec.mjs
     timeout_ms: 120000

@@ -15,8 +15,9 @@ This is in addition to every existing prerequisite; nothing existing was relaxed
 | Reviewer policy (Codex) | `AGENTS.md` `## Review guidelines` | Same priorities for Codex. |
 | Review trigger (Copilot) | ruleset "KEYFLOWOS Copilot Review" (existing, unchanged) | Requests Copilot on open, on every push, and on drafts. |
 | Review trigger (Codex) | native + `.github/workflows/ai-review-request.yml` | Codex reviews natively on open and draft->ready. The workflow posts one `@codex review` per semantic push. |
-| Gate | `.github/workflows/ai-review-gate.yml` -> `scripts/agent-control/ai-review-gate.mjs` -> `lib/ai-review.mjs` | Evaluates the current head; the check fails unless admissible. |
-| Admission | `scripts/agent-control/lib/admission.mjs` `ADMISSION_WORKFLOWS` | The autopilot merge path requires a green `AI Review Gate` run at the exact head. |
+| Evaluator | `scripts/agent-control/lib/ai-review.mjs` (+ `lib/ai-review-collect.mjs` for evidence) | One pure rule, used by both paths below. |
+| PR-visible check | `.github/workflows/ai-review-gate.yml` -> `scripts/agent-control/ai-review-gate.mjs` | Evaluates the current head on every relevant PR event and writes the ledger. |
+| Admission | `scripts/agent-control/auto-merge-admitted.mjs` -> `lib/admission.mjs` (`ai_review`) | The autopilot merge path computes the AI verdict **itself**, from trusted `main`, for the exact head it would merge. |
 | Proof | `scripts/agent-control/tests/ai-review.spec.mjs`, `admission.spec.mjs`, `negative-controls.yaml` (NC-AIGATE-*) | Fixtures and mutation controls. |
 
 ## What passes
@@ -55,7 +56,14 @@ This is in addition to every existing prerequisite; nothing existing was relaxed
      characters of evidence.
    The newest disposition wins. Resolving the thread in the UI, or a later
    summary review that no longer lists the finding, never clears it.
-7. **Completeness.** Unread pagination, a head that moved during evaluation,
+7. **Deletion and editing.** Every ledger records the findings it saw. A finding
+   an earlier ledger recorded (or a comment-deletion event carried) that no
+   longer exists is `DELETED` and blocks until a PR conversation comment
+   `KF-DISPOSITION: REJECTED_WITH_EVIDENCE finding=<id> <evidence>` names it.
+   A reviewer's comment or review edited by anyone but a reviewer bot is no
+   longer the reviewer's statement: an edited finding loses its severity tag
+   (so it cannot be downgraded to STYLE) and an edited review does not count.
+8. **Completeness.** Unread pagination, a head that moved during evaluation,
    or any API error fails the check.
 
 ## Re-evaluation and storms
@@ -72,11 +80,19 @@ only when the push changed a file outside `.agent-control/**`, never for a
 same-tree force push, and at most once per head (marker
 `<!-- kf-ai-review-request head=<sha> -->`).
 
-The gate is deliberately **not** in the autopilot's `workflow_run` list. Every
-evaluation would otherwise post an AUTO_EVENT to #80. Admission still requires
-it and picks it up on the next wake: another required workflow finishing, a #80
-REVIEW, or the hourly reconcile. This is why it lives in `ADMISSION_WORKFLOWS`
-(and `required_pr_review_gates` in the policy), not in `REQUIRED_WORKFLOWS`.
+The check is deliberately **not** in the autopilot's `workflow_run` list, since
+every evaluation would otherwise post an AUTO_EVENT to #80, and it is not in
+`REQUIRED_WORKFLOWS`. Admission does not read its conclusion at all. It
+re-evaluates the rule itself at merge time (`ai_review_admission` in the policy).
+
+Two live observations on PR #94 drove this:
+- Gate runs triggered by **Copilot's** review events end `action_required`:
+  GitHub holds workflows whose triggering actor is that bot until someone
+  approves them. Codex- and human-triggered runs are not held. The newest run at
+  a head can therefore be a stall, not a verdict. The merge path's own
+  evaluation does not depend on any run.
+- A `pull_request*` run executes the PR's own copy of the workflow, so a PR can
+  make its check green (Codex finding on #94). The merge path runs from `main`.
 
 ## Durable evidence
 
@@ -103,8 +119,13 @@ list is reported as unclassified, never as low risk.
   bootstrap: while the base predates the gate (this packet's own PR), the PR's
   copy runs, and the ledger says so.
 - The workflow file itself comes from the PR for `pull_request*` events, as for
-  every existing check here. A PR that edits it is a control-plane change:
-  high-risk, reviewed by Copilot, and visible to ChatGPT review.
+  every existing check here, so the **check** can be forged by a PR that edits
+  it. Autopilot **admission** cannot: it recomputes the verdict from `main`.
+  For human merges the fix is the ruleset below, pinned to `main`.
+- Residual: a repository writer who deletes a finding before any ledger or
+  deletion-event run records it (for example while runs are held) removes it
+  from view. The deletion event itself triggers a recording run, but GitHub's
+  audit log is the only complete record.
 - The reviewer is independent of the implementer. The implementer can
   disposition a finding but cannot produce a review; REJECTED_WITH_EVIDENCE
   dispositions are visible in the ledger for ChatGPT integration review.
@@ -114,6 +135,9 @@ list is reported as unclassified, never as low risk.
 `main` has no branch protection and no required status checks; the only active
 ruleset requests Copilot review. Today only the autopilot merge path enforces
 admission. Enforcing the gate for human merges too needs a repository ruleset
-that requires the `ai-review-gate` check (ideally with the existing required
-workflows). That is a settings change and the check must exist on `main` first,
-so it is a post-merge step for the repository owner, not part of this branch.
+"require workflows to pass" rule for `.github/workflows/ai-review-gate.yml`
+pinned to `main` (so a PR cannot substitute its own copy), ideally together with
+the existing required workflows. It also needs a decision on approving
+Copilot-triggered runs. That is a settings change, and the workflow must exist
+on `main` first, so it is a post-merge step for the repository owner, not part
+of this branch.

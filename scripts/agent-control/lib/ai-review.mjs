@@ -72,11 +72,28 @@ export function normalizeLogin(login) {
   return String(login || '').replace(/\[bot\]$/i, '').trim().toLowerCase();
 }
 
-/** True only for a pinned reviewer bot: login, node id and actor type all agree. */
+/**
+ * The pinned reviewer an actor is, or null. Identity is the node id plus actor
+ * type Bot; the login is not trusted (REST even reports Copilot's inline
+ * comments as login "Copilot").
+ */
+export function reviewerName(author) {
+  if (!author || author.type !== 'Bot') return null;
+  const hit = Object.entries(REVIEWERS).find(([, pinned]) => author.id === pinned.id);
+  return hit ? hit[0] : null;
+}
+
+/** True only for a pinned reviewer bot. */
 export function isReviewerBot(author) {
-  if (!author || author.type !== 'Bot') return false;
-  const pinned = REVIEWERS[normalizeLogin(author.login)];
-  return Boolean(pinned && author.id === pinned.id);
+  return reviewerName(author) !== null;
+}
+
+/**
+ * A reviewer's review or comment edited by anyone other than a reviewer bot is
+ * no longer the reviewer's statement (a repository writer can edit comments).
+ */
+export function editedByOther(item) {
+  return Boolean(item?.editor) && !isReviewerBot(item.editor);
 }
 
 export function isDispositioner(author) {
@@ -139,12 +156,16 @@ export function parseDisposition(body) {
   const m = text.match(/^KF-DISPOSITION:[ \t]*(RESOLVED|REJECTED_WITH_EVIDENCE)\b([^\n]*)$/m);
   if (!m) return null;
   const state = m[1];
+  const finding = (m[2].match(/\bfinding=(F-\d+)\b/) || [])[1] || null;
   if (state === 'RESOLVED') {
     const fixed = m[2].match(/\bfixed_in=([0-9a-fA-F]+)\b/);
-    return { state, fixed_in: fixed ? fixed[1].toLowerCase() : null };
+    return { state, finding, fixed_in: fixed ? fixed[1].toLowerCase() : null };
   }
-  const evidence = text.replace(m[0], '').replace(/\s+/g, ' ').trim();
-  return { state, evidence };
+  // Evidence may follow on the same line or on the lines after it; the
+  // finding= reference is an address, not evidence.
+  const sameLine = m[2].replace(/\bfinding=F-\d+\b/, '');
+  const rest = text.slice(0, m.index) + '\n' + sameLine + '\n' + text.slice(m.index + m[0].length);
+  return { state, finding, evidence: rest.replace(/\s+/g, ' ').trim() };
 }
 
 // ---------------------------------------------------------------------------
@@ -304,8 +325,27 @@ function evaluateDisposition(thread, head, comparisons) {
   return { ...latest, valid: true, detail: null };
 }
 
+/** A deleted finding can only be dispositioned in the PR conversation, by id, with evidence. */
+function evaluatePrLevelDisposition(findingId, comments) {
+  let latest = null;
+  for (const c of comments) {
+    if (!isDispositioner(c.author)) continue;
+    const d = parseDisposition(c.body);
+    if (!d || d.finding !== findingId) continue;
+    if (!latest || new Date(c.created_at) >= new Date(latest.at)) latest = { ...d, by: c.author.login, at: c.created_at };
+  }
+  if (!latest) return { state: 'DELETED', valid: false, detail: `finding deleted without a PR-level KF-DISPOSITION finding=${findingId}`, by: null, fixed_in: null };
+  if (latest.state !== 'REJECTED_WITH_EVIDENCE') {
+    return { state: latest.state, valid: false, detail: 'a deleted finding needs REJECTED_WITH_EVIDENCE (its thread history is gone)', by: latest.by, fixed_in: null };
+  }
+  const ok = String(latest.evidence || '').length >= MIN_EVIDENCE_CHARS;
+  return { state: latest.state, valid: ok, detail: ok ? null : `evidence shorter than ${MIN_EVIDENCE_CHARS} characters`, by: latest.by, fixed_in: null };
+}
+
 /**
  * @param {object} snapshot
+ *   recorded_findings: [{id, reviewer?, reviewer_author?, severity}] from earlier ledgers / deletion events
+ *   pr_dispositions: [{author, body, created_at}] PR conversation comments
  *   pr: {number, state, draft, head_sha, base_sha}
  *   expected_head_sha: head the triggering event was about
  *   reviews: [{id, author:{login,type,id}, state, commit_sha, submitted_at, body}]
@@ -342,12 +382,12 @@ export function evaluateAiReview(snapshot) {
       }
       continue;
     }
-    const unusable = reviewUsable(r);
+    const unusable = editedByOther(r) ? 'edited_by_non_reviewer' : reviewUsable(r);
     if (unusable) {
-      rejected.push({ id: r.id, author: normalizeLogin(r.author.login), reason: unusable, commit_sha: r.commit_sha ?? null });
+      rejected.push({ id: r.id, author: reviewerName(r.author), reason: unusable, commit_sha: r.commit_sha ?? null });
       continue;
     }
-    reviews.push({ ...r, reviewer: normalizeLogin(r.author.login), ...reviewCurrency(r, head, comparisons) });
+    reviews.push({ ...r, reviewer: reviewerName(r.author), ...reviewCurrency(r, head, comparisons) });
   }
 
   const current = reviews.filter((r) => r.current);
@@ -363,7 +403,7 @@ export function evaluateAiReview(snapshot) {
   // --- findings --------------------------------------------------------------
   const overview = new Map();
   for (const r of snapshot.reviews || []) {
-    if (!isReviewerBot(r.author)) continue;
+    if (!isReviewerBot(r.author) || editedByOther(r)) continue;
     for (const [id, sev] of severitiesFromOverview(r.body)) overview.set(id, maxSeverity(overview.get(id) || null, sev));
   }
 
@@ -371,20 +411,52 @@ export function evaluateAiReview(snapshot) {
   for (const t of snapshot.threads || []) {
     const first = (t.comments || [])[0];
     if (!first || !isReviewerBot(first.author)) continue;
-    const severity = severityFromComment(first.body) || overview.get(String(first.id)) || 'UNCLASSIFIED';
+    // An edited finding is no longer the reviewer's own words: ignore its
+    // severity tag (so it cannot be downgraded to STYLE) and keep it blocking.
+    const tampered = editedByOther(first);
+    const severity = tampered ? 'UNCLASSIFIED' : severityFromComment(first.body) || overview.get(String(first.id)) || 'UNCLASSIFIED';
     const disposition = evaluateDisposition(t, head, comparisons);
     const blocking = !NON_BLOCKING_SEVERITIES.includes(severity) && !disposition.valid;
     findings.push({
       id: `F-${first.id}`,
-      reviewer: normalizeLogin(first.author.login),
+      reviewer: reviewerName(first.author),
       severity,
       path: t.path ?? null,
       line: t.line ?? null,
       commit_sha: findingCommit(t),
       thread_resolved: t.is_resolved === true,
       outdated: t.is_outdated === true,
+      tampered,
       disposition: { state: disposition.state, valid: disposition.valid, detail: disposition.detail, by: disposition.by ?? null, fixed_in: disposition.fixed_in ?? null },
       blocking,
+    });
+  }
+
+  // Findings recorded earlier (gate ledgers, deletion events) that no longer
+  // exist were deleted. Deletion is not a disposition: they block until a
+  // PR-level KF-DISPOSITION names them.
+  const present = new Set(findings.map((f) => f.id));
+  const deleted = new Map();
+  for (const rec of snapshot.recorded_findings || []) {
+    if (present.has(rec.id)) continue;
+    if (rec.reviewer_author && !isReviewerBot(rec.reviewer_author)) continue; // a deleted human comment is not a finding
+    const prev = deleted.get(rec.id);
+    deleted.set(rec.id, { ...rec, severity: maxSeverity(prev?.severity || null, SEVERITIES.includes(rec.severity) ? rec.severity : 'UNCLASSIFIED') });
+  }
+  for (const rec of deleted.values()) {
+    const disposition = evaluatePrLevelDisposition(rec.id, snapshot.pr_dispositions || []);
+    findings.push({
+      id: rec.id,
+      reviewer: rec.reviewer || reviewerName(rec.reviewer_author) || 'unknown',
+      severity: rec.severity,
+      path: null,
+      line: null,
+      commit_sha: null,
+      thread_resolved: false,
+      outdated: false,
+      deleted: true,
+      disposition,
+      blocking: !NON_BLOCKING_SEVERITIES.includes(rec.severity) && !disposition.valid,
     });
   }
   const blockingIds = findings.filter((f) => f.blocking).map((f) => f.id);
@@ -409,6 +481,19 @@ export const LEDGER_MARKER = 'kf-ai-review-gate:ledger';
 
 export function ledgerMarker(headSha) {
   return `<!-- ${LEDGER_MARKER} head=${headSha} -->`;
+}
+
+/**
+ * Findings an earlier ledger recorded. The ledgers are the gate's durable
+ * memory: a finding recorded once is expected to still exist later, so its
+ * deletion is visible. A forged row can only add a blocker, never remove one.
+ */
+export function parseLedgerFindings(body) {
+  const out = [];
+  for (const m of String(body || '').matchAll(/^\| (F-\d+) \| ([a-z0-9-]+) \| ([A-Z]+) \|/gm)) {
+    out.push({ id: m[1], reviewer: m[2], severity: m[3], source: 'ledger' });
+  }
+  return out;
 }
 
 /** Markdown ledger for one head. Written by github-actions; never review evidence. */
@@ -441,7 +526,8 @@ export function renderLedger(verdict, { prNumber = null, runUrl = null } = {}) {
     lines.push('| id | reviewer | severity | location | disposition | blocking |', '|---|---|---|---|---|---|');
     for (const f of verdict.findings) {
       const d = f.disposition.valid ? f.disposition.state : `${f.disposition.state}${f.disposition.detail ? ` (${f.disposition.detail})` : ''}`;
-      lines.push(`| ${f.id} | ${f.reviewer} | ${f.severity} | ${f.path ?? '-'}:${f.line ?? '-'} | ${d} | ${f.blocking ? 'YES' : 'no'} |`);
+      const where = f.deleted ? 'DELETED' : `${f.path ?? '-'}:${f.line ?? '-'}${f.tampered ? ' (edited by non-reviewer)' : ''}`;
+      lines.push(`| ${f.id} | ${f.reviewer} | ${f.severity} | ${where} | ${d} | ${f.blocking ? 'YES' : 'no'} |`);
     }
   } else {
     lines.push('- none');
@@ -452,7 +538,7 @@ export function renderLedger(verdict, { prNumber = null, runUrl = null } = {}) {
   } else {
     lines.push('- none detected');
   }
-  lines.push('', 'Clear a finding with a reply in its thread: `KF-DISPOSITION: RESOLVED fixed_in=<40-char sha>` or `KF-DISPOSITION: REJECTED_WITH_EVIDENCE` followed by the evidence.');
+  lines.push('', 'Clear a finding with a reply in its thread: `KF-DISPOSITION: RESOLVED fixed_in=<40-char sha>` or `KF-DISPOSITION: REJECTED_WITH_EVIDENCE` followed by the evidence. A DELETED finding needs a PR comment: `KF-DISPOSITION: REJECTED_WITH_EVIDENCE finding=<id>` with evidence.');
   return lines.join('\n');
 }
 

@@ -9,6 +9,7 @@ import {
   renderLedger,
   ledgerMarker,
   parseDisposition,
+  parseLedgerFindings,
   severityFromComment,
   severitiesFromOverview,
   isReviewerBot,
@@ -184,7 +185,9 @@ test('SPOOF: a User account with a reviewer login, or a Bot with the wrong node 
   const wrongId = { ...COPILOT, id: 'BOT_forged' };
   assert.equal(isReviewerBot(asUser), false);
   assert.equal(isReviewerBot(wrongId), false);
-  assert.equal(isReviewerBot({ ...COPILOT, login: 'copilot-pull-request-reviewer[bot]' }), true, 'REST [bot] suffix normalizes');
+  assert.equal(isReviewerBot({ ...COPILOT, login: 'copilot-pull-request-reviewer[bot]' }), true, 'REST [bot] suffix');
+  // REST reports Copilot's inline comments as login "Copilot": identity is the node id.
+  assert.equal(isReviewerBot({ login: 'Copilot', type: 'Bot', id: REVIEWERS['copilot-pull-request-reviewer'].id }), true);
   const v = evaluateAiReview(snap({ reviews: [review({ author: asUser }), review({ author: wrongId })] }));
   assert.equal(v.admissible, false);
   assert.equal(v.rejected_reviews.length, 2);
@@ -319,6 +322,59 @@ test('dispositions are only accepted from authorized humans, as an anchored line
   assert.equal(parseDisposition('we could write KF-DISPOSITION: RESOLVED fixed_in=' + FIX + ' later'), null);
 });
 
+test('one-line REJECTED_WITH_EVIDENCE keeps its same-line evidence (Codex F-4111957403 on #94)', () => {
+  const evidence = '`q` is validated by SearchDto before this call; see search.dto.ts:12 and its denial test.';
+  assert.equal(parseDisposition(`KF-DISPOSITION: REJECTED_WITH_EVIDENCE ${evidence}`).evidence, evidence);
+  const v = evaluateAiReview(snap({ threads: [thread(HIGH_FINDING, { replies: [{ body: `KF-DISPOSITION: REJECTED_WITH_EVIDENCE ${evidence}` }] })] }));
+  assert.equal(v.admissible, true, JSON.stringify(v.findings));
+});
+
+test('a DELETED finding keeps blocking until a PR-level disposition names it (Codex F-4111957400 on #94)', () => {
+  // Recorded by an earlier ledger, gone from the threads now.
+  const ledger = renderLedger(evaluateAiReview(snap({ threads: [thread(HIGH_FINDING)] })), { prNumber: 101 });
+  const recorded = parseLedgerFindings(ledger);
+  assert.deepEqual(recorded.map((r) => [r.id, r.reviewer, r.severity]), [['F-4100000001', 'copilot-pull-request-reviewer', 'HIGH']]);
+
+  const gone = evaluateAiReview(snap({ threads: [], recorded_findings: recorded }));
+  assert.equal(gone.reason, GATE_REASONS.UNDISPOSITIONED);
+  assert.equal(gone.findings[0].deleted, true);
+  assert.match(renderLedger(gone), /F-4100000001 .* HIGH \| DELETED .* \| YES/, 'the deletion itself is carried into the next ledger');
+
+  const disp = (author, body) => ({ id: 1, author, body, created_at: '2026-09-26T12:00:00Z' });
+  const good = `KF-DISPOSITION: REJECTED_WITH_EVIDENCE finding=F-4100000001 duplicate of F-4100000002, fixed there in the same commit series`;
+  assert.equal(evaluateAiReview(snap({ recorded_findings: recorded, pr_dispositions: [disp(OWNER, good)] })).admissible, true);
+  assert.equal(evaluateAiReview(snap({ recorded_findings: recorded, pr_dispositions: [disp(ACTIONS, good)] })).admissible, false, 'bots cannot disposition');
+  assert.equal(
+    evaluateAiReview(snap({ recorded_findings: recorded, pr_dispositions: [disp(OWNER, good.replace('F-4100000001', 'F-9'))] })).admissible,
+    false,
+    'the disposition must name this finding',
+  );
+});
+
+test('a deletion event records the deleted reviewer comment; a deleted human comment is not a finding', () => {
+  const fromEvent = { id: 'F-4100000077', reviewer_author: { login: 'Copilot', type: 'Bot', id: REVIEWERS['copilot-pull-request-reviewer'].id }, severity: 'UNCLASSIFIED' };
+  assert.equal(evaluateAiReview(snap({ recorded_findings: [fromEvent] })).reason, GATE_REASONS.UNDISPOSITIONED);
+  const human = { ...fromEvent, reviewer_author: OWNER };
+  assert.equal(evaluateAiReview(snap({ recorded_findings: [human] })).admissible, true);
+});
+
+test('a finding edited by a repository writer loses its severity tag and stays blocking', () => {
+  const t = thread('KF-SEVERITY: HIGH tenant filter missing');
+  t.comments[0] = { ...t.comments[0], body: 'KF-SEVERITY: STYLE nit', editor: OWNER };
+  const v = evaluateAiReview(snap({ threads: [t] }));
+  assert.equal(v.reason, GATE_REASONS.UNDISPOSITIONED);
+  assert.equal(v.findings[0].tampered, true);
+  // The reviewer editing its own comment is fine.
+  t.comments[0] = { ...t.comments[0], editor: COPILOT };
+  assert.equal(evaluateAiReview(snap({ threads: [t] })).admissible, true);
+});
+
+test('a review edited by a non-reviewer is not the reviewer\'s review', () => {
+  const v = evaluateAiReview(snap({ reviews: [review({ editor: OWNER })] }));
+  assert.equal(v.admissible, false);
+  assert.equal(v.rejected_reviews[0].reason, 'edited_by_non_reviewer');
+});
+
 test('the newest disposition wins', () => {
   const t = thread(HIGH_FINDING, {
     replies: [
@@ -401,6 +457,11 @@ test('the gate re-evaluates on open, ready, push, review and reply; the verdict 
   assert.ok(!/:\s*write/.test(verdictJob), 'verdict job must hold no write permission');
   assert.match(verdictJob, /ref:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}/, 'evaluator comes from the trusted base');
   assert.match(verdictJob, /EXPECTED_HEAD_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  // Regression (first live run on #94): `shell: bash` is -e, so a failing verdict
+  // aborted before the ledger and outputs were written.
+  const run = verdictJob.slice(verdictJob.indexOf('run: |'));
+  assert.ok(run.indexOf('set +e') > -1 && run.indexOf('set +e') < run.indexOf('node trusted/'), 'errexit must be off before the evaluator runs');
+  assert.match(run, /exit "\$code"/, 'the verdict exit code is still propagated');
 });
 
 test('the request workflow only fires on synchronize, never for drafts or forks', () => {

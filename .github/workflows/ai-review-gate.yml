@@ -12,8 +12,14 @@ name: AI Review Gate
 # the newest run at the exact head, so an early "review not posted yet" failure
 # is superseded by the evaluation that follows the review.
 #
-# No path filter: admission requires this workflow on every impl/* PR
-# (ADMISSION_WORKFLOWS in scripts/agent-control/lib/admission.mjs).
+# No path filter: every PR needs it.
+#
+# This check is PR-visible evidence and writes the ledger. Autopilot admission
+# does NOT trust its conclusion: a pull_request run executes the PR's own copy
+# of this file, and GitHub holds runs triggered by Copilot's review events for
+# approval (action_required). The merge path re-evaluates the same rule itself
+# from trusted main (auto-merge-admitted.mjs). For human merges, require this
+# check through a repository ruleset that pins the workflow to main.
 #
 # Deliberately NOT a wake source for the autopilot: every evaluation would
 # post an AUTO_EVENT to #80.
@@ -30,8 +36,10 @@ permissions:
   contents: read
 
 concurrency:
-  # One live evaluation per PR; a newer event supersedes an older one.
-  group: ai-review-gate-${{ github.event.pull_request.number }}
+  # One live evaluation per PR; a newer event supersedes an older one. A
+  # comment-deletion run is never cancelled: it alone can record the deleted
+  # finding into the ledger, which every later evaluation reads back.
+  group: ai-review-gate-${{ github.event.pull_request.number }}-${{ github.event.action == 'deleted' && github.run_id || 'eval' }}
   cancel-in-progress: true
 
 jobs:
@@ -76,8 +84,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # A deleted review comment is gone from the API afterwards; the event
+          # payload is the last chance to record it as a finding.
+          DELETED_COMMENT: ${{ github.event_name == 'pull_request_review_comment' && github.event.action == 'deleted' && toJSON(github.event.comment) || '' }}
         run: |
-          set -uo pipefail
+          # `shell: bash` implies -e; the evaluator's non-zero verdict must not
+          # abort before the verdict, outputs and ledger are written.
+          set +e -uo pipefail
           source_note="trusted base $BASE_SHA"
           if ! git -C trusted cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || [ "$(git -C trusted rev-parse HEAD)" != "$BASE_SHA" ]; then
             source_note="BOOTSTRAP: PR head $EXPECTED_HEAD_SHA (base has no evaluator yet)"

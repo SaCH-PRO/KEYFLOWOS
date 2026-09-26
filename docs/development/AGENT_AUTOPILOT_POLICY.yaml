@@ -45,11 +45,18 @@ required_pr_workflows:
   - DAST (HawkScan)
   - Agent Control Worker Proof
 
-# Required at the exact head too (KF-AI-PR-REVIEW-GATE-001), but deliberately
-# NOT a workflow_run wake source: it re-evaluates on every review and reply,
-# and each wake would post an AUTO_EVENT to #80. See docs/development/AI_PR_REVIEW_GATE.md.
-required_pr_review_gates:
-  - AI Review Gate
+# KF-AI-PR-REVIEW-GATE-001. The merge path evaluates the AI review itself, from
+# trusted main, at the exact head it merges. It does not trust the "AI Review
+# Gate" workflow conclusion: the PR supplies that workflow file, and runs
+# triggered by Copilot's review events are held for approval. The workflow is
+# PR-visible evidence and the ledger writer; it is not an autopilot wake source.
+# See docs/development/AI_PR_REVIEW_GATE.md.
+ai_review_admission:
+  evaluated_by: scripts/agent-control/auto-merge-admitted.mjs
+  evaluator: scripts/agent-control/lib/ai-review.mjs
+  required_reviewers:
+    - copilot-pull-request-reviewer
+  pr_visible_check: AI Review Gate
 
 concurrency:
   mutation_lock: keyflow-agent-control-mutation
