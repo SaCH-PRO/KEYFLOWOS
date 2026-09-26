@@ -47,6 +47,22 @@ export const REQUIRED_HUMAN_GATES = Object.freeze({
  */
 export const PLATFORM_PROGRAMME_ID = 'KEYFLOWOS_PLATFORM_CONVERGENCE';
 
+/** The control-room channel activation authority is read from. */
+export const AUTHORITY_CHANNEL = 'github_issue_80';
+
+/** How the evaluator picks the deciding message; the file must say the same. */
+export const DECIDED_BY = 'newest_valid_authority_message_naming_this_programme';
+
+/** Sources that must be listed as never activating the programme. */
+export const NEVER_ACTIVATED_BY = Object.freeze([
+  'file_presence_or_merge_of_this_file',
+  'prose_or_objective_text',
+  'message_id_or_packet_id_pattern',
+  'REVIEW_or_RESUME_message_type',
+  'AUTO_EVENT_or_derived_programme_state',
+  'any_sender_other_than_chatgpt_or_author_outside_allowlist',
+]);
+
 /** The only message type that may activate or hold (issue #80 lists no HOLD type). */
 export const PROGRAMME_CONTROL_MESSAGE_TYPE = 'DIRECTIVE';
 
@@ -149,6 +165,24 @@ export function validatePlatformContract(doc, policy) {
   }
   if (activation.activation_releases_no_other_hold !== true) {
     add('ACTIVATION_RELEASES_HOLD', 'activating the successor must not release any other hold');
+  }
+
+  // --- activation boundary --------------------------------------------------
+  if (activation.authority_channel !== AUTHORITY_CHANNEL) {
+    add('ACTIVATION_CHANNEL_MISMATCH', `activation.authority_channel is ${activation.authority_channel}; it must be ${AUTHORITY_CHANNEL}`);
+  }
+  if (activation.evaluation?.decided_by !== DECIDED_BY) {
+    add('ACTIVATION_DECIDER_MISMATCH', `activation.evaluation.decided_by must be ${DECIDED_BY}, as the evaluator enforces`);
+  }
+  if (activation.evaluation?.advancement_still_requires_reconcile !== true) {
+    add('ACTIVATION_BYPASSES_RECONCILE', 'ACTIVE must never be sufficient: advancement still requires reconcile.mjs');
+  }
+  if (activation.current_application_programme_remains_authoritative_until_activation !== true) {
+    add('ACTIVATION_PREEMPTS_APPLICATION_PROGRAMME', 'the application programme must remain authoritative until activation');
+  }
+  const neverBy = Array.isArray(activation.never_activated_by) ? activation.never_activated_by : [];
+  for (const source of NEVER_ACTIVATED_BY) {
+    if (!neverBy.includes(source)) add('ACTIVATION_SOURCE_UNLISTED', `activation.never_activated_by must list ${source}`);
   }
 
   // --- human gates ----------------------------------------------------------
@@ -393,6 +427,9 @@ export default {
   AUTOPILOT_POLICY_PATH,
   PLATFORM_STATES,
   PLATFORM_PROGRAMME_ID,
+  AUTHORITY_CHANNEL,
+  DECIDED_BY,
+  NEVER_ACTIVATED_BY,
   REQUIRED_HUMAN_GATES,
   PROGRAMME_CONTROL_MESSAGE_TYPE,
   REQUIRED_ENVELOPE,

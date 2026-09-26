@@ -415,6 +415,29 @@ test('NEGATIVE CONTROL: envelope values outside the repository vocabulary cannot
   }
 });
 
+test('NEGATIVE CONTROL: editing any activation-boundary field fails validation and blocks activation', () => {
+  // r4111509416: each mutation alone must be caught, and the evaluator must
+  // then refuse to activate on an otherwise valid ACTIVATE (referent below).
+  const policy = loadAutopilotPolicy(repoRoot);
+  assert.equal(stateOf([comment(activateFields())]), PLATFORM_STATES.ACTIVE);
+  const mutations = [
+    ['ACTIVATION_CHANNEL_MISMATCH', (d) => { d.activation.authority_channel = 'slack'; }],
+    ['ACTIVATION_CHANNEL_MISMATCH', (d) => { delete d.activation.authority_channel; }],
+    ['ACTIVATION_DECIDER_MISMATCH', (d) => { d.activation.evaluation.decided_by = 'oldest_message'; }],
+    ['ACTIVATION_BYPASSES_RECONCILE', (d) => { d.activation.evaluation.advancement_still_requires_reconcile = false; }],
+    ['ACTIVATION_BYPASSES_RECONCILE', (d) => { delete d.activation.evaluation.advancement_still_requires_reconcile; }],
+    ['ACTIVATION_PREEMPTS_APPLICATION_PROGRAMME', (d) => { d.activation.current_application_programme_remains_authoritative_until_activation = false; }],
+    ['ACTIVATION_SOURCE_UNLISTED', (d) => { d.activation.never_activated_by = d.activation.never_activated_by.filter((s) => s !== 'prose_or_objective_text'); }],
+    ['ACTIVATION_SOURCE_UNLISTED', (d) => { delete d.activation.never_activated_by; }],
+  ];
+  for (const [code, mutate] of mutations) {
+    const doc = clone(loadPlatformDag(repoRoot).doc);
+    mutate(doc);
+    assert.ok(codes(validatePlatformContract(doc, policy)).includes(code), `${mutate} must raise ${code}`);
+    assert.equal(stateOf([comment(activateFields())], doc), PLATFORM_STATES.INACTIVE, `${mutate} must block activation`);
+  }
+});
+
 test('NEGATIVE CONTROL: activation fields with unmatched quotes cannot activate; they hold', () => {
   // r4111466813: readField strips a leading and a trailing quote independently.
   // Referent: balanced quoting is ordinary YAML and still activates, so HELD
