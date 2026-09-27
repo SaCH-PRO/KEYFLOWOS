@@ -512,10 +512,11 @@ negative_controls:
     claim: >
       Two messages naming the successor programme with one comment id cannot
       be ordered, so activation cannot depend on input order (Copilot review
-      5330709017).
+      5330709017). The guard is collectAuthority's id check, which counts
+      rejected messages as well as candidates.
     mutation:
-      file: scripts/agent-control/lib/platform-dag.mjs
-      find: "  if (new Set(naming.map((n) => n.comment_id)).size !== naming.length) {"
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  if (new Set(ids).size !== ids.length) {"
       replace: "  if (false) {"
     proof_command: node --test --test-name-pattern="naming messages sharing an id" scripts/agent-control/tests/platform-dag.spec.mjs
     timeout_ms: 120000
