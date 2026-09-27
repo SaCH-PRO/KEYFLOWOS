@@ -91,3 +91,7 @@ See `architecture/event-registry.yaml` for the full list of 276 event names.
 ## Database Dependency
 
 Nearly every module depends on `@keyflow/db` either directly or through `PrismaService`. The Prisma schema (`packages/db/prisma/schema.prisma`) is the single source of truth for ~440 models (verified 2026-08-11). Tenant isolation is applied transparently by the client extension in `packages/db/src/client.ts`.
+
+## Control-Plane Admission Dependencies
+
+`scripts/agent-control/auto-merge-admitted.mjs` (run from trusted `main` by the autopilot) depends on `lib/admission.mjs`, and since KF-AI-PR-REVIEW-GATE-001 also on `lib/ai-review.mjs` + `lib/ai-review-collect.mjs`. Those read GitHub PR reviews, review threads, PR comments, changed files and commit comparisons (GraphQL + REST, read-only). `lib/admission.mjs` imports `REQUIRED_WORKFLOWS` from `lib/events.mjs` (unchanged). The PR-visible `AI Review Gate`, `AI Review Request` and `AI Review Redispatch` workflows depend on the same libraries. External reviewers are GitHub Copilot code review and OpenAI Codex, identified by pinned bot node ids. No application package depends on any of this.

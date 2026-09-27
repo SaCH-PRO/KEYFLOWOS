@@ -34,6 +34,8 @@ const admissible = (overrides = {}) => ({
   ancestry: { source_head_is_ancestor: true, non_control_files: [] },
   workflow_runs: greenRuns(),
   contradictions: [],
+  // KF-AI-PR-REVIEW-GATE-001: the merge path's own exact-head AI review verdict.
+  ai_review: { admissible: true, reason: 'current_head_ai_review_admissible', head_sha: HEAD, reviews: [], blocking_findings: [] },
   ...overrides,
 });
 
@@ -191,4 +193,48 @@ test('every required workflow exists, runs on every PR, and wakes the autopilot'
 
   const policy = parseYaml(fs.readFileSync('docs/development/AGENT_AUTOPILOT_POLICY.yaml', 'utf8'));
   assert.deepEqual([...policy.required_pr_workflows].sort(), [...REQUIRED_WORKFLOWS].sort(), 'policy and code must agree');
+});
+
+// ------------------------------------------ AI REVIEW (KF-AI-PR-REVIEW-GATE-001)
+
+test('admission requires an admissible AI review verdict for the exact head, on top of every workflow', () => {
+  const base = admissible();
+  const notEvaluated = evaluateAdmission({ ...base, ai_review: undefined });
+  assert.equal(notEvaluated.reason, ADMISSION_REASONS.AI_REVIEW_NOT_ADMISSIBLE);
+  assert.equal(notEvaluated.detail.reason, 'ai_review_not_evaluated');
+
+  const blocked = evaluateAdmission({
+    ...base,
+    ai_review: { admissible: false, reason: 'undispositioned_substantive_findings', head_sha: HEAD, blocking_findings: ['F-1'] },
+  });
+  assert.equal(blocked.reason, ADMISSION_REASONS.AI_REVIEW_NOT_ADMISSIBLE);
+  assert.deepEqual(blocked.detail.blocking_findings, ['F-1']);
+
+  // A pass computed for another head proves nothing about this tree.
+  const otherHead = evaluateAdmission({ ...base, ai_review: { ...base.ai_review, head_sha: 'e'.repeat(40) } });
+  assert.equal(otherHead.reason, ADMISSION_REASONS.AI_REVIEW_NOT_ADMISSIBLE);
+
+  // A truthy-but-not-true admissible flag is not a pass.
+  assert.equal(evaluateAdmission({ ...base, ai_review: { ...base.ai_review, admissible: 'yes' } }).eligible, false);
+
+  // Existing prerequisites still come first: the AI verdict cannot rescue a red workflow.
+  const runs = greenRuns();
+  runs[0] = { ...runs[0], conclusion: 'failure' };
+  assert.equal(evaluateAdmission({ ...base, workflow_runs: runs }).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
+  assert.deepEqual([...REQUIRED_WORKFLOWS].sort(), [...parseYaml(fs.readFileSync('docs/development/AGENT_AUTOPILOT_POLICY.yaml', 'utf8')).required_pr_workflows].sort());
+});
+
+test('the merge path computes the AI verdict itself, from trusted main, for the head it merges', () => {
+  // Referent check: the merger must not trust a workflow conclusion the PR can author.
+  const merger = fs.readFileSync('scripts/agent-control/auto-merge-admitted.mjs', 'utf8');
+  assert.match(merger, /evaluateAiReview\(\s*await collectAiReviewSnapshot\(\{[^}]*expectedHead: pr\.head\.sha/);
+  assert.match(merger, /evaluateAdmission\(\{\s*ai_review,/);
+  const autopilot = fs.readFileSync('.github/workflows/agent-control-autopilot.yml', 'utf8');
+  for (const job of ['exact-head-auto-merge:', 'hourly-reconcile-open-prs:']) {
+    const body = autopilot.slice(autopilot.indexOf(job));
+    assert.match(body.slice(0, 2500), /ref:\s*main/, `${job} must run the trusted main checkout`);
+  }
+  // The gate workflow is PR-visible evidence only; it neither wakes the autopilot nor gates admission.
+  assert.ok(!autopilot.includes('- "AI Review Gate"'));
+  assert.ok(!REQUIRED_WORKFLOWS.includes('AI Review Gate'));
 });

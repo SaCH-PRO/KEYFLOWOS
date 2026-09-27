@@ -395,3 +395,178 @@ negative_controls:
       replace: "decide({ state, reconciliation: { consistent: true, findings: [] }, event, dag, registry, duplicate })"
     proof_command: node --test --test-name-pattern="CLI end to end" scripts/agent-control/tests/reconcile.spec.mjs
     timeout_ms: 120000
+
+  # ---------------------------------------------------------------- KF-AI-PR-REVIEW-GATE-001
+
+  - id: NC-AIGATE-SEMANTIC-PUSH-INVALIDATES
+    claim: >
+      A review at an older commit stops counting once a non-control file
+      changes after it; a semantic push always needs a fresh exact-head review.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "  if (semantic.length) return { current: false, relation: 'semantic_change_since_review', files: semantic };"
+      replace: "  // defect restored: semantic changes after the review are ignored"
+    proof_command: node --test --test-name-pattern="OLD sha blocks admission" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-UNPROVEN-HEAD-FAILS-CLOSED
+    claim: >
+      A review whose relation to the head cannot be proved is stale, never
+      assumed current.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "  if (!cmp) return { current: false, relation: 'unproven' };"
+      replace: "  if (!cmp) return { current: true, relation: 'unproven' };"
+    proof_command: node --test --test-name-pattern="cannot be proved is stale" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-REVIEWER-IDENTITY-PINNED
+    claim: >
+      Reviewer identity is the pinned bot node id, not a login string; a
+      look-alike account cannot supply a passing review.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "  const hit = Object.entries(REVIEWERS).find(([, pinned]) => author.id === pinned.id);"
+      replace: "  const hit = Object.entries(REVIEWERS).find(([name]) => normalizeLogin(author.login) === name);"
+    proof_command: node --test --test-name-pattern="wrong node id, is refused" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-NO-SILENT-DISAPPEARANCE
+    claim: >
+      Resolving a finding's thread without a KF-DISPOSITION never clears it.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    const blocking = !NON_BLOCKING_SEVERITIES.includes(severity) && !disposition.valid;"
+      replace: "    const blocking = !NON_BLOCKING_SEVERITIES.includes(severity) && !disposition.valid && t.is_resolved !== true;"
+    proof_command: node --test --test-name-pattern="resolving the thread without a disposition" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-UNCLASSIFIED-BLOCKS
+    claim: >
+      A finding the reviewer did not classify is substantive until dispositioned;
+      only an explicit STYLE tag is non-blocking.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    const severity = tampered ? 'UNCLASSIFIED' : severityFromComment(first.body) || overview.get(String(first.id)) || 'UNCLASSIFIED';"
+      replace: "    const severity = tampered ? 'UNCLASSIFIED' : severityFromComment(first.body) || overview.get(String(first.id)) || 'STYLE';"
+    proof_command: node --test --test-name-pattern="UNCLASSIFIED finding also blocks" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-REQUEST-NO-STORM
+    claim: >
+      A push that only touches .agent-control/** does not request a re-review.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "  if (!semantic.length) return { request: false, reason: 'control_only_update' };"
+      replace: "  // defect restored: control-only pushes request a review"
+    proof_command: node --test --test-name-pattern="NO STORM" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-AI-REVIEW-REQUIRED
+    claim: >
+      Admission requires an admissible AI review verdict for the exact head,
+      in addition to every existing required workflow.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  if (!ai || ai.admissible !== true || String(ai.head_sha) !== String(pr.head_sha)) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="admissible AI review verdict for the exact head" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-AI-REVIEW-EXACT-HEAD
+    claim: >
+      An AI review verdict computed for another head cannot admit this tree.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  if (!ai || ai.admissible !== true || String(ai.head_sha) !== String(pr.head_sha)) {"
+      replace: "  if (!ai || ai.admissible !== true) {"
+    proof_command: node --test --test-name-pattern="admissible AI review verdict for the exact head" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGER-COMPUTES-AI-VERDICT
+    claim: >
+      The merge path computes the AI verdict itself from trusted main rather
+      than trusting a PR-authored workflow conclusion.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: "  const verdict = evaluateAdmission({\n    ai_review,"
+      replace: "  const verdict = evaluateAdmission({\n    ai_review: { admissible: true, head_sha: pr.head.sha },"
+    proof_command: node --test --test-name-pattern="computes the AI verdict itself" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-DELETED-FINDING-BLOCKS
+    claim: >
+      A finding recorded earlier and then deleted keeps blocking until a
+      PR-level disposition names it.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    if (present.has(rec.id)) continue;"
+      replace: "    continue;"
+    proof_command: node --test --test-name-pattern="DELETED finding" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-REGISTER-TAMPER-FAILS-CLOSED
+    claim: >
+      The finding register (append-only gate reviews) edited by anyone but the
+      gate writer fails the evaluation; its history cannot be rewritten.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "      if (r.edited === true || editedByOther(r)) {"
+      replace: "      if (r.edited === true) {"
+    proof_command: node --test --test-name-pattern="REGISTER: an edit by anyone" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-REGISTER-ANY-EDIT-FAILS-CLOSED
+    claim: >
+      A register review edited even under the gate writer's own identity (a PR
+      workflow shares it) fails the evaluation.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "      if (r.edited === true || editedByOther(r)) {"
+      replace: "      if (editedByOther(r)) {"
+    proof_command: node --test --test-name-pattern="REGISTER: any edit" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-BODY-ONLY-FINDINGS-BLOCK
+    claim: >
+      Findings stated only in a reviewer's review body block until a PR-level
+      disposition names them.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    if (!/KF-SEVERITY:/i.test(block)) continue;"
+      replace: "    continue;"
+    proof_command: node --test --test-name-pattern="BODY-ONLY findings" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-REGISTER-SURVIVES-DELETION
+    claim: >
+      A registered finding stays blocking after its thread and every ledger
+      comment are deleted.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "        recordedAll.push({ ...row, source: 'register' });"
+      replace: "        // defect restored: register rows ignored"
+    proof_command: node --test --test-name-pattern="REGISTER: a finding survives deletion" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-OVERVIEW-RECORDS-FINDINGS
+    claim: >
+      The reviewer's own overview records its finding ids, so a thread deleted
+      before any gate run still blocks.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    if (isReviewerBot(r.author) && !editedByOther(r)) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="reviewer overview records ids" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AIGATE-EDITED-FINDING-NOT-DOWNGRADED
+    claim: >
+      A reviewer finding edited by a non-reviewer loses its severity tag and
+      stays blocking.
+    mutation:
+      file: scripts/agent-control/lib/ai-review.mjs
+      find: "    const tampered = editedByOther(first);"
+      replace: "    const tampered = false;"
+    proof_command: node --test --test-name-pattern="edited by a repository writer" scripts/agent-control/tests/ai-review.spec.mjs
+    timeout_ms: 120000

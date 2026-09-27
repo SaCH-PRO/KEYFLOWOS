@@ -1,0 +1,63 @@
+name: AI Review Request
+
+# Deterministic exact-head re-review request (KF-AI-PR-REVIEW-GATE-001).
+#
+# Copilot is re-requested on every push by the "KEYFLOWOS Copilot Review"
+# ruleset. Codex reviews natively on open and on draft -> ready, but never on
+# a push. This asks Codex once per semantic head: non-draft PRs only, never for
+# a push that changes only .agent-control/**, never twice for one head, never
+# for a same-tree force push. The request is a trigger only; the AI Review Gate
+# never counts it as review evidence.
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Rapid pushes collapse to one request for the newest head.
+  group: ai-review-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  request:
+    # A fork's token cannot comment; there is nothing to request there.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout trusted request logic (PR base)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Checkout PR request logic (bootstrap only)
+        if: hashFiles('trusted/scripts/agent-control/ai-review-request.mjs') == ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+
+      - name: Request Codex re-review for a semantic head
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_ACTION: ${{ github.event.action }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -euo pipefail
+          node trusted/scripts/agent-control/ai-review-request.mjs
