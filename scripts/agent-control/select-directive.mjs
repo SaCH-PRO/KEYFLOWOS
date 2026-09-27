@@ -79,7 +79,9 @@ export function selectDirective({ comments, processed = [], authors = [] }) {
     message_id: decisive.message_id,
     message_type: decisive.message_type,
     packet_id: decisive.packet_id,
-    source_main: decisive.source_main,
+    // AUTHORITY accepts source_main|source_head, so a head-only message still
+    // names its base. The output keeps one field; an explicit source_main wins.
+    source_main: decisive.source_main ?? decisive.source_head,
     implementation_branch: decisive.implementation_branch,
     created_at: decisive.created_at,
     url: decisive.url,

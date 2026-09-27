@@ -514,6 +514,29 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC escaped comment" scripts/agent-control/tests/yaml.spec.mjs scripts/agent-control/tests/control-envelope.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-SELECTOR-SOURCE-HEAD-FALLBACK
+    claim: >
+      A directive that names only source_head is routed by that head. The
+      selector dropped it, so the worker based the wake worktree on origin/main
+      (Copilot review 5332418633 at 82454cce).
+    mutation:
+      file: scripts/agent-control/select-directive.mjs
+      find: "    source_main: decisive.source_main ?? decisive.source_head,"
+      replace: "    source_main: decisive.source_main,"
+    proof_command: node --test --test-name-pattern="NC source head" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SELECTOR-SOURCE-MAIN-PRECEDENCE
+    claim: >
+      When a directive names both, the explicit source_main is the base, not
+      source_head.
+    mutation:
+      file: scripts/agent-control/select-directive.mjs
+      find: "    source_main: decisive.source_main ?? decisive.source_head,"
+      replace: "    source_main: decisive.source_head ?? decisive.source_main,"
+    proof_command: node --test --test-name-pattern="NC source precedence" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-ENVELOPE-MISSING-KEY
     claim: >
       AUTHORITY requires every envelope key to be present (null allowed). An

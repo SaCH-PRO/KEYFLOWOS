@@ -93,6 +93,37 @@ test('a REVIEW is actionable too, and carries its routing fields', opts, () => {
   assert.equal(out.selected.source_main, 'abc123');
 });
 
+// Copilot review 5332418633 (select-directive.mjs:82). The worker bases its
+// worktree on selected.source_main, so dropping source_head sent a head-only
+// directive to origin/main.
+test('NC source head: a source_head-only message routes by that head', opts, () => {
+  const head = '07e272c7ff5e93e7db07aa54419c01b4d19df1be';
+  const only = comment({ id: 'CG-HEAD-001', type: 'REVIEW', extra: `source_head: ${head}` });
+  only.body = only.body.replace('source_main: null\n', '');
+  assert.doesNotMatch(only.body, /source_main/);
+  const { status, out, raw } = select([only]);
+  assert.equal(status, 0, raw);
+  assert.equal(out.selected?.message_id, 'CG-HEAD-001', raw);
+  assert.equal(out.selected.source_main, head);
+  assert.deepEqual(Object.keys(out.selected).sort(), [
+    'author', 'created_at', 'implementation_branch', 'message_id', 'message_type', 'packet_id', 'source_main', 'url',
+  ]);
+});
+
+test('NC source head: a null source_main falls back to source_head too', opts, () => {
+  const head = '07e272c7ff5e93e7db07aa54419c01b4d19df1be';
+  const { out, raw } = select([comment({ id: 'CG-HEAD-002', extra: `source_head: ${head}` })]);
+  assert.match(raw, /"source_main":"07e272c7/);
+  assert.equal(out.selected?.source_main, head);
+});
+
+test('NC source precedence: an explicit source_main wins over source_head', opts, () => {
+  const main = '71a534b8944f4bb4191c9123e64a93e87c6db9d4';
+  const head = '07e272c7ff5e93e7db07aa54419c01b4d19df1be';
+  const { out, raw } = select([comment({ id: 'CG-BOTH-001', extra: `source_main: ${main}\nsource_head: ${head}` })]);
+  assert.equal(out.selected?.source_main, main, raw);
+});
+
 test('a directive with NO sender does not wake the worker', opts, () => {
   // The live wake harness proved this path once woke Claude.
   const { out } = select([comment({ id: 'HARNESS-001', sender: null })]);

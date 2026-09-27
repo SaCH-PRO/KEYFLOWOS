@@ -32,6 +32,7 @@
 .OUTPUTS
   JSON: { selected: {message_id, message_type, packet_id, source_main,
                      implementation_branch, created_at, url, author} | null,
+          (source_main is the directive's source_head when it has no source_main)
           reason, rejected: [{message_id, reason}] }
   Exit 0 on a decision (including "nothing to do"), 2 when the input is unreadable.
 #>
