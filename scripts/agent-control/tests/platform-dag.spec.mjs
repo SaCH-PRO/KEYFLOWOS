@@ -514,6 +514,15 @@ test('NEGATIVE CONTROL: a repeat whose first value fails the prefilter still hol
 
 const fieldLines = (body, key) => body.split('\n').filter((l) => l.startsWith(`${key}:`)).length;
 
+test('NEGATIVE CONTROL: a newer naming message with an undeclared type holds rather than vanishing', () => {
+  const good = comment(activateFields(), { at: '2026-09-26T10:00:00Z' });
+  assert.equal(stateOf([good]), PLATFORM_STATES.ACTIVE, 'referent');
+  for (const type of ['HOLDD', 'directive']) {
+    const typo = comment(activateFields({ message_type: type, programme_action: 'HOLD' }), { at: '2026-09-26T11:00:00Z' });
+    assert.equal(stateOf([good, typo]), PLATFORM_STATES.HELD, `message_type ${type}`);
+  }
+});
+
 test('NEGATIVE CONTROL: naming messages sharing an id cannot be ordered, whatever the input order', () => {
   // Copilot review 5330709017: a valid ACTIVATE and a wrong-sender naming
   // message with the same id and time sorted as equal, so input order decided.

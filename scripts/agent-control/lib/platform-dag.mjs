@@ -21,6 +21,7 @@ import {
   AUTHORIZED_AUTHORS,
   PROFILES,
   REQUIRED_ENVELOPE,
+  claimedAuthorityType,
   collectAuthority,
   compareAuthorityOrder,
   envelopeField,
@@ -320,7 +321,7 @@ export function platformProgrammeState(comments, doc, policy) {
     // Any occurrence qualifies: a repeated field is then rejected as malformed
     // by the ACTIVATION profile instead of being skipped here.
     if (!(env.values.programme || []).includes(PLATFORM_PROGRAMME_ID)) continue;
-    const messageType = (env.values.message_type || []).find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));
+    const messageType = claimedAuthorityType(env);
     if (!messageType) continue;
     if (!authors.includes(String(comment.author || '').toLowerCase())) continue;
     const entry = {

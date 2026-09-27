@@ -35,6 +35,16 @@ import { HEALTH, STATES } from './state-machine.mjs';
 /** Message types that carry execution authority when ChatGPT sends them. */
 export const AUTHORITY_MESSAGE_TYPES = Object.freeze(['DIRECTIVE', 'REVIEW', 'HOLD', 'RESUME']);
 
+/**
+ * Types issue #80 declares under "Message types" ("Use one of") that carry no
+ * authority, plus the automation's own records. ChatGPT speaks only in
+ * declared types, so from the ChatGPT sender anything else is unreadable
+ * authority, never silence.
+ */
+export const DECLARED_NON_AUTHORITY_TYPES = Object.freeze([
+  'ACK', 'PROGRESS', 'MOMENTUM', 'CONTRADICTION', 'RETURN', 'CLOSE', 'AUTO_EVENT', 'AUTO_MERGE',
+]);
+
 /** Exact, case-sensitive sender value. */
 export const AUTHORITY_SENDER = 'chatgpt';
 
@@ -212,6 +222,22 @@ export function rejectionOf(env, author, authors = AUTHORIZED_AUTHORS) {
   return null;
 }
 
+/**
+ * The authority type a body claims, or null when it plainly is not authority.
+ * Any occurrence of an authority type counts, so a repeat whose first value
+ * is something else cannot hide it. From the ChatGPT sender, a missing,
+ * repeated or undeclared type (say `HOLDD`, `directive` or `PLAN`) returns
+ * UNKNOWN: it is authority that cannot be read, and it fails closed.
+ */
+export function claimedAuthorityType(env) {
+  const types = env.values.message_type || [];
+  const authority = types.find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));
+  if (authority) return authority;
+  if (!(env.values.sender || []).includes(AUTHORITY_SENDER)) return null;
+  if (types.length === 1 && DECLARED_NON_AUTHORITY_TYPES.includes(types[0])) return null;
+  return 'UNKNOWN';
+}
+
 // --------------------------------------------------------------- comments
 
 /**
@@ -295,11 +321,11 @@ export function collectAuthority(comments, options = {}) {
     if (allowlisted && c.edited === null) editUnknown.push(c.id ?? c.url);
 
     const env = parseEnvelope(c.body);
-    const type = (env.values.message_type || []).find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));
+    const type = claimedAuthorityType(env);
     if (!type) continue;
     const entry = {
       message_id: envelopeField(env, 'message_id'),
-      message_type: type,
+      message_type: type === 'UNKNOWN' ? envelopeField(env, 'message_type') : type,
       packet_id: envelopeField(env, 'packet_id'),
       sender: envelopeField(env, 'sender'),
       state: envelopeField(env, 'state'),
@@ -360,7 +386,9 @@ export default {
   AUTHORIZED_AUTHORS,
   AUTHORITY_FAILURES,
   REQUIRED_ENVELOPE,
+  DECLARED_NON_AUTHORITY_TYPES,
   PROFILES,
+  claimedAuthorityType,
   parseEnvelope,
   envelopeField,
   validateEnvelope,

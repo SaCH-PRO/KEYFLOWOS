@@ -446,10 +446,23 @@ negative_controls:
       made such a message vanish, so a newer hold could be lost.
     mutation:
       file: scripts/agent-control/lib/control-envelope.mjs
-      find: "    const type = (env.values.message_type || []).find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));"
-      replace: "    const type = [envelopeField(env, 'message_type')].find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));"
+      find: "  const authority = types.find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));"
+      replace: "  const authority = [envelopeField(env, 'message_type')].find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));"
     proof_command: node --test --test-name-pattern="NC invalid-first repeat" scripts/agent-control/tests/control-envelope.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-ENVELOPE-UNDECLARED-TYPE
+    claim: >
+      A ChatGPT-sender comment whose message_type is missing, repeated or not
+      declared on #80 (a typo'd HOLD, say) is malformed authority, never
+      skipped, so the worker cannot fall back to an older directive past it
+      (Copilot r4115806024).
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  return 'UNKNOWN';"
+      replace: "  return null;"
+    proof_command: node --test --test-name-pattern="undeclared type" scripts/agent-control/tests/control-envelope.spec.mjs scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
 
   - id: NC-ENVELOPE-INLINE-COMMENT
     claim: >

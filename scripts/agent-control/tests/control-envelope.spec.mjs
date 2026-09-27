@@ -80,7 +80,31 @@ test('NC invalid-first repeat: a repeat whose first value is not authority still
     assert.equal(auth.candidates.length, 1, `${key}: ${first} first must not hide the message`);
     assert.equal(auth.messages.length, 0, 'and it is not valid authority');
     assert.deepEqual(auth.malformed.map((m) => m.message_id), ['CG-DIRECTIVE-T-001']);
+    // The record still says what the message claimed to be.
+    assert.equal(auth.malformed[0].message_type, 'DIRECTIVE', `${key}: ${first} first`);
   }
+});
+
+test('NC undeclared type: a ChatGPT message with a missing, repeated or undeclared type is malformed authority', () => {
+  for (const type of ['HOLDD', 'directive', 'PLAN', undefined, 'ACK\nmessage_type: ACK']) {
+    const auth = collectAuthority([rest(body(fields({ message_id: 'CG-X', message_type: type })))]);
+    assert.equal(auth.verified, true);
+    assert.deepEqual(auth.malformed.map((m) => m.message_id), ['CG-X'], `message_type ${JSON.stringify(type)} must not vanish`);
+  }
+  // Referents: a declared non-authority type from ChatGPT, or an undeclared
+  // type from anyone else, is not authority at all.
+  for (const f of [fields({ message_type: 'ACK' }), fields({ message_type: 'CLOSE' }), fields({ message_type: 'PLAN', sender: 'claude-code' })]) {
+    const auth = collectAuthority([rest(body(f))]);
+    assert.equal(auth.candidates.length + auth.rejected, 0, JSON.stringify(f));
+  }
+  // Newer than the anchor, it fails reconcile closed.
+  const anchor = rest(body(fields({ message_id: 'CG-ANCHOR' })));
+  const typo = rest(body(fields({ message_id: 'CG-HOLD-TYPO', message_type: 'HOLDD' })));
+  const state = emptyState();
+  state.programme.state = 'PROVING';
+  state.authority_basis = { message_id: 'CG-ANCHOR', comment_id: anchor.id };
+  const rec = reconcile(state, collectAuthority([anchor, typo]), { verified: true, main_sha: SHA, source_main_on_main: true, pr: null });
+  assert.deepEqual(rec.findings.map((f) => f.code), [FINDINGS.AUTHORITY_MALFORMED]);
 });
 
 test('NC inline comment: read as the YAML codec reads it, never as part of the value', () => {

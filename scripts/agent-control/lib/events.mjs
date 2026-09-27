@@ -9,8 +9,8 @@
  */
 
 import {
-  AUTHORITY_MESSAGE_TYPES,
   PROFILES,
+  claimedAuthorityType,
   envelopeField,
   parseEnvelope,
   rejectionOf,
@@ -95,7 +95,7 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
     // An authority-typed message wakes nothing unless it IS authority under the
     // shared AUTHORITY profile: ChatGPT sender, allowlisted author, full envelope.
     let authority = null;
-    if (AUTHORITY_MESSAGE_TYPES.includes(kind)) {
+    if (kind !== 'MALFORMED' && claimedAuthorityType(env)) {
       const author = comment.user?.login || null;
       const rejection = rejectionOf(env, author);
       const problems = rejection ? [rejection] : validateEnvelope(env, PROFILES.AUTHORITY);

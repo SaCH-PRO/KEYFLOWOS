@@ -148,7 +148,7 @@ test('AUTO_EVENT, ACK and plain text are never actionable', opts, () => {
   const { out } = select([
     comment({ id: 'AUTO-1', type: 'AUTO_EVENT', sender: 'github-autopilot' }),
     comment({ id: 'CC-ACK-1', type: 'ACK', sender: 'claude' }),
-    comment({ id: 'CG-ACK-LIKE', type: 'directive' }), // wrong case is not DIRECTIVE
+    comment({ id: 'CG-ACK-1', type: 'ACK' }), // a declared non-authority type, even from ChatGPT
     { author: { login: OWNER }, body: 'just a plain comment', createdAt: '2026-09-24T00:00:00Z', includesCreatedEdit: false, url: commentUrl(6999) },
   ]);
   assert.equal(out.selected, null);
@@ -209,6 +209,17 @@ test('a MALFORMED newest ChatGPT message selects nothing and never falls back to
     assert.equal(status, 0, raw);
     assert.equal(out.selected, null, `${name}: the older directive must not be selected`);
     assert.match(out.reason, /^newest_authority_malformed:/, name);
+  }
+});
+
+test('an undeclared type from ChatGPT selects nothing and never falls back to an older directive', opts, () => {
+  // Copilot r4115806024: a typo'd HOLD must not let an older DIRECTIVE through.
+  // `directive` in the wrong case was previously ignored; it now fails closed too.
+  for (const type of ['HOLDD', 'directive', 'PLAN']) {
+    const { status, out, raw } = select([comment({ id: `CG-OLD-${type}` }), comment({ id: `CG-TYPO-${type}`, type })]);
+    assert.equal(status, 0, raw);
+    assert.equal(out.selected, null, `${type}: the older directive must not be selected`);
+    assert.equal(out.reason, `newest_authority_malformed:CG-TYPO-${type}`);
   }
 });
 
