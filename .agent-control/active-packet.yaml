@@ -5,6 +5,9 @@ decision_message_id: CG-REVIEW-META-CONTROL-PARSER-DECISION-001
 decision_comment_id: 5856547302
 in_reply_to: CC-CONTRADICTION-META-CONTROL-PARSER-001
 ack_message_id: CC-ACK-META-CONTROL-PARSER-DECISION-001
+correction_review_message_id: CG-REVIEW-META-CONTROL-PARSER-FINAL-001
+correction_review_comment_id: 5859854366
+correction_ack_message_id: CC-ACK-META-CONTROL-PARSER-FINAL-001
 tracking_issue: 98
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
 implementation_branch: impl/kf-meta-control-parser-001
@@ -82,6 +85,27 @@ constraints:
   - no secrets
   - no merge by Claude
   - one active implementation lineage only
+
+correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-FINAL-001
+  state: CORRECTION_REQUIRED
+  scope_changed: false
+  required:
+    - fix r4115915819 only; do not broaden scope
+    - regression test for an attributable DIRECTIVE/REVIEW/HOLD that parses but is AUTHORITY-profile invalid
+    - prove it is non-actionable and classified MALFORMED
+    - preserve claimed message_type separately if needed for audit/provenance
+    - add/retarget a live negative control so restoring the mislabel fails
+    - rerun portable, Windows, mutation, exact-head CI and fresh Copilot review
+    - new RETURN with the final semantic head and final PR head
+  dispositions:
+    r4115719493: DEFERRED_WITH_TRACKING (#99)
+    r4115915819: ACCEPTED_MUST_FIX_BEFORE_ADMISSION
+    r4115915841: RESOLVED_WITH_EVIDENCE
+    r4115719440: RESOLVED_WITH_EVIDENCE
+  constraints:
+    - do not regenerate architecture maps in this correction
+    - keep programme-state re-anchor deferred
 
 return_contract: >
   ACK exact source/branch/scope before mutation; post CONTRADICTION if current

@@ -6,9 +6,13 @@ progress_message_ids:
   - CC-PROGRESS-META-CONTROL-PARSER-001
 momentum_message_ids:
   - CC-MOMENTUM-META-CONTROL-PARSER-001
-return_message_id: CC-RETURN-META-CONTROL-PARSER-001
+return_message_id: CC-RETURN-META-CONTROL-PARSER-FINAL-001
+previous_return_message_ids:
+  - CC-RETURN-META-CONTROL-PARSER-001
+correction_review_message_id: CG-REVIEW-META-CONTROL-PARSER-FINAL-001
+correction_ack_message_id: CC-ACK-META-CONTROL-PARSER-FINAL-001
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
-source_head: 1a52f48d73ef29d348a9f5e5667581f7612a1837
+source_head: a5f46027e5d02b5339228d7cc3eb1ae9ae8c9567
 implementation_branch: impl/kf-meta-control-parser-001
 pr_number: 100
 state: PROVING
@@ -83,6 +87,10 @@ commits:
     subject: return artifact for 2b184808
   - sha: 1a52f48d73ef29d348a9f5e5667581f7612a1837
     subject: escape-aware quote balance
+  - sha: 03b22a58d154fd53f4df82d7f4ba4731d89ab6d3
+    subject: return artifact for 1a52f48d
+  - sha: a5f46027e5d02b5339228d7cc3eb1ae9ae8c9567
+    subject: malformed authority events are kind MALFORMED (CG-REVIEW-META-CONTROL-PARSER-FINAL-001, r4115915819)
 
 contract_as_implemented:
   field_syntax:
@@ -104,7 +112,14 @@ contract_as_implemented:
     - from the ChatGPT sender, a missing, repeated or undeclared message_type is malformed authority; the declared non-authority types are the #80 list (ACK, PROGRESS, MOMENTUM, CONTRADICTION, RETURN, CLOSE) plus AUTO_EVENT and AUTO_MERGE
     - entries keep comment id, created_at, updated_at, edit evidence and the raw body for audit
   selector: selects only when the newest authority is valid, a DIRECTIVE or REVIEW, and unprocessed; exits 2 when authority is unverifiable or node is missing
-  events: authority-typed messages are actionable only when they pass AUTHORITY; a syntactically malformed envelope is MALFORMED and not actionable
+  events: >
+    authority-typed messages are actionable only when they pass AUTHORITY. A
+    syntactically malformed envelope is MALFORMED and not actionable. An
+    attributable (sender chatgpt, allowlisted author) authority-typed envelope
+    that parses but fails AUTHORITY is also kind MALFORMED, as collectAuthority
+    classifies it; its claimed type stays in the event's message_type and the
+    profile problems in authority.problems. A forged-author or non-ChatGPT
+    message keeps its claimed kind with actionable false (r4115915819).
 
 behaviour_changes_to_note:
   - >
@@ -164,12 +179,20 @@ proof_matrix:
       (NC-RECONCILE-MALFORMED-NEWER), undeclared ChatGPT types (NC-ENVELOPE-UNDECLARED-TYPE),
       selector no-fallback / newer hold / no node
     result: PASS
+  - obligation: attributable profile-invalid authority is non-actionable and classified MALFORMED (CG-REVIEW-META-CONTROL-PARSER-FINAL-001)
+    proof: >
+      events.spec "attributable authority that parses but fails the AUTHORITY profile is MALFORMED,
+      never its claimed kind": DIRECTIVE, REVIEW and HOLD from SaCH-PRO / sender chatgpt, each with a
+      missing key and with a null packet_id; envelope_problems empty, kind MALFORMED, actionable false,
+      message_type keeps the claimed type, authority.problems names the defect; the valid envelope keeps
+      its kind. Live control NC-EVENTS-MALFORMED-AUTHORITY-KIND restores the mislabel and that test fails.
+    result: PASS
   - obligation: restored defects make their relevant tests fail
-    proof: proof-mutation.mjs at 1a52f48d, see negative_controls
+    proof: proof-mutation.mjs at a5f46027, see negative_controls
     result: PASS
   - obligation: exact-head CI, portable/Windows proof, AI review, finding disposition
     proof: >
-      portable 264/264 and Windows 19/19 at 1a52f48d; every Copilot finding is
+      portable 265/265 and Windows 19/19 at a5f46027; every Copilot finding is
       dispositioned in ai_review; exact-head CI for the final PR head is in the RETURN (see ci)
     result: PASS_LOCAL_CI_IN_RETURN
   - obligation: no production, provider traffic, secrets, paid resource, activation, ACTION-001 release or gate weakening
@@ -181,8 +204,8 @@ proof_matrix:
 
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
-  portable_total: 264
-  portable_passed: 264
+  portable_total: 265
+  portable_passed: 265
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
   windows_total: 19
   windows_passed: 19
@@ -201,13 +224,13 @@ tests:
     from ChatGPT selects nothing", and its old slot holds a ChatGPT ACK.
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 1a52f48d
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref a5f46027
   baseline_before_change: 32/32 live
-  result: 51/51 live at 1a52f48d
+  result: 52/52 live at a5f46027
   retargeted_same_claim_and_proof:
     - NC-WORKER-SENDERLESS-REJECTED, NC-WORKER-SENDER-EXACT, NC-WORKER-AUTHOR-ALLOWLIST (select-directive.ps1 -> lib/control-envelope.mjs)
     - NC-RECONCILE-AUTHORITY-SENDER (reconcile.mjs -> lib/control-envelope.mjs rejectionOf)
-  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-WORKFLOW-D1-TOKEN]
+  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-EVENTS-MALFORMED-AUTHORITY-KIND, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-WORKFLOW-D1-TOKEN]
   history: >
     48/48 live at 8744d90c and at a8c87ccb. At 81a2ddd2, NC-PLATFORM-DUPLICATE-ID
     was VACUOUS: its platform-level guard was unreachable behind collectAuthority's
@@ -215,14 +238,16 @@ negative_controls:
     in 584d2edf, which ran 49/49 live. 2b184808 added NC-ENVELOPE-UNDECLARED-TYPE
     and made the invalid-first proof also pin the claimed type, because the new
     rule is a second guard for that case. 2b184808 ran 50/50 live. 1a52f48d
-    added NC-ENVELOPE-ESCAPED-QUOTE.
+    added NC-ENVELOPE-ESCAPED-QUOTE (51/51). a5f46027 added
+    NC-EVENTS-MALFORMED-AUTHORITY-KIND (52/52).
 
 ci:
   exact_head: >
     Required checks run on the PR head that carries this artifact commit (the
-    semantic head 1a52f48d plus this control-only commit). Their result is
-    recorded in the RETURN on #80 (CC-RETURN-META-CONTROL-PARSER-001), which
+    semantic head a5f46027 plus this control-only commit). Their result is
+    recorded in the RETURN on #80 (CC-RETURN-META-CONTROL-PARSER-FINAL-001), which
     names that head. An artifact cannot record CI for the commit that contains it.
+  previous_head_03b22a58: all exact-head workflows completed with zero failures (r4115915841, RESOLVED_WITH_EVIDENCE)
   previous_head_4f559de3: all 28 checks pass or are skipped by their own conditions
   previous_head_9eb4f884: all 28 checks pass or are skipped by their own conditions
   previous_head_a8c87ccb: all required workflows green (agent-control, self-test, Portable proof ubuntu, Windows worker proof, CI/CD, branch divergence, HawkScan, GitGuardian, Vercel)
@@ -231,6 +256,12 @@ ai_review:
   reviewer: copilot-pull-request-reviewer[bot]
   reviews: [5330693593 on 33b46896, 5330709017 on a8c87ccb, 5330788503 on 9eb4f884, 5330834778 on 4f559de3]
   findings:
+    - id: r4115915819
+      disposition: FIXED
+      evidence: a5f46027; events.spec "attributable authority that parses but fails the AUTHORITY profile"; NC-EVENTS-MALFORMED-AUTHORITY-KIND
+    - id: r4115915841
+      disposition: RESOLVED_WITH_EVIDENCE
+      evidence: per CG-REVIEW-META-CONTROL-PARSER-FINAL-001; CC-RETURN-META-CONTROL-PARSER-001 on #80, exact-head workflows at 03b22a58 green
     - id: r4115848580
       disposition: FIXED
       evidence: 1a52f48d; escape-aware wellQuoted(); NC-ENVELOPE-ESCAPED-QUOTE
@@ -262,13 +293,12 @@ ai_review:
       disposition: FIXED
       evidence: 81a2ddd2 + 584d2edf; collectAuthority counts rejections in the id check; platform regression test; NC-PLATFORM-DUPLICATE-ID
     - id: r4115719493
-      disposition: DEFERRED_PROPOSED
+      disposition: DEFERRED_WITH_TRACKING
+      tracking_issue: 99
       evidence: >
-        architecture/inventory.json and dependencies.json are not regenerated. This
-        session cannot run the Python scanners, which need interactive approval, and
-        hand-editing derived maps would not be scanner output. No gate reads them.
-        Proposed: refresh them in a reviewed map refresh (KF-MAP-SCANNER-001 / #99, or
-        an explicit refresh). A programme-map refresh needs authority anyway. Your call.
+        Dispositioned by CG-REVIEW-META-CONTROL-PARSER-FINAL-001. architecture maps are
+        not regenerated or hand-edited here; #99 owns scanner/standard reconciliation
+        and deterministic map regeneration.
 
 scope_ledger:
   declared:
@@ -285,7 +315,7 @@ scope_ledger:
     - item: re-anchor programme-state.yaml
       reason: D2; a reviewed projection refresh is needed before DERIVED_STATE_STALE_AUTHORITY and AUTHORITY_MALFORMED clear
     - item: regenerate architecture/inventory.json and dependencies.json (r4115719493)
-      reason: scanners cannot run in this session; derived maps are not hand-edited; map refresh needs authority
+      reason: DEFERRED_WITH_TRACKING to #99 by CG-REVIEW-META-CONTROL-PARSER-FINAL-001; derived maps are not hand-edited
     - item: refresh the KF-META-CONTROL-PARSER-001 blocking_dependencies record in KEYFLOWOS_PLATFORM_DAG.yaml and the programme doc
       reason: "`satisfied` flips on admission, which is ChatGPT's call; the text there still describes the pre-packet readField"
   dropped: []
