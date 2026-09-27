@@ -64,8 +64,6 @@
     ".canvas",
     ".canvas/assets",
     ".claude",
-    ".claude/coordination",
-    ".claude/coordination/sessions",
     ".claude/hooks",
     ".github",
     ".github/ISSUE_TEMPLATE",
@@ -86,6 +84,7 @@
     "apps/server/src",
     "apps/server/src/core",
     "apps/server/src/core/auth",
+    "apps/server/src/core/authority",
     "apps/server/src/core/config",
     "apps/server/src/core/connectors",
     "apps/server/src/core/connectors/implementations",
@@ -893,6 +892,12 @@
     "packages/ui/src/styles",
     "patches",
     "scripts",
+    "scripts/agent-control",
+    "scripts/agent-control/fixtures",
+    "scripts/agent-control/lib",
+    "scripts/agent-control/tests",
+    "scripts/agent-control/tests/helpers",
+    "scripts/agent-control/tests/windows",
     "scripts/architecture",
     "scripts/auth-audit",
     "scripts/ci",
@@ -907,9 +912,9 @@
   "files": [
     {
       "extension": ".md",
-      "lines": 18,
+      "lines": 34,
       "path": ".agent-control/README.md",
-      "size_bytes": 1116
+      "size_bytes": 1833
     },
     {
       "extension": ".yaml",
@@ -919,9 +924,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 71,
+      "lines": 99,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 4044
+      "size_bytes": 4705
     },
     {
       "extension": ".yaml",
@@ -931,9 +936,15 @@
     },
     {
       "extension": ".yaml",
-      "lines": 74,
+      "lines": 246,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 3938
+      "size_bytes": 12708
+    },
+    {
+      "extension": ".yaml",
+      "lines": 156,
+      "path": ".agent-control/programme-state.yaml",
+      "size_bytes": 5876
     },
     {
       "extension": ".toml",
@@ -3199,12 +3210,6 @@
       "size_bytes": 599160
     },
     {
-      "extension": ".json",
-      "lines": 9,
-      "path": ".claude/coordination/sessions/1066c27f-9957-5a23-96f6-18e326aada97.json",
-      "size_bytes": 274
-    },
-    {
       "extension": ".md",
       "lines": 126,
       "path": ".claude/hooks/README.md",
@@ -3234,12 +3239,6 @@
       "lines": 44,
       "path": ".dockerignore",
       "size_bytes": 934
-    },
-    {
-      "extension": "",
-      "lines": 1,
-      "path": ".env",
-      "size_bytes": 83
     },
     {
       "extension": ".example",
@@ -3279,9 +3278,21 @@
     },
     {
       "extension": ".yml",
+      "lines": 313,
+      "path": ".github/workflows/agent-control-autopilot.yml",
+      "size_bytes": 11964
+    },
+    {
+      "extension": ".yml",
       "lines": 135,
       "path": ".github/workflows/agent-control-gate.yml",
       "size_bytes": 5280
+    },
+    {
+      "extension": ".yml",
+      "lines": 68,
+      "path": ".github/workflows/agent-control-worker-proof.yml",
+      "size_bytes": 2514
     },
     {
       "extension": ".yml",
@@ -3315,9 +3326,9 @@
     },
     {
       "extension": "",
-      "lines": 55,
+      "lines": 58,
       "path": ".gitignore",
-      "size_bytes": 1088
+      "size_bytes": 1192
     },
     {
       "extension": ".json",
@@ -3603,6 +3614,7 @@
         "./app.service",
         "./core/auth/auth.middleware",
         "./core/auth/auth.module",
+        "./core/authority/authority.module",
         "./core/connectors/connector.module",
         "./core/event-bus/event-bus.module",
         "./core/growthbook/growthbook.module",
@@ -3726,9 +3738,9 @@
         "@nestjs/core",
         "@nestjs/schedule"
       ],
-      "lines": 285,
+      "lines": 287,
       "path": "apps/server/src/app.module.ts",
-      "size_bytes": 13026
+      "size_bytes": 13116
     },
     {
       "exports": [
@@ -3892,20 +3904,24 @@
     },
     {
       "exports": [
+        "AUTHORITY_SHADOW_KEY",
         "MODULE_SCOPE_KEY",
         "ModuleScopeGuard",
         "ModuleScopeRequirement",
-        "RequireModuleScope"
+        "RequireModuleScope",
+        "ShadowEffectiveAuthority"
       ],
       "extension": ".ts",
       "imports": [
+        "../authority/effective-authority.resolver",
+        "../authority/module-vocabulary",
         "../prisma/prisma.service",
         "@nestjs/common",
         "@nestjs/core"
       ],
-      "lines": 87,
+      "lines": 148,
       "path": "apps/server/src/core/auth/module-scope.guard.ts",
-      "size_bytes": 3435
+      "size_bytes": 6890
     },
     {
       "exports": [
@@ -3981,6 +3997,160 @@
       "lines": 133,
       "path": "apps/server/src/core/auth/tenant-body-override.spec.ts",
       "size_bytes": 5598
+    },
+    {
+      "exports": [
+        "ApprovalTierResolution",
+        "MembershipTierInput",
+        "membershipApprovalTier",
+        "resolveMembershipApprovalTier"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "./module-vocabulary"
+      ],
+      "lines": 65,
+      "path": "apps/server/src/core/authority/approval-tier.ts",
+      "size_bytes": 2983
+    },
+    {
+      "exports": [
+        "AuthorityInventoryClient",
+        "AuthorityInventoryService",
+        "GrantorClass",
+        "GrantorFinding",
+        "StaleCopyClass",
+        "StaleCopyFinding"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "./approval-tier",
+        "./module-vocabulary"
+      ],
+      "lines": 299,
+      "path": "apps/server/src/core/authority/authority-inventory.service.ts",
+      "size_bytes": 12153
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "../auth/module-scope.guard",
+        "../prisma/prisma.service",
+        "./effective-authority.resolver",
+        "@nestjs/common",
+        "@nestjs/core",
+        "vitest"
+      ],
+      "lines": 201,
+      "path": "apps/server/src/core/authority/authority-shadow.spec.ts",
+      "size_bytes": 8052
+    },
+    {
+      "exports": [
+        "AuthorityModule"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "./effective-authority.resolver",
+        "@nestjs/common"
+      ],
+      "lines": 36,
+      "path": "apps/server/src/core/authority/authority.module.ts",
+      "size_bytes": 1760
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "../prisma/prisma.service",
+        "./effective-authority.resolver",
+        "vitest"
+      ],
+      "lines": 715,
+      "path": "apps/server/src/core/authority/effective-authority.resolver.spec.ts",
+      "size_bytes": 29327
+    },
+    {
+      "exports": [
+        "AUTHORITY_PAGE_SIZE",
+        "AuthorityReadIncompleteError",
+        "DEFAULT_AUTHORITY_PAGE_SIZE",
+        "EffectiveAuthorityResolver"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "../prisma/prisma.service",
+        "./approval-tier",
+        "./effective-authority.types",
+        "./module-vocabulary",
+        "@nestjs/common"
+      ],
+      "lines": 712,
+      "path": "apps/server/src/core/authority/effective-authority.resolver.ts",
+      "size_bytes": 29810
+    },
+    {
+      "exports": [
+        "ApprovalTierResult",
+        "AuthoritySource",
+        "DelegationContribution",
+        "EffectiveAuthorityResult",
+        "GrantContribution",
+        "ModuleDecision",
+        "ModuleDecisionReason",
+        "PositionContribution"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "./module-vocabulary"
+      ],
+      "lines": 180,
+      "path": "apps/server/src/core/authority/effective-authority.types.ts",
+      "size_bytes": 7480
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "../../modules/identity/identity.service",
+        "./module-vocabulary",
+        "node:child_process",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 111,
+      "path": "apps/server/src/core/authority/module-vocabulary.spec.ts",
+      "size_bytes": 4909
+    },
+    {
+      "exports": [
+        "ACCESS_LEVELS",
+        "AccessLevel",
+        "CANONICAL_MODULES",
+        "CRM_SUBPERMISSION_VALUES",
+        "CanonicalModule",
+        "DEFAULT_APPROVAL_TIERS",
+        "DEFAULT_ROLE",
+        "EXPLICIT_MAP_MISSING_KEY",
+        "LEVEL_RANK",
+        "MAX_APPROVAL_TIER",
+        "ROLE_DEFAULT_SCOPES",
+        "TIER4_GRANT_MIN_TIER",
+        "defaultScopesForRole",
+        "isAccessLevel",
+        "isCanonicalModule",
+        "isCrmSubPermission",
+        "isTier4Scope",
+        "rankOf",
+        "strongest",
+        "weakest"
+      ],
+      "extension": ".ts",
+      "imports": [],
+      "lines": 192,
+      "path": "apps/server/src/core/authority/module-vocabulary.ts",
+      "size_bytes": 7953
     },
     {
       "exports": [
@@ -6366,6 +6536,7 @@
       ],
       "extension": ".ts",
       "imports": [
+        "../../core/authority/approval-tier",
         "../../core/prisma/prisma.service",
         "../structure/job-role-policy.service",
         "./ai-execution-log.service",
@@ -6377,7 +6548,7 @@
       ],
       "lines": 815,
       "path": "apps/server/src/modules/ai/ai-oversight.service.ts",
-      "size_bytes": 35006
+      "size_bytes": 34926
     },
     {
       "exports": [
@@ -6413,9 +6584,9 @@
         "@nestjs/common",
         "express"
       ],
-      "lines": 178,
+      "lines": 203,
       "path": "apps/server/src/modules/ai/ai-settings.controller.ts",
-      "size_bytes": 6326
+      "size_bytes": 7312
     },
     {
       "exports": [
@@ -6424,12 +6595,14 @@
       ],
       "extension": ".ts",
       "imports": [
+        "../../core/authority/effective-authority.resolver",
+        "../../core/authority/module-vocabulary",
         "../../core/prisma/prisma.service",
         "@nestjs/common"
       ],
-      "lines": 395,
+      "lines": 444,
       "path": "apps/server/src/modules/ai/ai-settings.service.ts",
-      "size_bytes": 14750
+      "size_bytes": 17283
     },
     {
       "exports": [],
@@ -6541,6 +6714,7 @@
       "imports": [
         "../../core/auth/auth.guard",
         "../../core/auth/business.guard",
+        "../../core/authority/approval-tier",
         "../../core/prisma/prisma.service",
         "../crm/guards/rate-limit.guard",
         "../key-autonomy/key-action-proposal.service",
@@ -6577,9 +6751,9 @@
         "@nestjs/event-emitter",
         "express"
       ],
-      "lines": 1679,
+      "lines": 1676,
       "path": "apps/server/src/modules/ai/ai.controller.ts",
-      "size_bytes": 63341
+      "size_bytes": 63109
     },
     {
       "exports": [
@@ -6744,6 +6918,20 @@
       "lines": 238,
       "path": "apps/server/src/modules/ai/asset-tools.spec.ts",
       "size_bytes": 10029
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "../../core/authority/effective-authority.resolver",
+        "../../core/prisma/prisma.service",
+        "./ai-settings.service",
+        "@nestjs/common",
+        "vitest"
+      ],
+      "lines": 125,
+      "path": "apps/server/src/modules/ai/authority-grant-grantor.spec.ts",
+      "size_bytes": 5245
     },
     {
       "exports": [
@@ -7205,9 +7393,9 @@
       "imports": [
         "class-validator"
       ],
-      "lines": 31,
+      "lines": 43,
       "path": "apps/server/src/modules/ai/dto/create-authority-grant.dto.ts",
-      "size_bytes": 618
+      "size_bytes": 1511
     },
     {
       "exports": [
@@ -20517,9 +20705,9 @@
         "@keyflow/db",
         "@nestjs/common"
       ],
-      "lines": 354,
+      "lines": 356,
       "path": "apps/server/src/modules/identity/founding-membership.service.ts",
-      "size_bytes": 14188
+      "size_bytes": 14346
     },
     {
       "exports": [],
@@ -20639,6 +20827,8 @@
       ],
       "extension": ".ts",
       "imports": [
+        "../../core/authority/approval-tier",
+        "../../core/authority/module-vocabulary",
         "../../core/prisma/prisma.service",
         "../../core/security/sanitize-business",
         "../ai/default-triggers.service",
@@ -20648,9 +20838,9 @@
         "@keyflow/db",
         "@nestjs/common"
       ],
-      "lines": 1444,
+      "lines": 1455,
       "path": "apps/server/src/modules/identity/identity.service.ts",
-      "size_bytes": 59415
+      "size_bytes": 60172
     },
     {
       "exports": [
@@ -20695,6 +20885,22 @@
       "lines": 89,
       "path": "apps/server/src/modules/identity/refresh-session.spec.ts",
       "size_bytes": 3676
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "../../core/auth/module-scope.guard",
+        "../../core/prisma/prisma.service",
+        "../blueprint/blueprint.service",
+        "./identity.service",
+        "@nestjs/common",
+        "@nestjs/core",
+        "vitest"
+      ],
+      "lines": 184,
+      "path": "apps/server/src/modules/identity/team-scope-convergence.spec.ts",
+      "size_bytes": 8004
     },
     {
       "exports": [],
@@ -31486,6 +31692,18 @@
       "lines": 146,
       "path": "apps/server/test/auth-callback-bootstrap.e2e.test.ts",
       "size_bytes": 6642
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "../src/core/authority/authority-inventory.service",
+        "@keyflow/db",
+        "vitest"
+      ],
+      "lines": 221,
+      "path": "apps/server/test/authority-inventory.integration.test.ts",
+      "size_bytes": 11768
     },
     {
       "exports": [],
@@ -57347,9 +57565,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1484,
+      "lines": 1546,
       "path": "architecture/architecture.json",
-      "size_bytes": 46876
+      "size_bytes": 49297
     },
     {
       "extension": ".yaml",
@@ -57365,15 +57583,15 @@
     },
     {
       "extension": ".yaml",
-      "lines": 2436,
+      "lines": 2438,
       "path": "architecture/data-ownership.yaml",
-      "size_bytes": 52247
+      "size_bytes": 52301
     },
     {
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4118296
+      "size_bytes": 4185729
     },
     {
       "extension": ".md",
@@ -57395,15 +57613,15 @@
     },
     {
       "extension": ".json",
-      "lines": 0,
+      "lines": 63024,
       "path": "architecture/inventory.json",
-      "size_bytes": 0
+      "size_bytes": 1631490
     },
     {
       "extension": ".md",
-      "lines": 142,
+      "lines": 194,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 6030
+      "size_bytes": 9270
     },
     {
       "extension": ".md",
@@ -58097,9 +58315,9 @@
     },
     {
       "extension": ".md",
-      "lines": 109,
+      "lines": 144,
       "path": "architecture/target-architecture.md",
-      "size_bytes": 4637
+      "size_bytes": 6761
     },
     {
       "extension": ".md",
@@ -58669,9 +58887,27 @@
     },
     {
       "extension": ".md",
-      "lines": 206,
+      "lines": 265,
+      "path": "docs/development/AGENT_AUTOPILOT.md",
+      "size_bytes": 13316
+    },
+    {
+      "extension": ".md",
+      "lines": 184,
+      "path": "docs/development/AGENT_AUTOPILOT_OPERATIONS.md",
+      "size_bytes": 10365
+    },
+    {
+      "extension": ".yaml",
+      "lines": 196,
+      "path": "docs/development/AGENT_AUTOPILOT_POLICY.yaml",
+      "size_bytes": 7712
+    },
+    {
+      "extension": ".md",
+      "lines": 299,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 6358
+      "size_bytes": 11905
     },
     {
       "extension": ".md",
@@ -58684,6 +58920,30 @@
       "lines": 53,
       "path": "docs/development/EXECUTION_PACKET_STATUS_TEMPLATE.yaml",
       "size_bytes": 1184
+    },
+    {
+      "extension": ".md",
+      "lines": 99,
+      "path": "docs/development/KEYFLOWOS_AUTONOMOUS_AGENT_ROLES.md",
+      "size_bytes": 4030
+    },
+    {
+      "extension": ".md",
+      "lines": 276,
+      "path": "docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md",
+      "size_bytes": 15930
+    },
+    {
+      "extension": ".yaml",
+      "lines": 521,
+      "path": "docs/development/KEYFLOWOS_PLATFORM_DAG.yaml",
+      "size_bytes": 17788
+    },
+    {
+      "extension": ".yaml",
+      "lines": 267,
+      "path": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "size_bytes": 10617
     },
     {
       "extension": ".md",
@@ -61288,6 +61548,697 @@
     },
     {
       "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/admission.mjs",
+        "./lib/yaml.mjs"
+      ],
+      "lines": 142,
+      "path": "scripts/agent-control/auto-merge-admitted.mjs",
+      "size_bytes": 4785
+    },
+    {
+      "extension": ".ps1",
+      "lines": 689,
+      "path": "scripts/agent-control/claude-worker.ps1",
+      "size_bytes": 29852
+    },
+    {
+      "extension": ".ps1",
+      "lines": 90,
+      "path": "scripts/agent-control/evaluate-run.ps1",
+      "size_bytes": 3162
+    },
+    {
+      "extension": ".ps1",
+      "lines": 37,
+      "path": "scripts/agent-control/fixtures/stub-claude.ps1",
+      "size_bytes": 1702
+    },
+    {
+      "extension": ".ps1",
+      "lines": 23,
+      "path": "scripts/agent-control/fixtures/stub-gh.ps1",
+      "size_bytes": 1039
+    },
+    {
+      "extension": ".ps1",
+      "lines": 150,
+      "path": "scripts/agent-control/install-claude-worker.ps1",
+      "size_bytes": 6519
+    },
+    {
+      "exports": [
+        "AGENT_STATUS",
+        "ROLES",
+        "agentStatusReport",
+        "claudeLocalAdapter",
+        "defaultRegistry",
+        "openAiAdapter",
+        "secondaryReviewerAdapter",
+        "selectAdapter"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "node:child_process"
+      ],
+      "lines": 201,
+      "path": "scripts/agent-control/lib/adapters.mjs",
+      "size_bytes": 7865
+    },
+    {
+      "exports": [
+        "ADMISSION_REASONS",
+        "evaluateAdmission"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./events.mjs"
+      ],
+      "lines": 135,
+      "path": "scripts/agent-control/lib/admission.mjs",
+      "size_bytes": 5637
+    },
+    {
+      "exports": [
+        "AUTO_CORRECTABLE",
+        "DECISIONS",
+        "ESCALATE_ONLY",
+        "MAX_IDENTICAL_ATTEMPTS",
+        "clearCorrection",
+        "planCorrection",
+        "recordAttempt"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./momentum.mjs"
+      ],
+      "lines": 121,
+      "path": "scripts/agent-control/lib/correction.mjs",
+      "size_bytes": 3459
+    },
+    {
+      "exports": [
+        "DAG_PATH",
+        "buildDag",
+        "loadDag",
+        "proveDrainable",
+        "selectNext",
+        "validateDag"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./yaml.mjs",
+        "node:fs",
+        "node:path"
+      ],
+      "lines": 240,
+      "path": "scripts/agent-control/lib/dag.mjs",
+      "size_bytes": 8384
+    },
+    {
+      "exports": [
+        "ACTIONABLE_MESSAGE_TYPES",
+        "CONTROL_ISSUE",
+        "MUTATION_LOCK",
+        "REQUIRED_WORKFLOWS",
+        "mutationLockKey",
+        "normalizeEvent",
+        "observationKey",
+        "parseControlMessage",
+        "readField"
+      ],
+      "extension": ".mjs",
+      "imports": [],
+      "lines": 223,
+      "path": "scripts/agent-control/lib/events.mjs",
+      "size_bytes": 8565
+    },
+    {
+      "exports": [
+        "MOMENTUM_REASONS",
+        "THRESHOLDS",
+        "clearOnTransition",
+        "countFailure",
+        "countOperation",
+        "evaluateMomentum",
+        "failureSignature"
+      ],
+      "extension": ".mjs",
+      "imports": [],
+      "lines": 139,
+      "path": "scripts/agent-control/lib/momentum.mjs",
+      "size_bytes": 4564
+    },
+    {
+      "exports": [
+        "ACTIONS",
+        "decide",
+        "derivedDecision"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./adapters.mjs",
+        "./correction.mjs",
+        "./dag.mjs",
+        "./momentum.mjs",
+        "./reconcile.mjs",
+        "./state-machine.mjs"
+      ],
+      "lines": 215,
+      "path": "scripts/agent-control/lib/orchestrator.mjs",
+      "size_bytes": 8618
+    },
+    {
+      "exports": [
+        "AUTHORITY_CHANNEL",
+        "AUTOPILOT_POLICY_PATH",
+        "DECIDED_BY",
+        "NEVER_ACTIVATED_BY",
+        "PLATFORM_DAG_PATH",
+        "PLATFORM_PROGRAMME_ID",
+        "PLATFORM_STATES",
+        "PROGRAMME_CONTROL_MESSAGE_TYPE",
+        "REQUIRED_ENVELOPE",
+        "REQUIRED_HUMAN_GATES",
+        "loadAutopilotPolicy",
+        "loadPlatformDag",
+        "missingEnvelopeFields",
+        "platformProgrammeState",
+        "validatePlatformContract"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./dag.mjs",
+        "./events.mjs",
+        "./reconcile.mjs",
+        "./state-machine.mjs",
+        "./yaml.mjs",
+        "node:fs",
+        "node:path"
+      ],
+      "lines": 462,
+      "path": "scripts/agent-control/lib/platform-dag.mjs",
+      "size_bytes": 21739
+    },
+    {
+      "exports": [
+        "AUTHORITY_MESSAGE_TYPES",
+        "AUTHORITY_SENDER",
+        "AUTHORIZED_AUTHORS",
+        "FINDINGS",
+        "collectAuthority",
+        "reconcile"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./events.mjs"
+      ],
+      "lines": 200,
+      "path": "scripts/agent-control/lib/reconcile.mjs",
+      "size_bytes": 9561
+    },
+    {
+      "exports": [
+        "HEALTH",
+        "STATES",
+        "TERMINAL_STATES",
+        "TransitionError",
+        "assertTransition",
+        "canTransition",
+        "legalNext",
+        "requiresAuthority"
+      ],
+      "extension": ".mjs",
+      "imports": [],
+      "lines": 125,
+      "path": "scripts/agent-control/lib/state-machine.mjs",
+      "size_bytes": 4342
+    },
+    {
+      "exports": [
+        "JOURNAL_LIMIT",
+        "PROCESSED_KEY_LIMIT",
+        "STATE_PATH",
+        "emptyState",
+        "hasProcessed",
+        "loadState",
+        "normalizeState",
+        "projectionDrift",
+        "recordEvent",
+        "saveState",
+        "validateState"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./state-machine.mjs",
+        "./yaml.mjs",
+        "node:fs",
+        "node:path"
+      ],
+      "lines": 223,
+      "path": "scripts/agent-control/lib/state.mjs",
+      "size_bytes": 8730
+    },
+    {
+      "exports": [
+        "DEFAULT_REPOSITORY",
+        "fetchComments",
+        "fetchRepoTruth",
+        "gatherTruth",
+        "ghRunner",
+        "reconcileWithTruth"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./events.mjs",
+        "./reconcile.mjs",
+        "node:child_process",
+        "node:fs"
+      ],
+      "lines": 98,
+      "path": "scripts/agent-control/lib/truth.mjs",
+      "size_bytes": 4303
+    },
+    {
+      "exports": [
+        "parseYaml",
+        "stringifyYaml"
+      ],
+      "extension": ".mjs",
+      "imports": [],
+      "lines": 356,
+      "path": "scripts/agent-control/lib/yaml.mjs",
+      "size_bytes": 11846
+    },
+    {
+      "extension": ".yaml",
+      "lines": 397,
+      "path": "scripts/agent-control/negative-controls.yaml",
+      "size_bytes": 18181
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/events.mjs",
+        "node:fs"
+      ],
+      "lines": 32,
+      "path": "scripts/agent-control/normalize-event.mjs",
+      "size_bytes": 1054
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/adapters.mjs",
+        "./lib/dag.mjs",
+        "./lib/events.mjs",
+        "./lib/orchestrator.mjs",
+        "./lib/state.mjs",
+        "./lib/truth.mjs",
+        "node:fs"
+      ],
+      "lines": 93,
+      "path": "scripts/agent-control/orchestrate.mjs",
+      "size_bytes": 3854
+    },
+    {
+      "exports": [
+        "applyMutation",
+        "runManifest"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/yaml.mjs",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path"
+      ],
+      "lines": 145,
+      "path": "scripts/agent-control/proof-mutation.mjs",
+      "size_bytes": 5854
+    },
+    {
+      "extension": ".ps1",
+      "lines": 136,
+      "path": "scripts/agent-control/select-directive.ps1",
+      "size_bytes": 5177
+    },
+    {
+      "exports": [
+        "buildStatus",
+        "renderHuman"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/adapters.mjs",
+        "./lib/dag.mjs",
+        "./lib/momentum.mjs",
+        "./lib/state.mjs",
+        "./lib/truth.mjs"
+      ],
+      "lines": 153,
+      "path": "scripts/agent-control/status.mjs",
+      "size_bytes": 6651
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/admission.mjs",
+        "../lib/events.mjs",
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 194,
+      "path": "scripts/agent-control/tests/admission.spec.mjs",
+      "size_bytes": 9176
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/dag.mjs",
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:test"
+      ],
+      "lines": 184,
+      "path": "scripts/agent-control/tests/dag.spec.mjs",
+      "size_bytes": 6636
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./helpers/powershell.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 144,
+      "path": "scripts/agent-control/tests/evaluate-run.spec.mjs",
+      "size_bytes": 6018
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/events.mjs",
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:test"
+      ],
+      "lines": 234,
+      "path": "scripts/agent-control/tests/events.spec.mjs",
+      "size_bytes": 11385
+    },
+    {
+      "exports": [
+        "PS",
+        "needsPowerShell",
+        "requireWindows"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "node:child_process"
+      ],
+      "lines": 39,
+      "path": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "size_bytes": 1465
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/adapters.mjs",
+        "../lib/correction.mjs",
+        "../lib/dag.mjs",
+        "../lib/momentum.mjs",
+        "../lib/orchestrator.mjs",
+        "../lib/state.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:test"
+      ],
+      "lines": 238,
+      "path": "scripts/agent-control/tests/orchestration.spec.mjs",
+      "size_bytes": 11586
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/dag.mjs",
+        "../lib/platform-dag.mjs",
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:test"
+      ],
+      "lines": 525,
+      "path": "scripts/agent-control/tests/platform-dag.spec.mjs",
+      "size_bytes": 27105
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/adapters.mjs",
+        "../lib/admission.mjs",
+        "../lib/dag.mjs",
+        "../lib/orchestrator.mjs",
+        "../lib/reconcile.mjs",
+        "../lib/state.mjs",
+        "../lib/truth.mjs",
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 442,
+      "path": "scripts/agent-control/tests/reconcile.spec.mjs",
+      "size_bytes": 23365
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/events.mjs",
+        "../lib/state.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 141,
+      "path": "scripts/agent-control/tests/recovery.spec.mjs",
+      "size_bytes": 5985
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./helpers/powershell.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 172,
+      "path": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "size_bytes": 7511
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/state-machine.mjs",
+        "node:assert/strict",
+        "node:test"
+      ],
+      "lines": 100,
+      "path": "scripts/agent-control/tests/state-machine.spec.mjs",
+      "size_bytes": 4297
+    },
+    {
+      "exports": [
+        "OWNER",
+        "blocked",
+        "cleanup",
+        "comment",
+        "cursor",
+        "done",
+        "git",
+        "install",
+        "invocations",
+        "makeWorld",
+        "posts",
+        "samePath",
+        "setComments",
+        "setTranscripts",
+        "tick",
+        "worker"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path"
+      ],
+      "lines": 139,
+      "path": "scripts/agent-control/tests/windows/harness.mjs",
+      "size_bytes": 5617
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../helpers/powershell.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 183,
+      "path": "scripts/agent-control/tests/windows/install.spec.mjs",
+      "size_bytes": 9114
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../helpers/powershell.mjs",
+        "./harness.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 107,
+      "path": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "size_bytes": 3590
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../helpers/powershell.mjs",
+        "./harness.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 126,
+      "path": "scripts/agent-control/tests/windows/worker-retry.spec.mjs",
+      "size_bytes": 4559
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../helpers/powershell.mjs",
+        "./harness.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 114,
+      "path": "scripts/agent-control/tests/windows/worker-worktree.spec.mjs",
+      "size_bytes": 4278
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./helpers/powershell.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 193,
+      "path": "scripts/agent-control/tests/worker.spec.mjs",
+      "size_bytes": 9527
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:test"
+      ],
+      "lines": 56,
+      "path": "scripts/agent-control/tests/yaml-escapes.spec.mjs",
+      "size_bytes": 2234
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:test"
+      ],
+      "lines": 176,
+      "path": "scripts/agent-control/tests/yaml.spec.mjs",
+      "size_bytes": 6768
+    },
+    {
+      "extension": ".ps1",
+      "lines": 76,
+      "path": "scripts/agent-control/uninstall-claude-worker.ps1",
+      "size_bytes": 2771
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/dag.mjs"
+      ],
+      "lines": 33,
+      "path": "scripts/agent-control/validate-dag.mjs",
+      "size_bytes": 1049
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/dag.mjs",
+        "./lib/platform-dag.mjs"
+      ],
+      "lines": 41,
+      "path": "scripts/agent-control/validate-platform-dag.mjs",
+      "size_bytes": 1709
+    },
+    {
+      "exports": [],
       "extension": ".js",
       "imports": [],
       "lines": 264,
@@ -61310,6 +62261,17 @@
       "lines": 57,
       "path": "scripts/auth-audit/verify-supabase-keys.mjs",
       "size_bytes": 2484
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "../apps/server/src/core/authority/authority-inventory.service",
+        "@keyflow/db"
+      ],
+      "lines": 93,
+      "path": "scripts/authority-inventory.ts",
+      "size_bytes": 4540
     },
     {
       "exports": [],
@@ -61350,7 +62312,7 @@
       ],
       "lines": 254,
       "path": "scripts/backfill-founding-memberships.ts",
-      "size_bytes": 10363
+      "size_bytes": 10372
     },
     {
       "exports": [],
@@ -62020,22 +62982,22 @@
   ],
   "meta": {
     "extensions": {
-      "": 15,
+      "": 14,
       ".css": 2,
       ".csv": 23,
       ".example": 1,
       ".html": 8,
       ".ico": 1,
       ".js": 10,
-      ".json": 37,
-      ".md": 560,
-      ".mjs": 26,
+      ".json": 36,
+      ".md": 564,
+      ".mjs": 65,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
       ".png": 13,
       ".prisma": 1,
-      ".ps1": 2,
+      ".ps1": 9,
       ".py": 43,
       ".pyc": 2,
       ".sh": 28,
@@ -62043,20 +63005,20 @@
       ".svg": 6,
       ".template": 1,
       ".toml": 2,
-      ".ts": 2118,
+      ".ts": 2131,
       ".tsbuildinfo": 1,
       ".tsv": 1,
       ".tsx": 1233,
       ".txt": 7,
       ".xlsx": 1,
       ".xsd": 39,
-      ".yaml": 16,
-      ".yml": 13
+      ".yaml": 21,
+      ".yml": 15
     },
-    "root": "/home/user/KEYFLOWOS",
+    "root": "C:/Users/Public/kfw-architecture-scan/KEYFLOWOS",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3387,
-    "total_files": 4359,
-    "total_lines": 1049445
+    "source_files": 3439,
+    "total_files": 4427,
+    "total_lines": 1127042
   }
 }
