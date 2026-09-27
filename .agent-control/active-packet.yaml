@@ -11,6 +11,9 @@ correction_ack_message_id: CC-ACK-META-CONTROL-PARSER-FINAL-001
 escape_review_message_id: CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
 escape_review_comment_id: 5860337548
 escape_ack_message_id: CC-ACK-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
+source_head_review_message_id: CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
+source_head_review_comment_id: 5860592508
+source_head_ack_message_id: CC-ACK-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
 tracking_issue: 98
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
 implementation_branch: impl/kf-meta-control-parser-001
@@ -128,6 +131,26 @@ escape_correction:
   constraints:
     - no merge, activation, ACTION-001 release, scope broadening, gate weakening
     - no production/provider traffic, secrets, OAuth, paid resources or programme-state re-anchor
+
+source_head_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
+  source_head: 07e272c7ff5e93e7db07aa54419c01b4d19df1be
+  state: CORRECTION_REQUIRED
+  scope_changed: false
+  finding: >
+    Copilot review 5332418633 at 82454cce: select-directive.mjs emits only
+    source_main, so a valid source-head-only authority message is based on
+    origin/main by the worker. Inside the authorized D3 selector migration.
+  required:
+    - preserve the selector JSON shape
+    - when source_main is absent, project source_head into the existing source_main output field
+    - explicit source_main wins when both are present
+    - source-head-only and precedence regressions
+    - add or retarget a live negative control
+    - portable, Windows, mutation, exact-head CI, fresh Copilot review, superseding RETURN
+  constraints:
+    - no merge, activation, ACTION-001 release, scope broadening beyond D3, gate weakening
+    - no production/provider traffic or programme-state re-anchor
 
 return_contract: >
   ACK exact source/branch/scope before mutation; post CONTRADICTION if current
