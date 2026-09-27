@@ -29,7 +29,7 @@ source_head_ack_message_id: CC-ACK-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
 evidence_order_review_message_id: CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001
 evidence_order_ack_message_id: CC-ACK-META-CONTROL-PARSER-EVIDENCE-ORDER-001
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
-source_head: 940d89b93abd5755e17771b490c9e6f8035c0627
+source_head: 6d8a6bd83e9c2e8b1964a87937e27e8c5d633344
 implementation_branch: impl/kf-meta-control-parser-001
 pr_number: 100
 state: PROVING
@@ -118,6 +118,10 @@ commits:
     subject: return artifact for 07e272c7
   - sha: 940d89b93abd5755e17771b490c9e6f8035c0627
     subject: selector projects source_head into source_main (CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001)
+  - sha: d9b12873239b91d179e574de279d76f052883a9e
+    subject: return artifact for 940d89b9
+  - sha: 6d8a6bd83e9c2e8b1964a87937e27e8c5d633344
+    subject: pre-RETURN artifact cannot claim a RETURN or exact-head proof (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001)
 
 contract_as_implemented:
   field_syntax:
@@ -272,8 +276,9 @@ proof_matrix:
 
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
-  portable_total: 270
-  portable_passed: 270
+  at: 6d8a6bd8
+  portable_total: 279
+  portable_passed: 279
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
   windows_total: 19
   windows_passed: 19
@@ -292,13 +297,13 @@ tests:
     from ChatGPT selects nothing", and its old slot holds a ChatGPT ACK.
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 940d89b9
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 6d8a6bd8
   baseline_before_change: 32/32 live
-  result: 55/55 live at 940d89b9
+  result: 61/61 live at 6d8a6bd8
   retargeted_same_claim_and_proof:
     - NC-WORKER-SENDERLESS-REJECTED, NC-WORKER-SENDER-EXACT, NC-WORKER-AUTHOR-ALLOWLIST (select-directive.ps1 -> lib/control-envelope.mjs)
     - NC-RECONCILE-AUTHORITY-SENDER (reconcile.mjs -> lib/control-envelope.mjs rejectionOf)
-  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-ESCAPED-COMMENT, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-EVENTS-MALFORMED-AUTHORITY-KIND, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-SELECTOR-SOURCE-HEAD-FALLBACK, NC-SELECTOR-SOURCE-MAIN-PRECEDENCE, NC-WORKFLOW-D1-TOKEN]
+  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-ESCAPED-COMMENT, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-EVENTS-MALFORMED-AUTHORITY-KIND, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-SELECTOR-SOURCE-HEAD-FALLBACK, NC-SELECTOR-SOURCE-MAIN-PRECEDENCE, NC-WORKFLOW-D1-TOKEN, NC-RETURN-EVIDENCE-RETURN-ID, NC-RETURN-EVIDENCE-STATUS, NC-RETURN-EVIDENCE-FUTURE-ID, NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING, NC-RETURN-EVIDENCE-VOCABULARY, NC-RETURN-ARTIFACT-PREMATURE-ID]
   history: >
     48/48 live at 8744d90c and at a8c87ccb. At 81a2ddd2, NC-PLATFORM-DUPLICATE-ID
     was VACUOUS: its platform-level guard was unreachable behind collectAuthority's
@@ -310,6 +315,7 @@ negative_controls:
     NC-EVENTS-MALFORMED-AUTHORITY-KIND (52/52). 07e272c7 added
     NC-ENVELOPE-ESCAPED-COMMENT (53/53). 940d89b9 added
     NC-SELECTOR-SOURCE-HEAD-FALLBACK and NC-SELECTOR-SOURCE-MAIN-PRECEDENCE (55/55).
+    6d8a6bd8 added the six NC-RETURN-* controls (61/61).
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline

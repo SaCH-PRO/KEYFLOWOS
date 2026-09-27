@@ -152,6 +152,29 @@ source_head_correction:
     - no merge, activation, ACTION-001 release, scope broadening beyond D3, gate weakening
     - no production/provider traffic or programme-state re-anchor
 
+evidence_order_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001
+  ack: CC-ACK-META-CONTROL-PARSER-EVIDENCE-ORDER-001
+  source_head: d9b12873239b91d179e574de279d76f052883a9e
+  state: CORRECTION_REQUIRED
+  scope_changed: false
+  finding: >
+    Copilot review 5332604917 at d9b12873: the branch artifact named a RETURN
+    before it was posted and recorded exact-head proof as complete while
+    checks were pending.
+  required:
+    - keep the semantic source_head fix unchanged
+    - claude-return.yaml is a truthful pre-RETURN artifact; return_message_id null; return_status AWAITING_POSTCHECK_RETURN
+    - exact-head checks and review not yet complete stay PENDING, never PASS
+    - regression proof that a pre-return artifact cannot claim a posted RETURN or completed exact-head proof
+    - portable, Windows, mutation, all exact-head workflows, fresh Copilot review, no unresolved substantive finding
+    - only then post the superseding RETURN on #80, with no further branch mutation
+  evidence_policy: only PROVEN satisfies a required gate; pending or unknown is never green
+  constraints:
+    - no merge, programme-state re-anchor, ACTION-001 release, activation, map regeneration
+    - no scope beyond the evidence-order correction and the authorized D3 fix
+    - no production/provider traffic or gate weakening
+
 return_contract: >
   ACK exact source/branch/scope before mutation; post CONTRADICTION if current
   repository truth invalidates the packet; otherwise implement, prove, open the
