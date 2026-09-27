@@ -192,7 +192,9 @@ let nextId = 1000;
 function comment(fields, { author = 'SaCH-PRO', at } = {}) {
   nextId += 1;
   const body = ['```yaml', ...Object.entries(fields).map(([k, v]) => `${k}: ${v}`), '```'].join('\n');
-  return { id: nextId, created_at: at || `2026-09-25T10:${String(nextId % 60).padStart(2, '0')}:00Z`, user: { login: author }, body };
+  const created = at || `2026-09-25T10:${String(nextId % 60).padStart(2, '0')}:00Z`;
+  // REST shape: updated_at equal to created_at is the evidence of "never edited".
+  return { id: nextId, created_at: created, updated_at: created, user: { login: author }, body };
 }
 const activateFields = (extra = {}) => ({
   message_id: `CG-DIRECTIVE-TEST-${nextId}`,
@@ -223,6 +225,7 @@ test('the real correction directive does not activate the programme', () => {
   const directive = {
     id: 5830323946,
     created_at: '2026-09-25T09:46:43Z',
+    updated_at: '2026-09-25T09:46:43Z',
     user: { login: 'SaCH-PRO' },
     body: [
       '```yaml',

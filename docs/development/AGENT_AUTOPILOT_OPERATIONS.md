@@ -152,6 +152,10 @@ Agent Control Gate enforces the same contract with or without automation.
 | Orchestrator publishes `REPORT_DRIFT` / `DERIVED_STATE_STALE_AUTHORITY` | a ChatGPT DIRECTIVE/REVIEW/HOLD/RESUME is newer than programme-state's `authority_basis` | expected after every new authority message; re-derive programme-state from that message and repository truth in a reviewed commit and re-anchor it. Never edit the anchor alone |
 | `REPORT_DRIFT` / `PR_ALREADY_MERGED`, `PR_NOT_MERGED`, `PR_CLOSED_UNMERGED`, `PR_BRANCH_MISMATCH`, `SOURCE_MAIN_NOT_ON_MAIN` | the repository contradicts the projected packet state | repository truth wins: verify post-merge state, then re-derive the projection |
 | `REPORT_DRIFT` / `AUTHORITY_UNVERIFIABLE` or `REPO_TRUTH_UNVERIFIABLE` | `gh` could not read #80 or the repository (no token on the runner, expired login, API error) | fix access; nothing advances meanwhile, by design |
+| `REPORT_DRIFT` / `AUTHORITY_EDITED` | a comment by an allowlisted author on #80 has been edited, so earlier authority cannot be verified | no automated recovery by design; ChatGPT decides how to proceed. Never edit #80 comments |
+| `REPORT_DRIFT` / `AUTHORITY_MALFORMED` | an authority message newer than programme-state's anchor has a repeated key, an unmatched quote or a missing envelope key | treat it as a possible hold; re-derive the projection past it only in a reviewed commit |
+| `REPORT_DRIFT` / `AUTHORITY_ORDER_AMBIGUOUS` | an authority comment has no id or timestamp, or two share an id | the snapshot is unusable; re-read #80 |
+| Worker logs `newest_authority_malformed` / `newest_authority_not_actionable` / `authority_edited` | the selector's shared AUTHORITY profile refused to wake | expected fail-closed behaviour; ChatGPT posts a well-formed DIRECTIVE/REVIEW |
 | Status shows `BOARD DRIFT` | the intelligence board disagrees with programme-state | neither advances work; reconcile both against #80 and the repository at a checkpoint |
 | State file looks wrong | hand-edited while running | stop the worker, correct it, re-run `status.mjs --verify`; `validateState` rejects impossible values on save |
 

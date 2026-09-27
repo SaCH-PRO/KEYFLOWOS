@@ -15,9 +15,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseYaml } from './yaml.mjs';
 import { buildDag } from './dag.mjs';
-import { readField } from './events.mjs';
-import { AUTHORITY_MESSAGE_TYPES, AUTHORITY_SENDER, AUTHORIZED_AUTHORS, collectAuthority } from './reconcile.mjs';
-import { HEALTH, STATES } from './state-machine.mjs';
+import {
+  AUTHORITY_MESSAGE_TYPES,
+  AUTHORITY_SENDER,
+  AUTHORIZED_AUTHORS,
+  PROFILES,
+  REQUIRED_ENVELOPE,
+  collectAuthority,
+  compareAuthorityOrder,
+  envelopeField,
+  hasDeterministicOrder,
+  normalizeComment,
+  parseEnvelope,
+  validateEnvelope,
+} from './control-envelope.mjs';
+
+export { REQUIRED_ENVELOPE };
 
 export const PLATFORM_DAG_PATH = 'docs/development/KEYFLOWOS_PLATFORM_DAG.yaml';
 export const AUTOPILOT_POLICY_PATH = 'docs/development/AGENT_AUTOPILOT_POLICY.yaml';
@@ -243,91 +256,14 @@ export function validatePlatformContract(doc, policy) {
 }
 
 /**
- * Fields every issue #80 control message must carry (issue #80 body, "Every
- * message must include"). `source_main/source_head` is satisfied by either.
- * An authority message missing any of them is malformed and cannot activate.
- */
-export const REQUIRED_ENVELOPE = Object.freeze([
-  'message_id',
-  'packet_id',
-  'sender',
-  'source_main|source_head',
-  'implementation_branch',
-  'state',
-  'health',
-  'scope_changed',
-  'production_touched',
-]);
-
-const SHA = /^[0-9a-f]{40}$/;
-const BOOLEAN = ['true', 'false'];
-
-/**
- * Fields read from a message naming the programme. readField strips a leading
- * and a trailing quote independently, so `programme_action: 'ACTIVATE` would
- * read as ACTIVATE; the raw value is checked for balanced quoting first.
- */
-const QUOTE_CHECKED_FIELDS = Object.freeze([
-  'message_id', 'message_type', 'packet_id', 'sender', 'source_main', 'source_head',
-  'implementation_branch', 'state', 'health', 'scope_changed', 'production_touched',
-  'programme', 'programme_action',
-]);
-
-/** Same line match as events.mjs readField, without unquoting. */
-function rawField(body, key) {
-  if (typeof body !== 'string') return null;
-  const m = body.match(new RegExp(`^${key}:[ \\t]*([^\\n]*)$`, 'm'));
-  return m ? m[1].trim() : null;
-}
-
-/**
- * Every value of `key:` at a line start, unquoted as readField does. Used by
- * the naming prefilter so a repeated field cannot hide the programme behind
- * a first occurrence that fails the filter.
- */
-function allFieldValues(body, key) {
-  if (typeof body !== 'string') return [];
-  return [...body.matchAll(new RegExp(`^${key}:[ \\t]*([^\\n]*)$`, 'gm'))]
-    .map((m) => m[1].trim().replace(/^["']|["']$/g, ''))
-    .filter((v) => v !== '' && v !== 'null');
-}
-
-/** Occurrences of `key:` at a line start; readField silently uses the first. */
-function fieldCount(body, key) {
-  if (typeof body !== 'string') return 0;
-  return (body.match(new RegExp(`^${key}:`, 'gm')) || []).length;
-}
-
-function unbalancedQuote(raw) {
-  const opens = /^["']/.test(raw);
-  const closes = /["']$/.test(raw);
-  if (!opens && !closes) return false;
-  return !(opens && closes && raw.length >= 2 && raw[0] === raw[raw.length - 1]);
-}
-
-/**
- * Envelope problems of a raw #80 comment body: absent fields, present fields
- * whose value is outside the repository vocabulary (state-machine.mjs
- * STATES/HEALTH, full 40-hex SHAs, true/false), and control fields with
- * unbalanced quotes or more than one occurrence. Empty list = well formed.
+ * ACTIVATION-profile problems of a raw #80 comment body (lib/control-envelope.mjs):
+ * everything AUTHORITY rejects -- sender, message type, ids, absent envelope
+ * keys, repeated keys, unmatched quotes -- plus absent-or-null envelope values
+ * and values outside the repository vocabulary (state-machine.mjs
+ * STATES/HEALTH, full 40-hex SHAs, true/false). Empty list = may activate.
  */
 export function missingEnvelopeFields(body) {
-  const problems = REQUIRED_ENVELOPE.filter((spec) => spec.split('|').every((key) => readField(body, key) === null));
-  const value = (key) => readField(body, key);
-  for (const key of ['source_main', 'source_head']) {
-    if (value(key) !== null && !SHA.test(value(key))) problems.push(`${key} (not a 40-hex SHA)`);
-  }
-  if (value('state') !== null && !STATES.includes(value('state'))) problems.push(`state (${value('state')} is not a packet state)`);
-  if (value('health') !== null && !HEALTH.includes(value('health'))) problems.push(`health (${value('health')} is not ${HEALTH.join('/')})`);
-  for (const key of ['scope_changed', 'production_touched']) {
-    if (value(key) !== null && !BOOLEAN.includes(value(key))) problems.push(`${key} (not true/false)`);
-  }
-  for (const key of QUOTE_CHECKED_FIELDS) {
-    const raw = rawField(body, key);
-    if (raw !== null && unbalancedQuote(raw)) problems.push(`${key} (unmatched quote)`);
-    if (fieldCount(body, key) > 1) problems.push(`${key} (repeated; ambiguous)`);
-  }
-  return problems;
+  return validateEnvelope(parseEnvelope(body), PROFILES.ACTIVATION);
 }
 
 /**
@@ -366,44 +302,41 @@ export function platformProgrammeState(comments, doc, policy) {
   }
 
   // Always the fixed authority constants: no caller override of the allowlist.
+  // An edited or unordered #80 is unverifiable here as everywhere else.
   const authority = collectAuthority(comments);
   if (!authority.verified) {
     return { state: PLATFORM_STATES.INACTIVE, reason: authority.reason, decided_by: null };
   }
 
-  // collectAuthority drops a comment without message_id or with a sender other
-  // than exactly `chatgpt`. From an allowlisted author, with an authority type
-  // and naming this programme, such a comment is a malformed message about
-  // this programme: it must hold, not vanish. Other authors stay ignored.
+  // Every authority-typed comment from an allowlisted author that names this
+  // programme is considered, whatever its sender: a wrong sender, a missing
+  // message_id or any other ACTIVATION problem makes it a malformed message
+  // about this programme, which must hold, not vanish. Other authors stay ignored.
   const authors = AUTHORIZED_AUTHORS.map((a) => a.toLowerCase());
   const naming = [];
-  for (const comment of comments) {
-    const body = comment?.body || '';
+  for (const raw of comments) {
+    const comment = normalizeComment(raw);
+    const env = parseEnvelope(comment.body);
     // Any occurrence qualifies: a repeated field is then rejected as malformed
-    // by missingEnvelopeFields instead of being skipped here.
-    if (!allFieldValues(body, 'programme').includes(PLATFORM_PROGRAMME_ID)) continue;
-    const messageType = allFieldValues(body, 'message_type').find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));
+    // by the ACTIVATION profile instead of being skipped here.
+    if (!(env.values.programme || []).includes(PLATFORM_PROGRAMME_ID)) continue;
+    const messageType = (env.values.message_type || []).find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));
     if (!messageType) continue;
-    if (!authors.includes(String(comment?.user?.login || '').toLowerCase())) continue;
-    if (comment.id === undefined || comment.id === null || !comment.created_at) {
-      return { state: PLATFORM_STATES.INACTIVE, reason: 'a comment naming this programme has no id or timestamp', decided_by: null };
-    }
-    const missing = missingEnvelopeFields(body);
-    const sender = readField(body, 'sender');
-    if (sender !== null && sender !== AUTHORITY_SENDER) missing.push(`sender (${sender} is not exactly ${AUTHORITY_SENDER})`);
-    naming.push({
-      message_id: readField(body, 'message_id'),
+    if (!authors.includes(String(comment.author || '').toLowerCase())) continue;
+    const entry = {
+      message_id: envelopeField(env, 'message_id'),
       message_type: messageType,
       comment_id: comment.id,
       created_at: comment.created_at,
-      programme_action: readField(body, 'programme_action'),
-      missing_envelope: missing,
-    });
+      programme_action: envelopeField(env, 'programme_action'),
+      missing_envelope: validateEnvelope(env, PROFILES.ACTIVATION),
+    };
+    if (!hasDeterministicOrder(entry)) {
+      return { state: PLATFORM_STATES.INACTIVE, reason: 'a comment naming this programme has no id or timestamp', decided_by: null };
+    }
+    naming.push(entry);
   }
-  naming.sort((a, b) => {
-    const t = Date.parse(a.created_at) - Date.parse(b.created_at);
-    return t !== 0 ? t : Number(a.comment_id) - Number(b.comment_id);
-  });
+  naming.sort(compareAuthorityOrder);
 
   if (!naming.length) {
     return { state: PLATFORM_STATES.INACTIVE, reason: 'no valid authority message names this programme', decided_by: null };

@@ -22,7 +22,9 @@ const INDENT = '  ';
 
 // ---------------------------------------------------------------- parsing
 
-function stripComment(text) {
+// Exported so the issue #80 envelope parser (lib/control-envelope.mjs) reads
+// inline comments and quoting exactly as this codec does.
+export function stripComment(text) {
   // Only strip a '#' that starts a token, so URLs and SHAs survive.
   let quote = null;
   for (let i = 0; i < text.length; i += 1) {
@@ -40,7 +42,7 @@ function stripComment(text) {
   return text;
 }
 
-function parseScalar(raw) {
+export function parseScalar(raw) {
   const text = stripComment(raw).trim();
   if (text === '' || text === '~' || text === 'null') return null;
   if (text === 'true') return true;

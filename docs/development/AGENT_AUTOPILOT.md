@@ -53,11 +53,12 @@ not classify holds or releases from message ids or prose either: any newer
 authority message makes the projection stale until someone re-derives it in a
 reviewed commit.
 
-The CI observer passes no token to the decide step
-(`.github/workflows/agent-control-autopilot.yml`), so it cannot read #80 there.
-The published `derived_action` is then `REPORT_DRIFT` (AUTHORITY_UNVERIFIABLE)
-until that step gets a token. That is fail-closed by design; enabling it is a
-workflow change outside CG-DIRECTIVE-META-STATE-RECONCILE-001's scope.
+The CI observer's decide step reads #80 and the repository with the job's own
+token (`GH_TOKEN: ${{ github.token }}`, plus `pull-requests: read` on that job;
+KF-META-CONTROL-PARSER-001 D1). Before that, every read failed there, and the
+published `derived_action` was `REPORT_DRIFT` with AUTHORITY_UNVERIFIABLE and
+REPO_TRUTH_UNVERIFIABLE even on healthy evidence. An unreadable #80 or
+repository still fails closed the same way.
 
 ## Spanning packets and the wave gate
 
@@ -180,7 +181,11 @@ Hardening (CG-REVIEW-META-AUTO-WORKER-001/-002, worker contract 2):
   allowlist (default `SaCH-PRO`). The repository is public, so `sender:` alone
   proves nothing. Claude's own messages come from the same account and are
   excluded by their sender. This is an owner-account boundary, not proof that
-  a message came from ChatGPT (`select-directive.ps1`).
+  a message came from ChatGPT. Since KF-META-CONTROL-PARSER-001 the rule is the
+  shared AUTHORITY profile (`lib/control-envelope.mjs`, via `select-directive.mjs`,
+  wrapped by `select-directive.ps1`). The worker also wakes on nothing when
+  the newest authority is malformed, a HOLD or RESUME, or when any allowlisted
+  comment has been edited.
 - **Completion.** A run counts as processed only when the session ends with
   `KEYFLOW-WORKER-DONE: <message_id>`. Exit status alone proves nothing
   (`evaluate-run.ps1`).
@@ -215,7 +220,8 @@ recovery.
 - `scripts/agent-control/validate-dag.mjs` — DAG executability proof.
 - `scripts/agent-control/proof-mutation.mjs` + `negative-controls.yaml` — negative controls.
 - `scripts/agent-control/claude-worker.ps1` (+ install/uninstall) — local worker.
-- `scripts/agent-control/select-directive.ps1` — the worker's command-authority rule.
+- `scripts/agent-control/lib/control-envelope.mjs` — the one #80 envelope parser (AUTHORITY / ACTIVATION profiles).
+- `scripts/agent-control/select-directive.mjs` (+ `select-directive.ps1` wrapper) — the worker's command-authority rule.
 - `scripts/agent-control/evaluate-run.ps1` — the worker's run verdict.
 - `scripts/agent-control/tests/*.spec.mjs` — portable proofs.
 - `scripts/agent-control/tests/windows/*.spec.mjs` — Windows worker/install proofs (fail off Windows).

@@ -89,9 +89,13 @@ jobs:
 
   normalize-event:
     if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.number == 80)
+    # Reconciliation reads #80 (issues), main and source_main ancestry
+    # (contents) and the projected PR (pull-requests). All reads; issues:write
+    # is only for publishing the wake event.
     permissions:
       contents: read
       issues: write
+      pull-requests: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted main
@@ -117,6 +121,11 @@ jobs:
       - name: Derive next legal action
         id: decide
         shell: bash
+        # The job's own token, for gh reads of #80 and repository truth. Without
+        # it every read failed and reconciliation reported AUTHORITY_UNVERIFIABLE
+        # and REPO_TRUTH_UNVERIFIABLE on healthy evidence (KF-META-CONTROL-PARSER-001 D1).
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           json="$(node scripts/agent-control/orchestrate.mjs --json)"
