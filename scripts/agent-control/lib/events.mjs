@@ -90,7 +90,7 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
     }
     // A repeated or badly quoted field makes the whole envelope ambiguous;
     // it is recorded, never acted on.
-    const kind = env.problems.length ? 'MALFORMED' : msg.message_type || 'CONTROL_COMMENT';
+    let kind = env.problems.length ? 'MALFORMED' : msg.message_type || 'CONTROL_COMMENT';
     let actionable = ACTIONABLE_MESSAGE_TYPES.includes(kind);
     // An authority-typed message wakes nothing unless it IS authority under the
     // shared AUTHORITY profile: ChatGPT sender, allowlisted author, full envelope.
@@ -101,6 +101,11 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
       const problems = rejection ? [rejection] : validateEnvelope(env, PROFILES.AUTHORITY);
       authority = { valid: problems.length === 0, problems };
       if (problems.length) actionable = false;
+      // Attributable authority that fails the profile is malformed authority,
+      // as collectAuthority() classifies it; the claimed type stays in
+      // message_type. A forged or non-ChatGPT message is somebody else's and
+      // keeps the kind it claims.
+      if (problems.length && !rejection) kind = 'MALFORMED';
     }
     return {
       actionable,

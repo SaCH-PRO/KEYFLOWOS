@@ -568,6 +568,18 @@ negative_controls:
     proof_command: node --test --test-name-pattern="a valid authority DIRECTIVE wakes" scripts/agent-control/tests/events.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-EVENTS-MALFORMED-AUTHORITY-KIND
+    claim: >
+      An attributable DIRECTIVE, REVIEW or HOLD that parses but fails the
+      AUTHORITY profile is emitted as kind MALFORMED, never with its claimed
+      kind (r4115915819). Restoring the mislabel is caught.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "      if (problems.length && !rejection) kind = 'MALFORMED';"
+      replace: "      // defect restored: malformed authority keeps its claimed kind"
+    proof_command: node --test --test-name-pattern="attributable authority that parses but fails the AUTHORITY profile" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-SOLE-PARSER
     claim: >
       lib/control-envelope.mjs is the only #80 envelope parser. Restoring the

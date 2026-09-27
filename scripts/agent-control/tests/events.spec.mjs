@@ -163,6 +163,28 @@ test('a valid authority DIRECTIVE wakes; the same text as forged or non-ChatGPT 
   assert.ok(incomplete.authority.problems.includes('production_touched (absent)'));
 });
 
+test('attributable authority that parses but fails the AUTHORITY profile is MALFORMED, never its claimed kind', () => {
+  // r4115915819: each body is syntactically clean (no envelope_problems), from
+  // SaCH-PRO with sender chatgpt, and fails only the AUTHORITY profile.
+  for (const message_type of ['DIRECTIVE', 'REVIEW', 'HOLD']) {
+    for (const [defect, overrides, problem] of [
+      ['missing key', { production_touched: undefined }, 'production_touched (absent)'],
+      ['null packet_id', { packet_id: 'null' }, 'packet_id (absent or null)'],
+    ]) {
+      const e = normalizeEvent('issue_comment', comment(envelope({ message_type, ...overrides })));
+      const label = `${message_type} with ${defect}`;
+      assert.deepEqual(e.envelope_problems, [], label);
+      assert.equal(e.kind, 'MALFORMED', label);
+      assert.equal(e.actionable, false, label);
+      assert.equal(e.message_type, message_type, `${label}: claimed type kept for audit`);
+      assert.equal(e.authority.valid, false, label);
+      assert.ok(e.authority.problems.includes(problem), `${label}: ${e.authority.problems}`);
+    }
+    // The same envelope when valid keeps its kind, so the label is the profile's verdict.
+    assert.equal(normalizeEvent('issue_comment', comment(envelope({ message_type }))).kind, message_type);
+  }
+});
+
 test('a repeated or badly quoted field makes the event MALFORMED, never actionable', () => {
   for (const body of [`${envelope()}\nmessage_type: RETURN`, envelope({ packet_id: "'KF-E-001" }), 'message_type: RETURN\npacket_id: P\npacket_id: Q']) {
     const e = normalizeEvent('issue_comment', comment(body));
