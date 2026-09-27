@@ -336,6 +336,11 @@ export function platformProgrammeState(comments, doc, policy) {
     }
     naming.push(entry);
   }
+  // Two naming messages with one id cannot be ordered: the result would
+  // depend on input order. Unverifiable, so INACTIVE.
+  if (new Set(naming.map((n) => n.comment_id)).size !== naming.length) {
+    return { state: PLATFORM_STATES.INACTIVE, reason: 'two comments naming this programme share a comment id; ordering is not deterministic', decided_by: null };
+  }
   naming.sort(compareAuthorityOrder);
 
   if (!naming.length) {

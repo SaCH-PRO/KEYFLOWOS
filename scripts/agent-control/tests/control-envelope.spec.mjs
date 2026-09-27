@@ -182,9 +182,12 @@ test('an unknown profile is an error, not a pass', () => {
 test('NC edited comment: any edit by an allowlisted author fails closed as AUTHORITY_EDITED', () => {
   const clean = collectAuthority([rest(body(fields()))]);
   assert.equal(clean.verified, true, 'referent');
-  const editedAuthority = rest(body(fields()), { updated: '2026-09-28T00:00:00Z' });
+  // Issue #98: an edited newest DIRECTIVE, HOLD and REVIEW, plus an edited ACK
+  // (an edit can turn any comment into, or out of, authority).
+  const editedNewest = ['DIRECTIVE', 'HOLD', 'REVIEW'].map((type) =>
+    rest(body(fields({ message_id: `CG-${type}-EDITED`, message_type: type })), { at: '2026-10-05T00:00:00Z', updated: '2026-10-06T00:00:00Z' }));
   const editedAck = rest(body({ message_id: 'CC-ACK-1', message_type: 'ACK', sender: 'claude-code' }), { updated: '2026-09-28T00:00:00Z' });
-  for (const c of [editedAuthority, editedAck]) {
+  for (const c of [...editedNewest, editedAck]) {
     const auth = collectAuthority([rest(body(fields({ message_id: 'OLDER' }))), c]);
     assert.equal(auth.verified, false);
     assert.equal(auth.code, AUTHORITY_FAILURES.EDITED);
@@ -225,6 +228,29 @@ test('NC ambiguous ordering: missing id, unparseable time or a shared id fails c
     assert.equal(auth.verified, false);
     assert.equal(auth.code, AUTHORITY_FAILURES.ORDER_AMBIGUOUS);
   }
+});
+
+test('NC conflicting same-order candidates: a rejected and a candidate message sharing an id fail closed', () => {
+  const real = rest(body(fields({ message_id: 'REAL' })), { id: 77 });
+  const other = rest(body(fields({ message_id: 'OTHER', sender: 'claude-code' })), { id: 77 });
+  const auth = collectAuthority([real, other]);
+  assert.equal(auth.verified, false);
+  assert.equal(auth.code, AUTHORITY_FAILURES.ORDER_AMBIGUOUS);
+  assert.equal(collectAuthority([real]).verified, true, 'referent');
+});
+
+test('the authority record keeps the audit evidence it was read from (issue #98)', () => {
+  const c = rest(body(fields()), { id: 4242, at: '2026-09-27T05:00:00Z' });
+  const [entry] = collectAuthority([c]).messages;
+  assert.equal(entry.comment_id, 4242);
+  assert.equal(entry.created_at, '2026-09-27T05:00:00Z');
+  assert.equal(entry.evidence.updated_at, '2026-09-27T05:00:00Z');
+  assert.equal(entry.evidence.body, c.body);
+  assert.equal(entry.evidence.edited, false);
+  const gh = { author: { login: 'SaCH-PRO' }, body: body(fields()), createdAt: '2026-09-27T00:00:00Z', includesCreatedEdit: false, url: 'https://github.com/o/r/issues/80#issuecomment-5' };
+  const [viaGh] = collectAuthority([gh]).messages;
+  assert.equal(viaGh.evidence.includes_created_edit, false);
+  assert.equal(viaGh.comment_id, 5);
 });
 
 test('ordering is created_at then comment id, whatever the input order', () => {

@@ -219,6 +219,7 @@ export function rejectionOf(env, author, authors = AUTHORIZED_AUTHORS) {
  *   REST       {id, created_at, updated_at, user: {login}, body, html_url}
  *   gh view    {id: 'IC_...', createdAt, includesCreatedEdit, author: {login}, body, url}
  * `edited` is true, false, or null when the shape carries no edit evidence.
+ * The raw body and timestamps are kept as audit evidence (issue #98).
  */
 export function normalizeComment(comment) {
   const c = comment || {};
@@ -236,6 +237,8 @@ export function normalizeComment(comment) {
   return {
     id,
     created_at: createdAt,
+    updated_at: typeof c.updated_at === 'string' ? c.updated_at : null,
+    includes_created_edit: typeof c.includesCreatedEdit === 'boolean' ? c.includesCreatedEdit : null,
     author: c.user?.login ?? c.author?.login ?? null,
     body: typeof c.body === 'string' ? c.body : '',
     edited: evidence.length ? evidence.some(Boolean) : null,
@@ -308,6 +311,8 @@ export function collectAuthority(comments, options = {}) {
       created_at: c.created_at,
       author: c.author,
       url: c.url,
+      // Audit evidence: exactly what was read, and the edit evidence it was read with.
+      evidence: { body: c.body, updated_at: c.updated_at, includes_created_edit: c.includes_created_edit, edited: c.edited },
       envelope: env,
     };
     const reason = rejectionOf(env, c.author, authors);
@@ -329,7 +334,9 @@ export function collectAuthority(comments, options = {}) {
   if (unordered.length) {
     return unverified(AUTHORITY_FAILURES.ORDER_AMBIGUOUS, 'an authority comment has no id or timestamp; ordering is not deterministic');
   }
-  const ids = candidates.map((e) => e.comment_id);
+  // Rejections count too: a rejected message sharing an id with a candidate
+  // means the snapshot cannot say which comment that id is.
+  const ids = [...candidates, ...rejections].map((e) => e.comment_id).filter((id) => id !== null);
   if (new Set(ids).size !== ids.length) {
     return unverified(AUTHORITY_FAILURES.ORDER_AMBIGUOUS, 'two authority comments share a comment id; ordering is not deterministic');
   }

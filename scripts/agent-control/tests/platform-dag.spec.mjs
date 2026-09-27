@@ -514,6 +514,17 @@ test('NEGATIVE CONTROL: a repeat whose first value fails the prefilter still hol
 
 const fieldLines = (body, key) => body.split('\n').filter((l) => l.startsWith(`${key}:`)).length;
 
+test('NEGATIVE CONTROL: naming messages sharing an id cannot be ordered, whatever the input order', () => {
+  // Copilot review 5330709017: a valid ACTIVATE and a wrong-sender naming
+  // message with the same id and time sorted as equal, so input order decided.
+  const at = '2026-09-26T10:00:00Z';
+  const activate = comment(activateFields(), { at });
+  const wrongSender = { ...comment(activateFields({ sender: 'claude-code' }), { at }), id: activate.id };
+  assert.equal(stateOf([activate]), PLATFORM_STATES.ACTIVE, 'referent');
+  assert.equal(stateOf([activate, wrongSender]), PLATFORM_STATES.INACTIVE);
+  assert.equal(stateOf([wrongSender, activate]), PLATFORM_STATES.INACTIVE);
+});
+
 test('hold is DIRECTIVE-only in the contract; a HOLD-typed message still holds', () => {
   const doc = clone(loadPlatformDag(repoRoot).doc);
   doc.activation.hold.message_types = ['DIRECTIVE', 'HOLD'];

@@ -508,6 +508,18 @@ negative_controls:
     proof_command: node --test --test-name-pattern="strictly additive" scripts/agent-control/tests/control-envelope.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-PLATFORM-DUPLICATE-ID
+    claim: >
+      Two messages naming the successor programme with one comment id cannot
+      be ordered, so activation cannot depend on input order (Copilot review
+      5330709017).
+    mutation:
+      file: scripts/agent-control/lib/platform-dag.mjs
+      find: "  if (new Set(naming.map((n) => n.comment_id)).size !== naming.length) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="naming messages sharing an id" scripts/agent-control/tests/platform-dag.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-RECONCILE-MALFORMED-NEWER
     claim: >
       Malformed authority newer than the projection's anchor fails closed as
