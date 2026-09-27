@@ -4,9 +4,11 @@ decision_message_id: CG-REVIEW-META-CONTROL-PARSER-DECISION-001
 ack_message_id: CC-ACK-META-CONTROL-PARSER-DECISION-001
 progress_message_ids:
   - CC-PROGRESS-META-CONTROL-PARSER-001
+momentum_message_ids:
+  - CC-MOMENTUM-META-CONTROL-PARSER-001
 return_message_id: CC-RETURN-META-CONTROL-PARSER-001
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
-source_head: 2b18480826dcef5bde7784efeb7b3a14b547fd87
+source_head: 1a52f48d73ef29d348a9f5e5667581f7612a1837
 implementation_branch: impl/kf-meta-control-parser-001
 pr_number: 100
 state: PROVING
@@ -77,6 +79,10 @@ commits:
     subject: complete return artifact
   - sha: 2b18480826dcef5bde7784efeb7b3a14b547fd87
     subject: undeclared ChatGPT message types fail closed
+  - sha: 4f559de32fe3606558d998e5b9bf3f2ac291aafb
+    subject: return artifact for 2b184808
+  - sha: 1a52f48d73ef29d348a9f5e5667581f7612a1837
+    subject: escape-aware quote balance
 
 contract_as_implemented:
   field_syntax:
@@ -84,6 +90,7 @@ contract_as_implemented:
     - inline comments and quoting are read as lib/yaml.mjs reads them
     - a repeated key, including one in a second fenced block, has no value and is malformed
     - an unmatched quote is malformed; the value is still read as written, for filtering only
+    - quote balance is escape-aware (backslash escapes in double quotes, doubled '' in single quotes); a stray interior quote is unmatched
   authority_profile:
     - authority message_type; sender exactly chatgpt; allowlisted author
     - message_id and packet_id non-null; every envelope key present, null allowed, any state or health value
@@ -136,7 +143,7 @@ proof_matrix:
     result: PASS
   - obligation: AUTHORITY_UNVERIFIABLE and REPO_TRUTH_UNVERIFIABLE disappear when evidence is readable and valid
     proof: >
-      local live orchestrate.mjs --json at 2b184808 with gh auth: findings are only
+      local live orchestrate.mjs --json at 2b184808 and again at 1a52f48d with gh auth: findings are only
       DERIVED_STATE_STALE_AUTHORITY and AUTHORITY_MALFORMED (5826124586, 5826612913,
       5826799265); newest authority CG-REVIEW-META-CONTROL-PARSER-DECISION-001; decision
       REPORT_DRIFT. The live selector on real #80 selects that REVIEW, as the old selector did.
@@ -158,11 +165,13 @@ proof_matrix:
       selector no-fallback / newer hold / no node
     result: PASS
   - obligation: restored defects make their relevant tests fail
-    proof: proof-mutation.mjs at 2b184808, see negative_controls
+    proof: proof-mutation.mjs at 1a52f48d, see negative_controls
     result: PASS
   - obligation: exact-head CI, portable/Windows proof, AI review, finding disposition
-    proof: see ci and ai_review
-    result: PASS
+    proof: >
+      portable 264/264 and Windows 19/19 at 1a52f48d; every Copilot finding is
+      dispositioned in ai_review; exact-head CI for the final PR head is in the RETURN (see ci)
+    result: PASS_LOCAL_CI_IN_RETURN
   - obligation: no production, provider traffic, secrets, paid resource, activation, ACTION-001 release or gate weakening
     proof: >
       only gh reads plus one control-room workflow_dispatch; no secret or PAT; the only
@@ -192,30 +201,42 @@ tests:
     from ChatGPT selects nothing", and its old slot holds a ChatGPT ACK.
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 2b184808
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 1a52f48d
   baseline_before_change: 32/32 live
-  result: PENDING_RUN_AT_2b184808
+  result: 51/51 live at 1a52f48d
   retargeted_same_claim_and_proof:
     - NC-WORKER-SENDERLESS-REJECTED, NC-WORKER-SENDER-EXACT, NC-WORKER-AUTHOR-ALLOWLIST (select-directive.ps1 -> lib/control-envelope.mjs)
     - NC-RECONCILE-AUTHORITY-SENDER (reconcile.mjs -> lib/control-envelope.mjs rejectionOf)
-  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-WORKFLOW-D1-TOKEN]
+  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-WORKFLOW-D1-TOKEN]
   history: >
     48/48 live at 8744d90c and at a8c87ccb. At 81a2ddd2, NC-PLATFORM-DUPLICATE-ID
     was VACUOUS: its platform-level guard was unreachable behind collectAuthority's
     id check. The guard was removed and the control retargeted at the real guard
     in 584d2edf, which ran 49/49 live. 2b184808 added NC-ENVELOPE-UNDECLARED-TYPE
     and made the invalid-first proof also pin the claimed type, because the new
-    rule is a second guard for that case.
+    rule is a second guard for that case. 2b184808 ran 50/50 live. 1a52f48d
+    added NC-ENVELOPE-ESCAPED-QUOTE.
 
 ci:
-  exact_head: PENDING_RUN
+  exact_head: >
+    Required checks run on the PR head that carries this artifact commit (the
+    semantic head 1a52f48d plus this control-only commit). Their result is
+    recorded in the RETURN on #80 (CC-RETURN-META-CONTROL-PARSER-001), which
+    names that head. An artifact cannot record CI for the commit that contains it.
+  previous_head_4f559de3: all 28 checks pass or are skipped by their own conditions
   previous_head_9eb4f884: all 28 checks pass or are skipped by their own conditions
   previous_head_a8c87ccb: all required workflows green (agent-control, self-test, Portable proof ubuntu, Windows worker proof, CI/CD, branch divergence, HawkScan, GitGuardian, Vercel)
 
 ai_review:
   reviewer: copilot-pull-request-reviewer[bot]
-  reviews: [5330693593 on 33b46896, 5330709017 on a8c87ccb, 5330788503 on 9eb4f884]
+  reviews: [5330693593 on 33b46896, 5330709017 on a8c87ccb, 5330788503 on 9eb4f884, 5330834778 on 4f559de3]
   findings:
+    - id: r4115848580
+      disposition: FIXED
+      evidence: 1a52f48d; escape-aware wellQuoted(); NC-ENVELOPE-ESCAPED-QUOTE
+    - id: r4115848599
+      disposition: FIXED
+      evidence: negative_controls.result records the run at the final semantic head
     - id: r4115806024
       disposition: FIXED
       evidence: 2b184808; undeclared or missing ChatGPT message types are malformed authority in every consumer; NC-ENVELOPE-UNDECLARED-TYPE; selector and platform no-fallback tests
