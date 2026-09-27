@@ -124,6 +124,12 @@ test('NC unmatched quote: rejected; balanced quoting decodes as the codec does',
   for (const [key, value] of [['packet_id', "'KF-T-001"], ['message_id', 'CG-X"'], ['state', `'RELEASED"`], ['sender', '"chatgpt']]) {
     assert.ok(authority(body(fields({ [key]: value }))).includes(`${key} (unmatched quote)`), `${key}: ${value}`);
   }
+  // Escape-aware (Copilot r4115848580): an escaped closing quote does not close.
+  assert.deepEqual(authority(body(fields({ packet_id: '"KF\\"-1"', message_id: "'it''s'" }))), [], 'referent: escaped and doubled quotes inside are fine');
+  assert.equal(envelopeField(parseEnvelope('packet_id: "KF\\"-1"'), 'packet_id'), 'KF"-1');
+  for (const [key, value] of [['packet_id', '"KF-X\\"'], ['packet_id', '"KF-X\\\\\\"'], ['message_id', "'a'b'"], ['state', '"RE"LEASED"']]) {
+    assert.ok(authority(body(fields({ [key]: value }))).includes(`${key} (unmatched quote)`), `${key}: ${value}`);
+  }
   // A sender with an unmatched quote is malformed ChatGPT authority, not somebody else's message.
   const auth = collectAuthority([rest(body(fields({ sender: '"chatgpt' })))]);
   assert.equal(auth.rejected, 0);

@@ -96,12 +96,32 @@ const BOOLEAN = Object.freeze(['true', 'false']);
 
 // ------------------------------------------------------------------ parsing
 
+/**
+ * True when `text` is exactly one well-terminated quoted scalar. Double quotes
+ * honour backslash escapes, so `"KF-X\"` is unterminated. Single quotes escape
+ * only as a doubled '', so `'a'b'` has a stray quote inside.
+ */
+function wellQuoted(text) {
+  const q = text[0];
+  if ((q !== '"' && q !== "'") || text.length < 2 || text[text.length - 1] !== q) return false;
+  let i = 1;
+  while (i < text.length - 1) {
+    if (q === '"' && text[i] === '\\') i += 2;
+    else if (text[i] === q) {
+      if (q === "'" && text[i + 1] === "'" && i + 1 < text.length - 1) i += 2;
+      else return false;
+    } else i += 1;
+  }
+  // An escape that swallowed the final quote leaves i past it.
+  return i === text.length - 1;
+}
+
 function decodeValue(rest) {
   const text = stripComment(rest).trim();
   const opens = /^["']/.test(text);
   const closes = /["']$/.test(text);
   if (opens || closes) {
-    const balanced = opens && closes && text.length >= 2 && text[0] === text[text.length - 1];
+    const balanced = wellQuoted(text);
     // The envelope is malformed either way. The value is still read as it
     // appears, so `programme: 'X` names X and holds rather than vanishing, and
     // `sender: "chatgpt` is malformed authority rather than somebody else's.

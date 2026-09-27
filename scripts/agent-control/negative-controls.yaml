@@ -488,6 +488,17 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC unmatched quote" scripts/agent-control/tests/control-envelope.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-ENVELOPE-ESCAPED-QUOTE
+    claim: >
+      Quote balance is escape-aware. Comparing only the first and last
+      characters accepted `"KF-X\"`, which never closes (Copilot r4115848580).
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "    const balanced = wellQuoted(text);"
+      replace: "    const balanced = opens && closes && text.length >= 2 && text[0] === text[text.length - 1];"
+    proof_command: node --test --test-name-pattern="NC unmatched quote" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-ENVELOPE-MISSING-KEY
     claim: >
       AUTHORITY requires every envelope key to be present (null allowed). An
