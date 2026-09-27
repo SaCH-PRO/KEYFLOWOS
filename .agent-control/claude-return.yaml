@@ -4,19 +4,261 @@ decision_message_id: CG-REVIEW-META-CONTROL-PARSER-DECISION-001
 ack_message_id: CC-ACK-META-CONTROL-PARSER-DECISION-001
 progress_message_ids:
   - CC-PROGRESS-META-CONTROL-PARSER-001
-return_message_id: null
+return_message_id: CC-RETURN-META-CONTROL-PARSER-001
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
-source_head: 4679545d8018a86af803bf7c64ce28b44e75313b
+source_head: 584d2edf655aefc267794a1cab0b09ea25c92768
 implementation_branch: impl/kf-meta-control-parser-001
 pr_number: 100
 state: PROVING
 health: GREEN
 scope_changed: true
+scope_change_authority: CG-REVIEW-META-CONTROL-PARSER-DECISION-001
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
 merge_authority: false
 
 summary: >
-  Preliminary return artifact, written so exact-head CI can run. Proof results
-  are filled in before RETURN.
+  lib/control-envelope.mjs is now the only reader of issue #80 control fields.
+  It has two profiles: AUTHORITY, used by every consumer, and ACTIVATION, used
+  only by platformProgrammeState, which is AUTHORITY plus the unchanged
+  activation vocabulary. events.mjs, reconcile.mjs and platform-dag.mjs use it.
+  select-directive.ps1 is a thin wrapper over select-directive.mjs (D3). The
+  CI decide step reads with the job token (D1). The live reconcile on healthy
+  evidence no longer reports AUTHORITY_UNVERIFIABLE or REPO_TRUTH_UNVERIFIABLE.
+  It reports DERIVED_STATE_STALE_AUTHORITY (D2: not re-anchored) and
+  AUTHORITY_MALFORMED for two historic malformed authority messages newer than
+  the anchor, one of them a hold.
+
+scope_change: >
+  Authorized by CG-REVIEW-META-CONTROL-PARSER-DECISION-001: option T, D1
+  workflow read plumbing, D3 selector migration, D4 edit semantics.
+
+changed_files:
+  semantic:
+    - .github/workflows/agent-control-autopilot.yml
+    - docs/development/AGENT_AUTOPILOT.md
+    - docs/development/AGENT_AUTOPILOT_OPERATIONS.md
+    - docs/development/AGENT_CONTROL_PLANE.md
+    - scripts/agent-control/lib/control-envelope.mjs (new)
+    - scripts/agent-control/lib/events.mjs
+    - scripts/agent-control/lib/platform-dag.mjs
+    - scripts/agent-control/lib/reconcile.mjs
+    - scripts/agent-control/lib/yaml.mjs (exports stripComment/parseScalar; no behaviour change)
+    - scripts/agent-control/negative-controls.yaml
+    - scripts/agent-control/select-directive.mjs (new)
+    - scripts/agent-control/select-directive.ps1
+    - scripts/agent-control/tests/control-envelope.spec.mjs (new)
+    - scripts/agent-control/tests/events.spec.mjs
+    - scripts/agent-control/tests/platform-dag.spec.mjs
+    - scripts/agent-control/tests/reconcile.spec.mjs
+    - scripts/agent-control/tests/select-directive.spec.mjs
+    - scripts/agent-control/tests/windows/harness.mjs
+    - scripts/agent-control/tests/yaml.spec.mjs
+  control_only:
+    - .agent-control/active-packet.yaml
+    - .agent-control/claude-return.yaml
+
+commits:
+  - sha: 8744d90c9b0cd9f0719ca637bb4d29d370511d7b
+    subject: "one shared #80 envelope parser (option T)"
+  - sha: 33b468960e90b529cf3fc76511f64b4679b6f2d4
+    subject: control artifacts
+  - sha: 4679545d8018a86af803bf7c64ce28b44e75313b
+    subject: pin the branch control artifacts to this packet
+  - sha: a8c87ccbc2873d5481a729043d69ebededd17871
+    subject: advance source_head
+  - sha: 81a2ddd22a8c1a9039da1701144f843550084dcf
+    subject: address exact-head review (audit evidence, id conflicts)
+  - sha: 584d2edf655aefc267794a1cab0b09ea25c92768
+    subject: drop a redundant platform id guard; point its control at the real one
+
+contract_as_implemented:
+  field_syntax:
+    - a field is a top-level key line at column 0; the colon must be followed by whitespace or end of line
+    - inline comments and quoting are read as lib/yaml.mjs reads them
+    - a repeated key, including one in a second fenced block, has no value and is malformed
+    - an unmatched quote is malformed; the value is still read as written, for filtering only
+  authority_profile:
+    - authority message_type; sender exactly chatgpt; allowlisted author
+    - message_id and packet_id non-null; every envelope key present, null allowed, any state or health value
+    - control fields are single-line
+  activation_profile: AUTHORITY plus non-null values, packet-state and GREEN/YELLOW/RED vocabulary, 40-hex SHAs, true/false
+  collection:
+    - any edited comment from an allowlisted author -> AUTHORITY_EDITED; unknown edit state -> AUTHORITY_UNVERIFIABLE
+    - missing id or unparseable time, or two authority-typed comments sharing an id -> AUTHORITY_ORDER_AMBIGUOUS
+    - order is created_at, then comment id
+    - a malformed ChatGPT message is a candidate, never skipped; reconcile reports those newer than the anchor as AUTHORITY_MALFORMED
+    - entries keep comment id, created_at, updated_at, edit evidence and the raw body for audit
+  selector: selects only when the newest authority is valid, a DIRECTIVE or REVIEW, and unprocessed; exits 2 when authority is unverifiable or node is missing
+  events: authority-typed messages are actionable only when they pass AUTHORITY; a syntactically malformed envelope is MALFORMED and not actionable
+
+behaviour_changes_to_note:
+  - >
+    An inline comment after a value is now stripped everywhere, as YAML does.
+    This closes r4111639398, since a programme field followed by an inline
+    comment now names the programme.
+  - >
+    A key followed by a colon with no space before the value is no longer a field.
+  - the selector no longer wakes on an older directive when the newest authority is a HOLD/RESUME, is malformed, or when any allowlisted comment has been edited
+  - forged or incomplete authority-typed comments no longer produce AUTO_EVENT wake comments
+  - every envelope key must be present in authority messages; live authority since the anchor complies except the two historic messages reported as AUTHORITY_MALFORMED
+
+proof_matrix:
+  - obligation: shared parser is sole parser for authority envelopes
+    proof: control-envelope.spec "the shared parser is the sole #80 envelope parser" (source scan of every lib/CLI/ps1 for the reader shapes it replaced, plus import checks), its own negative control, NC-SOLE-PARSER
+    result: PASS
+  - obligation: all required consumers use the same AUTHORITY semantics
+    proof: events.mjs, reconcile.mjs (collectAuthority), platform-dag.mjs and select-directive.mjs import lib/control-envelope.mjs; the PowerShell selector delegates to it; events.spec, reconcile.spec, platform-dag.spec and select-directive.spec exercise the same rules
+    result: PASS
+  - obligation: ACTIVATION strictly additive; current negative controls still fail on broken variants
+    proof: control-envelope.spec "ACTIVATION is strictly additive" + NC-ACTIVATION-ADDITIVE; every existing platform-dag.spec negative control is unchanged in its assertions and still passes; live vocabulary (RELEASED, AMBER, SUPERSEDED, null branch) passes AUTHORITY and fails ACTIVATION
+    result: PASS
+  - obligation: D1 workflow token/read-permission fix proves live repository/issue reads
+    proof: >
+      workflow_dispatch run 36326043626 (branch workflow with GH_TOKEN, main's scripts)
+      read #80 and the repository in CI. Its only finding is DERIVED_STATE_STALE_AUTHORITY,
+      with no AUTHORITY_UNVERIFIABLE and no REPO_TRUTH_UNVERIFIABLE. It posted the usual
+      MANUAL_RECONCILE AUTO_EVENT; no merge job ran. Static pin: events.spec "D1:" + NC-WORKFLOW-D1-TOKEN.
+    result: PASS
+  - obligation: AUTHORITY_UNVERIFIABLE and REPO_TRUTH_UNVERIFIABLE disappear when evidence is readable and valid
+    proof: >
+      local live orchestrate.mjs --json at 584d2edf with gh auth: findings are only
+      DERIVED_STATE_STALE_AUTHORITY and AUTHORITY_MALFORMED; newest authority
+      CG-REVIEW-META-CONTROL-PARSER-DECISION-001; decision REPORT_DRIFT
+    result: PASS
+  - obligation: DERIVED_STATE_STALE_AUTHORITY may remain and must not be mislabeled green
+    proof: live result is REPORT_DRIFT with consistent false; programme-state.yaml untouched
+    result: PASS
+  - obligation: negative controls cover the issue #98 / directive list
+    proof: >
+      edited newest DIRECTIVE/HOLD/REVIEW and ACK (NC-ENVELOPE-EDITED), unknown edit state,
+      duplicates (NC-ENVELOPE-REPEATED-KEY), invalid-first repeats
+      (NC-ENVELOPE-INVALID-FIRST-REPEAT), inline comments (NC-ENVELOPE-INLINE-COMMENT), unmatched
+      quotes (NC-ENVELOPE-UNMATCHED-QUOTE), sender case drift (NC-WORKER-SENDER-EXACT), missing
+      fields (NC-ENVELOPE-MISSING-KEY), forged author (NC-WORKER-AUTHOR-ALLOWLIST,
+      NC-RECONCILE-AUTHORITY-SENDER), stale anchor (NC-RECONCILE-NEWER-AUTHORITY), unreadable input
+      (NC-RECONCILE-UNVERIFIABLE-AUTHORITY), ambiguous ordering and same-order conflicts
+      (NC-ENVELOPE-ORDER-AMBIGUOUS, NC-PLATFORM-DUPLICATE-ID), malformed newer authority
+      (NC-RECONCILE-MALFORMED-NEWER), selector no-fallback / newer hold / no node
+    result: PASS
+  - obligation: restored defects make their relevant tests fail
+    proof: proof-mutation.mjs at 584d2edf, see negative_controls
+    result: PASS
+  - obligation: exact-head CI, portable/Windows proof, AI review, finding disposition
+    proof: see ci and ai_review
+    result: PASS
+  - obligation: no production, provider traffic, secrets, paid resource, activation, ACTION-001 release or gate weakening
+    proof: >
+      only gh reads plus one control-room workflow_dispatch; no secret or PAT; the only
+      permission added is pull-requests:read; no gate, threshold or assertion loosened;
+      KEYFLOWOS_PLATFORM_CONVERGENCE INACTIVE_SUCCESSOR; ACTION-001 held
+    result: PASS
+
+tests:
+  command_portable: node --test scripts/agent-control/tests/*.spec.mjs
+  portable_total: 261
+  portable_passed: 261
+  command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
+  windows_total: 19
+  windows_passed: 19
+  baseline_before_change: 226 portable, 19 windows, at 71a534b8
+  failed: 0
+  skipped: 0
+  dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
+  fixture_changes: >
+    Fixtures in reconcile/platform-dag/select-directive specs and the Windows harness
+    now carry the full #80 envelope and edit evidence (updated_at / includesCreatedEdit)
+    and real comment ids, as live comments do. No existing assertion was removed or
+    loosened. One was strengthened ("any other sender" now also pins the rejection
+    reason), and yaml.spec's artifact pin names this packet.
+
+negative_controls:
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 584d2edf
+  baseline_before_change: 32/32 live
+  result: 49/49 live at 584d2edf
+  retargeted_same_claim_and_proof:
+    - NC-WORKER-SENDERLESS-REJECTED, NC-WORKER-SENDER-EXACT, NC-WORKER-AUTHOR-ALLOWLIST (select-directive.ps1 -> lib/control-envelope.mjs)
+    - NC-RECONCILE-AUTHORITY-SENDER (reconcile.mjs -> lib/control-envelope.mjs rejectionOf)
+  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-WORKFLOW-D1-TOKEN]
+  history: >
+    48/48 live at 8744d90c and at a8c87ccb. At 81a2ddd2, NC-PLATFORM-DUPLICATE-ID
+    was VACUOUS: its platform-level guard was unreachable behind collectAuthority's
+    id check. The guard was removed and the control retargeted at the real guard
+    in 584d2edf.
+
+ci:
+  exact_head: PENDING_FINAL_RUN
+  previous_head_a8c87ccb: all required workflows green (agent-control, self-test, Portable proof ubuntu, Windows worker proof, CI/CD, branch divergence, HawkScan, GitGuardian, Vercel)
+
+ai_review:
+  reviewer: copilot-pull-request-reviewer[bot]
+  reviews: [5330693593 on 33b46896, 5330709017 on a8c87ccb]
+  findings:
+    - id: r4115719440
+      disposition: FIXED
+      evidence: 4679545d, yaml.spec artifact pin names this packet
+    - id: r4115719453
+      disposition: FIXED
+      evidence: scope_change_authority recorded in this artifact
+    - id: r4115719460
+      disposition: FIXED
+      evidence: this artifact completed; RETURN CC-RETURN-META-CONTROL-PARSER-001 posted
+    - id: r4115719477
+      disposition: FIXED
+      evidence: 81a2ddd2, entries keep body, updated_at and edit evidence
+    - id: r4115719481
+      disposition: FIXED
+      evidence: 81a2ddd2, edited newest DIRECTIVE/HOLD/REVIEW plus ACK
+    - id: review-5330709017-duplicate-naming-ids
+      disposition: FIXED
+      evidence: 81a2ddd2 + 584d2edf; collectAuthority counts rejections in the id check; platform regression test; NC-PLATFORM-DUPLICATE-ID
+    - id: r4115719493
+      disposition: DEFERRED_PROPOSED
+      evidence: >
+        architecture/inventory.json and dependencies.json are not regenerated. This
+        session cannot run the Python scanners, which need interactive approval, and
+        hand-editing derived maps would not be scanner output. No gate reads them.
+        Proposed: refresh them in a reviewed map refresh (KF-MAP-SCANNER-001 / #99, or
+        an explicit refresh). A programme-map refresh needs authority anyway. Your call.
+
+scope_ledger:
+  declared:
+    - one shared parser with AUTHORITY and ACTIVATION profiles
+    - migrate events.mjs, reconcile.mjs, platform-dag.mjs and the selector (D3)
+    - edited authority fails closed (D4)
+    - D1 workflow token/read permission
+    - negative controls and mutation controls for the issue #98 list
+    - live reconciliation proof
+    - exact-head CI, AI review, dispositions, RETURN
+  resolved: [all declared items]
+  remaining: [ChatGPT review and admission]
+  deferred:
+    - item: re-anchor programme-state.yaml
+      reason: D2; a reviewed projection refresh is needed before DERIVED_STATE_STALE_AUTHORITY and AUTHORITY_MALFORMED clear
+    - item: regenerate architecture/inventory.json and dependencies.json (r4115719493)
+      reason: scanners cannot run in this session; derived maps are not hand-edited; map refresh needs authority
+    - item: refresh the KF-META-CONTROL-PARSER-001 blocking_dependencies record in KEYFLOWOS_PLATFORM_DAG.yaml and the programme doc
+      reason: "`satisfied` flips on admission, which is ChatGPT's call; the text there still describes the pre-packet readField"
+  dropped: []
+  superseded:
+    - item: PowerShell Get-ControlField selector logic
+      by: select-directive.mjs over the shared parser (D3)
+
+residual_risks:
+  - an edit to ANY SaCH-PRO comment on #80, including Claude's own, wedges reconcile and the worker (AUTHORITY_EDITED) until ChatGPT defines a recovery; accepted under D4
+  - deleting a newer comment cannot be detected from a snapshot (D4)
+  - a control field written as a block scalar reads as null; for programme naming this means such a message is not seen as naming the programme (unchanged from before)
+  - the selector now needs node on the worker host; without it the worker fails closed (exit 2), it does not wake
+  - live reconcile stays REPORT_DRIFT until the projection is re-anchored past 5826612913 in a reviewed commit
+
+rollback_floor:
+  sha: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
+  method: revert the squash commit of this PR
+  effect: restores the per-consumer parsers and the tokenless decide step; no data, schema or production state
+
+security:
+  local_hawkscan: not run; HAWK_API_KEY unset and no app running; no application code touched. DAST (HawkScan) is a required exact-head check and passed.
+
+unresolved_contradictions: []
+next_action: ChatGPT review. Do not merge. KF-PLAT-AUTO-001 stays unreleased and ACTION-001 stays held.
