@@ -147,6 +147,14 @@ test('a "#" after whitespace in a plain scalar is a comment, per YAML', () => {
   assert.equal(parseYaml('a: refs/heads#86\n').a, 'refs/heads#86');
 });
 
+test('NC escaped comment: an escaped quote does not end the scalar, so a later " #" is value', () => {
+  // The exact Copilot input: `packet_id: "KF\" # 1"` was cut at "#".
+  assert.equal(parseYaml('packet_id: "KF\\" # 1"\n').packet_id, 'KF" # 1');
+  assert.equal(parseYaml("packet_id: 'it''s # 1'\n").packet_id, "it's # 1");
+  assert.equal(parseYaml('packet_id: "KF\\\\" # note\n').packet_id, 'KF\\', 'referent: an escaped backslash still closes');
+  assert.equal(parseYaml('packet_id: "KF\\" # 1" # note\n').packet_id, 'KF" # 1', 'referent: the comment after the close is stripped');
+});
+
 test('REGRESSION: a block scalar as a sequence item is read', () => {
   // The real claude-return.yaml uses `- >` for long prose entries. The parser
   // rejected it, which meant a control artifact this codec must read was

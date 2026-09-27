@@ -499,6 +499,21 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC unmatched quote" scripts/agent-control/tests/control-envelope.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-ENVELOPE-ESCAPED-COMMENT
+    claim: >
+      The inline-comment scanner is escape-aware. Ending a quoted scalar at an
+      escaped \" or doubled '' cut `packet_id: "KF\" # 1"` at the "#" and then
+      rejected it as an unmatched quote (Copilot review 21:31Z at ad9c908d).
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        if (quote === '"' && ch === '\\') i += 1;
+              else if (quote === "'" && ch === "'" && text[i + 1] === "'") i += 1;
+              else if (ch === quote) quote = null;
+      replace: "if (ch === quote) quote = null;"
+    proof_command: node --test --test-name-pattern="NC escaped comment" scripts/agent-control/tests/yaml.spec.mjs scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-ENVELOPE-MISSING-KEY
     claim: >
       AUTHORITY requires every envelope key to be present (null allowed). An

@@ -136,6 +136,17 @@ test('NC unmatched quote: rejected; balanced quoting decodes as the codec does',
   assert.equal(auth.malformed.length, 1);
 });
 
+test('NC escaped comment: an escaped quote does not end the scalar before an inline " #"', () => {
+  // The exact Copilot input: `packet_id: "KF\" # 1"` was cut at "#" and then
+  // rejected as an unmatched quote.
+  assert.equal(envelopeField(parseEnvelope('packet_id: "KF\\" # 1"'), 'packet_id'), 'KF" # 1');
+  assert.equal(envelopeField(parseEnvelope("packet_id: 'it''s # 1'"), 'packet_id'), "it's # 1");
+  assert.deepEqual(authority(body(fields({ packet_id: '"KF\\" # 1"', message_id: "'it''s # 1'" }))), []);
+  // Fail-closed is unchanged: still unterminated, and a comment after the close is still a comment.
+  assert.ok(authority(body(fields({ packet_id: '"KF\\" # 1' }))).includes('packet_id (unmatched quote)'));
+  assert.equal(envelopeField(parseEnvelope('packet_id: "KF\\" # 1" # note'), 'packet_id'), 'KF" # 1');
+});
+
 test('NC sender case drift and other senders are not authority at all', () => {
   const auth = collectAuthority([
     rest(body(fields({ message_id: 'A', sender: 'ChatGPT' }))),
