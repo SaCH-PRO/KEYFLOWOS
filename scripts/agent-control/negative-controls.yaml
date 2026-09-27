@@ -679,3 +679,72 @@ negative_controls:
       replace: "KF-META-CONTROL-PARSER-001 D1)."
     proof_command: node --test --test-name-pattern="D1:" scripts/agent-control/tests/events.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-RETURN-ID
+    claim: >
+      A branch claude-return.yaml may not carry a return_message_id before the
+      RETURN is posted (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001,
+      Copilot review 5332604917).
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "  if (ret.return_message_id !== undefined && ret.return_message_id !== null) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC premature return id" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-STATUS
+    claim: >
+      A branch claude-return.yaml is always AWAITING_POSTCHECK_RETURN. The
+      RETURN comment, not the branch, is the final evidence envelope.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "  if (ret.return_status !== PRE_RETURN_STATUS) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC premature return status" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-FUTURE-ID
+    claim: >
+      A RETURN id named anywhere in the artifact must be listed as previously
+      posted or never posted. d9b12873 named its own future RETURN in
+      ci.exact_head prose.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "      if (!accounted.has(id)) unaccounted.add(id);"
+      replace: "      // defect restored: unaccounted RETURN ids accepted"
+    proof_command: node --test --test-name-pattern="NC future return id" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING
+    claim: >
+      Exact-head workflows and the fresh AI review stay PENDING in the
+      artifact. Pending or unknown is never green.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (entry?.status !== 'PENDING') {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="NC exact-head pending" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-VOCABULARY
+    claim: >
+      proof_matrix results use the evidence states, so an ad hoc value such as
+      PASS_LOCAL_CI_IN_RETURN cannot read as green.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (!EVIDENCE_STATES.includes(entry?.result)) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="NC proof vocabulary" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-ARTIFACT-PREMATURE-ID
+    claim: >
+      The checker runs on this branch's real claude-return.yaml, so an artifact
+      that names a RETURN before it is posted fails the portable suite at the
+      exact head.
+    mutation:
+      file: .agent-control/claude-return.yaml
+      find: "return_message_id: null"
+      replace: "return_message_id: CC-RETURN-META-CONTROL-PARSER-PREMATURE-001"
+    proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
