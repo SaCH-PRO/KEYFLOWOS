@@ -8,6 +8,9 @@ ack_message_id: CC-ACK-META-CONTROL-PARSER-DECISION-001
 correction_review_message_id: CG-REVIEW-META-CONTROL-PARSER-FINAL-001
 correction_review_comment_id: 5859854366
 correction_ack_message_id: CC-ACK-META-CONTROL-PARSER-FINAL-001
+escape_review_message_id: CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
+escape_review_comment_id: 5860337548
+escape_ack_message_id: CC-ACK-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
 tracking_issue: 98
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
 implementation_branch: impl/kf-meta-control-parser-001
@@ -106,6 +109,25 @@ correction:
   constraints:
     - do not regenerate architecture maps in this correction
     - keep programme-state re-anchor deferred
+
+escape_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
+  source_head: ad9c908d7040a8f43eda047984e4b418e4159648
+  state: FIXING_PROOF_FAILURES
+  scope_changed: false
+  finding: >
+    Copilot review at ad9c908d, previously missed: lib/yaml.mjs stripComment
+    ends a quoted scalar at an escaped \" or a doubled '', so
+    `packet_id: "KF\" # 1"` is cut at "#" and then rejected as an unmatched quote.
+  required:
+    - make stripComment quote-and-escape aware
+    - preserve AUTHORITY and ACTIVATION profile semantics and fail-closed behaviour
+    - regression tests reproducing the exact Copilot finding
+    - a live negative control so restoring the defect fails
+    - portable, Windows, mutation, exact-head CI, fresh Copilot review, superseding RETURN
+  constraints:
+    - no merge, activation, ACTION-001 release, scope broadening, gate weakening
+    - no production/provider traffic, secrets, OAuth, paid resources or programme-state re-anchor
 
 return_contract: >
   ACK exact source/branch/scope before mutation; post CONTRADICTION if current
