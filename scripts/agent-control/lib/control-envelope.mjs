@@ -189,8 +189,12 @@ function authorityProblems(env) {
   }
   const sender = envelopeField(env, 'sender');
   if (sender !== AUTHORITY_SENDER) problems.push(`sender (${sender} is not exactly ${AUTHORITY_SENDER})`);
+  // An identity is text. A quoted "" or "   " decodes to a string, not null,
+  // and would otherwise name nothing while passing (Copilot r4117477528).
   for (const key of ['message_id', 'packet_id']) {
-    if (envelopeField(env, key) === null) problems.push(`${key} (absent or null)`);
+    const value = envelopeField(env, key);
+    if (value === null) problems.push(`${key} (absent or null)`);
+    else if (value.trim() === '') problems.push(`${key} (blank)`);
   }
   for (const spec of REQUIRED_ENVELOPE) {
     if (spec.split('|').every((key) => !has(env, key))) problems.push(`${spec} (absent)`);

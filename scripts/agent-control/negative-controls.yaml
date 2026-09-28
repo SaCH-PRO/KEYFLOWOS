@@ -748,3 +748,48 @@ negative_controls:
       replace: "return_message_id: CC-RETURN-META-CONTROL-PARSER-PREMATURE-001"
     proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-ENVELOPE-BLANK-IDENTITY
+    claim: >
+      An empty or whitespace-only message_id or packet_id is not an identity.
+      A quoted blank decodes to a string, so a null check alone accepted it
+      (Copilot r4117477528, CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001).
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "    else if (value.trim() === '') problems.push(`${key} (blank)`);"
+      replace: "    // defect restored: blank identities accepted"
+    proof_command: node --test --test-name-pattern="NC blank identity" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SELECTOR-BLANK-IDENTITY
+    claim: >
+      A newest ChatGPT message with a blank message_id or packet_id is never
+      the selected cursor, and nothing older is selected in its place.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "    else if (value.trim() === '') problems.push(`${key} (blank)`);"
+      replace: "    // defect restored: blank identities accepted"
+    proof_command: node --test --test-name-pattern="BLANK-id newest" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-RETURN-EVIDENCE-PASS-PROSE
+    claim: >
+      Prose cannot claim an exact-head gate passed while its structured entry
+      is PENDING (Copilot r4117477551).
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (named.length && PASS_WORD.test(sentence)) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="NC pass prose" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-ARTIFACT-PASS-PROSE
+    claim: >
+      The prose rule runs on this branch's real claude-return.yaml, so the
+      6d8a6bd8 DAST sentence fails the portable suite at the exact head.
+    mutation:
+      file: .agent-control/claude-return.yaml
+      find: "DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN."
+      replace: "DAST (HawkScan) is a required exact-head check and passed."
+    proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000

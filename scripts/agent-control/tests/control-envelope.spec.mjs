@@ -176,6 +176,29 @@ test('NC missing envelope key: absent is malformed; null is allowed where histor
   }
 });
 
+test('NC blank identity: an empty or whitespace-only message_id or packet_id is not authority', () => {
+  // Copilot r4117477528. A quoted blank decodes to a string, so a null check alone let it through.
+  for (const key of ['message_id', 'packet_id']) {
+    for (const blank of ['""', "''", '"   "', "'  '", '"\\t"']) {
+      const env = parseEnvelope(body(fields({ [key]: blank })));
+      assert.notEqual(envelopeField(env, key), null, `${key}: ${blank} decodes to a string, not null`);
+      assert.deepEqual(validateEnvelope(env, PROFILES.AUTHORITY), [`${key} (blank)`], `${key}: ${blank}`);
+      assert.ok(validateEnvelope(env, PROFILES.ACTIVATION).includes(`${key} (blank)`), `${key}: ${blank} under ACTIVATION`);
+    }
+    // Unquoted blanks stay null, as before: absent-valued, not blank.
+    for (const blank of ['', '   ']) {
+      assert.deepEqual(authority(body(fields({ [key]: blank }))), [`${key} (absent or null)`], `${key}: unquoted "${blank}"`);
+    }
+    // Referent: a quoted identity with text is fine, padding included.
+    assert.deepEqual(authority(body(fields({ [key]: '" X-1 "' }))), [], `${key}: text is an identity`);
+  }
+  // A blank newest message is malformed authority: it is never a message and never skipped.
+  const auth = collectAuthority([rest(body(fields({ message_id: 'CG-OLD-1' }))), rest(body(fields({ message_id: '"  "' })))]);
+  assert.deepEqual(ids(auth), ['CG-OLD-1']);
+  assert.equal(auth.malformed.length, 1);
+  assert.deepEqual(auth.malformed[0].problems, ['message_id (blank)']);
+});
+
 test('a control field written as a block scalar is malformed', () => {
   assert.ok(authority(`${body(fields({ packet_id: '>' }))}\n  KF-T-001`).includes('packet_id (block scalar; a control field is one line)'));
   assert.deepEqual(authority(`${body(fields({ objective: '>' }))}\n  prose`), [], 'referent: prose fields may be blocks');

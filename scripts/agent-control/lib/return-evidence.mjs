@@ -11,7 +11,16 @@
  *   - that any RETURN id it names was posted, unless it lists that id as
  *     previously posted or as never posted;
  *   - that an exact-head check or the fresh AI review has passed. Those are
- *     PENDING until the RETURN reports them.
+ *     PENDING until the RETURN reports them, in exact_head_proof and in prose
+ *     alike (Copilot r4117477551: `security` said DAST "passed" while its
+ *     structured entry was PENDING).
+ *
+ * The prose rule reads each sentence of every value. A sentence that names an
+ * exact-head gate next to a pass word is a claim. Two kinds of text are not
+ * claims about this head: an `obligation` (it states what must be proven, and
+ * its result is checked separately) and a `previous_head_<sha>` record (it is
+ * about that earlier head by name). A sentence that names a gate but says
+ * "not passed" is still flagged; write PENDING instead.
  *
  * Only PROVEN satisfies a gate. PENDING and UNKNOWN are never green.
  *
@@ -56,6 +65,24 @@ function* strings(value, key = null) {
   }
 }
 
+const PASS_WORD = /\b(?:pass(?:ed|es|ing)?|green|succeeded|successful(?:ly)?|proven)\b/i;
+const HISTORICAL_KEY = /^previous_head_[0-9a-f]{7,40}$/;
+const REQUIREMENT_KEYS = new Set(['obligation']);
+
+/** Every sentence of every value that could claim something about this head. */
+function* claimSentences(value, key = null) {
+  if (key !== null && (HISTORICAL_KEY.test(key) || REQUIREMENT_KEYS.has(key))) return;
+  if (typeof value === 'string') {
+    for (const sentence of value.split(/(?<=[.;])\s+|\n/)) {
+      if (sentence.trim()) yield sentence.trim();
+    }
+  } else if (Array.isArray(value)) {
+    for (const item of value) yield* claimSentences(item);
+  } else if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) yield* claimSentences(v, k);
+  }
+}
+
 /**
  * @param {object} ret parsed claude-return.yaml
  * @returns {string[]} problems; empty when the artifact claims nothing it cannot know
@@ -94,6 +121,13 @@ export function preReturnEvidenceProblems(ret) {
   for (const entry of proof) {
     if (entry?.status !== 'PENDING') {
       problems.push(`exact_head_proof ${entry?.gate ?? '?'} must be PENDING before the RETURN; found ${entry?.status ?? 'none'}`);
+    }
+  }
+
+  for (const sentence of claimSentences(ret)) {
+    const named = EXACT_HEAD_GATES.filter((gate) => sentence.toLowerCase().includes(gate.toLowerCase()));
+    if (named.length && PASS_WORD.test(sentence)) {
+      problems.push(`prose claims ${named.join(', ')} passed before the RETURN: "${sentence}"`);
     }
   }
 

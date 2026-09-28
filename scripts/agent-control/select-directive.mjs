@@ -13,7 +13,7 @@
  *   - it comes from an allowlisted GitHub author with sender exactly `chatgpt`
  *     (WORKER-DIRECTIVE-AUTHORITY-001, WORKER-AUTHORITY-PUBLIC-REPO-001);
  *   - its envelope is well formed: no repeated key, no unmatched quote,
- *     message_id and packet_id set, every envelope key present;
+ *     message_id and packet_id set and not blank, every envelope key present;
  *   - no comment from an allowlisted author has been edited;
  *   - it is a DIRECTIVE or REVIEW (a newer HOLD or RESUME selects nothing);
  *   - it is not already in the processed cursor.
@@ -59,7 +59,8 @@ export function selectDirective({ comments, processed = [], authors = [] }) {
 
   if (!decisive) return decision(null, 'no_actionable_message', rejected);
 
-  const label = decisive.message_id ?? `comment:${decisive.comment_id}`;
+  // A blank id is malformed, so it only ever labels a rejection; name the comment instead.
+  const label = decisive.message_id?.trim() ? decisive.message_id : `comment:${decisive.comment_id}`;
   if (decisive.problems.length) {
     return decision(null, `newest_authority_malformed:${label}`, [
       ...rejected,

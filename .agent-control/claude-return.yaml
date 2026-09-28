@@ -457,7 +457,7 @@ rollback_floor:
   effect: restores the per-consumer parsers and the tokenless decide step; no data, schema or production state
 
 security:
-  local_hawkscan: not run; HAWK_API_KEY unset and no app running; no application code touched. DAST (HawkScan) is a required exact-head check and passed.
+  local_hawkscan: not run; HAWK_API_KEY unset and no app running; no application code touched. DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
 
 unresolved_contradictions: []
 next_action: >

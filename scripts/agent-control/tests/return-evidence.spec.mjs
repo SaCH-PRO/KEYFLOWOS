@@ -103,6 +103,30 @@ test('NC proof vocabulary: proof_matrix results use the evidence states', () => 
   );
 });
 
+test('NC pass prose: prose cannot claim an exact-head gate passed while it is PENDING', () => {
+  // Copilot r4117477551: the exact 6d8a6bd8 security prose.
+  const security = { local_hawkscan: 'not run; no app running. DAST (HawkScan) is a required exact-head check and passed.' };
+  assertOnly(artifact({ security }), /^prose claims DAST \(HawkScan\) passed before the RETURN: "DAST \(HawkScan\) is a required exact-head check and passed\."$/);
+  // Every gate and every pass word, anywhere, in any case.
+  for (const gate of EXACT_HEAD_GATES) {
+    for (const word of ['passed', 'GREEN', 'succeeded', 'Proven']) {
+      assertOnly(artifact({ notes: [{ status: `${gate.toLowerCase()}: ${word}` }] }), /^prose claims /);
+    }
+  }
+  // Referents: the same sentences in the vocabulary a pre-RETURN artifact may use.
+  assert.deepEqual(problemsOf(artifact({ security: { local_hawkscan: 'not run. DAST (HawkScan) is a required exact-head check and is PENDING.' } })), []);
+  // A pass word in another sentence, or with no gate named, is not a claim about a gate.
+  assert.deepEqual(problemsOf(artifact({ summary: 'The local suite passed. DAST (HawkScan) is PENDING.' })), []);
+  // An obligation states what must be proven; a previous_head_<sha> record is about that head.
+  assert.deepEqual(problemsOf(artifact({ ci: { previous_head_82454cce: 'DAST (HawkScan) green' } })), []);
+  assert.deepEqual(problemsOf(artifact({
+    proof_matrix: [{ obligation: 'all exact-head workflows green and a fresh Copilot review', evidence_scope: 'exact_head', result: 'PENDING' }],
+  })), []);
+  // Only a real historical key is exempt.
+  assertOnly(artifact({ ci: { previous_head: 'DAST (HawkScan) green' } }), /^prose claims DAST/);
+  assertOnly(artifact({ ci: { previous_head_final: 'DAST (HawkScan) green' } }), /^prose claims DAST/);
+});
+
 test('NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record', () => {
   const ret = parseYaml(fs.readFileSync('.agent-control/claude-return.yaml', 'utf8'));
   assert.equal(ret.packet_id, 'KF-META-CONTROL-PARSER-001');

@@ -243,6 +243,31 @@ test('a MALFORMED newest ChatGPT message selects nothing and never falls back to
   }
 });
 
+test('a BLANK-id newest ChatGPT message is never the selected cursor and never falls back', opts, () => {
+  // Copilot r4117477528: a quoted blank message_id or packet_id is not an identity.
+  const referent = select([comment({ id: 'CG-OLDER-BLANK-0' }), comment({ id: 'CG-TEXT-BLANK-0' })]);
+  assert.equal(referent.out.selected?.message_id, 'CG-TEXT-BLANK-0', referent.raw);
+  const cases = [
+    ['empty message_id', { id: '""' }, 'message_id (blank)'],
+    ['whitespace message_id', { id: '"   "' }, 'message_id (blank)'],
+    ['whitespace packet_id', { id: 'CG-BLANK-PKT-1', extra: "packet_id: '  '" }, 'packet_id (blank)'],
+  ];
+  for (const [name, spec, problem] of cases) {
+    const older = comment({ id: `CG-OLDER-${name.length}` });
+    const blank = comment(spec);
+    const { status, out, raw } = select([older, blank]);
+    assert.equal(status, 0, raw);
+    assert.equal(out.selected, null, `${name}: nothing is selected`);
+    const label = spec.id.startsWith('CG-') ? spec.id : `comment:${blank.url.match(/\d+$/)[0]}`;
+    assert.equal(out.reason, `newest_authority_malformed:${label}`, name);
+    assert.equal(out.rejected.at(-1).reason, `malformed:${problem}`, name);
+    // A blank id already in the cursor still selects nothing and is never processed as done.
+    const again = select([blank], { processed: ['', '   '] });
+    assert.equal(again.out.selected, null, `${name}: a blank cursor entry changes nothing`);
+    assert.match(again.out.reason, /^newest_authority_malformed:/, name);
+  }
+});
+
 test('an undeclared type from ChatGPT selects nothing and never falls back to an older directive', opts, () => {
   // Copilot r4115806024: a typo'd HOLD must not let an older DIRECTIVE through.
   // `directive` in the wrong case was previously ignored; it now fails closed too.
