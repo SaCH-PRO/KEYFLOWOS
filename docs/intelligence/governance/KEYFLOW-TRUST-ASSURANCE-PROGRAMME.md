@@ -325,7 +325,27 @@ Target:
 - recurring penetration tests and access reviews;
 - continuous vendor/subprocessor and evidence monitoring.
 
-## 7. Required programme artifacts
+## 7. Ironclad whole-system assurance
+
+The Trust Assurance Programme is operationalized by the whole-system assurance layer:
+
+- `docs/intelligence/governance/IRONCLAD-ASSURANCE-CENSUS.md`
+- `docs/intelligence/governance/IRONCLAD-ASSURANCE-MATRIX.yaml`
+- `docs/intelligence/governance/CATASTROPHIC-FAILURE-REGISTER.yaml`
+
+The census is the programme's explicit unknown-risk detector. A material domain may not be silently absent from the roadmap simply because no implementation packet happened to raise it.
+
+For release purposes:
+- every T0/T1 assurance domain must have an explicit state;
+- no T0/T1 domain may remain UNASSESSED at production release consideration;
+- T0 domains default to PROVEN_AT_DECLARED_SCOPE or stronger;
+- catastrophic scenarios require a named disposition;
+- accepted residual risk requires owner, rationale and review/expiry condition;
+- later code changes must trigger proof revalidation where they change the proof substrate.
+
+The census does not create new implementation authority. Gaps are routed into the existing journey/kernel/packet owner whenever possible.
+
+## 8. Required programme artifacts
 
 These are governance/evidence records, not new semantic runtimes:
 1. `docs/intelligence/governance/TRUST-ASSURANCE-MATRIX.yaml`
@@ -342,7 +362,7 @@ These are governance/evidence records, not new semantic runtimes:
 
 Exact storage location/format for items 2-11 may be finalized by the relevant packet or governance workstream. Do not create duplicate sources of truth where an existing artifact already owns the information.
 
-## 8. Packet trust-impact contract
+## 9. Packet trust-impact contract
 
 Every packet released after adoption must return:
 
@@ -366,7 +386,7 @@ trust_impact:
 
 If not applicable, record the negative explicitly. Security/privacy impact may not disappear merely because functional tests pass.
 
-## 9. Secure-development admission rules
+## 10. Secure-development admission rules
 
 For applicable packets, proof must consider:
 - wrong tenant / IDOR;
@@ -387,7 +407,7 @@ For applicable packets, proof must consider:
 
 Unexpected passage of a negative control invalidates admission.
 
-## 10. Agent and environment rules
+## 11. Agent and environment rules
 
 ChatGPT owns trust-overlay interpretation, packet mapping, evidence admission and contradiction resolution.
 
@@ -401,13 +421,13 @@ All coding agents:
 - never paste production secrets into chats/issues/prompts;
 - do not weaken security gates or retention/privacy obligations to complete a packet.
 
-## 11. Legal and assurance boundary
+## 12. Legal and assurance boundary
 
 This programme is an engineering/evidence plan, not legal advice, PCI QSA advice, audit, insurer underwriting or certification.
 
 Before market-specific launch, qualified counsel/assessors must confirm applicability and customer-facing claims.
 
-## 12. Completion law
+## 13. Completion law
 
 The 35-packet programme is not release-ready merely because functional convergence is complete.
 
