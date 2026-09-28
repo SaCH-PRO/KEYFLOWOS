@@ -28,8 +28,10 @@ source_head_review_message_id: CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
 source_head_ack_message_id: CC-ACK-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
 evidence_order_review_message_id: CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001
 evidence_order_ack_message_id: CC-ACK-META-CONTROL-PARSER-EVIDENCE-ORDER-001
+blank_id_review_message_id: CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
+blank_id_ack_message_id: CC-ACK-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
-source_head: 6d8a6bd83e9c2e8b1964a87937e27e8c5d633344
+source_head: 3d1944cc8d87ff15bb4fe5b7eae8a68ad198205a
 implementation_branch: impl/kf-meta-control-parser-001
 pr_number: 100
 state: PROVING
@@ -57,6 +59,8 @@ summary: >
 scope_change: >
   Authorized by CG-REVIEW-META-CONTROL-PARSER-DECISION-001: option T, D1
   workflow read plumbing, D3 selector migration, D4 edit semantics.
+  CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001 added the blank-identity
+  rule (r4117477528) and the prose evidence check (r4117477551).
 
 changed_files:
   semantic:
@@ -122,6 +126,10 @@ commits:
     subject: return artifact for 940d89b9
   - sha: 6d8a6bd83e9c2e8b1964a87937e27e8c5d633344
     subject: pre-RETURN artifact cannot claim a RETURN or exact-head proof (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001)
+  - sha: ec89053857f913f1a54d5609070f9fc827fc2a92
+    subject: pre-RETURN artifact for 6d8a6bd8
+  - sha: 3d1944cc8d87ff15bb4fe5b7eae8a68ad198205a
+    subject: blank identities are not authority; prose cannot claim exact-head pass (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001)
 
 contract_as_implemented:
   field_syntax:
@@ -133,7 +141,7 @@ contract_as_implemented:
     - the inline-comment scanner reads quotes the same escape-aware way, so a "#" after an escaped quote inside a quoted scalar is value, not comment
   authority_profile:
     - authority message_type; sender exactly chatgpt; allowlisted author
-    - message_id and packet_id non-null; every envelope key present, null allowed, any state or health value
+    - message_id and packet_id non-null and not blank (a quoted "" or whitespace-only value is "<key> (blank)"); every envelope key present, null allowed, any state or health value
     - control fields are single-line
   activation_profile: AUTHORITY plus non-null values, packet-state and GREEN/YELLOW/RED vocabulary, 40-hex SHAs, true/false
   collection:
@@ -252,6 +260,35 @@ proof_matrix:
       NC-RETURN-EVIDENCE-STATUS, NC-RETURN-EVIDENCE-FUTURE-ID, NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING,
       NC-RETURN-EVIDENCE-VOCABULARY, NC-RETURN-ARTIFACT-PREMATURE-ID.
     result: PROVEN
+  - obligation: empty and whitespace-only message_id / packet_id are not authority identity (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001, r4117477528)
+    proof: >
+      control-envelope.spec "NC blank identity": for both keys, quoted "", '', "   ",
+      '  ' and "\t" decode to a string (not null) and fail AUTHORITY with exactly
+      "<key> (blank)", and ACTIVATION too. Unquoted blanks still read as null and
+      report "(absent or null)" as before. Referent: a quoted identity with text,
+      padding included, passes AUTHORITY. collectAuthority keeps a blank newest
+      message as a malformed candidate, not a message. select-directive.spec
+      "a BLANK-id newest ChatGPT message", through the PowerShell wrapper: an empty
+      message_id, a whitespace message_id and a whitespace packet_id each select
+      nothing, never fall back to the older directive, are labelled by comment id
+      when the id is blank, and stay unselected with blank entries in the processed
+      cursor. Live controls NC-ENVELOPE-BLANK-IDENTITY and NC-SELECTOR-BLANK-IDENTITY
+      restore blank-id acceptance and their tests fail. Null, missing, repeated and
+      malformed semantics are unchanged; no existing assertion changed.
+    result: PROVEN
+  - obligation: pre-RETURN prose cannot describe a pending exact-head result as complete (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001, r4117477551)
+    proof: >
+      The security.local_hawkscan sentence now says PENDING. lib/return-evidence.mjs
+      reads every sentence of every value; one that names an exact-head gate beside
+      a pass word is a problem. Obligation texts and previous_head_<sha> records are
+      exempt by key. return-evidence.spec "NC pass prose" uses the exact 6d8a6bd8
+      sentence, every gate with four pass words, and referents (PENDING wording,
+      a pass word in another sentence, the exempt keys, and near-miss keys that are
+      not exempt). Run against the 6d8a6bd8 artifact, the checker reported that one
+      sentence and nothing else. Live controls NC-RETURN-EVIDENCE-PASS-PROSE (rule
+      removed) and NC-RETURN-ARTIFACT-PASS-PROSE (the old sentence restored in this
+      file) each make their test fail.
+    result: PROVEN
   - obligation: restored defects make their relevant tests fail
     proof: proof-mutation.mjs at the semantic head, see negative_controls
     result: PROVEN
@@ -276,9 +313,9 @@ proof_matrix:
 
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
-  at: 6d8a6bd8
-  portable_total: 279
-  portable_passed: 279
+  at: 3d1944cc
+  portable_total: 282
+  portable_passed: 282
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
   windows_total: 19
   windows_passed: 19
@@ -295,15 +332,17 @@ tests:
     `directive` from ChatGPT in "AUTO_EVENT, ACK and plain text are never actionable"
     now fails closed instead of being ignored. It is asserted in "an undeclared type
     from ChatGPT selects nothing", and its old slot holds a ChatGPT ACK.
+    3d1944cc adds three tests (NC blank identity, BLANK-id newest, NC pass prose)
+    and changes no existing one.
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 6d8a6bd8
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 3d1944cc
   baseline_before_change: 32/32 live
-  result: 61/61 live at 6d8a6bd8
+  result: 65/65 live at 3d1944cc
   retargeted_same_claim_and_proof:
     - NC-WORKER-SENDERLESS-REJECTED, NC-WORKER-SENDER-EXACT, NC-WORKER-AUTHOR-ALLOWLIST (select-directive.ps1 -> lib/control-envelope.mjs)
     - NC-RECONCILE-AUTHORITY-SENDER (reconcile.mjs -> lib/control-envelope.mjs rejectionOf)
-  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-ESCAPED-COMMENT, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-EVENTS-MALFORMED-AUTHORITY-KIND, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-SELECTOR-SOURCE-HEAD-FALLBACK, NC-SELECTOR-SOURCE-MAIN-PRECEDENCE, NC-WORKFLOW-D1-TOKEN, NC-RETURN-EVIDENCE-RETURN-ID, NC-RETURN-EVIDENCE-STATUS, NC-RETURN-EVIDENCE-FUTURE-ID, NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING, NC-RETURN-EVIDENCE-VOCABULARY, NC-RETURN-ARTIFACT-PREMATURE-ID]
+  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-ESCAPED-COMMENT, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-EVENTS-MALFORMED-AUTHORITY-KIND, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-SELECTOR-SOURCE-HEAD-FALLBACK, NC-SELECTOR-SOURCE-MAIN-PRECEDENCE, NC-WORKFLOW-D1-TOKEN, NC-RETURN-EVIDENCE-RETURN-ID, NC-RETURN-EVIDENCE-STATUS, NC-RETURN-EVIDENCE-FUTURE-ID, NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING, NC-RETURN-EVIDENCE-VOCABULARY, NC-RETURN-ARTIFACT-PREMATURE-ID, NC-ENVELOPE-BLANK-IDENTITY, NC-SELECTOR-BLANK-IDENTITY, NC-RETURN-EVIDENCE-PASS-PROSE, NC-RETURN-ARTIFACT-PASS-PROSE]
   history: >
     48/48 live at 8744d90c and at a8c87ccb. At 81a2ddd2, NC-PLATFORM-DUPLICATE-ID
     was VACUOUS: its platform-level guard was unreachable behind collectAuthority's
@@ -315,7 +354,8 @@ negative_controls:
     NC-EVENTS-MALFORMED-AUTHORITY-KIND (52/52). 07e272c7 added
     NC-ENVELOPE-ESCAPED-COMMENT (53/53). 940d89b9 added
     NC-SELECTOR-SOURCE-HEAD-FALLBACK and NC-SELECTOR-SOURCE-MAIN-PRECEDENCE (55/55).
-    6d8a6bd8 added the six NC-RETURN-* controls (61/61).
+    6d8a6bd8 added the six NC-RETURN-* controls (61/61). 3d1944cc added the two
+    blank-identity controls and the two pass-prose controls (65/65).
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
@@ -336,6 +376,10 @@ ci:
     PENDING. Required checks run on the PR head that carries this artifact
     commit (the semantic head plus this control-only commit). An artifact cannot
     record CI for the commit that contains it. No RETURN for this head exists yet.
+  previous_head_ec890538: >
+    every check run concluded success or was skipped by its own condition, with
+    zero failures; Copilot review 5332682603 raised r4117477528 and r4117477551,
+    so no RETURN was posted for that head.
   previous_head_d9b12873: >
     every exact-head workflow completed with zero failures, as reported in
     CC-RETURN-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001. The artifact at that head
@@ -349,9 +393,17 @@ ci:
 
 ai_review:
   reviewer: copilot-pull-request-reviewer[bot]
-  reviews: [5330693593 on 33b46896, 5330709017 on a8c87ccb, 5330788503 on 9eb4f884, 5330834778 on 4f559de3, 03b22a58 (15:31Z), ad9c908d (21:31Z), 5332418633 on 82454cce, 5332604917 on d9b12873]
+  reviews: [5330693593 on 33b46896, 5330709017 on a8c87ccb, 5330788503 on 9eb4f884, 5330834778 on 4f559de3, 03b22a58 (15:31Z), ad9c908d (21:31Z), 5332418633 on 82454cce, 5332604917 on d9b12873, 5332682603 on ec890538]
   final_head_review: PENDING
   findings:
+    - id: r4117477528
+      source: Copilot review 5332682603 at ec890538, "Quoted empty identifiers bypass the required-ID check", control-envelope.mjs:194
+      disposition: FIXED
+      evidence: 3d1944cc; blank message_id/packet_id is "<key> (blank)" under AUTHORITY; control-envelope.spec "NC blank identity", select-directive.spec "BLANK-id newest"; NC-ENVELOPE-BLANK-IDENTITY, NC-SELECTOR-BLANK-IDENTITY
+    - id: r4117477551
+      source: Copilot review 5332682603 at ec890538, DAST prose in this file contradicted its PENDING entry, claude-return.yaml:460
+      disposition: FIXED
+      evidence: 3d1944cc; the sentence now says PENDING and return-evidence checks prose; return-evidence.spec "NC pass prose"; NC-RETURN-EVIDENCE-PASS-PROSE, NC-RETURN-ARTIFACT-PASS-PROSE
     - id: review-5332604917-premature-return-evidence
       source: Copilot review 5332604917 at d9b12873, "artifact records a superseding RETURN before it exists and while exact-head checks remain incomplete"
       disposition: FIXED
@@ -427,6 +479,7 @@ scope_ledger:
     - exact-head CI, AI review, dispositions, RETURN
     - selector source_head fallback into source_main, explicit source_main wins (CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001, inside D3)
     - truthful pre-RETURN artifact plus a regression checker (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001)
+    - blank message_id/packet_id rejected; pre-RETURN prose checked for exact-head pass claims (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001)
   resolved: [all declared items except the exact-head items under remaining]
   remaining:
     - exact-head workflows and a fresh Copilot review on the final PR head (PENDING)

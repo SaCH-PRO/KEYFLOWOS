@@ -18,7 +18,7 @@ tracking_issue: 98
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
 implementation_branch: impl/kf-meta-control-parser-001
 state: PROVING
-health: GREEN
+health: YELLOW   # per CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
 scope_changed: true
 production_touched: false
 programme_credit: ZERO
@@ -174,6 +174,30 @@ evidence_order_correction:
     - no merge, programme-state re-anchor, ACTION-001 release, activation, map regeneration
     - no scope beyond the evidence-order correction and the authorized D3 fix
     - no production/provider traffic or gate weakening
+
+blank_id_evidence_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
+  review_comment_id: 5861197569
+  ack: CC-ACK-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
+  source_head: ec89053857f913f1a54d5609070f9fc827fc2a92
+  state: CORRECTION_AUTHORIZED
+  scope_changed: true
+  scope_change_authority: CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
+  findings:
+    r4117477528: ACCEPTED_MUST_FIX_BEFORE_ADMISSION; empty or whitespace-only message_id/packet_id is not authority identity
+    r4117477551: ACCEPTED_MUST_FIX_BEFORE_ADMISSION; pre-RETURN prose may not describe a pending exact-head result as passed
+  required:
+    - reject empty and whitespace-only message_id and packet_id; preserve null/missing/duplicate/malformed semantics
+    - parser regressions for "", "   " and quoted whitespace; selector regression that blank authority is never the selected cursor
+    - live negative/mutation control restoring blank-id acceptance must fail
+    - correct the DAST prose to PENDING; extend return-evidence checking to prose if practical within this packet
+    - keep all exact-head evidence PENDING in branch artifacts until the final proof is complete
+    - portable, Windows, mutation, validate-dag, validate-platform-dag, all exact-head workflows, fresh Copilot review, every finding dispositioned
+    - post the superseding RETURN only after all checks and review complete, with no further semantic branch mutation
+  evidence_policy: only PROVEN satisfies a required gate; partial, not run, unknown or pending is never green
+  constraints:
+    - no merge, ACTION-001 release, programme-state re-anchor, platform activation, map regeneration
+    - no production/provider traffic, secrets or gate weakening; one implementation lineage
 
 return_contract: >
   ACK exact source/branch/scope before mutation; post CONTRADICTION if current
