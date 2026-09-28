@@ -1,422 +1,163 @@
-packet_id: KF-META-CONTROL-PARSER-001
-directive_message_id: CG-DIRECTIVE-META-CONTROL-PARSER-001
-decision_message_id: CG-REVIEW-META-CONTROL-PARSER-DECISION-001
-ack_message_id: CC-ACK-META-CONTROL-PARSER-DECISION-001
-progress_message_ids:
-  - CC-PROGRESS-META-CONTROL-PARSER-001
-momentum_message_ids:
-  - CC-MOMENTUM-META-CONTROL-PARSER-001
+packet_id: KF-META-STATE-RECONCILE-002
+directive_message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002
+directive_comment_id: 5875639550
+ack_message_id: CC-ACK-META-STATE-RECONCILE-002
+ack_comment_id: 5875719435
+progress_message_ids: []
+momentum_message_ids: []
 # This file is a pre-RETURN record (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001).
 # The RETURN is posted on #80 after every exact-head check and the fresh AI
 # review finish on the head that carries this file, with no further branch
-# mutation. That RETURN is the final evidence envelope. Until then nothing here
-# claims a RETURN id or exact-head proof. lib/return-evidence.mjs checks this
-# file on every run of the portable suite.
+# mutation. That RETURN is the final evidence envelope. lib/return-evidence.mjs
+# checks this file on every run of the portable suite.
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
-previous_return_message_ids:   # each was posted on #80
-  - CC-RETURN-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001   # 5860765092, superseded by the evidence-order REVIEW
-  - CC-RETURN-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002   # 5860500340
-  - CC-RETURN-META-CONTROL-PARSER-001   # 5857296594
-never_posted_return_message_ids:
-  - CC-RETURN-META-CONTROL-PARSER-FINAL-001   # named here at ad9c908d; that run was held before posting
-correction_review_message_id: CG-REVIEW-META-CONTROL-PARSER-FINAL-001
-correction_ack_message_id: CC-ACK-META-CONTROL-PARSER-FINAL-001
-escape_review_message_id: CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
-escape_ack_message_id: CC-ACK-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
-source_head_review_message_id: CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
-source_head_ack_message_id: CC-ACK-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
-evidence_order_review_message_id: CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001
-evidence_order_ack_message_id: CC-ACK-META-CONTROL-PARSER-EVIDENCE-ORDER-001
-blank_id_review_message_id: CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
-blank_id_ack_message_id: CC-ACK-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
-missing_scope_review_message_id: CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002
-missing_scope_ack_message_id: CC-ACK-META-CONTROL-PARSER-MISSING-SCOPE-002
-source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
-source_head: c6541442c020164746ddb6fe3ad2560bed378ad6
-implementation_branch: impl/kf-meta-control-parser-001
-pr_number: 100
+previous_return_message_ids: []
+never_posted_return_message_ids: []
+source_main: 9c8e49791705361227135a9032a640199949113f
+source_head: 9c8e49791705361227135a9032a640199949113f
+implementation_branch: impl/kf-meta-state-reconcile-002
+pr_number: null
 state: PROVING
-health: YELLOW   # exact-head proof for this head is PENDING
-scope_changed: true
-scope_change_authority: CG-REVIEW-META-CONTROL-PARSER-DECISION-001
+health: GREEN
+scope_changed: false
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
 merge_authority: false
 
 summary: >
-  lib/control-envelope.mjs is now the only reader of issue #80 control fields.
-  It has two profiles: AUTHORITY, used by every consumer, and ACTIVATION, used
-  only by platformProgrammeState, which is AUTHORITY plus the unchanged
-  activation vocabulary. events.mjs, reconcile.mjs and platform-dag.mjs use it.
-  select-directive.ps1 is a thin wrapper over select-directive.mjs (D3). The
-  CI decide step reads with the job token (D1). The live reconcile on healthy
-  evidence no longer reports AUTHORITY_UNVERIFIABLE or REPO_TRUTH_UNVERIFIABLE.
-  It reports DERIVED_STATE_STALE_AUTHORITY (D2: not re-anchored) and
-  AUTHORITY_MALFORMED for three ChatGPT messages newer than the anchor that
-  are not well-formed authority: two historic malformed ones (one of them a
-  hold) and one PLAN, a type #80 does not declare.
+  .agent-control/programme-state.yaml is re-derived from current authority and
+  repository truth. It is anchored to CG-DIRECTIVE-META-STATE-RECONCILE-002
+  (comment 5875639550), the newest valid authority on #80. It records
+  KF-META-CONTROL-PARSER-001 as CHECKPOINTED from PR 100 (exact head 85020063,
+  merge 9c8e4979), and only the four application packets are checkpointed. The
+  ACTION-001 hold stays active, the platform programme stays inactive and every
+  safety flag stays false. Live reconcile against real #80 and main is
+  consistent with no findings, and decide() returns WAIT_AUTHORITY because of
+  the hold. Before this change it was REPORT_DRIFT with
+  DERIVED_STATE_STALE_AUTHORITY and AUTHORITY_MALFORMED. No gate, parser rule,
+  threshold or application code changed.
 
-scope_change: >
-  Authorized by CG-REVIEW-META-CONTROL-PARSER-DECISION-001: option T, D1
-  workflow read plumbing, D3 selector migration, D4 edit semantics.
-  CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001 added the blank-identity
-  rule (r4117477528) and the prose evidence check (r4117477551).
-  CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002 released r4117714827, the
-  required evidence_scope on every proof_matrix entry.
+characterization:
+  live_before: >
+    orchestrate.mjs --json on real #80 and main 9c8e4979 gave REPORT_DRIFT.
+    DERIVED_STATE_STALE_AUTHORITY listed 21 valid authority messages newer than
+    the 2026-09-25 anchor 5825443535, ending at this directive. AUTHORITY_MALFORMED
+    listed 4 authority-typed ChatGPT messages after that anchor that fail the
+    AUTHORITY profile: 5826124586, 5826612913, 5826799265 and 5875440129.
+  root_cause: >
+    The projection was never re-anchored after 2026-09-25; D2 of
+    KF-META-CONTROL-PARSER-001 deferred it to this packet. All 4 malformed messages
+    predate the new anchor, so under the admitted parser rule they are evidence
+    only. No gate needs changing.
+  ci_observer: >
+    The autopilot decide step now carries GH_TOKEN (PR 100, D1). The post-merge
+    AUTO_EVENTs on #80 report the same two findings, not the *_UNVERIFIABLE pair.
+  discoveries:
+    - >
+      The ACTION-001 hold sequence is CG-HOLD-ACTION-AUTO-001, then CG-RESUME-ACTION-001
+      (5826160790, characterization only), then CG-HOLD-ACTION-CONTROLLER-BRIDGE-001
+      (5826612913, HOLD_AUTONOMY_BRIDGE). That last hold fails the AUTHORITY profile.
+      The projection cites it and treats the directive's required_truth.action_hold
+      as the binding current statement.
+    - >
+      CC-CONTRADICTION-AI-PR-REVIEW-GATE-001 (5848225019, PR 94, options A/B/C) has
+      no ChatGPT disposition on #80. It is recorded under unresolved_contradictions.
+      This fails closed. The decision is unchanged, because the hold already
+      yields WAIT_AUTHORITY.
+    - >
+      .agent-control/README.md still calls programme-state the canonical live state.
+      That contradicts AGENT_CONTROL_PLANE.md "Control-state precedence". It is not
+      changed here, because it is outside the minimum projection scope.
 
 changed_files:
   semantic:
-    - .github/workflows/agent-control-autopilot.yml
-    - docs/development/AGENT_AUTOPILOT.md
-    - docs/development/AGENT_AUTOPILOT_OPERATIONS.md
-    - docs/development/AGENT_CONTROL_PLANE.md
-    - scripts/agent-control/lib/control-envelope.mjs (new)
-    - scripts/agent-control/lib/events.mjs
-    - scripts/agent-control/lib/platform-dag.mjs
-    - scripts/agent-control/lib/reconcile.mjs
-    - scripts/agent-control/lib/return-evidence.mjs (new)
-    - scripts/agent-control/lib/yaml.mjs (exports stripComment/parseScalar; stripComment is escape-aware)
+    - scripts/agent-control/fixtures/reconcile-002-truth.json (new)
     - scripts/agent-control/negative-controls.yaml
-    - scripts/agent-control/select-directive.mjs (new)
-    - scripts/agent-control/select-directive.ps1
-    - scripts/agent-control/tests/control-envelope.spec.mjs (new)
-    - scripts/agent-control/tests/events.spec.mjs
-    - scripts/agent-control/tests/platform-dag.spec.mjs
     - scripts/agent-control/tests/reconcile.spec.mjs
-    - scripts/agent-control/tests/return-evidence.spec.mjs (new)
-    - scripts/agent-control/tests/select-directive.spec.mjs
-    - scripts/agent-control/tests/windows/harness.mjs
+    - scripts/agent-control/tests/return-evidence.spec.mjs
     - scripts/agent-control/tests/yaml.spec.mjs
   control_only:
+    - .agent-control/programme-state.yaml
     - .agent-control/active-packet.yaml
     - .agent-control/claude-return.yaml
 
-commits:
-  - sha: 8744d90c9b0cd9f0719ca637bb4d29d370511d7b
-    subject: "one shared #80 envelope parser (option T)"
-  - sha: 33b468960e90b529cf3fc76511f64b4679b6f2d4
-    subject: control artifacts
-  - sha: 4679545d8018a86af803bf7c64ce28b44e75313b
-    subject: pin the branch control artifacts to this packet
-  - sha: a8c87ccbc2873d5481a729043d69ebededd17871
-    subject: advance source_head
-  - sha: 81a2ddd22a8c1a9039da1701144f843550084dcf
-    subject: address exact-head review (audit evidence, id conflicts)
-  - sha: 584d2edf655aefc267794a1cab0b09ea25c92768
-    subject: drop a redundant platform id guard; point its control at the real one
-  - sha: 9eb4f88496245ce49b7c2e4028b4886b79e0cabf
-    subject: complete return artifact
-  - sha: 2b18480826dcef5bde7784efeb7b3a14b547fd87
-    subject: undeclared ChatGPT message types fail closed
-  - sha: 4f559de32fe3606558d998e5b9bf3f2ac291aafb
-    subject: return artifact for 2b184808
-  - sha: 1a52f48d73ef29d348a9f5e5667581f7612a1837
-    subject: escape-aware quote balance
-  - sha: 03b22a58d154fd53f4df82d7f4ba4731d89ab6d3
-    subject: return artifact for 1a52f48d
-  - sha: a5f46027e5d02b5339228d7cc3eb1ae9ae8c9567
-    subject: malformed authority events are kind MALFORMED (CG-REVIEW-META-CONTROL-PARSER-FINAL-001, r4115915819)
-  - sha: ad9c908d7040a8f43eda047984e4b418e4159648
-    subject: return artifact for a5f46027
-  - sha: 07e272c7ff5e93e7db07aa54419c01b4d19df1be
-    subject: escape-aware inline-comment scanner (CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002)
-  - sha: 82454ccefc3ed16b1c5886e80da3b8c47a409e5b
-    subject: return artifact for 07e272c7
-  - sha: 940d89b93abd5755e17771b490c9e6f8035c0627
-    subject: selector projects source_head into source_main (CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001)
-  - sha: d9b12873239b91d179e574de279d76f052883a9e
-    subject: return artifact for 940d89b9
-  - sha: 6d8a6bd83e9c2e8b1964a87937e27e8c5d633344
-    subject: pre-RETURN artifact cannot claim a RETURN or exact-head proof (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001)
-  - sha: ec89053857f913f1a54d5609070f9fc827fc2a92
-    subject: pre-RETURN artifact for 6d8a6bd8
-  - sha: 3d1944cc8d87ff15bb4fe5b7eae8a68ad198205a
-    subject: blank identities are not authority; prose cannot claim exact-head pass (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001)
-  - sha: b21b8f0f65fa4992a73056e89b20989c771d9c89
-    subject: pre-RETURN artifact for 3d1944cc
-  - sha: 6a76b8495da43dfc36f2a09e9ae5790a5aae414b
-    subject: completion and umbrella prose claims; document blank identities (Copilot review 5332867429)
-  - sha: b4f70730262a7c7a15b4322be3ac7e8d5d85198b
-    subject: pre-RETURN artifact for 6a76b849
-  - sha: c6541442c020164746ddb6fe3ad2560bed378ad6
-    subject: evidence_scope is required on every proof_matrix entry (CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002, r4117714827)
-
-contract_as_implemented:
-  field_syntax:
-    - a field is a top-level key line at column 0; the colon must be followed by whitespace or end of line
-    - inline comments and quoting are read as lib/yaml.mjs reads them
-    - a repeated key, including one in a second fenced block, has no value and is malformed
-    - an unmatched quote is malformed; the value is still read as written, for filtering only
-    - quote balance is escape-aware (backslash escapes in double quotes, doubled '' in single quotes); a stray interior quote is unmatched
-    - the inline-comment scanner reads quotes the same escape-aware way, so a "#" after an escaped quote inside a quoted scalar is value, not comment
-  authority_profile:
-    - authority message_type; sender exactly chatgpt; allowlisted author
-    - message_id and packet_id non-null and not blank (a quoted "" or whitespace-only value is "<key> (blank)"); every envelope key present, null allowed, any state or health value
-    - control fields are single-line
-  activation_profile: AUTHORITY plus non-null values, packet-state and GREEN/YELLOW/RED vocabulary, 40-hex SHAs, true/false
-  collection:
-    - any edited comment from an allowlisted author -> AUTHORITY_EDITED; unknown edit state -> AUTHORITY_UNVERIFIABLE
-    - missing id or unparseable time, or two authority-typed comments sharing an id -> AUTHORITY_ORDER_AMBIGUOUS
-    - order is created_at, then comment id
-    - a malformed ChatGPT message is a candidate, never skipped; reconcile reports those newer than the anchor as AUTHORITY_MALFORMED
-    - from the ChatGPT sender, a missing, repeated or undeclared message_type is malformed authority; the declared non-authority types are the #80 list (ACK, PROGRESS, MOMENTUM, CONTRADICTION, RETURN, CLOSE) plus AUTO_EVENT and AUTO_MERGE
-    - entries keep comment id, created_at, updated_at, edit evidence and the raw body for audit
-  selector: selects only when the newest authority is valid, a DIRECTIVE or REVIEW, and unprocessed; exits 2 when authority is unverifiable or node is missing. The output JSON shape is unchanged; selected.source_main is the directive's source_main, or its source_head when source_main is absent or null
-  events: >
-    authority-typed messages are actionable only when they pass AUTHORITY. A
-    syntactically malformed envelope is MALFORMED and not actionable. An
-    attributable (sender chatgpt, allowlisted author) authority-typed envelope
-    that parses but fails AUTHORITY is also kind MALFORMED, as collectAuthority
-    classifies it; its claimed type stays in the event's message_type and the
-    profile problems in authority.problems. A forged-author or non-ChatGPT
-    message keeps its claimed kind with actionable false (r4115915819).
-
-behaviour_changes_to_note:
-  - >
-    An inline comment after a value is now stripped everywhere, as YAML does.
-    This closes r4111639398, since a programme field followed by an inline
-    comment now names the programme.
-  - >
-    A key followed by a colon with no space before the value is no longer a field.
-  - the selector no longer wakes on an older directive when the newest authority is a HOLD/RESUME, is malformed, or when any allowlisted comment has been edited
-  - forged or incomplete authority-typed comments no longer produce AUTO_EVENT wake comments
-  - every envelope key must be present in authority messages; live authority since the anchor complies except the two historic messages reported as AUTHORITY_MALFORMED
-  - >
-    ChatGPT must use a declared #80 message type. A ChatGPT PLAN, a
-    lowercase directive or a typo now fails closed (reconcile finding; the
-    worker does not wake past it) instead of being ignored. Live, this adds
-    CG-PLAN-PLATFORM-CONVERGENCE-001 (5826799265) to AUTHORITY_MALFORMED.
-    If PLAN should be a declared non-authority type, that is a contract
-    decision for ChatGPT.
+projection_as_derived:
+  authority_basis: CG-DIRECTIVE-META-STATE-RECONCILE-002 / 5875639550
+  derivation_source_main: 9c8e49791705361227135a9032a640199949113f
+  programme: KF-META-CONTROL-PARSER-001, CHECKPOINTED, GREEN, PR 100, branch impl/kf-meta-control-parser-001, source_main 71a534b8 (an ancestor of main)
+  checkpointed: [KF-EXEC-K12-001, KF-EXEC-EXTFX-001, KF-EXEC-TENANT-001, KF-EXEC-AUTH-001]
+  application_frontier: KF-EXEC-ACTION-001
+  hold: active; KF-EXEC-ACTION-001; hold_message_id CG-HOLD-ACTION-CONTROLLER-BRIDGE-001; affirmed_by this directive
+  platform_programme: KEYFLOWOS_PLATFORM_CONVERGENCE INACTIVE_SUCCESSOR, activation_authorized false
+  safety: production release, production mutation, real provider traffic, platform activation, forensic rebaseline, map refresh and OS cycles all false
+  next_legal_action: WAIT_AUTHORITY
 
 proof_matrix:
-  - obligation: shared parser is sole parser for authority envelopes
-    evidence_scope: semantic_head
-    proof: control-envelope.spec "the shared parser is the sole #80 envelope parser" (source scan of every lib/CLI/ps1 for the reader shapes it replaced, plus import checks), its own negative control, NC-SOLE-PARSER
-    result: PROVEN
-  - obligation: all required consumers use the same AUTHORITY semantics
-    evidence_scope: semantic_head
-    proof: events.mjs, reconcile.mjs (collectAuthority), platform-dag.mjs and select-directive.mjs import lib/control-envelope.mjs; the PowerShell selector delegates to it; events.spec, reconcile.spec, platform-dag.spec and select-directive.spec exercise the same rules
-    result: PROVEN
-  - obligation: ACTIVATION strictly additive; current negative controls still fail on broken variants
-    evidence_scope: semantic_head
-    proof: control-envelope.spec "ACTIVATION is strictly additive" + NC-ACTIVATION-ADDITIVE; every existing platform-dag.spec negative control is unchanged in its assertions and still passes; live vocabulary (RELEASED, AMBER, SUPERSEDED, null branch) passes AUTHORITY and fails ACTIVATION
-    result: PROVEN
-  - obligation: D1 workflow token/read-permission fix proves live repository/issue reads
+  - obligation: current Issue 80 authority parses deterministically through the shared parser
     evidence_scope: semantic_head
     proof: >
-      workflow_dispatch run 36326043626 (branch workflow with GH_TOKEN, main's scripts)
-      read #80 and the repository in CI. Its only finding is DERIVED_STATE_STALE_AUTHORITY,
-      with no AUTHORITY_UNVERIFIABLE and no REPO_TRUTH_UNVERIFIABLE. It posted the usual
-      MANUAL_RECONCILE AUTO_EVENT; no merge job ran. Static pin: events.spec "D1:" + NC-WORKFLOW-D1-TOKEN.
-    result: PROVEN
-  - obligation: AUTHORITY_UNVERIFIABLE and REPO_TRUTH_UNVERIFIABLE disappear when evidence is readable and valid
+      reconcile.spec "recorded evidence": collectAuthority over the unmodified REST
+      payloads of #80 comments 5875440129..5875719435 is verified, and its newest
+      message is this directive. The live orchestrate run reports the same newest message.
+    result: PENDING
+  - obligation: programme-state no longer anchors to the obsolete September 25 authority basis
+    evidence_scope: semantic_head
+    proof: authority_basis equals the recorded newest authority; NC-PROJECTION-OBSOLETE-ANCHOR restores 5825443535 and the recorded-evidence test fails
+    result: PENDING
+  - obligation: repository truth for merged PR 100 is represented correctly
     evidence_scope: semantic_head
     proof: >
-      local live orchestrate.mjs --json at 2b184808 and again at 1a52f48d with gh auth: findings are only
-      DERIVED_STATE_STALE_AUTHORITY and AUTHORITY_MALFORMED (5826124586, 5826612913,
-      5826799265); newest authority CG-REVIEW-META-CONTROL-PARSER-DECISION-001; decision
-      REPORT_DRIFT. The live selector on real #80 selects that REVIEW, as the old selector did.
-    result: PROVEN
-  - obligation: DERIVED_STATE_STALE_AUTHORITY may remain and must not be mislabeled green
+      programme pr_number 100, branch impl/kf-meta-control-parser-001, CHECKPOINTED,
+      source_main 71a534b8 is ahead-of on main (compare API). The recorded repo truth
+      matches. Referent: the same evidence with PR 100 open gives PR_NOT_MERGED.
+    result: PENDING
+  - obligation: reconcile returns consistent on recorded healthy current evidence
     evidence_scope: semantic_head
-    proof: live result is REPORT_DRIFT with consistent false; programme-state.yaml untouched
-    result: PROVEN
-  - obligation: negative controls cover the issue #98 / directive list
+    proof: orchestrate.mjs --truth-file scripts/agent-control/fixtures/reconcile-002-truth.json gives consistent true with no findings and WAIT_AUTHORITY
+    result: PENDING
+  - obligation: the scheduled/autopilot decision no longer reports a stale projection solely because of the old anchor
     evidence_scope: semantic_head
-    proof: >
-      edited newest DIRECTIVE/HOLD/REVIEW and ACK (NC-ENVELOPE-EDITED), unknown edit state,
-      duplicates (NC-ENVELOPE-REPEATED-KEY), invalid-first repeats
-      (NC-ENVELOPE-INVALID-FIRST-REPEAT), inline comments (NC-ENVELOPE-INLINE-COMMENT), unmatched
-      quotes (NC-ENVELOPE-UNMATCHED-QUOTE), sender case drift (NC-WORKER-SENDER-EXACT), missing
-      fields (NC-ENVELOPE-MISSING-KEY), forged author (NC-WORKER-AUTHOR-ALLOWLIST,
-      NC-RECONCILE-AUTHORITY-SENDER), stale anchor (NC-RECONCILE-NEWER-AUTHORITY), unreadable input
-      (NC-RECONCILE-UNVERIFIABLE-AUTHORITY), ambiguous ordering and same-order conflicts
-      (NC-ENVELOPE-ORDER-AMBIGUOUS, NC-PLATFORM-DUPLICATE-ID), malformed newer authority
-      (NC-RECONCILE-MALFORMED-NEWER), undeclared ChatGPT types (NC-ENVELOPE-UNDECLARED-TYPE),
-      selector no-fallback / newer hold / no node
-    result: PROVEN
-  - obligation: attributable profile-invalid authority is non-actionable and classified MALFORMED (CG-REVIEW-META-CONTROL-PARSER-FINAL-001)
+    proof: live orchestrate.mjs --json (the command the autopilot decide step runs) with gh auth on real #80 and main gives consistent true, no findings, WAIT_AUTHORITY
+    result: PENDING
+  - obligation: no prior safety gate is weakened
     evidence_scope: semantic_head
-    proof: >
-      events.spec "attributable authority that parses but fails the AUTHORITY profile is MALFORMED,
-      never its claimed kind": DIRECTIVE, REVIEW and HOLD from SaCH-PRO / sender chatgpt, each with a
-      missing key and with a null packet_id; envelope_problems empty, kind MALFORMED, actionable false,
-      message_type keeps the claimed type, authority.problems names the defect; the valid envelope keeps
-      its kind. Live control NC-EVENTS-MALFORMED-AUTHORITY-KIND restores the mislabel and that test fails.
-    result: PROVEN
-  - obligation: escape-aware inline-comment scanning (CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002)
+    proof: no lib, workflow, parser, threshold or gate file changed; the only test edits add assertions or retarget the artifact packet pins; 2 new live negative controls
+    result: PENDING
+  - obligation: no application packet credit is created by this meta packet
     evidence_scope: semantic_head
-    proof: >
-      yaml.spec and control-envelope.spec "NC escaped comment": the exact Copilot input
-      `packet_id: "KF\" # 1"` reads as `KF" # 1` in the codec and the envelope parser, with no
-      AUTHORITY problems; `'it''s # 1'` reads as `it's # 1`. Referents: an escaped backslash still
-      closes, a comment after the real close is still stripped, and `"KF\" # 1` (never closed) is
-      still an unmatched quote. Live control NC-ENVELOPE-ESCAPED-COMMENT restores the escape-blind
-      scanner and both tests fail. On live #80 (375 comments, 15,487 lines) the old and new
-      scanners agree on every line, so no live message changes classification.
-    result: PROVEN
-  - obligation: source_head routing in the selector (CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001)
-    evidence_scope: semantic_head
-    proof: >
-      select-directive.spec, run through the PowerShell wrapper. "NC source head": a REVIEW with
-      no source_main key, and a DIRECTIVE with source_main null, both select with source_main set
-      to their source_head, and the selected key set is pinned to the same eight fields.
-      "NC source precedence": with both present, source_main wins. Live controls
-      NC-SELECTOR-SOURCE-HEAD-FALLBACK (fallback removed) and NC-SELECTOR-SOURCE-MAIN-PRECEDENCE
-      (source_head preferred) each make their test fail. claude-worker.ps1 Resolve-WorktreeBase
-      is unchanged; it now receives the head through the existing field.
-    result: PROVEN
-  - obligation: a pre-RETURN artifact cannot claim a posted RETURN or finished proof of the head that carries it (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001)
-    evidence_scope: semantic_head
-    proof: >
-      lib/return-evidence.mjs preReturnEvidenceProblems. return-evidence.spec has one
-      fixture per premature claim: a return_message_id, a return_status other than
-      AWAITING_POSTCHECK_RETURN, a RETURN id named but not listed as posted or never
-      posted (the d9b12873 ci.exact_head prose), an exact-head gate or the fresh
-      Copilot review not PENDING, a missing gate, and a proof_matrix result outside
-      the evidence states (the d9b12873 PASS_LOCAL_CI_IN_RETURN). "NC branch artifact"
-      runs the checker on this file, so every exact-head portable run checks the
-      artifact it carries. Live controls: NC-RETURN-EVIDENCE-RETURN-ID,
-      NC-RETURN-EVIDENCE-STATUS, NC-RETURN-EVIDENCE-FUTURE-ID, NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING,
-      NC-RETURN-EVIDENCE-VOCABULARY, NC-RETURN-ARTIFACT-PREMATURE-ID.
-    result: PROVEN
-  - obligation: empty and whitespace-only message_id / packet_id are not authority identity (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001, r4117477528)
-    evidence_scope: semantic_head
-    proof: >
-      control-envelope.spec "NC blank identity": for both keys, quoted "", '', "   ",
-      '  ' and "\t" decode to a string (not null) and fail AUTHORITY with exactly
-      "<key> (blank)", and ACTIVATION too. Unquoted blanks still read as null and
-      report "(absent or null)" as before. Referent: a quoted identity with text,
-      padding included, passes AUTHORITY. collectAuthority keeps a blank newest
-      message as a malformed candidate, not a message. select-directive.spec
-      "a BLANK-id newest ChatGPT message", through the PowerShell wrapper: an empty
-      message_id, a whitespace message_id and a whitespace packet_id each select
-      nothing, never fall back to the older directive, are labelled by comment id
-      when the id is blank, and stay unselected with blank entries in the processed
-      cursor. Live controls NC-ENVELOPE-BLANK-IDENTITY and NC-SELECTOR-BLANK-IDENTITY
-      restore blank-id acceptance and their tests fail. Null, missing, repeated and
-      malformed semantics are unchanged; no existing assertion changed.
-    result: PROVEN
-  - obligation: pre-RETURN prose cannot describe a pending exact-head result as complete (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001, r4117477551)
-    evidence_scope: semantic_head
-    proof: >
-      The security.local_hawkscan sentence now says PENDING. lib/return-evidence.mjs
-      reads every sentence of every value and flags one that names a gate, or all
-      of them at once, beside pass or completion vocabulary. Obligation texts and
-      previous_head_<sha> records are exempt by key. return-evidence.spec "NC pass prose" uses the exact 6d8a6bd8
-      sentence, every gate with four pass words, and referents (PENDING wording,
-      a pass word in another sentence, the exempt keys, and near-miss keys that are
-      not exempt). Run against the 6d8a6bd8 artifact, the checker reported that one
-      sentence and nothing else. Live controls NC-RETURN-EVIDENCE-PASS-PROSE (rule
-      removed) and NC-RETURN-ARTIFACT-PASS-PROSE (the old sentence restored in this
-      file) each make their test fail. 6a76b849 (Copilot 5332867429) extends the
-      rule to completion vocabulary (r4117648609) and to phrases that name every
-      gate at once (r4117648627); see return-evidence.mjs PASS_WORD and
-      UMBRELLA_GATE. Tests: NC completion prose, NC umbrella prose. Live controls:
-      NC-RETURN-EVIDENCE-COMPLETION-PROSE, NC-RETURN-EVIDENCE-UMBRELLA-PROSE.
-    result: PROVEN
-  - obligation: a proof_matrix entry cannot reach PROVEN on an exact-head obligation by omitting its scope marker (CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002, r4117714827)
-    evidence_scope: semantic_head
-    proof: >
-      c6541442. evidence_scope is structured and required: every proof_matrix
-      entry must say exact_head or semantic_head, and an absent, empty or unknown
-      value is a problem. exact_head entries must be PENDING, as before. Second
-      guard: an obligation that names an exact-head gate, by the same matching
-      the prose rule already uses (no new vocabulary), must be exact_head.
-      return-evidence.spec "NC missing scope" uses the exact Copilot entry
-      and a gate-free label with absent, null, empty, unknown and wrong-case
-      scopes; referents show the same entry with the marker is held to PENDING.
-      "NC scope mislabel" rejects semantic_head on four gate-naming obligations.
-      "NC branch artifact" now also requires a scope on each entry of this file.
-      Live controls NC-RETURN-EVIDENCE-MISSING-SCOPE (absent scope accepted
-      again), NC-RETURN-EVIDENCE-SCOPE-MISLABEL (second guard removed) and
-      NC-RETURN-ARTIFACT-MISSING-SCOPE (this file's exact_head marker removed)
-      each make their test fail.
-    result: PROVEN
+    proof: reconcile.spec committed-projection test pins checkpointed to exactly the four application packets and excludes all three meta packets
+    result: PENDING
   - obligation: restored defects make their relevant tests fail
     evidence_scope: semantic_head
     proof: proof-mutation.mjs at the semantic head, see negative_controls
-    result: PROVEN
+    result: PENDING
   - obligation: portable and Windows suites at the semantic head
     evidence_scope: semantic_head
     proof: see tests
-    result: PROVEN
-  - obligation: every Copilot finding raised so far is dispositioned
-    evidence_scope: semantic_head
-    proof: see ai_review.findings
-    result: PROVEN
+    result: PENDING
   - obligation: all required exact-head workflows green and a fresh Copilot review on the final PR head, with no unresolved substantive finding
     evidence_scope: exact_head
     proof: >
       Cannot be recorded in the commit it is about. See exact_head_proof. The RETURN
       on #80 reports the outcome after it is known.
     result: PENDING
-  - obligation: no production, provider traffic, secrets, paid resource, activation, ACTION-001 release or gate weakening
-    evidence_scope: semantic_head
-    proof: >
-      only gh reads plus one control-room workflow_dispatch; no secret or PAT; the only
-      permission added is pull-requests:read; no gate, threshold or assertion loosened;
-      KEYFLOWOS_PLATFORM_CONVERGENCE INACTIVE_SUCCESSOR; ACTION-001 held
-    result: PROVEN
 
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
-  at: c6541442
-  portable_total: 286
-  portable_passed: 286
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  windows_total: 19
-  windows_passed: 19
-  baseline_before_change: 226 portable, 19 windows, at 71a534b8
-  failed: 0
-  skipped: 0
-  dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
+  failed: null
+  skipped: null
   fixture_changes: >
-    Fixtures in reconcile/platform-dag/select-directive specs and the Windows harness
-    now carry the full #80 envelope and edit evidence (updated_at / includesCreatedEdit)
-    and real comment ids, as live comments do. No existing assertion was loosened. One
-    was strengthened ("any other sender" now also pins the rejection reason), and
-    yaml.spec's artifact pin names this packet. One case moved: the lowercase
-    `directive` from ChatGPT in "AUTO_EVENT, ACK and plain text are never actionable"
-    now fails closed instead of being ignored. It is asserted in "an undeclared type
-    from ChatGPT selects nothing", and its old slot holds a ChatGPT ACK.
-    3d1944cc adds three tests (NC blank identity, BLANK-id newest, NC pass prose)
-    and changes no existing one. 6a76b849 adds two (NC completion prose, NC
-    umbrella prose) and changes none. c6541442 adds two (NC missing scope, NC
-    scope mislabel). Two existing return-evidence fixtures gain the evidence_scope
-    that is now required ('local suite' semantic_head, the PASS_LOCAL_CI_IN_RETURN
-    entry exact_head); their assertions are unchanged. In this file, every
-    proof_matrix entry gains a scope, and the EVIDENCE-ORDER obligation now reads
-    "finished proof of the head that carries it" because its old words named an
-    exact-head gate to the second guard. Its meaning is the same.
+    One new test (recorded evidence). The committed-projection test gains
+    assertions and loses none. The yaml.spec and return-evidence.spec artifact
+    pins name this packet.
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref c6541442
-  baseline_before_change: 32/32 live
-  result: 70/70 live at c6541442
-  retargeted_same_claim_and_proof:
-    - NC-WORKER-SENDERLESS-REJECTED, NC-WORKER-SENDER-EXACT, NC-WORKER-AUTHOR-ALLOWLIST (select-directive.ps1 -> lib/control-envelope.mjs)
-    - NC-RECONCILE-AUTHORITY-SENDER (reconcile.mjs -> lib/control-envelope.mjs rejectionOf)
-  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-ESCAPED-COMMENT, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-EVENTS-MALFORMED-AUTHORITY-KIND, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-SELECTOR-SOURCE-HEAD-FALLBACK, NC-SELECTOR-SOURCE-MAIN-PRECEDENCE, NC-WORKFLOW-D1-TOKEN, NC-RETURN-EVIDENCE-RETURN-ID, NC-RETURN-EVIDENCE-STATUS, NC-RETURN-EVIDENCE-FUTURE-ID, NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING, NC-RETURN-EVIDENCE-VOCABULARY, NC-RETURN-ARTIFACT-PREMATURE-ID, NC-ENVELOPE-BLANK-IDENTITY, NC-SELECTOR-BLANK-IDENTITY, NC-RETURN-EVIDENCE-PASS-PROSE, NC-RETURN-ARTIFACT-PASS-PROSE, NC-RETURN-EVIDENCE-COMPLETION-PROSE, NC-RETURN-EVIDENCE-UMBRELLA-PROSE, NC-RETURN-EVIDENCE-MISSING-SCOPE, NC-RETURN-EVIDENCE-SCOPE-MISLABEL, NC-RETURN-ARTIFACT-MISSING-SCOPE]
-  history: >
-    48/48 live at 8744d90c and at a8c87ccb. At 81a2ddd2, NC-PLATFORM-DUPLICATE-ID
-    was VACUOUS: its platform-level guard was unreachable behind collectAuthority's
-    id check. The guard was removed and the control retargeted at the real guard
-    in 584d2edf, which ran 49/49 live. 2b184808 added NC-ENVELOPE-UNDECLARED-TYPE
-    and made the invalid-first proof also pin the claimed type, because the new
-    rule is a second guard for that case. 2b184808 ran 50/50 live. 1a52f48d
-    added NC-ENVELOPE-ESCAPED-QUOTE (51/51). a5f46027 added
-    NC-EVENTS-MALFORMED-AUTHORITY-KIND (52/52). 07e272c7 added
-    NC-ENVELOPE-ESCAPED-COMMENT (53/53). 940d89b9 added
-    NC-SELECTOR-SOURCE-HEAD-FALLBACK and NC-SELECTOR-SOURCE-MAIN-PRECEDENCE (55/55).
-    6d8a6bd8 added the six NC-RETURN-* controls (61/61). 3d1944cc added the two
-    blank-identity controls and the two pass-prose controls (65/65). 6a76b849
-    added NC-RETURN-EVIDENCE-COMPLETION-PROSE and NC-RETURN-EVIDENCE-UMBRELLA-PROSE
-    (67/67). c6541442 added NC-RETURN-EVIDENCE-MISSING-SCOPE,
-    NC-RETURN-EVIDENCE-SCOPE-MISLABEL and NC-RETURN-ARTIFACT-MISSING-SCOPE (70/70).
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
+  added: [NC-PROJECTION-OBSOLETE-ANCHOR, NC-RECONCILE-RECORDED-MALFORMED]
+  result: PENDING
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
@@ -435,172 +176,47 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
 ci:
   exact_head: >
     PENDING. Required checks run on the PR head that carries this artifact
-    commit (the semantic head plus this control-only commit). An artifact cannot
-    record CI for the commit that contains it. No RETURN for this head exists yet.
-  previous_head_b4f70730: >
-    18 check runs concluded success and 10 were skipped by their own conditions,
-    with zero failures; Copilot review 5332939730 raised r4117714827, so no
-    RETURN was posted for that head.
-  previous_head_b21b8f0f: >
-    18 check runs concluded success and 10 were skipped by their own conditions,
-    with zero failures; Copilot review 5332867429 raised r4117648609, r4117648627
-    and r4117648637, so no RETURN was posted for that head.
-  previous_head_ec890538: >
-    every check run concluded success or was skipped by its own condition, with
-    zero failures; Copilot review 5332682603 raised r4117477528 and r4117477551,
-    so no RETURN was posted for that head.
-  previous_head_d9b12873: >
-    every exact-head workflow completed with zero failures, as reported in
-    CC-RETURN-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001. The artifact at that head
-    claimed that RETURN before it existed (Copilot 5332604917); this revision fixes that.
-  previous_head_82454cce: all exact-head workflows green, zero failing (CC-RETURN-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002)
-  previous_head_ad9c908d: CI/CD, Agent Control Worker Proof, Branch divergence and DAST (HawkScan) green per the AUTO_EVENT records on #80
-  previous_head_03b22a58: all exact-head workflows completed with zero failures (r4115915841, RESOLVED_WITH_EVIDENCE)
-  previous_head_4f559de3: all 28 checks pass or are skipped by their own conditions
-  previous_head_9eb4f884: all 28 checks pass or are skipped by their own conditions
-  previous_head_a8c87ccb: all required workflows green (agent-control, self-test, Portable proof ubuntu, Windows worker proof, CI/CD, branch divergence, HawkScan, GitGuardian, Vercel)
+    commit. An artifact cannot record CI for the commit that contains it. No
+    RETURN for this head exists yet.
 
 ai_review:
   reviewer: copilot-pull-request-reviewer[bot]
-  reviews: [5330693593 on 33b46896, 5330709017 on a8c87ccb, 5330788503 on 9eb4f884, 5330834778 on 4f559de3, 03b22a58 (15:31Z), ad9c908d (21:31Z), 5332418633 on 82454cce, 5332604917 on d9b12873, 5332682603 on ec890538, 5332867429 on b21b8f0f, 5332939730 on b4f70730]
   final_head_review: PENDING
-  findings:
-    - id: r4117714827
-      source: Copilot review 5332939730 at b4f70730, "This guard trusts the optional evidence_scope marker", return-evidence.mjs:149
-      disposition: FIXED
-      evidence: c6541442, released by CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002; evidence_scope is required on every proof_matrix entry and gate-naming obligations must be exact_head; return-evidence.spec "NC missing scope", "NC scope mislabel"; NC-RETURN-EVIDENCE-MISSING-SCOPE, NC-RETURN-EVIDENCE-SCOPE-MISLABEL, NC-RETURN-ARTIFACT-MISSING-SCOPE
-    - id: r4117648609
-      source: Copilot review 5332867429 at b21b8f0f, "Recognize completion vocabulary for pending gates", return-evidence.mjs:68
-      disposition: FIXED
-      evidence: 6a76b849; "complete(d)", "zero/no/0 failures" count as claims; return-evidence.spec "NC completion prose"; NC-RETURN-EVIDENCE-COMPLETION-PROSE
-    - id: r4117648627
-      source: Copilot review 5332867429 at b21b8f0f, "Recognize umbrella exact-head gate references", return-evidence.mjs:128
-      disposition: FIXED
-      evidence: 6a76b849; "exact-head workflows/checks/CI/gates/proof" and "required workflows/checks" name every gate; return-evidence.spec "NC umbrella prose"; NC-RETURN-EVIDENCE-UMBRELLA-PROSE
-    - id: r4117648637
-      source: Copilot review 5332867429 at b21b8f0f, "Document blank identity rejection in profile contract", AGENT_CONTROL_PLANE.md:269
-      disposition: FIXED
-      evidence: 6a76b849; the AUTHORITY profile text says message_id/packet_id are non-null and non-blank, and null is allowed only for the other keys
-    - id: r4117477528
-      source: Copilot review 5332682603 at ec890538, "Quoted empty identifiers bypass the required-ID check", control-envelope.mjs:194
-      disposition: FIXED
-      evidence: 3d1944cc; blank message_id/packet_id is "<key> (blank)" under AUTHORITY; control-envelope.spec "NC blank identity", select-directive.spec "BLANK-id newest"; NC-ENVELOPE-BLANK-IDENTITY, NC-SELECTOR-BLANK-IDENTITY
-    - id: r4117477551
-      source: Copilot review 5332682603 at ec890538, DAST prose in this file contradicted its PENDING entry, claude-return.yaml:460
-      disposition: FIXED
-      evidence: 3d1944cc; the sentence now says PENDING and return-evidence checks prose; return-evidence.spec "NC pass prose"; NC-RETURN-EVIDENCE-PASS-PROSE, NC-RETURN-ARTIFACT-PASS-PROSE
-    - id: review-5332604917-premature-return-evidence
-      source: Copilot review 5332604917 at d9b12873, "artifact records a superseding RETURN before it exists and while exact-head checks remain incomplete"
-      disposition: FIXED
-      evidence: >
-        Accepted by CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001, which withdraws
-        the RESOLVED disposition given in the d9b12873 RETURN. This file now carries
-        return_message_id null and return_status AWAITING_POSTCHECK_RETURN, and every
-        exact-head gate is PENDING. lib/return-evidence.mjs and return-evidence.spec
-        enforce this, with six live negative controls.
-    - id: review-5332418633-source-head-fallback
-      source: Copilot review 5332418633 at 82454cce, "Preserve source_head fallback when source_main is absent", select-directive.mjs:82
-      disposition: FIXED
-      evidence: 940d89b9, directed by CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001; select-directive.spec "NC source head" and "NC source precedence"; NC-SELECTOR-SOURCE-HEAD-FALLBACK, NC-SELECTOR-SOURCE-MAIN-PRECEDENCE
-    - id: review-5332418633-return-not-posted
-      disposition: FIXED
-      evidence: CC-RETURN-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002 posted (comment 5860500340)
-    - id: review-ad9c908d-escape-blind-strip-comment
-      source: Copilot review at ad9c908d (2026-09-27T21:31Z), "Previously missed", lib/yaml.mjs:27
-      disposition: FIXED
-      evidence: 07e272c7; yaml.spec and control-envelope.spec "NC escaped comment"; NC-ENVELOPE-ESCAPED-COMMENT
-    - id: r4115915819
-      disposition: FIXED
-      evidence: a5f46027; events.spec "attributable authority that parses but fails the AUTHORITY profile"; NC-EVENTS-MALFORMED-AUTHORITY-KIND
-    - id: r4115915841
-      disposition: RESOLVED_WITH_EVIDENCE
-      evidence: per CG-REVIEW-META-CONTROL-PARSER-FINAL-001; CC-RETURN-META-CONTROL-PARSER-001 on #80, exact-head workflows at 03b22a58 green
-    - id: r4115848580
-      disposition: FIXED
-      evidence: 1a52f48d; escape-aware wellQuoted(); NC-ENVELOPE-ESCAPED-QUOTE
-    - id: r4115848599
-      disposition: FIXED
-      evidence: negative_controls.result records the run at the final semantic head
-    - id: r4115806024
-      disposition: FIXED
-      evidence: 2b184808; undeclared or missing ChatGPT message types are malformed authority in every consumer; NC-ENVELOPE-UNDECLARED-TYPE; selector and platform no-fallback tests
-    - id: r4115806038
-      disposition: FIXED
-      evidence: ci.exact_head records the final head run; the obligation cites it
-    - id: r4115719440
-      disposition: FIXED
-      evidence: 4679545d, yaml.spec artifact pin names this packet
-    - id: r4115719453
-      disposition: FIXED
-      evidence: scope_change_authority recorded in this artifact
-    - id: r4115719460
-      disposition: FIXED
-      evidence: this artifact completed; RETURN CC-RETURN-META-CONTROL-PARSER-001 posted
-    - id: r4115719477
-      disposition: FIXED
-      evidence: 81a2ddd2, entries keep body, updated_at and edit evidence
-    - id: r4115719481
-      disposition: FIXED
-      evidence: 81a2ddd2, edited newest DIRECTIVE/HOLD/REVIEW plus ACK
-    - id: review-5330709017-duplicate-naming-ids
-      disposition: FIXED
-      evidence: 81a2ddd2 + 584d2edf; collectAuthority counts rejections in the id check; platform regression test; NC-PLATFORM-DUPLICATE-ID
-    - id: r4115719493
-      disposition: DEFERRED_WITH_TRACKING
-      tracking_issue: 99
-      evidence: >
-        Dispositioned by CG-REVIEW-META-CONTROL-PARSER-FINAL-001. architecture maps are
-        not regenerated or hand-edited here; #99 owns scanner/standard reconciliation
-        and deterministic map regeneration.
+  findings: []
 
 scope_ledger:
   declared:
-    - one shared parser with AUTHORITY and ACTIVATION profiles
-    - migrate events.mjs, reconcile.mjs, platform-dag.mjs and the selector (D3)
-    - edited authority fails closed (D4)
-    - D1 workflow token/read permission
-    - negative controls and mutation controls for the issue #98 list
-    - live reconciliation proof
-    - exact-head CI, AI review, dispositions, RETURN
-    - selector source_head fallback into source_main, explicit source_main wins (CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001, inside D3)
-    - truthful pre-RETURN artifact plus a regression checker (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001)
-    - blank message_id/packet_id rejected; pre-RETURN prose checked for exact-head pass claims (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001)
-    - evidence_scope required on every proof_matrix entry (CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002, r4117714827)
-  resolved: [all declared items except the exact-head items under remaining]
+    - fresh branch impl/kf-meta-state-reconcile-002 from main 9c8e4979
+    - re-derive programme-state.yaml; authority_basis is this directive by comment identity
+    - incorporate the KF-META-CONTROL-PARSER-001 checkpoint and PR 100 merge truth
+    - keep ACTION-001 held and the platform programme inactive
+    - deterministic reconcile/decision proof and the existing agent-control proof for the touched surface
+    - PR and RETURN
+  resolved: []
   remaining:
-    - exact-head workflows and a fresh Copilot review on the final PR head (PENDING)
-    - RETURN on #80 once those finish
-    - ChatGPT review and admission
+    - every declared item, until the proof above is recorded
   deferred:
-    - item: re-anchor programme-state.yaml
-      reason: D2; a reviewed projection refresh is needed before DERIVED_STATE_STALE_AUTHORITY and AUTHORITY_MALFORMED clear
-    - item: regenerate architecture/inventory.json and dependencies.json (r4115719493)
-      reason: DEFERRED_WITH_TRACKING to #99 by CG-REVIEW-META-CONTROL-PARSER-FINAL-001; derived maps are not hand-edited
-    - item: refresh the KF-META-CONTROL-PARSER-001 blocking_dependencies record in KEYFLOWOS_PLATFORM_DAG.yaml and the programme doc
-      reason: "`satisfied` flips on admission, which is ChatGPT's call; the text there still describes the pre-packet readField"
+    - item: .agent-control/README.md wording
+      reason: outside the minimum projection scope; it contradicts AGENT_CONTROL_PLANE.md and is raised for ChatGPT
   dropped: []
-  superseded:
-    - item: PowerShell Get-ControlField selector logic
-      by: select-directive.mjs over the shared parser (D3)
+  superseded: []
 
 residual_risks:
-  - an edit to ANY SaCH-PRO comment on #80, including Claude's own, wedges reconcile and the worker (AUTHORITY_EDITED) until ChatGPT defines a recovery; accepted under D4
-  - deleting a newer comment cannot be detected from a snapshot (D4)
-  - a control field written as a block scalar reads as null; for programme naming this means such a message is not seen as naming the programme (unchanged from before)
-  - the selector now needs node on the worker host; without it the worker fails closed (exit 2), it does not wake
-  - live reconcile stays REPORT_DRIFT until the projection is re-anchored past 5826612913 in a reviewed commit
+  - the projection goes stale again at the next ChatGPT authority message, including the REVIEW of this RETURN; that is the designed fail-closed behaviour, and a reviewed re-derivation is needed after each authority step
+  - an edit to any SaCH-PRO comment on #80 makes authority unverifiable (AUTHORITY_EDITED) until ChatGPT defines a recovery; accepted under D4
 
 rollback_floor:
-  sha: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
+  sha: 9c8e49791705361227135a9032a640199949113f
   method: revert the squash commit of this PR
-  effect: restores the per-consumer parsers and the tokenless decide step; no data, schema or production state
+  effect: restores the 2026-09-25 projection, which fails closed as REPORT_DRIFT; no data, schema or production state
 
 security:
   local_hawkscan: not run; HAWK_API_KEY unset and no app running; no application code touched. DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
 
-unresolved_contradictions: []
+unresolved_contradictions:
+  - id: CC-CONTRADICTION-AI-PR-REVIEW-GATE-001
+    note: not this packet's; carried in the projection for a ChatGPT disposition
 next_action: >
-  Wait for every exact-head workflow and a fresh Copilot review on the head
+  Wait for every exact-head check and a fresh Copilot review on the head
   carrying this file, then post the RETURN on #80 without mutating the branch.
-  Then ChatGPT review. Do not merge. KF-PLAT-AUTO-001 stays unreleased and
-  ACTION-001 stays held.
+  Then ChatGPT review. Do not merge. ACTION-001 stays held.

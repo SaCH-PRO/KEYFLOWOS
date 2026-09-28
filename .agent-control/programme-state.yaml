@@ -18,97 +18,177 @@
 version: 1
 schema: keyflowos.programme-state/v1
 authority: derived-programme-projection
-updated_at: 2026-09-25T02:30:00Z
+updated_at: 2026-09-28T18:06:18Z
 
 authority_basis:
-  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-001
-  comment_id: 5825443535
+  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002
+  comment_id: 5875639550
 
-# Re-derived under CG-DIRECTIVE-META-STATE-RECONCILE-001 against main
-# 4fafdef635d1f41f287f094370217999e1418041. Replaces the projection written in
-# PR #87 (403881dc), which still showed PR #87 READY_TO_MERGE after #87 and #89
-# had merged and CG-REVIEW-LIVE-AUTHORITY-WAKE-001 had accepted the live proof.
+# Re-derived under CG-DIRECTIVE-META-STATE-RECONCILE-002 against main
+# 9c8e49791705361227135a9032a640199949113f, read through the shared #80
+# envelope parser (lib/control-envelope.mjs, admitted in PR 100). Replaces the
+# projection anchored to CG-DIRECTIVE-META-STATE-RECONCILE-001 (5825443535,
+# 2026-09-25), which 21 newer valid authority messages had made stale.
 derivation:
-  source_main: 4fafdef635d1f41f287f094370217999e1418041
+  source_main: 9c8e49791705361227135a9032a640199949113f
+  directive: CG-DIRECTIVE-META-STATE-RECONCILE-002
+  # Every valid authority message after the previous anchor, oldest first.
   incorporates:
-    - CG-REVIEW-META-AUTO-003
-    - CG-REVIEW-META-AUTO-WORKER-003
-    - CG-REVIEW-LIVE-AUTHORITY-WAKE-001
-    - CG-DIRECTIVE-META-STATE-RECONCILE-001
+    - CG-RESUME-ACTION-001
+    - CG-DIRECTIVE-META-CONTROLLER-BRIDGE-001
+    - CG-REVIEW-META-CONTROLLER-CONTINUE-001
+    - CG-REVIEW-META-CONTROLLER-SUPERSEDE-001
+    - CG-DIRECTIVE-PLATFORM-PREACTIVATION-CORRECTION-001
+    - CG-REVIEW-PLATFORM-PREACTIVATION-CORRECTION-002
+    - CG-REVIEW-PLATFORM-PREACTIVATION-PARSER-DECISION-001
+    - CG-DIRECTIVE-AI-PR-REVIEW-GATE-001
+    - CG-DIRECTIVE-AUTONOMY-BOOTSTRAP-METRICS-001
+    - CG-DIRECTIVE-NO-FAKE-GREEN-COST-OPS-001
+    - CG-REVIEW-PREACTIVATION-RECOVERY-AND-LINEAGE-001
+    - CG-REVIEW-PREACTIVATION-RECOVERY-ADMISSION-002
+    - CG-DIRECTIVE-META-CONTROL-PARSER-001
+    - CG-REVIEW-META-CONTROL-PARSER-DECISION-001
+    - CG-REVIEW-META-CONTROL-PARSER-FINAL-001
+    - CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
+    - CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
+    - CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001
+    - CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
+    - CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002
+    - CG-DIRECTIVE-META-STATE-RECONCILE-002
+  # Authority-typed ChatGPT messages that fail the AUTHORITY profile. All are
+  # older than this anchor, so reconcile treats them as evidence only; their
+  # content is recorded below where it bears on the projection.
+  malformed_authority_evidence:
+    - CG-REVIEW-META-STATE-RECONCILE-001 (5826124586), repeated merge_authority
+    - CG-HOLD-ACTION-CONTROLLER-BRIDGE-001 (5826612913), no implementation_branch, scope_changed or production_touched
+    - CG-PLAN-PLATFORM-CONVERGENCE-001 (5826799265), undeclared type PLAN
+    - CG-REVIEW-META-CONTROL-PARSER-ADMIT-001 (5875440129), repeated merge_authority
   repository_evidence:
-    - PR 87 merged 2026-09-24T15:58:27Z as 403881dc
-    - PR 89 merged 2026-09-25T01:40:16Z as 4fafdef6
+    - PR 92 merged 2026-09-25T03:20:51Z as ad97ea48
+    - PR 96 merged 2026-09-27T12:42:33Z as 71a534b8
+    - PR 100 merged 2026-09-28T17:46:52Z as 9c8e4979 from exact head 85020063
+    - PR 101 merged into docs/keyflow-intelligence-foundation, not main
+    - PR 94 (impl/kf-ai-pr-review-gate-001) open, not admitted
 
 programme:
   packets_total: 35
-  # Checkpointed per the canonical intelligence board
+  # Checkpointed application packets per the canonical intelligence board
   # (docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md).
+  # Meta packets earn no credit and never appear here.
   checkpointed:
     - KF-EXEC-K12-001
     - KF-EXEC-EXTFX-001
     - KF-EXEC-TENANT-001
     - KF-EXEC-AUTH-001
-  active_packet: KF-META-AUTO-001
+  # The next application packet by the DAG. Held; see `hold`.
+  application_frontier: KF-EXEC-ACTION-001
+  # The newest checkpointed control-plane packet, so every reference below can
+  # be checked against repository truth.
+  active_packet: KF-META-CONTROL-PARSER-001
   active_phase: null
   state: CHECKPOINTED
   health: GREEN
-  source_main: 403881dc9b9d99f698a4670c75e0fd6bc5225159
-  implementation_branch: impl/kf-meta-auto-001-worker-hardening
-  pr_number: 89
+  source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
+  implementation_branch: impl/kf-meta-control-parser-001
+  pr_number: 100
   merge_authority: false
   production_touched: false
 
-# KF-META-AUTO-001 is a meta-package: it earns zero packet credit and is not a
-# member of the 35-packet DAG. It does not appear in `checkpointed`.
+# Meta packets are not members of the 35-packet DAG and earn zero credit.
 meta_package:
-  packet_id: KF-META-AUTO-001
+  packet_id: KF-META-CONTROL-PARSER-001
   programme_credit: ZERO
   state: CHECKPOINTED
-  checkpoint_review: CG-REVIEW-LIVE-AUTHORITY-WAKE-001
-  merged_prs:
-    - 87
-    - 89
-  directive: CG-DIRECTIVE-META-AUTO-001
-  review: CG-REVIEW-META-AUTO-003
-  correction_applied: META-P1-CONCURRENCY-CROSS-PATH-001
-  # Open control-state correction; its own PR carries active-packet/claude-return.
-  correction_in_flight: CG-DIRECTIVE-META-STATE-RECONCILE-001
+  directive: CG-DIRECTIVE-META-CONTROL-PARSER-001
+  admission_review: CG-REVIEW-META-CONTROL-PARSER-ADMIT-001
+  close: CG-CLOSE-META-CONTROL-PARSER-001
+  pr_number: 100
+  exact_source_head: 850200636686c6589199c3ef22d75c849627c05c
+  merge_commit: 9c8e49791705361227135a9032a640199949113f
+  deferred_follow_up: r4123794859
+  earlier:
+    - packet_id: KF-META-AUTO-001
+      state: CHECKPOINTED
+      checkpoint_review: CG-REVIEW-LIVE-AUTHORITY-WAKE-001
+      merged_prs:
+        - 87
+        - 89
+        - 92
+    - packet_id: KF-META-CONTROLLER-001
+      state: SUPERSEDED
+      superseded_by: CG-REVIEW-META-CONTROLLER-SUPERSEDE-001
+  # This re-derivation; its own PR carries active-packet/claude-return.
+  correction_in_flight: KF-META-STATE-RECONCILE-002
 
 hold:
   active: true
   packet_id: KF-EXEC-ACTION-001
   reason: >
-    ACTION-001 is held by CG-HOLD-ACTION-AUTO-001. Per
-    CG-REVIEW-LIVE-AUTHORITY-WAKE-001 and CG-DIRECTIVE-META-STATE-RECONCILE-001
-    it remains held until the control-state reconciliation is admitted.
-  hold_message_id: CG-HOLD-ACTION-AUTO-001
+    ACTION-001 was released for characterization by CG-RESUME-ACTION-001 and
+    held again by CG-HOLD-ACTION-CONTROLLER-BRIDGE-001 (HOLD_AUTONOMY_BRIDGE):
+    no implementation until a separate ChatGPT review accepts the preserved
+    characterization and issues a bounded implementation directive.
+    CG-DIRECTIVE-META-STATE-RECONCILE-002 restates the hold (action_hold true).
+  hold_message_id: CG-HOLD-ACTION-CONTROLLER-BRIDGE-001
+  hold_comment_id: 5826612913
+  # The hold message fails the AUTHORITY profile. The binding current statement
+  # of the hold is the anchor directive's required_truth.
+  affirmed_by: CG-DIRECTIVE-META-STATE-RECONCILE-002
+  history:
+    - CG-HOLD-ACTION-AUTO-001 held ACTION-001
+    - CG-RESUME-ACTION-001 (5826160790) released it for CHARACTERIZING only
+    - CG-HOLD-ACTION-CONTROLLER-BRIDGE-001 (5826612913) held implementation
+  preserved_characterization:
+    return_message_id: CC-RETURN-ACTION-001-CHAR
+    selected_family: helpdesk_create_ticket
+    source_main: ad97ea48841a0a4acb13f9a170bae0e07159d6f4
   branch_cut: false
   local_work: none
-  release_authority: ChatGPT only, after the CG-DIRECTIVE-META-STATE-RECONCILE-001 correction is admitted
+  release_authority: ChatGPT only
   resume_condition: >
-    Not resolved here; two recorded wordings differ. CG-HOLD-ACTION-AUTO-001
-    says ChatGPT will post "CG-RESUME-ACTION-*". CG-REVIEW-META-AUTO-001 (as
-    previously recorded here) says a fresh, complete "CG-DIRECTIVE-ACTION-CHAR-*"
-    against the then-current main is the durable seed. Either way the release is
-    a new #80 authority message, which makes this projection stale until it is
-    re-derived; automation never applies a release itself.
+    A separate ChatGPT review accepts the ACTION-001 characterization and issues
+    the bounded implementation directive. That is a new #80 authority message,
+    which makes this projection stale until it is re-derived; automation never
+    applies a release itself.
 
-unresolved_contradictions: []
+# The successor programme is defined on main (PR 96) and is not active.
+platform_programme:
+  programme: KEYFLOWOS_PLATFORM_CONVERGENCE
+  status: INACTIVE_SUCCESSOR
+  activation_authorized: false
+
+unresolved_contradictions:
+  - id: CC-CONTRADICTION-AI-PR-REVIEW-GATE-001
+    comment_id: 5848225019
+    packet_id: KF-AI-PR-REVIEW-GATE-001
+    pr_number: 94
+    raised_by: claude
+    scope: >
+      Codex re-review trigger sub-obligation only. Codex ignores review requests
+      from the github-actions identity, and a working trigger needs a user
+      credential the directive prohibits. Options A, B and C await a ChatGPT
+      decision; no authority message on #80 has dispositioned it.
 
 resolved_contradictions:
   - id: META-C1
     resolved_by: CG-REVIEW-META-AUTO-001
     decision: R1_ADOPT_ON_GATED_CANONICAL_BRANCH
     detail: >
-      PR #86 is prototype input only. Its useful content is adopted onto the
-      gated impl/* branch. One canonical autopilot package; #86 is not merged.
+      PR 86 is prototype input only. Its useful content is adopted onto the
+      gated impl/* branch. One canonical autopilot package; 86 is not merged.
+  - id: CC-CONTRADICTION-META-CONTROL-PARSER-001
+    resolved_by: CG-REVIEW-META-CONTROL-PARSER-DECISION-001
+    decision: OPTION_T
+    detail: >
+      One shared #80 envelope parser with an AUTHORITY profile for every
+      consumer and an additive ACTIVATION profile; admitted in PR 100.
 
 momentum:
   operations_since_transition: 0
   consecutive_identical_failures: 0
   consecutive_ci_failures_without_new_root_cause: 0
   last_failure_signature: null
-  last_transition_at: 2026-09-25T01:59:46Z
+  last_transition_at: 2026-09-28T17:47:01Z
   alarm_active: false
 
 correction:
@@ -135,6 +215,7 @@ safety:
   production_release_authorized: false
   production_mutations_authorized: false
   real_provider_traffic_authorized: false
+  platform_programme_activation_authorized: false
   forensic_rebaseline_authorized: false
   programme_map_refresh_authorized: false
   architecture_os_cycles_authorized: false
@@ -144,8 +225,8 @@ last_processed_event_key: null
 processed_event_keys: []
 event_journal: []
 
-# No merge authority is outstanding. CG-REVIEW-META-AUTO-003 granted it for
-# PR #87, which has merged; recorded under meta_package.review.
+# No merge authority is outstanding. CG-REVIEW-META-CONTROL-PARSER-ADMIT-001
+# granted it for PR 100, which has merged; recorded under meta_package.
 merge_authority_marker: null
 
 # Cache of decide() for this projection when reconciliation is consistent. It
@@ -153,4 +234,4 @@ merge_authority_marker: null
 next_legal_action:
   action: WAIT_AUTHORITY
   reason: ACTION-001 is held; release is a ChatGPT authority action
-  derived_at: 2026-09-25T02:30:00Z
+  derived_at: 2026-09-28T18:06:18Z

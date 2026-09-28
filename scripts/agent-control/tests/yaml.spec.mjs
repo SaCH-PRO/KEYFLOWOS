@@ -107,7 +107,7 @@ test('unsupported constructs throw instead of parsing to something wrong', () =>
 test('the real control artifacts on this branch parse', () => {
   for (const file of ['.agent-control/active-packet.yaml', '.agent-control/claude-return.yaml']) {
     const doc = parseYaml(fs.readFileSync(file, 'utf8'));
-    assert.equal(doc.packet_id, 'KF-META-CONTROL-PARSER-001', `${file} must expose packet_id`);
+    assert.equal(doc.packet_id, 'KF-META-STATE-RECONCILE-002', `${file} must expose packet_id`);
     assert.equal(typeof doc.production_touched, 'boolean', `${file} production_touched must be boolean`);
   }
 });
