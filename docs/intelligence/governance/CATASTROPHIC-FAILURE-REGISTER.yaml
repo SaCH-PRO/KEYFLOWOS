@@ -1,0 +1,264 @@
+version: 1
+adopted: "2026-09-28"
+status: CANONICAL_ADVERSARIAL_FAILURE_REGISTER
+allowed_dispositions:
+  - UNASSESSED
+  - PREVENTED
+  - DETECTED_AND_CONTAINED
+  - RECOVERABLE
+  - TRANSFERRED
+  - ACCEPTED_RESIDUAL_RISK
+  - NOT_APPLICABLE
+
+scenarios:
+  - id: CF-001
+    tier: T0
+    scenario: "Tenant A reads Tenant B data by changing an object or business identifier."
+    assurance_domains: [IA-006, IA-018]
+    disposition: UNASSESSED
+  - id: CF-002
+    tier: T0
+    scenario: "Tenant A mutates or deletes Tenant B data."
+    assurance_domains: [IA-006, IA-018]
+    disposition: UNASSESSED
+  - id: CF-003
+    tier: T0
+    scenario: "AI retrieval injects another tenant's files, memory or vectors into a prompt."
+    assurance_domains: [IA-006, IA-035]
+    disposition: UNASSESSED
+  - id: CF-004
+    tier: T0
+    scenario: "A revoked employee executes an action using stale authority."
+    assurance_domains: [IA-008, IA-011]
+    disposition: UNASSESSED
+  - id: CF-005
+    tier: T0
+    scenario: "An approved action is materially changed after approval but before execution."
+    assurance_domains: [IA-011]
+    disposition: UNASSESSED
+  - id: CF-006
+    tier: T0
+    scenario: "Voice/chat/direct tool path bypasses the canonical clearance boundary."
+    assurance_domains: [IA-012, IA-036]
+    disposition: UNASSESSED
+  - id: CF-007
+    tier: T0
+    scenario: "Two workers execute the same material action concurrently."
+    assurance_domains: [IA-021]
+    disposition: UNASSESSED
+  - id: CF-008
+    tier: T0
+    scenario: "Provider accepts an external effect, local timeout occurs, and retry duplicates the effect."
+    assurance_domains: [IA-024]
+    disposition: DETECTED_AND_CONTAINED
+    evidence: ["EXTFX admitted at declared scope for Resend-shaped effect certainty"]
+  - id: CF-009
+    tier: T0
+    scenario: "Forged or replayed webhook creates legitimate-looking work."
+    assurance_domains: [IA-020, IA-023]
+    disposition: UNASSESSED
+  - id: CF-010
+    tier: T0
+    scenario: "Revoked OAuth credentials or a stale connector generation continues acting."
+    assurance_domains: [IA-022, IA-025]
+    disposition: UNASSESSED
+  - id: CF-011
+    tier: T0
+    scenario: "Production secret is committed, logged, emitted to CI artifacts or exposed to an agent prompt."
+    assurance_domains: [IA-013, IA-044, IA-046]
+    disposition: UNASSESSED
+  - id: CF-012
+    tier: T0
+    scenario: "Encryption exists but compromise of one runtime identity exposes all connector/customer secrets."
+    assurance_domains: [IA-014, IA-015]
+    disposition: UNASSESSED
+  - id: CF-013
+    tier: T0
+    scenario: "Prompt injection from customer content causes unauthorized tool/action execution."
+    assurance_domains: [IA-036, IA-011]
+    disposition: UNASSESSED
+  - id: CF-014
+    tier: T0
+    scenario: "AI confidently promotes fabricated/superseded information into canonical business truth."
+    assurance_domains: [IA-038]
+    disposition: UNASSESSED
+  - id: CF-015
+    tier: T0
+    scenario: "Deleted/corrected personal information remains active in vectors, memory or recommendations."
+    assurance_domains: [IA-031]
+    disposition: UNASSESSED
+  - id: CF-016
+    tier: T0
+    scenario: "A tenant purge claims success while data remains in an active store."
+    assurance_domains: [IA-032]
+    disposition: UNASSESSED
+  - id: CF-017
+    tier: T0
+    scenario: "Backup restore silently resurrects erased data into active use."
+    assurance_domains: [IA-034, IA-052]
+    disposition: UNASSESSED
+  - id: CF-018
+    tier: T0
+    scenario: "Retention/legal-hold state is bypassed by a destructive delete path."
+    assurance_domains: [IA-033]
+    disposition: UNASSESSED
+  - id: CF-019
+    tier: T0
+    scenario: "Raw card number/CVV enters KEYFLOWOS storage, logs, analytics or AI context."
+    assurance_domains: [IA-040, IA-044]
+    disposition: UNASSESSED
+  - id: CF-020
+    tier: T0
+    scenario: "Payment webhook replay or race causes duplicate charge/refund/settlement state."
+    assurance_domains: [IA-020, IA-023, IA-041, IA-042]
+    disposition: UNASSESSED
+  - id: CF-021
+    tier: T0
+    scenario: "Financial action executes after authority or policy is tightened."
+    assurance_domains: [IA-008, IA-041]
+    disposition: UNASSESSED
+  - id: CF-022
+    tier: T0
+    scenario: "Compromised support/superadmin account obtains unrestricted tenant access without durable evidence."
+    assurance_domains: [IA-003, IA-009]
+    disposition: UNASSESSED
+  - id: CF-023
+    tier: T0
+    scenario: "Developer/CI identity can alter production or secrets outside reviewed release controls."
+    assurance_domains: [IA-010, IA-048, IA-049]
+    disposition: UNASSESSED
+  - id: CF-024
+    tier: T0
+    scenario: "Database/admin/network service is unintentionally public or broadly reachable."
+    assurance_domains: [IA-050]
+    disposition: UNASSESSED
+  - id: CF-025
+    tier: T0
+    scenario: "Critical dependency or compromised package enters release unnoticed."
+    assurance_domains: [IA-045, IA-047, IA-048]
+    disposition: UNASSESSED
+  - id: CF-026
+    tier: T0
+    scenario: "Malicious uploaded file exploits parsing/storage/rendering or crosses tenant ACL."
+    assurance_domains: [IA-017, IA-006]
+    disposition: UNASSESSED
+  - id: CF-027
+    tier: T0
+    scenario: "Injection through API/content reaches SQL, command, template or browser execution."
+    assurance_domains: [IA-016]
+    disposition: UNASSESSED
+  - id: CF-028
+    tier: T0
+    scenario: "Audit/logging silently omits the actor/authority/effect needed to reconstruct a material incident."
+    assurance_domains: [IA-043]
+    disposition: UNASSESSED
+  - id: CF-029
+    tier: T0
+    scenario: "Security logging itself leaks access tokens, secrets, PII or payment data."
+    assurance_domains: [IA-044]
+    disposition: UNASSESSED
+  - id: CF-030
+    tier: T0
+    scenario: "Backups exist but cannot be restored when primary data is lost."
+    assurance_domains: [IA-052]
+    disposition: UNASSESSED
+  - id: CF-031
+    tier: T0
+    scenario: "Cloud/database/provider outage has no viable disaster-recovery path."
+    assurance_domains: [IA-053]
+    disposition: UNASSESSED
+  - id: CF-032
+    tier: T0
+    scenario: "Security incident occurs and KEYFLOWOS cannot rapidly identify affected tenants/data/actions."
+    assurance_domains: [IA-043, IA-056, IA-057]
+    disposition: UNASSESSED
+  - id: CF-033
+    tier: T0
+    scenario: "Incident response delays containment because no credential/session/provider kill path is known."
+    assurance_domains: [IA-057]
+    disposition: UNASSESSED
+  - id: CF-034
+    tier: T1
+    scenario: "Public API abuse exhausts compute/AI/provider budget and degrades all tenants."
+    assurance_domains: [IA-055, IA-058]
+    disposition: UNASSESSED
+  - id: CF-035
+    tier: T1
+    scenario: "Spam/abuse through outbound messaging damages shared sender/domain reputation."
+    assurance_domains: [IA-059]
+    disposition: UNASSESSED
+  - id: CF-036
+    tier: T1
+    scenario: "Customer exits but active provider copies, tokens or derived data remain operational."
+    assurance_domains: [IA-060, IA-031]
+    disposition: UNASSESSED
+  - id: CF-037
+    tier: T1
+    scenario: "Data is transferred/stored in a jurisdiction or provider path the customer/legal terms do not allow."
+    assurance_domains: [IA-026, IA-029, IA-063, IA-064]
+    disposition: UNASSESSED
+  - id: CF-038
+    tier: T1
+    scenario: "Customer-facing privacy/compliance claim exceeds actual implementation or certification."
+    assurance_domains: [IA-063, IA-064, IA-067]
+    disposition: UNASSESSED
+  - id: CF-039
+    tier: T1
+    scenario: "AI provider retains/trains on customer data contrary to contractual/privacy assumptions."
+    assurance_domains: [IA-037, IA-026]
+    disposition: UNASSESSED
+  - id: CF-040
+    tier: T1
+    scenario: "Unexpected traffic or automation creates runaway AI/provider/cloud cost."
+    assurance_domains: [IA-055, IA-058]
+    disposition: UNASSESSED
+  - id: CF-041
+    tier: T1
+    scenario: "Capacity saturation corrupts work semantics rather than degrading safely."
+    assurance_domains: [IA-054, IA-020, IA-021]
+    disposition: UNASSESSED
+  - id: CF-042
+    tier: T1
+    scenario: "User account recovery lets an attacker take over an account or leaves old sessions active."
+    assurance_domains: [IA-004, IA-002]
+    disposition: UNASSESSED
+  - id: CF-043
+    tier: T1
+    scenario: "CSRF/CORS/browser boundary allows unintended authenticated mutation."
+    assurance_domains: [IA-019]
+    disposition: UNASSESSED
+  - id: CF-044
+    tier: T1
+    scenario: "Domain/DNS/email account compromise redirects users or enables convincing impersonation."
+    assurance_domains: [IA-051, IA-003]
+    disposition: UNASSESSED
+  - id: CF-045
+    tier: T1
+    scenario: "A security/privacy control exists only in documentation/UI and is not load-bearing."
+    assurance_domains: [IA-033, IA-045, IA-047]
+    disposition: UNASSESSED
+  - id: CF-046
+    tier: T1
+    scenario: "Later packet change invalidates earlier security proof without detection."
+    assurance_domains: [IA-048]
+    disposition: UNASSESSED
+  - id: CF-047
+    tier: T1
+    scenario: "Accessibility failure prevents a customer from using a critical operational or security flow."
+    assurance_domains: [IA-061]
+    disposition: UNASSESSED
+  - id: CF-048
+    tier: T1
+    scenario: "Critical flow fails on a supported browser/device but release evidence misses it."
+    assurance_domains: [IA-062]
+    disposition: UNASSESSED
+  - id: CF-049
+    tier: T1
+    scenario: "Material cyber loss occurs but insurance exclusions/limits do not match KEYFLOWOS risk."
+    assurance_domains: [IA-065]
+    disposition: UNASSESSED
+  - id: CF-050
+    tier: T1
+    scenario: "Internal tests all pass but an independent penetration test reveals a systemic reachable flaw."
+    assurance_domains: [IA-066]
+    disposition: UNASSESSED
