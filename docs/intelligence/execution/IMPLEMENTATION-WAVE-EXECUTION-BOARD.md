@@ -26,6 +26,13 @@ Every packet is also subject to the cross-cutting Trust Assurance Programme:
 
 The Trust Assurance Programme does **not** add a 36th packet or alter the frozen journey/kernel map. It adds security, privacy, AI-governance, payment, incident-response and assurance proof obligations to the existing semantic owners. Applicable `TRUST-G*` milestone gates are release constraints in addition to packet dependency gates.
 
+Whole-system gap discovery is governed by:
+- `docs/intelligence/governance/IRONCLAD-ASSURANCE-CENSUS.md`
+- `docs/intelligence/governance/IRONCLAD-ASSURANCE-MATRIX.yaml`
+- `docs/intelligence/governance/CATASTROPHIC-FAILURE-REGISTER.yaml`
+
+An unassessed T0/T1 assurance domain is an explicit programme gap. T0/T1 census review is mandatory at packet characterization, packet admission, every wave boundary and final whole-app acceptance.
+
 ## Wave 0 — Proof + first real external-effect falsification
 
 Purpose: establish trustworthy proof admission and validate effect/recovery semantics against a real provider-shaped slice.
@@ -246,7 +253,7 @@ Forensic baseline preserved: yes
 Do not skip ahead because a later packet looks easier.
 
 For each packet:
-1. classify `trust_impact` against the Trust Assurance Matrix and add applicable security/privacy negative controls;
+1. classify `trust_impact` against the Trust Assurance Matrix **and** identify touched `IA-*` assurance domains / `CF-*` catastrophic scenarios;
 2. re-resolve current main;
 3. characterize exact current code;
 4. lock scope ledger, invariants, failure matrix and proof obligations;
@@ -256,8 +263,9 @@ For each packet:
 8. adversarially review functional **and trust** impact;
 9. merge only when completion gates are satisfied;
 10. verify post-merge state;
-11. update durable handoff/board and trust evidence;
-12. select the next dependency-safe packet.
+11. update durable handoff/board, trust evidence, assurance-domain states and catastrophic-scenario dispositions where accepted proof changed them;
+12. scan for newly exposed T0/T1 gaps or invalidated prior proof;
+13. select the next dependency-safe packet.
 
 After all 35 packets are checkpointed, the programme enters FINAL WHOLE-APP ACCEPTANCE. Packet completion alone is not sufficient.
 
@@ -275,6 +283,10 @@ The final gate is the completion contract in `docs/development/EXECUTION_CONTROL
 - legacy writers/readers retired only after replacement/consumer proof;
 - final architecture-to-code reconciliation against the accepted intelligence work;
 - final `main` revalidated after the last merge;
-- no unexplained skips, TODO proof cases, deferrals or unknowns.
+- no unexplained skips, TODO proof cases, deferrals or unknowns;
+- no T0/T1 Ironclad Assurance domain remains UNASSESSED;
+- every T0 domain reaches PROVEN_AT_DECLARED_SCOPE or EXTERNALLY_VERIFIED for the release scope;
+- every catastrophic failure scenario has an explicit disposition;
+- accepted residual risks have named owners and review/expiry conditions.
 
 If any required final item is NO, UNKNOWN, SKIPPED or UNPROVEN, the programme remains incomplete.
