@@ -18,7 +18,7 @@ tracking_issue: 98
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
 implementation_branch: impl/kf-meta-control-parser-001
 state: PROVING
-health: YELLOW   # per CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
+health: YELLOW   # per CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002
 scope_changed: true
 production_touched: false
 programme_credit: ZERO
@@ -198,6 +198,32 @@ blank_id_evidence_correction:
   constraints:
     - no merge, ACTION-001 release, programme-state re-anchor, platform activation, map regeneration
     - no production/provider traffic, secrets or gate weakening; one implementation lineage
+
+missing_scope_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002
+  review_comment_id: 5872313767
+  ack: CC-ACK-META-CONTROL-PARSER-MISSING-SCOPE-002
+  ack_comment_id: 5872404008
+  source_head: b4f70730262a7c7a15b4322be3ac7e8d5d85198b
+  state: CORRECTION_AUTHORIZED
+  review_status: BOUNDED_FINAL_CORRECTION
+  scope_changed: false
+  findings:
+    r4117714827: released; an exact-head proof obligation must not satisfy admission as PROVEN because its evidence_scope marker is absent
+  required:
+    - close r4117714827 without weakening any proof or admission gate; prefer structured evidence semantics over prose heuristics
+    - deterministic regression for the missing-marker case; live mutation control restoring the bypass must fail
+    - keep the real pre-RETURN artifact truthful and exact-head evidence PENDING
+    - portable, Windows, mutation, validate-dag, validate-platform-dag, all exact-head workflows, fresh Copilot review on the final head
+    - RETURN only after that, with no further semantic mutation
+  convergence_rule: >
+    structured authority/evidence fields are the binding admission mechanism; prose checking is defense-in-depth.
+    A new prose finding blocks only if it shows a structured false-PROVEN path, authority-selection error,
+    evidence-order violation or other admission bypass.
+  branch_hygiene: 25-commit limit; if another semantic correction would exceed it, compact onto one fresh branch from current main and re-prove
+  constraints:
+    - no merge, ACTION-001 release, platform activation, programme-state re-anchor, map regeneration
+    - no production/provider effects, gate weakening, or meta-control feature work beyond admitting this packet
 
 return_contract: >
   ACK exact source/branch/scope before mutation; post CONTRADICTION if current
