@@ -357,7 +357,16 @@ test('the committed programme-state is anchored, valid, and keeps ACTION-001 hel
   assert.equal(state.hold?.active, true);
   assert.equal(state.hold?.packet_id, 'KF-EXEC-ACTION-001');
   assert.equal(state.programme.merge_authority, false);
-  assert.ok(!state.programme.checkpointed.includes('KF-META-AUTO-001'), 'the meta-package earns zero packet credit');
+  // CG-DIRECTIVE-META-STATE-RECONCILE-002 required_truth.
+  assert.deepEqual(state.programme.checkpointed, CHECKPOINTED_BEFORE, 'only admitted application packets earn credit');
+  for (const meta of ['KF-META-AUTO-001', 'KF-META-CONTROL-PARSER-001', 'KF-META-STATE-RECONCILE-002']) {
+    assert.ok(!state.programme.checkpointed.includes(meta), `the meta-package ${meta} earns zero packet credit`);
+  }
+  assert.equal(state.programme.application_frontier, 'KF-EXEC-ACTION-001');
+  assert.equal(state.platform_programme?.status, 'INACTIVE_SUCCESSOR');
+  for (const flag of ['production_release_authorized', 'production_mutations_authorized', 'real_provider_traffic_authorized', 'platform_programme_activation_authorized']) {
+    assert.equal(state.safety?.[flag], false, `${flag} must stay false`);
+  }
 
   // Consistent with its own anchor and with a merged PR: the hold still wins.
   const anchor = chatgpt('DIRECTIVE', state.authority_basis.message_id, 'KF-META-AUTO-001', { id: state.authority_basis.comment_id });
@@ -456,4 +465,40 @@ test('CLI end to end: a newer #80 message makes the committed projection report 
 
   const blind = cli({ comments: null, repo: { verified: false, reason: 'no token' } });
   assert.equal(blind.decision.action, ACTIONS.REPORT_DRIFT);
+});
+
+// ------------------------------------------------------------- RECORDED EVIDENCE (KF-META-STATE-RECONCILE-002)
+
+// Real #80 comment payloads (unmodified REST fields) around the anchor, and the
+// repository truth for main 9c8e4979 and PR 100, recorded at re-derivation.
+const RECORDED = 'scripts/agent-control/fixtures/reconcile-002-truth.json';
+
+test('recorded evidence: the committed projection reconciles on real #80 and main 9c8e4979, and stays held', () => {
+  const recorded = JSON.parse(fs.readFileSync(RECORDED, 'utf8'));
+  const state = loadState(process.cwd());
+
+  // The real directive parses as valid authority through the shared parser, and it is the anchor.
+  const authority = collectAuthority(recorded.comments);
+  assert.equal(authority.verified, true, authority.reason);
+  assert.equal(authority.newest.message_id, 'CG-DIRECTIVE-META-STATE-RECONCILE-002');
+  assert.deepEqual(state.authority_basis, { message_id: authority.newest.message_id, comment_id: authority.newest.comment_id });
+  assert.equal(recorded.repo.pr.number, state.programme.pr_number);
+  assert.equal(recorded.repo.pr.head_ref, state.programme.implementation_branch);
+
+  const out = cli(recorded);
+  assert.equal(out.reconciliation.consistent, true, JSON.stringify(out.reconciliation.findings));
+  assert.equal(out.decision.action, ACTIONS.WAIT_AUTHORITY, 'ACTION-001 stays held');
+
+  // Referent: the recording holds a real malformed ChatGPT REVIEW. Older than
+  // the anchor it is evidence only; placed after the anchor it fails closed.
+  assert.deepEqual(authority.malformed.map((m) => m.comment_id), [5875440129]);
+  const admit = recorded.comments.find((c) => c.id === 5875440129);
+  const later = { ...admit, id: 5875719436, created_at: '2026-09-28T18:30:00Z', updated_at: '2026-09-28T18:30:00Z' };
+  const moved = cli({ ...recorded, comments: [...recorded.comments.filter((c) => c.id !== admit.id), later] });
+  assert.equal(moved.decision.action, ACTIONS.REPORT_DRIFT);
+  assert.deepEqual(moved.reconciliation.findings.map((f) => f.code), [FINDINGS.AUTHORITY_MALFORMED]);
+
+  // Referent: the same evidence with PR 100 still open contradicts the CHECKPOINTED projection.
+  const open = cli({ ...recorded, repo: { ...recorded.repo, pr: { ...recorded.repo.pr, state: 'open', merged: false } } });
+  assert.deepEqual(open.reconciliation.findings.map((f) => f.code), [FINDINGS.PR_NOT_MERGED]);
 });

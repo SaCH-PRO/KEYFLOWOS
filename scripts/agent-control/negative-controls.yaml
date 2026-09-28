@@ -849,3 +849,29 @@ negative_controls:
       replace: "    # evidence_scope removed"
     proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
     timeout_ms: 120000
+
+  # --- re-derived projection (KF-META-STATE-RECONCILE-002) -------------------
+
+  - id: NC-PROJECTION-OBSOLETE-ANCHOR
+    claim: >
+      The committed projection is anchored to the newest authority in the
+      recorded #80 evidence. Restoring the obsolete 2026-09-25 anchor fails the
+      recorded-evidence proof.
+    mutation:
+      file: .agent-control/programme-state.yaml
+      find: "  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n  comment_id: 5875639550"
+      replace: "  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-001\n  comment_id: 5825443535"
+    proof_command: node --test --test-name-pattern="recorded evidence" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECONCILE-RECORDED-MALFORMED
+    claim: >
+      The real malformed ChatGPT REVIEW in the recorded evidence fails closed
+      once it is newer than the anchor; re-anchoring only moves it into the
+      evidence-only past and never stops it being checked.
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: "        const unreadable = (authority.malformed || []).filter((m) => compareAuthorityOrder(m, anchor) > 0);"
+      replace: "        const unreadable = [];"
+    proof_command: node --test --test-name-pattern="recorded evidence" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
