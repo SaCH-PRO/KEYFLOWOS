@@ -21,6 +21,12 @@ real CapabilityContract
 
 This packet is the foundation for later family-by-family adoption, not an instruction to migrate every tool at once.
 
+## Trust Assurance overlay
+
+ACTION-001 is a primary owner for TA-02 (tenant/authority), TA-06 (audit/evidence) and TA-10 (AI governance). During current characterization and proof, the selected bounded action family must explicitly return `trust_impact` and exercise applicable negative controls for wrong tenant, stale/revoked authority, policy tightening before execution, action-parameter rebinding, concurrent claim and AI/direct-surface clearance bypass.
+
+This does **not** broaden the packet to all capabilities or create a parallel security runtime. It makes the existing capability -> control -> clearance boundary carry the trust obligations that later AI, voice, conversation and automation surfaces depend on.
+
 ## Current seams
 
 - apps/server/src/modules/capabilities/capability-contract.service.ts
