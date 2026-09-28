@@ -10,6 +10,12 @@ Forensic evidence baseline: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2`
 ## Objective
 Prepare—not execute—release/canary plan with exposure-only flags, stop/revoke controls, accepted proof, rollback/forward-repair and reconciliation.
 
+## Trust Assurance release gate
+
+RELEASE-001 is a primary owner for TA-01/03/11/12 release evidence and must evaluate `TRUST-G6` before any production-release recommendation. At minimum, release evidence must account for secure-SDLC gates, appropriate authenticated/public DAST coverage, external penetration-test disposition, backup/restore proof, incident tabletop evidence, privacy/payment/AI applicability sign-off, unresolved security-risk disposition, subprocessor/privacy evidence and the cyber-liability/Technology E&O placement decision.
+
+Packet completion still does **not** authorize production release and must not be represented as SOC 2, ISO 27001, HIPAA or other certification unless the corresponding independent/legal prerequisites have actually been satisfied.
+
 ## Existing seams to revalidate on current main
 - deployment/release controls
 - feature flags
