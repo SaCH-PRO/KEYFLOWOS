@@ -44,3 +44,18 @@ return_envelope:
   deviations_from_packet: []
   rollback_floor: []
   open_questions: []
+  trust_impact:
+    domains: []
+    data_classes_touched: []
+    personal_data: false
+    sensitive_data: false
+    secrets_or_credentials: false
+    payment_or_financial_data: false
+    external_processors_or_providers: []
+    ai_action_or_inference: false
+    privacy_retention_or_deletion: false
+    security_controls_changed: []
+    new_attack_surface: []
+    required_negative_controls: []
+    evidence_refs: []
+    residual_risks: []
