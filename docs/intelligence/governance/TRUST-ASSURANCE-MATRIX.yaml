@@ -1,0 +1,90 @@
+version: 1
+adopted: "2026-09-28"
+status: CANONICAL_CROSS_CUTTING_OVERLAY
+canonical_packet_count: 35
+changes_packet_count: false
+production_release_authorized: false
+production_mutations_authorized: false
+
+engineering_baselines:
+  - NIST_CSF_2_0
+  - NIST_SSDF_1_1
+  - OWASP_ASVS_5_0_0
+  - OWASP_API_SECURITY
+  - NIST_AI_RMF_1_0
+  - PCI_DSS_4_0_1
+
+jurisdiction_or_market_overlays:
+  trinidad_tobago_data_protection_act_2011:
+    posture: DESIGN_AND_LEGAL_APPLICABILITY_OVERLAY
+  gdpr:
+    posture: PRIVACY_BY_DESIGN_BASELINE_AND_BINDING_WHERE_APPLICABLE
+  ccpa_cpra:
+    posture: CONDITIONAL_MARKET_OVERLAY
+  eu_ai_act:
+    posture: CONDITIONAL_AI_MARKET_OVERLAY
+  hipaa:
+    posture: SEPARATE_HEALTHCARE_PROFILE_REQUIRED
+
+assurance_targets:
+  soc2:
+    posture: READINESS_NOW_CERTIFICATION_LATER
+  iso_iec_27001_2022:
+    posture: ALIGNMENT_NOW_CERTIFICATION_AS_JUSTIFIED
+  cyber_liability:
+    posture: REQUIRED_PLACEMENT_DECISION_BEFORE_MATERIAL_PRODUCTION_EXPOSURE
+  technology_e_and_o:
+    posture: REQUIRED_PLACEMENT_DECISION_BEFORE_MATERIAL_PRODUCTION_EXPOSURE
+
+milestone_gates:
+  TRUST_G0:
+    timing: NOW
+  TRUST_G1:
+    timing: BEFORE_WAVE_B_RELEASE
+  TRUST_G2:
+    timing: BEFORE_REAL_PROVIDER_OR_REAL_CUSTOMER_DATA_PILOT
+  TRUST_G3:
+    timing: BEFORE_PRODUCTION_PAYMENTS
+  TRUST_G4:
+    timing: BEFORE_GA_WITH_PERSONAL_DATA
+  TRUST_G5:
+    timing: BEFORE_AI_AUTOPILOT_MATERIAL_ACTIONS
+  TRUST_G6:
+    timing: BEFORE_PRODUCTION_RELEASE_AUTHORIZATION
+  TRUST_G7:
+    timing: ENTERPRISE_ASSURANCE_STAGE
+
+packet_return_contract:
+  required_key: trust_impact
+  fields:
+    domains: list
+    data_classes_touched: list
+    personal_data: boolean
+    sensitive_data: boolean
+    secrets_or_credentials: boolean
+    payment_or_financial_data: boolean
+    external_processors_or_providers: list
+    ai_action_or_inference: boolean
+    privacy_retention_or_deletion: boolean
+    security_controls_changed: list
+    new_attack_surface: list
+    required_negative_controls: list
+    evidence_refs: list
+    residual_risks: list
+
+negative_control_catalog:
+  - wrong_tenant_or_idor
+  - stale_or_revoked_authority
+  - replay_or_duplicate_ingress
+  - forged_or_invalid_webhook
+  - concurrent_action_claim
+  - stale_connector_generation
+  - secret_or_pii_log_leakage
+  - overbroad_data_export
+  - deletion_leaves_active_derived_state
+  - retention_bypass
+  - unsafe_file_or_content_handling
+  - dependency_or_security_regression
+  - ai_clearance_bypass
+  - provider_timeout_or_unknown_outcome
+  - backup_or_recovery_failure
