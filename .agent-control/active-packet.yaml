@@ -1,99 +1,232 @@
-packet_id: KF-META-AUTO-001
-correction_id: KF-META-AUTO-001-STATE-RECONCILE
-directive_message_id: CG-DIRECTIVE-META-STATE-RECONCILE-001
-directive_comment_id: 5825443535
-in_reply_to: CG-REVIEW-LIVE-AUTHORITY-WAKE-001
-ack_message_id: CC-ACK-META-STATE-RECONCILE-001
-source_main: 4fafdef635d1f41f287f094370217999e1418041
-implementation_branch: impl/kf-meta-auto-001-state-reconcile
-pr_number: 92
+packet_id: KF-META-CONTROL-PARSER-001
+directive_message_id: CG-DIRECTIVE-META-CONTROL-PARSER-001
+directive_comment_id: 5855915052
+decision_message_id: CG-REVIEW-META-CONTROL-PARSER-DECISION-001
+decision_comment_id: 5856547302
+in_reply_to: CC-CONTRADICTION-META-CONTROL-PARSER-001
+ack_message_id: CC-ACK-META-CONTROL-PARSER-DECISION-001
+correction_review_message_id: CG-REVIEW-META-CONTROL-PARSER-FINAL-001
+correction_review_comment_id: 5859854366
+correction_ack_message_id: CC-ACK-META-CONTROL-PARSER-FINAL-001
+escape_review_message_id: CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
+escape_review_comment_id: 5860337548
+escape_ack_message_id: CC-ACK-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
+source_head_review_message_id: CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
+source_head_review_comment_id: 5860592508
+source_head_ack_message_id: CC-ACK-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
+tracking_issue: 98
+source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
+implementation_branch: impl/kf-meta-control-parser-001
 state: PROVING
-health: GREEN
-scope_changed: false
+health: YELLOW   # per CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002
+scope_changed: true
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
 review_status: PENDING_CHATGPT_REVIEW
 
 objective: >
-  Reconcile KEYFLOWOS control-state precedence and stale-state handling before
-  ACTION-001 is released. Issue #80 is execution authority, repository/PR/CI
-  evidence is implementation truth, programme-state.yaml is derived operational
-  state, and architectural intelligence is durable intent/checkpoint history.
-  A stale derived state must never authorize advancement against newer authority
-  or repository reality.
+  Implement one canonical deterministic fail-closed Issue #80 control-envelope
+  parser and migrate every authority consumer to it so healthy repository and
+  authority truth can be re-derived without human relay.
 
-required_characterization:
-  - enumerate every writer and reader of .agent-control/programme-state.yaml
-  - trace how issue #80 DIRECTIVE/REVIEW/HOLD/RESUME/PR_MERGED events reach the orchestrator
-  - trace how next_legal_action is derived and consumed
-  - identify all docs/tests/code that assume programme-state is unquestionable canonical authority
-  - explain why main still projects PR #87 READY_TO_MERGE after PR #87 and #89 merged and LIVE-AUTHORITY-WAKE-001 was accepted
-  - report any contradiction before implementation if the requested precedence cannot be made deterministic
+decision:
+  c1: OPTION_T
+  parser_contract: >
+    One canonical parser module with two named validation profiles. AUTHORITY
+    is the shared syntax/provenance/order/edit/duplicate/quoting/comment
+    contract used by reconcile, selector, event normalization and all
+    authority readers. ACTIVATION is an additive stricter profile used only for
+    platformProgrammeState activation and preserves the existing packet-state,
+    GREEN/YELLOW/RED and non-null activation requirements.
+  d1: minimum read-only workflow plumbing for the decide step; GH_TOKEN from github.token; least privilege; no new credentials, PATs, secrets, provider access or write scopes
+  d2: DERIVED_STATE_STALE_AUTHORITY may remain; do not re-anchor programme-state.yaml in this packet
+  d3: migrate select-directive.ps1 to the shared parser through a thin wrapper preserving its I/O contract and fail-closed behaviour
+  d4: edited allowlisted authority comments fail closed as AUTHORITY_EDITED; no deletion recovery from snapshot evidence
 
-authorized_scope:
-  - docs/development/AGENT_CONTROL_PLANE.md
-  - docs/development/AGENT_AUTOPILOT*.md
-  - docs/development/AGENT_AUTOPILOT_POLICY.yaml
-  - scripts/agent-control/**
-  - .agent-control/programme-state.yaml
-  - .agent-control/active-packet.yaml
-  - .agent-control/claude-return.yaml
-  - tests/fixtures directly required to prove this correction
-  - no application/product code
+required_consumers:
+  - scripts/agent-control/lib/events.mjs
+  - scripts/agent-control/lib/reconcile.mjs
+  - scripts/agent-control/lib/platform-dag.mjs
+  - any selector/orchestrator authority-reading path
 
-required_semantics:
-  - code/repository evidence establishes what actually exists
-  - newest valid ChatGPT DIRECTIVE/REVIEW/HOLD/RESUME on #80 establishes current execution authority
-  - programme-state.yaml is a derived machine projection and may be stale
-  - derived state may summarize/accelerate decisions but may not override newer authority or repository truth
-  - disagreement between implementation truth, execution authority and derived state fails closed and is surfaced explicitly
-  - the orchestrator must not advance from stale READY_TO_MERGE/MERGED/CHECKPOINTED assumptions
-  - ACTION-001 remains held throughout this correction
-  - preserve append-only #80 audit history and existing ACK/RETURN protocol
+authority_profile:
+  - sender exactly chatgpt
+  - authorized GitHub author relationship preserved
+  - recognized authority message_type
+  - message_id non-null
+  - packet_id non-null
+  - required envelope keys present; null permitted where historical authority requires it
+  - repeated top-level keys rejected
+  - malformed or unmatched quoting rejected
+  - YAML inline comments handled consistently with repository YAML codec
+  - edited authority comments fail closed
+  - deterministic auditable ordering
+  - stale/forged/unreadable/ambiguous authority fails closed
 
-proof_obligations:
-  - focused tests for event/source precedence
-  - "negative control: stale programme-state says READY_TO_MERGE while the referenced PR is already merged; automation must not attempt a second merge or release next work"
-  - "negative control: newer #80 HOLD overrides an older derived allow/advance state"
-  - "negative control: repository reality contradicts derived state; system fails closed and reports drift"
-  - "positive control: consistent authority + repository truth + derived state still permits the same legal advancement as before"
-  - existing agent-control test suite green
-  - existing negative-control mutation suite remains live
-  - no weakening/removal of current safety gates
+activation_profile:
+  - existing state vocabulary unchanged
+  - existing GREEN/YELLOW/RED health vocabulary unchanged
+  - existing activation-required fields remain non-null
+  - existing platform activation negative controls remain live
+
+required_proof:
+  - shared parser is sole parser for authority envelopes
+  - all required consumers use the same AUTHORITY semantics
+  - ACTIVATION remains strictly additive and current negative controls still fail on broken variants
+  - D1 workflow token/read-permission fix proves live repository/issue reads
+  - AUTHORITY_UNVERIFIABLE and REPO_TRUTH_UNVERIFIABLE disappear when evidence is actually readable and valid
+  - DERIVED_STATE_STALE_AUTHORITY may remain if projection anchor is stale and must not be mislabeled green
+  - negative controls cover edited comments, duplicates, invalid-first repeats, inline comments, unmatched quotes, sender case drift, missing fields, forged author, stale anchor, unreadable input and ambiguous ordering
+  - restored defects make their relevant tests fail
+  - exact-head CI, portable/Windows proof, mutation controls, AI review and finding disposition all pass
+  - no production, provider traffic, secrets, paid resource, activation, ACTION-001 release or gate weakening
+
+constraints:
+  - keep ACTION-001 held
+  - KEYFLOWOS_PLATFORM_CONVERGENCE remains INACTIVE_SUCCESSOR
+  - do not wire or activate KF-PLAT-AUTO-001
+  - do not weaken existing gates
   - no production/provider traffic
+  - no secrets
+  - no merge by Claude
+  - one active implementation lineage only
 
-current_reconciliation_target:
-  meta_package: KF-META-AUTO-001
-  admitted_live_proof: CG-REVIEW-LIVE-AUTHORITY-WAKE-001
-  current_main: 4fafdef635d1f41f287f094370217999e1418041
-  desired_meta_state: CHECKPOINTED
-  programme_credit: ZERO
-  action_hold:
-    packet_id: KF-EXEC-ACTION-001
-    active: true
-    release_authority: ChatGPT only after this correction is admitted
+correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-FINAL-001
+  state: CORRECTION_REQUIRED
+  scope_changed: false
+  required:
+    - fix r4115915819 only; do not broaden scope
+    - regression test for an attributable DIRECTIVE/REVIEW/HOLD that parses but is AUTHORITY-profile invalid
+    - prove it is non-actionable and classified MALFORMED
+    - preserve claimed message_type separately if needed for audit/provenance
+    - add/retarget a live negative control so restoring the mislabel fails
+    - rerun portable, Windows, mutation, exact-head CI and fresh Copilot review
+    - new RETURN with the final semantic head and final PR head
+  dispositions:
+    r4115719493: DEFERRED_WITH_TRACKING (#99)
+    r4115915819: ACCEPTED_MUST_FIX_BEFORE_ADMISSION
+    r4115915841: RESOLVED_WITH_EVIDENCE
+    r4115719440: RESOLVED_WITH_EVIDENCE
+  constraints:
+    - do not regenerate architecture maps in this correction
+    - keep programme-state re-anchor deferred
 
-prohibited:
-  - merge of this PR
-  - release of ACTION-001 or any ACTION-001 work
-  - application/product code
-  - production mutation or provider traffic
-  - weakening any gate, proof or negative control
-  - independent architecture or precedence decisions beyond the model above
+escape_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002
+  source_head: ad9c908d7040a8f43eda047984e4b418e4159648
+  state: FIXING_PROOF_FAILURES
+  scope_changed: false
+  finding: >
+    Copilot review at ad9c908d, previously missed: lib/yaml.mjs stripComment
+    ends a quoted scalar at an escaped \" or a doubled '', so
+    `packet_id: "KF\" # 1"` is cut at "#" and then rejected as an unmatched quote.
+  required:
+    - make stripComment quote-and-escape aware
+    - preserve AUTHORITY and ACTIVATION profile semantics and fail-closed behaviour
+    - regression tests reproducing the exact Copilot finding
+    - a live negative control so restoring the defect fails
+    - portable, Windows, mutation, exact-head CI, fresh Copilot review, superseding RETURN
+  constraints:
+    - no merge, activation, ACTION-001 release, scope broadening, gate weakening
+    - no production/provider traffic, secrets, OAuth, paid resources or programme-state re-anchor
 
-stop_conditions:
-  - architectural ambiguity that requires a new precedence decision beyond the model above
-  - inability to deterministically verify #80/repository truth
-  - scope pressure into application/product code
-  - any need to weaken a gate or proof
-  - production impact
+source_head_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001
+  source_head: 07e272c7ff5e93e7db07aa54419c01b4d19df1be
+  state: CORRECTION_REQUIRED
+  scope_changed: false
+  finding: >
+    Copilot review 5332418633 at 82454cce: select-directive.mjs emits only
+    source_main, so a valid source-head-only authority message is based on
+    origin/main by the worker. Inside the authorized D3 selector migration.
+  required:
+    - preserve the selector JSON shape
+    - when source_main is absent, project source_head into the existing source_main output field
+    - explicit source_main wins when both are present
+    - source-head-only and precedence regressions
+    - add or retarget a live negative control
+    - portable, Windows, mutation, exact-head CI, fresh Copilot review, superseding RETURN
+  constraints:
+    - no merge, activation, ACTION-001 release, scope broadening beyond D3, gate weakening
+    - no production/provider traffic or programme-state re-anchor
 
-return_requirements:
-  - ACK before mutation
-  - characterization summary with writers/readers/event path
-  - exact changed files and semantic head
-  - tests and negative controls with results
-  - before/after precedence behavior
-  - residual risks and rollback floor
-  - RETURN on #80 with review_status PENDING_CHATGPT_REVIEW
+evidence_order_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001
+  ack: CC-ACK-META-CONTROL-PARSER-EVIDENCE-ORDER-001
+  source_head: d9b12873239b91d179e574de279d76f052883a9e
+  state: CORRECTION_REQUIRED
+  scope_changed: false
+  finding: >
+    Copilot review 5332604917 at d9b12873: the branch artifact named a RETURN
+    before it was posted and recorded exact-head proof as complete while
+    checks were pending.
+  required:
+    - keep the semantic source_head fix unchanged
+    - claude-return.yaml is a truthful pre-RETURN artifact; return_message_id null; return_status AWAITING_POSTCHECK_RETURN
+    - exact-head checks and review not yet complete stay PENDING, never PASS
+    - regression proof that a pre-return artifact cannot claim a posted RETURN or completed exact-head proof
+    - portable, Windows, mutation, all exact-head workflows, fresh Copilot review, no unresolved substantive finding
+    - only then post the superseding RETURN on #80, with no further branch mutation
+  evidence_policy: only PROVEN satisfies a required gate; pending or unknown is never green
+  constraints:
+    - no merge, programme-state re-anchor, ACTION-001 release, activation, map regeneration
+    - no scope beyond the evidence-order correction and the authorized D3 fix
+    - no production/provider traffic or gate weakening
+
+blank_id_evidence_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
+  review_comment_id: 5861197569
+  ack: CC-ACK-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
+  source_head: ec89053857f913f1a54d5609070f9fc827fc2a92
+  state: CORRECTION_AUTHORIZED
+  scope_changed: true
+  scope_change_authority: CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
+  findings:
+    r4117477528: ACCEPTED_MUST_FIX_BEFORE_ADMISSION; empty or whitespace-only message_id/packet_id is not authority identity
+    r4117477551: ACCEPTED_MUST_FIX_BEFORE_ADMISSION; pre-RETURN prose may not describe a pending exact-head result as passed
+  required:
+    - reject empty and whitespace-only message_id and packet_id; preserve null/missing/duplicate/malformed semantics
+    - parser regressions for "", "   " and quoted whitespace; selector regression that blank authority is never the selected cursor
+    - live negative/mutation control restoring blank-id acceptance must fail
+    - correct the DAST prose to PENDING; extend return-evidence checking to prose if practical within this packet
+    - keep all exact-head evidence PENDING in branch artifacts until the final proof is complete
+    - portable, Windows, mutation, validate-dag, validate-platform-dag, all exact-head workflows, fresh Copilot review, every finding dispositioned
+    - post the superseding RETURN only after all checks and review complete, with no further semantic branch mutation
+  evidence_policy: only PROVEN satisfies a required gate; partial, not run, unknown or pending is never green
+  constraints:
+    - no merge, ACTION-001 release, programme-state re-anchor, platform activation, map regeneration
+    - no production/provider traffic, secrets or gate weakening; one implementation lineage
+
+missing_scope_correction:
+  review: CG-REVIEW-META-CONTROL-PARSER-MISSING-SCOPE-002
+  review_comment_id: 5872313767
+  ack: CC-ACK-META-CONTROL-PARSER-MISSING-SCOPE-002
+  ack_comment_id: 5872404008
+  source_head: b4f70730262a7c7a15b4322be3ac7e8d5d85198b
+  state: CORRECTION_AUTHORIZED
+  review_status: BOUNDED_FINAL_CORRECTION
+  scope_changed: false
+  findings:
+    r4117714827: released; an exact-head proof obligation must not satisfy admission as PROVEN because its evidence_scope marker is absent
+  required:
+    - close r4117714827 without weakening any proof or admission gate; prefer structured evidence semantics over prose heuristics
+    - deterministic regression for the missing-marker case; live mutation control restoring the bypass must fail
+    - keep the real pre-RETURN artifact truthful and exact-head evidence PENDING
+    - portable, Windows, mutation, validate-dag, validate-platform-dag, all exact-head workflows, fresh Copilot review on the final head
+    - RETURN only after that, with no further semantic mutation
+  convergence_rule: >
+    structured authority/evidence fields are the binding admission mechanism; prose checking is defense-in-depth.
+    A new prose finding blocks only if it shows a structured false-PROVEN path, authority-selection error,
+    evidence-order violation or other admission bypass.
+  branch_hygiene: 25-commit limit; if another semantic correction would exceed it, compact onto one fresh branch from current main and re-prove
+  constraints:
+    - no merge, ACTION-001 release, platform activation, programme-state re-anchor, map regeneration
+    - no production/provider effects, gate weakening, or meta-control feature work beyond admitting this packet
+
+return_contract: >
+  ACK exact source/branch/scope before mutation; post CONTRADICTION if current
+  repository truth invalidates the packet; otherwise implement, prove, open the
+  canonical PR, obtain exact-head AI review, disposition findings, and RETURN
+  to Issue #80 for ChatGPT admission.

@@ -129,6 +129,92 @@ test('null and empty fields normalize to null', () => {
   assert.equal(readField('source_head: abc123', 'source_head'), 'abc123');
 });
 
+// ----------------------------------------- SHARED AUTHORITY PROFILE (KF-META-CONTROL-PARSER-001)
+
+const envelope = (overrides = {}) => Object.entries({
+  message_id: 'CG-DIRECTIVE-E-001',
+  message_type: 'DIRECTIVE',
+  packet_id: 'KF-E-001',
+  sender: 'chatgpt',
+  source_main: 'd'.repeat(40),
+  implementation_branch: 'null',
+  state: 'RELEASED',
+  health: 'GREEN',
+  scope_changed: 'false',
+  production_touched: 'false',
+  ...overrides,
+}).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}: ${v}`).join('\n');
+
+test('a valid authority DIRECTIVE wakes; the same text as forged or non-ChatGPT authority does not', () => {
+  const real = normalizeEvent('issue_comment', comment(envelope()));
+  assert.equal(real.actionable, true, JSON.stringify(real.authority));
+  assert.equal(real.authority.valid, true);
+
+  const forged = normalizeEvent('issue_comment', { ...comment(envelope()), comment: { ...comment(envelope()).comment, user: { login: 'mallory' } } });
+  assert.equal(forged.kind, 'DIRECTIVE');
+  assert.equal(forged.actionable, false);
+  assert.deepEqual(forged.authority.problems, ['author_not_authorized:mallory']);
+
+  for (const sender of ['claude-code', 'ChatGPT']) {
+    assert.equal(normalizeEvent('issue_comment', comment(envelope({ sender }))).actionable, false, `sender ${sender}`);
+  }
+  const incomplete = normalizeEvent('issue_comment', comment(envelope({ production_touched: undefined })));
+  assert.equal(incomplete.actionable, false);
+  assert.ok(incomplete.authority.problems.includes('production_touched (absent)'));
+});
+
+test('attributable authority that parses but fails the AUTHORITY profile is MALFORMED, never its claimed kind', () => {
+  // r4115915819: each body is syntactically clean (no envelope_problems), from
+  // SaCH-PRO with sender chatgpt, and fails only the AUTHORITY profile.
+  for (const message_type of ['DIRECTIVE', 'REVIEW', 'HOLD']) {
+    for (const [defect, overrides, problem] of [
+      ['missing key', { production_touched: undefined }, 'production_touched (absent)'],
+      ['null packet_id', { packet_id: 'null' }, 'packet_id (absent or null)'],
+    ]) {
+      const e = normalizeEvent('issue_comment', comment(envelope({ message_type, ...overrides })));
+      const label = `${message_type} with ${defect}`;
+      assert.deepEqual(e.envelope_problems, [], label);
+      assert.equal(e.kind, 'MALFORMED', label);
+      assert.equal(e.actionable, false, label);
+      assert.equal(e.message_type, message_type, `${label}: claimed type kept for audit`);
+      assert.equal(e.authority.valid, false, label);
+      assert.ok(e.authority.problems.includes(problem), `${label}: ${e.authority.problems}`);
+    }
+    // The same envelope when valid keeps its kind, so the label is the profile's verdict.
+    assert.equal(normalizeEvent('issue_comment', comment(envelope({ message_type }))).kind, message_type);
+  }
+});
+
+test('a repeated or badly quoted field makes the event MALFORMED, never actionable', () => {
+  for (const body of [`${envelope()}\nmessage_type: RETURN`, envelope({ packet_id: "'KF-E-001" }), 'message_type: RETURN\npacket_id: P\npacket_id: Q']) {
+    const e = normalizeEvent('issue_comment', comment(body));
+    assert.equal(e.kind, 'MALFORMED', body);
+    assert.equal(e.actionable, false);
+    assert.ok(e.envelope_problems.length > 0);
+  }
+});
+
+test('inline comments are read as the YAML codec reads them', () => {
+  const e = normalizeEvent('issue_comment', comment('message_id: X\nmessage_type: RETURN   # returning\npacket_id: P # the packet'));
+  assert.equal(e.kind, 'RETURN');
+  assert.equal(e.packet_id, 'P');
+  assert.equal(e.actionable, true);
+});
+
+// ----------------------------------------- D1: live reads in the CI observer
+
+test('D1: the decide step reads #80 and the repository with the job token, read-only', () => {
+  const workflow = parseYaml(fs.readFileSync(WORKFLOW, 'utf8'));
+  const job = workflow.jobs['normalize-event'];
+  const decide = job.steps.find((s) => s.id === 'decide');
+  assert.equal(decide.env?.GH_TOKEN, '${{ github.token }}', 'without a token every gh read fails and reconcile reports AUTHORITY_UNVERIFIABLE');
+  assert.match(decide.run, /orchestrate\.mjs --json/);
+  // Exactly the reads reconciliation needs; the only write is publishing the wake event.
+  assert.deepEqual(job.permissions, { contents: 'read', issues: 'write', 'pull-requests': 'read' });
+  assert.equal(workflow.permissions.contents, 'read');
+  assert.ok(!JSON.stringify(workflow).includes('secrets.'), 'no secret or PAT is introduced');
+});
+
 // ══════════════════════════════════════════════════════════ MUTATION LOCK (F1)
 //
 // META-P1-CONCURRENCY-CROSS-PATH-001.

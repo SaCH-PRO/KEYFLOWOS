@@ -22,13 +22,19 @@ const INDENT = '  ';
 
 // ---------------------------------------------------------------- parsing
 
-function stripComment(text) {
-  // Only strip a '#' that starts a token, so URLs and SHAs survive.
+// Exported so the issue #80 envelope parser (lib/control-envelope.mjs) reads
+// inline comments and quoting exactly as this codec does.
+export function stripComment(text) {
+  // Only strip a '#' that starts a token, so URLs and SHAs survive. Quotes are
+  // escape-aware, as control-envelope.mjs wellQuoted() reads them: \" does not
+  // close a double-quoted scalar and '' does not close a single-quoted one.
   let quote = null;
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
     if (quote) {
-      if (ch === quote) quote = null;
+      if (quote === '"' && ch === '\\') i += 1;
+      else if (quote === "'" && ch === "'" && text[i + 1] === "'") i += 1;
+      else if (ch === quote) quote = null;
       continue;
     }
     if (ch === '"' || ch === "'") {
@@ -40,7 +46,7 @@ function stripComment(text) {
   return text;
 }
 
-function parseScalar(raw) {
+export function parseScalar(raw) {
   const text = stripComment(raw).trim();
   if (text === '' || text === '~' || text === 'null') return null;
   if (text === 'true') return true;

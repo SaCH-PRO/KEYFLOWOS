@@ -26,24 +26,24 @@
  * "advance", and a resume can never be applied by automation.
  */
 
-import { parseControlMessage } from './events.mjs';
+import {
+  AUTHORITY_MESSAGE_TYPES,
+  AUTHORITY_SENDER,
+  AUTHORIZED_AUTHORS,
+  collectAuthority,
+  compareAuthorityOrder,
+} from './control-envelope.mjs';
 
-/** Message types that carry execution authority when ChatGPT sends them. */
-export const AUTHORITY_MESSAGE_TYPES = Object.freeze(['DIRECTIVE', 'REVIEW', 'HOLD', 'RESUME']);
-
-/** Exact sender value. Matches the worker's dispatch rule (select-directive.ps1). */
-export const AUTHORITY_SENDER = 'chatgpt';
-
-/**
- * GitHub accounts whose comments may carry authority. Must equal
- * AGENT_AUTOPILOT_POLICY.yaml worker.dispatch_authority.author_allowlist; the
- * repository is public, so `sender:` alone proves nothing.
- */
-export const AUTHORIZED_AUTHORS = Object.freeze(['SaCH-PRO']);
+// Authority is defined once, in the shared #80 envelope parser; these are
+// re-exported so existing importers keep one source.
+export { AUTHORITY_MESSAGE_TYPES, AUTHORITY_SENDER, AUTHORIZED_AUTHORS, collectAuthority };
 
 export const FINDINGS = Object.freeze({
   RECONCILIATION_NOT_PERFORMED: 'RECONCILIATION_NOT_PERFORMED',
   AUTHORITY_UNVERIFIABLE: 'AUTHORITY_UNVERIFIABLE',
+  AUTHORITY_EDITED: 'AUTHORITY_EDITED',
+  AUTHORITY_ORDER_AMBIGUOUS: 'AUTHORITY_ORDER_AMBIGUOUS',
+  AUTHORITY_MALFORMED: 'AUTHORITY_MALFORMED',
   DERIVED_STATE_UNANCHORED: 'DERIVED_STATE_UNANCHORED',
   DERIVED_ANCHOR_NOT_FOUND: 'DERIVED_ANCHOR_NOT_FOUND',
   DERIVED_STATE_STALE_AUTHORITY: 'DERIVED_STATE_STALE_AUTHORITY',
@@ -78,49 +78,10 @@ function summarize(message) {
 }
 
 /**
- * Reduce raw issue #80 comments to the ordered list of valid authority messages.
- *
- * @param {Array|null} comments GitHub issue comments ({id, created_at, user:{login}, body})
- * @param {object} [options] { authors } allowlist override for tests
- * @returns {{verified: boolean, reason?: string, messages: object[], newest: object|null, rejected: number}}
- */
-export function collectAuthority(comments, options = {}) {
-  if (!Array.isArray(comments)) {
-    return { verified: false, reason: 'issue #80 comments were not observed', messages: [], newest: null, rejected: 0 };
-  }
-  const authors = (options.authors || AUTHORIZED_AUTHORS).map((a) => String(a).toLowerCase());
-  const messages = [];
-  let rejected = 0;
-
-  for (const comment of comments) {
-    const msg = parseControlMessage(comment?.body || '');
-    if (!msg.message_type || !AUTHORITY_MESSAGE_TYPES.includes(msg.message_type)) continue;
-    const author = String(comment?.user?.login || '').toLowerCase();
-    // Exact, case-sensitive sender (as the worker); allowlisted GitHub author.
-    if (msg.sender !== AUTHORITY_SENDER || !authors.includes(author) || !msg.message_id) {
-      rejected += 1;
-      continue;
-    }
-    if (comment.id === undefined || comment.id === null || !comment.created_at) {
-      return { verified: false, reason: 'an authority comment has no id or timestamp; ordering is not deterministic', messages: [], newest: null, rejected };
-    }
-    messages.push({ ...msg, comment_id: comment.id, created_at: comment.created_at, author: comment.user.login });
-  }
-
-  // Oldest first. Comment ids are monotonic on GitHub and break timestamp ties.
-  messages.sort((a, b) => {
-    const t = Date.parse(a.created_at) - Date.parse(b.created_at);
-    return t !== 0 ? t : Number(a.comment_id) - Number(b.comment_id);
-  });
-
-  return { verified: true, messages, newest: messages.length ? messages[messages.length - 1] : null, rejected };
-}
-
-/**
  * Compare the derived projection against authority and repository truth.
  *
  * @param {object} state      normalized programme-state
- * @param {object} authority  collectAuthority() output
+ * @param {object} authority  collectAuthority() output (lib/control-envelope.mjs)
  * @param {object} repo       {verified, reason?, main_sha, source_main_on_main: true|false|null,
  *                             pr: {number, state, merged, head_ref} | null}
  * @returns {{consistent: boolean, findings: object[], authority_newest: object|null}}
@@ -131,7 +92,11 @@ export function reconcile(state, authority, repo) {
 
   // --- execution authority (#80) ------------------------------------------
   if (!authority?.verified) {
-    findings.push(finding(FINDINGS.AUTHORITY_UNVERIFIABLE, authority?.reason || 'no authority snapshot supplied'));
+    // AUTHORITY_EDITED / AUTHORITY_ORDER_AMBIGUOUS name the cause; anything else is unverifiable.
+    const code = [FINDINGS.AUTHORITY_EDITED, FINDINGS.AUTHORITY_ORDER_AMBIGUOUS].includes(authority?.code)
+      ? authority.code
+      : FINDINGS.AUTHORITY_UNVERIFIABLE;
+    findings.push(finding(code, authority?.reason || 'no authority snapshot supplied'));
   } else {
     const basis = state?.authority_basis;
     if (!basis?.message_id || basis.comment_id === undefined || basis.comment_id === null) {
@@ -148,6 +113,19 @@ export function reconcile(state, authority, repo) {
           anchor: basis,
           newer: authority.messages.slice(idx + 1).map(summarize),
         }));
+      }
+      // Authority that spoke after the anchor but cannot be read is never
+      // skipped: it may be a hold. Older malformed messages predate the
+      // reviewed projection and are evidence only.
+      if (idx >= 0) {
+        const anchor = authority.messages[idx];
+        const unreadable = (authority.malformed || []).filter((m) => compareAuthorityOrder(m, anchor) > 0);
+        if (unreadable.length) {
+          findings.push(finding(FINDINGS.AUTHORITY_MALFORMED, {
+            anchor: basis,
+            malformed: unreadable.map((m) => ({ ...summarize(m), problems: m.problems })),
+          }));
+        }
       }
     }
   }

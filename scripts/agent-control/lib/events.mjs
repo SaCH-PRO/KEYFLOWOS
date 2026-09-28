@@ -8,6 +8,15 @@
  * effect. (F3)
  */
 
+import {
+  PROFILES,
+  claimedAuthorityType,
+  envelopeField,
+  parseEnvelope,
+  rejectionOf,
+  validateEnvelope,
+} from './control-envelope.mjs';
+
 export const CONTROL_ISSUE = 80;
 
 /** Control-room message types that should wake the orchestrator. */
@@ -27,28 +36,29 @@ export const REQUIRED_WORKFLOWS = Object.freeze([
 ]);
 
 /**
- * Read a top-level `key: value` from a control message body.
- * Anchored to line start so a quoted mention inside prose cannot spoof a field.
+ * Read a top-level `key: value` from a control message body, through the one
+ * #80 envelope parser (lib/control-envelope.mjs). Anchored to line start so a
+ * mention inside prose cannot spoof a field; null when absent, null or repeated.
  */
 export function readField(body, key) {
-  if (typeof body !== 'string') return null;
-  const m = body.match(new RegExp(`^${key}:[ \\t]*([^\\n]*)$`, 'm'));
-  if (!m) return null;
-  const value = m[1].trim().replace(/^["']|["']$/g, '');
-  return value === '' || value === 'null' ? null : value;
+  return envelopeField(parseEnvelope(body), key);
+}
+
+function messageFields(env) {
+  return {
+    message_id: envelopeField(env, 'message_id'),
+    message_type: envelopeField(env, 'message_type'),
+    packet_id: envelopeField(env, 'packet_id'),
+    sender: envelopeField(env, 'sender'),
+    state: envelopeField(env, 'state'),
+    health: envelopeField(env, 'health'),
+    source_main: envelopeField(env, 'source_main'),
+    implementation_branch: envelopeField(env, 'implementation_branch'),
+  };
 }
 
 export function parseControlMessage(body = '') {
-  return {
-    message_id: readField(body, 'message_id'),
-    message_type: readField(body, 'message_type'),
-    packet_id: readField(body, 'packet_id'),
-    sender: readField(body, 'sender'),
-    state: readField(body, 'state'),
-    health: readField(body, 'health'),
-    source_main: readField(body, 'source_main'),
-    implementation_branch: readField(body, 'implementation_branch'),
-  };
+  return messageFields(parseEnvelope(body));
 }
 
 /** Stable hour bucket so repeated scheduled ticks in one hour collapse. */
@@ -72,14 +82,33 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
   if (eventName === 'issue_comment') {
     if (payload.issue?.number !== CONTROL_ISSUE) return ignored('IGNORE', 'issue_comment', 'not the control issue');
     const comment = payload.comment || {};
-    const msg = parseControlMessage(comment.body || '');
+    const env = parseEnvelope(comment.body || '');
+    const msg = messageFields(env);
     // Comment id is stable across workflow re-runs and webhook redeliveries.
     if (comment.id === undefined || comment.id === null) {
       return ignored('MALFORMED', 'issue_comment', 'comment has no id; cannot derive a stable key');
     }
-    const kind = msg.message_type || 'CONTROL_COMMENT';
+    // A repeated or badly quoted field makes the whole envelope ambiguous;
+    // it is recorded, never acted on.
+    let kind = env.problems.length ? 'MALFORMED' : msg.message_type || 'CONTROL_COMMENT';
+    let actionable = ACTIONABLE_MESSAGE_TYPES.includes(kind);
+    // An authority-typed message wakes nothing unless it IS authority under the
+    // shared AUTHORITY profile: ChatGPT sender, allowlisted author, full envelope.
+    let authority = null;
+    if (kind !== 'MALFORMED' && claimedAuthorityType(env)) {
+      const author = comment.user?.login || null;
+      const rejection = rejectionOf(env, author);
+      const problems = rejection ? [rejection] : validateEnvelope(env, PROFILES.AUTHORITY);
+      authority = { valid: problems.length === 0, problems };
+      if (problems.length) actionable = false;
+      // Attributable authority that fails the profile is malformed authority,
+      // as collectAuthority() classifies it; the claimed type stays in
+      // message_type. A forged or non-ChatGPT message is somebody else's and
+      // keeps the kind it claims.
+      if (problems.length && !rejection) kind = 'MALFORMED';
+    }
     return {
-      actionable: ACTIONABLE_MESSAGE_TYPES.includes(kind),
+      actionable,
       kind,
       source: 'issue_comment',
       idempotency_key: `issue_comment:${comment.id}:${payload.action || 'created'}`,
@@ -88,6 +117,8 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
       ref: comment.html_url || null,
       observed_at: now,
       ...msg,
+      envelope_problems: env.problems,
+      authority,
     };
   }
 

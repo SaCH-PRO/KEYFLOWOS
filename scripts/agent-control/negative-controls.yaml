@@ -188,15 +188,19 @@ negative_controls:
   # proofs are Windows-only and run the real worker against stub gh/claude.
   # ---------------------------------------------------------------------------
 
+  # Since KF-META-CONTROL-PARSER-001 (D3) the selector decides through the
+  # shared parser, so these three restore their defect there. Claims and
+  # proofs are unchanged: the proofs still drive select-directive.ps1.
+
   - id: NC-WORKER-SENDERLESS-REJECTED
     claim: >
       A DIRECTIVE with no sender field is not actionable. The live wake harness
       proved a senderless comment could wake the worker
       (WORKER-DIRECTIVE-AUTHORITY-001); this restores exactly that acceptance.
     mutation:
-      file: scripts/agent-control/select-directive.ps1
-      find: "  if ($senderField -cne 'chatgpt') {"
-      replace: "  if ($senderField -and $senderField -cne 'chatgpt') {"
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  if (!senders.includes(AUTHORITY_SENDER)) {"
+      replace: "  if (senders.length && !senders.includes(AUTHORITY_SENDER)) {"
     proof_command: node --test --test-name-pattern="NO sender" scripts/agent-control/tests/select-directive.spec.mjs
     timeout_ms: 180000
 
@@ -205,9 +209,9 @@ negative_controls:
       The sender must be exactly `chatgpt`. PowerShell's -ne ignores case, so
       the draft selector would have accepted `sender: ChatGPT`.
     mutation:
-      file: scripts/agent-control/select-directive.ps1
-      find: "  if ($senderField -cne 'chatgpt') {"
-      replace: "  if ($senderField -ne 'chatgpt') {"
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  if (!senders.includes(AUTHORITY_SENDER)) {"
+      replace: "  if (!senders.some((s) => String(s).toLowerCase() === AUTHORITY_SENDER)) {"
     proof_command: node --test --test-name-pattern="any other sender" scripts/agent-control/tests/select-directive.spec.mjs
     timeout_ms: 180000
 
@@ -217,9 +221,9 @@ negative_controls:
       is rejected. The repository is public and the sender field is text anyone
       can type (WORKER-AUTHORITY-PUBLIC-REPO-001).
     mutation:
-      file: scripts/agent-control/select-directive.ps1
-      find: "  if (-not $author -or $allowed -notcontains $author.ToLowerInvariant()) {"
-      replace: "  if ($false) {"
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  if (!author || !authors.map((a) => String(a).toLowerCase()).includes(String(author).toLowerCase())) {"
+      replace: "  if (false) {"
     proof_command: node --test --test-name-pattern="FORGED" scripts/agent-control/tests/select-directive.spec.mjs
     timeout_ms: 180000
 
@@ -377,10 +381,13 @@ negative_controls:
     claim: >
       Only sender chatgpt from an allowlisted GitHub author carries authority;
       a claude-sent or forged REVIEW does not move the anchor.
+    # Moved with collectAuthority into the shared parser (KF-META-CONTROL-PARSER-001).
     mutation:
-      file: scripts/agent-control/lib/reconcile.mjs
-      find: "    if (msg.sender !== AUTHORITY_SENDER || !authors.includes(author) || !msg.message_id) {"
-      replace: "    if (!msg.message_id) {"
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "export function rejectionOf(env, author, authors = AUTHORIZED_AUTHORS) {"
+      replace: |-
+        export function rejectionOf(env, author, authors = AUTHORIZED_AUTHORS) {
+          return null;
     proof_command: node --test --test-name-pattern="only chatgpt-sent" scripts/agent-control/tests/reconcile.spec.mjs
     timeout_ms: 120000
 
@@ -394,4 +401,451 @@ negative_controls:
       find: "decide({ state, reconciliation, event, dag, registry, duplicate })"
       replace: "decide({ state, reconciliation: { consistent: true, findings: [] }, event, dag, registry, duplicate })"
     proof_command: node --test --test-name-pattern="CLI end to end" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
+
+  # --- one #80 envelope parser (KF-META-CONTROL-PARSER-001, option T) ---------
+
+  - id: NC-ENVELOPE-EDITED
+    claim: >
+      An edited comment from an allowlisted author fails closed as
+      AUTHORITY_EDITED. An edit can add, change or remove authority, including
+      a hold, and the prior body is not observable.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  if (edited.length) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC edited comment" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-EDIT-UNKNOWN
+    claim: >
+      An allowlisted comment whose input shape carries no edit evidence is
+      unverifiable, never assumed unedited.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  if (editUnknown.length) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="edit state not observable" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-REPEATED-KEY
+    claim: >
+      A repeated top-level key is ambiguous and malformed; no first-wins value
+      is ever read from it.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "    if (env.values[key].length > 1) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="NC repeated key" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-INVALID-FIRST-REPEAT
+    claim: >
+      A message whose repeated message_type starts with a non-authority value
+      is still authority (malformed), not skipped. Reading only the first value
+      made such a message vanish, so a newer hold could be lost.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  const authority = types.find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));"
+      replace: "  const authority = [envelopeField(env, 'message_type')].find((t) => AUTHORITY_MESSAGE_TYPES.includes(t));"
+    proof_command: node --test --test-name-pattern="NC invalid-first repeat" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-UNDECLARED-TYPE
+    claim: >
+      A ChatGPT-sender comment whose message_type is missing, repeated or not
+      declared on #80 (a typo'd HOLD, say) is malformed authority, never
+      skipped, so the worker cannot fall back to an older directive past it
+      (Copilot r4115806024).
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  return 'UNKNOWN';"
+      replace: "  return null;"
+    proof_command: node --test --test-name-pattern="undeclared type" scripts/agent-control/tests/control-envelope.spec.mjs scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-ENVELOPE-INLINE-COMMENT
+    claim: >
+      Inline YAML comments are read as lib/yaml.mjs reads them. events.mjs used
+      to keep "value # note" as the value (CONTRADICTION D6).
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  const text = stripComment(rest).trim();"
+      replace: "  const text = rest.trim();"
+    proof_command: node --test --test-name-pattern="NC inline comment" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-UNMATCHED-QUOTE
+    claim: >
+      A value with an unmatched quote is malformed. Stripping each quote
+      independently read `'ACTIVATE` as ACTIVATE.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: |-
+            if (!balanced) return { value: text.replace(/^["']|["']$/g, ''), problem: 'unmatched quote' };
+      replace: |-
+            if (!balanced) return { value: text.replace(/^["']|["']$/g, '') };
+    proof_command: node --test --test-name-pattern="NC unmatched quote" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-ESCAPED-QUOTE
+    claim: >
+      Quote balance is escape-aware. Comparing only the first and last
+      characters accepted `"KF-X\"`, which never closes (Copilot r4115848580).
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "    const balanced = wellQuoted(text);"
+      replace: "    const balanced = opens && closes && text.length >= 2 && text[0] === text[text.length - 1];"
+    proof_command: node --test --test-name-pattern="NC unmatched quote" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-ESCAPED-COMMENT
+    claim: >
+      The inline-comment scanner is escape-aware. Ending a quoted scalar at an
+      escaped \" or doubled '' cut `packet_id: "KF\" # 1"` at the "#" and then
+      rejected it as an unmatched quote (Copilot review 21:31Z at ad9c908d).
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        if (quote === '"' && ch === '\\') i += 1;
+              else if (quote === "'" && ch === "'" && text[i + 1] === "'") i += 1;
+              else if (ch === quote) quote = null;
+      replace: "if (ch === quote) quote = null;"
+    proof_command: node --test --test-name-pattern="NC escaped comment" scripts/agent-control/tests/yaml.spec.mjs scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SELECTOR-SOURCE-HEAD-FALLBACK
+    claim: >
+      A directive that names only source_head is routed by that head. The
+      selector dropped it, so the worker based the wake worktree on origin/main
+      (Copilot review 5332418633 at 82454cce).
+    mutation:
+      file: scripts/agent-control/select-directive.mjs
+      find: "    source_main: decisive.source_main ?? decisive.source_head,"
+      replace: "    source_main: decisive.source_main,"
+    proof_command: node --test --test-name-pattern="NC source head" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SELECTOR-SOURCE-MAIN-PRECEDENCE
+    claim: >
+      When a directive names both, the explicit source_main is the base, not
+      source_head.
+    mutation:
+      file: scripts/agent-control/select-directive.mjs
+      find: "    source_main: decisive.source_main ?? decisive.source_head,"
+      replace: "    source_main: decisive.source_head ?? decisive.source_main,"
+    proof_command: node --test --test-name-pattern="NC source precedence" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-MISSING-KEY
+    claim: >
+      AUTHORITY requires every envelope key to be present (null allowed). An
+      absent key is malformed authority.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "    if (spec.split('|').every((key) => !has(env, key))) problems.push(`${spec} (absent)`);"
+      replace: "    // defect restored: absent envelope keys accepted"
+    proof_command: node --test --test-name-pattern="NC missing envelope key" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-ORDER-AMBIGUOUS
+    claim: >
+      Authority without a comment id or a parseable timestamp cannot be ordered
+      and fails closed.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  if (unordered.length) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC ambiguous ordering" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ACTIVATION-ADDITIVE
+    claim: >
+      ACTIVATION is AUTHORITY plus the activation vocabulary. It never accepts
+      what AUTHORITY rejects.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  const problems = authorityProblems(env);"
+      replace: "  const problems = [];"
+    proof_command: node --test --test-name-pattern="strictly additive" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-PLATFORM-DUPLICATE-ID
+    claim: >
+      Two messages naming the successor programme with one comment id cannot
+      be ordered, so activation cannot depend on input order (Copilot review
+      5330709017). The guard is collectAuthority's id check, which counts
+      rejected messages as well as candidates.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "  if (new Set(ids).size !== ids.length) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="naming messages sharing an id" scripts/agent-control/tests/platform-dag.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECONCILE-MALFORMED-NEWER
+    claim: >
+      Malformed authority newer than the projection's anchor fails closed as
+      AUTHORITY_MALFORMED. It is never skipped, because it may be a hold
+      (as CG-HOLD-ACTION-CONTROLLER-BRIDGE-001 is).
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: "        if (unreadable.length) {"
+      replace: "        if (false) {"
+    proof_command: node --test --test-name-pattern="NC malformed authority newer than the anchor" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-AUTHORITY-GATE
+    claim: >
+      Event normalization applies the AUTHORITY profile: a forged, non-ChatGPT
+      or incomplete DIRECTIVE does not produce a wake event.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "      if (problems.length) actionable = false;"
+      replace: "      // defect restored: authority problems ignored"
+    proof_command: node --test --test-name-pattern="a valid authority DIRECTIVE wakes" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-MALFORMED-AUTHORITY-KIND
+    claim: >
+      An attributable DIRECTIVE, REVIEW or HOLD that parses but fails the
+      AUTHORITY profile is emitted as kind MALFORMED, never with its claimed
+      kind (r4115915819). Restoring the mislabel is caught.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "      if (problems.length && !rejection) kind = 'MALFORMED';"
+      replace: "      // defect restored: malformed authority keeps its claimed kind"
+    proof_command: node --test --test-name-pattern="attributable authority that parses but fails the AUTHORITY profile" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SOLE-PARSER
+    claim: >
+      lib/control-envelope.mjs is the only #80 envelope parser. Restoring the
+      private line-regex reader in events.mjs is caught.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "  return envelopeField(parseEnvelope(body), key);"
+      replace: |-
+          if (typeof body !== 'string') return null;
+          const m = body.match(new RegExp(`^${key}:[ \\t]*([^\\n]*)$`, 'm'));
+          return m ? m[1].trim() : null;
+    proof_command: node --test --test-name-pattern="sole #80 envelope parser" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SELECTOR-MALFORMED-NO-FALLBACK
+    claim: >
+      A malformed newest ChatGPT message selects nothing. The worker neither
+      wakes on it nor falls back to an older directive.
+    mutation:
+      file: scripts/agent-control/select-directive.mjs
+      find: "  if (decisive.problems.length) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="MALFORMED newest" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-SELECTOR-NEWER-HOLD
+    claim: >
+      A newer HOLD or RESUME selects nothing. The PowerShell selector skipped
+      those types and would have woken on an older directive.
+    mutation:
+      file: scripts/agent-control/select-directive.mjs
+      find: "  if (!WAKE_TYPES.includes(decisive.message_type)) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="newer HOLD" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-SELECTOR-WRAPPER-NO-NODE
+    claim: >
+      Without node the selector wrapper fails closed with node_unavailable
+      rather than selecting or crashing into an unexplained state.
+    mutation:
+      file: scripts/agent-control/select-directive.ps1
+      find: "if (-not $node) { Write-Selection"
+      replace: "if ($false) { Write-Selection"
+    proof_command: node --test --test-name-pattern="without node" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-WORKFLOW-D1-TOKEN
+    claim: >
+      The CI decide step reads #80 and the repository with the job token.
+      Without it every read fails and healthy evidence reports
+      AUTHORITY_UNVERIFIABLE / REPO_TRUTH_UNVERIFIABLE.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: |-
+        KF-META-CONTROL-PARSER-001 D1).
+                env:
+                  GH_TOKEN: ${{ github.token }}
+      replace: "KF-META-CONTROL-PARSER-001 D1)."
+    proof_command: node --test --test-name-pattern="D1:" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-RETURN-ID
+    claim: >
+      A branch claude-return.yaml may not carry a return_message_id before the
+      RETURN is posted (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001,
+      Copilot review 5332604917).
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "  if (ret.return_message_id !== undefined && ret.return_message_id !== null) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC premature return id" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-STATUS
+    claim: >
+      A branch claude-return.yaml is always AWAITING_POSTCHECK_RETURN. The
+      RETURN comment, not the branch, is the final evidence envelope.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "  if (ret.return_status !== PRE_RETURN_STATUS) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC premature return status" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-FUTURE-ID
+    claim: >
+      A RETURN id named anywhere in the artifact must be listed as previously
+      posted or never posted. d9b12873 named its own future RETURN in
+      ci.exact_head prose.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "      if (!accounted.has(id)) unaccounted.add(id);"
+      replace: "      // defect restored: unaccounted RETURN ids accepted"
+    proof_command: node --test --test-name-pattern="NC future return id" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING
+    claim: >
+      Exact-head workflows and the fresh AI review stay PENDING in the
+      artifact. Pending or unknown is never green.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (entry?.status !== 'PENDING') {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="NC exact-head pending" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-VOCABULARY
+    claim: >
+      proof_matrix results use the evidence states, so an ad hoc value such as
+      PASS_LOCAL_CI_IN_RETURN cannot read as green.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (!EVIDENCE_STATES.includes(entry?.result)) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="NC proof vocabulary" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-ARTIFACT-PREMATURE-ID
+    claim: >
+      The checker runs on this branch's real claude-return.yaml, so an artifact
+      that names a RETURN before it is posted fails the portable suite at the
+      exact head.
+    mutation:
+      file: .agent-control/claude-return.yaml
+      find: "return_message_id: null"
+      replace: "return_message_id: CC-RETURN-META-CONTROL-PARSER-PREMATURE-001"
+    proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ENVELOPE-BLANK-IDENTITY
+    claim: >
+      An empty or whitespace-only message_id or packet_id is not an identity.
+      A quoted blank decodes to a string, so a null check alone accepted it
+      (Copilot r4117477528, CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001).
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "    else if (value.trim() === '') problems.push(`${key} (blank)`);"
+      replace: "    // defect restored: blank identities accepted"
+    proof_command: node --test --test-name-pattern="NC blank identity" scripts/agent-control/tests/control-envelope.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SELECTOR-BLANK-IDENTITY
+    claim: >
+      A newest ChatGPT message with a blank message_id or packet_id is never
+      the selected cursor, and nothing older is selected in its place.
+    mutation:
+      file: scripts/agent-control/lib/control-envelope.mjs
+      find: "    else if (value.trim() === '') problems.push(`${key} (blank)`);"
+      replace: "    // defect restored: blank identities accepted"
+    proof_command: node --test --test-name-pattern="BLANK-id newest" scripts/agent-control/tests/select-directive.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-RETURN-EVIDENCE-PASS-PROSE
+    claim: >
+      Prose cannot claim an exact-head gate passed while its structured entry
+      is PENDING (Copilot r4117477551).
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (named.length && PASS_WORD.test(sentence)) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="NC pass prose" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-COMPLETION-PROSE
+    claim: >
+      "Completed with zero failures" claims a finished gate as surely as
+      "passed" (Copilot r4117648609).
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "|proven|complete[ds]?|(?:zero|no|0) fail(?:ures?|ed|ing)?)\\b/i;"
+      replace: "|proven)\\b/i;"
+    proof_command: node --test --test-name-pattern="NC completion prose" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-UMBRELLA-PROSE
+    claim: >
+      "All required exact-head workflows passed" names every gate at once and
+      is a claim (Copilot r4117648627).
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (umbrella && !named.length) named.push(umbrella[0]);"
+      replace: "    // defect restored: umbrella gate references ignored"
+    proof_command: node --test --test-name-pattern="NC umbrella prose" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-ARTIFACT-PASS-PROSE
+    claim: >
+      The prose rule runs on this branch's real claude-return.yaml, so the
+      6d8a6bd8 DAST sentence fails the portable suite at the exact head.
+    mutation:
+      file: .agent-control/claude-return.yaml
+      find: "DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN."
+      replace: "DAST (HawkScan) is a required exact-head check and passed."
+    proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-MISSING-SCOPE
+    claim: >
+      Every proof_matrix entry must declare evidence_scope, so an exact-head
+      obligation cannot read as PROVEN by omitting the marker (Copilot
+      r4117714827). The defect accepts an absent scope again.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (!EVIDENCE_SCOPES.includes(scope)) {"
+      replace: "    if (scope !== undefined && !EVIDENCE_SCOPES.includes(scope)) {"
+    proof_command: node --test --test-name-pattern="NC missing scope" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-SCOPE-MISLABEL
+    claim: >
+      An obligation that names an exact-head gate cannot be scoped
+      semantic_head and so escape the PENDING rule.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    } else if (scope !== 'exact_head' && namesExactHeadGate(String(label))) {"
+      replace: "    } else if (false) {"
+    proof_command: node --test --test-name-pattern="NC scope mislabel" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-ARTIFACT-MISSING-SCOPE
+    claim: >
+      The scope rule runs on this branch's real claude-return.yaml: dropping
+      the exact-head obligation's evidence_scope fails the portable suite.
+    mutation:
+      file: .agent-control/claude-return.yaml
+      find: "    evidence_scope: exact_head"
+      replace: "    # evidence_scope removed"
+    proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
     timeout_ms: 120000

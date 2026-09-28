@@ -249,6 +249,42 @@ the allowlist (`SaCH-PRO`, the same rule the local worker uses), and a
 `message_type` of DIRECTIVE, REVIEW, HOLD or RESUME. Newest means latest
 `created_at`, ties broken by comment id.
 
+### One #80 envelope parser
+
+Set by CG-REVIEW-META-CONTROL-PARSER-DECISION-001 (option T, packet
+KF-META-CONTROL-PARSER-001). `scripts/agent-control/lib/control-envelope.mjs`
+is the only reader of #80 control fields. Event normalization, reconcile, the
+platform activation evaluator and the worker selector (`select-directive.mjs`,
+wrapped by `select-directive.ps1`) all go through it.
+
+- **Field syntax.** A field is a top-level `key: value` line. Inline comments
+  and quoting are read as `lib/yaml.mjs` reads them. A repeated key, including
+  one in a second fenced block, or an unmatched quote makes the envelope
+  malformed.
+- **AUTHORITY profile** (every consumer). The rules above, plus: message_id and
+  packet_id are non-null and non-blank (a quoted empty or whitespace-only
+  value such as `""` or `"   "` is rejected), and every envelope key is present
+  (`message_id`, `packet_id`, `sender`, `source_main|source_head`,
+  `implementation_branch`, `state`, `health`, `scope_changed`,
+  `production_touched`). Null is allowed for the other keys, and so is any
+  state or health value, because live authority uses RELEASED, REVIEWED and
+  AMBER.
+- **ACTIVATION profile** (`platformProgrammeState` only). AUTHORITY plus
+  non-null values, packet-state and GREEN/YELLOW/RED vocabulary, 40-hex SHAs and
+  true/false. It is strictly additive.
+- **Edits.** Any edited comment from an allowlisted author makes authority
+  unverifiable (`AUTHORITY_EDITED`), and so does a comment whose edit state the
+  input cannot show. An edit can add, change or remove a hold, and the prior
+  body is gone. There is no automated recovery. A deleted comment cannot be
+  detected from a snapshot; that limit is accepted, not worked around.
+- **Malformed authority** is never skipped. In reconcile, a malformed authority
+  message newer than the projection's anchor fails closed as
+  `AUTHORITY_MALFORMED`, while older ones are evidence only. The selector wakes
+  on nothing when the newest authority is malformed, or when it is a HOLD or
+  RESUME.
+- **Ordering.** An authority message without a comment id or a parseable
+  timestamp, or two sharing an id, fails closed as `AUTHORITY_ORDER_AMBIGUOUS`.
+
 Rules:
 
 - programme-state.yaml records `authority_basis {message_id, comment_id}`: the

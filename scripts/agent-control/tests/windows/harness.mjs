@@ -75,12 +75,37 @@ export function cleanup(world) {
   fs.rmSync(world.tmp, { recursive: true, force: true });
 }
 
+let nextComment = 8000;
+
+/**
+ * A control-room comment as `gh issue view --json comments` returns it, with
+ * the full #80 envelope the shared AUTHORITY profile requires. Numbered in
+ * call order, so a later call is a newer comment. `extra` lines override
+ * envelope fields by key.
+ */
 export function comment({ id, type = 'DIRECTIVE', sender = 'chatgpt', author = OWNER, extra = '' }) {
-  const lines = ['```yaml', `message_id: ${id}`, `message_type: ${type}`, 'packet_id: KF-TEST-001'];
-  if (sender !== null) lines.push(`sender: ${sender}`);
-  if (extra) lines.push(extra);
-  lines.push('```');
-  return { author: { login: author }, body: lines.join('\n'), createdAt: '2026-09-24T00:00:00Z', url: `u/${id}` };
+  const fields = { message_id: id, message_type: type, packet_id: 'KF-TEST-001' };
+  if (sender !== null) fields.sender = sender;
+  Object.assign(fields, {
+    source_main: 'null',
+    implementation_branch: 'null',
+    state: 'RELEASED',
+    health: 'GREEN',
+    scope_changed: 'false',
+    production_touched: 'false',
+  });
+  for (const line of extra ? extra.split('\n') : []) {
+    const i = line.indexOf(':');
+    fields[line.slice(0, i)] = line.slice(i + 1).trim();
+  }
+  nextComment += 1;
+  return {
+    author: { login: author },
+    body: ['```yaml', ...Object.entries(fields).map(([k, v]) => `${k}: ${v}`), '```'].join('\n'),
+    createdAt: '2026-09-24T00:00:00Z',
+    includesCreatedEdit: false,
+    url: `https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-${nextComment}`,
+  };
 }
 
 export const done = (id) => ({ is_error: false, permission_denials: [], result: `Processed.\n\nKEYFLOW-WORKER-DONE: ${id}` });

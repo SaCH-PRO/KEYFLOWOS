@@ -37,14 +37,31 @@ let nextId = 1000;
 function comment(fields, { author = 'SaCH-PRO', at, id } = {}) {
   const lines = Object.entries(fields).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}: ${v}`);
   nextId += 1;
+  const created = at ?? new Date(Date.UTC(2026, 8, 24, 0, 0, nextId - 1000)).toISOString();
   return {
     id: id ?? nextId,
-    created_at: at ?? new Date(Date.UTC(2026, 8, 24, 0, 0, nextId - 1000)).toISOString(),
+    created_at: created,
+    updated_at: created, // never edited
     user: { login: author },
     body: ['```yaml', ...lines, '```'].join('\n'),
   };
 }
-const chatgpt = (type, id, packet, opts) => comment({ message_id: id, message_type: type, packet_id: packet, sender: 'chatgpt' }, opts);
+/**
+ * A well-formed ChatGPT authority message: the full #80 envelope, in the
+ * vocabulary live authority actually uses (state RELEASED, a null branch).
+ */
+const chatgpt = (type, id, packet, opts) => comment({
+  message_id: id,
+  message_type: type,
+  packet_id: packet,
+  sender: 'chatgpt',
+  source_main: SHA_SOURCE,
+  implementation_branch: 'null',
+  state: 'RELEASED',
+  health: 'GREEN',
+  scope_changed: 'false',
+  production_touched: 'false',
+}, opts);
 
 function anchoredState(programme, anchorComment, extra = {}) {
   const state = emptyState();

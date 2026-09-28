@@ -7,24 +7,17 @@
   a non-interactive Claude session with gh and git in hand, so it must accept
   only what authority actually sent.
 
-  It lives in its own script so the rule can be exercised directly against
-  fixture comments, rather than only through a live read of the issue. The
-  worker and the tests call exactly the same code.
+  The decision is made by select-directive.mjs over the shared issue #80
+  envelope parser (lib/control-envelope.mjs, AUTHORITY profile), so the worker,
+  reconcile.mjs and event normalization read authority with one set of rules
+  (KF-META-CONTROL-PARSER-001, D3). This wrapper keeps the worker's interface
+  and adds no rule of its own. It fails closed: no node, a crash, or output
+  that is not a decision all exit 2 with nothing selected.
 
-  A comment is actionable only when ALL of these hold:
-    - it carries message_type and message_id;
-    - message_type is DIRECTIVE or REVIEW;
-    - sender is exactly `chatgpt`. A missing sender is NOT accepted: the live
-      wake harness proved a senderless comment could wake the worker
-      (WORKER-DIRECTIVE-AUTHORITY-001);
-    - the comment's GitHub author is in the authorized-author allowlist. The
-      repository is public and `sender:` is text anyone can type, so the field
-      alone cannot establish who sent the message
-      (WORKER-AUTHORITY-PUBLIC-REPO-001).
-
-  Newest first: the newest actionable message wins. If it is already in the
-  processed cursor there is nothing to do -- older messages are superseded and
-  are never replayed.
+  In short, the newest authority message is selected only when it comes from
+  an allowlisted author with sender exactly `chatgpt`, is well formed, is a
+  DIRECTIVE or REVIEW, no allowlisted comment has been edited, and it is not
+  already processed. See select-directive.mjs for the full rule.
 
 .PARAMETER CommentsFile
   JSON as written by `gh issue view <n> --json comments`.
@@ -39,6 +32,7 @@
 .OUTPUTS
   JSON: { selected: {message_id, message_type, packet_id, source_main,
                      implementation_branch, created_at, url, author} | null,
+          (source_main is the directive's source_head when it has no source_main)
           reason, rejected: [{message_id, reason}] }
   Exit 0 on a decision (including "nothing to do"), 2 when the input is unreadable.
 #>
@@ -62,75 +56,30 @@ function Write-Selection {
   exit $Code
 }
 
-function Get-ControlField {
-  param([string]$Body, [string]$Key)
-  foreach ($line in ($Body -split "`n")) {
-    if ($line -match ('^{0}:\s*(.+?)\s*$' -f [regex]::Escape($Key))) {
-      return $Matches[1].Trim('"', "'")
-    }
-  }
-  return $null
+$node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $node) { Write-Selection -Selected $null -Reason 'node_unavailable' -Rejected @() -Code 2 }
+
+# `--name=value` keeps an empty author list as one argument; Windows
+# PowerShell 5.1 drops a bare empty-string argument to a native command.
+$cliArgs = @(
+  (Join-Path $PSScriptRoot 'select-directive.mjs'),
+  "--comments-file=$CommentsFile",
+  "--authorized-authors=$AuthorizedAuthors"
+)
+if ($CursorFile) { $cliArgs += "--cursor-file=$CursorFile" }
+
+# Native stderr must not become a terminating error (Windows PowerShell 5.1).
+$ErrorActionPreference = 'Continue'
+$output = & $node.Path @cliArgs 2>$null
+$code = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+
+$text = (@($output) -join "`n").Trim()
+$parsed = $null
+try { $parsed = $text | ConvertFrom-Json } catch { $parsed = $null }
+if ($null -eq $parsed -or -not ($parsed.PSObject.Properties.Name -contains 'reason') -or ($code -ne 0 -and $code -ne 2)) {
+  Write-Selection -Selected $null -Reason "selector_failed:$code" -Rejected @() -Code 2
 }
 
-try {
-  $raw = (Get-Content -Path $CommentsFile -Raw) -replace "^\xEF\xBB\xBF", ''
-  $comments = @(($raw | ConvertFrom-Json).comments)
-} catch {
-  Write-Selection -Selected $null -Reason 'comments_unreadable' -Rejected @() -Code 2
-}
-
-$processed = @()
-if ($CursorFile -and (Test-Path $CursorFile)) {
-  try {
-    $cursor = (Get-Content -Path $CursorFile -Raw) -replace "^\xEF\xBB\xBF", '' | ConvertFrom-Json
-    if ($cursor.processed_message_ids) { $processed = @($cursor.processed_message_ids) }
-  } catch {
-    # An unreadable cursor must not be read as "nothing processed": that would
-    # replay every directive on the channel.
-    Write-Selection -Selected $null -Reason 'cursor_unreadable' -Rejected @() -Code 2
-  }
-}
-
-$allowed = @($AuthorizedAuthors -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
-
-$rejected = @()
-for ($i = $comments.Count - 1; $i -ge 0; $i--) {
-  $comment = $comments[$i]
-  $body = [string]$comment.body
-  $type = Get-ControlField -Body $body -Key 'message_type'
-  $id   = Get-ControlField -Body $body -Key 'message_id'
-
-  # Case-sensitive throughout: PowerShell's -ne and -notin ignore case, which
-  # would accept `sender: ChatGPT` where the rule says exactly `chatgpt`.
-  if ($null -eq $type -or $null -eq $id) { continue }            # plain text
-  if ($type -cnotin @('DIRECTIVE', 'REVIEW')) { continue }      # ACK, RETURN, AUTO_EVENT, ...
-
-  $senderField = Get-ControlField -Body $body -Key 'sender'
-  if ($senderField -cne 'chatgpt') {
-    $rejected += [ordered]@{ message_id = $id; reason = "sender_not_chatgpt:$senderField" }
-    continue
-  }
-
-  $author = [string]$comment.author.login
-  if (-not $author -or $allowed -notcontains $author.ToLowerInvariant()) {
-    $rejected += [ordered]@{ message_id = $id; reason = "author_not_authorized:$author" }
-    continue
-  }
-
-  if ($processed -contains $id) {
-    Write-Selection -Selected $null -Reason "newest_already_processed:$id" -Rejected $rejected
-  }
-
-  Write-Selection -Selected ([ordered]@{
-      message_id            = $id
-      message_type          = $type
-      packet_id             = (Get-ControlField -Body $body -Key 'packet_id')
-      source_main           = (Get-ControlField -Body $body -Key 'source_main')
-      implementation_branch = (Get-ControlField -Body $body -Key 'implementation_branch')
-      created_at            = $comment.createdAt
-      url                   = $comment.url
-      author                = $author
-    }) -Reason 'selected' -Rejected $rejected
-}
-
-Write-Selection -Selected $null -Reason 'no_actionable_message' -Rejected $rejected
+$text
+exit $code

@@ -192,7 +192,9 @@ let nextId = 1000;
 function comment(fields, { author = 'SaCH-PRO', at } = {}) {
   nextId += 1;
   const body = ['```yaml', ...Object.entries(fields).map(([k, v]) => `${k}: ${v}`), '```'].join('\n');
-  return { id: nextId, created_at: at || `2026-09-25T10:${String(nextId % 60).padStart(2, '0')}:00Z`, user: { login: author }, body };
+  const created = at || `2026-09-25T10:${String(nextId % 60).padStart(2, '0')}:00Z`;
+  // REST shape: updated_at equal to created_at is the evidence of "never edited".
+  return { id: nextId, created_at: created, updated_at: created, user: { login: author }, body };
 }
 const activateFields = (extra = {}) => ({
   message_id: `CG-DIRECTIVE-TEST-${nextId}`,
@@ -223,6 +225,7 @@ test('the real correction directive does not activate the programme', () => {
   const directive = {
     id: 5830323946,
     created_at: '2026-09-25T09:46:43Z',
+    updated_at: '2026-09-25T09:46:43Z',
     user: { login: 'SaCH-PRO' },
     body: [
       '```yaml',
@@ -510,6 +513,26 @@ test('NEGATIVE CONTROL: a repeat whose first value fails the prefilter still hol
 });
 
 const fieldLines = (body, key) => body.split('\n').filter((l) => l.startsWith(`${key}:`)).length;
+
+test('NEGATIVE CONTROL: a newer naming message with an undeclared type holds rather than vanishing', () => {
+  const good = comment(activateFields(), { at: '2026-09-26T10:00:00Z' });
+  assert.equal(stateOf([good]), PLATFORM_STATES.ACTIVE, 'referent');
+  for (const type of ['HOLDD', 'directive']) {
+    const typo = comment(activateFields({ message_type: type, programme_action: 'HOLD' }), { at: '2026-09-26T11:00:00Z' });
+    assert.equal(stateOf([good, typo]), PLATFORM_STATES.HELD, `message_type ${type}`);
+  }
+});
+
+test('NEGATIVE CONTROL: naming messages sharing an id cannot be ordered, whatever the input order', () => {
+  // Copilot review 5330709017: a valid ACTIVATE and a wrong-sender naming
+  // message with the same id and time sorted as equal, so input order decided.
+  const at = '2026-09-26T10:00:00Z';
+  const activate = comment(activateFields(), { at });
+  const wrongSender = { ...comment(activateFields({ sender: 'claude-code' }), { at }), id: activate.id };
+  assert.equal(stateOf([activate]), PLATFORM_STATES.ACTIVE, 'referent');
+  assert.equal(stateOf([activate, wrongSender]), PLATFORM_STATES.INACTIVE);
+  assert.equal(stateOf([wrongSender, activate]), PLATFORM_STATES.INACTIVE);
+});
 
 test('hold is DIRECTIVE-only in the contract; a HOLD-typed message still holds', () => {
   const doc = clone(loadPlatformDag(repoRoot).doc);

@@ -107,7 +107,7 @@ test('unsupported constructs throw instead of parsing to something wrong', () =>
 test('the real control artifacts on this branch parse', () => {
   for (const file of ['.agent-control/active-packet.yaml', '.agent-control/claude-return.yaml']) {
     const doc = parseYaml(fs.readFileSync(file, 'utf8'));
-    assert.equal(doc.packet_id, 'KF-META-AUTO-001', `${file} must expose packet_id`);
+    assert.equal(doc.packet_id, 'KF-META-CONTROL-PARSER-001', `${file} must expose packet_id`);
     assert.equal(typeof doc.production_touched, 'boolean', `${file} production_touched must be boolean`);
   }
 });
@@ -145,6 +145,14 @@ test('a "#" after whitespace in a plain scalar is a comment, per YAML', () => {
   assert.equal(parseYaml('a: applies to PR #86\n').a, 'applies to PR');
   assert.equal(parseYaml('a: "applies to PR #86"\n').a, 'applies to PR #86');
   assert.equal(parseYaml('a: refs/heads#86\n').a, 'refs/heads#86');
+});
+
+test('NC escaped comment: an escaped quote does not end the scalar, so a later " #" is value', () => {
+  // The exact Copilot input: `packet_id: "KF\" # 1"` was cut at "#".
+  assert.equal(parseYaml('packet_id: "KF\\" # 1"\n').packet_id, 'KF" # 1');
+  assert.equal(parseYaml("packet_id: 'it''s # 1'\n").packet_id, "it's # 1");
+  assert.equal(parseYaml('packet_id: "KF\\\\" # note\n').packet_id, 'KF\\', 'referent: an escaped backslash still closes');
+  assert.equal(parseYaml('packet_id: "KF\\" # 1" # note\n').packet_id, 'KF" # 1', 'referent: the comment after the close is stripped');
 });
 
 test('REGRESSION: a block scalar as a sequence item is read', () => {
