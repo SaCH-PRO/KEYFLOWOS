@@ -3,7 +3,8 @@ directive_message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002
 directive_comment_id: 5875639550
 ack_message_id: CC-ACK-META-STATE-RECONCILE-002
 ack_comment_id: 5875719435
-progress_message_ids: []
+progress_message_ids:
+  - CC-PROGRESS-META-STATE-RECONCILE-002   # 5875818202
 momentum_message_ids: []
 # This file is a pre-RETURN record (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001).
 # The RETURN is posted on #80 after every exact-head check and the fresh AI
@@ -15,9 +16,9 @@ return_message_id: null
 previous_return_message_ids: []
 never_posted_return_message_ids: []
 source_main: 9c8e49791705361227135a9032a640199949113f
-source_head: 9c8e49791705361227135a9032a640199949113f
+source_head: 75b43f00e6f544c11ad0aee4d2f77a3eb9c7faed
 implementation_branch: impl/kf-meta-state-reconcile-002
-pr_number: null
+pr_number: 103
 state: PROVING
 health: GREEN
 scope_changed: false
@@ -101,42 +102,42 @@ proof_matrix:
       reconcile.spec "recorded evidence": collectAuthority over the unmodified REST
       payloads of #80 comments 5875440129..5875719435 is verified, and its newest
       message is this directive. The live orchestrate run reports the same newest message.
-    result: PENDING
+    result: PROVEN
   - obligation: programme-state no longer anchors to the obsolete September 25 authority basis
     evidence_scope: semantic_head
     proof: authority_basis equals the recorded newest authority; NC-PROJECTION-OBSOLETE-ANCHOR restores 5825443535 and the recorded-evidence test fails
-    result: PENDING
+    result: PROVEN
   - obligation: repository truth for merged PR 100 is represented correctly
     evidence_scope: semantic_head
     proof: >
       programme pr_number 100, branch impl/kf-meta-control-parser-001, CHECKPOINTED,
       source_main 71a534b8 is ahead-of on main (compare API). The recorded repo truth
       matches. Referent: the same evidence with PR 100 open gives PR_NOT_MERGED.
-    result: PENDING
+    result: PROVEN
   - obligation: reconcile returns consistent on recorded healthy current evidence
     evidence_scope: semantic_head
     proof: orchestrate.mjs --truth-file scripts/agent-control/fixtures/reconcile-002-truth.json gives consistent true with no findings and WAIT_AUTHORITY
-    result: PENDING
+    result: PROVEN
   - obligation: the scheduled/autopilot decision no longer reports a stale projection solely because of the old anchor
     evidence_scope: semantic_head
     proof: live orchestrate.mjs --json (the command the autopilot decide step runs) with gh auth on real #80 and main gives consistent true, no findings, WAIT_AUTHORITY
-    result: PENDING
+    result: PROVEN
   - obligation: no prior safety gate is weakened
     evidence_scope: semantic_head
     proof: no lib, workflow, parser, threshold or gate file changed; the only test edits add assertions or retarget the artifact packet pins; 2 new live negative controls
-    result: PENDING
+    result: PROVEN
   - obligation: no application packet credit is created by this meta packet
     evidence_scope: semantic_head
     proof: reconcile.spec committed-projection test pins checkpointed to exactly the four application packets and excludes all three meta packets
-    result: PENDING
+    result: PROVEN
   - obligation: restored defects make their relevant tests fail
     evidence_scope: semantic_head
     proof: proof-mutation.mjs at the semantic head, see negative_controls
-    result: PENDING
+    result: PROVEN
   - obligation: portable and Windows suites at the semantic head
     evidence_scope: semantic_head
     proof: see tests
-    result: PENDING
+    result: PROVEN
   - obligation: all required exact-head workflows green and a fresh Copilot review on the final PR head, with no unresolved substantive finding
     evidence_scope: exact_head
     proof: >
@@ -147,17 +148,27 @@ proof_matrix:
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  failed: null
-  skipped: null
+  at: 75b43f00
+  portable_total: 287
+  portable_passed: 287
+  windows_total: 19
+  windows_passed: 19
+  baseline_before_change: 286 portable, 19 windows, at 9c8e4979
+  failed: 0
+  skipped: 0
+  dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
+  live_reconcile: orchestrate.mjs --json on real #80 and main 9c8e4979 at 75b43f00, consistent true, findings none, WAIT_AUTHORITY
+  recorded_reconcile: orchestrate.mjs --json --truth-file scripts/agent-control/fixtures/reconcile-002-truth.json, consistent true, findings none, WAIT_AUTHORITY
   fixture_changes: >
     One new test (recorded evidence). The committed-projection test gains
     assertions and loses none. The yaml.spec and return-evidence.spec artifact
     pins name this packet.
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 75b43f00
+  baseline_before_change: 70/70 live at c6541442, the semantic head merged as 9c8e4979, per the PR 100 record; not re-run at 9c8e4979 here
   added: [NC-PROJECTION-OBSOLETE-ANCHOR, NC-RECONCILE-RECORDED-MALFORMED]
-  result: PENDING
+  result: 72/72 live at 75b43f00; each new control passed at baseline and failed with its defect restored
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
@@ -192,9 +203,11 @@ scope_ledger:
     - keep ACTION-001 held and the platform programme inactive
     - deterministic reconcile/decision proof and the existing agent-control proof for the touched surface
     - PR and RETURN
-  resolved: []
+  resolved: [all declared items except those under remaining]
   remaining:
-    - every declared item, until the proof above is recorded
+    - exact-head checks and a fresh Copilot review on the final PR head (PENDING)
+    - RETURN on #80 once those finish
+    - ChatGPT review and admission
   deferred:
     - item: .agent-control/README.md wording
       reason: outside the minimum projection scope; it contradicts AGENT_CONTROL_PLANE.md and is raised for ChatGPT
