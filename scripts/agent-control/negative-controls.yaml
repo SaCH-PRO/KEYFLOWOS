@@ -783,6 +783,28 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC pass prose" scripts/agent-control/tests/return-evidence.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-RETURN-EVIDENCE-COMPLETION-PROSE
+    claim: >
+      "Completed with zero failures" claims a finished gate as surely as
+      "passed" (Copilot r4117648609).
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "|proven|complete[ds]?|(?:zero|no|0) fail(?:ures?|ed|ing)?)\\b/i;"
+      replace: "|proven)\\b/i;"
+    proof_command: node --test --test-name-pattern="NC completion prose" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-UMBRELLA-PROSE
+    claim: >
+      "All required exact-head workflows passed" names every gate at once and
+      is a claim (Copilot r4117648627).
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (umbrella && !named.length) named.push(umbrella[0]);"
+      replace: "    // defect restored: umbrella gate references ignored"
+    proof_command: node --test --test-name-pattern="NC umbrella prose" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-RETURN-ARTIFACT-PASS-PROSE
     claim: >
       The prose rule runs on this branch's real claude-return.yaml, so the

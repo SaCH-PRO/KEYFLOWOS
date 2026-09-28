@@ -279,9 +279,9 @@ proof_matrix:
   - obligation: pre-RETURN prose cannot describe a pending exact-head result as complete (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001, r4117477551)
     proof: >
       The security.local_hawkscan sentence now says PENDING. lib/return-evidence.mjs
-      reads every sentence of every value; one that names an exact-head gate beside
-      a pass word is a problem. Obligation texts and previous_head_<sha> records are
-      exempt by key. return-evidence.spec "NC pass prose" uses the exact 6d8a6bd8
+      reads every sentence of every value and flags one that names a gate, or all
+      of them at once, beside pass or completion vocabulary. Obligation texts and
+      previous_head_<sha> records are exempt by key. return-evidence.spec "NC pass prose" uses the exact 6d8a6bd8
       sentence, every gate with four pass words, and referents (PENDING wording,
       a pass word in another sentence, the exempt keys, and near-miss keys that are
       not exempt). Run against the 6d8a6bd8 artifact, the checker reported that one

@@ -16,11 +16,13 @@
  *     structured entry was PENDING).
  *
  * The prose rule reads each sentence of every value. A sentence that names an
- * exact-head gate next to a pass word is a claim. Two kinds of text are not
+ * exact-head gate, or all of them ("exact-head workflows", "required checks"),
+ * next to a pass or completion word is a claim. Two kinds of text are not
  * claims about this head: an `obligation` (it states what must be proven, and
  * its result is checked separately) and a `previous_head_<sha>` record (it is
- * about that earlier head by name). A sentence that names a gate but says
- * "not passed" is still flagged; write PENDING instead.
+ * about that earlier head by name). Outcomes for earlier heads belong in those
+ * records, and other prose points at them. A sentence that names a gate but
+ * says "not passed" is still flagged; write PENDING instead.
  *
  * Only PROVEN satisfies a gate. PENDING and UNKNOWN are never green.
  *
@@ -65,7 +67,11 @@ function* strings(value, key = null) {
   }
 }
 
-const PASS_WORD = /\b(?:pass(?:ed|es|ing)?|green|succeeded|successful(?:ly)?|proven)\b/i;
+// Pass and completion vocabulary; "completed with zero failures" claims a
+// finished gate as surely as "passed" does (Copilot r4117648609).
+const PASS_WORD = /\b(?:pass(?:ed|es|ing)?|green|succeeded|successful(?:ly)?|proven|complete[ds]?|(?:zero|no|0) fail(?:ures?|ed|ing)?)\b/i;
+// "All required exact-head workflows passed" names every gate at once (r4117648627).
+const UMBRELLA_GATE = /\b(?:exact[- ]head (?:workflows?|checks?|ci|gates?|proof)|required (?:workflows?|checks?))\b/i;
 const HISTORICAL_KEY = /^previous_head_[0-9a-f]{7,40}$/;
 const REQUIREMENT_KEYS = new Set(['obligation']);
 
@@ -126,6 +132,8 @@ export function preReturnEvidenceProblems(ret) {
 
   for (const sentence of claimSentences(ret)) {
     const named = EXACT_HEAD_GATES.filter((gate) => sentence.toLowerCase().includes(gate.toLowerCase()));
+    const umbrella = sentence.match(UMBRELLA_GATE);
+    if (umbrella && !named.length) named.push(umbrella[0]);
     if (named.length && PASS_WORD.test(sentence)) {
       problems.push(`prose claims ${named.join(', ')} passed before the RETURN: "${sentence}"`);
     }

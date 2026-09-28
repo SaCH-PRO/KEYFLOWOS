@@ -127,6 +127,31 @@ test('NC pass prose: prose cannot claim an exact-head gate passed while it is PE
   assertOnly(artifact({ ci: { previous_head_final: 'DAST (HawkScan) green' } }), /^prose claims DAST/);
 });
 
+test('NC completion prose: completion vocabulary claims a finished gate as surely as "passed"', () => {
+  // Copilot r4117648609.
+  for (const claim of ['DAST (HawkScan) completed with zero failures', 'CI/CD Pipeline complete', 'Branch divergence: no failures', 'Agent Control Gate had 0 failed jobs']) {
+    assertOnly(artifact({ summary: claim }), /^prose claims /);
+  }
+  // Referent: a completion word with no gate named is not a gate claim.
+  assert.deepEqual(problemsOf(artifact({ summary: 'The correction is complete. DAST (HawkScan) is PENDING.' })), []);
+});
+
+test('NC umbrella prose: "exact-head workflows" and "required checks" name every gate at once', () => {
+  // Copilot r4117648627.
+  for (const claim of [
+    'All required exact-head workflows passed successfully.',
+    'exact-head checks green',
+    'Exact head CI completed.',
+    'every required check succeeded',
+    'exact-head proof: PROVEN',
+  ]) {
+    assertOnly(artifact({ ci: { exact_head: claim } }), /^prose claims /);
+  }
+  // Referents: the same umbrella phrases stated as PENDING, next to a completion word in another sentence.
+  assert.deepEqual(problemsOf(artifact({ ci: { exact_head: 'PENDING. Required checks run on the PR head that carries this artifact commit.' } })), []);
+  assert.deepEqual(problemsOf(artifact({ summary: 'The correction is complete. The exact-head workflows are PENDING.' })), []);
+});
+
 test('NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record', () => {
   const ret = parseYaml(fs.readFileSync('.agent-control/claude-return.yaml', 'utf8'));
   assert.equal(ret.packet_id, 'KF-META-CONTROL-PARSER-001');

@@ -262,11 +262,13 @@ wrapped by `select-directive.ps1`) all go through it.
   one in a second fenced block, or an unmatched quote makes the envelope
   malformed.
 - **AUTHORITY profile** (every consumer). The rules above, plus: message_id and
-  packet_id are non-null, and every envelope key is present (`message_id`,
-  `packet_id`, `sender`, `source_main|source_head`, `implementation_branch`,
-  `state`, `health`, `scope_changed`, `production_touched`). Null is allowed,
-  and so is any state or health value, because live authority uses RELEASED,
-  REVIEWED and AMBER.
+  packet_id are non-null and non-blank (a quoted empty or whitespace-only
+  value such as `""` or `"   "` is rejected), and every envelope key is present
+  (`message_id`, `packet_id`, `sender`, `source_main|source_head`,
+  `implementation_branch`, `state`, `health`, `scope_changed`,
+  `production_touched`). Null is allowed for the other keys, and so is any
+  state or health value, because live authority uses RELEASED, REVIEWED and
+  AMBER.
 - **ACTIVATION profile** (`platformProgrammeState` only). AUTHORITY plus
   non-null values, packet-state and GREEN/YELLOW/RED vocabulary, 40-hex SHAs and
   true/false. It is strictly additive.
