@@ -815,3 +815,37 @@ negative_controls:
       replace: "DAST (HawkScan) is a required exact-head check and passed."
     proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-MISSING-SCOPE
+    claim: >
+      Every proof_matrix entry must declare evidence_scope, so an exact-head
+      obligation cannot read as PROVEN by omitting the marker (Copilot
+      r4117714827). The defect accepts an absent scope again.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    if (!EVIDENCE_SCOPES.includes(scope)) {"
+      replace: "    if (scope !== undefined && !EVIDENCE_SCOPES.includes(scope)) {"
+    proof_command: node --test --test-name-pattern="NC missing scope" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-EVIDENCE-SCOPE-MISLABEL
+    claim: >
+      An obligation that names an exact-head gate cannot be scoped
+      semantic_head and so escape the PENDING rule.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: "    } else if (scope !== 'exact_head' && namesExactHeadGate(String(label))) {"
+      replace: "    } else if (false) {"
+    proof_command: node --test --test-name-pattern="NC scope mislabel" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-ARTIFACT-MISSING-SCOPE
+    claim: >
+      The scope rule runs on this branch's real claude-return.yaml: dropping
+      the exact-head obligation's evidence_scope fails the portable suite.
+    mutation:
+      file: .agent-control/claude-return.yaml
+      find: "    evidence_scope: exact_head"
+      replace: "    # evidence_scope removed"
+    proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000

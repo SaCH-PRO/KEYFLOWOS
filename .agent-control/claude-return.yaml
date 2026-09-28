@@ -185,15 +185,19 @@ behaviour_changes_to_note:
 
 proof_matrix:
   - obligation: shared parser is sole parser for authority envelopes
+    evidence_scope: semantic_head
     proof: control-envelope.spec "the shared parser is the sole #80 envelope parser" (source scan of every lib/CLI/ps1 for the reader shapes it replaced, plus import checks), its own negative control, NC-SOLE-PARSER
     result: PROVEN
   - obligation: all required consumers use the same AUTHORITY semantics
+    evidence_scope: semantic_head
     proof: events.mjs, reconcile.mjs (collectAuthority), platform-dag.mjs and select-directive.mjs import lib/control-envelope.mjs; the PowerShell selector delegates to it; events.spec, reconcile.spec, platform-dag.spec and select-directive.spec exercise the same rules
     result: PROVEN
   - obligation: ACTIVATION strictly additive; current negative controls still fail on broken variants
+    evidence_scope: semantic_head
     proof: control-envelope.spec "ACTIVATION is strictly additive" + NC-ACTIVATION-ADDITIVE; every existing platform-dag.spec negative control is unchanged in its assertions and still passes; live vocabulary (RELEASED, AMBER, SUPERSEDED, null branch) passes AUTHORITY and fails ACTIVATION
     result: PROVEN
   - obligation: D1 workflow token/read-permission fix proves live repository/issue reads
+    evidence_scope: semantic_head
     proof: >
       workflow_dispatch run 36326043626 (branch workflow with GH_TOKEN, main's scripts)
       read #80 and the repository in CI. Its only finding is DERIVED_STATE_STALE_AUTHORITY,
@@ -201,6 +205,7 @@ proof_matrix:
       MANUAL_RECONCILE AUTO_EVENT; no merge job ran. Static pin: events.spec "D1:" + NC-WORKFLOW-D1-TOKEN.
     result: PROVEN
   - obligation: AUTHORITY_UNVERIFIABLE and REPO_TRUTH_UNVERIFIABLE disappear when evidence is readable and valid
+    evidence_scope: semantic_head
     proof: >
       local live orchestrate.mjs --json at 2b184808 and again at 1a52f48d with gh auth: findings are only
       DERIVED_STATE_STALE_AUTHORITY and AUTHORITY_MALFORMED (5826124586, 5826612913,
@@ -208,9 +213,11 @@ proof_matrix:
       REPORT_DRIFT. The live selector on real #80 selects that REVIEW, as the old selector did.
     result: PROVEN
   - obligation: DERIVED_STATE_STALE_AUTHORITY may remain and must not be mislabeled green
+    evidence_scope: semantic_head
     proof: live result is REPORT_DRIFT with consistent false; programme-state.yaml untouched
     result: PROVEN
   - obligation: negative controls cover the issue #98 / directive list
+    evidence_scope: semantic_head
     proof: >
       edited newest DIRECTIVE/HOLD/REVIEW and ACK (NC-ENVELOPE-EDITED), unknown edit state,
       duplicates (NC-ENVELOPE-REPEATED-KEY), invalid-first repeats
@@ -224,6 +231,7 @@ proof_matrix:
       selector no-fallback / newer hold / no node
     result: PROVEN
   - obligation: attributable profile-invalid authority is non-actionable and classified MALFORMED (CG-REVIEW-META-CONTROL-PARSER-FINAL-001)
+    evidence_scope: semantic_head
     proof: >
       events.spec "attributable authority that parses but fails the AUTHORITY profile is MALFORMED,
       never its claimed kind": DIRECTIVE, REVIEW and HOLD from SaCH-PRO / sender chatgpt, each with a
@@ -232,6 +240,7 @@ proof_matrix:
       its kind. Live control NC-EVENTS-MALFORMED-AUTHORITY-KIND restores the mislabel and that test fails.
     result: PROVEN
   - obligation: escape-aware inline-comment scanning (CG-REVIEW-META-CONTROL-PARSER-ESCAPE-COMMENT-FIX-002)
+    evidence_scope: semantic_head
     proof: >
       yaml.spec and control-envelope.spec "NC escaped comment": the exact Copilot input
       `packet_id: "KF\" # 1"` reads as `KF" # 1` in the codec and the envelope parser, with no
@@ -242,6 +251,7 @@ proof_matrix:
       scanners agree on every line, so no live message changes classification.
     result: PROVEN
   - obligation: source_head routing in the selector (CG-REVIEW-META-CONTROL-PARSER-SOURCE-HEAD-FIX-001)
+    evidence_scope: semantic_head
     proof: >
       select-directive.spec, run through the PowerShell wrapper. "NC source head": a REVIEW with
       no source_main key, and a DIRECTIVE with source_main null, both select with source_main set
@@ -251,7 +261,8 @@ proof_matrix:
       (source_head preferred) each make their test fail. claude-worker.ps1 Resolve-WorktreeBase
       is unchanged; it now receives the head through the existing field.
     result: PROVEN
-  - obligation: a pre-RETURN artifact cannot claim a posted RETURN or finished exact-head proof (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001)
+  - obligation: a pre-RETURN artifact cannot claim a posted RETURN or finished proof of the head that carries it (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001)
+    evidence_scope: semantic_head
     proof: >
       lib/return-evidence.mjs preReturnEvidenceProblems. return-evidence.spec has one
       fixture per premature claim: a return_message_id, a return_status other than
@@ -265,6 +276,7 @@ proof_matrix:
       NC-RETURN-EVIDENCE-VOCABULARY, NC-RETURN-ARTIFACT-PREMATURE-ID.
     result: PROVEN
   - obligation: empty and whitespace-only message_id / packet_id are not authority identity (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001, r4117477528)
+    evidence_scope: semantic_head
     proof: >
       control-envelope.spec "NC blank identity": for both keys, quoted "", '', "   ",
       '  ' and "\t" decode to a string (not null) and fail AUTHORITY with exactly
@@ -281,6 +293,7 @@ proof_matrix:
       malformed semantics are unchanged; no existing assertion changed.
     result: PROVEN
   - obligation: pre-RETURN prose cannot describe a pending exact-head result as complete (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001, r4117477551)
+    evidence_scope: semantic_head
     proof: >
       The security.local_hawkscan sentence now says PENDING. lib/return-evidence.mjs
       reads every sentence of every value and flags one that names a gate, or all
@@ -298,12 +311,15 @@ proof_matrix:
       NC-RETURN-EVIDENCE-COMPLETION-PROSE, NC-RETURN-EVIDENCE-UMBRELLA-PROSE.
     result: PROVEN
   - obligation: restored defects make their relevant tests fail
+    evidence_scope: semantic_head
     proof: proof-mutation.mjs at the semantic head, see negative_controls
     result: PROVEN
   - obligation: portable and Windows suites at the semantic head
+    evidence_scope: semantic_head
     proof: see tests
     result: PROVEN
   - obligation: every Copilot finding raised so far is dispositioned
+    evidence_scope: semantic_head
     proof: see ai_review.findings
     result: PROVEN
   - obligation: all required exact-head workflows green and a fresh Copilot review on the final PR head, with no unresolved substantive finding
@@ -313,6 +329,7 @@ proof_matrix:
       on #80 reports the outcome after it is known.
     result: PENDING
   - obligation: no production, provider traffic, secrets, paid resource, activation, ACTION-001 release or gate weakening
+    evidence_scope: semantic_head
     proof: >
       only gh reads plus one control-room workflow_dispatch; no secret or PAT; the only
       permission added is pull-requests:read; no gate, threshold or assertion loosened;

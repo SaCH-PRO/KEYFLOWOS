@@ -27,7 +27,7 @@ function artifact(overrides = {}) {
     summary: 'supersedes CC-RETURN-TEST-001; CC-RETURN-TEST-DRAFT-001 was never posted',
     exact_head_proof: EXACT_HEAD_GATES.map((gate) => ({ gate, status: 'PENDING' })),
     proof_matrix: [
-      { obligation: 'local suite', result: 'PROVEN' },
+      { obligation: 'local suite', evidence_scope: 'semantic_head', result: 'PROVEN' },
       { obligation: 'exact-head CI', evidence_scope: 'exact_head', result: 'PENDING' },
     ],
     ...overrides,
@@ -94,13 +94,47 @@ test('NC exact-head complete: every exact-head gate must be listed', () => {
 test('NC proof vocabulary: proof_matrix results use the evidence states', () => {
   // PASS_LOCAL_CI_IN_RETURN is the d9b12873 value that read as green.
   assertOnly(
-    artifact({ proof_matrix: [{ obligation: 'exact-head CI', result: 'PASS_LOCAL_CI_IN_RETURN' }] }),
+    artifact({ proof_matrix: [{ obligation: 'exact-head CI', evidence_scope: 'exact_head', result: 'PASS_LOCAL_CI_IN_RETURN' }] }),
     /^proof_matrix "exact-head CI" result PASS_LOCAL_CI_IN_RETURN is not an evidence state$/,
   );
   assertOnly(
     artifact({ proof_matrix: [{ obligation: 'exact-head CI', evidence_scope: 'exact_head', result: 'PROVEN' }] }),
     /^proof_matrix "exact-head CI" depends on the exact head and must be PENDING; found PROVEN$/,
   );
+});
+
+test('NC missing scope: a proof_matrix entry without evidence_scope is rejected, so it cannot bypass the exact-head rule', () => {
+  // Copilot r4117714827: the exact entry. Without the marker it used to pass while every gate was PENDING.
+  assertOnly(
+    artifact({ proof_matrix: [{ obligation: 'all exact-head workflows green', result: 'PROVEN' }] }),
+    /^proof_matrix "all exact-head workflows green" evidence_scope none must be one of exact_head, semantic_head$/,
+  );
+  // An obligation that names no gate still has to say where its evidence comes from.
+  for (const evidence_scope of [undefined, null, '', 'local', 'EXACT_HEAD']) {
+    assertOnly(
+      artifact({ proof_matrix: [{ obligation: 'final head proof', evidence_scope, result: 'PROVEN' }] }),
+      new RegExp(`^proof_matrix "final head proof" evidence_scope ${evidence_scope || 'none'} must be one of exact_head, semantic_head$`),
+    );
+  }
+  // Referents: with the marker, the same entry is held to PENDING, and PENDING passes.
+  assertOnly(
+    artifact({ proof_matrix: [{ obligation: 'all exact-head workflows green', evidence_scope: 'exact_head', result: 'PROVEN' }] }),
+    /^proof_matrix "all exact-head workflows green" depends on the exact head and must be PENDING; found PROVEN$/,
+  );
+  assert.deepEqual(problemsOf(artifact({ proof_matrix: [{ obligation: 'all exact-head workflows green', evidence_scope: 'exact_head', result: 'PENDING' }] })), []);
+});
+
+test('NC scope mislabel: an obligation that names an exact-head gate must be scoped exact_head', () => {
+  for (const obligation of ['all exact-head workflows green', 'DAST (HawkScan) on the final head', 'fresh Copilot review', 'required checks']) {
+    for (const result of ['PROVEN', 'PENDING']) {
+      assertOnly(
+        artifact({ proof_matrix: [{ obligation, evidence_scope: 'semantic_head', result }] }),
+        /^proof_matrix ".*" names an exact-head gate and must have evidence_scope exact_head; found semantic_head$/,
+      );
+    }
+  }
+  // Referent: an obligation that names no gate may be semantic_head and PROVEN.
+  assert.deepEqual(problemsOf(artifact({ proof_matrix: [{ obligation: 'portable and Windows suites at the semantic head', evidence_scope: 'semantic_head', result: 'PROVEN' }] })), []);
 });
 
 test('NC pass prose: prose cannot claim an exact-head gate passed while it is PENDING', () => {

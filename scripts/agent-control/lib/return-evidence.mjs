@@ -26,6 +26,14 @@
  *
  * Only PROVEN satisfies a gate. PENDING and UNKNOWN are never green.
  *
+ * Every proof_matrix entry declares its evidence_scope: exact_head for proof
+ * that only the checks on the head carrying the artifact can give (it must be
+ * PENDING), semantic_head for proof gathered before the artifact commit. The
+ * scope is required, so an exact-head obligation cannot read as PROVEN by
+ * leaving the marker out (Copilot r4117714827). As a second guard, an
+ * obligation that names an exact-head gate, by the same matching the prose
+ * rule uses, must be exact_head.
+ *
  * Pure: takes the parsed artifact and returns a list of problems, empty when
  * the artifact is truthful.
  */
@@ -45,6 +53,9 @@ export const EVIDENCE_STATES = Object.freeze([
 ]);
 
 export const PRE_RETURN_STATUS = 'AWAITING_POSTCHECK_RETURN';
+
+/** Where a proof_matrix entry's evidence comes from; required on every entry. */
+export const EVIDENCE_SCOPES = Object.freeze(['exact_head', 'semantic_head']);
 
 /** The exact-head gates a pre-RETURN artifact must list, all PENDING. */
 export const AI_REVIEW_GATE = 'fresh Copilot review';
@@ -74,6 +85,12 @@ const PASS_WORD = /\b(?:pass(?:ed|es|ing)?|green|succeeded|successful(?:ly)?|pro
 const UMBRELLA_GATE = /\b(?:exact[- ]head (?:workflows?|checks?|ci|gates?|proof)|required (?:workflows?|checks?))\b/i;
 const HISTORICAL_KEY = /^previous_head_[0-9a-f]{7,40}$/;
 const REQUIREMENT_KEYS = new Set(['obligation']);
+
+/** Whether text names an exact-head gate, or all of them at once. */
+function namesExactHeadGate(text) {
+  const lower = text.toLowerCase();
+  return EXACT_HEAD_GATES.some((gate) => lower.includes(gate.toLowerCase())) || UMBRELLA_GATE.test(text);
+}
 
 /** Every sentence of every value that could claim something about this head. */
 function* claimSentences(value, key = null) {
@@ -141,9 +158,15 @@ export function preReturnEvidenceProblems(ret) {
 
   for (const entry of Array.isArray(ret.proof_matrix) ? ret.proof_matrix : []) {
     const label = entry?.obligation ?? '?';
+    const scope = entry?.evidence_scope;
     if (!EVIDENCE_STATES.includes(entry?.result)) {
       problems.push(`proof_matrix "${label}" result ${entry?.result ?? 'none'} is not an evidence state`);
-    } else if (entry.evidence_scope === 'exact_head' && entry.result !== 'PENDING') {
+    }
+    if (!EVIDENCE_SCOPES.includes(scope)) {
+      problems.push(`proof_matrix "${label}" evidence_scope ${scope || 'none'} must be one of ${EVIDENCE_SCOPES.join(', ')}`);
+    } else if (scope !== 'exact_head' && namesExactHeadGate(String(label))) {
+      problems.push(`proof_matrix "${label}" names an exact-head gate and must have evidence_scope exact_head; found ${scope}`);
+    } else if (scope === 'exact_head' && EVIDENCE_STATES.includes(entry.result) && entry.result !== 'PENDING') {
       problems.push(`proof_matrix "${label}" depends on the exact head and must be PENDING; found ${entry.result}`);
     }
   }
@@ -151,4 +174,4 @@ export function preReturnEvidenceProblems(ret) {
   return problems;
 }
 
-export default { preReturnEvidenceProblems, EVIDENCE_STATES, EXACT_HEAD_GATES, PRE_RETURN_STATUS, AI_REVIEW_GATE };
+export default { preReturnEvidenceProblems, EVIDENCE_STATES, EVIDENCE_SCOPES, EXACT_HEAD_GATES, PRE_RETURN_STATUS, AI_REVIEW_GATE };
