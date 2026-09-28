@@ -59,3 +59,10 @@ return_envelope:
     required_negative_controls: []
     evidence_refs: []
     residual_risks: []
+  assurance:
+    domains_touched: []
+    state_changes_proposed: []
+    catastrophic_scenarios_exercised: []
+    catastrophic_disposition_changes_proposed: []
+    new_gaps: []
+    invalidated_prior_proof: []
