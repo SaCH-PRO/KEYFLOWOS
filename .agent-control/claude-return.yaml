@@ -31,7 +31,7 @@ evidence_order_ack_message_id: CC-ACK-META-CONTROL-PARSER-EVIDENCE-ORDER-001
 blank_id_review_message_id: CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
 blank_id_ack_message_id: CC-ACK-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001
 source_main: 71a534b8944f4bb4191c9123e64a93e87c6db9d4
-source_head: 3d1944cc8d87ff15bb4fe5b7eae8a68ad198205a
+source_head: 6a76b8495da43dfc36f2a09e9ae5790a5aae414b
 implementation_branch: impl/kf-meta-control-parser-001
 pr_number: 100
 state: PROVING
@@ -130,6 +130,10 @@ commits:
     subject: pre-RETURN artifact for 6d8a6bd8
   - sha: 3d1944cc8d87ff15bb4fe5b7eae8a68ad198205a
     subject: blank identities are not authority; prose cannot claim exact-head pass (CG-REVIEW-META-CONTROL-PARSER-BLANK-ID-EVIDENCE-001)
+  - sha: b21b8f0f65fa4992a73056e89b20989c771d9c89
+    subject: pre-RETURN artifact for 3d1944cc
+  - sha: 6a76b8495da43dfc36f2a09e9ae5790a5aae414b
+    subject: completion and umbrella prose claims; document blank identities (Copilot review 5332867429)
 
 contract_as_implemented:
   field_syntax:
@@ -287,7 +291,11 @@ proof_matrix:
       not exempt). Run against the 6d8a6bd8 artifact, the checker reported that one
       sentence and nothing else. Live controls NC-RETURN-EVIDENCE-PASS-PROSE (rule
       removed) and NC-RETURN-ARTIFACT-PASS-PROSE (the old sentence restored in this
-      file) each make their test fail.
+      file) each make their test fail. 6a76b849 (Copilot 5332867429) extends the
+      rule to completion vocabulary (r4117648609) and to phrases that name every
+      gate at once (r4117648627); see return-evidence.mjs PASS_WORD and
+      UMBRELLA_GATE. Tests: NC completion prose, NC umbrella prose. Live controls:
+      NC-RETURN-EVIDENCE-COMPLETION-PROSE, NC-RETURN-EVIDENCE-UMBRELLA-PROSE.
     result: PROVEN
   - obligation: restored defects make their relevant tests fail
     proof: proof-mutation.mjs at the semantic head, see negative_controls
@@ -313,9 +321,9 @@ proof_matrix:
 
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
-  at: 3d1944cc
-  portable_total: 282
-  portable_passed: 282
+  at: 6a76b849
+  portable_total: 284
+  portable_passed: 284
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
   windows_total: 19
   windows_passed: 19
@@ -333,16 +341,17 @@ tests:
     now fails closed instead of being ignored. It is asserted in "an undeclared type
     from ChatGPT selects nothing", and its old slot holds a ChatGPT ACK.
     3d1944cc adds three tests (NC blank identity, BLANK-id newest, NC pass prose)
-    and changes no existing one.
+    and changes no existing one. 6a76b849 adds two (NC completion prose, NC
+    umbrella prose) and changes none.
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 3d1944cc
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 6a76b849
   baseline_before_change: 32/32 live
-  result: 65/65 live at 3d1944cc
+  result: 67/67 live at 6a76b849
   retargeted_same_claim_and_proof:
     - NC-WORKER-SENDERLESS-REJECTED, NC-WORKER-SENDER-EXACT, NC-WORKER-AUTHOR-ALLOWLIST (select-directive.ps1 -> lib/control-envelope.mjs)
     - NC-RECONCILE-AUTHORITY-SENDER (reconcile.mjs -> lib/control-envelope.mjs rejectionOf)
-  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-ESCAPED-COMMENT, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-EVENTS-MALFORMED-AUTHORITY-KIND, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-SELECTOR-SOURCE-HEAD-FALLBACK, NC-SELECTOR-SOURCE-MAIN-PRECEDENCE, NC-WORKFLOW-D1-TOKEN, NC-RETURN-EVIDENCE-RETURN-ID, NC-RETURN-EVIDENCE-STATUS, NC-RETURN-EVIDENCE-FUTURE-ID, NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING, NC-RETURN-EVIDENCE-VOCABULARY, NC-RETURN-ARTIFACT-PREMATURE-ID, NC-ENVELOPE-BLANK-IDENTITY, NC-SELECTOR-BLANK-IDENTITY, NC-RETURN-EVIDENCE-PASS-PROSE, NC-RETURN-ARTIFACT-PASS-PROSE]
+  added: [NC-ENVELOPE-EDITED, NC-ENVELOPE-EDIT-UNKNOWN, NC-ENVELOPE-REPEATED-KEY, NC-ENVELOPE-INVALID-FIRST-REPEAT, NC-ENVELOPE-UNDECLARED-TYPE, NC-ENVELOPE-INLINE-COMMENT, NC-ENVELOPE-UNMATCHED-QUOTE, NC-ENVELOPE-ESCAPED-QUOTE, NC-ENVELOPE-ESCAPED-COMMENT, NC-ENVELOPE-MISSING-KEY, NC-ENVELOPE-ORDER-AMBIGUOUS, NC-ACTIVATION-ADDITIVE, NC-PLATFORM-DUPLICATE-ID, NC-RECONCILE-MALFORMED-NEWER, NC-EVENTS-AUTHORITY-GATE, NC-EVENTS-MALFORMED-AUTHORITY-KIND, NC-SOLE-PARSER, NC-SELECTOR-MALFORMED-NO-FALLBACK, NC-SELECTOR-NEWER-HOLD, NC-SELECTOR-WRAPPER-NO-NODE, NC-SELECTOR-SOURCE-HEAD-FALLBACK, NC-SELECTOR-SOURCE-MAIN-PRECEDENCE, NC-WORKFLOW-D1-TOKEN, NC-RETURN-EVIDENCE-RETURN-ID, NC-RETURN-EVIDENCE-STATUS, NC-RETURN-EVIDENCE-FUTURE-ID, NC-RETURN-EVIDENCE-EXACT-HEAD-PENDING, NC-RETURN-EVIDENCE-VOCABULARY, NC-RETURN-ARTIFACT-PREMATURE-ID, NC-ENVELOPE-BLANK-IDENTITY, NC-SELECTOR-BLANK-IDENTITY, NC-RETURN-EVIDENCE-PASS-PROSE, NC-RETURN-ARTIFACT-PASS-PROSE, NC-RETURN-EVIDENCE-COMPLETION-PROSE, NC-RETURN-EVIDENCE-UMBRELLA-PROSE]
   history: >
     48/48 live at 8744d90c and at a8c87ccb. At 81a2ddd2, NC-PLATFORM-DUPLICATE-ID
     was VACUOUS: its platform-level guard was unreachable behind collectAuthority's
@@ -355,7 +364,9 @@ negative_controls:
     NC-ENVELOPE-ESCAPED-COMMENT (53/53). 940d89b9 added
     NC-SELECTOR-SOURCE-HEAD-FALLBACK and NC-SELECTOR-SOURCE-MAIN-PRECEDENCE (55/55).
     6d8a6bd8 added the six NC-RETURN-* controls (61/61). 3d1944cc added the two
-    blank-identity controls and the two pass-prose controls (65/65).
+    blank-identity controls and the two pass-prose controls (65/65). 6a76b849
+    added NC-RETURN-EVIDENCE-COMPLETION-PROSE and NC-RETURN-EVIDENCE-UMBRELLA-PROSE
+    (67/67).
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
@@ -376,6 +387,10 @@ ci:
     PENDING. Required checks run on the PR head that carries this artifact
     commit (the semantic head plus this control-only commit). An artifact cannot
     record CI for the commit that contains it. No RETURN for this head exists yet.
+  previous_head_b21b8f0f: >
+    18 check runs concluded success and 10 were skipped by their own conditions,
+    with zero failures; Copilot review 5332867429 raised r4117648609, r4117648627
+    and r4117648637, so no RETURN was posted for that head.
   previous_head_ec890538: >
     every check run concluded success or was skipped by its own condition, with
     zero failures; Copilot review 5332682603 raised r4117477528 and r4117477551,
@@ -393,9 +408,21 @@ ci:
 
 ai_review:
   reviewer: copilot-pull-request-reviewer[bot]
-  reviews: [5330693593 on 33b46896, 5330709017 on a8c87ccb, 5330788503 on 9eb4f884, 5330834778 on 4f559de3, 03b22a58 (15:31Z), ad9c908d (21:31Z), 5332418633 on 82454cce, 5332604917 on d9b12873, 5332682603 on ec890538]
+  reviews: [5330693593 on 33b46896, 5330709017 on a8c87ccb, 5330788503 on 9eb4f884, 5330834778 on 4f559de3, 03b22a58 (15:31Z), ad9c908d (21:31Z), 5332418633 on 82454cce, 5332604917 on d9b12873, 5332682603 on ec890538, 5332867429 on b21b8f0f]
   final_head_review: PENDING
   findings:
+    - id: r4117648609
+      source: Copilot review 5332867429 at b21b8f0f, "Recognize completion vocabulary for pending gates", return-evidence.mjs:68
+      disposition: FIXED
+      evidence: 6a76b849; "complete(d)", "zero/no/0 failures" count as claims; return-evidence.spec "NC completion prose"; NC-RETURN-EVIDENCE-COMPLETION-PROSE
+    - id: r4117648627
+      source: Copilot review 5332867429 at b21b8f0f, "Recognize umbrella exact-head gate references", return-evidence.mjs:128
+      disposition: FIXED
+      evidence: 6a76b849; "exact-head workflows/checks/CI/gates/proof" and "required workflows/checks" name every gate; return-evidence.spec "NC umbrella prose"; NC-RETURN-EVIDENCE-UMBRELLA-PROSE
+    - id: r4117648637
+      source: Copilot review 5332867429 at b21b8f0f, "Document blank identity rejection in profile contract", AGENT_CONTROL_PLANE.md:269
+      disposition: FIXED
+      evidence: 6a76b849; the AUTHORITY profile text says message_id/packet_id are non-null and non-blank, and null is allowed only for the other keys
     - id: r4117477528
       source: Copilot review 5332682603 at ec890538, "Quoted empty identifiers bypass the required-ID check", control-envelope.mjs:194
       disposition: FIXED
