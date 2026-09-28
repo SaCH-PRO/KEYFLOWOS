@@ -5,6 +5,8 @@ Checkpoint: `PKGSTD-2026-09-17-01`
 
 Every L2 surgical package MUST contain:
 
+All packages also inherit the cross-cutting Trust Assurance Programme in `docs/intelligence/governance/KEYFLOW-TRUST-ASSURANCE-PROGRAMME.md` and MUST classify `trust_impact` using `docs/intelligence/governance/TRUST-ASSURANCE-MATRIX.yaml`.
+
 ## 1. README.md
 Human-readable mission:
 - objective;
@@ -134,6 +136,25 @@ Binary checklist used by ChatGPT before promoting:
 - L4 → L5;
 - L5 → release consideration.
 
+## 12. TRUST-IMPACT.md / trust_impact return
+
+Every package must explicitly classify:
+- trust domains touched;
+- data classes touched;
+- personal/sensitive data;
+- secrets/credentials;
+- payment/financial data;
+- external processors/providers;
+- AI inference/action involvement;
+- privacy/retention/deletion impact;
+- security controls changed;
+- new attack surface;
+- required negative controls;
+- evidence references;
+- residual risks.
+
+Not-applicable values must be stated explicitly. Applicable trust obligations become part of the package proof and acceptance contract and may not disappear because functional CI is green.
+
 ## Package design rules
 
 1. One package owns one bounded semantic migration.
@@ -146,3 +167,5 @@ Binary checklist used by ChatGPT before promoting:
 8. Debug logging must not leak secrets/PII.
 9. A package can be disabled without pretending already-completed real-world effects disappeared.
 10. Package completion means proof at declared scope, never "code compiled."
+11. Wrong-tenant, stale-authority, replay, secret/PII leakage, privacy-lineage, payment/provider and AI-clearance negative controls are mandatory where the Trust Assurance Matrix marks them applicable.
+12. A packet cannot create an unsupported legal/compliance/certification claim; assurance claims must match evidence actually obtained.
