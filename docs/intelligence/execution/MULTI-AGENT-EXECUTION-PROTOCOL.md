@@ -1,7 +1,7 @@
 # KEYFLOWOS Multi-Agent Execution Protocol
 
 ## ChatGPT — Architecture / Evidence Command Center
-Owns packet semantics, dependency release, evidence admission and minimal architecture reopen decisions.
+Owns packet semantics, dependency release, evidence admission, Ironclad Assurance state/disposition changes and minimal architecture reopen decisions.
 
 ## Claude Code — Primary Implementer
 For an authorized packet:
@@ -11,10 +11,11 @@ For an authorized packet:
 4. implement bounded scope only;
 5. run applicable proof;
 6. return exact diff/migrations/commands/results/new consumers;
-7. stop on target contradiction.
+7. report touched `IA-*` assurance domains, exercised `CF-*` failure scenarios and newly discovered gaps;
+8. stop on target contradiction.
 
 ## Kimi Code — Adversarial Reviewer
-Independently challenge missed writers/readers, concurrency/idempotency/tenant/authority assumptions, migration ambiguity, rollback and proof vacuity.
+Independently challenge missed writers/readers, concurrency/idempotency/tenant/authority assumptions, migration ambiguity, rollback and proof vacuity. Kimi also checks whether the packet leaves a material `IA-*` domain falsely classified or misses a relevant `CF-*` catastrophic scenario.
 
 ## Required return envelope
 
@@ -39,7 +40,15 @@ deviations_from_packet:
 rollback_floor:
 open_questions:
 evidence_refs:
+assurance:
+  domains_touched: []
+  state_changes_proposed: []
+  catastrophic_scenarios_exercised: []
+  catastrophic_disposition_changes_proposed: []
+  new_gaps: []
+  invalidated_prior_proof: []
 ```
+
 
 No agent may silently add a kernel, duplicate authority/billing/workflow/recovery engine, weaken a gate, or expand scope.
 
@@ -120,7 +129,11 @@ RETURN messages must additionally include the full existing required return enve
 - new consumers/writers;
 - deviations;
 - rollback floor;
-- open questions.
+- open questions;
+- assurance domains touched/state changes proposed;
+- catastrophic scenarios exercised/disposition changes proposed;
+- newly discovered gaps;
+- any earlier assurance proof invalidated by the current change.
 
 ### GitHub issue use
 
