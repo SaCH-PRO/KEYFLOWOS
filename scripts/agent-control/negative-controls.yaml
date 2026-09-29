@@ -1034,6 +1034,21 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC forged ChatGPT evidence" scripts/agent-control/tests/semantic-review.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-SR-REST-EVIDENCE-URL
+    claim: >
+      ChatGPT review evidence fetched through the REST API is keyed by the
+      comment's html_url. Keying it on the REST `url` (the API URL) made every
+      real fallback review fail as live_evidence_missing
+      (CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001).
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+            url: comment?.html_url ?? c.url,
+      replace: |-
+            url: c.url,
+    proof_command: node --test --test-name-pattern="NC REST evidence URL" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-ADMISSION-SEMANTIC-REVIEW-BYPASS
     claim: >
       The admission path consumes the semantic-review contract: an otherwise
