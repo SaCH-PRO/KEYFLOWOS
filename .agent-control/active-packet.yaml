@@ -1,73 +1,73 @@
-packet_id: KF-META-STATE-RECONCILE-002
-directive_message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002
-directive_comment_id: 5875639550
-in_reply_to: CC-ACK-META-CONTROL-PARSER-ADMIT-001
-ack_message_id: CC-ACK-META-STATE-RECONCILE-002
-ack_comment_id: 5875719435
-source_main: 9c8e49791705361227135a9032a640199949113f
-implementation_branch: impl/kf-meta-state-reconcile-002
+packet_id: KF-META-AI-REVIEW-FAILOVER-001
+directive_message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-001
+directive_comment_id: 5876689636
+decision_message_id: CG-DECISION-META-AI-REVIEW-FAILOVER-001
+decision_comment_id: 5877357166
+continue_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
+continue_review_comment_id: 5881457102
+in_reply_to: CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
+ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001
+ack_comment_id: 5881559355
+prior_ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-001
+contradiction_message_id: CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-001
+contradiction_comment_id: 5876793708
+source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
+implementation_branch: impl/kf-meta-ai-review-failover-001
 state: PROVING
 health: GREEN
-scope_changed: false
+scope_changed: true
+scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A, Kimi removed, admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
 review_status: PENDING_CHATGPT_REVIEW
 
 objective: >
-  Re-derive the derived control/programme projection from the admitted canonical
-  Issue #80 parser, current repository truth at main 9c8e4979 and the newest
-  valid authority record. Restore a clean, reproducible reconciliation without
-  changing application semantics.
+  Remove Copilot review capacity as a single point of failure without weakening
+  independent semantic review. The admission path consumes exact-head
+  semantic-review evidence through a provider-neutral contract. Copilot is
+  preferred; ChatGPT is the one approved fallback when Copilot is NOT_RUN. Also
+  correct the PR 103 admission-order race.
 
 authorized_scope:
-  - one fresh bounded branch impl/kf-meta-state-reconcile-002 from current main
-  - update only the minimum control-state artifacts required to make the derived projection truthful
-  - authority_basis set to this directive by its real GitHub comment identity
-  - incorporate the admitted KF-META-CONTROL-PARSER-001 checkpoint and PR 100 merge truth
-  - preserve KF-EXEC-ACTION-001 as held
-  - preserve the platform programme as inactive
-  - deterministic reconcile/decision proof plus the existing agent-control proof the touched surface requires
-  - open a PR and RETURN to Issue 80 for ChatGPT admission
+  - one fresh branch impl/kf-meta-ai-review-failover-001 from main 4eba59eb
+  - the minimum new provider-neutral semantic-review evaluator/policy surface on main, built fresh (not from PR 94)
+  - exact-head binding and fail-closed behaviour for self-review, stale or wrong-head evidence, missing reviewer identity, contradictory evidence and unresolved substantive findings
+  - unavailable Copilot represented as NOT_RUN, never PASS; ChatGPT never represented as Copilot
+  - the bounded admission-order race correction from CG-DECISION-META-AI-REVIEW-FAILOVER-001
+  - deterministic tests and live negative controls for the above
+  - operator-visible review state and recovery documentation
+  - open one PR and RETURN to Issue 80 for ChatGPT admission
 
-required_truth:
-  parser_checkpoint:
-    packet_id: KF-META-CONTROL-PARSER-001
-    pr_number: 100
-    merge_commit: 9c8e49791705361227135a9032a640199949113f
-    state: CHECKPOINTED
-  application_checkpointed:
-    - KF-EXEC-K12-001
-    - KF-EXEC-EXTFX-001
-    - KF-EXEC-TENANT-001
-    - KF-EXEC-AUTH-001
-  application_frontier: KF-EXEC-ACTION-001
-  action_hold: true
-  production_release_authorized: false
-  production_mutations_authorized: false
-  real_provider_traffic_authorized: false
-  platform_programme_activation_authorized: false
+approved_reviewers:
+  primary: copilot (copilot-pull-request-reviewer[bot])
+  fallback: chatgpt
+  not_approved: any other reviewer; no Kimi path is implemented, provisioned or referenced by the contract
 
 acceptance:
-  - current Issue 80 authority parses deterministically through the shared parser
-  - programme-state no longer anchors to the obsolete September 25 authority basis
-  - repository truth for merged PR 100 is represented correctly
-  - reconcile returns consistent on recorded healthy current evidence
-  - scheduled/autopilot decision no longer reports stale projection solely because of the old authority anchor
-  - no prior safety gate is weakened
-  - no application packet credit is created by this meta packet
-  - RETURN includes exact branch head, proof results, any residual contradiction and the proposed next legal action
+  - Copilot capacity exhaustion no longer blocks progress when ChatGPT independent review is available
+  - self-review fails closed
+  - NOT_RUN can never satisfy PASS
+  - stale-head fallback review fails closed
+  - exact-head fallback review with all deterministic gates green can satisfy the semantic-review obligation
+  - normal Copilot review continues to satisfy the same provider-neutral contract when available
+  - a PR cannot be admitted while a newly triggered required check for the admission head is pending, owed, failing or unresolved; merge authority is evaluated against the current head and complete required-check set immediately before merge
+  - all relevant prior gates and negative controls remain green
+  - RETURN includes exact head, reviewer/implementer identities, proof, residuals and next legal action
 
 constraints:
-  - do not release or implement KF-EXEC-ACTION-001
-  - do not implement Issue 102 in this packet
-  - do not activate the platform convergence programme
-  - do not mutate production data, deploy production or send real provider traffic
-  - do not regenerate the architecture/intelligence map
-  - do not broaden agent-control features beyond what is necessary for truthful re-derivation
-  - do not merge; ChatGPT retains admission and merge authority
+  - KF-EXEC-ACTION-001 remains held
+  - platform programme remains INACTIVE_SUCCESSOR
+  - no application implementation in this packet
+  - no production mutation, deployment or real provider traffic
+  - no new secrets, OAuth tokens or paid-service dependency
+  - no weakening of exact-head or negative-control requirements
+  - PR 94 is superseded historical/characterization evidence only; not merged, absorbed or rebased
+  - Claude implements and may not satisfy its own independent review
+  - do not merge; ChatGPT retains admission authority
 
 return_contract: >
-  ACK before mutation; implement the bounded re-derivation; prove it against
-  current authority and repository truth; open the PR; wait for exact-head
-  checks and a fresh Copilot review; RETURN to Issue 80 for ChatGPT admission.
+  ACK before mutation; implement the bounded contract and correction; prove it
+  with the portable and Windows suites and live negative controls; open the PR;
+  wait for the exact-head checks and the independent semantic review; RETURN to
+  Issue 80 for ChatGPT admission.

@@ -359,7 +359,7 @@ test('the committed programme-state is anchored, valid, and keeps ACTION-001 hel
   assert.equal(state.programme.merge_authority, false);
   // CG-DIRECTIVE-META-STATE-RECONCILE-002 required_truth.
   assert.deepEqual(state.programme.checkpointed, CHECKPOINTED_BEFORE, 'only admitted application packets earn credit');
-  for (const meta of ['KF-META-AUTO-001', 'KF-META-CONTROL-PARSER-001', 'KF-META-STATE-RECONCILE-002']) {
+  for (const meta of ['KF-META-AUTO-001', 'KF-META-CONTROL-PARSER-001', 'KF-META-STATE-RECONCILE-002', 'KF-META-AI-REVIEW-FAILOVER-001']) {
     assert.ok(!state.programme.checkpointed.includes(meta), `the meta-package ${meta} earns zero packet credit`);
   }
   assert.equal(state.programme.application_frontier, 'KF-EXEC-ACTION-001');

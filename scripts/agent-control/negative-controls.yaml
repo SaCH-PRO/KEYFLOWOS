@@ -875,3 +875,265 @@ negative_controls:
       replace: "        const unreadable = [];"
     proof_command: node --test --test-name-pattern="recorded evidence" scripts/agent-control/tests/reconcile.spec.mjs
     timeout_ms: 120000
+
+  # --- provider-neutral semantic review + admission order (KF-META-AI-REVIEW-FAILOVER-001)
+
+  - id: NC-SR-SELF-REVIEW
+    claim: >
+      The implementing agent cannot satisfy its own review obligation, whether
+      it appears as the reviewer or as the provider.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+          if (reviewer === implementer || provider === implementer) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC self-review" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-NOT-RUN-COUNTED-AS-PASS
+    claim: >
+      NOT_RUN can never satisfy PASS: a record whose only primary entry is
+      NOT_RUN has no independent pass.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+          const passing = reviews.filter((e) => e.outcome === 'PASS');
+      replace: |-
+          const passing = reviews.filter((e) => e.outcome === 'PASS' || e.outcome === 'NOT_RUN');
+    proof_command: node --test --test-name-pattern="NC NOT_RUN is never PASS" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-FAKE-PASS-ON-NOT-RUN
+    claim: >
+      A recorded Copilot PASS at a head where the bot said it was unable to
+      review is contradicted by the live evidence (the real PR 103 review).
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+            if (notRun) return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: entry.outcome, live: 'NOT_RUN' });
+      replace: |-
+            if (false) return null;
+    proof_command: node --test --test-name-pattern="NC fake PASS on NOT_RUN" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-COPILOT-UNAVAILABLE-UNPARSED
+    claim: >
+      The bot's "unable to review" body is read as NOT_RUN, never as a review
+      that ran.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+        export const COPILOT_UNAVAILABLE = /\bunable to review\b/i;
+      replace: |-
+        export const COPILOT_UNAVAILABLE = /(?!)/;
+    proof_command: node --test --test-name-pattern="real PR 103 Copilot reviews" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-STALE-HEAD
+    claim: >
+      A review of any commit that does not carry exactly the admitted semantics
+      fails closed.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+          if (sha === source_head || sha === pr_head) return true;
+      replace: |-
+          return true;
+    proof_command: node --test --test-name-pattern="NC stale-head review" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-MISSING-REVIEWER-IDENTITY
+    claim: >
+      A review entry without a reviewer identity fails closed as missing
+      identity, not as some other defect.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+          if (!reviewer) return fail(R.REVIEWER_IDENTITY_MISSING, provider);
+      replace: |-
+          // reviewer identity not checked
+    proof_command: node --test --test-name-pattern="NC missing reviewer identity" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-FALLBACK-WITHOUT-PRIMARY-UNAVAILABLE
+    claim: >
+      ChatGPT satisfies the obligation only when Copilot is recorded as NOT_RUN;
+      a fallback pass without primary-unavailable evidence fails closed.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+          if (!primaryPassed && !primaryNotRun) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC fallback without capacity-unavailable evidence" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-PROVIDER-IMPERSONATION
+    claim: >
+      ChatGPT review is never presented as Copilot review, nor the reverse: a
+      reviewer must be its provider's one identity.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+          if (reviewer !== REVIEW_PROVIDERS[provider].reviewer) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC ChatGPT review is never presented as Copilot" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-KIMI-PROVIDER
+    claim: >
+      Copilot and ChatGPT are the only approved reviewers; adding any other
+      provider (Kimi) is rejected.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+          chatgpt: Object.freeze({ reviewer: 'chatgpt', role: 'fallback' }),
+      replace: |-
+          chatgpt: Object.freeze({ reviewer: 'chatgpt', role: 'fallback' }),
+          kimi: Object.freeze({ reviewer: 'kimi', role: 'fallback' }),
+    proof_command: node --test --test-name-pattern="NC unapproved provider" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-UNDISPOSITIONED-COPILOT-FINDINGS
+    claim: >
+      A Copilot PASS must disposition every finding the live review reports
+      (PR 103: 1 finding).
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+              if (entry.dispositioned_findings.length < reported) {
+      replace: |-
+              if (false) {
+    proof_command: node --test --test-name-pattern="NC undispositioned Copilot findings" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-FORGED-CHATGPT-AUTHOR
+    claim: >
+      ChatGPT review evidence must come from an authorized author; the AUTHORITY
+      rejection is not bypassed.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+          if (rejected) problems.push(rejected);
+      replace: |-
+          // author not checked
+    proof_command: node --test --test-name-pattern="NC forged ChatGPT evidence" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-EDITED-CHATGPT-EVIDENCE
+    claim: >
+      An edited #80 comment cannot serve as ChatGPT review evidence.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+          if (c.edited !== false) problems.push(c.edited ? 'edited' : 'edit state unknown');
+      replace: |-
+          // edits not checked
+    proof_command: node --test --test-name-pattern="NC forged ChatGPT evidence" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-SEMANTIC-REVIEW-BYPASS
+    claim: >
+      The admission path consumes the semantic-review contract: an otherwise
+      admissible head with no satisfied review is not eligible.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+          if (!review.satisfied) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC admission consumes" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-PENDING-RERUN
+    claim: >
+      A required run still queued or in progress at the admission head blocks
+      admission even when an older run of that workflow succeeded.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+          const pending = atHead.filter((r) => REQUIRED_WORKFLOWS.includes(r.name) && r.status !== 'completed');
+      replace: |-
+          const pending = [];
+    proof_command: node --test --test-name-pattern="NC pending re-run" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-PR103-TRANSITION
+    claim: >
+      The PR 103 race: a ready_for_review newer than the last Agent Control Gate
+      run owes a re-run, and admission waits for it even before GitHub lists it.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+          ready_for_review: Object.freeze(['Agent Control Gate']),
+      replace: |-
+          ready_for_review: Object.freeze([]),
+    proof_command: node --test --test-name-pattern="NC PR 103 replay" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-TRANSITIONS-UNKNOWN
+    claim: >
+      Without the PR timeline admission cannot know that no re-run is owed, so
+      it fails closed rather than assuming none.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+          if (!Array.isArray(snapshot.pr_transitions)) return fail(ADMISSION_REASONS.TRANSITIONS_UNKNOWN);
+      replace: |-
+          if (!Array.isArray(snapshot.pr_transitions)) snapshot = { ...snapshot, pr_transitions: [] };
+    proof_command: node --test --test-name-pattern="NC unknown timeline" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-RECHECK-IGNORED
+    claim: >
+      The verdict a merge acts on is the recheck taken immediately before the
+      merge call; an ineligible second snapshot stops the merge.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+          if (!second?.eligible) return second ?? fail(ADMISSION_REASONS.CHANGED_BEFORE_MERGE, 'no recheck');
+      replace: |-
+          if (!second?.eligible) return first;
+    proof_command: node --test --test-name-pattern="NC recheck before merge" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-RECHECK-HEAD-MOVED
+    claim: >
+      A head or base that moved between the two snapshots stops the merge even
+      when the moved head is itself admissible.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+          if (String(first.head_sha) !== String(second.head_sha) || String(first.base_sha) !== String(second.base_sha)) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC recheck before merge" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AUTOMERGE-SINGLE-SNAPSHOT
+    claim: >
+      The merge path re-collects the complete snapshot and rechecks it before
+      the merge call; merging on the first snapshot alone is the PR 103 shape.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: |-
+          const verdict = recheckBeforeMerge(first, await evaluateNow());
+      replace: |-
+          const verdict = first;
+    proof_command: node --test --test-name-pattern="NC merge path shape" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RETURN-REVIEW-ALIAS-PROSE
+    claim: >
+      Before the RETURN, a sentence claiming a Copilot, ChatGPT, AI or semantic
+      review passed is a claim about the independent semantic review gate.
+    mutation:
+      file: scripts/agent-control/lib/return-evidence.mjs
+      find: |-
+        const REVIEW_GATE_ALIAS = /\b(?:copilot|chatgpt|ai|semantic|independent)(?:[- ](?:fallback|fresh|primary|independent|semantic|ai|copilot|chatgpt))*[- ]review\b/i;
+      replace: |-
+        const REVIEW_GATE_ALIAS = /(?!)/;
+    proof_command: node --test --test-name-pattern="NC review alias" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000

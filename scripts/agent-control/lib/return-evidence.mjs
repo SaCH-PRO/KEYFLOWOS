@@ -10,7 +10,9 @@
  *   - that a RETURN exists (return_message_id stays null);
  *   - that any RETURN id it names was posted, unless it lists that id as
  *     previously posted or as never posted;
- *   - that an exact-head check or the fresh AI review has passed. Those are
+ *   - that an exact-head check or the independent semantic review has passed.
+ *     The review is provider-neutral (lib/semantic-review.mjs): Copilot when it
+ *     runs, ChatGPT when Copilot is NOT_RUN. Those are
  *     PENDING until the RETURN reports them, in exact_head_proof and in prose
  *     alike (Copilot r4117477551: `security` said DAST "passed" while its
  *     structured entry was PENDING).
@@ -58,7 +60,7 @@ export const PRE_RETURN_STATUS = 'AWAITING_POSTCHECK_RETURN';
 export const EVIDENCE_SCOPES = Object.freeze(['exact_head', 'semantic_head']);
 
 /** The exact-head gates a pre-RETURN artifact must list, all PENDING. */
-export const AI_REVIEW_GATE = 'fresh Copilot review';
+export const AI_REVIEW_GATE = 'independent semantic review';
 export const EXACT_HEAD_GATES = Object.freeze([...REQUIRED_WORKFLOWS, AI_REVIEW_GATE]);
 
 const RETURN_ID = /CC-RETURN-[A-Z0-9]+(?:-[A-Z0-9]+)*/g;
@@ -83,13 +85,17 @@ function* strings(value, key = null) {
 const PASS_WORD = /\b(?:pass(?:ed|es|ing)?|green|succeeded|successful(?:ly)?|proven|complete[ds]?|(?:zero|no|0) fail(?:ures?|ed|ing)?)\b/i;
 // "All required exact-head workflows passed" names every gate at once (r4117648627).
 const UMBRELLA_GATE = /\b(?:exact[- ]head (?:workflows?|checks?|ci|gates?|proof)|required (?:workflows?|checks?))\b/i;
+// The review gate under any provider's name: "the ChatGPT review passed" or
+// "fresh Copilot review complete" claims the independent semantic review as
+// surely as its gate label does (KF-META-AI-REVIEW-FAILOVER-001).
+const REVIEW_GATE_ALIAS = /\b(?:copilot|chatgpt|ai|semantic|independent)(?:[- ](?:fallback|fresh|primary|independent|semantic|ai|copilot|chatgpt))*[- ]review\b/i;
 const HISTORICAL_KEY = /^previous_head_[0-9a-f]{7,40}$/;
 const REQUIREMENT_KEYS = new Set(['obligation']);
 
 /** Whether text names an exact-head gate, or all of them at once. */
 function namesExactHeadGate(text) {
   const lower = text.toLowerCase();
-  return EXACT_HEAD_GATES.some((gate) => lower.includes(gate.toLowerCase())) || UMBRELLA_GATE.test(text);
+  return EXACT_HEAD_GATES.some((gate) => lower.includes(gate.toLowerCase())) || UMBRELLA_GATE.test(text) || REVIEW_GATE_ALIAS.test(text);
 }
 
 /** Every sentence of every value that could claim something about this head. */
@@ -149,7 +155,7 @@ export function preReturnEvidenceProblems(ret) {
 
   for (const sentence of claimSentences(ret)) {
     const named = EXACT_HEAD_GATES.filter((gate) => sentence.toLowerCase().includes(gate.toLowerCase()));
-    const umbrella = sentence.match(UMBRELLA_GATE);
+    const umbrella = sentence.match(UMBRELLA_GATE) || sentence.match(REVIEW_GATE_ALIAS);
     if (umbrella && !named.length) named.push(umbrella[0]);
     if (named.length && PASS_WORD.test(sentence)) {
       problems.push(`prose claims ${named.join(', ')} passed before the RETURN: "${sentence}"`);

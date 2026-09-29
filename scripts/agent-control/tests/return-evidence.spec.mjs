@@ -78,7 +78,7 @@ test('NC exact-head pending: a finished exact-head gate cannot be claimed before
     const exact_head_proof = EXACT_HEAD_GATES.map((gate) => ({ gate, status: gate === AI_REVIEW_GATE ? status : 'PENDING' }));
     assertOnly(
       artifact({ exact_head_proof }),
-      new RegExp(`^exact_head_proof fresh Copilot review must be PENDING before the RETURN; found ${status}$`),
+      new RegExp(`^exact_head_proof independent semantic review must be PENDING before the RETURN; found ${status}$`),
     );
   }
 });
@@ -188,8 +188,32 @@ test('NC umbrella prose: "exact-head workflows" and "required checks" name every
 
 test('NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record', () => {
   const ret = parseYaml(fs.readFileSync('.agent-control/claude-return.yaml', 'utf8'));
-  assert.equal(ret.packet_id, 'KF-META-STATE-RECONCILE-002');
+  assert.equal(ret.packet_id, 'KF-META-AI-REVIEW-FAILOVER-001');
   assert.deepEqual(preReturnEvidenceProblems(ret), []);
   // Referent: the artifact really lists the gates, rather than passing vacuously.
   assert.deepEqual(ret.exact_head_proof.map((entry) => entry.gate), [...EXACT_HEAD_GATES]);
+});
+
+// KF-META-AI-REVIEW-FAILOVER-001: the review gate is provider-neutral, and a
+// claim about it under any provider's name is still a claim about it.
+test('the exact-head review gate is the provider-neutral independent semantic review', () => {
+  assert.equal(AI_REVIEW_GATE, 'independent semantic review');
+  assert.ok(!EXACT_HEAD_GATES.some((gate) => /copilot|chatgpt/i.test(gate)), 'no provider is named in a gate label');
+});
+
+test('NC review alias prose: "the ChatGPT review passed" before the RETURN is a claim', () => {
+  for (const sentence of ['The ChatGPT review passed.', 'Fresh Copilot review completed with zero failures.', 'The AI review is green.', 'Independent semantic review succeeded.']) {
+    assertOnly(artifact({ summary: sentence }), /^prose claims .* passed before the RETURN: /);
+  }
+  // Referent: naming the review without a pass word is not a claim.
+  assert.deepEqual(problemsOf(artifact({ summary: 'The ChatGPT review is requested after the RETURN.' })), []);
+});
+
+test('NC review alias scope: an obligation naming a provider review must be scoped exact_head', () => {
+  for (const obligation of ['fresh Copilot review on the final head', 'ChatGPT fallback review', 'independent semantic review']) {
+    assertOnly(
+      artifact({ proof_matrix: [{ obligation, evidence_scope: 'semantic_head', result: 'PENDING' }] }),
+      /^proof_matrix ".*" names an exact-head gate and must have evidence_scope exact_head; found semantic_head$/,
+    );
+  }
 });

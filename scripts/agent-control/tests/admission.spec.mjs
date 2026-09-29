@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { evaluateAdmission, ADMISSION_REASONS } from '../lib/admission.mjs';
+import { evaluateAdmission, recheckBeforeMerge, ADMISSION_REASONS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
+import { SEMANTIC_REVIEW_REASONS } from '../lib/semantic-review.mjs';
 import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
 import { parseYaml } from '../lib/yaml.mjs';
 
@@ -30,10 +31,27 @@ const admissible = (overrides = {}) => ({
     production_touched: false,
     scope_changed: false,
     tests: { failed: 0, skipped: 0 },
+    semantic_review: {
+      implementer: 'claude',
+      reviews: [
+        {
+          provider: 'copilot',
+          reviewer: 'copilot-pull-request-reviewer[bot]',
+          reviewed_head: HEAD,
+          outcome: 'PASS',
+          reason: null,
+          unresolved_substantive_findings: [],
+          dispositioned_findings: [],
+          evidence_location: 'https://github.com/o/r/pull/87#pullrequestreview-1',
+        },
+      ],
+    },
   },
   ancestry: { source_head_is_ancestor: true, non_control_files: [] },
   workflow_runs: greenRuns(),
   contradictions: [],
+  pr_transitions: [],
+  semantic_review_live: { copilot: [{ commit_id: HEAD, status: 'REVIEWED', url: null }], chatgpt: [] },
   ...overrides,
 });
 
@@ -191,4 +209,145 @@ test('every required workflow exists, runs on every PR, and wakes the autopilot'
 
   const policy = parseYaml(fs.readFileSync('docs/development/AGENT_AUTOPILOT_POLICY.yaml', 'utf8'));
   assert.deepEqual([...policy.required_pr_workflows].sort(), [...REQUIRED_WORKFLOWS].sort(), 'policy and code must agree');
+});
+
+// ------------------------------------------ INDEPENDENT SEMANTIC REVIEW
+// (KF-META-AI-REVIEW-FAILOVER-001) Admission consumes the provider-neutral
+// contract; lib/semantic-review.mjs and its spec cover the contract itself.
+
+test('NC admission consumes semantic review: an otherwise admissible head with no review record is not eligible', () => {
+  const base = admissible();
+  const { semantic_review, ...ret } = base.ret;
+  const v = evaluateAdmission({ ...base, ret });
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.SEMANTIC_REVIEW_NOT_SATISFIED);
+  assert.equal(v.detail.reason, SEMANTIC_REVIEW_REASONS.RECORD_MISSING);
+});
+
+test('NC admission consumes live review evidence: a recorded Copilot PASS the PR does not show is not eligible', () => {
+  const v = evaluateAdmission(admissible({ semantic_review_live: { copilot: [], chatgpt: [] } }));
+  assert.equal(v.reason, ADMISSION_REASONS.SEMANTIC_REVIEW_NOT_SATISFIED);
+  assert.equal(v.detail.reason, SEMANTIC_REVIEW_REASONS.LIVE_EVIDENCE_MISSING);
+});
+
+test('an eligible verdict records which independent review satisfied it', () => {
+  const v = evaluateAdmission(admissible());
+  assert.equal(v.eligible, true);
+  assert.deepEqual(v.evidence.semantic_review.passing.map((p) => p.provider), ['copilot']);
+});
+
+// ------------------------------------------------ ADMISSION ORDER (PR 103)
+
+test('NC pending re-run: a required run still in progress at the head blocks admission even after an older green run', () => {
+  const runs = [
+    ...greenRuns(),
+    { id: 900, name: 'Agent Control Gate', head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:01Z' },
+  ];
+  const v = evaluateAdmission(admissible({ workflow_runs: runs }));
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
+  assert.deepEqual(v.detail.map((d) => d.workflow), ['Agent Control Gate']);
+});
+
+test('NC pending re-run: an older queued run beside a newer green one still blocks', () => {
+  const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-23T10:00:05Z' }));
+  runs.push({ id: 901, name: 'CI/CD Pipeline', head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:00Z' });
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: runs })).reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
+});
+
+test('NC PR 103 replay: ready_for_review after the last gate run owes a re-run, even before GitHub lists it', () => {
+  // The recorded timeline: green runs at 18:22:37, ready_for_review 19:09:33,
+  // manual merge 19:09:40. The owed gate run is not in the list yet.
+  const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-28T18:22:37Z' }));
+  const v = evaluateAdmission(admissible({
+    workflow_runs: runs,
+    pr_transitions: [
+      { event: 'review_requested', created_at: '2026-09-28T18:21:23Z' },
+      { event: 'ready_for_review', created_at: '2026-09-28T19:09:33Z' },
+    ],
+  }));
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.CHECKS_PREDATE_TRANSITION);
+  assert.deepEqual(v.detail.map((d) => d.workflow), ['Agent Control Gate']);
+});
+
+test('PR 103 replay, settled: once the owed gate run exists and is green, the transition is satisfied', () => {
+  const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-28T18:22:37Z' }));
+  runs.push({ id: 902, name: 'Agent Control Gate', head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-28T19:09:36Z' });
+  const v = evaluateAdmission(admissible({
+    workflow_runs: runs,
+    pr_transitions: [{ event: 'ready_for_review', created_at: '2026-09-28T19:09:33Z' }],
+  }));
+  assert.equal(v.eligible, true);
+});
+
+test('PR 103 replay, failed: the owed gate run that failed blocks admission', () => {
+  const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-28T18:22:37Z' }));
+  runs.push({ id: 903, name: 'Agent Control Gate', head_sha: HEAD, status: 'completed', conclusion: 'failure', created_at: '2026-09-28T19:09:36Z' });
+  const v = evaluateAdmission(admissible({
+    workflow_runs: runs,
+    pr_transitions: [{ event: 'ready_for_review', created_at: '2026-09-28T19:09:33Z' }],
+  }));
+  assert.equal(v.reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
+});
+
+test('reopened owes a re-run of every required workflow', () => {
+  assert.deepEqual([...TRANSITION_TRIGGERS.reopened], [...REQUIRED_WORKFLOWS]);
+  const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-23T10:00:00Z' }));
+  const v = evaluateAdmission(admissible({ workflow_runs: runs, pr_transitions: [{ event: 'reopened', created_at: '2026-09-23T11:00:00Z' }] }));
+  assert.equal(v.reason, ADMISSION_REASONS.CHECKS_PREDATE_TRANSITION);
+  assert.deepEqual(v.detail.map((d) => d.workflow).sort(), [...REQUIRED_WORKFLOWS].sort());
+});
+
+test('NC unknown timeline fails closed: without pr_transitions admission cannot know no re-run is owed', () => {
+  const { pr_transitions, ...snapshot } = admissible();
+  assert.equal(evaluateAdmission(snapshot).reason, ADMISSION_REASONS.TRANSITIONS_UNKNOWN);
+});
+
+test('every transition trigger names only required workflows that listen to that PR event type', () => {
+  for (const [event, workflows] of Object.entries(TRANSITION_TRIGGERS)) {
+    for (const name of workflows) assert.ok(REQUIRED_WORKFLOWS.includes(name), `${event} -> ${name}`);
+  }
+  const gate = fs.readFileSync('.github/workflows/agent-control-gate.yml', 'utf8');
+  assert.match(gate, /types: \[[^\]]*\bready_for_review\b[^\]]*\bconverted_to_draft\b[^\]]*\bedited\b/);
+});
+
+test('NC recheck before merge: a second snapshot that is no longer eligible stops the merge', () => {
+  const first = evaluateAdmission(admissible());
+  const runs = [...greenRuns(), { id: 904, name: 'Agent Control Gate', head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
+  const second = evaluateAdmission(admissible({ workflow_runs: runs }));
+  const v = recheckBeforeMerge(first, second);
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
+});
+
+test('NC recheck before merge: a head that moved between the snapshots stops the merge', () => {
+  const first = evaluateAdmission(admissible());
+  const moved = 'd'.repeat(40);
+  const second = evaluateAdmission(admissible({
+    pr: { ...admissible().pr, head_sha: moved },
+    workflow_runs: greenRuns(moved),
+    reviewed_head_lineage: { [HEAD]: { descends_from_source_head: true, ancestor_of_pr_head: true, non_control_files: [] } },
+  }));
+  assert.equal(second.eligible, true, 'the moved head is itself admissible; only the change must block');
+  const v = recheckBeforeMerge(first, second);
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.CHANGED_BEFORE_MERGE);
+});
+
+test('recheck before merge: two eligible snapshots at the same head and base allow the merge', () => {
+  const v = recheckBeforeMerge(evaluateAdmission(admissible()), evaluateAdmission(admissible()));
+  assert.equal(v.eligible, true);
+});
+
+test('NC merge path shape: auto-merge re-collects and rechecks the complete snapshot before the merge call', () => {
+  const src = fs.readFileSync('scripts/agent-control/auto-merge-admitted.mjs', 'utf8');
+  const recheck = src.indexOf('recheckBeforeMerge(first, await evaluateNow())');
+  const mergeCall = src.indexOf('/merge`');
+  assert.ok(recheck > 0, 'the merge verdict must come from a second, freshly collected snapshot');
+  assert.ok(mergeCall > recheck, 'the recheck must precede the merge call');
+  assert.match(src, /sha: verdict\.head_sha/, 'the merge is pinned to the rechecked head');
+  for (const input of ['pr_transitions:', 'semantic_review_live:', 'reviewed_head_lineage:']) {
+    assert.ok(src.includes(input), `evaluateAdmission must receive ${input}`);
+  }
 });
