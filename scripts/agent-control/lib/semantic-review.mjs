@@ -166,7 +166,11 @@ export function chatgptReviewEvidence(comment) {
   if (c.edited !== false) problems.push(c.edited ? 'edited' : 'edit state unknown');
   const findings = envelopeField(env, 'unresolved_substantive_findings');
   return {
-    url: c.url,
+    // REST issue comments expose both an API `url` and browser `html_url`.
+    // evidence_location is the canonical browser comment URL, so prefer
+    // html_url when the raw shape provides it; gh-shaped comments already
+    // expose the browser URL as `url` through normalizeComment().
+    url: comment?.html_url ?? c.url,
     valid: problems.length === 0,
     problems,
     reviewed_head: envelopeField(env, 'reviewed_head'),
