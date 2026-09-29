@@ -31,6 +31,13 @@ Whole-system gap discovery is governed by:
 - `docs/intelligence/governance/IRONCLAD-ASSURANCE-MATRIX.yaml`
 - `docs/intelligence/governance/CATASTROPHIC-FAILURE-REGISTER.yaml`
 
+Connector and device integration convergence is governed by:
+- `docs/intelligence/architecture/KEYFLOW_CONNECTOR_FABRIC_MASTER_PLAN.md`
+- `docs/intelligence/architecture/CONNECTOR_FABRIC_PROVIDER_MATRIX.yaml`
+- `docs/intelligence/architecture/CONNECTOR_FABRIC_PACKET_OWNERSHIP.md`
+
+The Connector Fabric is a cross-cutting architecture overlay, not a 36th packet and not a new kernel. Any packet touching an external provider, device, browser, MCP surface, communication channel, or connector must characterize and prove the applicable Connector Fabric obligations inside its existing packet boundary. Connector connectivity or OAuth never grants action authority by itself; ACTION-001 remains the canonical capability/control/clearance boundary.
+
 An unassessed T0/T1 assurance domain is an explicit programme gap. T0/T1 census review is mandatory at packet characterization, packet admission, every wave boundary and final whole-app acceptance.
 
 ## Wave 0 — Proof + first real external-effect falsification
