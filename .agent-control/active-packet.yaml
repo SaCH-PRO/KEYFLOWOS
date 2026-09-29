@@ -5,18 +5,24 @@ decision_message_id: CG-DECISION-META-AI-REVIEW-FAILOVER-001
 decision_comment_id: 5877357166
 continue_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
 continue_review_comment_id: 5881457102
-in_reply_to: CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
-ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001
-ack_comment_id: 5881559355
-prior_ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-001
-contradiction_message_id: CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-001
-contradiction_comment_id: 5876793708
+live_evidence_fix_directive_message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
+live_evidence_fix_directive_comment_id: 5889027553
+in_reply_to: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
+ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
+ack_comment_id: 5896173916
+prior_ack_message_ids:
+  - CC-ACK-META-AI-REVIEW-FAILOVER-001
+  - CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001   # 5881559355
+  - CC-ACK-META-AI-REVIEW-FAILOVER-ADMIT-001
+contradiction_message_ids:
+  - CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-001         # 5876793708
+  - CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001   # 5887342673
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
 implementation_branch: impl/kf-meta-ai-review-failover-001
 state: PROVING
 health: GREEN
 scope_changed: true
-scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A, Kimi removed, admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102
+scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A, Kimi removed, admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102; CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001 / 5889027553 (bounded live-evidence correction)
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
@@ -38,6 +44,31 @@ authorized_scope:
   - deterministic tests and live negative controls for the above
   - operator-visible review state and recovery documentation
   - open one PR and RETURN to Issue 80 for ChatGPT admission
+
+live_evidence_fix:   # CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
+  authorized_scope:
+    - scripts/agent-control/lib/semantic-review.mjs
+    - scripts/agent-control/tests/semantic-review.spec.mjs
+    - the minimum existing agent-control proof/negative-control fixture needed to prove this exact defect
+    - .agent-control/active-packet.yaml
+    - .agent-control/claude-return.yaml
+  required_correction: >
+    Make ChatGPT live-review evidence identity canonical across real GitHub REST
+    comments and gh-shaped comments, without weakening author, sender,
+    edit-state, envelope, reviewed-head, outcome, finding, lineage or
+    provider-separation checks.
+  required_proof:
+    - a regression using the real REST-shaped issue comment with both url and html_url
+    - the exact previously failing live path satisfies only when the stored ChatGPT evidence is genuine and matching
+    - a negative control that reverses the correction and must fail
+    - all existing semantic-review, admission, worker and prior negative controls retained
+    - portable and Windows proof rerun
+    - a new semantic head and a refreshed RETURN artifact; the prior ChatGPT review at ae3e1d2b is stale
+    - fresh exact-head required workflows before RETURN
+  constraints:
+    - no broader refactor of control-envelope or review architecture
+    - do not record ACCEPT_FOR_ADMISSION against ae3e1d2b
+    - the queued closed-loop/memory/KEY architecture work does not start until this packet is admitted and checkpointed
 
 approved_reviewers:
   primary: copilot (copilot-pull-request-reviewer[bot])

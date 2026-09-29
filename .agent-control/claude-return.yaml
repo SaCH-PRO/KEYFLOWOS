@@ -5,8 +5,13 @@ decision_message_id: CG-DECISION-META-AI-REVIEW-FAILOVER-001
 decision_comment_id: 5877357166
 continue_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
 continue_review_comment_id: 5881457102
-ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001
-ack_comment_id: 5881559355
+live_evidence_fix_directive_message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
+live_evidence_fix_directive_comment_id: 5889027553
+ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
+ack_comment_id: 5896173916
+prior_ack_message_ids:
+  - CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001   # 5881559355
+  - CC-ACK-META-AI-REVIEW-FAILOVER-ADMIT-001
 progress_message_ids:
   - CC-PROGRESS-META-AI-REVIEW-FAILOVER-001   # 5881729832
 momentum_message_ids: []
@@ -17,16 +22,19 @@ momentum_message_ids: []
 # every run of the portable suite.
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
-previous_return_message_ids: []
+previous_return_message_ids:
+  - CC-RETURN-META-AI-REVIEW-FAILOVER-001   # for semantic head b70dff17 at PR head ae3e1d2b; superseded
 never_posted_return_message_ids: []
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
-source_head: b70dff17bf6d0c71791cd9e62ae8bb8096ea34d4
+source_head: c40ed180a34981b05627b185d73313357eca5883
+previous_source_heads:
+  - b70dff17bf6d0c71791cd9e62ae8bb8096ea34d4   # semantics before the live-evidence correction
 implementation_branch: impl/kf-meta-ai-review-failover-001
 pr_number: 104
 state: PROVING
 health: GREEN
 scope_changed: true
-scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A; Kimi removed; admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102
+scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A; Kimi removed; admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102; CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001 / 5889027553
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
@@ -46,6 +54,10 @@ summary: >
   in three ways. A pending or owed required run blocks admission. Auto-merge
   takes a second complete snapshot immediately before the merge call. The docs
   require every manual merge to pass the same evaluator first.
+  Live-evidence correction (CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001):
+  the admission path reads the cited #80 comment through REST, where `url` is
+  the API URL. The ChatGPT evidence is now keyed on the comment's html_url, so a
+  genuine fallback review at the cited location can match its record.
 
 characterization:
   review_substrate_on_main: >
@@ -65,6 +77,24 @@ characterization:
     three rules. A review that ran is not a pass. A Copilot PASS must list
     dispositioned_findings. One provider may give different outcomes at
     different heads.
+  live_evidence_defect: >
+    Found at admission (CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001). At
+    b70dff17, chatgptReviewEvidence took `url` from normalizeComment, which
+    prefers `c.url`. auto-merge-admitted.mjs fetches the cited comment with GET
+    /repos/{repo}/issues/comments/{id}, and that REST shape has `url` =
+    https://api.github.com/... next to `html_url`. It only fetches an
+    evidence_location in the #80 browser form, so no record could match, and
+    every ChatGPT fallback failed closed as live_evidence_missing. The spec
+    fixture had html_url alone, so the suites never saw the real shape.
+  correction_commit: >
+    6b40df3a ("fix(agent-control): canonicalize ChatGPT review URL") made the
+    one-line code change: url = comment.html_url when present, else the
+    normalized url, which is already the browser URL in the gh shape. It was
+    authored by Sachin Dookie after the directive, not by Claude, and was
+    pushed to this branch with no test. Claude verified it independently.
+    c40ed180 adds the regression, the replay of the failing live path and
+    the negative control. No other line of semantic-review.mjs or
+    control-envelope.mjs changed.
   discoveries:
     - >
       The local worker picks only the newest authority. Two REVIEWs 3s apart
@@ -105,7 +135,7 @@ design:
 
 changed_files:
   semantic:
-    - scripts/agent-control/lib/semantic-review.mjs (new)
+    - scripts/agent-control/lib/semantic-review.mjs (new; one-line live-evidence correction in 6b40df3a)
     - scripts/agent-control/lib/admission.mjs
     - scripts/agent-control/auto-merge-admitted.mjs
     - scripts/agent-control/lib/return-evidence.mjs
@@ -158,6 +188,18 @@ proof_matrix:
     evidence_scope: semantic_head
     proof: NC contradictory evidence, NC unresolved substantive findings, NC undispositioned Copilot findings, NC ChatGPT live finding count; NC-SR-UNDISPOSITIONED-COPILOT-FINDINGS, NC-SR-FORGED-CHATGPT-AUTHOR and NC-SR-EDITED-CHATGPT-EVIDENCE live
     result: PROVEN
+  - obligation: ChatGPT live-review evidence from a real REST comment (url and html_url) matches its evidence_location, only when genuine and matching
+    evidence_scope: semantic_head
+    proof: >
+      semantic-review.spec. The "NC REST evidence URL" tests use the live REST
+      responses for comment 5887238277 and Copilot review 5346592135. They
+      replay the PR 104 admission evaluation that failed live, and it is now
+      satisfied. "REST evidence still satisfies only genuine, matching
+      evidence" covers another comment, the API url as evidence_location, an
+      edit, another author, another sender, another head, a hidden finding and
+      no html_url; each fails closed with its reason. "gh-shaped comments
+      still match". NC-SR-REST-EVIDENCE-URL is live.
+    result: PROVEN
   - obligation: the admission path consumes the contract
     evidence_scope: semantic_head
     proof: NC admission consumes semantic review and NC admission consumes live review evidence; NC-ADMISSION-SEMANTIC-REVIEW-BYPASS live
@@ -189,11 +231,11 @@ proof_matrix:
   - obligation: no prior gate or negative control is weakened
     evidence_scope: semantic_head
     proof: >
-      All 72 prior controls stay live at b70dff17. The exception is
-      NC-RETURN-ARTIFACT-PASS-PROSE, which targets this artifact's security
-      sentence; it was absent from the interim artifact and is re-run at the
-      artifact commit. Prior tests keep all their assertions; three pins are
-      retargeted to this packet, and reconcile.spec gains one exclusion.
+      All 93 controls in the manifest are live at c40ed180: the 72 from
+      4eba59eb, the 20 added at b70dff17, and NC-SR-REST-EVIDENCE-URL.
+      Prior tests keep all their assertions; three pins are retargeted to this
+      packet, and reconcile.spec gains one exclusion. The live-evidence
+      correction adds tests and changes no existing assertion.
     result: PROVEN
   - obligation: portable and Windows suites at the semantic head
     evidence_scope: semantic_head
@@ -209,19 +251,20 @@ proof_matrix:
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  at: b70dff17
-  portable_total: 329
-  portable_passed: 329
+  at: c40ed180
+  portable_total: 333
+  portable_passed: 333
   windows_total: 19
   windows_passed: 19
   baseline_before_change: 287 portable, 19 windows, at 4eba59eb
+  previous_semantic_head: 329 portable, 19 windows, at b70dff17
   failed: 0
   skipped: 0
   dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
-  added: 24 in semantic-review.spec, 15 in admission.spec, 3 in return-evidence.spec
+  added: 28 in semantic-review.spec (4 for the live-evidence correction), 15 in admission.spec, 3 in return-evidence.spec
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref b70dff17
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref c40ed180
   baseline_before_change: 72 controls in the manifest at 4eba59eb
   added:
     - NC-SR-SELF-REVIEW
@@ -244,11 +287,13 @@ negative_controls:
     - NC-ADMISSION-RECHECK-HEAD-MOVED
     - NC-AUTOMERGE-SINGLE-SNAPSHOT
     - NC-RETURN-REVIEW-ALIAS-PROSE
+    - NC-SR-REST-EVIDENCE-URL   # live-evidence correction; restores url = c.url from b70dff17
   result_at_semantic_head: >
-    91/92 live at b70dff17, and all 20 new controls are live.
-    NC-RETURN-ARTIFACT-PASS-PROSE could not apply its mutation, because its
-    target sentence is in this artifact's security section and the interim
-    artifact carried by b70dff17 did not have it.
+    93/93 live at c40ed180, including NC-SR-REST-EVIDENCE-URL and the three
+    controls that mutate this artifact.
+  result_at_previous_semantic_head: >
+    91/92 live at b70dff17. NC-RETURN-ARTIFACT-PASS-PROSE could not apply its
+    mutation there, because the interim artifact lacked its target sentence.
   artifact_commit_rerun: the controls that mutate this file are re-run at the artifact commit; the result is in the RETURN
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
@@ -278,6 +323,17 @@ ai_review:
   final_head_review: PENDING
   self_review: none; Claude does not review this change
   findings: []
+  stale:
+    - comment: 5887238277
+      message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-001
+      reviewed_head: ae3e1d2b0ac07447e0febef82cb5c93a00df58a5
+      why: >
+        It is about the semantics of b70dff17. The live-evidence correction
+        changed those semantics, so it cannot support admission of this head,
+        and ACCEPT_FOR_ADMISSION was never recorded against ae3e1d2b.
+  copilot_at_intermediate_heads: >
+    The bot answered "unable to review ... quota limit" at b70dff17
+    (5346577112), ae3e1d2b (5346592135) and 6b40df3a (5352194550).
 
 scope_ledger:
   declared:
@@ -289,6 +345,7 @@ scope_ledger:
     - deterministic tests and live negative controls
     - operator-visible review state and recovery documentation
     - PR and RETURN
+    - live-evidence correction, REST regression and negative control (CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001)
   resolved: [all declared items except those under remaining]
   remaining:
     - exact-head checks and the independent semantic review on the final PR head (PENDING)
@@ -341,10 +398,14 @@ contradictions_disposed:
     disposition: SUPERSEDED_BY_REVIEWER_FAILOVER (CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-001 authority_decision)
   - id: CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-001
     disposition: resolved by CG-DECISION-META-AI-REVIEW-FAILOVER-001 (option A) and CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
+  - id: CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001
+    disposition: accepted by CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001, which released the bounded correction proved at c40ed180
 
 next_action: >
   Wait for every exact-head check on the head carrying this file, then post the
   RETURN on #80 without mutating the branch. The independent semantic review
   follows under this packet's own contract: Copilot if it has capacity,
-  otherwise ChatGPT as fallback. Claude does not review this change. Do not
-  merge. ACTION-001 stays held.
+  otherwise ChatGPT as fallback, on the new semantics. Claude does not review
+  this change. Do not merge. ACTION-001 stays held, the platform programme
+  stays inactive, and the queued closed-loop/memory/KEY work waits for this
+  packet's admission and checkpoint.
