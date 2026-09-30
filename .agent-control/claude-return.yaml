@@ -1,6 +1,6 @@
 packet_id: KF-META-STATE-REDUCER-001
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
-source_head: 15a96c6a4dd17c63f0fb18ccc08a6763d7b087f9
+source_head: e77e80dde5d6ef0c39e3a7385237bc2b53867e45
 implementation_branch: impl/kf-meta-state-reducer-001
 state: PROVING
 health: GREEN
