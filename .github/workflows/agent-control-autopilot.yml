@@ -21,7 +21,7 @@ on:
       - "CI/CD Pipeline"
       - "Agent Control Gate"
       - "Branch divergence"
-      - "DAST (HawkScan)"
+      - "DAST (Native)"
       - "Agent Control Worker Proof"
     types: [completed]
   schedule:
