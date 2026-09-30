@@ -1,6 +1,6 @@
 packet_id: KF-META-DISPATCH-QUEUE-001
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
-source_head: 63bb9c553146b302f53f4f28b5baec3693570696
+source_head: 6a4a6dd6bc60dd515721725d6089c3da6b2aebfb
 implementation_branch: impl/kf-meta-dispatch-queue-001
 state: PROVING
 health: YELLOW
@@ -17,8 +17,15 @@ never_posted_return_message_ids: []
 
 summary: >
   Per-packet authority queue and explicit-supersession foundation. This is a pre-RETURN record. Exact-head evidence and independent
-  semantic review remain pending and must be reported only after they execute
-  against the head carrying this artifact.
+  semantic review remain pending and cannot be claimed from this artifact.
+
+evidence_note: "CI/CD Pipeline evidence is PENDING until the RETURN."
+
+proof_matrix:
+  - obligation: required exact-head checks
+    evidence_scope: exact_head
+    proof: PENDING until exact-head workflows execute against this artifact head
+    result: PENDING
 
 exact_head_proof:
   - gate: CI/CD Pipeline
@@ -38,5 +45,5 @@ ci:
   exact_head: PENDING
 
 next_action: >
-  Wait for exact-head evidence and independent review. Do not claim admission,
-  merge authority, production readiness or programme credit from this artifact.
+  Execute every required proof on the exact head, run mutation controls, obtain
+  independent review, and report any failure without masking or substitution.
