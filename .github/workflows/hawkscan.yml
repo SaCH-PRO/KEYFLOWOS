@@ -6,15 +6,11 @@
 # injection in a live route is invisible to it. HawkScan boots the API and
 # attacks it, which is the only way those show up.
 #
-# DARK BY DEFAULT. The scan runs only when the HAWK_API_KEY repo secret exists;
-# without it the guard short-circuits and every heavy step is skipped, so the
-# job goes green as a no-op. That keeps this safe to merge into a branch-
-# protected main today and activate later — see docs/SECURITY_DAST_SETUP.md.
-#
-# SEPARATE WORKFLOW, not a job in ci-cd.yml, on purpose: ci-cd.yml carries the
-# required status checks, and a scan that needs an external account must not be
-# able to turn those red. Promote this to a required check only after it has run
-# green with real credentials.
+# HONEST REQUIRED PROOF. If this workflow is counted as a required admission
+# check, it must either perform the scan and pass or fail visibly. Missing
+# credentials are a failed prerequisite, never a green no-op. KEYFLOWOS is
+# moving toward a native DAST replacement so admission will not depend on a
+# third-party service; until that replacement lands, this workflow fails closed.
 name: DAST (HawkScan)
 
 on:
@@ -72,20 +68,19 @@ jobs:
       # JWT_SECRET / BYOK_ENCRYPTION_SECRET / CREDENTIALS_ENCRYPTION_KEY are NOT
       # set here — hardcoding secret-shaped literals trips secret scanners even
       # when they're throwaways. They're generated per run in "Start the API".
-      # The real activation switches. Absent HAWK_API_KEY => the whole scan skips.
+      # Until native DAST replaces this workflow, absence is a hard failure.
       HAWK_API_KEY: ${{ secrets.HAWK_API_KEY }}
       HAWK_APP_ID: ${{ secrets.HAWK_APP_ID }}
 
     steps:
-      - name: Guard — is DAST configured?
+      - name: Require an executable DAST proof
         id: guard
         run: |
           if [ -z "$HAWK_API_KEY" ]; then
-            echo "HAWK_API_KEY not set — DAST is dormant. Add the secret to activate (docs/SECURITY_DAST_SETUP.md)."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "::error::DAST is required for admission but HAWK_API_KEY is absent. A missing proof channel is failure, not green."
+            exit 1
           fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         if: steps.guard.outputs.run == 'true'
@@ -151,9 +146,6 @@ jobs:
       - name: Run HawkScan
         if: steps.guard.outputs.run == 'true'
         uses: stackhawk/hawkscan-action@v2
-        # Soft gate to start: surface findings without failing the build. Flip to
-        # false (and make this a required check) once the baseline is triaged.
-        continue-on-error: true
         with:
           apiKey: ${{ secrets.HAWK_API_KEY }}
           configurationFiles: stackhawk.yml
