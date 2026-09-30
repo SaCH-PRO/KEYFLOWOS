@@ -1,6 +1,6 @@
 packet_id: KF-META-STATE-REDUCER-001
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
-source_head: 25b5e31a05d8d98fd11cf8cdb33a884d4e7d6c78
+source_head: 98a869b442ed1bd298b8639e1bbe6f88875039fe
 implementation_branch: impl/kf-meta-state-reducer-001
 state: PROVING
 health: YELLOW
@@ -17,8 +17,15 @@ never_posted_return_message_ids: []
 
 summary: >
   Typed authority-effect and generation-reducer foundation. This is a pre-RETURN record. Exact-head evidence and independent
-  semantic review remain pending and must be reported only after they execute
-  against the head carrying this artifact.
+  semantic review remain pending and cannot be claimed from this artifact.
+
+evidence_note: "CI/CD Pipeline evidence is PENDING until the RETURN."
+
+proof_matrix:
+  - obligation: required exact-head checks
+    evidence_scope: exact_head
+    proof: PENDING until exact-head workflows execute against this artifact head
+    result: PENDING
 
 exact_head_proof:
   - gate: CI/CD Pipeline
@@ -38,5 +45,5 @@ ci:
   exact_head: PENDING
 
 next_action: >
-  Wait for exact-head evidence and independent review. Do not claim admission,
-  merge authority, production readiness or programme credit from this artifact.
+  Execute every required proof on the exact head, run mutation controls, obtain
+  independent review, and report any failure without masking or substitution.
