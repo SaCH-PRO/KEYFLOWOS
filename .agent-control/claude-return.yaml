@@ -1,6 +1,6 @@
 packet_id: KF-META-DISPATCH-QUEUE-001
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
-source_head: cb73661e6ed12fd12d8d6a551fa402d86cb00773
+source_head: 63bb9c553146b302f53f4f28b5baec3693570696
 implementation_branch: impl/kf-meta-dispatch-queue-001
 state: PROVING
 health: GREEN
