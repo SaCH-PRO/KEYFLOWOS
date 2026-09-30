@@ -43,6 +43,7 @@ jobs:
       - name: Portable control-plane proofs
         env:
           KF_REQUIRE_POWERSHELL: '1'
+          GH_TOKEN: ${{ github.token }}
         run: node --test scripts/agent-control/tests/*.spec.mjs
       - name: Prove the programme DAG is executable
         run: node scripts/agent-control/validate-dag.mjs
@@ -62,6 +63,7 @@ jobs:
         shell: bash
         env:
           KF_REQUIRE_POWERSHELL: '1'
+          GH_TOKEN: ${{ github.token }}
         run: node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
       - name: Negative controls (every proof must fail with its defect restored)
         shell: bash

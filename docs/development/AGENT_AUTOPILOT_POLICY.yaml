@@ -42,7 +42,7 @@ required_pr_workflows:
   - CI/CD Pipeline
   - Agent Control Gate
   - Branch divergence
-  - DAST (HawkScan)
+  - DAST (Native)
   - Agent Control Worker Proof
 
 concurrency:

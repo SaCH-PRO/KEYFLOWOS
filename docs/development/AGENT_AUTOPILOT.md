@@ -93,7 +93,7 @@ The evaluator requires all of:
 - `production_touched == false` in both artifacts;
 - no unresolved contradiction; no unexplained failed or skipped proof;
 - the latest runs of CI/CD Pipeline, Agent Control Gate, Branch divergence and
-  DAST (HawkScan) are successful **at the exact PR head** — green runs at any
+  DAST (Native) are successful **at the exact PR head** — green runs at any
   other sha are reported as a stale head, not treated as satisfied;
 - the squash merge is issued with the current head SHA, so a changed head fails
   rather than merging a different tree.

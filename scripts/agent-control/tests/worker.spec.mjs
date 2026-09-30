@@ -123,7 +123,8 @@ function ghAuthenticated() {
   return probe.status === 0;
 }
 
-const CHANNEL_READY = PS && ghAuthenticated();
+const CHANNEL_READY = Boolean(PS && ghAuthenticated());
+const CI_REQUIRES_CHANNEL = String(process.env.CI || '').toLowerCase() === 'true';
 
 function runWorker(root) {
   return spawnSync(
@@ -133,8 +134,12 @@ function runWorker(root) {
   );
 }
 
-test('the cursor makes directive processing idempotent', { skip: CHANNEL_READY ? false : 'needs PowerShell and an authenticated gh' }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-worker-'));
+test(
+  'the cursor makes directive processing idempotent',
+  { skip: !CI_REQUIRES_CHANNEL && !CHANNEL_READY ? 'local environment lacks PowerShell/authenticated gh' : false },
+  () => {
+    assert.ok(CHANNEL_READY, 'CI requires PowerShell plus an authenticated GitHub control channel; absence is a proof failure, not a skip');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-worker-'));
   const stateDir = path.join(root, '.agent-control', '.worker');
   fs.mkdirSync(stateDir, { recursive: true });
 
@@ -160,8 +165,9 @@ test('the cursor makes directive processing idempotent', { skip: CHANNEL_READY ?
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /no unprocessed directive/, `${pending[1]} was recorded as processed and must not wake Claude again`);
   assert.ok(!/would invoke claude/.test(run.stdout), 'no invocation may be planned for a processed directive');
-  fs.rmSync(root, { recursive: true, force: true });
-});
+    fs.rmSync(root, { recursive: true, force: true });
+  },
+);
 
 test('the worker delegates authority and verdict to the shared scripts', () => {
   // Both decisions are proved behaviourally: select-directive.spec.mjs and

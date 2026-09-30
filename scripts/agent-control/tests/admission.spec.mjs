@@ -145,7 +145,7 @@ test('NEGATIVE CONTROL: the prototype head filter would have admitted a stale tr
   // The prototype queried runs by head_sha but never re-verified head_sha on
   // the returned rows, so a mixed response could admit the wrong tree.
   const mixed = [...greenRuns('f'.repeat(40))];
-  const prototypeVerdict = ['CI/CD Pipeline', 'Agent Control Gate', 'Branch divergence', 'DAST (HawkScan)'].every((name) =>
+  const prototypeVerdict = REQUIRED_WORKFLOWS.every((name) =>
     mixed.some((r) => r.name === name && r.status === 'completed' && r.conclusion === 'success'),
   );
   assert.equal(prototypeVerdict, true, 'the old check passes on stale runs');

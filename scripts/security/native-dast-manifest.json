@@ -1,0 +1,52 @@
+{
+  "base_url_env": "NATIVE_DAST_BASE_URL",
+  "probes": [
+    {
+      "id": "public.healthz",
+      "method": "GET",
+      "path": "/healthz",
+      "expected_status": [200],
+      "body_must_include": ["\"status\":\"ok\""]
+    },
+    {
+      "id": "protected.admin_risc.erase",
+      "method": "POST",
+      "path": "/admin/risc/users/native-dast-user/erase",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "protected.business_genome.constitution_latest",
+      "method": "GET",
+      "path": "/business-genome/businesses/native-dast-business/constitution/latest",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "protected.connectors.dashboard",
+      "method": "GET",
+      "path": "/connectors/businesses/native-dast-business/dashboard",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "protected.connectors.dashboard_malformed_bearer",
+      "method": "GET",
+      "path": "/connectors/businesses/native-dast-business/dashboard",
+      "headers": {
+        "authorization": "Bearer definitely-not-a-valid-token"
+      },
+      "expected_status": [401, 403],
+      "protected": true
+    }
+  ],
+  "forbidden_body_patterns": [
+    "PrismaClientKnownRequestError",
+    "PrismaClientValidationError",
+    "node_modules/",
+    "node_modules\\\\",
+    "at processTicksAndRejections",
+    "UnhandledPromiseRejection",
+    "TypeError:"
+  ]
+}

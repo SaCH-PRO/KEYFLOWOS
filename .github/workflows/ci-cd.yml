@@ -206,17 +206,32 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit dependencies
-        run: pnpm audit --audit-level high
+        id: dependency_audit
         continue-on-error: true
+        run: pnpm audit --audit-level high
 
       - name: Secret scanning (trufflehog)
+        id: secret_scan
+        continue-on-error: true
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
           base: main
           head: HEAD
           extra_args: --debug --only-verified
-        continue-on-error: true
+
+      - name: Enforce security scan outcomes
+        if: always()
+        env:
+          DEPENDENCY_AUDIT_OUTCOME: ${{ steps.dependency_audit.outcome }}
+          SECRET_SCAN_OUTCOME: ${{ steps.secret_scan.outcome }}
+        run: |
+          echo "dependency_audit=$DEPENDENCY_AUDIT_OUTCOME"
+          echo "secret_scan=$SECRET_SCAN_OUTCOME"
+          if [ "$DEPENDENCY_AUDIT_OUTCOME" != "success" ] || [ "$SECRET_SCAN_OUTCOME" != "success" ]; then
+            echo "::error::Security Scan failed: every required scanner must execute successfully."
+            exit 1
+          fi
 
   build-server:
     name: Build Server
