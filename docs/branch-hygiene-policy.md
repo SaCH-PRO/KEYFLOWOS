@@ -20,17 +20,15 @@ without losing work.
 
 ---
 
-## Rule 1 — `main` is the only integration branch
+## Rule 1 — `main` is the only application integration branch
 
-- **`main` is the single source of truth.** All feature branches, hotfix
-  branches, and agent branches target `main` directly via PR.
+- **`main` is the single source of truth for executable application code.** Feature, hotfix, and agent branches that change application/runtime code target `main` directly via PR.
+- **`docs/keyflow-intelligence-foundation` is a governed canonical programme-memory branch, not an application integration branch.** It may receive architecture/programme-only PRs when the programme contract explicitly names it as their base. It never becomes runtime truth and must not carry product-code mutations.
 - **`develop` is retired.** After Task #240, `develop` on origin is
   fast-forwarded to match `main` (or, if it cannot fast-forward, left frozen
   with an `archive/develop-<date>` tag and a note in
   `BRANCH_CLEANUP_REPORT.md`). New work must not branch from `develop`.
-- **No new long-lived integration branches** (no `develop`, `staging`,
-  `next`, `v2`, etc.) without a written owner, a written sunset date,
-  and CI enforcement via the `Branch divergence` workflow (Rule 5).
+- **No new long-lived integration or canonical branches** (no `develop`, `staging`, `next`, `v2`, etc.) without an explicit branch role, written owner, reconciliation rule, and CI enforcement via the `Branch divergence` workflow (Rule 5). The existing intelligence-foundation branch is the only current non-main canonical branch.
   Equivalent manual reconciliation: `scripts/check-branch-divergence.sh
   main <branch> --max-commits 25 --max-files 50`.
 - **GitHub default branch and required-status-checks point at `main`.**
@@ -89,10 +87,8 @@ without losing work.
   to continue diverging silently.
 - **CI enforces this automatically** via
   `.github/workflows/branch-divergence.yml`. The workflow runs on:
-  - every PR targeting `main` (compares the PR head against the PR base) —
-    this is the gate that branch protection should mark **required**;
-  - every push to any non-`main` branch (per-push gate, covers long-lived
-    branches and in-flight feature branches alike);
+  - every PR (compares the PR head against its declared PR base) — this is the gate branch protection/rulesets should mark **required** on governed bases;
+  - every push to any non-`main` branch: if the branch has an open PR, the check resolves that PR's declared base and compares against it; otherwise it compares against `main`. This prevents a branch targeting the canonical intelligence branch from being falsely judged against unrelated `main` ancestry while still auditing long-lived branches;
   - nightly at 06:00 UTC, sweeping every branch on `origin` so silent
     drift on stale, no-recent-push branches still surfaces; and
   - `workflow_dispatch` with overridable thresholds for one-off audits
@@ -139,7 +135,7 @@ without losing work.
 | Cadence  | Action                                                                 |
 | -------- | ---------------------------------------------------------------------- |
 | Per PR   | Reviewer enforces Rule 2 (one scope per PR, no piggy-backed work).     |
-| Per PR   | CI runs `Branch divergence / Check divergence vs main (PR)` (Rule 5).  |
+| Per PR   | CI runs `Branch divergence / Check divergence vs PR base` (Rule 5).   |
 | Per push | CI workflow `Branch divergence` runs `check-branch-divergence.sh` on  |
 |          | every non-`main` branch and fails the check when thresholds are       |
 |          | exceeded (Rule 5).                                                     |
