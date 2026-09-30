@@ -1,0 +1,71 @@
+name: Dependency remediation one-shot
+
+on:
+  push:
+    branches:
+      - security/kf-audit-remediation-001
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dependency-remediation-one-shot
+  cancel-in-progress: false
+
+jobs:
+  remediate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: security/kf-audit-remediation-001
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: '9.15.0'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+          cache: pnpm
+
+      - name: Install exact current graph
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate pnpm security remediation
+        id: remediate
+        shell: bash
+        run: |
+          set +e
+          pnpm audit --fix
+          status=$?
+          set -e
+          echo "audit_fix_exit=$status" >> "$GITHUB_OUTPUT"
+          echo "pnpm audit --fix exit=$status; generated changes, if any, will be committed and re-audited."
+
+      - name: Normalize lockfile
+        run: pnpm install --lockfile-only
+
+      - name: Remove one-shot workflow before commit
+        run: git rm .github/workflows/dependency-remediation-one-shot.yml
+
+      - name: Commit generated remediation
+        id: commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pnpm-workspace.yaml pnpm-lock.yaml package.json apps packages .github/workflows/dependency-remediation-one-shot.yml 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "::error::pnpm audit --fix produced no remediating diff."
+            exit 1
+          fi
+          git commit -m "fix(security): apply pnpm audit remediation"
+          git push origin HEAD:security/kf-audit-remediation-001
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Re-audit generated graph
+        run: pnpm audit --audit-level high
