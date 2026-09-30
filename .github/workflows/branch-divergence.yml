@@ -7,11 +7,12 @@ name: Branch divergence
 # summary when a threshold is exceeded.
 #
 # Triggers:
-#   - pull_request targeting `main` -> compares PR head <-> PR base. This
-#     is the gate that branch protection should mark as a required check.
-#   - push to any branch except `main` -> immediate per-push status check
-#     for direct pushes (covers long-lived branches like develop/staging
-#     plus any in-flight feature branch).
+#   - pull_request -> compares PR head <-> its declared PR base. This is the
+#     gate branch protection should mark as required on governed bases.
+#   - push to any branch except `main` -> if the branch has an open PR,
+#     compare it with that PR's declared base; otherwise compare with main.
+#     This avoids false divergence on intentionally stacked/governed branches
+#     while still surfacing silent long-lived drift.
 #   - schedule (daily 06:00 UTC)    -> sweeps every branch on origin so
 #                                       stale, no-recent-push branches
 #                                       still surface (the original
@@ -31,7 +32,6 @@ name: Branch divergence
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches-ignore:
       - main
@@ -82,13 +82,14 @@ jobs:
         run: bash scripts/ci/test-resolve-divergence-thresholds.sh
 
   # ---------------------------------------------------------------------------
-  # PR job: runs on every PR targeting `main`. Compares the PR head against
-  # the PR base. This is the job that branch protection should mark as a
-  # required check so a drifting branch cannot merge.
+  # PR job: runs on every PR and compares the PR head against its declared
+  # base. This matters for the governed canonical intelligence branch as well
+  # as main: a feature branch must be judged against the branch it will
+  # actually merge into, not against an unrelated integration lineage.
   # ---------------------------------------------------------------------------
   check-pr:
     if: github.event_name == 'pull_request'
-    name: Check divergence vs main (PR)
+    name: Check divergence vs PR base
     needs: resolver-tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -190,8 +191,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch origin/main
-        run: git fetch --no-tags --quiet origin main:refs/remotes/origin/main
+      - name: Resolve comparison base
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          BASE_REF="$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open --json baseRefName --jq '.[0].baseRefName // empty')"
+          if [ -z "$BASE_REF" ]; then
+            BASE_REF="main"
+          fi
+          echo "base_ref=$BASE_REF" >> "$GITHUB_OUTPUT"
+          git fetch --no-tags --quiet origin "$BASE_REF:refs/remotes/origin/$BASE_REF" ||             git fetch --no-tags --quiet origin "$BASE_REF"
+          git rev-parse --verify "origin/$BASE_REF" >/dev/null
 
       - name: Resolve thresholds for ${{ github.ref_name }}
         id: thresholds
@@ -211,7 +224,7 @@ jobs:
         run: |
           set +e
           OUTPUT=$(scripts/check-branch-divergence.sh \
-            origin/main HEAD \
+            "origin/${{ steps.base.outputs.base_ref }}" HEAD \
             --max-commits "$MAX_COMMITS" \
             --max-files "$MAX_FILES" \
             --max-lines "$MAX_LINES" \
@@ -223,7 +236,7 @@ jobs:
 
           # Human-readable summary alongside the JSON, also archived.
           scripts/check-branch-divergence.sh \
-            origin/main HEAD \
+            "origin/${{ steps.base.outputs.base_ref }}" HEAD \
             --max-commits "$MAX_COMMITS" \
             --max-files "$MAX_FILES" \
             --max-lines "$MAX_LINES" \
@@ -254,7 +267,7 @@ jobs:
       - name: Fail when thresholds exceeded
         if: steps.check.outputs.status != '0'
         run: |
-          echo "::error title=Branch divergence threshold exceeded::Branch '${{ github.ref_name }}' has drifted past the configured thresholds. See https://github.com/${{ github.repository }}/blob/main/docs/branch-hygiene-policy.md#rule-5--detect-divergence-early for guidance, or add an override in .github/branch-divergence-overrides.yml."
+          echo "::error title=Branch divergence threshold exceeded::Branch '${{ github.ref_name }}' has drifted past the configured thresholds vs '${{ steps.base.outputs.base_ref }}'. See https://github.com/${{ github.repository }}/blob/main/docs/branch-hygiene-policy.md#rule-5--detect-divergence-early for guidance, or add an override in .github/branch-divergence-overrides.yml."
           exit 1
 
   # ---------------------------------------------------------------------------

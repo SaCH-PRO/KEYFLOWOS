@@ -1,73 +1,16 @@
-packet_id: KF-META-STATE-RECONCILE-002
-directive_message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002
-directive_comment_id: 5875639550
-in_reply_to: CC-ACK-META-CONTROL-PARSER-ADMIT-001
-ack_message_id: CC-ACK-META-STATE-RECONCILE-002
-ack_comment_id: 5875719435
-source_main: 9c8e49791705361227135a9032a640199949113f
-implementation_branch: impl/kf-meta-state-reconcile-002
+packet_id: KF-META-BRANCH-ROLES-001
+source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
+implementation_branch: impl/kf-meta-branch-roles-001
 state: PROVING
 health: GREEN
-scope_changed: false
+scope_changed: true
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
-review_status: PENDING_CHATGPT_REVIEW
-
-objective: >
-  Re-derive the derived control/programme projection from the admitted canonical
-  Issue #80 parser, current repository truth at main 9c8e4979 and the newest
-  valid authority record. Restore a clean, reproducible reconciliation without
-  changing application semantics.
-
-authorized_scope:
-  - one fresh bounded branch impl/kf-meta-state-reconcile-002 from current main
-  - update only the minimum control-state artifacts required to make the derived projection truthful
-  - authority_basis set to this directive by its real GitHub comment identity
-  - incorporate the admitted KF-META-CONTROL-PARSER-001 checkpoint and PR 100 merge truth
-  - preserve KF-EXEC-ACTION-001 as held
-  - preserve the platform programme as inactive
-  - deterministic reconcile/decision proof plus the existing agent-control proof the touched surface requires
-  - open a PR and RETURN to Issue 80 for ChatGPT admission
-
-required_truth:
-  parser_checkpoint:
-    packet_id: KF-META-CONTROL-PARSER-001
-    pr_number: 100
-    merge_commit: 9c8e49791705361227135a9032a640199949113f
-    state: CHECKPOINTED
-  application_checkpointed:
-    - KF-EXEC-K12-001
-    - KF-EXEC-EXTFX-001
-    - KF-EXEC-TENANT-001
-    - KF-EXEC-AUTH-001
-  application_frontier: KF-EXEC-ACTION-001
-  action_hold: true
-  production_release_authorized: false
-  production_mutations_authorized: false
-  real_provider_traffic_authorized: false
-  platform_programme_activation_authorized: false
-
-acceptance:
-  - current Issue 80 authority parses deterministically through the shared parser
-  - programme-state no longer anchors to the obsolete September 25 authority basis
-  - repository truth for merged PR 100 is represented correctly
-  - reconcile returns consistent on recorded healthy current evidence
-  - scheduled/autopilot decision no longer reports stale projection solely because of the old authority anchor
-  - no prior safety gate is weakened
-  - no application packet credit is created by this meta packet
-  - RETURN includes exact branch head, proof results, any residual contradiction and the proposed next legal action
-
+summary: >
+  Base-aware divergence and canonical branch-role policy foundation.
 constraints:
-  - do not release or implement KF-EXEC-ACTION-001
-  - do not implement Issue 102 in this packet
-  - do not activate the platform convergence programme
-  - do not mutate production data, deploy production or send real provider traffic
-  - do not regenerate the architecture/intelligence map
-  - do not broaden agent-control features beyond what is necessary for truthful re-derivation
-  - do not merge; ChatGPT retains admission and merge authority
-
-return_contract: >
-  ACK before mutation; implement the bounded re-derivation; prove it against
-  current authority and repository truth; open the PR; wait for exact-head
-  checks and a fresh Copilot review; RETURN to Issue 80 for ChatGPT admission.
+  - no production mutation
+  - no provider traffic
+  - no third-party runtime dependency
+  - draft until independent review/admission

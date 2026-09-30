@@ -1,176 +1,33 @@
-packet_id: KF-META-STATE-RECONCILE-002
-directive_message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002
-directive_comment_id: 5875639550
-ack_message_id: CC-ACK-META-STATE-RECONCILE-002
-ack_comment_id: 5875719435
-progress_message_ids:
-  - CC-PROGRESS-META-STATE-RECONCILE-002   # 5875818202
-momentum_message_ids: []
-# This file is a pre-RETURN record (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001).
-# The RETURN is posted on #80 after every exact-head check and the fresh AI
-# review finish on the head that carries this file, with no further branch
-# mutation. That RETURN is the final evidence envelope. lib/return-evidence.mjs
-# checks this file on every run of the portable suite.
-return_status: AWAITING_POSTCHECK_RETURN
-return_message_id: null
-previous_return_message_ids: []
-never_posted_return_message_ids: []
-source_main: 9c8e49791705361227135a9032a640199949113f
-source_head: 75b43f00e6f544c11ad0aee4d2f77a3eb9c7faed
-implementation_branch: impl/kf-meta-state-reconcile-002
-pr_number: 103
+packet_id: KF-META-BRANCH-ROLES-001
+source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
+source_head: b08a97869ce645f1a252b62bd0b509442399bb40
+implementation_branch: impl/kf-meta-branch-roles-001
 state: PROVING
-health: GREEN
-scope_changed: false
+health: YELLOW
+scope_changed: true
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
 merge_authority: false
 
+return_status: AWAITING_POSTCHECK_RETURN
+return_message_id: null
+previous_return_message_ids: []
+never_posted_return_message_ids: []
+
 summary: >
-  .agent-control/programme-state.yaml is re-derived from current authority and
-  repository truth. It is anchored to CG-DIRECTIVE-META-STATE-RECONCILE-002
-  (comment 5875639550), the newest valid authority on #80. It records
-  KF-META-CONTROL-PARSER-001 as CHECKPOINTED from PR 100 (exact head 85020063,
-  merge 9c8e4979), and only the four application packets are checkpointed. The
-  ACTION-001 hold stays active, the platform programme stays inactive and every
-  safety flag stays false. Live reconcile against real #80 and main is
-  consistent with no findings, and decide() returns WAIT_AUTHORITY because of
-  the hold. Before this change it was REPORT_DRIFT with
-  DERIVED_STATE_STALE_AUTHORITY and AUTHORITY_MALFORMED. No gate, parser rule,
-  threshold or application code changed.
+  Base-aware divergence and canonical branch-role policy foundation. This is a pre-RETURN record. Exact-head evidence and independent
+  semantic review remain pending and cannot be claimed from this artifact.
 
-characterization:
-  live_before: >
-    orchestrate.mjs --json on real #80 and main 9c8e4979 gave REPORT_DRIFT.
-    DERIVED_STATE_STALE_AUTHORITY listed 21 valid authority messages newer than
-    the 2026-09-25 anchor 5825443535, ending at this directive. AUTHORITY_MALFORMED
-    listed 4 authority-typed ChatGPT messages after that anchor that fail the
-    AUTHORITY profile: 5826124586, 5826612913, 5826799265 and 5875440129.
-  root_cause: >
-    The projection was never re-anchored after 2026-09-25; D2 of
-    KF-META-CONTROL-PARSER-001 deferred it to this packet. All 4 malformed messages
-    predate the new anchor, so under the admitted parser rule they are evidence
-    only. No gate needs changing.
-  ci_observer: >
-    The autopilot decide step now carries GH_TOKEN (PR 100, D1). The post-merge
-    AUTO_EVENTs on #80 report the same two findings, not the *_UNVERIFIABLE pair.
-  discoveries:
-    - >
-      The ACTION-001 hold sequence is CG-HOLD-ACTION-AUTO-001, then CG-RESUME-ACTION-001
-      (5826160790, characterization only), then CG-HOLD-ACTION-CONTROLLER-BRIDGE-001
-      (5826612913, HOLD_AUTONOMY_BRIDGE). That last hold fails the AUTHORITY profile.
-      The projection cites it and treats the directive's required_truth.action_hold
-      as the binding current statement.
-    - >
-      CC-CONTRADICTION-AI-PR-REVIEW-GATE-001 (5848225019, PR 94, options A/B/C) has
-      no ChatGPT disposition on #80. It is recorded under unresolved_contradictions.
-      This fails closed. The decision is unchanged, because the hold already
-      yields WAIT_AUTHORITY.
-    - >
-      .agent-control/README.md still calls programme-state the canonical live state.
-      That contradicts AGENT_CONTROL_PLANE.md "Control-state precedence". It is not
-      changed here, because it is outside the minimum projection scope.
-
-changed_files:
-  semantic:
-    - scripts/agent-control/fixtures/reconcile-002-truth.json (new)
-    - scripts/agent-control/negative-controls.yaml
-    - scripts/agent-control/tests/reconcile.spec.mjs
-    - scripts/agent-control/tests/return-evidence.spec.mjs
-    - scripts/agent-control/tests/yaml.spec.mjs
-  control_only:
-    - .agent-control/programme-state.yaml
-    - .agent-control/active-packet.yaml
-    - .agent-control/claude-return.yaml
-
-projection_as_derived:
-  authority_basis: CG-DIRECTIVE-META-STATE-RECONCILE-002 / 5875639550
-  derivation_source_main: 9c8e49791705361227135a9032a640199949113f
-  programme: KF-META-CONTROL-PARSER-001, CHECKPOINTED, GREEN, PR 100, branch impl/kf-meta-control-parser-001, source_main 71a534b8 (an ancestor of main)
-  checkpointed: [KF-EXEC-K12-001, KF-EXEC-EXTFX-001, KF-EXEC-TENANT-001, KF-EXEC-AUTH-001]
-  application_frontier: KF-EXEC-ACTION-001
-  hold: active; KF-EXEC-ACTION-001; hold_message_id CG-HOLD-ACTION-CONTROLLER-BRIDGE-001; affirmed_by this directive
-  platform_programme: KEYFLOWOS_PLATFORM_CONVERGENCE INACTIVE_SUCCESSOR, activation_authorized false
-  safety: production release, production mutation, real provider traffic, platform activation, forensic rebaseline, map refresh and OS cycles all false
-  next_legal_action: WAIT_AUTHORITY
+evidence_note: "CI/CD Pipeline evidence is PENDING until the RETURN."
 
 proof_matrix:
-  - obligation: current Issue 80 authority parses deterministically through the shared parser
-    evidence_scope: semantic_head
-    proof: >
-      reconcile.spec "recorded evidence": collectAuthority over the unmodified REST
-      payloads of #80 comments 5875440129..5875719435 is verified, and its newest
-      message is this directive. The live orchestrate run reports the same newest message.
-    result: PROVEN
-  - obligation: programme-state no longer anchors to the obsolete September 25 authority basis
-    evidence_scope: semantic_head
-    proof: authority_basis equals the recorded newest authority; NC-PROJECTION-OBSOLETE-ANCHOR restores 5825443535 and the recorded-evidence test fails
-    result: PROVEN
-  - obligation: repository truth for merged PR 100 is represented correctly
-    evidence_scope: semantic_head
-    proof: >
-      programme pr_number 100, branch impl/kf-meta-control-parser-001, CHECKPOINTED,
-      source_main 71a534b8 is ahead-of on main (compare API). The recorded repo truth
-      matches. Referent: the same evidence with PR 100 open gives PR_NOT_MERGED.
-    result: PROVEN
-  - obligation: reconcile returns consistent on recorded healthy current evidence
-    evidence_scope: semantic_head
-    proof: orchestrate.mjs --truth-file scripts/agent-control/fixtures/reconcile-002-truth.json gives consistent true with no findings and WAIT_AUTHORITY
-    result: PROVEN
-  - obligation: the scheduled/autopilot decision no longer reports a stale projection solely because of the old anchor
-    evidence_scope: semantic_head
-    proof: live orchestrate.mjs --json (the command the autopilot decide step runs) with gh auth on real #80 and main gives consistent true, no findings, WAIT_AUTHORITY
-    result: PROVEN
-  - obligation: no prior safety gate is weakened
-    evidence_scope: semantic_head
-    proof: no lib, workflow, parser, threshold or gate file changed; the only test edits add assertions or retarget the artifact packet pins; 2 new live negative controls
-    result: PROVEN
-  - obligation: no application packet credit is created by this meta packet
-    evidence_scope: semantic_head
-    proof: reconcile.spec committed-projection test pins checkpointed to exactly the four application packets and excludes all three meta packets
-    result: PROVEN
-  - obligation: restored defects make their relevant tests fail
-    evidence_scope: semantic_head
-    proof: proof-mutation.mjs at the semantic head, see negative_controls
-    result: PROVEN
-  - obligation: portable and Windows suites at the semantic head
-    evidence_scope: semantic_head
-    proof: see tests
-    result: PROVEN
-  - obligation: all required exact-head workflows green and a fresh Copilot review on the final PR head, with no unresolved substantive finding
+  - obligation: required exact-head checks
     evidence_scope: exact_head
-    proof: >
-      Cannot be recorded in the commit it is about. See exact_head_proof. The RETURN
-      on #80 reports the outcome after it is known.
+    proof: PENDING until exact-head workflows execute against this artifact head
     result: PENDING
 
-tests:
-  command_portable: node --test scripts/agent-control/tests/*.spec.mjs
-  command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  at: 75b43f00
-  portable_total: 287
-  portable_passed: 287
-  windows_total: 19
-  windows_passed: 19
-  baseline_before_change: 286 portable, 19 windows, at 9c8e4979
-  failed: 0
-  skipped: 0
-  dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
-  live_reconcile: orchestrate.mjs --json on real #80 and main 9c8e4979 at 75b43f00, consistent true, findings none, WAIT_AUTHORITY
-  recorded_reconcile: orchestrate.mjs --json --truth-file scripts/agent-control/fixtures/reconcile-002-truth.json, consistent true, findings none, WAIT_AUTHORITY
-  fixture_changes: >
-    One new test (recorded evidence). The committed-projection test gains
-    assertions and loses none. The yaml.spec and return-evidence.spec artifact
-    pins name this packet.
-
-negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 75b43f00
-  baseline_before_change: 70/70 live at c6541442, the semantic head merged as 9c8e4979, per the PR 100 record; not re-run at 9c8e4979 here
-  added: [NC-PROJECTION-OBSOLETE-ANCHOR, NC-RECONCILE-RECORDED-MALFORMED]
-  result: 72/72 live at 75b43f00; each new control passed at baseline and failed with its defect restored
-
-exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
+exact_head_proof:
   - gate: CI/CD Pipeline
     status: PENDING
   - gate: Agent Control Gate
@@ -185,51 +42,8 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
     status: PENDING
 
 ci:
-  exact_head: >
-    PENDING. Required checks run on the PR head that carries this artifact
-    commit. An artifact cannot record CI for the commit that contains it. No
-    RETURN for this head exists yet.
+  exact_head: PENDING
 
-ai_review:
-  reviewer: copilot-pull-request-reviewer[bot]
-  final_head_review: PENDING
-  findings: []
-
-scope_ledger:
-  declared:
-    - fresh branch impl/kf-meta-state-reconcile-002 from main 9c8e4979
-    - re-derive programme-state.yaml; authority_basis is this directive by comment identity
-    - incorporate the KF-META-CONTROL-PARSER-001 checkpoint and PR 100 merge truth
-    - keep ACTION-001 held and the platform programme inactive
-    - deterministic reconcile/decision proof and the existing agent-control proof for the touched surface
-    - PR and RETURN
-  resolved: [all declared items except those under remaining]
-  remaining:
-    - exact-head checks and a fresh Copilot review on the final PR head (PENDING)
-    - RETURN on #80 once those finish
-    - ChatGPT review and admission
-  deferred:
-    - item: .agent-control/README.md wording
-      reason: outside the minimum projection scope; it contradicts AGENT_CONTROL_PLANE.md and is raised for ChatGPT
-  dropped: []
-  superseded: []
-
-residual_risks:
-  - the projection goes stale again at the next ChatGPT authority message, including the REVIEW of this RETURN; that is the designed fail-closed behaviour, and a reviewed re-derivation is needed after each authority step
-  - an edit to any SaCH-PRO comment on #80 makes authority unverifiable (AUTHORITY_EDITED) until ChatGPT defines a recovery; accepted under D4
-
-rollback_floor:
-  sha: 9c8e49791705361227135a9032a640199949113f
-  method: revert the squash commit of this PR
-  effect: restores the 2026-09-25 projection, which fails closed as REPORT_DRIFT; no data, schema or production state
-
-security:
-  local_hawkscan: not run; HAWK_API_KEY unset and no app running; no application code touched. DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
-
-unresolved_contradictions:
-  - id: CC-CONTRADICTION-AI-PR-REVIEW-GATE-001
-    note: not this packet's; carried in the projection for a ChatGPT disposition
 next_action: >
-  Wait for every exact-head check and a fresh Copilot review on the head
-  carrying this file, then post the RETURN on #80 without mutating the branch.
-  Then ChatGPT review. Do not merge. ACTION-001 stays held.
+  Execute every required proof on the exact head, run mutation controls, obtain
+  independent review, and report any failure without masking or substitution.
