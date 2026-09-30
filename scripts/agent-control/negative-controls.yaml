@@ -1049,6 +1049,63 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC REST evidence URL" scripts/agent-control/tests/semantic-review.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-SR-COPILOT-EVIDENCE-LOCATION
+    claim: >
+      A Copilot record is bound to the live review it cites, by reviewed_head
+      and evidence_location together. Matching on the head alone let a record
+      cite an arbitrary or stale URL and still be satisfied by another bot
+      review at that head (CG104-F1-COPILOT-EVIDENCE-LOCATION).
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+            const cited = atHead.filter((r) => r.url === entry.evidence_location);
+      replace: |-
+            const cited = atHead;
+    proof_command: node --test --test-name-pattern="NC Copilot evidence location" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-NOT-RUN-REASON-MISMATCH
+    claim: >
+      A recorded Copilot NOT_RUN reason must equal the reason derived from the
+      live bot body; labelling a quota-limit review as capacity_exhausted or
+      service_unavailable is contradicted (CG104-F2-NOTRUN-REASON-LIVE-BINDING).
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+                if (r.reason !== entry.reason) {
+      replace: |-
+                if (false) {
+    proof_command: node --test --test-name-pattern="NC Copilot NOT_RUN reason mismatch" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-NOT-RUN-REASON-UNKNOWN
+    claim: >
+      An "unable to review" body that names no known reason derives no reason
+      and cannot authorize the ChatGPT fallback. Guessing a reason for it is
+      the defect (CG104-F2-NOTRUN-REASON-LIVE-BINDING).
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+            reason: notRun ? (COPILOT_NOT_RUN_REASONS.find((k) => k.pattern.test(body))?.reason ?? null) : null,
+      replace: |-
+            reason: notRun ? (COPILOT_NOT_RUN_REASONS.find((k) => k.pattern.test(body))?.reason ?? 'quota_exhausted') : null,
+    proof_command: node --test --test-name-pattern="NC Copilot NOT_RUN unknown reason" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-COPILOT-FINDINGS-UNREADABLE
+    claim: >
+      A recorded Copilot PASS needs a readable finding count at the cited
+      review. An unparseable or missing count fails closed; it never becomes
+      zero findings (CG104-F3-UNPARSEABLE-FINDINGS-FAILOPEN).
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+              if (unreadable.length) {
+      replace: |-
+              if (false) {
+    proof_command: node --test --test-name-pattern="NC Copilot unreadable findings" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-ADMISSION-SEMANTIC-REVIEW-BYPASS
     claim: >
       The admission path consumes the semantic-review contract: an otherwise

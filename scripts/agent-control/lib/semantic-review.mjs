@@ -36,12 +36,18 @@
  *
  * The record alone proves nothing, because anyone can write a file. Each
  * entry must match live evidence that the admission path fetches:
- *   - copilot: a review by the bot on the PR at commit_id == reviewed_head. A
- *     bot review saying it was unable to review is NOT_RUN evidence, never PASS.
- *     A review that ran is not a pass either: on PR 103 the bot reviewed the
- *     semantic head and recommended changes with one finding. So a recorded
- *     copilot PASS must list dispositioned_findings explicitly, with at least
- *     as many entries as the live review reports findings.
+ *   - copilot: the one review by the bot on the PR at both commit_id ==
+ *     reviewed_head and html_url == evidence_location. Another bot review at
+ *     the same head does not stand in for the one the record cites. A bot
+ *     review saying it was unable to review is NOT_RUN evidence, never PASS,
+ *     and its machine reason is derived from the live body: the record's
+ *     reason must equal it, and a body that names no known reason cannot
+ *     authorize the fallback. A review that ran is not a pass either: on PR
+ *     103 the bot reviewed the semantic head and recommended changes with one
+ *     finding. So a recorded copilot PASS must list dispositioned_findings
+ *     explicitly, with at least as many entries as the live review reports
+ *     findings, and a finding count that cannot be read fails closed rather
+ *     than counting as zero.
  *   - chatgpt: the #80 comment at evidence_location. It must be an unedited
  *     AUTHORITY-profile REVIEW from sender chatgpt by an authorized author,
  *     whose one-line reviewed_head, semantic_review_outcome and
@@ -97,6 +103,16 @@ export const NOT_RUN_REASONS = Object.freeze(['capacity_exhausted', 'quota_exhau
 /** The body GitHub's Copilot bot posts when it could not review. */
 export const COPILOT_UNAVAILABLE = /\bunable to review\b/i;
 
+/**
+ * The machine reason each known "unable to review" body carries. Only bodies
+ * GitHub has actually posted are listed. PR 103 and every PR 104 head: "...
+ * because the user who requested the review has reached their quota limit."
+ * Any other unavailable body derives no reason, and so authorizes no fallback.
+ */
+export const COPILOT_NOT_RUN_REASONS = Object.freeze([
+  Object.freeze({ pattern: /\breached their quota limit\b/i, reason: 'quota_exhausted' }),
+]);
+
 /** The finding count in a Copilot review overview ("**Findings:** 1"). */
 const COPILOT_FINDINGS = /\*\*Findings:\*\*\s*(\d+)/i;
 
@@ -122,6 +138,8 @@ export const SEMANTIC_REVIEW_REASONS = Object.freeze({
   FALLBACK_WITHOUT_PRIMARY_UNAVAILABLE: 'fallback_without_primary_unavailable_evidence',
   LIVE_EVIDENCE_MISSING: 'live_evidence_missing',
   LIVE_EVIDENCE_CONTRADICTS: 'live_evidence_contradicts_record',
+  NOT_RUN_REASON_NOT_EVIDENCED: 'not_run_reason_not_evidenced',
+  FINDINGS_COUNT_UNREADABLE: 'reviewer_findings_count_unreadable',
   SATISFIED: 'independent_semantic_review_satisfied',
 });
 
@@ -142,10 +160,14 @@ export function copilotReviewEvidence(review) {
   const login = review?.user?.login;
   if (identity(login) !== REVIEW_PROVIDERS.copilot.reviewer || review?.user?.type !== 'Bot') return null;
   const body = String(review.body || '');
-  const findings = body.match(COPILOT_FINDINGS);
+  const notRun = COPILOT_UNAVAILABLE.test(body);
+  const findings = notRun ? null : body.match(COPILOT_FINDINGS);
   return {
     commit_id: review.commit_id ?? null,
-    status: COPILOT_UNAVAILABLE.test(body) ? 'NOT_RUN' : 'REVIEWED',
+    status: notRun ? 'NOT_RUN' : 'REVIEWED',
+    // null when the body names no known reason; never guessed.
+    reason: notRun ? (COPILOT_NOT_RUN_REASONS.find((k) => k.pattern.test(body))?.reason ?? null) : null,
+    // null when the count cannot be read; never read as zero.
     findings: findings ? Number(findings[1]) : null,
     url: review.html_url ?? null,
   };
@@ -236,23 +258,46 @@ function liveProblem(entry, live) {
   const provider = identity(entry.provider);
   if (provider === 'copilot') {
     const atHead = (live.copilot || []).filter((r) => r && r.commit_id === entry.reviewed_head);
-    const reviewed = atHead.some((r) => r.status === 'REVIEWED');
+    const reviewed = atHead.filter((r) => r.status === 'REVIEWED');
     const notRun = atHead.some((r) => r.status === 'NOT_RUN');
+    // The record is bound to the one review it cites, at its head.
+    const cited = atHead.filter((r) => r.url === entry.evidence_location);
+    const citedMissing = () =>
+      fail(R.LIVE_EVIDENCE_MISSING, { provider, reviewed_head: entry.reviewed_head, evidence_location: entry.evidence_location });
+    if (entry.outcome === 'NOT_RUN') {
+      // A real Copilot review at this head would be hidden by calling it NOT_RUN.
+      if (reviewed.length) return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: 'NOT_RUN', live: 'REVIEWED' });
+      if (!notRun) return fail(R.LIVE_EVIDENCE_MISSING, { provider, reviewed_head: entry.reviewed_head });
+      if (!cited.length) return citedMissing();
+      for (const r of cited) {
+        if (!r.reason) return fail(R.NOT_RUN_REASON_NOT_EVIDENCED, { provider, recorded: entry.reason, evidence_location: r.url });
+        if (r.reason !== entry.reason) {
+          return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded_reason: entry.reason, live_reason: r.reason });
+        }
+      }
+      return null;
+    }
+    if (!reviewed.length) {
+      if (notRun) return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: entry.outcome, live: 'NOT_RUN' });
+      return fail(R.LIVE_EVIDENCE_MISSING, { provider, reviewed_head: entry.reviewed_head });
+    }
+    if (!cited.length) return citedMissing();
+    if (cited.some((r) => r.status !== 'REVIEWED')) {
+      return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: entry.outcome, live: 'NOT_RUN' });
+    }
     if (entry.outcome === 'PASS') {
-      const reported = Math.max(0, ...atHead.filter((r) => r.status === 'REVIEWED').map((r) => Number(r.findings) || 0));
+      // Every review that ran at this head must state a readable count, so a
+      // changed or unknown format can never pass as zero findings.
+      const unreadable = reviewed.filter((r) => !Number.isSafeInteger(r.findings) || r.findings < 0);
+      if (unreadable.length) {
+        return fail(R.FINDINGS_COUNT_UNREADABLE, { provider, evidence_location: unreadable.map((r) => r.url) });
+      }
+      const reported = Math.max(...reviewed.map((r) => r.findings));
       if (entry.dispositioned_findings.length < reported) {
         return fail(R.UNDISPOSITIONED_FINDINGS, { provider, reported, dispositioned: entry.dispositioned_findings.length });
       }
     }
-    if (entry.outcome === 'NOT_RUN') {
-      // A real Copilot review at this head would be hidden by calling it NOT_RUN.
-      if (reviewed) return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: 'NOT_RUN', live: 'REVIEWED' });
-      if (!notRun) return fail(R.LIVE_EVIDENCE_MISSING, { provider, reviewed_head: entry.reviewed_head });
-      return null;
-    }
-    if (reviewed) return null;
-    if (notRun) return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: entry.outcome, live: 'NOT_RUN' });
-    return fail(R.LIVE_EVIDENCE_MISSING, { provider, reviewed_head: entry.reviewed_head });
+    return null;
   }
   const matches = (live.chatgpt || []).filter((r) => r && r.url === entry.evidence_location);
   if (!matches.length) return fail(R.LIVE_EVIDENCE_MISSING, { provider, evidence_location: entry.evidence_location });

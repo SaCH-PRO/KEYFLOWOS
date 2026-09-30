@@ -51,7 +51,12 @@ const admissible = (overrides = {}) => ({
   workflow_runs: greenRuns(),
   contradictions: [],
   pr_transitions: [],
-  semantic_review_live: { copilot: [{ commit_id: HEAD, status: 'REVIEWED', url: null }], chatgpt: [] },
+  // The cited bot review, as copilotReviewEvidence reads it: bound by head and
+  // URL, with a readable finding count (CG104-F1, CG104-F3).
+  semantic_review_live: {
+    copilot: [{ commit_id: HEAD, status: 'REVIEWED', reason: null, findings: 0, url: 'https://github.com/o/r/pull/87#pullrequestreview-1' }],
+    chatgpt: [],
+  },
   ...overrides,
 });
 
