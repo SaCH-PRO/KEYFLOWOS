@@ -6,11 +6,17 @@ function read(path) {
   return fs.readFileSync(path, 'utf8');
 }
 
-test('NC fake green: required security scans may not swallow failures', () => {
+test('NC fake green: required security scanners all execute and failures are re-raised', () => {
   const ci = read('.github/workflows/ci-cd.yml');
   const security = ci.match(/\n  security-scan:[\s\S]*?(?=\n  [a-zA-Z0-9_-]+:|$)/)?.[0] || '';
   assert.ok(security, 'security-scan job must exist');
-  assert.ok(!/continue-on-error:\s*true/.test(security), 'Security Scan must fail the workflow when audit or secret scanning fails');
+  assert.match(security, /id: dependency_audit[\s\S]*?continue-on-error:\s*true/);
+  assert.match(security, /id: secret_scan[\s\S]*?continue-on-error:\s*true/);
+  assert.match(
+    security,
+    /Enforce security scan outcomes[\s\S]*?if: always\(\)[\s\S]*?DEPENDENCY_AUDIT_OUTCOME[\s\S]*?SECRET_SCAN_OUTCOME[\s\S]*?exit 1/,
+    'captured scanner failures must be explicitly re-raised after every scanner executes',
+  );
 
   const dast = read('.github/workflows/native-dast.yml');
   assert.ok(!/continue-on-error:\s*true/.test(dast), 'required native DAST may not swallow scanner failures');
