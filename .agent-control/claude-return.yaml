@@ -9,14 +9,19 @@ live_evidence_fix_directive_message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIV
 live_evidence_fix_directive_comment_id: 5889027553
 correction_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
 correction_review_comment_id: 5901320677
-ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-CORRECTION-003
-ack_comment_id: 5916562968
+admission_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004
+admission_review_comment_id: 5917653398
+ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-ADMIT-004
+ack_comment_id: 5917678572
 prior_ack_message_ids:
   - CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001   # 5881559355
   - CC-ACK-META-AI-REVIEW-FAILOVER-ADMIT-001
   - CC-ACK-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001   # 5896173916
+  - CC-ACK-META-AI-REVIEW-FAILOVER-CORRECTION-003   # 5916562968
 progress_message_ids:
   - CC-PROGRESS-META-AI-REVIEW-FAILOVER-001   # 5881729832
+  - CC-PROGRESS-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001   # 5896432790
+  - CC-PROGRESS-META-AI-REVIEW-FAILOVER-CORRECTION-003   # 5917557490; duplicate-RETURN and loop-blocker report
 momentum_message_ids: []
 # This file is a pre-RETURN record (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001).
 # The RETURN is posted on #80 after every exact-head check on the head that
@@ -28,6 +33,7 @@ return_message_id: null
 previous_return_message_ids:
   - CC-RETURN-META-AI-REVIEW-FAILOVER-001   # for semantic head b70dff17 at PR head ae3e1d2b; superseded
   - CC-RETURN-META-AI-REVIEW-FAILOVER-002   # 5896726468, for semantic head c40ed180 at PR head 7fe3db96; CHANGES_REQUIRED by CORRECTION-003
+  - CC-RETURN-META-AI-REVIEW-FAILOVER-003   # 5917337547 and 5917339877 (one id posted twice by two sessions; same heads and verdict), for semantic head 44e894c6 at PR head d42659b7; ACCEPT_FOR_ADMISSION by ADMIT-004
 never_posted_return_message_ids: []
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
 source_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb
@@ -36,15 +42,36 @@ previous_source_heads:
   - c40ed180a34981b05627b185d73313357eca5883   # semantics before the Copilot evidence-binding correction (CORRECTION-003)
 implementation_branch: impl/kf-meta-ai-review-failover-001
 pr_number: 104
-state: PROVING
+state: RECORDING_ADMISSION_EVIDENCE
 health: GREEN
 scope_changed: true
-scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A; Kimi removed; admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102; CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001 / 5889027553; CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003 / 5901320677
+scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A; Kimi removed; admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102; CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001 / 5889027553; CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003 / 5901320677; CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004 / 5917653398 (control-only admission-evidence record)
 production_touched: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: ACCEPT_FOR_ADMISSION
 programme_credit: ZERO
 merge_authority: false
 implementer: claude
+
+# Recorded by Claude as directed by CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004.
+# The record alone proves nothing: admission checks every entry against the
+# live bot review and the live #80 comment it cites (lib/semantic-review.mjs).
+semantic_review:
+  implementer: claude
+  reviews:
+    - provider: copilot
+      reviewer: copilot-pull-request-reviewer[bot]
+      reviewed_head: d42659b78a632e965a643aa8e83ee47eefcf1f87
+      outcome: NOT_RUN
+      reason: quota_exhausted
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/104#pullrequestreview-5370148236
+    - provider: chatgpt
+      reviewer: chatgpt
+      reviewed_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb
+      outcome: PASS
+      reason: null
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5917653398
 
 summary: >
   Admission now requires an independent semantic review through one
@@ -289,20 +316,20 @@ proof_matrix:
     proof: >
       The manifest holds 97 controls: the 72 from 4eba59eb, the 20 added at
       b70dff17, NC-SR-REST-EVIDENCE-URL, and four added at 44e894c6. At
-      44e894c6 on Linux, 88 are live and 9 are Windows-only worker proofs
-      (tests/windows) that cannot run off Windows; see negative_controls.
+      d42659b7 (tree identical to 44e894c6 outside .agent-control/) on a
+      Windows host, 97/97 are live and 0 are vacuous; see negative_controls.
       Prior tests keep all their assertions; three pins are retargeted to this
       packet, and reconcile.spec gains one exclusion. The CORRECTION-003 change
       extends one deepEqual in semantic-review.spec with the new reason field
       and corrects the admission.spec live fixture; no assertion is removed.
-    result: PARTIAL
+    result: PROVEN
   - obligation: portable and Windows suites at the semantic head
     evidence_scope: semantic_head
     proof: >
-      see tests. The portable suite ran at 44e894c6 (PowerShell 7.4.6 on
-      Linux). The Windows suite requires windows-latest and asserts so on any
-      other host; it was not run by Claude for this head.
-    result: PARTIAL
+      see tests. Both suites ran on a Windows host with authenticated gh at
+      d42659b7, whose tree equals 44e894c6 outside .agent-control/: portable
+      338/338 and Windows 19/19, none skipped.
+    result: PROVEN
   - obligation: all required exact-head workflows green and the independent semantic review on the final PR head, with no unresolved substantive finding
     evidence_scope: exact_head
     proof: >
@@ -313,18 +340,19 @@ proof_matrix:
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  at: 44e894c6
-  host: Linux container with PowerShell 7.4.6; no authenticated gh; not Windows
+  at: d42659b7   # tree equals 44e894c6 outside .agent-control/
+  host: Windows 11 with authenticated gh (Claude session, 2026-09-30)
   portable_total: 338
-  portable_passed: 337
-  portable_skipped: 1   # "the cursor makes directive processing idempotent": needs PowerShell and an authenticated gh
+  portable_passed: 338
+  portable_skipped: 0
   windows_total: 19
-  windows_passed: NOT_RUN   # each test asserts "this proof must run on Windows"; the windows-latest job runs it
+  windows_passed: 19
+  earlier_run_at_44e894c6: Linux container with PowerShell 7.4.6 and no authenticated gh; portable 337/338 with 1 skipped (the gh-dependent cursor test); Windows suite not runnable there
   baseline_before_change: 287 portable, 19 windows, at 4eba59eb
   previous_semantic_head: 333 portable, 19 windows, at c40ed180 (operator host)
   earlier_semantic_head: 329 portable, 19 windows, at b70dff17
   failed: 0
-  skipped: 1
+  skipped: 0
   dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
   added: 33 in semantic-review.spec (4 for the live-evidence correction, 5 for CORRECTION-003), 15 in admission.spec, 3 in return-evidence.spec
 
@@ -357,6 +385,9 @@ negative_controls:
     - NC-SR-NOT-RUN-REASON-MISMATCH       # CORRECTION-003 F2
     - NC-SR-NOT-RUN-REASON-UNKNOWN        # CORRECTION-003 F2
     - NC-SR-COPILOT-FINDINGS-UNREADABLE   # CORRECTION-003 F3
+  result_at_d42659b7_windows_host: >
+    97/97 live, 0 vacuous, on a Windows host at d42659b7 (tree equals 44e894c6
+    outside .agent-control/), including all nine NC-SR controls.
   result_at_semantic_head: >
     88/97 live at 44e894c6 on Linux, including all four CORRECTION-003
     controls, NC-SR-REST-EVIDENCE-URL and the three controls that mutate this
@@ -396,7 +427,12 @@ ai_review:
   implementer: claude
   primary: copilot-pull-request-reviewer[bot]
   fallback: chatgpt
-  final_head_review: PENDING
+  final_head_review: >
+    Recorded in semantic_review above, from CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004
+    (5917653398, reviewed_head 44e894c6, ACCEPT_FOR_ADMISSION) and Copilot
+    NOT_RUN quota_exhausted at d42659b7 (5370148236). The exact-head gate
+    below stays PENDING until the admission path evaluates the record against
+    live evidence on the head that carries this file.
   self_review: none; Claude does not review this change
   findings: []
   stale:
@@ -431,12 +467,12 @@ scope_ledger:
     - PR and RETURN
     - live-evidence correction, REST regression and negative control (CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001)
     - Copilot evidence binding F1-F3, regressions and four negative controls (CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003)
+    - control-only record of the admitted semantic-review evidence (CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004)
   resolved: [all declared items except those under remaining]
   remaining:
-    - exact-head checks and the independent semantic review on the final PR head (PENDING)
-    - Windows suite and the 9 Windows-only negative controls at 44e894c6, from the windows-latest job on the exact head (PENDING)
-    - RETURN on #80 once the exact-head checks finish
-    - ChatGPT review and admission
+    - exact-head checks on the head that carries this file (PENDING)
+    - RETURN on #80 once those checks finish, under a new unique message_id
+    - admission decision; PR 104 is still a draft, and admission refuses a draft (pr_is_draft), so marking it ready is for ChatGPT or the operator
   deferred:
     - item: GitHub branch-protection or ruleset required checks on main
       reason: repository-admin setting; HUMAN_GATED; the docs make the evaluator mandatory meanwhile
@@ -502,9 +538,9 @@ review_findings_disposed:
 
 next_action: >
   Wait for every exact-head check on the head carrying this file, then post the
-  RETURN on #80 without mutating the branch. The independent semantic review
-  follows under this packet's own contract: Copilot if it has capacity,
-  otherwise ChatGPT as fallback, on the new semantics. Claude does not review
+  RETURN on #80 once, under a new unique message_id, without mutating the
+  branch. ChatGPT then decides admission; the admission path evaluates the
+  semantic_review record above against live evidence. Claude does not review
   this change. Do not merge. ACTION-001 stays held, the platform programme
   stays inactive, and the queued closed-loop/memory/KEY work waits for this
   packet's admission and checkpoint.

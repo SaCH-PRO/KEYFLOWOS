@@ -9,27 +9,30 @@ live_evidence_fix_directive_message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIV
 live_evidence_fix_directive_comment_id: 5889027553
 correction_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
 correction_review_comment_id: 5901320677
-in_reply_to: CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
-ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-CORRECTION-003
-ack_comment_id: 5916562968
+admission_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004
+admission_review_comment_id: 5917653398
+in_reply_to: CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004
+ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-ADMIT-004
+ack_comment_id: 5917678572
 prior_ack_message_ids:
   - CC-ACK-META-AI-REVIEW-FAILOVER-001
   - CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001   # 5881559355
   - CC-ACK-META-AI-REVIEW-FAILOVER-ADMIT-001
   - CC-ACK-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001   # 5896173916
+  - CC-ACK-META-AI-REVIEW-FAILOVER-CORRECTION-003   # 5916562968
 contradiction_message_ids:
   - CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-001         # 5876793708
   - CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001   # 5887342673
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
 implementation_branch: impl/kf-meta-ai-review-failover-001
-state: PROVING
+state: RECORDING_ADMISSION_EVIDENCE
 health: GREEN
 scope_changed: true
-scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A, Kimi removed, admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102; CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001 / 5889027553 (bounded live-evidence correction); CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003 / 5901320677 (Copilot evidence binding F1-F3)
+scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A, Kimi removed, admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102; CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001 / 5889027553 (bounded live-evidence correction); CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003 / 5901320677 (Copilot evidence binding F1-F3); CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004 / 5917653398 (control-only admission-evidence record)
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: ACCEPT_FOR_ADMISSION
 
 objective: >
   Remove Copilot review capacity as a single point of failure without weakening
@@ -90,6 +93,20 @@ correction_003:   # CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
   constraints:
     - no broader control-envelope refactor
     - this REVIEW supersedes any PASS for the prior semantics
+
+admission_004:   # CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004
+  reviewed_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb
+  outcome: PASS
+  review_status: ACCEPT_FOR_ADMISSION
+  required_completion:
+    - record Copilot NOT_RUN quota_exhausted at d42659b7 (review 5370148236) and ChatGPT PASS at 44e894c6 (comment 5917653398) in semantic_review
+    - preserve source_head 44e894c6; every commit after it stays control-only
+    - rerun the required exact-head workflows on the resulting PR head
+    - RETURN once under a new unique message_id after searching all of #80
+  constraints:
+    - no change to packet semantics
+    - no merge, application work, production or provider effects
+    - the duplicate-message-id and stale programme-state defects are accepted follow-on work, released after this packet's checkpoint
 
 approved_reviewers:
   primary: copilot (copilot-pull-request-reviewer[bot])
