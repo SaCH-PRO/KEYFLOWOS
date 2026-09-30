@@ -1,6 +1,6 @@
 packet_id: KF-META-BRANCH-ROLES-001
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
-source_head: 2b3b8d31ec2a05eeb6de328e2f1915cc9d365b91
+source_head: dc1c533c05523b4f8a56d3658baf985dff22953c
 implementation_branch: impl/kf-meta-branch-roles-001
 state: PROVING
 health: GREEN
