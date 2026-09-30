@@ -97,6 +97,28 @@ export const NOT_RUN_REASONS = Object.freeze(['capacity_exhausted', 'quota_exhau
 /** The body GitHub's Copilot bot posts when it could not review. */
 export const COPILOT_UNAVAILABLE = /\bunable to review\b/i;
 
+/**
+ * Machine-verifiable primary-unavailable reasons.
+ *
+ * The artifact never gets to choose one of these by declaration alone. The
+ * reason is derived from the cited live Copilot review body and then compared
+ * with the recorded reason. Unknown "unable to review" prose fails closed and
+ * does not authorize fallback.
+ */
+const COPILOT_NOT_RUN_REASON_PATTERNS = Object.freeze([
+  Object.freeze({ reason: 'quota_exhausted', pattern: /\b(?:reached|exceeded|hit)?\s*(?:their\s+|the\s+)?quota(?:\s+limit)?\b|\bquota\s+(?:is\s+)?exhausted\b/i }),
+  Object.freeze({ reason: 'capacity_exhausted', pattern: /\bcapacity\b|\bresource(?:s)?\s+exhausted\b/i }),
+  Object.freeze({ reason: 'service_unavailable', pattern: /\bservice\s+unavailable\b|\btemporar(?:y|ily)\s+unavailable\b|\btry\s+again\s+later\b/i }),
+]);
+
+function copilotNotRunReason(body) {
+  if (!COPILOT_UNAVAILABLE.test(body)) return null;
+  for (const candidate of COPILOT_NOT_RUN_REASON_PATTERNS) {
+    if (candidate.pattern.test(body)) return candidate.reason;
+  }
+  return null;
+}
+
 /** The finding count in a Copilot review overview ("**Findings:** 1"). */
 const COPILOT_FINDINGS = /\*\*Findings:\*\*\s*(\d+)/i;
 
@@ -143,9 +165,11 @@ export function copilotReviewEvidence(review) {
   if (identity(login) !== REVIEW_PROVIDERS.copilot.reviewer || review?.user?.type !== 'Bot') return null;
   const body = String(review.body || '');
   const findings = body.match(COPILOT_FINDINGS);
+  const status = COPILOT_UNAVAILABLE.test(body) ? 'NOT_RUN' : 'REVIEWED';
   return {
     commit_id: review.commit_id ?? null,
-    status: COPILOT_UNAVAILABLE.test(body) ? 'NOT_RUN' : 'REVIEWED',
+    status,
+    reason: status === 'NOT_RUN' ? copilotNotRunReason(body) : null,
     findings: findings ? Number(findings[1]) : null,
     url: review.html_url ?? null,
   };
@@ -236,23 +260,68 @@ function liveProblem(entry, live) {
   const provider = identity(entry.provider);
   if (provider === 'copilot') {
     const atHead = (live.copilot || []).filter((r) => r && r.commit_id === entry.reviewed_head);
-    const reviewed = atHead.some((r) => r.status === 'REVIEWED');
-    const notRun = atHead.some((r) => r.status === 'NOT_RUN');
+    const cited = atHead.filter((r) => r.url === entry.evidence_location);
+    if (!cited.length) {
+      return fail(R.LIVE_EVIDENCE_MISSING, {
+        provider,
+        reviewed_head: entry.reviewed_head,
+        evidence_location: entry.evidence_location,
+      });
+    }
+
+    const reviewedAtHead = atHead.some((r) => r.status === 'REVIEWED');
+    const citedReviewed = cited.filter((r) => r.status === 'REVIEWED');
+    const citedNotRun = cited.filter((r) => r.status === 'NOT_RUN');
+
     if (entry.outcome === 'PASS') {
-      const reported = Math.max(0, ...atHead.filter((r) => r.status === 'REVIEWED').map((r) => Number(r.findings) || 0));
+      if (!citedReviewed.length) {
+        const liveStatus = citedNotRun.length ? 'NOT_RUN' : 'UNKNOWN';
+        return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: 'PASS', live: liveStatus });
+      }
+      if (citedReviewed.some((r) => !Number.isInteger(r.findings) || r.findings < 0)) {
+        return fail(R.LIVE_EVIDENCE_CONTRADICTS, {
+          provider,
+          evidence_location: entry.evidence_location,
+          live: 'UNPARSEABLE_FINDINGS',
+        });
+      }
+      const reported = Math.max(...citedReviewed.map((r) => r.findings));
       if (entry.dispositioned_findings.length < reported) {
         return fail(R.UNDISPOSITIONED_FINDINGS, { provider, reported, dispositioned: entry.dispositioned_findings.length });
       }
-    }
-    if (entry.outcome === 'NOT_RUN') {
-      // A real Copilot review at this head would be hidden by calling it NOT_RUN.
-      if (reviewed) return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: 'NOT_RUN', live: 'REVIEWED' });
-      if (!notRun) return fail(R.LIVE_EVIDENCE_MISSING, { provider, reviewed_head: entry.reviewed_head });
       return null;
     }
-    if (reviewed) return null;
-    if (notRun) return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: entry.outcome, live: 'NOT_RUN' });
-    return fail(R.LIVE_EVIDENCE_MISSING, { provider, reviewed_head: entry.reviewed_head });
+
+    if (entry.outcome === 'NOT_RUN') {
+      // If Copilot actually reviewed the head, fallback cannot be authorized by
+      // citing a separate unavailable review at the same head.
+      if (reviewedAtHead) {
+        return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: 'NOT_RUN', live: 'REVIEWED' });
+      }
+      if (!citedNotRun.length) {
+        return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: 'NOT_RUN', live: 'UNKNOWN' });
+      }
+      const reasons = new Set(citedNotRun.map((r) => r.reason).filter(Boolean));
+      if (!reasons.size) {
+        return fail(R.LIVE_EVIDENCE_CONTRADICTS, {
+          provider,
+          recorded_reason: entry.reason,
+          live_reason: null,
+          evidence_location: entry.evidence_location,
+        });
+      }
+      if (reasons.size !== 1 || !reasons.has(entry.reason)) {
+        return fail(R.LIVE_EVIDENCE_CONTRADICTS, {
+          provider,
+          recorded_reason: entry.reason,
+          live_reason: reasons.size === 1 ? [...reasons][0] : [...reasons],
+          evidence_location: entry.evidence_location,
+        });
+      }
+      return null;
+    }
+
+    return fail(R.LIVE_EVIDENCE_CONTRADICTS, { provider, recorded: entry.outcome, live: cited.map((r) => r.status) });
   }
   const matches = (live.chatgpt || []).filter((r) => r && r.url === entry.evidence_location);
   if (!matches.length) return fail(R.LIVE_EVIDENCE_MISSING, { provider, evidence_location: entry.evidence_location });
