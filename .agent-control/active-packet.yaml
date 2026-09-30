@@ -7,13 +7,16 @@ continue_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
 continue_review_comment_id: 5881457102
 live_evidence_fix_directive_message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
 live_evidence_fix_directive_comment_id: 5889027553
-in_reply_to: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
-ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
-ack_comment_id: 5896173916
+correction_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
+correction_review_comment_id: 5901320677
+in_reply_to: CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
+ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-CORRECTION-003
+ack_comment_id: 5916562968
 prior_ack_message_ids:
   - CC-ACK-META-AI-REVIEW-FAILOVER-001
   - CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001   # 5881559355
   - CC-ACK-META-AI-REVIEW-FAILOVER-ADMIT-001
+  - CC-ACK-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001   # 5896173916
 contradiction_message_ids:
   - CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-001         # 5876793708
   - CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001   # 5887342673
@@ -22,7 +25,7 @@ implementation_branch: impl/kf-meta-ai-review-failover-001
 state: PROVING
 health: GREEN
 scope_changed: true
-scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A, Kimi removed, admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102; CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001 / 5889027553 (bounded live-evidence correction)
+scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A, Kimi removed, admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102; CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001 / 5889027553 (bounded live-evidence correction); CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003 / 5901320677 (Copilot evidence binding F1-F3)
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
@@ -69,6 +72,24 @@ live_evidence_fix:   # CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-00
     - no broader refactor of control-envelope or review architecture
     - do not record ACCEPT_FOR_ADMISSION against ae3e1d2b
     - the queued closed-loop/memory/KEY architecture work does not start until this packet is admitted and checkpointed
+
+correction_003:   # CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
+  reviewed_head: 7fe3db96d431d5cedb09e25cf1b45fe299cb2e59
+  outcome: CHANGES_REQUIRED
+  findings:
+    - CG104-F1-COPILOT-EVIDENCE-LOCATION: bind each Copilot record to the live review at reviewed_head and evidence_location
+    - CG104-F2-NOTRUN-REASON-LIVE-BINDING: derive the NOT_RUN reason from live evidence; unknown reasons never authorize fallback
+    - CG104-F3-UNPARSEABLE-FINDINGS-FAILOPEN: a Copilot PASS needs a parseable live finding count
+  required_proof:
+    - exact evidence_location mismatch negative control for Copilot
+    - live NOT_RUN reason mismatch and unknown-reason negative controls
+    - unparseable/missing Copilot finding-count negative control for PASS
+    - retain the REST html_url regression and all existing controls
+    - rerun portable suite, Windows suite and full proof-mutation manifest
+    - fresh semantic head, refreshed pre-RETURN artifacts and fresh exact-head workflows
+  constraints:
+    - no broader control-envelope refactor
+    - this REVIEW supersedes any PASS for the prior semantics
 
 approved_reviewers:
   primary: copilot (copilot-pull-request-reviewer[bot])
