@@ -3,13 +3,40 @@ source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
 source_head: dc1c533c05523b4f8a56d3658baf985dff22953c
 implementation_branch: impl/kf-meta-branch-roles-001
 state: PROVING
-health: GREEN
+health: YELLOW
 scope_changed: true
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
 merge_authority: false
+
+return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
+previous_return_message_ids: []
+never_posted_return_message_ids: []
+
 summary: >
-  Base-aware divergence and canonical branch-role policy foundation. Pre-return artifact only. Exact-head workflows and independent
-  semantic review remain required before admission.
+  Base-aware divergence and canonical branch-role policy foundation. This is a pre-RETURN record. Exact-head evidence and independent
+  semantic review remain pending and must be reported only after they execute
+  against the head carrying this artifact.
+
+exact_head_proof:
+  - gate: CI/CD Pipeline
+    status: PENDING
+  - gate: Agent Control Gate
+    status: PENDING
+  - gate: Branch divergence
+    status: PENDING
+  - gate: DAST (HawkScan)
+    status: PENDING
+  - gate: Agent Control Worker Proof
+    status: PENDING
+  - gate: fresh Copilot review
+    status: PENDING
+
+ci:
+  exact_head: PENDING
+
+next_action: >
+  Wait for exact-head evidence and independent review. Do not claim admission,
+  merge authority, production readiness or programme credit from this artifact.
