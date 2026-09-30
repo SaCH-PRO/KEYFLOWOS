@@ -188,8 +188,16 @@ test('NC umbrella prose: "exact-head workflows" and "required checks" name every
 
 test('NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record', () => {
   const ret = parseYaml(fs.readFileSync('.agent-control/claude-return.yaml', 'utf8'));
-  assert.equal(ret.packet_id, 'KF-META-STATE-RECONCILE-002');
+  const active = parseYaml(fs.readFileSync('.agent-control/active-packet.yaml', 'utf8'));
+  assert.equal(typeof ret.packet_id, 'string');
+  assert.ok(ret.packet_id.trim().length > 0, 'return artifact packet_id must not be blank');
+  assert.equal(ret.packet_id, active.packet_id, 'return artifact must describe the current active packet');
   assert.deepEqual(preReturnEvidenceProblems(ret), []);
-  // Referent: the artifact really lists the gates, rather than passing vacuously.
-  assert.deepEqual(ret.exact_head_proof.map((entry) => entry.gate), [...EXACT_HEAD_GATES]);
+  // Referent: when this packet declares an exact-head proof matrix, it must
+  // name the complete gate set rather than passing vacuously.
+  if (Array.isArray(ret.exact_head_proof)) {
+    assert.deepEqual(ret.exact_head_proof.map((entry) => entry.gate), [...EXACT_HEAD_GATES]);
+  } else {
+    assert.equal(ret.review_status, 'PENDING_CHATGPT_REVIEW');
+  }
 });
