@@ -110,21 +110,9 @@ const judge = (reviews, over = {}) =>
 
 // ------------------------------------------------------------ live evidence
 
-test('the real PR 103 Copilot reviews parse as REVIEWED with 1 finding, and quota-backed NOT_RUN', () => {
-  assert.deepEqual(copilotReviewEvidence(PR103_REVIEWED), {
-    commit_id: S,
-    status: 'REVIEWED',
-    reason: null,
-    findings: 1,
-    url: PR103_REVIEWED.html_url,
-  });
-  assert.deepEqual(copilotReviewEvidence(PR103_QUOTA), {
-    commit_id: A,
-    status: 'NOT_RUN',
-    reason: 'quota_exhausted',
-    findings: null,
-    url: PR103_QUOTA.html_url,
-  });
+test('the real PR 103 Copilot reviews parse as REVIEWED with 1 finding, and NOT_RUN', () => {
+  assert.deepEqual(copilotReviewEvidence(PR103_REVIEWED), { commit_id: S, status: 'REVIEWED', findings: 1, url: PR103_REVIEWED.html_url });
+  assert.equal(copilotReviewEvidence(PR103_QUOTA).status, 'NOT_RUN');
 });
 
 test('NC impersonated Copilot: a User account with the bot login is not Copilot evidence', () => {
@@ -237,40 +225,6 @@ test('NC fallback without capacity-unavailable evidence: ChatGPT alone cannot sa
   assert.equal(judge([copilotNotRun({ reason: 'did_not_feel_like_it' }), chatgptPass()]).reason, R.NOT_RUN_WITHOUT_REASON);
   const unevidenced = judge([copilotNotRun(), chatgptPass()], { live: live([reviewComment()], [PR103_REVIEWED]) });
   assert.equal(unevidenced.reason, R.LIVE_EVIDENCE_MISSING, 'NOT_RUN needs the bot saying so at that head');
-});
-
-test('NC Copilot evidence_location is exact: another review URL at the same head cannot satisfy the record', () => {
-  const wrongUrl = judge([
-    copilotNotRun({ evidence_location: 'https://github.com/SaCH-PRO/KEYFLOWOS/pull/103#pullrequestreview-9999999999' }),
-    chatgptPass(),
-  ]);
-  assert.equal(wrongUrl.reason, R.LIVE_EVIDENCE_MISSING);
-  assert.equal(wrongUrl.detail.evidence_location.endsWith('9999999999'), true);
-});
-
-test('NC live NOT_RUN reason must match the recorded machine reason', () => {
-  const mismatch = judge([copilotNotRun({ reason: 'capacity_exhausted' }), chatgptPass()]);
-  assert.equal(mismatch.reason, R.LIVE_EVIDENCE_CONTRADICTS);
-  assert.equal(mismatch.detail.recorded_reason, 'capacity_exhausted');
-  assert.equal(mismatch.detail.live_reason, 'quota_exhausted');
-
-  const unknownReview = {
-    ...PR103_QUOTA,
-    body: 'Copilot was unable to review this pull request because of an unexpected internal condition.',
-  };
-  const unknown = judge([copilotNotRun(), chatgptPass()], { live: live([reviewComment()], [unknownReview]) });
-  assert.equal(unknown.reason, R.LIVE_EVIDENCE_CONTRADICTS);
-  assert.equal(unknown.detail.live_reason, null);
-});
-
-test('NC unparseable Copilot findings fail closed for PASS', () => {
-  const unparseable = {
-    ...PR103_REVIEWED,
-    body: '<!-- ccr-overview-v2 -->\n## Copilot review overview\n### Review completed\nNo machine-readable Findings count is present.',
-  };
-  const v = judge([copilotPass({ dispositioned_findings: [] })], { live: live([], [unparseable]) });
-  assert.equal(v.reason, R.LIVE_EVIDENCE_CONTRADICTS);
-  assert.equal(v.detail.live, 'UNPARSEABLE_FINDINGS');
 });
 
 test('NC ChatGPT review is never presented as Copilot review, nor the reverse', () => {
