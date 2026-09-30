@@ -12,14 +12,23 @@ test('NC fake green: required security scans may not swallow failures', () => {
   assert.ok(security, 'security-scan job must exist');
   assert.ok(!/continue-on-error:\s*true/.test(security), 'Security Scan must fail the workflow when audit or secret scanning fails');
 
-  const dast = read('.github/workflows/hawkscan.yml');
-  assert.ok(!/continue-on-error:\s*true/.test(dast), 'required DAST may not swallow scanner failures');
+  const dast = read('.github/workflows/native-dast.yml');
+  assert.ok(!/continue-on-error:\s*true/.test(dast), 'required native DAST may not swallow scanner failures');
 });
 
-test('NC fake green: required DAST cannot succeed by skipping all scan steps', () => {
-  const dast = read('.github/workflows/hawkscan.yml');
-  assert.match(dast, /HAWK_API_KEY is absent[\s\S]*?exit 1/, 'missing DAST credentials must fail closed');
-  assert.ok(!/run=false/.test(dast), 'required DAST must not emit a green no-op state');
+test('NC fake green: native DAST is the required automatic gate and cannot green-no-op', () => {
+  const events = read('scripts/agent-control/lib/events.mjs');
+  assert.match(events, /'DAST \(Native\)'/, 'native DAST must be required for admission');
+  assert.ok(!events.includes("'DAST (HawkScan)'"), 'legacy HawkScan must not satisfy admission');
+
+  const native = read('.github/workflows/native-dast.yml');
+  assert.match(native, /pull_request:/, 'native DAST must run on pull requests');
+  assert.ok(!/continue-on-error:\s*true/.test(native), 'native DAST may not swallow failures');
+  assert.ok(!/run=false/.test(native), 'native DAST must not have a green no-op mode');
+
+  const hawk = read('.github/workflows/hawkscan.yml');
+  assert.match(hawk, /workflow_dispatch:/, 'legacy HawkScan remains manually runnable');
+  assert.ok(!/pull_request:/.test(hawk), 'legacy third-party HawkScan must not gate pull requests');
 });
 
 test('NC hidden skip: worker proof supplies an authenticated control channel on both platforms', () => {
