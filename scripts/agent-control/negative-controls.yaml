@@ -807,12 +807,13 @@ negative_controls:
 
   - id: NC-RETURN-ARTIFACT-PASS-PROSE
     claim: >
-      The prose rule runs on this branch's real claude-return.yaml, so the
-      6d8a6bd8 DAST sentence fails the portable suite at the exact head.
+      The prose rule runs on every packet's real claude-return.yaml using the
+      standardized exact-head evidence note, so a premature pass claim cannot
+      hide behind packet-specific prose.
     mutation:
       file: .agent-control/claude-return.yaml
-      find: "DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN."
-      replace: "DAST (HawkScan) is a required exact-head check and passed."
+      find: "evidence_note: \"CI/CD Pipeline evidence is PENDING until the RETURN.\""
+      replace: "evidence_note: \"CI/CD Pipeline passed.\""
     proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
     timeout_ms: 120000
 
