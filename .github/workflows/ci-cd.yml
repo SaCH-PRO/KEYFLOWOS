@@ -207,7 +207,6 @@ jobs:
 
       - name: Audit dependencies
         run: pnpm audit --audit-level high
-        continue-on-error: true
 
       - name: Secret scanning (trufflehog)
         uses: trufflesecurity/trufflehog@main
@@ -216,7 +215,6 @@ jobs:
           base: main
           head: HEAD
           extra_args: --debug --only-verified
-        continue-on-error: true
 
   build-server:
     name: Build Server
