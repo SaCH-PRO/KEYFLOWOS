@@ -1,6 +1,6 @@
 packet_id: KF-META-PROOF-INTEGRITY-001
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
-source_head: 311dc20fb754a735e6e5b7a6da2807f29d323e5e
+source_head: 2b5c0aee5bffb78603c44fc7339b35e82a532072
 implementation_branch: impl/kf-meta-proof-integrity-001
 state: PROVING
 health: YELLOW
@@ -16,9 +16,17 @@ previous_return_message_ids: []
 never_posted_return_message_ids: []
 
 summary: >
-  Proof-integrity hardening for swallowed failures, hidden skips and required-security evidence. This is a pre-RETURN record. Exact-head evidence and independent
-  semantic review remain pending and must be reported only after they execute
-  against the head carrying this artifact.
+  Proof-integrity hardening plus the native dynamic-security gate. This is a
+  pre-RETURN record; exact-head evidence and independent semantic review remain
+  pending and cannot be claimed from this artifact.
+
+evidence_note: "CI/CD Pipeline evidence is PENDING until the RETURN."
+
+proof_matrix:
+  - obligation: required exact-head checks
+    evidence_scope: exact_head
+    proof: PENDING until exact-head workflows execute against this artifact head
+    result: PENDING
 
 exact_head_proof:
   - gate: CI/CD Pipeline
@@ -27,7 +35,7 @@ exact_head_proof:
     status: PENDING
   - gate: Branch divergence
     status: PENDING
-  - gate: DAST (HawkScan)
+  - gate: DAST (Native)
     status: PENDING
   - gate: Agent Control Worker Proof
     status: PENDING
@@ -38,5 +46,5 @@ ci:
   exact_head: PENDING
 
 next_action: >
-  Wait for exact-head evidence and independent review. Do not claim admission,
-  merge authority, production readiness or programme credit from this artifact.
+  Execute every required proof on the exact head, run mutation controls, obtain
+  independent review, and report any failure without masking or substitution.
