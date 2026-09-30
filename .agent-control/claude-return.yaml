@@ -1,6 +1,6 @@
 packet_id: KF-META-NATIVE-DAST-001
 source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
-source_head: cb21b24aa139b1cbba6d51316ca56fe604a3c3cb
+source_head: dcdcf4fd92215f489555603e095921c8553111b7
 implementation_branch: impl/kf-meta-native-dast-001
 state: PROVING
 health: YELLOW
@@ -9,8 +9,34 @@ production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
 merge_authority: false
+
+return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
+previous_return_message_ids: []
+never_posted_return_message_ids: []
+
 summary: >
-  First native DAST layer added: real API boot, exact protected-route probes,
-  404-as-proof rejection, 5xx/internal leakage rejection and evaluator tests.
-  Coverage expansion remains required before replacing the existing DAST gate.
+  Native dynamic-security proof foundation with explicit coverage limits. This is a pre-RETURN record. Exact-head evidence and independent
+  semantic review remain pending and must be reported only after they execute
+  against the head carrying this artifact.
+
+exact_head_proof:
+  - gate: CI/CD Pipeline
+    status: PENDING
+  - gate: Agent Control Gate
+    status: PENDING
+  - gate: Branch divergence
+    status: PENDING
+  - gate: DAST (HawkScan)
+    status: PENDING
+  - gate: Agent Control Worker Proof
+    status: PENDING
+  - gate: fresh Copilot review
+    status: PENDING
+
+ci:
+  exact_head: PENDING
+
+next_action: >
+  Wait for exact-head evidence and independent review. Do not claim admission,
+  merge authority, production readiness or programme credit from this artifact.
