@@ -6,16 +6,12 @@
 # injection in a live route is invisible to it. HawkScan boots the API and
 # attacks it, which is the only way those show up.
 #
-# HONEST REQUIRED PROOF. If this workflow is counted as a required admission
-# check, it must either perform the scan and pass or fail visibly. Missing
-# credentials are a failed prerequisite, never a green no-op. KEYFLOWOS is
-# moving toward a native DAST replacement so admission will not depend on a
-# third-party service; until that replacement lands, this workflow fails closed.
+# LEGACY MANUAL SCANNER. Admission is gated by DAST (Native). This workflow is
+# retained only for optional manual comparison when StackHawk credentials
+# already exist. It never runs automatically and cannot satisfy admission.
 name: DAST (HawkScan)
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch: {}
 
 concurrency:
