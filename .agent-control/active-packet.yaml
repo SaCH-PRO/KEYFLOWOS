@@ -5,7 +5,9 @@ correction_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001
 correction_review_comment_id: 5963636295
 control_artifacts_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
 control_artifacts_review_comment_id: 5963957510
-in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
+correction_003_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003
+correction_003_review_comment_id: 5964146187
+in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003
 ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
 ack_comment_id: 5964147770
 prior_ack_message_ids:
@@ -65,6 +67,14 @@ control_artifacts_002:   # CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-0
     semantic head with rerun proof. Rerun the full proof and every required
     exact-head workflow; the Agent Control Gate must pass at the final head.
     RETURN once.
+
+correction_003:   # CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003
+  F1: non-canonical health fails closed with a named reducer finding before orchestration can act; live negative control
+  F2: the CLI end-to-end proof is deterministic through an explicit builder-readiness seam; DISPATCH_BUILDER after release and a later HOLD_SET wins
+  F3: run the architecture scanners and refresh the maps for authority-effects.mjs; never hand-edit generated output
+  F4: the programme diagnostic describes only the actual prohibition
+  F5: resolve the GitGuardian finding safely, never weakening secret scanning
+  completion: new semantic head; full portable, Windows and negative-control proof; regenerated architecture artifacts; fresh Copilot review; GitGuardian and every required exact-head check; RETURN once
 
 proof_obligations:
   - deterministic reducer tests

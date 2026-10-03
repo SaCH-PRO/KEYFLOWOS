@@ -5,6 +5,8 @@ correction_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001
 correction_review_comment_id: 5963636295
 control_artifacts_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
 control_artifacts_review_comment_id: 5963957510
+correction_003_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003
+correction_003_review_comment_id: 5964146187
 ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
 ack_comment_id: 5964147770
 prior_ack_message_ids:
@@ -23,8 +25,9 @@ return_message_id: null
 previous_return_message_ids: []
 never_posted_return_message_ids: []
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
-source_head: 194d42bf526826b9eebcc1a1d05d3f5d39e06c6b
+source_head: 340f3ae40d4d06ee2808a45a0c6f40cb2cc27892
 previous_source_heads:
+  - 194d42bf526826b9eebcc1a1d05d3f5d39e06c6b   # artifact head f064001d; 116/116 there; health mapped to null, superseded by CORRECTION-003 F1 fail-closed
   - fefbfc558de275654b2374d73af6de976ffab685   # validity fix (Copilot r4171049945); 115/116 there, NC-REDUCER-STOP-SKIPPED target moved, retargeted in 194d42bf (manifest only)
   - a5235ab387483d1731261c5f47946c1aee65590e   # host-independent RESUME CLI test; 114/114 controls live there (builder disabled); superseded by the validity fix (Copilot r4171049945)
   - dc462045b5551da9c90f41b40651d83d44c1f0f0   # semantic head of the first artifact (PR head d25779a5); one host-dependent test, fixed in a5235ab3
@@ -198,21 +201,29 @@ proof_matrix:
     evidence_scope: semantic_head
     proof: "CHECKPOINT credits only programme DAG packets"; programme-naming authority is unfoldable; NC-REDUCER-META-CREDIT live
     result: PROVEN
-  - obligation: the folded projection always satisfies the state contract (Copilot r4171049945)
+  - obligation: non-canonical health fails closed and the folded projection always satisfies the state contract (CORRECTION-003 F1)
     evidence_scope: semantic_head
     proof: >
-      "health outside the vocabulary is never projected" (AMBER, PURPLE, YELLOW)
+      "NC health outside the vocabulary fails closed" (PURPLE, AMBER, green on
+      packet and NO_STATE_CHANGE effects; GREEN, YELLOW, RED fold)
       and "the fold never hands decide() an invalid projection"; the programme
       diagnostic test covers r4171100288. NC-REDUCER-HEALTH-UNVALIDATED and
       NC-REDUCER-INVALID-PROJECTION are live.
     result: PROVEN
-  - obligation: architecture memory refreshed for the new module (AGENTS.md; Copilot r4171049954, r4171100183)
+  - obligation: architecture memory refreshed for the new module (CORRECTION-003 F3; AGENTS.md; Copilot r4171049954, r4171100183)
     evidence_scope: semantic_head
     proof: >
       Not done. The scanners are Python scripts that the unattended worker
       sandbox refuses to run; the generated maps were not hand-edited to
       imitate them. Open for an operator run or a ChatGPT ruling.
     result: NOT_RUN
+  - obligation: CLI end-to-end proof is environment-independent (CORRECTION-003 F2)
+    evidence_scope: semantic_head
+    proof: >
+      "orchestrate decides on the effective projection" uses the builder seam
+      and passes with the ambient adapter enabled, disabled, or pointing at a
+      missing binary; NC-REDUCER-CLI-STORED-PROJECTION live.
+    result: PROVEN
   - obligation: existing portable and Windows worker proof retained
     evidence_scope: semantic_head
     proof: see tests
@@ -231,7 +242,7 @@ proof_matrix:
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  at: 194d42bf   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
+  at: 340f3ae4   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
   host: Windows 11 with authenticated gh (Claude worker session, 2026-10-03)
   portable_total: 387
   portable_passed: 387
@@ -245,7 +256,7 @@ tests:
   skipped: 0
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 194d42bf
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 340f3ae4
   baseline_before_change: 97 controls in the manifest at 11053288
   added:
     - NC-REDUCER-HEALTH-UNVALIDATED   # Copilot r4171049945
@@ -270,10 +281,12 @@ negative_controls:
   retargeted:
     - NC-PROJECTION-OBSOLETE-ANCHOR now restores the RECONCILE-002 anchor over the new one
   result_at_semantic_head: >
-    116/116 live, 0 vacuous, at 194d42bf on a Windows host with KEYFLOW_AGENT_CLAUDE_DISABLED=1
+    116/116 live, 0 vacuous, at 340f3ae4 on a Windows host with KEYFLOW_AGENT_CLAUDE_DISABLED=1
     (the runner condition), including the 19
     NC-REDUCER controls, the retargeted NC-PROJECTION-OBSOLETE-ANCHOR and every
     tests/windows control.
+  previous_head_194d42bf: >
+    116/116 live, 0 vacuous.
   previous_head_fefbfc55: >
     115/116; NC-REDUCER-STOP-SKIPPED could not find its target after the guard edit.
   previous_head_a5235ab3: >
@@ -388,12 +401,25 @@ security:
 unresolved_contradictions: []
 review_findings_disposed:
   - id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
-    disposition: items 1-2 landed at d25779a5 and this file adds the REVIEW to the lineage; item 3 is three declared semantic commits (a5235ab3 test, fefbfc55 validity fix, 194d42bf control retarget) for defects found by exact-head CI and Copilot
-  - id: Copilot r4171049945 (HIGH, health)
-    disposition: corrected at fefbfc55 (semantic head 194d42bf); NC-REDUCER-HEALTH-UNVALIDATED, NC-REDUCER-INVALID-PROJECTION
+    disposition: items 1-2 landed at d25779a5 and this file adds the REVIEW to the lineage; item 3 is declared semantic commits a5235ab3, fefbfc55 and 194d42bf for defects found by exact-head CI and Copilot
+  - id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003 F1 and Copilot r4171049945 (HIGH, health)
+    disposition: non-canonical health fails closed as CONTROL_EFFECT_HEALTH_INVALID at 340f3ae4, plus the validateState() guard on every step; NC-REDUCER-HEALTH-UNVALIDATED, NC-REDUCER-INVALID-PROJECTION
+  - id: CORRECTION-003 F2 (environment-independent CLI proof)
+    disposition: KEYFLOW_CLAUDE_BIN stub seam at 340f3ae4; DISPATCH_BUILDER after RESUME, WAIT_AUTHORITY after a later HOLD_SET, WAIT_EXTERNAL_AGENT without the stub
+  - id: CORRECTION-003 F4
+    disposition: corrected at fefbfc55
+  - id: CORRECTION-003 F5 (GitGuardian incident 37827877)
+    disposition: >
+      False positive on recorded public #80 evidence: the nested
+      merge.authorized_exact_head value in comment 5876679691 is the public PR
+      103 head commit, not a credential. The line is elided at 340f3ae4 with
+      the parsed envelopes unchanged. It was introduced in de3ea0f6, which is
+      still in the branch history; see the RETURN for the scanner outcome.
+  - id: CORRECTION-003 F3
+    disposition: OPEN; the scanners cannot run in the worker sandbox
   - id: Copilot r4171100288 (low, diagnostic)
     disposition: corrected at fefbfc55
-  - id: Copilot r4171049954 and r4171100183 (low, architecture maps)
+  - id: Copilot r4171049954 and r4171100183 (low, architecture maps; CORRECTION-003 F3)
     disposition: OPEN; the worker sandbox cannot run the Python scanners; needs an operator run or a ChatGPT ruling
   - id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001 C1
     disposition: packet-keyed holds; NC-REDUCER-SINGLE-HOLD-LAW and NC-REDUCER-HOLD-DUPLICATE
