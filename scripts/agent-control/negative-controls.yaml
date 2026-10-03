@@ -863,7 +863,9 @@ negative_controls:
       file: .agent-control/programme-state.yaml
       find: "  message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001\n  comment_id: 5963509515"
       replace: "  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n  comment_id: 5875639550"
-    proof_command: node --test --test-name-pattern="recorded evidence" scripts/agent-control/tests/reconcile.spec.mjs
+    # The committed-checkpoint recorded-evidence proof moved to authority-effects.spec;
+    # reconcile.spec's recorded test now replays the RECONCILE-002 checkpoint in-test.
+    proof_command: node --test --test-name-pattern="the committed checkpoint folds the real typed" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
   - id: NC-RECONCILE-RECORDED-MALFORMED
@@ -1234,13 +1236,15 @@ negative_controls:
       applying later typed authority would let an untyped hold be outrun.
     mutation:
       file: scripts/agent-control/lib/authority-effects.mjs
+      # A block's first-line indent is stripped from every line; the find is
+      # matched as a substring, so later lines carry their source indentation.
       find: |-
             const applied = read.ok ? applyEffect(state, message, read, options) : read;
-            if (!applied.ok) {
+                if (!applied.ok) {
       replace: |-
             const applied = read.ok ? applyEffect(state, message, read, options) : read;
-            if (!applied.ok) continue;
-            if (false) {
+                if (!applied.ok) continue;
+                if (false) {
     proof_command: node --test --test-name-pattern="NC untyped authority" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
@@ -1304,10 +1308,10 @@ negative_controls:
       file: scripts/agent-control/lib/authority-effects.mjs
       find: |-
             if (held) {
-              return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_HELD,
+                  return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_HELD,
       replace: |-
             if (false) {
-              return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_HELD,
+                  return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_HELD,
     proof_command: node --test --test-name-pattern="keeps ACTION-001 held" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
@@ -1319,10 +1323,10 @@ negative_controls:
       file: scripts/agent-control/lib/authority-effects.mjs
       find: |-
             if (held) {
-              return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_DUPLICATE,
+                  return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_DUPLICATE,
       replace: |-
             if (false) {
-              return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_DUPLICATE,
+                  return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_DUPLICATE,
     proof_command: node --test --test-name-pattern="NC holds are packet-bound" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 

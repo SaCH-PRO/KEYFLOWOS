@@ -146,7 +146,11 @@ test('the fold is pure: the checkpoint and the authority snapshot are never modi
 test('replay is idempotent: folding the effective projection again applies nothing and changes nothing', () => {
   const { base, comments } = lifecycle();
   const once = fold(base, comments);
+  // Referent: the first fold really applied the whole lifecycle, so "nothing applied" below is not vacuous.
+  assert.equal(once.blocked, null);
+  assert.deepEqual(once.applied.map((a) => a.effect), ['PACKET_CORRECTION', 'PACKET_ADMISSION', 'CHECKPOINT']);
   const twice = fold(once.state, comments);
+  assert.equal(twice.blocked, null);
   assert.equal(twice.applied.length, 0);
   assert.deepEqual(twice.state, once.state);
   assert.equal(twice.observed_generation, once.observed_generation);
