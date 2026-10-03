@@ -104,12 +104,19 @@ test('unsupported constructs throw instead of parsing to something wrong', () =>
   assert.throws(() => parseYaml('a:\n\tb: 1\n'), /tabs/);
 });
 
-test('the real control artifacts on this branch parse', () => {
+// Packet-agnostic since KF-META-STATE-REDUCER-LIVE-001, so the pin no longer
+// has to be retargeted on every packet: both artifacts expose one non-blank
+// packet_id, the same one.
+test('the real control artifacts on this branch parse and name the same packet', () => {
+  const ids = [];
   for (const file of ['.agent-control/active-packet.yaml', '.agent-control/claude-return.yaml']) {
     const doc = parseYaml(fs.readFileSync(file, 'utf8'));
-    assert.equal(doc.packet_id, 'KF-META-AI-REVIEW-FAILOVER-001', `${file} must expose packet_id`);
+    assert.equal(typeof doc.packet_id, 'string', `${file} must expose packet_id as text`);
+    assert.match(doc.packet_id, /^KF-[A-Z0-9-]+$/, `${file} packet_id must be a packet id`);
     assert.equal(typeof doc.production_touched, 'boolean', `${file} production_touched must be boolean`);
+    ids.push(doc.packet_id);
   }
+  assert.equal(ids[0], ids[1], 'active-packet.yaml and claude-return.yaml must describe the same packet');
 });
 
 test('the programme DAG parses and keeps its quoted wave key as a string', () => {

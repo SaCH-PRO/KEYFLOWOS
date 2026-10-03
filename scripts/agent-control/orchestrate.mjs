@@ -2,8 +2,10 @@
 /**
  * AUTO-ORCHESTRATOR entry point.
  *
- * Reads the derived programme-state, reconciles it against the newest #80
- * authority and repository truth, normalizes the incoming event, applies the
+ * Reads the derived programme-state (the reviewed checkpoint), folds newer
+ * typed #80 authority over it (lib/authority-effects.mjs), reconciles the
+ * effective projection against the newest #80 authority and repository truth,
+ * normalizes the incoming event, applies the
  * journal for replay safety, and prints the single next legal control action.
  * If the projection cannot be shown consistent the action is REPORT_DRIFT.
  *
@@ -41,13 +43,16 @@ function readEvent() {
 
 function main() {
   const repoRoot = process.cwd();
-  const state = loadState(repoRoot);
+  // The reviewed checkpoint as committed. It is never rewritten from authority.
+  const checkpoint = loadState(repoRoot);
   const dag = loadDag(repoRoot);
   const registry = defaultRegistry();
   const event = readEvent();
 
-  const duplicate = event ? hasProcessed(state, event.idempotency_key) : false;
-  const reconciliation = reconcileWithTruth(state, { truthFile: argValue('--truth-file') });
+  const duplicate = event ? hasProcessed(checkpoint, event.idempotency_key) : false;
+  const reconciliation = reconcileWithTruth(checkpoint, { truthFile: argValue('--truth-file'), dag });
+  // The effective projection: the checkpoint plus every newer typed authority effect.
+  const state = reconciliation.effective_state;
   const decision = decide({ state, reconciliation, event, dag, registry, duplicate });
 
   const output = {
@@ -60,7 +65,8 @@ function main() {
   };
 
   if (process.argv.includes('--apply') && event && !duplicate && event.actionable) {
-    const recorded = recordEvent(state, event, { action: decision.action, rule: 'AUTO-ORCHESTRATOR', result: decision.reason });
+    // Journal onto the checkpoint; the effective projection is never persisted.
+    const recorded = recordEvent(checkpoint, event, { action: decision.action, rule: 'AUTO-ORCHESTRATOR', result: decision.reason });
     if (recorded.recorded) {
       recorded.state.next_legal_action = { action: decision.action, reason: decision.reason, derived_at: new Date().toISOString() };
       saveState(recorded.state, repoRoot);

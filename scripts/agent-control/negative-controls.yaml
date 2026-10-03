@@ -855,12 +855,14 @@ negative_controls:
   - id: NC-PROJECTION-OBSOLETE-ANCHOR
     claim: >
       The committed projection is anchored to the newest authority in the
-      recorded #80 evidence. Restoring the obsolete 2026-09-25 anchor fails the
-      recorded-evidence proof.
+      recorded #80 evidence. Restoring the obsolete RECONCILE-002 anchor
+      (2026-09-28), which 13 untyped authority messages made stale, fails the
+      recorded-evidence proof. (Retargeted by KF-META-STATE-REDUCER-LIVE-001
+      from the 2026-09-25 anchor the RECONCILE-002 checkpoint replaced.)
     mutation:
       file: .agent-control/programme-state.yaml
-      find: "  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n  comment_id: 5875639550"
-      replace: "  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-001\n  comment_id: 5825443535"
+      find: "  message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001\n  comment_id: 5963509515"
+      replace: "  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n  comment_id: 5875639550"
     proof_command: node --test --test-name-pattern="recorded evidence" scripts/agent-control/tests/reconcile.spec.mjs
     timeout_ms: 120000
 
@@ -1208,4 +1210,239 @@ negative_controls:
       replace: |-
         const REVIEW_GATE_ALIAS = /(?!)/;
     proof_command: node --test --test-name-pattern="NC review alias" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  # --- typed authority effects folded live (KF-META-STATE-REDUCER-LIVE-001) ---
+
+  - id: NC-REDUCER-UNTYPED-INFERRED
+    claim: >
+      Authority without an explicit control_effect is never given a meaning.
+      Reading a missing effect as NO_STATE_CHANGE would let any untyped hold or
+      release advance the anchor silently.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          const effect = field(message, 'control_effect');
+      replace: |-
+          const effect = field(message, 'control_effect') ?? 'NO_STATE_CHANGE';
+    proof_command: node --test --test-name-pattern="NC untyped authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-STOP-SKIPPED
+    claim: >
+      The fold stops at the first message it cannot apply. Skipping it and
+      applying later typed authority would let an untyped hold be outrun.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            const applied = read.ok ? applyEffect(state, message, read, options) : read;
+            if (!applied.ok) {
+      replace: |-
+            const applied = read.ok ? applyEffect(state, message, read, options) : read;
+            if (!applied.ok) continue;
+            if (false) {
+    proof_command: node --test --test-name-pattern="NC untyped authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-MALFORMED-SKIPPED
+    claim: >
+      Malformed authority after the anchor stops the fold. Folding only the
+      valid messages would apply a typed effect that a malformed hold precedes.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              ? [...(Array.isArray(authority.candidates) ? authority.candidates : authority.messages || [])].sort(compareAuthorityOrder)
+      replace: |-
+              ? [...(authority.messages || [])].sort(compareAuthorityOrder)
+    proof_command: node --test --test-name-pattern="NC malformed authority after the anchor" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-TYPE-BINDING
+    claim: >
+      HOLD_SET only on a HOLD, HOLD_CLEAR only on a RESUME, and a HOLD or
+      RESUME carries nothing else; a REVIEW cannot clear a hold.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          if (!allowed.includes(effect)) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC unfoldable authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-PROGRAMME-FOLDED
+    claim: >
+      Authority naming programme or programme_action stops the fold; platform
+      activation is never derived by the reducer.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          for (const key of ['programme', 'programme_action']) {
+      replace: |-
+          for (const key of []) {
+    proof_command: node --test --test-name-pattern="NC unfoldable authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-HOLD-CLEAR-UNBOUND
+    claim: >
+      HOLD_CLEAR releases only a packet that has an active hold; a clear naming
+      another packet, or none held, fails closed.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            if (!held) {
+      replace: |-
+            if (false) {
+    proof_command: node --test --test-name-pattern="NC holds are packet-bound" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-HELD-PACKET-RELEASED
+    claim: >
+      A packet effect naming the held packet is a release in disguise and fails
+      closed; only an explicit RESUME HOLD_CLEAR releases KF-EXEC-ACTION-001.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            if (held) {
+              return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_HELD,
+      replace: |-
+            if (false) {
+              return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_HELD,
+    proof_command: node --test --test-name-pattern="keeps ACTION-001 held" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-HOLD-DUPLICATE
+    claim: >
+      A duplicate HOLD_SET on a packet that is already held fails closed rather
+      than silently replacing the hold it duplicates (C1).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            if (held) {
+              return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_DUPLICATE,
+      replace: |-
+            if (false) {
+              return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_DUPLICATE,
+    proof_command: node --test --test-name-pattern="NC holds are packet-bound" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-SINGLE-HOLD-LAW
+    claim: >
+      Holds are packet-keyed: a hold on packet A does not make a valid effect
+      for unrelated packet B unfoldable, and several packets may be held at
+      once (CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001, C1).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          const held = holds[packet] && holds[packet].active !== false ? holds[packet] : null;
+      replace: |-
+          const held = Object.values(holds).find((h) => h && h.active !== false) || null;
+    proof_command: node --test --test-name-pattern="does not make a valid effect for unrelated packet B" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-REPLAY-REAPPLIES
+    claim: >
+      Only authority strictly newer than the anchor is folded, so replaying the
+      fold over its own result applies nothing.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          for (let i = index + 1; i < candidates.length; i += 1) {
+      replace: |-
+          for (let i = index; i < candidates.length; i += 1) {
+    proof_command: node --test --test-name-pattern="replay is idempotent" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-GENERATION-RENUMBERED
+    claim: >
+      A generation is a position among all authority candidates, malformed ones
+      included, so a later event keeps its generation when an earlier one turns
+      malformed. Numbering only the valid messages renumbers it (C2).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          const mark = (m, i) => ({ message_id: m.message_id ?? null, comment_id: m.comment_id ?? null, generation: i + 1, coordinate: coordinateOf(m) });
+      replace: |-
+          const mark = (m) => ({ message_id: m.message_id ?? null, comment_id: m.comment_id ?? null, generation: (authority.messages || []).indexOf(m) + 1, coordinate: coordinateOf(m) });
+    proof_command: node --test --test-name-pattern="NC generation is stable" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-ADMISSION-WITHOUT-PR
+    claim: >
+      An admission or a checkpoint is about a PR and must name it; only a
+      release or a correction may come before a PR exists.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        const PR_REQUIRED = Object.freeze(['PACKET_ADMISSION', 'CHECKPOINT']);
+      replace: |-
+        const PR_REQUIRED = Object.freeze([]);
+    proof_command: node --test --test-name-pattern="NC unfoldable authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-STATE-FROM-PROSE
+    claim: >
+      A packet effect projects its packet state from the effect, never from the
+      free-vocabulary state field (RELEASED, REVIEWED, QUEUED).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              state: PROJECTED_STATE[effect],
+      replace: |-
+              state: field(message, 'state'),
+    proof_command: node --test --test-name-pattern="packet effects project state from the effect" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-META-CREDIT
+    claim: >
+      CHECKPOINT credits only members of the programme DAG; a meta packet
+      checkpoint earns zero programme credit.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            if (effect === 'CHECKPOINT' && options.applicationPackets?.has(packet)) {
+      replace: |-
+            if (effect === 'CHECKPOINT') {
+    proof_command: node --test --test-name-pattern="CHECKPOINT credits only programme DAG packets" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-REPO-TRUTH-STORED
+    claim: >
+      Repository truth is read for the effective projection. Reading it for the
+      stored checkpoint would skip the PR checks that catch a folded CHECKPOINT
+      or ADMISSION the repository contradicts.
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: |-
+          const repo = typeof repoFor === 'function' ? repoFor(effective?.programme || {}) : repoFor;
+      replace: |-
+          const repo = typeof repoFor === 'function' ? repoFor(checkpoint?.programme || {}) : repoFor;
+    proof_command: node --test --test-name-pattern="NC repository contradictions still report drift" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-CLI-STORED-PROJECTION
+    claim: >
+      The orchestrator decides on the effective projection it reconciled.
+      Deciding on the stored checkpoint ignores an explicit RESUME HOLD_CLEAR.
+    mutation:
+      file: scripts/agent-control/orchestrate.mjs
+      find: |-
+          const state = reconciliation.effective_state;
+      replace: |-
+          const state = checkpoint;
+    proof_command: node --test --test-name-pattern="orchestrate decides on the effective projection" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-LIVE-FOLD-DISABLED
+    claim: >
+      The live path folds: with typed authority withheld from the reducer, an
+      observed typed REVIEW makes the committed checkpoint stale again, which is
+      the DERIVED_STATE_STALE_AUTHORITY deadlock this packet removes.
+    mutation:
+      file: scripts/agent-control/lib/truth.mjs
+      find: |-
+          return reconcileProjection(state, authority, truth.repoFor, { applicationPackets: applicationPacketsOf(dag) });
+      replace: |-
+          return reconcileProjection(state, { ...authority, candidates: [] }, truth.repoFor, { applicationPackets: applicationPacketsOf(dag) });
+    proof_command: node --test --test-name-pattern="orchestrate decides on the effective projection" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000

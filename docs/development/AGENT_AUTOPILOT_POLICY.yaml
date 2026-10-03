@@ -27,14 +27,20 @@ state_authority:
     author_allowlist: [SaCH-PRO]
     ordering: created_at, then comment id
   projection_anchor: programme-state.yaml#authority_basis
+  reducer: scripts/agent-control/lib/authority-effects.mjs   # KF-META-STATE-REDUCER-LIVE-001
   reconciler: scripts/agent-control/lib/reconcile.mjs
   on_disagreement: REPORT_DRIFT (fail closed; every finding surfaced)
+  control_effects: [NO_STATE_CHANGE, PACKET_RELEASE, PACKET_CORRECTION, PACKET_ADMISSION, CHECKPOINT, HOLD_SET, HOLD_CLEAR]
   rules:
     - the derived projection may summarize or accelerate a decision, never override newer authority or repository truth
-    - any valid authority message newer than the projection anchor makes the projection stale
-    - hold and release meaning is never inferred from message ids or prose; automation never applies a release
+    - programme-state.yaml is a reviewed checkpoint; the effective projection folds every newer authority message that declares an explicit control_effect over it, oldest first, at read time
+    - the fold stops at the first newer authority message that is untyped, unknown, malformed, conflicting, or names a programme; that message and every later one keep the projection stale
+    - hold and release meaning is never inferred from message ids or prose; only HOLD_SET on a HOLD sets a hold and only HOLD_CLEAR on a RESUME clears one
+    - holds are keyed by packet and several may be active; any active hold stops derived progression
+    - a generation is a position among all authority candidates, malformed ones included, so later messages are never renumbered
+    - the fold never activates a programme and never changes a safety flag
     - a projection that is unanchored, contradicted by the repository, or unverifiable advances nothing
-    - the projection is re-derived in a reviewed commit, never repaired by automation
+    - the effective projection is never written back; the checkpoint moves only in a reviewed commit
     - issue 80 is append-only; its history is the authority record
     - board drift is detected and reported, never followed
 

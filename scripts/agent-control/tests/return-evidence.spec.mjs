@@ -188,7 +188,11 @@ test('NC umbrella prose: "exact-head workflows" and "required checks" name every
 
 test('NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record', () => {
   const ret = parseYaml(fs.readFileSync('.agent-control/claude-return.yaml', 'utf8'));
-  assert.equal(ret.packet_id, 'KF-META-AI-REVIEW-FAILOVER-001');
+  // Referent: this is the artifact of the packet the branch declares (packet-agnostic since
+  // KF-META-STATE-REDUCER-LIVE-001, so the pin is not retargeted on every packet).
+  const active = parseYaml(fs.readFileSync('.agent-control/active-packet.yaml', 'utf8'));
+  assert.match(String(ret.packet_id), /^KF-[A-Z0-9-]+$/);
+  assert.equal(ret.packet_id, active.packet_id);
   assert.deepEqual(preReturnEvidenceProblems(ret), []);
   // Referent: the artifact really lists the gates, rather than passing vacuously.
   assert.deepEqual(ret.exact_head_proof.map((entry) => entry.gate), [...EXACT_HEAD_GATES]);
