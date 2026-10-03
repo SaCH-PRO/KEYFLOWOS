@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { emptyState, loadState, validateState } from '../lib/state.mjs';
+import { activeHolds, emptyState, loadState, saveState, validateState } from '../lib/state.mjs';
 import { decide, derivedDecision, ACTIONS } from '../lib/orchestrator.mjs';
 import { collectAuthority, reconcile, FINDINGS, AUTHORIZED_AUTHORS } from '../lib/reconcile.mjs';
 import { fetchRepoTruth, reconcileWithTruth } from '../lib/truth.mjs';
@@ -349,17 +349,26 @@ test('positive control: a consistent hold still outranks progression', () => {
 
 // ------------------------------------------------------------- THE COMMITTED PROJECTION
 
+/** The PR a checkpoint's programme implies: merged once CHECKPOINTED, open while in flight. */
+function prImpliedBy(p) {
+  if (!p.pr_number) return null;
+  const merged = p.state === 'CHECKPOINTED';
+  return { number: Number(p.pr_number), state: merged ? 'closed' : 'open', merged, head_ref: p.implementation_branch };
+}
+
 test('the committed programme-state is anchored, valid, and keeps ACTION-001 held', () => {
   const state = loadState(process.cwd());
   assert.equal(validateState(state).ok, true, JSON.stringify(validateState(state).problems));
   assert.equal(state.authority, 'derived-programme-projection');
   assert.ok(state.authority_basis?.message_id && state.authority_basis?.comment_id, 'projection must name its authority anchor');
-  assert.equal(state.hold?.active, true);
-  assert.equal(state.hold?.packet_id, 'KF-EXEC-ACTION-001');
+  // Packet-keyed since KF-META-STATE-REDUCER-LIVE-001 (C1); ACTION-001 is the one active hold.
+  assert.equal(state.holds?.['KF-EXEC-ACTION-001']?.active, true);
+  assert.equal(state.holds['KF-EXEC-ACTION-001'].packet_id, 'KF-EXEC-ACTION-001');
+  assert.deepEqual(activeHolds(state).map((h) => h.packet_id), ['KF-EXEC-ACTION-001']);
   assert.equal(state.programme.merge_authority, false);
   // CG-DIRECTIVE-META-STATE-RECONCILE-002 required_truth.
   assert.deepEqual(state.programme.checkpointed, CHECKPOINTED_BEFORE, 'only admitted application packets earn credit');
-  for (const meta of ['KF-META-AUTO-001', 'KF-META-CONTROL-PARSER-001', 'KF-META-STATE-RECONCILE-002', 'KF-META-AI-REVIEW-FAILOVER-001']) {
+  for (const meta of ['KF-META-AUTO-001', 'KF-META-CONTROL-PARSER-001', 'KF-META-STATE-RECONCILE-002', 'KF-META-AI-REVIEW-FAILOVER-001', 'KF-META-STATE-REDUCER-LIVE-001']) {
     assert.ok(!state.programme.checkpointed.includes(meta), `the meta-package ${meta} earns zero packet credit`);
   }
   assert.equal(state.programme.application_frontier, 'KF-EXEC-ACTION-001');
@@ -368,12 +377,9 @@ test('the committed programme-state is anchored, valid, and keeps ACTION-001 hel
     assert.equal(state.safety?.[flag], false, `${flag} must stay false`);
   }
 
-  // Consistent with its own anchor and with a merged PR: the hold still wins.
+  // Consistent with its own anchor and with its PR in the state the checkpoint implies: the hold still wins.
   const anchor = chatgpt('DIRECTIVE', state.authority_basis.message_id, 'KF-META-AUTO-001', { id: state.authority_basis.comment_id });
-  const pr = state.programme.pr_number
-    ? { number: state.programme.pr_number, state: 'closed', merged: true, head_ref: state.programme.implementation_branch }
-    : null;
-  const rec = verdict(state, [anchor], repo(pr));
+  const rec = verdict(state, [anchor], repo(prImpliedBy(state.programme)));
   assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
   assert.equal(run(state, rec).action, ACTIONS.WAIT_AUTHORITY);
 });
@@ -426,9 +432,12 @@ test('an unreadable control issue is AUTHORITY_UNVERIFIABLE, never "no newer aut
 
 test('the orchestrator CLI reconciles before deciding and never calls the ungated table', () => {
   const src = fs.readFileSync('scripts/agent-control/orchestrate.mjs', 'utf8');
-  assert.match(src, /reconcileWithTruth\(state/);
+  assert.match(src, /reconcileWithTruth\(checkpoint/);
+  // decide() sees exactly the projection that was reconciled (KF-META-STATE-REDUCER-LIVE-001).
+  assert.match(src, /const state = reconciliation\.effective_state;/);
   assert.match(src, /decide\(\{ state, reconciliation,/);
   assert.ok(!/derivedDecision/.test(src), 'orchestrate.mjs must not bypass the reconciliation gate');
+  assert.ok(!/saveState\(reconciliation|saveState\(state/.test(src), 'the effective projection is never persisted');
 });
 
 function cli(snapshot) {
@@ -451,9 +460,7 @@ test('CLI end to end: a newer #80 message makes the committed projection report 
   const state = loadState(process.cwd());
   const anchor = chatgpt('DIRECTIVE', state.authority_basis.message_id, 'KF-META-AUTO-001', { id: state.authority_basis.comment_id, at: '2026-09-25T02:00:11Z' });
   const newer = chatgpt('REVIEW', 'CG-REVIEW-LATER', 'KF-META-AUTO-001', { id: Number(state.authority_basis.comment_id) + 1, at: '2026-09-25T09:00:00Z' });
-  const pr = state.programme.pr_number
-    ? { number: state.programme.pr_number, state: 'closed', merged: true, head_ref: state.programme.implementation_branch }
-    : null;
+  const pr = prImpliedBy(state.programme);
 
   const consistent = cli({ comments: [anchor], repo: repo(pr) });
   assert.equal(consistent.reconciliation.consistent, true, JSON.stringify(consistent.reconciliation.findings));
@@ -473,9 +480,46 @@ test('CLI end to end: a newer #80 message makes the committed projection report 
 // repository truth for main 9c8e4979 and PR 100, recorded at re-derivation.
 const RECORDED = 'scripts/agent-control/fixtures/reconcile-002-truth.json';
 
-test('recorded evidence: the committed projection reconciles on real #80 and main 9c8e4979, and stays held', () => {
-  const recorded = JSON.parse(fs.readFileSync(RECORDED, 'utf8'));
+// The RECONCILE-002 checkpoint as it was committed at 4eba59eb. Since
+// KF-META-STATE-REDUCER-LIVE-001 the committed checkpoint is anchored later
+// (authority-effects.spec "recorded evidence (reducer)"), so this replay
+// rebuilds the older one; its file is written for the CLI to read.
+function reconcile002Checkpoint() {
   const state = loadState(process.cwd());
+  state.authority_basis = { message_id: 'CG-DIRECTIVE-META-STATE-RECONCILE-002', comment_id: 5875639550 };
+  Object.assign(state.programme, {
+    active_packet: 'KF-META-CONTROL-PARSER-001',
+    state: 'CHECKPOINTED',
+    source_main: '71a534b8944f4bb4191c9123e64a93e87c6db9d4',
+    implementation_branch: 'impl/kf-meta-control-parser-001',
+    pr_number: 100,
+  });
+  return state;
+}
+
+function cliAt(state, snapshot) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-root-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.agent-control'));
+    fs.mkdirSync(path.join(dir, 'docs', 'development'), { recursive: true });
+    fs.copyFileSync('docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml', path.join(dir, 'docs', 'development', 'KEYFLOWOS_PROGRAMME_DAG.yaml'));
+    saveState(state, dir, { now: '2026-09-28T18:06:18Z' });
+    const file = path.join(dir, 'truth.json');
+    fs.writeFileSync(file, JSON.stringify(snapshot));
+    const env = { ...process.env };
+    delete env.GITHUB_EVENT_NAME;
+    delete env.GITHUB_EVENT_PATH;
+    const res = spawnSync(process.execPath, [path.resolve('scripts/agent-control/orchestrate.mjs'), '--json', '--truth-file', file], { encoding: 'utf8', env, cwd: dir });
+    assert.equal(res.status, 0, res.stderr);
+    return JSON.parse(res.stdout);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('recorded evidence: the RECONCILE-002 checkpoint reconciles on real #80 and main 9c8e4979, and stays held', () => {
+  const recorded = JSON.parse(fs.readFileSync(RECORDED, 'utf8'));
+  const state = reconcile002Checkpoint();
 
   // The real directive parses as valid authority through the shared parser, and it is the anchor.
   const authority = collectAuthority(recorded.comments);
@@ -485,6 +529,7 @@ test('recorded evidence: the committed projection reconciles on real #80 and mai
   assert.equal(recorded.repo.pr.number, state.programme.pr_number);
   assert.equal(recorded.repo.pr.head_ref, state.programme.implementation_branch);
 
+  const cli = (snapshot) => cliAt(state, snapshot);
   const out = cli(recorded);
   assert.equal(out.reconciliation.consistent, true, JSON.stringify(out.reconciliation.findings));
   assert.equal(out.decision.action, ACTIONS.WAIT_AUTHORITY, 'ACTION-001 stays held');

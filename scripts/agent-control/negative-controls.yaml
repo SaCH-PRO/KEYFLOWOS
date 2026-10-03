@@ -855,13 +855,18 @@ negative_controls:
   - id: NC-PROJECTION-OBSOLETE-ANCHOR
     claim: >
       The committed projection is anchored to the newest authority in the
-      recorded #80 evidence. Restoring the obsolete 2026-09-25 anchor fails the
-      recorded-evidence proof.
+      recorded #80 evidence. Restoring the obsolete
+      CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 anchor, whose fold stops at the
+      malformed CORRECTION-004, fails the recorded-evidence recovery proof.
+      (Retargeted by CONTRACT-CORRECTION-008 C8-F2; earlier it restored the
+      RECONCILE-002 anchor, and before that the 2026-09-25 one.)
     mutation:
       file: .agent-control/programme-state.yaml
-      find: "  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n  comment_id: 5875639550"
-      replace: "  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-001\n  comment_id: 5825443535"
-    proof_command: node --test --test-name-pattern="recorded evidence" scripts/agent-control/tests/reconcile.spec.mjs
+      find: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008\n  comment_id: 5965390363"
+      replace: "  message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001\n  comment_id: 5963509515"
+    # The committed-checkpoint recorded-evidence proof is the C8-F2 recovery test in
+    # authority-effects.spec; the previous checkpoints are replayed in-test.
+    proof_command: node --test --test-name-pattern="the committed checkpoint is re-derived at CONTRACT-CORRECTION-008" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
   - id: NC-RECONCILE-RECORDED-MALFORMED
@@ -1208,4 +1213,478 @@ negative_controls:
       replace: |-
         const REVIEW_GATE_ALIAS = /(?!)/;
     proof_command: node --test --test-name-pattern="NC review alias" scripts/agent-control/tests/return-evidence.spec.mjs
+    timeout_ms: 120000
+
+  # --- typed authority effects folded live (KF-META-STATE-REDUCER-LIVE-001) ---
+
+  - id: NC-REDUCER-UNTYPED-INFERRED
+    claim: >
+      Authority without an explicit control_effect is never given a meaning.
+      Reading a missing effect as NO_STATE_CHANGE would let any untyped hold or
+      release advance the anchor silently.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          const effect = field(message, 'control_effect');
+      replace: |-
+          const effect = field(message, 'control_effect') ?? 'NO_STATE_CHANGE';
+    proof_command: node --test --test-name-pattern="NC untyped authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-STOP-SKIPPED
+    claim: >
+      The fold stops at the first message it cannot apply. Skipping it and
+      applying later typed authority would let an untyped hold be outrun.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      # A block's first-line indent is stripped from every line; the find is
+      # matched as a substring, so later lines carry their source indentation.
+      find: |-
+            if (!applied.ok) {
+      replace: |-
+            if (!applied.ok) continue;
+                if (false) {
+    proof_command: node --test --test-name-pattern="NC untyped authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-MALFORMED-SKIPPED
+    claim: >
+      Malformed authority after the anchor stops the fold. Folding only the
+      valid messages would apply a typed effect that a malformed hold precedes.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              ? [...(Array.isArray(authority.candidates) ? authority.candidates : authority.messages || [])].sort(compareAuthorityOrder)
+      replace: |-
+              ? [...(authority.messages || [])].sort(compareAuthorityOrder)
+    proof_command: node --test --test-name-pattern="NC malformed authority after the anchor" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-TYPE-BINDING
+    claim: >
+      HOLD_SET only on a HOLD, HOLD_CLEAR only on a RESUME, and a HOLD or
+      RESUME carries nothing else; a REVIEW cannot clear a hold.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          if (!allowed.includes(effect)) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC unfoldable authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-PROGRAMME-FOLDED
+    claim: >
+      Authority naming programme or programme_action stops the fold; platform
+      activation is never derived by the reducer.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          for (const key of ['programme', 'programme_action']) {
+      replace: |-
+          for (const key of []) {
+    proof_command: node --test --test-name-pattern="NC unfoldable authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-HOLD-CLEAR-UNBOUND
+    claim: >
+      HOLD_CLEAR releases only a packet that has an active hold; a clear naming
+      another packet, or none held, fails closed.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            if (!held) {
+      replace: |-
+            if (false) {
+    proof_command: node --test --test-name-pattern="NC holds are packet-bound" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-HELD-PACKET-RELEASED
+    claim: >
+      A packet effect naming the held packet is a release in disguise and fails
+      closed; only an explicit RESUME HOLD_CLEAR releases KF-EXEC-ACTION-001.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            if (held) {
+                  return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_HELD,
+      replace: |-
+            if (false) {
+                  return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_HELD,
+    proof_command: node --test --test-name-pattern="keeps ACTION-001 held" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-HOLD-DUPLICATE
+    claim: >
+      A duplicate HOLD_SET on a packet that is already held fails closed rather
+      than silently replacing the hold it duplicates (C1).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            if (held) {
+                  return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_DUPLICATE,
+      replace: |-
+            if (false) {
+                  return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_DUPLICATE,
+    proof_command: node --test --test-name-pattern="NC holds are packet-bound" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-SINGLE-HOLD-LAW
+    claim: >
+      Holds are packet-keyed: a hold on packet A does not make a valid effect
+      for unrelated packet B unfoldable, and several packets may be held at
+      once (CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001, C1). Retargeted
+      by CORRECTION-010 C10-F3: the own-key hold read (A7-F1) replaced the
+      line this control mutated, so it reported VACUOUS on ae195643.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        const held = own && own.active !== false ? own : null;
+      replace: |-
+        const held = Object.values(holds).find((h) => h && h.active !== false) || null;
+    proof_command: node --test --test-name-pattern="does not make a valid effect for unrelated packet B" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-REPLAY-REAPPLIES
+    claim: >
+      Only authority strictly newer than the anchor is folded, so replaying the
+      fold over its own result applies nothing.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          for (let i = index + 1; i < candidates.length; i += 1) {
+      replace: |-
+          for (let i = index; i < candidates.length; i += 1) {
+    proof_command: node --test --test-name-pattern="replay is idempotent" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-GENERATION-RENUMBERED
+    claim: >
+      A generation is a position among all authority candidates, malformed ones
+      included, so a later event keeps its generation when an earlier one turns
+      malformed. Numbering only the valid messages renumbers it (C2).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          const mark = (m, i) => ({ message_id: m.message_id ?? null, comment_id: m.comment_id ?? null, generation: i + 1, coordinate: coordinateOf(m) });
+      replace: |-
+          const mark = (m) => ({ message_id: m.message_id ?? null, comment_id: m.comment_id ?? null, generation: (authority.messages || []).indexOf(m) + 1, coordinate: coordinateOf(m) });
+    proof_command: node --test --test-name-pattern="NC generation is stable" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-HEALTH-UNVALIDATED
+    claim: >
+      A typed effect whose health is outside GREEN/YELLOW/RED fails closed as
+      CONTROL_EFFECT_HEALTH_INVALID before it applies (CORRECTION-003 F1;
+      Copilot r4171049945).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          if (read.health !== null && !HEALTH.includes(read.health)) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC health outside the vocabulary" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-INVALID-PROJECTION
+    claim: >
+      Every folded step is checked against the state contract, and a step it
+      rejects stops the fold, so decide() never acts on an invalid projection.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          if (invalid.length) applied = { ok: false, ...problem(EFFECT_PROBLEMS.PROJECTION_INVALID, invalid.map((x) => x.code)) };
+      replace: |-
+          if (false) applied = null;
+    proof_command: node --test --test-name-pattern="a step the state contract rejects stops it" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-ADMISSION-WITHOUT-PR
+    claim: >
+      An admission or a checkpoint is about a PR and must name it; only a
+      release or a correction may come before a PR exists.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        const PR_REQUIRED = Object.freeze(['PACKET_ADMISSION', 'CHECKPOINT']);
+      replace: |-
+        const PR_REQUIRED = Object.freeze([]);
+    proof_command: node --test --test-name-pattern="NC unfoldable authority" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-STATE-FROM-PROSE
+    claim: >
+      A packet effect projects its packet state from the effect, never from the
+      free-vocabulary state field (RELEASED, REVIEWED, QUEUED).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              state: PROJECTED_STATE[effect],
+      replace: |-
+              state: field(message, 'state'),
+    proof_command: node --test --test-name-pattern="packet effects project state from the effect" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-META-CREDIT
+    claim: >
+      CHECKPOINT credits only members of the programme DAG; a meta packet
+      checkpoint earns zero programme credit.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            if (effect === 'CHECKPOINT' && options.applicationPackets?.has(packet)) {
+      replace: |-
+            if (effect === 'CHECKPOINT') {
+    proof_command: node --test --test-name-pattern="CHECKPOINT credits only programme DAG packets" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-REPO-TRUTH-STORED
+    claim: >
+      Repository truth is read for the effective projection. Reading it for the
+      stored checkpoint would skip the PR checks that catch a folded CHECKPOINT
+      or ADMISSION the repository contradicts.
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: |-
+          const repo = typeof repoFor === 'function' ? repoFor(effective?.programme || {}) : repoFor;
+      replace: |-
+          const repo = typeof repoFor === 'function' ? repoFor(checkpoint?.programme || {}) : repoFor;
+    proof_command: node --test --test-name-pattern="NC repository contradictions still report drift" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-CLI-STORED-PROJECTION
+    claim: >
+      The orchestrator decides on the effective projection it reconciled.
+      Deciding on the stored checkpoint ignores an explicit RESUME HOLD_CLEAR.
+    mutation:
+      file: scripts/agent-control/orchestrate.mjs
+      find: |-
+          const state = reconciliation.effective_state;
+      replace: |-
+          const state = checkpoint;
+    proof_command: node --test --test-name-pattern="orchestrate decides on the effective projection" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-LIVE-FOLD-DISABLED
+    claim: >
+      The live path folds: with typed authority withheld from the reducer, an
+      observed typed REVIEW makes the committed checkpoint stale again, which is
+      the DERIVED_STATE_STALE_AUTHORITY deadlock this packet removes.
+    mutation:
+      file: scripts/agent-control/lib/truth.mjs
+      find: |-
+          return reconcileProjection(state, authority, truth.repoFor, { applicationPackets: applicationPacketsOf(dag) });
+      replace: |-
+          return reconcileProjection(state, { ...authority, candidates: [] }, truth.repoFor, { applicationPackets: applicationPacketsOf(dag) });
+    proof_command: node --test --test-name-pattern="orchestrate decides on the effective projection" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-PRODUCTION-TOUCHED-FOLDED
+    claim: >
+      Authority carrying production_touched other than false stops the fold on
+      every effect, holds included. No effect projects the field, so without
+      the guard such a message would fold as untouched (Copilot r4171364250).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        if (touched !== 'false') {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="NC production_touched other than false" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-INHERITED-HOLD
+    claim: >
+      Holds are read by own key only, so an inherited name such as __proto__
+      or constructor is never an active hold, and an unmatched HOLD_CLEAR for
+      it fails closed (AUDIT-CORRECTION-007 A7-F1, Copilot r4171599236).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        const ownHold = (holds, packet) => (Object.hasOwn(holds, packet) ? holds[packet] : undefined);
+      replace: |-
+        const ownHold = (holds, packet) => holds[packet];
+    proof_command: node --test --test-name-pattern="an unmatched HOLD_CLEAR for an inherited name" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-HOLD-PROTO-SETTER
+    claim: >
+      A hold is written as an own data property, so a hold for the packet id
+      __proto__ is stored, never routed through the prototype setter (A7-F1).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        Object.defineProperty(holds, packet, { value: hold, enumerable: true, writable: true, configurable: true });
+      replace: |-
+        holds[packet] = hold;
+    proof_command: node --test --test-name-pattern="a hold for any non-blank packet id" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-PROTO-KEY
+    claim: >
+      The control-state YAML codec defines every mapping key as an own
+      property, so a checkpoint whose holds are keyed __proto__ round-trips
+      without prototype mutation (A7-F1 serialization path).
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+      replace: |-
+        out[key] = value;
+    proof_command: node --test --test-name-pattern="survives the checkpoint YAML round trip" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECOVERY-MALFORMED-SKIPPED
+    claim: >
+      Recovery past malformed authority is a reviewed re-anchor, never a skip
+      (C8-F2). On the real #80 recording, folding only valid messages would
+      carry the previous checkpoint past the malformed CORRECTION-004, and
+      would carry the new one past a later malformed message.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              ? [...(Array.isArray(authority.candidates) ? authority.candidates : authority.messages || [])].sort(compareAuthorityOrder)
+      replace: |-
+              ? [...(authority.messages || [])].sort(compareAuthorityOrder)
+    proof_command: node --test --test-name-pattern="recorded evidence .recovery." scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-RECORDED-UNMINIMIZED
+    claim: >
+      The recorded #80 evidence stays minimized to the column-0 lines the
+      parser reads (CORRECTION-004 C4-F2). A restored fence line changes no
+      parsed field, so only the minimality proof can notice it.
+    mutation:
+      file: scripts/agent-control/fixtures/reducer-live-truth.json
+      find: |-
+              "body": "message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n
+      replace: |-
+              "body": "```yaml\nmessage_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n
+    proof_command: node --test --test-name-pattern="every recorded body is only the column-0 lines" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-KEY-AMBIGUOUS
+    claim: >
+      The checkpoint codec writes a mapping key in the form its parser reads
+      back as the same key, so a hold keyed by a packet id such as ":" or
+      "a: b" survives a save and reload (CORRECTION-010 C10-F1, Copilot
+      r4171689174). Restoring the plain-key rule emits a line that fails to
+      parse or parses to another key.
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        const safeKey = formatKey(key);
+      replace: |-
+        const safeKey = PLAIN_SAFE.test(key) ? key : JSON.stringify(key);
+    proof_command: node --test --test-name-pattern="ambiguous packet id survives the checkpoint YAML round trip" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-KEY-AMBIGUOUS-ENVELOPE
+    claim: >
+      A colon-bearing packet id that arrives through the real #80 envelope is
+      held, saved, reloaded and cleared under the same key (C10-F1). The
+      packet-id vocabulary is not narrowed.
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        const safeKey = formatKey(key);
+      replace: |-
+        const safeKey = PLAIN_SAFE.test(key) ? key : JSON.stringify(key);
+    proof_command: node --test --test-name-pattern="a colon-bearing packet id folds from a real envelope" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-QUOTED-KEY-ESCAPE
+    claim: >
+      A plain key never starts with a quote, so a quoted scalar holding a
+      colon is read whole, as a quoted key or as a value, never split at the
+      colon inside it (C10-F1).
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        |(?!["'])[^:#]+?):
+      replace: |-
+        |[^:#]+?):
+    proof_command: node --test --test-name-pattern="mapping keys round-trip as the same keys" scripts/agent-control/tests/yaml.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-SEQUENCE-ITEM-KEYLIKE
+    claim: >
+      A sequence item the parser would read as "key: value" is quoted, so a
+      list of packet ids keeps an id such as "a: b" as text (C10-F1).
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        const ambiguous = scalar === null || (typeof item === 'string' && !scalar.startsWith('"') && matchKey(scalar) !== null);
+      replace: |-
+        const ambiguous = scalar === null;
+    proof_command: node --test --test-name-pattern="mapping keys round-trip as the same keys" scripts/agent-control/tests/yaml.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-ARTIFACTS-UNBOUND
+    claim: >
+      Admission binds the control artifacts to the PR being admitted. A pair
+      copied whole from another packet agrees with itself on packet, branch
+      and PR, and is still not eligible (CORRECTION-010 C10-F2, Copilot
+      r4171689190 and r4171689206).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (unbound.length) return fail(ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, unbound);
+      replace: |-
+        if (false) return fail(ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, unbound);
+    proof_command: node --test --test-name-pattern="NC stale artifacts" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-BRANCH-UNBOUND
+    claim: >
+      Each artifact's implementation_branch must equal the PR head_ref; two
+      artifacts agreeing on another branch are not bound (C10-F2).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (headRef === '' || branch !== headRef) {
+      replace: |-
+        if (headRef === '' || branch === '') {
+    proof_command: node --test --test-name-pattern="NC wrong branch" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-PR-NUMBER-UNBOUND
+    claim: >
+      An artifact that names a PR must name the one being admitted, so another
+      packet's pair with only its branch retargeted is not bound (C10-F2).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (declared !== undefined && declared !== null && text(declared) !== text(pr.number)) {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="NC wrong packet" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-PACKET-ID-SPLIT
+    claim: >
+      Both artifacts must name the same non-blank packet; artifacts that name
+      different packets are not bound (C10-F2).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (ids[0] !== '' && ids[1] !== '' && ids[0] !== ids[1]) {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="NC wrong packet" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-BRANCH-ARTIFACT-UNBOUND
+    claim: >
+      The suite binds the branch's own control artifacts by the admission
+      rule, and proves the rule rejects that same real pair for another PR,
+      so the branch-artifact check is not satisfied by mere agreement
+      (C10-F2, Copilot r4171689206).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (headRef === '' || branch !== headRef) {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="the real control artifacts on this branch parse and are bound" scripts/agent-control/tests/yaml.spec.mjs
     timeout_ms: 120000

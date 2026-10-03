@@ -51,7 +51,11 @@ export function emptyState() {
       merge_authority: false,
       production_touched: false,
     },
+    // Legacy single hold. Superseded by `holds`; still honoured when present.
     hold: null,
+    // Packet-keyed holds: {<packet_id>: {active, packet_id, reason, ...}}.
+    // Several packets may be held at once (KF-META-STATE-REDUCER-LIVE-001, C1).
+    holds: {},
     unresolved_contradictions: [],
     momentum: {
       operations_since_transition: 0,
@@ -88,6 +92,7 @@ export function normalizeState(raw) {
   state.momentum = { ...base.momentum, ...(raw?.momentum || {}) };
   state.correction = { ...base.correction, ...(raw?.correction || {}) };
   state.agents = { ...(raw?.agents || {}) };
+  state.holds = { ...(raw?.holds || {}) };
   state.programme.checkpointed = [...(state.programme.checkpointed || [])];
   state.unresolved_contradictions = [...(state.unresolved_contradictions || [])];
   state.processed_event_keys = [...(state.processed_event_keys || [])];
@@ -119,6 +124,14 @@ export function validateState(state) {
     && (typeof basis !== 'object' || !basis.message_id || basis.comment_id === undefined || basis.comment_id === null)) {
     problems.push({ code: 'AUTHORITY_BASIS_INVALID', detail: 'authority_basis must be {message_id, comment_id} or null' });
   }
+  for (const [key, hold] of Object.entries(state.holds || {})) {
+    if (!hold || typeof hold !== 'object' || hold.packet_id !== key) {
+      problems.push({ code: 'HOLD_KEY_MISMATCH', detail: `holds.${key} must be an object whose packet_id is ${key}` });
+    }
+  }
+  if (state.hold?.packet_id && Object.hasOwn(state.holds || {}, state.hold.packet_id)) {
+    problems.push({ code: 'HOLD_REPRESENTATION_AMBIGUOUS', detail: `${state.hold.packet_id} is in both hold and holds` });
+  }
   if (new Set(state.processed_event_keys).size !== state.processed_event_keys.length) {
     problems.push({ code: 'DUPLICATE_PROCESSED_KEYS', detail: 'processed_event_keys must be a set' });
   }
@@ -142,6 +155,19 @@ export function saveState(state, repoRoot = process.cwd(), options = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, stringifyYaml(out), 'utf8');
   return out;
+}
+
+/**
+ * Every active hold, packet-keyed holds first in packet order, then a legacy
+ * single `hold` (which may name no packet). Deterministic.
+ */
+export function activeHolds(state) {
+  const keyed = Object.keys(state?.holds || {})
+    .sort()
+    .map((key) => state.holds[key])
+    .filter((hold) => hold && hold.active !== false);
+  const legacy = state?.hold && state.hold.active !== false ? [state.hold] : [];
+  return [...keyed, ...legacy];
 }
 
 /** True when this exact underlying event has already been applied. */
@@ -217,6 +243,7 @@ export default {
   saveState,
   normalizeState,
   validateState,
+  activeHolds,
   hasProcessed,
   recordEvent,
   projectionDrift,

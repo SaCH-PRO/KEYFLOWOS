@@ -326,6 +326,28 @@ The repository gate enforces:
 
 If any non-control file changes after a RETURN is prepared, the implementer must advance `source_head`, refresh the return evidence, rerun required proof, and return to `PENDING_CHATGPT_REVIEW`.
 
+## Artifact binding rule
+
+(CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010, C10-F2)
+
+Two control artifacts that agree with each other prove nothing: a pair copied
+from another packet agrees too. The exact-head evaluator
+(`artifactBindingProblems` in `scripts/agent-control/lib/admission.mjs`)
+therefore binds both artifacts to the PR being admitted, before it reads
+anything else from them:
+
+- `active-packet.yaml` and `claude-return.yaml` each name a non-blank
+  `packet_id`, and it is the same one;
+- each artifact's `implementation_branch` equals the PR `head_ref`;
+- an artifact that declares `pr_number` declares this PR's number.
+
+Any failure is `control_artifacts_not_bound_to_pr`, and the detail names each
+artifact and field. No packet id or branch is hard-coded: the PR is the
+referent. A packet id is free text, so it is bound through the branch and PR
+number its artifacts declare, not by its spelling. The suite applies the same
+rule to the branch's own artifacts, against the PR GitHub names on an `impl/*`
+pull_request run.
+
 ## Layer 5 — unattended event orchestration
 
 The repository has an event-driven automation layer defined by
@@ -417,15 +439,120 @@ Rules:
   authority message than the anchor, a PR whose real state contradicts the
   projected state, a branch mismatch, a `source_main` not on main, a missing
   anchor, or anything that could not be read.
-- Hold and release meaning is never inferred. So far holds and resumes on #80
-  have been typed DIRECTIVE and distinguished only by id and prose. Any newer
-  authority message therefore makes the projection stale. A newer hold always
-  beats an older derived "advance", and automation never applies a release.
-- The projection is re-derived in a reviewed commit and re-anchored to the
-  newest authority. It is never repaired by automation. There is no automated
-  writer: `orchestrate.mjs --apply` only journals events. The projection is
-  expected to be stale between re-derivations, and the orchestrator waits
-  while it is.
+- Hold and release meaning is never inferred. Historically, holds and resumes
+  on #80 were typed DIRECTIVE and distinguished only by id and prose. A newer
+  authority message that declares no typed effect therefore still makes the
+  projection stale, and a newer hold always beats an older derived "advance".
+- `programme-state.yaml` is a reviewed checkpoint. Newer authority that
+  declares a typed effect is folded over it automatically (see "Typed authority
+  effects" below). The checkpoint itself moves only in a reviewed commit, and
+  is never repaired by automation. There is no automated writer:
+  `orchestrate.mjs --apply` only journals events, and the folded projection is
+  never written back.
+
+### Typed authority effects
+
+Set by CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 (packet
+KF-META-STATE-REDUCER-LIVE-001). It removes the recurring
+DERIVED_STATE_STALE_AUTHORITY deadlock: ordinary valid authority no longer
+needs a hand-written reconciliation PR to advance the projection.
+
+An authority message declares exactly one effect on its own line:
+
+```yaml
+control_effect: PACKET_CORRECTION
+pr_number: 110   # required by PACKET_ADMISSION and CHECKPOINT; optional before a PR exists
+```
+
+| Effect | Allowed on | Needs | Projects |
+|---|---|---|---|
+| `NO_STATE_CHANGE` | DIRECTIVE, REVIEW | nothing | only advances the anchor |
+| `PACKET_RELEASE` | DIRECTIVE | `packet_id`, `implementation_branch`, 40-hex `source_main`; `pr_number` optional | the packet, `CHARACTERIZING`; only when no packet is in flight (or the same packet is still `CHARACTERIZING`) |
+| `PACKET_CORRECTION` | DIRECTIVE, REVIEW | as above; `pr_number` optional (omitted keeps the projected PR) | `FIXING_PROOF_FAILURES`; the active packet only |
+| `PACKET_ADMISSION` | REVIEW | as above plus `pr_number`; `merge_authority: true` records the grant | `READY_TO_MERGE`; the active packet only |
+| `CHECKPOINT` | REVIEW | as above plus `pr_number` | `CHECKPOINTED`; credit only for packets in `KEYFLOWOS_PROGRAMME_DAG.yaml` |
+| `HOLD_SET` | HOLD | `packet_id` of a packet that is not already held | an active hold on that packet |
+| `HOLD_CLEAR` | RESUME | `packet_id` of a held packet | that packet's hold released |
+
+The rules:
+
+- **Order and generation.** `lib/authority-effects.mjs` folds, oldest first,
+  every authority message newer than the checkpoint's `authority_basis`.
+  Generations are stable: a message's generation is its 1-based position among
+  **all** authority candidates on #80, malformed ones included. A message that
+  turns malformed keeps its position, so no later message is ever renumbered,
+  and an edit makes the snapshot unverifiable, so nothing is numbered at all.
+  Each folded or unapplied message also reports its immutable coordinate,
+  `created_at#comment_id`. The fold is pure, so replaying it, or folding a
+  prefix and then the rest, gives the same projection.
+- **Holds are keyed by packet** (`holds: {<packet_id>: {...}}`), and several
+  packets may be held at once. A duplicate HOLD_SET on a held packet, or a
+  HOLD_CLEAR for a packet with no active hold, fails closed. A hold on one
+  packet never stops a valid effect for another. Execution policy stays
+  serialized: `decide()` waits while any hold is active. A legacy single
+  `hold` naming a packet is lifted into `holds` by the fold.
+- **State comes from the effect.** A packet's state is set by its effect, never
+  by the free-vocabulary `state:` field (RELEASED, REVIEWED, QUEUED). `health:`
+  must be GREEN, YELLOW, RED or absent. Any other value, AMBER included, fails
+  closed before the effect applies (`CONTROL_EFFECT_HEALTH_INVALID`). It is
+  never translated.
+- **Production safety is checked on every effect.** No effect projects
+  `production_touched`, so any value other than `false` fails closed, holds and
+  NO_STATE_CHANGE included (`CONTROL_EFFECT_PRODUCTION_TOUCHED`).
+- **Holds are own keys.** A packet id is any non-blank text, so `holds` is read
+  and written by own key only, and the control-state YAML codec defines every
+  mapping key as an own property. A packet named `__proto__` or `constructor`
+  is held and cleared like any other, and an unmatched HOLD_CLEAR for such a
+  name fails closed (`CONTROL_EFFECT_HOLD_MISMATCH`). The codec also writes a
+  key in the form its parser reads back as the same key: a packet id such as
+  `:`, `a:b`, `a: b` or `- z` is quoted, so a saved checkpoint reloads with
+  the same holds. The packet-id vocabulary is not narrowed for this.
+- **The projection stays valid.** Each folded step is checked with
+  `validateState()`. A step that the state contract rejects stops the fold
+  (`CONTROL_EFFECT_PROJECTION_INVALID`).
+- **The first unfoldable message stops the fold.** It and every later message
+  stay newer than the anchor, so `reconcile()` reports
+  DERIVED_STATE_STALE_AUTHORITY, with `blocked` naming the message and the
+  reason, or AUTHORITY_MALFORMED. A message is unfoldable when it:
+  - has no `control_effect`;
+  - has an unknown effect, or one its type cannot carry;
+  - is malformed;
+  - names `programme` or `programme_action`;
+  - is missing a required field;
+  - targets a packet that is not active;
+  - releases while another packet is in flight;
+  - names a different PR;
+  - names a held packet, duplicates a hold, or clears a hold that does not exist.
+
+  A later typed message cannot get past the stop. Edited or unorderable
+  authority never reaches the fold.
+- **Recovery is a reviewed re-anchor, never a skip.** #80 is append-only, so
+  a malformed message cannot be repaired in place. A reviewed commit
+  re-derives the whole checkpoint at a later valid authority message and sets
+  `authority_basis` to it. The malformed message is then older than the
+  anchor, so it becomes evidence only; a malformed message newer than the
+  anchor still stops the fold. CONTRACT-CORRECTION-008 did this past the
+  malformed CORRECTION-004 (5964575594).
+- **Authoring rule: keep prose off column 0 as `word:`.** The parser reads
+  every column-0 `key: value` line in a body as an envelope field, prose
+  included. A heading such as `Required:` that appears twice is a repeated
+  key, which makes the whole message malformed. That is what happened to
+  CORRECTION-004. Outside the envelope, write `**Required**`, a `###`
+  heading, or an indented line instead. The parser is not relaxed for this.
+- **Only HOLD_CLEAR releases a hold.** A packet effect that names the held
+  packet fails closed.
+- **The fold changes the projection, nothing else.** It never activates a
+  programme, never touches `safety`, and never resolves a contradiction.
+- **Repository truth is still checked.** `truth.mjs` reads repository truth for
+  the effective projection, and `reconcile()` checks it as before. A folded
+  CHECKPOINT whose PR did not merge is still PR_NOT_MERGED, and a merged PR
+  whose admission folded but whose CHECKPOINT has not been posted is
+  PR_ALREADY_MERGED.
+- **CLOSE carries no authority.** A checkpoint is therefore sent as a REVIEW
+  with `control_effect: CHECKPOINT`.
+- **Consumers.** `orchestrate.mjs` decides on the effective projection, and
+  `status.mjs --verify` renders it, with the checkpoint, the applied effects
+  and any stop.
 - The intelligence board is a durable projection too. Its CURRENT
   handoff/status may be refreshed at a checkpoint or an explicit hold so
   humans are not misled. `status.mjs` reports board drift, and neither

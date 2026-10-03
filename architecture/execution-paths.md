@@ -492,3 +492,58 @@ Key files:
 - `apps/server/src/core/connectors/connector.interface.ts`
 - `packages/api/src/routers/key-connector.ts`
 - `packages/db/src/middleware/token-encryption.ts`
+
+## 12. Agent Control Plane: Issue #80 Authority → Effective Programme Projection
+
+Added by KF-META-STATE-REDUCER-LIVE-001. `.agent-control/programme-state.yaml` is a reviewed checkpoint, anchored to one #80 authority message (`authority_basis`). The CLIs never decide on it directly. They decide on the checkpoint with every newer typed authority folded over it.
+
+```
+orchestrate.mjs / status.mjs --verify
+  → loadState() — the committed checkpoint (never rewritten from authority)
+  → reconcileWithTruth() (lib/truth.mjs)
+      → gatherTruth(): #80 comments via gh, or a recorded --truth-file snapshot
+      → collectAuthority() (lib/control-envelope.mjs) — parseEnvelope on every body;
+        an edited or unorderable snapshot is refused whole
+      → reconcileProjection() (lib/reconcile.mjs)
+          → reduceAuthority() (lib/authority-effects.mjs)
+              fold applyEffect, oldest first, over each valid authority message newer than
+              the anchor that declares `control_effect:`; stop at the first message that is
+              malformed, untyped, has an unknown or unauthorized effect, lacks a field its
+              effect needs, carries a non-canonical health or production_touched other
+              than false, conflicts with the projection (holds are read and written
+              by own key, so any non-blank packet id is safe),
+              names programme activation, or yields a projection validateState() rejects
+          → repoFor(effective programme) — repository truth for the folded projection
+          → reconcile(effective, authority, repo, reduction) — findings (a stopped fold
+            reports DERIVED_STATE_STALE_AUTHORITY naming the blocking message)
+  → decide({ state: effective_state, reconciliation, … }) (lib/orchestrator.mjs)
+  → --apply journals the event onto the checkpoint only; the effective projection is never persisted
+```
+
+The exact-head merge path is separate and does not read the projection:
+
+```
+auto-merge-admitted.mjs
+  → the PR, and both control artifacts at the PR head, via the GitHub API
+  → evaluateAdmission() (lib/admission.mjs)
+      → artifactBindingProblems() — both artifacts name one non-blank packet, each
+        implementation_branch is the PR head_ref, and a declared pr_number is this PR's;
+        a matching pair from another packet fails as control_artifacts_not_bound_to_pr
+      → review status, safety, source_main / source_head / control-only tail
+      → evaluateSemanticReview() (lib/semantic-review.mjs)
+      → proof, then the required workflows at the exact head
+```
+
+The checkpoint is read and written by `lib/yaml.mjs`. It defines every mapping key as an own property and writes a key in the form its parser reads back as the same key, so a hold keyed by any non-blank packet id survives a save and reload.
+
+Key files:
+
+- `scripts/agent-control/lib/authority-effects.mjs` — `CONTROL_EFFECTS`, `readEffect()`, `applyEffect()`, `reduceAuthority()`
+- `scripts/agent-control/lib/admission.mjs` — `evaluateAdmission()`, `artifactBindingProblems()`
+- `scripts/agent-control/lib/yaml.mjs` — `parseYaml()`, `stringifyYaml()`
+- `scripts/agent-control/lib/reconcile.mjs` — `reconcileProjection()`, `reconcile()`
+- `scripts/agent-control/lib/truth.mjs` — `gatherTruth()`, `reconcileWithTruth()`
+- `scripts/agent-control/lib/control-envelope.mjs` — `parseEnvelope()`, `collectAuthority()`
+- `scripts/agent-control/orchestrate.mjs`, `scripts/agent-control/status.mjs`
+- `.agent-control/programme-state.yaml` — the reviewed checkpoint
+- Contract: `docs/development/AGENT_CONTROL_PLANE.md`

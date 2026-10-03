@@ -5,12 +5,14 @@
  * Renders the derived programme-state and the static DAG. programme-state is a
  * projection, not authority: with --verify it is reconciled against the newest
  * #80 authority and repository truth (lib/reconcile.mjs) and every
- * disagreement is shown. Without --verify the status is labelled UNVERIFIED.
+ * disagreement is shown; the projection shown is then the reviewed checkpoint
+ * plus every newer typed authority effect (lib/authority-effects.mjs).
+ * Without --verify it is the checkpoint alone, labelled UNVERIFIED.
  *
  * Usage: node scripts/agent-control/status.mjs [--json] [--verify]
  */
 
-import { loadState, projectionDrift } from './lib/state.mjs';
+import { activeHolds, loadState, projectionDrift } from './lib/state.mjs';
 import { loadDag, selectNext } from './lib/dag.mjs';
 import { evaluateMomentum } from './lib/momentum.mjs';
 import { defaultRegistry, agentStatusReport } from './lib/adapters.mjs';
@@ -50,7 +52,9 @@ export function buildStatus(repoRoot = process.cwd(), options = {}) {
       production_touched: Boolean(p.production_touched),
       merge_authority: Boolean(p.merge_authority),
     },
-    hold: state.hold || null,
+    // First active hold, kept for existing readers; `holds` lists every one.
+    hold: activeHolds(state)[0] || null,
+    holds: activeHolds(state),
     contradictions: state.unresolved_contradictions || [],
     momentum: { alarm: momentum.alarm, reasons: momentum.reasons },
     agents: agentStatusReport(options.registry || defaultRegistry()),
@@ -81,6 +85,13 @@ export function renderHuman(status) {
   lines.push('='.repeat(60));
   const basis = status.authority_basis;
   lines.push(`Anchored to    : ${basis ? `${basis.message_id} (comment ${basis.comment_id})` : '(none -- unanchored)'}`);
+  const reduction = status.reconciliation?.reduction;
+  if (reduction?.started) {
+    lines.push(`Checkpoint     : ${reduction.checkpoint.message_id} (generation ${reduction.checkpoint_generation}); ${reduction.applied.length} typed effect(s) applied; observed generation ${reduction.observed_generation} of ${reduction.generation}`);
+    if (reduction.blocked) {
+      lines.push(`  fold stopped at ${reduction.blocked.message_id} (comment ${reduction.blocked.comment_id}): ${reduction.blocked.code}`);
+    }
+  }
   if (!status.reconciliation) {
     lines.push('Reconciliation : UNVERIFIED -- run with --verify; do not act on this projection alone');
   } else if (status.reconciliation.consistent) {
@@ -104,9 +115,9 @@ export function renderHuman(status) {
   lines.push(`Merge authority: ${ap.merge_authority ? 'GRANTED' : 'false (default)'}`);
   lines.push('');
 
-  if (status.hold) {
-    lines.push(`HOLD           : ${status.hold.reason || 'active'}`);
-    if (status.hold.resume_condition) lines.push(`  resume when : ${status.hold.resume_condition}`);
+  for (const hold of status.holds || []) {
+    lines.push(`HOLD           : ${hold.packet_id ? hold.packet_id + ' -- ' : ''}${hold.reason || 'active'}`);
+    if (hold.resume_condition) lines.push(`  resume when : ${hold.resume_condition}`);
     lines.push('');
   }
 
@@ -140,8 +151,10 @@ export function renderHuman(status) {
 const invokedDirectly = process.argv[1] && process.argv[1].endsWith('status.mjs');
 if (invokedDirectly) {
   try {
-    const state = loadState(process.cwd());
-    const reconciliation = process.argv.includes('--verify') ? reconcileWithTruth(state) : null;
+    const checkpoint = loadState(process.cwd());
+    const reconciliation = process.argv.includes('--verify') ? reconcileWithTruth(checkpoint) : null;
+    // Verified: the checkpoint plus newer typed authority. Unverified: the checkpoint, labelled so.
+    const state = reconciliation ? reconciliation.effective_state : checkpoint;
     const status = buildStatus(process.cwd(), { state, reconciliation });
     process.stdout.write(process.argv.includes('--json') ? JSON.stringify(status, null, 2) + '\n' : renderHuman(status) + '\n');
   } catch (error) {

@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseYaml } from '../lib/yaml.mjs';
 import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
+import { artifactBindingProblems, BINDING_PROBLEMS } from '../lib/admission.mjs';
+import { branchPr } from './helpers/branch-pr.mjs';
 import {
   preReturnEvidenceProblems,
   EXACT_HEAD_GATES,
@@ -188,7 +190,19 @@ test('NC umbrella prose: "exact-head workflows" and "required checks" name every
 
 test('NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record', () => {
   const ret = parseYaml(fs.readFileSync('.agent-control/claude-return.yaml', 'utf8'));
-  assert.equal(ret.packet_id, 'KF-META-AI-REVIEW-FAILOVER-001');
+  // Referent: this is the artifact of the packet this branch's PR implements. It is
+  // packet-agnostic since KF-META-STATE-REDUCER-LIVE-001, so no pin is retargeted on every
+  // packet, and it is bound by the admission rule, because a pair copied from another packet
+  // also agrees with itself (C10-F2, Copilot r4171689190).
+  const active = parseYaml(fs.readFileSync('.agent-control/active-packet.yaml', 'utf8'));
+  assert.match(String(ret.packet_id), /^KF-[A-Z0-9-]+$/);
+  assert.deepEqual(artifactBindingProblems({ pr: branchPr(active), active, ret }), []);
+  const stale = { packet_id: 'KF-STALE-PACKET-000', implementation_branch: 'impl/kf-stale-packet-000', pr_number: 0 };
+  assert.deepEqual(
+    artifactBindingProblems({ pr: branchPr(active), active: { ...active, ...stale }, ret: { ...ret, ...stale } }).map((p) => p.code),
+    [BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, BINDING_PROBLEMS.PR_NUMBER_NOT_THIS_PR, BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, BINDING_PROBLEMS.PR_NUMBER_NOT_THIS_PR],
+    'a matching pair from another packet is not this branch\'s artifact',
+  );
   assert.deepEqual(preReturnEvidenceProblems(ret), []);
   // Referent: the artifact really lists the gates, rather than passing vacuously.
   assert.deepEqual(ret.exact_head_proof.map((entry) => entry.gate), [...EXACT_HEAD_GATES]);
