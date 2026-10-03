@@ -1239,11 +1239,9 @@ negative_controls:
       # A block's first-line indent is stripped from every line; the find is
       # matched as a substring, so later lines carry their source indentation.
       find: |-
-            const applied = read.ok ? applyEffect(state, message, read, options) : read;
-                if (!applied.ok) {
+            if (!applied.ok) {
       replace: |-
-            const applied = read.ok ? applyEffect(state, message, read, options) : read;
-                if (!applied.ok) continue;
+            if (!applied.ok) continue;
                 if (false) {
     proof_command: node --test --test-name-pattern="NC untyped authority" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
