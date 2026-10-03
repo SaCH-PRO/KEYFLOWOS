@@ -531,6 +531,60 @@ test('a hold keyed by an inherited name survives the checkpoint YAML round trip 
   assert.deepEqual(validateState(reloaded).problems, []);
 });
 
+// Copilot r4171689174: stringifyYaml() wrote a key holding a colon plain, and
+// matchKey() then rejected the line or read another key from it.
+const AMBIGUOUS_KEYS = [':', 'a:b', 'a: b', 'a :b', 'KF-META-P: 2', '- z', '-', '1.50', '-007', 'null', '#x', 'a #b', '[x]', '{}', '>', '& a', 'say "hi": now', "it's: here", 'back\\slash: x', 'trailing '];
+
+test('NC a hold keyed by a colon-bearing or otherwise ambiguous packet id survives the checkpoint YAML round trip under the same key (C10-F1, Copilot r4171689174)', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const base = checkpoint(anchor);
+  const message = collectAuthority([anchor, typed('HOLD', 'CG-H', 'KF-META-P', 'HOLD_SET')]).newest;
+  const clearing = collectAuthority([anchor, typed('RESUME', 'CG-R', 'KF-META-P', 'HOLD_CLEAR')]).newest;
+  let all = base;
+  for (const packet of [...AMBIGUOUS_KEYS, ...INHERITED_KEYS]) {
+    const held = applyEffect(base, message, { ok: true, effect: 'HOLD_SET', packet_id: packet });
+    assert.equal(held.ok, true, packet);
+    const text = stringifyYaml(held.state);
+    const parsed = parseYaml(text);
+    assert.deepEqual(Object.keys(parsed.holds), [packet], `${JSON.stringify(packet)} reads back as the same single key`);
+    assert.equal(parsed.holds[packet].packet_id, packet);
+    assert.equal(stringifyYaml(parsed), text, `${JSON.stringify(packet)}: a second save is identical`);
+    const reloaded = normalizeState(parsed);
+    assert.deepEqual(reloaded, normalizeState(held.state), `${JSON.stringify(packet)}: the reloaded checkpoint is the saved one`);
+    assert.deepEqual(activeHolds(reloaded).map((h) => h.packet_id), [packet]);
+    assert.deepEqual(validateState(reloaded).problems, []);
+    // The reloaded hold is still the packet's own hold: a duplicate is refused and its RESUME clears it.
+    assert.equal(applyEffect(reloaded, message, { ok: true, effect: 'HOLD_SET', packet_id: packet }).code, EFFECT_PROBLEMS.HOLD_DUPLICATE, packet);
+    const cleared = applyEffect(reloaded, clearing, { ok: true, effect: 'HOLD_CLEAR', packet_id: packet });
+    assert.equal(cleared.ok, true, packet);
+    assert.deepEqual(activeHolds(cleared.state), []);
+    all = applyEffect(all, message, { ok: true, effect: 'HOLD_SET', packet_id: packet }).state;
+  }
+  // Every one of them at once: no key collides with, or is swallowed by, another.
+  const together = parseYaml(stringifyYaml(all));
+  assert.deepEqual(Object.keys(together.holds), [...AMBIGUOUS_KEYS, ...INHERITED_KEYS]);
+  assert.equal(Object.getPrototypeOf(together.holds), Object.prototype);
+  assert.deepEqual(normalizeState(together), normalizeState(all));
+});
+
+test('a colon-bearing packet id folds from a real envelope and survives the round trip (C10-F1)', () => {
+  // The packet-id vocabulary is not narrowed: these arrive through the #80 envelope parser as written.
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  for (const packet of [':', 'a:b', 'a: b', '- z']) {
+    const set = typed('HOLD', 'CG-COLON-SET', packet, 'HOLD_SET', { implementation_branch: 'impl/x' });
+    const held = fold(checkpoint(anchor), [anchor, set]);
+    assert.equal(held.blocked, null, `${JSON.stringify(packet)} HOLD_SET folds`);
+    assert.deepEqual(Object.keys(held.state.holds), [packet]);
+    const reloaded = normalizeState(parseYaml(stringifyYaml(held.state)));
+    assert.deepEqual(activeHolds(reloaded).map((h) => h.packet_id), [packet]);
+    // From the reloaded checkpoint its RESUME clears it; before the fix the reload threw or lost the key.
+    const clear = typed('RESUME', 'CG-COLON-RESUME', packet, 'HOLD_CLEAR', { implementation_branch: 'impl/x' });
+    const cleared = fold(reloaded, [anchor, set, clear]);
+    assert.equal(cleared.blocked, null, `${JSON.stringify(packet)} HOLD_CLEAR folds from the reloaded checkpoint`);
+    assert.deepEqual(activeHolds(cleared.state), []);
+  }
+});
+
 test('the fold never hands decide() an invalid projection: a step the state contract rejects stops it', () => {
   const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
   const tainted = checkpoint(anchor, { production_touched: true });

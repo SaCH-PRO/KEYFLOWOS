@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { evaluateAdmission, recheckBeforeMerge, ADMISSION_REASONS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
+import { evaluateAdmission, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
 import { SEMANTIC_REVIEW_REASONS } from '../lib/semantic-review.mjs';
 import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
 import { parseYaml } from '../lib/yaml.mjs';
@@ -23,8 +23,11 @@ const greenRuns = (sha = HEAD) =>
 
 const admissible = (overrides = {}) => ({
   pr: { number: 87, state: 'open', draft: false, head_sha: HEAD, base_sha: BASE, head_ref: 'impl/x' },
-  active: { source_main: BASE, production_touched: false },
+  active: { packet_id: 'KF-X-001', implementation_branch: 'impl/x', pr_number: 87, source_main: BASE, production_touched: false },
   ret: {
+    packet_id: 'KF-X-001',
+    implementation_branch: 'impl/x',
+    pr_number: 87,
     source_main: BASE,
     source_head: SEMANTIC,
     review_status: 'READY_TO_MERGE',
@@ -77,6 +80,87 @@ test('a draft PR is never eligible', () => {
 test('a non-impl branch is never eligible', () => {
   const v = evaluateAdmission(admissible({ pr: { ...admissible().pr, head_ref: 'chore/agent-control-autopilot-v1' } }));
   assert.equal(v.reason, ADMISSION_REASONS.NOT_IMPL_BRANCH);
+});
+
+// --------------------------------------------------- ARTIFACT BINDING
+// (CORRECTION-010 C10-F2; Copilot r4171689190, r4171689206) The artifacts must
+// be this PR's, not merely a pair that agrees with itself.
+
+const bindingCodes = (v) => v.detail.map((p) => p.code);
+
+test('NC stale artifacts: a matching pair from another packet and branch never satisfies admission', () => {
+  const base = admissible();
+  // Both files copied whole from a prior packet: they agree with each other on
+  // packet, branch and PR, and every other contract below is still satisfied.
+  const stale = { packet_id: 'KF-OTHER-009', implementation_branch: 'impl/kf-other-009', pr_number: 41 };
+  const v = evaluateAdmission({ ...base, active: { ...base.active, ...stale }, ret: { ...base.ret, ...stale } });
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND);
+  assert.deepEqual(bindingCodes(v), [
+    BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, BINDING_PROBLEMS.PR_NUMBER_NOT_THIS_PR,
+    BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, BINDING_PROBLEMS.PR_NUMBER_NOT_THIS_PR,
+  ]);
+  assert.deepEqual(v.detail[0], { code: BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, artifact: 'active-packet.yaml', expected: 'impl/x', found: 'impl/kf-other-009' });
+  // Referent: the same snapshot with this PR's own artifacts is eligible.
+  assert.equal(evaluateAdmission(base).eligible, true);
+});
+
+test('NC wrong branch: artifacts that agree on a branch other than the PR head_ref are not bound', () => {
+  const base = admissible();
+  const wrong = { implementation_branch: 'impl/y' };
+  const v = evaluateAdmission({ ...base, active: { ...base.active, ...wrong }, ret: { ...base.ret, ...wrong } });
+  assert.equal(v.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND);
+  assert.deepEqual(bindingCodes(v), [BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD]);
+  // One artifact alone is enough to fail, whichever it is.
+  for (const side of ['active', 'ret']) {
+    const one = evaluateAdmission({ ...base, [side]: { ...base[side], ...wrong } });
+    assert.equal(one.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, side);
+    assert.deepEqual(bindingCodes(one), [BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD], side);
+  }
+  // A missing branch is not a match, and neither is a prefix or an extension of the head_ref.
+  for (const branch of [undefined, null, '', 'impl/', 'impl/x-2']) {
+    const none = evaluateAdmission({ ...base, ret: { ...base.ret, implementation_branch: branch } });
+    assert.equal(none.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, String(branch));
+  }
+});
+
+test('NC wrong packet: artifacts on the right branch that name another PR, or disagree on the packet, are not bound', () => {
+  const base = admissible();
+  // The wrong packet's pair, with only the branch retargeted to this PR.
+  const retargeted = { packet_id: 'KF-OTHER-009', pr_number: 41 };
+  const v = evaluateAdmission({ ...base, active: { ...base.active, ...retargeted }, ret: { ...base.ret, ...retargeted } });
+  assert.equal(v.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND);
+  assert.deepEqual(bindingCodes(v), [BINDING_PROBLEMS.PR_NUMBER_NOT_THIS_PR, BINDING_PROBLEMS.PR_NUMBER_NOT_THIS_PR]);
+  // The two artifacts name different packets.
+  const split = evaluateAdmission({ ...base, ret: { ...base.ret, packet_id: 'KF-OTHER-009' } });
+  assert.equal(split.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND);
+  assert.deepEqual(split.detail, [{ code: BINDING_PROBLEMS.PACKET_ID_MISMATCH, active: 'KF-X-001', ret: 'KF-OTHER-009' }]);
+  // A blank or absent packet id names no packet, even when both are blank alike.
+  for (const id of [undefined, null, '', '   ']) {
+    const blank = evaluateAdmission({ ...base, active: { ...base.active, packet_id: id }, ret: { ...base.ret, packet_id: id } });
+    assert.equal(blank.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, String(id));
+    assert.deepEqual(bindingCodes(blank), [BINDING_PROBLEMS.PACKET_ID_MISSING, BINDING_PROBLEMS.PACKET_ID_MISSING], String(id));
+  }
+});
+
+test("the binding is packet-agnostic: any packet id and branch bind when they are the PR's own", () => {
+  const base = admissible();
+  for (const [packet, branch, number] of [['KF-META-P', 'impl/kf-meta-p', 7], ['a: b', 'impl/anything', 120], ['__proto__', 'impl/p', 1]]) {
+    const own = { packet_id: packet, implementation_branch: branch, pr_number: number };
+    const snapshot = { ...base, pr: { ...base.pr, head_ref: branch, number }, active: { ...base.active, ...own }, ret: { ...base.ret, ...own } };
+    assert.deepEqual(artifactBindingProblems(snapshot), [], packet);
+    assert.equal(evaluateAdmission(snapshot).eligible, true, packet);
+  }
+  // An artifact written before the PR existed names none; that is not a conflict.
+  const { pr_number: omitted, ...active } = base.active;
+  assert.equal(evaluateAdmission({ ...base, active, ret: { ...base.ret, pr_number: null } }).eligible, true);
+});
+
+test('binding does not replace the exact-head contracts: bound artifacts still need source_head, ancestry and review', () => {
+  const base = admissible();
+  assert.equal(evaluateAdmission({ ...base, ret: { ...base.ret, source_head: null } }).reason, ADMISSION_REASONS.SOURCE_HEAD_MISSING);
+  assert.equal(evaluateAdmission({ ...base, ancestry: { source_head_is_ancestor: false, non_control_files: [] } }).reason, ADMISSION_REASONS.SOURCE_HEAD_NOT_ANCESTOR);
+  assert.equal(evaluateAdmission({ ...base, semantic_review_live: { copilot: [], chatgpt: [] } }).reason, ADMISSION_REASONS.SEMANTIC_REVIEW_NOT_SATISFIED);
 });
 
 test('without a review marker there is no admission', () => {

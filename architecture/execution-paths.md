@@ -520,9 +520,27 @@ orchestrate.mjs / status.mjs --verify
   → --apply journals the event onto the checkpoint only; the effective projection is never persisted
 ```
 
+The exact-head merge path is separate and does not read the projection:
+
+```
+auto-merge-admitted.mjs
+  → the PR, and both control artifacts at the PR head, via the GitHub API
+  → evaluateAdmission() (lib/admission.mjs)
+      → artifactBindingProblems() — both artifacts name one non-blank packet, each
+        implementation_branch is the PR head_ref, and a declared pr_number is this PR's;
+        a matching pair from another packet fails as control_artifacts_not_bound_to_pr
+      → review status, safety, source_main / source_head / control-only tail
+      → evaluateSemanticReview() (lib/semantic-review.mjs)
+      → proof, then the required workflows at the exact head
+```
+
+The checkpoint is read and written by `lib/yaml.mjs`. It defines every mapping key as an own property and writes a key in the form its parser reads back as the same key, so a hold keyed by any non-blank packet id survives a save and reload.
+
 Key files:
 
 - `scripts/agent-control/lib/authority-effects.mjs` — `CONTROL_EFFECTS`, `readEffect()`, `applyEffect()`, `reduceAuthority()`
+- `scripts/agent-control/lib/admission.mjs` — `evaluateAdmission()`, `artifactBindingProblems()`
+- `scripts/agent-control/lib/yaml.mjs` — `parseYaml()`, `stringifyYaml()`
 - `scripts/agent-control/lib/reconcile.mjs` — `reconcileProjection()`, `reconcile()`
 - `scripts/agent-control/lib/truth.mjs` — `gatherTruth()`, `reconcileWithTruth()`
 - `scripts/agent-control/lib/control-envelope.mjs` — `parseEnvelope()`, `collectAuthority()`

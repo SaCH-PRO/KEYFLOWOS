@@ -1333,13 +1333,15 @@ negative_controls:
     claim: >
       Holds are packet-keyed: a hold on packet A does not make a valid effect
       for unrelated packet B unfoldable, and several packets may be held at
-      once (CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001, C1).
+      once (CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001, C1). Retargeted
+      by CORRECTION-010 C10-F3: the own-key hold read (A7-F1) replaced the
+      line this control mutated, so it reported VACUOUS on ae195643.
     mutation:
       file: scripts/agent-control/lib/authority-effects.mjs
       find: |-
-          const held = holds[packet] && holds[packet].active !== false ? holds[packet] : null;
+        const held = own && own.active !== false ? own : null;
       replace: |-
-          const held = Object.values(holds).find((h) => h && h.active !== false) || null;
+        const held = Object.values(holds).find((h) => h && h.active !== false) || null;
     proof_command: node --test --test-name-pattern="does not make a valid effect for unrelated packet B" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
@@ -1559,4 +1561,130 @@ negative_controls:
       replace: |-
               "body": "```yaml\nmessage_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n
     proof_command: node --test --test-name-pattern="every recorded body is only the column-0 lines" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-KEY-AMBIGUOUS
+    claim: >
+      The checkpoint codec writes a mapping key in the form its parser reads
+      back as the same key, so a hold keyed by a packet id such as ":" or
+      "a: b" survives a save and reload (CORRECTION-010 C10-F1, Copilot
+      r4171689174). Restoring the plain-key rule emits a line that fails to
+      parse or parses to another key.
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        const safeKey = formatKey(key);
+      replace: |-
+        const safeKey = PLAIN_SAFE.test(key) ? key : JSON.stringify(key);
+    proof_command: node --test --test-name-pattern="ambiguous packet id survives the checkpoint YAML round trip" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-KEY-AMBIGUOUS-ENVELOPE
+    claim: >
+      A colon-bearing packet id that arrives through the real #80 envelope is
+      held, saved, reloaded and cleared under the same key (C10-F1). The
+      packet-id vocabulary is not narrowed.
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        const safeKey = formatKey(key);
+      replace: |-
+        const safeKey = PLAIN_SAFE.test(key) ? key : JSON.stringify(key);
+    proof_command: node --test --test-name-pattern="a colon-bearing packet id folds from a real envelope" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-QUOTED-KEY-ESCAPE
+    claim: >
+      A plain key never starts with a quote, so a quoted scalar holding a
+      colon is read whole, as a quoted key or as a value, never split at the
+      colon inside it (C10-F1).
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        |(?!["'])[^:#]+?):
+      replace: |-
+        |[^:#]+?):
+    proof_command: node --test --test-name-pattern="mapping keys round-trip as the same keys" scripts/agent-control/tests/yaml.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-SEQUENCE-ITEM-KEYLIKE
+    claim: >
+      A sequence item the parser would read as "key: value" is quoted, so a
+      list of packet ids keeps an id such as "a: b" as text (C10-F1).
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        const ambiguous = scalar === null || (typeof item === 'string' && !scalar.startsWith('"') && matchKey(scalar) !== null);
+      replace: |-
+        const ambiguous = scalar === null;
+    proof_command: node --test --test-name-pattern="mapping keys round-trip as the same keys" scripts/agent-control/tests/yaml.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-ARTIFACTS-UNBOUND
+    claim: >
+      Admission binds the control artifacts to the PR being admitted. A pair
+      copied whole from another packet agrees with itself on packet, branch
+      and PR, and is still not eligible (CORRECTION-010 C10-F2, Copilot
+      r4171689190 and r4171689206).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (unbound.length) return fail(ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, unbound);
+      replace: |-
+        if (false) return fail(ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, unbound);
+    proof_command: node --test --test-name-pattern="NC stale artifacts" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-BRANCH-UNBOUND
+    claim: >
+      Each artifact's implementation_branch must equal the PR head_ref; two
+      artifacts agreeing on another branch are not bound (C10-F2).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (headRef === '' || branch !== headRef) {
+      replace: |-
+        if (headRef === '' || branch === '') {
+    proof_command: node --test --test-name-pattern="NC wrong branch" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-PR-NUMBER-UNBOUND
+    claim: >
+      An artifact that names a PR must name the one being admitted, so another
+      packet's pair with only its branch retargeted is not bound (C10-F2).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (declared !== undefined && declared !== null && text(declared) !== text(pr.number)) {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="NC wrong packet" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-PACKET-ID-SPLIT
+    claim: >
+      Both artifacts must name the same non-blank packet; artifacts that name
+      different packets are not bound (C10-F2).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (ids[0] !== '' && ids[1] !== '' && ids[0] !== ids[1]) {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="NC wrong packet" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-BRANCH-ARTIFACT-UNBOUND
+    claim: >
+      The suite binds the branch's own control artifacts by the admission
+      rule, and proves the rule rejects that same real pair for another PR,
+      so the branch-artifact check is not satisfied by mere agreement
+      (C10-F2, Copilot r4171689206).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+        if (headRef === '' || branch !== headRef) {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="the real control artifacts on this branch parse and are bound" scripts/agent-control/tests/yaml.spec.mjs
     timeout_ms: 120000

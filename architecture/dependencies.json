@@ -109049,6 +109049,13 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "../lib/admission.mjs",
+      "target": "scripts/agent-control/lib/admission.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
       "specifier": "../lib/events.mjs",
       "target": "scripts/agent-control/lib/events.mjs",
       "type": "relative"
@@ -109065,6 +109072,13 @@
       "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
       "specifier": "../lib/yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "./helpers/branch-pr.mjs",
+      "target": "scripts/agent-control/tests/helpers/branch-pr.mjs",
       "type": "relative"
     },
     {
@@ -109462,8 +109476,22 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/tests/yaml.spec.mjs",
+      "specifier": "../lib/admission.mjs",
+      "target": "scripts/agent-control/lib/admission.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/yaml.spec.mjs",
       "specifier": "../lib/yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/yaml.spec.mjs",
+      "specifier": "./helpers/branch-pr.mjs",
+      "target": "scripts/agent-control/tests/helpers/branch-pr.mjs",
       "type": "relative"
     },
     {
@@ -110105,9 +110133,9 @@
     }
   ],
   "meta": {
-    "edges": 15729,
-    "nodes": 3846,
-    "root": "C:/Users/sachd/AppData/Local/KEYFLOWOS/worker-worktrees/CG-REVIEW-META-STATE-REDUCER-LIVE-HUMAN-GATES-CLEARED-006",
+    "edges": 15733,
+    "nodes": 3847,
+    "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
   },
   "nodes": [
@@ -128557,6 +128585,11 @@
     {
       "extension": ".mjs",
       "id": "scripts/agent-control/tests/events.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/helpers/branch-pr.mjs",
       "type": "file"
     },
     {

@@ -326,6 +326,28 @@ The repository gate enforces:
 
 If any non-control file changes after a RETURN is prepared, the implementer must advance `source_head`, refresh the return evidence, rerun required proof, and return to `PENDING_CHATGPT_REVIEW`.
 
+## Artifact binding rule
+
+(CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010, C10-F2)
+
+Two control artifacts that agree with each other prove nothing: a pair copied
+from another packet agrees too. The exact-head evaluator
+(`artifactBindingProblems` in `scripts/agent-control/lib/admission.mjs`)
+therefore binds both artifacts to the PR being admitted, before it reads
+anything else from them:
+
+- `active-packet.yaml` and `claude-return.yaml` each name a non-blank
+  `packet_id`, and it is the same one;
+- each artifact's `implementation_branch` equals the PR `head_ref`;
+- an artifact that declares `pr_number` declares this PR's number.
+
+Any failure is `control_artifacts_not_bound_to_pr`, and the detail names each
+artifact and field. No packet id or branch is hard-coded: the PR is the
+referent. A packet id is free text, so it is bound through the branch and PR
+number its artifacts declare, not by its spelling. The suite applies the same
+rule to the branch's own artifacts, against the PR GitHub names on an `impl/*`
+pull_request run.
+
 ## Layer 5 — unattended event orchestration
 
 The repository has an event-driven automation layer defined by
@@ -481,7 +503,10 @@ The rules:
   and written by own key only, and the control-state YAML codec defines every
   mapping key as an own property. A packet named `__proto__` or `constructor`
   is held and cleared like any other, and an unmatched HOLD_CLEAR for such a
-  name fails closed (`CONTROL_EFFECT_HOLD_MISMATCH`).
+  name fails closed (`CONTROL_EFFECT_HOLD_MISMATCH`). The codec also writes a
+  key in the form its parser reads back as the same key: a packet id such as
+  `:`, `a:b`, `a: b` or `- z` is quoted, so a saved checkpoint reloads with
+  the same holds. The packet-id vocabulary is not narrowed for this.
 - **The projection stays valid.** Each folded step is checked with
   `validateState()`. A step that the state contract rejects stops the fold
   (`CONTROL_EFFECT_PROJECTION_INVALID`).

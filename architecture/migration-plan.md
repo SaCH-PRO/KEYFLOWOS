@@ -166,6 +166,29 @@ completion contract.
 
 ## Changelog
 
+### 2026-10-03 — Live typed-authority reducer integrated into the control plane
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120). `.agent-control/programme-state.yaml` is now a
+  reviewed checkpoint, and `scripts/agent-control/lib/authority-effects.mjs` folds every
+  newer issue #80 authority message that declares `control_effect:` over it.
+  `orchestrate.mjs` and `status.mjs --verify` decide on that effective projection
+  (`execution-paths.md` §12). The projection is never written back.
+- New import edges, in one direction: `lib/truth.mjs` → `lib/reconcile.mjs` →
+  `lib/authority-effects.mjs` → `lib/control-envelope.mjs`, `lib/state-machine.mjs` and
+  `lib/state.mjs` (`dependency-map.md`, "Agent Control Plane: Authority Fold").
+- The exact-head merge path stays separate from the projection. `lib/admission.mjs` now
+  binds both control artifacts to the PR being admitted (packet, `implementation_branch`
+  against the PR `head_ref`, and PR number) before it reads anything else from them.
+- `lib/yaml.mjs` defines every mapping key as an own property and quotes any key its
+  parser would not read back as the same key, so holds keyed by any non-blank packet id
+  survive a checkpoint save and reload.
+- `inventory.py` and `dependency_scan.py` now record `meta.root` as `.` instead of the
+  absolute path of the checkout that ran them, so the generated maps are the same in
+  every checkout of the same tree. Both scanners were re-run, and
+  `architecture/inventory.json` and `architecture/dependencies.json` regenerated.
+- No application runtime, schema, deployment or production change. The platform
+  convergence programme stays inactive.
+
 ### 2026-09-25 — Successor platform programme recorded (inactive)
 
 - Recorded the platform/workflow convergence successor programme (PR #93) in
