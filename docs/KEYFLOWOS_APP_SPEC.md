@@ -69,7 +69,7 @@ Infrastructure: PostgreSQL 16 + pgvector, Redis 7 (BullMQ + cache), MinIO/S3,
                 Chatwoot (self-hosted support desk), Caddy edge proxy
 ```
 
-- **Monorepo:** pnpm 9.15 workspaces + Turborepo; Node 20.x; server is **CommonJS** (guarded by `commonjs-compat.test.ts`).
+- **Monorepo:** pnpm 9.15 workspaces + Turborepo; Node 24.x; server is **CommonJS** (guarded by `commonjs-compat.test.ts`).
 - **Compiled server required:** `tsx` breaks `emitDecoratorMetadata`; dev/prod run `node dist/main.js`. Launcher: `bash scripts/launch-dev.sh`.
 - **~101 server modules** (104 registered in AppModule), **441 Prisma models**, **~276 event names**, **287 canonical KEY tools**, **202 page.tsx** in web.
 

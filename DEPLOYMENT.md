@@ -38,7 +38,7 @@ The fastest way to get a complete local stack.
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop)
 - [pnpm](https://pnpm.io/installation) (`npm i -g pnpm`)
-- Node 20.x (see `.nvmrc`)
+- Node 24.x (see `.nvmrc`)
 
 ### 1. Clone & Install
 
