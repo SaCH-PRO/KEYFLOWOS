@@ -647,7 +647,17 @@ test('CLI end to end: orchestrate decides on the effective projection, and a hol
   const resume = run([...recorded.comments, msg(5963700002, 'RESUME', 'KF-EXEC-ACTION-001', 'HOLD_CLEAR')]);
   assert.equal(resume.reconciliation.consistent, true);
   assert.equal(resume.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, false);
-  assert.equal(resume.decision.action, ACTIONS.DISPATCH_BUILDER, 'with ACTION-001 explicitly released, the in-flight packet is the next legal work');
+  // With ACTION-001 explicitly released, the in-flight packet's builder step is
+  // the next legal work. Whether a builder is ready depends on the host (the CLI
+  // probes the local Claude adapter; runners have none), so both outcomes of
+  // that one step are accepted, and the hold no longer decides.
+  assert.notEqual(resume.decision.action, ACTIONS.WAIT_AUTHORITY);
+  if (resume.decision.action === ACTIONS.DISPATCH_BUILDER) {
+    assert.equal(resume.decision.packet_id, 'KF-META-STATE-REDUCER-LIVE-001');
+  } else {
+    assert.equal(resume.decision.action, ACTIONS.WAIT_EXTERNAL_AGENT);
+    assert.equal(resume.decision.role, ROLES.BUILDER);
+  }
 
   const untyped = run([...recorded.comments, { ...msg(5963700003, 'REVIEW', 'KF-META-STATE-REDUCER-LIVE-001', 'NO_STATE_CHANGE'), body: msg(5963700003, 'REVIEW', 'KF-META-STATE-REDUCER-LIVE-001', 'X').body.replace('control_effect: X\n', '') }]);
   assert.equal(untyped.decision.action, ACTIONS.REPORT_DRIFT);
