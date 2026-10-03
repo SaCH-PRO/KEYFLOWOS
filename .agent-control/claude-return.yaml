@@ -3,11 +3,15 @@ directive_message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001
 directive_comment_id: 5963509515
 correction_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001
 correction_review_comment_id: 5963636295
-ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001
-ack_comment_id: 5963710053
+control_artifacts_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
+control_artifacts_review_comment_id: 5963957510
+ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
+ack_comment_id: 5964147770
 prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-001   # 5963571216
-progress_message_ids: []
+  - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963710053
+progress_message_ids:
+  - CC-PROGRESS-META-STATE-REDUCER-LIVE-001   # 5964036080
 momentum_message_ids: []
 # This file is a pre-RETURN record (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001).
 # The RETURN is posted on #80 after every exact-head check on the head that
@@ -19,8 +23,11 @@ return_message_id: null
 previous_return_message_ids: []
 never_posted_return_message_ids: []
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
-source_head: dc462045b5551da9c90f41b40651d83d44c1f0f0
+source_head: 194d42bf526826b9eebcc1a1d05d3f5d39e06c6b
 previous_source_heads:
+  - fefbfc558de275654b2374d73af6de976ffab685   # validity fix (Copilot r4171049945); 115/116 there, NC-REDUCER-STOP-SKIPPED target moved, retargeted in 194d42bf (manifest only)
+  - a5235ab387483d1731261c5f47946c1aee65590e   # host-independent RESUME CLI test; 114/114 controls live there (builder disabled); superseded by the validity fix (Copilot r4171049945)
+  - dc462045b5551da9c90f41b40651d83d44c1f0f0   # semantic head of the first artifact (PR head d25779a5); one host-dependent test, fixed in a5235ab3
   - de3ea0f63b826ef153f0c309a886a212c9256ee0   # first semantic commit; 109/114 controls live there (5 repaired in de3e6c7d and dc462045)
   - de3e6c7d9ecdf0b56354707c2d56acc16378cf2e   # 113/114; NC-REDUCER-HELD-PACKET-RELEASED made live in dc462045
 implementation_branch: impl/kf-meta-state-reducer-live-001
@@ -191,6 +198,21 @@ proof_matrix:
     evidence_scope: semantic_head
     proof: "CHECKPOINT credits only programme DAG packets"; programme-naming authority is unfoldable; NC-REDUCER-META-CREDIT live
     result: PROVEN
+  - obligation: the folded projection always satisfies the state contract (Copilot r4171049945)
+    evidence_scope: semantic_head
+    proof: >
+      "health outside the vocabulary is never projected" (AMBER, PURPLE, YELLOW)
+      and "the fold never hands decide() an invalid projection"; the programme
+      diagnostic test covers r4171100288. NC-REDUCER-HEALTH-UNVALIDATED and
+      NC-REDUCER-INVALID-PROJECTION are live.
+    result: PROVEN
+  - obligation: architecture memory refreshed for the new module (AGENTS.md; Copilot r4171049954, r4171100183)
+    evidence_scope: semantic_head
+    proof: >
+      Not done. The scanners are Python scripts that the unattended worker
+      sandbox refuses to run; the generated maps were not hand-edited to
+      imitate them. Open for an operator run or a ChatGPT ruling.
+    result: NOT_RUN
   - obligation: existing portable and Windows worker proof retained
     evidence_scope: semantic_head
     proof: see tests
@@ -209,23 +231,25 @@ proof_matrix:
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  at: dc462045   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
+  at: 194d42bf   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
   host: Windows 11 with authenticated gh (Claude worker session, 2026-10-03)
-  portable_total: 384
-  portable_passed: 384
+  portable_total: 387
+  portable_passed: 387
   portable_skipped: 0
   windows_total: 19
   windows_passed: 19
   baseline_before_change: 338 portable at 11053288
-  added: 46 in authority-effects.spec (new); reconcile.spec gains the RECONCILE-002 replay helper and stronger wiring assertions
+  added: 49 in authority-effects.spec (new); reconcile.spec gains the RECONCILE-002 replay helper and stronger wiring assertions
   dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
   failed: 0
   skipped: 0
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref dc462045
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 194d42bf
   baseline_before_change: 97 controls in the manifest at 11053288
   added:
+    - NC-REDUCER-HEALTH-UNVALIDATED   # Copilot r4171049945
+    - NC-REDUCER-INVALID-PROJECTION   # Copilot r4171049945
     - NC-REDUCER-UNTYPED-INFERRED
     - NC-REDUCER-STOP-SKIPPED
     - NC-REDUCER-MALFORMED-SKIPPED
@@ -246,9 +270,16 @@ negative_controls:
   retargeted:
     - NC-PROJECTION-OBSOLETE-ANCHOR now restores the RECONCILE-002 anchor over the new one
   result_at_semantic_head: >
-    114/114 live, 0 vacuous, at dc462045 on a Windows host, including the 17
+    116/116 live, 0 vacuous, at 194d42bf on a Windows host with KEYFLOW_AGENT_CLAUDE_DISABLED=1
+    (the runner condition), including the 19
     NC-REDUCER controls, the retargeted NC-PROJECTION-OBSOLETE-ANCHOR and every
     tests/windows control.
+  previous_head_fefbfc55: >
+    115/116; NC-REDUCER-STOP-SKIPPED could not find its target after the guard edit.
+  previous_head_a5235ab3: >
+    114/114 live, 0 vacuous, with KEYFLOW_AGENT_CLAUDE_DISABLED=1.
+  previous_head_dc462045: >
+    114/114 live, 0 vacuous, on the worker host with the local Claude adapter READY.
   previous_head_de3ea0f6: >
     109/114. Three multi-line targets did not match, because a block scalar strips
     the first line indent from every line. NC-REDUCER-REPLAY-REAPPLIES and
@@ -271,6 +302,15 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
     status: PENDING
 
 ci:
+  previous_head_d25779a5: >
+    At the first artifact head d25779a5 (semantic dc462045) every required
+    workflow concluded success except Agent Control Worker Proof, and the
+    non-required KEYFLOWOS Agent Autopilot also failed. Both failed on one
+    test: after an explicit RESUME HOLD_CLEAR the CLI decided
+    WAIT_EXTERNAL_AGENT on runners, where no Claude adapter exists, not
+    DISPATCH_BUILDER as on the worker host. a5235ab3 asserts the
+    host-independent claim. Copilot ran on d25779a5; its result is reported in
+    the RETURN.
   exact_head: >
     PENDING. Required checks run on the PR head that carries this artifact
     commit. An artifact cannot record CI for the commit that contains it. No
@@ -301,7 +341,7 @@ scope_ledger:
     - independent semantic review at the final semantics
     - RETURN on #80 once those checks finish
   deferred:
-    - item: architecture/ map entries for scripts/agent-control/lib/authority-effects.mjs
+    - item: architecture/ map entries for scripts/agent-control/lib/authority-effects.mjs (UNRESOLVED; Copilot says it cannot be deferred)
       reason: >
         The codebase-architect scanners are Python scripts that an unattended
         worker session cannot run. The map also lacks the earlier
@@ -347,6 +387,14 @@ security:
 
 unresolved_contradictions: []
 review_findings_disposed:
+  - id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
+    disposition: items 1-2 landed at d25779a5 and this file adds the REVIEW to the lineage; item 3 is three declared semantic commits (a5235ab3 test, fefbfc55 validity fix, 194d42bf control retarget) for defects found by exact-head CI and Copilot
+  - id: Copilot r4171049945 (HIGH, health)
+    disposition: corrected at fefbfc55 (semantic head 194d42bf); NC-REDUCER-HEALTH-UNVALIDATED, NC-REDUCER-INVALID-PROJECTION
+  - id: Copilot r4171100288 (low, diagnostic)
+    disposition: corrected at fefbfc55
+  - id: Copilot r4171049954 and r4171100183 (low, architecture maps)
+    disposition: OPEN; the worker sandbox cannot run the Python scanners; needs an operator run or a ChatGPT ruling
   - id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001 C1
     disposition: packet-keyed holds; NC-REDUCER-SINGLE-HOLD-LAW and NC-REDUCER-HOLD-DUPLICATE
   - id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001 C2

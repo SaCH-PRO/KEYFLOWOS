@@ -3,11 +3,15 @@ directive_message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001
 directive_comment_id: 5963509515
 correction_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001
 correction_review_comment_id: 5963636295
-in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001
-ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001
-ack_comment_id: 5963710053
+control_artifacts_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
+control_artifacts_review_comment_id: 5963957510
+in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
+ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
+ack_comment_id: 5964147770
 prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-001   # 5963571216
+  - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963710053
+pr_number: 120
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
 implementation_branch: impl/kf-meta-state-reducer-live-001
 state: PROVING
@@ -51,6 +55,16 @@ correction_001:   # CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001
     stable under replay and fail-closed validation, with invalid or malformed
     candidates consuming their position. Add a negative/replay test proving no
     renumbering when an earlier event becomes malformed or edited.
+
+control_artifacts_002:   # CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
+  required: >
+    Both control artifacts describe this packet, its authority lineage, source
+    main 11053288, branch impl/kf-meta-state-reducer-live-001 and PR 120, with
+    no PR 104 review record carried forward. Commits after the semantic head
+    are control-only, unless a substantive defect forces a declared new
+    semantic head with rerun proof. Rerun the full proof and every required
+    exact-head workflow; the Agent Control Gate must pass at the final head.
+    RETURN once.
 
 proof_obligations:
   - deterministic reducer tests
