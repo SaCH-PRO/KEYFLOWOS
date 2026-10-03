@@ -230,6 +230,11 @@ function matchKey(text) {
   return { key: String(key), rest: text.slice(m[0].length - (m[2] === '' ? 0 : m[2].length)).trim() };
 }
 
+/** Define `key` as an own data property, so `__proto__` is a key like any other. */
+function setOwn(out, key, value) {
+  Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 function parseMapping(lines, start, indent) {
   const out = {};
   let i = start;
@@ -253,21 +258,21 @@ function parseMapping(lines, start, indent) {
 
     if (valueText === '>' || valueText === '|' || valueText === '>-' || valueText === '|-') {
       const [value, next] = readBlockScalar(lines, i, ind, valueText[0]);
-      out[kv.key] = value;
+      setOwn(out, kv.key, value);
       i = next;
       continue;
     }
 
     if (valueText === '') {
       const [value, next] = parseNode(lines, i, ind + 1);
-      out[kv.key] = value;
+      setOwn(out, kv.key, value);
       i = next;
       continue;
     }
 
     const [folded, next] = absorbContinuation(lines, i, ind, valueText);
     i = next;
-    out[kv.key] = parseScalar(folded);
+    setOwn(out, kv.key, parseScalar(folded));
   }
   return [out, i];
 }

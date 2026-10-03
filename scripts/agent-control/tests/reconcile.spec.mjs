@@ -349,6 +349,13 @@ test('positive control: a consistent hold still outranks progression', () => {
 
 // ------------------------------------------------------------- THE COMMITTED PROJECTION
 
+/** The PR a checkpoint's programme implies: merged once CHECKPOINTED, open while in flight. */
+function prImpliedBy(p) {
+  if (!p.pr_number) return null;
+  const merged = p.state === 'CHECKPOINTED';
+  return { number: Number(p.pr_number), state: merged ? 'closed' : 'open', merged, head_ref: p.implementation_branch };
+}
+
 test('the committed programme-state is anchored, valid, and keeps ACTION-001 held', () => {
   const state = loadState(process.cwd());
   assert.equal(validateState(state).ok, true, JSON.stringify(validateState(state).problems));
@@ -370,12 +377,9 @@ test('the committed programme-state is anchored, valid, and keeps ACTION-001 hel
     assert.equal(state.safety?.[flag], false, `${flag} must stay false`);
   }
 
-  // Consistent with its own anchor and with a merged PR: the hold still wins.
+  // Consistent with its own anchor and with its PR in the state the checkpoint implies: the hold still wins.
   const anchor = chatgpt('DIRECTIVE', state.authority_basis.message_id, 'KF-META-AUTO-001', { id: state.authority_basis.comment_id });
-  const pr = state.programme.pr_number
-    ? { number: state.programme.pr_number, state: 'closed', merged: true, head_ref: state.programme.implementation_branch }
-    : null;
-  const rec = verdict(state, [anchor], repo(pr));
+  const rec = verdict(state, [anchor], repo(prImpliedBy(state.programme)));
   assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
   assert.equal(run(state, rec).action, ACTIONS.WAIT_AUTHORITY);
 });
@@ -456,9 +460,7 @@ test('CLI end to end: a newer #80 message makes the committed projection report 
   const state = loadState(process.cwd());
   const anchor = chatgpt('DIRECTIVE', state.authority_basis.message_id, 'KF-META-AUTO-001', { id: state.authority_basis.comment_id, at: '2026-09-25T02:00:11Z' });
   const newer = chatgpt('REVIEW', 'CG-REVIEW-LATER', 'KF-META-AUTO-001', { id: Number(state.authority_basis.comment_id) + 1, at: '2026-09-25T09:00:00Z' });
-  const pr = state.programme.pr_number
-    ? { number: state.programme.pr_number, state: 'closed', merged: true, head_ref: state.programme.implementation_branch }
-    : null;
+  const pr = prImpliedBy(state.programme);
 
   const consistent = cli({ comments: [anchor], repo: repo(pr) });
   assert.equal(consistent.reconciliation.consistent, true, JSON.stringify(consistent.reconciliation.findings));

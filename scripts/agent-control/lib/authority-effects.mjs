@@ -34,8 +34,8 @@
  *   - names an unknown effect, or an effect its message type cannot carry;
  *   - names `programme` or `programme_action` (activation is not a fold);
  *   - lacks a field its effect needs, carries a health outside GREEN/YELLOW/RED,
- *     carries production_touched other than false, names a packet_id that is
- *     not a KF- packet id, or conflicts with the projection;
+ *     carries production_touched other than false, or conflicts with the
+ *     projection;
  *   - would produce a projection that validateState() rejects.
  * reconcile() then reports the projection stale (DERIVED_STATE_STALE_AUTHORITY,
  * with `blocked` naming the message and the reason), or AUTHORITY_MALFORMED,
@@ -78,7 +78,6 @@ export const EFFECT_PROBLEMS = Object.freeze({
   HOLD_MISMATCH: 'CONTROL_EFFECT_HOLD_MISMATCH',
   HEALTH_INVALID: 'CONTROL_EFFECT_HEALTH_INVALID',
   PRODUCTION_TOUCHED: 'CONTROL_EFFECT_PRODUCTION_TOUCHED',
-  PACKET_ID_INVALID: 'CONTROL_EFFECT_PACKET_ID_INVALID',
   PROJECTION_INVALID: 'CONTROL_EFFECT_PROJECTION_INVALID',
 });
 
@@ -114,8 +113,17 @@ const PR_REQUIRED = Object.freeze(['PACKET_ADMISSION', 'CHECKPOINT']);
 
 const SHA = /^[0-9a-f]{40}$/;
 const PR_NUMBER = /^[1-9][0-9]*$/;
-// A packet id keys the holds map, so it can never be `__proto__` or `constructor`.
-const PACKET_ID = /^KF-[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
+
+/**
+ * Own-key access to the packet-keyed holds map (AUDIT-CORRECTION-007 A7-F1).
+ * A packet id is any non-blank text, so `__proto__` or `constructor` must be
+ * an ordinary key: never read from the prototype, never written through the
+ * `__proto__` setter.
+ */
+const ownHold = (holds, packet) => (Object.hasOwn(holds, packet) ? holds[packet] : undefined);
+function setHold(holds, packet, hold) {
+  Object.defineProperty(holds, packet, { value: hold, enumerable: true, writable: true, configurable: true });
+}
 
 function problem(code, detail) {
   return { code, detail: detail ?? null };
@@ -176,10 +184,12 @@ export function readEffect(message) {
   if (touched !== 'false') {
     return { ok: false, ...problem(EFFECT_PROBLEMS.PRODUCTION_TOUCHED, `production_touched is ${touched ?? 'absent'}; only false folds`) };
   }
-  if (read.packet_id === null || !PACKET_ID.test(read.packet_id)) {
-    return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_ID_INVALID, `${read.packet_id ?? 'absent'} is not a KF- packet id`) };
+  if (effect === 'HOLD_SET' || effect === 'HOLD_CLEAR') {
+    // A hold is keyed by its packet; blank names none.
+    if (read.packet_id === null) return { ok: false, ...problem(EFFECT_PROBLEMS.FIELD_MISSING, `${effect} needs packet_id`) };
+    return { ok: true, ...read };
   }
-  if (effect === 'NO_STATE_CHANGE' || effect === 'HOLD_SET' || effect === 'HOLD_CLEAR') return { ok: true, ...read };
+  if (effect === 'NO_STATE_CHANGE') return { ok: true, ...read };
 
   const missing = [];
   if (read.implementation_branch === null) missing.push('implementation_branch');
@@ -201,9 +211,10 @@ const anchorOf = (message) => ({ message_id: message.message_id, comment_id: mes
  * packet is lifted in; one that names none stays where it is.
  */
 function liftHolds(next) {
+  // Spread copies own keys as data properties, `__proto__` included.
   const holds = { ...(next.holds || {}) };
   if (next.hold?.packet_id && !Object.hasOwn(holds, next.hold.packet_id)) {
-    holds[next.hold.packet_id] = next.hold;
+    setHold(holds, next.hold.packet_id, next.hold);
     next.hold = null;
   }
   next.holds = holds;
@@ -225,7 +236,8 @@ export function applyEffect(state, message, read, options = {}) {
   const holds = liftHolds(next);
   const { effect, packet_id: packet } = read;
   // Own keys only, so an inherited name never reads as an active hold (Copilot r4171599236).
-  const held = Object.hasOwn(holds, packet) && holds[packet] && holds[packet].active !== false ? holds[packet] : null;
+  const own = ownHold(holds, packet);
+  const held = own && own.active !== false ? own : null;
 
   if (effect === 'HOLD_SET') {
     // The effect carries nothing but the packet, so a second hold on a packet
@@ -233,18 +245,18 @@ export function applyEffect(state, message, read, options = {}) {
     if (held) {
       return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_DUPLICATE, { packet_id: packet, hold_message_id: held.hold_message_id ?? null }) };
     }
-    holds[packet] = {
+    setHold(holds, packet, {
       active: true,
       packet_id: packet,
       reason: `HOLD_SET by ${message.message_id}`,
       hold_message_id: message.message_id,
       hold_comment_id: message.comment_id,
-    };
+    });
   } else if (effect === 'HOLD_CLEAR') {
     if (!held) {
-      return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_MISMATCH, { packet_id: packet, held: Object.keys(holds).filter((k) => holds[k]?.active !== false) }) };
+      return { ok: false, ...problem(EFFECT_PROBLEMS.HOLD_MISMATCH, { packet_id: packet, held: Object.keys(holds).filter((k) => ownHold(holds, k)?.active !== false) }) };
     }
-    holds[packet] = { ...held, active: false, released_by: message.message_id, released_comment_id: message.comment_id };
+    setHold(holds, packet, { ...held, active: false, released_by: message.message_id, released_comment_id: message.comment_id });
   } else if (effect !== 'NO_STATE_CHANGE') {
     // A packet effect for a held packet would be a release; only HOLD_CLEAR
     // releases. Holds on other packets do not affect this one.

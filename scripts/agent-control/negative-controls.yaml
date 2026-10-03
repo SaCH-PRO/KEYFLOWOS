@@ -855,17 +855,18 @@ negative_controls:
   - id: NC-PROJECTION-OBSOLETE-ANCHOR
     claim: >
       The committed projection is anchored to the newest authority in the
-      recorded #80 evidence. Restoring the obsolete RECONCILE-002 anchor
-      (2026-09-28), which 13 untyped authority messages made stale, fails the
-      recorded-evidence proof. (Retargeted by KF-META-STATE-REDUCER-LIVE-001
-      from the 2026-09-25 anchor the RECONCILE-002 checkpoint replaced.)
+      recorded #80 evidence. Restoring the obsolete
+      CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 anchor, whose fold stops at the
+      malformed CORRECTION-004, fails the recorded-evidence recovery proof.
+      (Retargeted by CONTRACT-CORRECTION-008 C8-F2; earlier it restored the
+      RECONCILE-002 anchor, and before that the 2026-09-25 one.)
     mutation:
       file: .agent-control/programme-state.yaml
-      find: "  message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001\n  comment_id: 5963509515"
-      replace: "  message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n  comment_id: 5875639550"
-    # The committed-checkpoint recorded-evidence proof moved to authority-effects.spec;
-    # reconcile.spec's recorded test now replays the RECONCILE-002 checkpoint in-test.
-    proof_command: node --test --test-name-pattern="the committed checkpoint folds the real typed" scripts/agent-control/tests/authority-effects.spec.mjs
+      find: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008\n  comment_id: 5965390363"
+      replace: "  message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001\n  comment_id: 5963509515"
+    # The committed-checkpoint recorded-evidence proof is the C8-F2 recovery test in
+    # authority-effects.spec; the previous checkpoints are replayed in-test.
+    proof_command: node --test --test-name-pattern="the committed checkpoint is re-derived at CONTRACT-CORRECTION-008" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
   - id: NC-RECONCILE-RECORDED-MALFORMED
@@ -1490,30 +1491,60 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC production_touched other than false" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
-  - id: NC-REDUCER-PACKET-ID-UNCHECKED
-    claim: >
-      A packet_id that is not a KF- packet id, such as __proto__, never keys a
-      hold; the effect stops the fold (Copilot r4171599236).
-    mutation:
-      file: scripts/agent-control/lib/authority-effects.mjs
-      find: |-
-        if (read.packet_id === null || !PACKET_ID.test(read.packet_id)) {
-      replace: |-
-        if (false) {
-    proof_command: node --test --test-name-pattern="a packet_id that is not a KF- packet id" scripts/agent-control/tests/authority-effects.spec.mjs
-    timeout_ms: 120000
-
   - id: NC-REDUCER-INHERITED-HOLD
     claim: >
-      Below readEffect, holds are read by own key only, so an inherited name
-      such as __proto__ is never an active hold that a HOLD_CLEAR could clear.
+      Holds are read by own key only, so an inherited name such as __proto__
+      or constructor is never an active hold, and an unmatched HOLD_CLEAR for
+      it fails closed (AUDIT-CORRECTION-007 A7-F1, Copilot r4171599236).
     mutation:
       file: scripts/agent-control/lib/authority-effects.mjs
       find: |-
-        const held = Object.hasOwn(holds, packet) && holds[packet] && holds[packet].active !== false ? holds[packet] : null;
+        const ownHold = (holds, packet) => (Object.hasOwn(holds, packet) ? holds[packet] : undefined);
       replace: |-
-        const held = holds[packet] && holds[packet].active !== false ? holds[packet] : null;
-    proof_command: node --test --test-name-pattern="a packet_id that is not a KF- packet id" scripts/agent-control/tests/authority-effects.spec.mjs
+        const ownHold = (holds, packet) => holds[packet];
+    proof_command: node --test --test-name-pattern="an unmatched HOLD_CLEAR for an inherited name" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-HOLD-PROTO-SETTER
+    claim: >
+      A hold is written as an own data property, so a hold for the packet id
+      __proto__ is stored, never routed through the prototype setter (A7-F1).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        Object.defineProperty(holds, packet, { value: hold, enumerable: true, writable: true, configurable: true });
+      replace: |-
+        holds[packet] = hold;
+    proof_command: node --test --test-name-pattern="a hold for any non-blank packet id" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-YAML-PROTO-KEY
+    claim: >
+      The control-state YAML codec defines every mapping key as an own
+      property, so a checkpoint whose holds are keyed __proto__ round-trips
+      without prototype mutation (A7-F1 serialization path).
+    mutation:
+      file: scripts/agent-control/lib/yaml.mjs
+      find: |-
+        Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+      replace: |-
+        out[key] = value;
+    proof_command: node --test --test-name-pattern="survives the checkpoint YAML round trip" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECOVERY-MALFORMED-SKIPPED
+    claim: >
+      Recovery past malformed authority is a reviewed re-anchor, never a skip
+      (C8-F2). On the real #80 recording, folding only valid messages would
+      carry the previous checkpoint past the malformed CORRECTION-004, and
+      would carry the new one past a later malformed message.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              ? [...(Array.isArray(authority.candidates) ? authority.candidates : authority.messages || [])].sort(compareAuthorityOrder)
+      replace: |-
+              ? [...(authority.messages || [])].sort(compareAuthorityOrder)
+    proof_command: node --test --test-name-pattern="recorded evidence .recovery." scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
   - id: NC-REDUCER-RECORDED-UNMINIMIZED

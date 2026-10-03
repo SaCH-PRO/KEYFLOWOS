@@ -108599,6 +108599,13 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "scripts/agent-control/tests/control-envelope.spec.mjs",
       "specifier": "node:assert/strict",
@@ -110098,7 +110105,7 @@
     }
   ],
   "meta": {
-    "edges": 15728,
+    "edges": 15729,
     "nodes": 3846,
     "root": "C:/Users/sachd/AppData/Local/KEYFLOWOS/worker-worktrees/CG-REVIEW-META-STATE-REDUCER-LIVE-HUMAN-GATES-CLEARED-006",
     "scanner": "codebase-architect/dependency_scan.py"

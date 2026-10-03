@@ -474,11 +474,14 @@ The rules:
   must be GREEN, YELLOW, RED or absent. Any other value, AMBER included, fails
   closed before the effect applies (`CONTROL_EFFECT_HEALTH_INVALID`). It is
   never translated.
-- **Safety and identity are checked on every effect.** No effect projects
+- **Production safety is checked on every effect.** No effect projects
   `production_touched`, so any value other than `false` fails closed, holds and
-  NO_STATE_CHANGE included (`CONTROL_EFFECT_PRODUCTION_TOUCHED`). `packet_id`
-  must be a `KF-` packet id (`CONTROL_EFFECT_PACKET_ID_INVALID`), so a name
-  like `__proto__` never keys a hold, and holds are read by own key only.
+  NO_STATE_CHANGE included (`CONTROL_EFFECT_PRODUCTION_TOUCHED`).
+- **Holds are own keys.** A packet id is any non-blank text, so `holds` is read
+  and written by own key only, and the control-state YAML codec defines every
+  mapping key as an own property. A packet named `__proto__` or `constructor`
+  is held and cleared like any other, and an unmatched HOLD_CLEAR for such a
+  name fails closed (`CONTROL_EFFECT_HOLD_MISMATCH`).
 - **The projection stays valid.** Each folded step is checked with
   `validateState()`. A step that the state contract rejects stops the fold
   (`CONTROL_EFFECT_PROJECTION_INVALID`).
@@ -498,6 +501,19 @@ The rules:
 
   A later typed message cannot get past the stop. Edited or unorderable
   authority never reaches the fold.
+- **Recovery is a reviewed re-anchor, never a skip.** #80 is append-only, so
+  a malformed message cannot be repaired in place. A reviewed commit
+  re-derives the whole checkpoint at a later valid authority message and sets
+  `authority_basis` to it. The malformed message is then older than the
+  anchor, so it becomes evidence only; a malformed message newer than the
+  anchor still stops the fold. CONTRACT-CORRECTION-008 did this past the
+  malformed CORRECTION-004 (5964575594).
+- **Authoring rule: keep prose off column 0 as `word:`.** The parser reads
+  every column-0 `key: value` line in a body as an envelope field, prose
+  included. A heading such as `Required:` that appears twice is a repeated
+  key, which makes the whole message malformed. That is what happened to
+  CORRECTION-004. Outside the envelope, write `**Required**`, a `###`
+  heading, or an indented line instead. The parser is not relaxed for this.
 - **Only HOLD_CLEAR releases a hold.** A packet effect that names the held
   packet fails closed.
 - **The fold changes the projection, nothing else.** It never activates a

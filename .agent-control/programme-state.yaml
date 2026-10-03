@@ -23,56 +23,54 @@
 version: 1
 schema: keyflowos.programme-state/v1
 authority: derived-programme-projection
-updated_at: 2026-10-03T01:00:00Z
+updated_at: 2026-10-03T04:30:00Z
 
 authority_basis:
-  message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001
-  comment_id: 5963509515
+  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008
+  comment_id: 5965390363
 
-# Re-derived under CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 against main
-# 110532883411007787f62de35e0a951aa1c16cfa, read through the shared #80
-# envelope parser. Replaces the checkpoint anchored to
-# CG-DIRECTIVE-META-STATE-RECONCILE-002 (5875639550), which the 13 newer valid
-# authority messages below had made stale. None of them declares a
-# control_effect, so none could be folded; they are incorporated here by review.
+# Re-derived whole under CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008
+# (C8-F2) against main 110532883411007787f62de35e0a951aa1c16cfa, read through
+# the shared #80 envelope parser. This is a reviewed recovery. It replaces the
+# checkpoint anchored to CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 (5963509515),
+# whose fold stops, as designed, at the malformed
+# CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-004 (5964575594). The parser is
+# unchanged, and the fold still never skips a malformed message newer than
+# its anchor.
 derivation:
   source_main: 110532883411007787f62de35e0a951aa1c16cfa
-  directive: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001
+  review: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008
   # Generation = 1-based position among ALL authority candidates, valid or
-  # malformed (C2). 64 candidates (60 valid, 4 malformed) at derivation; the
-  # anchor is generation 64, the previous anchor generation 51.
-  anchor_generation: 64
-  # The first typed authority after this anchor,
-  # CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001 (5963636295,
-  # control_effect PACKET_CORRECTION), is folded at read time, not written here.
-  # Every valid authority message after the previous anchor, oldest first.
+  # malformed (C2). 73 candidates (68 valid, 5 malformed) at derivation; the
+  # anchor is generation 73, the previous anchor generation 64.
+  anchor_generation: 73
+  # Every authority message after the previous anchor, oldest first. All are
+  # typed PACKET_CORRECTION except CORRECTION-004, which is unreadable and is
+  # incorporated here by review only.
   incorporates:
-    - CG-REVIEW-META-STATE-RECONCILE-CORRECTION-001
-    - CG-REVIEW-META-STATE-RECONCILE-ADMIT-002
-    - CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-001
-    - CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
-    - CG-REVIEW-OBSERVABILITY-SENTRY-WEB-QUEUE-001
-    - CG-REVIEW-META-AI-REVIEW-FAILOVER-PROGRESS-001
-    - CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-001
-    - CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
-    - CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
-    - CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004
-    - CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-RETURN-WAKE-005
-    - CG-REVIEW-META-AI-REVIEW-FAILOVER-FINAL-005
-    - CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-004 (malformed; by review)
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-BLOCKER-RULING-005
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-HUMAN-GATES-CLEARED-006
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-006
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-007
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008
   # Authority-typed ChatGPT messages that fail the AUTHORITY profile. All are
-  # older than this anchor, so they are evidence only. None is newer than the
-  # previous anchor.
+  # older than this anchor, so they are evidence only.
   malformed_authority_evidence:
     - CG-REVIEW-META-STATE-RECONCILE-001 (5826124586), repeated merge_authority
     - CG-HOLD-ACTION-CONTROLLER-BRIDGE-001 (5826612913), no implementation_branch, scope_changed or production_touched
     - CG-PLAN-PLATFORM-CONVERGENCE-001 (5826799265), undeclared type PLAN
     - CG-REVIEW-META-CONTROL-PARSER-ADMIT-001 (5875440129), repeated merge_authority
+    - CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-004 (5964575594), repeated column-0 prose key Required
   repository_evidence:
     - PR 103 merged 2026-09-28T19:09:40Z as 4eba59eb from head 5dbfac61
     - PR 104 merged 2026-10-03T00:15:35Z as 11053288 from exact admitted head abcdb8f9
     - PR 94 (impl/kf-ai-pr-review-gate-001) open, superseded, not admitted
     - PR 109 (impl/kf-meta-state-reducer-001) open draft, reference input only
+    - PR 120 (impl/kf-meta-state-reducer-live-001) open draft, this packet; not merged
 
 programme:
   packets_total: 35
@@ -87,15 +85,15 @@ programme:
     - KF-EXEC-AUTH-001
   # The next application packet by the DAG. Held; see `hold`.
   application_frontier: KF-EXEC-ACTION-001
-  # The packet the anchor directive released, exactly as its PACKET_RELEASE
-  # effect would project it: no PR exists at the anchor, so none is named.
+  # The active meta packet exactly as the anchor REVIEW's PACKET_CORRECTION
+  # effect projects it: correction in progress on PR 120, no merge authority.
   active_packet: KF-META-STATE-REDUCER-LIVE-001
   active_phase: null
-  state: CHARACTERIZING
-  health: GREEN
+  state: FIXING_PROOF_FAILURES
+  health: YELLOW
   source_main: 110532883411007787f62de35e0a951aa1c16cfa
   implementation_branch: impl/kf-meta-state-reducer-live-001
-  pr_number: null
+  pr_number: 120
   merge_authority: false
   production_touched: false
 
@@ -133,7 +131,7 @@ meta_package:
     - packet_id: KF-META-CONTROLLER-001
       state: SUPERSEDED
       superseded_by: CG-REVIEW-META-CONTROLLER-SUPERSEDE-001
-  # Released by the anchor; this checkpoint is its own PR's subject.
+  # Released by CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001; this checkpoint is its own PR's subject.
   in_flight: KF-META-STATE-REDUCER-LIVE-001
   # Queued by authority, not released (no DIRECTIVE): after the failover packet.
   queued:
@@ -154,8 +152,8 @@ holds:
       held again by CG-HOLD-ACTION-CONTROLLER-BRIDGE-001 (HOLD_AUTONOMY_BRIDGE):
       no implementation until a separate ChatGPT review accepts the preserved
       characterization and issues a bounded implementation directive.
-      CG-CLOSE-META-AI-REVIEW-FAILOVER-001 and CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001
-      restate the hold.
+      CG-CLOSE-META-AI-REVIEW-FAILOVER-001, CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001
+      and CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008 restate the hold.
     hold_message_id: CG-HOLD-ACTION-CONTROLLER-BRIDGE-001
     hold_comment_id: 5826612913
     # The hold message fails the AUTHORITY profile. The binding current
@@ -226,7 +224,7 @@ momentum:
   consecutive_identical_failures: 0
   consecutive_ci_failures_without_new_root_cause: 0
   last_failure_signature: null
-  last_transition_at: 2026-10-03T00:16:04Z
+  last_transition_at: 2026-10-03T04:09:52Z
   alarm_active: false
 
 correction:
@@ -272,4 +270,4 @@ merge_authority_marker: null
 next_legal_action:
   action: WAIT_AUTHORITY
   reason: ACTION-001 is held; release is a ChatGPT authority action
-  derived_at: 2026-10-03T01:00:00Z
+  derived_at: 2026-10-03T04:30:00Z
