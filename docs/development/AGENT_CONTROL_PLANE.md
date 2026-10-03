@@ -471,7 +471,11 @@ The rules:
   `hold` naming a packet is lifted into `holds` by the fold.
 - **State comes from the effect.** A packet's state is set by its effect, never
   by the free-vocabulary `state:` field (RELEASED, REVIEWED, QUEUED). `health:`
-  is recorded as written.
+  is projected only when it is GREEN, YELLOW or RED. Any other value, such as
+  AMBER, projects null, and the value is kept verbatim as `authority_health`.
+- **The projection stays valid.** Each folded step is checked with
+  `validateState()`. A step that the state contract rejects stops the fold
+  (`CONTROL_EFFECT_PROJECTION_INVALID`).
 - **The first unfoldable message stops the fold.** It and every later message
   stay newer than the anchor, so `reconcile()` reports
   DERIVED_STATE_STALE_AUTHORITY, with `blocked` naming the message and the

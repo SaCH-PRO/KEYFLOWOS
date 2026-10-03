@@ -1371,6 +1371,33 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC generation is stable" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-REDUCER-HEALTH-UNVALIDATED
+    claim: >
+      A typed effect cannot put a health value outside GREEN/YELLOW/RED into the
+      projection; live values such as AMBER are kept verbatim as
+      authority_health (Copilot r4171049945).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              health: HEALTH.includes(read.health) ? read.health : null,
+      replace: |-
+              health: read.health,
+    proof_command: node --test --test-name-pattern="health outside the vocabulary" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-INVALID-PROJECTION
+    claim: >
+      Every folded step is checked against the state contract, and a step it
+      rejects stops the fold, so decide() never acts on an invalid projection.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          if (invalid.length) applied = { ok: false, ...problem(EFFECT_PROBLEMS.PROJECTION_INVALID, invalid.map((x) => x.code)) };
+      replace: |-
+          if (false) applied = null;
+    proof_command: node --test --test-name-pattern="a step the state contract rejects stops it" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-REDUCER-ADMISSION-WITHOUT-PR
     claim: >
       An admission or a checkpoint is about a PR and must name it; only a

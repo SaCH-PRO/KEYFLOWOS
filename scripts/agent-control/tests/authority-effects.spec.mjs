@@ -180,7 +180,8 @@ test('packet effects project state from the effect, never from the free-vocabula
   const { base, anchor, correction, admission } = lifecycle();
   const c = fold(base, [anchor, correction]).state.programme;
   assert.equal(c.state, 'FIXING_PROOF_FAILURES');
-  assert.equal(c.health, 'AMBER', 'health is recorded as authority wrote it');
+  assert.equal(c.authority_health, 'AMBER', 'health is recorded as authority wrote it');
+  assert.equal(c.health, null, 'and only the repository vocabulary is projected');
   assert.equal(c.pr_number, 41);
   assert.equal(c.merge_authority, false);
   const ad = fold(base, [anchor, correction, admission]);
@@ -419,6 +420,42 @@ test('NC holds are packet-bound: a duplicate hold, a clear without its hold, or 
   // Referent: a hold on a packet that is not yet held folds.
   const other = project(held, [anchor, typed('HOLD', 'CG-Y', 'KF-EXEC-OTHER-001', 'HOLD_SET')], repo(mergedPr(9, 'impl/kf-meta-p')));
   assert.equal(other.reduction.blocked, null);
+});
+
+// ------------------------------------------------------------------ the projection stays valid (Copilot r4171049945)
+
+test('health outside the vocabulary is never projected; it is kept verbatim as authority_health', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const base = checkpoint(anchor);
+  for (const [health, projected] of [['AMBER', null], ['PURPLE', null], ['YELLOW', 'YELLOW']]) {
+    const msg = typed('REVIEW', `CG-H-${health}`, 'KF-META-P', 'PACKET_CORRECTION', { pr_number: 41, health });
+    const rec = project(base, [anchor, msg], repo(openPr(41, 'impl/kf-meta-p')));
+    assert.equal(rec.reduction.blocked, null, health);
+    assert.equal(rec.consistent, true, health);
+    assert.equal(rec.effective_state.programme.health, projected, health);
+    assert.equal(rec.effective_state.programme.authority_health, health, health);
+    assert.deepEqual(validateState(rec.effective_state).problems, [], health);
+  }
+});
+
+test('the fold never hands decide() an invalid projection: a step the state contract rejects stops it', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const tainted = checkpoint(anchor, { production_touched: true });
+  const msg = typed('REVIEW', 'CG-N', 'KF-META-P', 'NO_STATE_CHANGE');
+  const rec = project(tainted, [anchor, msg], repo());
+  assert.equal(rec.reduction.blocked.code, EFFECT_PROBLEMS.PROJECTION_INVALID);
+  assert.deepEqual(rec.reduction.blocked.detail, ['PRODUCTION_TOUCHED']);
+  assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT);
+  // Referent: the same effect over a valid checkpoint folds.
+  assert.equal(project(checkpoint(anchor), [anchor, msg], repo()).consistent, true);
+});
+
+test('the programme diagnostic names only the actual prohibition (Copilot r4171100288)', () => {
+  const msg = typed('DIRECTIVE', 'CG-X', 'KF-META-P', 'NO_STATE_CHANGE', { programme_action: 'null' });
+  const read = readEffect(collectAuthority([msg]).newest);
+  assert.equal(read.code, EFFECT_PROBLEMS.PROGRAMME_NOT_FOLDABLE, 'mere presence, even null, stops the fold');
+  assert.match(read.detail, /programme_action is present; programme activation is never folded/);
+  assert.doesNotMatch(read.detail, /hold/i);
 });
 
 // ------------------------------------------------------------------ PR numbers

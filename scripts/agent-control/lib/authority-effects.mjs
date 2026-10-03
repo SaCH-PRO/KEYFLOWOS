@@ -45,6 +45,8 @@
  */
 
 import { compareAuthorityOrder, envelopeField } from './control-envelope.mjs';
+import { HEALTH } from './state-machine.mjs';
+import { validateState } from './state.mjs';
 
 /** The explicit effects an authority message may declare. One per message. */
 export const CONTROL_EFFECTS = Object.freeze([
@@ -71,6 +73,7 @@ export const EFFECT_PROBLEMS = Object.freeze({
   PACKET_HELD: 'CONTROL_EFFECT_PACKET_HELD',
   HOLD_DUPLICATE: 'CONTROL_EFFECT_HOLD_DUPLICATE',
   HOLD_MISMATCH: 'CONTROL_EFFECT_HOLD_MISMATCH',
+  PROJECTION_INVALID: 'CONTROL_EFFECT_PROJECTION_INVALID',
 });
 
 /** Why the fold could not start at all; reconcile() reports these itself. */
@@ -132,7 +135,7 @@ export function readEffect(message) {
   }
   for (const key of ['programme', 'programme_action']) {
     if (message?.envelope && Object.hasOwn(message.envelope.values, key)) {
-      return { ok: false, ...problem(EFFECT_PROBLEMS.PROGRAMME_NOT_FOLDABLE, `${key} is set; programme activation and holds are not folded`) };
+      return { ok: false, ...problem(EFFECT_PROBLEMS.PROGRAMME_NOT_FOLDABLE, `${key} is present; programme activation is never folded`) };
     }
   }
   const effect = field(message, 'control_effect');
@@ -243,7 +246,11 @@ export function applyEffect(state, message, read, options = {}) {
       active_packet: packet,
       active_phase: null,
       state: PROJECTED_STATE[effect],
-      health: read.health,
+      // The projection keeps the repository health vocabulary. Live authority
+      // also writes values such as AMBER; those are kept verbatim beside it
+      // and never translated (Copilot r4171049945).
+      health: HEALTH.includes(read.health) ? read.health : null,
+      authority_health: read.health,
       source_main: read.source_main,
       implementation_branch: read.implementation_branch,
       // A correction that names no PR keeps the projected one; a release starts afresh.
@@ -311,7 +318,10 @@ export function reduceAuthority(checkpoint, authority, options = {}) {
   for (let i = index + 1; i < candidates.length; i += 1) {
     const message = candidates[i];
     const read = readEffect(message);
-    const applied = read.ok ? applyEffect(state, message, read, options) : read;
+    let applied = read.ok ? applyEffect(state, message, read, options) : read;
+    // Never hand decide() a projection the state contract rejects.
+    const invalid = applied.ok ? validateState(applied.state).problems : [];
+    if (invalid.length) applied = { ok: false, ...problem(EFFECT_PROBLEMS.PROJECTION_INVALID, invalid.map((x) => x.code)) };
     if (!applied.ok) {
       return {
         ...out,
