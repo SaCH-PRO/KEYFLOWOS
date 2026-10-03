@@ -136,6 +136,90 @@ ChatGPT then posts one control decision:
 - READY_TO_MERGE
 - CLOSE_CHECKPOINTED
 
+## Independent semantic review
+
+(KF-META-AI-REVIEW-FAILOVER-001; CG-DECISION-META-AI-REVIEW-FAILOVER-001, option A)
+
+Admission needs an independent semantic review of the exact admitted
+semantics. The contract is provider-neutral; the implementation is
+`scripts/agent-control/lib/semantic-review.mjs`, and `evaluateAdmission`
+consumes it.
+
+- **Copilot** (`copilot-pull-request-reviewer[bot]`) is the preferred reviewer
+  whenever it can run.
+- **ChatGPT** (`chatgpt`) is the only approved fallback. It may satisfy the
+  obligation only when the record shows Copilot as `NOT_RUN` with a machine
+  reason (`capacity_exhausted`, `quota_exhausted` or `service_unavailable`), and
+  the PR shows the bot saying it was unable to review at that head.
+- No other reviewer is approved. The implementing agent never satisfies its own
+  review.
+
+ChatGPT records the review at admission, in the same commit that sets
+`review_status`, as the `semantic_review` block of
+`.agent-control/claude-return.yaml`:
+
+```yaml
+semantic_review:
+  implementer: claude
+  reviews:
+    - provider: copilot
+      reviewer: copilot-pull-request-reviewer[bot]
+      reviewed_head: <40-hex>
+      outcome: NOT_RUN            # PASS | NOT_RUN | CHANGES_REQUIRED
+      reason: quota_exhausted     # required for NOT_RUN
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/<repo>/pull/<n>#pullrequestreview-<id>
+    - provider: chatgpt
+      reviewer: chatgpt
+      reviewed_head: <40-hex>
+      outcome: PASS
+      reason: null
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/<repo>/issues/80#issuecomment-<id>
+```
+
+A Copilot `PASS` also lists `dispositioned_findings`: at least one entry for
+each finding the bot's review reports. A review that ran is not a pass by
+itself; on PR 103 the bot reviewed the semantic head and recommended a change.
+
+The record alone proves nothing, so the admission path checks it against live
+evidence:
+- **Copilot:** the bot's PR review at `commit_id == reviewed_head`. "Unable to
+  review" is `NOT_RUN` evidence and can never back a `PASS`. A `NOT_RUN`
+  recorded over a review that did run is a contradiction.
+- **ChatGPT:** the #80 comment at `evidence_location`. It must be an unedited
+  REVIEW from `sender: chatgpt` by an authorized author that passes the
+  AUTHORITY profile, with one-line fields matching the record:
+  ```yaml
+  reviewed_head: <40-hex>
+  semantic_review_outcome: PASS
+  unresolved_substantive_findings: 0
+  ```
+
+`reviewed_head` must carry exactly the admitted semantics: the `source_head`,
+the PR head, or a commit between them that differs from `source_head` only
+under `.agent-control/`. The compare API proves that lineage. A reviewer
+usually reviews the pre-RETURN artifact commit, and the admission commit then
+becomes the PR head.
+
+Admission fails closed on any of these:
+- missing evidence or identity;
+- self-review;
+- one provider presenting as another;
+- `NOT_RUN` without a reason, or `NOT_RUN` counted as `PASS`;
+- a stale or wrong head;
+- contradictory entries, or live evidence that contradicts the record;
+- `CHANGES_REQUIRED`, any unresolved substantive finding, or undispositioned
+  Copilot findings;
+- a ChatGPT pass without Copilot `NOT_RUN` evidence.
+
+When Copilot capacity returns, a Copilot `PASS` satisfies the contract again
+without any change: failover stays available.
+
+The pre-RETURN artifact names this gate `independent semantic review`, and it
+stays `PENDING` until the RETURN. A sentence that claims a Copilot, ChatGPT, AI
+or semantic review passed is a claim about this gate.
+
 ## No direct merge by Claude
 
 Default merge authority is false.
@@ -184,7 +268,44 @@ A packet PR is merge-eligible only when:
 - packet-specific proof is green;
 - branch hygiene is green;
 - ChatGPT review status in `.agent-control/claude-return.yaml` or accepted control artifact is `READY_TO_MERGE`;
+- the independent semantic review is satisfied at the exact admitted semantics
+  (see "Independent semantic review");
+- no required check at the admission head is pending, queued or in progress,
+  and the newest run of each required workflow is green;
+- no required check is owed: a `reopened`, `ready_for_review`,
+  `converted_to_draft`, `renamed` or `base_ref_changed` transition newer than a
+  workflow's latest run means GitHub is about to create a run the list may not
+  show yet;
 - no unresolved contradiction or unexplained defer/drop remains.
+
+### Every merge goes through the exact-head evaluator
+
+(Admission-order correction, CG-DECISION-META-AI-REVIEW-FAILOVER-001)
+
+PR 103 was marked ready for review at 19:09:33 and merged manually at 19:09:40.
+The Agent Control Gate run that the ready event triggered was still in
+progress, and at 19:09:48 it failed, so main took a head whose newest required
+check failed.
+
+The rule:
+- **Automated merge.** `auto-merge-admitted.mjs --merge` evaluates a complete
+  snapshot, collects a second complete snapshot immediately before the merge
+  call, and merges only if both are eligible at the same head and base. The
+  merge is pinned to that head.
+- **Manual merge** by anyone, including ChatGPT acting through the repository
+  account. First run the same evaluator without `--merge` against the current
+  head:
+  ```sh
+  GITHUB_TOKEN=... GITHUB_REPOSITORY=SaCH-PRO/KEYFLOWOS PR_NUMBER=<n> \
+    node scripts/agent-control/auto-merge-admitted.mjs
+  ```
+  Merge only on exit 0, only at the `head_sha` it printed, and only at once.
+  If anything changes after that (a push, a transition, a new run, a moved
+  base), the evaluation is void.
+- **Enforcement.** Nothing in the repository can stop a person with merge
+  rights from clicking merge. GitHub itself enforces this only through
+  branch-protection or ruleset required status checks on `main`. That is a
+  repository-admin setting, and it is a HUMAN_GATED residual of this packet.
 
 ## Safety
 

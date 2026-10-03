@@ -9,6 +9,7 @@
  */
 
 import { REQUIRED_WORKFLOWS } from './events.mjs';
+import { evaluateSemanticReview } from './semantic-review.mjs';
 
 export const ADMISSION_REASONS = Object.freeze({
   PR_NOT_OPEN: 'pr_not_open',
@@ -26,10 +27,32 @@ export const ADMISSION_REASONS = Object.freeze({
   MISSING_WORKFLOWS: 'missing_workflows',
   WORKFLOWS_NOT_GREEN: 'workflows_not_green',
   STALE_WORKFLOW_HEAD: 'workflow_runs_not_at_exact_head',
+  REQUIRED_CHECK_PENDING: 'required_check_pending_at_head',
+  TRANSITIONS_UNKNOWN: 'pr_transitions_unknown',
+  CHECKS_PREDATE_TRANSITION: 'required_checks_predate_pr_transition',
+  SEMANTIC_REVIEW_NOT_SATISFIED: 'semantic_review_not_satisfied',
+  CHANGED_BEFORE_MERGE: 'admission_changed_before_merge',
   ELIGIBLE: 'all_admission_contracts_satisfied',
 });
 
 const READY_STATUSES = new Set(['READY_TO_MERGE', 'ACCEPT_FOR_ADMISSION']);
+
+/**
+ * PR timeline events that re-run required workflows at an unchanged head, and
+ * which workflows they re-run (the `on.pull_request.types` of each workflow).
+ * A transition newer than a workflow's latest run means a run is owed that the
+ * run list may not show yet: GitHub creates it seconds after the event. PR 103
+ * was merged 7s after ready_for_review, while the Agent Control Gate run that
+ * event triggered was in progress; it then failed.
+ * (CG-DECISION-META-AI-REVIEW-FAILOVER-001, admission-order correction)
+ */
+export const TRANSITION_TRIGGERS = Object.freeze({
+  reopened: REQUIRED_WORKFLOWS,
+  ready_for_review: Object.freeze(['Agent Control Gate']),
+  converted_to_draft: Object.freeze(['Agent Control Gate']),
+  renamed: Object.freeze(['Agent Control Gate']),
+  base_ref_changed: Object.freeze(['Agent Control Gate']),
+});
 
 function fail(reason, detail) {
   return { eligible: false, reason, detail: detail ?? null };
@@ -43,6 +66,9 @@ function fail(reason, detail) {
  *   workflow_runs: [{name, head_sha, status, conclusion, created_at}]
  *   ancestry: {source_head_is_ancestor: bool, non_control_files: string[]}
  *   contradictions: string[]
+ *   pr_transitions: [{event, created_at}] from the PR timeline
+ *   semantic_review_live: {copilot: [...], chatgpt: [...]} (lib/semantic-review.mjs)
+ *   reviewed_head_lineage: {[sha]: {descends_from_source_head, ancestor_of_pr_head, non_control_files}}
  */
 export function evaluateAdmission(snapshot) {
   const { pr = {}, active = {}, ret = {}, ancestry = {}, contradictions = [] } = snapshot;
@@ -80,6 +106,20 @@ export function evaluateAdmission(snapshot) {
     return fail(ADMISSION_REASONS.NON_CONTROL_TAIL, ancestry.non_control_files);
   }
 
+  // --- independent semantic review ----------------------------------------
+  // Provider-neutral: Copilot when it ran, ChatGPT only when Copilot is
+  // recorded and evidenced as NOT_RUN. Never the implementer.
+  const review = evaluateSemanticReview({
+    record: ret.semantic_review,
+    source_head: ret.source_head,
+    pr_head: pr.head_sha,
+    lineage: snapshot.reviewed_head_lineage,
+    live: snapshot.semantic_review_live,
+  });
+  if (!review.satisfied) {
+    return fail(ADMISSION_REASONS.SEMANTIC_REVIEW_NOT_SATISFIED, { reason: review.reason, detail: review.detail });
+  }
+
   // --- proof -------------------------------------------------------------
   const tests = ret.tests || {};
   const failed = Number(tests.failed || 0);
@@ -111,6 +151,27 @@ export function evaluateAdmission(snapshot) {
     return fail(ADMISSION_REASONS.MISSING_WORKFLOWS, missing);
   }
 
+  // A required run at this head that has not finished is unresolved, even when
+  // an older run of the same workflow succeeded: merging now would admit a head
+  // whose newest verdict is unknown.
+  const pending = atHead.filter((r) => REQUIRED_WORKFLOWS.includes(r.name) && r.status !== 'completed');
+  if (pending.length) {
+    return fail(ADMISSION_REASONS.REQUIRED_CHECK_PENDING, pending.map((r) => ({ workflow: r.name, status: r.status, run_id: r.id ?? null })));
+  }
+
+  if (!Array.isArray(snapshot.pr_transitions)) return fail(ADMISSION_REASONS.TRANSITIONS_UNKNOWN);
+  const owed = [];
+  for (const t of snapshot.pr_transitions) {
+    const affected = TRANSITION_TRIGGERS[t?.event];
+    if (!affected) continue;
+    for (const name of affected) {
+      if (new Date(latest.get(name).created_at) < new Date(t.created_at)) {
+        owed.push({ workflow: name, transition: t.event, transition_at: t.created_at, latest_run_at: latest.get(name).created_at });
+      }
+    }
+  }
+  if (owed.length) return fail(ADMISSION_REASONS.CHECKS_PREDATE_TRANSITION, owed);
+
   const notGreen = REQUIRED_WORKFLOWS.filter((name) => {
     const run = latest.get(name);
     return !(run.status === 'completed' && run.conclusion === 'success');
@@ -126,10 +187,29 @@ export function evaluateAdmission(snapshot) {
     base_sha: pr.base_sha,
     evidence: {
       review_status: ret.review_status,
+      semantic_review: review.evidence,
       source_head: ret.source_head,
       workflows: REQUIRED_WORKFLOWS.map((n) => ({ workflow: n, run_id: latest.get(n).id ?? null, conclusion: 'success' })),
     },
   };
 }
 
-export default { evaluateAdmission, ADMISSION_REASONS };
+/**
+ * The verdict a merge may act on, given two evaluations of freshly collected
+ * snapshots: one to decide, one taken immediately before the merge call. Both
+ * must be eligible for the same head and base; anything that changed between
+ * them (a new run, a transition, a moved head or base) blocks the merge.
+ */
+export function recheckBeforeMerge(first, second) {
+  if (!first?.eligible) return first;
+  if (!second?.eligible) return second ?? fail(ADMISSION_REASONS.CHANGED_BEFORE_MERGE, 'no recheck');
+  if (String(first.head_sha) !== String(second.head_sha) || String(first.base_sha) !== String(second.base_sha)) {
+    return fail(ADMISSION_REASONS.CHANGED_BEFORE_MERGE, {
+      first: { head_sha: first.head_sha, base_sha: first.base_sha },
+      second: { head_sha: second.head_sha, base_sha: second.base_sha },
+    });
+  }
+  return second;
+}
+
+export default { evaluateAdmission, recheckBeforeMerge, ADMISSION_REASONS, TRANSITION_TRIGGERS };
