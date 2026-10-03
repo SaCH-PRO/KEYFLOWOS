@@ -470,13 +470,14 @@ test('NC generation is stable: a later event keeps its generation and coordinate
 test('the committed checkpoint keeps ACTION-001 held against any typed effect except an explicit RESUME HOLD_CLEAR', () => {
   const state = loadState(process.cwd());
   const anchor = authority('DIRECTIVE', state.authority_basis.message_id, 'KF-META-STATE-REDUCER-LIVE-001', {}, { id: state.authority_basis.comment_id, at: '2026-10-03T00:16:04Z' });
-  for (const msg of [
-    typed('DIRECTIVE', 'CG-X', 'KF-EXEC-ACTION-001', 'PACKET_RELEASE'),
-    typed('DIRECTIVE', 'CG-X', 'KF-EXEC-ACTION-001', 'PACKET_CORRECTION', { pr_number: 77 }),
-    typed('REVIEW', 'CG-X', 'KF-EXEC-ACTION-001', 'HOLD_CLEAR'),
+  for (const [msg, code] of [
+    // The hold is the reason, ahead of any in-flight or not-active conflict.
+    [typed('DIRECTIVE', 'CG-X', 'KF-EXEC-ACTION-001', 'PACKET_RELEASE'), EFFECT_PROBLEMS.PACKET_HELD],
+    [typed('DIRECTIVE', 'CG-X', 'KF-EXEC-ACTION-001', 'PACKET_CORRECTION', { pr_number: 77 }), EFFECT_PROBLEMS.PACKET_HELD],
+    [typed('REVIEW', 'CG-X', 'KF-EXEC-ACTION-001', 'HOLD_CLEAR'), EFFECT_PROBLEMS.EFFECT_TYPE_MISMATCH],
   ]) {
     const out = fold(state, [anchor, msg]);
-    assert.ok(out.blocked, msg.body);
+    assert.equal(out.blocked?.code, code, msg.body);
     assert.deepEqual(activeHolds(out.state).map((h) => h.packet_id), ['KF-EXEC-ACTION-001']);
   }
   // Referent: the explicit RESUME HOLD_CLEAR is the one thing that releases it.
