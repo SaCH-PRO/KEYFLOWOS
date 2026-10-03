@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { activeHolds, emptyState, loadState, validateState } from '../lib/state.mjs';
 import { decide, ACTIONS } from '../lib/orchestrator.mjs';
 import { collectAuthority, reconcile, reconcileProjection, FINDINGS } from '../lib/reconcile.mjs';
-import { reduceAuthority, readEffect, CONTROL_EFFECTS, EFFECT_PROBLEMS, FOLD_NOT_STARTED } from '../lib/authority-effects.mjs';
+import { reduceAuthority, readEffect, applyEffect, CONTROL_EFFECTS, EFFECT_PROBLEMS, FOLD_NOT_STARTED } from '../lib/authority-effects.mjs';
 import { parseEnvelope } from '../lib/control-envelope.mjs';
 import { applicationPacketsOf, reconcileWithTruth } from '../lib/truth.mjs';
 import { loadDag } from '../lib/dag.mjs';
@@ -444,6 +444,47 @@ test('NC health outside the vocabulary fails closed before the effect applies; c
       assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY]);
       assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, 'orchestration never consumes the invalid health');
     }
+  }
+});
+
+test('NC production_touched other than false fails closed on every effect, holds included (Copilot r4171364250)', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const base = checkpoint(anchor);
+  const effects = [
+    ['REVIEW', 'KF-META-P', 'PACKET_CORRECTION', { pr_number: 41 }],
+    ['REVIEW', 'KF-META-P', 'NO_STATE_CHANGE', {}],
+    ['HOLD', 'KF-EXEC-OTHER-001', 'HOLD_SET', {}],
+  ];
+  for (const [type, packet, effect, extra] of effects) {
+    // Referent: the canonical safe value folds.
+    const safe = project(base, [anchor, typed(type, 'CG-PT-SAFE', packet, effect, extra)], repo(openPr(41, 'impl/kf-meta-p')));
+    assert.equal(safe.reduction.blocked, null, `${effect} false`);
+    for (const touched of ['true', 'TRUE', 'yes', 'null']) {
+      const msg = typed(type, `CG-PT-${touched}`, packet, effect, { ...extra, production_touched: touched });
+      const rec = project(base, [anchor, msg], repo(openPr(41, 'impl/kf-meta-p')));
+      assert.equal(rec.reduction.blocked?.code, EFFECT_PROBLEMS.PRODUCTION_TOUCHED, `${effect} ${touched}`);
+      assert.deepEqual(rec.effective_state, base, 'nothing applied; the anchor did not move');
+      assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, `${effect} ${touched}: orchestration never consumes it`);
+    }
+  }
+});
+
+test('NC a packet_id that is not a KF- packet id never keys a hold (Copilot r4171599236)', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const base = checkpoint(anchor);
+  for (const packet of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+    for (const [type, effect] of [['RESUME', 'HOLD_CLEAR'], ['HOLD', 'HOLD_SET']]) {
+      const msg = typed(type, 'CG-PROTO', packet, effect, { implementation_branch: 'impl/x' });
+      const rec = project(base, [anchor, msg], repo());
+      assert.equal(rec.reduction.blocked?.code, EFFECT_PROBLEMS.PACKET_ID_INVALID, `${effect} ${packet}`);
+      assert.deepEqual(rec.effective_state, base, `${effect} ${packet}: the anchor did not move`);
+    }
+  }
+  // Defence in depth: below readEffect, an inherited key is still not an active hold.
+  const message = collectAuthority([anchor, typed('RESUME', 'CG-R', 'KF-META-P', 'HOLD_CLEAR')]).newest;
+  for (const packet of ['__proto__', 'constructor']) {
+    const out = applyEffect(base, message, { ok: true, effect: 'HOLD_CLEAR', packet_id: packet });
+    assert.equal(out.code, EFFECT_PROBLEMS.HOLD_MISMATCH, packet);
   }
 });
 

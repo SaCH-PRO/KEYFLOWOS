@@ -1476,6 +1476,46 @@ negative_controls:
     proof_command: node --test --test-name-pattern="orchestrate decides on the effective projection" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-REDUCER-PRODUCTION-TOUCHED-FOLDED
+    claim: >
+      Authority carrying production_touched other than false stops the fold on
+      every effect, holds included. No effect projects the field, so without
+      the guard such a message would fold as untouched (Copilot r4171364250).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        if (touched !== 'false') {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="NC production_touched other than false" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-PACKET-ID-UNCHECKED
+    claim: >
+      A packet_id that is not a KF- packet id, such as __proto__, never keys a
+      hold; the effect stops the fold (Copilot r4171599236).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        if (read.packet_id === null || !PACKET_ID.test(read.packet_id)) {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="a packet_id that is not a KF- packet id" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-REDUCER-INHERITED-HOLD
+    claim: >
+      Below readEffect, holds are read by own key only, so an inherited name
+      such as __proto__ is never an active hold that a HOLD_CLEAR could clear.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        const held = Object.hasOwn(holds, packet) && holds[packet] && holds[packet].active !== false ? holds[packet] : null;
+      replace: |-
+        const held = holds[packet] && holds[packet].active !== false ? holds[packet] : null;
+    proof_command: node --test --test-name-pattern="a packet_id that is not a KF- packet id" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-REDUCER-RECORDED-UNMINIMIZED
     claim: >
       The recorded #80 evidence stays minimized to the column-0 lines the

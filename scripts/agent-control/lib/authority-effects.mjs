@@ -34,7 +34,8 @@
  *   - names an unknown effect, or an effect its message type cannot carry;
  *   - names `programme` or `programme_action` (activation is not a fold);
  *   - lacks a field its effect needs, carries a health outside GREEN/YELLOW/RED,
- *     or conflicts with the projection;
+ *     carries production_touched other than false, names a packet_id that is
+ *     not a KF- packet id, or conflicts with the projection;
  *   - would produce a projection that validateState() rejects.
  * reconcile() then reports the projection stale (DERIVED_STATE_STALE_AUTHORITY,
  * with `blocked` naming the message and the reason), or AUTHORITY_MALFORMED,
@@ -76,6 +77,8 @@ export const EFFECT_PROBLEMS = Object.freeze({
   HOLD_DUPLICATE: 'CONTROL_EFFECT_HOLD_DUPLICATE',
   HOLD_MISMATCH: 'CONTROL_EFFECT_HOLD_MISMATCH',
   HEALTH_INVALID: 'CONTROL_EFFECT_HEALTH_INVALID',
+  PRODUCTION_TOUCHED: 'CONTROL_EFFECT_PRODUCTION_TOUCHED',
+  PACKET_ID_INVALID: 'CONTROL_EFFECT_PACKET_ID_INVALID',
   PROJECTION_INVALID: 'CONTROL_EFFECT_PROJECTION_INVALID',
 });
 
@@ -111,6 +114,8 @@ const PR_REQUIRED = Object.freeze(['PACKET_ADMISSION', 'CHECKPOINT']);
 
 const SHA = /^[0-9a-f]{40}$/;
 const PR_NUMBER = /^[1-9][0-9]*$/;
+// A packet id keys the holds map, so it can never be `__proto__` or `constructor`.
+const PACKET_ID = /^KF-[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
 
 function problem(code, detail) {
   return { code, detail: detail ?? null };
@@ -164,6 +169,16 @@ export function readEffect(message) {
   if (read.health !== null && !HEALTH.includes(read.health)) {
     return { ok: false, ...problem(EFFECT_PROBLEMS.HEALTH_INVALID, `${read.health} is not ${HEALTH.join('/')}`) };
   }
+  // No effect projects production_touched, so authority signalling anything
+  // but the safe value must stop the fold rather than fold as untouched
+  // (Copilot r4171364250). This applies to every effect, holds included.
+  const touched = field(message, 'production_touched');
+  if (touched !== 'false') {
+    return { ok: false, ...problem(EFFECT_PROBLEMS.PRODUCTION_TOUCHED, `production_touched is ${touched ?? 'absent'}; only false folds`) };
+  }
+  if (read.packet_id === null || !PACKET_ID.test(read.packet_id)) {
+    return { ok: false, ...problem(EFFECT_PROBLEMS.PACKET_ID_INVALID, `${read.packet_id ?? 'absent'} is not a KF- packet id`) };
+  }
   if (effect === 'NO_STATE_CHANGE' || effect === 'HOLD_SET' || effect === 'HOLD_CLEAR') return { ok: true, ...read };
 
   const missing = [];
@@ -209,7 +224,8 @@ export function applyEffect(state, message, read, options = {}) {
   const p = next.programme || (next.programme = {});
   const holds = liftHolds(next);
   const { effect, packet_id: packet } = read;
-  const held = holds[packet] && holds[packet].active !== false ? holds[packet] : null;
+  // Own keys only, so an inherited name never reads as an active hold (Copilot r4171599236).
+  const held = Object.hasOwn(holds, packet) && holds[packet] && holds[packet].active !== false ? holds[packet] : null;
 
   if (effect === 'HOLD_SET') {
     // The effect carries nothing but the packet, so a second hold on a packet

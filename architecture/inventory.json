@@ -1,6 +1,7 @@
 {
   "directories": [
     ".agent-control",
+    ".agent-control/.worker",
     ".agents",
     ".agents/skills",
     ".agents/skills/agent-tools",
@@ -913,6 +914,12 @@
   ],
   "files": [
     {
+      "extension": ".json",
+      "lines": 6,
+      "path": ".agent-control/.worker/cursor.json",
+      "size_bytes": 110
+    },
+    {
       "extension": ".md",
       "lines": 34,
       "path": ".agent-control/README.md",
@@ -926,9 +933,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 105,
+      "lines": 131,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 5958
+      "size_bytes": 8335
     },
     {
       "extension": ".yaml",
@@ -938,9 +945,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 434,
+      "lines": 517,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 24092
+      "size_bytes": 30726
     },
     {
       "extension": ".yaml",
@@ -3213,9 +3220,9 @@
     },
     {
       "extension": ".json",
-      "lines": 15,
+      "lines": 22,
       "path": ".claude/coordination/sessions/613e240c-259a-447e-935c-6b0dace84092.json",
-      "size_bytes": 712
+      "size_bytes": 1267
     },
     {
       "extension": ".md",
@@ -57621,15 +57628,15 @@
     },
     {
       "extension": ".md",
-      "lines": 529,
+      "lines": 530,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 20905
+      "size_bytes": 20993
     },
     {
       "extension": ".json",
-      "lines": 63226,
+      "lines": 63233,
       "path": "architecture/inventory.json",
-      "size_bytes": 1699896
+      "size_bytes": 1700069
     },
     {
       "extension": ".md",
@@ -58909,7 +58916,7 @@
       "extension": ".md",
       "lines": 199,
       "path": "docs/development/AGENT_AUTOPILOT_OPERATIONS.md",
-      "size_bytes": 14714
+      "size_bytes": 14759
     },
     {
       "extension": ".yaml",
@@ -58919,9 +58926,9 @@
     },
     {
       "extension": ".md",
-      "lines": 537,
+      "lines": 542,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 24961
+      "size_bytes": 25348
     },
     {
       "extension": ".md",
@@ -61666,9 +61673,9 @@
         "./state-machine.mjs",
         "./state.mjs"
       ],
-      "lines": 348,
+      "lines": 364,
       "path": "scripts/agent-control/lib/authority-effects.mjs",
-      "size_bytes": 17014
+      "size_bytes": 18160
     },
     {
       "exports": [
@@ -61954,9 +61961,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 1491,
+      "lines": 1531,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 71139
+      "size_bytes": 73071
     },
     {
       "exports": [],
@@ -62075,9 +62082,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 785,
+      "lines": 826,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
-      "size_bytes": 48595
+      "size_bytes": 51112
     },
     {
       "exports": [],
@@ -63191,7 +63198,7 @@
       ".html": 8,
       ".ico": 1,
       ".js": 10,
-      ".json": 39,
+      ".json": 40,
       ".md": 564,
       ".mjs": 74,
       ".patch": 1,
@@ -63220,7 +63227,7 @@
     "root": "C:/Users/sachd/AppData/Local/KEYFLOWOS/worker-worktrees/CG-REVIEW-META-STATE-REDUCER-LIVE-HUMAN-GATES-CLEARED-006",
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3448,
-    "total_files": 4440,
-    "total_lines": 1133495
+    "total_files": 4441,
+    "total_lines": 1133727
   }
 }

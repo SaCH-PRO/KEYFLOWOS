@@ -509,7 +509,8 @@ orchestrate.mjs / status.mjs --verify
               fold applyEffect, oldest first, over each valid authority message newer than
               the anchor that declares `control_effect:`; stop at the first message that is
               malformed, untyped, has an unknown or unauthorized effect, lacks a field its
-              effect needs, carries a non-canonical health, conflicts with the projection,
+              effect needs, carries a non-canonical health, production_touched other
+              than false or a packet_id that is not a KF- id, conflicts with the projection,
               names programme activation, or yields a projection validateState() rejects
           → repoFor(effective programme) — repository truth for the folded projection
           → reconcile(effective, authority, repo, reduction) — findings (a stopped fold

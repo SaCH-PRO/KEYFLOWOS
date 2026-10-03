@@ -474,6 +474,11 @@ The rules:
   must be GREEN, YELLOW, RED or absent. Any other value, AMBER included, fails
   closed before the effect applies (`CONTROL_EFFECT_HEALTH_INVALID`). It is
   never translated.
+- **Safety and identity are checked on every effect.** No effect projects
+  `production_touched`, so any value other than `false` fails closed, holds and
+  NO_STATE_CHANGE included (`CONTROL_EFFECT_PRODUCTION_TOUCHED`). `packet_id`
+  must be a `KF-` packet id (`CONTROL_EFFECT_PACKET_ID_INVALID`), so a name
+  like `__proto__` never keys a hold, and holds are read by own key only.
 - **The projection stays valid.** Each folded step is checked with
   `validateState()`. A step that the state contract rejects stops the fold
   (`CONTROL_EFFECT_PROJECTION_INVALID`).
