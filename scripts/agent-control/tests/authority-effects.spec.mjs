@@ -104,7 +104,7 @@ function deepFreeze(value) {
 function lifecycle() {
   const anchor = authority('DIRECTIVE', 'CG-DIRECTIVE-P', 'KF-META-P');
   const base = checkpoint(anchor);
-  const correction = typed('REVIEW', 'CG-REVIEW-P-CORRECTION', 'KF-META-P', 'PACKET_CORRECTION', { pr_number: 41, health: 'AMBER' });
+  const correction = typed('REVIEW', 'CG-REVIEW-P-CORRECTION', 'KF-META-P', 'PACKET_CORRECTION', { pr_number: 41, health: 'YELLOW' });
   const admission = typed('REVIEW', 'CG-REVIEW-P-ADMIT', 'KF-META-P', 'PACKET_ADMISSION', { pr_number: 41, merge_authority: 'true' });
   const close = typed('REVIEW', 'CG-REVIEW-P-CHECKPOINT', 'KF-META-P', 'CHECKPOINT', { pr_number: 41 });
   return { anchor, base, correction, admission, close, comments: [anchor, correction, admission, close] };
@@ -180,8 +180,7 @@ test('packet effects project state from the effect, never from the free-vocabula
   const { base, anchor, correction, admission } = lifecycle();
   const c = fold(base, [anchor, correction]).state.programme;
   assert.equal(c.state, 'FIXING_PROOF_FAILURES');
-  assert.equal(c.authority_health, 'AMBER', 'health is recorded as authority wrote it');
-  assert.equal(c.health, null, 'and only the repository vocabulary is projected');
+  assert.equal(c.health, 'YELLOW', 'canonical health is projected as authority wrote it');
   assert.equal(c.pr_number, 41);
   assert.equal(c.merge_authority, false);
   const ad = fold(base, [anchor, correction, admission]);
@@ -424,17 +423,26 @@ test('NC holds are packet-bound: a duplicate hold, a clear without its hold, or 
 
 // ------------------------------------------------------------------ the projection stays valid (Copilot r4171049945)
 
-test('health outside the vocabulary is never projected; it is kept verbatim as authority_health', () => {
+test('NC health outside the vocabulary fails closed before the effect applies; canonical health folds (CORRECTION-003 F1)', () => {
   const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
   const base = checkpoint(anchor);
-  for (const [health, projected] of [['AMBER', null], ['PURPLE', null], ['YELLOW', 'YELLOW']]) {
+  for (const health of ['GREEN', 'YELLOW', 'RED']) {
     const msg = typed('REVIEW', `CG-H-${health}`, 'KF-META-P', 'PACKET_CORRECTION', { pr_number: 41, health });
     const rec = project(base, [anchor, msg], repo(openPr(41, 'impl/kf-meta-p')));
     assert.equal(rec.reduction.blocked, null, health);
     assert.equal(rec.consistent, true, health);
-    assert.equal(rec.effective_state.programme.health, projected, health);
-    assert.equal(rec.effective_state.programme.authority_health, health, health);
+    assert.equal(rec.effective_state.programme.health, health, health);
     assert.deepEqual(validateState(rec.effective_state).problems, [], health);
+  }
+  for (const [effect, extra] of [['PACKET_CORRECTION', { pr_number: 41 }], ['NO_STATE_CHANGE', {}]]) {
+    for (const health of ['PURPLE', 'AMBER', 'green']) {
+      const msg = typed('REVIEW', `CG-H-${health}`, 'KF-META-P', effect, { ...extra, health });
+      const rec = project(base, [anchor, msg], repo(openPr(41, 'impl/kf-meta-p')));
+      assert.equal(rec.reduction.blocked?.code, EFFECT_PROBLEMS.HEALTH_INVALID, `${effect} ${health}`);
+      assert.deepEqual(rec.effective_state, base, 'nothing applied; the anchor did not move');
+      assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY]);
+      assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, 'orchestration never consumes the invalid health');
+    }
   }
 });
 
@@ -622,7 +630,7 @@ test('recorded evidence (reducer): the committed checkpoint folds the real typed
   const base = { id: 5963800000, html_url: 'https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5963800000', created_at: '2026-10-03T02:00:00Z', updated_at: '2026-10-03T02:00:00Z', user: { login: 'SaCH-PRO' } };
   const envelope = [
     'message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001', 'message_type: REVIEW', 'packet_id: KF-META-STATE-REDUCER-LIVE-001',
-    'sender: chatgpt', `source_main: ${p.source_main}`, `implementation_branch: ${p.implementation_branch}`, 'state: REVIEWED', 'health: AMBER',
+    'sender: chatgpt', `source_main: ${p.source_main}`, `implementation_branch: ${p.implementation_branch}`, 'state: REVIEWED', 'health: YELLOW',
     'scope_changed: false', 'production_touched: false', 'pr_number: 110',
   ];
   const typedReview = { ...base, body: ['```yaml', ...envelope, 'control_effect: PACKET_CORRECTION', '```'].join('\n') };
@@ -642,15 +650,43 @@ test('recorded evidence (reducer): the committed checkpoint folds the real typed
 
 // ------------------------------------------------------------------ live wiring
 
-function cli(script, args, snapshot) {
+function cli(script, args, snapshot, extraEnv = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-reducer-'));
   try {
     const file = path.join(dir, 'truth.json');
     fs.writeFileSync(file, JSON.stringify(snapshot));
-    const env = { ...process.env };
+    const env = { ...process.env, ...extraEnv };
     delete env.GITHUB_EVENT_NAME;
     delete env.GITHUB_EVENT_PATH;
+    for (const [key, value] of Object.entries(extraEnv)) if (value === undefined) delete env[key];
     return spawnSync(process.execPath, [script, ...args, '--truth-file', file], { encoding: 'utf8', env });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Builder readiness as an explicit test seam (CORRECTION-003 F2). The CLI's
+ * Claude adapter is READY when KEYFLOW_CLAUDE_BIN answers `--version`. A stub
+ * on a temporary PATH answers it, so readiness never comes from the host or
+ * the runner, and no credential or provider traffic is involved.
+ * `available: false` disables the adapter instead.
+ */
+function withBuilder(available, fn) {
+  if (!available) return fn({ KEYFLOW_AGENT_CLAUDE_DISABLED: '1' });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-stub-builder-'));
+  try {
+    if (process.platform === 'win32') {
+      fs.writeFileSync(path.join(dir, 'kf-stub-claude.cmd'), '@echo kf-stub-claude 0.0.0\r\n');
+    } else {
+      fs.writeFileSync(path.join(dir, 'kf-stub-claude'), '#!/bin/sh\necho kf-stub-claude 0.0.0\n', { mode: 0o755 });
+    }
+    const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+    return fn({
+      [pathKey]: `${dir}${path.delimiter}${process.env[pathKey] || ''}`,
+      KEYFLOW_CLAUDE_BIN: 'kf-stub-claude',
+      KEYFLOW_AGENT_CLAUDE_DISABLED: undefined,
+    });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -666,8 +702,8 @@ test('CLI end to end: orchestrate decides on the effective projection, and a hol
       `source_main: ${state.programme.source_main}`, `implementation_branch: ${state.programme.implementation_branch}`, 'state: REVIEWED',
       'health: GREEN', 'scope_changed: false', 'production_touched: false', `control_effect: ${effect}`, ...extra, '```'].join('\n'),
   });
-  const run = (comments) => {
-    const res = cli('scripts/agent-control/orchestrate.mjs', ['--json'], { comments, repo: recorded.repo });
+  const run = (comments, env = { KEYFLOW_AGENT_CLAUDE_DISABLED: '1' }) => {
+    const res = cli('scripts/agent-control/orchestrate.mjs', ['--json'], { comments, repo: recorded.repo }, env);
     assert.equal(res.status, 0, res.stderr);
     return JSON.parse(res.stdout);
   };
@@ -681,20 +717,27 @@ test('CLI end to end: orchestrate decides on the effective projection, and a hol
   assert.equal(observed.reconciliation.effective_state.authority_basis.message_id, 'REVIEW-5963700001');
   assert.deepEqual(observed.reconciliation.reduction.applied.map((a) => a.effect), ['PACKET_CORRECTION', 'NO_STATE_CHANGE']);
 
-  const resume = run([...recorded.comments, msg(5963700002, 'RESUME', 'KF-EXEC-ACTION-001', 'HOLD_CLEAR')]);
+  // With ACTION-001 explicitly released and a test builder available, the
+  // in-flight packet reaches DISPATCH_BUILDER. Readiness comes from the stub
+  // seam, never from the host or the runner (CORRECTION-003 F2).
+  const resumeMsg = msg(5963700002, 'RESUME', 'KF-EXEC-ACTION-001', 'HOLD_CLEAR');
+  const resume = withBuilder(true, (env) => run([...recorded.comments, resumeMsg], env));
   assert.equal(resume.reconciliation.consistent, true);
   assert.equal(resume.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, false);
-  // With ACTION-001 explicitly released, the in-flight packet's builder step is
-  // the next legal work. Whether a builder is ready depends on the host (the CLI
-  // probes the local Claude adapter; runners have none), so both outcomes of
-  // that one step are accepted, and the hold no longer decides.
-  assert.notEqual(resume.decision.action, ACTIONS.WAIT_AUTHORITY);
-  if (resume.decision.action === ACTIONS.DISPATCH_BUILDER) {
-    assert.equal(resume.decision.packet_id, 'KF-META-STATE-REDUCER-LIVE-001');
-  } else {
-    assert.equal(resume.decision.action, ACTIONS.WAIT_EXTERNAL_AGENT);
-    assert.equal(resume.decision.role, ROLES.BUILDER);
-  }
+  assert.equal(resume.decision.action, ACTIONS.DISPATCH_BUILDER);
+  assert.equal(resume.decision.packet_id, 'KF-META-STATE-REDUCER-LIVE-001');
+
+  // A subsequent typed HOLD_SET still wins, with the same builder available.
+  const reheld = withBuilder(true, (env) => run([...recorded.comments, resumeMsg, msg(5963700004, 'HOLD', 'KF-EXEC-ACTION-001', 'HOLD_SET')], env));
+  assert.equal(reheld.reconciliation.consistent, true);
+  assert.equal(reheld.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, true);
+  assert.equal(reheld.decision.action, ACTIONS.WAIT_AUTHORITY);
+
+  // Referent: the same release with no builder available waits for one, so the
+  // dispatch above is the seam's doing, not the host's.
+  const noBuilder = withBuilder(false, (env) => run([...recorded.comments, resumeMsg], env));
+  assert.equal(noBuilder.decision.action, ACTIONS.WAIT_EXTERNAL_AGENT);
+  assert.equal(noBuilder.decision.role, ROLES.BUILDER);
 
   const untyped = run([...recorded.comments, { ...msg(5963700003, 'REVIEW', 'KF-META-STATE-REDUCER-LIVE-001', 'NO_STATE_CHANGE'), body: msg(5963700003, 'REVIEW', 'KF-META-STATE-REDUCER-LIVE-001', 'X').body.replace('control_effect: X\n', '') }]);
   assert.equal(untyped.decision.action, ACTIONS.REPORT_DRIFT);

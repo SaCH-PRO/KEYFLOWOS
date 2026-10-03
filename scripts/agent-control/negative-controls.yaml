@@ -1371,16 +1371,16 @@ negative_controls:
 
   - id: NC-REDUCER-HEALTH-UNVALIDATED
     claim: >
-      A typed effect cannot put a health value outside GREEN/YELLOW/RED into the
-      projection; live values such as AMBER are kept verbatim as
-      authority_health (Copilot r4171049945).
+      A typed effect whose health is outside GREEN/YELLOW/RED fails closed as
+      CONTROL_EFFECT_HEALTH_INVALID before it applies (CORRECTION-003 F1;
+      Copilot r4171049945).
     mutation:
       file: scripts/agent-control/lib/authority-effects.mjs
       find: |-
-              health: HEALTH.includes(read.health) ? read.health : null,
+          if (read.health !== null && !HEALTH.includes(read.health)) {
       replace: |-
-              health: read.health,
-    proof_command: node --test --test-name-pattern="health outside the vocabulary" scripts/agent-control/tests/authority-effects.spec.mjs
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC health outside the vocabulary" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
   - id: NC-REDUCER-INVALID-PROJECTION

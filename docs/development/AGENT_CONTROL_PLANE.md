@@ -471,8 +471,9 @@ The rules:
   `hold` naming a packet is lifted into `holds` by the fold.
 - **State comes from the effect.** A packet's state is set by its effect, never
   by the free-vocabulary `state:` field (RELEASED, REVIEWED, QUEUED). `health:`
-  is projected only when it is GREEN, YELLOW or RED. Any other value, such as
-  AMBER, projects null, and the value is kept verbatim as `authority_health`.
+  must be GREEN, YELLOW, RED or absent. Any other value, AMBER included, fails
+  closed before the effect applies (`CONTROL_EFFECT_HEALTH_INVALID`). It is
+  never translated.
 - **The projection stays valid.** Each folded step is checked with
   `validateState()`. A step that the state contract rejects stops the fold
   (`CONTROL_EFFECT_PROJECTION_INVALID`).

@@ -33,7 +33,9 @@
  *   - carries no control_effect (meaning is never inferred from prose or ids);
  *   - names an unknown effect, or an effect its message type cannot carry;
  *   - names `programme` or `programme_action` (activation is not a fold);
- *   - lacks a field its effect needs, or conflicts with the projection.
+ *   - lacks a field its effect needs, carries a health outside GREEN/YELLOW/RED,
+ *     or conflicts with the projection;
+ *   - would produce a projection that validateState() rejects.
  * reconcile() then reports the projection stale (DERIVED_STATE_STALE_AUTHORITY,
  * with `blocked` naming the message and the reason), or AUTHORITY_MALFORMED,
  * and decide() fails closed. Edited or unorderable authority never reaches the
@@ -73,6 +75,7 @@ export const EFFECT_PROBLEMS = Object.freeze({
   PACKET_HELD: 'CONTROL_EFFECT_PACKET_HELD',
   HOLD_DUPLICATE: 'CONTROL_EFFECT_HOLD_DUPLICATE',
   HOLD_MISMATCH: 'CONTROL_EFFECT_HOLD_MISMATCH',
+  HEALTH_INVALID: 'CONTROL_EFFECT_HEALTH_INVALID',
   PROJECTION_INVALID: 'CONTROL_EFFECT_PROJECTION_INVALID',
 });
 
@@ -155,6 +158,12 @@ export function readEffect(message) {
     health: field(message, 'health'),
     merge_authority: field(message, 'merge_authority'),
   };
+  // Health is projected, so it must be in the repository vocabulary. Anything
+  // else, including the AMBER some authority has used, fails closed before an
+  // effect applies; it is never translated (CORRECTION-003 F1, Copilot r4171049945).
+  if (read.health !== null && !HEALTH.includes(read.health)) {
+    return { ok: false, ...problem(EFFECT_PROBLEMS.HEALTH_INVALID, `${read.health} is not ${HEALTH.join('/')}`) };
+  }
   if (effect === 'NO_STATE_CHANGE' || effect === 'HOLD_SET' || effect === 'HOLD_CLEAR') return { ok: true, ...read };
 
   const missing = [];
@@ -246,11 +255,7 @@ export function applyEffect(state, message, read, options = {}) {
       active_packet: packet,
       active_phase: null,
       state: PROJECTED_STATE[effect],
-      // The projection keeps the repository health vocabulary. Live authority
-      // also writes values such as AMBER; those are kept verbatim beside it
-      // and never translated (Copilot r4171049945).
-      health: HEALTH.includes(read.health) ? read.health : null,
-      authority_health: read.health,
+      health: read.health,
       source_main: read.source_main,
       implementation_branch: read.implementation_branch,
       // A correction that names no PR keeps the projected one; a release starts afresh.
