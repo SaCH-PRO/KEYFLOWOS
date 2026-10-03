@@ -17,6 +17,7 @@ import { activeHolds, emptyState, loadState, validateState } from '../lib/state.
 import { decide, ACTIONS } from '../lib/orchestrator.mjs';
 import { collectAuthority, reconcile, reconcileProjection, FINDINGS } from '../lib/reconcile.mjs';
 import { reduceAuthority, readEffect, CONTROL_EFFECTS, EFFECT_PROBLEMS, FOLD_NOT_STARTED } from '../lib/authority-effects.mjs';
+import { parseEnvelope } from '../lib/control-envelope.mjs';
 import { applicationPacketsOf, reconcileWithTruth } from '../lib/truth.mjs';
 import { loadDag } from '../lib/dag.mjs';
 import { ROLES, AGENT_STATUS } from '../lib/adapters.mjs';
@@ -578,6 +579,19 @@ test('stale projection recovery: typed authority advances a stale checkpoint wit
 });
 
 const RECORDED = 'scripts/agent-control/fixtures/reducer-live-truth.json';
+
+test('recorded evidence (reducer): every recorded body is only the column-0 lines parseEnvelope reads (C4-F2)', () => {
+  const recorded = JSON.parse(fs.readFileSync(RECORDED, 'utf8'));
+  assert.equal(recorded.comments.length, 18);
+  for (const c of recorded.comments) {
+    const lines = c.body.split('\n');
+    const env = parseEnvelope(c.body);
+    // Each line is a field the parser read, so no prose, fence or nested line survives.
+    const read = env.keys.reduce((n, key) => n + env.values[key].length, 0);
+    assert.equal(read, lines.length, `comment ${c.id} carries ${lines.length - read} line(s) the parser does not read`);
+    assert.deepEqual(env.problems, [], `comment ${c.id}`);
+  }
+});
 
 test('recorded evidence (reducer): the RECONCILE-002 checkpoint is stale on real #80 and cannot fold its untyped authority', () => {
   const recorded = JSON.parse(fs.readFileSync(RECORDED, 'utf8'));

@@ -1475,3 +1475,17 @@ negative_controls:
           return reconcileProjection(state, { ...authority, candidates: [] }, truth.repoFor, { applicationPackets: applicationPacketsOf(dag) });
     proof_command: node --test --test-name-pattern="orchestrate decides on the effective projection" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-REDUCER-RECORDED-UNMINIMIZED
+    claim: >
+      The recorded #80 evidence stays minimized to the column-0 lines the
+      parser reads (CORRECTION-004 C4-F2). A restored fence line changes no
+      parsed field, so only the minimality proof can notice it.
+    mutation:
+      file: scripts/agent-control/fixtures/reducer-live-truth.json
+      find: |-
+              "body": "message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n
+      replace: |-
+              "body": "```yaml\nmessage_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\n
+    proof_command: node --test --test-name-pattern="every recorded body is only the column-0 lines" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
