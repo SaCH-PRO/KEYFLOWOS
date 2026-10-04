@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeCheck, proofProgress } from './project-mission-control.service';
+import { aggregateProgrammeHealth, normalizeCheck, proofProgress } from './project-mission-control.service';
 
 describe('ProjectMissionControlService proof truth', () => {
   it('does not count skipped checks as passing proof', () => {
@@ -32,6 +32,12 @@ describe('ProjectMissionControlService proof truth', () => {
       { name: 'build', status: 'PASS' as const },
     ];
     expect(proofProgress(checks)).toMatchObject({ completed: 2, total: 2 });
+  });
+
+  it('never reports aggregate green when any tracked PR is unknown', () => {
+    expect(aggregateProgrammeHealth([{ health: 'GREEN' }, { health: 'UNKNOWN' }])).toBe('UNKNOWN');
+    expect(aggregateProgrammeHealth([{ health: 'UNKNOWN' }])).toBe('UNKNOWN');
+    expect(aggregateProgrammeHealth([{ health: 'GREEN' }, { health: 'GREEN' }])).toBe('GREEN');
   });
 
   it('returns unknown progress when there is no usable proof denominator', () => {
