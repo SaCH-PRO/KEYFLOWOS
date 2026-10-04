@@ -587,7 +587,292 @@ Allow proven repeated workflows to become higher-level capabilities only through
 - One KEY identity; multiple receptors/tools/workers are capabilities/topology, not identities.
 - Do not onboard an external orchestration platform merely because its design is useful; implement the learned patterns natively unless explicitly decided otherwise.
 
-## 16. Primary references used
+
+## 16. Stress-response / regulatory-program architecture
+
+The biological analogy should be refined slightly: DNA does not literally "send a packet". A stress signal activates signaling pathways and transcription factors, which induce a coordinated gene-regulatory program. That program can increase or decrease expression of receptors, enzymes, transporters and signaling machinery; endocrine/neural systems can also alter hormone release, receptor sensitivity and downstream responsiveness on different time scales.
+
+That is a strong model for KEY.
+
+KEY should support a first-class **Regulatory Program / Response Program**: a bounded, typed instruction bundle that temporarily reconfigures many subsystems together when a recognized condition is present.
+
+Conceptually:
+
+```text
+STIMULUS / CONDITION
+        |
+        v
+STATE CLASSIFIER
+  anomaly | opportunity | overload | uncertainty | incident | deadline | recovery
+        |
+        v
+REGULATORY PROGRAM
+        |
+        +-- receptor up/down-regulation
+        +-- sampling-rate changes
+        +-- attention/salience weighting
+        +-- tool/capability availability
+        +-- model/reasoning depth
+        +-- worker/swarm topology
+        +-- resource/compute budget
+        +-- retry/backoff policy
+        +-- memory retrieval/consolidation bias
+        +-- approval/safety thresholds
+        +-- telemetry/interoception depth
+        +-- communication/escalation behavior
+        |
+        v
+TEMPORARY OPERATING STATE
+        |
+        v
+OUTCOME / FEEDBACK
+        |
+        v
+DECAY / RECOVERY / CONSOLIDATION
+```
+
+### 16.1 Why this should be a coordinated packet
+
+Without a coordinated regulatory program, stress or opportunity handling becomes scattered local conditionals:
+
+`if incident -> poll faster`
+`if uncertainty -> use bigger model`
+`if overload -> reduce sampling`
+`if deadline -> spawn workers`
+
+That creates hidden interactions and unstable behavior.
+
+A regulatory program makes the coordinated response explicit, versioned, inspectable and reversible.
+
+Candidate contract:
+
+```text
+RegulatoryProgram {
+  id
+  version
+  trigger_conditions
+  applicable_scopes
+  activation_evidence
+  priority
+  mode
+  ttl / decay
+  receptor_modulation[]
+  stream_modulation[]
+  attention_modulation[]
+  cognition_modulation[]
+  resource_modulation[]
+  capability_modulation[]
+  topology_modulation[]
+  safety_modulation[]
+  memory_modulation[]
+  telemetry_modulation[]
+  exit_conditions
+  recovery_program
+  provenance
+}
+```
+
+### 16.2 Fast and slow response layers
+
+Biology uses responses on multiple time scales. KEY should too.
+
+**Fast layer — reflex / autonomic**
+- milliseconds to seconds;
+- deterministic limits, circuit breakers, rate reduction, queue shedding, failover, hold, alerting;
+- should not depend on elaborate model reasoning.
+
+**Intermediate layer — executive modulation**
+- seconds to minutes;
+- increase/decrease sampling;
+- allocate more compute;
+- switch reasoning depth;
+- call independent verifier;
+- spawn bounded parallel workers;
+- alter retrieval depth;
+- change tool-selection strategy.
+
+**Slow layer — adaptive / transcription-like**
+- minutes to days;
+- promote a repeated receptor gap into an adapter candidate;
+- change durable routing weights;
+- add a new procedure/skill;
+- alter consolidation priorities;
+- propose a new connector/receptor;
+- update long-term policy only through governed evidence.
+
+This prevents every transient stressor from causing permanent architectural change.
+
+### 16.3 Example programs
+
+#### INCIDENT_RESPONSE
+Trigger:
+- integrity violation;
+- repeated failed effects;
+- strong anomaly;
+- security/reliability threshold crossed.
+
+Possible coordinated modulation:
+- up-regulate logs, traces and critical receptors;
+- increase independent verification;
+- reduce or freeze high-risk writes;
+- increase evidence retention;
+- allocate incident worker topology;
+- narrow authority;
+- raise alert/escalation salience;
+- increase source cross-checking;
+- activate recovery planning.
+
+#### INFORMATION_DEFICIT
+Trigger:
+- decision-critical uncertainty above threshold.
+
+Modulation:
+- increase active sensing;
+- query additional independent sources;
+- raise retrieval depth;
+- increase temporal/history lookback;
+- temporarily allocate larger reasoning budget;
+- reduce irreversible action authority until evidence improves.
+
+#### HIGH_LOAD
+Trigger:
+- stream volume, queue depth, token/compute cost or latency exceeds envelope.
+
+Modulation:
+- down-regulate low-value receptors;
+- aggregate/window repetitive events;
+- lower sampling frequency;
+- defer low-salience cognition;
+- preserve high-risk/high-authority streams;
+- enforce backpressure and admission control.
+
+#### OPPORTUNITY_BURST
+Trigger:
+- time-sensitive high-value opportunity.
+
+Modulation:
+- increase relevant market/customer/event receptors;
+- prioritize required tools;
+- allocate bounded parallel analysis;
+- shorten non-critical polling elsewhere;
+- preserve ordinary safety/authority boundaries.
+
+#### RECOVERY
+Trigger:
+- incident condition cleared.
+
+Modulation:
+- gradually restore normal receptor gain;
+- release temporary holds;
+- reconcile deferred events;
+- consolidate incident learning;
+- evaluate whether any temporary adaptation merits durable promotion.
+
+### 16.4 Up-regulation and down-regulation
+
+A receptor should not only be ON/OFF.
+
+Useful modulation dimensions include:
+- sampling frequency;
+- event subscription breadth;
+- batch/window size;
+- allowed latency;
+- data fidelity;
+- retention depth;
+- independent-source requirement;
+- compute allocated to interpretation;
+- salience weight;
+- rate limit;
+- notification/escalation threshold.
+
+This is closer to biological receptor sensitivity and endocrine modulation than a binary feature flag.
+
+### 16.5 Homeostasis and allostatic load
+
+Repeated activation must have a cost.
+
+Every regulatory program should charge against explicit budgets:
+- compute;
+- token/model cost;
+- API quota;
+- bandwidth;
+- storage;
+- worker slots;
+- human attention;
+- latency;
+- operational risk.
+
+KEY should track cumulative **allostatic load**: prolonged elevated operating state should trigger recovery or resource rebalancing rather than becoming the silent new normal.
+
+### 16.6 Hysteresis and anti-flapping
+
+Triggers should not oscillate rapidly.
+
+Use:
+- activation thresholds;
+- separate recovery thresholds;
+- minimum dwell time;
+- cooldown;
+- evidence persistence;
+- exponential decay.
+
+Example:
+
+```text
+activate HIGH_LOAD at queue > 80%
+recover only after queue < 50% for 5 min
+```
+
+This prevents continuous up/down receptor thrashing.
+
+### 16.7 Regulatory hierarchy
+
+Not all programs are equal.
+
+Suggested precedence:
+
+```text
+CONSTITUTION / HUMAN AUTHORITY
+        >
+SAFETY / SECURITY / INCIDENT
+        >
+RESOURCE VIABILITY
+        >
+TASK / GOAL OPTIMIZATION
+        >
+PREFERENCE / STYLE
+```
+
+A performance-oriented program may not override a safety or authority program.
+
+Conflicting programs should be composed through explicit arbitration rather than last-write-wins.
+
+### 16.8 Relationship to K1-K7
+
+- K1 Self/Constitution: sets non-overridable bounds and program precedence.
+- K2 Reality: detects triggering conditions and receptor state.
+- K3 Memory/World Model: supplies context/history and records activation lineage.
+- K4 Cognition: changes reasoning methods/depth.
+- K5 Executive: selects/activates programs and arbitrates conflicts.
+- K6 Agency: changes execution topology, tools and operational behavior.
+- K7 Adaptation/Viability: homeostasis, recovery, learning and durable promotion.
+
+### 16.9 Hard invariants
+
+- A stress response changes **operating configuration**, not identity.
+- Temporary modulation must not silently become permanent policy.
+- Resource escalation does not imply authority escalation.
+- Receptor up-regulation increases observation, not truth.
+- More workers/models do not imply more confidence without independent evidence.
+- Emergency mode must have explicit entry, exit and recovery criteria.
+- Every activation is attributable to evidence and recorded.
+- Every program is reversible unless a separately governed durable change is accepted.
+- Competing programs compose by declared precedence and arbitration, never accidental last-write-wins.
+
+This regulatory-program model should become part of the future Specialization/Executive compiler and Adaptive Receptor Fabric rather than a separate biological subsystem.
+
+
+## 17. Primary references used
 
 - Model Context Protocol specification: https://modelcontextprotocol.io/specification/
 - Official MCP Registry: https://registry.modelcontextprotocol.io/
