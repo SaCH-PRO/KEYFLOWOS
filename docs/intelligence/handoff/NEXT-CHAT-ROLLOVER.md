@@ -1,33 +1,29 @@
-# KEYFLOWOS — Next Chat Rollover
+# KEYFLOWOS - Next Chat / Worker Rollover
 
-Checkpoint: `PKG-EXTFX-2026-09-19-02`
+Use this as the minimal continuation prompt:
 
-Paste the following into the new chat:
+> Continue KEYFLOWOS from durable repository state. Do not reconstruct from chat memory.
+>
+> Repository: SaCH-PRO/KEYFLOWOS
+>
+> First read PROJECT-SOURCE-BOOTSTRAP.md, then docs/intelligence/handoff/ACTIVE-WORK-LEDGER.yaml, CURRENT-HANDOFF.md, and CURRENT-STATE.yaml. Re-resolve live main and the selected PR/issue before mutation.
+>
+> Current programme families include the development control plane, Memory/Context Genome, KEY cognitive architecture, architecture forensics, verification/security, connector fabric, product/application hardening, and runtime stabilization. Do not give one stream progress credit for another.
+>
+> KEY architecture invariant: one persistent KEY identity; specialists/workflows/workers/swarms are temporary cognitive or execution configurations.
+>
+> Preserve no-fake-green, evidence-first, fail-closed, exact-head, no-silent-scope-widening, and no-production-effect constraints.
+>
+> If durable handoff state conflicts with live repository truth, record the contradiction and repair the handoff before claiming continuity.
+>
+> Run a Context Integrity Check before substantial work.
 
-> Continue KEYFLOWOS from the durable repository state. Do not restart or reconstruct K12/EXTFX.
->
-> Repository: `SaCH-PRO/KEYFLOWOS`
-> Forensic baseline: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2`
-> Current main at handoff: `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`
-> Intelligence branch: `docs/keyflow-intelligence-foundation`
->
-> K12 is already merged/proven. KF-EXEC-EXTFX-001 is now admitted and merged via PR #76. Its admitted implementation head is `42177f5639345d29448c50375c0c05b133c076b5`; merge commit is `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`.
->
-> Final EXTFX CI run `35469579096` is green: migrations, 4033 server tests, K12 resource/proof admission (16/16 SATISFIED_AT_DECLARED_SCOPE), 210 web tests, server/web builds, server/web typecheck, lint, and security. Branch divergence run `35469579079` is green. DAST workflow run `35469579109` is green at its configuration guard, but HawkScan itself was skipped because DAST is not configured.
->
-> Adversarial EXTFX review is admitted at declared scope. The proof set now explicitly covers P01–P16 and the five required deterministic provider-simulator cases. No real provider traffic was sent.
->
-> First read `docs/intelligence/handoff/CURRENT-STATE.yaml`, `CURRENT-HANDOFF.md`, this rollover, and the EXTFX characterization receipt. Re-resolve live heads before editing.
->
-> Do not reopen or reconstruct EXTFX unless new evidence invalidates its proof. No next bounded package is selected at this checkpoint; select from durable intelligence when continuation is authorized.
->
-> Do not send real provider traffic, mutate production data, deploy production, refresh the programme map, restart scheduled architecture cycles, or silently rebaseline the forensic baseline.
+## Recovery references
 
-## Current state
+- PROJECT-SOURCE-BOOTSTRAP.md
+- docs/intelligence/handoff/ACTIVE-WORK-LEDGER.yaml
+- docs/intelligence/CURRENT-PROGRAMME-LINES-OF-WORK-2026-10-05.md
+- docs/intelligence/KEY-COGNITIVE-ARCHAEOLOGY-AND-CONVERGENCE-PASS-001.md
+- docs/intelligence/KEY-COGNITIVE-IMPLEMENTATION-CROSSWALK-001.md
 
-- PR #76: merged.
-- Current main: `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`.
-- Forensic baseline remains `8f173bfe79f1418159cf4099ea18b0d60d203ec2`.
-- Programme map remains frozen.
-- Scheduled architecture cycles remain halted.
-- Next package: not selected.
+This rollover intentionally avoids hard-coding one future active packet. The active-work ledger and live repository state decide the continuation point.
