@@ -11,6 +11,12 @@ describe('ProjectMissionControlService proof truth', () => {
     expect(proofProgress(checks)).toMatchObject({ completed: 1, total: 2 });
   });
 
+  it('fails closed on stale/startup failures and keeps neutral evidence unknown', () => {
+    expect(normalizeCheck({ name: 'stale', status: 'completed', conclusion: 'stale' }).status).toBe('FAIL');
+    expect(normalizeCheck({ name: 'startup', status: 'completed', conclusion: 'startup_failure' }).status).toBe('FAIL');
+    expect(normalizeCheck({ name: 'neutral', status: 'completed', conclusion: 'neutral' }).status).toBe('UNKNOWN');
+  });
+
   it('keeps pending evidence in the denominator and never calls it complete', () => {
     const checks = [
       normalizeCheck({ name: 'build', status: 'completed', conclusion: 'success' }),
