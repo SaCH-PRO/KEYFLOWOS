@@ -20,6 +20,10 @@
       {
         "date": "2026-10-04",
         "change": "PR #120, RULING-012 R12-K1: lib/events.mjs imports readEffect from lib/authority-effects.mjs so a typed HOLD or RESUME comment wakes orchestration; both files are inside the scripts/agent-control node, so no node or edge is added; inventory.json and dependencies.json regenerated"
+      },
+      {
+        "date": "2026-10-04",
+        "change": "PR #120, CHECKPOINT-VALIDATION-017: lib/authority-effects.mjs validates the checkpoint before the fold and lib/reconcile.mjs imports validateState from lib/state.mjs to report an invalid anchored projection; both files are inside the scripts/agent-control node, so no node or edge is added; inventory.json and dependencies.json regenerated"
       }
     ],
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",

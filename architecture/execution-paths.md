@@ -506,6 +506,9 @@ orchestrate.mjs / status.mjs --verify
         an edited or unorderable snapshot is refused whole
       → reconcileProjection() (lib/reconcile.mjs)
           → reduceAuthority() (lib/authority-effects.mjs)
+              once the anchor is found, validateState(checkpoint): a checkpoint the state
+              contract rejects is never folded from (CHECKPOINT_INVALID), with zero or more
+              newer messages; otherwise
               fold applyEffect, oldest first, over each valid authority message newer than
               the anchor that declares `control_effect:`; stop at the first message that is
               malformed, untyped, has an unknown or unauthorized effect, lacks a field its
@@ -515,7 +518,8 @@ orchestrate.mjs / status.mjs --verify
               names programme activation, or yields a projection validateState() rejects
           → repoFor(effective programme) — repository truth for the folded projection
           → reconcile(effective, authority, repo, reduction) — findings (a stopped fold
-            reports DERIVED_STATE_STALE_AUTHORITY naming the blocking message)
+            reports DERIVED_STATE_STALE_AUTHORITY naming the blocking message; an anchored
+            projection validateState() rejects reports DERIVED_STATE_INVALID)
   → decide({ state: effective_state, reconciliation, … }) (lib/orchestrator.mjs)
   → --apply journals the event onto the checkpoint only; the effective projection is never persisted
 ```

@@ -13,15 +13,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { activeHolds, emptyState, loadState, normalizeState, validateState } from '../lib/state.mjs';
+import { STATE_PATH, activeHolds, emptyState, loadState, normalizeState, validateState } from '../lib/state.mjs';
 import { parseYaml, stringifyYaml } from '../lib/yaml.mjs';
 import { decide, ACTIONS } from '../lib/orchestrator.mjs';
 import { collectAuthority, reconcile, reconcileProjection, FINDINGS } from '../lib/reconcile.mjs';
 import { reduceAuthority, readEffect, applyEffect, CONTROL_EFFECTS, EFFECT_PROBLEMS, FOLD_NOT_STARTED } from '../lib/authority-effects.mjs';
 import { compareAuthorityOrder, parseEnvelope } from '../lib/control-envelope.mjs';
 import { applicationPacketsOf, reconcileWithTruth } from '../lib/truth.mjs';
-import { loadDag } from '../lib/dag.mjs';
+import { DAG_PATH, loadDag } from '../lib/dag.mjs';
 import { ROLES, AGENT_STATUS } from '../lib/adapters.mjs';
+import { buildStatus, renderHuman } from '../status.mjs';
 
 const SHA_MAIN = 'a'.repeat(40);
 const SHA_SOURCE = 'b'.repeat(40);
@@ -586,15 +587,196 @@ test('a colon-bearing packet id folds from a real envelope and survives the roun
 });
 
 test('the fold never hands decide() an invalid projection: a step the state contract rejects stops it', () => {
+  // The checkpoint is valid, so the step check is what stops this fold; an
+  // invalid checkpoint never starts one (CHECKPOINT-VALIDATION-017, below).
+  // The envelope parser never emits valid authority with a blank message id.
+  // A snapshot entry carrying one would anchor the projection to nothing.
   const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
-  const tainted = checkpoint(anchor, { production_touched: true });
   const msg = typed('REVIEW', 'CG-N', 'KF-META-P', 'NO_STATE_CHANGE');
-  const rec = project(tainted, [anchor, msg], repo());
+  const base = checkpoint(anchor);
+  assert.deepEqual(validateState(base).problems, []);
+  const auth = collectAuthority([anchor, msg]);
+  auth.messages.find((m) => m.message_id === 'CG-N').message_id = '';
+  const rec = reconcileProjection(base, auth, repo(), OPTIONS);
+  assert.equal(rec.reduction.started, true);
   assert.equal(rec.reduction.blocked.code, EFFECT_PROBLEMS.PROJECTION_INVALID);
-  assert.deepEqual(rec.reduction.blocked.detail, ['PRODUCTION_TOUCHED']);
+  assert.deepEqual(rec.reduction.blocked.detail, ['AUTHORITY_BASIS_INVALID']);
+  assert.deepEqual(rec.effective_state, base, 'the rejected step is not applied');
   assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT);
-  // Referent: the same effect over a valid checkpoint folds.
+  // Referent: the same effect, as the parser emits it, folds over the same checkpoint.
   assert.equal(project(checkpoint(anchor), [anchor, msg], repo()).consistent, true);
+});
+
+// ------------------------------------------------------------------ the checkpoint itself (CHECKPOINT-VALIDATION-017)
+
+/** Checkpoints validateState() rejects, each with the one problem it reports. */
+const INVALID_CHECKPOINTS = [
+  ['health AMBER', (s) => { s.programme.health = 'AMBER'; }, 'UNKNOWN_HEALTH'],
+  ['state REVIEWED', (s) => { s.programme.state = 'REVIEWED'; }, 'UNKNOWN_STATE'],
+  ['source_main is not a sha', (s) => { s.programme.source_main = 'main'; }, 'SOURCE_MAIN_NOT_A_SHA'],
+  ['production touched', (s) => { s.programme.production_touched = true; }, 'PRODUCTION_TOUCHED'],
+  ['merge authority without a marker', (s) => { s.programme.merge_authority = true; }, 'MERGE_AUTHORITY_WITHOUT_MARKER'],
+  ['a hold under another packet key', (s) => { s.holds = { 'KF-X': { active: true, packet_id: 'KF-Y' } }; }, 'HOLD_KEY_MISMATCH'],
+  ['a packet in both hold and holds', (s) => {
+    s.hold = { active: true, packet_id: 'KF-X' };
+    s.holds = { 'KF-X': { active: true, packet_id: 'KF-X' } };
+  }, 'HOLD_REPRESENTATION_AMBIGUOUS'],
+  ['duplicate processed keys', (s) => { s.processed_event_keys = ['k', 'k']; }, 'DUPLICATE_PROCESSED_KEYS'],
+];
+const invalidCheckpoint = (anchor, mutate, programme = {}, extra = {}) => {
+  const state = checkpoint(anchor, programme, extra);
+  mutate(state);
+  return state;
+};
+const amber = (s) => { s.programme.health = 'AMBER'; };
+
+test('NC an invalid checkpoint whose anchor is the newest authority fails closed, and is not repaired (017)', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  for (const [name, mutate, code] of INVALID_CHECKPOINTS) {
+    const bad = invalidCheckpoint(anchor, mutate);
+    const before = structuredClone(bad);
+    const out = fold(bad, [anchor]);
+    assert.equal(out.started, false, name);
+    assert.equal(out.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID, name);
+    assert.deepEqual(out.checkpoint_problems.map((x) => x.code), [code], name);
+    assert.equal(out.checkpoint_generation, 1, name);
+    assert.equal(out.observed_generation, null, name);
+    assert.deepEqual([out.applied, out.blocked, out.unapplied], [[], null, []], name);
+    assert.deepEqual(bad, before, `${name}: the checkpoint is not repaired, normalized or coerced`);
+
+    const rec = project(bad, [anchor], repo());
+    assert.equal(rec.consistent, false, name);
+    assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_INVALID], name);
+    assert.deepEqual(rec.findings[0].detail.anchor, bad.authority_basis, name);
+    assert.deepEqual(rec.findings[0].detail.problems.map((x) => x.code), [code], name);
+    assert.equal(rec.reduction.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID, name);
+    assert.deepEqual(rec.effective_state, before, name);
+    const decision = act(rec);
+    assert.equal(decision.action, ACTIONS.REPORT_DRIFT, name);
+    assert.deepEqual(decision.findings.map((f) => f.code), [FINDINGS.DERIVED_STATE_INVALID], name);
+  }
+  // Referent: the same checkpoint without a defect, same single message, is usable as before.
+  const good = fold(checkpoint(anchor), [anchor]);
+  assert.deepEqual([good.started, good.reason, good.checkpoint_problems, good.applied, good.observed_generation], [true, null, [], [], 1]);
+  const rec = project(checkpoint(anchor), [anchor], repo());
+  assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
+  assert.deepEqual(rec.effective_state, checkpoint(anchor));
+  assert.equal(act(rec).action, ACTIONS.DISPATCH_BUILDER);
+});
+
+test('NC a checkpoint with health AMBER cannot reconcile as consistent on real #80 with zero newer effects (017, Copilot r4178799610)', () => {
+  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const auth = collectAuthority(recorded.comments);
+  assert.equal(auth.newest.comment_id, ANCHOR_016.comment_id, 'the anchor is the newest recorded authority: nothing folds');
+  const state = loadState(process.cwd());
+  state.programme.health = 'AMBER';
+  const rec = reconcileProjection(state, auth, recorded.repo, OPTIONS);
+  assert.equal(rec.consistent, false);
+  assert.deepEqual(rec.findings, [{
+    code: FINDINGS.DERIVED_STATE_INVALID,
+    detail: { anchor: ANCHOR_016, problems: [{ code: 'UNKNOWN_HEALTH', detail: 'programme.health=AMBER' }] },
+  }]);
+  assert.equal(rec.reduction.started, false);
+  assert.equal(rec.reduction.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID);
+  assert.equal(rec.effective_state.programme.health, 'AMBER', 'never translated');
+  assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT);
+  // Referent: the committed checkpoint on the same recording reconciles and waits on the ACTION-001 hold.
+  const clean = reconcileProjection(loadState(process.cwd()), auth, recorded.repo, OPTIONS);
+  assert.equal(clean.consistent, true, JSON.stringify(clean.findings));
+  assert.equal(act(clean).action, ACTIONS.WAIT_AUTHORITY);
+});
+
+test('NC an invalid checkpoint is never the base of a fold, with one or many newer effects (017)', () => {
+  const { anchor, correction, comments } = lifecycle();
+  const pr = repo(openPr(41, 'impl/kf-meta-p'));
+  // The correction projects health YELLOW. Folded over the AMBER checkpoint it
+  // would overwrite the defect, and the result would pass every step check.
+  for (const [name, newer, stale] of [['one newer effect', [correction], 1], ['many newer effects', comments.slice(1), 3]]) {
+    const bad = invalidCheckpoint(anchor, amber);
+    const before = structuredClone(bad);
+    const out = fold(bad, [anchor, ...newer]);
+    assert.equal(out.started, false, name);
+    assert.equal(out.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID, name);
+    assert.deepEqual(out.applied, [], name);
+    assert.equal(out.state, bad, name);
+    const rec = project(bad, [anchor, ...newer], pr);
+    assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_INVALID, FINDINGS.DERIVED_STATE_STALE_AUTHORITY], name);
+    assert.equal(rec.findings[1].detail.newer.length, stale, name);
+    assert.deepEqual(rec.effective_state, before, name);
+    assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, name);
+  }
+  // Referent: the valid checkpoint folds the same messages exactly as before.
+  const one = project(checkpoint(anchor), [anchor, correction], pr);
+  assert.equal(one.consistent, true, JSON.stringify(one.findings));
+  assert.deepEqual(one.reduction.applied.map((a) => a.effect), ['PACKET_CORRECTION']);
+  assert.equal(one.effective_state.programme.health, 'YELLOW');
+  const many = fold(checkpoint(anchor), comments);
+  assert.deepEqual(many.applied.map((a) => a.effect), ['PACKET_CORRECTION', 'PACKET_ADMISSION', 'CHECKPOINT']);
+  assert.equal(many.state.programme.state, 'CHECKPOINTED');
+  assert.deepEqual(many.checkpoint_problems, []);
+});
+
+test('NC an invalid checkpoint reaches no dispatch, review, admission or wait decision as if it were valid (017)', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const marker = { merge_authority_marker: { message_id: 'CG-D', comment_id: collectAuthority([anchor]).newest.comment_id } };
+  const pr = repo(openPr(41, 'impl/kf-meta-p'));
+  const shapes = [
+    ['dispatch', {}, {}, repo(), ACTIONS.DISPATCH_BUILDER],
+    ['review', { state: 'PROVING', pr_number: 41 }, {}, pr, ACTIONS.REQUEST_REVIEW],
+    ['admission', { state: 'READY_TO_MERGE', pr_number: 41, merge_authority: true }, marker, pr, ACTIONS.EVALUATE_ADMISSION],
+    ['wait', {}, { holds: { 'KF-X': { active: true, packet_id: 'KF-X', reason: 'held' } } }, repo(), ACTIONS.WAIT_AUTHORITY],
+  ];
+  for (const [name, programme, extra, truth, normal] of shapes) {
+    // Referent first: valid, this checkpoint reaches its normal decision.
+    const good = project(checkpoint(anchor, programme, extra), [anchor], truth);
+    assert.equal(good.consistent, true, `${name}: ${JSON.stringify(good.findings)}`);
+    assert.equal(act(good).action, normal, name);
+    const rec = project(invalidCheckpoint(anchor, amber, programme, extra), [anchor], truth);
+    const decision = act(rec);
+    assert.equal(decision.action, ACTIONS.REPORT_DRIFT, name);
+    assert.equal(decision.advancement, 'NONE', name);
+    assert.deepEqual(decision.findings.map((f) => f.code), [FINDINGS.DERIVED_STATE_INVALID], name);
+  }
+});
+
+test('an invalid checkpoint does not change the precedence of unverifiable authority or a missing anchor (017)', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const effect = typed('REVIEW', 'CG-R', 'KF-META-P', 'PACKET_CORRECTION', { pr_number: 41 });
+  const edited = typed('REVIEW', 'CG-R', 'KF-META-P', 'PACKET_CORRECTION', { pr_number: 41 }, { id: effect.id, at: effect.created_at, edited: true });
+  const unanchored = (s) => { s.authority_basis = null; };
+  const partial = (s) => { s.authority_basis = { message_id: 'CG-D' }; };
+  const lost = (s) => { s.authority_basis = { message_id: 'CG-GONE', comment_id: 1 }; };
+  const cases = [
+    ['edited authority', () => {}, [anchor, edited], FOLD_NOT_STARTED.AUTHORITY_UNVERIFIED, [FINDINGS.AUTHORITY_EDITED]],
+    ['no anchor', unanchored, [anchor, effect], FOLD_NOT_STARTED.CHECKPOINT_UNANCHORED, [FINDINGS.DERIVED_STATE_UNANCHORED]],
+    ['an anchor without a comment id', partial, [anchor, effect], FOLD_NOT_STARTED.CHECKPOINT_UNANCHORED, [FINDINGS.DERIVED_STATE_UNANCHORED]],
+    ['an anchor that is not on #80', lost, [anchor, effect], FOLD_NOT_STARTED.CHECKPOINT_ANCHOR_NOT_FOUND, [FINDINGS.DERIVED_ANCHOR_NOT_FOUND]],
+  ];
+  for (const [name, shape, comments, reason, expected] of cases) {
+    const verdicts = [() => {}, amber].map((defect) => {
+      const state = checkpoint(anchor);
+      defect(state);
+      shape(state);
+      return project(state, comments, repo(openPr(41, 'impl/kf-meta-p')));
+    });
+    for (const rec of verdicts) {
+      assert.equal(rec.reduction.started, false, name);
+      assert.equal(rec.reduction.reason, reason, name);
+      assert.deepEqual(rec.reduction.checkpoint_problems, [], name);
+      assert.deepEqual(codes(rec), expected, name);
+      assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, name);
+    }
+  }
+  // Malformed authority newer than the anchor is still reported beside the invalid checkpoint.
+  const malformed = comment({ message_id: 'CG-BAD', message_type: 'REVIEW', sender: 'chatgpt' });
+  const rec = project(invalidCheckpoint(anchor, amber), [anchor, malformed], repo());
+  assert.equal(rec.reduction.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID);
+  assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_INVALID, FINDINGS.AUTHORITY_MALFORMED]);
+  // Referent: over the valid checkpoint the same malformed message stops a started fold, as before.
+  const started = project(checkpoint(anchor), [anchor, malformed], repo());
+  assert.equal(started.reduction.started, true);
+  assert.equal(started.reduction.blocked.code, EFFECT_PROBLEMS.AUTHORITY_MALFORMED);
+  assert.deepEqual(codes(started), [FINDINGS.AUTHORITY_MALFORMED]);
 });
 
 test('the programme diagnostic names only the actual prohibition (Copilot r4171100288)', () => {
@@ -1183,6 +1365,53 @@ test('CLI end to end: status --verify renders the effective projection and how i
   const src = fs.readFileSync('scripts/agent-control/status.mjs', 'utf8');
   assert.match(src, /reconcileWithTruth\(checkpoint\)/);
   assert.match(src, /reconciliation \? reconciliation\.effective_state : checkpoint/);
+});
+
+test('CLI end to end: an invalid checkpoint on disk is reported as drift by orchestrate and by the status rendering (017)', () => {
+  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const committed = loadState(process.cwd());
+  const script = path.resolve('scripts/agent-control/orchestrate.mjs');
+  // A repository root holding only what the CLI reads: the checkpoint and the programme DAG.
+  const run = (state) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-checkpoint-'));
+    try {
+      for (const file of [STATE_PATH, DAG_PATH]) fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      // Written as text, not through saveState(), which would refuse it.
+      fs.writeFileSync(path.join(root, STATE_PATH), stringifyYaml(state));
+      fs.copyFileSync(DAG_PATH, path.join(root, DAG_PATH));
+      const truth = path.join(root, 'truth.json');
+      fs.writeFileSync(truth, JSON.stringify({ comments: recorded.comments, repo: recorded.repo }));
+      const env = { ...process.env, KEYFLOW_AGENT_CLAUDE_DISABLED: '1' };
+      delete env.GITHUB_EVENT_NAME;
+      delete env.GITHUB_EVENT_PATH;
+      const res = spawnSync(process.execPath, [script, '--json', '--truth-file', truth], { encoding: 'utf8', env, cwd: root });
+      assert.equal(res.status, 0, res.stderr);
+      return { out: JSON.parse(res.stdout), reloaded: loadState(root) };
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  const bad = run(Object.assign(structuredClone(committed), { programme: { ...committed.programme, health: 'AMBER' } }));
+  assert.equal(bad.reloaded.programme.health, 'AMBER', 'loadState() reads the checkpoint as written');
+  assert.equal(bad.out.reconciliation.consistent, false);
+  assert.deepEqual(bad.out.reconciliation.findings.map((f) => f.code), [FINDINGS.DERIVED_STATE_INVALID]);
+  assert.deepEqual(bad.out.reconciliation.findings[0].detail.problems, [{ code: 'UNKNOWN_HEALTH', detail: 'programme.health=AMBER' }]);
+  assert.equal(bad.out.reconciliation.reduction.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID);
+  assert.equal(bad.out.decision.action, ACTIONS.REPORT_DRIFT);
+  assert.equal(bad.out.decision.advancement, 'NONE');
+
+  // What `status --verify` prints for that verdict.
+  const text = renderHuman(buildStatus(process.cwd(), { state: bad.out.reconciliation.effective_state, dag: DAG, registry: [], reconciliation: bad.out.reconciliation }));
+  assert.match(text, /Reconciliation : DRIFT/);
+  assert.match(text, /DERIVED_STATE_INVALID .*"code":"UNKNOWN_HEALTH","detail":"programme\.health=AMBER"/);
+  assert.doesNotMatch(text, /CONSISTENT/);
+
+  // Referent: the committed checkpoint in the same kind of root reconciles and waits on the hold.
+  const good = run(committed);
+  assert.deepEqual(good.reloaded, committed);
+  assert.equal(good.out.reconciliation.consistent, true, JSON.stringify(good.out.reconciliation.findings));
+  assert.equal(good.out.decision.action, ACTIONS.WAIT_AUTHORITY);
 });
 
 test('reconcileWithTruth folds with the programme DAG as the credit set and reads live truth for the effective projection', () => {

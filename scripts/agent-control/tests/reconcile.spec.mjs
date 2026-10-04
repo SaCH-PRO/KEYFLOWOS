@@ -286,6 +286,37 @@ test('anything that cannot be verified fails closed', () => {
   }
 });
 
+test('NC an anchored projection the state contract rejects is never consistent, with nothing newer than its anchor (CHECKPOINT-VALIDATION-017)', () => {
+  // reconcile() alone, with no fold in front of it: the anchor is the newest
+  // authority and repository truth agrees, so the state contract is the only
+  // thing that can reject this projection.
+  const anchor = chatgpt('REVIEW', 'CG-R', 'P');
+  const pr = { number: 7, state: 'open', merged: false, head_ref: 'impl/p' };
+  const base = (programme = {}) => anchoredState({ active_packet: 'P', state: 'PROVING', health: 'GREEN', pr_number: 7, implementation_branch: 'impl/p', ...programme }, anchor);
+  const cases = [
+    ['health AMBER', base({ health: 'AMBER' }), 'UNKNOWN_HEALTH'],
+    ['state REVIEWED', base({ state: 'REVIEWED' }), 'UNKNOWN_STATE'],
+    ['production touched', base({ production_touched: true }), 'PRODUCTION_TOUCHED'],
+    ['merge authority without a marker', base({ merge_authority: true }), 'MERGE_AUTHORITY_WITHOUT_MARKER'],
+  ];
+  for (const [name, state, code] of cases) {
+    const rec = verdict(state, [anchor], repo(pr));
+    assert.equal(rec.consistent, false, name);
+    assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_INVALID], name);
+    assert.deepEqual(rec.findings[0].detail.anchor, state.authority_basis, name);
+    assert.deepEqual(rec.findings[0].detail.problems.map((x) => x.code), [code], name);
+    assert.equal(run(state, rec).action, ACTIONS.REPORT_DRIFT, name);
+    // The rule table alone would have advanced it: the gate is what stops this.
+    assert.notEqual(ungated(state).action, ACTIONS.REPORT_DRIFT, name);
+  }
+  // Referent: the same projection without a defect reconciles and reaches its normal decision.
+  const rec = verdict(base(), [anchor], repo(pr));
+  assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
+  assert.equal(run(base(), rec).action, ACTIONS.REQUEST_REVIEW);
+  // A missing anchor still comes first, and alone.
+  assert.deepEqual(codes(verdict(Object.assign(base({ health: 'AMBER' }), { authority_basis: null }), [anchor], repo(pr))), [FINDINGS.DERIVED_STATE_UNANCHORED]);
+});
+
 test('decide() without a strictly consistent reconciliation never consults the projection', () => {
   const state = emptyState();
   state.programme.state = 'IMPLEMENTING';

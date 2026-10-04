@@ -166,6 +166,19 @@ completion contract.
 
 ## Changelog
 
+### 2026-10-04 — The reviewed checkpoint is validated before the fold
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), CHECKPOINT-VALIDATION-017.
+  `reduceAuthority()` checks the checkpoint with `validateState()` once its anchor is
+  found. A checkpoint the state contract rejects is never folded from, with zero or more
+  newer messages (`CHECKPOINT_INVALID`), and `reconcile()` reports `DERIVED_STATE_INVALID`,
+  so `decide()` returns REPORT_DRIFT (`execution-paths.md` §12). Before this an invalid
+  checkpoint whose anchor was the newest authority reached `decide()` unchecked.
+- New import edge: `lib/reconcile.mjs` → `lib/state.mjs` (`validateState`). No cycle;
+  `state.mjs` imports neither.
+- The checkpoint, the parser, the effects and the per-step validation are unchanged. No
+  application runtime, schema, deployment or production change.
+
 ### 2026-10-04 — Typed HOLD and RESUME comments wake orchestration
 
 - KF-META-STATE-REDUCER-LIVE-001 (PR #120), RULING-012 R12-K1. `lib/events.mjs` adds HOLD

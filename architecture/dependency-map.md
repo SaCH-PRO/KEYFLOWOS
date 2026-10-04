@@ -81,6 +81,7 @@ See `architecture/event-registry.yaml` for the full list of 276 event names.
 orchestrate.mjs, status.mjs → lib/truth.mjs → lib/reconcile.mjs → lib/authority-effects.mjs
 lib/reconcile.mjs, lib/authority-effects.mjs → lib/control-envelope.mjs (the one #80 parser)
 lib/authority-effects.mjs → lib/state-machine.mjs (HEALTH), lib/state.mjs (validateState)
+lib/reconcile.mjs → lib/state.mjs (validateState)
 normalize-event.mjs, orchestrate.mjs → lib/events.mjs → lib/authority-effects.mjs (readEffect), lib/control-envelope.mjs
 ```
 

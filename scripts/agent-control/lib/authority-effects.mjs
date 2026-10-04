@@ -42,6 +42,12 @@
  * and decide() fails closed. Edited or unorderable authority never reaches the
  * fold: collectAuthority() refuses the whole snapshot.
  *
+ * The checkpoint itself is checked first (CHECKPOINT-VALIDATION-017, Copilot
+ * r4178799610). Once its anchor is found, a checkpoint that validateState()
+ * rejects is never folded from, whether zero, one or many messages are newer:
+ * the fold does not start (CHECKPOINT_INVALID, with the contract problems) and
+ * reconcile() reports DERIVED_STATE_INVALID. It is never repaired or coerced.
+ *
  * The fold never reads repository truth, so it can never overwrite it: a
  * CHECKPOINT for a PR that did not merge folds to CHECKPOINTED and reconcile()
  * reports PR_NOT_MERGED.
@@ -86,6 +92,7 @@ export const FOLD_NOT_STARTED = Object.freeze({
   AUTHORITY_UNVERIFIED: 'AUTHORITY_UNVERIFIED',
   CHECKPOINT_UNANCHORED: 'CHECKPOINT_UNANCHORED',
   CHECKPOINT_ANCHOR_NOT_FOUND: 'CHECKPOINT_ANCHOR_NOT_FOUND',
+  CHECKPOINT_INVALID: 'CHECKPOINT_INVALID',
 });
 
 /**
@@ -309,12 +316,14 @@ export function applyEffect(state, message, read, options = {}) {
  * @param {object} [options]   { applicationPackets: Set<string> }
  * @returns {{
  *   started: boolean, reason: string|null, state: object,
- *   checkpoint: {message_id, comment_id}|null,
+ *   checkpoint: {message_id, comment_id}|null, checkpoint_problems: {code, detail}[],
  *   generation: number, checkpoint_generation: number|null, observed_generation: number|null,
  *   applied: object[], blocked: object|null, unapplied: object[] }}
  *   `state` is the effective projection; it equals the checkpoint when the
  *   fold could not start or applied nothing. `generation` is the number of
  *   authority candidates; every generation is a position among them.
+ *   `checkpoint_problems` is what validateState() rejects in the checkpoint,
+ *   non-empty only when `reason` is CHECKPOINT_INVALID.
  */
 export function reduceAuthority(checkpoint, authority, options = {}) {
   const verified = authority?.verified === true;
@@ -328,6 +337,7 @@ export function reduceAuthority(checkpoint, authority, options = {}) {
     checkpoint: checkpoint?.authority_basis
       ? { message_id: checkpoint.authority_basis.message_id ?? null, comment_id: checkpoint.authority_basis.comment_id ?? null }
       : null,
+    checkpoint_problems: [],
     generation: candidates.length,
     checkpoint_generation: null,
     observed_generation: null,
@@ -344,6 +354,12 @@ export function reduceAuthority(checkpoint, authority, options = {}) {
   const valid = new Set(authority.messages || []);
   const index = candidates.findIndex((m) => valid.has(m) && String(m.comment_id) === String(basis.comment_id) && m.message_id === basis.message_id);
   if (index < 0) return { ...out, reason: FOLD_NOT_STARTED.CHECKPOINT_ANCHOR_NOT_FOUND };
+  // The checkpoint is the base of every fold, and the whole projection when
+  // nothing is newer, so it must satisfy the state contract itself.
+  const rejected = validateState(checkpoint).problems;
+  if (rejected.length) {
+    return { ...out, reason: FOLD_NOT_STARTED.CHECKPOINT_INVALID, checkpoint_problems: rejected, checkpoint_generation: index + 1 };
+  }
 
   const mark = (m, i) => ({ message_id: m.message_id ?? null, comment_id: m.comment_id ?? null, generation: i + 1, coordinate: coordinateOf(m) });
   let state = checkpoint;

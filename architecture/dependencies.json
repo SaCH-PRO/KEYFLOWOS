@@ -108229,6 +108229,13 @@
     },
     {
       "resolved": true,
+      "source": "scripts/agent-control/lib/reconcile.mjs",
+      "specifier": "./state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
       "source": "scripts/agent-control/lib/return-evidence.mjs",
       "specifier": "./events.mjs",
       "target": "scripts/agent-control/lib/events.mjs",
@@ -108610,6 +108617,13 @@
       "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
       "specifier": "../lib/yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../status.mjs",
+      "target": "scripts/agent-control/status.mjs",
       "type": "relative"
     },
     {
@@ -110140,7 +110154,7 @@
     }
   ],
   "meta": {
-    "edges": 15734,
+    "edges": 15736,
     "nodes": 3847,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"

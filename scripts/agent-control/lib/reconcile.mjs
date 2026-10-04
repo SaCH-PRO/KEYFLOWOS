@@ -42,6 +42,7 @@ import {
   compareAuthorityOrder,
 } from './control-envelope.mjs';
 import { reduceAuthority } from './authority-effects.mjs';
+import { validateState } from './state.mjs';
 
 // Authority is defined once, in the shared #80 envelope parser; these are
 // re-exported so existing importers keep one source.
@@ -56,6 +57,7 @@ export const FINDINGS = Object.freeze({
   DERIVED_STATE_UNANCHORED: 'DERIVED_STATE_UNANCHORED',
   DERIVED_ANCHOR_NOT_FOUND: 'DERIVED_ANCHOR_NOT_FOUND',
   DERIVED_STATE_STALE_AUTHORITY: 'DERIVED_STATE_STALE_AUTHORITY',
+  DERIVED_STATE_INVALID: 'DERIVED_STATE_INVALID',
   REPO_TRUTH_UNVERIFIABLE: 'REPO_TRUTH_UNVERIFIABLE',
   SOURCE_MAIN_NOT_ON_MAIN: 'SOURCE_MAIN_NOT_ON_MAIN',
   PR_REFERENCE_MISSING: 'PR_REFERENCE_MISSING',
@@ -118,13 +120,22 @@ export function reconcile(state, authority, repo, reduction = null) {
           anchor: basis,
           reason: 'no valid authority message on #80 has this comment id and message id',
         }));
-      } else if (idx < authority.messages.length - 1) {
-        findings.push(finding(FINDINGS.DERIVED_STATE_STALE_AUTHORITY, {
-          anchor: basis,
-          newer: authority.messages.slice(idx + 1).map(summarize),
-          // Why the typed fold stopped short of the newest authority, when it ran.
-          ...(reduction?.blocked ? { blocked: reduction.blocked } : {}),
-        }));
+      } else {
+        // An anchored projection the state contract rejects is never usable,
+        // whether or not anything is newer than its anchor. The fold does not
+        // start from one (CHECKPOINT-VALIDATION-017, Copilot r4178799610).
+        const rejected = validateState(state).problems;
+        if (rejected.length) {
+          findings.push(finding(FINDINGS.DERIVED_STATE_INVALID, { anchor: basis, problems: rejected }));
+        }
+        if (idx < authority.messages.length - 1) {
+          findings.push(finding(FINDINGS.DERIVED_STATE_STALE_AUTHORITY, {
+            anchor: basis,
+            newer: authority.messages.slice(idx + 1).map(summarize),
+            // Why the typed fold stopped short of the newest authority, when it ran.
+            ...(reduction?.blocked ? { blocked: reduction.blocked } : {}),
+          }));
+        }
       }
       // Authority that spoke after the anchor but cannot be read is never
       // skipped: it may be a hold. Older malformed messages predate the

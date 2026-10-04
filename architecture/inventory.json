@@ -924,9 +924,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 153,
+      "lines": 176,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 10392
+      "size_bytes": 12695
     },
     {
       "extension": ".yaml",
@@ -936,9 +936,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 725,
+      "lines": 955,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 42945
+      "size_bytes": 58213
     },
     {
       "extension": ".yaml",
@@ -57565,9 +57565,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1579,
+      "lines": 1583,
       "path": "architecture/architecture.json",
-      "size_bytes": 50915
+      "size_bytes": 51322
     },
     {
       "extension": ".yaml",
@@ -57591,13 +57591,13 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4198373
+      "size_bytes": 4198807
     },
     {
       "extension": ".md",
-      "lines": 108,
+      "lines": 109,
       "path": "architecture/dependency-map.md",
-      "size_bytes": 6828
+      "size_bytes": 6880
     },
     {
       "extension": ".yaml",
@@ -57607,21 +57607,21 @@
     },
     {
       "extension": ".md",
-      "lines": 565,
+      "lines": 569,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 22631
+      "size_bytes": 22943
     },
     {
       "extension": ".json",
-      "lines": 63237,
+      "lines": 63239,
       "path": "architecture/inventory.json",
-      "size_bytes": 1636848
+      "size_bytes": 1636896
     },
     {
       "extension": ".md",
-      "lines": 236,
+      "lines": 249,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 12288
+      "size_bytes": 13141
     },
     {
       "extension": ".md",
@@ -58893,9 +58893,9 @@
     },
     {
       "extension": ".md",
-      "lines": 199,
+      "lines": 200,
       "path": "docs/development/AGENT_AUTOPILOT_OPERATIONS.md",
-      "size_bytes": 14538
+      "size_bytes": 14925
     },
     {
       "extension": ".yaml",
@@ -58905,9 +58905,9 @@
     },
     {
       "extension": ".md",
-      "lines": 599,
+      "lines": 608,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 28421
+      "size_bytes": 29080
     },
     {
       "extension": ".md",
@@ -61660,9 +61660,9 @@
         "./state-machine.mjs",
         "./state.mjs"
       ],
-      "lines": 376,
+      "lines": 392,
       "path": "scripts/agent-control/lib/authority-effects.mjs",
-      "size_bytes": 18175
+      "size_bytes": 19181
     },
     {
       "exports": [
@@ -61825,11 +61825,12 @@
       "extension": ".mjs",
       "imports": [
         "./authority-effects.mjs",
-        "./control-envelope.mjs"
+        "./control-envelope.mjs",
+        "./state.mjs"
       ],
-      "lines": 209,
+      "lines": 220,
       "path": "scripts/agent-control/lib/reconcile.mjs",
-      "size_bytes": 10281
+      "size_bytes": 10843
     },
     {
       "exports": [
@@ -61950,9 +61951,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 1824,
+      "lines": 1851,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 85732
+      "size_bytes": 87146
     },
     {
       "exports": [],
@@ -62065,6 +62066,7 @@
         "../lib/state.mjs",
         "../lib/truth.mjs",
         "../lib/yaml.mjs",
+        "../status.mjs",
         "node:assert/strict",
         "node:child_process",
         "node:fs",
@@ -62072,9 +62074,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 1203,
+      "lines": 1432,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
-      "size_bytes": 75399
+      "size_bytes": 89928
     },
     {
       "exports": [],
@@ -62211,9 +62213,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 549,
+      "lines": 580,
       "path": "scripts/agent-control/tests/reconcile.spec.mjs",
-      "size_bytes": 29297
+      "size_bytes": 31424
     },
     {
       "exports": [],
@@ -63232,6 +63234,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3449,
     "total_files": 4440,
-    "total_lines": 1136332
+    "total_lines": 1136933
   }
 }

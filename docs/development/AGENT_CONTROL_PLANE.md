@@ -519,6 +519,15 @@ The rules:
   key in the form its parser reads back as the same key: a packet id such as
   `:`, `a:b`, `a: b` or `- z` is quoted, so a saved checkpoint reloads with
   the same holds. The packet-id vocabulary is not narrowed for this.
+- **The checkpoint is checked before anything is folded.** Once its anchor is
+  found, the checkpoint itself must pass `validateState()`. One that does not
+  is never folded from, whether zero, one or many messages are newer: the fold
+  does not start (`CHECKPOINT_INVALID`, with the contract problems), and
+  `reconcile()` reports `DERIVED_STATE_INVALID`, so `decide()` returns
+  REPORT_DRIFT and `status.mjs --verify` shows the drift. Unverifiable
+  authority and a missing or unfound anchor are reported first, as before. An
+  invalid checkpoint is never repaired, normalized or coerced; it is corrected
+  in a reviewed commit (CHECKPOINT-VALIDATION-017).
 - **The projection stays valid.** Each folded step is checked with
   `validateState()`. A step that the state contract rejects stops the fold
   (`CONTROL_EFFECT_PROJECTION_INVALID`).

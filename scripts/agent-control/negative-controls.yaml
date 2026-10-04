@@ -1520,6 +1520,33 @@ negative_controls:
     proof_command: node --test --test-name-pattern="a step the state contract rejects stops it" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-REDUCER-CHECKPOINT-UNVALIDATED
+    claim: >
+      The reviewed checkpoint is checked against the state contract before
+      anything is folded over it. Without the check a newer correction
+      overwrites an AMBER checkpoint's health and the fold returns a
+      projection that passes every step check (CHECKPOINT-VALIDATION-017;
+      Copilot r4178799610).
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: "  const rejected = validateState(checkpoint).problems;"
+      replace: "  const rejected = [];"
+    proof_command: node --test --test-name-pattern="NC an invalid checkpoint is never the base of a fold" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECONCILE-INVALID-CHECKPOINT-CONSISTENT
+    claim: >
+      An anchored projection the state contract rejects is a finding, so with
+      the anchor as the newest authority and zero effects to fold it can
+      never reconcile as consistent and reach decide() as usable
+      (CHECKPOINT-VALIDATION-017).
+    mutation:
+      file: scripts/agent-control/lib/reconcile.mjs
+      find: "        const rejected = validateState(state).problems;"
+      replace: "        const rejected = [];"
+    proof_command: node --test --test-name-pattern="never consistent, with nothing newer than its anchor" scripts/agent-control/tests/reconcile.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-REDUCER-ADMISSION-WITHOUT-PR
     claim: >
       An admission or a checkpoint is about a PR and must name it; only a
