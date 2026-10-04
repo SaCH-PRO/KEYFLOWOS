@@ -162,10 +162,11 @@ export function normalizeCheck(run: GitHubCheckRun): MissionControlCheck {
     case 'cancelled':
     case 'timed_out':
     case 'action_required':
+    case 'stale':
+    case 'startup_failure':
       return { name: run.name ?? 'unnamed check', status: 'FAIL' };
-    case 'skipped':
     case 'neutral':
-      return { name: run.name ?? 'unnamed check', status: 'SKIPPED' };
+      return { name: run.name ?? 'unnamed check', status: 'UNKNOWN' };
     default:
       return { name: run.name ?? 'unnamed check', status: 'UNKNOWN' };
   }
@@ -195,14 +196,58 @@ function healthFromChecks(checks: MissionControlCheck[]): MissionControlHealth {
   return 'UNKNOWN';
 }
 
+const SNAPSHOT_TTL_MS = 30_000;
+let cached: { at: number; value: ProjectMissionControlSnapshot } | null = null;
+let inFlight: Promise<ProjectMissionControlSnapshot> | null = null;
+
 @Injectable()
 export class ProjectMissionControlService {
   private readonly repository = process.env.KEYFLOW_MISSION_CONTROL_REPO || 'SaCH-PRO/KEYFLOWOS';
   private readonly token = process.env.KEYFLOW_GITHUB_TOKEN || process.env.GITHUB_TOKEN || '';
 
   async snapshot(): Promise<ProjectMissionControlSnapshot> {
+    const now = Date.now();
+    if (cached && now - cached.at < SNAPSHOT_TTL_MS) return cached.value;
+    if (inFlight) return inFlight;
+
+    inFlight = this.buildSnapshot();
+    try {
+      const value = await inFlight;
+      cached = { at: Date.now(), value };
+      return value;
+    } finally {
+      inFlight = null;
+    }
+  }
+
+  private async buildSnapshot(): Promise<ProjectMissionControlSnapshot> {
     const generatedAt = new Date().toISOString();
     const blockers: ProjectMissionControlSnapshot['blockers'] = [];
+
+    if (!this.token) {
+      return {
+        generatedAt,
+        repository: this.repository,
+        sourceMain: null,
+        freshness: {
+          status: 'DEGRADED',
+          github: 'UNAVAILABLE',
+          detail: 'KEYFLOW_GITHUB_TOKEN or GITHUB_TOKEN is required for live Mission Control evidence.',
+        },
+        health: 'UNKNOWN',
+        workstreams: TRACKED.map((stream) => ({
+          ...stream,
+          progress: {
+            completed: null,
+            total: null,
+            basis: 'Authenticated live GitHub evidence unavailable; progress intentionally unknown.',
+          },
+        })),
+        pullRequests: [],
+        blockers: [{ source: 'mission-control', detail: 'Authenticated GitHub evidence is not configured; no green state is inferred.' }],
+        workers: [],
+      };
+    }
 
     try {
       const main = await this.github<{ commit?: { sha?: string } }>(`/branches/main`);
