@@ -4,9 +4,14 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { KnowledgeIngestionService } from './knowledge-ingestion.service';
 
+const MAX_SYNC_TEXT_BYTES = 64 * 1024;
+
 const textInput = z.object({
   title: z.string().trim().min(1).max(300),
-  content: z.string().min(1).max(2_000_000),
+  content: z.string().min(1).refine(
+    (value) => Buffer.byteLength(value, 'utf8') <= MAX_SYNC_TEXT_BYTES,
+    'content exceeds the 64 KiB synchronous ingestion limit',
+  ),
   sourceUrl: z.string().url().optional(),
 });
 
@@ -58,7 +63,11 @@ export class KnowledgeIngestionController {
       sourceUrl: input.sourceUrl,
       sourceType: input.sourceUrl ? 'url' : 'text',
     });
-    return { sourceId, status: 'processed' as const };
+    return {
+      sourceId,
+      status: 'quarantined' as const,
+      retrieval: 'NOT_ADMITTED' as const,
+    };
   }
 
   @Post('url')
@@ -79,7 +88,17 @@ export class KnowledgeIngestionController {
   list(
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
+    @Query('limit') limitRaw?: string,
+    @Query('offset') offsetRaw?: string,
   ) {
-    return this.knowledge.listSources(businessId, status);
+    const limit = limitRaw === undefined ? 50 : Number(limitRaw);
+    const offset = offsetRaw === undefined ? 0 : Number(offsetRaw);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) {
+      throw new BadRequestException({
+        code: 'KNOWLEDGE_SOURCE_PAGE_INVALID',
+        message: 'limit must be an integer from 1 to 100 and offset must be a non-negative integer',
+      });
+    }
+    return this.knowledge.listSources(businessId, status, { limit, offset });
   }
 }
