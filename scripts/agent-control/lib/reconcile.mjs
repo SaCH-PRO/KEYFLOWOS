@@ -115,27 +115,27 @@ export function reconcile(state, authority, repo, reduction = null) {
       findings.push(finding(FINDINGS.DERIVED_STATE_UNANCHORED, 'programme-state records no authority_basis {message_id, comment_id}'));
     } else {
       const idx = authority.messages.findIndex((m) => String(m.comment_id) === String(basis.comment_id));
+      // An anchored projection the state contract rejects is never usable,
+      // whether or not anything is newer than its anchor. The fold does not
+      // start from one (CHECKPOINT-VALIDATION-017, Copilot r4178799610).
+      if (idx >= 0 && authority.messages[idx].message_id === basis.message_id) {
+        const rejected = validateState(state).problems;
+        if (rejected.length) {
+          findings.push(finding(FINDINGS.DERIVED_STATE_INVALID, { anchor: basis, problems: rejected }));
+        }
+      }
       if (idx < 0 || authority.messages[idx].message_id !== basis.message_id) {
         findings.push(finding(FINDINGS.DERIVED_ANCHOR_NOT_FOUND, {
           anchor: basis,
           reason: 'no valid authority message on #80 has this comment id and message id',
         }));
-      } else {
-        // An anchored projection the state contract rejects is never usable,
-        // whether or not anything is newer than its anchor. The fold does not
-        // start from one (CHECKPOINT-VALIDATION-017, Copilot r4178799610).
-        const rejected = validateState(state).problems;
-        if (rejected.length) {
-          findings.push(finding(FINDINGS.DERIVED_STATE_INVALID, { anchor: basis, problems: rejected }));
-        }
-        if (idx < authority.messages.length - 1) {
-          findings.push(finding(FINDINGS.DERIVED_STATE_STALE_AUTHORITY, {
-            anchor: basis,
-            newer: authority.messages.slice(idx + 1).map(summarize),
-            // Why the typed fold stopped short of the newest authority, when it ran.
-            ...(reduction?.blocked ? { blocked: reduction.blocked } : {}),
-          }));
-        }
+      } else if (idx < authority.messages.length - 1) {
+        findings.push(finding(FINDINGS.DERIVED_STATE_STALE_AUTHORITY, {
+          anchor: basis,
+          newer: authority.messages.slice(idx + 1).map(summarize),
+          // Why the typed fold stopped short of the newest authority, when it ran.
+          ...(reduction?.blocked ? { blocked: reduction.blocked } : {}),
+        }));
       }
       // Authority that spoke after the anchor but cannot be read is never
       // skipped: it may be a hold. Older malformed messages predate the
