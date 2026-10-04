@@ -4,6 +4,8 @@ import { AdminUserController } from './admin-user.controller';
 import { AdminBusinessController } from './admin-business.controller';
 import { AdminEventController } from './admin-event.controller';
 import { GdprPurgeService } from './gdpr-purge.service';
+import { ProjectMissionControlController } from './project-mission-control.controller';
+import { ProjectMissionControlService } from './project-mission-control.service';
 
 @Module({
   imports: [PrismaModule],
@@ -11,8 +13,9 @@ import { GdprPurgeService } from './gdpr-purge.service';
     AdminUserController,
     AdminBusinessController,
     AdminEventController,
+    ProjectMissionControlController,
   ],
-  providers: [GdprPurgeService],
+  providers: [GdprPurgeService, ProjectMissionControlService],
   exports: [GdprPurgeService],
 })
 export class AdminPlatformModule {}
