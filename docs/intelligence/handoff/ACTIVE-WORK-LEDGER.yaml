@@ -1,0 +1,174 @@
+project: KEYFLOWOS
+ledger_version: 1
+snapshot_date: '2026-10-05'
+repository: SaCH-PRO/KEYFLOWOS
+observed_main: 110532883411007787f62de35e0a951aa1c16cfa
+canonical_intelligence_branch: docs/keyflow-intelligence-foundation
+working_convergence_branch: docs/key-cognitive-archaeology-001
+production_release_authorized: false
+production_mutations_authorized: false
+rule: repository_truth_overrides_stale_handoff
+
+priority_order:
+  - preserve_truth_and_no_fake_green
+  - unblock_control_plane
+  - finish_memory_M0
+  - continue_KEY_cognitive_convergence
+  - harden_verification_and_security
+  - converge_connector_fabric
+  - accelerate_product_delivery_after_foundations_stabilize
+
+workstreams:
+  control_plane:
+    status: ACTIVE_BLOCKED
+    current_pr: 120
+    current_issue: 119
+    head: 124f36409271d3ad23cd0844474be9e740afe6c1
+    blocker:
+      - agent-control check failing
+    green_evidence:
+      - server_build
+      - web_build
+      - tests
+      - typecheck
+      - security_scan
+      - portable_proof
+      - windows_worker_proof
+    queued:
+      - issue_119_state_liveness
+      - issue_121_contract_satisfiability
+      - issue_118_single_owner_work_claims
+    supporting_prs:
+      - 109
+      - 111
+      - 107
+    next_legal_action: diagnose PR 120 agent-control failure without weakening admission semantics
+
+  memory_context_genome:
+    status: ACTIVE_SEQUENCED
+    current_issue: 122
+    current_pr: 127
+    head: 1ab16967f0656a603f8b85e201e6bd3eb973a955
+    blocker:
+      - portable_proof failing
+      - agent-control failing
+    sequence:
+      - issue_122_M0_memory_truth_audit
+      - issue_123_M1_context_contracts
+      - issue_124_shadow_persistence_and_parity
+      - issue_125_adaptive_receptor_shadow
+      - issue_126_episodic_associative_shadow
+    constraints:
+      - no_active_cutover_before_M0_M1_acceptance
+      - no_destructive_migration
+      - no_third_party_memory_runtime
+    next_legal_action: close PR 127 proof gaps, then accept or revise M0 findings before M1
+
+  key_cognitive_architecture:
+    status: ACTIVE_RESEARCH_CONVERGENCE
+    current_pr: 128
+    branch: docs/key-cognitive-archaeology-001
+    head: 687185513e3147e5d4f211e4335542a5a173957a
+    current_model:
+      - K1_SELF_CONSTITUTION_AUTHORITY
+      - K2_REALITY_EPISTEMIC_INTEGRITY
+      - K3_MEMORY_WORLD_MODEL_TIME
+      - K4_COGNITION
+      - K5_EXECUTIVE_JUDGMENT_SPECIALIZATION
+      - K6_AGENCY_EXECUTION_COORDINATION
+      - K7_ADAPTATION_VIABILITY_LEARNING
+    invariants:
+      - KEY_is_one_persistent_identity
+      - multiplicity_is_execution_topology_not_identity
+      - business_genome_is_domain_world_model_not_KEY_self
+      - biological_metaphors_do_not_automatically_define_top_level_kernels
+      - hybrid_computation_is_expected
+    next:
+      - exact_K1_K7_ownership_and_reachability
+      - computational_realizability_matrix
+      - specialization_compiler_contract
+      - one_cognitive_runtime_convergence
+      - kernel_level_TEVV
+    next_legal_action: continue docs-only mapping and pressure testing before production refactor
+
+  verification_security:
+    status: ACTIVE_PARTLY_BLOCKED
+    current_pr: 114
+    current_issue: 113
+    blocker:
+      - PR_114_dirty_non_mergeable
+      - portable_proof_failing
+      - windows_proof_failing
+      - security_scan_failing
+      - divergence_failure
+    queued:
+      - issue_115_native_DAST
+      - issue_117_dependency_remediation
+      - issue_97_risk_based_verification_architecture
+    next_legal_action: reconcile PR 114 with current main and preserve fail-closed proof semantics
+
+  connector_world_fabric:
+    status: ARCHITECTURE_AVAILABLE_NOT_ADMITTED
+    current_pr: 105
+    blocker:
+      - branch_vs_main_failure
+      - based_on_historical_intelligence_branch
+    target_role:
+      - K2_perception_receptors
+      - K6_agency_effectors
+    next_legal_action: reconcile connector architecture with current main and KEY receptor/agency contracts
+
+  architecture_forensics:
+    status: ONGOING_FOUNDATION
+    canonical_branch: docs/keyflow-intelligence-foundation
+    forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+    warning:
+      - current canonical handoff was stale relative to live main at this snapshot
+    method:
+      - MAP
+      - MICROTRACE
+      - JOURNEY
+      - CONSTELLATION
+      - KERNEL
+      - GRAPH
+      - FINDING
+      - CONTRADICTION
+      - ANTI_DUP
+      - PRESSURE_TEST
+      - TARGET_CONTRACT
+      - BACKWARD_REAUDIT
+      - CONVERGENCE
+    next_legal_action: reuse forensic kernels inside KEY rather than duplicate them
+
+  product_application:
+    status: LARGE_EXISTING_SYSTEM_NEEDS_COHERENCE
+    current_focus: convergence_hardening_and_reachability
+    known_high_value_defects:
+      - cortex_audit_route_tenant_isolation
+      - unsafe_code_sandbox_boundary
+      - multi_replica_cron_duplication
+      - reflection_intuition_persistence_gaps
+      - incomplete_compensation_paths
+      - dead_or_unreached_surfaces
+    next_legal_action: keep defects visible while foundations converge; do not let meta progress mask application risk
+
+  runtime_deployment:
+    status: ONGOING
+    concerns:
+      - branch_and_production_drift
+      - branch_protection
+      - runtime_health
+      - stale_monitors
+      - gate_integrity
+    next_legal_action: revalidate older runtime findings before closure or remediation
+
+continuity:
+  bootstrap: PROJECT-SOURCE-BOOTSTRAP.md
+  start_here: docs/intelligence/00-START-HERE.md
+  current_state: docs/intelligence/handoff/CURRENT-STATE.yaml
+  current_handoff: docs/intelligence/handoff/CURRENT-HANDOFF.md
+  work_ledger: docs/intelligence/handoff/ACTIVE-WORK-LEDGER.yaml
+  rollover: docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.md
+  programme_lines: docs/intelligence/CURRENT-PROGRAMME-LINES-OF-WORK-2026-10-05.md
+  key_archaeology: docs/intelligence/KEY-COGNITIVE-ARCHAEOLOGY-AND-CONVERGENCE-PASS-001.md
+  key_crosswalk: docs/intelligence/KEY-COGNITIVE-IMPLEMENTATION-CROSSWALK-001.md
