@@ -279,7 +279,7 @@ export class ProjectMissionControlService {
         ? 'RED'
         : pullRequests.some((p) => p.health === 'YELLOW')
           ? 'YELLOW'
-          : pullRequests.length > 0
+          : pullRequests.length > 0 && pullRequests.every((p) => p.health === 'GREEN')
             ? 'GREEN'
             : 'UNKNOWN';
 
