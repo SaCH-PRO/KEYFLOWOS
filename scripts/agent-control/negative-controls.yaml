@@ -618,6 +618,110 @@ negative_controls:
     proof_command: node --test --test-name-pattern="attributable authority that parses but fails the AUTHORITY profile" scripts/agent-control/tests/events.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-EVENTS-HOLD-RESUME-NO-WAKE
+    claim: >
+      A valid typed HOLD or RESUME on #80 wakes orchestration (RULING-012
+      R12-K1, Copilot r4175650069). Restoring the wake list that omitted both
+      types is caught.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "'MOMENTUM', 'DIRECTIVE', 'REVIEW', 'HOLD', 'RESUME']);"
+      replace: "'MOMENTUM', 'DIRECTIVE', 'REVIEW']);"
+    proof_command: node --test --test-name-pattern="a valid typed HOLD wakes for HOLD_SET" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-HOLD-WAKE-NOT-LIVE
+    claim: >
+      Through the autopilot's own two steps, the comment that wakes is the one
+      the live fold reads HOLD_CLEAR or HOLD_SET from. With HOLD and RESUME
+      off the wake list the end-to-end proof fails.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "'MOMENTUM', 'DIRECTIVE', 'REVIEW', 'HOLD', 'RESUME']);"
+      replace: "'MOMENTUM', 'DIRECTIVE', 'REVIEW']);"
+    proof_command: node --test --test-name-pattern="wake path end to end" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-HOLD-TYPE-ALONE-WAKES
+    claim: >
+      A HOLD or RESUME wakes only for its own readable typed effect. Letting
+      the message type alone wake (untyped, the other type's effect, an
+      unknown effect, production_touched true, a programme field) is caught.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "  if (!read.ok) return { effect: null, refused: `${read.code}: ${JSON.stringify(read.detail)}` };"
+      replace: "  // defect restored: the message type alone wakes"
+    proof_command: node --test --test-name-pattern="without its own readable typed effect" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-HOLD-UNTYPED-WAKES-CLI
+    claim: >
+      Through the autopilot's own steps an untyped RESUME wakes nothing.
+      Letting the type alone wake is caught end to end.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "  if (!read.ok) return { effect: null, refused: `${read.code}: ${JSON.stringify(read.detail)}` };"
+      replace: "  // defect restored: the message type alone wakes"
+    proof_command: node --test --test-name-pattern="wake path end to end" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-HOLD-AUTHORITY-GATE
+    claim: >
+      A forged, non-ChatGPT or incomplete HOLD or RESUME does not wake, even
+      when it declares a valid typed effect. Ignoring authority problems is
+      caught for these types too.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "      if (problems.length) actionable = false;"
+      replace: "      // defect restored: authority problems ignored"
+    proof_command: node --test --test-name-pattern="a forged, malformed, ambiguous or unsupported HOLD or RESUME" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-HOLD-GATE-WIDENED
+    claim: >
+      The typed-effect gate applies to HOLD and RESUME only (CORRECTION-013
+      R13-K2). Widening it to every authority type would stop an untyped
+      DIRECTIVE or REVIEW from waking, and is caught.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "    if (actionable && HOLD_MESSAGE_TYPES.includes(kind)) {"
+      replace: "    if (actionable && authority) {"
+    proof_command: node --test --test-name-pattern="a hold effect on a non-wake type wakes nothing" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-HOLD-EDITED-WAKES
+    claim: >
+      A HOLD or RESUME whose payload shows an edit, or cannot show its edit
+      state, wakes nothing. Dropping the edit-state check is caught.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "  if (edited !== false) return { effect: read.effect, refused: edited ? 'comment edited' : 'edit state not observable' };"
+      replace: "  // defect restored: edit state ignored"
+    proof_command: node --test --test-name-pattern="an edited HOLD or RESUME" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-HOLD-NOT-CREATED-WAKES
+    claim: >
+      Only a HOLD or RESUME comment whose event action is exactly created
+      wakes. Letting an edited or deleted comment event wake is caught.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "  if (payload.action !== 'created') return {"
+      replace: "  if (false) return {"
+    proof_command: node --test --test-name-pattern="an edited HOLD or RESUME" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-HOLD-ABSENT-ACTION-DEFAULTED
+    claim: >
+      An absent event action is never read as created (ACTION-SHAPE-014).
+      Restoring the default that treats a missing action as created is caught.
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "  if (payload.action !== 'created') return {"
+      replace: "  if ((payload.action || 'created') !== 'created') return {"
+    proof_command: node --test --test-name-pattern="an edited HOLD or RESUME" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-SOLE-PARSER
     claim: >
       lib/control-envelope.mjs is the only #80 envelope parser. Restoring the

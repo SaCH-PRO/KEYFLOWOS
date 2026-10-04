@@ -166,6 +166,18 @@ completion contract.
 
 ## Changelog
 
+### 2026-10-04 — Typed HOLD and RESUME comments wake orchestration
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), RULING-012 R12-K1. `lib/events.mjs` adds HOLD
+  and RESUME to the #80 wake types. Such a comment wakes only as valid authority that
+  declares its own effect (`HOLD_SET` on a HOLD, `HOLD_CLEAR` on a RESUME) in a created,
+  unedited comment (`execution-paths.md` §12). Before this a hold or release changed the
+  projection but dispatched nothing until some other event ran the autopilot.
+- New import edge: `lib/events.mjs` → `lib/authority-effects.mjs` (`readEffect`). No cycle;
+  `authority-effects.mjs` does not import `events.mjs`.
+- The local worker selector, the workflow file and the wake rules of the other message
+  types are unchanged. No application runtime, schema, deployment or production change.
+
 ### 2026-10-03 — Live typed-authority reducer integrated into the control plane
 
 - KF-META-STATE-REDUCER-LIVE-001 (PR #120). `.agent-control/programme-state.yaml` is now a

@@ -201,6 +201,171 @@ test('inline comments are read as the YAML codec reads them', () => {
   assert.equal(e.actionable, true);
 });
 
+// ----------------------------------------- HOLD / RESUME WAKE (RULING-012 R12-K1)
+
+const POSTED_AT = '2026-10-04T17:00:00Z';
+
+/** An issue_comment payload as GitHub delivers a created comment: timestamps included. */
+const posted = (body, overrides = {}) => ({
+  issue: { number: 80 },
+  action: 'created',
+  comment: { id: 7001, body, html_url: 'https://example/h', user: { login: 'SaCH-PRO' }, created_at: POSTED_AT, updated_at: POSTED_AT },
+  ...overrides,
+});
+
+const holdEnvelope = (message_type, control_effect, overrides = {}) => envelope({
+  message_id: `CG-${message_type}-E-001`,
+  message_type,
+  packet_id: 'KF-EXEC-ACTION-001',
+  state: 'HELD',
+  control_effect,
+  ...overrides,
+});
+
+const HOLD_TYPES = [['HOLD', 'HOLD_SET'], ['RESUME', 'HOLD_CLEAR']];
+
+test('a valid typed HOLD wakes for HOLD_SET and a valid typed RESUME wakes for HOLD_CLEAR', () => {
+  for (const [message_type, effect] of HOLD_TYPES) {
+    const e = normalizeEvent('issue_comment', posted(holdEnvelope(message_type, effect)));
+    assert.equal(e.actionable, true, `${message_type}: ${e.wake_refused}`);
+    assert.equal(e.kind, message_type);
+    assert.equal(e.authority.valid, true);
+    assert.equal(e.control_effect, effect);
+    assert.equal(e.wake_refused, null);
+    assert.equal(e.packet_id, 'KF-EXEC-ACTION-001');
+    assert.equal(e.idempotency_key, 'issue_comment:7001:created');
+  }
+  // The other types carry neither field, and their wake rules are unchanged.
+  const directive = normalizeEvent('issue_comment', comment(envelope()));
+  assert.equal(directive.actionable, true);
+  assert.equal(directive.control_effect, null);
+  assert.equal(directive.wake_refused, null);
+});
+
+test('NC: a HOLD or RESUME without its own readable typed effect gains no actionability from its type', () => {
+  const swapped = { HOLD: 'HOLD_CLEAR', RESUME: 'HOLD_SET' };
+  for (const [message_type, effect] of HOLD_TYPES) {
+    const cases = [
+      ['untyped', holdEnvelope(message_type, undefined), /CONTROL_EFFECT_MISSING/],
+      ['the other type\'s effect', holdEnvelope(message_type, swapped[message_type]), /CONTROL_EFFECT_TYPE_MISMATCH/],
+      ['a packet effect', holdEnvelope(message_type, 'PACKET_RELEASE'), /CONTROL_EFFECT_TYPE_MISMATCH/],
+      ['NO_STATE_CHANGE', holdEnvelope(message_type, 'NO_STATE_CHANGE'), /CONTROL_EFFECT_TYPE_MISMATCH/],
+      ['an unknown effect', holdEnvelope(message_type, 'HOLD'), /CONTROL_EFFECT_UNKNOWN/],
+      ['a lower-case effect', holdEnvelope(message_type, effect.toLowerCase()), /CONTROL_EFFECT_UNKNOWN/],
+      ['a null effect', holdEnvelope(message_type, 'null'), /CONTROL_EFFECT_MISSING/],
+      ['an effect only in prose', `${holdEnvelope(message_type, undefined)}\n\nThis sets control_effect: ${effect} for the packet.\n  control_effect: ${effect}`, /CONTROL_EFFECT_MISSING/],
+      ['production_touched true', holdEnvelope(message_type, effect, { production_touched: 'true' }), /CONTROL_EFFECT_PRODUCTION_TOUCHED/],
+      ['production_touched null', holdEnvelope(message_type, effect, { production_touched: 'null' }), /CONTROL_EFFECT_PRODUCTION_TOUCHED/],
+      ['production_touched no', holdEnvelope(message_type, effect, { production_touched: 'no' }), /CONTROL_EFFECT_PRODUCTION_TOUCHED/],
+      ['production_touched False', holdEnvelope(message_type, effect, { production_touched: 'False' }), /CONTROL_EFFECT_PRODUCTION_TOUCHED/],
+      ['health outside the vocabulary', holdEnvelope(message_type, effect, { health: 'AMBER' }), /CONTROL_EFFECT_HEALTH_INVALID/],
+      ['lower-case health', holdEnvelope(message_type, effect, { health: 'green' }), /CONTROL_EFFECT_HEALTH_INVALID/],
+      ['a programme field', holdEnvelope(message_type, effect, { programme: 'KEYFLOWOS_PLATFORM_CONVERGENCE' }), /CONTROL_EFFECT_PROGRAMME_NOT_FOLDABLE/],
+      ['a programme_action field', holdEnvelope(message_type, effect, { programme_action: 'HOLD' }), /CONTROL_EFFECT_PROGRAMME_NOT_FOLDABLE/],
+    ];
+    for (const [defect, body, refusal] of cases) {
+      const e = normalizeEvent('issue_comment', posted(body));
+      const label = `${message_type} with ${defect}`;
+      assert.equal(e.actionable, false, label);
+      // Valid authority all the same: it is recorded under its own kind, and the fold decides what it means.
+      assert.equal(e.kind, message_type, label);
+      assert.equal(e.authority.valid, true, label);
+      assert.match(e.wake_refused, refusal, label);
+    }
+  }
+});
+
+test('NC: a forged, malformed, ambiguous or unsupported HOLD or RESUME does not wake', () => {
+  for (const [message_type, effect] of HOLD_TYPES) {
+    const valid = holdEnvelope(message_type, effect);
+    const from = (login) => posted(valid, { comment: { ...posted(valid).comment, user: { login } } });
+    const cases = [
+      ['an outside author', from('mallory'), message_type],
+      ['no author', from(undefined), message_type],
+      ['sender claude', posted(holdEnvelope(message_type, effect, { sender: 'claude' })), message_type],
+      ['sender ChatGPT', posted(holdEnvelope(message_type, effect, { sender: 'ChatGPT' })), message_type],
+      ['a missing envelope key', posted(holdEnvelope(message_type, effect, { production_touched: undefined })), 'MALFORMED'],
+      ['a null packet id', posted(holdEnvelope(message_type, effect, { packet_id: 'null' })), 'MALFORMED'],
+      ['a blank packet id', posted(holdEnvelope(message_type, effect, { packet_id: '"  "' })), 'MALFORMED'],
+      ['a repeated control_effect', posted(`${valid}\ncontrol_effect: ${effect}`), 'MALFORMED'],
+      ['a repeated message_type', posted(`${valid}\nmessage_type: ${message_type}`), 'MALFORMED'],
+      ['an unmatched quote', posted(holdEnvelope(message_type, effect, { packet_id: "'KF-EXEC-ACTION-001" })), 'MALFORMED'],
+      ['a block-scalar packet id', posted(holdEnvelope(message_type, effect, { packet_id: '>' })), 'MALFORMED'],
+      ['a typo of the type', posted(holdEnvelope(`${message_type}D`, effect)), 'MALFORMED'],
+      ['a lower-case type', posted(holdEnvelope(message_type.toLowerCase(), effect)), 'MALFORMED'],
+    ];
+    for (const [defect, payload, kind] of cases) {
+      const e = normalizeEvent('issue_comment', payload);
+      const label = `${message_type} with ${defect}`;
+      assert.equal(e.actionable, false, label);
+      assert.equal(e.kind, kind, label);
+    }
+    // Referent: the same envelope, well formed and from the authority, wakes.
+    assert.equal(normalizeEvent('issue_comment', posted(valid)).actionable, true, message_type);
+  }
+});
+
+test('NC: a hold effect on a non-wake type wakes nothing, and DIRECTIVE and REVIEW wake as before', () => {
+  for (const effect of ['HOLD_SET', 'HOLD_CLEAR']) {
+    for (const message_type of ['PROGRESS', 'ACK', 'CLOSE', 'AUTO_EVENT', 'AUTO_MERGE']) {
+      for (const sender of ['chatgpt', 'claude']) {
+        const e = normalizeEvent('issue_comment', posted(holdEnvelope(message_type, effect, { sender })));
+        const label = `${message_type} from ${sender} carrying ${effect}`;
+        assert.equal(e.actionable, false, label);
+        assert.equal(e.kind, message_type, label);
+        assert.equal(e.control_effect, null, label);
+      }
+    }
+    // A DIRECTIVE or REVIEW is not gated on its effect: it wakes with a hold
+    // effect it cannot carry, exactly as it wakes with none. The fold stops on it.
+    for (const message_type of ['DIRECTIVE', 'REVIEW']) {
+      for (const control_effect of [effect, undefined]) {
+        const e = normalizeEvent('issue_comment', posted(holdEnvelope(message_type, control_effect)));
+        assert.equal(e.actionable, true, `${message_type} with ${control_effect}`);
+        assert.equal(e.wake_refused, null);
+      }
+    }
+  }
+});
+
+test('NC: an edited HOLD or RESUME, or one whose edit state the payload cannot show, does not wake', () => {
+  for (const [message_type, effect] of HOLD_TYPES) {
+    const valid = holdEnvelope(message_type, effect);
+    const base = posted(valid);
+    const cases = [
+      ['an edited event', { ...base, action: 'edited' }, /comment action edited; only a created comment wakes/],
+      ['a deleted event', { ...base, action: 'deleted' }, /comment action deleted; only a created comment wakes/],
+      // ACTION-SHAPE-014: an absent action is never read as created.
+      ['an absent action', { ...base, action: undefined }, /comment action absent; only a created comment wakes/],
+      ['a null action', { ...base, action: null }, /comment action absent; only a created comment wakes/],
+      ['an empty action', { ...base, action: '' }, /comment action ; only a created comment wakes/],
+      ['an upper-case action', { ...base, action: 'CREATED' }, /comment action CREATED; only a created comment wakes/],
+      ['a later updated_at', { ...base, comment: { ...base.comment, updated_at: '2026-10-04T17:05:00Z' } }, /^comment edited$/],
+      ['no timestamps', { ...base, comment: { ...base.comment, created_at: undefined, updated_at: undefined } }, /edit state not observable/],
+      ['no updated_at', { ...base, comment: { ...base.comment, updated_at: undefined } }, /edit state not observable/],
+    ];
+    for (const [defect, payload, refusal] of cases) {
+      const e = normalizeEvent('issue_comment', payload);
+      const label = `${message_type} with ${defect}`;
+      assert.equal(e.actionable, false, label);
+      assert.equal(e.control_effect, effect, `${label}: the effect is still recorded`);
+      assert.match(e.wake_refused, refusal, label);
+    }
+    assert.equal(normalizeEvent('issue_comment', base).actionable, true, message_type);
+  }
+});
+
+test('the autopilot publishes a wake event exactly when the normalized event is actionable', () => {
+  const workflow = parseYaml(fs.readFileSync(WORKFLOW, 'utf8'));
+  const steps = workflow.jobs['normalize-event'].steps;
+  const normalize = steps.find((s) => s.id === 'event');
+  assert.match(normalize.run, /node scripts\/agent-control\/normalize-event\.mjs/);
+  const publish = steps.find((s) => s.name === 'Publish actionable wake event');
+  assert.equal(publish.if, 'fromJSON(steps.event.outputs.json).actionable == true');
+  // The comment trigger delivers created comments only, so an edit never reaches the wake path.
+  assert.deepEqual(workflow.on.issue_comment.types, ['created']);
+});
+
 // ----------------------------------------- D1: live reads in the CI observer
 
 test('D1: the decide step reads #80 and the repository with the job token, read-only', () => {

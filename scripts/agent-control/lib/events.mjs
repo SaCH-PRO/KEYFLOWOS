@@ -12,15 +12,24 @@ import {
   PROFILES,
   claimedAuthorityType,
   envelopeField,
+  normalizeComment,
   parseEnvelope,
   rejectionOf,
   validateEnvelope,
 } from './control-envelope.mjs';
+import { readEffect } from './authority-effects.mjs';
 
 export const CONTROL_ISSUE = 80;
 
 /** Control-room message types that should wake the orchestrator. */
-export const ACTIONABLE_MESSAGE_TYPES = Object.freeze(['RETURN', 'CONTRADICTION', 'MOMENTUM', 'DIRECTIVE', 'REVIEW']);
+export const ACTIONABLE_MESSAGE_TYPES = Object.freeze(['RETURN', 'CONTRADICTION', 'MOMENTUM', 'DIRECTIVE', 'REVIEW', 'HOLD', 'RESUME']);
+
+/**
+ * Types that wake only for the one typed effect they exist to carry: HOLD_SET
+ * on a HOLD, HOLD_CLEAR on a RESUME (RULING-012 R12-K1). The type alone never
+ * wakes; see holdWake().
+ */
+export const HOLD_MESSAGE_TYPES = Object.freeze(['HOLD', 'RESUME']);
 
 /** Workflows whose exact-head conclusions gate admission. */
 export const REQUIRED_WORKFLOWS = Object.freeze([
@@ -67,6 +76,26 @@ function hourBucket(iso) {
   return Number.isNaN(d.getTime()) ? 'invalid' : d.toISOString().slice(0, 13);
 }
 
+/**
+ * Whether a HOLD or RESUME that has passed the AUTHORITY profile may wake,
+ * and the effect it declares. It wakes only for the effect the live fold reads
+ * from this same comment (readEffect: the type's own effect, a packet id,
+ * production_touched false, canonical health, no programme field), and only as
+ * a comment whose event action is exactly `created` and whose payload shows it unedited. Nothing is read from prose or
+ * from the message id. `refused` says why it does not wake, or is null.
+ */
+function holdWake(env, kind, payload, comment) {
+  const read = readEffect({ message_type: kind, envelope: env, problems: [] });
+  if (!read.ok) return { effect: null, refused: `${read.code}: ${JSON.stringify(read.detail)}` };
+  // Exactly `created`: an absent action is not defaulted to it (ACTION-SHAPE-014).
+  if (payload.action !== 'created') return { effect: read.effect, refused: `comment action ${payload.action ?? 'absent'}; only a created comment wakes` };
+  // An edit can add, change or remove a hold and the prior body is gone, so an
+  // edited comment, or one whose edit state the payload cannot show, wakes nothing.
+  const edited = normalizeComment(comment).edited;
+  if (edited !== false) return { effect: read.effect, refused: edited ? 'comment edited' : 'edit state not observable' };
+  return { effect: read.effect, refused: null };
+}
+
 function ignored(kind, source, detail) {
   return { actionable: false, kind, source, idempotency_key: null, detail: detail || null };
 }
@@ -107,6 +136,13 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
       // keeps the kind it claims.
       if (problems.length && !rejection) kind = 'MALFORMED';
     }
+    // A HOLD or RESUME that is valid authority still does not wake by its type:
+    // it wakes for a readable HOLD_SET or HOLD_CLEAR and nothing else.
+    let hold = null;
+    if (actionable && HOLD_MESSAGE_TYPES.includes(kind)) {
+      hold = holdWake(env, kind, payload, comment);
+      if (hold.refused) actionable = false;
+    }
     return {
       actionable,
       kind,
@@ -119,6 +155,8 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
       ...msg,
       envelope_problems: env.problems,
       authority,
+      control_effect: hold ? hold.effect : null,
+      wake_refused: hold ? hold.refused : null,
     };
   }
 
@@ -250,5 +288,6 @@ export default {
   MUTATION_LOCK,
   CONTROL_ISSUE,
   ACTIONABLE_MESSAGE_TYPES,
+  HOLD_MESSAGE_TYPES,
   REQUIRED_WORKFLOWS,
 };

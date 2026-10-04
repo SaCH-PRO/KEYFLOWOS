@@ -81,7 +81,10 @@ See `architecture/event-registry.yaml` for the full list of 276 event names.
 orchestrate.mjs, status.mjs → lib/truth.mjs → lib/reconcile.mjs → lib/authority-effects.mjs
 lib/reconcile.mjs, lib/authority-effects.mjs → lib/control-envelope.mjs (the one #80 parser)
 lib/authority-effects.mjs → lib/state-machine.mjs (HEALTH), lib/state.mjs (validateState)
+normalize-event.mjs, orchestrate.mjs → lib/events.mjs → lib/authority-effects.mjs (readEffect), lib/control-envelope.mjs
 ```
+
+`lib/events.mjs` reads a HOLD or RESUME comment's effect with the fold's own `readEffect()`, so the wake decision and the fold cannot read the same comment differently.
 
 `authority-effects.mjs` does no I/O. `truth.mjs` alone reads #80 and repository truth through `gh`.
 

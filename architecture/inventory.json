@@ -924,9 +924,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 105,
+      "lines": 153,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 5853
+      "size_bytes": 10392
     },
     {
       "extension": ".yaml",
@@ -936,9 +936,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 434,
+      "lines": 725,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 23658
+      "size_bytes": 42945
     },
     {
       "extension": ".yaml",
@@ -57565,9 +57565,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1575,
+      "lines": 1579,
       "path": "architecture/architecture.json",
-      "size_bytes": 50568
+      "size_bytes": 50915
     },
     {
       "extension": ".yaml",
@@ -57591,13 +57591,13 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4198142
+      "size_bytes": 4198373
     },
     {
       "extension": ".md",
-      "lines": 105,
+      "lines": 108,
       "path": "architecture/dependency-map.md",
-      "size_bytes": 6533
+      "size_bytes": 6828
     },
     {
       "extension": ".yaml",
@@ -57607,21 +57607,21 @@
     },
     {
       "extension": ".md",
-      "lines": 549,
+      "lines": 565,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 21630
+      "size_bytes": 22631
     },
     {
       "extension": ".json",
-      "lines": 63235,
+      "lines": 63237,
       "path": "architecture/inventory.json",
-      "size_bytes": 1636779
+      "size_bytes": 1636846
     },
     {
       "extension": ".md",
-      "lines": 217,
+      "lines": 229,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 10929
+      "size_bytes": 11758
     },
     {
       "extension": ".md",
@@ -58905,9 +58905,9 @@
     },
     {
       "extension": ".md",
-      "lines": 583,
+      "lines": 595,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 27229
+      "size_bytes": 28127
     },
     {
       "extension": ".md",
@@ -61733,6 +61733,7 @@
       "exports": [
         "ACTIONABLE_MESSAGE_TYPES",
         "CONTROL_ISSUE",
+        "HOLD_MESSAGE_TYPES",
         "MUTATION_LOCK",
         "REQUIRED_WORKFLOWS",
         "mutationLockKey",
@@ -61743,11 +61744,12 @@
       ],
       "extension": ".mjs",
       "imports": [
+        "./authority-effects.mjs",
         "./control-envelope.mjs"
       ],
-      "lines": 254,
+      "lines": 293,
       "path": "scripts/agent-control/lib/events.mjs",
-      "size_bytes": 9848
+      "size_bytes": 12024
     },
     {
       "exports": [
@@ -61948,9 +61950,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 1690,
+      "lines": 1794,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 78845
+      "size_bytes": 84156
     },
     {
       "exports": [],
@@ -62070,9 +62072,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 1050,
+      "lines": 1130,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
-      "size_bytes": 65210
+      "size_bytes": 70551
     },
     {
       "exports": [],
@@ -62129,9 +62131,9 @@
         "node:fs",
         "node:test"
       ],
-      "lines": 320,
+      "lines": 485,
       "path": "scripts/agent-control/tests/events.spec.mjs",
-      "size_bytes": 15915
+      "size_bytes": 26148
     },
     {
       "exports": [
@@ -63230,6 +63232,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3449,
     "total_files": 4440,
-    "total_lines": 1134795
+    "total_lines": 1135571
   }
 }

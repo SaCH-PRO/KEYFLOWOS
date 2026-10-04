@@ -1026,6 +1026,86 @@ test('CLI end to end: orchestrate decides on the effective projection, and a hol
   assert.deepEqual(loadState(process.cwd()), state);
 });
 
+/**
+ * The autopilot's two steps for one delivered #80 comment, as the workflow runs
+ * them: normalize-event.mjs on the event payload, then orchestrate.mjs on the
+ * same payload with #80 read from a snapshot that contains the comment.
+ */
+function wake(comment, snapshot, extraEnv = {}, action = 'created') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-wake-'));
+  try {
+    const eventFile = path.join(dir, 'event.json');
+    const truthFile = path.join(dir, 'truth.json');
+    fs.writeFileSync(eventFile, JSON.stringify({ action, issue: { number: 80 }, comment }));
+    fs.writeFileSync(truthFile, JSON.stringify(snapshot));
+    const env = { ...process.env, ...extraEnv, GITHUB_EVENT_NAME: 'issue_comment', GITHUB_EVENT_PATH: eventFile };
+    delete env.GITHUB_RUN_ID;
+    for (const [key, value] of Object.entries(extraEnv)) if (value === undefined) delete env[key];
+    const normalized = spawnSync(process.execPath, ['scripts/agent-control/normalize-event.mjs'], { encoding: 'utf8', env });
+    assert.equal(normalized.status, 0, normalized.stderr);
+    const decided = spawnSync(process.execPath, ['scripts/agent-control/orchestrate.mjs', '--json', '--truth-file', truthFile], { encoding: 'utf8', env });
+    assert.equal(decided.status, 0, decided.stderr);
+    return { event: JSON.parse(normalized.stdout), out: JSON.parse(decided.stdout) };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('wake path end to end: a typed RESUME and a typed HOLD each wake, and the fold reads HOLD_CLEAR and HOLD_SET from the comment that woke', () => {
+  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const state = loadState(process.cwd());
+  const at = '2026-10-04T17:00:00Z';
+  const msg = (id, type, effect, lines = [`control_effect: ${effect}`]) => ({
+    id, html_url: `https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-${id}`, created_at: at, updated_at: at, user: { login: 'SaCH-PRO' },
+    body: ['```yaml', `message_id: ${type}-${id}`, `message_type: ${type}`, 'packet_id: KF-EXEC-ACTION-001', 'sender: chatgpt',
+      `source_main: ${state.programme.source_main}`, `implementation_branch: ${state.programme.implementation_branch}`, 'state: HELD',
+      'health: GREEN', 'scope_changed: false', 'production_touched: false', ...lines, '```'].join('\n'),
+  });
+  const applied = (out) => out.reconciliation.reduction.applied.map((a) => a.effect);
+
+  // RESUME: the comment wakes, and the decision made in that wake has the hold released.
+  const resumeMsg = msg(5982400001, 'RESUME', 'HOLD_CLEAR');
+  const resume = withBuilder(true, (env) => wake(resumeMsg, { comments: [...recorded.comments, resumeMsg], repo: recorded.repo }, env));
+  assert.equal(resume.event.actionable, true, resume.event.wake_refused);
+  assert.equal(resume.event.kind, 'RESUME');
+  assert.equal(resume.event.control_effect, 'HOLD_CLEAR');
+  assert.deepEqual(resume.out.event, { kind: 'RESUME', key: 'issue_comment:5982400001:created', actionable: true });
+  assert.deepEqual(applied(resume.out), ['HOLD_CLEAR']);
+  assert.equal(resume.out.reconciliation.effective_state.authority_basis.comment_id, 5982400001);
+  assert.equal(resume.out.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, false);
+  assert.equal(resume.out.decision.action, ACTIONS.DISPATCH_BUILDER);
+
+  // HOLD: the comment wakes, and the decision made in that wake has the hold set again.
+  const holdMsg = msg(5982400002, 'HOLD', 'HOLD_SET');
+  const hold = withBuilder(true, (env) => wake(holdMsg, { comments: [...recorded.comments, resumeMsg, holdMsg], repo: recorded.repo }, env));
+  assert.equal(hold.event.actionable, true, hold.event.wake_refused);
+  assert.equal(hold.event.kind, 'HOLD');
+  assert.equal(hold.event.control_effect, 'HOLD_SET');
+  assert.deepEqual(hold.out.event, { kind: 'HOLD', key: 'issue_comment:5982400002:created', actionable: true });
+  assert.deepEqual(applied(hold.out), ['HOLD_CLEAR', 'HOLD_SET']);
+  assert.equal(hold.out.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, true);
+  assert.equal(hold.out.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].hold_message_id, 'HOLD-5982400002');
+  assert.equal(hold.out.decision.action, ACTIONS.WAIT_AUTHORITY);
+
+  // NC: an untyped RESUME is valid authority and wakes nothing; read by any
+  // later wake, it stops the fold and the hold stays.
+  const untyped = msg(5982400003, 'RESUME', null, []);
+  const stale = withBuilder(true, (env) => wake(untyped, { comments: [...recorded.comments, untyped], repo: recorded.repo }, env));
+  assert.equal(stale.event.actionable, false);
+  assert.equal(stale.event.kind, 'RESUME');
+  assert.match(stale.event.wake_refused, /CONTROL_EFFECT_MISSING/);
+  assert.equal(stale.out.event.actionable, false);
+  assert.equal(stale.out.decision.action, ACTIONS.REPORT_DRIFT);
+  assert.equal(stale.out.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, true);
+
+  // NC: the same typed RESUME delivered as an edit wakes nothing.
+  const edited = withBuilder(true, (env) => wake(resumeMsg, { comments: [...recorded.comments, resumeMsg], repo: recorded.repo }, env, 'edited'));
+  assert.equal(edited.event.actionable, false);
+  assert.match(edited.event.wake_refused, /only a created comment wakes/);
+
+  assert.deepEqual(loadState(process.cwd()), state);
+});
+
 test('CLI end to end: status --verify renders the effective projection and how it was reached', () => {
   const src = fs.readFileSync('scripts/agent-control/status.mjs', 'utf8');
   assert.match(src, /reconcileWithTruth\(checkpoint\)/);

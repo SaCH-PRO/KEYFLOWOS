@@ -16,6 +16,10 @@
       {
         "date": "2026-10-03",
         "change": "PR #120 (KF-META-STATE-REDUCER-LIVE-001): lib/authority-effects.mjs and .agent-control/programme-state.yaml nodes and their edges added for the live typed-authority fold (execution-paths.md section 12); inventory.json and dependencies.json regenerated; application nodes unchanged"
+      },
+      {
+        "date": "2026-10-04",
+        "change": "PR #120, RULING-012 R12-K1: lib/events.mjs imports readEffect from lib/authority-effects.mjs so a typed HOLD or RESUME comment wakes orchestration; both files are inside the scripts/agent-control node, so no node or edge is added; inventory.json and dependencies.json regenerated"
       }
     ],
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",

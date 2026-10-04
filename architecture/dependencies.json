@@ -108118,6 +108118,13 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/lib/events.mjs",
+      "specifier": "./authority-effects.mjs",
+      "target": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/events.mjs",
       "specifier": "./control-envelope.mjs",
       "target": "scripts/agent-control/lib/control-envelope.mjs",
       "type": "relative"
@@ -110133,7 +110140,7 @@
     }
   ],
   "meta": {
-    "edges": 15733,
+    "edges": 15734,
     "nodes": 3847,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"

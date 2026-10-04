@@ -491,6 +491,18 @@ The rules:
   packet never stops a valid effect for another. Execution policy stays
   serialized: `decide()` waits while any hold is active. A legacy single
   `hold` naming a packet is lifted into `holds` by the fold.
+- **A typed HOLD or RESUME wakes orchestration.** `normalizeEvent()`
+  (`lib/events.mjs`) marks a #80 HOLD or RESUME comment actionable, so the
+  autopilot runs and publishes the decision made with the hold set or released.
+  It wakes only when the comment is valid authority under the AUTHORITY
+  profile, declares its own effect in a form the fold reads (`HOLD_SET` on a
+  HOLD, `HOLD_CLEAR` on a RESUME, with a packet id, `production_touched: false`
+  and canonical health), and arrives as a created comment whose payload shows
+  it unedited. An untyped, mistyped, malformed, forged or edited HOLD or RESUME
+  wakes nothing; the event records why in `wake_refused`. Whether the effect
+  then folds (a duplicate hold, a clear with no hold) is decided by the fold,
+  not by the wake. The local worker selector is separate and still selects
+  nothing when the newest authority is a HOLD or RESUME.
 - **State comes from the effect.** A packet's state is set by its effect, never
   by the free-vocabulary `state:` field (RELEASED, REVIEWED, QUEUED). `health:`
   must be GREEN, YELLOW, RED or absent. Any other value, AMBER included, fails

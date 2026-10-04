@@ -520,6 +520,21 @@ orchestrate.mjs / status.mjs --verify
   → --apply journals the event onto the checkpoint only; the effective projection is never persisted
 ```
 
+What wakes that path for a #80 comment (`.github/workflows/agent-control-autopilot.yml`, job `normalize-event`, on `issue_comment` `created`):
+
+```
+normalize-event.mjs
+  → normalizeEvent() (lib/events.mjs)
+      → parseEnvelope(); a repeated or badly quoted field is MALFORMED and never actionable
+      → RETURN, CONTRADICTION, MOMENTUM, DIRECTIVE, REVIEW, HOLD and RESUME are the wake types
+      → an authority type must pass rejectionOf() and the AUTHORITY profile
+      → a HOLD or RESUME must also declare its own effect as readEffect() reads it
+        (HOLD_SET on a HOLD, HOLD_CLEAR on a RESUME) in a created, unedited comment;
+        otherwise actionable is false and wake_refused says why
+orchestrate.mjs --json (the path above) — the decision with that comment folded
+  → "Publish actionable wake event" posts one AUTO_EVENT, only when actionable is true
+```
+
 The exact-head merge path is separate and does not read the projection:
 
 ```
@@ -544,6 +559,7 @@ Key files:
 - `scripts/agent-control/lib/reconcile.mjs` — `reconcileProjection()`, `reconcile()`
 - `scripts/agent-control/lib/truth.mjs` — `gatherTruth()`, `reconcileWithTruth()`
 - `scripts/agent-control/lib/control-envelope.mjs` — `parseEnvelope()`, `collectAuthority()`
+- `scripts/agent-control/lib/events.mjs` — `normalizeEvent()`, `ACTIONABLE_MESSAGE_TYPES`, `HOLD_MESSAGE_TYPES`
 - `scripts/agent-control/orchestrate.mjs`, `scripts/agent-control/status.mjs`
 - `.agent-control/programme-state.yaml` — the reviewed checkpoint
 - Contract: `docs/development/AGENT_CONTROL_PLANE.md`
