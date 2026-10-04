@@ -61,9 +61,9 @@ const componentResults = manifest.components.map((component) => {
   }
 
   const externalRefs = references.reduce((sum, r) => sum + r.count, 0);
-  const schedulerMarkers = exists ? countMatches(body, /@(Cron|Interval|Timeout)\\b|setInterval\\s*\\(|setTimeout\\s*\\(/g) : 0;
+  const schedulerMarkers = exists ? countMatches(body, /@(Cron|Interval|Timeout)\b|setInterval\s*\(|setTimeout\s*\(/g) : 0;
   const persistenceMarkers = exists
-    ? countMatches(body, /\\b(db|prisma|redis|aiMemory|GenomeMemory|CognitionMemory|TemporalFlow|embedding|vector)\\b/gi)
+    ? countMatches(body, /\b(db|prisma|redis|aiMemory|GenomeMemory|CognitionMemory|TemporalFlow|embedding|vector)\b/gi)
     : 0;
 
   return {
@@ -131,7 +131,7 @@ const report = {
 const outDir = path.join(repoRoot, '.proof');
 fs.mkdirSync(outDir, { recursive: true });
 const outFile = path.join(outDir, 'memory-truth-audit.json');
-fs.writeFileSync(outFile, JSON.stringify(report, null, 2) + '\\n');
+fs.writeFileSync(outFile, JSON.stringify(report, null, 2) + '\n');
 
 console.log('Memory truth audit: ' + componentResults.length + ' components, ' + probeResults.length + ' probes, ' + files.length + ' files scanned.');
 for (const row of componentResults) {
@@ -143,7 +143,7 @@ for (const probe of probeResults) {
 console.log('Report: ' + path.relative(repoRoot, outFile));
 
 if (failures.length > 0) {
-  console.error('\\nFAILURES');
+  console.error('\nFAILURES');
   for (const failure of failures) console.error('- ' + failure);
   process.exitCode = 1;
 }
