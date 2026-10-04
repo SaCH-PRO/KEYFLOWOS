@@ -25,10 +25,13 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982400414
   - CG-REVIEW-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982537977
   - CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982618421; authorized the second reviewed recovery
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; current authority and the checkpoint anchor
-in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016
-ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-EXACT-BINDING-016
-ack_comment_id: 5982734013
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; the checkpoint anchor
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017   # 5983193244; option (a) on CONTRADICTION-004
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018   # 5984704930; rules on CONTRADICTION-005 and -006
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019   # 5985390800; current authority; accepts K1 to K3 at a046914d and orders the artifact
+in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019
+ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019
+ack_comment_id: 5985415097
 prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-001   # 5963571216
   - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963710053
@@ -43,17 +46,24 @@ prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-012   # 5982353447
   - CC-ACK-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982498701
   - CC-ACK-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982558827; also reported the live drift that 015 ruled on
-  - CC-ACK-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982686568
+  - CC-ACK-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982686568; also reported the binding finding that 016 ruled on
+  - CC-ACK-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982734013
+  - CC-ACK-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017   # 5983216888
+  - CC-ACK-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018   # 5984745804
 contradiction_message_ids:
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-001   # 5964613912; settled by BLOCKER-RULING-005 and HUMAN-GATES-CLEARED-006
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-002   # 5972099796; settled by CONTRADICTION-RULING-011
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-003   # 5975322681; settled by CONTRADICTION-RULING-012, option (b)
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-004   # 5983093674; settled by CHECKPOINT-VALIDATION-017, option (a)
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-005   # 5983475073; settled by CONVERGED-CORRECTIONS-018
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-006   # 5983728795; settled by CONVERGED-CORRECTIONS-018
 pr_number: 120
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
 implementation_branch: impl/kf-meta-state-reducer-live-001
 state: PROVING
 health: YELLOW
-scope_changed: false
+scope_changed: true   # CONVERGED-CORRECTIONS-018 added K1 and K3 to the packet
+scope_change_authority: CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
@@ -145,6 +155,18 @@ ruling_012_to_016:   # one line each; the #80 comments are the full text
   R15: one reviewed whole-state re-anchor past the malformed memory REVIEW 5982337036; issue 80 is not edited; the memory track stays separate and zero-credit
   R16: packet_id and implementation_branch bind by exact value, with trimming only to detect a blank; the checkpoint is anchored to EXACT-BINDING-016; 6fdd8ff2 is an intermediate head only
 
+ruling_017_to_019:   # one line each; the #80 comments are the full text
+  R17-K1: the reviewed checkpoint itself must satisfy validateState() before it is returned or folded from, with zero, one or many newer messages; a named CHECKPOINT_INVALID; never repaired, normalized or coerced
+  R17-K2: the stale generation 73 text is corrected in the next artifact; ac4b3b7c is superseded and is not returned
+  R18-K1: a claimed HOLD or RESUME that does not wake exposes the refusal reason in wake_refused, authority and profile rejection included; authority.problems is preserved
+  R18-K2: a present container of the wrong structural type fails closed before normalization under a named problem; an absent defaultable container keeps its default
+  R18-K3: packet_id and implementation_branch bind only as non-blank strings; other types fail binding and are not stringified; the PR-number semantics and the textual vocabulary are unchanged
+  R18-scope: for a new finding on the next review, fix it if this correction introduced it, CONTRADICTION if it violates this packet's contracts or cannot be placed, follow-on with evidence if demonstrably pre-existing and out of scope
+  R18-sequence: one semantic head for K1 to K3, the full proof, a fresh independent review, then one artifact correcting all stale lineage and generation text, the exact-head proof, and RETURN
+  R19-accept: K1, K2 and K3 are accepted at declared scope at a046914d; they are not reopened unless the artifact tail introduces a new finding or one violates this packet's safety or admission contract
+  R19-findings: r4178799626 is fixed in the single control-artifact commit; r4174246267 is pre-existing and out of scope, follow-up issue 99, and PR 120 is not widened for it
+  R19-sequence: confirm the Windows proof at a046914d; one .agent-control-only commit bound to a046914d with lineage through 019; the exact-head checks; the artifact-aware review; RETURN if clean; no merge
+
 proof_obligations:
   - deterministic reducer tests
   - replay/idempotency tests
@@ -171,6 +193,6 @@ return_contract: >
   ACK before mutation; implement the bounded reducer and corrections; prove it
   with the portable and Windows suites and the live negative-control manifest;
   open the PR; wait for the exact-head checks and the independent semantic
-  review; RETURN to issue 80 for ChatGPT admission. RULING-012 R12-K2 and
-  R12-K3, as tightened by CORRECTION-013 to EXACT-BINDING-016, set the final
-  sequence.
+  review; RETURN to issue 80 for ChatGPT admission. The completion sequence
+  of CONVERGED-CORRECTIONS-018, as continued by SEMANTIC-ACCEPT-019, is the
+  current one.

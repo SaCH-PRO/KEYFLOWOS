@@ -19,11 +19,14 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982400414
   - CG-REVIEW-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982537977
   - CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982618421; authorized the second reviewed recovery
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; current authority and the checkpoint anchor
-current_authority_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016
-current_authority_comment_id: 5982685256
-ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-EXACT-BINDING-016
-ack_comment_id: 5982734013
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; the checkpoint anchor
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017   # 5983193244; option (a) on CONTRADICTION-004
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018   # 5984704930; rules on CONTRADICTION-005 and -006
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019   # 5985390800; current authority; accepts K1 to K3 at a046914d and orders the artifact
+current_authority_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019
+current_authority_comment_id: 5985390800
+ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019
+ack_comment_id: 5985415097
 prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-001   # 5963571216
   - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963710053
@@ -39,6 +42,9 @@ prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982498701
   - CC-ACK-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982558827; also reported the live drift that 015 ruled on
   - CC-ACK-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982686568; also reported the binding finding that 016 ruled on
+  - CC-ACK-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982734013
+  - CC-ACK-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017   # 5983216888
+  - CC-ACK-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018   # 5984745804
 progress_message_ids:
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-001   # 5964036080
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-002   # 5965254002
@@ -46,10 +52,14 @@ progress_message_ids:
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-004   # 5975256302; R11-K3 result and the scanner observation
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-005   # 5975402458; workflow conclusions at e53e329f
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-006   # 5982913148; the proof at e1834c89
+  - CC-PROGRESS-META-STATE-REDUCER-LIVE-007   # 5985186452; the proof at a046914d
 contradiction_message_ids:
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-001   # 5964613912; settled by BLOCKER-RULING-005 and HUMAN-GATES-CLEARED-006
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-002   # 5972099796; settled by CONTRADICTION-RULING-011
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-003   # 5975322681; settled by CONTRADICTION-RULING-012, option (b)
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-004   # 5983093674; settled by CHECKPOINT-VALIDATION-017, option (a)
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-005   # 5983475073; settled by CONVERGED-CORRECTIONS-018
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-006   # 5983728795; settled by CONVERGED-CORRECTIONS-018
 momentum_message_ids:
   - CW-MOMENTUM-HELD-CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965637280; posted by the local worker
 # This file is a pre-RETURN record (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001).
@@ -62,8 +72,11 @@ return_message_id: null
 previous_return_message_ids: []
 never_posted_return_message_ids: []
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
-source_head: e1834c8991b2797e07b1a302f43662e0e720377a
+source_head: a046914d0f5f56eeedd9c330e812110d66d56015
 previous_source_heads:
+  - 124f36409271d3ad23cd0844474be9e740afe6c1   # CHECKPOINT-VALIDATION-017 head; 439 tests and 144 controls there; three findings of review 5407820973 ruled on in CONVERGED-CORRECTIONS-018; no artifact was built for it
+  - 452d836e168b140429ad1276f6c0e7ff9b0cdf89   # intermediate head of 017; NC-RECONCILE-NEWER-AUTHORITY lost its mutation target there (143 of 144), repaired in 124f3640
+  - e1834c8991b2797e07b1a302f43662e0e720377a   # EXACT-BINDING-016 head, artifact head ac4b3b7c; 432 tests and 142 controls there; superseded by 017 and never returned
   - 6fdd8ff24241ec418c718d6e7e69bc62974c1a4d   # intermediate head (EXACT-BINDING-016): the HOLD and RESUME wake change of R12 to R14; superseded by the re-anchor and the exact binding in e1834c89
   - 2763f796cd453a78fde446bea41948f46853c48c   # CORRECTION-010 head, artifact head e53e329f; 404 portable tests and 131 controls there; HOLD and RESUME woke nothing (Copilot r4175650069)
   - ae1956437547714293228705700fa85a80eaf625   # CONTRACT-CORRECTION-008 head; one Windows control (NC-REDUCER-SINGLE-HOLD-LAW) lost its mutation target there, retargeted in 2763f796
@@ -80,7 +93,8 @@ implementation_branch: impl/kf-meta-state-reducer-live-001
 pr_number: 120
 state: PROVING
 health: YELLOW
-scope_changed: false
+scope_changed: true   # CONVERGED-CORRECTIONS-018 added K1 and K3 to the packet
+scope_change_authority: CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
@@ -104,8 +118,16 @@ summary: >
   recovery anchored it to CONTRACT-CORRECTION-008, past the malformed
   CORRECTION-004. That checkpoint then stopped, as designed, at a malformed
   REVIEW for another packet (5982337036), and RECOVERY-REANCHOR-015
-  authorized the re-anchor. Read live on 2026-10-04 the projection
-  reconciles CONSISTENT at generation 81 of 81 with ACTION-001 still held.
+  authorized the re-anchor. The checkpoint itself is validated before
+  anything is folded over it (CHECKPOINT-VALIDATION-017), and a container
+  that is present with the wrong structural type is left as written and
+  rejected, never coerced (CONVERGED-CORRECTIONS-018 K2). 018 also makes a
+  refused HOLD or RESUME record its reason in wake_refused in every case
+  (K1) and binds the artifact identities as strings only (K3). Read live on
+  2026-10-04 at a046914d the projection reconciles CONSISTENT: the anchor is
+  generation 81, the typed 017, 018 and 019 fold over it (two corrections
+  and one NO_STATE_CHANGE), and the observed generation is 84 of 84, with
+  ACTION-001 still held.
 
 characterization:
   starting_point: >
@@ -132,9 +154,11 @@ characterization:
     anchor stopped there. The parser was not relaxed. CONTRACT-CORRECTION-008
     ordered the reviewed re-anchor instead, and the authoring rule is in
     AGENT_CONTROL_PLANE.md. CORRECTION-009 (5965780538) was posted as a
-    one-line envelope; the live read on 2026-10-04 numbers the anchor 73 and
-    the two later typed messages 74 and 75, so 009 holds no generation and
-    does not stop the fold. CORRECTION-010 superseded it.
+    one-line envelope, which the parser does not read as an authority
+    candidate, so it holds no generation and never stopped a fold.
+    CORRECTION-010 superseded it. CONTRACT-CORRECTION-008 is generation 73
+    and was the anchor only until the second recovery; the current anchor is
+    EXACT-BINDING-016 at generation 81.
   malformed_authority_for_another_packet: >
     CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001 (5982337036), a REVIEW
     for KF-META-MEMORY-TRUTH-AUDIT-001 posted 30 seconds after RULING-012,
@@ -182,7 +206,10 @@ design:
     turning malformed never renumbers a later one. An edit makes the snapshot
     unverifiable and nothing is numbered. Each folded or unapplied message
     also carries its immutable coordinate, created_at#comment_id. The live
-    path reads the whole issue, where the anchor is generation 73.
+    path reads the whole issue, where the current anchor, EXACT-BINDING-016,
+    is generation 81. CHECKPOINT-VALIDATION-017 is 82,
+    CONVERGED-CORRECTIONS-018 is 83 and SEMANTIC-ACCEPT-019 is 84. The
+    previous anchor, CONTRACT-CORRECTION-008, is 73.
   safety_fields: >
     Every effect, holds and NO_STATE_CHANGE included, fails closed on a
     health value outside GREEN, YELLOW, RED (CORRECTION-003 F1) and on any
@@ -208,6 +235,11 @@ design:
     compared as written, so a value that differs from the PR only by
     surrounding whitespace is not bound. Trimming only decides whether a
     value is blank. The PR-number comparison is as it was.
+    CONVERGED-CORRECTIONS-018 K3: an identity is a string. A packet id that
+    is a number, boolean, mapping or list is packet_id_not_a_string, and a
+    branch that is not a string is not the PR head_ref. Nothing is made into
+    text, so 1 and "1" are not one identity. Any string is still a legal
+    packet id.
   hold_resume_wake: >
     R12-K1, R13, R14. HOLD and RESUME are on the wake list of
     normalizeEvent(). Such a comment is actionable only when it is valid
@@ -220,7 +252,35 @@ design:
     in control_effect. events.mjs holds no effect vocabulary of its own.
     Whether the effect then folds is the fold's decision. The wake rules of
     the other message types, the workflow file and the worker selector are
-    unchanged.
+    unchanged. CONVERGED-CORRECTIONS-018 K1: a claimed HOLD or RESUME that is
+    refused because it is not authority records the reason in wake_refused
+    too, as AUTHORITY_REJECTED (outside author, non-ChatGPT sender),
+    AUTHORITY_MALFORMED (fails the AUTHORITY profile) or ENVELOPE_MALFORMED
+    (repeated or badly quoted field), followed by exactly the problems that
+    authority.problems or envelope_problems carry. Those structured fields
+    are unchanged, and the effect of such a message is not read. A type that
+    is not exactly HOLD or RESUME claims neither and carries no wake_refused.
+  checkpoint_validation: >
+    CHECKPOINT-VALIDATION-017. Once the anchor is found, reduceAuthority()
+    checks the checkpoint with validateState(). One that fails is never
+    folded from, with zero, one or many newer messages: the fold does not
+    start (CHECKPOINT_INVALID, with checkpoint_problems) and reconcile()
+    reports DERIVED_STATE_INVALID, so decide() returns REPORT_DRIFT.
+    Unverifiable authority and a missing or unfound anchor are reported
+    first, as before. The per-step validation is unchanged.
+  checkpoint_shape: >
+    CONVERGED-CORRECTIONS-018 K2. normalizeState() defaults a container only
+    when its key is absent. One that is present with the wrong structural
+    type is returned exactly as written, and validateState() rejects it as
+    CHECKPOINT_SHAPE_INVALID, reported alone because every other check reads
+    through the containers. Mappings: programme, momentum, correction,
+    agents, holds, and the legacy hold (a mapping or null). Lists:
+    programme.checkpointed, unresolved_contradictions, processed_event_keys,
+    event_journal. The document itself is a mapping. An explicit null is
+    present and wrong; an empty document, and a document without these keys,
+    load with the defaults as before. status.mjs reads the checkpoint lists
+    only when they are lists and hasProcessed() answers false for a key list
+    that is not a list, so such a checkpoint is reported as drift.
   checkpoint: >
     Re-derived whole at main 11053288 under RECOVERY-REANCHOR-015 and
     anchored, as EXACT-BINDING-016 ruled, to that REVIEW (5982685256),
@@ -240,7 +300,7 @@ changed_files:
   semantic:
     - scripts/agent-control/lib/authority-effects.mjs (new)
     - scripts/agent-control/lib/admission.mjs
-    - scripts/agent-control/lib/events.mjs (RULING-012; the HOLD and RESUME wake)
+    - scripts/agent-control/lib/events.mjs (RULING-012, the HOLD and RESUME wake; 018 K1, the refusal summary)
     - scripts/agent-control/tests/events.spec.mjs
     - scripts/agent-control/lib/reconcile.mjs
     - scripts/agent-control/lib/truth.mjs
@@ -334,9 +394,9 @@ proof_matrix:
       checkpoint later typed authority folds, and later malformed authority
       still fails closed". NC-RECOVERY-MEMORY-REVIEW-SKIPPED and the
       retargeted NC-PROJECTION-OBSOLETE-ANCHOR are live. Live status
-      --verify on 2026-10-04 at e1834c89: CONSISTENT, anchored to
-      EXACT-BINDING-016, checkpoint generation 81, no typed effect to apply,
-      observed generation 81 of 81.
+      --verify on 2026-10-04 at a046914d: CONSISTENT, checkpoint
+      EXACT-BINDING-016 at generation 81, three typed effects applied (017,
+      018 and 019), observed generation 84 of 84.
     result: PROVEN
   - obligation: a valid typed HOLD or RESUME wakes orchestration and invalid authority does not (RULING-012 R12-K1, CORRECTION-013, ACTION-SHAPE-014; Copilot r4175650069)
     evidence_scope: semantic_head
@@ -370,6 +430,67 @@ proof_matrix:
       a leading or trailing space, tab or newline is not bound, on either
       artifact and on the PR side, and an all-whitespace identity is still
       missing. NC-ADMISSION-IDENTITY-TRIMMED is live.
+    result: PROVEN
+  - obligation: an invalid checkpoint is never the effective projection or the base of a fold (CHECKPOINT-VALIDATION-017; Copilot r4178799610)
+    evidence_scope: semantic_head
+    proof: >
+      authority-effects.spec: "NC an invalid checkpoint whose anchor is the
+      newest authority fails closed, and is not repaired" (eight defects),
+      "NC a checkpoint with health AMBER cannot reconcile as consistent on
+      real #80 with zero newer effects", "NC an invalid checkpoint is never
+      the base of a fold, with one or many newer effects", "NC an invalid
+      checkpoint reaches no dispatch, review, admission or wait decision as
+      if it were valid", "an invalid checkpoint does not change the
+      precedence of unverifiable authority or a missing anchor", and the CLI
+      test for an invalid checkpoint on disk. reconcile.spec "NC an anchored
+      projection the state contract rejects is never consistent".
+      NC-REDUCER-CHECKPOINT-UNVALIDATED and
+      NC-RECONCILE-INVALID-CHECKPOINT-CONSISTENT are live.
+    result: PROVEN
+  - obligation: a claimed HOLD or RESUME that does not wake records the refusal reason in wake_refused (CONVERGED-CORRECTIONS-018 K1; Copilot r4178914062)
+    evidence_scope: semantic_head
+    proof: >
+      events.spec "NC a claimed HOLD or RESUME that is not authority records
+      why in wake_refused, beside authority.problems": for HOLD and for
+      RESUME, an outside author, no author, sender claude, sender ChatGPT, no
+      sender, a missing key, a missing health, a null, blank and block-scalar
+      packet id, a repeated control_effect, a repeated and a second
+      message_type, and an unmatched quote. Each asserts that wake_refused is
+      the code followed by exactly the structured problems, that
+      authority.problems is kept, and that no effect is recorded. Referents:
+      the valid message wakes with wake_refused null, and the effect and
+      edit refusals read as before. The unreadable-effect and edited cases
+      stay in the two earlier NC tests. NC-EVENTS-HOLD-REFUSAL-NOT-RECORDED
+      and NC-EVENTS-HOLD-REFUSAL-AUTHORITY-REASON-DROPPED are live.
+    result: PROVEN
+  - obligation: a checkpoint container present with the wrong structural type fails closed before normalization, and an absent one keeps its default (CONVERGED-CORRECTIONS-018 K2; the lib/state.mjs finding in PR review 5407820973)
+    evidence_scope: semantic_head
+    proof: >
+      authority-effects.spec: "NC a container present with the wrong type is
+      left as written and fails closed before any fold or decision" (22
+      shapes written as YAML and loaded, holds [] first; a non-mapping
+      document; a newer correction is not folded over it; saveState()
+      refuses it), "NC a wrong-type container reaches no dispatch, review,
+      admission or wait decision as if it were valid", "an absent container
+      still gets its default, and the checkpoint is as usable as before"
+      (which also re-checks the eight 017 defects by their own codes), and
+      "CLI end to end: a checkpoint on disk with a wrong-type container is
+      drift for orchestrate, with or without an event, and for the status
+      rendering" (the committed checkpoint with holds [] in place of the
+      ACTION-001 hold). reconcile.spec adds three wrong-type shapes to the
+      017 test. NC-STATE-SHAPE-UNVALIDATED, -SHAPE-UNVALIDATED-CLI,
+      -SHAPE-DECISION, -MAPPING-COERCED and -LIST-COERCED are live.
+    result: PROVEN
+  - obligation: artifact identities bind only as strings (CONVERGED-CORRECTIONS-018 K3; Copilot r4179015393)
+    evidence_scope: semantic_head
+    proof: >
+      admission.spec "NC identity types": 1 against "1" as the YAML codec
+      reads each artifact, in both directions; eleven non-string values in
+      either artifact and in both alike, for the packet id and for the
+      branch; a numeric branch on the artifact side and on the PR side.
+      Referents: strings that look like other types bind, absent and blank
+      are still missing, and the PR-number rule is as it was.
+      NC-ADMISSION-IDENTITY-COERCED is live.
     result: PROVEN
   - obligation: repository-truth contradiction remains fail-closed
     evidence_scope: semantic_head
@@ -433,17 +554,18 @@ proof_matrix:
   - obligation: architecture memory refreshed for the new module, with repository-relative scanner metadata (CORRECTION-003 F3, C4-F3, C10-F4, C10-F5; Copilot r4171049954, r4171100183, r4171689250, r4171689281)
     evidence_scope: semantic_head
     proof: >
-      Run. The maps at e1834c89 are output of the repository scanners, which
+      Run. The maps at a046914d are output of the repository scanners, which
       record meta.root as "."; neither map holds an absolute or worktree
       path. authority-effects.mjs is in inventory.json, dependencies.json,
       architecture.json, dependency-map.md and execution-paths.md section
       12. migration-plan.md has the dated 2026-10-03 and 2026-10-04 entries.
-      For e1834c89 both scanners were run on an LF export of the commit's
+      For a046914d both scanners were run on an LF export of the commit's
       tree (git archive, so no untracked file and no CRLF), and the run was
-      repeated until the maps described the tree that holds them. The one
-      new dependency edge is lib/events.mjs to lib/authority-effects.mjs.
-      The sizes the inventory records for the two artifact files are those
-      at e1834c89; this commit changes those two files only.
+      repeated until the maps described the tree that holds them. The new
+      dependency edges of this packet are lib/events.mjs to
+      lib/authority-effects.mjs and lib/reconcile.mjs to lib/state.mjs; 018
+      adds none. The sizes the inventory records for the two artifact files
+      are those at a046914d; this commit changes those two files only.
     result: PROVEN
   - obligation: CLI end-to-end proof is environment-independent (CORRECTION-003 F2)
     evidence_scope: semantic_head
@@ -470,26 +592,28 @@ proof_matrix:
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  at: e1834c89   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
+  at: a046914d   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
   host: Windows 11 with authenticated gh, KF_REQUIRE_POWERSHELL=1 (Claude worker session, 2026-10-04)
-  total: 432
-  passed: 432
-  portable_total: 413
-  portable_passed: 413
+  total: 445
+  passed: 445
+  portable_total: 426
+  portable_passed: 426
   portable_skipped: 0
   windows_total: 19
   windows_passed: 19
   baseline_before_change: 338 portable at 11053288
+  previous_head_124f3640: 439 tests (420 portable, 19 Windows), 0 skipped
+  previous_head_e1834c89: 432 tests (413 portable, 19 Windows), 0 skipped
   previous_head_2763f796: 423 tests (404 portable, 19 Windows), 0 skipped
   dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
-  live_status_verify: CONSISTENT on 2026-10-04 at e1834c89; anchored to EXACT-BINDING-016; checkpoint EXACT-BINDING-016 at generation 81; 0 typed effects to apply; observed generation 81 of 81; ACTION-001 held
+  live_status_verify: CONSISTENT on 2026-10-04 at a046914d; checkpoint EXACT-BINDING-016 at generation 81; 3 typed effects applied (017 and 018 as PACKET_CORRECTION, 019 as NO_STATE_CHANGE); observed generation 84 of 84; ACTION-001 held. It read 83 of 83 with two effects before 019 was posted.
   failed: 0
   skipped: 0
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref e1834c8991b2797e07b1a302f43662e0e720377a
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref a046914d0f5f56eeedd9c330e812110d66d56015
   baseline_before_change: 97 controls in the manifest at 11053288
-  manifest_total: 142
+  manifest_total: 152
   added_through_340f3ae4:
     - NC-REDUCER-HEALTH-UNVALIDATED   # Copilot r4171049945
     - NC-REDUCER-INVALID-PROJECTION   # Copilot r4171049945
@@ -538,16 +662,37 @@ negative_controls:
     - NC-EVENTS-HOLD-ABSENT-ACTION-DEFAULTED   # R14
     - NC-RECOVERY-MEMORY-REVIEW-SKIPPED   # R15
     - NC-ADMISSION-IDENTITY-TRIMMED   # R16
+  added_after_e1834c89:
+    - NC-REDUCER-CHECKPOINT-UNVALIDATED   # R17-K1
+    - NC-RECONCILE-INVALID-CHECKPOINT-CONSISTENT   # R17-K1
+    - NC-EVENTS-HOLD-REFUSAL-NOT-RECORDED   # R18-K1
+    - NC-EVENTS-HOLD-REFUSAL-AUTHORITY-REASON-DROPPED   # R18-K1
+    - NC-STATE-SHAPE-UNVALIDATED   # R18-K2
+    - NC-STATE-SHAPE-UNVALIDATED-CLI   # R18-K2, end to end
+    - NC-STATE-SHAPE-DECISION   # R18-K2
+    - NC-STATE-MAPPING-COERCED   # R18-K2
+    - NC-STATE-LIST-COERCED   # R18-K2
+    - NC-ADMISSION-IDENTITY-COERCED   # R18-K3
   removed: []
   retargeted:
     - NC-PROJECTION-OBSOLETE-ANCHOR now restores the CONTRACT-CORRECTION-008 anchor over the EXACT-BINDING-016 one (e1834c89); earlier it restored the directive anchor, and before that the RECONCILE-002 one
     - NC-REDUCER-SINGLE-HOLD-LAW follows the own-key hold read (2763f796); it is the control that lost its target on ae195643
     - NC-ADMISSION-PR-NUMBER-UNBOUND follows the renamed PR-number comparison line (e1834c89); the assertion is unchanged
   result_at_semantic_head: >
-    142/142 live, 0 vacuous, at e1834c89. Run whole on 2026-10-04 on the
+    152/152 live, 0 vacuous, at a046914d. Run whole on 2026-10-04 on the
     Windows worker host in the session that wrote this file, with the local
-    Claude adapter READY. It covers the 45 controls this packet added, the
-    three retargeted controls and every tests/windows control.
+    Claude adapter READY. It covers the 55 controls this packet added, the
+    three retargeted controls and every tests/windows control. No control
+    was edited or removed for 017 or 018.
+  previous_head_124f3640: >
+    144/144 live, 0 vacuous.
+  previous_head_452d836e: >
+    143/144. NC-RECONCILE-NEWER-AUTHORITY reported its mutation target not
+    found, because the new validity check had re-indented the line it
+    mutates. 124f3640 puts the check beside that line and leaves it as it
+    was; the control was not edited.
+  previous_head_e1834c89: >
+    142/142 live, 0 vacuous.
   previous_head_2763f796: >
     131/131 live, 0 vacuous.
   previous_head_ae195643: >
@@ -586,6 +731,32 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
     status: PENDING
 
 ci:
+  previous_head_a046914d: >
+    At the semantic head, CI/CD Pipeline (run 37240397746), DAST (HawkScan)
+    (run 37240397813), Branch divergence (run 37240397745) and the Autopilot
+    run concluded success. Agent Control Worker Proof (run 37240397707): the
+    portable job concluded success and the Windows job concluded success.
+    Agent Control Gate failed (run 37240436557), because the committed
+    artifact still named e1834c89 as source_head while later commits changed
+    non-control files. Copilot review 5408594905 of this head is recorded in
+    semantic_head_review.
+  previous_head_124f3640: >
+    At the CHECKPOINT-VALIDATION-017 head, CI/CD Pipeline, DAST (HawkScan),
+    Branch divergence, the Autopilot run and Agent Control Worker Proof (run
+    37228344946) concluded success. Agent Control Gate failed (runs
+    37228344949 and 37229638867) for the same reason. Copilot review
+    5407820973 of it raised the three findings that
+    CONVERGED-CORRECTIONS-018 ruled on.
+  previous_head_452d836e: >
+    At the intermediate head of 017, Agent Control Gate failed (run
+    37226553541). Copilot review 5407708851 of it raised r4178914062.
+    Nothing from this head is counted.
+  previous_head_ac4b3b7c: >
+    At the artifact head for e1834c89, Agent Control Gate (run 37224224054),
+    Branch divergence, DAST (HawkScan), GitGuardian, the Autopilot self-test
+    and the portable job of Agent Control Worker Proof concluded success.
+    Copilot review 5407549178 of it raised r4178799610 and r4178799626,
+    CHECKPOINT-VALIDATION-017 superseded it, and no RETURN was posted for it.
   previous_head_e1834c89: >
     At the semantic head, CI/CD Pipeline, DAST (HawkScan), Branch
     divergence, the Autopilot self-test, the portable job of Agent Control
@@ -595,7 +766,7 @@ ci:
     37223890487), because the committed artifact still named 2763f796 as
     source_head while two later commits changed non-control files. Copilot
     review 5407483233 of this head recommended changes; see
-    semantic_head_review.
+    review_of_e1834c89.
   previous_head_6fdd8ff2: >
     At the intermediate head, Agent Control Gate failed for the same reason
     (run 37220981480). Copilot review 5407375269 of it raised the artifact
@@ -636,7 +807,64 @@ ai_review:
   self_review: none; Claude does not review this change
   final_head_review: PENDING; recorded by ChatGPT at admission in semantic_review
 
-semantic_head_review:   # the review of e1834c89, before this commit; the review of the head that carries this file is PENDING
+semantic_head_review:   # the review of a046914d, before this commit; the review of the head that carries this file is PENDING
+  review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5408594905
+  reviewer: copilot-pull-request-reviewer[bot]
+  reviewed_head: a046914d0f5f56eeedd9c330e812110d66d56015
+  submitted_at: 2026-10-04T22:42:38Z
+  verdict: Needs a closer look; 2 findings listed open, both low and both raised on earlier heads; 2 listed as resolved since the last review; no new finding and no inline comment
+  scope_rule: >
+    CONVERGED-CORRECTIONS-018 sets a disposition rule for a newly reported
+    finding. This review reports none, so the rule has nothing to apply to.
+    The two open threads are the only unresolved threads on the PR, and each
+    was ruled on before this head.
+  chatgpt_disposition: >
+    SEMANTIC-ACCEPT-019 (5985390800) is ChatGPT's own reading of the changed
+    implementation and of review 5408594905 at a046914d. It rules K1, K2 and
+    K3 accepted at declared scope, r4178799626 an artifact item for this
+    commit, and r4174246267 pre-existing and out of scope with follow-up
+    issue 99. The review record that admission reads (semantic_review) is
+    written by ChatGPT at admission, not here.
+  findings:
+    - id: r4178799626
+      severity: low
+      class: ARTIFACT_FINALIZE (CHECKPOINT-VALIDATION-017 K2; CONVERGED-CORRECTIONS-018 step 6)
+      disposition: >
+        The stale generation 73 text in this file. Corrected by this commit:
+        characterization.malformed_authority and design.generation now name
+        the current anchor, EXACT-BINDING-016, at generation 81, and say that
+        73 is the previous anchor. It can only be corrected in the artifact,
+        so the review of the semantic head still lists it.
+    - id: r4174246267
+      severity: low
+      class: PRE_EXISTING, OUT_OF_SCOPE (R11-K1; restated by SEMANTIC-ACCEPT-019)
+      disposition: unchanged; follow-up issue 99 (KF-MAP-SCANNER-001); thread left open with the reply that cites the ruling
+    - id: r4178914062
+      severity: medium
+      class: semantic, fixed in the tree (CONVERGED-CORRECTIONS-018 K1)
+      disposition: listed by the review as resolved since the last review
+    - id: r4179015393
+      severity: high
+      class: semantic, fixed in the tree (CONVERGED-CORRECTIONS-018 K3)
+      disposition: listed by the review as resolved since the last review
+    - id: review 5407820973, lib/state.mjs line 95 (no thread id)
+      severity: medium
+      class: semantic, fixed in the tree (CONVERGED-CORRECTIONS-018 K2)
+      disposition: >
+        normalizeState() no longer turns holds [] into a mapping. Review
+        5408594905 lists it neither as open nor as resolved, and no
+        unresolved thread on lib/state.mjs exists.
+review_of_124f3640:   # kept as history
+  review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5407820973
+  reviewed_head: 124f36409271d3ad23cd0844474be9e740afe6c1
+  submitted_at: 2026-10-04T19:35:22Z
+  verdict: three findings on code 017 did not change (events.mjs, state.mjs, admission.mjs); reported in CONTRADICTION-005 and -006 and ruled on in CONVERGED-CORRECTIONS-018 as K1, K2 and K3
+review_of_ac4b3b7c:   # kept as history
+  review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5407549178
+  reviewed_head: ac4b3b7cdb43fddb032a66f18a8870070663a8c5
+  submitted_at: 2026-10-04T18:28:59Z
+  verdict: two new findings, r4178799610 (the checkpoint was never validated) and r4178799626 (stale generation text); reported in CONTRADICTION-004 and ruled on in CHECKPOINT-VALIDATION-017
+review_of_e1834c89:   # kept as history
   review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5407483233
   reviewer: copilot-pull-request-reviewer[bot]
   reviewed_head: e1834c8991b2797e07b1a302f43662e0e720377a
@@ -751,6 +979,9 @@ scope_ledger:
     - R13-K1 to R13-K4 of R12-SURGICAL-CORRECTION-013 and the exact created action of R13-ACTION-SHAPE-014
     - the reviewed re-anchor of RECOVERY-REANCHOR-015, anchored to EXACT-BINDING-016
     - exact artifact identity binding (EXACT-BINDING-016)
+    - validation of the reviewed checkpoint before the fold (CHECKPOINT-VALIDATION-017)
+    - K1 refused-hold audit summary, K2 raw checkpoint shape, K3 string-only identities (CONVERGED-CORRECTIONS-018)
+    - the single control-artifact commit and completion sequence of SEMANTIC-ACCEPT-019
     - tests, negative controls, docs, PR and RETURN
   resolved: [all declared items except those under remaining and deferred]
   remaining:
@@ -760,9 +991,10 @@ scope_ledger:
   deferred:
     - item: .github entries in architecture/inventory.json (Copilot r4174246267)
       reason: >
-        PRE_EXISTING and OUT_OF_SCOPE by RULING-011 R11-K1. The scanner
-        exclusion policy is not changed in this PR. Follow-on work.
-      owner: ChatGPT, for a later packet
+        PRE_EXISTING and OUT_OF_SCOPE by RULING-011 R11-K1, restated by
+        SEMANTIC-ACCEPT-019. The scanner exclusion policy is not changed in
+        this PR. Follow-up issue 99, KF-MAP-SCANNER-001.
+      owner: ChatGPT, for a later packet (issue 99)
     - item: scanner_environment_sensitivity
       reason: >
         Found on 2026-10-04 while re-running the scanners for R11-K3. It is
@@ -824,7 +1056,13 @@ scope_ledger:
     - item: the re-anchor target named in RECOVERY-REANCHOR-015 (that REVIEW itself)
       by: EXACT-BINDING-016, which set the anchor to itself
     - item: 6fdd8ff2 as the new semantic head
-      by: EXACT-BINDING-016, which rules it an intermediate head; e1834c89 is the semantic head
+      by: EXACT-BINDING-016, which rules it an intermediate head; e1834c89 was the semantic head then
+    - item: the artifact commit ac4b3b7c for semantic head e1834c89
+      by: CHECKPOINT-VALIDATION-017; it was never returned
+    - item: 124f3640 as the semantic head, and an artifact for it
+      by: CONVERGED-CORRECTIONS-018; a046914d is the semantic head and this commit is its artifact
+    - item: normalizeState() filling in any falsy or wrong-type container
+      by: CONVERGED-CORRECTIONS-018 K2; only an absent key is defaulted
 
 residual_risks:
   - >
@@ -866,6 +1104,18 @@ residual_risks:
     A duplicate HOLD_SET on an already-held packet fails closed, even when
     it is only a restatement. Restatements should use NO_STATE_CHANGE.
   - >
+    An explicit null for a checkpoint container (a bare "holds:" line) is now
+    invalid, where it used to load as empty. No committed checkpoint has
+    one. This is the stricter reading of 018 K2 and was stated in the ACK
+    and in PROGRESS-007; a checkpoint written that way fails closed as
+    drift until a reviewed commit corrects it.
+  - >
+    With an invalid checkpoint on disk, orchestrate.mjs without --apply
+    reports REPORT_DRIFT and exits 0. With --apply and an actionable event
+    it exits non-zero when it tries to journal, because saveState() refuses
+    an invalid state. That was already so for the 017 defects and is
+    unchanged.
+  - >
     The architecture inventory is reproducible only from an LF tree without
     untracked files; see scanner_environment_sensitivity under scope_ledger.
 
@@ -906,7 +1156,7 @@ review_findings_disposed:
       BLOCKER-RULING-005 and cleared by HUMAN-GATES-CLEARED-006, with no
       history rewrite.
   - id: Copilot r4171267706 and CORRECTION-004 C4-F4 (lineage)
-    disposition: authority_lineage in both artifacts runs through EXACT-BINDING-016 and its ACK
+    disposition: authority_lineage in both artifacts runs through SEMANTIC-ACCEPT-019 and its ACK
   - id: CORRECTION-004 C4-F2
     disposition: recorded bodies minimized to column-0 lines; NC-REDUCER-RECORDED-UNMINIMIZED
   - id: AUDIT-CORRECTION-006 A6-F1 and Copilot r4171364250
@@ -946,6 +1196,28 @@ review_findings_disposed:
     disposition: packet_id and implementation_branch bind by exact value; NC-ADMISSION-IDENTITY-TRIMMED; the anchor is 016; nothing from 6fdd8ff2 is counted
   - id: Copilot r4178759955
     disposition: PR description rewritten with no branch change; thread closed
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-004 K1, CHECKPOINT-VALIDATION-017 and Copilot r4178799610
+    disposition: the checkpoint is validated once its anchor is found; CHECKPOINT_INVALID and DERIVED_STATE_INVALID; NC-REDUCER-CHECKPOINT-UNVALIDATED, NC-RECONCILE-INVALID-CHECKPOINT-CONSISTENT
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-004 K2 and Copilot r4178799626 (stale generation text)
+    disposition: this commit; characterization.malformed_authority and design.generation corrected
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-005 K2 (the control that lost its target at 452d836e)
+    disposition: repaired in 124f3640 without editing the control; 144 of 144 there and 152 of 152 at a046914d
+  - id: CONVERGED-CORRECTIONS-018 K1 and Copilot r4178914062
+    disposition: wake_refused carries the reason for every refused claimed HOLD or RESUME; authority.problems unchanged; two NC-EVENTS-HOLD-REFUSAL controls
+  - id: CONVERGED-CORRECTIONS-018 K2 and Copilot review 5407820973 (lib/state.mjs line 95)
+    disposition: wrong-type containers are left as written and rejected as CHECKPOINT_SHAPE_INVALID; absent ones keep their defaults; five NC-STATE controls
+  - id: CONVERGED-CORRECTIONS-018 K3 and Copilot r4179015393
+    disposition: identities bind only as strings; packet_id_not_a_string; NC-ADMISSION-IDENTITY-COERCED
+  - id: CONVERGED-CORRECTIONS-018 review-scope rule
+    disposition: review 5408594905 of a046914d reports no new finding; nothing was dismissed and nothing was deferred under the rule
+  - id: SEMANTIC-ACCEPT-019
+    disposition: >
+      The Windows proof at a046914d was confirmed (run 37240397707; see
+      ci.previous_head_a046914d). This commit is the one control-only
+      artifact: it binds source_head to a046914d, carries the lineage and
+      generation text through 019, records the K1 to K3 proof and the
+      disposition of review 5408594905, and records issue 99 as the
+      follow-up for r4174246267.
 
 next_action: >
   Wait for every exact-head check on the head carrying this file and for a
