@@ -47,8 +47,8 @@ const componentResults = manifest.components.map((component) => {
   const exists = fs.existsSync(abs);
   const body = exists ? fs.readFileSync(abs, 'utf8') : '';
   const symbol = escapedSymbol(component.symbol);
-  const symbolRegex = new RegExp('\\\\b' + symbol + '\\\\b', 'g');
-  const definitionRegex = new RegExp('\\\\b(class|const|function|interface|type)\\\\s+' + symbol + '\\\\b');
+  const symbolRegex = new RegExp('\\b' + symbol + '\\b', 'g');
+  const definitionRegex = new RegExp('\\b(class|const|function|interface|type)\\s+' + symbol + '\\b');
   const symbolPresent = exists && (definitionRegex.test(body) || symbolRegex.test(body));
 
   const references = [];
