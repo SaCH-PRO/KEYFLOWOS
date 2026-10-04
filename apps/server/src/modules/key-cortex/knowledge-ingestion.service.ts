@@ -9,7 +9,6 @@
 // driver is the work, and until then the atlas entry overstates what runs.
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { SemanticMemoryService } from '../ai/semantic-memory.service';
 
 export interface IngestTextInput {
   businessId: string;
@@ -33,10 +32,12 @@ export class KnowledgeIngestionService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly semanticMemory: SemanticMemoryService,
   ) {}
 
   async ingestText(input: IngestTextInput): Promise<string> {
+    // Learning Stream Phase A is quarantine-first. Supplied material is recorded
+    // with provenance but is NOT embedded into live semantic memory here.
+    // Admission into KEY's normal retrieval path is a later governed step.
     const source = await this.prisma.client.knowledgeSource.create({
       data: {
         businessId: input.businessId,
@@ -44,32 +45,11 @@ export class KnowledgeIngestionService {
         sourceType: input.sourceType,
         sourceUrl: input.sourceUrl ?? null,
         content: input.content,
-        status: 'pending',
+        status: 'quarantined',
       },
     });
 
-    const chunks = this.chunkText(input.content, 2000);
-    for (let i = 0; i < chunks.length; i++) {
-      await this.semanticMemory.store({
-        businessId: input.businessId,
-        content: `[${input.title} chunk ${i + 1}/${chunks.length}]\n${chunks[i]}`,
-        sourceType: 'document',
-        sourceId: `${source.id}:${i}`,
-        metadata: {
-          knowledgeSourceId: source.id,
-          title: input.title,
-          sourceType: input.sourceType,
-          chunkIndex: i,
-        },
-      });
-    }
-
-    await this.prisma.client.knowledgeSource.update({
-      where: { id: source.id },
-      data: { status: 'processed' },
-    });
-
-    this.logger.log(`[ingestText] Processed ${chunks.length} chunk(s) for ${source.id}`);
+    this.logger.log(`[ingestText] Quarantined source ${source.id}; no semantic-memory write performed`);
     return source.id;
   }
 
@@ -92,28 +72,22 @@ export class KnowledgeIngestionService {
   async listSources(
     businessId: string,
     status?: string,
+    options: { limit?: number; offset?: number } = {},
   ): Promise<Array<{ id: string; title: string; sourceType: string; status: string; createdAt: Date }>> {
-    const rows = await this.prisma.client.knowledgeSource.findMany({
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+    const offset = Math.max(options.offset ?? 0, 0);
+    return this.prisma.client.knowledgeSource.findMany({
       where: { businessId, ...(status ? { status } : {}) },
       orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+      select: {
+        id: true,
+        title: true,
+        sourceType: true,
+        status: true,
+        createdAt: true,
+      },
     });
-
-    return rows.map((r) => ({
-      id: r.id,
-      title: r.title,
-      sourceType: r.sourceType,
-      status: r.status,
-      createdAt: r.createdAt,
-    }));
-  }
-
-  private chunkText(text: string, maxChars: number): string[] {
-    const chunks: string[] = [];
-    let start = 0;
-    while (start < text.length) {
-      chunks.push(text.slice(start, start + maxChars));
-      start += maxChars;
-    }
-    return chunks;
   }
 }
