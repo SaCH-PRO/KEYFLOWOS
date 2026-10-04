@@ -960,17 +960,34 @@ negative_controls:
     claim: >
       The committed projection is anchored to the newest authority in the
       recorded #80 evidence. Restoring the obsolete
-      CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 anchor, whose fold stops at the
-      malformed CORRECTION-004, fails the recorded-evidence recovery proof.
-      (Retargeted by CONTRACT-CORRECTION-008 C8-F2; earlier it restored the
-      RECONCILE-002 anchor, and before that the 2026-09-25 one.)
+      CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008 anchor, whose
+      fold stops at the malformed memory REVIEW (5982337036), fails the
+      recorded-evidence recovery proof. (Retargeted by RECOVERY-REANCHOR-015
+      and EXACT-BINDING-016; under CONTRACT-CORRECTION-008 C8-F2 it restored
+      the release-directive anchor, earlier the RECONCILE-002 anchor, and
+      before that the 2026-09-25 one.)
     mutation:
       file: .agent-control/programme-state.yaml
-      find: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008\n  comment_id: 5965390363"
-      replace: "  message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001\n  comment_id: 5963509515"
-    # The committed-checkpoint recorded-evidence proof is the C8-F2 recovery test in
+      find: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016\n  comment_id: 5982685256"
+      replace: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008\n  comment_id: 5965390363"
+    # The committed-checkpoint recorded-evidence proof is the recovery test in
     # authority-effects.spec; the previous checkpoints are replayed in-test.
-    proof_command: node --test --test-name-pattern="the committed checkpoint is re-derived at CONTRACT-CORRECTION-008" scripts/agent-control/tests/authority-effects.spec.mjs
+    proof_command: node --test --test-name-pattern="the committed checkpoint is re-derived at EXACT-BINDING-016" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECOVERY-MEMORY-REVIEW-SKIPPED
+    claim: >
+      The second reviewed recovery is a re-anchor, never a skip
+      (RECOVERY-REANCHOR-015). On the real #80 recording, folding only valid
+      messages would carry the CONTRACT-CORRECTION-008 checkpoint past the
+      malformed memory REVIEW and apply the typed REVIEWs behind it.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              ? [...(Array.isArray(authority.candidates) ? authority.candidates : authority.messages || [])].sort(compareAuthorityOrder)
+      replace: |-
+              ? [...(authority.messages || [])].sort(compareAuthorityOrder)
+    proof_command: node --test --test-name-pattern="stops at the malformed memory REVIEW" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
   - id: NC-RECONCILE-RECORDED-MALFORMED
@@ -1759,7 +1776,7 @@ negative_controls:
     mutation:
       file: scripts/agent-control/lib/admission.mjs
       find: |-
-        if (declared !== undefined && declared !== null && text(declared) !== text(pr.number)) {
+        if (declared !== undefined && declared !== null && numberText(declared) !== numberText(pr.number)) {
       replace: |-
         if (false) {
     proof_command: node --test --test-name-pattern="NC wrong packet" scripts/agent-control/tests/admission.spec.mjs
@@ -1776,6 +1793,19 @@ negative_controls:
       replace: |-
         if (false) {
     proof_command: node --test --test-name-pattern="NC wrong packet" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-IDENTITY-TRIMMED
+    claim: >
+      The binding compares identities exactly. Trimming a branch, packet id
+      or PR number before the comparison accepts an artifact that differs from
+      the PR by surrounding whitespace (EXACT-BINDING-016; Copilot review
+      5407375269), and is caught.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  return exact.trim() === '' ? '' : exact;"
+      replace: "  return exact.trim();"
+    proof_command: node --test --test-name-pattern="NC whitespace" scripts/agent-control/tests/admission.spec.mjs
     timeout_ms: 120000
 
   - id: NC-ADMISSION-BRANCH-ARTIFACT-UNBOUND

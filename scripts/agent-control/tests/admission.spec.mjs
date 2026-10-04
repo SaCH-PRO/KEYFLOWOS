@@ -143,6 +143,38 @@ test('NC wrong packet: artifacts on the right branch that name another PR, or di
   }
 });
 
+test('NC whitespace: an identity that differs from the PR only by surrounding whitespace is not bound', () => {
+  // EXACT-BINDING-016; Copilot review 5407375269: the binding trimmed identities before comparing them.
+  const base = admissible();
+  const one = (side, overrides) => evaluateAdmission({ ...base, [side]: { ...base[side], ...overrides } });
+  for (const side of ['active', 'ret']) {
+    for (const branch of ['impl/x ', ' impl/x', 'impl/x\t', '\nimpl/x']) {
+      const v = one(side, { implementation_branch: branch });
+      assert.equal(v.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, JSON.stringify(branch));
+      assert.deepEqual(bindingCodes(v), [BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD], JSON.stringify(branch));
+      assert.equal(v.detail[0].found, branch, 'the value is reported as written');
+    }
+    for (const id of ['KF-X-001 ', ' KF-X-001', 'KF-X-001\t']) {
+      const v = one(side, { packet_id: id });
+      assert.equal(v.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, JSON.stringify(id));
+      assert.deepEqual(bindingCodes(v), [BINDING_PROBLEMS.PACKET_ID_MISMATCH], JSON.stringify(id));
+    }
+    // An all-whitespace identity is still missing, not a value.
+    assert.deepEqual(bindingCodes(one(side, { packet_id: ' \t ' })), [BINDING_PROBLEMS.PACKET_ID_MISSING]);
+    assert.deepEqual(bindingCodes(one(side, { implementation_branch: '   ' })), [BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD]);
+  }
+  // The PR side is exact too: a head_ref with a trailing space is not the artifacts' branch.
+  const padded = evaluateAdmission({ ...base, pr: { ...base.pr, head_ref: 'impl/x ' } });
+  assert.equal(padded.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND);
+  // Referents: the exact values bind, and two artifacts carrying the same
+  // padded packet id still name one packet. The PR-number contract is unchanged:
+  // a number or its text.
+  assert.equal(evaluateAdmission(base).eligible, true);
+  const same = { packet_id: 'KF-X-001 ' };
+  assert.deepEqual(artifactBindingProblems({ ...base, active: { ...base.active, ...same }, ret: { ...base.ret, ...same } }), []);
+  assert.equal(one('ret', { pr_number: String(base.pr.number) }).eligible, true);
+});
+
 test("the binding is packet-agnostic: any packet id and branch bind when they are the PR's own", () => {
   const base = admissible();
   for (const [packet, branch, number] of [['KF-META-P', 'impl/kf-meta-p', 7], ['a: b', 'impl/anything', 120], ['__proto__', 'impl/p', 1]]) {

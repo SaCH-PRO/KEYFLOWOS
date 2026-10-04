@@ -544,7 +544,11 @@ The rules:
   `authority_basis` to it. The malformed message is then older than the
   anchor, so it becomes evidence only; a malformed message newer than the
   anchor still stops the fold. CONTRACT-CORRECTION-008 did this past the
-  malformed CORRECTION-004 (5964575594).
+  malformed CORRECTION-004 (5964575594). RECOVERY-REANCHOR-015 authorized it
+  again, anchored to EXACT-BINDING-016 (5982685256), past
+  `CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001`
+  (5982337036), a malformed REVIEW for another packet: a malformed authority
+  message stops the fold for every packet, whichever packet it names.
 - **Authoring rule: keep prose off column 0 as `word:`.** The parser reads
   every column-0 `key: value` line in a body as an envelope field, prose
   included. A heading such as `Required:` that appears twice is a repeated

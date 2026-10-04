@@ -177,6 +177,13 @@ completion contract.
   `authority-effects.mjs` does not import `events.mjs`.
 - The local worker selector, the workflow file and the wake rules of the other message
   types are unchanged. No application runtime, schema, deployment or production change.
+- RECOVERY-REANCHOR-015 and EXACT-BINDING-016: `.agent-control/programme-state.yaml` is
+  re-derived whole and anchored to EXACT-BINDING-016 (5982685256), past a malformed REVIEW
+  for another packet (5982337036) that stopped the fold. The parser and the fold are
+  unchanged, and `fixtures/reducer-recovery-truth.json` now records the real #80 comments
+  through the new anchor.
+- EXACT-BINDING-016: `lib/admission.mjs` compares an artifact's packet id and branch with
+  the PR exactly; surrounding whitespace no longer matches.
 
 ### 2026-10-03 — Live typed-authority reducer integrated into the control plane
 

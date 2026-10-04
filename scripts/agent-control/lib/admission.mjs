@@ -67,7 +67,20 @@ export const BINDING_PROBLEMS = Object.freeze({
   PR_NUMBER_NOT_THIS_PR: 'pr_number_not_this_pr',
 });
 
-const text = (value) => (typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '');
+/**
+ * An identity as written, or '' when it names nothing (absent, not text, or
+ * only whitespace). Never trimmed: `impl/x ` is not `impl/x`, and two packet
+ * ids that differ by surrounding whitespace are two ids (EXACT-BINDING-016;
+ * Copilot review 5407375269). Trimming only decides whether a value is blank.
+ */
+const text = (value) => {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  const exact = String(value);
+  return exact.trim() === '' ? '' : exact;
+};
+
+/** A PR number as a number or its text; this comparison is unchanged by EXACT-BINDING-016. */
+const numberText = (value) => (typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '');
 
 /**
  * Bind the control artifacts to the PR being admitted (CORRECTION-010 C10-F2;
@@ -100,7 +113,7 @@ export function artifactBindingProblems({ pr = {}, active = {}, ret = {} } = {})
       problems.push({ code: BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, artifact, expected: pr.head_ref ?? null, found: doc.implementation_branch ?? null });
     }
     const declared = doc.pr_number;
-    if (declared !== undefined && declared !== null && text(declared) !== text(pr.number)) {
+    if (declared !== undefined && declared !== null && numberText(declared) !== numberText(pr.number)) {
       problems.push({ code: BINDING_PROBLEMS.PR_NUMBER_NOT_THIS_PR, artifact, expected: pr.number ?? null, found: declared });
     }
   }

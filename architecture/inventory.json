@@ -942,9 +942,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 273,
+      "lines": 305,
       "path": ".agent-control/programme-state.yaml",
-      "size_bytes": 12446
+      "size_bytes": 14612
     },
     {
       "extension": ".toml",
@@ -57615,13 +57615,13 @@
       "extension": ".json",
       "lines": 63237,
       "path": "architecture/inventory.json",
-      "size_bytes": 1636846
+      "size_bytes": 1636848
     },
     {
       "extension": ".md",
-      "lines": 229,
+      "lines": 236,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 11758
+      "size_bytes": 12288
     },
     {
       "extension": ".md",
@@ -58905,9 +58905,9 @@
     },
     {
       "extension": ".md",
-      "lines": 595,
+      "lines": 599,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 28127
+      "size_bytes": 28421
     },
     {
       "extension": ".md",
@@ -61585,9 +61585,9 @@
     },
     {
       "extension": ".json",
-      "lines": 496,
+      "lines": 1066,
       "path": "scripts/agent-control/fixtures/reducer-recovery-truth.json",
-      "size_bytes": 45742
+      "size_bytes": 100276
     },
     {
       "extension": ".ps1",
@@ -61640,9 +61640,9 @@
         "./events.mjs",
         "./semantic-review.mjs"
       ],
-      "lines": 270,
+      "lines": 283,
       "path": "scripts/agent-control/lib/admission.mjs",
-      "size_bytes": 12573
+      "size_bytes": 13182
     },
     {
       "exports": [
@@ -61950,9 +61950,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 1794,
+      "lines": 1824,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 84156
+      "size_bytes": 85732
     },
     {
       "exports": [],
@@ -62048,9 +62048,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 442,
+      "lines": 474,
       "path": "scripts/agent-control/tests/admission.spec.mjs",
-      "size_bytes": 23668
+      "size_bytes": 25844
     },
     {
       "exports": [],
@@ -62072,9 +62072,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 1130,
+      "lines": 1203,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
-      "size_bytes": 70551
+      "size_bytes": 75399
     },
     {
       "exports": [],
@@ -63232,6 +63232,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3449,
     "total_files": 4440,
-    "total_lines": 1135571
+    "total_lines": 1136332
   }
 }
