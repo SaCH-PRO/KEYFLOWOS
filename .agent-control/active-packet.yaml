@@ -20,10 +20,15 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965390363; the checkpoint anchor
   - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-009   # 5965780538; malformed one-line envelope, superseded history
   - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010   # 5971082969; supersedes 009
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011   # 5975152305; current authority
-in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011
-ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011
-ack_comment_id: 5975168836
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011   # 5975152305
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-012   # 5982332783; option (b) on CONTRADICTION-003
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982400414
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982537977
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982618421; authorized the second reviewed recovery
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; current authority and the checkpoint anchor
+in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016
+ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-EXACT-BINDING-016
+ack_comment_id: 5982734013
 prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-001   # 5963571216
   - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963710053
@@ -34,9 +39,15 @@ prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-006   # 5965326473
   - CC-ACK-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965426967; also covers AUDIT-CORRECTION-007
   - CC-ACK-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010   # 5971095944
+  - CC-ACK-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011   # 5975168836
+  - CC-ACK-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-012   # 5982353447
+  - CC-ACK-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982498701
+  - CC-ACK-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982558827; also reported the live drift that 015 ruled on
+  - CC-ACK-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982686568
 contradiction_message_ids:
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-001   # 5964613912; settled by BLOCKER-RULING-005 and HUMAN-GATES-CLEARED-006
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-002   # 5972099796; settled by CONTRADICTION-RULING-011
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-003   # 5975322681; settled by CONTRADICTION-RULING-012, option (b)
 pr_number: 120
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
 implementation_branch: impl/kf-meta-state-reducer-live-001
@@ -123,6 +134,17 @@ ruling_011:   # CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011
   R11-K4: one .agent-control-only commit recording the semantic-head proof, then the gates on that commit, a fresh review of it, and one RETURN
   not_in_this_pr: issue 121 (KF-META-CONTRACT-SAT-001) is follow-on work
 
+ruling_012_to_016:   # one line each; the #80 comments are the full text
+  R12-K1: a valid typed HOLD or RESUME on issue 80 wakes orchestration through the existing event-normalization path; invalid authority gains no actionability from its type
+  R12-K2: a new semantic head, with the whole proof matrix fresh at it and a fresh independent review
+  R12-K3: then one .agent-control-only commit, the exact-head checks on it, and one RETURN
+  R13-K1: HOLD and RESUME wake eligibility is the reducer contract itself, read with readEffect(); events.mjs holds no effect vocabulary of its own
+  R13-K2: DIRECTIVE and REVIEW wake rules, the non-wake types and the worker selector are unchanged
+  R13-K3: tests that fail on the old implementation, and mutation controls for the wake inclusion and for the typed-effect gate
+  R14: the event action must equal created exactly; an absent action is never read as created
+  R15: one reviewed whole-state re-anchor past the malformed memory REVIEW 5982337036; issue 80 is not edited; the memory track stays separate and zero-credit
+  R16: packet_id and implementation_branch bind by exact value, with trimming only to detect a blank; the checkpoint is anchored to EXACT-BINDING-016; 6fdd8ff2 is an intermediate head only
+
 proof_obligations:
   - deterministic reducer tests
   - replay/idempotency tests
@@ -149,5 +171,6 @@ return_contract: >
   ACK before mutation; implement the bounded reducer and corrections; prove it
   with the portable and Windows suites and the live negative-control manifest;
   open the PR; wait for the exact-head checks and the independent semantic
-  review; RETURN to issue 80 for ChatGPT admission. CORRECTION-010 and
-  RULING-011 R11-K4 set the final sequence.
+  review; RETURN to issue 80 for ChatGPT admission. RULING-012 R12-K2 and
+  R12-K3, as tightened by CORRECTION-013 to EXACT-BINDING-016, set the final
+  sequence.

@@ -14,11 +14,16 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965390363; the checkpoint anchor
   - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-009   # 5965780538; malformed one-line envelope, superseded history
   - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010   # 5971082969; supersedes 009
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011   # 5975152305; current authority
-current_authority_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011
-current_authority_comment_id: 5975152305
-ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011
-ack_comment_id: 5975168836
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011   # 5975152305
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-012   # 5982332783; option (b) on CONTRADICTION-003
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982400414
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982537977
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982618421; authorized the second reviewed recovery
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; current authority and the checkpoint anchor
+current_authority_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016
+current_authority_comment_id: 5982685256
+ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-EXACT-BINDING-016
+ack_comment_id: 5982734013
 prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-001   # 5963571216
   - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963710053
@@ -29,14 +34,22 @@ prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-006   # 5965326473
   - CC-ACK-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965426967; also covers AUDIT-CORRECTION-007
   - CC-ACK-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010   # 5971095944
+  - CC-ACK-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011   # 5975168836
+  - CC-ACK-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-012   # 5982353447
+  - CC-ACK-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982498701
+  - CC-ACK-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982558827; also reported the live drift that 015 ruled on
+  - CC-ACK-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982686568; also reported the binding finding that 016 ruled on
 progress_message_ids:
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-001   # 5964036080
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-002   # 5965254002
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-003   # 5971917993
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-004   # 5975256302; R11-K3 result and the scanner observation
+  - CC-PROGRESS-META-STATE-REDUCER-LIVE-005   # 5975402458; workflow conclusions at e53e329f
+  - CC-PROGRESS-META-STATE-REDUCER-LIVE-006   # 5982913148; the proof at e1834c89
 contradiction_message_ids:
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-001   # 5964613912; settled by BLOCKER-RULING-005 and HUMAN-GATES-CLEARED-006
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-002   # 5972099796; settled by CONTRADICTION-RULING-011
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-003   # 5975322681; settled by CONTRADICTION-RULING-012, option (b)
 momentum_message_ids:
   - CW-MOMENTUM-HELD-CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965637280; posted by the local worker
 # This file is a pre-RETURN record (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001).
@@ -49,8 +62,10 @@ return_message_id: null
 previous_return_message_ids: []
 never_posted_return_message_ids: []
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
-source_head: 2763f796cd453a78fde446bea41948f46853c48c
+source_head: e1834c8991b2797e07b1a302f43662e0e720377a
 previous_source_heads:
+  - 6fdd8ff24241ec418c718d6e7e69bc62974c1a4d   # intermediate head (EXACT-BINDING-016): the HOLD and RESUME wake change of R12 to R14; superseded by the re-anchor and the exact binding in e1834c89
+  - 2763f796cd453a78fde446bea41948f46853c48c   # CORRECTION-010 head, artifact head e53e329f; 404 portable tests and 131 controls there; HOLD and RESUME woke nothing (Copilot r4175650069)
   - ae1956437547714293228705700fa85a80eaf625   # CONTRACT-CORRECTION-008 head; one Windows control (NC-REDUCER-SINGLE-HOLD-LAW) lost its mutation target there, retargeted in 2763f796
   - 82a46300742a1425ec02fb99bdc5d0d720ca97bf   # AUDIT-CORRECTION-006 A6-F1; superseded by the own-key holds of ae195643
   - 90e4a6276e659ba14c499584f8457f55384a26c1   # CORRECTION-004 C4-F2 and C4-F3 pass; superseded by 82a46300
@@ -81,14 +96,16 @@ summary: >
   authority therefore advances the derived projection without a hand-written
   reconciliation PR. Untyped, unknown, malformed, conflicting or
   programme-naming authority stops the fold and fails closed as before, and
-  repository contradictions still report drift. The checkpoint in this branch
-  is the reviewed recovery of CONTRACT-CORRECTION-008: re-derived whole at
-  main 11053288 and anchored to that REVIEW (5965390363, generation 73),
-  because the fold from the earlier directive anchor stops, as designed, at
-  the malformed CORRECTION-004. Read live on 2026-10-04 the two newer typed
-  messages, CORRECTION-010 and CONTRADICTION-RULING-011, fold over it, the
-  observed generation is 75, and the projection reconciles CONSISTENT with
-  ACTION-001 still held.
+  repository contradictions still report drift. A typed HOLD or RESUME
+  comment now also wakes the autopilot, so a hold or a release is decided on
+  in the run that comment triggers (RULING-012). The checkpoint in this
+  branch is the second reviewed recovery: re-derived whole at main 11053288
+  and anchored to EXACT-BINDING-016 (5982685256, generation 81). The first
+  recovery anchored it to CONTRACT-CORRECTION-008, past the malformed
+  CORRECTION-004. That checkpoint then stopped, as designed, at a malformed
+  REVIEW for another packet (5982337036), and RECOVERY-REANCHOR-015
+  authorized the re-anchor. Read live on 2026-10-04 the projection
+  reconciles CONSISTENT at generation 81 of 81 with ACTION-001 still held.
 
 characterization:
   starting_point: >
@@ -118,6 +135,22 @@ characterization:
     one-line envelope; the live read on 2026-10-04 numbers the anchor 73 and
     the two later typed messages 74 and 75, so 009 holds no generation and
     does not stop the fold. CORRECTION-010 superseded it.
+  malformed_authority_for_another_packet: >
+    CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001 (5982337036), a REVIEW
+    for KF-META-MEMORY-TRUTH-AUDIT-001 posted 30 seconds after RULING-012,
+    repeats a column-0 Required key in its prose. The fold from the
+    CONTRACT-CORRECTION-008 anchor applied CORRECTION-010, RULING-011 and
+    RULING-012 and stopped there, with CORRECTION-013 and ACTION-SHAPE-014
+    behind it. Live status --verify reported DRIFT on 2026-10-04 and it was
+    reported on #80 in the ACK of 014. The parser was not relaxed and #80
+    was not edited. RECOVERY-REANCHOR-015 authorized the reviewed re-anchor
+    and EXACT-BINDING-016 set the anchor to itself.
+  hold_resume_wake: >
+    At 2763f796 and on main, ACTIONABLE_MESSAGE_TYPES in lib/events.mjs was
+    RETURN, CONTRADICTION, MOMENTUM, DIRECTIVE, REVIEW. A valid HOLD or
+    RESUME normalized to actionable false, so the autopilot published no
+    wake event for it and a HOLD_CLEAR dispatched nothing until some other
+    event ran the autopilot (Copilot r4175650069, CONTRADICTION-003).
 
 design:
   effects: >
@@ -171,21 +204,44 @@ design:
     on both, implementation_branch equal to the PR head_ref, and a declared
     pr_number equal to the PR's. A matching pair copied from another packet
     fails as control_artifacts_not_bound_to_pr. No packet id or branch is
-    hard-coded.
+    hard-coded. EXACT-BINDING-016: packet_id and implementation_branch are
+    compared as written, so a value that differs from the PR only by
+    surrounding whitespace is not bound. Trimming only decides whether a
+    value is blank. The PR-number comparison is as it was.
+  hold_resume_wake: >
+    R12-K1, R13, R14. HOLD and RESUME are on the wake list of
+    normalizeEvent(). Such a comment is actionable only when it is valid
+    authority under the AUTHORITY profile, the reducer's own readEffect()
+    reads HOLD_SET on a HOLD or HOLD_CLEAR on a RESUME (which also requires
+    a packet id, production_touched false, canonical health and no programme
+    field), the event action equals created exactly, and the payload shows
+    the comment unedited. Any other HOLD or RESUME is non-actionable, and
+    the normalized event records the reason in wake_refused and the effect
+    in control_effect. events.mjs holds no effect vocabulary of its own.
+    Whether the effect then folds is the fold's decision. The wake rules of
+    the other message types, the workflow file and the worker selector are
+    unchanged.
   checkpoint: >
-    Re-derived whole at main 11053288 under CONTRACT-CORRECTION-008 (C8-F2)
-    and anchored to that REVIEW (5965390363), generation 73 of 73 at
-    derivation. It replaces the checkpoint anchored to
+    Re-derived whole at main 11053288 under RECOVERY-REANCHOR-015 and
+    anchored, as EXACT-BINDING-016 ruled, to that REVIEW (5982685256),
+    generation 81 of 81 at derivation (75 valid, 6 malformed). It replaces
+    the checkpoint anchored to CONTRACT-CORRECTION-008 (5965390363), which
+    itself replaced the one anchored to
     CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 (5963509515). It records 4/35
     application packets checkpointed, ACTION-001 held in holds, the platform
-    programme INACTIVE_SUCCESSOR, and every safety flag false. PR 104 is
-    recorded under meta_package. Recovery is a reviewed re-anchor and never a
-    skip: a malformed message newer than the anchor still stops the fold.
+    programme INACTIVE_SUCCESSOR, every safety flag false, and this packet
+    in FIXING_PROOF_FAILURES on PR 120. PR 104 is recorded under
+    meta_package, and the KEY memory programme under
+    meta_package.parallel_tracks as a zero-credit track that is no
+    sequential state transition. Recovery is a reviewed re-anchor and never
+    a skip: a malformed message newer than the anchor still stops the fold.
 
 changed_files:
   semantic:
     - scripts/agent-control/lib/authority-effects.mjs (new)
     - scripts/agent-control/lib/admission.mjs
+    - scripts/agent-control/lib/events.mjs (RULING-012; the HOLD and RESUME wake)
+    - scripts/agent-control/tests/events.spec.mjs
     - scripts/agent-control/lib/reconcile.mjs
     - scripts/agent-control/lib/truth.mjs
     - scripts/agent-control/lib/state.mjs
@@ -195,7 +251,7 @@ changed_files:
     - scripts/agent-control/status.mjs
     - scripts/agent-control/negative-controls.yaml
     - scripts/agent-control/fixtures/reducer-live-truth.json (new; real #80 comments, bodies minimized to column-0 lines)
-    - scripts/agent-control/fixtures/reducer-recovery-truth.json (new)
+    - scripts/agent-control/fixtures/reducer-recovery-truth.json (new; 105 real #80 comments through EXACT-BINDING-016, minimized)
     - scripts/agent-control/tests/authority-effects.spec.mjs (new)
     - scripts/agent-control/tests/admission.spec.mjs
     - scripts/agent-control/tests/reconcile.spec.mjs
@@ -215,7 +271,7 @@ changed_files:
     - architecture/execution-paths.md
     - architecture/migration-plan.md
   control_only:
-    - .agent-control/programme-state.yaml (re-derived checkpoint; last changed in semantic commit ae195643)
+    - .agent-control/programme-state.yaml (re-derived checkpoint; last changed in semantic commit e1834c89)
     - .agent-control/active-packet.yaml
     - .agent-control/claude-return.yaml
 
@@ -262,8 +318,58 @@ proof_matrix:
       and the checkpoint anchored to CONTRACT-CORRECTION-008 reconciles.
       CLI end to end through orchestrate.mjs. NC-RECOVERY-MALFORMED-SKIPPED,
       NC-REDUCER-CLI-STORED-PROJECTION and NC-REDUCER-LIVE-FOLD-DISABLED are
-      live. Live status --verify on 2026-10-04: CONSISTENT, checkpoint
-      generation 73, two typed effects applied, observed generation 75 of 75.
+      live.
+    result: PROVEN
+  - obligation: second reviewed recovery, past the malformed memory REVIEW for another packet (RECOVERY-REANCHOR-015, EXACT-BINDING-016)
+    evidence_scope: semantic_head
+    proof: >
+      Recorded evidence in reducer-recovery-truth.json, 105 real #80
+      comments: "the recording is complete, minimized, and holds both real
+      malformed messages"; "the CONTRACT-CORRECTION-008 checkpoint folds
+      three typed corrections, then stops at the malformed memory REVIEW and
+      skips nothing after it"; "the committed checkpoint is re-derived at
+      EXACT-BINDING-016 and starts after both malformed messages", which
+      also checks 4/35, the ACTION-001 hold, the inactive platform, every
+      safety flag and the zero-credit memory track; and "from the new
+      checkpoint later typed authority folds, and later malformed authority
+      still fails closed". NC-RECOVERY-MEMORY-REVIEW-SKIPPED and the
+      retargeted NC-PROJECTION-OBSOLETE-ANCHOR are live. Live status
+      --verify on 2026-10-04 at e1834c89: CONSISTENT, anchored to
+      EXACT-BINDING-016, checkpoint generation 81, no typed effect to apply,
+      observed generation 81 of 81.
+    result: PROVEN
+  - obligation: a valid typed HOLD or RESUME wakes orchestration and invalid authority does not (RULING-012 R12-K1, CORRECTION-013, ACTION-SHAPE-014; Copilot r4175650069)
+    evidence_scope: semantic_head
+    proof: >
+      events.spec: "a valid typed HOLD wakes for HOLD_SET and a valid typed
+      RESUME wakes for HOLD_CLEAR"; "NC a HOLD or RESUME without its own
+      readable typed effect gains no actionability from its type" (untyped,
+      the other type's effect, a packet effect, NO_STATE_CHANGE, unknown,
+      lower-case and null effects, an effect only in prose, production_touched
+      true, null, no and False, non-canonical health, programme,
+      programme_action); "NC a forged, malformed, ambiguous or unsupported
+      HOLD or RESUME does not wake"; "NC a hold effect on a non-wake type
+      wakes nothing, and DIRECTIVE and REVIEW wake as before"; "NC an edited
+      HOLD or RESUME, or one whose edit state the payload cannot show, does
+      not wake" (edited, deleted, absent, null, empty and upper-case
+      actions, a later updated_at, no timestamps); and "the autopilot
+      publishes a wake event exactly when the normalized event is
+      actionable". authority-effects.spec "wake path end to end" runs
+      normalize-event.mjs and orchestrate.mjs on one comment: a RESUME wakes
+      and that run folds HOLD_CLEAR and decides DISPATCH_BUILDER, a HOLD
+      wakes and that run folds HOLD_SET and decides WAIT_AUTHORITY, and an
+      untyped RESUME wakes nothing. NC-EVENTS-HOLD-RESUME-NO-WAKE,
+      -HOLD-WAKE-NOT-LIVE, -HOLD-TYPE-ALONE-WAKES, -HOLD-UNTYPED-WAKES-CLI,
+      -HOLD-AUTHORITY-GATE, -HOLD-GATE-WIDENED, -HOLD-EDITED-WAKES,
+      -HOLD-NOT-CREATED-WAKES and -HOLD-ABSENT-ACTION-DEFAULTED are live.
+    result: PROVEN
+  - obligation: artifact identities bind to the PR by exact value (EXACT-BINDING-016; the finding in PR review 5407375269)
+    evidence_scope: semantic_head
+    proof: >
+      admission.spec "NC whitespace": a branch or packet id that differs by
+      a leading or trailing space, tab or newline is not bound, on either
+      artifact and on the PR side, and an all-whitespace identity is still
+      missing. NC-ADMISSION-IDENTITY-TRIMMED is live.
     result: PROVEN
   - obligation: repository-truth contradiction remains fail-closed
     evidence_scope: semantic_head
@@ -327,18 +433,17 @@ proof_matrix:
   - obligation: architecture memory refreshed for the new module, with repository-relative scanner metadata (CORRECTION-003 F3, C4-F3, C10-F4, C10-F5; Copilot r4171049954, r4171100183, r4171689250, r4171689281)
     evidence_scope: semantic_head
     proof: >
-      Run. The maps at 2763f796 are output of the repository scanners, which
+      Run. The maps at e1834c89 are output of the repository scanners, which
       record meta.root as "."; neither map holds an absolute or worktree
-      path. authority-effects.mjs is in inventory.json (file entry and
-      importers), in dependencies.json (24 occurrences), in architecture.json
-      (node and edges), in dependency-map.md and in execution-paths.md
-      section 12. migration-plan.md has the dated 2026-10-03 entry. Both
-      scanners were run again on 2026-10-04 in a worktree at 2763f796:
-      dependencies.json came out identical apart from the final newline, and
-      inventory.json came out with the same directories, files and fields
-      except for the checkout-dependent values listed under
-      scanner_environment_sensitivity. The regenerated files were discarded,
-      not committed.
+      path. authority-effects.mjs is in inventory.json, dependencies.json,
+      architecture.json, dependency-map.md and execution-paths.md section
+      12. migration-plan.md has the dated 2026-10-03 and 2026-10-04 entries.
+      For e1834c89 both scanners were run on an LF export of the commit's
+      tree (git archive, so no untracked file and no CRLF), and the run was
+      repeated until the maps described the tree that holds them. The one
+      new dependency edge is lib/events.mjs to lib/authority-effects.mjs.
+      The sizes the inventory records for the two artifact files are those
+      at e1834c89; this commit changes those two files only.
     result: PROVEN
   - obligation: CLI end-to-end proof is environment-independent (CORRECTION-003 F2)
     evidence_scope: semantic_head
@@ -365,25 +470,26 @@ proof_matrix:
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  at: 2763f796   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
-  host: Windows 11 with authenticated gh, KF_REQUIRE_POWERSHELL=1 (Claude worker sessions, 2026-10-03 and 2026-10-04)
-  total: 423
-  passed: 423
-  portable_total: 404
-  portable_passed: 404
+  at: e1834c89   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
+  host: Windows 11 with authenticated gh, KF_REQUIRE_POWERSHELL=1 (Claude worker session, 2026-10-04)
+  total: 432
+  passed: 432
+  portable_total: 413
+  portable_passed: 413
   portable_skipped: 0
   windows_total: 19
   windows_passed: 19
   baseline_before_change: 338 portable at 11053288
+  previous_head_2763f796: 423 tests (404 portable, 19 Windows), 0 skipped
   dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
-  live_status_verify: CONSISTENT on 2026-10-04; anchored to CONTRADICTION-RULING-011; checkpoint CONTRACT-CORRECTION-008 at generation 73; 2 typed effects applied; observed generation 75 of 75; ACTION-001 held
+  live_status_verify: CONSISTENT on 2026-10-04 at e1834c89; anchored to EXACT-BINDING-016; checkpoint EXACT-BINDING-016 at generation 81; 0 typed effects to apply; observed generation 81 of 81; ACTION-001 held
   failed: 0
   skipped: 0
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref 2763f796cd453a78fde446bea41948f46853c48c
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref e1834c8991b2797e07b1a302f43662e0e720377a
   baseline_before_change: 97 controls in the manifest at 11053288
-  manifest_total: 131
+  manifest_total: 142
   added_through_340f3ae4:
     - NC-REDUCER-HEALTH-UNVALIDATED   # Copilot r4171049945
     - NC-REDUCER-INVALID-PROJECTION   # Copilot r4171049945
@@ -420,16 +526,30 @@ negative_controls:
     - NC-ADMISSION-PR-NUMBER-UNBOUND   # C10-F2
     - NC-ADMISSION-PACKET-ID-SPLIT   # C10-F2
     - NC-ADMISSION-BRANCH-ARTIFACT-UNBOUND   # C10-F2
+  added_after_2763f796:
+    - NC-EVENTS-HOLD-RESUME-NO-WAKE   # R12-K1
+    - NC-EVENTS-HOLD-WAKE-NOT-LIVE   # R12-K1, end to end
+    - NC-EVENTS-HOLD-TYPE-ALONE-WAKES   # R13-K1
+    - NC-EVENTS-HOLD-UNTYPED-WAKES-CLI   # R13-K1, end to end
+    - NC-EVENTS-HOLD-AUTHORITY-GATE   # R12-K1
+    - NC-EVENTS-HOLD-GATE-WIDENED   # R13-K2
+    - NC-EVENTS-HOLD-EDITED-WAKES   # R13-K2
+    - NC-EVENTS-HOLD-NOT-CREATED-WAKES   # R13-K2
+    - NC-EVENTS-HOLD-ABSENT-ACTION-DEFAULTED   # R14
+    - NC-RECOVERY-MEMORY-REVIEW-SKIPPED   # R15
+    - NC-ADMISSION-IDENTITY-TRIMMED   # R16
   removed: []
   retargeted:
-    - NC-PROJECTION-OBSOLETE-ANCHOR now restores the RECONCILE-002 anchor over the new one
+    - NC-PROJECTION-OBSOLETE-ANCHOR now restores the CONTRACT-CORRECTION-008 anchor over the EXACT-BINDING-016 one (e1834c89); earlier it restored the directive anchor, and before that the RECONCILE-002 one
     - NC-REDUCER-SINGLE-HOLD-LAW follows the own-key hold read (2763f796); it is the control that lost its target on ae195643
+    - NC-ADMISSION-PR-NUMBER-UNBOUND follows the renamed PR-number comparison line (e1834c89); the assertion is unchanged
   result_at_semantic_head: >
-    131/131 live, 0 vacuous, at 2763f796. Run whole twice on the Windows
-    worker host: on 2026-10-03 (reported in CC-PROGRESS-META-STATE-REDUCER-LIVE-003)
-    and again on 2026-10-04 in the session that wrote this file, with the
-    local Claude adapter READY. It covers the 34 controls this packet added,
-    both retargeted controls and every tests/windows control.
+    142/142 live, 0 vacuous, at e1834c89. Run whole on 2026-10-04 on the
+    Windows worker host in the session that wrote this file, with the local
+    Claude adapter READY. It covers the 45 controls this packet added, the
+    three retargeted controls and every tests/windows control.
+  previous_head_2763f796: >
+    131/131 live, 0 vacuous.
   previous_head_ae195643: >
     The Windows negative-control step failed: NC-REDUCER-SINGLE-HOLD-LAW
     reported its mutation target not found, because the own-key hold read had
@@ -466,6 +586,28 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
     status: PENDING
 
 ci:
+  previous_head_e1834c89: >
+    At the semantic head, CI/CD Pipeline, DAST (HawkScan), Branch
+    divergence, the Autopilot self-test, the portable job of Agent Control
+    Worker Proof and GitGuardian concluded success. The Windows job of Agent
+    Control Worker Proof (run 37223329000) was still running when this file
+    was written. Agent Control Gate failed (runs 37223328986 and
+    37223890487), because the committed artifact still named 2763f796 as
+    source_head while two later commits changed non-control files. Copilot
+    review 5407483233 of this head recommended changes; see
+    semantic_head_review.
+  previous_head_6fdd8ff2: >
+    At the intermediate head, Agent Control Gate failed for the same reason
+    (run 37220981480). Copilot review 5407375269 of it raised the artifact
+    binding finding that EXACT-BINDING-016 ruled on. EXACT-BINDING-016 rules
+    this head inadmissible; nothing from it is counted.
+  previous_head_e53e329f: >
+    At the artifact head for 2763f796, Agent Control Gate, Agent Control
+    Worker Proof (portable and Windows, run 37167183907), CI/CD Pipeline,
+    DAST (HawkScan), Branch divergence, GitGuardian and the Autopilot
+    self-test concluded success (CC-PROGRESS-META-STATE-REDUCER-LIVE-005).
+    Copilot review 5403722362 of it raised r4175650069, and no RETURN was
+    posted for it.
   previous_head_2763f796: >
     At the semantic head, CI/CD Pipeline, DAST (HawkScan), Branch divergence,
     Agent Control Worker Proof (portable and Windows, run 37142479171, with
@@ -494,7 +636,42 @@ ai_review:
   self_review: none; Claude does not review this change
   final_head_review: PENDING; recorded by ChatGPT at admission in semantic_review
 
-semantic_head_review:   # the review of 2763f796, before this commit; the review of the head that carries this file is PENDING
+semantic_head_review:   # the review of e1834c89, before this commit; the review of the head that carries this file is PENDING
+  review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5407483233
+  reviewer: copilot-pull-request-reviewer[bot]
+  reviewed_head: e1834c8991b2797e07b1a302f43662e0e720377a
+  submitted_at: 2026-10-04T18:16:18Z
+  verdict: Changes recommended; 3 findings listed open, 1 of them new; none asks for a change to code, tests or controls at e1834c89
+  findings:
+    - id: r4175650069
+      severity: medium
+      class: semantic, fixed in the tree (RULING-012)
+      disposition: >
+        HOLD and RESUME wake orchestration since 6fdd8ff2, and e1834c89
+        carries it. The review listed the thread as open because nobody had
+        closed it. Replied with the evidence (r4178740467) and closed the
+        thread on 2026-10-04.
+    - id: r4178759955
+      severity: low
+      class: PR description
+      disposition: >
+        New at e1834c89. The PR 120 description still described the
+        CONTRACT-CORRECTION-008 checkpoint and 2763f796. Rewritten on
+        2026-10-04 with no branch change: lineage through EXACT-BINDING-016,
+        both recoveries, and the evidence at e1834c89. Replied (r4178764740)
+        and closed the thread.
+    - id: r4174246267
+      severity: low
+      class: PRE_EXISTING, OUT_OF_SCOPE (R11-K1)
+      disposition: unchanged; deferred as follow-on work, thread left open with the reply that cites the ruling
+    - id: review 5407375269 (previously missed, admission.mjs line 70)
+      severity: medium
+      class: semantic, fixed in the tree (EXACT-BINDING-016)
+      disposition: >
+        Raised against 6fdd8ff2: the binding trimmed identities before
+        comparing them. Fixed in e1834c89, and review 5407483233 no longer
+        lists it.
+earlier_semantic_head_review:   # the review of 2763f796, kept as history
   review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5401998800
   reviewer: copilot-pull-request-reviewer[bot]
   reviewed_head: 2763f796cd453a78fde446bea41948f46853c48c
@@ -570,6 +747,10 @@ scope_ledger:
     - C8-F2 reviewed checkpoint recovery (CONTRACT-CORRECTION-008)
     - C10-F1 to C10-F6 of CORRECTION-010
     - R11-K1 to R11-K4 of CONTRADICTION-RULING-011
+    - R12-K1 to R12-K3 of CONTRADICTION-RULING-012 (typed HOLD and RESUME wake orchestration)
+    - R13-K1 to R13-K4 of R12-SURGICAL-CORRECTION-013 and the exact created action of R13-ACTION-SHAPE-014
+    - the reviewed re-anchor of RECOVERY-REANCHOR-015, anchored to EXACT-BINDING-016
+    - exact artifact identity binding (EXACT-BINDING-016)
     - tests, negative controls, docs, PR and RETURN
   resolved: [all declared items except those under remaining and deferred]
   remaining:
@@ -609,6 +790,19 @@ scope_ledger:
       reason: RULING-011 forbids implementing it in PR 120
     - item: dispatch/queue work
       reason: prohibited in this packet by the directive; the next sequential packet
+    - item: the local worker selector on a HOLD or RESUME
+      reason: >
+        Unchanged by CORRECTION-013 R13-K2. It still selects nothing when
+        the newest authority is a HOLD or RESUME, as AGENT_CONTROL_PLANE.md
+        documents.
+      owner: ChatGPT, if it should ever change
+    - item: edit and action checks on DIRECTIVE and REVIEW wake events
+      reason: >
+        normalizeEvent() checks the event action and the edit state only for
+        HOLD and RESUME. CORRECTION-013 R13-K2 forbids changing DIRECTIVE or
+        REVIEW wake semantics here. The workflow delivers created comments
+        only, and the fold refuses an edited snapshot whole.
+      owner: ChatGPT, for a later packet
   dropped: []
   superseded:
     - item: the ACK's single-hold rule (second hold on another packet fails closed)
@@ -623,6 +817,14 @@ scope_ledger:
       by: AUDIT-CORRECTION-007, any non-blank packet id with own-key holds
     - item: CORRECTION-010 step 6 as written (no artifact while any finding is open)
       by: RULING-011 R11-K2, artifact-only findings are ARTIFACT_FINALIZE obligations
+    - item: the artifact commit e53e329f for semantic head 2763f796
+      by: RULING-012, option (b); this commit is the artifact for e1834c89
+    - item: the checkpoint anchored to CONTRACT-CORRECTION-008
+      by: RECOVERY-REANCHOR-015 and EXACT-BINDING-016, the reviewed re-anchor at 5982685256
+    - item: the re-anchor target named in RECOVERY-REANCHOR-015 (that REVIEW itself)
+      by: EXACT-BINDING-016, which set the anchor to itself
+    - item: 6fdd8ff2 as the new semantic head
+      by: EXACT-BINDING-016, which rules it an intermediate head; e1834c89 is the semantic head
 
 residual_risks:
   - >
@@ -636,6 +838,22 @@ residual_risks:
     same way. CORRECTION-004 did, and it took the reviewed re-anchor of
     CONTRACT-CORRECTION-008 to move past it. Prose written at column 0 as
     "word:" twice is enough to cause it.
+  - >
+    The stop is not scoped to a packet. A malformed authority message for
+    any packet stops the fold for every packet, as the memory REVIEW
+    5982337036 did on 2026-10-04, thirty seconds after RULING-012. With
+    parallel tracks posting authority on #80, each such message costs a
+    reviewed re-anchor. This PR has now needed two.
+  - >
+    A HOLD or RESUME wakes only when it is typed. An untyped or mistyped
+    one is valid authority that wakes nothing and then stops the fold when
+    any later wake reads it. That is the ruled behaviour (R13-K1), and it
+    means a hold ChatGPT forgets to type takes effect as drift, not as a
+    hold.
+  - >
+    The wake change takes effect when it is on main. The autopilot's
+    normalize-event job checks out main, so until this PR merges a HOLD or
+    RESUME still wakes nothing in CI.
   - >
     CLOSE is not an authority type. A packet's checkpoint must therefore be
     sent as a REVIEW with control_effect CHECKPOINT and the PR number. Until
@@ -688,7 +906,7 @@ review_findings_disposed:
       BLOCKER-RULING-005 and cleared by HUMAN-GATES-CLEARED-006, with no
       history rewrite.
   - id: Copilot r4171267706 and CORRECTION-004 C4-F4 (lineage)
-    disposition: authority_lineage in both artifacts runs through CONTRADICTION-RULING-011 and its ACK
+    disposition: authority_lineage in both artifacts runs through EXACT-BINDING-016 and its ACK
   - id: CORRECTION-004 C4-F2
     disposition: recorded bodies minimized to column-0 lines; NC-REDUCER-RECORDED-UNMINIMIZED
   - id: AUDIT-CORRECTION-006 A6-F1 and Copilot r4171364250
@@ -716,6 +934,18 @@ review_findings_disposed:
       needs a change outside .agent-control/. One new observation,
       scanner_environment_sensitivity, is recorded under scope_ledger as
       behaviour main already has; it was reported on #80 before this commit.
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-003, RULING-012 R12-K1 and Copilot r4175650069
+    disposition: HOLD and RESUME are wake types, gated on the typed effect; nine NC-EVENTS-HOLD controls
+  - id: R12-SURGICAL-CORRECTION-013 R13-K1 to R13-K3
+    disposition: wake eligibility is readEffect() itself; the negative cases R13-K3 lists are in events.spec, and the end-to-end case is in authority-effects.spec
+  - id: R13-ACTION-SHAPE-014
+    disposition: the guard is payload.action !== 'created'; NC-EVENTS-HOLD-ABSENT-ACTION-DEFAULTED restores the default and is caught
+  - id: RECOVERY-REANCHOR-015
+    disposition: checkpoint re-derived whole and anchored to 5982685256; NC-RECOVERY-MEMORY-REVIEW-SKIPPED and the retargeted NC-PROJECTION-OBSOLETE-ANCHOR
+  - id: EXACT-BINDING-016 and Copilot review 5407375269
+    disposition: packet_id and implementation_branch bind by exact value; NC-ADMISSION-IDENTITY-TRIMMED; the anchor is 016; nothing from 6fdd8ff2 is counted
+  - id: Copilot r4178759955
+    disposition: PR description rewritten with no branch change; thread closed
 
 next_action: >
   Wait for every exact-head check on the head carrying this file and for a
