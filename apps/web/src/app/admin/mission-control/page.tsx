@@ -76,9 +76,15 @@ export default function MissionControlPage() {
   }, []);
 
   useEffect(() => {
-    void load();
+    // Schedule the first refresh through the external timer system rather than
+    // synchronously setting React state from the effect body. Subsequent
+    // refreshes use the same subscription-style path.
+    const initial = window.setTimeout(() => void load(), 0);
     const timer = window.setInterval(() => void load(), 30_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
   }, [load]);
 
   const checkTotals = useMemo(() => {
