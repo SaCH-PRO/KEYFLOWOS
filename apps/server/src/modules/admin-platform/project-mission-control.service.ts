@@ -165,6 +165,8 @@ export function normalizeCheck(run: GitHubCheckRun): MissionControlCheck {
     case 'stale':
     case 'startup_failure':
       return { name: run.name ?? 'unnamed check', status: 'FAIL' };
+    case 'skipped':
+      return { name: run.name ?? 'unnamed check', status: 'SKIPPED' };
     case 'neutral':
       return { name: run.name ?? 'unnamed check', status: 'UNKNOWN' };
     default:
