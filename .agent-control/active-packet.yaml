@@ -7,17 +7,41 @@ control_artifacts_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-A
 control_artifacts_review_comment_id: 5963957510
 correction_003_review_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003
 correction_003_review_comment_id: 5964146187
-in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003
-ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002
-ack_comment_id: 5964147770
+authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
+  - CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001   # 5963509515
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963636295
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002   # 5963957510
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003   # 5964146187
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-004   # 5964575594; malformed envelope, incorporated by review in the 008 checkpoint
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-BLOCKER-RULING-005   # 5964875474
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-HUMAN-GATES-CLEARED-006   # 5965127894
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-006   # 5965297008
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-007   # 5965350865
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965390363; the checkpoint anchor
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-009   # 5965780538; malformed one-line envelope, superseded history
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010   # 5971082969; supersedes 009
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011   # 5975152305; current authority
+in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011
+ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011
+ack_comment_id: 5975168836
 prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-001   # 5963571216
   - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963710053
+  - CC-ACK-META-STATE-REDUCER-LIVE-CONTROL-ARTIFACTS-002   # 5964147770
+  - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-004   # 5964609219
+  - CC-ACK-META-STATE-REDUCER-LIVE-BLOCKER-RULING-005   # 5964899077
+  - CC-ACK-META-STATE-REDUCER-LIVE-HUMAN-GATES-CLEARED-006   # 5965168442
+  - CC-ACK-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-006   # 5965326473
+  - CC-ACK-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965426967; also covers AUDIT-CORRECTION-007
+  - CC-ACK-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010   # 5971095944
+contradiction_message_ids:
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-001   # 5964613912; settled by BLOCKER-RULING-005 and HUMAN-GATES-CLEARED-006
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-002   # 5972099796; settled by CONTRADICTION-RULING-011
 pr_number: 120
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
 implementation_branch: impl/kf-meta-state-reducer-live-001
 state: PROVING
-health: GREEN
+health: YELLOW
 scope_changed: false
 production_touched: false
 programme_credit: ZERO
@@ -76,6 +100,29 @@ correction_003:   # CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-003
   F5: resolve the GitGuardian finding safely, never weakening secret scanning
   completion: new semantic head; full portable, Windows and negative-control proof; regenerated architecture artifacts; fresh Copilot review; GitGuardian and every required exact-head check; RETURN once
 
+later_corrections:   # one line each; the #80 comments are the full text
+  correction_004: C4-F2 recorded fixture bodies minimized to column-0 lines; C4-F3 run the architecture scanners; C4-F4 lineage
+  blocker_ruling_005: the scanner permission and GitGuardian incident 37827877 are human gates; no history rewrite
+  human_gates_cleared_006: both human gates cleared; resume
+  audit_correction_006: A6-F1 production_touched and packet id fail closed on every effect
+  audit_correction_007: every non-blank packet id is supported; holds are prototype-safe own keys, with no new id restriction
+  contract_correction_008: C8-F2 the checkpoint is re-derived whole and anchored to this REVIEW, a reviewed recovery past the malformed CORRECTION-004
+
+correction_010:   # CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010
+  C10-F1: the checkpoint YAML codec round-trips any non-blank packet id as a mapping key; the vocabulary is not narrowed
+  C10-F2: admission binds both control artifacts to the PR being admitted (packet, branch, PR number); nothing packet-specific is hard-coded
+  C10-F3: one new semantic head; all proof is generated against it; the failing Windows control is fixed, not removed
+  C10-F4: scanner metadata is repository-relative; maps are regenerated scanner output; the scanner change is limited to path normalization
+  C10-F5: authority-effects.mjs is in the generated maps; execution and dependency docs are current; migration-plan has the dated 2026-10-03 entry
+  C10-F6: both control artifacts describe repository truth at the final head, with lineage through the ACK to CORRECTION-010
+
+ruling_011:   # CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011
+  R11-K1: Copilot r4174246267 (.github entries in the inventory) is PRE_EXISTING and OUT_OF_SCOPE; no scanner exclusion change in this PR; recorded as deferred follow-on work
+  R11-K2: findings whose only legal resolution is the .agent-control-only commit are ARTIFACT_FINALIZE obligations (r4171689226, r4171636255, r4171689267, and r4171100183 to the extent it is stale control evidence)
+  R11-K3: before the artifact, check r4171689174, r4171689281, r4171049954 and every other open thread against the tree at 2763f796; a real semantic defect stops the packet
+  R11-K4: one .agent-control-only commit recording the semantic-head proof, then the gates on that commit, a fresh review of it, and one RETURN
+  not_in_this_pr: issue 121 (KF-META-CONTRACT-SAT-001) is follow-on work
+
 proof_obligations:
   - deterministic reducer tests
   - replay/idempotency tests
@@ -102,4 +149,5 @@ return_contract: >
   ACK before mutation; implement the bounded reducer and corrections; prove it
   with the portable and Windows suites and the live negative-control manifest;
   open the PR; wait for the exact-head checks and the independent semantic
-  review; RETURN to issue 80 for ChatGPT admission.
+  review; RETURN to issue 80 for ChatGPT admission. CORRECTION-010 and
+  RULING-011 R11-K4 set the final sequence.
