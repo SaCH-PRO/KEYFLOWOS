@@ -53,7 +53,6 @@ const UNREACHABLE_ACKNOWLEDGED = new Set<string>([
   'KeyCortexSagaExecutorService',
   'KeyAuditorService',
   'KeyPlannerService',
-  'KnowledgeIngestionService',
   // Slack integration that nothing calls.
   'SlackService',
 
