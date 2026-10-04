@@ -870,7 +870,674 @@ The research direction is therefore **convergence and expansion**, not replaceme
 15. Every high-impact action must remain causally traceable from authority -> execution -> external effect -> outcome.
 16. Security/quality findings are preserved until fixed, explicitly accepted, superseded or proven false; never hidden by a green aggregate.
 
-## 21. Reference set
+
+## 21. Defensive doctrine parallel — immune systems, mission command, cyber defense and fault-tolerant engineering
+
+This section treats immune systems, military command-and-control, defensive cyber doctrine and aerospace fault management as **engineering analogies for defensive resilience and coordinated response**. It does not authorize offensive action against third-party systems.
+
+### 21.1 Immune-system parallel
+
+The strongest immune-system mapping is not "find enemy -> destroy enemy". It is:
+
+```text
+BARRIER
+  -> RECOGNIZE
+  -> CLASSIFY
+  -> CONTAIN
+  -> SIGNAL
+  -> ESCALATE
+  -> TARGET
+  -> REMEMBER
+  -> RESOLVE
+  -> RESTORE HOMEOSTASIS
+```
+
+Useful parallels:
+
+| Immune concept | KEYFLOWOS assurance interpretation |
+|---|---|
+| epithelial/barrier defense | auth, validation, sandboxing, schema boundaries, rate limits |
+| pattern-recognition receptors | deterministic invariant/anomaly detectors |
+| PAMP/DAMP-style danger signals | external threat signals + internal damage/failure signals |
+| innate immunity | fast generic deterministic containment |
+| complement/cytokine signaling | event/alert/regulatory-program propagation |
+| adaptive immunity | targeted learned countermeasures and precise regression proof |
+| clonal expansion | temporary up-regulation of relevant workers/receptors/tests |
+| immune memory | incident signatures, regression tests, defensive procedures, known-bad patterns |
+| trained immunity | reversible short/medium-term defensive priming after an incident |
+| regulatory T cells/tolerance | false-positive control, self/non-self discipline, prevention of autoimmune overreaction |
+| inflammation | incident mode: heightened observability/containment at a real resource cost |
+| resolution/homeostasis | de-escalation, repair, reconciliation, return to normal |
+| tissue repair | recovery, data repair, reprocessing, compensation |
+| quarantine/apoptosis analogy | isolate or disable a compromised component while preserving the wider system |
+
+#### Critical lesson — defense needs tolerance
+
+A system that treats every novelty as hostile becomes autoimmune.
+
+Therefore:
+- UNKNOWN != MALICIOUS;
+- ANOMALY != COMPROMISE;
+- DISAGREEMENT != ATTACK;
+- NEW CONNECTOR != TRUSTED;
+- FAILED PROBE != SYSTEM-WIDE INCIDENT by itself.
+
+Escalation should require corroborating evidence, persistence, severity or high-confidence invariant violation.
+
+#### Immune memory hierarchy
+
+```text
+single weak anomaly
+    -> transient signal
+
+repeated anomaly
+    -> trained defensive posture
+
+confirmed incident
+    -> durable incident memory + regression test
+
+repeated confirmed class
+    -> promoted defensive procedure / detector
+
+constitutional lesson
+    -> policy change only through governed acceptance
+```
+
+Temporary defensive priming must decay unless evidence supports promotion.
+
+### 21.2 Military command-and-control parallel
+
+Army mission-command doctrine emphasizes shared understanding, clear intent, disciplined initiative, prudent risk and subordinate freedom of action within commander's intent. Marine doctrine emphasizes friction, uncertainty, disorder and the impossibility of perfect information.
+
+The useful KEYFLOWOS translation is:
+
+```text
+COMMANDER'S INTENT
+    =
+constitutional invariants + objective + end state
+
+MISSION ORDERS
+    =
+bounded packets/contracts
+
+DISCIPLINED INITIATIVE
+    =
+worker autonomy inside authority + risk + scope
+
+COMMAND AND CONTROL
+    =
+project/control-plane authority + telemetry + state reducer
+
+FOG / FRICTION
+    =
+missing, stale, contradictory or delayed information
+
+UNITY OF EFFORT
+    =
+different workers/systems converge on one objective without requiring one process
+```
+
+Implication for ChatGPT/Claude/Kimi/KEY workers:
+- central authority should specify purpose, non-negotiable constraints and end state;
+- workers should not need micro-orders for every local decision;
+- workers may adapt locally when the plan meets reality;
+- local initiative never permits rewriting constitutional or safety boundaries;
+- uncertainty is expected and must be represented, not fabricated away.
+
+### 21.3 Defense in depth and layered security
+
+NIST cyber-resiliency engineering emphasizes the ability to anticipate, withstand, recover from and adapt to adverse conditions. It also explicitly discusses redundancy, diversity, layering and partitioning.
+
+KEYFLOWOS should treat security as overlapping independent defenses:
+
+```text
+IDENTITY / AUTH
+      |
+LEAST PRIVILEGE / SCOPES
+      |
+INPUT / MESSAGE HARDENING
+      |
+TENANT / OBJECT AUTHORIZATION
+      |
+SANDBOX / ISOLATION
+      |
+RUNTIME INVARIANT MONITORS
+      |
+AUDIT / TELEMETRY
+      |
+EFFECT VERIFICATION
+      |
+RECOVERY / ROLLBACK
+```
+
+No single layer is allowed to claim the system secure.
+
+### 21.4 Compartmentalization and fault-containment regions
+
+Military compartmentalization, zero trust and aerospace fault-containment all point to the same engineering rule:
+
+> compromise/failure should be prevented from automatically becoming system-wide compromise/failure.
+
+Candidate containment boundaries:
+- tenant;
+- connector;
+- credential/grant;
+- workflow;
+- packet;
+- worker;
+- tool;
+- model provider;
+- database transaction;
+- queue;
+- deployment replica;
+- memory scope;
+- business domain.
+
+A failing compartment should:
+1. stop or degrade locally;
+2. preserve evidence;
+3. prevent propagation;
+4. retain communication/control path;
+5. request recovery/escalation when needed.
+
+### 21.5 Defensive reconnaissance / ISR parallel
+
+Military intelligence, surveillance and reconnaissance maps to **authorized system awareness**:
+
+- logs;
+- traces;
+- metrics;
+- health checks;
+- audit events;
+- connector/provider status;
+- dependency/security advisories;
+- branch/CI state;
+- worker heartbeat;
+- business-semantic invariants;
+- external-effect reconciliation.
+
+The principle is not "collect everything".
+
+Collect information that improves:
+- detection;
+- localization;
+- decision quality;
+- recovery;
+- proof.
+
+Overcollection increases noise, cost and privacy risk.
+
+### 21.6 Rules of engagement
+
+Military rules of engagement map cleanly to KEY action policy:
+
+```text
+WHAT action is allowed?
+WHO may authorize it?
+UNDER WHAT evidence?
+AGAINST WHICH scoped object?
+WITH WHAT risk ceiling?
+FOR HOW LONG?
+WHAT requires human approval?
+WHAT happens when the situation changes?
+```
+
+For KEY:
+- tool availability != permission;
+- model recommendation != authorization;
+- emergency mode does not imply unlimited authority;
+- uncertain target identity must fail closed for high-impact actions.
+
+### 21.7 Reserves, redundancy and diversity
+
+A resilient force does not commit every resource continuously; NIST/NASA similarly support redundancy and diversity.
+
+KEYFLOWOS needs strategic reserve:
+- spare worker capacity;
+- provider failover;
+- queue capacity;
+- database/Redis recovery options;
+- alternate connector binding;
+- rollback artifacts;
+- human override;
+- emergency compute budget.
+
+Redundancy should not be homogeneous only. If every fallback shares one failure mode, it is false redundancy.
+
+Examples:
+- multiple identical AI calls are not independent review;
+- two replicas with the same poisoned config are not meaningful diversity;
+- two proof jobs reading the same stale artifact are not two proofs.
+
+### 21.8 Combined-arms / multi-capability defense
+
+Military planning integrates multiple warfighting functions rather than assuming one arm solves every problem.
+
+KEYFLOWOS equivalent:
+
+```text
+SECURITY
++ PROOF
++ OBSERVABILITY
++ RUNTIME RESILIENCE
++ DATA INTEGRITY
++ HUMAN AUTHORITY
++ AI TEVV
++ RECOVERY
+= ASSURANCE
+```
+
+Security scanner alone is not defense.
+Tests alone are not assurance.
+Observability alone is not correctness.
+AI reviewer alone is not proof.
+
+The power comes from coordinated, partially independent layers.
+
+### 21.9 Battle damage assessment / external-effect certainty
+
+After an action, a military system needs to know what actually happened. KEYFLOWOS already has the analogous external-reality problem.
+
+Maintain:
+
+```text
+INTENDED EFFECT
+ !=
+COMMAND / REQUEST SENT
+ !=
+PROVIDER ACCEPTED
+ !=
+EXTERNAL REALITY OBSERVED
+ !=
+BUSINESS OUTCOME
+```
+
+The assurance system should perform the equivalent of battle-damage assessment as **effect reconciliation**, without assuming API success equals outcome success.
+
+### 21.10 Wargaming / red teaming
+
+Wargaming is valuable because plans are tested against uncertainty and opposing behavior before reality forces the lesson.
+
+KEYFLOWOS equivalents:
+- threat modeling;
+- adversarial review;
+- chaos experiments;
+- fault injection;
+- tabletop incident exercises;
+- simulated hostile/malformed connector input;
+- prompt-injection exercises;
+- multi-agent race scenarios;
+- recovery drills;
+- rollback drills;
+- dependency outage scenarios.
+
+The red team should attempt to falsify the assurance claim, not merely verify the happy path.
+
+### 21.11 Tempo and readiness
+
+Military doctrine recognizes that high tempo cannot be sustained indefinitely. Immune systems likewise pay a cost for prolonged activation.
+
+KEYFLOWOS should explicitly manage defensive/operational tempo:
+
+```text
+NORMAL
+HEIGHTENED
+INCIDENT
+CONTAINMENT
+RECOVERY
+```
+
+Each readiness state can modulate:
+- sampling/telemetry;
+- worker concurrency;
+- proof depth;
+- autonomy;
+- tool availability;
+- review strictness;
+- deployment velocity;
+- retention;
+- human escalation.
+
+Prolonged heightened state contributes to allostatic/operational load and must not become silent normality.
+
+### 21.12 Logistics is part of assurance
+
+Military operations fail without logistics. KEYFLOWOS security/quality also depend on:
+
+- compute;
+- tokens/model quota;
+- API rate limits;
+- storage;
+- bandwidth;
+- CI minutes;
+- worker slots;
+- database capacity;
+- credential lifecycle;
+- human reviewer attention;
+- recovery time.
+
+The Assurance Fabric should model these as finite resources. A defense that exhausts the system can become a failure mechanism itself.
+
+### 21.13 Mission-critical vs survival-critical functions
+
+NASA fault-management practice distinguishes levels of criticality and uses redundancy, fault containment, graceful degradation and safe states.
+
+KEYFLOWOS should classify functions such as:
+
+**Survival / constitutional**
+- identity/auth;
+- tenant isolation;
+- data integrity;
+- audit/provenance;
+- safe shutdown/hold;
+- operator control;
+- recovery path.
+
+**Mission-critical**
+- core business workflows;
+- control-plane coordination;
+- memory/world-model consistency;
+- payment/accounting correctness;
+- connector effect certainty.
+
+**Degradable**
+- optional analytics;
+- cosmetic UI;
+- non-critical recommendations;
+- background enrichment.
+
+When resources/faults force a choice, preserve survival/constitutional capabilities first.
+
+### 21.14 Fail-safe, fail-secure, fail-operational and graceful degradation
+
+One failure response is not correct for every subsystem.
+
+#### FAIL-SAFE
+Move to the state with least unacceptable harm.
+
+Example:
+- destructive KEY action becomes blocked pending review.
+
+#### FAIL-SECURE
+Preserve security even if availability suffers.
+
+Example:
+- auth/tenant proof unavailable -> deny access rather than infer permission.
+
+#### FAIL-OPERATIONAL
+Continue essential service through one or more faults.
+
+Example:
+- one model provider fails -> approved alternate provider serves low-risk work.
+
+#### GRACEFUL DEGRADATION
+Preserve a smaller mission set rather than crash or falsely claim normality.
+
+Example:
+- connector outage -> read cached last-known state with STALE marker; disable writes; continue unrelated domains.
+
+The correct mode must be declared per function/risk.
+
+### 21.15 Safe mode / survival kernel
+
+Borrowing directly from spacecraft fault management, KEYFLOWOS should define a minimal **survival kernel**.
+
+If systemic uncertainty is high, the platform should be able to enter a safe sustainable state that preserves:
+- authentication;
+- tenant boundaries;
+- durable data;
+- audit/evidence;
+- read-only diagnostics;
+- operator communication;
+- rollback/recovery;
+- critical financial integrity.
+
+Temporarily suspend or constrain:
+- autonomous high-risk actions;
+- unverified external writes;
+- self-modification;
+- nonessential background tasks;
+- aggressive concurrency.
+
+Safe mode must be recoverable, observable and explicitly exited.
+
+### 21.16 Watchdogs, tripwires and canaries
+
+Defensive tripwires should detect failure before large damage:
+
+- stale worker heartbeat;
+- duplicate semantic writer;
+- unexpected new public route;
+- secret exposure canary;
+- cross-tenant impossible-state monitor;
+- duplicate financial effect detector;
+- exact-head proof mismatch;
+- deployment drift;
+- connector scope expansion;
+- anomalous outbound destination;
+- sustained queue saturation.
+
+A tripwire triggers investigation/containment according to severity; it does not itself prove hostile intent.
+
+### 21.17 Two-key / multi-party control for catastrophic actions
+
+High-impact operations can borrow the logic of independent authorization.
+
+Candidate use:
+- production destructive migration;
+- mass deletion;
+- broad credential rotation;
+- disabling tenant/security boundaries;
+- self-modifying control-plane policy;
+- financial bulk action;
+- emergency override.
+
+For extreme-risk actions:
+
+```text
+PROPOSER
+   !=
+SECOND INDEPENDENT AUTHORIZER
+   !=
+EXECUTION RECEIPT
+```
+
+The second key must be genuinely independent, not another model call with the same authority/context.
+
+### 21.18 Tactical utility / response selection
+
+Defense should be proportional and useful.
+
+Every response option can be scored on:
+
+```text
+expected harm prevented
++ information gained
++ reversibility
++ containment value
+- collateral operational cost
+- false-positive cost
+- resource consumption
+- recovery difficulty
+```
+
+This prevents maximum-force responses to low-confidence anomalies.
+
+Candidate response ladder:
+
+```text
+OBSERVE
+ -> VERIFY
+ -> INCREASE SENSING
+ -> RATE-LIMIT
+ -> REQUIRE EXTRA AUTH
+ -> ISOLATE COMPONENT
+ -> HOLD EFFECTS
+ -> FAILOVER
+ -> ROLLBACK
+ -> SAFE MODE
+ -> HUMAN EMERGENCY CONTROL
+```
+
+### 21.19 Friendly-fire / self-generated-effect control
+
+The system must distinguish its own actions from external threats.
+
+Every internally generated effect should carry:
+- causation id;
+- initiating actor;
+- packet/workflow id;
+- expected affected resources;
+- expected telemetry signatures;
+- expiry.
+
+This lets surveillance identify expected self-generated change versus unexplained change.
+
+It also prevents KEY from interpreting its own automated actions as a new external incident.
+
+### 21.20 Defensive deception and canarying
+
+Defensive deception can be used narrowly for detection:
+- honeytokens;
+- canary records;
+- unused sentinel credentials;
+- decoy endpoints inside controlled environments;
+- impossible-state markers.
+
+Any access/use creates a high-signal alert.
+
+These are defensive tripwires only. They must not be used to interfere with third-party systems.
+
+### 21.21 After-action review and doctrine evolution
+
+Every material incident, failed rollout, escaped defect or successful recovery should yield:
+
+```text
+WHAT WAS EXPECTED?
+WHAT ACTUALLY HAPPENED?
+WHY?
+WHAT SIGNALS WERE MISSED?
+WHAT CONTAINMENT WORKED?
+WHAT FAILED?
+WHAT SHOULD CHANGE?
+WHAT SHOULD NOT CHANGE?
+WHAT NEW TEST / MONITOR / PROCEDURE IS JUSTIFIED?
+```
+
+Lessons then move through:
+
+```text
+incident evidence
+ -> finding
+ -> regression proof
+ -> procedure
+ -> repeated evidence
+ -> policy/doctrine proposal
+ -> governed acceptance
+```
+
+One incident should not rewrite doctrine automatically.
+
+### 21.22 Proposed Defense Coordination Kernel contract
+
+Do not create a new sovereign service immediately. Conceptually, the Assurance Fabric needs a coordinator that can compile a threat/failure situation into a bounded response program.
+
+Candidate:
+
+```ts
+interface DefensiveResponseProgram {
+  id: string;
+  triggerEvidence: EvidenceRef[];
+  incidentClass: string;
+  confidence: number;
+  affectedScopes: string[];
+  readinessState: 'NORMAL' | 'HEIGHTENED' | 'INCIDENT' | 'CONTAINMENT' | 'RECOVERY';
+  missionCriticality: 'DEGRADABLE' | 'MISSION_CRITICAL' | 'SURVIVAL_CRITICAL';
+  containment: ResponseAction[];
+  receptorModulation: Modulation[];
+  authorityModulation: Modulation[];
+  concurrencyModulation: Modulation[];
+  proofEscalation: EvidenceRequirement[];
+  failMode: 'FAIL_SAFE' | 'FAIL_SECURE' | 'FAIL_OPERATIONAL' | 'GRACEFUL_DEGRADATION';
+  fallbackState?: string;
+  ttl: string;
+  exitCriteria: EvidenceRequirement[];
+  recoveryPlan: ResponseAction[];
+}
+```
+
+This should compose with the Regulatory Program architecture already defined for KEY rather than duplicating it.
+
+### 21.23 Defensive invariant summary
+
+1. Detect early, but do not confuse detection with proof.
+2. Contain locally before escalating globally when safe.
+3. Preserve a command/control and recovery channel.
+4. Maintain strategic reserve.
+5. Prefer layered partially independent defenses.
+6. Treat uncertainty as real state.
+7. Let bounded workers exercise disciplined initiative.
+8. Never let local initiative override constitutional intent.
+9. Match response force to confidence, severity and reversibility.
+10. Recover deliberately; do not remain permanently inflamed.
+11. Convert confirmed incidents into memory/tests, not reflexive permanent restrictions.
+12. Protect against autoimmunity/false positives as seriously as underreaction.
+13. Preserve mission-essential/survival functions under degradation.
+14. Require stronger fault tolerance as consequence severity rises.
+15. Every action needs after-action/effect reconciliation.
+
+## 22. Research-derived additions to the Assurance programme
+
+Add the following to #130 execution planning:
+
+### ASSURANCE-DEFENSE-MAP-001
+Map current mechanisms to:
+- barrier;
+- detector;
+- containment;
+- escalation;
+- adaptive response;
+- memory;
+- tolerance;
+- recovery.
+
+Find immune/security gaps where detection has no containment, or containment has no recovery.
+
+### ASSURANCE-SAFE-MODE-001
+Define KEYFLOWOS survival kernel, safe-mode entry/exit and degraded-operation contracts.
+
+### ASSURANCE-FAULT-TOLERANCE-001
+Assign required fault tolerance by criticality:
+- degradable;
+- mission-critical;
+- survival-critical.
+
+Identify single points of failure and false/homogeneous redundancy.
+
+### ASSURANCE-READINESS-001
+Integrate NORMAL / HEIGHTENED / INCIDENT / CONTAINMENT / RECOVERY readiness into the Regulatory Program framework.
+
+### ASSURANCE-WARGAME-001
+Create repeatable tabletop/simulation scenarios against:
+- control plane;
+- memory;
+- connectors;
+- payment/financial effects;
+- AI authority;
+- tenant boundaries;
+- deployment/runtime.
+
+### ASSURANCE-AAR-001
+Standardize after-action evidence and promotion of lessons into tests/procedures/policy proposals.
+
+### ASSURANCE-TACTICAL-UTILITY-001
+Create proportional response selection based on severity, confidence, reversibility, blast radius, information value and resource cost.
+
+### ASSURANCE-INDEPENDENT-CONTROL-001
+Define multi-party/two-key rules for catastrophic operations and prove independence of authorizers.
+
+
+## 23. Reference set
 
 Primary/authoritative sources:
 - NIST SP 800-218 SSDF — https://csrc.nist.gov/pubs/sp/800/218/final
@@ -899,3 +1566,17 @@ Primary/authoritative sources:
 - Pact contract testing — https://docs.pact.io/
 - GSN assurance cases — https://scsc.uk/gsn-standard
 - FDA Computer Software Assurance (risk-based testing analogy) — https://www.fda.gov/regulatory-information/search-fda-guidance-documents/computer-software-assurance-production-and-quality-management-system-software
+
+
+Additional defensive-doctrine references:
+- NIST SP 800-160 Vol. 2 Rev. 1 cyber resiliency — https://csrc.nist.gov/pubs/sp/800/160/v2/r1/final
+- NIST SP 800-207 Zero Trust Architecture — https://csrc.nist.gov/pubs/sp/800/207/final
+- MITRE D3FEND — https://d3fend.mitre.org/
+- U.S. Army ADP 6-0 Mission Command (2019) — https://armypubs.army.mil/epubs/DR_pubs/DR_a/ARN34403-ADP_6-0-000-WEB-3.pdf
+- U.S. Marine Corps MCDP 1 Warfighting — https://www.marines.mil/portals/1/publications/mcdp%201%20warfighting.pdf
+- NASA fault detection/recovery handbook guidance — https://swehb.nasa.gov/
+- NASA NPR 8705.4B risk/fault-tolerance guidance — https://nodis3.gsfc.nasa.gov/displayDir.cfm?Internal_ID=N_PR_8705_004B_&page_name=AppendixD
+- Innate immunological memory review — https://pmc.ncbi.nlm.nih.gov/articles/PMC7067670/
+- Trained immunity review — https://pmc.ncbi.nlm.nih.gov/articles/PMC5087274/
+- Regulatory T cells / immune tolerance review — https://pmc.ncbi.nlm.nih.gov/articles/PMC10842646/
+- PAMP/DAMP danger signaling review — https://pmc.ncbi.nlm.nih.gov/articles/PMC5554486/
