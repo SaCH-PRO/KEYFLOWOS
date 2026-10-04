@@ -25,7 +25,7 @@ function walk(absPath) {
 
 const files = [...new Set(manifest.roots.flatMap((r) => walk(path.join(repoRoot, r))))];
 const textByFile = new Map(files.map((f) => [f, fs.readFileSync(f, 'utf8')]));
-const rel = (f) => path.relative(repoRoot, f).replaceAll('\\\\', '/');
+const rel = (f) => path.relative(repoRoot, f).replaceAll('\\', '/');
 
 function countMatches(text, regex) {
   const flags = regex.flags.includes('g') ? regex.flags : regex.flags + 'g';
