@@ -198,6 +198,15 @@ function healthFromChecks(checks: MissionControlCheck[]): MissionControlHealth {
   return 'UNKNOWN';
 }
 
+export function aggregateProgrammeHealth(
+  pullRequests: Array<Pick<MissionControlPullRequest, 'health'>>,
+): MissionControlHealth {
+  if (pullRequests.some((p) => p.health === 'RED')) return 'RED';
+  if (pullRequests.some((p) => p.health === 'YELLOW')) return 'YELLOW';
+  if (pullRequests.length > 0 && pullRequests.every((p) => p.health === 'GREEN')) return 'GREEN';
+  return 'UNKNOWN';
+}
+
 const SNAPSHOT_TTL_MS = 30_000;
 let cached: { at: number; value: ProjectMissionControlSnapshot } | null = null;
 let inFlight: Promise<ProjectMissionControlSnapshot> | null = null;
@@ -275,13 +284,7 @@ export class ProjectMissionControlService {
         };
       });
 
-      const health: MissionControlHealth = pullRequests.some((p) => p.health === 'RED')
-        ? 'RED'
-        : pullRequests.some((p) => p.health === 'YELLOW')
-          ? 'YELLOW'
-          : pullRequests.length > 0 && pullRequests.every((p) => p.health === 'GREEN')
-            ? 'GREEN'
-            : 'UNKNOWN';
+      const health = aggregateProgrammeHealth(pullRequests);
 
       return {
         generatedAt,
