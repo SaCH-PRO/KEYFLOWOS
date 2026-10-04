@@ -63,21 +63,28 @@ function fail(reason, detail) {
 export const BINDING_PROBLEMS = Object.freeze({
   PACKET_ID_MISSING: 'packet_id_missing',
   PACKET_ID_MISMATCH: 'packet_id_mismatch',
+  PACKET_ID_NOT_TEXT: 'packet_id_not_a_string',
   BRANCH_NOT_PR_HEAD: 'implementation_branch_not_pr_head_ref',
   PR_NUMBER_NOT_THIS_PR: 'pr_number_not_this_pr',
 });
 
 /**
- * An identity as written, or '' when it names nothing (absent, not text, or
- * only whitespace). Never trimmed: `impl/x ` is not `impl/x`, and two packet
+ * An identity as written, or '' when it names nothing (absent, not a string,
+ * or only whitespace). Never trimmed: `impl/x ` is not `impl/x`, and two packet
  * ids that differ by surrounding whitespace are two ids (EXACT-BINDING-016;
  * Copilot review 5407375269). Trimming only decides whether a value is blank.
+ * Never made into text either: YAML reads `packet_id: 1` as a number and
+ * `packet_id: "1"` as a string, and those are not one identity. A number,
+ * boolean, mapping or list binds nothing (CONVERGED-CORRECTIONS-018 K3;
+ * Copilot r4179015393). Any string is still a legal identity, `"1"` included.
  */
-const text = (value) => {
-  if (typeof value !== 'string' && typeof value !== 'number') return '';
-  const exact = String(value);
+const text = (exact) => {
+  if (typeof exact !== 'string') return '';
   return exact.trim() === '' ? '' : exact;
 };
+
+/** True when a value is present but is not a string, so it cannot be an identity. */
+const notText = (value) => value !== undefined && value !== null && typeof value !== 'string';
 
 /** A PR number as a number or its text; this comparison is unchanged by EXACT-BINDING-016. */
 const numberText = (value) => (typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '');
@@ -87,8 +94,8 @@ const numberText = (value) => (typeof value === 'string' || typeof value === 'nu
  * Copilot r4171689190, r4171689206). Two artifacts that agree with each other
  * prove nothing: a pair copied from another packet agrees too. The packet
  * being admitted is the one this PR implements, so:
- *   - both artifacts name one non-blank packet_id, the same one;
- *   - each artifact's implementation_branch is the PR's head_ref;
+ *   - both artifacts name one non-blank string packet_id, the same one;
+ *   - each artifact's implementation_branch is a string, the PR's head_ref;
  *   - an artifact that names a PR names this one.
  * No packet id or branch is hard-coded; the PR is the referent. A packet id is
  * free text, so it is bound to the PR through the branch and the PR number its
@@ -100,8 +107,10 @@ export function artifactBindingProblems({ pr = {}, active = {}, ret = {} } = {})
   const problems = [];
   const artifacts = [['active-packet.yaml', active || {}], ['claude-return.yaml', ret || {}]];
   const ids = artifacts.map(([, doc]) => text(doc.packet_id));
-  artifacts.forEach(([artifact], i) => {
-    if (ids[i] === '') problems.push({ code: BINDING_PROBLEMS.PACKET_ID_MISSING, artifact });
+  artifacts.forEach(([artifact, doc], i) => {
+    if (ids[i] !== '') return;
+    if (notText(doc.packet_id)) problems.push({ code: BINDING_PROBLEMS.PACKET_ID_NOT_TEXT, artifact, found: doc.packet_id });
+    else problems.push({ code: BINDING_PROBLEMS.PACKET_ID_MISSING, artifact });
   });
   if (ids[0] !== '' && ids[1] !== '' && ids[0] !== ids[1]) {
     problems.push({ code: BINDING_PROBLEMS.PACKET_ID_MISMATCH, active: ids[0], ret: ids[1] });

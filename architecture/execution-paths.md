@@ -499,7 +499,10 @@ Added by KF-META-STATE-REDUCER-LIVE-001. `.agent-control/programme-state.yaml` i
 
 ```
 orchestrate.mjs / status.mjs --verify
-  → loadState() — the committed checkpoint (never rewritten from authority)
+  → loadState() — the committed checkpoint (never rewritten from authority);
+    normalizeState() defaults an absent container only, and leaves one that is present
+    with the wrong structural type (`holds: []`) as written for validateState() to reject
+    (CHECKPOINT_SHAPE_INVALID)
   → reconcileWithTruth() (lib/truth.mjs)
       → gatherTruth(): #80 comments via gh, or a recorded --truth-file snapshot
       → collectAuthority() (lib/control-envelope.mjs) — parseEnvelope on every body;
@@ -535,6 +538,9 @@ normalize-event.mjs
       → a HOLD or RESUME must also declare its own effect as readEffect() reads it
         (HOLD_SET on a HOLD, HOLD_CLEAR on a RESUME) in a created, unedited comment;
         otherwise actionable is false and wake_refused says why
+      → a claimed HOLD or RESUME refused earlier (outside author, non-ChatGPT sender,
+        malformed or incomplete envelope) records that reason in wake_refused too;
+        authority.problems keeps the structured form
 orchestrate.mjs --json (the path above) — the decision with that comment folded
   → "Publish actionable wake event" posts one AUTO_EVENT, only when actionable is true
 ```
@@ -547,6 +553,8 @@ auto-merge-admitted.mjs
   → evaluateAdmission() (lib/admission.mjs)
       → artifactBindingProblems() — both artifacts name one non-blank packet, each
         implementation_branch is the PR head_ref, and a declared pr_number is this PR's;
+        a packet id or branch is a string compared as written, never trimmed and never
+        made into text (`1` is not `"1"`);
         a matching pair from another packet fails as control_artifacts_not_bound_to_pr
       → review status, safety, source_main / source_head / control-only tail
       → evaluateSemanticReview() (lib/semantic-review.mjs)

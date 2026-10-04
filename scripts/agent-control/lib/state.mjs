@@ -84,23 +84,85 @@ export function loadState(repoRoot = process.cwd()) {
   return normalizeState(parsed);
 }
 
-/** Fill in absent collections so callers never branch on undefined. */
+/** The problem a container of the wrong structural type is reported as. */
+export const SHAPE_INVALID = 'CHECKPOINT_SHAPE_INVALID';
+
+/** Containers that are mappings, and containers that are lists, when present. */
+const MAPPING_CONTAINERS = Object.freeze(['programme', 'momentum', 'correction', 'agents', 'holds']);
+const LIST_CONTAINERS = Object.freeze(['unresolved_contradictions', 'processed_event_keys', 'event_journal']);
+
+const isMapping = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const shapeOf = (value) => {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'list';
+  return typeof value === 'object' ? 'mapping' : typeof value;
+};
+
+/**
+ * Containers that are present with the wrong structural type
+ * (CONVERGED-CORRECTIONS-018 K2; Copilot review 5407820973). Absent means the
+ * key is not there: only that is defaulted. An explicit null, a list where a
+ * mapping belongs (`holds: []`), a mapping where a list belongs, or a scalar
+ * is present and wrong. The legacy single `hold` is a mapping or null. Reads
+ * a checkpoint as written or as normalizeState() returns it: the answer is
+ * the same, because normalizeState() leaves a wrong container untouched.
+ *
+ * @returns {{code: string, detail: string}[]} empty when every present container has its type
+ */
+export function shapeProblems(raw) {
+  const wrong = (name, expected, value) => ({ code: SHAPE_INVALID, detail: `${name} must be a ${expected} when present, found ${shapeOf(value)}` });
+  if (!isMapping(raw)) return [wrong('programme-state', 'mapping', raw)];
+  const problems = [];
+  for (const name of MAPPING_CONTAINERS) {
+    if (raw[name] !== undefined && !isMapping(raw[name])) problems.push(wrong(name, 'mapping', raw[name]));
+  }
+  if (isMapping(raw.programme) && raw.programme.checkpointed !== undefined && !Array.isArray(raw.programme.checkpointed)) {
+    problems.push(wrong('programme.checkpointed', 'list', raw.programme.checkpointed));
+  }
+  for (const name of LIST_CONTAINERS) {
+    if (raw[name] !== undefined && !Array.isArray(raw[name])) problems.push(wrong(name, 'list', raw[name]));
+  }
+  if (raw.hold !== undefined && raw.hold !== null && !isMapping(raw.hold)) problems.push(wrong('hold', 'mapping or null', raw.hold));
+  return problems;
+}
+
+/**
+ * Fill in absent collections so callers never branch on undefined. Only an
+ * absent container gets its default. One that is present with the wrong type
+ * is returned exactly as written, never coerced into the right one, so
+ * validateState() rejects it (shapeProblems). A checkpoint that is not a
+ * mapping at all is returned as written too.
+ */
 export function normalizeState(raw) {
   const base = emptyState();
-  const state = { ...base, ...(raw || {}) };
-  state.programme = { ...base.programme, ...(raw?.programme || {}) };
-  state.momentum = { ...base.momentum, ...(raw?.momentum || {}) };
-  state.correction = { ...base.correction, ...(raw?.correction || {}) };
-  state.agents = { ...(raw?.agents || {}) };
-  state.holds = { ...(raw?.holds || {}) };
-  state.programme.checkpointed = [...(state.programme.checkpointed || [])];
-  state.unresolved_contradictions = [...(state.unresolved_contradictions || [])];
-  state.processed_event_keys = [...(state.processed_event_keys || [])];
-  state.event_journal = [...(state.event_journal || [])];
+  if (raw === undefined || raw === null) return base;
+  if (!isMapping(raw)) return raw;
+  const mapping = (written, fallback) => {
+    if (written === undefined) return fallback;
+    return isMapping(written) ? { ...fallback, ...written } : written;
+  };
+  const list = (written) => {
+    if (written === undefined) return [];
+    return Array.isArray(written) ? [...written] : written;
+  };
+  const state = { ...base, ...raw };
+  state.programme = mapping(raw.programme, base.programme);
+  state.momentum = mapping(raw.momentum, base.momentum);
+  state.correction = mapping(raw.correction, base.correction);
+  state.agents = mapping(raw.agents, {});
+  state.holds = mapping(raw.holds, {});
+  if (isMapping(state.programme)) state.programme.checkpointed = list(state.programme.checkpointed);
+  state.unresolved_contradictions = list(raw.unresolved_contradictions);
+  state.processed_event_keys = list(raw.processed_event_keys);
+  state.event_journal = list(raw.event_journal);
   return state;
 }
 
 export function validateState(state) {
+  // A container of the wrong type is reported alone: every check below reads
+  // through the containers, so none of them means anything until the shape holds.
+  const shape = shapeProblems(state);
+  if (shape.length) return { ok: false, problems: shape };
   const problems = [];
   const p = state.programme || {};
 
@@ -173,6 +235,9 @@ export function activeHolds(state) {
 /** True when this exact underlying event has already been applied. */
 export function hasProcessed(state, idempotencyKey) {
   if (!idempotencyKey) return false;
+  // A checkpoint whose key list is not a list has recorded nothing readable;
+  // validateState() rejects it, so the caller's decision is REPORT_DRIFT.
+  if (!Array.isArray(state?.processed_event_keys)) return false;
   return state.processed_event_keys.includes(idempotencyKey);
 }
 
@@ -242,6 +307,8 @@ export default {
   loadState,
   saveState,
   normalizeState,
+  shapeProblems,
+  SHAPE_INVALID,
   validateState,
   activeHolds,
   hasProcessed,

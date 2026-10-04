@@ -23,7 +23,10 @@ export function buildStatus(repoRoot = process.cwd(), options = {}) {
   const dag = options.dag || loadDag(repoRoot);
   const p = state.programme || {};
 
-  const completed = p.checkpointed || [];
+  // A checkpoint with a container of the wrong type is rendered, as drift
+  // (validateState), so the lists read here are read only when they are lists.
+  const listOf = (value) => (Array.isArray(value) ? value : []);
+  const completed = listOf(p.checkpointed);
   const selection = selectNext(dag, completed);
   const momentum = evaluateMomentum(state, options.momentumExtra || {});
   const drift = projectionDrift(state, options.boardProjection || null);
@@ -55,7 +58,7 @@ export function buildStatus(repoRoot = process.cwd(), options = {}) {
     // First active hold, kept for existing readers; `holds` lists every one.
     hold: activeHolds(state)[0] || null,
     holds: activeHolds(state),
-    contradictions: state.unresolved_contradictions || [],
+    contradictions: listOf(state.unresolved_contradictions),
     momentum: { alarm: momentum.alarm, reasons: momentum.reasons },
     agents: agentStatusReport(options.registry || defaultRegistry()),
     next_dependency_safe: selection.selected
@@ -72,7 +75,7 @@ export function buildStatus(repoRoot = process.cwd(), options = {}) {
     // null = not checked. The projection is only usable when this is consistent.
     reconciliation: options.reconciliation || null,
     last_processed_event_key: state.last_processed_event_key || null,
-    journal_entries: (state.event_journal || []).length,
+    journal_entries: listOf(state.event_journal).length,
   };
 }
 

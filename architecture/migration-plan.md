@@ -166,6 +166,22 @@ completion contract.
 
 ## Changelog
 
+### 2026-10-04 — Checkpoint shape, refused-hold audit and string identities
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), CONVERGED-CORRECTIONS-018. Three bounded
+  corrections to the control plane, with no new module and no new import edge:
+  - K1, `lib/events.mjs`: a claimed HOLD or RESUME that is refused because it is not
+    authority records the reason in `wake_refused`, beside `authority.problems`.
+  - K2, `lib/state.mjs`: `normalizeState()` defaults an absent container only. One that is
+    present with the wrong structural type is left as written and `validateState()`
+    rejects it (`CHECKPOINT_SHAPE_INVALID`), so `holds: []` no longer loads as `{}`.
+    New export `shapeProblems()`.
+  - K3, `lib/admission.mjs`: a packet id or branch binds only as a string
+    (`packet_id_not_a_string`); `1` and `"1"` are not one identity.
+- `status.mjs` reads the checkpoint's lists only when they are lists, so an invalid
+  checkpoint is rendered as drift.
+- No application runtime, schema, deployment or production change.
+
 ### 2026-10-04 — The reviewed checkpoint is validated before the fold
 
 - KF-META-STATE-REDUCER-LIVE-001 (PR #120), CHECKPOINT-VALIDATION-017.

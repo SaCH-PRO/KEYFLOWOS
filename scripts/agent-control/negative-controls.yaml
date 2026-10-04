@@ -722,6 +722,33 @@ negative_controls:
     proof_command: node --test --test-name-pattern="an edited HOLD or RESUME" scripts/agent-control/tests/events.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-EVENTS-HOLD-REFUSAL-NOT-RECORDED
+    claim: >
+      A claimed HOLD or RESUME that is refused because it is not authority (an
+      outside author, a non-ChatGPT sender, a malformed or incomplete
+      envelope) records why in wake_refused. Removing the propagation leaves
+      the field null for those refusals, as it was, and is caught
+      (CONVERGED-CORRECTIONS-018 K1; Copilot r4178914062).
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "    if (!hold && claimsHold(env)) hold = { effect: null, refused: notAuthority };"
+      replace: "    // defect restored: a refused claim records nothing in wake_refused"
+    proof_command: node --test --test-name-pattern="claimed HOLD or RESUME that is not authority records why" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-EVENTS-HOLD-REFUSAL-AUTHORITY-REASON-DROPPED
+    claim: >
+      The wake_refused summary of a forged or incomplete HOLD or RESUME is the
+      authority verdict itself: the code, then exactly authority.problems.
+      Dropping the authority reason from the summary is caught
+      (CONVERGED-CORRECTIONS-018 K1).
+    mutation:
+      file: scripts/agent-control/lib/events.mjs
+      find: "      if (problems.length) notAuthority = `${rejection ? HOLD_REFUSALS.AUTHORITY_REJECTED : HOLD_REFUSALS.AUTHORITY_MALFORMED}: ${JSON.stringify(problems)}`;"
+      replace: "      // defect restored: the authority verdict is not summarized"
+    proof_command: node --test --test-name-pattern="claimed HOLD or RESUME that is not authority records why" scripts/agent-control/tests/events.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-SOLE-PARSER
     claim: >
       lib/control-envelope.mjs is the only #80 envelope parser. Restoring the
@@ -1547,6 +1574,71 @@ negative_controls:
     proof_command: node --test --test-name-pattern="never consistent, with nothing newer than its anchor" scripts/agent-control/tests/reconcile.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-STATE-SHAPE-UNVALIDATED
+    claim: >
+      A checkpoint container that is present with the wrong structural type
+      (`holds: []`, a null or scalar mapping, a mapping where a list belongs)
+      is rejected by the state contract under a named problem, so the fold
+      does not start. Without the shape check `holds: []` passes every other
+      check and the checkpoint reconciles (CONVERGED-CORRECTIONS-018 K2;
+      Copilot review 5407820973).
+    mutation:
+      file: scripts/agent-control/lib/state.mjs
+      find: "  if (shape.length) return { ok: false, problems: shape };"
+      replace: "  // defect restored: the shape of the containers is not checked"
+    proof_command: node --test --test-name-pattern="container present with the wrong type is left as written" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STATE-SHAPE-UNVALIDATED-CLI
+    claim: >
+      The same defect is caught on the live path: orchestrate.mjs, reading
+      the committed checkpoint from disk with `holds: []` in place of its
+      held packet, must report drift. Without the shape check it reconciles
+      with the ACTION-001 hold gone (CONVERGED-CORRECTIONS-018 K2).
+    mutation:
+      file: scripts/agent-control/lib/state.mjs
+      find: "  if (shape.length) return { ok: false, problems: shape };"
+      replace: "  // defect restored: the shape of the containers is not checked"
+    proof_command: node --test --test-name-pattern="wrong-type container is drift for orchestrate" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-STATE-SHAPE-DECISION
+    claim: >
+      A checkpoint with a wrong-type container reaches no dispatch, review,
+      admission or wait decision. Without the shape check each of those
+      checkpoints reaches its normal decision (CONVERGED-CORRECTIONS-018 K2).
+    mutation:
+      file: scripts/agent-control/lib/state.mjs
+      find: "  if (shape.length) return { ok: false, problems: shape };"
+      replace: "  // defect restored: the shape of the containers is not checked"
+    proof_command: node --test --test-name-pattern="wrong-type container reaches no dispatch" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STATE-MAPPING-COERCED
+    claim: >
+      normalizeState() defaults an absent mapping only. Restoring the coercion
+      that spread any present value into a mapping turns `holds: []` into
+      `{}` before the checkpoint is validated, and is caught
+      (CONVERGED-CORRECTIONS-018 K2; CHECKPOINT-VALIDATION-017).
+    mutation:
+      file: scripts/agent-control/lib/state.mjs
+      find: "    return isMapping(written) ? { ...fallback, ...written } : written;"
+      replace: "    return { ...fallback, ...(written || {}) };"
+    proof_command: node --test --test-name-pattern="container present with the wrong type is left as written" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STATE-LIST-COERCED
+    claim: >
+      normalizeState() defaults an absent list only. Replacing a present value
+      that is not a list with an empty list repairs the checkpoint before it
+      is validated, and is caught (CONVERGED-CORRECTIONS-018 K2).
+    mutation:
+      file: scripts/agent-control/lib/state.mjs
+      find: "    return Array.isArray(written) ? [...written] : written;"
+      replace: "    return Array.isArray(written) ? [...written] : [];"
+    proof_command: node --test --test-name-pattern="container present with the wrong type is left as written" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-REDUCER-ADMISSION-WITHOUT-PR
     claim: >
       An admission or a checkpoint is about a PR and must name it; only a
@@ -1833,6 +1925,19 @@ negative_controls:
       find: "  return exact.trim() === '' ? '' : exact;"
       replace: "  return exact.trim();"
     proof_command: node --test --test-name-pattern="NC whitespace" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ADMISSION-IDENTITY-COERCED
+    claim: >
+      An identity is a string. Turning a number or a boolean into its text
+      before the comparison makes `packet_id: 1` in one artifact equal
+      `packet_id: "1"` in the other, and is caught (CONVERGED-CORRECTIONS-018
+      K3; Copilot r4179015393).
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  if (typeof exact !== 'string') return '';"
+      replace: "  if (typeof exact === 'number' || typeof exact === 'boolean') exact = String(exact);"
+    proof_command: node --test --test-name-pattern="NC identity types" scripts/agent-control/tests/admission.spec.mjs
     timeout_ms: 120000
 
   - id: NC-ADMISSION-BRANCH-ARTIFACT-UNBOUND

@@ -57607,21 +57607,21 @@
     },
     {
       "extension": ".md",
-      "lines": 569,
+      "lines": 577,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 22943
+      "size_bytes": 23506
     },
     {
       "extension": ".json",
-      "lines": 63239,
+      "lines": 63242,
       "path": "architecture/inventory.json",
-      "size_bytes": 1636896
+      "size_bytes": 1636973
     },
     {
       "extension": ".md",
-      "lines": 249,
+      "lines": 265,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 13141
+      "size_bytes": 14173
     },
     {
       "extension": ".md",
@@ -58895,7 +58895,7 @@
       "extension": ".md",
       "lines": 200,
       "path": "docs/development/AGENT_AUTOPILOT_OPERATIONS.md",
-      "size_bytes": 14925
+      "size_bytes": 15019
     },
     {
       "extension": ".yaml",
@@ -58905,9 +58905,9 @@
     },
     {
       "extension": ".md",
-      "lines": 608,
+      "lines": 647,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 29080
+      "size_bytes": 31390
     },
     {
       "extension": ".md",
@@ -61640,9 +61640,9 @@
         "./events.mjs",
         "./semantic-review.mjs"
       ],
-      "lines": 283,
+      "lines": 292,
       "path": "scripts/agent-control/lib/admission.mjs",
-      "size_bytes": 13182
+      "size_bytes": 13822
     },
     {
       "exports": [
@@ -61734,6 +61734,7 @@
         "ACTIONABLE_MESSAGE_TYPES",
         "CONTROL_ISSUE",
         "HOLD_MESSAGE_TYPES",
+        "HOLD_REFUSALS",
         "MUTATION_LOCK",
         "REQUIRED_WORKFLOWS",
         "mutationLockKey",
@@ -61747,9 +61748,9 @@
         "./authority-effects.mjs",
         "./control-envelope.mjs"
       ],
-      "lines": 293,
+      "lines": 315,
       "path": "scripts/agent-control/lib/events.mjs",
-      "size_bytes": 12024
+      "size_bytes": 13471
     },
     {
       "exports": [
@@ -61892,6 +61893,7 @@
       "exports": [
         "JOURNAL_LIMIT",
         "PROCESSED_KEY_LIMIT",
+        "SHAPE_INVALID",
         "STATE_PATH",
         "activeHolds",
         "emptyState",
@@ -61901,6 +61903,7 @@
         "projectionDrift",
         "recordEvent",
         "saveState",
+        "shapeProblems",
         "validateState"
       ],
       "extension": ".mjs",
@@ -61910,9 +61913,9 @@
         "node:fs",
         "node:path"
       ],
-      "lines": 250,
+      "lines": 317,
       "path": "scripts/agent-control/lib/state.mjs",
-      "size_bytes": 9970
+      "size_bytes": 13408
     },
     {
       "exports": [
@@ -61951,9 +61954,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 1851,
+      "lines": 1956,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 87146
+      "size_bytes": 93132
     },
     {
       "exports": [],
@@ -62032,9 +62035,9 @@
         "./lib/state.mjs",
         "./lib/truth.mjs"
       ],
-      "lines": 166,
+      "lines": 169,
       "path": "scripts/agent-control/status.mjs",
-      "size_bytes": 7680
+      "size_bytes": 7904
     },
     {
       "exports": [],
@@ -62049,9 +62052,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 474,
+      "lines": 532,
       "path": "scripts/agent-control/tests/admission.spec.mjs",
-      "size_bytes": 25844
+      "size_bytes": 30189
     },
     {
       "exports": [],
@@ -62074,9 +62077,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 1432,
+      "lines": 1674,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
-      "size_bytes": 89928
+      "size_bytes": 105513
     },
     {
       "exports": [],
@@ -62133,9 +62136,9 @@
         "node:fs",
         "node:test"
       ],
-      "lines": 485,
+      "lines": 548,
       "path": "scripts/agent-control/tests/events.spec.mjs",
-      "size_bytes": 26148
+      "size_bytes": 31582
     },
     {
       "exports": [
@@ -62213,9 +62216,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 580,
+      "lines": 584,
       "path": "scripts/agent-control/tests/reconcile.spec.mjs",
-      "size_bytes": 31424
+      "size_bytes": 31835
     },
     {
       "exports": [],
@@ -63234,6 +63237,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3449,
     "total_files": 4440,
-    "total_lines": 1136933
+    "total_lines": 1137572
   }
 }

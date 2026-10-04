@@ -298,6 +298,10 @@ test('NC an anchored projection the state contract rejects is never consistent, 
     ['state REVIEWED', base({ state: 'REVIEWED' }), 'UNKNOWN_STATE'],
     ['production touched', base({ production_touched: true }), 'PRODUCTION_TOUCHED'],
     ['merge authority without a marker', base({ merge_authority: true }), 'MERGE_AUTHORITY_WITHOUT_MARKER'],
+    // A container of the wrong type (CONVERGED-CORRECTIONS-018 K2): `holds: []` read as no holds.
+    ['holds is a list', Object.assign(base(), { holds: [] }), 'CHECKPOINT_SHAPE_INVALID'],
+    ['agents is a list', Object.assign(base(), { agents: [] }), 'CHECKPOINT_SHAPE_INVALID'],
+    ['the contradiction list is null', Object.assign(base(), { unresolved_contradictions: null }), 'CHECKPOINT_SHAPE_INVALID'],
   ];
   for (const [name, state, code] of cases) {
     const rec = verdict(state, [anchor], repo(pr));

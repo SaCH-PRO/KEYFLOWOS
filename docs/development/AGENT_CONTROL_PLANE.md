@@ -341,6 +341,14 @@ anything else from them:
 - each artifact's `implementation_branch` equals the PR `head_ref`;
 - an artifact that declares `pr_number` declares this PR's number.
 
+An identity is a string, compared exactly as written (EXACT-BINDING-016;
+CONVERGED-CORRECTIONS-018 K3). It is never trimmed and never made into text:
+YAML reads `packet_id: 1` as a number and `packet_id: "1"` as a string, and
+those are not one identity. A `packet_id` that is a number, boolean, mapping
+or list is `packet_id_not_a_string`, and an `implementation_branch` that is
+not a string is not the PR `head_ref`. Any string is still a legal packet id,
+`"1"` included. The PR-number rule is separate: a number or its text.
+
 Any failure is `control_artifacts_not_bound_to_pr`, and the detail names each
 artifact and field. No packet id or branch is hard-coded: the PR is the
 referent. A packet id is free text, so it is bound through the branch and PR
@@ -499,7 +507,23 @@ The rules:
   HOLD, `HOLD_CLEAR` on a RESUME, with a packet id, `production_touched: false`
   and canonical health), and arrives as a created comment whose payload shows
   it unedited. An untyped, mistyped, malformed, forged or edited HOLD or RESUME
-  wakes nothing; the event records why in `wake_refused`. Whether the effect
+  wakes nothing; the event records why in `wake_refused`. That field is the
+  one-line audit summary of every such refusal
+  (CONVERGED-CORRECTIONS-018 K1):
+  - `AUTHORITY_REJECTED: [...]` for an outside author or a non-ChatGPT sender;
+  - `AUTHORITY_MALFORMED: [...]` for an envelope that fails the AUTHORITY
+    profile;
+  - `ENVELOPE_MALFORMED: [...]` for a repeated or badly quoted field;
+  - the fold's own code (`CONTROL_EFFECT_MISSING`, ...) for valid authority
+    whose effect cannot be read;
+  - the comment action or edit state for one that did not arrive as an
+    unedited created comment.
+
+  The list in the first three is exactly `authority.problems` (or
+  `envelope_problems`), which stay as the structured record. A message whose
+  type is not exactly `HOLD` or `RESUME` (`HOLDD`, `hold`) claims neither, so
+  it carries no `wake_refused`; its reason is in `authority.problems`, as for
+  a DIRECTIVE or REVIEW. Whether the effect
   then folds (a duplicate hold, a clear with no hold) is decided by the fold,
   not by the wake. The local worker selector is separate and still selects
   nothing when the newest authority is a HOLD or RESUME.
@@ -528,6 +552,21 @@ The rules:
   authority and a missing or unfound anchor are reported first, as before. An
   invalid checkpoint is never repaired, normalized or coerced; it is corrected
   in a reviewed commit (CHECKPOINT-VALIDATION-017).
+- **The checkpoint's shape is part of that contract.**
+  (CONVERGED-CORRECTIONS-018 K2) `normalizeState()` fills in a container only
+  when its key is absent. A container that is present with the wrong
+  structural type is left exactly as written and `validateState()` rejects
+  it as `CHECKPOINT_SHAPE_INVALID`, reported alone, so the checkpoint is
+  `CHECKPOINT_INVALID` and reconciles as `DERIVED_STATE_INVALID`:
+  - mappings: `programme`, `momentum`, `correction`, `agents`, `holds`, and
+    the legacy `hold` (a mapping or null);
+  - lists: `programme.checkpointed`, `unresolved_contradictions`,
+    `processed_event_keys`, `event_journal`;
+  - the document itself, which is a mapping.
+
+  Present means the key is there: an explicit `null` is the wrong type, like
+  `holds: []`, which earlier read as "no holds". An empty document and a
+  document with none of these keys load with the defaults, as before.
 - **The projection stays valid.** Each folded step is checked with
   `validateState()`. A step that the state contract rejects stops the fold
   (`CONTROL_EFFECT_PROJECTION_INVALID`).

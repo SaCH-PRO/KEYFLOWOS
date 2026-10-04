@@ -175,6 +175,64 @@ test('NC whitespace: an identity that differs from the PR only by surrounding wh
   assert.equal(one('ret', { pr_number: String(base.pr.number) }).eligible, true);
 });
 
+test('NC identity types: a packet id or branch that is not a string binds nothing, and is never made into text (018 K3)', () => {
+  // Copilot r4179015393: text() turned a number into its text, so `packet_id: 1`
+  // in one artifact and `packet_id: "1"` in the other compared equal.
+  const base = admissible();
+  const one = (side, overrides) => evaluateAdmission({ ...base, [side]: { ...base[side], ...overrides } });
+  const both = (overrides) => evaluateAdmission({ ...base, active: { ...base.active, ...overrides }, ret: { ...base.ret, ...overrides } });
+  const file = { active: 'active-packet.yaml', ret: 'claude-return.yaml' };
+  const notStrings = [1, 0, -1, 1.5, NaN, true, false, {}, { id: 'KF-X-001' }, [], ['KF-X-001']];
+
+  // 1 against "1": the pair Copilot named, as the YAML codec reads each artifact.
+  const numbered = { ...base.active, ...parseYaml('packet_id: 1\n') };
+  const quoted = { ...base.ret, ...parseYaml('packet_id: "1"\n') };
+  assert.deepEqual([typeof numbered.packet_id, typeof quoted.packet_id], ['number', 'string']);
+  for (const [active, ret, artifact] of [[numbered, quoted, file.active], [{ ...base.active, packet_id: '1' }, { ...base.ret, packet_id: 1 }, file.ret]]) {
+    const v = evaluateAdmission({ ...base, active, ret });
+    assert.equal(v.eligible, false);
+    assert.equal(v.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND);
+    assert.deepEqual(v.detail, [{ code: BINDING_PROBLEMS.PACKET_ID_NOT_TEXT, artifact, found: 1 }]);
+  }
+
+  for (const value of notStrings) {
+    const label = JSON.stringify(value) ?? String(value);
+    // In either artifact alone, against the real id in the other.
+    for (const side of ['active', 'ret']) {
+      const v = one(side, { packet_id: value });
+      assert.equal(v.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, `${side} ${label}`);
+      assert.deepEqual(v.detail, [{ code: BINDING_PROBLEMS.PACKET_ID_NOT_TEXT, artifact: file[side], found: value }], `${side} ${label}`);
+      const branch = one(side, { implementation_branch: value });
+      assert.equal(branch.reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, `${side} branch ${label}`);
+      assert.deepEqual(branch.detail, [{ code: BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, artifact: file[side], expected: 'impl/x', found: value }], `${side} branch ${label}`);
+    }
+    // In both alike: agreement between two non-strings is not an identity.
+    assert.deepEqual(bindingCodes(both({ packet_id: value })), [BINDING_PROBLEMS.PACKET_ID_NOT_TEXT, BINDING_PROBLEMS.PACKET_ID_NOT_TEXT], label);
+    assert.deepEqual(bindingCodes(both({ implementation_branch: value })), [BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD], label);
+  }
+
+  // A branch that would only match as text does not match: on the artifact side or the PR side.
+  const numeric = { ...base, pr: { ...base.pr, head_ref: '123' }, active: { ...base.active, implementation_branch: '123' }, ret: { ...base.ret, implementation_branch: '123' } };
+  assert.deepEqual(artifactBindingProblems(numeric), [], 'referent: three equal strings bind');
+  assert.deepEqual(artifactBindingProblems({ ...numeric, ret: { ...numeric.ret, implementation_branch: 123 } }).map((p) => p.code), [BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD]);
+  assert.deepEqual(artifactBindingProblems({ ...numeric, pr: { ...numeric.pr, head_ref: 123 } }).map((p) => p.code), [BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD]);
+
+  // Absent and blank are still "missing", not "not a string".
+  for (const id of [undefined, null, '', '  ']) {
+    assert.deepEqual(bindingCodes(both({ packet_id: id })), [BINDING_PROBLEMS.PACKET_ID_MISSING, BINDING_PROBLEMS.PACKET_ID_MISSING], String(id));
+  }
+  // The textual vocabulary is not narrowed: any string binds, the ones that look like other types included.
+  for (const id of ['1', '0', 'true', 'null', '1.5', '[]', '{}']) {
+    const text = parseYaml(`packet_id: ${JSON.stringify(id)}\n`);
+    assert.equal(text.packet_id, id);
+    assert.equal(both(text).eligible, true, id);
+  }
+  // The PR-number contract is separate and unchanged: a number or its text.
+  assert.equal(one('ret', { pr_number: '87' }).eligible, true);
+  assert.equal(one('active', { pr_number: 87 }).eligible, true);
+  assert.deepEqual(bindingCodes(one('ret', { pr_number: 88 })), [BINDING_PROBLEMS.PR_NUMBER_NOT_THIS_PR]);
+});
+
 test("the binding is packet-agnostic: any packet id and branch bind when they are the PR's own", () => {
   const base = admissible();
   for (const [packet, branch, number] of [['KF-META-P', 'impl/kf-meta-p', 7], ['a: b', 'impl/anything', 120], ['__proto__', 'impl/p', 1]]) {

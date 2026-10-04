@@ -83,6 +83,8 @@ function hourBucket(iso) {
  * production_touched false, canonical health, no programme field), and only as
  * a comment whose event action is exactly `created` and whose payload shows it unedited. Nothing is read from prose or
  * from the message id. `refused` says why it does not wake, or is null.
+ * A claimed HOLD or RESUME that is not authority never gets here; normalizeEvent()
+ * records its reason in the same `wake_refused` field.
  */
 function holdWake(env, kind, payload, comment) {
   const read = readEffect({ message_type: kind, envelope: env, problems: [] });
@@ -95,6 +97,16 @@ function holdWake(env, kind, payload, comment) {
   if (edited !== false) return { effect: read.effect, refused: edited ? 'comment edited' : 'edit state not observable' };
   return { effect: read.effect, refused: null };
 }
+
+/** True when any `message_type` value of the body is exactly HOLD or RESUME. */
+const claimsHold = (env) => (env.values.message_type || []).some((type) => HOLD_MESSAGE_TYPES.includes(type));
+
+/** Why a claimed HOLD or RESUME never reached holdWake(), in the form `wake_refused` carries. */
+export const HOLD_REFUSALS = Object.freeze({
+  ENVELOPE_MALFORMED: 'ENVELOPE_MALFORMED',
+  AUTHORITY_REJECTED: 'AUTHORITY_REJECTED',
+  AUTHORITY_MALFORMED: 'AUTHORITY_MALFORMED',
+});
 
 function ignored(kind, source, detail) {
   return { actionable: false, kind, source, idempotency_key: null, detail: detail || null };
@@ -124,12 +136,16 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
     // An authority-typed message wakes nothing unless it IS authority under the
     // shared AUTHORITY profile: ChatGPT sender, allowlisted author, full envelope.
     let authority = null;
+    // Why the comment is not authority, as one summary line; null when it is,
+    // or when it claims none. `authority.problems` keeps the structured form.
+    let notAuthority = env.problems.length ? `${HOLD_REFUSALS.ENVELOPE_MALFORMED}: ${JSON.stringify(env.problems)}` : null;
     if (kind !== 'MALFORMED' && claimedAuthorityType(env)) {
       const author = comment.user?.login || null;
       const rejection = rejectionOf(env, author);
       const problems = rejection ? [rejection] : validateEnvelope(env, PROFILES.AUTHORITY);
       authority = { valid: problems.length === 0, problems };
       if (problems.length) actionable = false;
+      if (problems.length) notAuthority = `${rejection ? HOLD_REFUSALS.AUTHORITY_REJECTED : HOLD_REFUSALS.AUTHORITY_MALFORMED}: ${JSON.stringify(problems)}`;
       // Attributable authority that fails the profile is malformed authority,
       // as collectAuthority() classifies it; the claimed type stays in
       // message_type. A forged or non-ChatGPT message is somebody else's and
@@ -143,6 +159,11 @@ export function normalizeEvent(eventName, payload = {}, options = {}) {
       hold = holdWake(env, kind, payload, comment);
       if (hold.refused) actionable = false;
     }
+    // A claimed HOLD or RESUME that was refused before that gate (an outside
+    // author, a non-ChatGPT sender, a malformed or incomplete envelope) records
+    // why in the same field. Its effect is not read: it is not authority.
+    // (CONVERGED-CORRECTIONS-018 K1; Copilot r4178914062)
+    if (!hold && claimsHold(env)) hold = { effect: null, refused: notAuthority };
     return {
       actionable,
       kind,
@@ -289,5 +310,6 @@ export default {
   CONTROL_ISSUE,
   ACTIONABLE_MESSAGE_TYPES,
   HOLD_MESSAGE_TYPES,
+  HOLD_REFUSALS,
   REQUIRED_WORKFLOWS,
 };

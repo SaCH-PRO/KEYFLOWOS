@@ -305,6 +305,69 @@ test('NC: a forged, malformed, ambiguous or unsupported HOLD or RESUME does not 
   }
 });
 
+test('NC: a claimed HOLD or RESUME that is not authority records why in wake_refused, beside authority.problems (018 K1)', () => {
+  // Copilot r4178914062: these were refused with wake_refused null; the reason
+  // was only in authority.problems, or in envelope_problems.
+  for (const [message_type, effect] of HOLD_TYPES) {
+    const valid = holdEnvelope(message_type, effect);
+    const from = (login) => posted(valid, { comment: { ...posted(valid).comment, user: { login } } });
+    const cases = [
+      ['an outside author', from('mallory'), 'AUTHORITY_REJECTED', ['author_not_authorized:mallory']],
+      ['no author', from(undefined), 'AUTHORITY_REJECTED', ['author_not_authorized:']],
+      ['sender claude', posted(holdEnvelope(message_type, effect, { sender: 'claude' })), 'AUTHORITY_REJECTED', ['sender_not_chatgpt:claude']],
+      ['sender ChatGPT', posted(holdEnvelope(message_type, effect, { sender: 'ChatGPT' })), 'AUTHORITY_REJECTED', ['sender_not_chatgpt:ChatGPT']],
+      ['no sender', posted(holdEnvelope(message_type, effect, { sender: undefined })), 'AUTHORITY_REJECTED', ['sender_not_chatgpt:']],
+      ['a missing envelope key', posted(holdEnvelope(message_type, effect, { production_touched: undefined })), 'AUTHORITY_MALFORMED', ['production_touched (absent)']],
+      ['a missing health', posted(holdEnvelope(message_type, effect, { health: undefined })), 'AUTHORITY_MALFORMED', ['health (absent)']],
+      ['a null packet id', posted(holdEnvelope(message_type, effect, { packet_id: 'null' })), 'AUTHORITY_MALFORMED', ['packet_id (absent or null)']],
+      ['a blank packet id', posted(holdEnvelope(message_type, effect, { packet_id: '"  "' })), 'AUTHORITY_MALFORMED', ['packet_id (blank)']],
+      ['a block-scalar packet id', posted(holdEnvelope(message_type, effect, { packet_id: '>' })), 'AUTHORITY_MALFORMED', null],
+      ['a repeated control_effect', posted(`${valid}\ncontrol_effect: ${effect}`), 'ENVELOPE_MALFORMED', ['control_effect (repeated; ambiguous)']],
+      ['a repeated message_type', posted(`${valid}\nmessage_type: ${message_type}`), 'ENVELOPE_MALFORMED', ['message_type (repeated; ambiguous)']],
+      ['a second, different message_type', posted(`${valid}\nmessage_type: RETURN`), 'ENVELOPE_MALFORMED', ['message_type (repeated; ambiguous)']],
+      ['an unmatched quote', posted(holdEnvelope(message_type, effect, { packet_id: "'KF-EXEC-ACTION-001" })), 'ENVELOPE_MALFORMED', null],
+    ];
+    for (const [defect, payload, code, problems] of cases) {
+      const e = normalizeEvent('issue_comment', payload);
+      const label = `${message_type} with ${defect}`;
+      assert.equal(e.actionable, false, label);
+      assert.equal(typeof e.wake_refused, 'string', `${label}: wake_refused is ${e.wake_refused}`);
+      // The summary is the structured record, not a second opinion: the code, then exactly the problems.
+      const structured = code === 'ENVELOPE_MALFORMED' ? e.envelope_problems : e.authority.problems;
+      assert.ok(structured.length > 0, label);
+      assert.equal(e.wake_refused, `${code}: ${JSON.stringify(structured)}`, label);
+      if (problems) assert.deepEqual(structured, problems, label);
+      // The structured form is kept, and only for a message that reached the authority check.
+      assert.equal(e.authority === null, code === 'ENVELOPE_MALFORMED', label);
+      if (e.authority) assert.equal(e.authority.valid, false, label);
+      // Not authority, so its effect is never read into the event.
+      assert.equal(e.control_effect, null, label);
+    }
+
+    // Valid authority that is refused for its effect, or for how it arrived, is unchanged.
+    assert.match(normalizeEvent('issue_comment', posted(holdEnvelope(message_type, undefined))).wake_refused, /^CONTROL_EFFECT_MISSING: /);
+    assert.equal(normalizeEvent('issue_comment', { ...posted(valid), action: 'edited' }).wake_refused, 'comment action edited; only a created comment wakes');
+    // Referent: the same envelope from the authority wakes and refuses nothing.
+    const woke = normalizeEvent('issue_comment', posted(valid));
+    assert.deepEqual([woke.actionable, woke.wake_refused, woke.control_effect, woke.authority.problems], [true, null, effect, []], message_type);
+
+    // A type that is not exactly HOLD or RESUME claims neither, so the field stays
+    // null and the reason stays in authority.problems, as for any other type.
+    for (const typo of [`${message_type}D`, message_type.toLowerCase()]) {
+      const e = normalizeEvent('issue_comment', posted(holdEnvelope(typo, effect)));
+      assert.deepEqual([e.actionable, e.kind, e.wake_refused], [false, 'MALFORMED', null], typo);
+      assert.ok(e.authority.problems.some((p) => p.startsWith('message_type (')), typo);
+    }
+  }
+  // The field is about HOLD and RESUME only: a refused DIRECTIVE or REVIEW still carries none.
+  for (const message_type of ['DIRECTIVE', 'REVIEW']) {
+    const forged = normalizeEvent('issue_comment', posted(holdEnvelope(message_type, 'HOLD_SET', { sender: 'claude' })));
+    assert.deepEqual([forged.actionable, forged.wake_refused, forged.authority.problems], [false, null, ['sender_not_chatgpt:claude']], message_type);
+    const incomplete = normalizeEvent('issue_comment', posted(holdEnvelope(message_type, 'HOLD_SET', { health: undefined })));
+    assert.deepEqual([incomplete.actionable, incomplete.kind, incomplete.wake_refused], [false, 'MALFORMED', null], message_type);
+  }
+});
+
 test('NC: a hold effect on a non-wake type wakes nothing, and DIRECTIVE and REVIEW wake as before', () => {
   for (const effect of ['HOLD_SET', 'HOLD_CLEAR']) {
     for (const message_type of ['PROGRESS', 'ACK', 'CLOSE', 'AUTO_EVENT', 'AUTO_MERGE']) {

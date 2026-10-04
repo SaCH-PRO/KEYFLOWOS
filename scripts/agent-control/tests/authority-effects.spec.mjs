@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { STATE_PATH, activeHolds, emptyState, loadState, normalizeState, validateState } from '../lib/state.mjs';
+import { SHAPE_INVALID, STATE_PATH, activeHolds, emptyState, hasProcessed, loadState, normalizeState, saveState, shapeProblems, validateState } from '../lib/state.mjs';
 import { parseYaml, stringifyYaml } from '../lib/yaml.mjs';
 import { decide, ACTIONS } from '../lib/orchestrator.mjs';
 import { collectAuthority, reconcile, reconcileProjection, FINDINGS } from '../lib/reconcile.mjs';
@@ -779,6 +779,181 @@ test('an invalid checkpoint does not change the precedence of unverifiable autho
   assert.deepEqual(codes(started), [FINDINGS.AUTHORITY_MALFORMED]);
 });
 
+// ------------------------------------------------------------------ the checkpoint's raw shape (CONVERGED-CORRECTIONS-018 K2)
+
+const HELD_X = { active: true, packet_id: 'KF-X', reason: 'held' };
+
+/** Containers present with the wrong structural type: [name, container, value as written, what was found]. */
+const WRONG_SHAPES = [
+  ['holds: []', 'holds', [], 'mapping', 'list'],
+  ['holds: a list of holds', 'holds', [HELD_X], 'mapping', 'list'],
+  ['holds: null', 'holds', null, 'mapping', 'null'],
+  ['holds: text', 'holds', 'none', 'mapping', 'string'],
+  ['programme: []', 'programme', [], 'mapping', 'list'],
+  ['programme: null', 'programme', null, 'mapping', 'null'],
+  ['momentum: []', 'momentum', [], 'mapping', 'list'],
+  ['momentum: 0', 'momentum', 0, 'mapping', 'number'],
+  ['correction: text', 'correction', 'none', 'mapping', 'string'],
+  ['agents: []', 'agents', [], 'mapping', 'list'],
+  ['agents: false', 'agents', false, 'mapping', 'boolean'],
+  ['programme.checkpointed: {}', 'programme.checkpointed', {}, 'list', 'mapping'],
+  ['programme.checkpointed: null', 'programme.checkpointed', null, 'list', 'null'],
+  ['programme.checkpointed: text', 'programme.checkpointed', 'KF-EXEC-K12-001', 'list', 'string'],
+  ['unresolved_contradictions: {}', 'unresolved_contradictions', {}, 'list', 'mapping'],
+  ['unresolved_contradictions: null', 'unresolved_contradictions', null, 'list', 'null'],
+  ['processed_event_keys: {}', 'processed_event_keys', {}, 'list', 'mapping'],
+  ['processed_event_keys: text', 'processed_event_keys', 'k', 'list', 'string'],
+  ['event_journal: {}', 'event_journal', {}, 'list', 'mapping'],
+  ['event_journal: 3', 'event_journal', 3, 'list', 'number'],
+  ['hold: []', 'hold', [], 'mapping or null', 'list'],
+  ['hold: text', 'hold', 'held', 'mapping or null', 'string'],
+];
+const containerOf = (state, name) => name.split('.').reduce((at, key) => at[key], state);
+/** The checkpoint as a document on disk: written as YAML, with one container set to `value`. */
+function writtenWith(anchor, name, value, programme = {}, extra = {}) {
+  const raw = structuredClone(checkpoint(anchor, programme, extra));
+  const keys = name.split('.');
+  const last = keys.pop();
+  keys.reduce((at, key) => at[key], raw)[last] = value;
+  return stringifyYaml(raw);
+}
+const shapeProblem = (name, expected, found) => ({ code: SHAPE_INVALID, detail: `${name} must be a ${expected} when present, found ${found}` });
+
+test('NC a container present with the wrong type is left as written and fails closed before any fold or decision (018 K2)', () => {
+  // Copilot review 5407820973: normalizeState() turned `holds: []` into `{}`,
+  // so validateState() accepted the checkpoint and the fold started from it.
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  for (const [label, name, value, expected, found] of WRONG_SHAPES) {
+    const text = writtenWith(anchor, name, value);
+    const raw = parseYaml(text);
+    assert.deepEqual(containerOf(raw, name), value, `${label}: the document carries the wrong container`);
+    const problem = shapeProblem(name, expected, found);
+    // Rejected as written, before normalization.
+    assert.deepEqual(shapeProblems(raw), [problem], label);
+    // Normalization does not turn it into the right type.
+    const loaded = normalizeState(raw);
+    assert.deepEqual(containerOf(loaded, name), value, `${label}: left as written`);
+    assert.deepEqual(validateState(loaded), { ok: false, problems: [problem] }, label);
+    const before = structuredClone(loaded);
+
+    const out = fold(loaded, [anchor]);
+    assert.equal(out.started, false, label);
+    assert.equal(out.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID, label);
+    assert.deepEqual(out.checkpoint_problems, [problem], label);
+    assert.deepEqual([out.applied, out.blocked, out.unapplied], [[], null, []], label);
+
+    const rec = project(loaded, [anchor], repo());
+    assert.equal(rec.consistent, false, label);
+    assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_INVALID], label);
+    assert.deepEqual(rec.findings[0].detail.problems, [problem], label);
+    const decision = act(rec);
+    assert.equal(decision.action, ACTIONS.REPORT_DRIFT, label);
+    assert.equal(decision.advancement, 'NONE', label);
+    assert.deepEqual(loaded, before, `${label}: not repaired by the fold, the reconciliation or the decision`);
+    // The journal lookup the orchestrator makes before deciding reads it without failing.
+    assert.equal(hasProcessed(loaded, 'issue_comment:1:created'), false, label);
+    // And it can never be written back.
+    assert.throws(() => saveState(loaded, os.tmpdir()), /programme-state invalid: CHECKPOINT_SHAPE_INVALID/, label);
+  }
+  // A newer typed effect is not folded over it either.
+  const { anchor: first, correction } = lifecycle();
+  const listed = normalizeState(parseYaml(writtenWith(first, 'holds', [])));
+  const newer = project(listed, [first, correction], repo(openPr(41, 'impl/kf-meta-p')));
+  assert.equal(newer.reduction.started, false);
+  assert.deepEqual(newer.reduction.applied, []);
+  assert.deepEqual(codes(newer), [FINDINGS.DERIVED_STATE_INVALID, FINDINGS.DERIVED_STATE_STALE_AUTHORITY]);
+  assert.equal(act(newer).action, ACTIONS.REPORT_DRIFT);
+  // A document that is not a mapping at all is not read as an empty checkpoint.
+  assert.deepEqual(validateState(undefined), { ok: false, problems: [shapeProblem('programme-state', 'mapping', 'undefined')] });
+  assert.deepEqual(validateState(null), { ok: false, problems: [shapeProblem('programme-state', 'mapping', 'null')] });
+  for (const [document, found] of [[[], 'list'], [[{ holds: {} }], 'list'], ['text', 'string'], [7, 'number']]) {
+    assert.deepEqual(shapeProblems(document), [shapeProblem('programme-state', 'mapping', found)], JSON.stringify(document));
+    assert.deepEqual(normalizeState(document), document, 'returned as written');
+    assert.equal(validateState(normalizeState(document)).ok, false);
+    const rec = project(normalizeState(document), [anchor], repo());
+    assert.equal(rec.consistent, false, JSON.stringify(document));
+    assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, JSON.stringify(document));
+  }
+  // Referent: the same document with every container in its own type is valid and reaches its decision.
+  const good = normalizeState(parseYaml(stringifyYaml(checkpoint(anchor))));
+  assert.deepEqual(shapeProblems(good), []);
+  assert.deepEqual(validateState(good).problems, []);
+  const rec = project(good, [anchor], repo());
+  assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
+  assert.equal(act(rec).action, ACTIONS.DISPATCH_BUILDER);
+});
+
+test('NC a wrong-type container reaches no dispatch, review, admission or wait decision as if it were valid (018 K2)', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const marker = { merge_authority_marker: { message_id: 'CG-D', comment_id: collectAuthority([anchor]).newest.comment_id } };
+  const pr = repo(openPr(41, 'impl/kf-meta-p'));
+  const shapes = [
+    ['dispatch', {}, {}, repo(), ACTIONS.DISPATCH_BUILDER],
+    ['review', { state: 'PROVING', pr_number: 41 }, {}, pr, ACTIONS.REQUEST_REVIEW],
+    ['admission', { state: 'READY_TO_MERGE', pr_number: 41, merge_authority: true }, marker, pr, ACTIONS.EVALUATE_ADMISSION],
+    ['wait', {}, { hold: { active: true, reason: 'held, no packet named' } }, repo(), ACTIONS.WAIT_AUTHORITY],
+  ];
+  for (const [name, programme, extra, truth, normal] of shapes) {
+    // Referent first: with its containers in their own types, this checkpoint reaches its normal decision.
+    const good = project(normalizeState(parseYaml(stringifyYaml(checkpoint(anchor, programme, extra)))), [anchor], truth);
+    assert.equal(good.consistent, true, `${name}: ${JSON.stringify(good.findings)}`);
+    assert.equal(act(good).action, normal, name);
+    for (const [container, value] of [['holds', []], ['agents', []], ['event_journal', {}], ['programme.checkpointed', {}]]) {
+      const label = `${name}, ${container}`;
+      const bad = normalizeState(parseYaml(writtenWith(anchor, container, value, programme, extra)));
+      const rec = project(bad, [anchor], truth);
+      const decision = act(rec);
+      assert.equal(decision.action, ACTIONS.REPORT_DRIFT, label);
+      assert.equal(decision.advancement, 'NONE', label);
+      assert.deepEqual(decision.findings.map((f) => f.code), [FINDINGS.DERIVED_STATE_INVALID], label);
+      assert.deepEqual(decision.findings[0].detail.problems.map((x) => x.code), [SHAPE_INVALID], label);
+    }
+  }
+});
+
+test('an absent container still gets its default, and the checkpoint is as usable as before (018 K2)', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const full = checkpoint(anchor);
+  const legacy = structuredClone(full);
+  for (const key of ['momentum', 'correction', 'agents', 'holds', 'hold', 'unresolved_contradictions', 'processed_event_keys', 'event_journal']) delete legacy[key];
+  delete legacy.programme.checkpointed;
+  const text = stringifyYaml(legacy);
+  for (const key of ['momentum', 'correction', 'agents', 'holds', 'event_journal', 'checkpointed']) assert.doesNotMatch(text, new RegExp(`^\\s*${key}:`, 'm'), key);
+
+  assert.deepEqual(shapeProblems(parseYaml(text)), []);
+  const loaded = normalizeState(parseYaml(text));
+  const defaults = emptyState();
+  for (const key of ['momentum', 'correction', 'agents', 'holds', 'hold', 'unresolved_contradictions', 'processed_event_keys', 'event_journal']) {
+    assert.deepEqual(loaded[key], defaults[key], key);
+  }
+  assert.deepEqual(loaded.programme.checkpointed, []);
+  assert.equal(loaded.programme.active_packet, 'KF-META-P');
+  assert.deepEqual(validateState(loaded).problems, []);
+  const rec = project(loaded, [anchor], repo());
+  assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
+  assert.equal(act(rec).action, ACTIONS.DISPATCH_BUILDER);
+
+  // A document with no programme, and an empty one, are filled in whole, as before.
+  const { programme: omitted, ...bare } = legacy;
+  assert.deepEqual(normalizeState(parseYaml(stringifyYaml(bare))).programme, defaults.programme);
+  assert.deepEqual(normalizeState(parseYaml('')), defaults);
+  assert.deepEqual(normalizeState(undefined), defaults);
+  assert.deepEqual(validateState(normalizeState(parseYaml(''))).problems, []);
+  // Containers in their own types are copied, never shared with the document.
+  const raw = parseYaml(stringifyYaml(full));
+  const copy = normalizeState(raw);
+  assert.deepEqual(copy, normalizeState(parseYaml(stringifyYaml(full))));
+  for (const key of ['programme', 'momentum', 'correction', 'agents', 'holds', 'unresolved_contradictions', 'processed_event_keys', 'event_journal']) {
+    assert.notEqual(copy[key], raw[key], key);
+  }
+  // The existing explicit checks are unchanged once the shape holds.
+  for (const [name, mutate, code] of INVALID_CHECKPOINTS) {
+    const bad = normalizeState(parseYaml(stringifyYaml(invalidCheckpoint(anchor, mutate))));
+    assert.deepEqual(validateState(bad).problems.map((x) => x.code), [code], name);
+  }
+  assert.deepEqual(validateState(Object.assign(checkpoint(anchor), { authority_basis: [] })).problems.map((x) => x.code), ['AUTHORITY_BASIS_INVALID']);
+});
+
 test('the programme diagnostic names only the actual prohibition (Copilot r4171100288)', () => {
   const msg = typed('DIRECTIVE', 'CG-X', 'KF-META-P', 'NO_STATE_CHANGE', { programme_action: 'null' });
   const read = readEffect(collectAuthority([msg]).newest);
@@ -1410,6 +1585,73 @@ test('CLI end to end: an invalid checkpoint on disk is reported as drift by orch
   // Referent: the committed checkpoint in the same kind of root reconciles and waits on the hold.
   const good = run(committed);
   assert.deepEqual(good.reloaded, committed);
+  assert.equal(good.out.reconciliation.consistent, true, JSON.stringify(good.out.reconciliation.findings));
+  assert.equal(good.out.decision.action, ACTIONS.WAIT_AUTHORITY);
+});
+
+test('CLI end to end: a checkpoint on disk with a wrong-type container is drift for orchestrate, with or without an event, and for the status rendering (018 K2)', () => {
+  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const committedText = fs.readFileSync(STATE_PATH, 'utf8').replace(/\r\n/g, '\n');
+  const script = path.resolve('scripts/agent-control/orchestrate.mjs');
+  // One line of the committed document replaced; everything else is the reviewed checkpoint.
+  const rewritten = (pattern, replacement) => {
+    assert.match(committedText, pattern);
+    return committedText.replace(pattern, replacement);
+  };
+  const run = (text, event = null) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-shape-'));
+    try {
+      for (const file of [STATE_PATH, DAG_PATH]) fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, STATE_PATH), text);
+      fs.copyFileSync(DAG_PATH, path.join(root, DAG_PATH));
+      const truth = path.join(root, 'truth.json');
+      fs.writeFileSync(truth, JSON.stringify({ comments: recorded.comments, repo: recorded.repo }));
+      const env = { ...process.env, KEYFLOW_AGENT_CLAUDE_DISABLED: '1' };
+      delete env.GITHUB_EVENT_NAME;
+      delete env.GITHUB_EVENT_PATH;
+      delete env.GITHUB_RUN_ID;
+      if (event) {
+        const eventFile = path.join(root, 'event.json');
+        fs.writeFileSync(eventFile, JSON.stringify(event));
+        Object.assign(env, { GITHUB_EVENT_NAME: 'schedule', GITHUB_EVENT_PATH: eventFile });
+      }
+      const res = spawnSync(process.execPath, [script, '--json', '--truth-file', truth], { encoding: 'utf8', env, cwd: root });
+      assert.equal(res.status, 0, res.stderr);
+      return { out: JSON.parse(res.stdout), reloaded: loadState(root), text: fs.readFileSync(path.join(root, STATE_PATH), 'utf8') };
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  const cases = [
+    // The committed checkpoint holds ACTION-001 in `holds`. Read as `{}`, an empty list would release it.
+    ['holds: []', rewritten(/^holds:\n(?: .*\n|\n)*?(?=^\S)/m, 'holds: []\n\n'), 'holds must be a mapping when present, found list'],
+    ['processed_event_keys: {}', rewritten(/^processed_event_keys: \[\]$/m, 'processed_event_keys: {}'), 'processed_event_keys must be a list when present, found mapping'],
+    ['event_journal: null', rewritten(/^event_journal: \[\]$/m, 'event_journal: null'), 'event_journal must be a list when present, found null'],
+  ];
+  for (const [name, text, detail] of cases) {
+    for (const event of [null, { schedule_time: '2026-10-04T22:00:00Z' }]) {
+      const label = `${name}${event ? ', with an event' : ''}`;
+      const bad = run(text, event);
+      assert.equal(bad.text, text, `${label}: the document is not rewritten`);
+      assert.equal(bad.out.duplicate, false, label);
+      assert.equal(bad.out.reconciliation.consistent, false, label);
+      assert.deepEqual(bad.out.reconciliation.findings.map((f) => f.code), [FINDINGS.DERIVED_STATE_INVALID], label);
+      assert.deepEqual(bad.out.reconciliation.findings[0].detail.problems, [{ code: SHAPE_INVALID, detail }], label);
+      assert.equal(bad.out.reconciliation.reduction.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID, label);
+      assert.equal(bad.out.decision.action, ACTIONS.REPORT_DRIFT, label);
+      assert.equal(bad.out.decision.advancement, 'NONE', label);
+
+      const rendered = renderHuman(buildStatus(process.cwd(), { state: bad.out.reconciliation.effective_state, dag: DAG, registry: [], reconciliation: bad.out.reconciliation }));
+      assert.match(rendered, /Reconciliation : DRIFT/, label);
+      assert.ok(rendered.includes(`DERIVED_STATE_INVALID`) && rendered.includes(detail), label);
+      assert.doesNotMatch(rendered, /CONSISTENT/, label);
+    }
+  }
+  assert.deepEqual(run(cases[0][1]).reloaded.holds, [], 'loadState() reads the list as written');
+
+  // Referent: the committed document in the same kind of root reconciles and waits on the hold.
+  const good = run(committedText, { schedule_time: '2026-10-04T22:00:00Z' });
   assert.equal(good.out.reconciliation.consistent, true, JSON.stringify(good.out.reconciliation.findings));
   assert.equal(good.out.decision.action, ACTIONS.WAIT_AUTHORITY);
 });
