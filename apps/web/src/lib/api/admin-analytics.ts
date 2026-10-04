@@ -187,3 +187,55 @@ export async function fetchAdminEvents(eventType?: string, limit = 50, offset = 
   qs.set("offset", String(offset));
   return apiGet<AdminEventList>(`/api/admin/events?${qs.toString()}`);
 }
+
+
+export type MissionControlHealth = "GREEN" | "YELLOW" | "RED" | "STALE" | "UNKNOWN";
+export type MissionControlEvidenceStatus = "PASS" | "FAIL" | "PENDING" | "SKIPPED" | "UNKNOWN";
+
+export interface ProjectMissionControlSnapshot {
+  generatedAt: string;
+  repository: string;
+  sourceMain: string | null;
+  freshness: {
+    status: "LIVE" | "DEGRADED";
+    github: "AVAILABLE" | "UNAVAILABLE";
+    detail: string | null;
+  };
+  health: MissionControlHealth;
+  workstreams: Array<{
+    id: string;
+    label: string;
+    issue: number | null;
+    pullRequest: number | null;
+    phase: string;
+    status: string;
+    progress: { completed: number | null; total: number | null; basis: string };
+    nextLegalAction: string;
+  }>;
+  pullRequests: Array<{
+    number: number;
+    title: string;
+    headSha: string | null;
+    branch: string | null;
+    draft: boolean | null;
+    mergeable: boolean | null;
+    mergeableState: string | null;
+    updatedAt: string | null;
+    checks: Array<{ name: string; status: MissionControlEvidenceStatus }>;
+    proof: { completed: number | null; total: number | null; basis: string };
+    health: MissionControlHealth;
+  }>;
+  blockers: Array<{ source: string; detail: string }>;
+  workers: Array<{
+    id: string;
+    kind: "CHATGPT" | "CLAUDE" | "KIMI" | "AUTOMATION" | "KEY" | "OTHER";
+    state: string;
+    packetId: string | null;
+    branch: string | null;
+    lastHeartbeatAt: string | null;
+  }>;
+}
+
+export async function fetchProjectMissionControl() {
+  return apiGet<ProjectMissionControlSnapshot>("/api/admin/mission-control");
+}
