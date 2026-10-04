@@ -23,9 +23,9 @@ workstreams:
     status: ACTIVE_BLOCKED
     current_pr: 120
     current_issue: 119
-    head: 124f36409271d3ad23cd0844474be9e740afe6c1
+    head: a046914d0f5f56eeedd9c330e812110d66d56015
     blocker:
-      - agent-control check failing
+      - final control-artifact/admission gate pending after semantic acceptance
     green_evidence:
       - server_build
       - web_build
@@ -42,7 +42,7 @@ workstreams:
       - 109
       - 111
       - 107
-    next_legal_action: diagnose PR 120 agent-control failure without weakening admission semantics
+    next_legal_action: finalize one control-only artifact at semantic head a046914d, rerun exact-head admission, review, RETURN; no merge
 
   memory_context_genome:
     status: ACTIVE_SEQUENCED
@@ -68,7 +68,7 @@ workstreams:
     status: ACTIVE_RESEARCH_CONVERGENCE
     current_pr: 128
     branch: docs/key-cognitive-archaeology-001
-    head: 687185513e3147e5d4f211e4335542a5a173957a
+    head: 4a7c2dff5781ffa8ddb4fa65f2ca12066126da3
     current_model:
       - K1_SELF_CONSTITUTION_AUTHORITY
       - K2_REALITY_EPISTEMIC_INTEGRITY
@@ -106,6 +106,66 @@ workstreams:
       - issue_117_dependency_remediation
       - issue_97_risk_based_verification_architecture
     next_legal_action: reconcile PR 114 with current main and preserve fail-closed proof semantics
+
+  mission_control:
+    status: IMPLEMENTING_READ_ONLY_PHASE_A
+    current_issue: 129
+    current_pr: 132
+    branch: impl/kf-meta-mission-control-readmodel-001
+    constraints:
+      - owner_admin_only
+      - read_only_first
+      - no_fake_progress_percentages
+      - exact_head_evidence
+      - no_control_authority_bypass
+    implemented:
+      - admin mission-control route
+      - live GitHub main and PR check aggregation
+      - evidence-backed progress bars
+      - degraded_unknown state when GitHub truth unavailable
+      - exact-head proof rail
+      - worker lanes remain unknown until trustworthy heartbeats exist
+    next_legal_action: prove PR 132 in CI and resolve review findings before widening to dependency graph or control actions
+
+  assurance_fabric:
+    status: QUEUED_FOR_IMPLEMENTATION_AFTER_MAP
+    current_issue: 130
+    current_pr: null
+    target:
+      - security
+      - proof_integrity
+      - runtime_surveillance
+      - edge_adversarial_failure_testing
+      - debugging_forensics
+      - product_quality
+      - adaptation_recovery
+      - KEY_AI_TEVV
+    constraints:
+      - converge_existing_97_113_114_115_117
+      - no_parallel_test_platform
+      - fail_closed
+      - no_production_chaos_without_explicit_authority
+    next_legal_action: execute ASSURANCE-MAP-001 against live main, then implement claim-evidence contracts and risk-derived proof compiler
+
+  continuous_learning_stream:
+    status: QUEUED_BEHIND_MEMORY_CONTRACTS_FOR_CANONICAL_CUTOVER
+    current_issue: 131
+    current_pr: null
+    existing_precursor: apps/server/src/modules/key-cortex/knowledge-ingestion.service.ts
+    known_reality:
+      - KnowledgeIngestionService currently dormant/unreachable
+      - ingestUrl records URL but does not fetch it
+    safe_parallel_work:
+      - source registry and observation contracts
+      - read-only discovery/retrieval
+      - provenance and shadow ingestion
+      - TEVV
+    constraints:
+      - Memory_M0_M1_before_canonical_persistence
+      - retrieved_not_truth
+      - no_web_content_authority_escalation
+      - no_access_control_bypass
+    next_legal_action: run LEARN-MAP-001 and implement source/observation contracts without creating a new permanent memory silo
 
   connector_world_fabric:
     status: ARCHITECTURE_AVAILABLE_NOT_ADMITTED
