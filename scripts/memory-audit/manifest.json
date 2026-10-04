@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "roots": [
+    "apps/server/src/modules/ai",
+    "apps/server/src/modules/key-cortex",
+    "packages/db/prisma",
+    "scripts"
+  ],
+  "components": [
+    {
+      "name": "AiMemoryService",
+      "path": "apps/server/src/modules/ai/ai-memory.service.ts",
+      "symbol": "AiMemoryService",
+      "required": true
+    },
+    {
+      "name": "SemanticMemoryService",
+      "path": "apps/server/src/modules/ai/semantic-memory.service.ts",
+      "symbol": "SemanticMemoryService",
+      "required": true
+    },
+    {
+      "name": "UnifiedMemoryWriterService",
+      "path": "apps/server/src/modules/key-cortex/unified-memory-writer.service.ts",
+      "symbol": "UnifiedMemoryWriterService",
+      "required": true
+    },
+    {
+      "name": "UnifiedMemoryRetrievalService",
+      "path": "apps/server/src/modules/key-cortex/unified-memory-retrieval.service.ts",
+      "symbol": "UnifiedMemoryRetrievalService",
+      "required": true
+    },
+    {
+      "name": "KeyCortexMemoryService",
+      "path": "apps/server/src/modules/key-cortex/key-cortex-memory.service.ts",
+      "symbol": "KeyCortexMemoryService",
+      "required": true
+    },
+    {
+      "name": "KeyCortexPromptContextService",
+      "path": "apps/server/src/modules/key-cortex/key-cortex-prompt-context.service.ts",
+      "symbol": "KeyCortexPromptContextService",
+      "required": true
+    },
+    {
+      "name": "KeyCortexQueryPipelineService",
+      "path": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+      "symbol": "KeyCortexQueryPipelineService",
+      "required": true
+    },
+    {
+      "name": "MemoryConsolidationService",
+      "path": "apps/server/src/modules/key-cortex/memory-consolidation.service.ts",
+      "symbol": "MemoryConsolidationService",
+      "required": true
+    },
+    {
+      "name": "KeyCortexCerebellumService",
+      "path": "apps/server/src/modules/key-cortex/key-cortex-cerebellum.service.ts",
+      "symbol": "KeyCortexCerebellumService",
+      "required": true
+    },
+    {
+      "name": "KeyCortexSalienceService",
+      "path": "apps/server/src/modules/key-cortex/key-cortex-salience.service.ts",
+      "symbol": "KeyCortexSalienceService",
+      "required": true
+    },
+    {
+      "name": "KeyCortexReflectionService",
+      "path": "apps/server/src/modules/key-cortex/key-cortex-reflection.service.ts",
+      "symbol": "KeyCortexReflectionService",
+      "required": true
+    },
+    {
+      "name": "KeyCortexMetacognitionService",
+      "path": "apps/server/src/modules/key-cortex/key-cortex-metacognition.service.ts",
+      "symbol": "KeyCortexMetacognitionService",
+      "required": true
+    },
+    {
+      "name": "KeyCortexEvolutionService",
+      "path": "apps/server/src/modules/key-cortex/key-cortex-evolution.service.ts",
+      "symbol": "KeyCortexEvolutionService",
+      "required": true
+    },
+    {
+      "name": "KeyCortexLearningService",
+      "path": "apps/server/src/modules/key-cortex/key-cortex-learning.service.ts",
+      "symbol": "KeyCortexLearningService",
+      "required": true
+    },
+    {
+      "name": "KnowledgeIngestionService",
+      "path": "apps/server/src/modules/key-cortex/knowledge-ingestion.service.ts",
+      "symbol": "KnowledgeIngestionService",
+      "required": true
+    },
+    {
+      "name": "SelfAssessmentService",
+      "path": "apps/server/src/modules/key-cortex/self-assessment.service.ts",
+      "symbol": "SelfAssessmentService",
+      "required": true
+    },
+    {
+      "name": "EvalHarnessService",
+      "path": "apps/server/src/modules/key-cortex/eval-harness.service.ts",
+      "symbol": "EvalHarnessService",
+      "required": true
+    }
+  ],
+  "methodProbes": [
+    {
+      "id": "learning.recordObservation.external-call",
+      "definitionFile": "apps/server/src/modules/key-cortex/key-cortex-learning.service.ts",
+      "regex": "\\.recordObservation\\s*\\(",
+      "minimumExternalMatches": 1
+    },
+    {
+      "id": "evolution.trackInteraction.external-call",
+      "definitionFile": "apps/server/src/modules/key-cortex/key-cortex-evolution.service.ts",
+      "regex": "\\.trackInteraction\\s*\\(",
+      "minimumExternalMatches": 1,
+      "allowMissing": true
+    },
+    {
+      "id": "evolution.learnPreferences.external-call",
+      "definitionFile": "apps/server/src/modules/key-cortex/key-cortex-evolution.service.ts",
+      "regex": "\\.learnPreferences\\s*\\(",
+      "minimumExternalMatches": 1,
+      "allowMissing": true
+    }
+  ]
+}
