@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { AuthGuard } from '../../core/auth/auth.guard';
+import { AdminGuard } from '../../core/auth/admin.guard';
+import { AssuranceController } from './assurance.controller';
 import { ProofObligationService } from './proof-obligation.service';
 
 const service = new ProofObligationService();
@@ -35,6 +38,7 @@ describe('ProofObligationService', () => {
       'CRITICAL_E2E',
       'NEGATIVE_CONTROLS',
       'EXACT_HEAD_REVIEW',
+      'POST_DEPLOY_VERIFY',
     ]));
   });
 
@@ -83,5 +87,33 @@ describe('ProofObligationService', () => {
 
   it('fails closed when the surface contract is incomplete', () => {
     expect(() => service.compile({ declaredRisk: 'R3', surfaces: { authTenancy: true } })).toThrow(BadRequestException);
+  });
+});
+
+
+describe('AssuranceController access contract', () => {
+  it('is wired behind AuthGuard + AdminGuard', () => {
+    const guards = Reflect.getMetadata('__guards__', AssuranceController) ?? [];
+    expect(guards).toContain(AuthGuard);
+    expect(guards).toContain(AdminGuard);
+  });
+
+  it('AdminGuard rejects a non-admin and accepts a super admin', () => {
+    const guard = new AdminGuard();
+    const context = (user: { id: string; role: string }) =>
+      ({
+        switchToHttp: () => ({
+          getRequest: () => ({ user }),
+        }),
+      }) as never;
+
+    expect(() => guard.canActivate(context({ id: 'u-1', role: 'MEMBER' }))).toThrow(ForbiddenException);
+    expect(guard.canActivate(context({ id: 'u-2', role: 'SUPER_ADMIN' }))).toBe(true);
+  });
+
+  it('authorized controller execution delegates to the compiler', () => {
+    const controller = new AssuranceController(service);
+    const out = controller.compile({ declaredRisk: 'R0', surfaces: empty });
+    expect(out).toMatchObject({ effectiveRisk: 'R0', riskEscalated: false });
   });
 });
