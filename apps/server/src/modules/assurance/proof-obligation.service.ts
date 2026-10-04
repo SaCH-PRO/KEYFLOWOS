@@ -7,16 +7,16 @@ export type RiskTier = (typeof RISK_TIERS)[number];
 export const assuranceInputSchema = z.object({
   declaredRisk: z.enum(RISK_TIERS),
   surfaces: z.object({
-    authTenancy: z.boolean().default(false),
-    moneyPayments: z.boolean().default(false),
-    destructiveData: z.boolean().default(false),
-    migration: z.boolean().default(false),
-    externalIntegration: z.boolean().default(false),
-    aiAgent: z.boolean().default(false),
-    concurrency: z.boolean().default(false),
-    infrastructure: z.boolean().default(false),
-    userJourney: z.boolean().default(false),
-  }),
+    authTenancy: z.boolean(),
+    moneyPayments: z.boolean(),
+    destructiveData: z.boolean(),
+    migration: z.boolean(),
+    externalIntegration: z.boolean(),
+    aiAgent: z.boolean(),
+    concurrency: z.boolean(),
+    infrastructure: z.boolean(),
+    userJourney: z.boolean(),
+  }).strict(),
 });
 
 export type AssuranceInput = z.infer<typeof assuranceInputSchema>;
@@ -73,7 +73,7 @@ function baseForRisk(risk: RiskTier): ProofObligation[] {
   if (rank[risk] >= rank.R1) out.push('UNIT_COMPONENT');
   if (rank[risk] >= rank.R2) out.push('INTEGRATION_API', 'REGRESSION');
   if (rank[risk] >= rank.R3) {
-    out.push('SECURITY_TENANT', 'CRITICAL_E2E', 'NEGATIVE_CONTROLS', 'EXACT_HEAD_REVIEW');
+    out.push('SECURITY_TENANT', 'CRITICAL_E2E', 'NEGATIVE_CONTROLS', 'EXACT_HEAD_REVIEW', 'POST_DEPLOY_VERIFY');
   }
   if (rank[risk] >= rank.R4) {
     out.push(
@@ -105,7 +105,7 @@ function reasonFor(id: ProofObligation, input: AssuranceInput, effectiveRisk: Ri
     case 'RESILIENCE_FAULT_INJECTION': return 'Systemic changes require bounded fault-injection/resilience proof.';
     case 'OBSERVABILITY': return 'Systemic changes require proof that failures are detectable and causally attributable.';
     case 'RECOVERY_ROLLBACK': return 'Systemic changes require a proven recovery/rollback path.';
-    case 'POST_DEPLOY_VERIFY': return 'Systemic changes require post-deploy verification bound to the released build.';
+    case 'POST_DEPLOY_VERIFY': return 'R3/R4 changes require post-deploy verification bound to the released build.';
     case 'INDEPENDENT_REVIEW': return 'Systemic changes require an independent semantic review.';
     case 'UAT_ACCESSIBILITY_COMPATIBILITY': return 'User-facing journeys require usability/accessibility/compatibility release proof.';
     default: return 'Required by assurance policy.';
