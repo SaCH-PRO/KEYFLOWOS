@@ -15,6 +15,7 @@ import {
   Home,
   ExternalLink,
   Brain,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isSuperAdmin, refreshWorkspace } from "@/lib/workspace";
@@ -28,6 +29,7 @@ const navItems = [
   { label: "AI Usage", href: "/admin/ai-usage", icon: Brain },
   { label: "Events", href: "/admin/events", icon: Bell },
   { label: "System Health", href: "/admin/system", icon: Cpu },
+  { label: "Mission Control", href: "/admin/mission-control", icon: Gauge },
   { label: "Feature Flags", href: "/admin/feature-flags", icon: Flag },
 ];
 
