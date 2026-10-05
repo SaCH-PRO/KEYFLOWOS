@@ -1,409 +1,45 @@
-packet_id: KF-META-AI-REVIEW-FAILOVER-001
-directive_message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-001
-directive_comment_id: 5876689636
-decision_message_id: CG-DECISION-META-AI-REVIEW-FAILOVER-001
-decision_comment_id: 5877357166
-continue_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
-continue_review_comment_id: 5881457102
-live_evidence_fix_directive_message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001
-live_evidence_fix_directive_comment_id: 5889027553
-correction_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
-correction_review_comment_id: 5901320677
-admission_review_message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004
-admission_review_comment_id: 5917653398
-ack_message_id: CC-ACK-META-AI-REVIEW-FAILOVER-ADMIT-004
-ack_comment_id: 5917678572
-prior_ack_message_ids:
-  - CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001   # 5881559355
-  - CC-ACK-META-AI-REVIEW-FAILOVER-ADMIT-001
-  - CC-ACK-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001   # 5896173916
-  - CC-ACK-META-AI-REVIEW-FAILOVER-CORRECTION-003   # 5916562968
-progress_message_ids:
-  - CC-PROGRESS-META-AI-REVIEW-FAILOVER-001   # 5881729832
-  - CC-PROGRESS-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001   # 5896432790
-  - CC-PROGRESS-META-AI-REVIEW-FAILOVER-CORRECTION-003   # 5917557490; duplicate-RETURN and loop-blocker report
-momentum_message_ids: []
-# This file is a pre-RETURN record (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001).
-# The RETURN is posted on #80 after every exact-head check on the head that
-# carries this file has finished, with no further branch mutation. That RETURN
-# is the final evidence envelope. lib/return-evidence.mjs checks this file on
-# every run of the portable suite.
-return_status: AWAITING_POSTCHECK_RETURN
-return_message_id: null
-previous_return_message_ids:
-  - CC-RETURN-META-AI-REVIEW-FAILOVER-001   # for semantic head b70dff17 at PR head ae3e1d2b; superseded
-  - CC-RETURN-META-AI-REVIEW-FAILOVER-002   # 5896726468, for semantic head c40ed180 at PR head 7fe3db96; CHANGES_REQUIRED by CORRECTION-003
-  - CC-RETURN-META-AI-REVIEW-FAILOVER-003   # 5917337547 and 5917339877 (one id posted twice by two sessions; same heads and verdict), for semantic head 44e894c6 at PR head d42659b7; ACCEPT_FOR_ADMISSION by ADMIT-004
-never_posted_return_message_ids: []
-source_main: 4eba59ebc28230f2d114cad852304a9f791b47d2
-source_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb
-previous_source_heads:
-  - b70dff17bf6d0c71791cd9e62ae8bb8096ea34d4   # semantics before the live-evidence correction
-  - c40ed180a34981b05627b185d73313357eca5883   # semantics before the Copilot evidence-binding correction (CORRECTION-003)
-implementation_branch: impl/kf-meta-ai-review-failover-001
-pr_number: 104
-state: RECORDING_ADMISSION_EVIDENCE
-health: GREEN
-scope_changed: true
-scope_change_authority: CG-DECISION-META-AI-REVIEW-FAILOVER-001 / 5877357166 (option A; Kimi removed; admission-order correction added); CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001 / 5881457102; CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001 / 5889027553; CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003 / 5901320677; CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004 / 5917653398 (control-only admission-evidence record)
+packet_id: KF-KEY-NATIVE-CAPACITY-SHADOW-001
+tracking_issue: 138
+source_main: 110532883411007787f62de35e0a951aa1c16cfa
+source_head: 6f2a3f1519f3af7059b49f4ef381b0cd6286ccdf
+implementation_branch: impl/kf-key-native-capacity-shadow-001
+pr_number: 139
+state: PROVING
+health: YELLOW
+scope_changed: false
 production_touched: false
-review_status: ACCEPT_FOR_ADMISSION
+review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
 merge_authority: false
-implementer: claude
+implementer: chatgpt
 
-# Recorded by Claude as directed by CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004.
-# The record alone proves nothing: admission checks every entry against the
-# live bot review and the live #80 comment it cites (lib/semantic-review.mjs).
-semantic_review:
-  implementer: claude
-  reviews:
-    - provider: copilot
-      reviewer: copilot-pull-request-reviewer[bot]
-      reviewed_head: d42659b78a632e965a643aa8e83ee47eefcf1f87
-      outcome: NOT_RUN
-      reason: quota_exhausted
-      unresolved_substantive_findings: []
-      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/104#pullrequestreview-5370148236
-    - provider: chatgpt
-      reviewer: chatgpt
-      reviewed_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb
-      outcome: PASS
-      reason: null
-      unresolved_substantive_findings: []
-      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5917653398
+# Branch artifact is intentionally pre-RETURN. Exact-head checks and independent
+# review occur after this artifact exists and are reported in the eventual RETURN.
+return_status: AWAITING_POSTCHECK_RETURN
+return_message_id: null
+previous_return_message_ids: []
+never_posted_return_message_ids: []
 
 summary: >
-  Admission now requires an independent semantic review through one
-  provider-neutral contract, scripts/agent-control/lib/semantic-review.mjs,
-  which evaluateAdmission consumes. Copilot is the preferred reviewer. ChatGPT
-  is the one approved fallback, and only when Copilot is recorded and evidenced
-  on the PR as NOT_RUN for a capacity, quota or service reason. ChatGPT writes
-  the semantic_review record at admission. The admission path checks the
-  record against live evidence: the bot's PR reviews, and the cited #80
-  REVIEW, read through the admitted envelope parser. Every failure mode the
-  directive names fails closed. The PR 103 admission-order race is corrected
-  in three ways. A pending or owed required run blocks admission. Auto-merge
-  takes a second complete snapshot immediately before the merge call. The docs
-  require every manual merge to pass the same evaluator first.
-  Live-evidence correction (CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001):
-  the admission path reads the cited #80 comment through REST, where `url` is
-  the API URL. The ChatGPT evidence is now keyed on the comment's html_url, so a
-  genuine fallback review at the cited location can match its record.
-  Copilot evidence-binding correction (CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003):
-  a Copilot record is matched to the live bot review at both reviewed_head and
-  evidence_location (F1). The NOT_RUN machine reason is derived from the live
-  bot body and must equal the recorded one; an unknown unavailable body
-  derives none and cannot authorize the fallback (F2). A Copilot PASS needs a
-  readable finding count on every review that ran at its head; an unreadable
-  count fails closed instead of reading as zero (F3).
-
-characterization:
-  review_substrate_on_main: >
-    At 4eba59eb the only AI-review element was return-evidence.mjs AI_REVIEW_GATE
-    = 'fresh Copilot review', a pre-RETURN label. admission.mjs and
-    auto-merge-admitted.mjs had no review input, and there was no Codex machinery.
-    Nothing was removed; the contract is new code on main (option A).
-  pr_103_race: >
-    From the GitHub API: the head was 5dbfac61. ready_for_review came at 19:09:33
-    and triggered an Agent Control Gate run at 19:09:36. A manual merge commit,
-    4eba59eb, landed at 19:09:40, outside the evaluator. At 19:09:48 the run
-    concluded failure (review_status was still PENDING_CHATGPT_REVIEW).
-  live_review_evidence_on_pr_103: >
-    The Copilot bot filed two reviews. At 75b43f00, the semantic head, it reviewed
-    and wrote "Changes recommended, Findings: 1". At 5dbfac61 it wrote "unable to
-    review ... quota limit". Both are fixtures in semantic-review.spec. They shaped
-    three rules. A review that ran is not a pass. A Copilot PASS must list
-    dispositioned_findings. One provider may give different outcomes at
-    different heads.
-  live_evidence_defect: >
-    Found at admission (CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001). At
-    b70dff17, chatgptReviewEvidence took `url` from normalizeComment, which
-    prefers `c.url`. auto-merge-admitted.mjs fetches the cited comment with GET
-    /repos/{repo}/issues/comments/{id}, and that REST shape has `url` =
-    https://api.github.com/... next to `html_url`. It only fetches an
-    evidence_location in the #80 browser form, so no record could match, and
-    every ChatGPT fallback failed closed as live_evidence_missing. The spec
-    fixture had html_url alone, so the suites never saw the real shape.
-  correction_commit: >
-    6b40df3a ("fix(agent-control): canonicalize ChatGPT review URL") made the
-    one-line code change: url = comment.html_url when present, else the
-    normalized url, which is already the browser URL in the gh shape. It was
-    authored by Sachin Dookie after the directive, not by Claude, and was
-    pushed to this branch with no test. Claude verified it independently.
-    c40ed180 adds the regression, the replay of the failing live path and
-    the negative control. No other line of semantic-review.mjs or
-    control-envelope.mjs changed.
-  correction_003: >
-    CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003 reviewed 7fe3db96 and
-    returned CHANGES_REQUIRED with three HIGH findings in semantic-review.mjs.
-    After that review the operator pushed 718085fc and 3e9911ec (a fix and
-    tests), then reverted both in ec91b6e8 and ddce69f4 ("preserve independent
-    reviewer boundary"; "leave PR 104 correction to builder"). The tree at
-    ddce69f4 equals 7fe3db96. Claude built the correction on that tree without
-    reusing the reverted commits; it is semantic head 44e894c6. Only the live
-    bot body observed on PR 103 and every PR 104 head ("... has reached their
-    quota limit.") maps to a reason (quota_exhausted). capacity_exhausted and
-    service_unavailable stay valid record values, but no live Copilot body
-    derives them yet, so a Copilot NOT_RUN with those reasons fails closed.
-    The admission.spec fixture's live Copilot evidence had url null and no
-    finding count, the exact F1/F3 shape; it now carries the cited URL and a
-    readable count. No assertion was removed or loosened.
-  discoveries:
-    - >
-      The local worker picks only the newest authority. Two REVIEWs 3s apart
-      (5881457102 for this packet, 5881457544 for the web-Sentry queue) meant it
-      processed the second and never woke for this packet. Authority can be
-      shadowed without any error. This run executed the packet interactively; the
-      worker selector is unchanged (out of scope).
-    - >
-      docs/development/KEYFLOWOS_AUTONOMOUS_AGENT_ROLES.md, a successor-programme
-      document, still says "Copilot reviews" and mentions Kimi as an optional
-      challenger. It is not changed here, because the successor programme is
-      INACTIVE and the change is outside the minimum scope. It is raised for
-      ChatGPT.
-    - >
-      programme-state.yaml is stale against the authority messages since
-      CG-DIRECTIVE-META-STATE-RECONCILE-002, so the autopilot reports
-      DERIVED_STATE_STALE_AUTHORITY every hour. Re-deriving it is not in this
-      directive's scope.
-
-design:
-  contract: >
-    semantic_review in claude-return.yaml has implementer and reviews[]. Each
-    entry has provider, reviewer, reviewed_head, outcome (PASS, NOT_RUN or
-    CHANGES_REQUIRED), reason, unresolved_substantive_findings and
-    evidence_location. A copilot PASS also needs dispositioned_findings. The
-    approved identities are copilot-pull-request-reviewer[bot] (type Bot) and
-    chatgpt.
-  exact_head_binding: >
-    reviewed_head is the source_head, the PR head, or a commit whose lineage the
-    compare API proves. That commit descends from source_head, is an ancestor of
-    the PR head, and differs from source_head only under .agent-control/.
-  admission_order: >
-    TRANSITION_TRIGGERS maps each PR timeline event to the required workflows it
-    re-runs (reopened -> all five; ready_for_review, converted_to_draft, renamed,
-    base_ref_changed -> Agent Control Gate). This follows each workflow's
-    on.pull_request types. recheckBeforeMerge requires two eligible verdicts at
-    the same head and base.
+  The semantic implementation adds a read-only cognitive dependency scanner,
+  procedure motif miner, derived report builder, deterministic tests and a
+  read-only GitHub Actions shadow workflow. The analyzers create evidence and
+  candidate patterns only. They do not call AI providers, mutate application
+  state, promote procedures, alter authority, or claim model independence from
+  static absence alone. Current branch evidence remains pre-RETURN.
 
 changed_files:
   semantic:
-    - scripts/agent-control/lib/semantic-review.mjs (new; one-line live-evidence correction in 6b40df3a; Copilot evidence binding in 44e894c6)
-    - scripts/agent-control/lib/admission.mjs
-    - scripts/agent-control/auto-merge-admitted.mjs
-    - scripts/agent-control/lib/return-evidence.mjs
-    - scripts/agent-control/negative-controls.yaml
-    - scripts/agent-control/tests/semantic-review.spec.mjs (new)
-    - scripts/agent-control/tests/admission.spec.mjs
-    - scripts/agent-control/tests/return-evidence.spec.mjs
-    - scripts/agent-control/tests/reconcile.spec.mjs
-    - scripts/agent-control/tests/yaml.spec.mjs
-    - docs/development/AGENT_CONTROL_PLANE.md
-    - docs/development/AGENT_AUTOPILOT_OPERATIONS.md
+    - scripts/key-native-capacity/cognitive-dependency-scan.mjs
+    - scripts/key-native-capacity/procedure-motif-miner.mjs
+    - scripts/key-native-capacity/build-report.mjs
+    - scripts/key-native-capacity/native-capacity.spec.mjs
+    - .github/workflows/key-native-capacity-shadow.yml
   control_only:
     - .agent-control/active-packet.yaml
     - .agent-control/claude-return.yaml
 
-proof_matrix:
-  - obligation: Copilot capacity exhaustion no longer blocks progress when the ChatGPT fallback has reviewed the exact head
-    evidence_scope: semantic_head
-    proof: semantic-review.spec "Copilot quota exhaustion no longer blocks" uses the real PR 103 quota review as NOT_RUN evidence. The contract is satisfied with primary NOT_RUN and ChatGPT as the passing provider.
-    result: PROVEN
-  - obligation: a primary reviewer that ran continues to satisfy the same contract
-    evidence_scope: semantic_head
-    proof: semantic-review.spec "normal Copilot review satisfies the contract" and admission.spec "a fully admitted exact head is eligible"
-    result: PROVEN
-  - obligation: self-review fails closed
-    evidence_scope: semantic_head
-    proof: NC self-review, as reviewer and as provider; NC-SR-SELF-REVIEW live
-    result: PROVEN
-  - obligation: NOT_RUN can never satisfy PASS
-    evidence_scope: semantic_head
-    proof: NC NOT_RUN is never PASS and NC fake PASS on NOT_RUN (real PR 103 review); NC-SR-NOT-RUN-COUNTED-AS-PASS, NC-SR-FAKE-PASS-ON-NOT-RUN and NC-SR-COPILOT-UNAVAILABLE-UNPARSED live
-    result: PROVEN
-  - obligation: stale-head fallback evidence fails closed
-    evidence_scope: semantic_head
-    proof: NC stale-head review (another sha, and a lineage with a non-control file) and NC stale live evidence; NC-SR-STALE-HEAD live
-    result: PROVEN
-  - obligation: missing reviewer identity and missing evidence fail closed
-    evidence_scope: semantic_head
-    proof: NC missing reviewer identity and NC missing evidence fails closed at every level; NC-SR-MISSING-REVIEWER-IDENTITY live
-    result: PROVEN
-  - obligation: fallback without capacity-unavailable evidence fails closed
-    evidence_scope: semantic_head
-    proof: NC fallback without capacity-unavailable evidence (no NOT_RUN, no reason, invalid reason, no live bot evidence); NC-SR-FALLBACK-WITHOUT-PRIMARY-UNAVAILABLE live
-    result: PROVEN
-  - obligation: ChatGPT is never represented as Copilot, and no unapproved provider exists
-    evidence_scope: semantic_head
-    proof: NC-SR-PROVIDER-IMPERSONATION and NC-SR-KIMI-PROVIDER live; NC impersonated Copilot rejects a User account with the bot login
-    result: PROVEN
-  - obligation: contradictory evidence and unresolved or undispositioned findings fail closed
-    evidence_scope: semantic_head
-    proof: NC contradictory evidence, NC unresolved substantive findings, NC undispositioned Copilot findings, NC ChatGPT live finding count; NC-SR-UNDISPOSITIONED-COPILOT-FINDINGS, NC-SR-FORGED-CHATGPT-AUTHOR and NC-SR-EDITED-CHATGPT-EVIDENCE live
-    result: PROVEN
-  - obligation: ChatGPT live-review evidence from a real REST comment (url and html_url) matches its evidence_location, only when genuine and matching
-    evidence_scope: semantic_head
-    proof: >
-      semantic-review.spec. The "NC REST evidence URL" tests use the live REST
-      responses for comment 5887238277 and Copilot review 5346592135. They
-      replay the PR 104 admission evaluation that failed live, and it is now
-      satisfied. "REST evidence still satisfies only genuine, matching
-      evidence" covers another comment, the API url as evidence_location, an
-      edit, another author, another sender, another head, a hidden finding and
-      no html_url; each fails closed with its reason. "gh-shaped comments
-      still match". NC-SR-REST-EVIDENCE-URL is live.
-    result: PROVEN
-  - obligation: a Copilot record is bound to the live review it cites by reviewed_head and evidence_location (CG104-F1)
-    evidence_scope: semantic_head
-    proof: >
-      The "NC Copilot evidence location" test covers records of either
-      outcome citing another URL, a real URL of a review at another head, a
-      citation of the unavailable review beside one that ran, and a live review
-      without a URL; each fails closed, and the genuine citation is still
-      accepted.
-      NC-SR-COPILOT-EVIDENCE-LOCATION live.
-    result: PROVEN
-  - obligation: the Copilot NOT_RUN reason is derived from live evidence and must match the record; an unknown reason never authorizes fallback (CG104-F2)
-    evidence_scope: semantic_head
-    proof: >
-      semantic-review.spec "NC Copilot NOT_RUN reason mismatch" (the quota
-      body recorded as capacity_exhausted or service_unavailable is
-      contradicted) and "NC Copilot NOT_RUN unknown reason" (an unrecognised
-      unavailable body fails as not_run_reason_not_evidenced for every
-      recorded reason). NC-SR-NOT-RUN-REASON-MISMATCH and
-      NC-SR-NOT-RUN-REASON-UNKNOWN live.
-    result: PROVEN
-  - obligation: a Copilot PASS requires a parseable live finding count; unknown format is never zero findings (CG104-F3)
-    evidence_scope: semantic_head
-    proof: >
-      semantic-review.spec "NC Copilot unreadable findings": no count, a
-      non-numeric count, an empty count and an empty body each fail as
-      reviewer_findings_count_unreadable, with or without dispositions, as does
-      an unreadable second review at the same head; a readable zero still
-      satisfies. NC-SR-COPILOT-FINDINGS-UNREADABLE live.
-    result: PROVEN
-  - obligation: the admission path consumes the contract
-    evidence_scope: semantic_head
-    proof: NC admission consumes semantic review and NC admission consumes live review evidence; NC-ADMISSION-SEMANTIC-REVIEW-BYPASS live
-    result: PROVEN
-  - obligation: no merge while a newly triggered admission workflow run for the head is pending, owed or failing
-    evidence_scope: semantic_head
-    proof: >
-      admission.spec: NC pending re-run (in-progress, and queued beside newer
-      green), NC PR 103 replay (the recorded timeline; the owed run is not yet
-      listed), the settled and failed replays, reopened, and NC unknown
-      timeline. NC-ADMISSION-PENDING-RERUN, NC-ADMISSION-PR103-TRANSITION and
-      NC-ADMISSION-TRANSITIONS-UNKNOWN live.
-    result: PROVEN
-  - obligation: merge authority is evaluated against the current head and complete required-check set immediately before merge
-    evidence_scope: semantic_head
-    proof: NC recheck before merge (ineligible second snapshot; moved head) and NC merge path shape; NC-ADMISSION-RECHECK-IGNORED, NC-ADMISSION-RECHECK-HEAD-MOVED and NC-AUTOMERGE-SINGLE-SNAPSHOT live
-    result: PROVEN
-  - obligation: a manual merge cannot bypass the evaluator
-    evidence_scope: semantic_head
-    proof: >
-      Not provable in repository code. The docs make the evaluator mandatory
-      before every manual merge. GitHub enforcement needs branch-protection or
-      ruleset required checks, which is a repository-admin setting.
-    result: HUMAN_GATED
-  - obligation: pre-RETURN claims about the review under any provider name are caught
-    evidence_scope: semantic_head
-    proof: NC review alias prose and NC review alias scope; NC-RETURN-REVIEW-ALIAS-PROSE live
-    result: PROVEN
-  - obligation: no prior gate or negative control is weakened
-    evidence_scope: semantic_head
-    proof: >
-      The manifest holds 97 controls: the 72 from 4eba59eb, the 20 added at
-      b70dff17, NC-SR-REST-EVIDENCE-URL, and four added at 44e894c6. At
-      d42659b7 (tree identical to 44e894c6 outside .agent-control/) on a
-      Windows host, 97/97 are live and 0 are vacuous; see negative_controls.
-      Prior tests keep all their assertions; three pins are retargeted to this
-      packet, and reconcile.spec gains one exclusion. The CORRECTION-003 change
-      extends one deepEqual in semantic-review.spec with the new reason field
-      and corrects the admission.spec live fixture; no assertion is removed.
-    result: PROVEN
-  - obligation: portable and Windows suites at the semantic head
-    evidence_scope: semantic_head
-    proof: >
-      see tests. Both suites ran on a Windows host with authenticated gh at
-      d42659b7, whose tree equals 44e894c6 outside .agent-control/: portable
-      338/338 and Windows 19/19, none skipped.
-    result: PROVEN
-  - obligation: all required exact-head workflows green and the independent semantic review on the final PR head, with no unresolved substantive finding
-    evidence_scope: exact_head
-    proof: >
-      Cannot be recorded in the commit it is about. See exact_head_proof. The
-      RETURN on #80 reports the outcome once it is known.
-    result: PENDING
-
-tests:
-  command_portable: node --test scripts/agent-control/tests/*.spec.mjs
-  command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  at: d42659b7   # tree equals 44e894c6 outside .agent-control/
-  host: Windows 11 with authenticated gh (Claude session, 2026-09-30)
-  portable_total: 338
-  portable_passed: 338
-  portable_skipped: 0
-  windows_total: 19
-  windows_passed: 19
-  earlier_run_at_44e894c6: Linux container with PowerShell 7.4.6 and no authenticated gh; portable 337/338 with 1 skipped (the gh-dependent cursor test); Windows suite not runnable there
-  baseline_before_change: 287 portable, 19 windows, at 4eba59eb
-  previous_semantic_head: 333 portable, 19 windows, at c40ed180 (operator host)
-  earlier_semantic_head: 329 portable, 19 windows, at b70dff17
-  failed: 0
-  skipped: 0
-  dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
-  added: 33 in semantic-review.spec (4 for the live-evidence correction, 5 for CORRECTION-003), 15 in admission.spec, 3 in return-evidence.spec
-
-negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref c40ed180
-  baseline_before_change: 72 controls in the manifest at 4eba59eb
-  added:
-    - NC-SR-SELF-REVIEW
-    - NC-SR-NOT-RUN-COUNTED-AS-PASS
-    - NC-SR-FAKE-PASS-ON-NOT-RUN
-    - NC-SR-COPILOT-UNAVAILABLE-UNPARSED
-    - NC-SR-STALE-HEAD
-    - NC-SR-MISSING-REVIEWER-IDENTITY
-    - NC-SR-FALLBACK-WITHOUT-PRIMARY-UNAVAILABLE
-    - NC-SR-PROVIDER-IMPERSONATION
-    - NC-SR-KIMI-PROVIDER
-    - NC-SR-UNDISPOSITIONED-COPILOT-FINDINGS
-    - NC-SR-FORGED-CHATGPT-AUTHOR
-    - NC-SR-EDITED-CHATGPT-EVIDENCE
-    - NC-ADMISSION-SEMANTIC-REVIEW-BYPASS
-    - NC-ADMISSION-PENDING-RERUN
-    - NC-ADMISSION-PR103-TRANSITION
-    - NC-ADMISSION-TRANSITIONS-UNKNOWN
-    - NC-ADMISSION-RECHECK-IGNORED
-    - NC-ADMISSION-RECHECK-HEAD-MOVED
-    - NC-AUTOMERGE-SINGLE-SNAPSHOT
-    - NC-RETURN-REVIEW-ALIAS-PROSE
-    - NC-SR-REST-EVIDENCE-URL   # live-evidence correction; restores url = c.url from b70dff17
-    - NC-SR-COPILOT-EVIDENCE-LOCATION     # CORRECTION-003 F1
-    - NC-SR-NOT-RUN-REASON-MISMATCH       # CORRECTION-003 F2
-    - NC-SR-NOT-RUN-REASON-UNKNOWN        # CORRECTION-003 F2
-    - NC-SR-COPILOT-FINDINGS-UNREADABLE   # CORRECTION-003 F3
-  result_at_d42659b7_windows_host: >
-    97/97 live, 0 vacuous, on a Windows host at d42659b7 (tree equals 44e894c6
-    outside .agent-control/), including all nine NC-SR controls.
-  result_at_semantic_head: >
-    88/97 live at 44e894c6 on Linux, including all four CORRECTION-003
-    controls, NC-SR-REST-EVIDENCE-URL and the three controls that mutate this
-    artifact. The other 9 (NC-WORKER-CMDLET-EXISTS, -RETRY-BOUNDED,
-    -HELD-IS-NOT-RETRIED, -WORKTREE-ISOLATION, -WORKTREE-ROOT-GUARD,
-    -CLEANUP-KEEPS-UNPUSHED, -CLEANUP-KEEPS-UNCOMMITTED, -INSTALL-CONTRACT,
-    -PAUSE) report VACUOUS because their tests/windows proofs cannot pass off
-    Windows; the windows-latest job runs the full manifest on the exact head.
-  result_at_c40ed180: >
-    93/93 live at c40ed180 (operator host).
-  result_at_previous_semantic_head: >
-    91/92 live at b70dff17. NC-RETURN-ARTIFACT-PASS-PROSE could not apply its
-    mutation there, because the interim artifact lacked its target sentence.
-  artifact_commit_rerun: the controls that mutate this file are re-run at the artifact commit; the result is in the RETURN
-
-exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
+exact_head_proof:
   - gate: CI/CD Pipeline
     status: PENDING
   - gate: Agent Control Gate
@@ -417,130 +53,34 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
   - gate: independent semantic review
     status: PENDING
 
-ci:
-  exact_head: >
-    PENDING. Required checks run on the PR head that carries this artifact
-    commit. An artifact cannot record CI for the commit that contains it. No
-    RETURN for this head exists yet.
+proof_matrix:
+  - obligation: analyzers are deterministic over fixed inputs
+    evidence_scope: semantic_head
+    proof: native-capacity.spec.mjs covers dependency classification, duplicate-key fail-closed parsing and no-authority motif candidates
+    result: PROVEN
+  - obligation: workflow has read-only repository and issue permissions
+    evidence_scope: semantic_head
+    proof: key-native-capacity-shadow.yml declares contents read and issues read only
+    result: PROVEN
+  - obligation: procedure candidates cannot become authority
+    evidence_scope: semantic_head
+    proof: motif output hard-codes status CANDIDATE_PATTERN and authority NONE; no activation path exists in this packet
+    result: PROVEN
+  - obligation: model-free classification does not claim independence
+    evidence_scope: semantic_head
+    proof: scanner emits a heuristic-only disclaimer and requires separate reachability/transitive proof
+    result: PROVEN
+  - obligation: exact-head verification obligations for this branch
+    evidence_scope: exact_head
+    proof: awaiting checks on the head carrying these control artifacts
+    result: PENDING
 
-ai_review:
-  implementer: claude
-  primary: copilot-pull-request-reviewer[bot]
-  fallback: chatgpt
-  final_head_review: >
-    Recorded in semantic_review above, from CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004
-    (5917653398, reviewed_head 44e894c6, ACCEPT_FOR_ADMISSION) and Copilot
-    NOT_RUN quota_exhausted at d42659b7 (5370148236). The exact-head gate
-    below stays PENDING until the admission path evaluates the record against
-    live evidence on the head that carries this file.
-  self_review: none; Claude does not review this change
-  findings: []
-  stale:
-    - comment: 5887238277
-      message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-001
-      reviewed_head: ae3e1d2b0ac07447e0febef82cb5c93a00df58a5
-      why: >
-        It is about the semantics of b70dff17. The live-evidence correction
-        changed those semantics, so it cannot support admission of this head,
-        and ACCEPT_FOR_ADMISSION was never recorded against ae3e1d2b.
-    - comment: 5901320677
-      message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003
-      reviewed_head: 7fe3db96d431d5cedb09e25cf1b45fe299cb2e59
-      why: >
-        CHANGES_REQUIRED on the semantics of c40ed180 (F1, F2, F3). It is
-        addressed by 44e894c6 and is not a review of these semantics.
-  copilot_at_intermediate_heads: >
-    The bot answered "unable to review ... quota limit" at b70dff17
-    (5346577112), ae3e1d2b (5346592135), 6b40df3a (5352194550), 7fe3db96
-    (5356888797), 718085fc (5369376954), 3e9911ec (5369381085) and ddce69f4
-    (5369459934).
+residuals:
+  - static scanning cannot prove runtime reachability or transitive model dependence
+  - motif frequency cannot prove correctness, usefulness or safe autonomy
+  - scheduled execution becomes durable only after this workflow is reviewed and merged
+  - broader cognitive offload and procedure promotion remain separate benchmark-gated work
 
-scope_ledger:
-  declared:
-    - fresh branch impl/kf-meta-ai-review-failover-001 from main 4eba59eb
-    - provider-neutral semantic-review evaluator/policy surface built fresh on main
-    - exact-head binding and fail-closed behaviour for every named failure mode
-    - NOT_RUN never PASS; ChatGPT never Copilot; no Kimi path
-    - admission-order race correction
-    - deterministic tests and live negative controls
-    - operator-visible review state and recovery documentation
-    - PR and RETURN
-    - live-evidence correction, REST regression and negative control (CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001)
-    - Copilot evidence binding F1-F3, regressions and four negative controls (CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003)
-    - control-only record of the admitted semantic-review evidence (CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004)
-  resolved: [all declared items except those under remaining]
-  remaining:
-    - exact-head checks on the head that carries this file (PENDING)
-    - RETURN on #80 once those checks finish, under a new unique message_id
-    - admission decision; PR 104 is still a draft, and admission refuses a draft (pr_is_draft), so marking it ready is for ChatGPT or the operator
-  deferred:
-    - item: GitHub branch-protection or ruleset required checks on main
-      reason: repository-admin setting; HUMAN_GATED; the docs make the evaluator mandatory meanwhile
-    - item: KEYFLOWOS_AUTONOMOUS_AGENT_ROLES.md wording (Copilot reviews; Kimi mention)
-      reason: inactive successor-programme document, outside the minimum scope; raised for ChatGPT
-    - item: worker selector shadowing an older authority when two arrive together
-      reason: outside this directive; raised as a discovery
-  dropped:
-    - item: removing Codex-trigger machinery
-      reason: none exists on main (confirmed in the CONTRADICTION and again at 4eba59eb)
-  superseded:
-    - item: PR 94 (impl/kf-ai-pr-review-gate-001)
-      by: this packet, per CG-DECISION-META-AI-REVIEW-FAILOVER-001; PR 94 remains historical/characterization evidence
-
-residual_risks:
-  - >
-    A person with merge rights can still merge by hand without running the
-    evaluator. Only GitHub branch protection or a ruleset enforces required
-    checks for a manual merge. That setting is HUMAN_GATED.
-  - >
-    Reviewer identity on #80 is the envelope sender plus the authorized-author
-    allowlist, and both agents post from the same GitHub account. The contract
-    relies on the same trust model as all #80 authority. It cannot tell a
-    ChatGPT-authored REVIEW from one typed by another agent under that account.
-  - >
-    TRANSITION_TRIGGERS mirrors the workflows' on.pull_request types. If a
-    required workflow's triggers change, the map must change too. admission.spec
-    checks the gate's types and that every mapped workflow is required.
-  - >
-    The Copilot finding count is parsed from the bot's overview text
-    ("**Findings:** N"). If GitHub changes that format, a Copilot PASS fails
-    closed as reviewer_findings_count_unreadable until the parser learns the
-    new format (CORRECTION-003 F3).
-  - >
-    Only the observed quota-limit body maps to a Copilot NOT_RUN reason. A
-    genuine capacity or service outage worded differently fails closed and
-    blocks the ChatGPT fallback until its body is added to
-    COPILOT_NOT_RUN_REASONS under review (CORRECTION-003 F2).
-
-rollback_floor:
-  sha: 4eba59ebc28230f2d114cad852304a9f791b47d2
-  method: revert the squash commit of this PR
-  effect: restores the previous admission evaluator with no review input; no data, schema or production state
-
-security:
-  local_hawkscan: not run; HAWK_API_KEY unset and no app running; no application code touched. DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
-
-unresolved_contradictions: []
-contradictions_disposed:
-  - id: CC-CONTRADICTION-AI-PR-REVIEW-GATE-001
-    disposition: SUPERSEDED_BY_REVIEWER_FAILOVER (CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-001 authority_decision)
-  - id: CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-001
-    disposition: resolved by CG-DECISION-META-AI-REVIEW-FAILOVER-001 (option A) and CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001
-  - id: CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001
-    disposition: accepted by CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001, which released the bounded correction proved at c40ed180
-review_findings_disposed:
-  - id: CG104-F1-COPILOT-EVIDENCE-LOCATION
-    disposition: corrected at 44e894c6; NC-SR-COPILOT-EVIDENCE-LOCATION
-  - id: CG104-F2-NOTRUN-REASON-LIVE-BINDING
-    disposition: corrected at 44e894c6; NC-SR-NOT-RUN-REASON-MISMATCH, NC-SR-NOT-RUN-REASON-UNKNOWN
-  - id: CG104-F3-UNPARSEABLE-FINDINGS-FAILOPEN
-    disposition: corrected at 44e894c6; NC-SR-COPILOT-FINDINGS-UNREADABLE
-
-next_action: >
-  Wait for every exact-head check on the head carrying this file, then post the
-  RETURN on #80 once, under a new unique message_id, without mutating the
-  branch. ChatGPT then decides admission; the admission path evaluates the
-  semantic_review record above against live evidence. Claude does not review
-  this change. Do not merge. ACTION-001 stays held, the platform programme
-  stays inactive, and the queued closed-loop/memory/KEY work waits for this
-  packet's admission and checkpoint.
+next_legal_action: >
+  Wait for exact-head checks on the control-artifact head and independent review.
+  Do not post RETURN, merge, activate procedures, or infer authority before then.
