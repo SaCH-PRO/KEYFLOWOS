@@ -33,7 +33,9 @@
     "architecture:atlas:check": "node scripts/architecture/generate-atlas.mjs --check",
     "architecture:atlas:test": "node --test scripts/architecture/generate-atlas.spec.mjs",
     "architecture:atlas:intelligence": "node scripts/architecture/sync-atlas-intelligence.mjs",
-    "architecture:atlas:intelligence:test": "node --test scripts/architecture/sync-atlas-intelligence.spec.mjs"
+    "architecture:atlas:intelligence:test": "node --test scripts/architecture/sync-atlas-intelligence.spec.mjs",
+    "architecture:atlas:packets": "node scripts/architecture/sync-atlas-packet-semantics.mjs",
+    "architecture:atlas:packets:test": "node --test scripts/architecture/sync-atlas-packet-semantics.spec.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

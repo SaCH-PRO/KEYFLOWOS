@@ -1,0 +1,86 @@
+packet_id: KF-ATLAS-PACKET-SEMANTIC-INDEX-001
+title: Execution packet semantic reverse index
+state: PROVING
+health: YELLOW
+scope_changed: false
+production_touched: false
+base_branch: impl/kf-atlas-intelligence-import-001
+implementation_branch: impl/kf-atlas-packet-semantic-index-001
+
+declared_obligations:
+  - index execution packets against canonical journeys and kernels
+  - preserve primary versus consumer journey semantics
+  - preserve broad scopes without inventing denominator expansion
+  - expose characterization seams but keep them unverified
+  - reject unknown journey/kernel references
+  - surface missing standardized semantic metadata
+  - project valid packet semantic edges into the Living System Atlas
+
+resolved:
+  - packet semantic synchronizer added
+  - packet semantic parser added
+  - primary versus consumer journey distinction preserved
+  - broad scopes ALL_CANONICAL ALL_MIGRATED ALL_CONSTELLATIONS preserved
+  - characterization seams marked requires_revalidation
+  - unknown journey/kernel references become contradictions
+  - missing primary semantic headers become contradictions
+  - packet journey/kernel edges added to Atlas projection
+  - packet semantic contradictions added as L8 nodes
+  - focused positive and negative-control tests added
+  - package commands added
+  - 35 packet documents characterized
+  - J26 contradiction documented
+
+known_source_gaps:
+  missing_standardized_both:
+    - KF-EXEC-AUTH-001
+    - KF-EXEC-EXTFX-001
+    - KF-EXEC-K12-001
+  missing_standardized_primary_journey:
+    - KF-EXEC-GROWTH-001
+    - KF-EXEC-NETWORK-001
+    - KF-EXEC-SPACE-001
+  unresolved_j26_references:
+    - KF-EXEC-EXPERIENCE-001
+    - KF-EXEC-PLAYBOOK-001
+  broad_scope_packets:
+    - KF-EXEC-INTEGRATED-001
+    - KF-EXEC-MIGRATE-001
+    - KF-EXEC-OPS-001
+    - KF-EXEC-RELEASE-001
+    - KF-EXEC-WITHDRAW-001
+    - KF-EXEC-WITHDRAW-002
+
+remaining:
+  - run packet semantic index tests in repository runtime
+  - generate packet-semantic-index.json from a local checkout that has the canonical intelligence ref
+  - run full Atlas materializer with packet semantic snapshot
+  - independently review parser behavior against all 35 packet documents
+  - reconcile J26 and standardized metadata at the canonical intelligence source
+  - rebase/retarget after parent Atlas tranches are admitted
+
+deferred:
+  - live-code revalidation of packet characterization seams
+  - code-to-journey reverse index
+  - PR-to-journey/kernel impact index
+  - Mission Control Atlas projection
+  - visual owner control panel
+
+architecture_invariant: >-
+  Packet documents may define accepted semantic impact, but broad scopes and
+  characterization seams must not be expanded into precise live-code truth
+  without evidence. Unknown canonical ids remain contradictions.
+
+proof_commands:
+  - pnpm architecture:atlas:packets:test
+  - pnpm architecture:atlas:packets
+  - pnpm architecture:atlas:test
+  - pnpm architecture:atlas
+
+safety:
+  production_deploy_authorized: false
+  production_mutation_authorized: false
+  provider_effect_authorized: false
+  application_packet_release_authorized: false
+
+next_action: open stacked draft PR, inspect checks/review, then build live-code seam revalidation on a separate bounded tranche

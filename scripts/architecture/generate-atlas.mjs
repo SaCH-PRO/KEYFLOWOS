@@ -150,6 +150,7 @@ export function buildAtlasGraph({
   ownershipRegistryText,
   dag,
   intelligenceTopology = null,
+  packetSemanticIndex = null,
 }) {
   const nodes = new Map();
   const edges = new Map();
@@ -473,6 +474,84 @@ export function buildAtlasGraph({
     }
   }
 
+
+  if (packetSemanticIndex) {
+    const sourceRef = packetSemanticIndex.source_ref || 'docs/keyflow-intelligence-foundation';
+
+    for (const packet of packetSemanticIndex.packets || []) {
+      const packetNodeId = `packet:${packet.packet_id}`;
+      if (nodes.has(packetNodeId)) {
+        addNode({
+          ...nodes.get(packetNodeId),
+          metadata: {
+            ...(nodes.get(packetNodeId)?.metadata || {}),
+            semantic_status: packet.semantic_status || 'UNKNOWN',
+            characterization_seams: packet.seams || [],
+          },
+        });
+      }
+
+      for (const journeyId of packet.primary_journeys || []) {
+        addEdge({
+          source: packetNodeId,
+          target: `journey:${journeyId}`,
+          relation: 'impacts_journey',
+          layer: 'L7',
+          evidence_class: 'accepted',
+          authority: 'canonical_intelligence',
+          confidence: 'high',
+          evidence: [{ path: packet.source_file, ref: sourceRef }],
+        });
+      }
+
+      for (const journeyId of packet.consumer_journeys || []) {
+        addEdge({
+          source: packetNodeId,
+          target: `journey:${journeyId}`,
+          relation: 'consumer_journey',
+          layer: 'L7',
+          evidence_class: 'accepted',
+          authority: 'canonical_intelligence',
+          confidence: 'medium',
+          evidence: [{ path: packet.source_file, ref: sourceRef }],
+        });
+      }
+
+      for (const kernelId of packet.primary_kernels || []) {
+        addEdge({
+          source: packetNodeId,
+          target: `kernel:${kernelId}`,
+          relation: 'impacts_kernel',
+          layer: 'L7',
+          evidence_class: 'accepted',
+          authority: 'canonical_intelligence',
+          confidence: 'high',
+          evidence: [{ path: packet.source_file, ref: sourceRef }],
+        });
+      }
+    }
+
+    for (const contradiction of packetSemanticIndex.contradictions || []) {
+      addNode({
+        id: `contradiction:${contradiction.id}`,
+        kind: 'contradiction',
+        layer: 'L8',
+        label: contradiction.type || contradiction.id,
+        evidence_class: 'accepted',
+        authority: 'canonical_intelligence',
+        confidence: 'high',
+        evidence: contradiction.source_file
+          ? [{ path: contradiction.source_file, ref: sourceRef }]
+          : [{ path: 'docs/intelligence/execution/', ref: sourceRef }],
+        metadata: {
+          packet_id: contradiction.packet_id || null,
+          reference: contradiction.reference || null,
+          disposition: contradiction.disposition || 'UNRESOLVED',
+        },
+      });
+    }
+  }
+
   const result = {
     schema: 'keyflowos-living-atlas/v1',
     deterministic: true,
@@ -489,6 +568,9 @@ export function buildAtlasGraph({
       intelligence_journeys: intelligenceTopology?.journeys?.length ?? null,
       intelligence_kernels: intelligenceTopology?.kernels?.length ?? null,
       intelligence_contradictions: intelligenceTopology?.contradictions?.length ?? null,
+      packet_semantic_status: packetSemanticIndex?.status || 'NOT_MATERIALIZED',
+      packet_semantic_packets: packetSemanticIndex?.packets?.length ?? null,
+      packet_semantic_contradictions: packetSemanticIndex?.contradictions?.length ?? null,
     },
     nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)),
     edges: [...edges.values()].sort((a, b) => a.id.localeCompare(b.id)),
@@ -505,6 +587,10 @@ export function buildFromRepository(repoRoot = ROOT) {
   const intelligenceTopology = fs.existsSync(intelligencePath)
     ? JSON.parse(fs.readFileSync(intelligencePath, 'utf8'))
     : null;
+  const packetSemanticPath = path.join(repoRoot, 'architecture/atlas/generated/packet-semantic-index.json');
+  const packetSemanticIndex = fs.existsSync(packetSemanticPath)
+    ? JSON.parse(fs.readFileSync(packetSemanticPath, 'utf8'))
+    : null;
   return buildAtlasGraph({
     architectureGraph,
     moduleRegistryText: fs.readFileSync(path.join(repoRoot, 'architecture/module-registry.yaml'), 'utf8'),
@@ -514,6 +600,7 @@ export function buildFromRepository(repoRoot = ROOT) {
     ownershipRegistryText: fs.readFileSync(path.join(repoRoot, 'architecture/data-ownership.yaml'), 'utf8'),
     dag,
     intelligenceTopology,
+    packetSemanticIndex,
   });
 }
 
