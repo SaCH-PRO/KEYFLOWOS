@@ -31,7 +31,9 @@
     "start:prod": "bash scripts/start-prod.sh",
     "architecture:atlas": "node scripts/architecture/generate-atlas.mjs",
     "architecture:atlas:check": "node scripts/architecture/generate-atlas.mjs --check",
-    "architecture:atlas:test": "node --test scripts/architecture/generate-atlas.spec.mjs"
+    "architecture:atlas:test": "node --test scripts/architecture/generate-atlas.spec.mjs",
+    "architecture:atlas:intelligence": "node scripts/architecture/sync-atlas-intelligence.mjs",
+    "architecture:atlas:intelligence:test": "node --test scripts/architecture/sync-atlas-intelligence.spec.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

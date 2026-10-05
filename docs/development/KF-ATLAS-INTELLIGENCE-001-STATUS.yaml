@@ -1,0 +1,77 @@
+packet_id: KF-ATLAS-INTELLIGENCE-001
+title: Canonical journey/kernel intelligence import
+state: PROVING
+health: YELLOW
+scope_changed: false
+production_touched: false
+base_branch: impl/kf-atlas-materializer-001
+implementation_branch: impl/kf-atlas-intelligence-import-001
+
+declared_obligations:
+  - read accepted journey/kernel topology from docs/keyflow-intelligence-foundation
+  - keep accepted architecture distinct from current-code implementation evidence
+  - materialize named canonical journeys and kernels without inventing new ids
+  - preserve cross-source contradictions instead of silently choosing a count
+  - expose primary journey/kernel relationships from the kernel programme
+  - make intelligence synchronization reproducible from git
+  - feed the resulting topology into the Living System Atlas graph
+
+resolved:
+  - intelligence synchronizer added using git show against a configurable intelligence ref
+  - canonical journey catalogue parser added
+  - canonical kernel catalogue parser added
+  - kernel heading cross-check added
+  - primary journey/kernel relationship parser added
+  - contradiction handling added
+  - current intelligence snapshot generated from the canonical branch
+  - 25 named canonical journeys materialized
+  - 12 named canonical kernels materialized
+  - 54 primary journey/kernel relationships materialized
+  - journey-count contradiction preserved: analysis map 25 vs current-state coverage 26
+  - materializer now emits journey/kernel nodes and contradiction nodes
+  - focused positive and negative-control tests added
+  - package commands added
+
+current_contradictions:
+  - id: ATLAS-INTEL-CONTRADICTION-JOURNEY-COUNT
+    subject: canonical_journey_count
+    analysis_map_value: 25
+    current_state_value: 26
+    disposition: UNRESOLVED
+    effect: >-
+      Atlas must not expose a canonical journey completion denominator until the
+      durable intelligence sources are reconciled.
+
+remaining:
+  - run intelligence-sync tests
+  - run full atlas materializer tests with intelligence snapshot present
+  - independent semantic review
+  - determine whether the 26 coverage count is stale, counts a non-canonical dossier, or reflects an unregistered canonical journey
+  - reconcile source documents through the canonical intelligence process rather than editing the Atlas to choose a winner
+  - rebase/retarget after parent materializer and foundation tranches are admitted
+
+deferred:
+  - reviewed semantic ownership
+  - code-to-journey reverse index
+  - PR-to-journey/kernel reverse index
+  - Mission Control Atlas projection
+  - visual owner control panel
+
+architecture_invariant: >-
+  Accepted intelligence may define semantic journey/kernel identities, but any
+  disagreement among canonical/durable sources remains represented as a
+  contradiction until explicitly reconciled at the source.
+
+proof_commands:
+  - pnpm architecture:atlas:intelligence:test
+  - pnpm architecture:atlas:intelligence
+  - pnpm architecture:atlas:test
+  - pnpm architecture:atlas
+
+safety:
+  production_deploy_authorized: false
+  production_mutation_authorized: false
+  provider_effect_authorized: false
+  application_packet_release_authorized: false
+
+next_action: open stacked draft PR, inspect repository review/check evidence, then resolve code defects without masking the source contradiction

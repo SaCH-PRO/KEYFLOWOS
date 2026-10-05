@@ -290,3 +290,65 @@ test('NEGATIVE CONTROL: observed edges require provenance', () => {
       err.problems.some((p) => p.code === 'OBSERVED_EDGE_WITHOUT_EVIDENCE'),
   );
 });
+
+test('canonical intelligence topology becomes journey/kernel nodes and preserves contradictions', () => {
+  const graph = buildAtlasGraph({
+    architectureGraph: { meta: {}, nodes: [], edges: [] },
+    moduleRegistryText: 'modules:\n',
+    routeRegistryText: 'routes:\n',
+    eventRegistryText: 'events:\n',
+    capabilityRegistryText: 'capabilities:\n',
+    ownershipRegistryText: 'models:\n',
+    dag: fakeDag(),
+    intelligenceTopology: {
+      schema: 'keyflowos-intelligence-topology/v1',
+      source_ref: 'docs/keyflow-intelligence-foundation',
+      source_files: [
+        'docs/intelligence/03-ANALYSIS-MAP.md',
+        'docs/intelligence/12-KERNEL-PROGRAMME.md',
+        'docs/intelligence/handoff/CURRENT-STATE.yaml',
+      ],
+      status: 'CONTRADICTED',
+      journeys: [{ id: 'KF-JOURNEY-001', name: 'Business Birth' }],
+      kernels: [{ id: 'KF-KERNEL-001', name: 'Tenant Genesis & Identity' }],
+      primary_journey_kernel_links: [
+        { journey_id: 'KF-JOURNEY-001', kernel_id: 'KF-KERNEL-001' },
+      ],
+      contradictions: [
+        {
+          id: 'ATLAS-INTEL-CONTRADICTION-JOURNEY-COUNT',
+          subject: 'canonical_journey_count',
+          analysis_map_value: 25,
+          current_state_value: 26,
+          disposition: 'UNRESOLVED',
+          evidence: [
+            {
+              path: 'docs/intelligence/03-ANALYSIS-MAP.md',
+              ref: 'docs/keyflow-intelligence-foundation',
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  assert.ok(graph.nodes.some((n) => n.id === 'journey:KF-JOURNEY-001' && n.layer === 'L2'));
+  assert.ok(graph.nodes.some((n) => n.id === 'kernel:KF-KERNEL-001' && n.layer === 'L3'));
+  assert.ok(
+    graph.edges.some(
+      (e) =>
+        e.source === 'journey:KF-JOURNEY-001' &&
+        e.target === 'kernel:KF-KERNEL-001' &&
+        e.relation === 'uses',
+    ),
+  );
+  const contradiction = graph.nodes.find(
+    (n) => n.id === 'contradiction:ATLAS-INTEL-CONTRADICTION-JOURNEY-COUNT',
+  );
+  assert.ok(contradiction);
+  assert.equal(contradiction.metadata.disposition, 'UNRESOLVED');
+  assert.equal(contradiction.metadata.analysis_map_value, 25);
+  assert.equal(contradiction.metadata.current_state_value, 26);
+  assert.equal(graph.source_state.intelligence_status, 'CONTRADICTED');
+});
+

@@ -1,0 +1,408 @@
+{
+  "schema": "keyflowos-intelligence-topology/v1",
+  "source_ref": "docs/keyflow-intelligence-foundation",
+  "source_files": [
+    "docs/intelligence/03-ANALYSIS-MAP.md",
+    "docs/intelligence/12-KERNEL-PROGRAMME.md",
+    "docs/intelligence/handoff/CURRENT-STATE.yaml"
+  ],
+  "verified_at": "2026-10-05",
+  "status": "CONTRADICTED",
+  "claims": {
+    "analysis_map_journeys": 25,
+    "current_state_journeys": 26,
+    "analysis_map_kernels": 12,
+    "current_state_kernels": 12,
+    "journey_dossiers": 26,
+    "kernel_dossiers": 12
+  },
+  "journeys": [
+    {
+      "id": "KF-JOURNEY-001",
+      "name": "Business Birth"
+    },
+    {
+      "id": "KF-JOURNEY-002",
+      "name": "KEY Request → Governed Action"
+    },
+    {
+      "id": "KF-JOURNEY-003",
+      "name": "Lead → Customer → Cash"
+    },
+    {
+      "id": "KF-JOURNEY-004",
+      "name": "Booking → Service → Payment"
+    },
+    {
+      "id": "KF-JOURNEY-005",
+      "name": "Conversation → Business Action"
+    },
+    {
+      "id": "KF-JOURNEY-006",
+      "name": "Proactive KEY / Autonomy"
+    },
+    {
+      "id": "KF-JOURNEY-007",
+      "name": "Financial Truth"
+    },
+    {
+      "id": "KF-JOURNEY-008",
+      "name": "Project / Work Delivery"
+    },
+    {
+      "id": "KF-JOURNEY-009",
+      "name": "Marketing → Lead Generation"
+    },
+    {
+      "id": "KF-JOURNEY-010",
+      "name": "Commerce / Fulfilment"
+    },
+    {
+      "id": "KF-JOURNEY-011",
+      "name": "Contract → Obligation → Renewal"
+    },
+    {
+      "id": "KF-JOURNEY-012",
+      "name": "Document / Evidence Lifecycle"
+    },
+    {
+      "id": "KF-JOURNEY-013",
+      "name": "Connector Lifecycle"
+    },
+    {
+      "id": "KF-JOURNEY-014",
+      "name": "Webhook / External Event Ingress"
+    },
+    {
+      "id": "KF-JOURNEY-015",
+      "name": "Approval / Governance Lifecycle"
+    },
+    {
+      "id": "KF-JOURNEY-016",
+      "name": "Business Genome Evolution"
+    },
+    {
+      "id": "KF-JOURNEY-017",
+      "name": "Command Center → Priority → Action"
+    },
+    {
+      "id": "KF-JOURNEY-018",
+      "name": "Failure → Recovery"
+    },
+    {
+      "id": "KF-JOURNEY-019",
+      "name": "Privacy / Deletion / Exit"
+    },
+    {
+      "id": "KF-JOURNEY-020",
+      "name": "Plan / Subscription / AI Cost"
+    },
+    {
+      "id": "KF-JOURNEY-021",
+      "name": "Public Customer Experience"
+    },
+    {
+      "id": "KF-JOURNEY-022",
+      "name": "KEY Voice"
+    },
+    {
+      "id": "KF-JOURNEY-023",
+      "name": "Temporal Flow / Long-Running Workflow"
+    },
+    {
+      "id": "KF-JOURNEY-024",
+      "name": "System Change / Engineering Safety"
+    },
+    {
+      "id": "KF-JOURNEY-025",
+      "name": "Human Authority Lifecycle"
+    }
+  ],
+  "kernels": [
+    {
+      "id": "KF-KERNEL-001",
+      "name": "Tenant Genesis & Identity"
+    },
+    {
+      "id": "KF-KERNEL-002",
+      "name": "Human Authority & Organization"
+    },
+    {
+      "id": "KF-KERNEL-003",
+      "name": "KEY Authority & Governance"
+    },
+    {
+      "id": "KF-KERNEL-004",
+      "name": "Business Knowledge"
+    },
+    {
+      "id": "KF-KERNEL-005",
+      "name": "Capability Fabric"
+    },
+    {
+      "id": "KF-KERNEL-006",
+      "name": "State Transition"
+    },
+    {
+      "id": "KF-KERNEL-007",
+      "name": "Temporal / Event / Workflow"
+    },
+    {
+      "id": "KF-KERNEL-008",
+      "name": "Evidence & Outcome"
+    },
+    {
+      "id": "KF-KERNEL-009",
+      "name": "Integration & External Reality"
+    },
+    {
+      "id": "KF-KERNEL-010",
+      "name": "Financial Truth"
+    },
+    {
+      "id": "KF-KERNEL-011",
+      "name": "Recovery & Reliability"
+    },
+    {
+      "id": "KF-KERNEL-012",
+      "name": "Engineering Control Plane"
+    }
+  ],
+  "primary_journey_kernel_links": [
+    {
+      "journey_id": "KF-JOURNEY-001",
+      "kernel_id": "KF-KERNEL-001"
+    },
+    {
+      "journey_id": "KF-JOURNEY-025",
+      "kernel_id": "KF-KERNEL-001"
+    },
+    {
+      "journey_id": "KF-JOURNEY-019",
+      "kernel_id": "KF-KERNEL-001"
+    },
+    {
+      "journey_id": "KF-JOURNEY-020",
+      "kernel_id": "KF-KERNEL-001"
+    },
+    {
+      "journey_id": "KF-JOURNEY-002",
+      "kernel_id": "KF-KERNEL-001"
+    },
+    {
+      "journey_id": "KF-JOURNEY-025",
+      "kernel_id": "KF-KERNEL-002"
+    },
+    {
+      "journey_id": "KF-JOURNEY-015",
+      "kernel_id": "KF-KERNEL-002"
+    },
+    {
+      "journey_id": "KF-JOURNEY-002",
+      "kernel_id": "KF-KERNEL-002"
+    },
+    {
+      "journey_id": "KF-JOURNEY-008",
+      "kernel_id": "KF-KERNEL-002"
+    },
+    {
+      "journey_id": "KF-JOURNEY-011",
+      "kernel_id": "KF-KERNEL-002"
+    },
+    {
+      "journey_id": "KF-JOURNEY-012",
+      "kernel_id": "KF-KERNEL-002"
+    },
+    {
+      "journey_id": "KF-JOURNEY-023",
+      "kernel_id": "KF-KERNEL-002"
+    },
+    {
+      "journey_id": "KF-JOURNEY-002",
+      "kernel_id": "KF-KERNEL-003"
+    },
+    {
+      "journey_id": "KF-JOURNEY-006",
+      "kernel_id": "KF-KERNEL-003"
+    },
+    {
+      "journey_id": "KF-JOURNEY-015",
+      "kernel_id": "KF-KERNEL-003"
+    },
+    {
+      "journey_id": "KF-JOURNEY-016",
+      "kernel_id": "KF-KERNEL-003"
+    },
+    {
+      "journey_id": "KF-JOURNEY-017",
+      "kernel_id": "KF-KERNEL-003"
+    },
+    {
+      "journey_id": "KF-JOURNEY-018",
+      "kernel_id": "KF-KERNEL-003"
+    },
+    {
+      "journey_id": "KF-JOURNEY-023",
+      "kernel_id": "KF-KERNEL-003"
+    },
+    {
+      "journey_id": "KF-JOURNEY-001",
+      "kernel_id": "KF-KERNEL-004"
+    },
+    {
+      "journey_id": "KF-JOURNEY-002",
+      "kernel_id": "KF-KERNEL-004"
+    },
+    {
+      "journey_id": "KF-JOURNEY-006",
+      "kernel_id": "KF-KERNEL-004"
+    },
+    {
+      "journey_id": "KF-JOURNEY-016",
+      "kernel_id": "KF-KERNEL-004"
+    },
+    {
+      "journey_id": "KF-JOURNEY-017",
+      "kernel_id": "KF-KERNEL-004"
+    },
+    {
+      "journey_id": "KF-JOURNEY-003",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-004",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-006",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-008",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-009",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-010",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-011",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-013",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-014",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-018",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-023",
+      "kernel_id": "KF-KERNEL-007"
+    },
+    {
+      "journey_id": "KF-JOURNEY-002",
+      "kernel_id": "KF-KERNEL-008"
+    },
+    {
+      "journey_id": "KF-JOURNEY-006",
+      "kernel_id": "KF-KERNEL-008"
+    },
+    {
+      "journey_id": "KF-JOURNEY-012",
+      "kernel_id": "KF-KERNEL-008"
+    },
+    {
+      "journey_id": "KF-JOURNEY-014",
+      "kernel_id": "KF-KERNEL-008"
+    },
+    {
+      "journey_id": "KF-JOURNEY-016",
+      "kernel_id": "KF-KERNEL-008"
+    },
+    {
+      "journey_id": "KF-JOURNEY-018",
+      "kernel_id": "KF-KERNEL-008"
+    },
+    {
+      "journey_id": "KF-JOURNEY-013",
+      "kernel_id": "KF-KERNEL-009"
+    },
+    {
+      "journey_id": "KF-JOURNEY-014",
+      "kernel_id": "KF-KERNEL-009"
+    },
+    {
+      "journey_id": "KF-JOURNEY-004",
+      "kernel_id": "KF-KERNEL-009"
+    },
+    {
+      "journey_id": "KF-JOURNEY-009",
+      "kernel_id": "KF-KERNEL-009"
+    },
+    {
+      "journey_id": "KF-JOURNEY-010",
+      "kernel_id": "KF-KERNEL-009"
+    },
+    {
+      "journey_id": "KF-JOURNEY-021",
+      "kernel_id": "KF-KERNEL-009"
+    },
+    {
+      "journey_id": "KF-JOURNEY-018",
+      "kernel_id": "KF-KERNEL-009"
+    },
+    {
+      "journey_id": "KF-JOURNEY-003",
+      "kernel_id": "KF-KERNEL-010"
+    },
+    {
+      "journey_id": "KF-JOURNEY-004",
+      "kernel_id": "KF-KERNEL-010"
+    },
+    {
+      "journey_id": "KF-JOURNEY-007",
+      "kernel_id": "KF-KERNEL-010"
+    },
+    {
+      "journey_id": "KF-JOURNEY-010",
+      "kernel_id": "KF-KERNEL-010"
+    },
+    {
+      "journey_id": "KF-JOURNEY-011",
+      "kernel_id": "KF-KERNEL-010"
+    },
+    {
+      "journey_id": "KF-JOURNEY-020",
+      "kernel_id": "KF-KERNEL-010"
+    }
+  ],
+  "contradictions": [
+    {
+      "id": "ATLAS-INTEL-CONTRADICTION-JOURNEY-COUNT",
+      "subject": "canonical_journey_count",
+      "analysis_map_value": 25,
+      "current_state_value": 26,
+      "evidence": [
+        {
+          "path": "docs/intelligence/03-ANALYSIS-MAP.md",
+          "ref": "docs/keyflow-intelligence-foundation"
+        },
+        {
+          "path": "docs/intelligence/handoff/CURRENT-STATE.yaml",
+          "ref": "docs/keyflow-intelligence-foundation"
+        }
+      ],
+      "disposition": "UNRESOLVED"
+    }
+  ]
+}
