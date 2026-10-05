@@ -266,11 +266,7 @@ proof_matrix:
     evidence_scope: semantic_head
     proof: tsc --noEmit in apps/web stops on a missing Next type library in a checkout with no Next build; the three web files are covered by the web unit suite only
     result: NOT_RUN
-  - obligation: required exact-head workflows on the head that carries this file
-    evidence_scope: exact_head
-    proof: see exact_head_proof
-    result: PENDING
-  - obligation: independent semantic review of the head that carries this file
+  - obligation: required exact-head workflows and the independent semantic review of the head that carries this file
     evidence_scope: exact_head
     proof: see exact_head_proof and semantic_head_review
     result: PENDING
@@ -365,6 +361,16 @@ ci:
     fixed in cfb3322c. Run Tests was cancelled after 15 minutes with no step
     recorded and no runner. The two worker proof jobs and the control gate
     failed on the control artifacts, which were still main's.
+  previous_head_23fb25af: >
+    The first artifact head. Every required workflow produced a result there
+    except the Windows worker proof, which failed in its negative-control
+    step with 155 of 157 controls live. The two that were not live mutate
+    this file: one looks for the DAST sentence now under security, which the
+    file did not contain, and one for a single exact_head scope line, of
+    which the file had two. Both were faults of the artifact, not of the
+    manifest, and the manifest is unchanged. Run Tests, both builds, Type
+    Check, lint, the DAST job, the divergence jobs, the control gate and the
+    portable worker proof all succeeded on that head once a runner took them.
   previous_head_cfb3322c: >
     Lint and Security Scan succeeded. Type Check, the DAST job, the PR
     divergence job and one Threshold resolver run were cancelled after 910
@@ -513,6 +519,7 @@ security:
   secrets: none added; no secret appears in a test, a manifest or this file
   preview_deployment: the PR triggers the repository's own Vercel preview, as every PR does; nothing was deployed by this session
   local_dast: not run in the worker session, which has no API key and no running application
+  dast: DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
 
 unresolved_contradictions: []
 settled_contradictions:
