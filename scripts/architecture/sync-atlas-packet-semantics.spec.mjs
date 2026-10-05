@@ -60,6 +60,22 @@ test('mapped packets connect only to known canonical ids', () => {
   assert.equal(index.packets.length, 2);
 });
 
+
+
+test('broad packet scopes are preserved without inventing journey edges', () => {
+  const parsedAll = parsePacketSemantics('Primary kernels: K12/all\nPrimary journeys: all\n');
+  assert.equal(parsedAll.journey_scope, 'ALL_CANONICAL');
+  assert.equal(parsedAll.kernel_scope, 'ALL');
+  assert.deepEqual(parsedAll.primary_journeys, []);
+  assert.deepEqual(parsedAll.primary_kernels, ['KF-KERNEL-012']);
+
+  const parsedMigrated = parsePacketSemantics('Primary kernels: K12/K11\nPrimary journeys: all migrated\n');
+  assert.equal(parsedMigrated.journey_scope, 'ALL_MIGRATED');
+
+  const parsedConstellations = parsePacketSemantics('Primary kernels: K12\nPrimary journeys: all constellations\n');
+  assert.equal(parsedConstellations.journey_scope, 'ALL_CONSTELLATIONS');
+});
+
 test('NEGATIVE CONTROL: missing packet source remains unresolved', () => {
   const index = buildPacketSemanticIndex({
     dag: dag(),
