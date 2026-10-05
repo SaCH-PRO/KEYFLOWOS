@@ -609,6 +609,11 @@ The rules:
   `CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001`
   (5982337036), a malformed REVIEW for another packet: a malformed authority
   message stops the fold for every packet, whichever packet it names.
+  RECOVERY-021 (5993146604) authorized the third and is its own anchor, past
+  `CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020` (5985754624),
+  a second ruling posted 27 seconds after the valid FINAL-CORRECTION-020 with
+  a column-0 `Reason:` line under each finding. The valid ruling folded; the
+  malformed one grants nothing and stays as evidence.
 - **Authoring rule: keep prose off column 0 as `word:`.** The parser reads
   every column-0 `key: value` line in a body as an envelope field, prose
   included. A heading such as `Required:` that appears twice is a repeated

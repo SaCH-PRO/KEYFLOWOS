@@ -942,9 +942,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 305,
+      "lines": 311,
       "path": ".agent-control/programme-state.yaml",
-      "size_bytes": 14612
+      "size_bytes": 15480
     },
     {
       "extension": ".toml",
@@ -57619,9 +57619,9 @@
     },
     {
       "extension": ".md",
-      "lines": 279,
+      "lines": 291,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 15083
+      "size_bytes": 15882
     },
     {
       "extension": ".md",
@@ -58905,9 +58905,9 @@
     },
     {
       "extension": ".md",
-      "lines": 659,
+      "lines": 664,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 32188
+      "size_bytes": 32551
     },
     {
       "extension": ".md",
@@ -61585,9 +61585,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1066,
+      "lines": 2066,
       "path": "scripts/agent-control/fixtures/reducer-recovery-truth.json",
-      "size_bytes": 100276
+      "size_bytes": 191829
     },
     {
       "extension": ".ps1",
@@ -61954,9 +61954,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 2008,
+      "lines": 2024,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 95947
+      "size_bytes": 96786
     },
     {
       "exports": [],
@@ -62077,9 +62077,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 1861,
+      "lines": 1929,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
-      "size_bytes": 117041
+      "size_bytes": 121249
     },
     {
       "exports": [],
@@ -63237,6 +63237,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3449,
     "total_files": 4440,
-    "total_lines": 1138164
+    "total_lines": 1139271
   }
 }

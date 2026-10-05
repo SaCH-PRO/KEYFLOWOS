@@ -166,6 +166,18 @@ completion contract.
 
 ## Changelog
 
+### 2026-10-05 — Reviewed re-anchor of the programme checkpoint at RECOVERY-021
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), RECOVERY-021. `.agent-control/programme-state.yaml`
+  is re-derived whole and anchored to RECOVERY-021 (5993146604, generation 87), past the
+  malformed RULING-020 (5985754624) that stopped the fold for every packet. The programme
+  it records is unchanged. No code changes: the parser, the fold, `orchestrate.mjs` and
+  `lib/state.mjs` are as FINAL-CORRECTION-020 left them, with no new module, export or
+  import edge.
+- `fixtures/reducer-recovery-truth.json` now records the 205 real #80 comments through the
+  new anchor, and the recovery tests replay the previous checkpoint stopping at RULING-020.
+- No application runtime, schema, deployment or production change.
+
 ### 2026-10-04 — An invalid checkpoint is not journaled onto, and its holds are not rendered
 
 - KF-META-STATE-REDUCER-LIVE-001 (PR #120), FINAL-CORRECTION-020. Two bounded corrections

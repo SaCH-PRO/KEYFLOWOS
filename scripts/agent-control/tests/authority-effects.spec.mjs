@@ -667,14 +667,14 @@ test('NC an invalid checkpoint whose anchor is the newest authority fails closed
 test('NC a checkpoint with health AMBER cannot reconcile as consistent on real #80 with zero newer effects (017, Copilot r4178799610)', () => {
   const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
   const auth = collectAuthority(recorded.comments);
-  assert.equal(auth.newest.comment_id, ANCHOR_016.comment_id, 'the anchor is the newest recorded authority: nothing folds');
+  assert.equal(auth.newest.comment_id, ANCHOR_021.comment_id, 'the anchor is the newest recorded authority: nothing folds');
   const state = loadState(process.cwd());
   state.programme.health = 'AMBER';
   const rec = reconcileProjection(state, auth, recorded.repo, OPTIONS);
   assert.equal(rec.consistent, false);
   assert.deepEqual(rec.findings, [{
     code: FINDINGS.DERIVED_STATE_INVALID,
-    detail: { anchor: ANCHOR_016, problems: [{ code: 'UNKNOWN_HEALTH', detail: 'programme.health=AMBER' }] },
+    detail: { anchor: ANCHOR_021, problems: [{ code: 'UNKNOWN_HEALTH', detail: 'programme.health=AMBER' }] },
   }]);
   assert.equal(rec.reduction.started, false);
   assert.equal(rec.reduction.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID);
@@ -1253,8 +1253,12 @@ const CONTRACT_008 = { message_id: 'CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-C
 // authorized by RECOVERY-REANCHOR-015 and anchored, as EXACT-BINDING-016 ruled, to 016.
 const MEMORY_REVIEW = { message_id: 'CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001', comment_id: 5982337036 };
 const ANCHOR_016 = { message_id: 'CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016', comment_id: 5982685256 };
+// The third reviewed recovery, past a malformed second ruling for this packet:
+// RECOVERY-021 authorized it and is itself the anchor.
+const RULING_020 = { message_id: 'CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020', comment_id: 5985754624 };
+const ANCHOR_021 = { message_id: 'CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021', comment_id: 5993146604 };
 /** A time after every recorded comment, for authority the tests add. */
-const AFTER_RECORDING = '2026-10-05T00:00:00Z';
+const AFTER_RECORDING = '2026-10-06T00:00:00Z';
 
 /**
  * The checkpoint anchored to CONTRACT-CORRECTION-008, which RECOVERY-REANCHOR-015
@@ -1264,6 +1268,18 @@ const AFTER_RECORDING = '2026-10-05T00:00:00Z';
 function checkpoint008() {
   const state = loadState(process.cwd());
   state.authority_basis = { ...CONTRACT_008 };
+  return state;
+}
+
+/**
+ * The checkpoint anchored to EXACT-BINDING-016, which RECOVERY-021 replaced.
+ * Every valid REVIEW between the two anchors is a PACKET_CORRECTION of the
+ * same packet or, for SEMANTIC-ACCEPT-019, a NO_STATE_CHANGE, so only the
+ * anchor differs.
+ */
+function checkpoint016() {
+  const state = loadState(process.cwd());
+  state.authority_basis = { ...ANCHOR_016 };
   return state;
 }
 
@@ -1293,15 +1309,26 @@ const AFTER_008 = [
   ANCHOR_016.message_id,
 ];
 
-test('recorded evidence (recovery): the recording is complete, minimized, and holds both real malformed messages', () => {
+/** Every authority candidate recorded after EXACT-BINDING-016, oldest first. */
+const AFTER_016 = [
+  'CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017',
+  'CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018',
+  'CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019',
+  'CG-REVIEW-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020',
+  RULING_020.message_id,
+  ANCHOR_021.message_id,
+];
+
+test('recorded evidence (recovery): the recording is complete, minimized, and holds all three real malformed messages', () => {
   const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
   const ids = recorded.comments.map((c) => c.id);
-  assert.equal(ids.length, 105);
-  assert.equal(new Set(ids).size, 105);
+  assert.equal(ids.length, 205);
+  assert.equal(new Set(ids).size, 205);
   assert.deepEqual(ids, [...ids].sort((a, b) => a - b), 'in comment order');
   assert.equal(Math.min(...ids), 5963509515);
   assert.equal(ids.filter((id) => id <= CONTRACT_008.comment_id).length, 48, 'the first recording is intact');
-  assert.equal(Math.max(...ids), ANCHOR_016.comment_id);
+  assert.equal(ids.filter((id) => id <= ANCHOR_016.comment_id).length, 105, 'the second recording is intact');
+  assert.equal(Math.max(...ids), ANCHOR_021.comment_id);
   for (const c of recorded.comments) {
     const env = parseEnvelope(c.body);
     assert.equal(env.keys.reduce((n, key) => n + env.values[key].length, 0), c.body.split('\n').length, `comment ${c.id} is minimized`);
@@ -1312,8 +1339,9 @@ test('recorded evidence (recovery): the recording is complete, minimized, and ho
   assert.deepEqual(auth.malformed.map((m) => [m.message_id, m.comment_id, m.problems]), [
     [CORRECTION_004.message_id, CORRECTION_004.comment_id, ['Required (repeated; ambiguous)']],
     [MEMORY_REVIEW.message_id, MEMORY_REVIEW.comment_id, ['Required (repeated; ambiguous)']],
+    [RULING_020.message_id, RULING_020.comment_id, ['Reason (repeated; ambiguous)']],
   ]);
-  assert.equal(auth.newest.message_id, ANCHOR_016.message_id);
+  assert.equal(auth.newest.message_id, ANCHOR_021.message_id);
 });
 
 test('recorded evidence (recovery): the previous checkpoint stops at the malformed CORRECTION-004 and skips nothing after it (C8-F2 1, 5)', () => {
@@ -1335,6 +1363,7 @@ test('recorded evidence (recovery): the previous checkpoint stops at the malform
     'CG-REVIEW-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-007',
     CONTRACT_008.message_id,
     ...AFTER_008,
+    ...AFTER_016,
   ]);
   assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY, FINDINGS.AUTHORITY_MALFORMED]);
   assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT);
@@ -1348,8 +1377,8 @@ test('recorded evidence (recovery): the CONTRACT-CORRECTION-008 checkpoint folds
   assert.equal(rec.reduction.blocked.message_id, MEMORY_REVIEW.message_id);
   assert.equal(rec.reduction.blocked.code, 'AUTHORITY_MALFORMED');
   assert.equal(rec.reduction.blocked.coordinate, '2026-10-04T16:59:19Z#5982337036');
-  // The typed, valid REVIEWs after it stay unapplied, the new anchor included.
-  assert.deepEqual(rec.reduction.unapplied.map((m) => m.message_id), AFTER_008.slice(3));
+  // The typed, valid REVIEWs after it stay unapplied, both later anchors included.
+  assert.deepEqual(rec.reduction.unapplied.map((m) => m.message_id), [...AFTER_008.slice(3), ...AFTER_016]);
   assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY, FINDINGS.AUTHORITY_MALFORMED]);
   assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT);
   // The malformed REVIEW names another packet; it projects nothing, and the hold is untouched.
@@ -1363,20 +1392,59 @@ test('recorded evidence (recovery): the CONTRACT-CORRECTION-008 checkpoint folds
   assert.equal(clean.reduction.applied.length, 3);
 });
 
-test('recorded evidence (recovery): the committed checkpoint is re-derived at EXACT-BINDING-016 and starts after both malformed messages (C8-F2 2, R15, R16)', () => {
+test('recorded evidence (recovery): the EXACT-BINDING-016 checkpoint folds four typed effects, then stops at the malformed RULING-020 and skips nothing after it (R21)', () => {
+  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const auth = collectAuthority(recorded.comments);
+  const rec = reconcileProjection(checkpoint016(), auth, recorded.repo, OPTIONS);
+  // FINAL-CORRECTION-020 is the valid ruling of that round and folds; the malformed one follows it.
+  assert.deepEqual(rec.reduction.applied.map((a) => [a.message_id, a.effect]), [
+    [AFTER_016[0], 'PACKET_CORRECTION'],
+    [AFTER_016[1], 'PACKET_CORRECTION'],
+    [AFTER_016[2], 'NO_STATE_CHANGE'],
+    [AFTER_016[3], 'PACKET_CORRECTION'],
+  ]);
+  assert.equal(rec.reduction.blocked.message_id, RULING_020.message_id);
+  assert.equal(rec.reduction.blocked.code, 'AUTHORITY_MALFORMED');
+  assert.deepEqual(rec.reduction.blocked.detail, ['Reason (repeated; ambiguous)']);
+  assert.equal(rec.reduction.blocked.coordinate, '2026-10-04T23:51:21Z#5985754624');
+  // The typed, valid REVIEW after it, the new anchor, stays unapplied: a recovery is never a skip.
+  assert.deepEqual(rec.reduction.unapplied.map((m) => m.message_id), AFTER_016.slice(4));
+  assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY, FINDINGS.AUTHORITY_MALFORMED]);
+  assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT);
+  // The malformed ruling names this packet and still projects nothing: the hold and the packet are as before.
+  assert.equal(auth.malformed.find((m) => m.comment_id === RULING_020.comment_id).packet_id, 'KF-META-STATE-REDUCER-LIVE-001');
+  assert.equal(rec.effective_state.programme.active_packet, 'KF-META-STATE-REDUCER-LIVE-001');
+  assert.equal(rec.effective_state.programme.merge_authority, false);
+  assert.deepEqual(activeHolds(rec.effective_state).map((h) => h.packet_id), ['KF-EXEC-ACTION-001']);
+  // Referent: on the recording as it stood before RULING-020, the same checkpoint reconciles.
+  const before = collectAuthority(recorded.comments.filter((c) => c.id < RULING_020.comment_id));
+  const clean = reconcileProjection(checkpoint016(), before, recorded.repo, OPTIONS);
+  assert.equal(clean.consistent, true, JSON.stringify(clean.findings));
+  assert.equal(clean.reduction.applied.length, 4);
+});
+
+test('recorded evidence (recovery): the committed checkpoint is re-derived at RECOVERY-021 and starts after all three malformed messages (C8-F2 2, R15, R16, R21)', () => {
   const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
   const state = loadState(process.cwd());
   const auth = collectAuthority(recorded.comments);
-  const anchor = auth.messages.find((m) => m.message_id === ANCHOR_016.message_id);
-  assert.deepEqual(state.authority_basis, ANCHOR_016);
-  assert.equal(anchor.comment_id, ANCHOR_016.comment_id);
-  assert.equal(auth.newest.comment_id, ANCHOR_016.comment_id, 'the anchor is the newest recorded authority');
-  assert.equal(auth.candidates.indexOf(anchor) + 1, AFTER_008.length + auth.candidates.findIndex((m) => m.comment_id === CONTRACT_008.comment_id) + 1);
-  // The re-derived programme is exactly what the previous checkpoint recorded: every
-  // REVIEW between the anchors is a correction of the same packet on the same PR.
+  const anchor = auth.messages.find((m) => m.message_id === ANCHOR_021.message_id);
+  assert.deepEqual(state.authority_basis, ANCHOR_021);
+  assert.equal(anchor.comment_id, ANCHOR_021.comment_id);
+  assert.equal(auth.newest.comment_id, ANCHOR_021.comment_id, 'the anchor is the newest recorded authority');
+  assert.equal(auth.candidates.indexOf(anchor) + 1,
+    AFTER_016.length + AFTER_008.length + auth.candidates.findIndex((m) => m.comment_id === CONTRACT_008.comment_id) + 1);
+  // The re-derived programme is exactly what the previous checkpoints recorded: every
+  // valid REVIEW between the anchors is a correction of the same packet on the same PR,
+  // or changes no state.
   assert.deepEqual(state.programme, checkpoint008().programme);
-  // Recorded for the live issue read whole; this recording starts later, so its positions differ.
-  assert.equal(state.derivation.anchor_generation, 81);
+  assert.deepEqual(state.programme, checkpoint016().programme);
+  // Recorded for the live issue read whole; this recording starts later, so its positions differ
+  // by the 63 candidates older than the release directive.
+  assert.equal(state.derivation.anchor_generation, 87);
+  assert.equal(auth.candidates.indexOf(anchor) + 1, 87 - 63);
+  // The anchor's posted identity and ordering metadata, as GitHub returned them.
+  assert.equal(anchor.created_at, '2026-10-05T11:02:59Z');
+  assert.equal(new Date(state.derivation.anchor_created_at).toISOString(), '2026-10-05T11:02:59.000Z');
 
   // The anchor's own PACKET_CORRECTION projects exactly the committed programme.
   const read = readEffect(anchor);
@@ -1399,12 +1467,12 @@ test('recorded evidence (recovery): the committed checkpoint is re-derived at EX
     [['KF-META-MEMORY-TRUTH-AUDIT-001', 'ZERO', false]]);
   assert.equal(state.meta_package.in_flight, 'KF-META-STATE-REDUCER-LIVE-001');
 
-  // From here the fold starts after both malformed messages, which are evidence-only history.
+  // From here the fold starts after all three malformed messages, which are evidence-only history.
   const rec = reconcileProjection(state, auth, recorded.repo, OPTIONS);
   assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
   assert.equal(rec.reduction.blocked, null);
   assert.deepEqual(rec.reduction.applied, []);
-  for (const older of [CORRECTION_004, MEMORY_REVIEW]) {
+  for (const older of [CORRECTION_004, MEMORY_REVIEW, RULING_020]) {
     const malformed = auth.malformed.find((m) => m.comment_id === older.comment_id);
     assert.ok(compareAuthorityOrder(malformed, anchor) < 0, `${older.message_id} is older than the new anchor`);
   }

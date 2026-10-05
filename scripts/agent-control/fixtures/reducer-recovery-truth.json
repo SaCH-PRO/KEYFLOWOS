@@ -1,5 +1,5 @@
 {
-  "_recorded": "Real issue #80 comments 5963509515 (CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001, the first checkpoint anchor) through 5982685256 (CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016, the current anchor), every comment in that range: 105, including Claude messages and AUTO_EVENTs. It holds two reviewed recoveries. The first 48 comments, through 5965390363 (CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008, the second anchor), were recorded 2026-10-03 (C8-F2) and include the malformed CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-004 (5964575594). The next 57 were recorded 2026-10-04 (RECOVERY-REANCHOR-015, EXACT-BINDING-016) and include the malformed CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001 (5982337036), which belongs to another packet. REST metadata (id, html_url, created_at, updated_at, user) is unmodified, and every comment is unedited. Each body is minimized to its column-0 `key: value` lines in body order, which are the only lines parseEnvelope reads. At each recording, parseEnvelope of every minimized body deep-equalled parseEnvelope of the live body, and at the second recording the first 48 were checked again against the live issue. Repository truth is fetchRepoTruth output for main 11053288 and PR 120, unchanged between the two recordings.",
+  "_recorded": "Real issue #80 comments 5963509515 (CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001, the first checkpoint anchor) through 5993146604 (CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021, the current anchor), every comment in that range: 205, including Claude messages and AUTO_EVENTs. It holds three reviewed recoveries. The first 48 comments, through 5965390363 (CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008, the second anchor), were recorded 2026-10-03 (C8-F2) and include the malformed CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-004 (5964575594). The next 57, through 5982685256 (CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016, the third anchor), were recorded 2026-10-04 (RECOVERY-REANCHOR-015, EXACT-BINDING-016) and include the malformed CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001 (5982337036), which belongs to another packet. The last 100 were recorded 2026-10-05 (RECOVERY-021) and include the malformed CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020 (5985754624), posted 27 seconds after the valid CG-REVIEW-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020 (5985751518). REST metadata (id, html_url, created_at, updated_at, user) is unmodified, and every comment is unedited. Each body is minimized to its column-0 `key: value` lines in body order, which are the only lines parseEnvelope reads. At each recording, parseEnvelope of every minimized body deep-equalled parseEnvelope of the live body, and at the second and third recordings every earlier comment was checked again against the live issue. Repository truth is fetchRepoTruth output for main 11053288 and PR 120, unchanged across the three recordings.",
   "comments": [
     {
       "id": 5963509515,
@@ -1050,6 +1050,1006 @@
         "login": "SaCH-PRO"
       },
       "body": "message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016\nmessage_type: REVIEW\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: chatgpt\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 6fdd8ff24241ec418c718d6e7e69bc62974c1a4d\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: CHANGES_REQUIRED\ncontrol_effect: PACKET_CORRECTION\nsummary: The new semantic head fixes the HOLD/RESUME wake path, but exact artifact binding still normalizes identity values before equality and the R15 recovery checkpoint is not yet present.\nnext_action: ACK this REVIEW, preserve raw identity equality for packet and branch binding, complete the reviewed whole-state re-anchor to this REVIEW, rerun the entire fresh proof matrix, and push a new semantic head only if clean."
+    },
+    {
+      "id": 5982686568,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982686568",
+      "created_at": "2026-10-04T17:42:07Z",
+      "updated_at": "2026-10-04T17:42:07Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-ACK-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015\nmessage_type: ACK\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 2763f796cd453a78fde446bea41948f46853c48c\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: 6fdd8ff24241ec418c718d6e7e69bc62974c1a4d\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5982694106,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982694106",
+      "created_at": "2026-10-04T17:43:05Z",
+      "updated_at": "2026-10-04T17:43:05Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5982685256:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: REVIEW\nidempotency_key: issue_comment:5982685256:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982685256\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5982719331,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982719331",
+      "created_at": "2026-10-04T17:46:14Z",
+      "updated_at": "2026-10-04T17:46:14Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37220981297:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37220981297:1\npacket_id: null\npr_number: 120\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: 6fdd8ff24241ec418c718d6e7e69bc62974c1a4d\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37220981297\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5982734013,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982734013",
+      "created_at": "2026-10-04T17:48:04Z",
+      "updated_at": "2026-10-04T17:48:04Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-ACK-META-STATE-REDUCER-LIVE-EXACT-BINDING-016\nmessage_type: ACK\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 6fdd8ff24241ec418c718d6e7e69bc62974c1a4d\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: 6fdd8ff24241ec418c718d6e7e69bc62974c1a4d\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5982826642,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982826642",
+      "created_at": "2026-10-04T17:59:44Z",
+      "updated_at": "2026-10-04T17:59:44Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37220981390:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37220981390:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: 6fdd8ff24241ec418c718d6e7e69bc62974c1a4d\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37220981390\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5982913148,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982913148",
+      "created_at": "2026-10-04T18:10:10Z",
+      "updated_at": "2026-10-04T18:10:10Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-PROGRESS-META-STATE-REDUCER-LIVE-006\nmessage_type: PROGRESS\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: e1834c8991b2797e07b1a302f43662e0e720377a\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: e1834c8991b2797e07b1a302f43662e0e720377a\nstate: PROVING\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5982926772,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982926772",
+      "created_at": "2026-10-04T18:11:48Z",
+      "updated_at": "2026-10-04T18:11:48Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37223329009:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37223329009:1\npacket_id: null\npr_number: 120\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: e1834c8991b2797e07b1a302f43662e0e720377a\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37223329009\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5982985034,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982985034",
+      "created_at": "2026-10-04T18:18:55Z",
+      "updated_at": "2026-10-04T18:18:55Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37223329002:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37223329002:1\npacket_id: null\npr_number: 120\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: e1834c8991b2797e07b1a302f43662e0e720377a\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37223329002\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5982993829,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982993829",
+      "created_at": "2026-10-04T18:20:00Z",
+      "updated_at": "2026-10-04T18:20:00Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37223890487:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37223890487:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: e1834c8991b2797e07b1a302f43662e0e720377a\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37223890487\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983032577,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983032577",
+      "created_at": "2026-10-04T18:24:43Z",
+      "updated_at": "2026-10-04T18:24:43Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37224223978:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37224223978:1\npacket_id: null\npr_number: 120\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: ac4b3b7cdb43fddb032a66f18a8870070663a8c5\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37224223978\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983093674,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983093674",
+      "created_at": "2026-10-04T18:32:11Z",
+      "updated_at": "2026-10-04T18:32:11Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-004\nmessage_type: CONTRADICTION\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: e1834c8991b2797e07b1a302f43662e0e720377a\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: ac4b3b7cdb43fddb032a66f18a8870070663a8c5\nstate: BLOCKED_CONTRADICTION\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5983103691,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983103691",
+      "created_at": "2026-10-04T18:33:20Z",
+      "updated_at": "2026-10-04T18:33:20Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5983093674:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: CONTRADICTION\nidempotency_key: issue_comment:5983093674:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983093674\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983116825,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983116825",
+      "created_at": "2026-10-04T18:34:56Z",
+      "updated_at": "2026-10-04T18:34:56Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37224224043:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37224224043:1\npacket_id: null\npr_number: 120\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: ac4b3b7cdb43fddb032a66f18a8870070663a8c5\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37224224043\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983193244,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983193244",
+      "created_at": "2026-10-04T18:44:11Z",
+      "updated_at": "2026-10-04T18:44:11Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017\nmessage_type: REVIEW\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: chatgpt\nin_reply_to: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-004\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: e1834c8991b2797e07b1a302f43662e0e720377a\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: CHANGES_REQUIRED\ncontrol_effect: PACKET_CORRECTION\nsummary: Accept CONTRADICTION-004 K1 as substantive and in-scope; an invalid reviewed checkpoint must fail closed even when no newer authority effect is applied. K2 is an artifact-finalization correction.\nnext_action: ACK this REVIEW, add fail-closed checkpoint validation to the reducer/reconcile path with deterministic proof and a mutation control, create a new semantic head, rerun the full proof matrix and fresh independent review, then build a new artifact that also corrects the stale generation text."
+    },
+    {
+      "id": 5983203131,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983203131",
+      "created_at": "2026-10-04T18:45:24Z",
+      "updated_at": "2026-10-04T18:45:24Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5983193244:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: REVIEW\nidempotency_key: issue_comment:5983193244:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983193244\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983216888,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983216888",
+      "created_at": "2026-10-04T18:47:01Z",
+      "updated_at": "2026-10-04T18:47:01Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-ACK-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017\nmessage_type: ACK\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: e1834c8991b2797e07b1a302f43662e0e720377a\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: ac4b3b7cdb43fddb032a66f18a8870070663a8c5\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5983269100,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983269100",
+      "created_at": "2026-10-04T18:53:20Z",
+      "updated_at": "2026-10-04T18:53:20Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37224224011:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37224224011:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: ac4b3b7cdb43fddb032a66f18a8870070663a8c5\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37224224011\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983337595,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983337595",
+      "created_at": "2026-10-04T19:01:56Z",
+      "updated_at": "2026-10-04T19:01:56Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37226553636:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37226553636:1\npacket_id: null\npr_number: 120\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: 452d836e168b140429ad1276f6c0e7ff9b0cdf89\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37226553636\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983414251,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983414251",
+      "created_at": "2026-10-04T19:10:59Z",
+      "updated_at": "2026-10-04T19:10:59Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37226553697:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37226553697:1\npacket_id: null\npr_number: 120\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: 452d836e168b140429ad1276f6c0e7ff9b0cdf89\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37226553697\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983475073,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983475073",
+      "created_at": "2026-10-04T19:16:23Z",
+      "updated_at": "2026-10-04T19:16:23Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-005\nmessage_type: CONTRADICTION\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 452d836e168b140429ad1276f6c0e7ff9b0cdf89\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: 452d836e168b140429ad1276f6c0e7ff9b0cdf89\nstate: BLOCKED_CONTRADICTION\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5983486093,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983486093",
+      "created_at": "2026-10-04T19:17:34Z",
+      "updated_at": "2026-10-04T19:17:34Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5983475073:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: CONTRADICTION\nidempotency_key: issue_comment:5983475073:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983475073\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983584665,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983584665",
+      "created_at": "2026-10-04T19:29:20Z",
+      "updated_at": "2026-10-04T19:29:20Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37228344983:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37228344983:1\npacket_id: null\npr_number: 120\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: 124f36409271d3ad23cd0844474be9e740afe6c1\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37228344983\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983643707,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983643707",
+      "created_at": "2026-10-04T19:36:21Z",
+      "updated_at": "2026-10-04T19:36:21Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-schedule:2026-10-04T19\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: SCHEDULED_RECONCILE\nidempotency_key: schedule:2026-10-04T19\npacket_id: null\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: null\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983665281,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983665281",
+      "created_at": "2026-10-04T19:39:01Z",
+      "updated_at": "2026-10-04T19:39:01Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37228344958:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37228344958:1\npacket_id: null\npr_number: 120\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: 124f36409271d3ad23cd0844474be9e740afe6c1\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37228344958\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983728795,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983728795",
+      "created_at": "2026-10-04T19:46:39Z",
+      "updated_at": "2026-10-04T19:46:39Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-006\nmessage_type: CONTRADICTION\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 124f36409271d3ad23cd0844474be9e740afe6c1\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: 124f36409271d3ad23cd0844474be9e740afe6c1\nstate: BLOCKED_CONTRADICTION\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5983736144,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983736144",
+      "created_at": "2026-10-04T19:47:32Z",
+      "updated_at": "2026-10-04T19:47:32Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5983728795:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: CONTRADICTION\nidempotency_key: issue_comment:5983728795:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983728795\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983750419,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983750419",
+      "created_at": "2026-10-04T19:49:12Z",
+      "updated_at": "2026-10-04T19:49:12Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37229638867:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37229638867:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: 124f36409271d3ad23cd0844474be9e740afe6c1\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37229638867\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5983802684,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5983802684",
+      "created_at": "2026-10-04T19:55:37Z",
+      "updated_at": "2026-10-04T19:55:37Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37228344946:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37228344946:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: 124f36409271d3ad23cd0844474be9e740afe6c1\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37228344946\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5984646048,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5984646048",
+      "created_at": "2026-10-04T21:36:57Z",
+      "updated_at": "2026-10-04T21:36:57Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37236736909:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37236736909:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: cancelled\nhead_sha: 175b45d86dd0aa4349d21aedd6514ac9d5dac5ae\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37236736909\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5984654166,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5984654166",
+      "created_at": "2026-10-04T21:37:59Z",
+      "updated_at": "2026-10-04T21:37:59Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37236739442:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37236739442:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: failure\nhead_sha: 687185513e3147e5d4f211e4335542a5a173957a\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37236739442\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5984679759,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5984679759",
+      "created_at": "2026-10-04T21:41:16Z",
+      "updated_at": "2026-10-04T21:41:16Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37237017413:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37237017413:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: cancelled\nhead_sha: e77b46abdbf7479ddbe8e72888158da020240433\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37237017413\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5984688162,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5984688162",
+      "created_at": "2026-10-04T21:42:18Z",
+      "updated_at": "2026-10-04T21:42:18Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37237040562:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37237040562:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: failure\nhead_sha: 22feb42f7afcdd8f84b8fcf3093f1cdce7de4a81\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37237040562\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5984704930,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5984704930",
+      "created_at": "2026-10-04T21:44:02Z",
+      "updated_at": "2026-10-04T21:44:02Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018\nmessage_type: REVIEW\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: chatgpt\nin_reply_to: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-006\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 124f36409271d3ad23cd0844474be9e740afe6c1\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: CHANGES_REQUIRED\ncontrol_effect: PACKET_CORRECTION\nContract:"
+    },
+    {
+      "id": 5984714736,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5984714736",
+      "created_at": "2026-10-04T21:44:58Z",
+      "updated_at": "2026-10-04T21:44:58Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5984704930:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: REVIEW\nidempotency_key: issue_comment:5984704930:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5984704930\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5984745804,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5984745804",
+      "created_at": "2026-10-04T21:47:59Z",
+      "updated_at": "2026-10-04T21:47:59Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-ACK-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018\nmessage_type: ACK\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 124f36409271d3ad23cd0844474be9e740afe6c1\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: 124f36409271d3ad23cd0844474be9e740afe6c1\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5985002470,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985002470",
+      "created_at": "2026-10-04T22:12:45Z",
+      "updated_at": "2026-10-04T22:12:45Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37239057888:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37239057888:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: failure\nhead_sha: 9e4f5ba0f3cc4c7deee1c21a476ffb10a4ff9669\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37239057888\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985076108,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985076108",
+      "created_at": "2026-10-04T22:19:37Z",
+      "updated_at": "2026-10-04T22:19:37Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37239497798:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37239497798:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: failure\nhead_sha: c70e2717597a809620d1052d9a93c6168bc9b6e0\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37239497798\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985112122,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985112122",
+      "created_at": "2026-10-04T22:23:55Z",
+      "updated_at": "2026-10-04T22:23:55Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37239725599:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37239725599:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: failure\nhead_sha: 77db6cb83b192a1cd008a28547edd2437a3dbb68\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37239725599\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985186452,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985186452",
+      "created_at": "2026-10-04T22:33:43Z",
+      "updated_at": "2026-10-04T22:33:43Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-PROGRESS-META-STATE-REDUCER-LIVE-007\nmessage_type: PROGRESS\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: a046914d0f5f56eeedd9c330e812110d66d56015\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: a046914d0f5f56eeedd9c330e812110d66d56015\nstate: PROVING\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5985188681,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985188681",
+      "created_at": "2026-10-04T22:34:00Z",
+      "updated_at": "2026-10-04T22:34:00Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37240436557:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37240436557:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: a046914d0f5f56eeedd9c330e812110d66d56015\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37240436557\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985196502,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985196502",
+      "created_at": "2026-10-04T22:35:01Z",
+      "updated_at": "2026-10-04T22:35:01Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37240472699:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37240472699:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: failure\nhead_sha: b03da7827395dc6d1a960e2f79be4ed049d621fd\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37240472699\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985196747,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985196747",
+      "created_at": "2026-10-04T22:35:02Z",
+      "updated_at": "2026-10-04T22:35:02Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37240397813:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37240397813:1\npacket_id: null\npr_number: 120\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: a046914d0f5f56eeedd9c330e812110d66d56015\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37240397813\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985228931,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985228931",
+      "created_at": "2026-10-04T22:39:19Z",
+      "updated_at": "2026-10-04T22:39:19Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37240741948:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37240741948:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: failure\nhead_sha: 7ada60111aa4b873e2ab4281195f157367700c9a\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37240741948\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985259930,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985259930",
+      "created_at": "2026-10-04T22:43:24Z",
+      "updated_at": "2026-10-04T22:43:24Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37240990111:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37240990111:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: failure\nhead_sha: 4a7c2dff5781ffa8ddb4fa65f2ca12066126da3a\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37240990111\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985266044,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985266044",
+      "created_at": "2026-10-04T22:44:13Z",
+      "updated_at": "2026-10-04T22:44:13Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37240397746:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37240397746:1\npacket_id: null\npr_number: 120\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: a046914d0f5f56eeedd9c330e812110d66d56015\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37240397746\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985390800,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985390800",
+      "created_at": "2026-10-04T23:01:26Z",
+      "updated_at": "2026-10-04T23:01:26Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019\nmessage_type: REVIEW\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: chatgpt\nin_reply_to: CC-PROGRESS-META-STATE-REDUCER-LIVE-007\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: a046914d0f5f56eeedd9c330e812110d66d56015\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\nstate: PROVING\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\ncontrol_effect: NO_STATE_CHANGE"
+    },
+    {
+      "id": 5985394633,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985394633",
+      "created_at": "2026-10-04T23:01:57Z",
+      "updated_at": "2026-10-04T23:01:57Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37240397707:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37240397707:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: a046914d0f5f56eeedd9c330e812110d66d56015\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37240397707\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985399536,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985399536",
+      "created_at": "2026-10-04T23:02:37Z",
+      "updated_at": "2026-10-04T23:02:37Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5985390800:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: REVIEW\nidempotency_key: issue_comment:5985390800:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985390800\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985415097,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985415097",
+      "created_at": "2026-10-04T23:04:39Z",
+      "updated_at": "2026-10-04T23:04:39Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-ACK-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019\nmessage_type: ACK\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: a046914d0f5f56eeedd9c330e812110d66d56015\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: a046914d0f5f56eeedd9c330e812110d66d56015\nstate: PROVING\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5985417770,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985417770",
+      "created_at": "2026-10-04T23:05:00Z",
+      "updated_at": "2026-10-04T23:05:00Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242360246:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242360246:1\npacket_id: null\npr_number: 132\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: 2cea77ee36a180b5056f7801c13dd3f0b25ebcdf\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242360246\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985425857,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985425857",
+      "created_at": "2026-10-04T23:05:59Z",
+      "updated_at": "2026-10-04T23:05:59Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242360239:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242360239:1\npacket_id: null\npr_number: 132\nworkflow: Branch divergence\nconclusion: success\nhead_sha: 2cea77ee36a180b5056f7801c13dd3f0b25ebcdf\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242360239\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985427390,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985427390",
+      "created_at": "2026-10-04T23:06:11Z",
+      "updated_at": "2026-10-04T23:06:11Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242429295:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242429295:1\npacket_id: null\npr_number: 128\nworkflow: Branch divergence\nconclusion: failure\nhead_sha: ea5c1983bfc7e841ecbd9a121cabf8d0a102ee83\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242429295\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985434731,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985434731",
+      "created_at": "2026-10-04T23:07:11Z",
+      "updated_at": "2026-10-04T23:07:11Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242506245:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242506245:1\npacket_id: null\npr_number: 133\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: ee4cdab15bd7742d6003c6a709579c2cf906c2ee\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242506245\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985441309,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985441309",
+      "created_at": "2026-10-04T23:08:03Z",
+      "updated_at": "2026-10-04T23:08:03Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242574884:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242574884:1\npacket_id: null\npr_number: 134\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: 093aeb4e8bcf31bf5cbfb378c2ee94261256b0be\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242574884\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985443358,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985443358",
+      "created_at": "2026-10-04T23:08:20Z",
+      "updated_at": "2026-10-04T23:08:20Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242506243:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242506243:1\npacket_id: null\npr_number: 133\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: ee4cdab15bd7742d6003c6a709579c2cf906c2ee\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242506243\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985445488,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985445488",
+      "created_at": "2026-10-04T23:08:37Z",
+      "updated_at": "2026-10-04T23:08:37Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-schedule:2026-10-04T23\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: SCHEDULED_RECONCILE\nidempotency_key: schedule:2026-10-04T23\npacket_id: null\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: null\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985448684,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985448684",
+      "created_at": "2026-10-04T23:09:04Z",
+      "updated_at": "2026-10-04T23:09:04Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242574943:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242574943:1\npacket_id: null\npr_number: 134\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: 093aeb4e8bcf31bf5cbfb378c2ee94261256b0be\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242574943\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985454700,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985454700",
+      "created_at": "2026-10-04T23:09:55Z",
+      "updated_at": "2026-10-04T23:09:55Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242673020:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242673020:1\npacket_id: null\npr_number: 132\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: 849fce536e758cef3a444d5daebbea610f0aadbd\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242673020\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985463831,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985463831",
+      "created_at": "2026-10-04T23:11:07Z",
+      "updated_at": "2026-10-04T23:11:07Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242713738:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242713738:1\npacket_id: null\npr_number: 132\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: eb807917d8c84d408d1e86420a9416f5ab6a44f5\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242713738\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985465383,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985465383",
+      "created_at": "2026-10-04T23:11:20Z",
+      "updated_at": "2026-10-04T23:11:20Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242757599:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242757599:1\npacket_id: null\npr_number: 133\nworkflow: Branch divergence\nconclusion: cancelled\nhead_sha: cabf7e065f93dd986e8638ef35f47cbc8aa6e09a\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242757599\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985466655,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985466655",
+      "created_at": "2026-10-04T23:11:31Z",
+      "updated_at": "2026-10-04T23:11:31Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242765454:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242765454:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Gate\nconclusion: success\nhead_sha: b1bc8f5e13e750dec9432e6312858e79eac13c08\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242765454\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985473677,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985473677",
+      "created_at": "2026-10-04T23:12:29Z",
+      "updated_at": "2026-10-04T23:12:29Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242772389:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242772389:1\npacket_id: null\npr_number: 133\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: e1d81c09cc1ce96582d116b984c05c59eb78b6fc\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242772389\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985512555,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985512555",
+      "created_at": "2026-10-04T23:17:45Z",
+      "updated_at": "2026-10-04T23:17:45Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242574960:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242574960:1\npacket_id: null\npr_number: 134\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: 093aeb4e8bcf31bf5cbfb378c2ee94261256b0be\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242574960\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985517308,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985517308",
+      "created_at": "2026-10-04T23:18:25Z",
+      "updated_at": "2026-10-04T23:18:25Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-007\nmessage_type: CONTRADICTION\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: a046914d0f5f56eeedd9c330e812110d66d56015\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: b1bc8f5e13e750dec9432e6312858e79eac13c08\nstate: BLOCKED_CONTRADICTION\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5985525266,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985525266",
+      "created_at": "2026-10-04T23:19:29Z",
+      "updated_at": "2026-10-04T23:19:29Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5985517308:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: CONTRADICTION\nidempotency_key: issue_comment:5985517308:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985517308\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985527975,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985527975",
+      "created_at": "2026-10-04T23:19:51Z",
+      "updated_at": "2026-10-04T23:19:51Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37243295121:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37243295121:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Gate\nconclusion: success\nhead_sha: b1bc8f5e13e750dec9432e6312858e79eac13c08\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37243295121\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985531207,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985531207",
+      "created_at": "2026-10-04T23:20:17Z",
+      "updated_at": "2026-10-04T23:20:17Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242713770:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242713770:1\npacket_id: null\npr_number: 132\nworkflow: CI/CD Pipeline\nconclusion: failure\nhead_sha: eb807917d8c84d408d1e86420a9416f5ab6a44f5\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242713770\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985535263,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985535263",
+      "created_at": "2026-10-04T23:20:50Z",
+      "updated_at": "2026-10-04T23:20:50Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242772394:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242772394:1\npacket_id: null\npr_number: 133\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: e1d81c09cc1ce96582d116b984c05c59eb78b6fc\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242772394\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985544180,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985544180",
+      "created_at": "2026-10-04T23:22:05Z",
+      "updated_at": "2026-10-04T23:22:05Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242743926:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242743926:1\npacket_id: null\npr_number: 120\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: b1bc8f5e13e750dec9432e6312858e79eac13c08\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242743926\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985579369,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985579369",
+      "created_at": "2026-10-04T23:26:57Z",
+      "updated_at": "2026-10-04T23:26:57Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242772393:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242772393:1\npacket_id: null\npr_number: 133\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: e1d81c09cc1ce96582d116b984c05c59eb78b6fc\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242772393\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985580584,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985580584",
+      "created_at": "2026-10-04T23:27:07Z",
+      "updated_at": "2026-10-04T23:27:07Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242575019:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242575019:1\npacket_id: null\npr_number: 134\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: 093aeb4e8bcf31bf5cbfb378c2ee94261256b0be\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242575019\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985613070,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985613070",
+      "created_at": "2026-10-04T23:31:34Z",
+      "updated_at": "2026-10-04T23:31:34Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242713765:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242713765:1\npacket_id: null\npr_number: 132\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: eb807917d8c84d408d1e86420a9416f5ab6a44f5\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242713765\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985659110,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985659110",
+      "created_at": "2026-10-04T23:37:54Z",
+      "updated_at": "2026-10-04T23:37:54Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-PROGRESS-META-STATE-REDUCER-LIVE-008\nmessage_type: PROGRESS\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: a046914d0f5f56eeedd9c330e812110d66d56015\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: b1bc8f5e13e750dec9432e6312858e79eac13c08\nstate: BLOCKED_CONTRADICTION\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5985659157,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985659157",
+      "created_at": "2026-10-04T23:37:55Z",
+      "updated_at": "2026-10-04T23:37:55Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37242743888:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37242743888:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: b1bc8f5e13e750dec9432e6312858e79eac13c08\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37242743888\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985751518,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985751518",
+      "created_at": "2026-10-04T23:50:54Z",
+      "updated_at": "2026-10-04T23:50:54Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020\nmessage_type: REVIEW\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: chatgpt\nin_reply_to: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-007\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: a046914d0f5f56eeedd9c330e812110d66d56015\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: CHANGES_REQUIRED\ncontrol_effect: PACKET_CORRECTION\nPin:"
+    },
+    {
+      "id": 5985754624,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985754624",
+      "created_at": "2026-10-04T23:51:21Z",
+      "updated_at": "2026-10-04T23:51:21Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020\nmessage_type: REVIEW\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: chatgpt\nin_reply_to: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-007\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: a046914d0f5f56eeedd9c330e812110d66d56015\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\ncontrol_effect: PACKET_CORRECTION\nReason: the TypeError variants were introduced/exposed by K2's stricter wrong-shape preservation and directly violate the packet's fail-closed operational contract. Invalid checkpoints must return/report drift without secondary crashes or partial persistence. The older non-TypeError exit behavior does not excuse a newly introduced crash class.\nReason: although the behavior predates 018, it is in this packet's own packet-keyed-hold code and now conflicts with K2's explicit rule that wrong-shape containers remain invalid rather than being interpreted. It is low-risk and directly affects operator truthfulness.\nExecution:"
+    },
+    {
+      "id": 5985758348,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985758348",
+      "created_at": "2026-10-04T23:51:52Z",
+      "updated_at": "2026-10-04T23:51:52Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5985751518:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: REVIEW\nidempotency_key: issue_comment:5985751518:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985751518\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985766202,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985766202",
+      "created_at": "2026-10-04T23:52:57Z",
+      "updated_at": "2026-10-04T23:52:57Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245282991:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245282991:1\npacket_id: null\npr_number: 132\nworkflow: Branch divergence\nconclusion: cancelled\nhead_sha: d3672e33ea2b4b5cc799e58ff14eed17c91f82ca\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245282991\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985769244,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985769244",
+      "created_at": "2026-10-04T23:53:21Z",
+      "updated_at": "2026-10-04T23:53:21Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245306058:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245306058:1\npacket_id: null\npr_number: 134\nworkflow: Branch divergence\nconclusion: cancelled\nhead_sha: ddc650f6ef44199bd3916386f8b37e86131c7ea9\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245306058\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985773892,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985773892",
+      "created_at": "2026-10-04T23:53:58Z",
+      "updated_at": "2026-10-04T23:53:58Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245287439:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245287439:1\npacket_id: null\npr_number: 132\nworkflow: Agent Control Worker Proof\nconclusion: cancelled\nhead_sha: c67766729e390a7fc0686cee3f58021413cbea5e\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245287439\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985778566,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985778566",
+      "created_at": "2026-10-04T23:54:36Z",
+      "updated_at": "2026-10-04T23:54:36Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245323712:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245323712:1\npacket_id: null\npr_number: 134\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: 24ab961f6522ced2f2d1e70670161c6eb95b1fc1\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245323712\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985781587,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985781587",
+      "created_at": "2026-10-04T23:55:02Z",
+      "updated_at": "2026-10-04T23:55:02Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245337337:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245337337:1\npacket_id: null\npr_number: 132\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: 698f1bcb24fc1bdc43f99f0b1860da15b0eb4f4b\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245337337\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985786188,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985786188",
+      "created_at": "2026-10-04T23:55:39Z",
+      "updated_at": "2026-10-04T23:55:39Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-ACK-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020\nmessage_type: ACK\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: a046914d0f5f56eeedd9c330e812110d66d56015\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: b1bc8f5e13e750dec9432e6312858e79eac13c08\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5985786311,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985786311",
+      "created_at": "2026-10-04T23:55:41Z",
+      "updated_at": "2026-10-04T23:55:41Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-008\nmessage_type: CONTRADICTION\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: a046914d0f5f56eeedd9c330e812110d66d56015\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: b1bc8f5e13e750dec9432e6312858e79eac13c08\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5985786761,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985786761",
+      "created_at": "2026-10-04T23:55:44Z",
+      "updated_at": "2026-10-04T23:55:44Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245391261:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245391261:1\npacket_id: null\npr_number: 134\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: 24ab961f6522ced2f2d1e70670161c6eb95b1fc1\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245391261\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985789989,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985789989",
+      "created_at": "2026-10-04T23:56:12Z",
+      "updated_at": "2026-10-04T23:56:12Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245399574:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245399574:1\npacket_id: null\npr_number: 132\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: 698f1bcb24fc1bdc43f99f0b1860da15b0eb4f4b\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245399574\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985802033,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985802033",
+      "created_at": "2026-10-04T23:57:55Z",
+      "updated_at": "2026-10-04T23:57:55Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5985786311:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: CONTRADICTION\nidempotency_key: issue_comment:5985786311:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985786311\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985848464,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985848464",
+      "created_at": "2026-10-05T00:04:10Z",
+      "updated_at": "2026-10-05T00:04:10Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245337474:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245337474:1\npacket_id: null\npr_number: 132\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: 698f1bcb24fc1bdc43f99f0b1860da15b0eb4f4b\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245337474\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985852266,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985852266",
+      "created_at": "2026-10-05T00:04:39Z",
+      "updated_at": "2026-10-05T00:04:39Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245323642:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245323642:1\npacket_id: null\npr_number: 134\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: 24ab961f6522ced2f2d1e70670161c6eb95b1fc1\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245323642\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985935478,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985935478",
+      "created_at": "2026-10-05T00:14:19Z",
+      "updated_at": "2026-10-05T00:14:19Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245323643:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245323643:1\npacket_id: null\npr_number: 134\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: 24ab961f6522ced2f2d1e70670161c6eb95b1fc1\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245323643\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5985942621,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985942621",
+      "created_at": "2026-10-05T00:15:06Z",
+      "updated_at": "2026-10-05T00:15:06Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37245337327:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37245337327:1\npacket_id: null\npr_number: 132\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: 698f1bcb24fc1bdc43f99f0b1860da15b0eb4f4b\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37245337327\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5986307762,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5986307762",
+      "created_at": "2026-10-05T00:58:13Z",
+      "updated_at": "2026-10-05T00:58:13Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-PROGRESS-META-STATE-REDUCER-LIVE-009\nmessage_type: PROGRESS\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682\nstate: PROVING\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5986316490,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5986316490",
+      "created_at": "2026-10-05T00:59:17Z",
+      "updated_at": "2026-10-05T00:59:17Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37249475768:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37249475768:1\npacket_id: null\npr_number: 120\nworkflow: DAST (HawkScan)\nconclusion: success\nhead_sha: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37249475768\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5986397345,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5986397345",
+      "created_at": "2026-10-05T01:08:48Z",
+      "updated_at": "2026-10-05T01:08:48Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37249475748:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37249475748:1\npacket_id: null\npr_number: 120\nworkflow: CI/CD Pipeline\nconclusion: success\nhead_sha: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37249475748\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5986424499,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5986424499",
+      "created_at": "2026-10-05T01:11:51Z",
+      "updated_at": "2026-10-05T01:11:51Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37250333362:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37250333362:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Gate\nconclusion: failure\nhead_sha: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37250333362\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5986551341,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5986551341",
+      "created_at": "2026-10-05T01:26:56Z",
+      "updated_at": "2026-10-05T01:26:56Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-workflow_run:37249475797:1\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: WORKFLOW_COMPLETED\nidempotency_key: workflow_run:37249475797:1\npacket_id: null\npr_number: 120\nworkflow: Agent Control Worker Proof\nconclusion: success\nhead_sha: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37249475797\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5986574041,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5986574041",
+      "created_at": "2026-10-05T01:29:40Z",
+      "updated_at": "2026-10-05T01:29:40Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-PROGRESS-META-STATE-REDUCER-LIVE-010\nmessage_type: PROGRESS\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\npr_head: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682\nstate: BLOCKED_CONTRADICTION\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5986823131,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5986823131",
+      "created_at": "2026-10-05T01:59:44Z",
+      "updated_at": "2026-10-05T01:59:44Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-schedule:2026-10-05T01\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: SCHEDULED_RECONCILE\nidempotency_key: schedule:2026-10-05T01\npacket_id: null\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: null\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5991346117,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5991346117",
+      "created_at": "2026-10-05T09:01:37Z",
+      "updated_at": "2026-10-05T09:01:37Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-schedule:2026-10-05T09\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: SCHEDULED_RECONCILE\nidempotency_key: schedule:2026-10-05T09\npacket_id: null\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: null\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY, AUTHORITY_MALFORMED; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5993146604,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5993146604",
+      "created_at": "2026-10-05T11:02:59Z",
+      "updated_at": "2026-10-05T11:02:59Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021\nmessage_type: REVIEW\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: chatgpt\nin_reply_to: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-008\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682\nimplementation_branch: impl/kf-meta-state-reducer-live-001\npr_number: 120\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: CHANGES_REQUIRED\ncontrol_effect: PACKET_CORRECTION"
     }
   ],
   "repo": {

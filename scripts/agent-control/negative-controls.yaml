@@ -987,19 +987,35 @@ negative_controls:
     claim: >
       The committed projection is anchored to the newest authority in the
       recorded #80 evidence. Restoring the obsolete
-      CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008 anchor, whose
-      fold stops at the malformed memory REVIEW (5982337036), fails the
-      recorded-evidence recovery proof. (Retargeted by RECOVERY-REANCHOR-015
-      and EXACT-BINDING-016; under CONTRACT-CORRECTION-008 C8-F2 it restored
-      the release-directive anchor, earlier the RECONCILE-002 anchor, and
-      before that the 2026-09-25 one.)
+      CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016 anchor, whose fold
+      stops at the malformed RULING-020 (5985754624), fails the
+      recorded-evidence recovery proof. (Retargeted by RECOVERY-021; under
+      RECOVERY-REANCHOR-015 and EXACT-BINDING-016 it restored the
+      CONTRACT-CORRECTION-008 anchor, under CONTRACT-CORRECTION-008 C8-F2 the
+      release-directive anchor, earlier the RECONCILE-002 anchor, and before
+      that the 2026-09-25 one.)
     mutation:
       file: .agent-control/programme-state.yaml
-      find: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016\n  comment_id: 5982685256"
-      replace: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008\n  comment_id: 5965390363"
+      find: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021\n  comment_id: 5993146604"
+      replace: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016\n  comment_id: 5982685256"
     # The committed-checkpoint recorded-evidence proof is the recovery test in
     # authority-effects.spec; the previous checkpoints are replayed in-test.
-    proof_command: node --test --test-name-pattern="the committed checkpoint is re-derived at EXACT-BINDING-016" scripts/agent-control/tests/authority-effects.spec.mjs
+    proof_command: node --test --test-name-pattern="the committed checkpoint is re-derived at RECOVERY-021" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECOVERY-RULING-020-SKIPPED
+    claim: >
+      The third reviewed recovery is a re-anchor, never a skip (RECOVERY-021).
+      On the real #80 recording, folding only valid messages would carry the
+      EXACT-BINDING-016 checkpoint past the malformed RULING-020 and apply
+      the typed REVIEW behind it.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              ? [...(Array.isArray(authority.candidates) ? authority.candidates : authority.messages || [])].sort(compareAuthorityOrder)
+      replace: |-
+              ? [...(authority.messages || [])].sort(compareAuthorityOrder)
+    proof_command: node --test --test-name-pattern="stops at the malformed RULING-020" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
   - id: NC-RECOVERY-MEMORY-REVIEW-SKIPPED
