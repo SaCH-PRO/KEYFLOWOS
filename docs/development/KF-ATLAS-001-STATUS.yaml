@@ -6,6 +6,8 @@ scope_changed: false
 production_touched: false
 baseline_main: 6fdffc26c7c7748d5c09900535c97c197864ab54
 implementation_branch: docs/kf-living-system-atlas-001
+pull_request: 141
+pull_request_state: DRAFT
 
 declared_obligations:
   - define the atlas authority model so maps cannot become a second truth system
@@ -30,8 +32,6 @@ resolved:
   - AGENTS.md map-before-modifying guidance includes atlas
 
 remaining:
-  - review branch diff against baseline
-  - open PR
   - independent review and repository checks
   - merge only after normal repository admission
 
@@ -60,4 +60,4 @@ proof:
   provider_effects: false
   application_packet_release: false
 
-next_action: review exact branch delta, open bounded PR, then run normal review/admission
+next_action: run normal review/admission on PR 141; do not merge until proof/admission is green
