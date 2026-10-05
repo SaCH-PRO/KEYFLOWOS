@@ -177,6 +177,8 @@ For any significant change — adding/removing/renaming a module, service, contr
 - `/architecture/target-architecture.md` — target direction.
 - `/architecture/migration-plan.md` — living migration plan.
 - `/architecture/architecture.json` — machine-readable graph.
+- `/architecture/atlas/README.md` — Living System Atlas: cross-layer map of product, KEY cognition, journeys, kernels, execution, implementation, development/control, and evidence.
+- `/architecture/atlas/atlas.yaml` — machine-readable atlas manifest and view/layer contracts.
 
 ## Deterministic Scanners
 
@@ -190,4 +192,6 @@ Both scripts use the standard library only, exclude build/vendor/runtime artifac
 ## Update Discipline
 
 After any architecture-affecting change, re-run the scanners and update the relevant `/architecture/` documents. The map must reflect the code.
+
+For cross-layer work, also check whether the Living System Atlas needs a new or updated node/edge. Atlas entries must state their evidence class and must not promote generated ownership, intended architecture, AI inference, or stale documentation into implementation truth.
 
