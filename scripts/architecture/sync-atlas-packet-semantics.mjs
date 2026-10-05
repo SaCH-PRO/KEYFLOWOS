@@ -31,12 +31,19 @@ export function parsePacketSemantics(text) {
   const src = String(text);
   const kLine = src.match(/^Primary kernels:\s*(.+)$/mi);
   const jLine = src.match(/^Primary journeys:\s*(.+)$/mi);
-  const primary_kernels = ids(kLine?.[1] || '', 'K');
+  const kernelText = kLine?.[1] || '';
+  const primary_kernels = ids(kernelText, 'K');
+  const kernel_scope = /\ball\b/i.test(kernelText) ? 'ALL' : null;
   let primary_journeys = [];
   let consumer_journeys = [];
+  let journey_scope = null;
   if (jLine) {
     const parts = jLine[1].split(';');
-    primary_journeys = ids(parts.shift() || '', 'J');
+    const primaryText = parts.shift() || '';
+    if (/^\s*all\s+constellations\b/i.test(primaryText)) journey_scope = 'ALL_CONSTELLATIONS';
+    else if (/^\s*all\s+migrated\b/i.test(primaryText)) journey_scope = 'ALL_MIGRATED';
+    else if (/^\s*all\b/i.test(primaryText)) journey_scope = 'ALL_CANONICAL';
+    primary_journeys = ids(primaryText, 'J');
     consumer_journeys = ids(parts.join(';'), 'J').filter((id) => !primary_journeys.includes(id));
   }
   const seams = [];
@@ -51,7 +58,7 @@ export function parsePacketSemantics(text) {
       seams.push({ value, kind: /[/\\]|\.(?:ts|tsx|js|mjs|prisma|yaml|yml|json)\b/.test(value) ? 'path_or_symbol' : 'conceptual', requires_revalidation: true });
     }
   }
-  return { primary_journeys, consumer_journeys, primary_kernels, seams };
+  return { primary_journeys, consumer_journeys, primary_kernels, journey_scope, kernel_scope, seams };
 }
 
 export function buildPacketSemanticIndex({ dag, executionFiles, documents, intelligenceTopology = null, sourceRef }) {
@@ -70,9 +77,11 @@ export function buildPacketSemanticIndex({ dag, executionFiles, documents, intel
     const parsed = parsePacketSemantics(documents[source_file] || '');
     for (const id of [...parsed.primary_journeys, ...parsed.consumer_journeys]) if (knownJ.size && !knownJ.has(id)) contradictions.push({ id: 'ATLAS-PACKET-UNKNOWN-JOURNEY-' + packetId + '-' + id, packet_id: packetId, type: 'UNKNOWN_JOURNEY_REFERENCE', reference: id, source_file, disposition: 'UNRESOLVED' });
     for (const id of parsed.primary_kernels) if (knownK.size && !knownK.has(id)) contradictions.push({ id: 'ATLAS-PACKET-UNKNOWN-KERNEL-' + packetId + '-' + id, packet_id: packetId, type: 'UNKNOWN_KERNEL_REFERENCE', reference: id, source_file, disposition: 'UNRESOLVED' });
-    if (!parsed.primary_journeys.length) contradictions.push({ id: 'ATLAS-PACKET-MISSING-JOURNEY-' + packetId, packet_id: packetId, type: 'MISSING_PRIMARY_JOURNEY', source_file, disposition: 'UNRESOLVED' });
-    if (!parsed.primary_kernels.length) contradictions.push({ id: 'ATLAS-PACKET-MISSING-KERNEL-' + packetId, packet_id: packetId, type: 'MISSING_PRIMARY_KERNEL', source_file, disposition: 'UNRESOLVED' });
-    packets.push({ packet_id: packetId, title: phases[0]?.title || packetId, source_file, source_ref: sourceRef, ...parsed, semantic_status: parsed.primary_journeys.length && parsed.primary_kernels.length ? 'MAPPED' : 'PARTIAL' });
+    if (!parsed.primary_journeys.length && !parsed.journey_scope) contradictions.push({ id: 'ATLAS-PACKET-MISSING-JOURNEY-' + packetId, packet_id: packetId, type: 'MISSING_PRIMARY_JOURNEY', source_file, disposition: 'UNRESOLVED' });
+    if (!parsed.primary_kernels.length && !parsed.kernel_scope) contradictions.push({ id: 'ATLAS-PACKET-MISSING-KERNEL-' + packetId, packet_id: packetId, type: 'MISSING_PRIMARY_KERNEL', source_file, disposition: 'UNRESOLVED' });
+    const journeyMapped = parsed.primary_journeys.length > 0 || Boolean(parsed.journey_scope);
+    const kernelMapped = parsed.primary_kernels.length > 0 || Boolean(parsed.kernel_scope);
+    packets.push({ packet_id: packetId, title: phases[0]?.title || packetId, source_file, source_ref: sourceRef, ...parsed, semantic_status: journeyMapped && kernelMapped ? 'MAPPED' : 'PARTIAL' });
   }
   return { schema: 'keyflowos-packet-semantic-index/v1', source_ref: sourceRef, programme_packets: dag.packetsTotal, packets: packets.sort((a,b) => a.packet_id.localeCompare(b.packet_id)), contradictions: contradictions.sort((a,b) => a.id.localeCompare(b.id)), status: contradictions.length ? 'PARTIAL_OR_CONTRADICTED' : 'MAPPED' };
 }
