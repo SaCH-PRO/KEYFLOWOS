@@ -278,6 +278,26 @@ must reduce automatically.
 - no parallel merge/checkpoint mutation;
 - no production/provider traffic from builders.
 
+
+## Existing open-PR convergence map
+
+The parallel-orchestration work must absorb existing control-plane PRs rather than recreate them.
+
+| PR | Existing work | Disposition |
+|---|---|---|
+| #111 `KF-META-DISPATCH-QUEUE-001` | per-packet authority queue | **PRIMARY REUSE CANDIDATE.** Rebase and extend into the dispatcher queue rather than writing a second queue. |
+| #107 `KF-META-BRANCH-ROLES-001` | canonical branch roles / base-aware divergence | **REUSE.** Packet worktree ownership and branch admission must consume these branch-role semantics. |
+| #120 merged live reducer | typed authority folded over repository truth | **CANONICAL CURRENT AUTHORITY MODEL.** All multi-worker scheduling must preserve its reducer/reconciliation semantics. |
+| #109 `KF-META-STATE-REDUCER-001` | earlier typed-effect reducer | **SUPERSESSION AUDIT.** Compare unique semantics against merged #120, retain only missing proven behavior, then close rather than merge a second reducer. |
+| #114 `KF-META-PROOF-INTEGRITY-001` | fake-green / hidden-skip proof hardening | **REBASE / EXTRACT.** Its proof-integrity laws apply to every worker lane; do not merge stale control artifacts wholesale. |
+| #133 `KF-ASSURANCE-FABRIC-001` | risk-derived proof obligation compiler | **INTEGRATE AFTER MVP.** Candidate for deriving per-packet proof obligations before admission. |
+| #94 `KF-AI-PR-REVIEW-GATE-001` | exact-head AI review gate | **SUPERSESSION / REUSE AUDIT.** Current control-plane review/admission semantics already evolved beyond it; preserve any missing exact-head reviewer logic only. |
+| #90 Copilot review guidance | repository reviewer instructions | **REASSESS FOR REVIEWER LANE.** Update only if compatible with provider-neutral primary/fallback review semantics. |
+| #93 platform convergence programme | Phase 9 multi-agent DAG and programme contracts | **CURRENT STRATEGIC INPUT.** Much of this content already exists on main; verify lineage and close/rebase the stale PR rather than duplicate it. |
+| #139 native-capacity shadow | read-only latent-capacity loop | **PARALLEL READ-ONLY LANE CANDIDATE.** Useful for proving multi-worker non-mutating analysis before wider mutation concurrency. |
+
+Hard rule: no new scheduler, queue, reducer, review gate, branch-role model or proof compiler may be introduced until the corresponding open PR above is classified as reused, superseded, or incompatible with evidence.
+
 ## Implementation packets
 
 ### KF-AGENT-001 — packet worktree ownership
