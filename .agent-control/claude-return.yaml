@@ -11,7 +11,7 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-META-STATE-REDUCER-LIVE-HUMAN-GATES-CLEARED-006   # 5965127894
   - CG-REVIEW-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-006   # 5965297008
   - CG-REVIEW-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-007   # 5965350865
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965390363; the checkpoint anchor
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965390363; the checkpoint anchor until EXACT-BINDING-016
   - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-009   # 5965780538; malformed one-line envelope, superseded history
   - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010   # 5971082969; supersedes 009
   - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011   # 5975152305
@@ -19,14 +19,19 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982400414
   - CG-REVIEW-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982537977
   - CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982618421; authorized the second reviewed recovery
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; the checkpoint anchor
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; the checkpoint anchor until RECOVERY-021
   - CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017   # 5983193244; option (a) on CONTRADICTION-004
   - CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018   # 5984704930; rules on CONTRADICTION-005 and -006
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019   # 5985390800; current authority; accepts K1 to K3 at a046914d and orders the artifact
-current_authority_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019
-current_authority_comment_id: 5985390800
-ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019
-ack_comment_id: 5985415097
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019   # 5985390800; accepts K1 to K3 of 018 at a046914d and orders the artifact
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020   # 5985751518; rules on CONTRADICTION-007; K1 and K2 in one semantic head
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020   # 5985754624; malformed envelope (a repeated column-0 Reason line), posted 27 seconds after FINAL-CORRECTION-020; evidence only, it grants nothing
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021   # 5993146604; rules on CONTRADICTION-008; authorized the third reviewed recovery and is the checkpoint anchor
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022   # 5994182518; rules on CONTRADICTION-009; the approved fallback reading of 1a536ead
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023   # 5994568448; current authority; rules on CONTRADICTION-010; authorized one force-with-lease replacement of the artifact commit 37b78d27
+current_authority_message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023
+current_authority_comment_id: 5994568448
+ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023
+ack_comment_id: 5994585226
 prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-001   # 5963571216
   - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963710053
@@ -45,6 +50,10 @@ prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982734013
   - CC-ACK-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017   # 5983216888
   - CC-ACK-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018   # 5984745804
+  - CC-ACK-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019   # 5985415097
+  - CC-ACK-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020   # 5985786188; also said that RULING-020 is unreadable as authority
+  - CC-ACK-META-STATE-REDUCER-LIVE-RECOVERY-021   # 5993187922
+  - CC-ACK-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022   # 5994349681; also said that the artifact commit already existed
 progress_message_ids:
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-001   # 5964036080
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-002   # 5965254002
@@ -53,6 +62,11 @@ progress_message_ids:
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-005   # 5975402458; workflow conclusions at e53e329f
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-006   # 5982913148; the proof at e1834c89
   - CC-PROGRESS-META-STATE-REDUCER-LIVE-007   # 5985186452; the proof at a046914d
+  - CC-PROGRESS-META-STATE-REDUCER-LIVE-008   # 5985659110; workflow conclusions at b1bc8f5e
+  - CC-PROGRESS-META-STATE-REDUCER-LIVE-009   # 5986307762; K1 and K2 of 020 at 5a9f9aa5
+  - CC-PROGRESS-META-STATE-REDUCER-LIVE-010   # 5986574041; workflow conclusions and the review at 5a9f9aa5
+  - CC-PROGRESS-META-STATE-REDUCER-LIVE-011   # 5993537762; the re-anchor and the local proof at 1a536ead
+  - CC-PROGRESS-META-STATE-REDUCER-LIVE-012   # 5994463458; workflow conclusions at the replaced artifact head 37b78d27
 contradiction_message_ids:
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-001   # 5964613912; settled by BLOCKER-RULING-005 and HUMAN-GATES-CLEARED-006
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-002   # 5972099796; settled by CONTRADICTION-RULING-011
@@ -60,6 +74,10 @@ contradiction_message_ids:
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-004   # 5983093674; settled by CHECKPOINT-VALIDATION-017, option (a)
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-005   # 5983475073; settled by CONVERGED-CORRECTIONS-018
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-006   # 5983728795; settled by CONVERGED-CORRECTIONS-018
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-007   # 5985517308; settled by FINAL-CORRECTION-020
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-008   # 5985786311; settled by RECOVERY-021
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-009   # 5993708417; the review of 1a536ead did not run, because Copilot is out of quota; settled by SEMANTIC-PASS-022, and recorded as settled by ARTIFACT-REWRITE-023
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-010   # 5994350028; the artifact commit 37b78d27 predated 022; settled by ARTIFACT-REWRITE-023, option (a)
 momentum_message_ids:
   - CW-MOMENTUM-HELD-CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965637280; posted by the local worker
 # This file is a pre-RETURN record (CG-REVIEW-META-CONTROL-PARSER-EVIDENCE-ORDER-001).
@@ -72,8 +90,10 @@ return_message_id: null
 previous_return_message_ids: []
 never_posted_return_message_ids: []
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
-source_head: a046914d0f5f56eeedd9c330e812110d66d56015
+source_head: 1a536eadf1f11c61cfd4f64c830a4c6c2a33570c
 previous_source_heads:
+  - 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682   # FINAL-CORRECTION-020 head; 447 tests and 156 controls there; live verification was in drift behind the malformed RULING-020, so no artifact was built for it; its K1 and K2 are carried unchanged
+  - a046914d0f5f56eeedd9c330e812110d66d56015   # CONVERGED-CORRECTIONS-018 head, artifact head b1bc8f5e; 445 tests and 152 controls there; PR review 5408692496 of the artifact head raised r4179736619 and r4179736650, ruled on in FINAL-CORRECTION-020; never returned
   - 124f36409271d3ad23cd0844474be9e740afe6c1   # CHECKPOINT-VALIDATION-017 head; 439 tests and 144 controls there; three findings of review 5407820973 ruled on in CONVERGED-CORRECTIONS-018; no artifact was built for it
   - 452d836e168b140429ad1276f6c0e7ff9b0cdf89   # intermediate head of 017; NC-RECONCILE-NEWER-AUTHORITY lost its mutation target there (143 of 144), repaired in 124f3640
   - e1834c8991b2797e07b1a302f43662e0e720377a   # EXACT-BINDING-016 head, artifact head ac4b3b7c; 432 tests and 142 controls there; superseded by 017 and never returned
@@ -93,8 +113,8 @@ implementation_branch: impl/kf-meta-state-reducer-live-001
 pr_number: 120
 state: PROVING
 health: YELLOW
-scope_changed: true   # CONVERGED-CORRECTIONS-018 added K1 and K3 to the packet
-scope_change_authority: CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018
+scope_changed: true   # FINAL-CORRECTION-020 added its K1 and K2 to the packet, and RECOVERY-021 the third reviewed re-anchor; 022 and 023 change no scope
+scope_change_authority: CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021
 production_touched: false
 review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
@@ -113,21 +133,26 @@ summary: >
   repository contradictions still report drift. A typed HOLD or RESUME
   comment now also wakes the autopilot, so a hold or a release is decided on
   in the run that comment triggers (RULING-012). The checkpoint in this
-  branch is the second reviewed recovery: re-derived whole at main 11053288
-  and anchored to EXACT-BINDING-016 (5982685256, generation 81). The first
+  branch is the third reviewed recovery: re-derived whole at main 11053288
+  and anchored to RECOVERY-021 (5993146604, generation 87). The first
   recovery anchored it to CONTRACT-CORRECTION-008, past the malformed
   CORRECTION-004. That checkpoint then stopped, as designed, at a malformed
   REVIEW for another packet (5982337036), and RECOVERY-REANCHOR-015
-  authorized the re-anchor. The checkpoint itself is validated before
+  authorized the re-anchor at EXACT-BINDING-016. That one folded 017, 018,
+  019 and FINAL-CORRECTION-020 and then stopped at the malformed
+  CONTRADICTION-RULING-020 (5985754624), and RECOVERY-021 authorized the
+  re-anchor at itself. The checkpoint itself is validated before
   anything is folded over it (CHECKPOINT-VALIDATION-017), and a container
   that is present with the wrong structural type is left as written and
   rejected, never coerced (CONVERGED-CORRECTIONS-018 K2). 018 also makes a
   refused HOLD or RESUME record its reason in wake_refused in every case
-  (K1) and binds the artifact identities as strings only (K3). Read live on
-  2026-10-04 at a046914d the projection reconciles CONSISTENT: the anchor is
-  generation 81, the typed 017, 018 and 019 fold over it (two corrections
-  and one NO_STATE_CHANGE), and the observed generation is 84 of 84, with
-  ACTION-001 still held.
+  (K1) and binds the artifact identities as strings only (K3).
+  FINAL-CORRECTION-020 makes orchestrate.mjs with --apply refuse to journal
+  onto a checkpoint the state contract rejects (K1) and stops activeHolds()
+  rendering a hold from a wrong-type container (K2). Read live on 2026-10-05
+  at 1a536ead the projection reconciles CONSISTENT: the anchor is
+  generation 87, the typed 022 and 023 fold over it as NO_STATE_CHANGE, the
+  observed generation is 89 of 89, and ACTION-001 is still held.
 
 characterization:
   starting_point: >
@@ -157,8 +182,9 @@ characterization:
     one-line envelope, which the parser does not read as an authority
     candidate, so it holds no generation and never stopped a fold.
     CORRECTION-010 superseded it. CONTRACT-CORRECTION-008 is generation 73
-    and was the anchor only until the second recovery; the current anchor is
-    EXACT-BINDING-016 at generation 81.
+    and was the anchor only until the second recovery, and EXACT-BINDING-016
+    is generation 81 and was the anchor until the third; the current anchor
+    is RECOVERY-021 at generation 87.
   malformed_authority_for_another_packet: >
     CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001 (5982337036), a REVIEW
     for KF-META-MEMORY-TRUTH-AUDIT-001 posted 30 seconds after RULING-012,
@@ -169,6 +195,31 @@ characterization:
     reported on #80 in the ACK of 014. The parser was not relaxed and #80
     was not edited. RECOVERY-REANCHOR-015 authorized the reviewed re-anchor
     and EXACT-BINDING-016 set the anchor to itself.
+  malformed_second_ruling: >
+    ChatGPT answered CONTRADICTION-007 twice. FINAL-CORRECTION-020
+    (5985751518) is valid and folds as generation 85. CONTRADICTION-RULING-020
+    (5985754624), posted 27 seconds later, carries a column-0 Reason line
+    under each of its two findings, so the envelope has a repeated key and
+    the message is malformed authority at generation 86. The fold from the
+    EXACT-BINDING-016 anchor applied 017, 018, 019 and FINAL-CORRECTION-020
+    and stopped there, for every packet. Live status --verify reported
+    DRIFT from 2026-10-04T23:53Z, and it was reported on #80 in
+    CONTRADICTION-008. The parser was not relaxed and #80 was not edited.
+    Its prose asks for the same two fixes as FINAL-CORRECTION-020, and it
+    is read as evidence only. RECOVERY-021 authorized the reviewed
+    re-anchor and set the anchor to itself.
+  apply_on_invalid_checkpoint: >
+    At a046914d, orchestrate.mjs with --apply and an actionable event went
+    on to journal onto a checkpoint that reconcile had just rejected. With
+    processed_event_keys {} or event_journal null it ended in a TypeError,
+    and with any other invalid checkpoint in a refused save, each with exit
+    2 and no decision printed (Copilot r4179736619, CONTRADICTION-007).
+    Nothing was written in any of those runs.
+  hold_rendering: >
+    At a046914d, activeHolds() iterated whatever holds contained, so
+    holds: none was rendered as four one-letter holds beside the drift
+    that rejected it (Copilot r4179736650). The same output is produced by
+    every head since the packet-keyed holds of CORRECTION-001.
   hold_resume_wake: >
     At 2763f796 and on main, ACTIONABLE_MESSAGE_TYPES in lib/events.mjs was
     RETURN, CONTRADICTION, MOMENTUM, DIRECTIVE, REVIEW. A valid HOLD or
@@ -206,10 +257,13 @@ design:
     turning malformed never renumbers a later one. An edit makes the snapshot
     unverifiable and nothing is numbered. Each folded or unapplied message
     also carries its immutable coordinate, created_at#comment_id. The live
-    path reads the whole issue, where the current anchor, EXACT-BINDING-016,
-    is generation 81. CHECKPOINT-VALIDATION-017 is 82,
-    CONVERGED-CORRECTIONS-018 is 83 and SEMANTIC-ACCEPT-019 is 84. The
-    previous anchor, CONTRACT-CORRECTION-008, is 73.
+    path reads the whole issue, where the current anchor, RECOVERY-021, is
+    generation 87. CHECKPOINT-VALIDATION-017 is 82,
+    CONVERGED-CORRECTIONS-018 is 83, SEMANTIC-ACCEPT-019 is 84,
+    FINAL-CORRECTION-020 is 85 and the malformed CONTRADICTION-RULING-020 is
+    86. SEMANTIC-PASS-022 is 88 and ARTIFACT-REWRITE-023 is 89; both are
+    newer than the anchor and fold over it. The earlier anchors are
+    EXACT-BINDING-016 at 81 and CONTRACT-CORRECTION-008 at 73.
   safety_fields: >
     Every effect, holds and NO_STATE_CHANGE included, fails closed on a
     health value outside GREEN, YELLOW, RED (CORRECTION-003 F1) and on any
@@ -281,13 +335,32 @@ design:
     load with the defaults as before. status.mjs reads the checkpoint lists
     only when they are lists and hasProcessed() answers false for a key list
     that is not a list, so such a checkpoint is reported as drift.
+  apply_on_invalid_checkpoint: >
+    FINAL-CORRECTION-020 K1. orchestrate.mjs with --apply runs
+    validateState() on the stored checkpoint before the journal step. On
+    an invalid one recordEvent() and saveState() are not called and no
+    byte is written. The output keeps the REPORT_DRIFT decision and adds
+    applied false and apply_refused (CHECKPOINT_INVALID, with the contract
+    problems). The exit code is 0, the existing convention for reported
+    drift; exit 2 stays for an unexpected failure. A valid checkpoint is
+    journaled exactly once, as before.
+  hold_rendering: >
+    FINAL-CORRECTION-020 K2. activeHolds() reads holds only when it is a
+    mapping, and an entry of holds or the legacy hold only when it is a
+    mapping. Anything else gives no hold entry. validateState() is
+    unchanged and still names the wrong container, and valid keyed and
+    legacy holds render as before.
   checkpoint: >
-    Re-derived whole at main 11053288 under RECOVERY-REANCHOR-015 and
-    anchored, as EXACT-BINDING-016 ruled, to that REVIEW (5982685256),
-    generation 81 of 81 at derivation (75 valid, 6 malformed). It replaces
-    the checkpoint anchored to CONTRACT-CORRECTION-008 (5965390363), which
+    Re-derived whole at main 11053288 under RECOVERY-021 and anchored to
+    that REVIEW (5993146604, posted 2026-10-05T11:02:59Z), generation 87
+    of 87 at derivation (80 valid, 7 malformed). It replaces the
+    checkpoint anchored to EXACT-BINDING-016 (5982685256), which replaced
+    the one anchored to CONTRACT-CORRECTION-008 (5965390363), which
     itself replaced the one anchored to
-    CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 (5963509515). It records 4/35
+    CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 (5963509515). Its lineage
+    lists every authority message after the previous anchor with its
+    generation and effect, the malformed CONTRADICTION-RULING-020
+    included as evidence that projects nothing. It records 4/35
     application packets checkpointed, ACTION-001 held in holds, the platform
     programme INACTIVE_SUCCESSOR, every safety flag false, and this packet
     in FIXING_PROOF_FAILURES on PR 120. PR 104 is recorded under
@@ -311,7 +384,7 @@ changed_files:
     - scripts/agent-control/status.mjs
     - scripts/agent-control/negative-controls.yaml
     - scripts/agent-control/fixtures/reducer-live-truth.json (new; real #80 comments, bodies minimized to column-0 lines)
-    - scripts/agent-control/fixtures/reducer-recovery-truth.json (new; 105 real #80 comments through EXACT-BINDING-016, minimized)
+    - scripts/agent-control/fixtures/reducer-recovery-truth.json (new; 205 real #80 comments through RECOVERY-021, minimized)
     - scripts/agent-control/tests/authority-effects.spec.mjs (new)
     - scripts/agent-control/tests/admission.spec.mjs
     - scripts/agent-control/tests/reconcile.spec.mjs
@@ -331,7 +404,7 @@ changed_files:
     - architecture/execution-paths.md
     - architecture/migration-plan.md
   control_only:
-    - .agent-control/programme-state.yaml (re-derived checkpoint; last changed in semantic commit e1834c89)
+    - .agent-control/programme-state.yaml (re-derived checkpoint; last changed in semantic commit 1a536ead)
     - .agent-control/active-packet.yaml
     - .agent-control/claude-return.yaml
 
@@ -383,20 +456,66 @@ proof_matrix:
   - obligation: second reviewed recovery, past the malformed memory REVIEW for another packet (RECOVERY-REANCHOR-015, EXACT-BINDING-016)
     evidence_scope: semantic_head
     proof: >
-      Recorded evidence in reducer-recovery-truth.json, 105 real #80
-      comments: "the recording is complete, minimized, and holds both real
-      malformed messages"; "the CONTRACT-CORRECTION-008 checkpoint folds
-      three typed corrections, then stops at the malformed memory REVIEW and
-      skips nothing after it"; "the committed checkpoint is re-derived at
-      EXACT-BINDING-016 and starts after both malformed messages", which
-      also checks 4/35, the ACTION-001 hold, the inactive platform, every
-      safety flag and the zero-credit memory track; and "from the new
-      checkpoint later typed authority folds, and later malformed authority
-      still fails closed". NC-RECOVERY-MEMORY-REVIEW-SKIPPED and the
-      retargeted NC-PROJECTION-OBSOLETE-ANCHOR are live. Live status
-      --verify on 2026-10-04 at a046914d: CONSISTENT, checkpoint
-      EXACT-BINDING-016 at generation 81, three typed effects applied (017,
-      018 and 019), observed generation 84 of 84.
+      Recorded evidence in reducer-recovery-truth.json: "the
+      CONTRACT-CORRECTION-008 checkpoint folds three typed corrections,
+      then stops at the malformed memory REVIEW and skips nothing after
+      it", which now also holds every message of the third recording
+      behind the stop. NC-RECOVERY-MEMORY-REVIEW-SKIPPED is live. The
+      committed-checkpoint test and the anchor control now belong to the
+      third recovery, below.
+    result: PROVEN
+  - obligation: third reviewed recovery, past the malformed CONTRADICTION-RULING-020 (RECOVERY-021; CONTRADICTION-008)
+    evidence_scope: semantic_head
+    proof: >
+      Recorded evidence in reducer-recovery-truth.json, 205 real #80
+      comments, the 105 earlier ones checked again against the live issue:
+      "the recording is complete, minimized, and holds all three real
+      malformed messages"; "the EXACT-BINDING-016 checkpoint folds four
+      typed effects, then stops at the malformed RULING-020 and skips
+      nothing after it" (017, 018 and FINAL-CORRECTION-020 as
+      PACKET_CORRECTION, 019 as NO_STATE_CHANGE, the stop at coordinate
+      2026-10-04T23:51:21Z#5985754624, RECOVERY-021 left unapplied, and the
+      same checkpoint reconciling on the recording as it stood before
+      RULING-020); "the committed checkpoint is re-derived at RECOVERY-021
+      and starts after all three malformed messages", which also checks
+      the anchor identity and posting time, generation 87, 4/35, the
+      ACTION-001 hold, the inactive platform, every safety flag, no merge
+      authority and the zero-credit memory track; and "from the new
+      checkpoint later typed authority folds, and later malformed
+      authority still fails closed". NC-RECOVERY-RULING-020-SKIPPED and
+      the retargeted NC-PROJECTION-OBSOLETE-ANCHOR are live. Live status
+      --verify on 2026-10-05 at 1a536ead: CONSISTENT, checkpoint
+      RECOVERY-021 at generation 87, no typed effect applied, observed
+      generation 87 of 87. Before the re-anchor the same command read
+      DRIFT at 85 of 87, stopped at RULING-020. After 022 and 023 were
+      posted it reads CONSISTENT at 89 of 89 with two NO_STATE_CHANGE
+      effects applied, which is the fold working on ordinary typed
+      authority with no further re-anchor.
+    result: PROVEN
+  - obligation: --apply never journals onto an invalid checkpoint and still reports the drift (FINAL-CORRECTION-020 K1; Copilot r4179736619)
+    evidence_scope: semantic_head
+    proof: >
+      authority-effects.spec "CLI end to end: --apply on an invalid
+      checkpoint journals nothing, writes nothing and still reports the
+      drift": processed_event_keys {}, event_journal null, holds [] and
+      health AMBER through the CLI, each with an empty stderr, a result
+      equal to the run without --apply, a byte-identical checkpoint and no
+      new file; the valid checkpoint with the same event journals once and
+      a second run is a duplicate with the file unchanged.
+      NC-APPLY-INVALID-CHECKPOINT-JOURNALED is live. Unchanged from
+      5a9f9aa5.
+    result: PROVEN
+  - obligation: a wrong-type hold container never fabricates a rendered hold (FINAL-CORRECTION-020 K2; Copilot r4179736650)
+    evidence_scope: semantic_head
+    proof: >
+      authority-effects.spec: holds as a string, a list of holds, an empty
+      list, null and a number, and the legacy hold as a string, a list and
+      a boolean, each give zero entries in activeHolds(), in buildStatus()
+      and in the rendered status, with DRIFT and the named
+      CHECKPOINT_SHAPE_INVALID problem still shown; valid keyed and legacy
+      holds render as before, in packet order.
+      NC-HOLDS-CONTAINER-FABRICATED, NC-HOLDS-ENTRY-FABRICATED and
+      NC-HOLD-LEGACY-FABRICATED are live. Unchanged from 5a9f9aa5.
     result: PROVEN
   - obligation: a valid typed HOLD or RESUME wakes orchestration and invalid authority does not (RULING-012 R12-K1, CORRECTION-013, ACTION-SHAPE-014; Copilot r4175650069)
     evidence_scope: semantic_head
@@ -554,18 +673,20 @@ proof_matrix:
   - obligation: architecture memory refreshed for the new module, with repository-relative scanner metadata (CORRECTION-003 F3, C4-F3, C10-F4, C10-F5; Copilot r4171049954, r4171100183, r4171689250, r4171689281)
     evidence_scope: semantic_head
     proof: >
-      Run. The maps at a046914d are output of the repository scanners, which
+      Run. The maps at 1a536ead are output of the repository scanners, which
       record meta.root as "."; neither map holds an absolute or worktree
       path. authority-effects.mjs is in inventory.json, dependencies.json,
       architecture.json, dependency-map.md and execution-paths.md section
-      12. migration-plan.md has the dated 2026-10-03 and 2026-10-04 entries.
-      For a046914d both scanners were run on an LF export of the commit's
+      12. migration-plan.md has the dated 2026-10-03, 2026-10-04 and
+      2026-10-05 entries.
+      For 1a536ead both scanners were run on an LF export of the commit's
       tree (git archive, so no untracked file and no CRLF), and the run was
       repeated until the maps described the tree that holds them. The new
       dependency edges of this packet are lib/events.mjs to
-      lib/authority-effects.mjs and lib/reconcile.mjs to lib/state.mjs; 018
-      adds none. The sizes the inventory records for the two artifact files
-      are those at a046914d; this commit changes those two files only.
+      lib/authority-effects.mjs and lib/reconcile.mjs to lib/state.mjs; 018,
+      020 and 021 add none, and for 021 only inventory.json changed. The
+      sizes the inventory records for the two artifact files are those at
+      1a536ead; this commit changes those two files only.
     result: PROVEN
   - obligation: CLI end-to-end proof is environment-independent (CORRECTION-003 F2)
     evidence_scope: semantic_head
@@ -592,28 +713,31 @@ proof_matrix:
 tests:
   command_portable: node --test scripts/agent-control/tests/*.spec.mjs
   command_windows: node --test scripts/agent-control/tests/windows/*.spec.mjs
-  at: a046914d   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
-  host: Windows 11 with authenticated gh, KF_REQUIRE_POWERSHELL=1 (Claude worker session, 2026-10-04)
-  total: 445
-  passed: 445
-  portable_total: 426
-  portable_passed: 426
+  at: 1a536ead   # the portable count is re-run on the artifact tree, which differs only under .agent-control/
+  host: Windows 11 with authenticated gh, KF_REQUIRE_POWERSHELL=1 (Claude worker session, 2026-10-05)
+  total: 448
+  passed: 448
+  portable_total: 429
+  portable_passed: 429
   portable_skipped: 0
   windows_total: 19
   windows_passed: 19
   baseline_before_change: 338 portable at 11053288
+  previous_head_5a9f9aa5: 447 tests (428 portable, 19 Windows), 0 skipped
+  previous_head_a046914d: 445 tests (426 portable, 19 Windows), 0 skipped
   previous_head_124f3640: 439 tests (420 portable, 19 Windows), 0 skipped
   previous_head_e1834c89: 432 tests (413 portable, 19 Windows), 0 skipped
   previous_head_2763f796: 423 tests (404 portable, 19 Windows), 0 skipped
   dag: validate-dag OK (35 packets / 37 phases); validate-platform-dag OK (63 packets, INACTIVE_SUCCESSOR)
-  live_status_verify: CONSISTENT on 2026-10-04 at a046914d; checkpoint EXACT-BINDING-016 at generation 81; 3 typed effects applied (017 and 018 as PACKET_CORRECTION, 019 as NO_STATE_CHANGE); observed generation 84 of 84; ACTION-001 held. It read 83 of 83 with two effects before 019 was posted.
+  live_status_verify: CONSISTENT on 2026-10-05 at 1a536ead; checkpoint RECOVERY-021 at generation 87; 2 typed effects applied (022 and 023, both NO_STATE_CHANGE); observed generation 89 of 89; ACTION-001 held; next legal action WAIT_AUTHORITY. It read 87 of 87 with no effect before 022 was posted. Before the re-anchor it read DRIFT at 85 of 87, with four effects applied and the fold stopped at the malformed CONTRADICTION-RULING-020.
+  local_and_ci_are_separate: the counts above are the local run; the counts of the runner jobs, which skip one test, are under ci
   failed: 0
   skipped: 0
 
 negative_controls:
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml --ref a046914d0f5f56eeedd9c330e812110d66d56015
+  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml   # run with 1a536ead checked out, before that commit was pushed
   baseline_before_change: 97 controls in the manifest at 11053288
-  manifest_total: 152
+  manifest_total: 157
   added_through_340f3ae4:
     - NC-REDUCER-HEALTH-UNVALIDATED   # Copilot r4171049945
     - NC-REDUCER-INVALID-PROJECTION   # Copilot r4171049945
@@ -673,17 +797,28 @@ negative_controls:
     - NC-STATE-MAPPING-COERCED   # R18-K2
     - NC-STATE-LIST-COERCED   # R18-K2
     - NC-ADMISSION-IDENTITY-COERCED   # R18-K3
+  added_after_a046914d:
+    - NC-APPLY-INVALID-CHECKPOINT-JOURNALED   # R20-K1
+    - NC-HOLDS-CONTAINER-FABRICATED   # R20-K2
+    - NC-HOLDS-ENTRY-FABRICATED   # R20-K2
+    - NC-HOLD-LEGACY-FABRICATED   # R20-K2
+    - NC-RECOVERY-RULING-020-SKIPPED   # R21
   removed: []
   retargeted:
-    - NC-PROJECTION-OBSOLETE-ANCHOR now restores the CONTRACT-CORRECTION-008 anchor over the EXACT-BINDING-016 one (e1834c89); earlier it restored the directive anchor, and before that the RECONCILE-002 one
+    - NC-PROJECTION-OBSOLETE-ANCHOR now restores the EXACT-BINDING-016 anchor over the RECOVERY-021 one (1a536ead); at e1834c89 it restored the CONTRACT-CORRECTION-008 anchor, earlier the directive anchor, and before that the RECONCILE-002 one
     - NC-REDUCER-SINGLE-HOLD-LAW follows the own-key hold read (2763f796); it is the control that lost its target on ae195643
     - NC-ADMISSION-PR-NUMBER-UNBOUND follows the renamed PR-number comparison line (e1834c89); the assertion is unchanged
   result_at_semantic_head: >
-    152/152 live, 0 vacuous, at a046914d. Run whole on 2026-10-04 on the
+    157/157 live, 0 vacuous, at 1a536ead. Run whole on 2026-10-05 on the
     Windows worker host in the session that wrote this file, with the local
-    Claude adapter READY. It covers the 55 controls this packet added, the
-    three retargeted controls and every tests/windows control. No control
-    was edited or removed for 017 or 018.
+    Claude adapter READY. It covers the 60 controls this packet added, the
+    three retargeted controls and every tests/windows control. For 021 one
+    control was added and one retargeted; no other control was edited, and
+    none was removed.
+  previous_head_5a9f9aa5: >
+    156/156 live, 0 vacuous.
+  previous_head_a046914d: >
+    152/152 live, 0 vacuous.
   previous_head_124f3640: >
     144/144 live, 0 vacuous.
   previous_head_452d836e: >
@@ -731,6 +866,60 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
     status: PENDING
 
 ci:
+  previous_head_37b78d27: >
+    History of a replaced head, not proof of the head that carries this
+    file. 37b78d27 was the first artifact commit for this semantic head,
+    pushed before SEMANTIC-PASS-022 and replaced under
+    ARTIFACT-REWRITE-023. At it, CI/CD Pipeline (run 37306976653), Agent
+    Control Gate (runs 37306976554, 37307008485 and 37309879547), Branch
+    divergence (runs 37306970106 and 37306976641, 25 commits), DAST
+    (HawkScan) (run 37306976561), Agent Control Worker Proof (run
+    37306976610, both jobs) and the Autopilot run (37306976726) concluded
+    success. From the Worker Proof log: Windows 448 tests, 447 passed, 0
+    failed, 1 skipped, 157/157 live; portable 429 tests, 428 passed, 0
+    failed, 1 skipped; the same one skipped test as at the semantic head.
+    Copilot did not run there either (PR review 5414208553, the quota
+    text). Reported in CC-PROGRESS-META-STATE-REDUCER-LIVE-012. The commit
+    is no longer on the branch; its runs and that review stay on the PR.
+  previous_head_1a536ead: >
+    At the semantic head of this file, CI/CD Pipeline (run 37303150292),
+    DAST (HawkScan) (run 37303150321), Branch divergence (runs 37303144869
+    and 37303150414, 24 commits ahead of main) and the Autopilot run
+    (37303150297) concluded success, and GitGuardian reported no finding.
+    Agent Control Worker Proof (run 37303150342) concluded success in both
+    jobs. From its log: the Windows job ran 448 tests, 447 passed, 0
+    failed, 1 skipped, and its mutation step reported 157/157 live; the
+    portable job ran 429 tests, 428 passed, 0 failed, 1 skipped, and its
+    validate-dag step reported the programme DAG OK. The one skip is the
+    same test in both jobs, "the cursor makes directive processing
+    idempotent", with its declared reason "needs PowerShell and an
+    authenticated gh"; it runs and passes locally and is not counted as
+    passed for the runners. validate-platform-dag is not a workflow step;
+    it ran locally, and platform-dag.spec is part of the suite. Agent
+    Control Gate failed (runs 37303150365 and 37303212580), because the
+    committed artifact still named a046914d as source_head while later
+    commits changed non-control files. The Copilot review of this head did
+    not run, and ChatGPT read the head as the approved fallback; see
+    semantic_head_review.
+  previous_head_5a9f9aa5: >
+    At the FINAL-CORRECTION-020 head, CI/CD Pipeline (run 37249475748),
+    DAST (HawkScan) (run 37249475768), Branch divergence (run 37249475857)
+    and the Autopilot run (37249475883) concluded success. Agent Control
+    Worker Proof (run 37249475797) concluded success in both jobs: Windows
+    447 tests, 446 passed, 0 failed, 1 skipped, 156/156 live; portable 428
+    tests, 427 passed, 0 failed, 1 skipped; the same one skipped test.
+    Agent Control Gate failed (runs 37249475793 and 37250333362) for the
+    same reason as above. Copilot review 5409091586 of it is recorded in
+    review_of_5a9f9aa5. No artifact was built for this head.
+  previous_head_b1bc8f5e: >
+    At the artifact head for a046914d, CI/CD Pipeline (run 37242743926),
+    Agent Control Gate (runs 37242765454 and 37243295121), Branch
+    divergence (run 37242743942), DAST (HawkScan) (run 37242743939), Agent
+    Control Worker Proof (run 37242743888, both jobs) and the Autopilot run
+    (37242744008) concluded success (CC-PROGRESS-META-STATE-REDUCER-LIVE-008).
+    Copilot review 5408692496 of it raised r4179736619 and r4179736650,
+    FINAL-CORRECTION-020 ruled both in scope, and no RETURN was posted for
+    it.
   previous_head_a046914d: >
     At the semantic head, CI/CD Pipeline (run 37240397746), DAST (HawkScan)
     (run 37240397813), Branch divergence (run 37240397745) and the Autopilot
@@ -806,8 +995,82 @@ ai_review:
   fallback: chatgpt
   self_review: none; Claude does not review this change
   final_head_review: PENDING; recorded by ChatGPT at admission in semantic_review
+  primary_at_semantic_head: NOT_RUN, reason quota_exhausted (PR review 5413803361 at 1a536ead); it is never counted towards the gate
+  fallback_at_semantic_head: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022 (5994182518), written by ChatGPT for 1a536ead; see semantic_head_review
+  at_the_head_that_carries_this_file: PENDING; the artifact-aware reading is requested on #80 once the checks at that head have finished
 
-semantic_head_review:   # the review of a046914d, before this commit; the review of the head that carries this file is PENDING
+semantic_head_review:   # the review of 1a536ead, before this commit; the review of the head that carries this file is PENDING
+  review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5413803361
+  reviewer: copilot-pull-request-reviewer[bot]
+  reviewed_head: 1a536eadf1f11c61cfd4f64c830a4c6c2a33570c
+  submitted_at: 2026-10-05T11:28:28Z
+  outcome: NOT_RUN
+  reason: quota_exhausted
+  verdict: >
+    The bot reviewed nothing. Its whole text says it was unable to review
+    this pull request because the user who requested the review has
+    reached their quota limit. No finding and no inline comment exists for
+    this head. It is evidence that the primary reviewer could not run, and
+    it is never counted as anything else.
+  findings: []
+  reviews:   # the two records for this head, in the shape ChatGPT writes at admission; that record, semantic_review, is still ChatGPT's to write
+    - provider: copilot
+      reviewer: copilot-pull-request-reviewer[bot]
+      reviewed_head: 1a536eadf1f11c61cfd4f64c830a4c6c2a33570c
+      outcome: NOT_RUN
+      reason: quota_exhausted
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5413803361
+    - provider: chatgpt
+      reviewer: chatgpt
+      reviewed_head: 1a536eadf1f11c61cfd4f64c830a4c6c2a33570c
+      outcome: PASS
+      reason: null
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5994182518
+      message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022
+      authorized_as_fallback_by: CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023
+  fallback_reading: >
+    ChatGPT is the one approved fallback when Copilot cannot run, and it
+    wrote 022 after comparing 5a9f9aa5 with this head. Its envelope
+    carries reviewed_head 1a536ead, semantic_review_outcome with the value
+    recorded above, and unresolved_substantive_findings 0. It found one
+    recovery commit across seven evidence, control, test and document
+    files, no runtime code changed, the checkpoint re-derived whole at
+    generation 87, the previous checkpoint stopping at the malformed
+    RULING-020 with RECOVERY-021 left unapplied, and the programme
+    contract preserved. Claude did not review this change and records the
+    outcome only as ChatGPT wrote it.
+  not_covered: >
+    022 is about the semantic head. The head that carries this file
+    differs from it only in the two artifact files, and its own reading is
+    PENDING in exact_head_proof.
+review_of_5a9f9aa5:   # kept as history
+  review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5409091586
+  reviewer: copilot-pull-request-reviewer[bot]
+  reviewed_head: 5a9f9aa5b775984a2b9d4d2f2a2f593247c11682
+  submitted_at: 2026-10-05T01:04:58Z
+  verdict: lists r4179736619 (K1 of 020) and r4179736650 (K2 of 020) as resolved; two open threads and one note without a thread
+  findings:
+    - id: r4180039928
+      severity: low
+      class: PR description
+      disposition: the PR 120 description was behind the head; rewritten on 2026-10-05 with no branch change, and again for 1a536ead
+    - id: r4174246267
+      severity: low
+      class: PRE_EXISTING, OUT_OF_SCOPE (R11-K1; restated by SEMANTIC-ACCEPT-019, FINAL-CORRECTION-020 and RECOVERY-021)
+      disposition: unchanged; follow-up issue 99
+    - id: note without a thread, activeHolds() and a keyed hold whose packet_id differs from its key
+      severity: low
+      class: pre-existing display behaviour (convergence rule of FINAL-CORRECTION-020; RECOVERY-021)
+      disposition: not changed; recorded under scope_ledger.deferred
+review_of_b1bc8f5e:   # kept as history
+  review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5408692496
+  reviewer: copilot-pull-request-reviewer[bot]
+  reviewed_head: b1bc8f5e13e750dec9432e6312858e79eac13c08
+  submitted_at: 2026-10-04T23:15:22Z
+  verdict: lists r4178799626 as resolved; two new findings on semantic code, r4179736619 (orchestrate.mjs) and r4179736650 (lib/state.mjs); reported in CONTRADICTION-007 and ruled on in FINAL-CORRECTION-020 as K1 and K2
+review_of_a046914d:   # kept as history; written for the artifact commit b1bc8f5e
   review: https://github.com/SaCH-PRO/KEYFLOWOS/pull/120#pullrequestreview-5408594905
   reviewer: copilot-pull-request-reviewer[bot]
   reviewed_head: a046914d0f5f56eeedd9c330e812110d66d56015
@@ -821,8 +1084,8 @@ semantic_head_review:   # the review of a046914d, before this commit; the review
   chatgpt_disposition: >
     SEMANTIC-ACCEPT-019 (5985390800) is ChatGPT's own reading of the changed
     implementation and of review 5408594905 at a046914d. It rules K1, K2 and
-    K3 accepted at declared scope, r4178799626 an artifact item for this
-    commit, and r4174246267 pre-existing and out of scope with follow-up
+    K3 accepted at declared scope, r4178799626 an artifact item for
+    b1bc8f5e, and r4174246267 pre-existing and out of scope with follow-up
     issue 99. The review record that admission reads (semantic_review) is
     written by ChatGPT at admission, not here.
   findings:
@@ -830,7 +1093,7 @@ semantic_head_review:   # the review of a046914d, before this commit; the review
       severity: low
       class: ARTIFACT_FINALIZE (CHECKPOINT-VALIDATION-017 K2; CONVERGED-CORRECTIONS-018 step 6)
       disposition: >
-        The stale generation 73 text in this file. Corrected by this commit:
+        The stale generation 73 text in this file. Corrected in b1bc8f5e:
         characterization.malformed_authority and design.generation now name
         the current anchor, EXACT-BINDING-016, at generation 81, and say that
         73 is the previous anchor. It can only be corrected in the artifact,
@@ -982,11 +1245,14 @@ scope_ledger:
     - validation of the reviewed checkpoint before the fold (CHECKPOINT-VALIDATION-017)
     - K1 refused-hold audit summary, K2 raw checkpoint shape, K3 string-only identities (CONVERGED-CORRECTIONS-018)
     - the single control-artifact commit and completion sequence of SEMANTIC-ACCEPT-019
+    - K1 no journal onto an invalid checkpoint, K2 no rendered hold from a wrong-type container (FINAL-CORRECTION-020)
+    - the reviewed re-anchor of RECOVERY-021, anchored to that REVIEW, past the malformed CONTRADICTION-RULING-020
     - tests, negative controls, docs, PR and RETURN
   resolved: [all declared items except those under remaining and deferred]
   remaining:
     - exact-head checks on the head that carries this file (PENDING)
     - independent semantic review at the final semantics
+    - the artifact-aware reading of the head that carries this file; if Copilot is out of quota there too, its evidence goes to ChatGPT as the fallback (ARTIFACT-REWRITE-023 step 5)
     - RETURN on #80 once those checks finish
   deferred:
     - item: .github entries in architecture/inventory.json (Copilot r4174246267)
@@ -995,6 +1261,18 @@ scope_ledger:
         SEMANTIC-ACCEPT-019. The scanner exclusion policy is not changed in
         this PR. Follow-up issue 99, KF-MAP-SCANNER-001.
       owner: ChatGPT, for a later packet (issue 99)
+    - item: activeHolds() returns a keyed hold whose packet_id differs from its key
+      reason: >
+        Noted without a thread in PR review 5409091586 of 5a9f9aa5, under
+        code that had not changed: holds {KF-A: {packet_id: KF-B}} is still
+        returned as an entry. The a046914d module gives the same output, so
+        K1 and K2 of 020 did not introduce it. validateState() rejects that
+        checkpoint as HOLD_KEY_MISMATCH and decide() returns REPORT_DRIFT
+        before any hold is read, so it appears only in the rendering beside
+        the drift, where it errs towards waiting. Not changed. RECOVERY-021
+        records it for follow-up unless independent review establishes a
+        direct safety or proof violation. No follow-up issue is opened yet.
+      owner: ChatGPT, for a later packet
     - item: scanner_environment_sensitivity
       reason: >
         Found on 2026-10-04 while re-running the scanners for R11-K3. It is
@@ -1050,7 +1328,7 @@ scope_ledger:
     - item: CORRECTION-010 step 6 as written (no artifact while any finding is open)
       by: RULING-011 R11-K2, artifact-only findings are ARTIFACT_FINALIZE obligations
     - item: the artifact commit e53e329f for semantic head 2763f796
-      by: RULING-012, option (b); this commit is the artifact for e1834c89
+      by: RULING-012, option (b); ac4b3b7c was the artifact for e1834c89
     - item: the checkpoint anchored to CONTRACT-CORRECTION-008
       by: RECOVERY-REANCHOR-015 and EXACT-BINDING-016, the reviewed re-anchor at 5982685256
     - item: the re-anchor target named in RECOVERY-REANCHOR-015 (that REVIEW itself)
@@ -1060,7 +1338,17 @@ scope_ledger:
     - item: the artifact commit ac4b3b7c for semantic head e1834c89
       by: CHECKPOINT-VALIDATION-017; it was never returned
     - item: 124f3640 as the semantic head, and an artifact for it
-      by: CONVERGED-CORRECTIONS-018; a046914d is the semantic head and this commit is its artifact
+      by: CONVERGED-CORRECTIONS-018; a046914d was the semantic head then
+    - item: the artifact commit b1bc8f5e for semantic head a046914d
+      by: FINAL-CORRECTION-020; it was never returned
+    - item: 5a9f9aa5 as the final semantic head, and an artifact for it
+      by: RECOVERY-021; 1a536ead is the semantic head and this commit is its artifact
+    - item: the first artifact commit for this semantic head, 37b78d27
+      by: ARTIFACT-REWRITE-023, option (a) of CONTRADICTION-010; replaced once with force-with-lease by the commit that carries this file, so that the one artifact commit records 022
+    - item: the checkpoint anchored to EXACT-BINDING-016
+      by: RECOVERY-021, the reviewed re-anchor at 5993146604
+    - item: a re-anchor inside the one semantic commit of 020 (option a of CONTRADICTION-008 as first written)
+      by: RECOVERY-021; 5a9f9aa5 was already pushed, so the re-anchor is its own semantic commit
     - item: normalizeState() filling in any falsy or wrong-type container
       by: CONVERGED-CORRECTIONS-018 K2; only an absent key is defaulted
 
@@ -1081,7 +1369,11 @@ residual_risks:
     any packet stops the fold for every packet, as the memory REVIEW
     5982337036 did on 2026-10-04, thirty seconds after RULING-012. With
     parallel tracks posting authority on #80, each such message costs a
-    reviewed re-anchor. This PR has now needed two.
+    reviewed re-anchor. This PR has now needed three: the third was for
+    CONTRADICTION-RULING-020 (5985754624), a second ruling for this packet
+    posted 27 seconds after the valid one. Until a re-anchor lands, live
+    verification is in drift for every packet and the worker selector wakes
+    on nothing.
   - >
     A HOLD or RESUME wakes only when it is typed. An untyped or mistyped
     one is valid authority that wakes nothing and then stops the fold when
@@ -1110,11 +1402,37 @@ residual_risks:
     and in PROGRESS-007; a checkpoint written that way fails closed as
     drift until a reviewed commit corrects it.
   - >
-    With an invalid checkpoint on disk, orchestrate.mjs without --apply
-    reports REPORT_DRIFT and exits 0. With --apply and an actionable event
-    it exits non-zero when it tries to journal, because saveState() refuses
-    an invalid state. That was already so for the 017 defects and is
-    unchanged.
+    With an invalid checkpoint on disk, orchestrate.mjs reports
+    REPORT_DRIFT and exits 0, with or without --apply (020 K1). A caller
+    that reads only the exit code cannot tell a refused apply from an
+    applied one; the refusal is in applied false and apply_refused. This
+    was stated in the ACK of 020 and in PROGRESS-009, and no ruling asked
+    for a non-zero exit.
+  - >
+    A checkpoint file that is not parseable YAML at all (a bare scalar
+    document) exits 2 at load with the parser error, with or without
+    --apply. That is older than the corrections of this packet and is the
+    unexpected-failure exit. Not changed.
+  - >
+    activeHolds() still returns a keyed hold whose packet_id differs from
+    its key. It is display only and errs towards waiting; see scope_ledger.
+  - >
+    The re-anchor has been read by one reviewer, the fallback. Copilot
+    answered that it was unable to review 1a536ead for lack of quota, and
+    the same at 37b78d27, and it will probably answer the same for the
+    head that carries this file.
+  - >
+    The branch is at the 25-commit cap with this commit. An admission
+    commit that records review_status and semantic_review in this file
+    would be commit 26, and Branch divergence fails above 25.
+    ARTIFACT-REWRITE-023 authorizes no 26th commit and makes this the next
+    explicit contradiction if admission needs one; nothing here works
+    around it.
+  - >
+    This head replaced a pushed commit. 37b78d27 is unreachable from the
+    branch, and its workflow runs and PR review 5414208553 remain on the
+    PR as history. The replacement was authorized once, for this purpose
+    only.
   - >
     The architecture inventory is reproducible only from an LF tree without
     untracked files; see scanner_environment_sensitivity under scope_ledger.
@@ -1133,6 +1451,16 @@ security:
     that carries this file is reported in the RETURN.
 
 unresolved_contradictions: []
+settled_contradictions_of_this_head:   # kept as history (ARTIFACT-REWRITE-023)
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-009
+    comment_id: 5993708417
+    about: the review of 1a536ead did not run (PR review 5413803361, quota_exhausted); RECOVERY-021 requires one before the RETURN, and only ChatGPT can be the fallback reviewer
+    settled_by: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022 (5994182518), recorded as settled by ARTIFACT-REWRITE-023
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-010
+    comment_id: 5994350028
+    about: 022 ordered one artifact commit recording its outcome, and the artifact commit 37b78d27 had been pushed eight minutes before 022; correcting it needed a 26th commit or a rewrite of the 25th
+    cause: Claude pushed the artifact before the ruling on CONTRADICTION-009, to protect unpushed work, and wrongly said it foreclosed nothing
+    settled_by: CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023 (5994568448), option (a)
 review_findings_disposed:
   - id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001 C1
     disposition: packet-keyed holds; NC-REDUCER-SINGLE-HOLD-LAW and NC-REDUCER-HOLD-DUPLICATE
@@ -1156,7 +1484,7 @@ review_findings_disposed:
       BLOCKER-RULING-005 and cleared by HUMAN-GATES-CLEARED-006, with no
       history rewrite.
   - id: Copilot r4171267706 and CORRECTION-004 C4-F4 (lineage)
-    disposition: authority_lineage in both artifacts runs through SEMANTIC-ACCEPT-019 and its ACK
+    disposition: authority_lineage in both artifacts runs through RECOVERY-021 and its ACK
   - id: CORRECTION-004 C4-F2
     disposition: recorded bodies minimized to column-0 lines; NC-REDUCER-RECORDED-UNMINIMIZED
   - id: AUDIT-CORRECTION-006 A6-F1 and Copilot r4171364250
@@ -1213,15 +1541,42 @@ review_findings_disposed:
   - id: SEMANTIC-ACCEPT-019
     disposition: >
       The Windows proof at a046914d was confirmed (run 37240397707; see
-      ci.previous_head_a046914d). This commit is the one control-only
-      artifact: it binds source_head to a046914d, carries the lineage and
-      generation text through 019, records the K1 to K3 proof and the
-      disposition of review 5408594905, and records issue 99 as the
-      follow-up for r4174246267.
+      ci.previous_head_a046914d). b1bc8f5e was the one control-only
+      artifact for it: it bound source_head to a046914d, carried the
+      lineage and generation text through 019, and recorded issue 99 as
+      the follow-up for r4174246267. The review of b1bc8f5e raised two
+      semantic findings, so FINAL-CORRECTION-020 superseded it and no
+      RETURN was posted for it.
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-007 K1, FINAL-CORRECTION-020 K1 and Copilot r4179736619
+    disposition: --apply validates the stored checkpoint before the journal step and refuses with apply_refused; NC-APPLY-INVALID-CHECKPOINT-JOURNALED; in the tree since 5a9f9aa5
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-007 K2, FINAL-CORRECTION-020 K2 and Copilot r4179736650
+    disposition: activeHolds() reads only mappings; three NC-HOLD controls; in the tree since 5a9f9aa5
+  - id: Copilot r4180039928 (PR description behind the head)
+    disposition: PR description rewritten with no branch change, at 5a9f9aa5 and again for this head
+  - id: PR review 5409091586, the note on a keyed hold whose packet_id differs from its key (no thread id)
+    disposition: pre-existing display behaviour, not introduced by 020; recorded under scope_ledger.deferred as RECOVERY-021 rules
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-008 and RECOVERY-021
+    disposition: >
+      Checkpoint re-derived whole and anchored to 5993146604, with the
+      malformed CONTRADICTION-RULING-020 in the lineage as evidence only;
+      NC-RECOVERY-RULING-020-SKIPPED and the retargeted
+      NC-PROJECTION-OBSOLETE-ANCHOR. K1 and K2 of 020 are not touched.
+      This commit is the one control-only artifact, bound to 1a536ead.
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-009 and SEMANTIC-PASS-022
+    disposition: Copilot NOT_RUN for quota_exhausted at the semantic head; the fallback reading by ChatGPT is recorded in semantic_head_review; nothing is substituted or counted twice
+  - id: CC-CONTRADICTION-META-STATE-REDUCER-LIVE-010 and ARTIFACT-REWRITE-023
+    disposition: >
+      37b78d27 replaced once with force-with-lease by this commit. The
+      parent is unchanged, the diff against 37b78d27 is the two artifact
+      files, and the branch is still 25 commits ahead of main. Every check
+      runs again on this head; nothing is inherited from 37b78d27.
 
 next_action: >
-  Wait for every exact-head check on the head carrying this file and for a
-  fresh review of that head, then post the RETURN on #80 once, without
-  mutating the branch. ChatGPT then reviews. Claude does not review this
+  Wait for every exact-head check on the head carrying this file and for
+  the artifact-aware reading of that head. If Copilot is out of quota
+  again, post that evidence on #80 for the ChatGPT fallback. Post the
+  RETURN on #80 once, only when both are satisfied, without mutating the
+  branch. If admission needs a commit beyond the cap, raise it as a
+  contradiction. Claude does not review this
   change. Do not merge. ACTION-001 stays held, the platform programme stays
   inactive, issue 121 and dispatch/queue work wait for later packets.

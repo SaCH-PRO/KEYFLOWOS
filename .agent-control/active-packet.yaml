@@ -17,7 +17,7 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-META-STATE-REDUCER-LIVE-HUMAN-GATES-CLEARED-006   # 5965127894
   - CG-REVIEW-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-006   # 5965297008
   - CG-REVIEW-META-STATE-REDUCER-LIVE-AUDIT-CORRECTION-007   # 5965350865
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965390363; the checkpoint anchor
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008   # 5965390363; the checkpoint anchor until EXACT-BINDING-016
   - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-009   # 5965780538; malformed one-line envelope, superseded history
   - CG-REVIEW-META-STATE-REDUCER-LIVE-COPILOT-CORRECTION-010   # 5971082969; supersedes 009
   - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-011   # 5975152305
@@ -25,13 +25,18 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-META-STATE-REDUCER-LIVE-R12-SURGICAL-CORRECTION-013   # 5982400414
   - CG-REVIEW-META-STATE-REDUCER-LIVE-R13-ACTION-SHAPE-014   # 5982537977
   - CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015   # 5982618421; authorized the second reviewed recovery
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; the checkpoint anchor
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982685256; the checkpoint anchor until RECOVERY-021
   - CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017   # 5983193244; option (a) on CONTRADICTION-004
   - CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018   # 5984704930; rules on CONTRADICTION-005 and -006
-  - CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019   # 5985390800; current authority; accepts K1 to K3 at a046914d and orders the artifact
-in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019
-ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019
-ack_comment_id: 5985415097
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019   # 5985390800; accepts K1 to K3 of 018 at a046914d and orders the artifact
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020   # 5985751518; rules on CONTRADICTION-007; K1 and K2 in one semantic head
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020   # 5985754624; malformed envelope (a repeated column-0 Reason line), posted 27 seconds after FINAL-CORRECTION-020; evidence only, it grants nothing
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021   # 5993146604; rules on CONTRADICTION-008; authorized the third reviewed recovery and is the checkpoint anchor
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022   # 5994182518; rules on CONTRADICTION-009; the approved fallback reading of 1a536ead
+  - CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023   # 5994568448; current authority; rules on CONTRADICTION-010; authorized one force-with-lease replacement of the artifact commit 37b78d27
+in_reply_to: CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023
+ack_message_id: CC-ACK-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023
+ack_comment_id: 5994585226
 prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-001   # 5963571216
   - CC-ACK-META-STATE-REDUCER-LIVE-CORRECTION-001   # 5963710053
@@ -50,6 +55,10 @@ prior_ack_message_ids:
   - CC-ACK-META-STATE-REDUCER-LIVE-EXACT-BINDING-016   # 5982734013
   - CC-ACK-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017   # 5983216888
   - CC-ACK-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018   # 5984745804
+  - CC-ACK-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019   # 5985415097
+  - CC-ACK-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020   # 5985786188; also said that RULING-020 is unreadable as authority
+  - CC-ACK-META-STATE-REDUCER-LIVE-RECOVERY-021   # 5993187922
+  - CC-ACK-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022   # 5994349681; also said that the artifact commit already existed
 contradiction_message_ids:
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-001   # 5964613912; settled by BLOCKER-RULING-005 and HUMAN-GATES-CLEARED-006
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-002   # 5972099796; settled by CONTRADICTION-RULING-011
@@ -57,13 +66,17 @@ contradiction_message_ids:
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-004   # 5983093674; settled by CHECKPOINT-VALIDATION-017, option (a)
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-005   # 5983475073; settled by CONVERGED-CORRECTIONS-018
   - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-006   # 5983728795; settled by CONVERGED-CORRECTIONS-018
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-007   # 5985517308; settled by FINAL-CORRECTION-020
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-008   # 5985786311; settled by RECOVERY-021
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-009   # 5993708417; the review of 1a536ead did not run, because Copilot is out of quota; settled by SEMANTIC-PASS-022, and recorded as settled by ARTIFACT-REWRITE-023
+  - CC-CONTRADICTION-META-STATE-REDUCER-LIVE-010   # 5994350028; the artifact commit 37b78d27 predated 022; settled by ARTIFACT-REWRITE-023, option (a)
 pr_number: 120
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
 implementation_branch: impl/kf-meta-state-reducer-live-001
 state: PROVING
 health: YELLOW
-scope_changed: true   # CONVERGED-CORRECTIONS-018 added K1 and K3 to the packet
-scope_change_authority: CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018
+scope_changed: true   # FINAL-CORRECTION-020 added its K1 and K2 to the packet, and RECOVERY-021 the third reviewed re-anchor; 022 and 023 change no scope
+scope_change_authority: CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
@@ -167,6 +180,28 @@ ruling_017_to_019:   # one line each; the #80 comments are the full text
   R19-findings: r4178799626 is fixed in the single control-artifact commit; r4174246267 is pre-existing and out of scope, follow-up issue 99, and PR 120 is not widened for it
   R19-sequence: confirm the Windows proof at a046914d; one .agent-control-only commit bound to a046914d with lineage through 019; the exact-head checks; the artifact-aware review; RETURN if clean; no merge
 
+ruling_020_to_021:   # one line each; the #80 comments are the full text
+  R20-K1: orchestrate.mjs with --apply validates the stored checkpoint before any journal or save; on an invalid one it keeps REPORT_DRIFT, calls no persistence helper, repairs nothing, writes no byte, throws nothing, and uses the deliberate drift exit
+  R20-K2: activeHolds() reads holds only when it is a non-array mapping and the legacy hold only when it is a mapping; a wrong-type container gives no derived hold entry, and CHECKPOINT_SHAPE_INVALID stays visible as the drift reason
+  R20-sequence: one semantic head for K1 and K2, the whole proof, a fresh independent review, one control-only artifact commit, the exact-head checks, the artifact-aware review, RETURN if clean; no merge; the path stays inside the 25-commit cap
+  R20-convergence: after K1 and K2 a new review finding blocks only if these corrections introduced it or it directly violates authority, exact binding, checkpoint integrity, admission, persistence safety or proof integrity; pre-existing non-safety debt is recorded and moved out
+  R20-malformed: CONTRADICTION-RULING-020 (5985754624) is not readable as authority; it is historical evidence and grants no additional permission (RECOVERY-021)
+  R21-recovery: one reviewed whole-state re-anchor inside PR 120, anchored to RECOVERY-021 by its posted identity and ordering metadata; the malformed comment is accounted for in the lineage; no history edit, no skip, no weaker parser or reducer validation
+  R21-preserve: K1 and K2 as at 5a9f9aa5; ACTION-001 held and every other valid hold; platform inactive; every safety flag false; memory separate and zero-credit; no merge authority; 4/35 application checkpoints
+  R21-sequence: one semantic commit for the re-anchor with the minimum fixtures, timestamps and negative controls; the whole proof fresh, local and CI results reported separately with skips named; live status verification CONSISTENT before the artifact; one control-artifact commit bound to the new semantic head; the checks at the final head; the artifact-aware review; RETURN only if the declared scope is clean
+  R21-cap: the 25-commit cap stays; further semantic work is reported as a conflict, not worked around
+  R21-follow-up: the convergence rule of FINAL-CORRECTION-020 is retained; the inventory follow-up stays under issue 99; the pre-existing hold-display mismatch is recorded for follow-up unless independent review establishes a direct safety or proof violation
+
+ruling_022_to_023:   # one line each; the #80 comments are the full text
+  R22-outcome: ChatGPT read 1a536ead as the approved fallback, with reviewed_head 1a536ead, semantic_review_outcome PASS and no unresolved substantive finding; Copilot at that head is NOT_RUN for quota_exhausted and is not counted
+  R22-artifact: exactly one control-artifact commit bound to that head, changing only the packet control artifacts, recording Copilot as NOT_RUN and the ChatGPT reading as PASS
+  R22-stop: if the artifact commit changes anything outside the control-artifact surface, or any required proof is red or skipped without an accepted reason, report the contradiction instead of posting RETURN
+  R23-replace: one force-with-lease replacement of the pushed artifact commit 37b78d27; the semantic head stays; only the two artifact files change; the branch stays at 25 commits ahead of main
+  R23-record: 022 as the approved fallback PASS; 022 and its ACK in the lineage; CONTRADICTION-009 and CONTRADICTION-010 settled, with their history kept
+  R23-proof: the results at 37b78d27 are history only; every required check runs again on the replacement head, and nothing is inherited
+  R23-sequence: verify the diff against 37b78d27 is the two artifact files; verify the cap; run the required workflows; request the artifact-aware review; if Copilot is NOT_RUN again, surface that evidence for the ChatGPT fallback; no RETURN until both are satisfied
+  R23-cap: no 26th commit is authorized; if admission needs one, that is the next explicit contradiction
+
 proof_obligations:
   - deterministic reducer tests
   - replay/idempotency tests
@@ -194,5 +229,5 @@ return_contract: >
   with the portable and Windows suites and the live negative-control manifest;
   open the PR; wait for the exact-head checks and the independent semantic
   review; RETURN to issue 80 for ChatGPT admission. The completion sequence
-  of CONVERGED-CORRECTIONS-018, as continued by SEMANTIC-ACCEPT-019, is the
-  current one.
+  of RECOVERY-021, as continued by SEMANTIC-PASS-022 and
+  ARTIFACT-REWRITE-023, is the current one.
