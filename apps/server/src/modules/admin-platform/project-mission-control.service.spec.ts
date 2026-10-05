@@ -134,12 +134,54 @@ describe('Mission Control Atlas projection', () => {
       });
 
       const atlas = buildAtlasProjection(root, new Date('2026-10-05T18:00:00Z'));
-      expect(atlas.status).toBe('FRESH');
+      expect(atlas.status).toBe('UNKNOWN');
       expect(atlas.graph.nodes).toBeNull();
       expect(atlas.graph.edges).toBeNull();
       expect(atlas.graph.verifiedCodeLinks).toBeNull();
       expect(atlas.missingArtifacts).toContain('architecture/atlas/generated/atlas-graph.json');
       expect(atlas.missingArtifacts).toContain('architecture/atlas/generated/packet-code-links.json');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('is FRESH only when the required Atlas artifacts exist and verified evidence is recent', () => {
+    const root = tempRepo();
+    try {
+      writeJson(root, 'architecture/atlas/generated/intelligence-topology.json', {
+        schema: 'keyflowos-intelligence-topology/v1',
+        verified_at: '2026-10-05',
+        status: 'CONSISTENT',
+        claims: {
+          analysis_map_journeys: 25,
+          current_state_journeys: 25,
+          analysis_map_kernels: 12,
+          current_state_kernels: 12,
+        },
+        journeys: Array.from({ length: 25 }),
+        kernels: Array.from({ length: 12 }),
+        contradictions: [],
+      });
+      writeJson(root, 'architecture/atlas/generated/atlas-graph.json', {
+        schema: 'keyflowos-living-atlas/v1',
+        nodes: [],
+        edges: [],
+        source_state: {},
+      });
+      writeJson(root, 'architecture/atlas/generated/packet-semantic-index.json', {
+        status: 'MAPPED',
+        packets: [],
+        contradictions: [],
+      });
+      writeJson(root, 'architecture/atlas/generated/packet-code-links.json', {
+        status: 'VERIFIED_AT_DECLARED_PATH_SCOPE',
+        links: [],
+        contradictions: [],
+      });
+
+      const atlas = buildAtlasProjection(root, new Date('2026-10-05T18:00:00Z'));
+      expect(atlas.status).toBe('FRESH');
+      expect(atlas.missingArtifacts).toEqual([]);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
