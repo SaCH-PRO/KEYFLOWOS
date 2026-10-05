@@ -72,7 +72,7 @@ function normalizeKind(type) {
   const known = new Set([
     'app', 'package', 'module', 'file', 'entity', 'event', 'route',
     'capability', 'integration', 'external_integration', 'execution_path',
-    'risk', 'packet', 'packet_phase',
+    'risk', 'packet', 'packet_phase', 'journey', 'kernel', 'contradiction',
   ]);
   return known.has(type) ? type : 'implementation_node';
 }
@@ -149,6 +149,7 @@ export function buildAtlasGraph({
   capabilityRegistryText,
   ownershipRegistryText,
   dag,
+  intelligenceTopology = null,
 }) {
   const nodes = new Map();
   const edges = new Map();
@@ -402,6 +403,76 @@ export function buildAtlasGraph({
     }
   }
 
+
+  if (intelligenceTopology) {
+    const sourceRef = intelligenceTopology.source_ref || 'docs/keyflow-intelligence-foundation';
+    const sourceEvidence = (intelligenceTopology.source_files || []).map((pathName) => ({
+      path: pathName,
+      ref: sourceRef,
+    }));
+
+    for (const journey of intelligenceTopology.journeys || []) {
+      addNode({
+        id: `journey:${journey.id}`,
+        kind: 'journey',
+        layer: 'L2',
+        label: journey.name || journey.id,
+        evidence_class: 'accepted',
+        authority: 'canonical_intelligence',
+        confidence: 'high',
+        evidence: sourceEvidence,
+        metadata: { canonicalId: journey.id },
+      });
+    }
+
+    for (const kernel of intelligenceTopology.kernels || []) {
+      addNode({
+        id: `kernel:${kernel.id}`,
+        kind: 'kernel',
+        layer: 'L3',
+        label: kernel.name || kernel.id,
+        evidence_class: 'accepted',
+        authority: 'canonical_intelligence',
+        confidence: 'high',
+        evidence: sourceEvidence,
+        metadata: { canonicalId: kernel.id },
+      });
+    }
+
+    for (const link of intelligenceTopology.primary_journey_kernel_links || []) {
+      addEdge({
+        source: `journey:${link.journey_id}`,
+        target: `kernel:${link.kernel_id}`,
+        relation: 'uses',
+        layer: 'L3',
+        evidence_class: 'accepted',
+        authority: 'canonical_intelligence',
+        confidence: 'high',
+        evidence: sourceEvidence,
+        notes: 'Primary journey/kernel relationship from canonical kernel programme.',
+      });
+    }
+
+    for (const contradiction of intelligenceTopology.contradictions || []) {
+      addNode({
+        id: `contradiction:${contradiction.id}`,
+        kind: 'contradiction',
+        layer: 'L8',
+        label: contradiction.subject || contradiction.id,
+        evidence_class: 'accepted',
+        authority: 'canonical_intelligence',
+        confidence: 'high',
+        evidence: contradiction.evidence || sourceEvidence,
+        metadata: {
+          disposition: contradiction.disposition || 'UNRESOLVED',
+          analysis_map_value: contradiction.analysis_map_value ?? null,
+          current_state_value: contradiction.current_state_value ?? null,
+          value: contradiction.value ?? null,
+        },
+      });
+    }
+  }
+
   const result = {
     schema: 'keyflowos-living-atlas/v1',
     deterministic: true,
@@ -414,6 +485,10 @@ export function buildAtlasGraph({
       data_model_items: ownership.length,
       programme_packets: dag.packetsTotal,
       programme_phases: dag.phasesTotal,
+      intelligence_status: intelligenceTopology?.status || 'NOT_MATERIALIZED',
+      intelligence_journeys: intelligenceTopology?.journeys?.length ?? null,
+      intelligence_kernels: intelligenceTopology?.kernels?.length ?? null,
+      intelligence_contradictions: intelligenceTopology?.contradictions?.length ?? null,
     },
     nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)),
     edges: [...edges.values()].sort((a, b) => a.id.localeCompare(b.id)),
@@ -426,6 +501,10 @@ export function buildAtlasGraph({
 export function buildFromRepository(repoRoot = ROOT) {
   const architectureGraph = JSON.parse(fs.readFileSync(path.join(repoRoot, 'architecture/architecture.json'), 'utf8'));
   const dag = loadDag(repoRoot);
+  const intelligencePath = path.join(repoRoot, 'architecture/atlas/generated/intelligence-topology.json');
+  const intelligenceTopology = fs.existsSync(intelligencePath)
+    ? JSON.parse(fs.readFileSync(intelligencePath, 'utf8'))
+    : null;
   return buildAtlasGraph({
     architectureGraph,
     moduleRegistryText: fs.readFileSync(path.join(repoRoot, 'architecture/module-registry.yaml'), 'utf8'),
@@ -434,6 +513,7 @@ export function buildFromRepository(repoRoot = ROOT) {
     capabilityRegistryText: fs.readFileSync(path.join(repoRoot, 'architecture/capability-registry.yaml'), 'utf8'),
     ownershipRegistryText: fs.readFileSync(path.join(repoRoot, 'architecture/data-ownership.yaml'), 'utf8'),
     dag,
+    intelligenceTopology,
   });
 }
 
