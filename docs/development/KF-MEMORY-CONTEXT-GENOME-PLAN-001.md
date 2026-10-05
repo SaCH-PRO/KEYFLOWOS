@@ -298,6 +298,24 @@ Must not precede claim/provenance proof:
 9. No fake green or unbounded completion percentage.
 10. Every architecture-affecting change updates the Living System Atlas.
 
+
+## Existing open-PR convergence map
+
+This programme MUST reuse or disposition existing open work before creating a replacement.
+
+| PR | Existing work | Disposition in this programme |
+|---|---|---|
+| #127 `KF-META-MEMORY-TRUTH-AUDIT-001` | static executable memory audit + CI workflow | **REUSE AS M0 STARTING POINT.** Rebase onto current main, expand roots/components to Business Genome, Temporal Flow, ingestion, evidence, BusinessEvent, context/learning surfaces, and use it as the machine-readable audit baseline rather than creating a second scanner. |
+| #134 `KF-LEARNING-STREAM-001` | makes dormant KnowledgeIngestionService reachable | **HOLD FOR M0/M1.** Mine tests and reachability work, but do not merge the chunk/embed-first runtime before Source/Claim/Provenance semantics converge. |
+| #112 `KF-META-CONTEXT-GENOME-001` | context-genome types, lineage and Business Genome adapter | **REASSESS / REUSE AFTER M0.** Treat as an implementation candidate for lineage/context contracts; do not create competing context types. |
+| #136 `KF-META-PROCEDURAL-MORPHOGENESIS-001` | ProcedureSpec / ScaleUnit contracts and experiment foundation | **REUSE IN M8.** Align procedural candidates with approved skills/capabilities and preserve provenance from episodes/outcomes. |
+| #128 cognitive archaeology | repository intelligence covering KEY cognition/reachability/learning | **INPUT TO M0/M7/M8.** Reconcile into canonical intelligence before using it as implementation truth. |
+| #105 Connector Fabric architecture | connector/provider ownership and implementation waves | **INPUT TO M3/M9.** Reuse provider/object identity, connector ownership and sync boundaries rather than inventing a second connector ingestion layer. |
+| #75 EXTFX effect certainty | external-effect certainty for outbound communications | **INPUT TO EVIDENCE/REALITY CONTRACT.** Reuse effect certainty semantics when memory claims depend on provider outcomes. |
+| #38 KEY IRONCLAD | older cognitive/consciousness services | **ARCHAEOLOGY ONLY UNTIL REACHABILITY PROVEN.** Do not merge wholesale; map any still-useful reasoning/reflection/intuition semantics through M0/M7/M8. |
+
+Anti-duplication rule: a new packet may replace one of these only after it records which existing semantics are reused, superseded, or rejected with evidence.
+
 ## Immediate next packets
 
 ### KF-MEMORY-TRUTH-AUDIT-001
