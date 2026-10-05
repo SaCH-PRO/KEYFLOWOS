@@ -28,7 +28,10 @@
     "test:db:soft-delete": "pnpm --filter db exec tsx --env-file .env src/test-soft-delete.ts",
     "verify:up": "bash scripts/verify-up.sh",
     "monitor:uptime": "bash scripts/uptime-monitor.sh",
-    "start:prod": "bash scripts/start-prod.sh"
+    "start:prod": "bash scripts/start-prod.sh",
+    "architecture:atlas": "node scripts/architecture/generate-atlas.mjs",
+    "architecture:atlas:check": "node scripts/architecture/generate-atlas.mjs --check",
+    "architecture:atlas:test": "node --test scripts/architecture/generate-atlas.spec.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
