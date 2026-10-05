@@ -336,6 +336,8 @@ export function buildAtlasProjection(
   let status: AtlasFreshness = 'UNKNOWN';
   if (contradictions.length > 0 || intelligence?.status === 'CONTRADICTED') {
     status = 'CONTRADICTED';
+  } else if (missingArtifacts.length > 0) {
+    status = 'UNKNOWN';
   } else if (verifiedAt) {
     const ageMs = now.getTime() - new Date(verifiedAt).getTime();
     status = Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= 7 * 24 * 60 * 60 * 1000 ? 'FRESH' : 'STALE';
