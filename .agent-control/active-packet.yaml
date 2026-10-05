@@ -6,10 +6,11 @@ source_main: 110532883411007787f62de35e0a951aa1c16cfa
 implementation_branch: impl/kf-key-native-capacity-shadow-001
 state: PROVING
 health: YELLOW
-scope_changed: false
+scope_changed: true
 production_touched: false
 programme_credit: ZERO
 merge_authority: false
+scope_change_authority: issue_138_comment_5997180520_stale_packet_id_test_correction
 review_status: PENDING_CHATGPT_REVIEW
 
 objective: >
@@ -24,6 +25,8 @@ authorized_scope:
   - scripts/key-native-capacity/build-report.mjs
   - scripts/key-native-capacity/native-capacity.spec.mjs
   - .github/workflows/key-native-capacity-shadow.yml
+  - scripts/agent-control/tests/yaml.spec.mjs
+  - scripts/agent-control/tests/return-evidence.spec.mjs
   - .agent-control/active-packet.yaml
   - .agent-control/claude-return.yaml
 
@@ -37,6 +40,7 @@ constraints:
   - heuristic absence of a model call is never presented as proof of independence
   - production remains untouched
   - this packet does not authorize merge
+  - agent-control runtime parser reducer admission and policy semantics remain unchanged
 
 acceptance:
   - deterministic analyzer tests exist
@@ -46,6 +50,7 @@ acceptance:
   - GitHub workflow permissions are contents read and issues read only
   - scheduled/manual/PR workflow produces disposable derived artifacts
   - exact-head proof and independent review are reported only after they actually occur
+  - reusable branch-artifact tests validate packet identity generically rather than pinning one historical packet id
 
 next_legal_action: >
   Run exact-head proof on the branch head carrying the pre-RETURN control artifacts,
