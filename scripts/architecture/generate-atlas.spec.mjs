@@ -473,3 +473,86 @@ test('packet semantic contradictions become visible L8 nodes', () => {
   assert.equal(graph.source_state.packet_semantic_status, 'PARTIAL_OR_CONTRADICTED');
 });
 
+test('verified code-link index creates observed packet-to-code edges', () => {
+  const graph = buildAtlasGraph({
+    architectureGraph: { meta: {}, nodes: [], edges: [] },
+    moduleRegistryText: 'modules:\n',
+    routeRegistryText: 'routes:\n',
+    eventRegistryText: 'events:\n',
+    capabilityRegistryText: 'capabilities:\n',
+    ownershipRegistryText: 'models:\n',
+    dag: fakeDag(),
+    intelligenceTopology: null,
+    packetSemanticIndex: null,
+    codeLinkIndex: {
+      status: 'VERIFIED_AT_DECLARED_PATH_SCOPE',
+      links: [
+        {
+          packet_id: 'KF-EXEC-A-001',
+          path: 'apps/server/src/example.ts',
+          node_id: 'code:apps/server/src/example.ts',
+          kind: 'file',
+          relation: 'characterizes_seam',
+          confidence: 'high',
+        },
+      ],
+      contradictions: [],
+    },
+  });
+
+  const codeNode = graph.nodes.find(
+    (n) => n.id === 'code:apps/server/src/example.ts',
+  );
+  assert.ok(codeNode);
+  assert.equal(codeNode.evidence_class, 'observed');
+  assert.equal(codeNode.authority, 'current_code');
+
+  const edge = graph.edges.find(
+    (e) =>
+      e.source === 'packet:KF-EXEC-A-001' &&
+      e.target === 'code:apps/server/src/example.ts',
+  );
+  assert.ok(edge);
+  assert.equal(edge.relation, 'characterizes_seam');
+  assert.equal(edge.evidence_class, 'observed');
+  assert.equal(graph.source_state.verified_code_links, 1);
+});
+
+test('missing declared code seams surface as L8 contradictions', () => {
+  const graph = buildAtlasGraph({
+    architectureGraph: { meta: {}, nodes: [], edges: [] },
+    moduleRegistryText: 'modules:\n',
+    routeRegistryText: 'routes:\n',
+    eventRegistryText: 'events:\n',
+    capabilityRegistryText: 'capabilities:\n',
+    ownershipRegistryText: 'models:\n',
+    dag: fakeDag(),
+    intelligenceTopology: null,
+    packetSemanticIndex: { source_ref: 'test-ref', packets: [], contradictions: [] },
+    codeLinkIndex: {
+      status: 'PARTIAL_OR_CONTRADICTED',
+      links: [],
+      contradictions: [
+        {
+          id: 'ATLAS-CODE-SEAM-MISSING-KF-EXEC-A-001-X',
+          packet_id: 'KF-EXEC-A-001',
+          type: 'MISSING_DECLARED_CODE_SEAM',
+          path: 'apps/server/src/missing.ts',
+          source_file: 'docs/intelligence/execution/a.md',
+          disposition: 'UNRESOLVED',
+        },
+      ],
+    },
+  });
+
+  const contradiction = graph.nodes.find(
+    (n) =>
+      n.id ===
+      'contradiction:ATLAS-CODE-SEAM-MISSING-KF-EXEC-A-001-X',
+  );
+  assert.ok(contradiction);
+  assert.equal(contradiction.layer, 'L8');
+  assert.equal(contradiction.metadata.path, 'apps/server/src/missing.ts');
+  assert.equal(graph.source_state.code_link_contradictions, 1);
+});
+
