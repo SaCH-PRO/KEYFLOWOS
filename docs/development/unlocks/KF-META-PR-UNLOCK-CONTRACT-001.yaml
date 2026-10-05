@@ -47,7 +47,10 @@ proof:
     - "PROVEN evidence requirement"
     - "LIVE post-merge verification requirement"
     - "self-contract parses and validates"
-  evidence: []
+  evidence:
+    - "scripts/agent-control/tests/unlock-contract.spec.mjs exercises positive and fail-closed contract semantics"
+    - "scripts/agent-control/validate-unlock-contract.mjs provides the deterministic CLI validator"
+    - "docs/development/EXECUTION_CONTROL_STANDARD.md now requires the contract for future merge candidates"
 
 post_merge_verified: false
 
