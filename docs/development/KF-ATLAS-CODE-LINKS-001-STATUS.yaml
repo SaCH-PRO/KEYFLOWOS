@@ -1,0 +1,61 @@
+packet_id: KF-ATLAS-CODE-LINKS-001
+title: Verified packet-to-code seam links
+state: PROVING
+health: GREEN
+scope_changed: false
+production_touched: false
+base_branch: impl/kf-atlas-packet-semantic-index-001
+implementation_branch: impl/kf-atlas-code-links-001
+
+declared_obligations:
+  - verify exact packet characterization paths against the current checkout
+  - create observed packet-to-code edges only for paths that actually exist
+  - keep conceptual seam names unlinked until a stronger symbol resolver exists
+  - fail visibly when an explicitly declared exact path is missing
+  - reject absolute paths and traversal
+  - project verified code links and contradictions into the Atlas
+
+resolved:
+  - exact repository-path classifier added
+  - path traversal and absolute paths rejected
+  - current-checkout existence verification added
+  - verified file/directory links carry current_code authority
+  - missing declared paths become contradictions
+  - conceptual and non-exact symbols remain unlinked
+  - Atlas projection for verified code nodes and packet-to-code edges added
+  - Atlas projection for missing-path contradictions added
+  - focused positive and negative-control tests added
+  - package proof commands added
+
+remaining:
+  - generate packet-semantic-index.json from a checkout with the intelligence ref
+  - run code-link verifier against the generated packet index
+  - inspect verified/missing path counts
+  - independently review path classification and edge semantics
+  - rebase/retarget after parent Atlas tranches are admitted
+
+deferred:
+  - conceptual symbol resolution
+  - call-graph reachability proof beyond path existence
+  - PR-to-code-to-journey impact calculation
+  - Mission Control Atlas projection
+  - visual owner control panel
+
+architecture_invariant: >-
+  A packet naming a seam is not evidence that the seam is live. Only exact
+  current-checkout paths that exist become observed code links. Symbol names and
+  conceptual seams remain unverified until stronger evidence is available.
+
+proof_commands:
+  - pnpm architecture:atlas:code-links:test
+  - pnpm architecture:atlas:code-links
+  - pnpm architecture:atlas:test
+  - pnpm architecture:atlas
+
+safety:
+  production_deploy_authorized: false
+  production_mutation_authorized: false
+  provider_effect_authorized: false
+  application_packet_release_authorized: false
+
+next_action: open stacked draft PR, then reconcile the existing Mission Control foundation against current main and the Atlas contracts
