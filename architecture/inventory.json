@@ -204,6 +204,7 @@
     "apps/server/src/modules/intelligence",
     "apps/server/src/modules/intelligence/dto",
     "apps/server/src/modules/key-autonomy",
+    "apps/server/src/modules/key-autonomy/action-boundary",
     "apps/server/src/modules/key-autonomy/dto",
     "apps/server/src/modules/key-connector",
     "apps/server/src/modules/key-connector/__tests__",
@@ -283,6 +284,7 @@
     "apps/server/src/modules/whatsapp",
     "apps/server/src/types",
     "apps/server/test",
+    "apps/server/test/helpers",
     "apps/voice-agent",
     "apps/voice-agent/src",
     "apps/web",
@@ -879,6 +881,7 @@
     "packages/db/prisma/migrations/20260830220000_add_project_deliverables",
     "packages/db/prisma/migrations/20260918060000_outbound_delivery_effect_certainty",
     "packages/db/prisma/migrations/20260919223000_flow_run_tenant_idempotency",
+    "packages/db/prisma/migrations/20261005170000_key_action_boundary_clearance",
     "packages/db/src",
     "packages/db/src/middleware",
     "packages/db/src/types",
@@ -924,9 +927,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 198,
+      "lines": 233,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 15737
+      "size_bytes": 21660
     },
     {
       "extension": ".yaml",
@@ -936,9 +939,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 1227,
+      "lines": 1582,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 77117
+      "size_bytes": 102265
     },
     {
       "extension": ".yaml",
@@ -6258,9 +6261,9 @@
         "@nestjs/common",
         "@nestjs/event-emitter"
       ],
-      "lines": 313,
+      "lines": 335,
       "path": "apps/server/src/modules/ai/action-dispatcher.service.ts",
-      "size_bytes": 10629
+      "size_bytes": 11995
     },
     {
       "exports": [
@@ -6531,6 +6534,7 @@
       "exports": [
         "AiOversightService",
         "AutonomySettings",
+        "AutonomySettingsReader",
         "GovernanceDecision",
         "RiskTier"
       ],
@@ -6546,9 +6550,9 @@
         "./role-engine.service",
         "@nestjs/common"
       ],
-      "lines": 815,
+      "lines": 833,
       "path": "apps/server/src/modules/ai/ai-oversight.service.ts",
-      "size_bytes": 34926
+      "size_bytes": 35714
     },
     {
       "exports": [
@@ -7232,9 +7236,9 @@
         "@nestjs/core",
         "@nestjs/event-emitter"
       ],
-      "lines": 412,
+      "lines": 418,
       "path": "apps/server/src/modules/ai/conversational-ai.service.ts",
-      "size_bytes": 15577
+      "size_bytes": 15927
     },
     {
       "exports": [],
@@ -7560,6 +7564,7 @@
         "../google-drive/google-drive.service",
         "../governance/governance.service",
         "../helpdesk/helpdesk.service",
+        "../key-autonomy/action-boundary/key-action-boundary.service",
         "../key-cortex/cognitive-triage.service",
         "../key-cortex/key-cortex-consciousness.service",
         "../key-cortex/key-cortex-expertise-lens.service",
@@ -7613,9 +7618,9 @@
         "@nestjs/core",
         "crypto"
       ],
-      "lines": 6750,
+      "lines": 6974,
       "path": "apps/server/src/modules/ai/flow-orchestrator.service.ts",
-      "size_bytes": 288561
+      "size_bytes": 298395
     },
     {
       "exports": [],
@@ -7682,9 +7687,9 @@
         "@nestjs/common",
         "express"
       ],
-      "lines": 165,
+      "lines": 178,
       "path": "apps/server/src/modules/ai/flow.controller.ts",
-      "size_bytes": 5258
+      "size_bytes": 5835
     },
     {
       "exports": [
@@ -7739,9 +7744,9 @@
         "@nestjs/event-emitter",
         "express"
       ],
-      "lines": 336,
+      "lines": 350,
       "path": "apps/server/src/modules/ai/graph-actions.controller.ts",
-      "size_bytes": 13116
+      "size_bytes": 13852
     },
     {
       "exports": [],
@@ -8434,6 +8439,17 @@
       "size_bytes": 11294
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./queue.service",
+        "vitest"
+      ],
+      "lines": 84,
+      "path": "apps/server/src/modules/ai/queue-step-awaiting-approval.spec.ts",
+      "size_bytes": 3889
+    },
+    {
       "exports": [
         "CronTriggerJob",
         "PlanStepJob",
@@ -8454,9 +8470,9 @@
         "bullmq",
         "ioredis"
       ],
-      "lines": 281,
+      "lines": 303,
       "path": "apps/server/src/modules/ai/queue.service.ts",
-      "size_bytes": 10032
+      "size_bytes": 11036
     },
     {
       "exports": [],
@@ -20497,7 +20513,9 @@
     },
     {
       "exports": [
-        "HelpdeskService"
+        "CreateTicketBody",
+        "HelpdeskService",
+        "TicketWriteClient"
       ],
       "extension": ".ts",
       "imports": [
@@ -20505,9 +20523,9 @@
         "@nestjs/common",
         "@nestjs/event-emitter"
       ],
-      "lines": 160,
+      "lines": 191,
       "path": "apps/server/src/modules/helpdesk/helpdesk.service.ts",
-      "size_bytes": 5295
+      "size_bytes": 6764
     },
     {
       "exports": [
@@ -21489,6 +21507,161 @@
       "size_bytes": 3458
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./action-envelope",
+        "vitest"
+      ],
+      "lines": 146,
+      "path": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.spec.ts",
+      "size_bytes": 6034
+    },
+    {
+      "exports": [
+        "ActionEnvelope",
+        "ActionEnvelopeError",
+        "BOUNDARY_CAPABILITIES",
+        "DEFAULT_TICKET_PRIORITY",
+        "DEFAULT_TICKET_SOURCE",
+        "HELPDESK_CREATE_TICKET",
+        "HELPDESK_CREATE_TICKET_FINGERPRINT_FIELDS",
+        "HelpdeskCreateTicketMaterial",
+        "TICKET_PRIORITIES",
+        "TICKET_SOURCES",
+        "TicketPriority",
+        "TicketSource",
+        "buildHelpdeskCreateTicketEnvelope",
+        "canonicalJson",
+        "fingerprintEnvelope",
+        "isBoundaryCapability",
+        "parseStoredEnvelope"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "crypto"
+      ],
+      "lines": 205,
+      "path": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.ts",
+      "size_bytes": 7819
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./control-clearance",
+        "vitest"
+      ],
+      "lines": 337,
+      "path": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.spec.ts",
+      "size_bytes": 16267
+    },
+    {
+      "exports": [
+        "CONFIRMATION_TTL_MS",
+        "ClearanceDecision",
+        "ClearanceInput",
+        "ClearanceRefusalCode",
+        "ControlDenialCode",
+        "ControlEvidence",
+        "ControlRequirement",
+        "ControlRequirementInput",
+        "EXECUTION_SURFACES",
+        "ExecutionSurface",
+        "KeyAutonomyVerdict",
+        "PrincipalAuthority",
+        "PrincipalRows",
+        "computeClearance",
+        "deriveControlRequirement",
+        "evidenceKindFor",
+        "isExecutionSurface",
+        "isStricter",
+        "parseStoredEvidence",
+        "resolvePrincipalAuthority",
+        "tenantBindingOf"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "../../../core/authority/approval-tier",
+        "../../../core/authority/module-vocabulary"
+      ],
+      "lines": 419,
+      "path": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+      "size_bytes": 15804
+    },
+    {
+      "exports": [
+        "ActionContext",
+        "ActionDisposition",
+        "ActionNotClearedError",
+        "ActionRefusalCode",
+        "AdmissionOutcome",
+        "KeyActionBoundaryService",
+        "PreparedAction",
+        "TicketOutcome",
+        "executionClaimKey"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "../../../core/prisma/prisma.service",
+        "../../ai/ai-execution-log.service",
+        "../../ai/ai-oversight.service",
+        "../../ai/role-engine.service",
+        "../../capabilities/capability-contract.service",
+        "../../helpdesk/helpdesk.service",
+        "../../temporal-flow/temporal-flow.service",
+        "./action-envelope",
+        "./control-clearance",
+        "./shadow-parity",
+        "@nestjs/common",
+        "@nestjs/core",
+        "@prisma/client"
+      ],
+      "lines": 1079,
+      "path": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "size_bytes": 44126
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./control-clearance",
+        "./shadow-parity",
+        "vitest"
+      ],
+      "lines": 203,
+      "path": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.spec.ts",
+      "size_bytes": 8839
+    },
+    {
+      "exports": [
+        "Disposition",
+        "ShadowComparison",
+        "boundaryDisposition",
+        "compareWithLegacy",
+        "legacyDisposition"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "./control-clearance"
+      ],
+      "lines": 125,
+      "path": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.ts",
+      "size_bytes": 4658
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "fs",
+        "path",
+        "vitest"
+      ],
+      "lines": 166,
+      "path": "apps/server/src/modules/key-autonomy/action-boundary/surface-inventory.spec.ts",
+      "size_bytes": 8195
+    },
+    {
       "exports": [
         "AuthorityGrantRuleService"
       ],
@@ -21855,7 +22028,9 @@
       "extension": ".ts",
       "imports": [
         "../../core/prisma/prisma.service",
+        "../capabilities/capability-contract.service",
         "../temporal-flow/temporal-flow.service",
+        "./action-boundary/key-action-boundary.service",
         "./autonomy-orchestrator.service",
         "./key-action-executor.service",
         "./key-action-genome-policy.service",
@@ -21865,9 +22040,9 @@
         "@nestjs/testing",
         "vitest"
       ],
-      "lines": 268,
+      "lines": 351,
       "path": "apps/server/src/modules/key-autonomy/key-action-proposal.service.spec.ts",
-      "size_bytes": 9528
+      "size_bytes": 14109
     },
     {
       "exports": [
@@ -21877,6 +22052,7 @@
       "imports": [
         "../../core/prisma/prisma.service",
         "../temporal-flow/temporal-flow.service",
+        "./action-boundary/key-action-boundary.service",
         "./autonomy-orchestrator.service",
         "./key-action-executor.service",
         "./key-action-genome-policy.service",
@@ -21886,9 +22062,9 @@
         "@nestjs/event-emitter",
         "@prisma/client"
       ],
-      "lines": 461,
+      "lines": 540,
       "path": "apps/server/src/modules/key-autonomy/key-action-proposal.service.ts",
-      "size_bytes": 14837
+      "size_bytes": 18990
     },
     {
       "exports": [
@@ -21906,9 +22082,9 @@
       ],
       "extension": ".ts",
       "imports": [],
-      "lines": 178,
+      "lines": 190,
       "path": "apps/server/src/modules/key-autonomy/key-action-proposal.types.ts",
-      "size_bytes": 4279
+      "size_bytes": 4738
     },
     {
       "exports": [],
@@ -21952,6 +22128,7 @@
         "../key-cortex/key-cortex.module",
         "../temporal-flow/temporal-flow.module",
         "./action-audit.service",
+        "./action-boundary/key-action-boundary.service",
         "./authority-grant-rule.service",
         "./autonomy-level.service",
         "./autonomy-orchestrator.service",
@@ -21970,9 +22147,9 @@
         "./safety-shell.service",
         "@nestjs/common"
       ],
-      "lines": 75,
+      "lines": 78,
       "path": "apps/server/src/modules/key-autonomy/key-autonomy.module.ts",
-      "size_bytes": 3218
+      "size_bytes": 3368
     },
     {
       "exports": [],
@@ -23336,9 +23513,9 @@
         "@nestjs/common",
         "@nestjs/core"
       ],
-      "lines": 128,
+      "lines": 132,
       "path": "apps/server/src/modules/key-cortex/key-cortex-action-executor.plugin.ts",
-      "size_bytes": 5105
+      "size_bytes": 5397
     },
     {
       "exports": [
@@ -24061,13 +24238,14 @@
       "imports": [
         "../ai/flow-orchestrator.service",
         "../ai/flow-tool-registry",
+        "../key-autonomy/action-boundary/key-action-boundary.service",
         "./key-cortex-tool-registry.service",
         "@nestjs/common",
         "@nestjs/core"
       ],
-      "lines": 164,
+      "lines": 182,
       "path": "apps/server/src/modules/key-cortex/key-cortex-efferent-bridge.service.ts",
-      "size_bytes": 6397
+      "size_bytes": 7344
     },
     {
       "exports": [],
@@ -24078,9 +24256,9 @@
         "./key-cortex-tool-registry.service",
         "vitest"
       ],
-      "lines": 259,
+      "lines": 262,
       "path": "apps/server/src/modules/key-cortex/key-cortex-efferent.spec.ts",
-      "size_bytes": 10724
+      "size_bytes": 10856
     },
     {
       "exports": [],
@@ -25515,6 +25693,17 @@
         "./key-cortex-tool-registry.service",
         "vitest"
       ],
+      "lines": 131,
+      "path": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.not-executed.spec.ts",
+      "size_bytes": 6797
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./key-cortex-tool-registry.service",
+        "vitest"
+      ],
       "lines": 379,
       "path": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.spec.ts",
       "size_bytes": 11843
@@ -25543,9 +25732,9 @@
         "./key-idempotency.service",
         "@nestjs/common"
       ],
-      "lines": 858,
+      "lines": 881,
       "path": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts",
-      "size_bytes": 31928
+      "size_bytes": 33165
     },
     {
       "exports": [],
@@ -28194,9 +28383,9 @@
         "node:path",
         "vitest"
       ],
-      "lines": 169,
+      "lines": 176,
       "path": "apps/server/src/modules/phone-voice/phone-voice-tool-args.spec.ts",
-      "size_bytes": 7235
+      "size_bytes": 7585
     },
     {
       "exports": [],
@@ -28257,9 +28446,9 @@
         "stream",
         "ws"
       ],
-      "lines": 269,
+      "lines": 286,
       "path": "apps/server/src/modules/phone-voice/phone-voice.service.ts",
-      "size_bytes": 10585
+      "size_bytes": 11389
     },
     {
       "exports": [
@@ -32077,6 +32266,21 @@
       "size_bytes": 2192
     },
     {
+      "exports": [
+        "deferred",
+        "sleep"
+      ],
+      "extension": ".js",
+      "imports": [
+        "dotenv",
+        "path",
+        "vitest"
+      ],
+      "lines": 298,
+      "path": "apps/server/test/helpers/key-action-boundary.fixture.js",
+      "size_bytes": 11624
+    },
+    {
       "exports": [],
       "extension": ".ts",
       "imports": [
@@ -32168,6 +32372,28 @@
       "lines": 112,
       "path": "apps/server/test/identity.service.test.ts",
       "size_bytes": 4529
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./helpers/key-action-boundary.fixture",
+        "vitest"
+      ],
+      "lines": 511,
+      "path": "apps/server/test/key-action-boundary-surfaces.integration.test.ts",
+      "size_bytes": 26890
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./helpers/key-action-boundary.fixture",
+        "vitest"
+      ],
+      "lines": 1069,
+      "path": "apps/server/test/key-action-boundary.integration.test.ts",
+      "size_bytes": 53643
     },
     {
       "exports": [],
@@ -52493,9 +52719,9 @@
         "@/lib/workspace",
         "react"
       ],
-      "lines": 559,
+      "lines": 580,
       "path": "apps/web/src/components/key/chat/use-key-chat-actions.ts",
-      "size_bytes": 20067
+      "size_bytes": 21227
     },
     {
       "exports": [
@@ -52559,9 +52785,9 @@
         "@/lib/api",
         "react"
       ],
-      "lines": 191,
+      "lines": 193,
       "path": "apps/web/src/components/key/chat/use-key-stream.ts",
-      "size_bytes": 5333
+      "size_bytes": 5454
     },
     {
       "exports": [
@@ -56567,9 +56793,9 @@
         "./workspace",
         "zod"
       ],
-      "lines": 15107,
+      "lines": 15115,
       "path": "apps/web/src/lib/client.ts",
-      "size_bytes": 536950
+      "size_bytes": 537313
     },
     {
       "exports": [
@@ -57565,9 +57791,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1583,
+      "lines": 1612,
       "path": "architecture/architecture.json",
-      "size_bytes": 51322
+      "size_bytes": 52769
     },
     {
       "extension": ".yaml",
@@ -57577,9 +57803,9 @@
     },
     {
       "extension": ".md",
-      "lines": 138,
+      "lines": 166,
       "path": "architecture/data-model.md",
-      "size_bytes": 6603
+      "size_bytes": 8207
     },
     {
       "extension": ".yaml",
@@ -57591,13 +57817,13 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4198807
+      "size_bytes": 4213638
     },
     {
       "extension": ".md",
-      "lines": 109,
+      "lines": 132,
       "path": "architecture/dependency-map.md",
-      "size_bytes": 6880
+      "size_bytes": 8755
     },
     {
       "extension": ".yaml",
@@ -57607,21 +57833,21 @@
     },
     {
       "extension": ".md",
-      "lines": 583,
+      "lines": 671,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 23922
+      "size_bytes": 31523
     },
     {
       "extension": ".json",
-      "lines": 63242,
+      "lines": 63504,
       "path": "architecture/inventory.json",
-      "size_bytes": 1636975
+      "size_bytes": 1644211
     },
     {
       "extension": ".md",
-      "lines": 291,
+      "lines": 337,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 15882
+      "size_bytes": 19332
     },
     {
       "extension": ".md",
@@ -60831,6 +61057,12 @@
       "size_bytes": 351
     },
     {
+      "extension": ".sql",
+      "lines": 25,
+      "path": "packages/db/prisma/migrations/20261005170000_key_action_boundary_clearance/migration.sql",
+      "size_bytes": 1189
+    },
+    {
       "extension": ".toml",
       "lines": 3,
       "path": "packages/db/prisma/migrations/migration_lock.toml",
@@ -60838,9 +61070,9 @@
     },
     {
       "extension": ".prisma",
-      "lines": 12845,
+      "lines": 12863,
       "path": "packages/db/prisma/schema.prisma",
-      "size_bytes": 502740
+      "size_bytes": 504131
     },
     {
       "exports": [],
@@ -62928,6 +63160,18 @@
     },
     {
       "extension": ".json",
+      "lines": 740,
+      "path": "scripts/proof-admission/manifests/action-001-negative-controls.json",
+      "size_bytes": 42233
+    },
+    {
+      "extension": ".json",
+      "lines": 115,
+      "path": "scripts/proof-admission/manifests/action-001-real-db.json",
+      "size_bytes": 16330
+    },
+    {
+      "extension": ".json",
       "lines": 66,
       "path": "scripts/proof-admission/manifests/ci-resources.json",
       "size_bytes": 1161
@@ -62937,6 +63181,24 @@
       "lines": 26,
       "path": "scripts/proof-admission/manifests/k12-self.json",
       "size_bytes": 1539
+    },
+    {
+      "exports": [
+        "runControls",
+        "runProof"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "../agent-control/proof-mutation.mjs",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:url"
+      ],
+      "lines": 252,
+      "path": "scripts/proof-admission/negative-controls.mjs",
+      "size_bytes": 11088
     },
     {
       "extension": ".sh",
@@ -63206,10 +63468,10 @@
       ".example": 1,
       ".html": 8,
       ".ico": 1,
-      ".js": 10,
-      ".json": 39,
+      ".js": 11,
+      ".json": 41,
       ".md": 564,
-      ".mjs": 75,
+      ".mjs": 76,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
@@ -63219,11 +63481,11 @@
       ".py": 43,
       ".pyc": 2,
       ".sh": 28,
-      ".sql": 144,
+      ".sql": 145,
       ".svg": 6,
       ".template": 1,
       ".toml": 2,
-      ".ts": 2131,
+      ".ts": 2143,
       ".tsbuildinfo": 1,
       ".tsv": 1,
       ".tsx": 1233,
@@ -63235,8 +63497,8 @@
     },
     "root": ".",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3449,
-    "total_files": 4440,
-    "total_lines": 1139271
+    "source_files": 3463,
+    "total_files": 4457,
+    "total_lines": 1146690
   }
 }

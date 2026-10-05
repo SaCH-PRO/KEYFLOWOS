@@ -37,6 +37,19 @@ export interface AutonomySettings {
   degraded?: boolean;
 }
 
+/**
+ * The two stores getAutonomySettings reads. The shared Prisma client satisfies
+ * it, and so does a transaction on that client.
+ */
+export interface AutonomySettingsReader {
+  autopilotSettings: { findUnique(args: { where: { businessId: string } }): Promise<any> };
+  aiMemory: {
+    findUnique(args: {
+      where: { businessId_category_key: { businessId: string; category: string; key: string } };
+    }): Promise<any>;
+  };
+}
+
 const DEFAULT_AUTONOMY: AutonomySettings = {
   mode: 'assisted',
   maxAutoTier: 1,
@@ -162,10 +175,14 @@ export class AiOversightService {
     // one-element crew reduces to applyRoleCeiling exactly.
     role?: BusinessRole | readonly BusinessRole[],
     envelope?: JobRoleEnvelope,
+    // KF-EXEC-ACTION-001: the action boundary evaluates inside its claim
+    // transaction, on the policy rows it has just locked. Every other caller
+    // omits this and reads through the shared client, exactly as before.
+    reader?: AutonomySettingsReader,
   ): Promise<GovernanceDecision> {
     const crew: readonly BusinessRole[] = Array.isArray(role) ? role : role ? [role as BusinessRole] : [];
     const tier = this.getToolTier(toolName);
-    const businessSettings = await this.getAutonomySettings(businessId);
+    const businessSettings = await this.getAutonomySettings(businessId, reader);
 
     // A role's authority caps the business's, never raises it.
     //
@@ -299,13 +316,14 @@ export class AiOversightService {
     return { ...decision, autoApproved: !decision.requiresQuickConfirm };
   }
 
-  async getAutonomySettings(businessId: string): Promise<AutonomySettings> {
+  async getAutonomySettings(businessId: string, reader?: AutonomySettingsReader): Promise<AutonomySettings> {
+    const client: AutonomySettingsReader = reader ?? this.prisma.client;
     // Set by either catch below. Distinguishes "the stores said no policy" from
     // "the stores could not be asked", which decides fail-open vs fail-closed.
     let readFailed = false;
     // Try typed AutopilotSettings first
     try {
-      const typed = await this.prisma.client.autopilotSettings.findUnique({
+      const typed = await client.autopilotSettings.findUnique({
         where: { businessId },
       });
       if (typed) {
@@ -340,7 +358,7 @@ export class AiOversightService {
 
     // Fallback to AiMemory
     try {
-      const memory = await this.prisma.client.aiMemory.findUnique({
+      const memory = await client.aiMemory.findUnique({
         where: { businessId_category_key: { businessId, category: 'settings', key: 'autonomy' } },
       });
       if (memory?.value) {

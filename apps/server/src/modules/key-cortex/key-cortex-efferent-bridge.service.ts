@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, Inject, Optional } from '@nestjs/comm
 import { ModuleRef } from '@nestjs/core';
 import { FLOW_TOOLS } from '../ai/flow-tool-registry';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
+import { ActionNotClearedError } from '../key-autonomy/action-boundary/key-action-boundary.service';
 import {
   KeyCortexToolRegistryService,
   type KeyCortexToolContext,
@@ -138,9 +139,26 @@ export class KeyCortexEfferentBridgeService implements OnModuleInit {
         ctx.businessId,
         toolName,
         input as Record<string, any>,
+        undefined,
+        // KF-EXEC-ACTION-001: `ctx.userId` is optional and set by callers
+        // that did not authenticate anyone, so it is not presented as a
+        // principal. The bridge has a business and nothing else.
+        { surface: 'CORTEX_BRIDGE' },
       );
       return { success: true, data: result as KeyCortexToolResult['data'] };
     } catch (err: unknown) {
+      // The action boundary answered. The tool was not attempted, and the
+      // registry is told so in the terms it already uses for its own
+      // "sent for approval" answer.
+      if (err instanceof ActionNotClearedError) {
+        return {
+          success: false,
+          notExecuted: true,
+          requiresApproval: err.disposition === 'AWAITING_APPROVAL' || err.disposition === 'AWAITING_CONFIRMATION',
+          error: err.message,
+          ...(err.actionId ? { data: { proposalId: err.actionId } as KeyCortexToolResult['data'] } : {}),
+        };
+      }
       // executeToolDirectly throws on failure. The registry expects a result
       // object, and a throw here would escape the registry's own outcome
       // recording and idempotency bookkeeping.

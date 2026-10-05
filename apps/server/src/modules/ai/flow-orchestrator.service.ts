@@ -21,7 +21,7 @@ import { KeyflowNotesService } from '../keyflow-command/keyflow-notes.service';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
-import { AiOversightService } from './ai-oversight.service';
+import { AiOversightService, type GovernanceDecision } from './ai-oversight.service';
 import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
 import { FinanceAccountsService } from '../finance/finance-accounts.service';
 import { BankMatchingService } from '../finance/bank-matching.service';
@@ -106,6 +106,11 @@ import {
 import { UnifiedMemoryRetrievalService } from '../key-cortex/unified-memory-retrieval.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
 import { ProcurementService } from '../procurement/procurement.service';
+import {
+  ActionNotClearedError,
+  KeyActionBoundaryService,
+  type ActionContext,
+} from '../key-autonomy/action-boundary/key-action-boundary.service';
 
 
 export interface FlowAttachment {
@@ -145,6 +150,11 @@ export interface FlowToolResult {
   riskTier: number;
   success: boolean;
   error?: string;
+  /**
+   * Set when the KEY action boundary did not clear the action. Nothing was
+   * executed; `actionId` is the server-issued id to confirm or approve.
+   */
+  notCleared?: { actionId: string | null; disposition: string; code: string };
 }
 
 export interface PendingConfirmation {
@@ -153,6 +163,25 @@ export interface PendingConfirmation {
   arguments: Record<string, any>;
   description: string;
   riskLevel: RiskLevel;
+  /**
+   * KF-EXEC-ACTION-001: the server-issued id of the action awaiting
+   * confirmation. For a capability the action boundary has adopted this is
+   * the only thing a confirmation may present; `name` and `arguments` are
+   * for display and are not read back.
+   */
+  confirmationId?: string;
+}
+
+/** One model tool call, with what governance decided about it. */
+interface GovernedToolCall {
+  tc: FlowToolCall;
+  decision: GovernanceDecision;
+  /** Context for the executor, when the action boundary prepared the call. */
+  action?: ActionContext;
+  /** The boundary is waiting for the requester to confirm this id. */
+  confirmationId?: string;
+  /** The boundary filed this id as a proposal for a human approver. */
+  proposalId?: string;
 }
 
 export type OnboardingCardType =
@@ -412,6 +441,13 @@ export class FlowOrchestratorService {
   // Lazy resolvers to avoid circular module dependencies
   private getContentRequest() {
     return this.moduleRef.get(ContentRequestService, { strict: false });
+  }
+  /**
+   * KF-EXEC-ACTION-001: the Capability -> Control -> Clearance boundary.
+   * Lazy like every other cross-module edge here.
+   */
+  private getActionBoundary() {
+    return this.moduleRef.get(KeyActionBoundaryService, { strict: false });
   }
   private getCallLog() {
     return this.moduleRef.get(CallLogService, { strict: false });
@@ -1509,7 +1545,7 @@ export class FlowOrchestratorService {
     businessId: string,
     message: string,
     conversationHistory: FlowMessage[] = [],
-    pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, any> },
+    pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, any>; confirmationId?: string },
     pageContext?: FlowPageContext,
     role?: BusinessRole,
     attachments?: FlowAttachment[],
@@ -1652,6 +1688,11 @@ ${triage.standingContext}`;
     }
 
     if (pendingConfirmation) {
+      // KF-EXEC-ACTION-001: a capability the action boundary has adopted is
+      // confirmed by its server-issued id, or not at all.
+      const boundaryConfirmation = await this.confirmThroughBoundary(businessId, pendingConfirmation, userId);
+      if (boundaryConfirmation) return boundaryConfirmation;
+
       if (!pendingConfirmation.confirmed) {
         return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
       }
@@ -1770,7 +1811,13 @@ ${triage.standingContext}`;
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
           const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, pageContext?.jobRoleEnvelope);
-          return { tc, decision };
+          return this.governToolCall(businessId, tc, decision, {
+            surface: 'CHAT',
+            principalUserId: userId ?? null,
+            crew,
+            sourceId: tc.id,
+            sessionId: effectiveSessionId,
+          });
         }),
       );
 
@@ -1786,7 +1833,9 @@ ${triage.standingContext}`;
       }
 
       if (needsFormalApproval.length > 0) {
-        for (const { tc, decision } of needsFormalApproval) {
+        for (const { tc, decision, proposalId } of needsFormalApproval) {
+          // The action boundary has already filed this one as a proposal.
+          if (proposalId) continue;
           this.governance.createApprovalItem(businessId, {
             toolName: tc.name,
             title: this.describeToolCall(tc.name, tc.arguments),
@@ -1809,12 +1858,13 @@ ${triage.standingContext}`;
       }
 
       if (needsQuickConfirm.length > 0) {
-        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc, decision }) => ({
+        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc, confirmationId }) => ({
           toolCallId: tc.id,
           name: tc.name,
           arguments: tc.arguments,
           description: this.describeToolCall(tc.name, tc.arguments),
           riskLevel: tc.riskLevel,
+          ...(confirmationId ? { confirmationId } : {}),
         }));
 
         return {
@@ -1827,7 +1877,7 @@ ${triage.standingContext}`;
       }
 
       const toolResults: FlowToolResult[] = await Promise.all(
-        toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined })),
+        governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
       );
 
       const followUpMessages: GatewayMessage[] = [
@@ -2246,7 +2296,13 @@ ${triage.standingContext}`;
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
           const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, pageContext?.jobRoleEnvelope);
-          return { tc, decision };
+          return this.governToolCall(businessId, tc, decision, {
+            surface: 'CHAT_STREAM',
+            principalUserId: userId ?? null,
+            crew,
+            sourceId: tc.id,
+            sessionId: effectiveSessionId,
+          });
         }),
       );
 
@@ -2275,7 +2331,9 @@ ${triage.standingContext}`;
       }
 
       if (needsFormalApproval.length > 0) {
-        for (const { tc, decision } of needsFormalApproval) {
+        for (const { tc, decision, proposalId } of needsFormalApproval) {
+          // The action boundary has already filed this one as a proposal.
+          if (proposalId) continue;
           this.governance.createApprovalItem(businessId, {
             toolName: tc.name,
             title: this.describeToolCall(tc.name, tc.arguments),
@@ -2311,12 +2369,13 @@ ${triage.standingContext}`;
       }
 
       if (needsQuickConfirm.length > 0) {
-        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc }) => ({
+        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc, confirmationId }) => ({
           toolCallId: tc.id,
           name: tc.name,
           arguments: tc.arguments,
           description: this.describeToolCall(tc.name, tc.arguments),
           riskLevel: tc.riskLevel,
+          ...(confirmationId ? { confirmationId } : {}),
         }));
 
         yield {
@@ -2342,7 +2401,7 @@ ${triage.standingContext}`;
       }
 
       const toolResults: FlowToolResult[] = await Promise.all(
-        toolCalls.map((tc) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined })),
+        governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
       );
 
       yield { type: 'tool_results', toolResults };
@@ -2411,14 +2470,150 @@ ${triage.standingContext}`;
     }
   }
 
+  /**
+   * Put one chat tool call through the action boundary, when the boundary has
+   * adopted its capability (KF-EXEC-ACTION-001).
+   *
+   * The legacy oversight decision still runs first and still refuses what it
+   * refused: the crew and position checks of the chat path are not weakened.
+   * What changes is who decides the rest. The boundary records the action and
+   * says what control it needs, and its answer replaces the tier-derived
+   * quick-confirm flag for this call.
+   */
+  private async governToolCall(
+    businessId: string,
+    tc: FlowToolCall,
+    legacy: GovernanceDecision,
+    ctx: ActionContext,
+  ): Promise<GovernedToolCall> {
+    const boundary = this.getActionBoundary();
+    if (!legacy.allowed || !boundary.adopts(tc.name)) return { tc, decision: legacy };
+
+    const flags = { requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false };
+    try {
+      const prepared = await boundary.prepare(businessId, tc.name, tc.arguments, ctx);
+      const base = { tier: legacy.tier, reason: prepared.requirement.reason };
+      switch (prepared.disposition) {
+        case 'DENIED':
+          return { tc, decision: { ...base, ...flags, allowed: false } };
+        case 'AWAITING_APPROVAL':
+          return {
+            tc,
+            decision: { ...base, ...flags, allowed: true, requiresFormalApproval: true },
+            proposalId: prepared.actionId ?? undefined,
+          };
+        case 'AWAITING_CONFIRMATION':
+          return {
+            tc,
+            decision: { ...base, ...flags, allowed: true, requiresQuickConfirm: true },
+            confirmationId: prepared.actionId ?? undefined,
+          };
+        case 'CLEARABLE':
+          return {
+            tc,
+            decision: { ...base, ...flags, allowed: true },
+            action: { ...ctx, actionId: prepared.actionId },
+          };
+      }
+    } catch (err: unknown) {
+      // Invalid arguments, or the boundary could not be consulted. Either way
+      // the call does not run.
+      return {
+        tc,
+        decision: { ...flags, tier: legacy.tier, allowed: false, reason: err instanceof Error ? err.message : String(err) },
+      };
+    }
+  }
+
+  /**
+   * E3 for a capability the action boundary has adopted.
+   *
+   * The confirm route used to execute the tool name and arguments the client
+   * sent back, after re-evaluating only the name; the confirmation the server
+   * had issued was never read. Here the client presents the server-issued id
+   * and the boundary executes the action recorded under it. A resubmitted name
+   * and arguments execute nothing.
+   *
+   * Returns null when the confirmation is not the boundary's to answer.
+   */
+  private async confirmThroughBoundary(
+    businessId: string,
+    pending: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, any>; confirmationId?: string },
+    userId?: string,
+  ): Promise<FlowResponse | null> {
+    const boundary = this.getActionBoundary();
+    const noUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 };
+
+    if (pending.confirmationId) {
+      if (!userId) {
+        return { reply: 'This action was not executed: an authenticated user is required to confirm it.', usage: noUsage };
+      }
+      if (!pending.confirmed) {
+        await boundary
+          .voidAction(businessId, pending.confirmationId, 'CANCELLED', userId, null, { onlyIfRequestedBy: userId })
+          .catch((e: unknown) => {
+            this.logger.warn(`Could not cancel action ${pending.confirmationId}: ${e instanceof Error ? e.message : String(e)}`);
+          });
+        return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
+      }
+      try {
+        const outcome = await boundary.confirmAndExecute(businessId, pending.confirmationId, userId);
+        const toolName = 'helpdesk_create_ticket';
+        const envelope = wrapToolResult(toolName, outcome.ticket);
+        this.businessGraph.invalidateCache(businessId);
+        return {
+          reply: `Done! ${this.formatToolSuccess(toolName, outcome.ticket)}`,
+          toolResults: [
+            {
+              toolCallId: pending.toolCallId,
+              name: toolName,
+              result: envelope.result,
+              changedEntities: envelope.changedEntities,
+              followOnSuggestions: envelope.followOnSuggestions,
+              family: envelope.family,
+              riskTier: envelope.riskTier,
+              success: true,
+            },
+          ],
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 2 },
+        };
+      } catch (err: unknown) {
+        return {
+          reply: `This action was not executed: ${err instanceof Error ? err.message : String(err)}`,
+          usage: noUsage,
+        };
+      }
+    }
+
+    if (pending.confirmed && boundary.adopts(pending.toolName)) {
+      return {
+        reply:
+          'This action was not executed. It has to be confirmed with the confirmation issued for it; a tool name and arguments sent back by the client are not a confirmation. Please ask again.',
+        usage: noUsage,
+      };
+    }
+    return null;
+  }
+
   async executeToolDirectly(
     businessId: string,
     toolName: string,
     args: Record<string, any>,
     planContext?: { planId: string; planStepId: string },
+    action?: ActionContext,
   ): Promise<any> {
-    const result = await this.executeTool(businessId, toolName, args, `direct_${toolName}`, planContext);
+    const result = await this.executeTool(businessId, toolName, args, `direct_${toolName}`, planContext, action);
     if (!result.success) {
+      // Kept typed so a caller with a retry loop can see that the boundary
+      // answered, and that asking again will get the same answer.
+      if (result.notCleared) {
+        throw new ActionNotClearedError(
+          result.notCleared.code as ActionNotClearedError['code'],
+          result.error ?? `Tool ${toolName} was not cleared`,
+          result.notCleared.actionId,
+          result.notCleared.disposition as ActionNotClearedError['disposition'],
+        );
+      }
       throw new Error(result.error ?? `Tool ${toolName} failed`);
     }
     return result.result;
@@ -2430,12 +2625,13 @@ ${triage.standingContext}`;
     args: Record<string, any>,
     toolCallId?: string,
     planContext?: { planId: string; planStepId: string; role?: string },
+    action?: ActionContext,
   ): Promise<FlowToolResult> {
     const id = toolCallId ?? `manual_${toolName}`;
     const startTime = Date.now();
     try {
       this.validateToolInput(toolName, args);
-      const rawResult = await this.executeToolAction(businessId, toolName, args);
+      const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
@@ -2480,6 +2676,9 @@ ${triage.standingContext}`;
         riskTier: errorEnvelope.riskTier,
         success: false,
         error: (error as Error).message,
+        ...(error instanceof ActionNotClearedError
+          ? { notCleared: { actionId: error.actionId, disposition: error.disposition, code: error.code } }
+          : {}),
       };
     }
   }
@@ -2528,11 +2727,20 @@ ${triage.standingContext}`;
     businessId: string,
     toolName: string,
     args: Record<string, any>,
+    action?: ActionContext,
   ): Promise<unknown> {
-    return this.executeToolAction(businessId, toolName, args);
+    return this.executeToolAction(businessId, toolName, args, action);
   }
 
-  private async executeToolAction(businessId: string, toolName: string, args: Record<string, any>): Promise<any> {
+  private async executeToolAction(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+    // KF-EXEC-ACTION-001: what the calling surface knows about the action.
+    // Read only by a capability the action boundary has adopted. A surface
+    // that passes nothing arrives there undeclared and is refused.
+    action?: ActionContext,
+  ): Promise<any> {
     // Bridged MCP tools route to the allowlisted remote server.
     if (isMcpToolName(toolName)) {
       return this.getMcp().callTool(toolName, args);
@@ -4841,13 +5049,12 @@ ${triage.standingContext}`;
         return { tickets, count: tickets.length };
       }
       case 'helpdesk_create_ticket': {
-        const ticket = await this.getHelpdesk().createTicket(businessId, {
-          title: args.title,
-          description: args.description ?? undefined,
-          contactId: args.contactId,
-          priority: args.priority ?? 'NORMAL',
-        });
-        return { id: ticket.id, title: ticket.title, status: ticket.status };
+        // KF-EXEC-ACTION-001. Every surface that can run this tool reaches
+        // this branch, and this branch does one thing: hand the call to the
+        // action boundary. The boundary's claim transaction is the only KEY
+        // code that writes the ticket, so there is no path from here to
+        // HelpdeskService that goes around it.
+        return this.getActionBoundary().executeFromTool(businessId, toolName, args, action);
       }
       case 'helpdesk_update_ticket': {
         const ticket = await this.getHelpdesk().updateTicket(businessId, args.ticketId, {
@@ -5532,7 +5739,7 @@ ${triage.standingContext}`;
           businessId,
           code: args.code,
           inputs: args.inputs,
-          innerToolExecutor: (bizId, name, toolArgs) => this.executeToolByName(bizId, name, toolArgs),
+          innerToolExecutor: (bizId, name, toolArgs) => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC' }),
         });
         return result;
       }
@@ -6559,7 +6766,12 @@ ${triage.standingContext}`;
     });
   }
 
-  async executePlan(businessId: string, planId: string): Promise<{
+  async executePlan(
+    businessId: string,
+    planId: string,
+    /** The authenticated caller, when the plan is run over HTTP. */
+    userId?: string,
+  ): Promise<{
     planId: string;
     status: string;
     stepsExecuted: number;
@@ -6655,8 +6867,19 @@ ${triage.standingContext}`;
           (step.inputPayload as Record<string, any>) ?? {},
           undefined,
           { planId, planStepId: step.id, role: step.role ?? plan.role ?? undefined },
+          { surface: 'PLAN_HTTP', principalUserId: userId ?? null, planId, planStepId: step.id },
         );
         const durationMs = Date.now() - startTime;
+
+        if (toolResult.notCleared && toolResult.notCleared.disposition.startsWith('AWAITING')) {
+          // The action boundary recorded the step's action and is waiting for
+          // a confirmation or an approval of it. Plan approval is not that:
+          // it names a plan, not this action's parameters.
+          await this.planner.updateStepStatus(step.id, 'awaiting_approval');
+          stepsSkipped++;
+          results.push({ stepId: step.id, action: step.action, status: 'awaiting_approval', error: toolResult.error });
+          continue;
+        }
 
         if (toolResult.success) {
           await this.planner.updateStepStatus(step.id, 'completed', toolResult.result, undefined, durationMs);
@@ -6703,9 +6926,10 @@ ${triage.standingContext}`;
     args: Record<string, any>,
     planId?: string,
     planStepId?: string,
+    action?: ActionContext,
   ): Promise<FlowToolResult> {
     const planContext = planId && planStepId ? { planId, planStepId } : undefined;
-    return this.executeTool(businessId, toolName, args, undefined, planContext);
+    return this.executeTool(businessId, toolName, args, undefined, planContext, action);
   }
 
   async autoExecuteToolForMonitoring(
@@ -6721,7 +6945,7 @@ ${triage.standingContext}`;
     const startTime = Date.now();
     try {
       this.validateToolInput(toolName, args);
-      const rawResult = await this.executeToolAction(businessId, toolName, args);
+      const rawResult = await this.executeToolAction(businessId, toolName, args, { surface: 'PRO_AUTO_MONITOR' });
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);

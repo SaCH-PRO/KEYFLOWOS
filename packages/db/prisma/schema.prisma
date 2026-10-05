@@ -2007,11 +2007,29 @@ model KeyActionProposal {
   executionResult Json?     @map("execution_result")
   failureReason   String?   @map("failure_reason")
 
+  // KF-EXEC-ACTION-001: Capability -> Control -> Clearance boundary.
+  // Set only on the action record of a capability the boundary has adopted
+  // (helpdesk_create_ticket first); null on every other row. The execution
+  // claim itself is an IdempotencyKey row, not a column here.
+  capabilityName     String?   @map("capability_name") // real CapabilityContract name, never a wrapper
+  capabilityVersion  Int?      @map("capability_version")
+  executionSurface   String?   @map("execution_surface")
+  actionEnvelope     Json?     @map("action_envelope") // canonical, server-built material parameters
+  actionFingerprint  String?   @map("action_fingerprint") // sha256 of the envelope
+  controlRequirement Json?     @map("control_requirement") // as derived when recorded, with the legacy oversight decision beside it
+  controlEvidence    Json?     @map("control_evidence") // server-issued, bound to the fingerprint and the principal
+  evidenceExpiresAt  DateTime? @map("evidence_expires_at")
+  requestedBy        String?   @map("requested_by")
+  proposedBy         String?   @map("proposed_by")
+  executedFor        String?   @map("executed_for")
+  outcomeEvidence    Json?     @map("outcome_evidence") // claim, entity id and principal chain, written with the effect
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([businessId])
   @@index([businessId, status])
+  @@index([businessId, capabilityName, actionFingerprint], map: "key_action_proposals_capability_fingerprint_idx")
   @@index([businessId, sourceType])
   @@index([businessId, actionType])
   @@index([businessId, toolName])

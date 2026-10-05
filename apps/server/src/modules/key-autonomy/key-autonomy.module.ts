@@ -24,6 +24,7 @@ import { ActionAuditService } from './action-audit.service';
 import { ComplianceMapService } from './compliance-map.service';
 import { KeyAutonomySafetyService } from './key-autonomy-safety.service';
 import { KeyCortexModule } from '../key-cortex/key-cortex.module';
+import { KeyActionBoundaryService } from './action-boundary/key-action-boundary.service';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { KeyCortexModule } from '../key-cortex/key-cortex.module';
   controllers: [KeyActionProposalController, KeyGenomeBridgeController],
   providers: [
     KeyActionProposalService,
+    KeyActionBoundaryService,
     KeyActionExecutorService,
     KeyActionExecutorRegistryService,
     KeyActionPolicyService,
@@ -56,6 +58,7 @@ import { KeyCortexModule } from '../key-cortex/key-cortex.module';
   ],
   exports: [
     KeyActionProposalService,
+    KeyActionBoundaryService,
     KeyActionExecutorService,
     KeyActionExecutorRegistryService,
     KeyActionPolicyService,

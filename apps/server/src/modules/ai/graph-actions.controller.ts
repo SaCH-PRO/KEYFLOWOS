@@ -143,7 +143,21 @@ export class GraphActionsController {
         body.args,
         body.planId,
         body.planStepId,
+        // KF-EXEC-ACTION-001: the authenticated caller is the principal.
+        { surface: 'GRAPH_ACTION', principalUserId: userId, planId: body.planId ?? null, planStepId: body.planStepId ?? null },
       );
+      if (result.notCleared) {
+        // The action boundary recorded the action and is waiting for it to be
+        // confirmed or approved by its server-issued id. Nothing ran.
+        return {
+          success: false,
+          requiresConfirmation: result.notCleared.disposition === 'AWAITING_CONFIRMATION',
+          requiresApproval: result.notCleared.disposition === 'AWAITING_APPROVAL',
+          confirmationId: result.notCleared.actionId,
+          reason: result.error,
+          tier: decision.tier,
+        };
+      }
       const executedPayload: ActionExecutedPayload = {
         businessId,
         toolName: body.toolName,

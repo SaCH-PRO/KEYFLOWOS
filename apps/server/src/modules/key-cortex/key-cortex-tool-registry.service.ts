@@ -68,6 +68,12 @@ export interface KeyCortexToolResult<T = unknown> {
   error?: string;
   costTtd?: number;
   requiresApproval?: boolean;
+  /**
+   * The handler did not attempt the tool: something in front of it refused
+   * the call or sent it for approval. Not an execution, so the registry does
+   * not score it, count it against limits or cache it as an outcome.
+   */
+  notExecuted?: boolean;
 }
 
 export interface KeyCortexToolDefinition {
@@ -373,6 +379,23 @@ export class KeyCortexToolRegistryService {
 
       const result = await tool.handler(ctx, validation.parsed);
       const durationMs = Date.now() - startMs;
+
+      // KF-EXEC-ACTION-001. A handler can now answer "not executed": the KEY
+      // action boundary sits behind the bridged handler of a capability it has
+      // adopted, and refuses or files a proposal there. That is this registry's
+      // own pre-handler answer (the checkRisk branch above) arriving from one
+      // layer down, and it is treated the same way. Scoring it as a failure
+      // would be worse than wrong: ToolOutcomeScore is what
+      // AutonomyOrchestratorService reads before a proposal executes, so five
+      // refusals would block the tool the approvals are waiting to run.
+      if (result.notExecuted && !result.success) {
+        if (ctx.sagaId && sagaStepIndex !== undefined) {
+          await this.saga.failStep(ctx.sagaId, sagaStepIndex, result.error ?? 'not executed').catch((err) => {
+            this.logger.warn(`Saga step failure logging failed: ${(err as Error).message}`);
+          });
+        }
+        return result;
+      }
 
       this.recordToolOutcome(name, result.success, durationMs, ctx.businessId);
       await this.recordLearningOutcome(ctx, name, result.success, result.error, durationMs).catch((err) => {

@@ -8599,6 +8599,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/ai/flow-orchestrator.service.ts",
+      "specifier": "../key-autonomy/action-boundary/key-action-boundary.service",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/flow-orchestrator.service.ts",
       "specifier": "../key-cortex/cognitive-triage.service",
       "target": "apps/server/src/modules/key-cortex/cognitive-triage.service.ts",
       "type": "relative"
@@ -10440,6 +10447,20 @@
     {
       "resolved": false,
       "source": "apps/server/src/modules/ai/provider-choice.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/queue-step-awaiting-approval.spec.ts",
+      "specifier": "./queue.service",
+      "target": "apps/server/src/modules/ai/queue.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/queue-step-awaiting-approval.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -37199,6 +37220,195 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.spec.ts",
+      "specifier": "./action-envelope",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.ts",
+      "specifier": "crypto",
+      "target": "crypto",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.spec.ts",
+      "specifier": "./control-clearance",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+      "specifier": "../../../core/authority/approval-tier",
+      "target": "apps/server/src/core/authority/approval-tier.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+      "specifier": "../../../core/authority/module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "@nestjs/core",
+      "target": "@nestjs/core",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "@prisma/client",
+      "target": "@prisma/client",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "../../../core/prisma/prisma.service",
+      "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "../../ai/ai-execution-log.service",
+      "target": "apps/server/src/modules/ai/ai-execution-log.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "../../ai/ai-oversight.service",
+      "target": "apps/server/src/modules/ai/ai-oversight.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "../../ai/role-engine.service",
+      "target": "apps/server/src/modules/ai/role-engine.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "../../capabilities/capability-contract.service",
+      "target": "apps/server/src/modules/capabilities/capability-contract.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "../../helpdesk/helpdesk.service",
+      "target": "apps/server/src/modules/helpdesk/helpdesk.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "./action-envelope",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "./control-clearance",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "./shadow-parity",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "specifier": "../../temporal-flow/temporal-flow.service",
+      "target": "apps/server/src/modules/temporal-flow/temporal-flow.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.spec.ts",
+      "specifier": "./control-clearance",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.spec.ts",
+      "specifier": "./shadow-parity",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.ts",
+      "specifier": "./control-clearance",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/surface-inventory.spec.ts",
+      "specifier": "fs",
+      "target": "fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/surface-inventory.spec.ts",
+      "specifier": "path",
+      "target": "path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/surface-inventory.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/key-autonomy/authority-grant-rule.service.ts",
       "specifier": "@nestjs/common",
@@ -37992,6 +38202,20 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/key-autonomy/key-action-proposal.service.spec.ts",
+      "specifier": "../capabilities/capability-contract.service",
+      "target": "apps/server/src/modules/capabilities/capability-contract.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/key-action-proposal.service.spec.ts",
+      "specifier": "./action-boundary/key-action-boundary.service",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/key-action-proposal.service.spec.ts",
       "specifier": "./autonomy-orchestrator.service",
       "target": "apps/server/src/modules/key-autonomy/autonomy-orchestrator.service.ts",
       "type": "relative"
@@ -38064,6 +38288,13 @@
       "source": "apps/server/src/modules/key-autonomy/key-action-proposal.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/key-action-proposal.service.ts",
+      "specifier": "./action-boundary/key-action-boundary.service",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
       "type": "relative"
     },
     {
@@ -38190,6 +38421,13 @@
       "source": "apps/server/src/modules/key-autonomy/key-autonomy.module.ts",
       "specifier": "./action-audit.service",
       "target": "apps/server/src/modules/key-autonomy/action-audit.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-autonomy/key-autonomy.module.ts",
+      "specifier": "./action-boundary/key-action-boundary.service",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
       "type": "relative"
     },
     {
@@ -42563,6 +42801,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/key-cortex/key-cortex-efferent-bridge.service.ts",
+      "specifier": "../key-autonomy/action-boundary/key-action-boundary.service",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-cortex/key-cortex-efferent-bridge.service.ts",
       "specifier": "./key-cortex-tool-registry.service",
       "target": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts",
       "type": "relative"
@@ -45541,6 +45786,20 @@
       "specifier": "./key-cortex.types",
       "target": "apps/server/src/modules/key-cortex/key-cortex.types.ts",
       "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.not-executed.spec.ts",
+      "specifier": "./key-cortex-tool-registry.service",
+      "target": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.not-executed.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
     },
     {
       "resolved": true,
@@ -59130,6 +59389,27 @@
       "type": "external"
     },
     {
+      "resolved": false,
+      "source": "apps/server/test/helpers/key-action-boundary.fixture.js",
+      "specifier": "dotenv",
+      "target": "dotenv",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/helpers/key-action-boundary.fixture.js",
+      "specifier": "path",
+      "target": "path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/helpers/key-action-boundary.fixture.js",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": true,
       "source": "apps/server/test/identity-bootstrap.service.test.ts",
       "specifier": "../src/core/prisma/prisma.service",
@@ -59461,6 +59741,34 @@
     {
       "resolved": false,
       "source": "apps/server/test/identity.service.test.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/test/key-action-boundary-surfaces.integration.test.ts",
+      "specifier": "./helpers/key-action-boundary.fixture",
+      "target": "apps/server/test/helpers/key-action-boundary.fixture.js",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/key-action-boundary-surfaces.integration.test.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/test/key-action-boundary.integration.test.ts",
+      "specifier": "./helpers/key-action-boundary.fixture",
+      "target": "apps/server/test/helpers/key-action-boundary.fixture.js",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/key-action-boundary.integration.test.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -109993,6 +110301,48 @@
     },
     {
       "resolved": false,
+      "source": "scripts/proof-admission/negative-controls.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/proof-admission/negative-controls.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/proof-admission/negative-controls.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/proof-admission/negative-controls.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/proof-admission/negative-controls.mjs",
+      "specifier": "node:url",
+      "target": "node:url",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/proof-admission/negative-controls.mjs",
+      "specifier": "../agent-control/proof-mutation.mjs",
+      "target": "scripts/agent-control/proof-mutation.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
       "source": "scripts/revert-problematic-renames.mjs",
       "specifier": "fs",
       "target": "fs",
@@ -110154,8 +110504,8 @@
     }
   ],
   "meta": {
-    "edges": 15736,
-    "nodes": 3847,
+    "edges": 15786,
+    "nodes": 3861,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
   },
@@ -112867,6 +113217,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/ai/provider-choice.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/ai/queue-step-awaiting-approval.spec.ts",
       "type": "file"
     },
     {
@@ -116826,6 +117181,46 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/key-autonomy/action-boundary/surface-inventory.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/key-autonomy/authority-grant-rule.service.ts",
       "type": "file"
     },
@@ -118042,6 +118437,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/key-cortex/key-cortex-tool-loop.service.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.not-executed.spec.ts",
       "type": "file"
     },
     {
@@ -120115,6 +120515,11 @@
       "type": "file"
     },
     {
+      "extension": ".js",
+      "id": "apps/server/test/helpers/key-action-boundary.fixture.js",
+      "type": "file"
+    },
+    {
       "extension": ".ts",
       "id": "apps/server/test/identity-bootstrap.service.test.ts",
       "type": "file"
@@ -120137,6 +120542,16 @@
     {
       "extension": ".ts",
       "id": "apps/server/test/identity.service.test.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/test/key-action-boundary-surfaces.integration.test.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/test/key-action-boundary.integration.test.ts",
       "type": "file"
     },
     {
@@ -128871,6 +129286,11 @@
     {
       "extension": ".mjs",
       "id": "scripts/proof-admission/evaluate.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/proof-admission/negative-controls.mjs",
       "type": "file"
     },
     {

@@ -1,0 +1,740 @@
+{
+  "manifestVersion": 1,
+  "packageId": "KF-EXEC-ACTION-001",
+  "description": "Negative controls for the KEY action boundary (helpdesk_create_ticket). Each restores one defect and names the tests that must then fail. Run with scripts/proof-admission/negative-controls.mjs against a migrated local database.",
+  "proofs": {
+    "unit": {
+      "cwd": "apps/server",
+      "runner": "apps/server/node_modules/vitest/vitest.mjs",
+      "args": [
+        "run",
+        "-c",
+        "vitest.unit.config.ts",
+        "src/modules/key-autonomy/action-boundary",
+        "src/modules/key-autonomy/key-action-proposal.service.spec.ts",
+        "src/modules/key-cortex/key-cortex-tool-registry.not-executed.spec.ts",
+        "src/modules/ai/queue-step-awaiting-approval.spec.ts",
+        "src/modules/key-cortex/key-cortex-tool-registry.service.spec.ts",
+        "src/modules/key-cortex/__tests__/key-cortex-tool-registry.service.spec.ts",
+        "src/modules/ai/cortex-tool-bridge.spec.ts"
+      ]
+    },
+    "core": {
+      "cwd": "apps/server",
+      "runner": "apps/server/node_modules/vitest/vitest.mjs",
+      "args": [
+        "run",
+        "-c",
+        "vitest.integration.config.ts",
+        "test/key-action-boundary.integration.test.ts"
+      ]
+    },
+    "surfaces": {
+      "cwd": "apps/server",
+      "runner": "apps/server/node_modules/vitest/vitest.mjs",
+      "args": [
+        "run",
+        "-c",
+        "vitest.integration.config.ts",
+        "test/key-action-boundary-surfaces.integration.test.ts"
+      ]
+    }
+  },
+  "controls": [
+    {
+      "id": "NC-P1-WRAPPER-IDENTITY",
+      "obligation": "P1",
+      "claim": "An EXECUTE_TOOL proposal for the tool is evaluated as helpdesk_create_ticket, not as key_autonomy.EXECUTE_TOOL.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/key-action-proposal.service.ts",
+        "find": "    const actionKey = governed\n      ? (this.boundary.resolveInvocation(proposal).toolName as string)\n      : `key_autonomy.${proposal.actionType}`;",
+        "replace": "    const actionKey = `key_autonomy.${proposal.actionType}`;"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyActionProposalService EXECUTE_TOOL wrapper identity it is evaluated as helpdesk_create_ticket and executed by the boundary alone"
+        ],
+        "core": [
+          "P1 — capability identity: a wrapper never substitutes for the capability it is governed as helpdesk_create_ticket, never as key_autonomy.EXECUTE_TOOL"
+        ]
+      }
+    },
+    {
+      "id": "NC-P1-WRAPPER-NOT-GOVERNED",
+      "obligation": "P1",
+      "claim": "The boundary recognises a wrapper proposal by the tool it names; it is sealed with the real capability.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "    if (record.actionType !== 'EXECUTE_TOOL') return false;\n    return this.adopts(this.resolveInvocation(record).toolName);",
+        "replace": "    return false;"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyActionProposalService EXECUTE_TOOL wrapper identity a proposal for helpdesk_create_ticket is sealed with the capability, not the wrapper"
+        ],
+        "core": [
+          "P1 — capability identity: a wrapper never substitutes for the capability an EXECUTE_TOOL proposal for the tool is sealed as helpdesk_create_ticket",
+          "P1 — capability identity: a wrapper never substitutes for the capability it is governed as helpdesk_create_ticket, never as key_autonomy.EXECUTE_TOOL"
+        ]
+      }
+    },
+    {
+      "id": "NC-P1-LEGACY-EXECUTOR",
+      "obligation": "P1",
+      "claim": "An adopted capability never takes the unguarded EXECUTING write and the executor plugin.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/key-action-proposal.service.ts",
+        "find": "    if (governed) {\n      return this.executeThroughBoundary(businessId, proposal, executedBy);\n    }",
+        "replace": "    if (false) {\n      return this.executeThroughBoundary(businessId, proposal, executedBy);\n    }"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyActionProposalService EXECUTE_TOOL wrapper identity it is evaluated as helpdesk_create_ticket and executed by the boundary alone"
+        ],
+        "core": [
+          "P1 — capability identity: a wrapper never substitutes for the capability it is governed as helpdesk_create_ticket, never as key_autonomy.EXECUTE_TOOL"
+        ]
+      }
+    },
+    {
+      "id": "NC-P1-STATUS-ONLY-APPROVAL",
+      "obligation": "P1",
+      "claim": "Approving an adopted capability records control evidence; a status and a name are not written in its place.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/key-action-proposal.service.ts",
+        "find": "    if (this.boundary.governs(existing)) {\n      if (!approvedBy) throw",
+        "replace": "    if (false) {\n      if (!approvedBy) throw"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyActionProposalService EXECUTE_TOOL wrapper identity its approval is control evidence recorded by the boundary, and needs someone to name"
+        ],
+        "core": [
+          "P1 — capability identity: a wrapper never substitutes for the capability an approval with nobody to name is refused",
+          "P1 — capability identity: a wrapper never substitutes for the capability it is governed as helpdesk_create_ticket, never as key_autonomy.EXECUTE_TOOL"
+        ]
+      }
+    },
+    {
+      "id": "NC-P2-FINGERPRINT-DROPS-A-FIELD",
+      "obligation": "P2",
+      "claim": "Every material field is bound by the fingerprint; changing one invalidates evidence given before the change.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/action-envelope.ts",
+        "find": "  'priority',\n  'source',\n] as const satisfies",
+        "replace": "  'source',\n] as const satisfies"
+      },
+      "mustFail": {
+        "unit": [
+          "fingerprint changes when only priority changes",
+          "fingerprint names every material field of the envelope"
+        ],
+        "core": [
+          "P2 — mutated parameters invalidate prior control evidence evidence for the original priority does not clear a changed one"
+        ]
+      }
+    },
+    {
+      "id": "NC-P2-EVIDENCE-NOT-BOUND-TO-FINGERPRINT",
+      "obligation": "P2",
+      "claim": "Control evidence clears only the envelope whose fingerprint it names.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "  if (evidence.fingerprint !== input.recomputedFingerprint) {",
+        "replace": "  if (false) {"
+      },
+      "mustFail": {
+        "unit": [
+          "computeClearance evidence for other parameters does not clear these"
+        ],
+        "core": [
+          "P2 — mutated parameters invalidate prior control evidence evidence for the original title does not clear a changed one",
+          "P2 — mutated parameters invalidate prior control evidence evidence for the original description does not clear a changed one",
+          "P2 — mutated parameters invalidate prior control evidence evidence for the original contactId does not clear a changed one",
+          "P2 — mutated parameters invalidate prior control evidence evidence for the original priority does not clear a changed one",
+          "P2 — mutated parameters invalidate prior control evidence evidence for the original source does not clear a changed one"
+        ]
+      }
+    },
+    {
+      "id": "NC-P2-STORED-FINGERPRINT-NOT-RECHECKED",
+      "obligation": "P2",
+      "claim": "The fingerprint is recomputed from the stored envelope inside the claim transaction and compared with the one recorded.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "  if (!input.storedFingerprint || input.storedFingerprint !== input.recomputedFingerprint) {",
+        "replace": "  if (false) {"
+      },
+      "mustFail": {
+        "unit": [
+          "computeClearance a changed envelope is refused before anything else, even when no control is required"
+        ],
+        "core": [
+          "P2 — mutated parameters invalidate prior control evidence an envelope changed under an unchanged fingerprint is refused outright"
+        ]
+      }
+    },
+    {
+      "id": "NC-P2-PRESENTED-ARGUMENTS-NOT-COMPARED",
+      "obligation": "P2",
+      "claim": "Arguments presented with an action id must fingerprint to the recorded envelope.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "          if (presented !== fresh.recomputedFingerprint) {",
+        "replace": "          if (false) {"
+      },
+      "mustFail": {
+        "core": [
+          "P2 — mutated parameters invalidate prior control evidence arguments presented with an action id must be the ones recorded for it"
+        ],
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E8 — the executor plugin admits a proposal by its id against its sealed envelope, or not at all"
+        ]
+      }
+    },
+    {
+      "id": "NC-P3-RESUBMISSION-PASSES-THROUGH",
+      "obligation": "P3",
+      "claim": "A confirmation that resubmits a tool name and arguments is answered by the boundary and never reaches the executor.",
+      "mutation": {
+        "file": "apps/server/src/modules/ai/flow-orchestrator.service.ts",
+        "find": "    if (pending.confirmed && boundary.adopts(pending.toolName)) {",
+        "replace": "    if (false) {"
+      },
+      "mustFail": {
+        "surfaces": [
+          "P3 — a client-resubmitted confirmation cannot execute a resubmitted tool name and arguments execute nothing and never reach the executor",
+          "P3 — a client-resubmitted confirmation cannot execute even an owner’s resubmission executes nothing",
+          "P3 — a client-resubmitted confirmation cannot execute the confirm route with the old body (a tool name and arguments, no id) executes nothing"
+        ]
+      }
+    },
+    {
+      "id": "NC-P3-ANYONE-MAY-CONFIRM",
+      "obligation": "P3",
+      "claim": "A confirmation is bound to the requesting principal; another member cannot give it.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "    if (giver.userId === requirement.principalUserId) return { kind: 'CONFIRMATION' };",
+        "replace": "    if (giver.basis !== 'none') return { kind: 'CONFIRMATION' };"
+      },
+      "mustFail": {
+        "unit": [
+          "evidenceKindFor someone else clears a confirmation only as an approver at the capability tier"
+        ],
+        "core": [
+          "control evidence is server-issued and bound to the action and the principal another staff member cannot confirm it for them"
+        ],
+        "surfaces": [
+          "P3 — a client-resubmitted confirmation cannot execute someone else’s confirmation id does not confirm for them"
+        ]
+      }
+    },
+    {
+      "id": "NC-P3-CANCEL-SOMEONE-ELSES",
+      "obligation": "P3",
+      "claim": "The chat \"No, cancel\" path voids only the caller’s own action.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "        if (opts.onlyIfRequestedBy && record.requestedBy !== opts.onlyIfRequestedBy) {",
+        "replace": "        if (false) {"
+      },
+      "mustFail": {
+        "core": [
+          "tenant binding of an action \"No, cancel\" voids only the caller’s own action"
+        ]
+      }
+    },
+    {
+      "id": "NC-P4-EVIDENCE-AUTHORITY-NOT-REREAD",
+      "obligation": "P4",
+      "claim": "The evidence-giver’s authority is re-read inside the claim transaction; a revocation or demotion committed before admission is observed.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "        const evidencePrincipal = evidence ? (fresh.principals.get(evidence.principalUserId) ?? null) : null;",
+        "replace": "        const evidencePrincipal = evidence ? ({ userId: evidence.principalUserId, basis: evidence.assumptions.basis, membershipId: evidence.assumptions.membershipId, membershipRole: null, approvalTier: evidence.assumptions.approvalTier } as PrincipalAuthority) : null;"
+      },
+      "mustFail": {
+        "core": [
+          "P4 — revocation or demotion before claim admission yields zero tickets the approver’s Membership is hard-deleted after they approved",
+          "P4 — revocation or demotion before claim admission yields zero tickets the approver is demoted from ADMIN to STAFF after they approved",
+          "P4 — revocation or demotion before claim admission yields zero tickets the approver’s tier is lowered below the capability tier after they approved",
+          "P4 — revocation or demotion before claim admission yields zero tickets SUPER_ADMIN may approve without a Membership, and loses that with the role",
+          "P4 — revocation or demotion before claim admission yields zero tickets a revocation still in flight makes admission wait, and is observed once it commits"
+        ]
+      }
+    },
+    {
+      "id": "NC-P4-MEMBERSHIP-NOT-LOCKED",
+      "obligation": "P4",
+      "claim": "The Membership row is locked before it is read, so admission and revocation cannot interleave.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "      await tx.$queryRaw`SELECT id FROM memberships WHERE user_id = ${userId} AND business_id = ${businessId} FOR SHARE`;\n",
+        "replace": ""
+      },
+      "mustFail": {
+        "core": [
+          "P4 — revocation or demotion before claim admission yields zero tickets a revocation still in flight makes admission wait, and is observed once it commits",
+          "P4 — revocation or demotion before claim admission yields zero tickets a revocation that starts during admission waits for the claim to commit"
+        ]
+      }
+    },
+    {
+      "id": "NC-P4-REQUESTER-AUTHORITY-NOT-REREAD",
+      "obligation": "P4",
+      "claim": "The requesting principal’s authority is re-read at admission; KEY autonomy does not act for a requester who has lost it.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "      principal: record.requestedBy ? (principals.get(record.requestedBy) ?? null) : null,\n      autonomy,\n    });",
+        "replace": "      principal: record.requestedBy ? ({ userId: record.requestedBy, basis: 'membership', membershipId: null, membershipRole: null, approvalTier: 0 } as PrincipalAuthority) : null,\n      autonomy,\n    });"
+      },
+      "mustFail": {
+        "core": [
+          "P4 — revocation or demotion before claim admission yields zero tickets the requester is banned after KEY autonomy would have cleared their action"
+        ]
+      }
+    },
+    {
+      "id": "NC-P4-BANNED-USER-KEEPS-AUTHORITY",
+      "obligation": "P4",
+      "claim": "A banned or deleted user has no authority, whatever their role or Membership.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "  if (!rows.user || rows.user.deletedAt || rows.user.bannedAt) return none;",
+        "replace": "  if (!rows.user) return none;"
+      },
+      "mustFail": {
+        "unit": [
+          "resolvePrincipalAuthority a deleted user has no authority",
+          "resolvePrincipalAuthority a banned user has no authority"
+        ],
+        "core": [
+          "P4 — revocation or demotion before claim admission yields zero tickets the requester is banned after KEY autonomy would have cleared their action"
+        ]
+      }
+    },
+    {
+      "id": "NC-P4-OWNER-WITHOUT-MEMBERSHIP-APPROVES",
+      "obligation": "P4",
+      "claim": "An owner with no Membership row has no approval tier (the frozen rule refuses an approver with no Membership).",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "    return { ...none, basis: 'owner_without_membership' };",
+        "replace": "    return { ...none, basis: 'owner_without_membership', approvalTier: 4 };"
+      },
+      "mustFail": {
+        "unit": [
+          "resolvePrincipalAuthority the owner with no Membership row may act, and cannot approve"
+        ],
+        "core": [
+          "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row cannot approve a proposal nobody requested: approval needs a Membership tier"
+        ]
+      }
+    },
+    {
+      "id": "NC-P4-APPROVAL-TIER-IGNORED",
+      "obligation": "P4",
+      "claim": "An approval requires an approval tier at or above the capability tier.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "  if (giver.approvalTier >= requirement.minApprovalTier) return { kind: 'APPROVAL' };",
+        "replace": "  if (giver.approvalTier >= 0) return { kind: 'APPROVAL' };"
+      },
+      "mustFail": {
+        "unit": [
+          "evidenceKindFor an approval needs the tier"
+        ],
+        "core": [
+          "Q1/Q4 — surfaces with no trusted principal cannot execute INBOUND_CONVERSATION files a human proposal and creates no ticket, at any autonomy level",
+          "Q1/Q4 — surfaces with no trusted principal cannot execute PLAN_QUEUE files a human proposal and creates no ticket, at any autonomy level",
+          "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row cannot approve a proposal nobody requested: approval needs a Membership tier"
+        ]
+      }
+    },
+    {
+      "id": "NC-P5-DECISION-CACHED",
+      "obligation": "P5",
+      "claim": "The ControlRequirement is derived again at admission from policy and autonomy as they are then; the one recorded earlier is not reused.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "    const requirement = deriveControlRequirement({\n      capability,\n      surface,\n      principal: record.requestedBy ? (principals.get(record.requestedBy) ?? null) : null,\n      autonomy,\n    });",
+        "replace": "    const derivedNow = deriveControlRequirement({\n      capability,\n      surface,\n      principal: record.requestedBy ? (principals.get(record.requestedBy) ?? null) : null,\n      autonomy,\n    });\n    const requirement = ((record.controlRequirement as ControlRequirement | null) ?? derivedNow) as ControlRequirement;"
+      },
+      "mustFail": {
+        "core": [
+          "P5 — tightened policy or reduced autonomy forces reevaluation or rejection autonomy that would have cleared the action is reduced before admission",
+          "P5 — tightened policy or reduced autonomy forces reevaluation or rejection the tool is blocked after the requester confirmed",
+          "P5 — tightened policy or reduced autonomy forces reevaluation or rejection the business is put in advisory mode after an approval",
+          "P5 — tightened policy or reduced autonomy forces reevaluation or rejection a policy store that cannot be read is a refusal, not a default"
+        ]
+      }
+    },
+    {
+      "id": "NC-P6-CLAIM-NOT-UNIQUE-PER-ACTION",
+      "obligation": "P6",
+      "claim": "The execution claim is one unique key per business action; N concurrent executors produce one claim and one ticket.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "  return `key-action-claim:${actionId}`;",
+        "replace": "  return `key-action-claim:${actionId}:${Math.random().toString(36).slice(2)}`;"
+      },
+      "mustFail": {
+        "core": [
+          "P6 — concurrent N-way execution gives exactly one claim and one ticket 12 concurrent admissions of one cleared action"
+        ]
+      }
+    },
+    {
+      "id": "NC-P6-APPROVAL-STATUS-AS-CLEARANCE",
+      "obligation": "P6",
+      "claim": "An APPROVED status is not clearance; only evidence that satisfies the requirement now is.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "        if (!clearance.cleared) {\n          throw new AdmissionRefused(clearance.code, clearance.reason, clearance.reevaluate, clearance.requirement);\n        }",
+        "replace": "        if (!clearance.cleared && record.status !== 'APPROVED') {\n          throw new AdmissionRefused((clearance as any).code, (clearance as any).reason, (clearance as any).reevaluate, clearance.requirement);\n        }"
+      },
+      "mustFail": {
+        "core": [
+          "control evidence is server-issued and bound to the action and the principal an approval status with no evidence behind it is not clearance",
+          "control evidence is server-issued and bound to the action and the principal a bare boolean in the evidence column is not evidence",
+          "control evidence is server-issued and bound to the action and the principal an approval flag in the evidence column is not evidence"
+        ],
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E8 — KeyActionProposalService.execute never reaches the plugin for this capability"
+        ]
+      }
+    },
+    {
+      "id": "NC-EVIDENCE-NEVER-EXPIRES",
+      "obligation": "control evidence",
+      "claim": "Control evidence expires.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "  if (!Number.isFinite(expiresAt) || expiresAt <= now.getTime()) {",
+        "replace": "  if (false) {"
+      },
+      "mustFail": {
+        "unit": [
+          "computeClearance evidence at its expiry instant is expired",
+          "computeClearance evidence after its expiry is expired",
+          "computeClearance evidence with an unreadable expiry is expired"
+        ],
+        "core": [
+          "control evidence is server-issued and bound to the action and the principal expired evidence clears nothing, and the action goes back to waiting"
+        ]
+      }
+    },
+    {
+      "id": "NC-Q1-AUTONOMY-SUBSTITUTES-FOR-A-PRINCIPAL",
+      "obligation": "Q1",
+      "claim": "With no trusted principal, KEY autonomy cannot clear the action: it becomes a proposal for a human.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "  if (!principal) {\n    return {\n      kind: 'HUMAN_APPROVAL',\n      minApprovalTier: capability.riskTier,",
+        "replace": "  if (!principal && !autonomy.requiresQuickConfirm && !autonomy.requiresFormalApproval && !autonomy.requiresAdminApproval) {\n    return { kind: 'NONE', reason: autonomy.reason };\n  }\n  if (!principal) {\n    return {\n      kind: 'HUMAN_APPROVAL',\n      minApprovalTier: capability.riskTier,"
+      },
+      "mustFail": {
+        "unit": [
+          "deriveControlRequirement with no trusted principal on INBOUND_CONVERSATION, KEY autonomy cannot clear it: a human at the capability tier must",
+          "deriveControlRequirement with no trusted principal on PLAN_QUEUE, KEY autonomy cannot clear it: a human at the capability tier must"
+        ],
+        "core": [
+          "Q1/Q4 — surfaces with no trusted principal cannot execute INBOUND_CONVERSATION files a human proposal and creates no ticket, at any autonomy level",
+          "Q1/Q4 — surfaces with no trusted principal cannot execute PLAN_QUEUE files a human proposal and creates no ticket, at any autonomy level",
+          "Q1/Q4 — surfaces with no trusted principal cannot execute CORTEX_BRIDGE files a human proposal and creates no ticket, at any autonomy level",
+          "Q1/Q4 — surfaces with no trusted principal cannot execute CUSTOM_LOGIC files a human proposal and creates no ticket, at any autonomy level",
+          "Q1/Q4 — surfaces with no trusted principal cannot execute PRO_AUTO_MONITOR files a human proposal and creates no ticket, at any autonomy level"
+        ],
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them autoExecuteToolForMonitoring, which overrides the oversight mode",
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them execute_custom_logic’s inner executor",
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E5 — ConversationalAIService: a confident model does not stand in for a person",
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E7 — ActionDispatcherService: one proposal, no retries, no ticket",
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E9 — KeyCortexEfferentBridgeService: a context user id is not a principal"
+        ]
+      }
+    },
+    {
+      "id": "NC-Q4-PHONE-STREAM-TRUSTED",
+      "obligation": "Q4",
+      "claim": "The phone stream has an untrusted tenant binding: it is refused and writes nothing.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "new Set(['PHONE_STREAM', 'UNDECLARED']);",
+        "replace": "new Set(['UNDECLARED']);"
+      },
+      "mustFail": {
+        "unit": [
+          "deriveControlRequirement only the phone stream and an undeclared caller have an untrusted tenant binding",
+          "deriveControlRequirement PHONE_STREAM is denied before policy or principal is considered, whatever they say"
+        ],
+        "core": [
+          "Q1/Q4 — surfaces with no trusted principal cannot execute PHONE_STREAM is refused and writes nothing, not even a proposal",
+          "Q1/Q4 — surfaces with no trusted principal cannot execute PHONE_STREAM claiming a principal is refused and writes nothing, not even a proposal"
+        ],
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E4 — PhoneVoiceService tells the model nothing was done, and nothing was"
+        ]
+      }
+    },
+    {
+      "id": "NC-P7-UNDECLARED-CALLER-TRUSTED",
+      "obligation": "P7",
+      "claim": "A caller that declares no surface is refused and writes nothing, so a surface added without context fails closed.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
+        "find": "new Set(['PHONE_STREAM', 'UNDECLARED']);",
+        "replace": "new Set(['PHONE_STREAM']);"
+      },
+      "mustFail": {
+        "unit": [
+          "deriveControlRequirement UNDECLARED is denied before policy or principal is considered, whatever they say"
+        ],
+        "core": [
+          "Q1/Q4 — surfaces with no trusted principal cannot execute a caller that declares no surface is refused and writes nothing, not even a proposal",
+          "Q1/Q4 — surfaces with no trusted principal cannot execute a caller with a made-up surface is refused and writes nothing, not even a proposal"
+        ],
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them executeToolByName with no context (the old E4 and E11 call shape)",
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them executeToolDirectly with no context (the old E5, E7, E8 and E9 call shape)",
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them executeToolDirect with no context (the old E10 call shape)"
+        ]
+      }
+    },
+    {
+      "id": "NC-P7-HANDLER-BYPASSES-THE-BOUNDARY",
+      "obligation": "P7",
+      "claim": "The tool handler hands the call to the boundary; no surface reaches the ticket write around it.",
+      "mutation": {
+        "file": "apps/server/src/modules/ai/flow-orchestrator.service.ts",
+        "find": "        return this.getActionBoundary().executeFromTool(businessId, toolName, args, action);",
+        "replace": "        const ticket = await this.getHelpdesk().createTicket(businessId, { title: args.title, description: args.description ?? undefined, contactId: args.contactId, priority: args.priority ?? 'NORMAL' });\n        return { id: ticket.id, title: ticket.title, status: ticket.status };"
+      },
+      "mustFail": {
+        "unit": [
+          "surface inventory: the tool handler does one thing: hand the call, with its context, to the boundary",
+          "surface inventory: who can write a SupportTicket HelpdeskService.createTicket, the manual operation, is called only by the human route"
+        ],
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them executeToolByName with no context (the old E4 and E11 call shape)",
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them executeToolDirectly with no context (the old E5, E7, E8 and E9 call shape)",
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them executeToolDirect with no context (the old E10 call shape)",
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them autoExecuteToolForMonitoring, which overrides the oversight mode",
+          "P7 — no surface reaches the ticket write around the boundary the orchestrator’s executor entries, called the way each surface used to call them execute_custom_logic’s inner executor",
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E4 — PhoneVoiceService tells the model nothing was done, and nothing was",
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E5 — ConversationalAIService: a confident model does not stand in for a person",
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E7 — ActionDispatcherService: one proposal, no retries, no ticket",
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E9 — KeyCortexEfferentBridgeService: a context user id is not a principal",
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E10 — GraphActionsController: an authenticated caller is asked to confirm; quick-confirm is no longer ignored",
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E6 — executePlan: plan approval is not a confirmation of the action"
+        ]
+      }
+    },
+    {
+      "id": "NC-P7-DISPATCHER-RETRIES-A-REFUSAL",
+      "obligation": "P7",
+      "claim": "The dispatcher stops retrying once the boundary has answered.",
+      "mutation": {
+        "file": "apps/server/src/modules/ai/action-dispatcher.service.ts",
+        "find": "          boundaryAnswer = err as { actionId?: string | null; disposition?: string };\n          break;\n",
+        "replace": "          boundaryAnswer = err as { actionId?: string | null; disposition?: string };\n"
+      },
+      "mustFail": {
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E7 — ActionDispatcherService: one proposal, no retries, no ticket"
+        ]
+      }
+    },
+    {
+      "id": "NC-P8-EFFECT-NOT-WRITTEN",
+      "obligation": "P8",
+      "claim": "Successful outcome evidence names a SupportTicket row that exists.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "          ticket = await this.helpdesk.createTicketRow(tx, businessId, {",
+        "replace": "          ticket = { id: `unwritten_${actionId}`, title: material.title, status: 'OPEN' };\n          void ({"
+      },
+      "mustFail": {
+        "core": [
+          "P8 — successful outcome evidence names the actual SupportTicket the ticket, the action record and the claim agree, and the ticket is the envelope"
+        ]
+      }
+    },
+    {
+      "id": "NC-P8-CONTACT-FROM-ANOTHER-BUSINESS",
+      "obligation": "P8",
+      "claim": "The contact a ticket names belongs to the business the action is for.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "            where: { id: material.contactId, businessId },",
+        "replace": "            where: { id: material.contactId },"
+      },
+      "mustFail": {
+        "core": [
+          "P9 — failure is explicit; a rollback before commit is retryable and never duplicates a domain failure is recorded as FAILED, with the reason, and is not retried into a ticket"
+        ]
+      }
+    },
+    {
+      "id": "NC-P9-EFFECT-OUTSIDE-THE-TRANSACTION",
+      "obligation": "P9",
+      "claim": "The ticket is written on the claim transaction; a crash before commit leaves no ticket and a retry makes exactly one.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "          ticket = await this.helpdesk.createTicketRow(tx, businessId, {",
+        "replace": "          ticket = await this.helpdesk.createTicketRow(this.prisma.client, businessId, {"
+      },
+      "mustFail": {
+        "core": [
+          "P9 — failure is explicit; a rollback before commit is retryable and never duplicates a crash after the ticket insert and before the commit leaves nothing, and the retry makes one ticket"
+        ]
+      }
+    },
+    {
+      "id": "NC-P9-FAILURE-NOT-RECORDED",
+      "obligation": "P9",
+      "claim": "A failed effect is recorded as FAILED, explicitly.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "          status: 'FAILED',\n          failureReason: message,",
+        "replace": "          status: 'APPROVED',\n          failureReason: message,"
+      },
+      "mustFail": {
+        "core": [
+          "P9 — failure is explicit; a rollback before commit is retryable and never duplicates a domain failure is recorded as FAILED, with the reason, and is not retried into a ticket",
+          "P9 — failure is explicit; a rollback before commit is retryable and never duplicates a write the database rejects is a FAILED outcome, and the claim does not survive it"
+        ]
+      }
+    },
+    {
+      "id": "NC-P10-EXECUTED-FOR-DROPPED",
+      "obligation": "P10",
+      "claim": "The principal chain is preserved: executedFor names the human on whose authority the action ran.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "          executedFor: clearance.approvedBy ?? record.requestedBy,",
+        "replace": "          executedFor: null,"
+      },
+      "mustFail": {
+        "core": [
+          "P10 — the principal chain is preserved approved proposal from a principalless surface",
+          "P10 — the principal chain is preserved requester-confirmed action from chat",
+          "P10 — the principal chain is preserved action cleared by KEY autonomy for a trusted requester: nobody approved it, and it says so"
+        ]
+      }
+    },
+    {
+      "id": "NC-PLAN-STEP-NOT-RESUMED",
+      "obligation": "plan step",
+      "claim": "A plan step is one action: run again after its approval it executes the approved action, and run again after execution it replays the ticket.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "      where: ctx.planStepId\n        ? {",
+        "replace": "      where: false\n        ? {"
+      },
+      "mustFail": {
+        "core": [
+          "a plan step is one action, however often and from wherever the step is run the step run again after its proposal was approved executes the approved action",
+          "a plan step is one action, however often and from wherever the step is run a step whose proposal the plan executor created is found by the queue run that follows its approval",
+          "a plan step is one action, however often and from wherever the step is run the step run again after it executed is given the same ticket and creates nothing"
+        ],
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E7 — the approved step, run again by the dispatcher, executes once"
+        ]
+      }
+    },
+    {
+      "id": "NC-APPROVED-ACTION-RESUMED-OUTSIDE-A-PLAN-STEP",
+      "obligation": "plan step",
+      "claim": "Outside a plan step a request never picks up an action that already carries evidence.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "            status: 'PENDING',\n            requestedBy,",
+        "replace": "            status: { in: ['PENDING', 'APPROVED'] },\n            requestedBy,"
+      },
+      "mustFail": {
+        "core": [
+          "a plan step is one action, however often and from wherever the step is run outside a plan step, an approved action is never picked up by a look-alike request"
+        ]
+      }
+    },
+    {
+      "id": "NC-P7-REFUSAL-SCORED-AS-TOOL-FAILURE",
+      "obligation": "P7",
+      "claim": "A boundary refusal on the cortex bridge is not scored as the tool failing.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts",
+        "find": "      if (result.notExecuted && !result.success) {",
+        "replace": "      if (false) {"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexToolRegistryService — a handler that did not execute a \"sent for approval\" answer is returned as it is and scored as nothing",
+          "KeyCortexToolRegistryService — a handler that did not execute a refusal is scored as nothing either",
+          "KeyCortexToolRegistryService — a handler that did not execute five refusals do not make a failing tool of it"
+        ]
+      }
+    },
+    {
+      "id": "NC-P7-BRIDGE-REPORTS-A-FAILURE",
+      "obligation": "P7",
+      "claim": "The cortex bridge reports a boundary answer as not executed.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-efferent-bridge.service.ts",
+        "find": "          notExecuted: true,\n",
+        "replace": ""
+      },
+      "mustFail": {
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E9 — KeyCortexEfferentBridgeService: a context user id is not a principal"
+        ]
+      }
+    },
+    {
+      "id": "NC-P7-REFUSAL-TRIPS-THE-CIRCUIT-BREAKER",
+      "obligation": "P7",
+      "claim": "A boundary refusal does not count towards the dispatcher circuit breaker.",
+      "mutation": {
+        "file": "apps/server/src/modules/ai/action-dispatcher.service.ts",
+        "find": "    if (!boundaryAnswer) this.recordFailure(ctx.toolName);",
+        "replace": "    this.recordFailure(ctx.toolName);"
+      },
+      "mustFail": {
+        "surfaces": [
+          "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E7 — proposals filed by the dispatcher never open the tool’s circuit breaker"
+        ]
+      }
+    },
+    {
+      "id": "NC-P7-WAITING-STEP-MARKED-FAILED",
+      "obligation": "P7",
+      "claim": "A plan step whose action is waiting for a human is left awaiting approval, not failed.",
+      "mutation": {
+        "file": "apps/server/src/modules/ai/queue.service.ts",
+        "find": "      if (err instanceof StepAwaitingApproval) throw err;\n",
+        "replace": ""
+      },
+      "mustFail": {
+        "unit": [
+          "QueueService.processPlanStep — a step whose action is waiting for a human leaves the step awaiting approval and the plan awaiting input"
+        ]
+      }
+    },
+    {
+      "id": "NC-EXECUTION-LOG-DROPPED",
+      "obligation": "P10",
+      "claim": "The confirm path still writes the execution log row it used to get from executeTool.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+        "find": "    return this.admit(businessId, actionId, { executedBy: principalUserId, log: true });",
+        "replace": "    return this.admit(businessId, actionId, { executedBy: principalUserId });"
+      },
+      "mustFail": {
+        "core": [
+          "the supplementary execution log is written once per execution the confirm path writes it, because it no longer passes through executeTool"
+        ]
+      }
+    }
+  ]
+}

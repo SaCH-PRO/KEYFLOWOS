@@ -128,6 +128,9 @@ describe('dispatch behaviour', () => {
       'biz_1',
       'crm_create_contact',
       { firstName: 'Ada' },
+      undefined,
+      // KF-EXEC-ACTION-001: the bridge declares its surface and no principal.
+      { surface: 'CORTEX_BRIDGE' },
     );
     expect(out.success).toBe(true);
   });

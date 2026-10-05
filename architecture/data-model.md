@@ -133,6 +133,34 @@ Invoice created (Quote → Invoice)
   → RevenueAction / attribution updated
 ```
 
+### 8. KEY Action Boundary Flow
+
+KF-EXEC-ACTION-001. No new table.
+
+```
+KeyActionProposal (key_action_proposals)      the action record
+  capability_name, capability_version         real CapabilityContract identity
+  execution_surface                           where the action entered
+  action_envelope, action_fingerprint         canonical material parameters and their sha256
+  control_requirement                         as derived when recorded, with the legacy decision beside it
+  control_evidence, evidence_expires_at       server-issued, bound to the fingerprint and the principal
+  requested_by, proposed_by, executed_for     with approved_by and executed_by, the principal chain
+  outcome_evidence                            claim key, entity id, clearance basis, principal chain
+
+IdempotencyKey (idempotency_keys)             the execution claim
+  idempotency_key = key-action-claim:<actionId>
+  @@unique([businessId, idempotencyKey])      the uniqueness invariant; unchanged
+  status   claimed → completed | voided
+  request_hash = the action fingerprint
+  response = { actionId, supportTicketId }
+
+SupportTicket (support_tickets)               the effect; unchanged
+```
+
+All twelve columns are nullable and are null on every row that is not an action record of an adopted capability. The claim row, the ticket and the outcome evidence are written in one transaction.
+
+`KeyIdempotencyService` uses the same table for other keys. It treats a `pending` row as new and never compares `request_hash`; the boundary does not go through it, and its keys cannot collide with `key-action-claim:`.
+
 ## Data-Ownership Registry
 
 Approximate model ownership is captured in `architecture/data-ownership.yaml` (auto-generated). It contains ~441 entries, with 92 currently marked `unassigned`.
