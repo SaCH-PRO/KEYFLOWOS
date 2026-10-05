@@ -352,3 +352,124 @@ test('canonical intelligence topology becomes journey/kernel nodes and preserves
   assert.equal(graph.source_state.intelligence_status, 'CONTRADICTED');
 });
 
+test('packet semantic index creates journey/kernel impact edges without promoting seam guesses', () => {
+  const graph = buildAtlasGraph({
+    architectureGraph: { meta: {}, nodes: [], edges: [] },
+    moduleRegistryText: 'modules:\n',
+    routeRegistryText: 'routes:\n',
+    eventRegistryText: 'events:\n',
+    capabilityRegistryText: 'capabilities:\n',
+    ownershipRegistryText: 'models:\n',
+    dag: fakeDag(),
+    intelligenceTopology: {
+      source_ref: 'docs/keyflow-intelligence-foundation',
+      source_files: ['docs/intelligence/03-ANALYSIS-MAP.md'],
+      status: 'CONSISTENT',
+      journeys: [
+        { id: 'KF-JOURNEY-001', name: 'Business Birth' },
+        { id: 'KF-JOURNEY-002', name: 'Governed Action' },
+      ],
+      kernels: [{ id: 'KF-KERNEL-001', name: 'Tenant Genesis & Identity' }],
+      primary_journey_kernel_links: [],
+      contradictions: [],
+    },
+    packetSemanticIndex: {
+      source_ref: 'docs/keyflow-intelligence-foundation',
+      status: 'MAPPED',
+      packets: [
+        {
+          packet_id: 'KF-EXEC-A-001',
+          source_file: 'docs/intelligence/execution/KF-EXEC-A-001.md',
+          semantic_status: 'MAPPED',
+          primary_journeys: ['KF-JOURNEY-001'],
+          consumer_journeys: ['KF-JOURNEY-002'],
+          primary_kernels: ['KF-KERNEL-001'],
+          seams: [
+            {
+              value: 'apps/server/src/example.ts',
+              kind: 'path_or_symbol',
+              requires_revalidation: true,
+            },
+          ],
+        },
+      ],
+      contradictions: [],
+    },
+  });
+
+  assert.ok(
+    graph.edges.some(
+      (e) =>
+        e.source === 'packet:KF-EXEC-A-001' &&
+        e.target === 'journey:KF-JOURNEY-001' &&
+        e.relation === 'impacts_journey',
+    ),
+  );
+  assert.ok(
+    graph.edges.some(
+      (e) =>
+        e.source === 'packet:KF-EXEC-A-001' &&
+        e.target === 'journey:KF-JOURNEY-002' &&
+        e.relation === 'consumer_journey',
+    ),
+  );
+  assert.ok(
+    graph.edges.some(
+      (e) =>
+        e.source === 'packet:KF-EXEC-A-001' &&
+        e.target === 'kernel:KF-KERNEL-001' &&
+        e.relation === 'impacts_kernel',
+    ),
+  );
+
+  const packet = graph.nodes.find((n) => n.id === 'packet:KF-EXEC-A-001');
+  assert.equal(packet.metadata.semantic_status, 'MAPPED');
+  assert.equal(packet.metadata.characterization_seams[0].requires_revalidation, true);
+  assert.ok(
+    !graph.edges.some(
+      (e) =>
+        e.source === 'packet:KF-EXEC-A-001' &&
+        e.target === 'apps/server/src/example.ts',
+    ),
+    'unrevalidated seam text must not become a code edge',
+  );
+});
+
+test('packet semantic contradictions become visible L8 nodes', () => {
+  const graph = buildAtlasGraph({
+    architectureGraph: { meta: {}, nodes: [], edges: [] },
+    moduleRegistryText: 'modules:\n',
+    routeRegistryText: 'routes:\n',
+    eventRegistryText: 'events:\n',
+    capabilityRegistryText: 'capabilities:\n',
+    ownershipRegistryText: 'models:\n',
+    dag: fakeDag(),
+    intelligenceTopology: null,
+    packetSemanticIndex: {
+      source_ref: 'docs/keyflow-intelligence-foundation',
+      status: 'PARTIAL_OR_CONTRADICTED',
+      packets: [],
+      contradictions: [
+        {
+          id: 'ATLAS-PACKET-UNKNOWN-JOURNEY-KF-EXEC-A-001-KF-JOURNEY-026',
+          type: 'UNKNOWN_JOURNEY_REFERENCE',
+          packet_id: 'KF-EXEC-A-001',
+          reference: 'KF-JOURNEY-026',
+          source_file: 'docs/intelligence/execution/KF-EXEC-A-001.md',
+          disposition: 'UNRESOLVED',
+        },
+      ],
+    },
+  });
+
+  const contradiction = graph.nodes.find(
+    (n) =>
+      n.id ===
+      'contradiction:ATLAS-PACKET-UNKNOWN-JOURNEY-KF-EXEC-A-001-KF-JOURNEY-026',
+  );
+  assert.ok(contradiction);
+  assert.equal(contradiction.layer, 'L8');
+  assert.equal(contradiction.metadata.reference, 'KF-JOURNEY-026');
+  assert.equal(graph.source_state.packet_semantic_status, 'PARTIAL_OR_CONTRADICTED');
+});
+
