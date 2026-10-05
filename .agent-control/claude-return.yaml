@@ -1,13 +1,14 @@
 packet_id: KF-KEY-NATIVE-CAPACITY-SHADOW-001
 tracking_issue: 138
 source_main: 110532883411007787f62de35e0a951aa1c16cfa
-source_head: 6f2a3f1519f3af7059b49f4ef381b0cd6286ccdf
+source_head: c15077cd9fc2954a385f7c912145d7980bbe06fc
 implementation_branch: impl/kf-key-native-capacity-shadow-001
 pr_number: 139
 state: PROVING
 health: YELLOW
-scope_changed: false
+scope_changed: true
 production_touched: false
+scope_change_authority: issue_138_comment_5997180520_stale_packet_id_test_correction
 review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
 merge_authority: false
@@ -26,7 +27,7 @@ summary: >
   read-only GitHub Actions shadow workflow. The analyzers create evidence and
   candidate patterns only. They do not call AI providers, mutate application
   state, promote procedures, alter authority, or claim model independence from
-  static absence alone. Current branch evidence remains pre-RETURN.
+  static absence alone. A bounded correction also removes stale hard-coding of one historical packet id from two agent-control tests while preserving all runtime control semantics. Current branch evidence remains pre-RETURN.
 
 changed_files:
   semantic:
@@ -35,6 +36,8 @@ changed_files:
     - scripts/key-native-capacity/build-report.mjs
     - scripts/key-native-capacity/native-capacity.spec.mjs
     - .github/workflows/key-native-capacity-shadow.yml
+    - scripts/agent-control/tests/yaml.spec.mjs
+    - scripts/agent-control/tests/return-evidence.spec.mjs
   control_only:
     - .agent-control/active-packet.yaml
     - .agent-control/claude-return.yaml
@@ -80,6 +83,7 @@ residuals:
   - motif frequency cannot prove correctness, usefulness or safe autonomy
   - scheduled execution becomes durable only after this workflow is reviewed and merged
   - broader cognitive offload and procedure promotion remain separate benchmark-gated work
+  - the generalized packet-id tests change test assumptions only and do not alter agent-control runtime semantics
 
 next_legal_action: >
   Wait for exact-head checks on the control-artifact head and independent review.
