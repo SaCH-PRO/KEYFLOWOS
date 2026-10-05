@@ -237,9 +237,11 @@ export interface ControlEvidence {
 }
 
 export function parseStoredEvidence(stored: unknown): ControlEvidence | null {
-  const e = stored && typeof stored === 'object' && !Array.isArray(stored) ? (stored as Record<string, any>) : null;
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  const e = asRecord(stored);
   if (!e) return null;
-  const a = e.assumptions;
+  const a = asRecord(e.assumptions);
   const wellFormed =
     e.v === 1 &&
     (e.kind === 'CONFIRMATION' || e.kind === 'APPROVAL') &&
@@ -248,13 +250,12 @@ export function parseStoredEvidence(stored: unknown): ControlEvidence | null {
     e.principalUserId !== '' &&
     typeof e.issuedAt === 'string' &&
     typeof e.expiresAt === 'string' &&
-    a &&
-    typeof a === 'object' &&
+    a !== null &&
     typeof a.basis === 'string' &&
     typeof a.approvalTier === 'number';
   // Malformed evidence is no evidence. It is never repaired into something
   // that might clear.
-  return wellFormed ? (e as ControlEvidence) : null;
+  return wellFormed ? (e as unknown as ControlEvidence) : null;
 }
 
 /** A requester's confirmation is short-lived: it answers a question just asked. */

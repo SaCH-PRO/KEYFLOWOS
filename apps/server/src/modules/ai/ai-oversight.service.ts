@@ -42,11 +42,18 @@ export interface AutonomySettings {
  * it, and so does a transaction on that client.
  */
 export interface AutonomySettingsReader {
-  autopilotSettings: { findUnique(args: { where: { businessId: string } }): Promise<any> };
+  autopilotSettings: {
+    findUnique(args: { where: { businessId: string } }): Promise<{
+      autonomyLevel: number;
+      blockedTools: string[];
+      approvedTools: string[];
+      approvalTimeoutHours: number;
+    } | null>;
+  };
   aiMemory: {
     findUnique(args: {
       where: { businessId_category_key: { businessId: string; category: string; key: string } };
-    }): Promise<any>;
+    }): Promise<{ value: string } | null>;
   };
 }
 

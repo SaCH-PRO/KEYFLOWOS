@@ -6550,9 +6550,9 @@
         "./role-engine.service",
         "@nestjs/common"
       ],
-      "lines": 833,
+      "lines": 840,
       "path": "apps/server/src/modules/ai/ai-oversight.service.ts",
-      "size_bytes": 35714
+      "size_bytes": 35879
     },
     {
       "exports": [
@@ -20523,9 +20523,9 @@
         "@nestjs/common",
         "@nestjs/event-emitter"
       ],
-      "lines": 191,
+      "lines": 189,
       "path": "apps/server/src/modules/helpdesk/helpdesk.service.ts",
-      "size_bytes": 6764
+      "size_bytes": 6751
     },
     {
       "exports": [
@@ -21585,9 +21585,9 @@
         "../../../core/authority/approval-tier",
         "../../../core/authority/module-vocabulary"
       ],
-      "lines": 419,
+      "lines": 420,
       "path": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
-      "size_bytes": 15804
+      "size_bytes": 15898
     },
     {
       "exports": [
@@ -21617,9 +21617,9 @@
         "@nestjs/core",
         "@prisma/client"
       ],
-      "lines": 1079,
+      "lines": 1084,
       "path": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
-      "size_bytes": 44126
+      "size_bytes": 44245
     },
     {
       "exports": [],
@@ -63499,6 +63499,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3463,
     "total_files": 4457,
-    "total_lines": 1146690
+    "total_lines": 1146701
   }
 }

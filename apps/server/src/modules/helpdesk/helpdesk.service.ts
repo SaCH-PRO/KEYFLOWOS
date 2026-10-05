@@ -14,9 +14,7 @@ export interface CreateTicketBody {
 }
 
 /** Anything that can insert a ticket: the Prisma client or a transaction on it. */
-export interface TicketWriteClient {
-  supportTicket: { create(args: any): Promise<any> };
-}
+export type TicketWriteClient = Pick<PrismaService['client'], 'supportTicket'>;
 
 @Injectable()
 export class HelpdeskService {

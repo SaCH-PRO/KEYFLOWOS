@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import type { Prisma } from '@prisma/client';
+import type { KeyActionProposal, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { AiExecutionLogService } from '../../ai/ai-execution-log.service';
 import { AiOversightService } from '../../ai/ai-oversight.service';
@@ -215,7 +215,7 @@ function isDeterministicWriteRejection(err: unknown): boolean {
 }
 
 type BoundaryDb = PrismaService['client'];
-type BoundaryTx = Parameters<Extract<Parameters<BoundaryDb['$transaction']>[0], (...args: any[]) => any>>[0];
+type BoundaryTx = Parameters<Extract<Parameters<BoundaryDb['$transaction']>[0], (...args: never[]) => unknown>>[0];
 
 interface FreshState {
   capability: CapabilityDefinition;
@@ -621,7 +621,7 @@ export class KeyActionBoundaryService {
     } = {},
   ): Promise<AdmissionOutcome> {
     const startedAt = Date.now();
-    let committed: { ticket: any; material: ActionEnvelope['material'] };
+    let committed: { ticket: TicketOutcome; material: ActionEnvelope['material'] };
     try {
       committed = await this.prisma.client.$transaction(async (tx) => {
         // 1. The claim. Insert-or-fail on the unique (business, action) key; a
@@ -684,7 +684,7 @@ export class KeyActionBoundaryService {
           });
           if (!contact) throw new EffectFailed('The contact for this ticket does not exist in this business');
         }
-        let ticket: any;
+        let ticket: TicketOutcome;
         try {
           ticket = await this.helpdesk.createTicketRow(tx, businessId, {
             title: material.title,
@@ -977,7 +977,7 @@ export class KeyActionBoundaryService {
    * that bypassed KeyActionProposalService.create). Sealed once, from its
    * stored payload, before any evidence is bound to it.
    */
-  private async sealIfUnsealed(tx: BoundaryTx, record: any): Promise<any> {
+  private async sealIfUnsealed(tx: BoundaryTx, record: KeyActionProposal): Promise<KeyActionProposal> {
     if (record.actionFingerprint && record.capabilityName) return record;
     const sealed = this.sealProposal(record.businessId, record, record.userId ?? null);
     if (!sealed || !('actionFingerprint' in sealed)) {
@@ -1011,7 +1011,12 @@ export class KeyActionBoundaryService {
    * transaction. A principal's authority at admission is therefore the
    * authority that is current when the claim commits.
    */
-  private async readFresh(tx: BoundaryTx, businessId: string, record: any, evidenceGivers: string[]): Promise<FreshState> {
+  private async readFresh(
+    tx: BoundaryTx,
+    businessId: string,
+    record: KeyActionProposal,
+    evidenceGivers: string[],
+  ): Promise<FreshState> {
     const { toolName } = this.resolveInvocation(record);
     const capability = this.resolveCapability(toolName as string);
 
@@ -1046,7 +1051,7 @@ export class KeyActionBoundaryService {
       principals.set(userId, await this.readPrincipal(tx, businessId, userId));
     }
 
-    const stored = (record.controlRequirement ?? {}) as { crew?: unknown };
+    const stored = (record.controlRequirement ?? {}) as unknown as { crew?: unknown };
     const crew = Array.isArray(stored.crew) ? (stored.crew.filter((r) => typeof r === 'string') as BusinessRole[]) : [];
     const autonomy = await this.oversight.evaluate(
       businessId,
