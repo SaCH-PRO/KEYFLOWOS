@@ -1,7 +1,7 @@
 version: 1
 work_id: KF-META-PR-UNLOCK-CONTRACT-001
 implementation_branch: docs/kf-pr-unlock-contract-001
-pr_number: null
+pr_number: 152
 state: IMPLEMENTED
 
 classifications:
