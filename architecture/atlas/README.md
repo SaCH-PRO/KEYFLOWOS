@@ -385,6 +385,30 @@ The atlas should index, not duplicate, these existing sources:
 - the programme DAG and packet contracts
 - tests, CI and post-merge evidence
 
+## Deterministic materialization
+
+The next layer is implemented by `scripts/architecture/generate-atlas.mjs`.
+
+Commands:
+
+```bash
+pnpm architecture:atlas:test
+pnpm architecture:atlas
+pnpm architecture:atlas:check
+```
+
+The materializer consumes existing architecture registries plus the canonical programme DAG and produces `architecture/atlas/generated/atlas-graph.json`.
+
+Its first hard guarantees are deliberately conservative:
+
+- generated data ownership becomes `references_most`, never semantic `owns`;
+- every observed edge must carry provenance;
+- missing source/target nodes fail validation;
+- packet and phase dependencies come from the canonical programme DAG rather than being re-authored in the Atlas;
+- output ordering is deterministic so drift is reviewable.
+
+Canonical journey/kernel materialization remains a separate tranche because those semantics live on the intelligence branch and must be imported without silently flattening accepted architecture into generated code facts.
+
 ## Foundation scope
 
 `KF-ATLAS-001` is intentionally a foundation, not a claim of full cartographic coverage.
