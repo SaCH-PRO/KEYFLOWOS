@@ -72,7 +72,7 @@ function normalizeKind(type) {
   const known = new Set([
     'app', 'package', 'module', 'file', 'entity', 'event', 'route',
     'capability', 'integration', 'external_integration', 'execution_path',
-    'risk', 'packet', 'packet_phase', 'journey', 'kernel', 'contradiction',
+    'risk', 'packet', 'packet_phase', 'journey', 'kernel', 'contradiction', 'directory',
   ]);
   return known.has(type) ? type : 'implementation_node';
 }
@@ -151,6 +151,7 @@ export function buildAtlasGraph({
   dag,
   intelligenceTopology = null,
   packetSemanticIndex = null,
+  codeLinkIndex = null,
 }) {
   const nodes = new Map();
   const edges = new Map();
@@ -552,6 +553,53 @@ export function buildAtlasGraph({
     }
   }
 
+
+  if (codeLinkIndex) {
+    for (const link of codeLinkIndex.links || []) {
+      addNode({
+        id: link.node_id,
+        kind: link.kind === 'directory' ? 'directory' : 'file',
+        layer: 'L6',
+        label: link.path,
+        evidence_class: 'observed',
+        authority: 'current_code',
+        confidence: 'high',
+        evidence: [{ path: link.path }],
+      });
+      addEdge({
+        source: `packet:${link.packet_id}`,
+        target: link.node_id,
+        relation: link.relation || 'characterizes_seam',
+        layer: 'L6',
+        evidence_class: 'observed',
+        authority: 'current_code',
+        confidence: link.confidence || 'high',
+        evidence: [{ path: link.path }],
+        notes: 'Exact current-checkout path verified from an intelligence packet characterization seam.',
+      });
+    }
+
+    for (const contradiction of codeLinkIndex.contradictions || []) {
+      addNode({
+        id: `contradiction:${contradiction.id}`,
+        kind: 'contradiction',
+        layer: 'L8',
+        label: contradiction.type || contradiction.id,
+        evidence_class: 'derived',
+        authority: 'current_code',
+        confidence: 'high',
+        evidence: contradiction.source_file
+          ? [{ path: contradiction.source_file, ref: packetSemanticIndex?.source_ref || null }]
+          : [],
+        metadata: {
+          packet_id: contradiction.packet_id || null,
+          path: contradiction.path || null,
+          disposition: contradiction.disposition || 'UNRESOLVED',
+        },
+      });
+    }
+  }
+
   const result = {
     schema: 'keyflowos-living-atlas/v1',
     deterministic: true,
@@ -571,6 +619,9 @@ export function buildAtlasGraph({
       packet_semantic_status: packetSemanticIndex?.status || 'NOT_MATERIALIZED',
       packet_semantic_packets: packetSemanticIndex?.packets?.length ?? null,
       packet_semantic_contradictions: packetSemanticIndex?.contradictions?.length ?? null,
+      code_link_status: codeLinkIndex?.status || 'NOT_MATERIALIZED',
+      verified_code_links: codeLinkIndex?.links?.length ?? null,
+      code_link_contradictions: codeLinkIndex?.contradictions?.length ?? null,
     },
     nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)),
     edges: [...edges.values()].sort((a, b) => a.id.localeCompare(b.id)),
@@ -591,6 +642,10 @@ export function buildFromRepository(repoRoot = ROOT) {
   const packetSemanticIndex = fs.existsSync(packetSemanticPath)
     ? JSON.parse(fs.readFileSync(packetSemanticPath, 'utf8'))
     : null;
+  const codeLinkPath = path.join(repoRoot, 'architecture/atlas/generated/packet-code-links.json');
+  const codeLinkIndex = fs.existsSync(codeLinkPath)
+    ? JSON.parse(fs.readFileSync(codeLinkPath, 'utf8'))
+    : null;
   return buildAtlasGraph({
     architectureGraph,
     moduleRegistryText: fs.readFileSync(path.join(repoRoot, 'architecture/module-registry.yaml'), 'utf8'),
@@ -601,6 +656,7 @@ export function buildFromRepository(repoRoot = ROOT) {
     dag,
     intelligenceTopology,
     packetSemanticIndex,
+    codeLinkIndex,
   });
 }
 
