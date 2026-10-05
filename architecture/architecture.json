@@ -1,7 +1,7 @@
 {
   "meta": {
     "schema": "codebase-architect/v1",
-    "generated": "2026-09-26T00:00:00Z",
+    "generated": "2026-10-03T00:00:00Z",
     "baseline_generated": "2026-08-30T20:45:00Z",
     "source": "baseline exploration output + inventory.py + dependency_scan.py + 2026-08-30 full-domain deep scan; revised 2026-09-25/26 (PR #93) with the INACTIVE platform-convergence successor target and the agent control plane nodes/edges",
     "revisions": [
@@ -12,6 +12,18 @@
       {
         "date": "2026-09-26",
         "change": "PR #93: platform_target added; scripts/agent-control, AGENT_AUTOPILOT_POLICY.yaml, KEYFLOWOS_PROGRAMME_DAG.yaml, KEYFLOWOS_PLATFORM_DAG.yaml and lib/platform-dag.mjs nodes and their edges added; application nodes unchanged from the baseline"
+      },
+      {
+        "date": "2026-10-03",
+        "change": "PR #120 (KF-META-STATE-REDUCER-LIVE-001): lib/authority-effects.mjs and .agent-control/programme-state.yaml nodes and their edges added for the live typed-authority fold (execution-paths.md section 12); inventory.json and dependencies.json regenerated; application nodes unchanged"
+      },
+      {
+        "date": "2026-10-04",
+        "change": "PR #120, RULING-012 R12-K1: lib/events.mjs imports readEffect from lib/authority-effects.mjs so a typed HOLD or RESUME comment wakes orchestration; both files are inside the scripts/agent-control node, so no node or edge is added; inventory.json and dependencies.json regenerated"
+      },
+      {
+        "date": "2026-10-04",
+        "change": "PR #120, CHECKPOINT-VALIDATION-017: lib/authority-effects.mjs validates the checkpoint before the fold and lib/reconcile.mjs imports validateState from lib/state.mjs to report an invalid anchored projection; both files are inside the scripts/agent-control node, so no node or edge is added; inventory.json and dependencies.json regenerated"
       }
     ],
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
@@ -474,6 +486,16 @@
       "id": "scripts/agent-control/lib/platform-dag.mjs",
       "type": "file",
       "label": "Platform DAG gate/activation contract validator (validation only; not wired into orchestrator)"
+    },
+    {
+      "id": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "file",
+      "label": "Typed control_effect fold: newer #80 authority over the reviewed programme-state checkpoint gives the effective projection orchestrate/status decide on (live)"
+    },
+    {
+      "id": ".agent-control/programme-state.yaml",
+      "type": "file",
+      "label": "Reviewed programme checkpoint anchored to one #80 authority message; never rewritten from authority"
     }
   ],
   "edges": [
@@ -965,6 +987,21 @@
     {
       "source": "scripts/agent-control/lib/platform-dag.mjs",
       "target": "docs/development/AGENT_AUTOPILOT_POLICY.yaml",
+      "type": "depends_on"
+    },
+    {
+      "source": "scripts/agent-control/lib/authority-effects.mjs",
+      "target": "scripts/agent-control",
+      "type": "belongs_to"
+    },
+    {
+      "source": "scripts/agent-control/lib/authority-effects.mjs",
+      "target": ".agent-control/programme-state.yaml",
+      "type": "depends_on"
+    },
+    {
+      "source": "scripts/agent-control",
+      "target": ".agent-control/programme-state.yaml",
       "type": "depends_on"
     }
   ],

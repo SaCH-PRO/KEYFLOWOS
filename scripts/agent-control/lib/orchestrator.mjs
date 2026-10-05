@@ -12,6 +12,7 @@
  */
 
 import { canTransition } from './state-machine.mjs';
+import { activeHolds } from './state.mjs';
 import { FINDINGS } from './reconcile.mjs';
 import { evaluateMomentum } from './momentum.mjs';
 import { planCorrection, DECISIONS as CORRECTION } from './correction.mjs';
@@ -86,11 +87,14 @@ export function derivedDecision(input) {
   const { state, event = null, dag = null, registry = [] } = input;
   const p = state.programme || {};
 
-  // A hold outranks everything except reporting.
-  if (state.hold && state.hold.active !== false) {
-    return action(ACTIONS.WAIT_AUTHORITY, `programme is held: ${state.hold.reason || 'no reason recorded'}`, {
-      hold: state.hold,
-      resume_condition: state.hold.resume_condition || null,
+  // A hold outranks everything except reporting. Execution stays serialized:
+  // any active hold, on any packet, stops derived progression.
+  const held = activeHolds(state);
+  if (held.length) {
+    return action(ACTIONS.WAIT_AUTHORITY, `programme is held: ${held.map((h) => h.reason || 'no reason recorded').join('; ')}`, {
+      hold: held[0],
+      holds: held,
+      resume_condition: held[0].resume_condition || null,
     });
   }
 

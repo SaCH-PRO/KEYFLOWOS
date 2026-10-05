@@ -15,6 +15,7 @@ export const ADMISSION_REASONS = Object.freeze({
   PR_NOT_OPEN: 'pr_not_open',
   PR_IS_DRAFT: 'pr_is_draft',
   NOT_IMPL_BRANCH: 'not_impl_branch',
+  ARTIFACTS_NOT_BOUND: 'control_artifacts_not_bound_to_pr',
   REVIEW_NOT_READY: 'review_not_ready',
   PRODUCTION_TOUCHED: 'production_touched',
   SOURCE_MAIN_DRIFT: 'source_main_drift',
@@ -58,11 +59,82 @@ function fail(reason, detail) {
   return { eligible: false, reason, detail: detail ?? null };
 }
 
+/** Why a pair of control artifacts is not the pair for this PR. */
+export const BINDING_PROBLEMS = Object.freeze({
+  PACKET_ID_MISSING: 'packet_id_missing',
+  PACKET_ID_MISMATCH: 'packet_id_mismatch',
+  PACKET_ID_NOT_TEXT: 'packet_id_not_a_string',
+  BRANCH_NOT_PR_HEAD: 'implementation_branch_not_pr_head_ref',
+  PR_NUMBER_NOT_THIS_PR: 'pr_number_not_this_pr',
+});
+
+/**
+ * An identity as written, or '' when it names nothing (absent, not a string,
+ * or only whitespace). Never trimmed: `impl/x ` is not `impl/x`, and two packet
+ * ids that differ by surrounding whitespace are two ids (EXACT-BINDING-016;
+ * Copilot review 5407375269). Trimming only decides whether a value is blank.
+ * Never made into text either: YAML reads `packet_id: 1` as a number and
+ * `packet_id: "1"` as a string, and those are not one identity. A number,
+ * boolean, mapping or list binds nothing (CONVERGED-CORRECTIONS-018 K3;
+ * Copilot r4179015393). Any string is still a legal identity, `"1"` included.
+ */
+const text = (exact) => {
+  if (typeof exact !== 'string') return '';
+  return exact.trim() === '' ? '' : exact;
+};
+
+/** True when a value is present but is not a string, so it cannot be an identity. */
+const notText = (value) => value !== undefined && value !== null && typeof value !== 'string';
+
+/** A PR number as a number or its text; this comparison is unchanged by EXACT-BINDING-016. */
+const numberText = (value) => (typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '');
+
+/**
+ * Bind the control artifacts to the PR being admitted (CORRECTION-010 C10-F2;
+ * Copilot r4171689190, r4171689206). Two artifacts that agree with each other
+ * prove nothing: a pair copied from another packet agrees too. The packet
+ * being admitted is the one this PR implements, so:
+ *   - both artifacts name one non-blank string packet_id, the same one;
+ *   - each artifact's implementation_branch is a string, the PR's head_ref;
+ *   - an artifact that names a PR names this one.
+ * No packet id or branch is hard-coded; the PR is the referent. A packet id is
+ * free text, so it is bound to the PR through the branch and the PR number its
+ * artifacts declare, never by its spelling.
+ *
+ * @returns {{code: string, artifact?: string, expected?: any, found?: any}[]} empty when bound
+ */
+export function artifactBindingProblems({ pr = {}, active = {}, ret = {} } = {}) {
+  const problems = [];
+  const artifacts = [['active-packet.yaml', active || {}], ['claude-return.yaml', ret || {}]];
+  const ids = artifacts.map(([, doc]) => text(doc.packet_id));
+  artifacts.forEach(([artifact, doc], i) => {
+    if (ids[i] !== '') return;
+    if (notText(doc.packet_id)) problems.push({ code: BINDING_PROBLEMS.PACKET_ID_NOT_TEXT, artifact, found: doc.packet_id });
+    else problems.push({ code: BINDING_PROBLEMS.PACKET_ID_MISSING, artifact });
+  });
+  if (ids[0] !== '' && ids[1] !== '' && ids[0] !== ids[1]) {
+    problems.push({ code: BINDING_PROBLEMS.PACKET_ID_MISMATCH, active: ids[0], ret: ids[1] });
+  }
+  const headRef = text(pr.head_ref);
+  for (const [artifact, doc] of artifacts) {
+    const branch = text(doc.implementation_branch);
+    if (headRef === '' || branch !== headRef) {
+      problems.push({ code: BINDING_PROBLEMS.BRANCH_NOT_PR_HEAD, artifact, expected: pr.head_ref ?? null, found: doc.implementation_branch ?? null });
+    }
+    const declared = doc.pr_number;
+    if (declared !== undefined && declared !== null && numberText(declared) !== numberText(pr.number)) {
+      problems.push({ code: BINDING_PROBLEMS.PR_NUMBER_NOT_THIS_PR, artifact, expected: pr.number ?? null, found: declared });
+    }
+  }
+  return problems;
+}
+
 /**
  * @param {object} snapshot
  *   pr: {number, state, draft, head_sha, base_sha, head_ref}
  *   active: parsed active-packet.yaml
  *   ret: parsed claude-return.yaml
+ *     (both must be this PR's own artifacts; see artifactBindingProblems)
  *   workflow_runs: [{name, head_sha, status, conclusion, created_at}]
  *   ancestry: {source_head_is_ancestor: bool, non_control_files: string[]}
  *   contradictions: string[]
@@ -77,6 +149,11 @@ export function evaluateAdmission(snapshot) {
   if (pr.state !== 'open') return fail(ADMISSION_REASONS.PR_NOT_OPEN, pr.state);
   if (pr.draft === true) return fail(ADMISSION_REASONS.PR_IS_DRAFT);
   if (!String(pr.head_ref || '').startsWith('impl/')) return fail(ADMISSION_REASONS.NOT_IMPL_BRANCH, pr.head_ref);
+
+  // --- artifact binding --------------------------------------------------
+  // Nothing an artifact says counts until it is this PR's artifact.
+  const unbound = artifactBindingProblems({ pr, active, ret });
+  if (unbound.length) return fail(ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, unbound);
 
   // --- authority ---------------------------------------------------------
   if (!READY_STATUSES.has(String(ret.review_status))) {
@@ -212,4 +289,4 @@ export function recheckBeforeMerge(first, second) {
   return second;
 }
 
-export default { evaluateAdmission, recheckBeforeMerge, ADMISSION_REASONS, TRANSITION_TRIGGERS };
+export default { evaluateAdmission, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS };

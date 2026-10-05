@@ -108013,6 +108013,20 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/auto-merge-admitted.mjs",
+      "specifier": "./lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/auto-merge-admitted.mjs",
+      "specifier": "./lib/semantic-review.mjs",
+      "target": "scripts/agent-control/lib/semantic-review.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/auto-merge-admitted.mjs",
       "specifier": "./lib/yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
       "type": "relative"
@@ -108029,6 +108043,48 @@
       "source": "scripts/agent-control/lib/admission.mjs",
       "specifier": "./events.mjs",
       "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/admission.mjs",
+      "specifier": "./semantic-review.mjs",
+      "target": "scripts/agent-control/lib/semantic-review.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/authority-effects.mjs",
+      "specifier": "./control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/authority-effects.mjs",
+      "specifier": "./state-machine.mjs",
+      "target": "scripts/agent-control/lib/state-machine.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/authority-effects.mjs",
+      "specifier": "./state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/control-envelope.mjs",
+      "specifier": "./state-machine.mjs",
+      "target": "scripts/agent-control/lib/state-machine.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/control-envelope.mjs",
+      "specifier": "./yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
       "type": "relative"
     },
     {
@@ -108057,6 +108113,20 @@
       "source": "scripts/agent-control/lib/dag.mjs",
       "specifier": "./yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/events.mjs",
+      "specifier": "./authority-effects.mjs",
+      "target": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/events.mjs",
+      "specifier": "./control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
       "type": "relative"
     },
     {
@@ -108102,6 +108172,13 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/orchestrator.mjs",
+      "specifier": "./state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "scripts/agent-control/lib/platform-dag.mjs",
       "specifier": "node:fs",
@@ -108118,29 +108195,15 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/lib/platform-dag.mjs",
+      "specifier": "./control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/platform-dag.mjs",
       "specifier": "./dag.mjs",
       "target": "scripts/agent-control/lib/dag.mjs",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "scripts/agent-control/lib/platform-dag.mjs",
-      "specifier": "./events.mjs",
-      "target": "scripts/agent-control/lib/events.mjs",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "scripts/agent-control/lib/platform-dag.mjs",
-      "specifier": "./reconcile.mjs",
-      "target": "scripts/agent-control/lib/reconcile.mjs",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "scripts/agent-control/lib/platform-dag.mjs",
-      "specifier": "./state-machine.mjs",
-      "target": "scripts/agent-control/lib/state-machine.mjs",
       "type": "relative"
     },
     {
@@ -108153,8 +108216,36 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/lib/reconcile.mjs",
+      "specifier": "./authority-effects.mjs",
+      "target": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/reconcile.mjs",
+      "specifier": "./control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/reconcile.mjs",
+      "specifier": "./state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/return-evidence.mjs",
       "specifier": "./events.mjs",
       "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/semantic-review.mjs",
+      "specifier": "./control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
       "type": "relative"
     },
     {
@@ -108198,6 +108289,13 @@
       "specifier": "node:fs",
       "target": "node:fs",
       "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/truth.mjs",
+      "specifier": "./dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
     },
     {
       "resolved": true,
@@ -108312,6 +108410,20 @@
       "type": "relative"
     },
     {
+      "resolved": false,
+      "source": "scripts/agent-control/select-directive.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/select-directive.mjs",
+      "specifier": "./lib/control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
       "resolved": true,
       "source": "scripts/agent-control/status.mjs",
       "specifier": "./lib/adapters.mjs",
@@ -108391,8 +108503,176 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "../lib/semantic-review.mjs",
+      "target": "scripts/agent-control/lib/semantic-review.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
       "specifier": "../lib/yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/adapters.mjs",
+      "target": "scripts/agent-control/lib/adapters.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/authority-effects.mjs",
+      "target": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/dag.mjs",
+      "target": "scripts/agent-control/lib/dag.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/orchestrator.mjs",
+      "target": "scripts/agent-control/lib/orchestrator.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/reconcile.mjs",
+      "target": "scripts/agent-control/lib/reconcile.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/truth.mjs",
+      "target": "scripts/agent-control/lib/truth.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "../status.mjs",
+      "target": "scripts/agent-control/status.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/control-envelope.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/control-envelope.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/control-envelope.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/control-envelope.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/control-envelope.spec.mjs",
+      "specifier": "../lib/control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/control-envelope.spec.mjs",
+      "specifier": "../lib/reconcile.mjs",
+      "target": "scripts/agent-control/lib/reconcile.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/control-envelope.spec.mjs",
+      "specifier": "../lib/state.mjs",
+      "target": "scripts/agent-control/lib/state.mjs",
       "type": "relative"
     },
     {
@@ -108768,6 +109048,62 @@
     },
     {
       "resolved": false,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "../lib/admission.mjs",
+      "target": "scripts/agent-control/lib/admission.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "../lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "../lib/return-evidence.mjs",
+      "target": "scripts/agent-control/lib/return-evidence.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "specifier": "./helpers/branch-pr.mjs",
+      "target": "scripts/agent-control/tests/helpers/branch-pr.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
       "source": "scripts/agent-control/tests/select-directive.spec.mjs",
       "specifier": "node:assert/strict",
       "target": "node:assert/strict",
@@ -108813,6 +109149,27 @@
       "source": "scripts/agent-control/tests/select-directive.spec.mjs",
       "specifier": "./helpers/powershell.mjs",
       "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/semantic-review.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/semantic-review.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/semantic-review.spec.mjs",
+      "specifier": "../lib/semantic-review.mjs",
+      "target": "scripts/agent-control/lib/semantic-review.mjs",
       "type": "relative"
     },
     {
@@ -109140,8 +109497,22 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/tests/yaml.spec.mjs",
+      "specifier": "../lib/admission.mjs",
+      "target": "scripts/agent-control/lib/admission.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/yaml.spec.mjs",
       "specifier": "../lib/yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/yaml.spec.mjs",
+      "specifier": "./helpers/branch-pr.mjs",
+      "target": "scripts/agent-control/tests/helpers/branch-pr.mjs",
       "type": "relative"
     },
     {
@@ -109783,9 +110154,9 @@
     }
   ],
   "meta": {
-    "edges": 15683,
-    "nodes": 3837,
-    "root": "C:/Users/Public/kfw-architecture-scan/KEYFLOWOS",
+    "edges": 15736,
+    "nodes": 3847,
+    "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
   },
   "nodes": [
@@ -128109,6 +128480,16 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/agent-control/lib/correction.mjs",
       "type": "file"
     },
@@ -128140,6 +128521,16 @@
     {
       "extension": ".mjs",
       "id": "scripts/agent-control/lib/reconcile.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/return-evidence.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/semantic-review.mjs",
       "type": "file"
     },
     {
@@ -128179,12 +128570,27 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/agent-control/select-directive.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/agent-control/status.mjs",
       "type": "file"
     },
     {
       "extension": ".mjs",
       "id": "scripts/agent-control/tests/admission.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/control-envelope.spec.mjs",
       "type": "file"
     },
     {
@@ -128200,6 +128606,11 @@
     {
       "extension": ".mjs",
       "id": "scripts/agent-control/tests/events.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/helpers/branch-pr.mjs",
       "type": "file"
     },
     {
@@ -128229,7 +128640,17 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/agent-control/tests/select-directive.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/semantic-review.spec.mjs",
       "type": "file"
     },
     {

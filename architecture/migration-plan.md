@@ -166,6 +166,103 @@ completion contract.
 
 ## Changelog
 
+### 2026-10-05 — Reviewed re-anchor of the programme checkpoint at RECOVERY-021
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), RECOVERY-021. `.agent-control/programme-state.yaml`
+  is re-derived whole and anchored to RECOVERY-021 (5993146604, generation 87), past the
+  malformed RULING-020 (5985754624) that stopped the fold for every packet. The programme
+  it records is unchanged. No code changes: the parser, the fold, `orchestrate.mjs` and
+  `lib/state.mjs` are as FINAL-CORRECTION-020 left them, with no new module, export or
+  import edge.
+- `fixtures/reducer-recovery-truth.json` now records the 205 real #80 comments through the
+  new anchor, and the recovery tests replay the previous checkpoint stopping at RULING-020.
+- No application runtime, schema, deployment or production change.
+
+### 2026-10-04 — An invalid checkpoint is not journaled onto, and its holds are not rendered
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), FINAL-CORRECTION-020. Two bounded corrections
+  to readers of a checkpoint the state contract rejects, with no new module, no new
+  export and no new import edge:
+  - K1, `orchestrate.mjs`: `--apply` runs `validateState()` on the stored checkpoint before
+    the journal step. An invalid one is not journaled onto and nothing is written; the
+    output keeps the `REPORT_DRIFT` decision and adds `apply_refused`
+    (`CHECKPOINT_INVALID`, with the contract problems). The exit code is 0.
+  - K2, `lib/state.mjs`: `activeHolds()` reads `holds`, its entries and the legacy `hold`
+    only when they are mappings, so `holds: none` or `hold: text` gives no hold entry in
+    a decision or in `status.mjs`.
+- No application runtime, schema, deployment or production change.
+
+### 2026-10-04 — Checkpoint shape, refused-hold audit and string identities
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), CONVERGED-CORRECTIONS-018. Three bounded
+  corrections to the control plane, with no new module and no new import edge:
+  - K1, `lib/events.mjs`: a claimed HOLD or RESUME that is refused because it is not
+    authority records the reason in `wake_refused`, beside `authority.problems`.
+  - K2, `lib/state.mjs`: `normalizeState()` defaults an absent container only. One that is
+    present with the wrong structural type is left as written and `validateState()`
+    rejects it (`CHECKPOINT_SHAPE_INVALID`), so `holds: []` no longer loads as `{}`.
+    New export `shapeProblems()`.
+  - K3, `lib/admission.mjs`: a packet id or branch binds only as a string
+    (`packet_id_not_a_string`); `1` and `"1"` are not one identity.
+- `status.mjs` reads the checkpoint's lists only when they are lists, so an invalid
+  checkpoint is rendered as drift.
+- No application runtime, schema, deployment or production change.
+
+### 2026-10-04 — The reviewed checkpoint is validated before the fold
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), CHECKPOINT-VALIDATION-017.
+  `reduceAuthority()` checks the checkpoint with `validateState()` once its anchor is
+  found. A checkpoint the state contract rejects is never folded from, with zero or more
+  newer messages (`CHECKPOINT_INVALID`), and `reconcile()` reports `DERIVED_STATE_INVALID`,
+  so `decide()` returns REPORT_DRIFT (`execution-paths.md` §12). Before this an invalid
+  checkpoint whose anchor was the newest authority reached `decide()` unchecked.
+- New import edge: `lib/reconcile.mjs` → `lib/state.mjs` (`validateState`). No cycle;
+  `state.mjs` imports neither.
+- The checkpoint, the parser, the effects and the per-step validation are unchanged. No
+  application runtime, schema, deployment or production change.
+
+### 2026-10-04 — Typed HOLD and RESUME comments wake orchestration
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), RULING-012 R12-K1. `lib/events.mjs` adds HOLD
+  and RESUME to the #80 wake types. Such a comment wakes only as valid authority that
+  declares its own effect (`HOLD_SET` on a HOLD, `HOLD_CLEAR` on a RESUME) in a created,
+  unedited comment (`execution-paths.md` §12). Before this a hold or release changed the
+  projection but dispatched nothing until some other event ran the autopilot.
+- New import edge: `lib/events.mjs` → `lib/authority-effects.mjs` (`readEffect`). No cycle;
+  `authority-effects.mjs` does not import `events.mjs`.
+- The local worker selector, the workflow file and the wake rules of the other message
+  types are unchanged. No application runtime, schema, deployment or production change.
+- RECOVERY-REANCHOR-015 and EXACT-BINDING-016: `.agent-control/programme-state.yaml` is
+  re-derived whole and anchored to EXACT-BINDING-016 (5982685256), past a malformed REVIEW
+  for another packet (5982337036) that stopped the fold. The parser and the fold are
+  unchanged, and `fixtures/reducer-recovery-truth.json` now records the real #80 comments
+  through the new anchor.
+- EXACT-BINDING-016: `lib/admission.mjs` compares an artifact's packet id and branch with
+  the PR exactly; surrounding whitespace no longer matches.
+
+### 2026-10-03 — Live typed-authority reducer integrated into the control plane
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120). `.agent-control/programme-state.yaml` is now a
+  reviewed checkpoint, and `scripts/agent-control/lib/authority-effects.mjs` folds every
+  newer issue #80 authority message that declares `control_effect:` over it.
+  `orchestrate.mjs` and `status.mjs --verify` decide on that effective projection
+  (`execution-paths.md` §12). The projection is never written back.
+- New import edges, in one direction: `lib/truth.mjs` → `lib/reconcile.mjs` →
+  `lib/authority-effects.mjs` → `lib/control-envelope.mjs`, `lib/state-machine.mjs` and
+  `lib/state.mjs` (`dependency-map.md`, "Agent Control Plane: Authority Fold").
+- The exact-head merge path stays separate from the projection. `lib/admission.mjs` now
+  binds both control artifacts to the PR being admitted (packet, `implementation_branch`
+  against the PR `head_ref`, and PR number) before it reads anything else from them.
+- `lib/yaml.mjs` defines every mapping key as an own property and quotes any key its
+  parser would not read back as the same key, so holds keyed by any non-blank packet id
+  survive a checkpoint save and reload.
+- `inventory.py` and `dependency_scan.py` now record `meta.root` as `.` instead of the
+  absolute path of the checkout that ran them, so the generated maps are the same in
+  every checkout of the same tree. Both scanners were re-run, and
+  `architecture/inventory.json` and `architecture/dependencies.json` regenerated.
+- No application runtime, schema, deployment or production change. The platform
+  convergence programme stays inactive.
+
 ### 2026-09-25 — Successor platform programme recorded (inactive)
 
 - Recorded the platform/workflow convergence successor programme (PR #93) in

@@ -73,6 +73,22 @@ The NestJS event bus decouples some cross-module workflows. Key event families:
 
 See `architecture/event-registry.yaml` for the full list of 276 event names.
 
+## Agent Control Plane: Authority Fold
+
+`scripts/agent-control` is plain Node ESM with no workspace dependencies. The live typed-authority fold (KF-META-STATE-REDUCER-LIVE-001; path in `execution-paths.md` §12) imports in one direction only, as recorded in `dependencies.json`:
+
+```
+orchestrate.mjs, status.mjs → lib/truth.mjs → lib/reconcile.mjs → lib/authority-effects.mjs
+lib/reconcile.mjs, lib/authority-effects.mjs → lib/control-envelope.mjs (the one #80 parser)
+lib/authority-effects.mjs → lib/state-machine.mjs (HEALTH), lib/state.mjs (validateState)
+lib/reconcile.mjs → lib/state.mjs (validateState)
+normalize-event.mjs, orchestrate.mjs → lib/events.mjs → lib/authority-effects.mjs (readEffect), lib/control-envelope.mjs
+```
+
+`lib/events.mjs` reads a HOLD or RESUME comment's effect with the fold's own `readEffect()`, so the wake decision and the fold cannot read the same comment differently.
+
+`authority-effects.mjs` does no I/O. `truth.mjs` alone reads #80 and repository truth through `gh`.
+
 ## External Integration Dependencies
 
 | Integration | Primary Server Files | Primary Web Files |

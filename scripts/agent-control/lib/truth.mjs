@@ -10,7 +10,8 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { CONTROL_ISSUE } from './events.mjs';
-import { collectAuthority, reconcile } from './reconcile.mjs';
+import { collectAuthority, reconcileProjection } from './reconcile.mjs';
+import { loadDag } from './dag.mjs';
 
 export const DEFAULT_REPOSITORY = 'SaCH-PRO/KEYFLOWOS';
 
@@ -66,33 +67,50 @@ export function fetchRepoTruth(repository, programme = {}, run = ghRunner) {
 /**
  * Live snapshot, or a recorded one from a JSON file
  * ({comments: [...] | null, repo: {...}}) so a verdict can be reproduced exactly.
+ * `repoFor(programme)` reads repository truth for a given projection, so the
+ * caller can ask for the projection it will actually check.
  */
 export function gatherTruth(state, options = {}) {
   if (options.truthFile) {
     const recorded = JSON.parse(fs.readFileSync(options.truthFile, 'utf8'));
+    const repo = recorded.repo || { verified: false, reason: 'recorded snapshot has no repo truth' };
     return {
       comments: Array.isArray(recorded.comments) ? recorded.comments : null,
       commentsReason: 'recorded snapshot has no comments array',
-      repo: recorded.repo || { verified: false, reason: 'recorded snapshot has no repo truth' },
+      repo,
+      repoFor: () => repo,
     };
   }
   const repository = options.repository || process.env.GITHUB_REPOSITORY || DEFAULT_REPOSITORY;
   const run = options.run || ghRunner;
   const comments = fetchComments(repository, run);
+  const repoFor = (programme) => fetchRepoTruth(repository, programme || {}, run);
   return {
     comments: comments.ok ? comments.comments : null,
     commentsReason: comments.reason,
-    repo: fetchRepoTruth(repository, state.programme || {}, run),
+    get repo() { return repoFor(state.programme); },
+    repoFor,
   };
 }
 
-/** gatherTruth() + reconcile() in one step; what the CLIs call. */
+/** Packets that earn programme credit: the members of the programme DAG. */
+export function applicationPacketsOf(dag) {
+  return new Set(dag.byPacket.keys());
+}
+
+/**
+ * What the CLIs call: read #80, fold newer typed authority over the reviewed
+ * checkpoint, read repository truth for the effective projection, reconcile.
+ * The result carries `effective_state`, the projection decide() may use, and
+ * the `reduction` that produced it. Nothing is written.
+ */
 export function reconcileWithTruth(state, options = {}) {
   const truth = gatherTruth(state, options);
   const authority = truth.comments
     ? collectAuthority(truth.comments)
     : { verified: false, reason: truth.commentsReason, messages: [], newest: null, rejected: 0 };
-  return reconcile(state, authority, truth.repo);
+  const dag = options.dag || loadDag(options.repoRoot || process.cwd());
+  return reconcileProjection(state, authority, truth.repoFor, { applicationPackets: applicationPacketsOf(dag) });
 }
 
-export default { gatherTruth, reconcileWithTruth, fetchComments, fetchRepoTruth, ghRunner, DEFAULT_REPOSITORY };
+export default { gatherTruth, reconcileWithTruth, applicationPacketsOf, fetchComments, fetchRepoTruth, ghRunner, DEFAULT_REPOSITORY };

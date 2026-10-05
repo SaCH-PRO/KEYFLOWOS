@@ -162,7 +162,9 @@ def scan(root: Path) -> dict[str, Any]:
     return {
         "meta": {
             "scanner": "codebase-architect/dependency_scan.py",
-            "root": root.resolve().as_posix(),
+            # Repository-relative, so the output is the same in every checkout
+            # of the same tree. Every path below is relative to this root.
+            "root": ".",
             "nodes": len(nodes),
             "edges": len(edges),
         },

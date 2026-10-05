@@ -56,8 +56,10 @@ export function parseScalar(raw) {
   // a literal backslash in the value, which silently corrupts anything matched
   // against real file text.
   if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
-    return text.slice(1, -1).replace(/\\(["\\/nrt0]|u[0-9a-fA-F]{4})/g, (_, esc) => {
+    return text.slice(1, -1).replace(/\\(["\\/bfnrt0]|u[0-9a-fA-F]{4})/g, (_, esc) => {
       switch (esc[0]) {
+        case 'b': return '\b';
+        case 'f': return '\f';
         case 'n': return '\n';
         case 'r': return '\r';
         case 't': return '\t';
@@ -224,10 +226,19 @@ function parseSequence(lines, start, indent) {
 }
 
 function matchKey(text) {
-  const m = text.match(/^("[^"]*"|'[^']*'|[^:#]+?):(\s|$)/);
+  // A quoted key ends at its closing quote, not at an escaped one, so a key
+  // holding a quote or a colon reads back whole. A plain key never starts with
+  // a quote, so a quoted scalar holding ": " is a value, not a key
+  // (CORRECTION-010 C10-F1).
+  const m = text.match(/^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|(?!["'])[^:#]+?):(\s|$)/);
   if (!m) return null;
   const key = parseScalar(m[1]);
   return { key: String(key), rest: text.slice(m[0].length - (m[2] === '' ? 0 : m[2].length)).trim() };
+}
+
+/** Define `key` as an own data property, so `__proto__` is a key like any other. */
+function setOwn(out, key, value) {
+  Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
 function parseMapping(lines, start, indent) {
@@ -253,21 +264,21 @@ function parseMapping(lines, start, indent) {
 
     if (valueText === '>' || valueText === '|' || valueText === '>-' || valueText === '|-') {
       const [value, next] = readBlockScalar(lines, i, ind, valueText[0]);
-      out[kv.key] = value;
+      setOwn(out, kv.key, value);
       i = next;
       continue;
     }
 
     if (valueText === '') {
       const [value, next] = parseNode(lines, i, ind + 1);
-      out[kv.key] = value;
+      setOwn(out, kv.key, value);
       i = next;
       continue;
     }
 
     const [folded, next] = absorbContinuation(lines, i, ind, valueText);
     i = next;
-    out[kv.key] = parseScalar(folded);
+    setOwn(out, kv.key, parseScalar(folded));
   }
   return [out, i];
 }
@@ -284,6 +295,19 @@ export function parseYaml(text) {
 
 const PLAIN_SAFE = /^[A-Za-z0-9_./:@+-][A-Za-z0-9 _./:@+-]*$/;
 
+/**
+ * A mapping key in the form the parser reads back as the same key
+ * (CORRECTION-010 C10-F1, Copilot r4171689174). A hold is keyed by its packet
+ * id, and a packet id is any non-blank text. A key is written plain only when
+ * matchKey() returns exactly that key for it, so `:`, `a:b`, `a: b`, `- z` and
+ * `1.50` are quoted, never emitted as a line that fails to parse or that
+ * parses to a different key.
+ */
+function formatKey(key) {
+  const plain = PLAIN_SAFE.test(key) && !/^\d+$/.test(key) && !key.startsWith('- ') && matchKey(`${key}:`)?.key === key;
+  return plain ? key : JSON.stringify(key);
+}
+
 function formatScalar(value) {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -295,7 +319,8 @@ function formatScalar(value) {
   if (text === '') return '""';
   if (text.includes('\n')) return null; // caller switches to a literal block
   const reserved = ['null', 'true', 'false', '~'];
-  if (reserved.includes(text) || !PLAIN_SAFE.test(text) || /^-?\d+(\.\d+)?$/.test(text)) {
+  // The parser trims a plain scalar, so one that ends in a space is quoted.
+  if (reserved.includes(text) || !PLAIN_SAFE.test(text) || text.endsWith(' ') || /^-?\d+(\.\d+)?$/.test(text)) {
     return JSON.stringify(text);
   }
   return text;
@@ -321,7 +346,9 @@ function serialize(value, depth, lines) {
         }
       } else {
         const scalar = formatScalar(item);
-        lines.push(`${pad}- ${scalar === null ? JSON.stringify(String(item)) : scalar}`);
+        // "- a: b" opens a mapping, so a plain item the parser would read as a key is quoted.
+        const ambiguous = scalar === null || (typeof item === 'string' && !scalar.startsWith('"') && matchKey(scalar) !== null);
+        lines.push(`${pad}- ${ambiguous ? JSON.stringify(String(item)) : scalar}`);
       }
     }
     return;
@@ -329,7 +356,7 @@ function serialize(value, depth, lines) {
 
   for (const [key, item] of Object.entries(value)) {
     if (item === undefined) continue;
-    const safeKey = PLAIN_SAFE.test(key) && !/^\d+$/.test(key) ? key : JSON.stringify(key);
+    const safeKey = formatKey(key);
     if (item !== null && typeof item === 'object') {
       const empty = Array.isArray(item) ? item.length === 0 : Object.keys(item).length === 0;
       if (empty) {

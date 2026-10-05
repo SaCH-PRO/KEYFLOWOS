@@ -1,0 +1,191 @@
+{
+  "_recorded": "Real issue #80 comments from the CG-DIRECTIVE-META-STATE-RECONCILE-002 anchor (5875639550) through the CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 anchor (5963509515), the first typed authority after it (CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001, 5963636295, control_effect PACKET_CORRECTION), and non-authority chatter (CLOSE, AUTO_EVENT, Claude ACK). Repository truth for main 11053288 recorded 2026-10-03 for KF-META-STATE-REDUCER-LIVE-001; the checkpoint names no PR. REST metadata (id, html_url, created_at, updated_at, user) is unmodified. Each body is minimized (CORRECTION-004 C4-F2) to the column-0 `key: value` lines, in body order, which are the only lines parseEnvelope reads; prose, fences and indented nested lines are removed. Proven at minimization: parseEnvelope of every minimized body deep-equals parseEnvelope of the live #80 body (each comment unedited since recording) and of the previous recording.",
+  "comments": [
+    {
+      "id": 5875639550,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5875639550",
+      "created_at": "2026-09-28T17:59:53Z",
+      "updated_at": "2026-09-28T17:59:53Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-DIRECTIVE-META-STATE-RECONCILE-002\nmessage_type: DIRECTIVE\npacket_id: KF-META-STATE-RECONCILE-002\nsender: chatgpt\nin_reply_to: CC-ACK-META-CONTROL-PARSER-ADMIT-001\nsource_main: 9c8e49791705361227135a9032a640199949113f\nsource_head: 9c8e49791705361227135a9032a640199949113f\nimplementation_branch: impl/kf-meta-state-reconcile-002\nstate: CHARACTERIZING\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nobjective: >\nauthorized_scope:\nrequired_truth:\nacceptance:\nconstraints:\nnext_action: >"
+    },
+    {
+      "id": 5876210525,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5876210525",
+      "created_at": "2026-09-28T18:37:48Z",
+      "updated_at": "2026-09-28T18:37:48Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-STATE-RECONCILE-CORRECTION-001\nmessage_type: REVIEW\npacket_id: KF-META-STATE-RECONCILE-002\nsender: chatgpt\nin_reply_to: CC-PROGRESS-META-STATE-RECONCILE-002\nsource_main: 9c8e49791705361227135a9032a640199949113f\nsource_head: 5dbfac61516027ac55f9b9a724e8185456565dfd\nsemantic_head: 75b43f00e6f544c11ad0aee4d2f77a3eb9c7faed\nimplementation_branch: impl/kf-meta-state-reconcile-002\npr_number: 103\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nreview_status: CORRECTION_REQUIRED\ndecision: >\nfindings:\nrequired_correction:\nconstraints:\nnext_action: >"
+    },
+    {
+      "id": 5876679691,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5876679691",
+      "created_at": "2026-09-28T19:09:23Z",
+      "updated_at": "2026-09-28T19:09:23Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-STATE-RECONCILE-ADMIT-002\nmessage_type: REVIEW\npacket_id: KF-META-STATE-RECONCILE-002\nsender: chatgpt\nin_reply_to: CC-RETURN-META-STATE-RECONCILE-002\nsource_main: 9c8e49791705361227135a9032a640199949113f\nsource_head: 5dbfac61516027ac55f9b9a724e8185456565dfd\nsemantic_head: 75b43f00e6f544c11ad0aee4d2f77a3eb9c7faed\nimplementation_branch: impl/kf-meta-state-reconcile-002\npr_number: 103\nstate: READY_TO_MERGE\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: true\nprogramme_credit: ZERO\nreview_status: ADMITTED\ndecision: >\nindependent_review:\nexact_head_evidence:\nreviewer_failover_decision:\nmerge:\nholds:\nnext_action: >"
+    },
+    {
+      "id": 5876689636,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5876689636",
+      "created_at": "2026-09-28T19:10:03Z",
+      "updated_at": "2026-09-28T19:10:03Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-001\nmessage_type: DIRECTIVE\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CG-REVIEW-META-STATE-RECONCILE-ADMIT-002\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: 4eba59ebc28230f2d114cad852304a9f791b47d2\nimplementation_branch: impl/kf-meta-ai-review-failover-001\nstate: CHARACTERIZING\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nobjective: >\nauthority_decision:\nrequired_policy:\nauthorized_scope:\nconstraints:\nacceptance:\nnext_action: >"
+    },
+    {
+      "id": 5881457102,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5881457102",
+      "created_at": "2026-09-29T00:44:47Z",
+      "updated_at": "2026-09-29T00:44:47Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001\nmessage_type: REVIEW\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-001\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: 4eba59ebc28230f2d114cad852304a9f791b47d2\nimplementation_branch: impl/kf-meta-ai-review-failover-001\nstate: IMPLEMENTING\nhealth: GREEN\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\ndecision: >\nauthority_basis:\nrequired_correction:\nsequencing:\nconstraints:\nnext_action: >"
+    },
+    {
+      "id": 5881457544,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5881457544",
+      "created_at": "2026-09-29T00:44:50Z",
+      "updated_at": "2026-09-29T00:44:50Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-OBSERVABILITY-SENTRY-WEB-QUEUE-001\nmessage_type: REVIEW\npacket_id: KF-OBSERVABILITY-SENTRY-WEB-001\nsender: chatgpt\nin_reply_to: CC-CONTRADICTION-OBSERVABILITY-SENTRY-WEB-001\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: 4eba59ebc28230f2d114cad852304a9f791b47d2\nimplementation_branch: impl/kf-observability-sentry-web-001\nstate: QUEUED\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\ndecision: >\nwhy_no_directive_yet: >\nqueued_scope:\nqueued_requirements:\nrelease_condition: >\nnext_legal_action: EXECUTE_KF-META-AI-REVIEW-FAILOVER-001"
+    },
+    {
+      "id": 5881596389,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5881596389",
+      "created_at": "2026-09-29T00:59:04Z",
+      "updated_at": "2026-09-29T00:59:04Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-PROGRESS-001\nmessage_type: REVIEW\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CC-ACK-META-AI-REVIEW-FAILOVER-CONTINUE-001\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: 4eba59ebc28230f2d114cad852304a9f791b47d2\nimplementation_branch: impl/kf-meta-ai-review-failover-001\nstate: IMPLEMENTING\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\ndecision: >\nworker_ordering_note: >\naccepted_plan:\nconstraints:\nrequired_return:\nnext_action: >"
+    },
+    {
+      "id": 5887238277,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5887238277",
+      "created_at": "2026-09-29T09:14:37Z",
+      "updated_at": "2026-09-29T09:14:37Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-001\nmessage_type: REVIEW\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CC-RETURN-META-AI-REVIEW-FAILOVER-001\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: b70dff17bf6d0c71791cd9e62ae8bb8096ea34d4\nimplementation_branch: impl/kf-meta-ai-review-failover-001\nstate: PROVING\nhealth: GREEN\nscope_changed: true\nproduction_touched: false\nreviewed_head: ae3e1d2b0ac07447e0febef82cb5c93a00df58a5\nsemantic_review_outcome: PASS\nunresolved_substantive_findings: 0\nmerge_authority: false\nprogramme_credit: ZERO\ndecision: >\nnext_action: >"
+    },
+    {
+      "id": 5889027553,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5889027553",
+      "created_at": "2026-09-29T11:09:32Z",
+      "updated_at": "2026-09-29T11:09:32Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001\nmessage_type: DIRECTIVE\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: b70dff17bf6d0c71791cd9e62ae8bb8096ea34d4\nimplementation_branch: impl/kf-meta-ai-review-failover-001\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\ndecision: >\nauthorized_scope:\nrequired_correction: >\nrequired_proof:\nconstraints:\nnext_action: >"
+    },
+    {
+      "id": 5901320677,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5901320677",
+      "created_at": "2026-09-29T23:56:55Z",
+      "updated_at": "2026-09-29T23:56:55Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-CORRECTION-003\nmessage_type: REVIEW\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CC-RETURN-META-AI-REVIEW-FAILOVER-002\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: c40ed180a34981b05627b185d73313357eca5883\nimplementation_branch: impl/kf-meta-ai-review-failover-001\nstate: FIXING_PROOF_FAILURES\nhealth: YELLOW\nscope_changed: true\nproduction_touched: false\nreviewed_head: 7fe3db96d431d5cedb09e25cf1b45fe299cb2e59\nsemantic_review_outcome: CHANGES_REQUIRED\nunresolved_substantive_findings: 3\nmerge_authority: false\nprogramme_credit: ZERO\ndecision: >\nfindings:\nrequired_proof:\nconstraints:\nnext_action: >"
+    },
+    {
+      "id": 5917653398,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5917653398",
+      "created_at": "2026-09-30T18:53:42Z",
+      "updated_at": "2026-09-30T18:53:42Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004\nmessage_type: REVIEW\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CC-RETURN-META-AI-REVIEW-FAILOVER-003\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb\nimplementation_branch: impl/kf-meta-ai-review-failover-001\nstate: RECORDING_ADMISSION_EVIDENCE\nhealth: GREEN\nscope_changed: true\nproduction_touched: false\nreviewed_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb\nsemantic_review_outcome: PASS\nunresolved_substantive_findings: 0\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: ACCEPT_FOR_ADMISSION"
+    },
+    {
+      "id": 5935438643,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5935438643",
+      "created_at": "2026-10-01T16:09:08Z",
+      "updated_at": "2026-10-01T16:09:08Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-RETURN-WAKE-005\nmessage_type: DIRECTIVE\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CG-REVIEW-META-AI-REVIEW-FAILOVER-ADMIT-004\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb\nimplementation_branch: impl/kf-meta-ai-review-failover-001\npr_number: 104\nexpected_pr_head: abcdb8f9af54da0c15f0805b1f9ae0054cfa196a\nstate: AWAITING_POSTCHECK_RETURN\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nThen:"
+    },
+    {
+      "id": 5963499659,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5963499659",
+      "created_at": "2026-10-03T00:14:58Z",
+      "updated_at": "2026-10-03T00:14:58Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-AI-REVIEW-FAILOVER-FINAL-005\nmessage_type: REVIEW\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CC-RETURN-META-AI-REVIEW-FAILOVER-004\nsource_main: 4eba59ebc28230f2d114cad852304a9f791b47d2\nsource_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb\nimplementation_branch: impl/kf-meta-ai-review-failover-001\npr_number: 104\nstate: READY_TO_MERGE\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: true\nprogramme_credit: ZERO\nreview_status: READY_TO_MERGE"
+    },
+    {
+      "id": 5963509170,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5963509170",
+      "created_at": "2026-10-03T00:16:02Z",
+      "updated_at": "2026-10-03T00:16:02Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-CLOSE-META-AI-REVIEW-FAILOVER-001\nmessage_type: CLOSE\npacket_id: KF-META-AI-REVIEW-FAILOVER-001\nsender: chatgpt\nin_reply_to: CG-REVIEW-META-AI-REVIEW-FAILOVER-FINAL-005\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 44e894c6f5de66202a76bc7a0449b580ee55bacb\nimplementation_branch: impl/kf-meta-ai-review-failover-001\npr_number: 104\nstate: CHECKPOINTED\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: MERGED_AND_CHECKPOINTED"
+    },
+    {
+      "id": 5963509515,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5963509515",
+      "created_at": "2026-10-03T00:16:04Z",
+      "updated_at": "2026-10-03T00:16:04Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001\nmessage_type: DIRECTIVE\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: chatgpt\nin_reply_to: CG-CLOSE-META-AI-REVIEW-FAILOVER-001\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 110532883411007787f62de35e0a951aa1c16cfa\nimplementation_branch: impl/kf-meta-state-reducer-live-001\nstate: RELEASED\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO"
+    },
+    {
+      "id": 5963524841,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5963524841",
+      "created_at": "2026-10-03T00:17:43Z",
+      "updated_at": "2026-10-03T00:17:43Z",
+      "user": {
+        "login": "github-actions[bot]"
+      },
+      "body": "message_id: AUTO-EVENT-issue_comment:5963509515:created\nmessage_type: AUTO_EVENT\nsender: github-autopilot\nkind: DIRECTIVE\nidempotency_key: issue_comment:5963509515:created\npacket_id: KF-META-STATE-REDUCER-LIVE-001\npr_number: null\nworkflow: null\nconclusion: null\nhead_sha: null\nsource_ref: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5963509515\nderived_action: REPORT_DRIFT\nderived_reason: \"derived programme-state is not usable: DERIVED_STATE_STALE_AUTHORITY; failing closed until it is re-derived from current authority and repository truth\""
+    },
+    {
+      "id": 5963571216,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5963571216",
+      "created_at": "2026-10-03T00:22:53Z",
+      "updated_at": "2026-10-03T00:22:53Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CC-ACK-META-STATE-REDUCER-LIVE-001\nmessage_type: ACK\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: claude\nin_reply_to: CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 110532883411007787f62de35e0a951aa1c16cfa\nimplementation_branch: impl/kf-meta-state-reducer-live-001\nstate: CHARACTERIZING\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW"
+    },
+    {
+      "id": 5963636295,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5963636295",
+      "created_at": "2026-10-03T00:30:35Z",
+      "updated_at": "2026-10-03T00:30:35Z",
+      "user": {
+        "login": "SaCH-PRO"
+      },
+      "body": "message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001\nmessage_type: REVIEW\npacket_id: KF-META-STATE-REDUCER-LIVE-001\nsender: chatgpt\nin_reply_to: CC-ACK-META-STATE-REDUCER-LIVE-001\nsource_main: 110532883411007787f62de35e0a951aa1c16cfa\nsource_head: 110532883411007787f62de35e0a951aa1c16cfa\nimplementation_branch: impl/kf-meta-state-reducer-live-001\nstate: CORRECTION_REQUIRED\nhealth: GREEN\nscope_changed: false\nproduction_touched: false\nmerge_authority: false\nprogramme_credit: ZERO\nreview_status: PENDING_CHATGPT_REVIEW\ncontrol_effect: PACKET_CORRECTION"
+    }
+  ],
+  "repo": {
+    "verified": true,
+    "main_sha": "110532883411007787f62de35e0a951aa1c16cfa",
+    "source_main_on_main": true,
+    "pr": null
+  }
+}

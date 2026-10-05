@@ -924,9 +924,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 99,
+      "lines": 198,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 4705
+      "size_bytes": 15737
     },
     {
       "extension": ".yaml",
@@ -936,15 +936,15 @@
     },
     {
       "extension": ".yaml",
-      "lines": 246,
+      "lines": 1227,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 12708
+      "size_bytes": 77117
     },
     {
       "extension": ".yaml",
-      "lines": 156,
+      "lines": 311,
       "path": ".agent-control/programme-state.yaml",
-      "size_bytes": 5876
+      "size_bytes": 15480
     },
     {
       "extension": ".toml",
@@ -1108,15 +1108,15 @@
     },
     {
       "extension": ".py",
-      "lines": 191,
+      "lines": 193,
       "path": ".agents/skills/codebase-architect/scripts/dependency_scan.py",
-      "size_bytes": 5724
+      "size_bytes": 5856
     },
     {
       "extension": ".py",
-      "lines": 196,
+      "lines": 198,
       "path": ".agents/skills/codebase-architect/scripts/inventory.py",
-      "size_bytes": 5559
+      "size_bytes": 5691
     },
     {
       "extension": ".md",
@@ -3278,9 +3278,9 @@
     },
     {
       "extension": ".yml",
-      "lines": 313,
+      "lines": 322,
       "path": ".github/workflows/agent-control-autopilot.yml",
-      "size_bytes": 11964
+      "size_bytes": 12492
     },
     {
       "extension": ".yml",
@@ -57565,9 +57565,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1546,
+      "lines": 1583,
       "path": "architecture/architecture.json",
-      "size_bytes": 49297
+      "size_bytes": 51322
     },
     {
       "extension": ".yaml",
@@ -57591,13 +57591,13 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4185729
+      "size_bytes": 4198807
     },
     {
       "extension": ".md",
-      "lines": 93,
+      "lines": 109,
       "path": "architecture/dependency-map.md",
-      "size_bytes": 5858
+      "size_bytes": 6880
     },
     {
       "extension": ".yaml",
@@ -57607,21 +57607,21 @@
     },
     {
       "extension": ".md",
-      "lines": 494,
+      "lines": 583,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 17988
+      "size_bytes": 23922
     },
     {
       "extension": ".json",
-      "lines": 63024,
+      "lines": 63242,
       "path": "architecture/inventory.json",
-      "size_bytes": 1631490
+      "size_bytes": 1636975
     },
     {
       "extension": ".md",
-      "lines": 194,
+      "lines": 291,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 9270
+      "size_bytes": 15882
     },
     {
       "extension": ".md",
@@ -58887,27 +58887,27 @@
     },
     {
       "extension": ".md",
-      "lines": 265,
+      "lines": 271,
       "path": "docs/development/AGENT_AUTOPILOT.md",
-      "size_bytes": 13316
+      "size_bytes": 13829
     },
     {
       "extension": ".md",
-      "lines": 184,
+      "lines": 200,
       "path": "docs/development/AGENT_AUTOPILOT_OPERATIONS.md",
-      "size_bytes": 10365
+      "size_bytes": 15019
     },
     {
       "extension": ".yaml",
-      "lines": 196,
+      "lines": 202,
       "path": "docs/development/AGENT_AUTOPILOT_POLICY.yaml",
-      "size_bytes": 7712
+      "size_bytes": 8580
     },
     {
       "extension": ".md",
-      "lines": 299,
+      "lines": 664,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 11905
+      "size_bytes": 32551
     },
     {
       "extension": ".md",
@@ -61551,11 +61551,13 @@
       "extension": ".mjs",
       "imports": [
         "./lib/admission.mjs",
+        "./lib/events.mjs",
+        "./lib/semantic-review.mjs",
         "./lib/yaml.mjs"
       ],
-      "lines": 142,
+      "lines": 236,
       "path": "scripts/agent-control/auto-merge-admitted.mjs",
-      "size_bytes": 4785
+      "size_bytes": 9168
     },
     {
       "extension": ".ps1",
@@ -61568,6 +61570,24 @@
       "lines": 90,
       "path": "scripts/agent-control/evaluate-run.ps1",
       "size_bytes": 3162
+    },
+    {
+      "extension": ".json",
+      "lines": 100,
+      "path": "scripts/agent-control/fixtures/reconcile-002-truth.json",
+      "size_bytes": 16369
+    },
+    {
+      "extension": ".json",
+      "lines": 191,
+      "path": "scripts/agent-control/fixtures/reducer-live-truth.json",
+      "size_bytes": 17186
+    },
+    {
+      "extension": ".json",
+      "lines": 2066,
+      "path": "scripts/agent-control/fixtures/reducer-recovery-truth.json",
+      "size_bytes": 191829
     },
     {
       "extension": ".ps1",
@@ -61609,15 +61629,68 @@
     {
       "exports": [
         "ADMISSION_REASONS",
-        "evaluateAdmission"
+        "BINDING_PROBLEMS",
+        "TRANSITION_TRIGGERS",
+        "artifactBindingProblems",
+        "evaluateAdmission",
+        "recheckBeforeMerge"
       ],
       "extension": ".mjs",
       "imports": [
-        "./events.mjs"
+        "./events.mjs",
+        "./semantic-review.mjs"
       ],
-      "lines": 135,
+      "lines": 292,
       "path": "scripts/agent-control/lib/admission.mjs",
-      "size_bytes": 5637
+      "size_bytes": 13822
+    },
+    {
+      "exports": [
+        "CONTROL_EFFECTS",
+        "EFFECT_PROBLEMS",
+        "FOLD_NOT_STARTED",
+        "applyEffect",
+        "coordinateOf",
+        "readEffect",
+        "reduceAuthority"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./control-envelope.mjs",
+        "./state-machine.mjs",
+        "./state.mjs"
+      ],
+      "lines": 392,
+      "path": "scripts/agent-control/lib/authority-effects.mjs",
+      "size_bytes": 19181
+    },
+    {
+      "exports": [
+        "AUTHORITY_FAILURES",
+        "AUTHORITY_MESSAGE_TYPES",
+        "AUTHORITY_SENDER",
+        "AUTHORIZED_AUTHORS",
+        "DECLARED_NON_AUTHORITY_TYPES",
+        "PROFILES",
+        "REQUIRED_ENVELOPE",
+        "claimedAuthorityType",
+        "collectAuthority",
+        "compareAuthorityOrder",
+        "envelopeField",
+        "hasDeterministicOrder",
+        "normalizeComment",
+        "parseEnvelope",
+        "rejectionOf",
+        "validateEnvelope"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./state-machine.mjs",
+        "./yaml.mjs"
+      ],
+      "lines": 424,
+      "path": "scripts/agent-control/lib/control-envelope.mjs",
+      "size_bytes": 17914
     },
     {
       "exports": [
@@ -61660,6 +61733,8 @@
       "exports": [
         "ACTIONABLE_MESSAGE_TYPES",
         "CONTROL_ISSUE",
+        "HOLD_MESSAGE_TYPES",
+        "HOLD_REFUSALS",
         "MUTATION_LOCK",
         "REQUIRED_WORKFLOWS",
         "mutationLockKey",
@@ -61669,10 +61744,13 @@
         "readField"
       ],
       "extension": ".mjs",
-      "imports": [],
-      "lines": 223,
+      "imports": [
+        "./authority-effects.mjs",
+        "./control-envelope.mjs"
+      ],
+      "lines": 315,
       "path": "scripts/agent-control/lib/events.mjs",
-      "size_bytes": 8565
+      "size_bytes": 13471
     },
     {
       "exports": [
@@ -61703,11 +61781,12 @@
         "./dag.mjs",
         "./momentum.mjs",
         "./reconcile.mjs",
-        "./state-machine.mjs"
+        "./state-machine.mjs",
+        "./state.mjs"
       ],
-      "lines": 215,
+      "lines": 219,
       "path": "scripts/agent-control/lib/orchestrator.mjs",
-      "size_bytes": 8618
+      "size_bytes": 8790
     },
     {
       "exports": [
@@ -61719,7 +61798,6 @@
         "PLATFORM_PROGRAMME_ID",
         "PLATFORM_STATES",
         "PROGRAMME_CONTROL_MESSAGE_TYPE",
-        "REQUIRED_ENVELOPE",
         "REQUIRED_HUMAN_GATES",
         "loadAutopilotPolicy",
         "loadPlatformDag",
@@ -61729,34 +61807,70 @@
       ],
       "extension": ".mjs",
       "imports": [
+        "./control-envelope.mjs",
         "./dag.mjs",
-        "./events.mjs",
-        "./reconcile.mjs",
-        "./state-machine.mjs",
         "./yaml.mjs",
         "node:fs",
         "node:path"
       ],
-      "lines": 462,
+      "lines": 398,
       "path": "scripts/agent-control/lib/platform-dag.mjs",
-      "size_bytes": 21739
+      "size_bytes": 18676
     },
     {
       "exports": [
-        "AUTHORITY_MESSAGE_TYPES",
-        "AUTHORITY_SENDER",
-        "AUTHORIZED_AUTHORS",
         "FINDINGS",
-        "collectAuthority",
-        "reconcile"
+        "reconcile",
+        "reconcileProjection"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./authority-effects.mjs",
+        "./control-envelope.mjs",
+        "./state.mjs"
+      ],
+      "lines": 220,
+      "path": "scripts/agent-control/lib/reconcile.mjs",
+      "size_bytes": 10894
+    },
+    {
+      "exports": [
+        "AI_REVIEW_GATE",
+        "EVIDENCE_SCOPES",
+        "EVIDENCE_STATES",
+        "EXACT_HEAD_GATES",
+        "PRE_RETURN_STATUS",
+        "preReturnEvidenceProblems"
       ],
       "extension": ".mjs",
       "imports": [
         "./events.mjs"
       ],
-      "lines": 200,
-      "path": "scripts/agent-control/lib/reconcile.mjs",
-      "size_bytes": 9561
+      "lines": 183,
+      "path": "scripts/agent-control/lib/return-evidence.mjs",
+      "size_bytes": 8876
+    },
+    {
+      "exports": [
+        "COPILOT_NOT_RUN_REASONS",
+        "COPILOT_UNAVAILABLE",
+        "FALLBACK_PROVIDER",
+        "NOT_RUN_REASONS",
+        "PRIMARY_PROVIDER",
+        "REVIEW_OUTCOMES",
+        "REVIEW_PROVIDERS",
+        "SEMANTIC_REVIEW_REASONS",
+        "chatgptReviewEvidence",
+        "copilotReviewEvidence",
+        "evaluateSemanticReview"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./control-envelope.mjs"
+      ],
+      "lines": 417,
+      "path": "scripts/agent-control/lib/semantic-review.mjs",
+      "size_bytes": 19513
     },
     {
       "exports": [
@@ -61779,7 +61893,9 @@
       "exports": [
         "JOURNAL_LIMIT",
         "PROCESSED_KEY_LIMIT",
+        "SHAPE_INVALID",
         "STATE_PATH",
+        "activeHolds",
         "emptyState",
         "hasProcessed",
         "loadState",
@@ -61787,6 +61903,7 @@
         "projectionDrift",
         "recordEvent",
         "saveState",
+        "shapeProblems",
         "validateState"
       ],
       "extension": ".mjs",
@@ -61796,13 +61913,14 @@
         "node:fs",
         "node:path"
       ],
-      "lines": 223,
+      "lines": 325,
       "path": "scripts/agent-control/lib/state.mjs",
-      "size_bytes": 8730
+      "size_bytes": 13917
     },
     {
       "exports": [
         "DEFAULT_REPOSITORY",
+        "applicationPacketsOf",
         "fetchComments",
         "fetchRepoTruth",
         "gatherTruth",
@@ -61811,31 +61929,34 @@
       ],
       "extension": ".mjs",
       "imports": [
+        "./dag.mjs",
         "./events.mjs",
         "./reconcile.mjs",
         "node:child_process",
         "node:fs"
       ],
-      "lines": 98,
+      "lines": 116,
       "path": "scripts/agent-control/lib/truth.mjs",
-      "size_bytes": 4303
+      "size_bytes": 5169
     },
     {
       "exports": [
+        "parseScalar",
         "parseYaml",
-        "stringifyYaml"
+        "stringifyYaml",
+        "stripComment"
       ],
       "extension": ".mjs",
       "imports": [],
-      "lines": 356,
+      "lines": 389,
       "path": "scripts/agent-control/lib/yaml.mjs",
-      "size_bytes": 11846
+      "size_bytes": 13753
     },
     {
       "extension": ".yaml",
-      "lines": 397,
+      "lines": 2024,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 18181
+      "size_bytes": 96786
     },
     {
       "exports": [],
@@ -61860,9 +61981,9 @@
         "./lib/truth.mjs",
         "node:fs"
       ],
-      "lines": 93,
+      "lines": 118,
       "path": "scripts/agent-control/orchestrate.mjs",
-      "size_bytes": 3854
+      "size_bytes": 5431
     },
     {
       "exports": [
@@ -61882,10 +62003,24 @@
       "size_bytes": 5854
     },
     {
+      "exports": [
+        "WAKE_TYPES",
+        "selectDirective"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/control-envelope.mjs",
+        "node:fs"
+      ],
+      "lines": 142,
+      "path": "scripts/agent-control/select-directive.mjs",
+      "size_bytes": 5985
+    },
+    {
       "extension": ".ps1",
-      "lines": 136,
+      "lines": 85,
       "path": "scripts/agent-control/select-directive.ps1",
-      "size_bytes": 5177
+      "size_bytes": 3318
     },
     {
       "exports": [
@@ -61900,9 +62035,9 @@
         "./lib/state.mjs",
         "./lib/truth.mjs"
       ],
-      "lines": 153,
+      "lines": 169,
       "path": "scripts/agent-control/status.mjs",
-      "size_bytes": 6651
+      "size_bytes": 7904
     },
     {
       "exports": [],
@@ -61910,15 +62045,57 @@
       "imports": [
         "../lib/admission.mjs",
         "../lib/events.mjs",
+        "../lib/semantic-review.mjs",
         "../lib/yaml.mjs",
         "node:assert/strict",
         "node:fs",
         "node:path",
         "node:test"
       ],
-      "lines": 194,
+      "lines": 532,
       "path": "scripts/agent-control/tests/admission.spec.mjs",
-      "size_bytes": 9176
+      "size_bytes": 30189
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/adapters.mjs",
+        "../lib/authority-effects.mjs",
+        "../lib/control-envelope.mjs",
+        "../lib/dag.mjs",
+        "../lib/orchestrator.mjs",
+        "../lib/reconcile.mjs",
+        "../lib/state.mjs",
+        "../lib/truth.mjs",
+        "../lib/yaml.mjs",
+        "../status.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 1929,
+      "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "size_bytes": 121249
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/control-envelope.mjs",
+        "../lib/reconcile.mjs",
+        "../lib/state.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 415,
+      "path": "scripts/agent-control/tests/control-envelope.spec.mjs",
+      "size_bytes": 22621
     },
     {
       "exports": [],
@@ -61959,9 +62136,19 @@
         "node:fs",
         "node:test"
       ],
-      "lines": 234,
+      "lines": 548,
       "path": "scripts/agent-control/tests/events.spec.mjs",
-      "size_bytes": 11385
+      "size_bytes": 31582
+    },
+    {
+      "exports": [
+        "branchPr"
+      ],
+      "extension": ".mjs",
+      "imports": [],
+      "lines": 21,
+      "path": "scripts/agent-control/tests/helpers/branch-pr.mjs",
+      "size_bytes": 1025
     },
     {
       "exports": [
@@ -62006,9 +62193,9 @@
         "node:fs",
         "node:test"
       ],
-      "lines": 525,
+      "lines": 548,
       "path": "scripts/agent-control/tests/platform-dag.spec.mjs",
-      "size_bytes": 27105
+      "size_bytes": 28485
     },
     {
       "exports": [],
@@ -62029,9 +62216,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 442,
+      "lines": 584,
       "path": "scripts/agent-control/tests/reconcile.spec.mjs",
-      "size_bytes": 23365
+      "size_bytes": 31835
     },
     {
       "exports": [],
@@ -62053,6 +62240,23 @@
       "exports": [],
       "extension": ".mjs",
       "imports": [
+        "../lib/admission.mjs",
+        "../lib/events.mjs",
+        "../lib/return-evidence.mjs",
+        "../lib/yaml.mjs",
+        "./helpers/branch-pr.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:test"
+      ],
+      "lines": 233,
+      "path": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "size_bytes": 13673
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
         "./helpers/powershell.mjs",
         "node:assert/strict",
         "node:child_process",
@@ -62061,9 +62265,21 @@
         "node:path",
         "node:test"
       ],
-      "lines": 172,
+      "lines": 332,
       "path": "scripts/agent-control/tests/select-directive.spec.mjs",
-      "size_bytes": 7511
+      "size_bytes": 16450
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/semantic-review.mjs",
+        "node:assert/strict",
+        "node:test"
+      ],
+      "lines": 499,
+      "path": "scripts/agent-control/tests/semantic-review.spec.mjs",
+      "size_bytes": 25417
     },
     {
       "exports": [],
@@ -62104,9 +62320,9 @@
         "node:os",
         "node:path"
       ],
-      "lines": 139,
+      "lines": 164,
       "path": "scripts/agent-control/tests/windows/harness.mjs",
-      "size_bytes": 5617
+      "size_bytes": 6380
     },
     {
       "exports": [],
@@ -62201,14 +62417,16 @@
       "exports": [],
       "extension": ".mjs",
       "imports": [
+        "../lib/admission.mjs",
         "../lib/yaml.mjs",
+        "./helpers/branch-pr.mjs",
         "node:assert/strict",
         "node:fs",
         "node:test"
       ],
-      "lines": 176,
+      "lines": 220,
       "path": "scripts/agent-control/tests/yaml.spec.mjs",
-      "size_bytes": 6768
+      "size_bytes": 10038
     },
     {
       "extension": ".ps1",
@@ -62989,9 +63207,9 @@
       ".html": 8,
       ".ico": 1,
       ".js": 10,
-      ".json": 36,
+      ".json": 39,
       ".md": 564,
-      ".mjs": 65,
+      ".mjs": 75,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
@@ -63015,10 +63233,10 @@
       ".yaml": 21,
       ".yml": 15
     },
-    "root": "C:/Users/Public/kfw-architecture-scan/KEYFLOWOS",
+    "root": ".",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3439,
-    "total_files": 4427,
-    "total_lines": 1127042
+    "source_files": 3449,
+    "total_files": 4440,
+    "total_lines": 1139271
   }
 }
