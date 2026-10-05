@@ -25,6 +25,7 @@ Start with:
 
 - `architecture/atlas/README.md` — authority rules, atlas layers, master maps and execution/development models.
 - `architecture/atlas/atlas.yaml` — machine-readable atlas manifest.
+- `architecture/atlas/MISSION-CONTROL-INTEGRATION.md` — convergence contract between the Atlas and the existing owner/admin Mission Control surface.
 
 The atlas is an **overlay, not a replacement source of truth**. It links business outcomes,
 journeys, kernels, KEY cognition, runtime execution, repository implementation, development
