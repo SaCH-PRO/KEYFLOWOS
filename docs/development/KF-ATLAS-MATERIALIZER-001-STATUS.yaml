@@ -1,0 +1,68 @@
+packet_id: KF-ATLAS-MATERIALIZER-001
+title: Living System Atlas deterministic materializer
+state: PROVING
+health: GREEN
+scope_changed: false
+production_touched: false
+base_branch: docs/kf-living-system-atlas-001
+implementation_branch: impl/kf-atlas-materializer-001
+
+declared_obligations:
+  - deterministically consume existing architecture registries
+  - project the canonical programme DAG into Atlas packet/phase topology
+  - preserve provenance and evidence classes
+  - prevent generated ownership guesses from becoming semantic ownership
+  - fail closed on broken graph references
+  - expose repeatable generation and proof commands
+  - leave canonical journey/kernel import for a dedicated intelligence-aware tranche
+
+resolved:
+  - deterministic atlas generator added
+  - portable repository-root resolution added
+  - generated module nodes
+  - generated route nodes
+  - generated event nodes
+  - generated capability nodes
+  - generated data-entity nodes
+  - approximate ownership represented only as references_most
+  - canonical programme packet/phase nodes and dependency edges materialized
+  - graph validator rejects missing references
+  - graph validator rejects generated ownership promotion
+  - graph validator requires provenance for observed edges
+  - focused positive and negative-control tests added
+  - package commands added
+  - atlas documentation updated
+
+remaining:
+  - run focused materializer tests in repository CI/runtime
+  - run materializer against live branch inputs
+  - inspect generated graph counts and validation result
+  - independent semantic review
+  - merge only after parent KF-ATLAS-001 foundation is admitted or rebase onto its admitted main equivalent
+
+deferred:
+  - canonical journey/kernel import from docs/keyflow-intelligence-foundation
+  - reviewed semantic ownership
+  - external-service deployment/permission/recovery topology
+  - code-to-journey reverse index
+  - PR-to-architecture reverse index
+  - Mission Control Atlas projection
+  - visual control panel
+
+architecture_invariant: >-
+  Generated repository structure may supply implementation evidence, but may not
+  silently become accepted semantic architecture. The materializer must preserve
+  the distinction between observed, accepted, intended, derived and unknown claims.
+
+proof_commands:
+  - pnpm architecture:atlas:test
+  - pnpm architecture:atlas
+  - pnpm architecture:atlas:check
+
+safety:
+  production_deploy_authorized: false
+  production_mutation_authorized: false
+  provider_effect_authorized: false
+  application_packet_release_authorized: false
+
+next_action: open a dependent draft PR, let repository checks run, inspect proof, then correct any real failures without weakening validators
