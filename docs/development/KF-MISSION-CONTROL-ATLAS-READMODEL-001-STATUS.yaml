@@ -1,0 +1,88 @@
+packet_id: KF-MISSION-CONTROL-ATLAS-READMODEL-001
+title: Owner Mission Control Atlas read model
+state: PROVING
+health: YELLOW
+scope_changed: false
+production_touched: false
+base_branch: impl/kf-atlas-code-links-001
+implementation_branch: impl/kf-mission-control-atlas-readmodel-001
+
+declared_obligations:
+  - reconcile the proven read-only semantics from historical PR 132 against current main
+  - do not use the diverged PR 132 branch as implementation substrate
+  - expose one guarded owner/admin Mission Control snapshot
+  - preserve exact-head GitHub proof semantics
+  - add a typed Living System Atlas projection to the snapshot
+  - expose contradictions missing artifacts and unknown denominators
+  - build the first read-only owner control panel at /admin/mission-control
+  - preserve business Command Center separation
+  - add no mutation/control-plane bypass
+
+resolved:
+  - fresh branch created from current Atlas stack
+  - guarded GET /api/admin/mission-control controller added
+  - Mission Control service registered in AdminPlatformModule
+  - authenticated server-side GitHub evidence aggregation reimplemented
+  - exact-head check normalization and no-fake-green proof progress reimplemented
+  - open KEYFLOWOS PR discovery replaces stale hard-coded PR list
+  - Atlas artifact reader added
+  - 25 versus 26 journey contradiction reaches the typed snapshot
+  - layer progress remains UNKNOWN UNBOUNDED without a trusted denominator
+  - missing Atlas artifacts remain explicit
+  - Atlas contradiction prevents aggregate GREEN
+  - worker lanes remain unknown without trustworthy heartbeat evidence
+  - typed web API contract added
+  - read-only owner control panel page added
+  - owner navigation entry added
+  - Mission Control environment variables documented
+  - focused server tests added for proof truth and Atlas contradiction handling
+
+remaining:
+  - run focused server tests
+  - run server typecheck/build
+  - run web typecheck/build
+  - run architecture scanners and refresh generated architecture artifacts for the new controller service route
+  - inspect architecture drift rather than hand-edit generated registries
+  - independent semantic and UI review
+  - browser verification of /admin/mission-control on a running dev server
+  - exact-head CI and admission
+  - rebase/retarget after parent Atlas stack is admitted
+
+known_friction:
+  - architecture scanner refresh cannot be claimed until executed in a real repository checkout
+  - Atlas graph packet-semantic and code-link snapshots are not all generated yet, so the panel must show those values as UNKNOWN
+  - canonical intelligence still contains the unresolved 25 versus 26 journey contradiction
+
+deferred:
+  - interactive dependency web
+  - zoomable Atlas graph
+  - packet detail drawer
+  - KEY cognition graph
+  - trustworthy worker heartbeat lanes
+  - control actions such as pause resume release or request review
+  - any production mutation
+
+architecture_invariant: >-
+  Mission Control is a read projection over existing authority and evidence.
+  It may expose contradictions and unknowns but may not resolve them silently,
+  infer unavailable worker state, invent completion denominators, or become a
+  new control-plane authority bypass.
+
+proof_commands:
+  - pnpm --filter @keyflow/server test -- project-mission-control.service.spec.ts
+  - pnpm --filter @keyflow/server typecheck
+  - pnpm --filter @keyflow/server build
+  - pnpm --filter @keyflow/web typecheck
+  - pnpm --filter @keyflow/web build
+  - node scripts/architecture/generate-registries.js
+  - python .agents/skills/codebase-architect/scripts/inventory.py
+  - python .agents/skills/codebase-architect/scripts/dependency_scan.py
+
+safety:
+  production_deploy_authorized: false
+  production_mutation_authorized: false
+  provider_effect_authorized: false
+  mission_control_mutation_authorized: false
+  application_packet_release_authorized: false
+
+next_action: open a stacked draft PR so repository CI can execute the proof, then correct real failures without weakening the no-fake-green contracts
