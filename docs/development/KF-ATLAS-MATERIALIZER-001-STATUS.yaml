@@ -6,6 +6,8 @@ scope_changed: false
 production_touched: false
 base_branch: docs/kf-living-system-atlas-001
 implementation_branch: impl/kf-atlas-materializer-001
+pull_request: 142
+pull_request_state: DRAFT
 
 declared_obligations:
   - deterministically consume existing architecture registries
@@ -65,4 +67,4 @@ safety:
   provider_effect_authorized: false
   application_packet_release_authorized: false
 
-next_action: open a dependent draft PR, let repository checks run, inspect proof, then correct any real failures without weakening validators
+next_action: inspect PR 142 exact-head checks and focused proof; correct real failures without weakening validators
