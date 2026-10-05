@@ -104,12 +104,20 @@ test('unsupported constructs throw instead of parsing to something wrong', () =>
   assert.throws(() => parseYaml('a:\n\tb: 1\n'), /tabs/);
 });
 
-test('the real control artifacts on this branch parse', () => {
-  for (const file of ['.agent-control/active-packet.yaml', '.agent-control/claude-return.yaml']) {
-    const doc = parseYaml(fs.readFileSync(file, 'utf8'));
-    assert.equal(doc.packet_id, 'KF-META-AI-REVIEW-FAILOVER-001', `${file} must expose packet_id`);
+test('the real control artifacts on this branch parse and agree on packet identity', () => {
+  const active = parseYaml(fs.readFileSync('.agent-control/active-packet.yaml', 'utf8'));
+  const ret = parseYaml(fs.readFileSync('.agent-control/claude-return.yaml', 'utf8'));
+
+  for (const [file, doc] of [
+    ['.agent-control/active-packet.yaml', active],
+    ['.agent-control/claude-return.yaml', ret],
+  ]) {
+    assert.equal(typeof doc.packet_id, 'string', `${file} must expose packet_id as a string`);
+    assert.ok(doc.packet_id.trim().length > 0, `${file} packet_id must not be blank`);
     assert.equal(typeof doc.production_touched, 'boolean', `${file} production_touched must be boolean`);
   }
+
+  assert.equal(ret.packet_id, active.packet_id, 'active and return artifacts must describe the same packet');
 });
 
 test('the programme DAG parses and keeps its quoted wave key as a string', () => {

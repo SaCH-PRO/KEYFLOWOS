@@ -1,0 +1,60 @@
+name: KEY Native Capacity Shadow
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '35 4 * * *'
+  pull_request:
+    paths:
+      - 'scripts/key-native-capacity/**'
+      - '.github/workflows/key-native-capacity-shadow.yml'
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: key-native-capacity-shadow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shadow:
+    name: Read-only native-capacity shadow
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+
+      - name: Deterministic tests
+        run: node --test scripts/key-native-capacity/*.spec.mjs
+
+      - name: Cognitive dependency scan
+        run: node scripts/key-native-capacity/cognitive-dependency-scan.mjs
+
+      - name: Mine Issue 80 procedure motifs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          KEYFLOW_CONTROL_ISSUE: '80'
+        run: node scripts/key-native-capacity/procedure-motif-miner.mjs
+
+      - name: Build native-capacity report
+        run: node scripts/key-native-capacity/build-report.mjs
+
+      - name: Publish workflow summary
+        run: cat artifacts/key-native-capacity/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload derived evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: key-native-capacity-shadow-${{ github.sha }}
+          path: artifacts/key-native-capacity/
+          if-no-files-found: error
+          retention-days: 14
