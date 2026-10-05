@@ -1,0 +1,38 @@
+version: 1
+work_id: ""
+implementation_branch: ""
+pr_number: null
+state: DECLARED
+
+classifications: []
+
+product:
+  effect: NONE
+  claim: ""
+
+key:
+  effect: NONE
+  claim: ""
+  dimensions: []
+
+development:
+  effect: NONE
+  claim: ""
+
+reliability:
+  effect: NONE
+  claim: ""
+
+enables: []
+converges: []
+complexity_cost: []
+
+proof:
+  obligations: []
+  evidence: []
+
+post_merge_verified: false
+
+net_value:
+  verdict: null
+  rationale: ""

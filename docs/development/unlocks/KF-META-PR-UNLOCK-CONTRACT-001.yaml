@@ -1,0 +1,56 @@
+version: 1
+work_id: KF-META-PR-UNLOCK-CONTRACT-001
+implementation_branch: docs/kf-pr-unlock-contract-001
+pr_number: null
+state: IMPLEMENTED
+
+classifications:
+  - GOVERNANCE_ONLY
+  - DEVELOPMENT_CAPABILITY
+
+product:
+  effect: NONE
+  claim: "No direct customer or production runtime behavior changes in this tranche."
+
+key:
+  effect: NONE
+  claim: "No direct KEY cognition or action capability changes in this tranche."
+  dimensions: []
+
+development:
+  effect: MATERIAL
+  claim: "Adds a durable machine-checkable contract for stating what each PR actually unlocks before it can be counted as progress."
+
+reliability:
+  effect: PARTIAL
+  claim: "Reduces the risk that technically green but duplicate, dead, stale, or value-negative changes are mistaken for programme progress."
+
+enables:
+  - "Mission Control unlock cards and dependency graph"
+  - "Atlas mapping from PR/work item to claimed capability delta"
+  - "future blocking admission on proven net-positive or neutral-required value"
+
+converges:
+  - "PR value accounting into the existing execution-control standard rather than a parallel workflow"
+
+complexity_cost:
+  - "one pure validator"
+  - "one durable contract file per merge candidate"
+  - "one CLI validation entry point"
+
+proof:
+  obligations:
+    - "positive validator case"
+    - "missing/invalid classification negative controls"
+    - "positive-without-effect rejection"
+    - "planning-only runtime-claim rejection"
+    - "PROVEN evidence requirement"
+    - "LIVE post-merge verification requirement"
+    - "self-contract parses and validates"
+  evidence: []
+
+post_merge_verified: false
+
+net_value:
+  verdict: POSITIVE
+  rationale: "The contract adds small bounded process machinery while making capability/value claims explicit, testable, and available to later Atlas, Mission Control, and admission integration."
