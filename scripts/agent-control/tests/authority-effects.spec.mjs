@@ -911,6 +911,81 @@ test('NC a wrong-type container reaches no dispatch, review, admission or wait d
   }
 });
 
+test('NC a wrong-type hold container yields no hold entry in activeHolds, the status or its rendering (020 K2)', () => {
+  // Copilot r4179736650: `holds: none` was shown as four one-letter holds and
+  // `holds: [{...}]` as a real-looking hold, beside the drift that rejects them.
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const held = { active: true, packet_id: 'KF-X', reason: 'held by review', resume_condition: 'a typed RESUME' };
+  const statusOf = (rec) => buildStatus(process.cwd(), { state: rec.effective_state, dag: DAG, registry: [], reconciliation: rec });
+  const wrong = [
+    ['holds: none', 'holds', 'none', 'mapping', 'string'],
+    ['holds: [{...}]', 'holds', [held], 'mapping', 'list'],
+    ['holds: []', 'holds', [], 'mapping', 'list'],
+    ['holds: null', 'holds', null, 'mapping', 'null'],
+    ['holds: 7', 'holds', 7, 'mapping', 'number'],
+    ['hold: text', 'hold', 'held', 'mapping or null', 'string'],
+    ['hold: [{...}]', 'hold', [held], 'mapping or null', 'list'],
+    ['hold: true', 'hold', true, 'mapping or null', 'boolean'],
+  ];
+  for (const [label, name, value, expected, found] of wrong) {
+    const loaded = normalizeState(parseYaml(writtenWith(anchor, name, value)));
+    assert.deepEqual(loaded[name], value, `${label}: left as written`);
+    assert.deepEqual(activeHolds(loaded), [], label);
+    // The wrong container is still what the drift names.
+    const problem = shapeProblem(name, expected, found);
+    const rec = project(loaded, [anchor], repo());
+    assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_INVALID], label);
+    assert.deepEqual(rec.findings[0].detail.problems, [problem], label);
+    assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, label);
+    const status = statusOf(rec);
+    assert.equal(status.hold, null, label);
+    assert.deepEqual(status.holds, [], label);
+    const text = renderHuman(status);
+    assert.doesNotMatch(text, /^HOLD\b/m, label);
+    assert.doesNotMatch(text, /resume when/, label);
+    assert.match(text, /Reconciliation : DRIFT/, label);
+    assert.ok(text.includes('DERIVED_STATE_INVALID') && text.includes(problem.detail), label);
+  }
+  // An entry of `holds` that is not a mapping is no hold either; the contract names it under its own code.
+  for (const entry of ['held', [held], 7, true, null]) {
+    const label = `holds.KF-X: ${JSON.stringify(entry)}`;
+    const loaded = normalizeState(parseYaml(writtenWith(anchor, 'holds', { 'KF-X': entry })));
+    assert.deepEqual(loaded.holds['KF-X'], entry, label);
+    assert.deepEqual(activeHolds(loaded), [], label);
+    assert.deepEqual(validateState(loaded).problems.map((x) => x.code), ['HOLD_KEY_MISMATCH'], label);
+    assert.doesNotMatch(renderHuman(statusOf(project(loaded, [anchor], repo()))), /^HOLD\b/m, label);
+  }
+  // A state that is not a mapping has no holds to read.
+  for (const state of [undefined, null, 'text', 7, [], [{ holds: { 'KF-X': held } }]]) assert.deepEqual(activeHolds(state), [], JSON.stringify(state));
+
+  // Referent: valid packet-keyed and legacy holds are read and rendered as before.
+  const first = { active: true, packet_id: 'KF-A', reason: 'held first' };
+  const released = { active: false, packet_id: 'KF-OFF', reason: 'released' };
+  const legacy = { active: true, reason: 'legacy hold, no packet named' };
+  const good = normalizeState(parseYaml(stringifyYaml(checkpoint(anchor, {}, { holds: { 'KF-X': held, 'KF-OFF': released, 'KF-A': first }, hold: legacy }))));
+  assert.deepEqual(validateState(good).problems, []);
+  assert.deepEqual(activeHolds(good), [first, held, legacy], 'keyed holds in packet order, then the legacy hold');
+  const rec = project(good, [anchor], repo());
+  assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
+  const decision = act(rec);
+  assert.equal(decision.action, ACTIONS.WAIT_AUTHORITY);
+  assert.deepEqual(decision.holds, [first, held, legacy]);
+  const status = statusOf(rec);
+  assert.deepEqual(status.hold, first);
+  assert.deepEqual(status.holds, [first, held, legacy]);
+  const text = renderHuman(status);
+  assert.deepEqual(text.split('\n').filter((line) => /^HOLD\b|resume when/.test(line)), [
+    'HOLD           : KF-A -- held first',
+    'HOLD           : KF-X -- held by review',
+    '  resume when : a typed RESUME',
+    'HOLD           : legacy hold, no packet named',
+  ]);
+  // A legacy hold alone, and one switched off.
+  assert.deepEqual(activeHolds({ ...emptyState(), hold: legacy }), [legacy]);
+  assert.deepEqual(activeHolds({ ...emptyState(), hold: { ...legacy, active: false } }), []);
+  assert.deepEqual(activeHolds(emptyState()), []);
+});
+
 test('an absent container still gets its default, and the checkpoint is as usable as before (018 K2)', () => {
   const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
   const full = checkpoint(anchor);
@@ -1654,6 +1729,118 @@ test('CLI end to end: a checkpoint on disk with a wrong-type container is drift 
   const good = run(committedText, { schedule_time: '2026-10-04T22:00:00Z' });
   assert.equal(good.out.reconciliation.consistent, true, JSON.stringify(good.out.reconciliation.findings));
   assert.equal(good.out.decision.action, ACTIONS.WAIT_AUTHORITY);
+});
+
+test('CLI end to end: --apply on an invalid checkpoint journals nothing, writes nothing and still reports the drift (020 K1)', () => {
+  // Copilot r4179736619: with `processed_event_keys: {}` or `event_journal: null`
+  // the journal step threw a TypeError, and with any other invalid checkpoint
+  // saveState() threw, so --apply exited 2 and printed no decision.
+  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const committedText = fs.readFileSync(STATE_PATH, 'utf8').replace(/\r\n/g, '\n');
+  const script = path.resolve('scripts/agent-control/orchestrate.mjs');
+  const rewritten = (pattern, replacement) => {
+    assert.match(committedText, pattern);
+    return committedText.replace(pattern, replacement);
+  };
+  // A repository root holding the checkpoint, the programme DAG and one schedule event.
+  const inRoot = (text, fn) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-apply-'));
+    try {
+      for (const file of [STATE_PATH, DAG_PATH]) fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, STATE_PATH), text);
+      fs.copyFileSync(DAG_PATH, path.join(root, DAG_PATH));
+      const truth = path.join(root, 'truth.json');
+      fs.writeFileSync(truth, JSON.stringify({ comments: recorded.comments, repo: recorded.repo }));
+      const eventFile = path.join(root, 'event.json');
+      fs.writeFileSync(eventFile, JSON.stringify({ schedule_time: '2026-10-04T22:00:00Z' }));
+      const env = { ...process.env, KEYFLOW_AGENT_CLAUDE_DISABLED: '1', GITHUB_EVENT_NAME: 'schedule', GITHUB_EVENT_PATH: eventFile };
+      delete env.GITHUB_RUN_ID;
+      const invoke = (...flags) => {
+        const res = spawnSync(process.execPath, [script, ...flags, '--truth-file', truth], { encoding: 'utf8', env, cwd: root });
+        return { status: res.status, stdout: res.stdout, stderr: res.stderr, text: fs.readFileSync(path.join(root, STATE_PATH), 'utf8') };
+      };
+      const files = () => fs.readdirSync(root, { recursive: true }).map(String).sort();
+      return fn(invoke, files);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+  const shape = (detail) => [{ code: SHAPE_INVALID, detail }];
+
+  const invalid = [
+    ['processed_event_keys: {}', rewritten(/^processed_event_keys: \[\]$/m, 'processed_event_keys: {}'), shape('processed_event_keys must be a list when present, found mapping')],
+    ['event_journal: null', rewritten(/^event_journal: \[\]$/m, 'event_journal: null'), shape('event_journal must be a list when present, found null')],
+    ['holds: []', rewritten(/^holds:\n(?: .*\n|\n)*?(?=^\S)/m, 'holds: []\n\n'), shape('holds must be a mapping when present, found list')],
+    ['health: AMBER', rewritten(/^ {2}health: YELLOW$/m, '  health: AMBER'), [{ code: 'UNKNOWN_HEALTH', detail: 'programme.health=AMBER' }]],
+  ];
+  for (const [label, text, problems] of invalid) {
+    inRoot(text, (invoke, files) => {
+      const before = files();
+      // Referent: without --apply this checkpoint is reported as drift and the run exits 0.
+      const plain = invoke('--json');
+      assert.equal(plain.status, 0, `${label}: ${plain.stderr}`);
+      const dry = JSON.parse(plain.stdout);
+      assert.equal(dry.decision.action, ACTIONS.REPORT_DRIFT, label);
+      assert.ok(!('applied' in dry) && !('apply_refused' in dry), label);
+
+      const applied = invoke('--json', '--apply');
+      assert.equal(applied.status, 0, `${label}: ${applied.stderr}`);
+      assert.equal(applied.stderr, '', label);
+      const out = JSON.parse(applied.stdout);
+      // The journal step was reached: an actionable event that is not a duplicate.
+      assert.deepEqual([out.event.actionable, out.duplicate], [true, false], label);
+      assert.equal(out.applied, false, label);
+      assert.deepEqual(out.apply_refused, { code: FOLD_NOT_STARTED.CHECKPOINT_INVALID, problems }, label);
+      // The result is the one the run without --apply gives.
+      assert.equal(out.decision.action, ACTIONS.REPORT_DRIFT, label);
+      assert.equal(out.decision.advancement, 'NONE', label);
+      assert.deepEqual(out.reconciliation.findings.map((f) => f.code), [FINDINGS.DERIVED_STATE_INVALID], label);
+      assert.deepEqual(out.reconciliation.findings[0].detail.problems, problems, label);
+      assert.deepEqual(out.decision, dry.decision, label);
+      assert.deepEqual(out.reconciliation, dry.reconciliation, label);
+      // Nothing is written: the checkpoint is byte-identical and no file appears.
+      assert.equal(applied.text, text, `${label}: the document is not rewritten`);
+      assert.deepEqual(files(), before, label);
+
+      // The plain form prints the same decision and says why nothing was journaled.
+      const human = invoke('--apply');
+      assert.equal(human.status, 0, `${label}: ${human.stderr}`);
+      assert.equal(human.stderr, '', label);
+      assert.match(human.stdout, /^ACTION : REPORT_DRIFT$/m, label);
+      assert.match(human.stdout, /^DRIFT {2}: DERIVED_STATE_INVALID /m, label);
+      assert.ok(human.stdout.includes(`APPLY  : refused, nothing journaled or written: CHECKPOINT_INVALID ${JSON.stringify(problems)}\n`), label);
+      assert.equal(human.text, text, `${label}: the document is not rewritten`);
+      assert.deepEqual(files(), before, label);
+    });
+  }
+
+  // Referent: the committed checkpoint with the same event and --apply journals it, exactly once.
+  inRoot(committedText, (invoke, files) => {
+    const before = files();
+    const first = invoke('--json', '--apply');
+    assert.equal(first.status, 0, first.stderr);
+    const out = JSON.parse(first.stdout);
+    assert.equal(out.reconciliation.consistent, true, JSON.stringify(out.reconciliation.findings));
+    assert.equal(out.decision.action, ACTIONS.WAIT_AUTHORITY);
+    assert.equal(out.applied, true);
+    assert.ok(!('apply_refused' in out));
+    assert.notEqual(first.text, committedText);
+    const saved = normalizeState(parseYaml(first.text));
+    assert.deepEqual(validateState(saved).problems, []);
+    assert.deepEqual(saved.processed_event_keys, [out.event.key]);
+    assert.equal(saved.last_processed_event_key, out.event.key);
+    assert.deepEqual(saved.event_journal.map((entry) => [entry.key, entry.action, entry.rule]), [[out.event.key, ACTIONS.WAIT_AUTHORITY, 'AUTO-ORCHESTRATOR']]);
+    assert.equal(saved.next_legal_action.action, ACTIONS.WAIT_AUTHORITY);
+    assert.deepEqual(files(), before, 'only the checkpoint is written');
+
+    const second = invoke('--json', '--apply');
+    assert.equal(second.status, 0, second.stderr);
+    const again = JSON.parse(second.stdout);
+    assert.equal(again.duplicate, true);
+    assert.equal(again.decision.action, ACTIONS.DUPLICATE_EVENT);
+    assert.ok(!('applied' in again) && !('apply_refused' in again));
+    assert.equal(second.text, first.text, 'the same event is not journaled a second time');
+  });
 });
 
 test('reconcileWithTruth folds with the programme DAG as the credit set and reads live truth for the effective projection', () => {

@@ -166,6 +166,20 @@ completion contract.
 
 ## Changelog
 
+### 2026-10-04 — An invalid checkpoint is not journaled onto, and its holds are not rendered
+
+- KF-META-STATE-REDUCER-LIVE-001 (PR #120), FINAL-CORRECTION-020. Two bounded corrections
+  to readers of a checkpoint the state contract rejects, with no new module, no new
+  export and no new import edge:
+  - K1, `orchestrate.mjs`: `--apply` runs `validateState()` on the stored checkpoint before
+    the journal step. An invalid one is not journaled onto and nothing is written; the
+    output keeps the `REPORT_DRIFT` decision and adds `apply_refused`
+    (`CHECKPOINT_INVALID`, with the contract problems). The exit code is 0.
+  - K2, `lib/state.mjs`: `activeHolds()` reads `holds`, its entries and the legacy `hold`
+    only when they are mappings, so `holds: none` or `hold: text` gives no hold entry in
+    a decision or in `status.mjs`.
+- No application runtime, schema, deployment or production change.
+
 ### 2026-10-04 — Checkpoint shape, refused-hold audit and string identities
 
 - KF-META-STATE-REDUCER-LIVE-001 (PR #120), CONVERGED-CORRECTIONS-018. Three bounded

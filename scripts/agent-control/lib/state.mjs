@@ -222,13 +222,21 @@ export function saveState(state, repoRoot = process.cwd(), options = {}) {
 /**
  * Every active hold, packet-keyed holds first in packet order, then a legacy
  * single `hold` (which may name no packet). Deterministic.
+ *
+ * It reads only what the state contract lets a hold be (FINAL-CORRECTION-020
+ * K2; Copilot r4179736650): `holds` when it is a mapping, and an entry or the
+ * legacy `hold` when it is a mapping. Anything else gives no entry, so a
+ * wrong-type container is never shown as holds that do not exist
+ * (`holds: none` read as four one-letter holds). This reports nothing and
+ * repairs nothing: validateState() is what names the wrong container.
  */
 export function activeHolds(state) {
-  const keyed = Object.keys(state?.holds || {})
+  const holds = isMapping(state?.holds) ? state.holds : {};
+  const keyed = Object.keys(holds)
     .sort()
-    .map((key) => state.holds[key])
-    .filter((hold) => hold && hold.active !== false);
-  const legacy = state?.hold && state.hold.active !== false ? [state.hold] : [];
+    .map((key) => holds[key])
+    .filter((hold) => isMapping(hold) && hold.active !== false);
+  const legacy = isMapping(state?.hold) && state.hold.active !== false ? [state.hold] : [];
   return [...keyed, ...legacy];
 }
 

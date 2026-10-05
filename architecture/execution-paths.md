@@ -524,7 +524,13 @@ orchestrate.mjs / status.mjs --verify
             reports DERIVED_STATE_STALE_AUTHORITY naming the blocking message; an anchored
             projection validateState() rejects reports DERIVED_STATE_INVALID)
   → decide({ state: effective_state, reconciliation, … }) (lib/orchestrator.mjs)
-  → --apply journals the event onto the checkpoint only; the effective projection is never persisted
+      → activeHolds() (lib/state.mjs) reads `holds`, its entries and the legacy `hold` only
+        when they are mappings; a wrong-type container gives no hold entry, here and in
+        the status rendering
+  → --apply: validateState(checkpoint) first; a checkpoint the contract rejects is not
+    journaled onto and nothing is written (`apply_refused: CHECKPOINT_INVALID`, the same
+    REPORT_DRIFT, exit 0); otherwise
+    journals the event onto the checkpoint only; the effective projection is never persisted
 ```
 
 What wakes that path for a #80 comment (`.github/workflows/agent-control-autopilot.yml`, job `normalize-event`, on `issue_comment` `created`):

@@ -924,9 +924,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 176,
+      "lines": 198,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 12695
+      "size_bytes": 15737
     },
     {
       "extension": ".yaml",
@@ -936,9 +936,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 955,
+      "lines": 1227,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 58213
+      "size_bytes": 77117
     },
     {
       "extension": ".yaml",
@@ -57607,21 +57607,21 @@
     },
     {
       "extension": ".md",
-      "lines": 577,
+      "lines": 583,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 23506
+      "size_bytes": 23922
     },
     {
       "extension": ".json",
       "lines": 63242,
       "path": "architecture/inventory.json",
-      "size_bytes": 1636973
+      "size_bytes": 1636975
     },
     {
       "extension": ".md",
-      "lines": 265,
+      "lines": 279,
       "path": "architecture/migration-plan.md",
-      "size_bytes": 14173
+      "size_bytes": 15083
     },
     {
       "extension": ".md",
@@ -58905,9 +58905,9 @@
     },
     {
       "extension": ".md",
-      "lines": 647,
+      "lines": 659,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 31390
+      "size_bytes": 32188
     },
     {
       "extension": ".md",
@@ -61913,9 +61913,9 @@
         "node:fs",
         "node:path"
       ],
-      "lines": 317,
+      "lines": 325,
       "path": "scripts/agent-control/lib/state.mjs",
-      "size_bytes": 13408
+      "size_bytes": 13917
     },
     {
       "exports": [
@@ -61954,9 +61954,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 1956,
+      "lines": 2008,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 93132
+      "size_bytes": 95947
     },
     {
       "exports": [],
@@ -61981,9 +61981,9 @@
         "./lib/truth.mjs",
         "node:fs"
       ],
-      "lines": 99,
+      "lines": 118,
       "path": "scripts/agent-control/orchestrate.mjs",
-      "size_bytes": 4299
+      "size_bytes": 5431
     },
     {
       "exports": [
@@ -62077,9 +62077,9 @@
         "node:path",
         "node:test"
       ],
-      "lines": 1674,
+      "lines": 1861,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
-      "size_bytes": 105513
+      "size_bytes": 117041
     },
     {
       "exports": [],
@@ -63237,6 +63237,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3449,
     "total_files": 4440,
-    "total_lines": 1137572
+    "total_lines": 1138164
   }
 }

@@ -456,7 +456,12 @@ Rules:
   effects" below). The checkpoint itself moves only in a reviewed commit, and
   is never repaired by automation. There is no automated writer:
   `orchestrate.mjs --apply` only journals events, and the folded projection is
-  never written back.
+  never written back. `--apply` checks the stored checkpoint before the
+  journal step (FINAL-CORRECTION-020 K1). On a checkpoint the state contract
+  rejects it journals nothing and writes nothing: the output is the same
+  `REPORT_DRIFT`, plus `applied: false` and `apply_refused` naming
+  `CHECKPOINT_INVALID` and the contract problems. The exit code is 0, as for
+  any reported drift; exit 2 is an unexpected failure.
 
 ### Typed authority effects
 
@@ -567,6 +572,13 @@ The rules:
   Present means the key is there: an explicit `null` is the wrong type, like
   `holds: []`, which earlier read as "no holds". An empty document and a
   document with none of these keys load with the defaults, as before.
+
+  A wrong container is never read as if it had content
+  (FINAL-CORRECTION-020 K2). `activeHolds()`, which `decide()` and
+  `status.mjs` render holds from, reads `holds` only when it is a mapping, and
+  an entry or the legacy `hold` only when it is a mapping. Anything else
+  gives no hold entry, so the status shows the drift and its named problem
+  and no hold that the checkpoint does not have.
 - **The projection stays valid.** Each folded step is checked with
   `validateState()`. A step that the state contract rejects stops the fold
   (`CONTROL_EFFECT_PROJECTION_INVALID`).

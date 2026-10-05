@@ -1639,6 +1639,58 @@ negative_controls:
     proof_command: node --test --test-name-pattern="container present with the wrong type is left as written" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-APPLY-INVALID-CHECKPOINT-JOURNALED
+    claim: >
+      orchestrate.mjs --apply checks the stored checkpoint before the journal
+      step. One the state contract rejects is not journaled onto and not
+      saved: the run prints the same REPORT_DRIFT, names the contract
+      problems and writes nothing. Without the check the journal helpers run
+      on the invalid checkpoint and the run ends in a TypeError or a refused
+      save, with no decision printed (FINAL-CORRECTION-020 K1; Copilot
+      r4179736619).
+    mutation:
+      file: scripts/agent-control/orchestrate.mjs
+      find: "    if (!stored.ok) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="apply on an invalid checkpoint journals nothing" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-HOLDS-CONTAINER-FABRICATED
+    claim: >
+      activeHolds() reads `holds` only when it is a mapping. Reading whatever
+      is there shows a list written in its place as holds that the checkpoint
+      does not have (FINAL-CORRECTION-020 K2; Copilot r4179736650).
+    mutation:
+      file: scripts/agent-control/lib/state.mjs
+      find: "  const holds = isMapping(state?.holds) ? state.holds : {};"
+      replace: "  const holds = state?.holds || {};"
+    proof_command: node --test --test-name-pattern="wrong-type hold container yields no hold entry" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-HOLDS-ENTRY-FABRICATED
+    claim: >
+      An entry of `holds` is a hold only when it is a mapping. Accepting any
+      truthy entry shows a scalar or a list as an active hold with no packet
+      and no reason (FINAL-CORRECTION-020 K2).
+    mutation:
+      file: scripts/agent-control/lib/state.mjs
+      find: "    .filter((hold) => isMapping(hold) && hold.active !== false);"
+      replace: "    .filter((hold) => hold && hold.active !== false);"
+    proof_command: node --test --test-name-pattern="wrong-type hold container yields no hold entry" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-HOLD-LEGACY-FABRICATED
+    claim: >
+      The legacy single `hold` is a hold only when it is a mapping. Accepting
+      any truthy value shows `hold: text` or a list as an active hold
+      (FINAL-CORRECTION-020 K2; Copilot r4179736650).
+    mutation:
+      file: scripts/agent-control/lib/state.mjs
+      find: "  const legacy = isMapping(state?.hold) && state.hold.active !== false ? [state.hold] : [];"
+      replace: "  const legacy = state?.hold && state.hold.active !== false ? [state.hold] : [];"
+    proof_command: node --test --test-name-pattern="wrong-type hold container yields no hold entry" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-REDUCER-ADMISSION-WITHOUT-PR
     claim: >
       An admission or a checkpoint is about a PR and must name it; only a
