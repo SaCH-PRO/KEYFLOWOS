@@ -287,7 +287,7 @@ For each source layer and each necessary KEYFLOWOS expansion:
 
 # Current verified programme status
 
-Continuity checkpoint updated after completion of GLOBAL CROSS-LAYER GENAI R&D CONVERGENCE pass 1.
+Continuity checkpoint updated after CONVERGENCE VALIDATION + IMPLEMENTATION PACKET DERIVATION pass 1.
 
 | Layer | Status |
 |---|---|
@@ -538,6 +538,60 @@ F. evaluation/proof foundation;
 G. context/tool trust-boundary admission;
 H. durable idempotency/compensation/outcome verification.
 
+
+## Convergence validation + packet derivation
+
+Status: **PASS 1 COMPLETE**.
+
+Canonical validation document:
+`docs/intelligence/research/GENAI-RD-CONVERGENCE-VALIDATION-AND-PACKET-DERIVATION.md`
+
+Creation commit:
+`b674046edd72b6407fdfea0dcf0eb5ac2ed57685`
+
+Durable ledger comment:
+**6010209031**
+
+Validated live main:
+`6fdffc26c7c7748d5c09900535c97c197864ab54`
+
+Key validation conclusions:
+- the global architecture remains valid against current main;
+- Flow remains the execution substrate and FLOW_TOOLS the capability source of truth;
+- current KeyCortex still contains the autonomy fail-open branch that logs "Autonomy check failed, using all parsed commands";
+- PR #147 `KF-EXEC-ACTION-001` remains open/draft at head `de47dd526b416a98418bb6337f12a1fc02e6e444` and is the active first Capability -> Control -> Clearance implementation;
+- issue #110 per-packet dispatch remains queued rather than proven live, so a new application DIRECTIVE is not yet safe merely because write sets differ;
+- Context Genome M1 is already owned by #123 under #106/#122; do not create a duplicate memory packet;
+- assurance/eval convergence remains owned by #130 + #151;
+- SafetyShell.check() is now wired, so old backlog claims that it still needs wiring are stale;
+- current Langfuse still uses legacy `/api/public/ingestion`, preserving the 2026-11-16 compatibility deadline;
+- old Mind/Soul and audit docs contain historical baseline claims that must not be treated as current-state authority.
+
+First implementation packet selected:
+**KF-EXEC-AUTH-FAIL-CLOSED-001**
+
+State:
+**DERIVED / READY-BUT-HELD / NOT RELEASED**
+
+Intended scope:
+- `apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts`;
+- minimum existing query-pipeline/autonomy tests;
+- minimum negative-control proof only.
+
+Hard invariant:
+**authority-check uncertainty/error may only narrow executable capability; for this parsed-command path the safe default is zero executable commands.**
+
+Release gate:
+1. ACTION-001 is admitted/checkpointed OR #110 per-packet dispatch is proven live;
+2. re-read current main;
+3. re-characterize the exact catch branch;
+4. bind exact source_main/source_head;
+5. verify no write-set conflict;
+6. compile proof obligations into the packet contract.
+
+Second recommended packet after that:
+**KF-ASSURANCE-OTEL-LANGFUSE-COMPAT-001** under #130 + #151, because of the time-bounded 2026-11-16 Langfuse compatibility deadline.
+
 ## Durable ledger
 
 Detailed research tranches and convergence passes are durably appended to GitHub issue **#153**. Important recent continuity anchors include:
@@ -569,39 +623,44 @@ Detailed research tranches and convergence passes are durably appended to GitHub
 - R&D-10F Rebuff — comment id **6009953713**
 - Layer-10 convergence — comment id **6010007429**
 - Global cross-layer convergence pass 1 — comment id **6010080039**
+- Convergence validation + packet derivation pass 1 — comment id **6010209031**
 
 The issue ledger is supporting detail. This file remains the **master chat-rollover / active-frontier continuity map** and must be updated as the programme moves.
 
 # Immediate next frontier
 
-# CONVERGENCE VALIDATION + IMPLEMENTATION PACKET DERIVATION
+# CONTROL-PLANE RELEASE SLOT -> KF-EXEC-AUTH-FAIL-CLOSED-001
 
-Global cross-layer convergence pass 1 is complete.
+The first implementation packet is fully derived but **not yet released**.
 
-The next legal work is **validation and packet derivation**, still research/control-plane preparation only.
+Packet:
+**KF-EXEC-AUTH-FAIL-CLOSED-001**
 
-Required next steps:
-1. validate the global convergence map against current live main and existing issue owners;
-2. identify stale/contradictory architecture claims and classify them explicitly;
-3. bind every candidate implementation tranche to an existing canonical owner/issue wherever possible;
-4. avoid creating duplicate programmes or replacement runtimes;
-5. choose the **smallest safe first implementation packet** based on:
-   - safety severity;
-   - dependency centrality;
-   - time sensitivity;
-   - blast radius;
-   - existing proof coverage;
-6. define exact files/invariants/negative controls/rollback for that packet;
-7. only then release execution through the normal control-plane authority path.
+Reason it is first:
+- critical safety severity;
+- high architectural leverage;
+- extremely small intended blast radius;
+- deterministic proofability;
+- directly closes a live fail-open authority defect.
 
-Current first-order packet candidates, NOT RELEASED:
-- critical autonomy fail-closed correction;
-- Langfuse 2026-11-16 compatibility / OTel foundation;
-- CognitiveFunction / structured-output honesty;
-- Context Genome M1 semantic contract;
-- capability/effect/account hardening;
-- evaluation/proof foundation;
-- context/tool trust-boundary admission;
-- durable idempotency/compensation/outcome verification.
+Current blocker:
+- PR #147 / KF-EXEC-ACTION-001 remains in the active admission path;
+- issue #110 per-packet authority queue is not yet proven live;
+- therefore a new application DIRECTIVE could reintroduce dispatch/shadowing ambiguity even without file overlap.
 
-Implementation remains parked until validation resolves ownership/dependency conflicts and a bounded packet is explicitly authorized.
+Release only when:
+1. ACTION-001 is admitted/checkpointed, or #110 becomes proven live;
+2. current main is re-read;
+3. the fail-open catch branch is still present;
+4. exact source/head binding is established;
+5. write-set conflict is rechecked;
+6. packet proof/negative-control contract is compiled.
+
+While held, legal work is read-only:
+- continue derivation of **KF-ASSURANCE-OTEL-LANGFUSE-COMPAT-001** under #130/#151;
+- reconcile stale architecture/docs findings;
+- do not widen ACTION-001;
+- do not create a duplicate Context Genome programme;
+- do not release new application mutation through #80.
+
+Implementation remains parked until the release gate above is satisfied.
