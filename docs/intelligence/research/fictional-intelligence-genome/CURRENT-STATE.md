@@ -327,6 +327,24 @@ Implementation requires:
 9. runtime effect evidenced where applicable;
 10. stale/parallel implementations disposed of.
 
+## Latest durable tranches
+
+- TRANCHE-INSTITUTIONAL-INTELLIGENCE-001.md — G100-G110 / AG27-AG34: plural values, scoped authority, authority conflict, non-transitive delegation, reason-giving, precedent, exceptions, reversibility, commitments, stewardship and institutional memory.
+- TRANCHE-DECEPTION-SELF-CORRECTION-001.md — G111-G125 / AG35-AG45: evidence-origin separation, source reliability, deception hypotheses, independent corroboration, cross-channel validation, adversarial perspective simulation, model-break detection, belief revision, rollback, epistemic quarantine, disclosure control, contradiction-seeking review, identity-preserving correction, manipulation-resistant goal admission and data/instruction/authority separation.
+
+### Newly strengthened candidate laws
+
+- DATA != INSTRUCTION != AUTHORITY.
+- Knowledge possession != disclosure authority.
+- Contradiction is evidence against a model, not something to suppress.
+- Being wrong must not threaten KEY identity.
+- Belief revision must preserve lineage.
+- High-impact claims should seek genuinely independent corroboration.
+- Review should search for disconfirming evidence, not merely supporting evidence.
+- Delegation does not imply unlimited re-delegation.
+- Long-horizon forecasting does not grant sovereignty.
+- Commitments require durable state beyond conversational context.
+
 ## Next extraction frontier
 
 High-value remaining weak regions:
