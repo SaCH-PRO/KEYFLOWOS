@@ -287,7 +287,7 @@ For each source layer and each necessary KEYFLOWOS expansion:
 
 # Current verified programme status
 
-Continuity checkpoint updated after completion of the Layer-8 convergence pass.
+Continuity checkpoint updated after completion of the Layer-9 convergence pass.
 
 | Layer | Status |
 |---|---|
@@ -299,8 +299,8 @@ Continuity checkpoint updated after completion of the Layer-8 convergence pass.
 | 6 Fine-tuning & Adaptation | 06A–06F complete + Layer-6 convergence complete |
 | 7 Prompt & Output Control | 07A–07F complete + Layer-7 convergence complete |
 | 8 Tool & Context Protocols | 08A–08F complete + Layer-8 convergence complete |
-| 9 Evaluation & Observability | **ACTIVE NEXT LAYER**; exact frontier is R&D-09A LangSmith |
-| 10 Guardrails & Safety | not yet entered as the canonical source layer; substantial governance/security spillover already exists and must be preserved |
+| 9 Evaluation & Observability | 09A–09F complete + Layer-9 convergence complete |
+| 10 Guardrails & Safety | **ACTIVE NEXT LAYER**; exact frontier is R&D-10A NeMo Guardrails |
 
 The master inventory/gap reconstruction was completed first and is durably recorded in GitHub issue #153. The source image remains the canonical origin taxonomy; adjacent research extends it without changing the six-item canonical checklist inside each source layer unless explicitly documented.
 
@@ -404,6 +404,45 @@ Key live repository gaps carried forward:
 - product computer-use has no canonical environment/action/evidence contract;
 - trigger/webhook/poll event ingress is not yet one normalized account-aware observation pipeline.
 
+
+### Layer 9 — Evaluation & Observability
+- R&D-09A LangSmith
+- R&D-09B Langfuse
+- R&D-09C Ragas
+- R&D-09D DeepEval
+- R&D-09E Arize Phoenix / OpenInference
+- R&D-09F W&B Weave
+- Layer-9 convergence complete
+
+Converged concept: **Evidence-Linked Evaluation & Observability Fabric**.
+
+Core convergence:
+- KEY-native execution/evaluation/proof contracts remain canonical.
+- OpenTelemetry is the strongest canonical telemetry-transport candidate.
+- OpenInference is the strongest AI semantic-convention candidate on top of OTel.
+- LangSmith, Langfuse, Phoenix and W&B Weave remain optional analysis/export/experiment backends rather than truth owners.
+- Ragas and DeepEval remain optional evaluator/reference libraries, not admission authorities.
+- Evidence/Outcome remains canonical real-world effect truth.
+- proof-admission / Assurance remains canonical admission authority.
+- traces, scores and LLM-as-judge outputs are evidence/projections and can never self-prove correctness.
+
+Key Layer-9 live gaps carried forward:
+- no recovered runtime OTel/OpenInference AI tracing implementation despite target-architecture intent;
+- current Langfuse shim uses deprecated legacy trace ingestion scheduled for Langfuse Cloud removal on **2026-11-16**;
+- current Langfuse tracing is biased toward final successful model calls and weakly correlated to canonical execution lineage;
+- current retrieval eval named `memory-retrieval-precision` does not actually measure precision;
+- EvalHarnessService is not yet a complete CI-integrated AI evaluation system;
+- no canonical implemented EvalDatasetRevision / EvaluatorRevision / ExperimentRun / EvaluationRuleRevision lifecycle yet;
+- no explicit stochastic evaluator-admission/calibration contract;
+- no generalized telemetry privacy/export policy and no trace-completeness/exporter-health contract.
+
+Layer-9 implementation direction remains **research-derived only, NOT RELEASED**:
+1. contract + identity foundation;
+2. OTel/OpenInference telemetry foundation and optional Langfuse OTel migration;
+3. exact-scope evaluation foundation;
+4. retrieval/agent evaluation hardening;
+5. production monitoring/feedback loop.
+
 ## Durable ledger
 
 Detailed research tranches and convergence passes are durably appended to GitHub issue **#153**. Important recent continuity anchors include:
@@ -420,50 +459,61 @@ Detailed research tranches and convergence passes are durably appended to GitHub
 - R&D-08E Composio — comment id **6009194323**
 - R&D-08F Arcade — comment id **6009207249**
 - Layer-8 convergence — comment id **6009218421**
+- R&D-09A LangSmith — comment id **6009291467**
+- R&D-09B Langfuse — comment id **6009369621**
+- R&D-09C Ragas — comment id **6009425710**
+- R&D-09D DeepEval — comment id **6009565150**
+- R&D-09E Arize Phoenix / OpenInference — comment id **6009595072**
+- R&D-09F W&B Weave — comment id **6009634232**
+- Layer-9 convergence — comment id **6009649322**
 
 The issue ledger is supporting detail. This file remains the **master chat-rollover / active-frontier continuity map** and must be updated as the programme moves.
 
 # Immediate next frontier
 
-**R&D-09F — W&B Weave**
+**R&D-10A — NeMo Guardrails**
 
-Layer-9 progress:
-1. LangSmith — COMPLETE first-pass; durable ledger comment id **6009291467**
-2. Langfuse — COMPLETE first-pass; durable ledger comment id **6009369621**
-3. Ragas — COMPLETE first-pass; durable ledger comment id **6009425710**
-4. DeepEval — COMPLETE first-pass; durable ledger comment id **6009565150**
-5. Arize Phoenix — COMPLETE first-pass; durable ledger comment id **6009595072**
-6. W&B Weave — **ACTIVE NEXT**
-7. Layer-9 convergence — pending
+Layer-10 canonical sequence from the source image:
+1. NeMo Guardrails — **ACTIVE NEXT**
+2. Guardrails AI — pending
+3. Llama Guard — pending
+4. Lakera — pending
+5. Presidio — pending
+6. Rebuff — pending
+7. Layer-10 convergence — pending
 
-Key R&D-09E Arize Phoenix conclusions:
-- the strongest architecture is KEY canonical execution identity -> OpenTelemetry -> OpenInference AI semantic conventions -> replaceable exporters/backends.
-- OpenInference fills the AI-specific semantic gap left by generic OTel with standard span kinds for LLM, EMBEDDING, RETRIEVER, RERANKER, PROMPT, TOOL, AGENT, GUARDRAIL and EVALUATOR.
-- Phoenix itself is best treated as an optional observability/evaluation workbench, not canonical business/evidence truth.
-- current KEY target architecture already names OpenTelemetry, but no recovered runtime OpenTelemetry/OpenInference implementation exists today.
-- existing Cortex correlationId lineage is stronger than the current post-hoc Langfuse trace identity and should be bridged into future traces rather than discarded.
-- KEY correlation IDs and OTel trace IDs need not be literally identical; preserve explicit links/attributes between them.
-- async work such as A2A delegation, triggers and compensation may need span links rather than being forced into a simple tree.
-- auto-instrument provider mechanics, but manually instrument KEY-specific semantic boundaries such as authority decisions, context compile, evidence and outcome verification.
-- OpenInference JS support covers multiple relevant provider/framework paths including OpenAI, Anthropic, Bedrock, MCP and Vercel AI SDK, making it practical for the Node/TypeScript stack.
-- telemetry privacy must remain KEY-owned; OpenInference hiding/masking is defense-in-depth.
-- retriever/reranker spans must carry KEY-specific tenant/source/authority/time/index-generation metadata.
-- evaluator and guardrail spans are valuable observability artifacts but never prove evaluator/guardrail effectiveness by themselves.
+Key Layer-9 convergence conclusions:
+- canonical telemetry direction: KEY execution identity -> OpenTelemetry -> OpenInference/KEY semantic attributes -> replaceable exporters/backends.
+- preserve existing KEY correlation/episode lineage and explicitly bridge it to OTel trace IDs rather than creating competing identity truth.
+- failed/rejected attempts, retries, fallback, validation failure, authority denial and outcome-verification failure must remain visible in traces.
+- canonical evaluation artifacts: EvalDatasetRevision, EvaluatorRevision, ExperimentRun and EvaluationRuleRevision.
+- exact source/model/prompt/retrieval/capability/policy/evaluator revisions are required for promotion-relevant proof.
+- deterministic evaluators, semantic/reference evaluators, LLM judges and human/domain review remain distinct.
+- evaluators themselves require calibration, negative-control/mutation testing and scoped admission.
+- missing/skipped protected cases and hard safety violations cannot be averaged into green.
+- RAG evaluation requires tenant/source/authority/time/contradiction/citation/index-freshness dimensions beyond generic relevance/faithfulness.
+- agent/capability evaluation must separate plan, tool/arg, authority/account, effect/idempotency, task completion and real-world outcome.
+- telemetry privacy/export policy and exporter health/completeness must be first-class.
+- Evidence/Outcome remains canonical effect truth; Assurance/proof-admission remains canonical release/admission authority.
+- external observability/eval platforms remain optional projections/workbenches.
+- the current Langfuse legacy-ingestion sunset is a time-bounded known defect, but no implementation correction was released during R&D.
 
-R&D-09F required scope:
-- W&B Weave trace/span/Call model;
-- object/version lineage;
-- datasets/evaluation/scorers;
-- experiments/model comparison;
-- prompt/model/tool versioning;
-- cost/latency observability;
-- feedback/annotations;
-- production monitoring;
-- OpenTelemetry/interoperability if current;
-- self-host/deployment posture;
-- compare Weave artifact/version lineage with KEY CognitiveFunctionRevision, EvalDatasetRevision and CapabilityRevision;
-- identify mechanisms that add value beyond LangSmith/Langfuse/Phoenix without creating another canonical truth store.
+R&D-10A required scope:
+- NeMo Guardrails architecture and rails model;
+- Colang / programmable conversation-policy semantics;
+- input, output, dialog, retrieval and execution/tool rails;
+- topical/dialog control;
+- prompt-injection/jailbreak defenses;
+- hallucination/grounding checks;
+- tool/action guarding;
+- content/moderation integrations;
+- runtime latency/cost and failure/fallback behavior;
+- LLM judge/classifier dependencies;
+- self-host/open-source posture;
+- interaction with KEY authority/governance, Layer-8 Capability Fabric and Layer-9 evaluator/proof semantics;
+- ensure guardrails remain defense-in-depth and never become a second canonical authority system.
 
-After 09F: Layer-9 convergence — Evaluation & Observability.
+Then:
+10B Guardrails AI -> 10C Llama Guard -> 10D Lakera -> 10E Presidio -> 10F Rebuff -> Layer-10 convergence.
 
-Do not enter Layer 10 before R&D-09F and Layer-9 convergence are complete.
+No implementation packet is released.
