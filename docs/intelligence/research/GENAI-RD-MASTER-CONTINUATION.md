@@ -389,34 +389,43 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-08A — MCP**
+**R&D-08B — Function Calling**
 
-Canonical Layer-8 sequence from the source image:
-1. MCP
-2. Function calling
-3. A2A
-4. Computer use
-5. Composio
-6. Arcade
-7. Layer-8 convergence
+Layer-8 progress:
+1. MCP — COMPLETE first-pass; durable ledger comment id **6008878520**
+2. Function calling — **ACTIVE NEXT**
+3. A2A — pending
+4. Computer use — pending
+5. Composio — pending
+6. Arcade — pending
+7. Layer-8 convergence — pending
 
-R&D-08A required scope:
-- MCP protocol architecture;
-- host/client/server roles;
-- tools, resources and prompts;
-- transports;
-- capability negotiation;
-- sampling;
-- roots;
-- elicitation;
-- authentication and security boundaries;
-- local vs remote servers;
-- connector lifecycle/interoperability;
-- comparison with the existing KEYFLOWOS MCP module;
-- whether MCP should remain a protocol adapter over KEY's Capability Fabric rather than become KEY's internal tool registry;
-- relationship to phone/computer/device/app integration and the Development Organism.
+Key R&D-08A MCP conclusions now durable:
+- MCP is an interoperability protocol adapter over KEY's Capability Fabric, not KEY's internal authority/tool registry.
+- current KEY MCP module direction (remote Streamable HTTP -> Flow bridge) is worth retaining and hardening rather than replacing.
+- current MCP implementation has a real tenant-isolation discrepancy: `listBridgedTools(_businessId)` ignores businessId, server/config caches are global, and `callTool()` receives no businessId despite comments claiming per-business isolation.
+- static bearer-token/env auth is insufficient for per-business/user connector identity; OAuth/scoped credential lifecycle needs later product-grade treatment.
+- prefix-based read/write risk inference is not sufficient as an authority mechanism.
+- MCP output truncation is a resource bound, not a prompt-injection/security boundary.
+- tools, resources and prompts require different KEY admission paths.
+- current 2026 MCP SDK/spec direction deprecates roots and sampling for new designs, so KEY must not build new core architecture around them.
+- central API should retain remote-HTTP-only default; local stdio MCP belongs, if ever, in bounded local/developer/device environments.
+- MCP expands available hands, not authority.
 
-Do not skip ahead to Function Calling or implementation before R&D-08A is complete.
+R&D-08B required scope:
+- provider-native tool/function calling semantics;
+- schema vs action authority;
+- parallel tool calls;
+- forced/required tool selection;
+- tool-result messages;
+- retries and duplicate effects;
+- argument streaming;
+- provider portability;
+- deterministic tool routers vs model selection;
+- current FLOW_TOOLS + ModelGateway comparison;
+- how function calling differs from MCP and why MCP transport/discovery must not be conflated with model tool-selection semantics.
+
+Do not skip ahead to A2A or implementation before R&D-08B is complete.
 
 # Active implementation posture
 
