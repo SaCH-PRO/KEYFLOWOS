@@ -29,9 +29,9 @@ No item may be described at a higher maturity than its evidence supports.
 | Development-speed laws | CROSS_DOMAIN_TESTED | speed traces 001-004C | promote individual laws only after architecture anti-duplication |
 | Repository Evolution Analyzer | CONTRACT IDEA ONLY | hotspot traces 002/002B | define machine-readable output + offline extractor |
 | Proof Planner | CONTRACT IDEA ONLY | proof-funnel trace 003 | define proof-profile registry + offline selection prototype |
-| ContextBundle | PROTOTYPED (CODE COMMITTED; EXECUTION PROOF PENDING) | Trace 004-004C + schema + compile-context.mjs + 3 fixtures | execute test suite and negative controls in repository runtime |
-| Context Compiler | PROTOTYPED (NOT INTEGRATED) | research-only compile-context.mjs + tests + CONTROL/TENANT/EXTFX fixtures | execute proof suite; fix failures; measure output/context reduction |
-| Claude worker integration | NOT AUTHORIZED | current worker inspected only | do not integrate until compiler proof succeeds |
+| ContextBundle | PROTOTYPED | Trace 004-004E + exact-head 16/16 suite + deterministic CONTROL/TENANT/EXTFX outputs + 36/36 historical critical-context checklist | enter architecture anti-duplication/convergence review |
+| Context Compiler | PROTOTYPED (NOT INTEGRATED) | Trace 004E; exact semantic head 709aa0f37a14124ed289dfca5ceaf5cf75e83183; authority RED->GREEN control; deterministic three-domain dry run | architecture-forensics promotion review; resolve profile semantics and composite runtime dependency before implementation |
+| Claude worker integration | NOT AUTHORIZED | offline compiler proof complete; architecture promotion and prospective validation pending | do not integrate until canonical architecture promotion and prospective dry-run gate pass |
 | KEY native context capability | RESEARCH DIRECTION | book/repo synthesis | defer until development-system primitive is proven |
 
 ## Anti-fake-green rules
@@ -63,9 +63,21 @@ Only build the reusable asset when expected future reduction in complexity, work
 
 ## Immediate frontier
 
-1. Build research-only deterministic ContextBundle compiler prototype.
-2. Validate determinism/provenance/stale-source handling.
-3. Run it against historical control-plane and TENANT fixtures.
-4. Add a third-domain dry run (EXTFX preferred).
-5. Measure context size and missing-critical-context rate against broad baseline.
-6. If evidence remains positive, enter canonical architecture-forensics for promotion.
+Completed R&D proof frontier:
+
+1. deterministic ContextBundle compiler prototype — COMPLETE;
+2. determinism/provenance/stale-source handling — COMPLETE for v0 fixtures;
+3. CONTROL + TENANT dry runs — COMPLETE;
+4. EXTFX third-domain dry run — COMPLETE;
+5. historical critical-context sufficiency measurement — 36/36;
+6. source-authority mutation sensitivity — COMPLETE.
+
+Current frontier:
+
+1. enter canonical architecture-forensics;
+2. run anti-duplication/convergence review against current architecture and production primitives;
+3. resolve proof-profile selection semantics;
+4. resolve composite YAML-codec dependency ownership/reproducibility;
+5. define canonical target contract if the candidate survives;
+6. design prospective measurement;
+7. keep Claude-worker integration blocked until architecture promotion.
