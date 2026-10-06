@@ -4,14 +4,15 @@ directive_comment_id: 6010541876
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001   # 6010541876; PACKET_RELEASE
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011507550; finding AUTH-FC-F1 on 65706fcc
-  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003   # 6018421547; the fallback reading of 8987f6db; the current authority
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003   # 6018421547; the fallback reading of 8987f6db; authorized the control binding
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022210803; the same reading with its three evidence fields at top level; the current authority
 in_reply_to: CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001
 ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-001
 ack_comment_id: 6010899764
-current_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003
-current_authority_comment_id: 6018421547
-current_authority_ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-003
-current_authority_ack_comment_id: 6018509327
+current_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
+current_authority_comment_id: 6022210803
+current_authority_ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
+current_authority_ack_comment_id: 6022283475
 pr_number: 155
 source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
 implementation_branch: impl/kf-exec-auth-fail-closed-001
@@ -103,8 +104,8 @@ review_finding_AUTH_FC_F1:   # CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001
     - a LIVE negative control so weakening the new shape validation makes the named malformed-verdict test fail by assertion
   scope: the same three semantic and proof files only
 
-current_authorization:   # CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003
-  control_artifacts: AUTHORIZED_TO_BIND
+current_authorization:   # CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
+  control_artifacts: update the review evidence of the return artifact to cite 6022210803; a new control-only head
   semantic_mutation: NOT_AUTHORIZED
   merge: NOT_AUTHORIZED
 

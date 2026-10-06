@@ -4,14 +4,16 @@ directive_comment_id: 6010541876
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001   # 6010541876; PACKET_RELEASE
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011507550; finding AUTH-FC-F1 on 65706fcc
-  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003   # 6018421547; the fallback reading of 8987f6db; the current authority
-current_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003
-current_authority_comment_id: 6018421547
-ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-003
-ack_comment_id: 6018509327
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003   # 6018421547; the fallback reading of 8987f6db; authorized the control binding
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022210803; the same reading with its three evidence fields at top level; the current authority
+current_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
+current_authority_comment_id: 6022210803
+ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
+ack_comment_id: 6022283475
 prior_ack_message_ids:
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-001   # 6010899764
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011551504
+  - CC-ACK-GENAI-AUTH-FAIL-CLOSED-003   # 6018509327
 progress_message_ids:
   - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-001   # 6011188304; IMPLEMENTING to PROVING at 65706fcc, and two discoveries
   - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-002   # 6011325128; workflow results at 65706fcc; the primary reviewer could not run
@@ -22,7 +24,8 @@ contradiction_message_ids: []
 # mutation. That RETURN is the final evidence envelope.
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
-previous_return_message_ids: []
+previous_return_message_ids:
+  - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-001
 never_posted_return_message_ids: []
 source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
 source_head: 8987f6db21a839f90c88e33479768d81cef508e9
@@ -48,16 +51,15 @@ summary: >
   boolean requiresApproval and a tier of manual, supervised or full, leaves
   the whole batch non-executable, keeps the conversational answer, and is
   recorded in STEP_5_CHECK_AUTONOMY as authority_check_failed_closed. Two
-  semantic commits and three files. This commit changes only the two control
-  artifacts.
+  semantic commits and three files. The two commits after them change only
+  the two control artifacts. This one records the review message that the
+  admission path can read; see semantic_head_review.
 
 health_reason: >
   YELLOW is about process, not code. The primary reviewer could not run at
-  either semantic head. The derived programme projection is stale, because
-  the fold does not know the control_effect values of the two reviews of this
-  packet. The review message that carries the fallback reading does not
-  expose its three evidence fields where the admission path reads them. See
-  admission_notes.
+  either semantic head or at the first artifact head. The derived programme
+  projection is stale, because the fold does not know the control_effect
+  value of the first review of this packet. See admission_notes.
 
 characterization:
   basis: the directive's live_defect, re-read at ac3a6384 before editing
@@ -240,6 +242,15 @@ ci:
     37433292809 failed on the two branch-artifact tests for the same reason.
     Both failures were the control artifacts of main and are not counted as
     application results.
+  previous_head_26111633: >
+    The first artifact head, reported in the earlier RETURN (6019191970) from
+    the live runs, all attempt 1. CI/CD Pipeline run 37480235161 succeeded,
+    with Run Tests reporting server 4,428 of 4,428 and web 210 of 210. Agent
+    Control Gate run 37480234895 succeeded. Branch divergence runs
+    37480234928 and 37480229449 succeeded. DAST (HawkScan) run 37480235001
+    succeeded. Agent Control Worker Proof run 37480234966 succeeded, with 157
+    of 157 controls live and one named skip in each job. The primary reviewer
+    was NOT_RUN there too (PR review 5430020110).
   this_head: PENDING. The workflows run on the head that carries this file and are read from the live runs for the RETURN.
 
 ai_review:
@@ -248,7 +259,7 @@ ai_review:
   fallback: chatgpt
   self_review: none; Claude does not review this change
   primary_at_semantic_head: NOT_RUN, reason quota_exhausted (PR review 5425457324 at 8987f6db); it is never counted towards the gate
-  fallback_at_semantic_head: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003 (6018421547), written by ChatGPT for 8987f6db; see semantic_head_review
+  fallback_at_semantic_head: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004 (6022210803), written by ChatGPT for 8987f6db; see semantic_head_review
   at_the_head_that_carries_this_file: PENDING
 
 semantic_head_review:   # the reading of 8987f6db, before this commit; the reading of the head that carries this file is PENDING
@@ -267,8 +278,8 @@ semantic_head_review:   # the reading of 8987f6db, before this commit; the readi
       outcome: PASS
       reason: null
       unresolved_substantive_findings: []
-      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6018421547
-      message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6022210803
+      message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
   primary_text: >
     The bot reviewed nothing. It said it was unable to review this pull
     request because the user who requested it has reached their quota limit.
@@ -278,32 +289,41 @@ semantic_head_review:   # the reading of 8987f6db, before this commit; the readi
     CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001 (6011507550) read 65706fcc
     and required a change, finding AUTH-FC-F1. 8987f6db is the correction.
   fallback_reading: >
-    ChatGPT read main..8987f6db and the 65706fcc..8987f6db correction. Its
-    message records, under a semantic_review mapping, reviewed_head 8987f6db,
-    the outcome recorded above and unresolved_substantive_findings 0, with
-    the primary reviewer NOT_RUN and not counted. Claude did not review this
-    change and records the outcome only as ChatGPT wrote it.
+    ChatGPT read main..8987f6db and the 65706fcc..8987f6db correction, and
+    first recorded the reading in CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003
+    (6018421547), with the primary reviewer NOT_RUN and not counted. Message
+    6022210803 keeps that reading and states it in three top-level fields:
+    reviewed_head 8987f6db, the outcome recorded above and
+    unresolved_substantive_findings 0. Claude did not review this change and
+    records the outcome only as ChatGPT wrote it.
+  evidence_location_change: >
+    The first artifact head (26111633) cited 6018421547 for the fallback
+    entry. This head cites 6022210803 instead, as that message directs.
+    Nothing else in the two entries changed.
   not_covered: >
     That reading is about the semantic head. The head that carries this file
     differs from it only in the two artifact files, and its own reading is
     PENDING in exact_head_proof.
+  record_ownership: >
+    These entries have the shape of the admission record, and they are not
+    that record. The semantic_review block and review_status are written at
+    admission by ChatGPT, and this file carries neither.
 
 admission_notes:   # for the reviewer; none of these is resolved or decided here
   review_evidence_fields: >
     scripts/agent-control/lib/semantic-review.mjs reads three top-level
     one-line fields from the cited #80 comment. Read through
-    chatgptReviewEvidence, comment 6018421547 is valid authority and gives
-    null for reviewed_head, for the outcome and for the findings count,
-    because the message nests them under semantic_review and names the
-    outcome key outcome. An admission record citing that comment as
-    evidence_location would fail closed as live_evidence_contradicts. Reported
-    in the ACK (6018509327).
+    chatgptReviewEvidence before this commit was written, comment 6022210803
+    is valid authority and gives reviewed_head 8987f6db, the outcome recorded
+    in semantic_head_review and a findings count of 0. Comment 6018421547 is
+    valid authority and gives null for all three, because it nests them under
+    a mapping, so a record citing it would fail closed as
+    live_evidence_contradicts. Reported in the ACK (6022283475).
   derived_projection: >
     status.mjs --verify reports DERIVED_STATE_STALE_AUTHORITY. The fold stops
     at CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001 with
-    CONTROL_EFFECT_UNKNOWN for BOUNDED_CORRECTION, and
-    AUTHORIZE_CONTROL_BINDING is not a known effect either.
-    programme-state.yaml is not touched by this packet.
+    CONTROL_EFFECT_UNKNOWN for BOUNDED_CORRECTION, so it does not reach the
+    two later reviews. programme-state.yaml is not touched by this packet.
 
 scope_ledger:
   declared:
@@ -318,13 +338,14 @@ scope_ledger:
   resolved: all seven obligations and AUTH-FC-F1, at 8987f6db
   remaining:
     - the required workflows on the head that carries this file
-    - the RETURN
+    - the RETURN for CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
     - ChatGPT admission
   added_inside_the_packet_boundary: []
   deferred: []
   dropped: []
   superseded:
     - semantic head 65706fcc, by 8987f6db
+    - artifact head 26111633, by the head that carries this file
 
 deviations_from_packet: []
 
