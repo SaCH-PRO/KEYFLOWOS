@@ -425,36 +425,42 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-09A — LangSmith**
+**R&D-09B — Langfuse**
 
-Layer-9 canonical sequence from the source image:
-1. LangSmith — **ACTIVE NEXT**
-2. Langfuse — pending
+Layer-9 progress:
+1. LangSmith — COMPLETE first-pass; durable ledger comment id **6009291467**
+2. Langfuse — **ACTIVE NEXT**
 3. Ragas — pending
 4. DeepEval — pending
 5. Arize Phoenix — pending
 6. W&B Weave — pending
 7. Layer-9 convergence — pending
 
-R&D-09A required scope:
-- tracing/run trees and span semantics;
-- datasets and experiments;
-- online vs offline evaluation;
-- feedback/annotation;
-- evaluators and LLM-as-judge;
-- prompt/model/tool observability;
-- production monitoring;
-- experiment comparison;
-- lineage/correlation;
+Key R&D-09A LangSmith conclusions:
+- traces/run trees are execution evidence and diagnostic projections, not canonical business truth.
+- KEY needs stable correlation IDs created before execution and propagated through cognition, retrieval, model, tools, approvals, effects and evidence.
+- current Langfuse trace IDs are generated post-completion and are not yet canonical execution lineage.
+- businessId and principal/user identity must remain distinct; current Langfuse metadata collapses businessId into vendor userId.
+- OpenTelemetry is a strong vendor-neutral telemetry transport candidate.
+- datasets/experiments, production-trace-to-regression-dataset loops and experiment comparison are strong mechanisms to absorb.
+- evaluator classes must remain separate: deterministic/code, reference-based semantic, LLM-as-judge and human/domain review.
+- LLM judges require calibration, negative controls, order-bias checks and admitted scope before gating promotion.
+- online eval sampling/coverage must be visible; skipped/missing evaluators can never be green.
+- existing Development Organism proof-admission is stronger than generic dashboard evaluation because it rejects missing/skipped/stale proof and mutation-tests evaluators.
+- privacy/redaction/export policy must precede deeper prompt/tool payload tracing.
+- external observability sinks may degrade safely, but required local evidence/outcome receipts cannot always be fire-and-forget.
+
+R&D-09B required scope:
+- Langfuse trace/span/session/user/observation model;
+- prompt management/versioning;
+- datasets/evals/scores;
+- LLM-as-judge and evaluator model;
+- tracing ingestion and OpenTelemetry support;
+- self-hosting / sovereignty;
 - privacy/redaction;
-- current KEY Evidence/Outcome/Assurance architecture comparison;
-- whether LangSmith mechanisms should be absorbed natively without introducing a second canonical telemetry/evaluation truth system.
+- cost/usage;
+- compare against the existing KEY LangfuseService shim;
+- determine whether to extend current integration, make it vendor-neutral, or keep it as a replaceable exporter;
+- ensure Langfuse remains observability/eval infrastructure, not canonical Evidence/Outcome/Assurance truth.
 
-Layer-9 must preserve the programme's no-fake-green standard:
-- evaluator results are not self-proving;
-- LLM-as-judge requires calibration and negative controls;
-- traces are evidence/projections, not canonical business truth;
-- observability must bind exact model/prompt/tool/capability revisions and downstream effects;
-- hidden skipped/failed evals cannot be summarized as green.
-
-Do not skip ahead to Langfuse or implementation before R&D-09A is complete.
+Do not skip ahead to Ragas or implementation before R&D-09B is complete.
