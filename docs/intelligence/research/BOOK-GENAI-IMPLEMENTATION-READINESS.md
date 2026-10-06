@@ -254,7 +254,7 @@ Do not feed directly into autonomous code mutation.
 
 Candidate id: `KF-KEY-ACTION-UNDERSTANDING-001`  
 Priority: P1/P2 product trust  
-State: CONTRACT_READY / NEEDS WRITE-SET TRACE BEFORE RELEASE  
+State: IMPLEMENTATION_READY / HELD  
 Owner: existing `KeyActionProposal` + action boundary + trust/explanation/user projection  
 Does not own: authority, execution, outcome truth
 
@@ -318,7 +318,7 @@ ACTU-P08 UI/signifier tests distinguish confirmation-required vs approval-requir
 
 ## Stop condition
 
-Before release, complete a microscopic trace of every current UI/API consumer of action proposals and trust explanations to avoid adding another competing projection.
+Microscopic consumer/write-set trace is complete in `traces/ACTION-UNDERSTANDING-TRACE-001.md`. Revalidate it against exact release-base main before authority is granted.
 
 ---
 
@@ -360,7 +360,7 @@ Do not create a parallel evaluation harness.
 3. `KF-META-CONTEXT-COMPILER-LIVE-001` can proceed in parallel only if its worker/control write set is conflict-free; otherwise hold.
 4. `KF-META-BEHAVIORAL-ARCH-001` is the safest independent offline implementation candidate and can be built without runtime authority.
 5. `KF-COG-ROUTING-HONESTY-001` after exact write-set/owner collision check with cognition work.
-6. `KF-KEY-ACTION-UNDERSTANDING-001` after consumer trace.
+6. `KF-KEY-ACTION-UNDERSTANDING-001` is now implementation-ready after the consumer trace; sequence by exact write-set collision and product priority.
 7. Context Genome / Assurance findings remain under their existing owners.
 
 ## 3. Readiness conclusion
