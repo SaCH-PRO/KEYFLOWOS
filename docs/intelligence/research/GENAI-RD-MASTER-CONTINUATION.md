@@ -425,44 +425,41 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-09C — Ragas**
+**R&D-09D — DeepEval**
 
 Layer-9 progress:
 1. LangSmith — COMPLETE first-pass; durable ledger comment id **6009291467**
 2. Langfuse — COMPLETE first-pass; durable ledger comment id **6009369621**
-3. Ragas — **ACTIVE NEXT**
-4. DeepEval — pending
+3. Ragas — COMPLETE first-pass; durable ledger comment id **6009425710**
+4. DeepEval — **ACTIVE NEXT**
 5. Arize Phoenix — pending
 6. W&B Weave — pending
 7. Layer-9 convergence — pending
 
-Key R&D-09B Langfuse conclusions:
-- Langfuse v4 is observation-first and OpenTelemetry-based, strengthening OTel as the likely vendor-neutral telemetry transport for KEY.
-- current KEY LangfuseService is only shallow model-call telemetry, not end-to-end execution tracing.
-- current shim uses the deprecated /api/public/ingestion trace-create/generation-create path; Langfuse Cloud removes legacy trace ingestion on **2026-11-16**, creating a concrete near-term compatibility defect.
-- tracing currently records only the final successful generation, omitting failed provider attempts, retries and contract-invalid outputs.
-- trace IDs are generated post-completion, so they cannot serve as canonical execution lineage.
-- current ModelGateway does not materially propagate sessionId into Langfuse/LLMProviderCost.
-- current shim maps businessId to vendor userId, conflating tenant and principal semantics.
-- the current metadata-only payload is privacy-conservative and should remain the default telemetry tier unless explicit export policy authorizes deeper payload capture.
-- PromptVersion exists in the repo but is currently unowned/unreferenced; Langfuse prompt management must not become an out-of-band cognition authority.
-- external telemetry export should remain optional/degrade-safe, but exporter health/drop/coverage must itself be observable.
-- Langfuse scores/evals/experiments are useful analysis surfaces, but KEY's Evidence/Outcome/Assurance and exact-scope proof admission remain canonical.
+Key R&D-09C Ragas conclusions:
+- retrieval quality must be decomposed into context precision, context recall, faithfulness/groundedness, response relevance, factual correctness and noise sensitivity rather than collapsed into one RAG score.
+- KEY needs extra blocking dimensions absent from generic RAG metrics: source correctness, tenant isolation, authority eligibility, temporal validity, contradiction handling, citation resolvability and index freshness.
+- current EvalHarnessService suite named memory-retrieval-precision does **not actually measure precision**; it only checks that results are arrays with numeric rankScore values.
+- recall requires immutable reference source/fact sets tied to a dataset revision, tenant fixture, temporal cutoff and index generation.
+- faithfulness is not truth: an answer can be perfectly supported by stale/wrong context and still be business-invalid.
+- SemanticMemoryService/UnifiedMemoryRetrievalService can degrade failures to empty results, so eval must distinguish NO_MATCH from retrieval infrastructure failure.
+- partial retrieval-channel/store failures must be visible in eval inputs/results.
+- hard-coded retrieval weights in UnifiedMemoryRetrievalService need benchmark-driven validation, not assumption.
+- synthetic testset/knowledge-graph generation is useful for multi-hop coverage but cannot be sole admission truth.
+- cross-tenant retrieval, forbidden-source use and other hard safety violations must be zero-tolerance gates, not averaged metrics.
+- current repo has no recovered GraphRAG implementation; graph-aware retrieval remains a supplemental R&D frontier.
 
-Immediate known defect carried forward:
-**LF-GAP-01 — current Langfuse legacy trace ingestion sunsets on 2026-11-16 and needs a separately authorized migration to OTel/current ingestion after Layer-9 convergence.**
+R&D-09D required scope:
+- unit-test-style LLM evaluation;
+- G-Eval and custom criteria;
+- RAG metrics and hallucination/faithfulness;
+- agent/tool/trajectory evals;
+- red teaming/adversarial evaluation if currently supported;
+- synthetic/adversarial datasets;
+- test-case/metric thresholds;
+- CI integration;
+- evaluator/model dependencies;
+- compare DeepEval's pytest-style workflow with KEY's proof-admission and mutation/negative-control harness;
+- determine what execution ergonomics are worth absorbing without making DeepEval a second admission authority.
 
-R&D-09C required scope:
-- RAG-specific evaluation taxonomy;
-- retrieval/context precision and recall;
-- faithfulness/groundedness;
-- answer relevance/correctness;
-- reference-free vs reference-based metrics;
-- synthetic testset generation;
-- LLM judge/evaluator dependencies;
-- knowledge-graph/test-generation concepts;
-- current multi-turn/agent evaluation support if present;
-- compare with KEY's Layer-4/5 retrieval fabric, Context Genome, GraphRAG supplement and Assurance architecture;
-- ensure RAG metrics do not hide source correctness, authority, temporal validity, contradiction handling or tenant leakage.
-
-Do not skip ahead to DeepEval or implementation before R&D-09C is complete.
+Do not skip ahead to Arize Phoenix or implementation before R&D-09D is complete.
