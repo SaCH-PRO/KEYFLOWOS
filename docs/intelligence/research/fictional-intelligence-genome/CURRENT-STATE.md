@@ -345,19 +345,36 @@ Implementation requires:
 - Long-horizon forecasting does not grant sovereignty.
 - Commitments require durable state beyond conversational context.
 
+## Latest durable tranches
+
+- TRANCHE-NEGOTIATION-ECOLOGY-DISAGREEMENT-001.md — G126-G147 / AG46-AG58: negotiation boundaries, information asymmetry, manipulation signals, preference/value boundaries, ecological and second-order reasoning, internal belief plurality, evidence-weighted consensus, disagreement handling, partition reconciliation and stale actor models.
+- TRANCHE-COGNITIVE-LIFECYCLE-RESILIENCE-001.md — G148-G172 / AG59-AG74: curiosity, question generation, abstraction formation, creativity, self-directed learning, attention/compute economics, memory consolidation/forgetting, graceful degradation, capability health, failure isolation, checkpoint/recovery, failover, circuit breakers and safe mode.
+
+### Newly strengthened candidate laws
+
+- Private negotiation state must remain distinct from disclosed state.
+- Agent count does not substitute for independent evidence.
+- Unresolved disagreement is a valid state.
+- Strategic interpretations must not overwrite event history.
+- Inferred preferences must not become constitutional values.
+- Curiosity is bounded by value, cost, risk and relevance.
+- Abstraction requires compression value without loss of critical distinctions.
+- Prototype does not imply canonical adoption.
+- Degraded cognition must reduce autonomy, not silently preserve it.
+- Restart is not recovery.
+- Provider/model failover must preserve privacy, authority, provenance and task capability.
+- Memory compression is a projection and must not silently replace required underlying evidence.
+- Safe mode is a first-class cognitive state.
+
 ## Next extraction frontier
 
-High-value remaining weak regions:
-- moral reasoning under plural values;
-- conflict between multiple legitimate authorities;
-- institutional/legal reasoning;
-- long-horizon stewardship;
-- negotiation under asymmetric information;
-- deception resistance and manipulation detection;
-- creative model invention;
-- self-correction under mistaken world models;
-- ecological / market multi-agent dynamics;
-- explicit value-learning boundaries.
+High-value remaining weak regions before Genome v0.1 convergence:
+- explicit moral/legal reasoning and conflicts between legitimate authorities;
+- curiosity calibration and self-directed learning pressure tests;
+- resource/attention economics against live repo workflows;
+- memory lifecycle/forgetting against current Context Genome seams;
+- graceful degradation and recovery against current control-plane/runtime reality;
+- final cross-gene deduplication and candidate-law normalization.
 
 Candidate references for next tranches:
 - Culture Contact / Special Circumstances deeper pass
