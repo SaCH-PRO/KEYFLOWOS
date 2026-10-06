@@ -287,7 +287,7 @@ For each source layer and each necessary KEYFLOWOS expansion:
 
 # Current verified programme status
 
-Continuity checkpoint updated after completion of the Layer-7 convergence pass.
+Continuity checkpoint updated after completion of the Layer-8 convergence pass.
 
 | Layer | Status |
 |---|---|
@@ -298,8 +298,8 @@ Continuity checkpoint updated after completion of the Layer-7 convergence pass.
 | 5 Vector Databases | 05A–05F complete + Layer-5 convergence complete |
 | 6 Fine-tuning & Adaptation | 06A–06F complete + Layer-6 convergence complete |
 | 7 Prompt & Output Control | 07A–07F complete + Layer-7 convergence complete |
-| 8 Tool & Context Protocols | **ACTIVE NEXT LAYER**; exact frontier is R&D-08A MCP |
-| 9 Evaluation & Observability | not yet entered as the canonical source layer; substantial spillover/adjacent assurance work already exists and must be preserved |
+| 8 Tool & Context Protocols | 08A–08F complete + Layer-8 convergence complete |
+| 9 Evaluation & Observability | **ACTIVE NEXT LAYER**; exact frontier is R&D-09A LangSmith |
 | 10 Guardrails & Safety | not yet entered as the canonical source layer; substantial governance/security spillover already exists and must be preserved |
 
 The master inventory/gap reconstruction was completed first and is durably recorded in GitHub issue #153. The source image remains the canonical origin taxonomy; adjacent research extends it without changing the six-item canonical checklist inside each source layer unless explicitly documented.
@@ -375,6 +375,35 @@ Layer-7 hard boundaries:
 - ModelGateway remains the provider-routing owner;
 - third-party prompt-control frameworks are mechanism references, not adopted canonical runtimes.
 
+
+### Layer 8 — Tool & Context Protocols
+- R&D-08A MCP
+- R&D-08B Function Calling
+- R&D-08C A2A
+- R&D-08D Computer Use
+- R&D-08E Composio
+- R&D-08F Arcade
+- Layer-8 convergence complete
+
+Converged concept: **Governed Capability, Connector & Delegation Fabric**.
+
+Core conclusion:
+- native FLOW_TOOLS/capability semantics, connector/account truth, credentials, authority and evidence remain KEY-owned;
+- MCP is an external protocol adapter;
+- Function Calling is a bounded model proposal surface;
+- A2A is an external independent-agent delegation adapter;
+- Computer Use is a last-mile fallback actuator;
+- Composio and Arcade are reference architectures whose useful mechanisms are absorbed natively rather than onboarded as new canonical runtimes.
+
+Key live repository gaps carried forward:
+- MCP tenancy/business propagation is not yet faithful to its comments;
+- ConnectorRegistry and the newer KeyConnector stack overlap and need convergence;
+- connected-account truth/credentials remain fragmented across multiple surfaces;
+- FLOW_TOOLS needs richer effect/idempotency/dependency metadata before safe parallel write execution;
+- provider-level tool semantics are not fully normalized;
+- product computer-use has no canonical environment/action/evidence contract;
+- trigger/webhook/poll event ingress is not yet one normalized account-aware observation pipeline.
+
 ## Durable ledger
 
 Detailed research tranches and convergence passes are durably appended to GitHub issue **#153**. Important recent continuity anchors include:
@@ -384,50 +413,48 @@ Detailed research tranches and convergence passes are durably appended to GitHub
 - R&D-06A through 06F + Layer-6 convergence
 - R&D-07A through 07F + Layer-7 convergence
 - Layer-7 convergence comment id: **6008603830**
+- R&D-08A MCP — comment id **6008878520**
+- R&D-08B Function Calling — comment id **6008938834**
+- R&D-08C A2A — comment id **6008959914**
+- R&D-08D Computer Use — comment id **6009055442**
+- R&D-08E Composio — comment id **6009194323**
+- R&D-08F Arcade — comment id **6009207249**
+- Layer-8 convergence — comment id **6009218421**
 
 The issue ledger is supporting detail. This file remains the **master chat-rollover / active-frontier continuity map** and must be updated as the programme moves.
 
 # Immediate next frontier
 
-**R&D-08E — Composio**
+**R&D-09A — LangSmith**
 
-Layer-8 progress:
-1. MCP — COMPLETE first-pass; durable ledger comment id **6008878520**
-2. Function calling — COMPLETE first-pass; durable ledger comment id **6008938834**
-3. A2A — COMPLETE first-pass; durable ledger comment id **6008959914**
-4. Computer use — COMPLETE first-pass; durable ledger comment id **6009055442**
-5. Composio — **ACTIVE NEXT**
-6. Arcade — pending
-7. Layer-8 convergence — pending
+Layer-9 canonical sequence from the source image:
+1. LangSmith — **ACTIVE NEXT**
+2. Langfuse — pending
+3. Ragas — pending
+4. DeepEval — pending
+5. Arize Phoenix — pending
+6. W&B Weave — pending
+7. Layer-9 convergence — pending
 
-Key R&D-08D Computer Use conclusions:
-- computer use should be a governed last-mile interoperability/fallback actuator, not KEY's default integration strategy.
-- preferred hierarchy: internal API/service -> native connector -> MCP/API capability -> semantic browser automation (DOM/ARIA/CDP/Playwright) -> visual computer use -> raw OS control.
-- semantic browser control should be preferred over raw pixel coordinates where available; screenshots remain the universal fallback.
-- UI/screen/page content is untrusted input and cannot grant authority.
-- browser profiles/cookies are authority-bearing credentials requiring explicit ownership, origin and session policy.
-- secret entry should be brokered outside model-visible context.
-- downloads are ingress boundaries; uploads are egress boundaries.
-- consequential confirmation must be effect-based, not click-based.
-- screenshot/action provenance must include observation identity, viewport/scale and post-state verification.
-- current browser-use skill is a Development Organism capability, not a product computer-use runtime.
-- DeviceService is perception/ingestion, not device control; voice/phone modules are communications, not phone-OS control.
-- future desktop/mobile actuation should use a trusted local Device/Computer Agent boundary rather than direct cloud control of an owner's workstation.
-- final model text is never proof of UI task completion; independent post-state verification is canonical.
+R&D-09A required scope:
+- tracing/run trees and span semantics;
+- datasets and experiments;
+- online vs offline evaluation;
+- feedback/annotation;
+- evaluators and LLM-as-judge;
+- prompt/model/tool observability;
+- production monitoring;
+- experiment comparison;
+- lineage/correlation;
+- privacy/redaction;
+- current KEY Evidence/Outcome/Assurance architecture comparison;
+- whether LangSmith mechanisms should be absorbed natively without introducing a second canonical telemetry/evaluation truth system.
 
-R&D-08E required scope:
-- managed tool/integration catalog architecture;
-- auth/OAuth account linking;
-- per-user/per-tenant connected accounts;
-- tool discovery and schema normalization;
-- execution proxy vs direct provider calls;
-- triggers/webhooks;
-- MCP support;
-- credential custody;
-- action policy/approval;
-- observability;
-- vendor lock-in/exportability;
-- comparison with KEY's native connector registry, MCP bridge, OAuth modules and FLOW_TOOLS;
-- identify mechanisms worth reproducing natively without onboarding Composio unless later convergence proves a need.
+Layer-9 must preserve the programme's no-fake-green standard:
+- evaluator results are not self-proving;
+- LLM-as-judge requires calibration and negative controls;
+- traces are evidence/projections, not canonical business truth;
+- observability must bind exact model/prompt/tool/capability revisions and downstream effects;
+- hidden skipped/failed evals cannot be summarized as green.
 
-Do not skip ahead to Arcade or Layer-8 convergence before R&D-08E is complete.
+Do not skip ahead to Langfuse or implementation before R&D-09A is complete.
