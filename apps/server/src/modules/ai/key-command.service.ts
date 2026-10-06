@@ -173,7 +173,11 @@ export class KeyCommandService {
     } else if (domain === 'connect' && action === 'drive_findings') {
       plan.steps.push({ tool: 'listDriveIntake', module: 'connect', input: { status: 'reviewing', limit: 20 }, riskTier: 'LOW', requiresApproval: false });
     } else if (domain === 'messages' && action === 'message_intake') {
-      plan.steps.push({ tool: 'listMessageIntake', module: 'messages', input: { status: 'reviewing', limit: 20 }, riskTier: 'LOW', requiresApproval: false });
+      // Use the canonical FLOW_TOOLS identity. The efferent bridge registers
+      // bare flow names in the cortex registry; emitting the legacy
+      // messages.listMessageIntake name here would force the fallback registry
+      // and preserve the split capability vocabulary.
+      plan.steps.push({ tool: 'inbox_list_threads', module: 'flow', input: { limit: 20 }, riskTier: 'LOW', requiresApproval: false });
     } else if (domain === 'social' && action === 'recent_engagement') {
       plan.steps.push({ tool: 'listRecentEngagement', module: 'social', input: { limit: 20 }, riskTier: 'LOW', requiresApproval: false });
     } else {
@@ -200,8 +204,15 @@ export class KeyCommandService {
     const results: ToolResult[] = [];
 
     for (const step of plan.steps) {
-      // Phase 3 Skeleton: prefer canonical registry; fall back to legacy AI-module registry.
-      const canonicalName = `${step.module}.${step.tool}`;
+      // FLOW_TOOLS are bridged into the cortex registry under their bare
+      // canonical names. Legacy organ tools are still dotted. Prefer the bare
+      // capability identity first so newly converged plans do not fall through
+      // to KeyToolRegistryService simply because they are not dotted.
+      const bareCanonicalName = step.tool;
+      const dottedLegacyName = `${step.module}.${step.tool}`;
+      const canonicalName = this.keyCortexToolRegistry?.getTool(bareCanonicalName)
+        ? bareCanonicalName
+        : dottedLegacyName;
       let result: ToolResult;
       if (this.keyCortexToolRegistry?.getTool(canonicalName)) {
         result = await this.keyCortexToolRegistry.execute(
