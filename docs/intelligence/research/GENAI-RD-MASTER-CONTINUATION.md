@@ -471,44 +471,48 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-10D — Lakera**
+**R&D-10E — Presidio**
 
 Layer-10 progress:
 1. NeMo Guardrails — COMPLETE first-pass; durable ledger comment id **6009696796**
 2. Guardrails AI — COMPLETE first-pass; durable ledger comment id **6009734842**
 3. Llama Guard — COMPLETE first-pass; durable ledger comment id **6009792035**
-4. Lakera — **ACTIVE NEXT**
-5. Presidio — pending
+4. Lakera / Check Point AI Guardrails — COMPLETE first-pass; durable ledger comment id **6009834485**
+5. Presidio — **ACTIVE NEXT**
 6. Rebuff — pending
 7. Layer-10 convergence — pending
 
-Key R&D-10C Llama Guard conclusions:
-- current flagship is Llama Guard 4 12B; Llama Guard 3 8B, 11B Vision, 1B and 1B INT4 remain relevant benchmark variants.
-- Llama Guard 4 is a multimodal input/output safety classifier, useful as a versioned detector/evaluator under GuardrailPolicyRevision, never as business authority or proof of safety.
-- Meta's MLCommons-aligned taxonomy is useful generic content-risk vocabulary but does not cover KEY-specific tenant/account/approval/payment/effect/device invariants.
-- classifier category and application action must remain separate; KEY decides block/mask/warn/escalate/current-source requirements by surface and business purpose.
-- Meta's own reported evaluation shows material false-negative/false-positive rates, so `safe` cannot mean proven safe and thresholds require local calibration.
-- input filtering and output filtering have different refusal/utility tradeoffs and should be calibrated independently.
-- static classifiers cannot replace current-source/authority/temporal/business-truth verification.
-- Meta explicitly separates Llama Guard from Prompt Guard 2; content-risk detection and prompt/instruction-manipulation detection are distinct security functions.
-- Prompt Guard 2 is adjacent R&D, not a new canonical stack item; its lightweight variants make a safety cascade worth benchmarking later.
-- Llama Guard 3 1B/INT4 is worth benchmarking for low-cost/local/edge moderation, while 12B is the stronger flagship benchmark.
-- multilingual support does not prove Trinidadian/Caribbean business-language or code-switching performance; protected local cases are required.
-- no production Llama Guard/Prompt Guard/PurpleLlama runtime integration was recovered in KEYFLOWOS.
-- current safety result semantics are too coarse for exact category/model/policy/action provenance; no calibrated multimodal/local-regional safety-model lifecycle exists yet.
+Key R&D-10D Lakera / Check Point AI Guardrails conclusions:
+- the canonical Lakera item has evolved into the current Check Point AI Security / AI Guardrails product surface.
+- strongest architecture is a managed AI-security screening plane across user input, model output, retrieved/reference content, tool calls, tool responses and tool descriptions.
+- indirect prompt injection is explicitly treated as a retrieval/tool/web/MCP/document problem, reinforcing that all external context channels are untrusted instruction surfaces.
+- agentic systems require per-loop screening and pre-execution tool screening; post-response safety checks are too late once side effects can occur.
+- tool descriptions themselves are a trust boundary and should be screened/re-admitted during MCP/tool discovery and schema drift.
+- Agent Behavior Defense introduces useful trusted-warrant semantics plus deterministic tool allow/deny lists, but semantic action-warrant detection remains defense-in-depth and cannot replace KEY business authority.
+- DLP must cover tool arguments, tool responses, model requests, outputs and telemetry/export destinations, not only final assistant text.
+- Detect -> calibrate -> Enforce is a strong rollout pattern; detect-mode coverage must never be confused with enforcement coverage.
+- detector confidence must remain separate from GuardrailPolicyRevision action decisions.
+- externally editable policies and managed model updates create a revision/provenance problem; KEY must preserve immutable native policy/admission identity.
+- official latency guidance varies with payload size and detector count, so KEY must benchmark realistic per-loop latency rather than rely on one marketing number.
+- current prompt-defense docs claim 100+ languages/scripts, but this does not replace protected Trinidad/Caribbean business-language benchmarks.
+- current runtime protection is primarily text/structured-text; multimodal image/audio protection remains a broader surface.
+- self-hosting supports Kubernetes, Docker and air-gapped deployment, improving sovereignty, but self-hosted API isolation/network security remains the operator's responsibility.
+- SaaS offers regional processing/log controls and PII masking/retention controls, but external security services remain a data-export boundary under KEY privacy policy.
+- no Lakera/Check Point AI Guardrails runtime integration was recovered in KEYFLOWOS.
 
-R&D-10D required scope:
-- current Lakera Guard architecture/product scope;
-- prompt/instruction-manipulation and indirect-context protection;
-- content/moderation and data-loss-prevention controls if current;
-- API/gateway/SDK deployment model;
-- latency/streaming behavior;
-- rule/policy customization;
-- observability/threat-intelligence mechanisms;
-- agent/tool/MCP security relevance;
-- privacy/data-retention/deployment posture;
-- benchmark evidence and false-positive/false-negative considerations;
-- compare managed AI-security gateway model with KEY native GuardrailPolicyRevision and local classifiers;
-- identify mechanisms worth reproducing natively without onboarding Lakera.
+R&D-10E required scope:
+- Microsoft Presidio architecture;
+- PII/entity recognizers;
+- analyzer/anonymizer/image-redactor capabilities;
+- custom recognizers and context-aware recognition;
+- allow/deny/entity lists;
+- masking/redaction/hash/encryption/replacement operators;
+- structured/semi-structured and image/OCR considerations;
+- false positives/false negatives and recognizer confidence;
+- multilingual support;
+- local/self-host deployment and privacy;
+- integration into LLM input/output/retrieval/tool/telemetry pipelines;
+- compare Presidio's deterministic/specialized privacy layer with KEY current regex PII checks, Guardrails AI validators and Lakera DLP;
+- determine whether Presidio-like PII processing should become a native privacy primitive without duplicating canonical business/privacy ownership.
 
-Do not skip ahead to Presidio or implementation before R&D-10D is complete.
+Do not skip ahead to Rebuff or implementation before R&D-10E is complete.
