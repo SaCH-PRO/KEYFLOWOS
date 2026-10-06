@@ -5,6 +5,14 @@ Status: WHOLE-SYSTEM CONVERGENCE / RECOVERING
 
 This is the canonical semantic continuation point for a new analytical session. Do not restart KEYFLOWOS from scratch.
 
+## Durable memory pointer
+
+For the full consolidated record of the latest speed/determinization + structure/function/storage + R&D freshness + whole-system convergence work, read:
+
+`docs/intelligence/handoff/DURABLE-MEMORY-2026-10-06-SPEED-STRUCTURE-RND-CONVERGENCE.md`
+
+This artifact is continuity evidence only; current code and live authority still outrank it.
+
 ## First read
 
 1. docs/intelligence/00-START-HERE.md
