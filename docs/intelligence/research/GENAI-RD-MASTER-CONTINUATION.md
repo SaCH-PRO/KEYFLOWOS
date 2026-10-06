@@ -287,7 +287,7 @@ For each source layer and each necessary KEYFLOWOS expansion:
 
 # Current verified programme status
 
-Continuity checkpoint updated after completion of the Layer-9 convergence pass.
+Continuity checkpoint updated after completion of the Layer-10 convergence pass.
 
 | Layer | Status |
 |---|---|
@@ -300,7 +300,7 @@ Continuity checkpoint updated after completion of the Layer-9 convergence pass.
 | 7 Prompt & Output Control | 07A–07F complete + Layer-7 convergence complete |
 | 8 Tool & Context Protocols | 08A–08F complete + Layer-8 convergence complete |
 | 9 Evaluation & Observability | 09A–09F complete + Layer-9 convergence complete |
-| 10 Guardrails & Safety | **ACTIVE NEXT LAYER**; exact frontier is R&D-10A NeMo Guardrails |
+| 10 Guardrails & Safety | 10A–10F complete + Layer-10 convergence complete |
 
 The master inventory/gap reconstruction was completed first and is durably recorded in GitHub issue #153. The source image remains the canonical origin taxonomy; adjacent research extends it without changing the six-item canonical checklist inside each source layer unless explicitly documented.
 
@@ -443,6 +443,51 @@ Layer-9 implementation direction remains **research-derived only, NOT RELEASED**
 4. retrieval/agent evaluation hardening;
 5. production monitoring/feedback loop.
 
+
+### Layer 10 — Guardrails & Safety
+- R&D-10A NeMo Guardrails
+- R&D-10B Guardrails AI
+- R&D-10C Llama Guard
+- R&D-10D Lakera / Check Point AI Guardrails
+- R&D-10E Presidio
+- R&D-10F Rebuff
+- Layer-10 convergence complete
+
+Converged concept: **Guardrail & Trust-Boundary Fabric**.
+
+Core convergence:
+- content safety, instruction integrity, privacy/DLP, structural validation, business authority/effect safety, and outcome verification remain distinct but composable concerns.
+- external/retrieved/tool/web/document/A2A/computer-use content is data by default, not authority-granting instruction.
+- Layer-7 OutputContract remains the canonical schema/output-contract owner.
+- Layer-8 Capability Fabric remains the canonical business-action authority.
+- Layer-9 Assurance remains the canonical evaluator/proof-admission owner.
+- Evidence/Outcome remains canonical real-world effect truth.
+- guardrail/classifier/detector outputs are findings that may constrain or transform behavior but can never self-authorize business effects.
+
+Key Layer-10 live gaps carried forward:
+- autonomy-check exception can currently widen execution to all parsed commands;
+- query safety is optional/fail-open on missing service or checker error;
+- medium-severity PII can be labelled unsafe yet continue;
+- direct prompt-injection protection is primarily literal/heuristic;
+- no unified indirect-context admission rail for retrieval/tool/MCP/web/A2A/browser/document content;
+- no strong unified output-safety boundary;
+- no implemented GuardrailPolicyRevision / DetectorRevision lifecycle;
+- no governed threat-memory / attack-signature lifecycle or canary tripwire;
+- content-aware PII/secret detection is incomplete beyond field-name redaction;
+- telemetry privacy is narrower than the desired generalized export policy;
+- multimodal safety/privacy is incomplete;
+- SafetyShell idempotency is process-local/in-memory;
+- real compensation/rollback is not wired for non-empty actions.
+
+Layer-10 implementation direction remains **research-derived only, NOT RELEASED**:
+1. critical fail-open corrections;
+2. native guardrail contracts;
+3. context/tool admission;
+4. privacy/DLP foundation;
+5. classifier cascade + adversarial proof;
+6. threat memory + canaries;
+7. effect-safety hardening.
+
 ## Durable ledger
 
 Detailed research tranches and convergence passes are durably appended to GitHub issue **#153**. Important recent continuity anchors include:
@@ -466,50 +511,68 @@ Detailed research tranches and convergence passes are durably appended to GitHub
 - R&D-09E Arize Phoenix / OpenInference — comment id **6009595072**
 - R&D-09F W&B Weave — comment id **6009634232**
 - Layer-9 convergence — comment id **6009649322**
+- R&D-10A NeMo Guardrails — comment id **6009696796**
+- R&D-10B Guardrails AI — comment id **6009734842**
+- R&D-10C Llama Guard — comment id **6009792035**
+- R&D-10D Lakera / Check Point AI Guardrails — comment id **6009834485**
+- R&D-10E Presidio — comment id **6009885416**
+- R&D-10F Rebuff — comment id **6009953713**
+- Layer-10 convergence — comment id **6010007429**
 
 The issue ledger is supporting detail. This file remains the **master chat-rollover / active-frontier continuity map** and must be updated as the programme moves.
 
 # Immediate next frontier
 
-**LAYER-10 CONVERGENCE — Guardrails & Safety**
+# GLOBAL CROSS-LAYER GENAI R&D CONVERGENCE
 
-Layer-10 progress:
-1. NeMo Guardrails — COMPLETE first-pass; durable ledger comment id **6009696796**
-2. Guardrails AI — COMPLETE first-pass; durable ledger comment id **6009734842**
-3. Llama Guard — COMPLETE first-pass; durable ledger comment id **6009792035**
-4. Lakera / Check Point AI Guardrails — COMPLETE first-pass; durable ledger comment id **6009834485**
-5. Presidio — COMPLETE first-pass; durable ledger comment id **6009885416**
-6. Rebuff — COMPLETE first-pass; durable ledger comment id **6009953713**
-7. Layer-10 convergence — **ACTIVE NEXT**
+All 10 canonical source layers have now completed:
+- individual technology research;
+- per-layer comparison with KEYFLOWOS;
+- layer-level convergence.
 
-Key R&D-10F Rebuff conclusions:
-- official Protect AI Rebuff repository was archived/read-only on **2025-05-16** and still describes itself as a prototype, so direct production adoption is rejected.
-- Rebuff's enduring value is its four-layer prompt-injection architecture: heuristics + LLM-based detection + vector similarity to prior attacks + canary-token leakage detection.
-- detector diversity is valuable because LLM-based injection detectors can themselves be prompt-injected; an archived public issue documents detector-evasion behavior.
-- attack-signature/vector memory is useful only as governed security threat memory; embedding similarity is evidence, not truth, and unvalidated attack prompts must not self-poison a global attack store.
-- security threat memory must remain separate from Context Genome/business memory.
-- canary/sentinel markers are tripwires that detect actual leakage/integrity failure but are not prevention and no-leak does not prove no attack occurred.
-- any future sentinel must be synthetic/non-privileged and checked across all egress surfaces, not only assistant text.
-- indirect injection across retrieved documents, MCP/tool results, web pages, A2A artifacts, OCR/image text and coding-agent outputs must use the same instruction-integrity architecture as direct input attacks.
-- source/trust class and current task intent matter; identical text from a user vs an untrusted tool result should not automatically receive the same policy action.
-- structural instruction/data separation is more foundational than text classification: external context is data by default, not authority-granting instructions.
-- current KEY repo has no Rebuff runtime integration, attack-signature lifecycle or canary tripwire; existing deterministic KeyCortex rules remain only a cheap first layer.
+The programme must now stop behaving like ten isolated technology inventories and synthesize the surviving mechanisms into the smallest coherent KEY/KEYFLOWOS architecture.
 
-Layer-10 convergence required scope:
-- canonical guardrail surfaces and trust boundaries;
-- GuardrailPolicyRevision / detector / validator / decision semantics;
-- content-safety vs instruction-integrity vs privacy vs business-authority separation;
-- direct + indirect prompt-injection defenses;
-- tool/MCP/A2A/browser/document result admission;
-- PII/secret detection and destination-aware transformation policy;
-- multimodal/privacy safety boundaries;
-- Detect -> calibrate -> Enforce lifecycle;
-- fail-open/fail-closed hierarchy;
-- safety-model/evaluator calibration and mutation proof;
-- governed security threat memory / attack-signature lifecycle;
-- canary/sentinel tripwire semantics;
-- current KEY fail-open gaps and prioritized future correction sequence;
-- relationship to Layer 7 Cognitive Function/output contracts, Layer 8 Capability Fabric and Layer 9 Assurance/Observability;
-- implementation packet scope if justified.
+Required global-convergence work:
+1. cross-map every converged Layer-1–10 concept against:
+   - existing owner;
+   - extension point;
+   - missing primitive;
+   - duplicate/overlap;
+   - rejected pattern.
+2. eliminate duplicate conceptual fabrics and ensure one source of truth per concern.
+3. reconcile the 10-layer findings with:
+   - Memory / Context Genome;
+   - Context Engineering;
+   - Cognition / reasoning;
+   - Autonomy / self-correction;
+   - Learning / ingestion;
+   - Development Organism;
+   - Perception / multimodal;
+   - LLMOps / deployment / sovereignty.
+4. produce one dependency/order graph showing which primitives must precede others.
+5. rank live repository gaps by:
+   - safety severity;
+   - architectural leverage;
+   - dependency centrality;
+   - time sensitivity;
+   - implementation blast radius.
+6. distinguish:
+   - already implemented and credible;
+   - partially implemented / semantically incomplete;
+   - declared but non-enforced / no-fake-green gaps;
+   - missing.
+7. decide the minimum external-runtime posture:
+   - native owner;
+   - optional adapter;
+   - benchmark-only;
+   - optional backend;
+   - reject.
+8. derive bounded implementation packets from the convergence, but do not release/execute them until the global architecture is coherent and explicitly authorized.
 
-Do not enter global cross-layer convergence or implementation before Layer-10 convergence is complete.
+Important live time-bounded defect:
+- current Langfuse legacy trace ingestion remains scheduled to lose Cloud compatibility on **2026-11-16**; global convergence must decide the narrow migration path without turning the observability layer into a vendor-specific rewrite.
+
+Important critical safety defect:
+- current KeyCortex autonomy-error path can widen execution to all parsed commands; global convergence must treat this as a top-priority fail-open correction candidate.
+
+Implementation remains parked until the global cross-layer convergence produces a coherent dependency graph and bounded packets.
