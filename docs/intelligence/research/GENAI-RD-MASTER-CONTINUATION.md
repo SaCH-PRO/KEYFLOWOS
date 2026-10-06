@@ -471,46 +471,45 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-10B — Guardrails AI**
+**R&D-10C — Llama Guard**
 
 Layer-10 progress:
 1. NeMo Guardrails — COMPLETE first-pass; durable ledger comment id **6009696796**
-2. Guardrails AI — **ACTIVE NEXT**
-3. Llama Guard — pending
+2. Guardrails AI — COMPLETE first-pass; durable ledger comment id **6009734842**
+3. Llama Guard — **ACTIVE NEXT**
 4. Lakera — pending
 5. Presidio — pending
 6. Rebuff — pending
 7. Layer-10 convergence — pending
 
-Key R&D-10A NeMo Guardrails conclusions:
-- guardrails must exist at multiple trust boundaries: input, retrieval/context, dialog/cognition, tool proposal/result, execution, output and outcome verification.
-- guardrail verdicts may block/narrow/transform content or proposals, but KEY's Layer-8 authority/governance remains the canonical business-action authority.
-- Colang is a strong reference for executable policy-flow semantics, but should not become a second durable workflow/runtime owner.
-- explicit allow/block/transform outcomes and per-rail fail-open/fail-closed policy are strong native patterns to absorb.
-- retrieval/context rails are a major current KEY gap: memory/external/tool content can enter prompts without a recovered first-class indirect-prompt-injection admission stage.
-- tool-call/result structural validation is useful beneath business authority; schema-valid tool calls are not authorized actions.
-- current main query output quality checks only warn and do not form a strong output safety boundary.
-- current KeyCortex safety wrapper is fail-open when the optional service is absent or throws.
-- current KeyCortex PII rule returns safe:false at medium severity, but the query wrapper blocks only high severity, so an unsafe PII finding can continue.
-- current prompt-injection checks are cheap literal/script heuristics and do not cover indirect/obfuscated/multilingual/tool-result/document attacks.
-- **critical live gap:** if autonomy checking throws, the current query pipeline logs "Autonomy check failed, using all parsed commands" and can widen execution rather than fail closed.
-- current SafetyShell.check() is genuinely wired into KeyActionExecutorService at HEAD; older audits saying otherwise are stale.
-- SafetyShell rollback remains unavailable for real non-empty compensation, but now truthfully fails rather than claiming success.
-- SafetyShell idempotency is process-local/in-memory and is not durable distributed idempotency.
-- LLM self-check/content-safety judges must be treated as calibrated EvaluatorRevisions, not security roots.
-- guardrail effectiveness requires adversarial protected cases and mutation/negative-control proof, not mere configuration.
+Key R&D-10B Guardrails AI conclusions:
+- Guardrails AI combines structured-output reliability with input/output risk validators, so it overlaps both Layer 7 and Layer 10.
+- its strongest transferable mechanism is an explicit validation-remediation algebra: reask, deterministic fix, filter/redact, refrain, exception, custom handling.
+- KEY should absorb the remediation semantics under native OutputContract/GuardrailPolicy ownership rather than adopt Guardrails AI as a second schema authority.
+- successful repair must preserve original invalid-output provenance; a final valid object cannot erase validation failure history.
+- reask is a new model execution and needs bounded attempts, exact model/evaluator revision, cost/latency and trace lineage.
+- deterministic fixes are appropriate for representation-level normalization, not silent changes to material business meaning such as amounts, identity, permissions or tool intent.
+- FILTER/REDACT must be followed by schema/domain revalidation.
+- NOOP is useful for shadow/telemetry but unacceptable as the default for protected policies.
+- current public validator catalog includes PII, secrets, jailbreak/prompt injection, web sanitization, Llama Guard and provenance validators; these are benchmark candidates, not automatically admitted policies.
+- Guardrails Hub moved to public PyPI validator packages and hosted remote validator inference was shut down on **2026-08-25**; local or operator-hosted inference is now the relevant deployment pattern.
+- core package is Apache-2.0 and validator packages are generally MIT/permissive, but exact package/model/dependency inventory still requires supply-chain review.
+- direct Node/TypeScript fit is limited: the current JS wrapper uses a Python IO bridge and does not support custom validators or automatic reasking, so direct runtime adoption would add complexity.
+- current KEY handwritten OutputContract validation remains shallow/manual, coerceToContract() can hide invalid-generation provenance behind fallback, and Cortex structured output remains markdown/regex parsing with defaults.
+- streaming safety requires explicit release policy; protected content/tool actions cannot be emitted/executed from unvalidated partial output.
+- semantic/ML validators remain EvaluatorRevisions that require calibration, mutation/negative-control proof and explicit fail policy.
 
-R&D-10B required scope:
-- Guardrails AI validator/Guard/Hub architecture;
-- schema/output validation and reask/correction loops;
-- input/output validation surfaces;
-- validators for PII, toxic content, secrets, prompt injection and factual/semantic constraints;
-- validator composition and pass/fail/fix/reask/filter semantics;
-- deterministic vs LLM validators;
-- async/streaming behavior;
-- telemetry/eval integration;
-- current licensing/open-source/cloud posture;
-- compare with KEY Layer-7 OutputContract/StructuredOutputStrategy, Layer-9 EvaluatorRevision and Layer-10 GuardrailPolicyRevision;
-- avoid duplicating CognitiveFunction/output-validation ownership.
+R&D-10C required scope:
+- current Llama Guard model family/generations and intended safety taxonomy;
+- prompt/input vs response/output classification;
+- policy/category customization;
+- model sizes/deployment/local inference;
+- classifier output semantics and confidence/calibration limits;
+- multilingual coverage;
+- tool/agent safety relevance if current;
+- benchmark/evaluation methodology and known failure modes;
+- licensing/acceptable-use/deployment constraints;
+- compare purpose-built safety models with KEY deterministic rules, Guardrails AI validators and NeMo rails;
+- determine where a Llama Guard-like classifier belongs in GuardrailPolicyRevision without becoming canonical authority.
 
-Do not skip ahead to Llama Guard or implementation before R&D-10B is complete.
+Do not skip ahead to Lakera or implementation before R&D-10C is complete.
