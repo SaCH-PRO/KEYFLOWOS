@@ -1,0 +1,102 @@
+schema_version: 1
+artifact: KEYFLOWOS_RESEARCH_PROOF_PROFILES
+authority: RESEARCH_ONLY
+description: >
+  Candidate semantic proof profiles derived from repository history and book-informed
+  R&D. They are not admission authority and must not weaken canonical packet proof.
+
+profiles:
+  CONTROL_AUTHORITY_STATE:
+    change_classes:
+      - CONTROL_PLANE_CHANGE
+      - STATE_MACHINE_CHANGE
+      - AUTHORITY_MIGRATION
+      - RECOVERY_SEMANTICS
+    reachability_checks:
+      - control envelope is parsed by the canonical parser
+      - normalized event reaches authority-effect reduction
+      - reduced state reaches programme-state projection
+      - admission consumes the exact artifacts being proved
+    fastest_falsification:
+      - characterize one valid authority fold
+      - characterize one malformed-authority fail-closed case
+      - round-trip adversarial packet identifiers through YAML
+    semantic_proofs:
+      - malformed authority fails closed
+      - wrong structural container types fail closed
+      - packet and branch identities bind exactly
+      - stale checkpoint requires explicit reviewed recovery
+      - replay is deterministic and idempotent
+    adversarial_proofs:
+      - repeated envelope fields
+      - non-string identities
+      - prototype-like mapping keys
+      - colon-bearing identifiers
+      - code movement does not make negative controls vacuous
+      - invalid checkpoint is never silently repaired
+    final_admission:
+      - portable control-plane proof
+      - platform-specific worker proof where required
+      - mutation-sensitive negative controls
+      - exact-head workflows
+      - artifact/PR binding
+
+  TENANT_AUTHORITY_DATA_BOUNDARY:
+    change_classes:
+      - TENANT_ISOLATION_CHANGE
+      - DATA_OWNERSHIP_CHANGE
+      - AUTHORITY_MIGRATION
+      - BACKFILL_MIGRATION
+    reachability_checks:
+      - enumerate every relevant constructor/writer
+      - enumerate tenant discovery/read paths
+      - identify caller-tenant and record-tenant checks separately
+    fastest_falsification:
+      - force low pagination size and compare semantic result
+      - exercise non-owner membership discovery
+      - attempt one cross-tenant mutation
+    semantic_proofs:
+      - every creation path establishes required founding membership
+      - ambiguous legacy rows fail closed
+      - pagination is complete and result-independent from page size
+      - sensitive entities cross API boundaries via explicit safe projection
+      - concurrent genesis converges
+    adversarial_proofs:
+      - conflicting owner beyond first page
+      - unresolvable owner
+      - mock query shape matches real nested predicate
+      - cross-tenant update and delete write nothing
+    final_admission:
+      - real database integration
+      - default/full server test configuration
+      - architecture scanner refresh when structure changes
+      - exact-head broad CI
+
+  EXTERNAL_EFFECT_CERTAINTY:
+    change_classes:
+      - EXTERNAL_EFFECT_CHANGE
+      - PROVIDER_EFFECT_CHANGE
+      - RETRY_RECOVERY_CHANGE
+    reachability_checks:
+      - trigger reaches canonical effect writer
+      - effect identity is persisted before/with execution as designed
+      - reconciliation can observe ambiguous outcomes
+    fastest_falsification:
+      - deterministic provider simulator happy path
+      - duplicate delivery with same effect identity
+    semantic_proofs:
+      - retries do not duplicate the business effect
+      - provider acceptance and local acknowledgement are distinct
+      - crash/restart preserves effect identity and recovery
+      - reconciliation resolves or exposes ambiguous outcomes
+    adversarial_proofs:
+      - timeout before provider acceptance
+      - provider accepted but response lost
+      - crash before local persistence
+      - crash after provider acceptance
+      - duplicate webhook or retry
+    final_admission:
+      - deterministic provider simulation
+      - persistence/integration proof
+      - broad CI
+      - exact-head evidence
