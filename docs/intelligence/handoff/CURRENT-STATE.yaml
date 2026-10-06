@@ -31,10 +31,27 @@ observed_repository_state:
     branch: impl/kf-exec-auth-fail-closed-001
     semantic_head: 8987f6db21a839f90c88e33479768d81cef508e9
     semantic_review: PASS
-    control_binding_head_observed: 26111633bf8ad3245a9f0abc90c75d1f87e1d564
-    state_at_checkpoint: EXACT_HEAD_ADMISSION_IN_PROGRESS
+    control_binding_head_observed: fdc900b72062391189d31c6994af353ce9dc4e9c
+    state_at_checkpoint: ADMISSION_BLOCKED_CONTROL_STATE
+    exact_head_workflows_observed: GREEN
     merge_authority: false
-    note: re_resolve_live_before_acting
+    note: application_semantics_preserved_control_projection_blocks_admission
+
+  control_plane_repair:
+    packet: KF-META-AUTHORITY-EFFECT-COMPAT-001
+    authority_comment: 6025258558
+    intended_branch: impl/kf-meta-authority-effect-compat-001
+    state: RELEASED_AWAITING_ACK_OR_IMPLEMENTATION
+    projected_effect: NO_STATE_CHANGE
+    programme_credit: ZERO
+    first_blocker_comment: 6011507550
+    first_blocker_raw_effect: BOUNDED_CORRECTION
+    next_unknown_comment: 6018421547
+    next_unknown_raw_effect: AUTHORIZE_CONTROL_BINDING
+    target_aliases:
+      BOUNDED_CORRECTION: PACKET_CORRECTION
+      AUTHORIZE_CONTROL_BINDING: NO_STATE_CHANGE
+    invariant: all_other_unknown_effects_remain_fail_closed
 
 context_integrity:
   verdict: FAIL_RECOVERING
