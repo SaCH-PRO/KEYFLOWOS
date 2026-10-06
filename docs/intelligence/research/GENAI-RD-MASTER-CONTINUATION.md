@@ -471,7 +471,7 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-10F — Rebuff**
+**LAYER-10 CONVERGENCE — Guardrails & Safety**
 
 Layer-10 progress:
 1. NeMo Guardrails — COMPLETE first-pass; durable ledger comment id **6009696796**
@@ -479,40 +479,37 @@ Layer-10 progress:
 3. Llama Guard — COMPLETE first-pass; durable ledger comment id **6009792035**
 4. Lakera / Check Point AI Guardrails — COMPLETE first-pass; durable ledger comment id **6009834485**
 5. Presidio — COMPLETE first-pass; durable ledger comment id **6009885416**
-6. Rebuff — **ACTIVE NEXT**
-7. Layer-10 convergence — pending
+6. Rebuff — COMPLETE first-pass; durable ledger comment id **6009953713**
+7. Layer-10 convergence — **ACTIVE NEXT**
 
-Key R&D-10E Presidio conclusions:
-- Presidio is transitioning from Microsoft ownership to the independent community-governed Data Privacy Stack project; new containers now publish under GHCR and old Microsoft Container Registry images are no longer updated.
-- strongest architecture is separation of sensitive-entity detection from purpose-specific transformation.
-- Presidio Analyzer combines regex, deny lists, checksums, NER and contextual recognition; Presidio Anonymizer supports replace, redact, hash, mask, encrypt, custom and reversible decrypt semantics.
-- PII detection and privacy action must remain separate; the same entity can be kept, masked, pseudonymized, encrypted, blocked or redacted depending on surface/destination/purpose.
-- Presidio itself warns automated detection cannot guarantee all sensitive information is found, so detector precision/recall and entity/surface-specific calibration are mandatory.
-- country/language/context-aware recognizers are strong patterns; Trinidad/Caribbean identifiers and business-language cases will require protected/custom local benchmarks rather than assuming generic coverage.
-- reversible pseudonymization is useful for model-context minimization but must preserve reversibility truth, tenant-scoped key/salt semantics and controlled re-association.
-- structured/semi-structured privacy scanning is highly relevant because KEY must protect both sensitive field names and sensitive values hidden in free text.
-- current KEY `deepRedact()` is a strong centralized field-name secret baseline but does not detect free-text PII/secrets in innocently named fields.
-- current Sentry redaction is narrower than the centralized redaction policy and does not provide generalized content-aware telemetry privacy.
-- DocumentIntelligenceService processes PII-rich invoices, receipts, cards, contracts and OCR/text through model paths; future architecture needs explicit provider/data-class eligibility and optional privacy transforms rather than blind redaction or blind export.
-- Presidio Image Redactor remains beta and OCR-dependent; image/document privacy has an OCR-failure plus recognizer-failure chain and metadata requires separate handling.
-- current ContactPrivacyService remains the canonical privacy/deletion domain owner; Presidio-like scanning can find residual free-text PII but cannot replace relational deletion/retention/authorization logic.
-- privacy detection must occur before external model/tool/telemetry/export boundaries because post-hoc redaction cannot undo disclosure.
-- a future privacy primitive should support protected raw evidence plus a safe model/export projection with full transform provenance.
+Key R&D-10F Rebuff conclusions:
+- official Protect AI Rebuff repository was archived/read-only on **2025-05-16** and still describes itself as a prototype, so direct production adoption is rejected.
+- Rebuff's enduring value is its four-layer prompt-injection architecture: heuristics + LLM-based detection + vector similarity to prior attacks + canary-token leakage detection.
+- detector diversity is valuable because LLM-based injection detectors can themselves be prompt-injected; an archived public issue documents detector-evasion behavior.
+- attack-signature/vector memory is useful only as governed security threat memory; embedding similarity is evidence, not truth, and unvalidated attack prompts must not self-poison a global attack store.
+- security threat memory must remain separate from Context Genome/business memory.
+- canary/sentinel markers are tripwires that detect actual leakage/integrity failure but are not prevention and no-leak does not prove no attack occurred.
+- any future sentinel must be synthetic/non-privileged and checked across all egress surfaces, not only assistant text.
+- indirect injection across retrieved documents, MCP/tool results, web pages, A2A artifacts, OCR/image text and coding-agent outputs must use the same instruction-integrity architecture as direct input attacks.
+- source/trust class and current task intent matter; identical text from a user vs an untrusted tool result should not automatically receive the same policy action.
+- structural instruction/data separation is more foundational than text classification: external context is data by default, not authority-granting instructions.
+- current KEY repo has no Rebuff runtime integration, attack-signature lifecycle or canary tripwire; existing deterministic KeyCortex rules remain only a cheap first layer.
 
-R&D-10F required scope:
-- current Rebuff project/runtime status and maintenance posture;
-- prompt-injection/jailbreak detection architecture;
-- heuristic/filter layers;
-- vector/database canary mechanisms if still current;
-- prompt-injection signatures/canaries;
-- LLM-based detection;
-- attack correlation/feedback;
-- integration surface and deployment model;
-- false-positive/false-negative behavior;
-- compare Rebuff with Prompt Guard 2 and Lakera prompt defense;
-- determine which multi-layer prompt-injection mechanisms remain valuable even if Rebuff itself is stale/deprecated;
-- identify what KEY should reproduce natively without onboarding Rebuff.
+Layer-10 convergence required scope:
+- canonical guardrail surfaces and trust boundaries;
+- GuardrailPolicyRevision / detector / validator / decision semantics;
+- content-safety vs instruction-integrity vs privacy vs business-authority separation;
+- direct + indirect prompt-injection defenses;
+- tool/MCP/A2A/browser/document result admission;
+- PII/secret detection and destination-aware transformation policy;
+- multimodal/privacy safety boundaries;
+- Detect -> calibrate -> Enforce lifecycle;
+- fail-open/fail-closed hierarchy;
+- safety-model/evaluator calibration and mutation proof;
+- governed security threat memory / attack-signature lifecycle;
+- canary/sentinel tripwire semantics;
+- current KEY fail-open gaps and prioritized future correction sequence;
+- relationship to Layer 7 Cognitive Function/output contracts, Layer 8 Capability Fabric and Layer 9 Assurance/Observability;
+- implementation packet scope if justified.
 
-After 10F: Layer-10 convergence — Guardrails & Safety.
-
-Do not enter global cross-layer convergence before R&D-10F and Layer-10 convergence are complete.
+Do not enter global cross-layer convergence or implementation before Layer-10 convergence is complete.
