@@ -121,7 +121,7 @@ The main branch .agent-control/programme-state.yaml is a reviewed derived checkp
 Do not manually rewrite it from this intelligence branch.
 
 Correct next step:
-re-derive/checkpoint it through its admitted reducer/control-plane owner after the active #155 authority sequence.
+complete the bounded authority-effect compatibility repair, replay the real #80 sequence from RECOVERY-021 without skipping authority messages, then re-derive/checkpoint through the admitted reducer/control-plane owner. PR #155 admission resumes only after the projection is current.
 
 ## Next actions
 
