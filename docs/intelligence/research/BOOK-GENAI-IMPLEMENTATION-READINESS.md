@@ -370,3 +370,49 @@ The research has crossed the line from idea collection to implementable engineer
 BG-4 is contract-ready but still requires a consumer/write-set trace.
 
 No packet is released from this document. Release must occur through the existing control-plane authority process with exact current-main rebinding.
+
+
+---
+
+# PACKET BG-5 — Proof-Class Honesty
+
+Candidate id: `KF-ASSURANCE-PROOF-CLASS-001`  
+Priority: P1 assurance leverage  
+State: IMPLEMENTATION_READY / ROUTE TO EXISTING ASSURANCE OWNER  
+Owner: existing #130/#151 Assurance + proof-admission  
+Does not create: theorem-prover runtime, second eval harness
+
+## Objective
+
+Make packet/evaluation design explicitly distinguish:
+
+- EXACT_FORMAL_OR_DETERMINISTIC
+- INTEGRATION_STATE
+- EXTERNAL_EFFECT
+- SEMANTIC_EVALUATION
+
+The system should use the strongest applicable proof form and prevent a weaker semantic evaluator from overriding deterministic failure.
+
+## Bounded approach
+
+Extend the existing research `PROOF-PROFILES.yaml` vocabulary and later, if admitted, packet proof metadata.
+
+Examples:
+- parser shape / fingerprint / state reducer -> exact deterministic;
+- tenant persistence / transaction / concurrency -> integration state;
+- provider side effect / timeout ambiguity -> external-effect simulator + reconciliation;
+- natural-language quality / usefulness -> semantic evaluation with calibration.
+
+## Proof obligations
+
+PROOF-P01 every required proof declares its class.  
+PROOF-P02 deterministic failure cannot be superseded by LLM-judge pass.  
+PROOF-P03 external-effect claims require effect evidence or explicit UNKNOWN.  
+PROOF-P04 semantic evaluator revision/calibration is explicit.  
+PROOF-P05 missing required proof class cannot yield green admission.  
+PROOF-P06 mutation of an exact invariant makes deterministic proof fail.  
+PROOF-P07 proof classification is metadata over existing Assurance, not a new authority.
+
+## Sequencing
+
+Route into #130/#151 when their write sets allow it. Do not release a parallel assurance packet from this research branch.
