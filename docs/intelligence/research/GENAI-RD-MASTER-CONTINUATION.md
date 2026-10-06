@@ -212,36 +212,151 @@ For each source layer and each necessary KEYFLOWOS expansion:
 
 # Current verified programme status
 
+Continuity checkpoint updated after completion of the Layer-7 convergence pass.
+
 | Layer | Status |
 |---|---|
-| 1 Foundation Models | inventory/gap recovery required |
-| 2 Model Serving & Inference | inventory/gap recovery required |
-| 3 Orchestration Frameworks | individual research + convergence complete |
-| 4 Embeddings & Rerankers | inventory/gap recovery required |
-| 5 Vector Databases | inventory/gap recovery required |
-| 6 Fine-tuning & Adaptation | inventory/gap recovery required |
-| 7 Prompt & Output Control | partial spillover findings exist; dedicated inventory required |
-| 8 Tool & Context Protocols | substantial KEYFLOWOS overlap exists; dedicated inventory required |
-| 9 Evaluation & Observability | substantial existing implementation/forensics overlap; dedicated inventory required |
-| 10 Guardrails & Safety | substantial governance/security overlap; dedicated inventory required |
+| 1 Foundation Models | individual research + convergence recovered/complete |
+| 2 Model Serving & Inference | individual research + convergence recovered/complete |
+| 3 Orchestration Frameworks | individual research + convergence complete; Microsoft Agent Framework retained as adjacent research, not a replacement for the source-image taxonomy |
+| 4 Embeddings & Rerankers | 04A–04F complete + Layer-4 convergence complete |
+| 5 Vector Databases | 05A–05F complete + Layer-5 convergence complete |
+| 6 Fine-tuning & Adaptation | 06A–06F complete + Layer-6 convergence complete |
+| 7 Prompt & Output Control | 07A–07F complete + Layer-7 convergence complete |
+| 8 Tool & Context Protocols | **ACTIVE NEXT LAYER**; exact frontier is R&D-08A MCP |
+| 9 Evaluation & Observability | not yet entered as the canonical source layer; substantial spillover/adjacent assurance work already exists and must be preserved |
+| 10 Guardrails & Safety | not yet entered as the canonical source layer; substantial governance/security spillover already exists and must be preserved |
 
-Do not infer "not researched" from "inventory required." Existing prior work must be recovered before assigning completion percentages.
+The master inventory/gap reconstruction was completed first and is durably recorded in GitHub issue #153. The source image remains the canonical origin taxonomy; adjacent research extends it without changing the six-item canonical checklist inside each source layer unless explicitly documented.
+
+## Completed source-layer sequence after the inventory recovery
+
+### Layer 4 — Embeddings & Rerankers
+- R&D-04A OpenAI Embeddings
+- R&D-04B Cohere Rerank / adjacent Embed findings
+- R&D-04C Voyage AI
+- R&D-04D Jina
+- R&D-04E BGE / FlagEmbedding
+- R&D-04F Nomic Embed
+- Layer-4 convergence complete
+
+Converged concept: **Governed Representation & Retrieval Fabric** as a logical cross-cutting contract, not a new truth owner or mandatory new kernel.
+
+### Layer 5 — Vector Databases
+- R&D-05A Pinecone
+- R&D-05B Qdrant
+- R&D-05C Weaviate
+- R&D-05D Milvus
+- R&D-05E Chroma
+- R&D-05F pgvector
+- Layer-5 convergence complete
+
+Converged decision pressure: retain PostgreSQL + pgvector as the baseline until a properly tuned benchmark proves that a specialized vector store solves a measured KEYFLOWOS requirement. Vector stores remain rebuildable projections, not canonical truth.
+
+### Layer 6 — Fine-tuning & Adaptation
+- R&D-06A Hugging Face ecosystem
+- R&D-06B PEFT / LoRA
+- R&D-06C Unsloth
+- R&D-06D Axolotl
+- R&D-06E TRL
+- R&D-06F LLaMA-Factory
+- Layer-6 convergence complete
+
+Converged concept: **Governed Adaptation & Model Artifact Lifecycle**. Model weights are replaceable competence artifacts, not KEY identity, memory, authority, policy or canonical truth.
+
+### Layer 7 — Prompt & Output Control
+- R&D-07A DSPy
+- R&D-07B Instructor
+- R&D-07C Outlines
+- R&D-07D Guidance
+- R&D-07E BAML
+- R&D-07F Structured Outputs
+- Layer-7 convergence complete
+
+Converged concept: **Cognitive Function Contract & Execution Fabric**.
+
+Logical package:
+
+```
+CognitiveFunctionRevision
+  ├─ CognitiveContract
+  ├─ PromptProgramArtifact
+  ├─ OutputContract
+  ├─ StructuredOutputStrategy
+  ├─ ProviderExecutionProfile
+  ├─ ValidationPolicy
+  ├─ RetryRepairPolicy
+  ├─ TestSuiteRef
+  └─ EvaluationSuiteRef
+```
+
+Key Layer-7 repository finding: `GatewayRequest.responseFormat` exists, but current recovered provider dispatch paths do not consume it, so the declared response-format surface is not currently backed by recovered native provider enforcement. This is recorded as a no-fake-green gap, not as implemented structured-output support.
+
+Layer-7 hard boundaries:
+- provider-native structured output is an execution strategy, not semantic authority;
+- schema validity is not factual correctness, business validity, permission or action authority;
+- prompt programs cannot become a second durable workflow runtime;
+- `FLOW_TOOLS` remains the governed action/capability surface;
+- ModelGateway remains the provider-routing owner;
+- third-party prompt-control frameworks are mechanism references, not adopted canonical runtimes.
+
+## Durable ledger
+
+Detailed research tranches and convergence passes are durably appended to GitHub issue **#153**. Important recent continuity anchors include:
+- GENAI-RD-MAP-001 recovery pass
+- R&D-04A through 04F + Layer-4 convergence
+- R&D-05A through 05F + Layer-5 convergence
+- R&D-06A through 06F + Layer-6 convergence
+- R&D-07A through 07F + Layer-7 convergence
+- Layer-7 convergence comment id: **6008603830**
+
+The issue ledger is supporting detail. This file remains the **master chat-rollover / active-frontier continuity map** and must be updated as the programme moves.
 
 # Immediate next frontier
 
-**GENAI-RD-MAP-001 — Master 10-Layer Research Inventory & Gap Map**
+**R&D-08A — MCP**
 
-Required output:
-- exact research already completed for each of the 10 source layers;
-- technologies individually studied;
-- durable artifacts/findings available;
-- partial/spillover research;
-- missing technologies/concepts;
-- stale research needing refresh;
-- cross-cutting KEY-specific tracks;
-- exact next individual research tranche.
+Canonical Layer-8 sequence from the source image:
+1. MCP
+2. Function calling
+3. A2A
+4. Computer use
+5. Composio
+6. Arcade
+7. Layer-8 convergence
 
-Only after that map is reconstructed should the next technology study be selected.
+R&D-08A required scope:
+- MCP protocol architecture;
+- host/client/server roles;
+- tools, resources and prompts;
+- transports;
+- capability negotiation;
+- sampling;
+- roots;
+- elicitation;
+- authentication and security boundaries;
+- local vs remote servers;
+- connector lifecycle/interoperability;
+- comparison with the existing KEYFLOWOS MCP module;
+- whether MCP should remain a protocol adapter over KEY's Capability Fabric rather than become KEY's internal tool registry;
+- relationship to phone/computer/device/app integration and the Development Organism.
+
+Do not skip ahead to Function Calling or implementation before R&D-08A is complete.
+
+# Active implementation posture
+
+Prepared implementation packet `KF-EXEC-COGNITION-001` remains **PARKED**.
+
+No Layer-4/5/6/7 research result has independently authorized:
+- onboarding a new vector database;
+- adopting DSPy/Instructor/Outlines/Guidance/BAML as a second runtime;
+- introducing a second provider gateway;
+- starting model fine-tuning;
+- replacing FLOW_TOOLS;
+- replacing Context Genome truth ownership;
+- bypassing Assurance, authority or no-fake-green gates.
+
+Research continues first; bounded implementation packets are released only after an explicit convergence/admission decision.
 
 # Hard rules
 
