@@ -46,10 +46,13 @@ Main includes:
 Active implementation frontier:
 KF-EXEC-AUTH-FAIL-CLOSED-001, PR #155.
 
-At the convergence checkpoint:
-- semantic head 8987f6db21a839f90c88e33479768d81cef508e9 had independent ChatGPT semantic PASS;
-- control-only head 26111633bf8ad3245a9f0abc90c75d1f87e1d564 was running exact-head admission;
-- merge/checkpoint must not be inferred from this file; re-resolve live issue #80 and PR #155.
+At the latest continuity refresh:
+- semantic head 8987f6db21a839f90c88e33479768d81cef508e9 has independent ChatGPT semantic PASS;
+- PR #155 is at control-only head fdc900b72062391189d31c6994af353ce9dc4e9c with exact-head workflows green;
+- admission is intentionally blocked by the derived control projection, not by a known application-code failure;
+- live replay from RECOVERY-021 stops first at historical raw effect BOUNDED_CORRECTION and would next encounter AUTHORIZE_CONTROL_BINDING, neither of which is in the admitted canonical effect vocabulary;
+- bounded control-plane repair KF-META-AUTHORITY-EFFECT-COMPAT-001 was released on issue #80 to normalize only those historical aliases to PACKET_CORRECTION and NO_STATE_CHANGE while preserving all other unknown effects as fail-closed;
+- merge/checkpoint must not be inferred from this file; re-resolve live issue #80 and PR #155 before acting.
 
 ## Current cross-stream architecture
 
