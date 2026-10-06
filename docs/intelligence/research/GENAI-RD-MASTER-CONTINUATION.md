@@ -389,93 +389,45 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-08D — Computer Use**
+**R&D-08E — Composio**
 
 Layer-8 progress:
 1. MCP — COMPLETE first-pass; durable ledger comment id **6008878520**
 2. Function calling — COMPLETE first-pass; durable ledger comment id **6008938834**
 3. A2A — COMPLETE first-pass; durable ledger comment id **6008959914**
-4. Computer use — **ACTIVE NEXT**
-5. Composio — pending
+4. Computer use — COMPLETE first-pass; durable ledger comment id **6009055442**
+5. Composio — **ACTIVE NEXT**
 6. Arcade — pending
 7. Layer-8 convergence — pending
 
-Key R&D-08A MCP conclusions:
-- MCP is an interoperability protocol adapter over KEY's Capability Fabric, not KEY's internal authority/tool registry.
-- current KEY MCP module direction (remote Streamable HTTP -> Flow bridge) is worth retaining and hardening rather than replacing.
-- current MCP implementation has a real tenant-isolation discrepancy: listBridgedTools(_businessId) ignores businessId, server/config caches are global, and callTool() receives no businessId despite comments claiming per-business isolation.
-- static bearer-token/env auth is insufficient for per-business/user connector identity; OAuth/scoped credential lifecycle needs later product-grade treatment.
-- prefix-based read/write risk inference is not sufficient as an authority mechanism.
-- MCP output truncation is a resource bound, not a prompt-injection/security boundary.
-- tools, resources and prompts require different KEY admission paths.
-- current 2026 MCP SDK/spec direction deprecates roots and sampling for new designs, so KEY must not build new core architecture around them.
-- central API should retain remote-HTTP-only default; local stdio MCP belongs, if ever, in bounded local/developer/device environments.
-- MCP expands available hands, not authority.
+Key R&D-08D Computer Use conclusions:
+- computer use should be a governed last-mile interoperability/fallback actuator, not KEY's default integration strategy.
+- preferred hierarchy: internal API/service -> native connector -> MCP/API capability -> semantic browser automation (DOM/ARIA/CDP/Playwright) -> visual computer use -> raw OS control.
+- semantic browser control should be preferred over raw pixel coordinates where available; screenshots remain the universal fallback.
+- UI/screen/page content is untrusted input and cannot grant authority.
+- browser profiles/cookies are authority-bearing credentials requiring explicit ownership, origin and session policy.
+- secret entry should be brokered outside model-visible context.
+- downloads are ingress boundaries; uploads are egress boundaries.
+- consequential confirmation must be effect-based, not click-based.
+- screenshot/action provenance must include observation identity, viewport/scale and post-state verification.
+- current browser-use skill is a Development Organism capability, not a product computer-use runtime.
+- DeviceService is perception/ingestion, not device control; voice/phone modules are communications, not phone-OS control.
+- future desktop/mobile actuation should use a trusted local Device/Computer Agent boundary rather than direct cloud control of an owner's workstation.
+- final model text is never proof of UI task completion; independent post-state verification is canonical.
 
-Key R&D-08B Function Calling conclusions:
-- model tool calls are proposals; KEY owns validation, authority and effects.
-- provider strict tool schemas are not yet represented in the canonical GatewayToolDefinition contract.
-- canonical provider-level parallelism controls are absent.
-- current Flow executes all individually auto-admitted tool calls with Promise.all, so provider batching can become unsafe parallel write execution without dependency/effect analysis.
-- Anthropic toolChoice none is not faithfully lowered.
-- Anthropic tool results are flattened into user text rather than native structured tool_result blocks.
-- capability effect/idempotency/dependency metadata is needed before safe tool-batch execution.
-- deterministic dispatch should replace LLM selection when intent is already exact.
-- tool-result content remains an untrusted prompt-injection boundary.
+R&D-08E required scope:
+- managed tool/integration catalog architecture;
+- auth/OAuth account linking;
+- per-user/per-tenant connected accounts;
+- tool discovery and schema normalization;
+- execution proxy vs direct provider calls;
+- triggers/webhooks;
+- MCP support;
+- credential custody;
+- action policy/approval;
+- observability;
+- vendor lock-in/exportability;
+- comparison with KEY's native connector registry, MCP bridge, OAuth modules and FLOW_TOOLS;
+- identify mechanisms worth reproducing natively without onboarding Composio unless later convergence proves a need.
 
-Key R&D-08C A2A conclusions:
-- A2A is for independent-agent interoperability/delegation, not KEY's internal orchestration truth.
-- current RoleEngine crews and AgentBus are not true independent-agent federation; repo audits explicitly say there are no independent agents behind the current multi-agent label.
-- Agent Cards are capability claims requiring admission, not authority.
-- A2A Tasks are useful for long-running delegated work; Messages are communication while Artifacts are deliverables.
-- remote completion must not become local acceptance without required artifacts/effect evidence.
-- streaming/push updates are projections requiring durable reconciliation and idempotent callback handling.
-- delegation requires a least-context, least-authority envelope with time/cost/data/effect limits.
-- opaque-agent assurance should be outcome/artifact/effect based, not chain-of-thought based.
-- internal AgentBus/Flow remain internal; A2A is a likely external adapter for vendors, other KEY instances, specialized agents and the Development Organism.
-
-R&D-08D required scope:
-- browser/desktop visual control;
-- screenshot/vision grounding;
-- coordinate vs accessibility-tree actions;
-- browser-only vs OS-level control;
-- hostile-page/prompt-injection risk;
-- credentials/session isolation;
-- downloads/uploads;
-- action confirmation;
-- UI drift and recovery;
-- phone/desktop/device boundaries;
-- current browser-use and Windows/device ambitions in KEYFLOWOS;
-- whether computer use should be a governed fallback beneath higher-level APIs/MCP/tools rather than the default integration method.
-
-Do not skip ahead to Composio or implementation before R&D-08D is complete.
-
-# Active implementation posture
-
-Prepared implementation packet `KF-EXEC-COGNITION-001` remains **PARKED**.
-
-No Layer-4/5/6/7 research result has independently authorized:
-- onboarding a new vector database;
-- adopting DSPy/Instructor/Outlines/Guidance/BAML as a second runtime;
-- introducing a second provider gateway;
-- starting model fine-tuning;
-- replacing FLOW_TOOLS;
-- replacing Context Genome truth ownership;
-- bypassing Assurance, authority or no-fake-green gates.
-
-Research continues first; bounded implementation packets are released only after an explicit convergence/admission decision.
-
-# Hard rules
-
-- the source image's 10 layers remain the origin taxonomy unless research justifies refinement;
-- KEY-specific additions extend the taxonomy rather than silently replacing it;
-- research individual subjects before declaring layer convergence;
-- preserve useful discoveries even when a framework/runtime is rejected;
-- no premature implementation;
-- no framework adoption by reputation;
-- no premature canonization;
-- distinguish external research evidence, repository evidence, inference and accepted architecture;
-- one durable truth owner per semantic concern;
-- cross-analyze after individual studies;
-- no fake green;
-- prepared implementation packets may be parked without becoming the active frontier.
+Do not skip ahead to Arcade or Layer-8 convergence before R&D-08E is complete.
