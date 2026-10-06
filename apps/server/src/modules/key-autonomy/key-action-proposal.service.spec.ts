@@ -8,6 +8,8 @@ import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
 import { AutonomyOrchestratorService } from './autonomy-orchestrator.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { CapabilityContractService } from '../capabilities/capability-contract.service';
+import { KeyActionBoundaryService } from './action-boundary/key-action-boundary.service';
 
 function createMockClient() {
   const rows: any[] = [];
@@ -44,6 +46,10 @@ describe('KeyActionProposalService', () => {
       providers: [
         KeyActionProposalService,
         KeyActionPolicyService,
+        // The real boundary: for any tool it has not adopted it answers
+        // "not mine" from its own code, with no collaborator involved.
+        KeyActionBoundaryService,
+        CapabilityContractService,
         {
           provide: PrismaService,
           useValue: { client: mockClient },
@@ -264,5 +270,82 @@ describe('KeyActionProposalService', () => {
 
     const executed = await service.execute('biz_1', created.id, 'user_1', false, true);
     expect(executed.status).toBe('EXECUTED');
+  });
+
+  // KF-EXEC-ACTION-001. The claim transaction itself is proved against the
+  // real database (test/key-action-boundary.integration.test.ts); what is
+  // proved here is the routing: which identity is evaluated, and that an
+  // adopted capability never reaches the unguarded EXECUTING write or the
+  // executor plugin.
+  describe('EXECUTE_TOOL wrapper identity', () => {
+    const wrapper = (toolName: string, inputPayload: Record<string, unknown>) => ({
+      sourceType: 'AI_PLAN' as const,
+      title: 'Plan step',
+      actionType: 'EXECUTE_TOOL' as const,
+      payload: { toolName, inputPayload },
+    });
+
+    it('a proposal for helpdesk_create_ticket is sealed with the capability, not the wrapper', async () => {
+      const created = await service.create('biz_1', wrapper('helpdesk_create_ticket', { title: 'From a plan' }));
+
+      expect(created.actionType).toBe('EXECUTE_TOOL');
+      expect(created.capabilityName).toBe('helpdesk_create_ticket');
+      expect(created.executionSurface).toBe('PROPOSAL');
+      expect(created.actionFingerprint).toMatch(/^[0-9a-f]{64}$/);
+      expect(created.requestedBy).toBeNull();
+    });
+
+    it('it is evaluated as helpdesk_create_ticket and executed by the boundary alone', async () => {
+      const boundary = moduleRef.get(KeyActionBoundaryService);
+      const autonomy = moduleRef.get(AutonomyOrchestratorService);
+      const admit = vi.spyOn(boundary, 'admit').mockImplementation(async (_biz, actionId) => {
+        mockClient.rows.find((r) => r.id === actionId).status = 'EXECUTED';
+        return { actionId, ticket: { id: 't1', title: 'From a plan', status: 'OPEN' }, replayed: false };
+      });
+
+      const created = await service.create('biz_1', wrapper('helpdesk_create_ticket', { title: 'From a plan' }));
+      mockClient.rows[0].status = 'APPROVED';
+      const executed = await service.execute('biz_1', created.id, 'user_1', true, true);
+
+      expect(vi.mocked(autonomy.evaluateAction).mock.calls.map((c) => c[1])).toEqual(['helpdesk_create_ticket']);
+      expect(admit).toHaveBeenCalledWith('biz_1', created.id, { executedBy: 'user_1', log: true });
+      expect(executor.execute).not.toHaveBeenCalled();
+      const statusesWritten = mockClient.keyActionProposal.update.mock.calls.map(([arg]: any[]) => arg.data.status);
+      expect(statusesWritten).not.toContain('EXECUTING');
+      expect(executed.status).toBe('EXECUTED');
+    });
+
+    it('its approval is control evidence recorded by the boundary, and needs someone to name', async () => {
+      const boundary = moduleRef.get(KeyActionBoundaryService);
+      const recordEvidence = vi.spyOn(boundary, 'recordEvidence').mockImplementation(async (_biz, actionId) => {
+        const row = mockClient.rows.find((r) => r.id === actionId);
+        Object.assign(row, { status: 'APPROVED', approvedBy: 'user_1' });
+        return row;
+      });
+
+      const created = await service.create('biz_1', wrapper('helpdesk_create_ticket', { title: 'From a plan' }));
+      await expect(service.approve('biz_1', created.id)).rejects.toThrow('authenticated approver');
+      expect(recordEvidence).not.toHaveBeenCalled();
+
+      const approved = await service.approve('biz_1', created.id, 'user_1');
+      expect(recordEvidence).toHaveBeenCalledWith('biz_1', created.id, 'user_1');
+      expect(approved.status).toBe('APPROVED');
+    });
+
+    it('a proposal for any other tool keeps the path it had', async () => {
+      const boundary = moduleRef.get(KeyActionBoundaryService);
+      const autonomy = moduleRef.get(AutonomyOrchestratorService);
+      const admit = vi.spyOn(boundary, 'admit');
+
+      const created = await service.create('biz_1', wrapper('crm_add_note', { note: 'x' }));
+      expect(created.capabilityName).toBeNull();
+      await service.approve('biz_1', created.id, 'user_1');
+      const executed = await service.execute('biz_1', created.id, 'user_1', true, true);
+
+      expect(vi.mocked(autonomy.evaluateAction).mock.calls.map((c) => c[1])).toEqual(['key_autonomy.EXECUTE_TOOL']);
+      expect(admit).not.toHaveBeenCalled();
+      expect(executor.execute).toHaveBeenCalledTimes(1);
+      expect(executed.status).toBe('EXECUTED');
+    });
   });
 });

@@ -89,6 +89,29 @@ normalize-event.mjs, orchestrate.mjs → lib/events.mjs → lib/authority-effect
 
 `authority-effects.mjs` does no I/O. `truth.mjs` alone reads #80 and repository truth through `gh`.
 
+## KEY Action Boundary
+
+KF-EXEC-ACTION-001 (`execution-paths.md` §13). `KeyActionBoundaryService` is provided and exported by `KeyAutonomyModule`.
+
+```
+flow-orchestrator.service.ts            → key-autonomy/action-boundary/key-action-boundary.service.ts (ModuleRef, at call time)
+key-action-proposal.service.ts          → key-action-boundary.service.ts (constructor)
+key-action-boundary.service.ts          → capabilities/capability-contract.service.ts
+                                        → ai/ai-oversight.service.ts
+                                        → helpdesk/helpdesk.service.ts
+                                        → temporal-flow/temporal-flow.service.ts
+                                          (all four through ModuleRef, at call time)
+                                        → action-envelope.ts, control-clearance.ts, shadow-parity.ts
+control-clearance.ts                    → core/authority/approval-tier.ts, core/authority/module-vocabulary.ts
+shadow-parity.ts                        → control-clearance.ts (types)
+```
+
+The three pure files import nothing from NestJS or Prisma. `action-envelope.ts` imports only `crypto`.
+
+The surfaces see the `ActionContext` type only through the orchestrator's method signatures. `phone-voice`, `conversational-ai`, `action-dispatcher`, `key-cortex-action-executor.plugin`, `key-cortex-efferent-bridge` and `graph-actions.controller` each pass a literal `{ surface: '...' }`. One of them imports the boundary file: `key-cortex-efferent-bridge.service.ts` imports `ActionNotClearedError` from it, to tell a boundary answer from a failure. `key-cortex` already imports `key-autonomy`, so this adds no module edge.
+
+No new module edge: `AiModule`, `KeyAutonomyModule` and `KeyCortexModule` already `forwardRef` each other, which is why every cross-module collaborator above is resolved lazily.
+
 ## External Integration Dependencies
 
 | Integration | Primary Server Files | Primary Web Files |

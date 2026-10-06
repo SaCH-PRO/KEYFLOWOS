@@ -223,7 +223,7 @@ export function useKeyChatActions() {
     async (
       text?: string,
       opts?: {
-        pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown> };
+        pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown>; confirmationId?: string };
         /**
          * Drive a turn without showing the prompt that caused it. The
          * onboarding view advances steps by asking KEY for the next card; that
@@ -380,6 +380,19 @@ export function useKeyChatActions() {
         }
       };
 
+      // A confirmation that carries a server-issued id goes to the REST route.
+      // The stream route has no field for a confirmation, so sending one there
+      // starts an ordinary turn with an empty message and the action the user
+      // just confirmed is never executed.
+      if (opts?.pendingConfirmation?.confirmationId) {
+        await fallbackToRest();
+        chat.setStatus("idle");
+        processingRef.current = false;
+        window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "idle" } }));
+        void loadSessions();
+        return;
+      }
+
       await startStream(
         {
           businessId,
@@ -530,11 +543,19 @@ export function useKeyChatActions() {
 
   const confirmAction = useCallback(
     async (toolCallId: string, confirmed: boolean, toolName: string, toolArgs: Record<string, unknown>) => {
+      // The server issues an id with a confirmation it will only execute by
+      // that id. It arrives on the message's pendingConfirmations, so it is
+      // looked up here by tool call and sent back with the answer.
+      let confirmationId: string | undefined;
+      for (const m of chat.messages) {
+        const pending = m.pendingConfirmations?.find((pc) => pc.toolCallId === toolCallId);
+        if (pending?.confirmationId) confirmationId = pending.confirmationId;
+      }
       await sendMessage("", {
-        pendingConfirmation: { toolCallId, confirmed, toolName, toolArgs },
+        pendingConfirmation: { toolCallId, confirmed, toolName, toolArgs, ...(confirmationId ? { confirmationId } : {}) },
       });
     },
-    [sendMessage]
+    [sendMessage, chat.messages]
   );
 
   const stop = useCallback(() => {

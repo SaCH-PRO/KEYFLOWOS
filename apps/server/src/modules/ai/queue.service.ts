@@ -24,6 +24,13 @@ export interface PlanStepJob {
   planContext?: { planId: string; planStepId: string };
 }
 
+/**
+ * The step did not fail: it is waiting for a human. Thrown so the job ends
+ * the way the pre-dispatch "requires manual approval" branch ends it, without
+ * the step being marked failed on the way out.
+ */
+class StepAwaitingApproval extends Error {}
+
 export interface CronTriggerJob {
   triggerId: string;
   businessId: string;
@@ -202,6 +209,19 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
       const durationMs = Date.now() - startTime;
 
+      if (dispatchResult.awaitingApproval) {
+        // KF-EXEC-ACTION-001: the KEY action boundary filed the step's action
+        // for a human. Same state as the governance branch above: the step
+        // waits, and approving the proposal sets it pending and runs it again
+        // (PlanExecutorService.onProposalApproved).
+        await this.prisma.client.aiPlanStep.update({
+          where: { id: data.stepId },
+          data: { status: 'awaiting_approval' },
+        });
+        await this.stateMachine.transition(data.planId, data.businessId, 'awaiting_input', 'queue_worker');
+        throw new StepAwaitingApproval(`Step ${data.stepId} requires manual approval`);
+      }
+
       if (!dispatchResult.success) {
         throw new Error(dispatchResult.error ?? `Tool ${data.toolName} failed`);
       }
@@ -237,6 +257,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
       return result;
     } catch (err: any) {
+      if (err instanceof StepAwaitingApproval) throw err;
+
       const durationMs = Date.now() - startTime;
       const errorMsg = (err as Error).message;
 

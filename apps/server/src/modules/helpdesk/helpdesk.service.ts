@@ -2,6 +2,20 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
+export interface CreateTicketBody {
+  title: string;
+  description?: string;
+  status?: string;
+  priority?: string;
+  source?: string;
+  contactId?: string;
+  assignedToId?: string;
+  orgUnitId?: string;
+}
+
+/** Anything that can insert a ticket: the Prisma client or a transaction on it. */
+export type TicketWriteClient = Pick<PrismaService['client'], 'supportTicket'>;
+
 @Injectable()
 export class HelpdeskService {
   constructor(
@@ -32,22 +46,35 @@ export class HelpdeskService {
     });
   }
 
-  async createTicket(businessId: string, body: {
-    title: string;
-    description?: string;
-    status?: string;
-    priority?: string;
-    contactId?: string;
-    assignedToId?: string;
-    orgUnitId?: string;
-  }) {
-    const ticket = await this.prisma.client.supportTicket.create({
+  async createTicket(businessId: string, body: Omit<CreateTicketBody, 'source'>) {
+    // `source` is stripped, not forwarded. The manual route's body is typed
+    // inline, so nothing removes an extra key from it, and this method has
+    // never written a caller's source. It still does not.
+    const ticket = await this.createTicketRow(this.prisma.client, businessId, { ...body, source: undefined });
+    this.emitTicketCreated(businessId, ticket, body);
+    return ticket;
+  }
+
+  /**
+   * The row write of createTicket, on a caller-supplied client.
+   *
+   * KF-EXEC-ACTION-001: the KEY action boundary writes the ticket inside the
+   * transaction that admits its execution claim, so the insert has to be able
+   * to run on that transaction. It does not emit: an event for a row that may
+   * still roll back is an event for a ticket that never existed. The caller
+   * emits after its commit, with emitTicketCreated.
+   */
+  createTicketRow(client: TicketWriteClient, businessId: string, body: CreateTicketBody) {
+    return client.supportTicket.create({
       data: {
         businessId,
         title: body.title,
         description: body.description,
         status: body.status || 'OPEN',
         priority: body.priority || 'NORMAL',
+        // Omitted, not defaulted, when the caller gives none: the column
+        // default (MANUAL) is what the manual route has always produced.
+        ...(body.source ? { source: body.source } : {}),
         contactId: body.contactId,
         assignedToId: body.assignedToId,
         orgUnitId: body.orgUnitId,
@@ -58,13 +85,15 @@ export class HelpdeskService {
         orgUnit: { select: { id: true, name: true } },
       },
     });
+  }
+
+  emitTicketCreated(businessId: string, ticket: unknown, body: Pick<CreateTicketBody, 'contactId' | 'priority'>) {
     this.events.emit('supportTicket.created', {
       ticket,
       businessId,
       contactId: body.contactId,
       priority: body.priority || 'NORMAL',
     });
-    return ticket;
   }
 
   async updateTicket(businessId: string, ticketId: string, body: {

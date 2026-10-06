@@ -92,6 +92,10 @@ export class KeyCortexActionExecutorPlugin
           toolName,
           args as Record<string, any>,
           payload.planContext,
+          // KF-EXEC-ACTION-001: the proposal is the action record. A capability
+          // the action boundary has adopted is admitted by this id, against
+          // the envelope sealed on the proposal, never by these arguments.
+          { surface: 'PROPOSAL', actionId: proposal.id },
         );
 
         return { success: true, result: result as Record<string, unknown> | undefined };

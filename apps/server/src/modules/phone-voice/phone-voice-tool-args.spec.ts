@@ -138,9 +138,16 @@ describe('behaviour: nothing is executed when the arguments cannot be read', () 
   // is its own outage.
   it('still executes a well-formed call', async () => {
     await onFunctionCall(svc, 'helpdesk_create_ticket', '{"subject":"Broken tap"}');
-    expect(executeToolByName).toHaveBeenCalledWith('biz_1', 'helpdesk_create_ticket', {
-      subject: 'Broken tap',
-    });
+    // KF-EXEC-ACTION-001: the call still reaches the executor with its
+    // arguments, and now declares the surface it came from. What the action
+    // boundary then does with a phone-stream call is proved against the real
+    // database in test/key-action-boundary-surfaces.integration.test.ts.
+    expect(executeToolByName).toHaveBeenCalledWith(
+      'biz_1',
+      'helpdesk_create_ticket',
+      { subject: 'Broken tap' },
+      { surface: 'PHONE_STREAM' },
+    );
   });
 
   it('still executes a booking with real arguments', async () => {

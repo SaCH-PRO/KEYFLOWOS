@@ -581,3 +581,91 @@ Key files:
 - `scripts/agent-control/orchestrate.mjs`, `scripts/agent-control/status.mjs`
 - `.agent-control/programme-state.yaml` — the reviewed checkpoint
 - Contract: `docs/development/AGENT_CONTROL_PLANE.md`
+
+## 13. KEY Action Boundary: Capability → Control → Clearance (helpdesk_create_ticket)
+
+KF-EXEC-ACTION-001, first adoption. One capability is governed: `helpdesk_create_ticket`. Every other tool keeps the path in §6.
+
+Every surface that can run the tool reaches one branch of the executor, and that branch does one thing:
+
+```
+FlowOrchestratorService.executeToolAction(businessId, toolName, args, action?)
+  case 'helpdesk_create_ticket'
+    → KeyActionBoundaryService.executeFromTool(businessId, toolName, args, action)
+```
+
+`action` is what the calling surface knows: its surface name, the authenticated user if it has one, and a server-issued action id if it holds one. A caller that passes nothing arrives as `UNDECLARED` and is refused.
+
+| Surface | Declared as | Principal |
+|---|---|---|
+| `POST ai/businesses/:id/flow/chat`, `.../chat/stream` | `CHAT`, `CHAT_STREAM` | the authenticated user |
+| `POST ai/businesses/:id/flow/confirm` (and `pendingConfirmation` on chat) | confirms by id | the authenticated user |
+| phone stream WebSocket (`PhoneVoiceService`) | `PHONE_STREAM` | none; tenant binding untrusted |
+| inbound conversational (`ConversationalAIService`) | `INBOUND_CONVERSATION` | none |
+| `POST ai/businesses/:id/flow/execute-plan/:planId` | `PLAN_HTTP` | the authenticated user |
+| plan queue (`ActionDispatcherService`) | `PLAN_QUEUE` | none |
+| proposal execute (`KeyActionProposalService`, executor plugin) | `PROPOSAL` | the approver on the proposal |
+| cortex registry bridge (`KeyCortexEfferentBridgeService`) | `CORTEX_BRIDGE` | none |
+| `POST actions/businesses/:id/execute` (`GraphActionsController`) | `GRAPH_ACTION` | the authenticated user |
+| `execute_custom_logic` inner executor | `CUSTOM_LOGIC` | none |
+| `autoExecuteToolForMonitoring` | `PRO_AUTO_MONITOR` | none |
+
+The chain, in the order it runs:
+
+```
+prepare(businessId, capability, rawArgs, action)
+  → CapabilityContractService.get(name)                 real capability identity, never a wrapper
+  → an untrusted tenant binding (PHONE_STREAM, UNDECLARED) is refused here; nothing is read or written
+  → buildHelpdeskCreateTicketEnvelope()                  server-built, canonical, frozen
+  → fingerprintEnvelope()                                sha256 over capability, version, business, material
+  → AiOversightService.evaluate(real tool name)          KEY autonomy and business policy
+  → deriveControlRequirement()                           DENY | NONE | PRINCIPAL_CONFIRMATION | HUMAN_APPROVAL
+  → compareWithLegacy()                                  what the surface used to do, recorded beside it
+  → KeyActionProposal row (PENDING)                      the action record; a denial writes no row
+
+recordEvidence(businessId, actionId, authenticatedUserId)
+  → lock the action record; lock and re-read policy and the giver's authority
+  → evidenceKindFor()                                    requester → CONFIRMATION; tier ≥ capability tier → APPROVAL
+  → ControlEvidence { fingerprint, principal, expiresAt, authority assumptions }
+
+admit(businessId, actionId)                              ONE transaction
+  1. INSERT idempotency_keys (business, key-action-claim:<actionId>)   the claim: insert-or-fail on the unique index
+  2. read the action record; recompute the fingerprint from the stored envelope
+  3. SELECT ... FOR SHARE on autopilot_settings, ai_memories (autonomy), businesses, users, memberships; re-read them
+  4. deriveControlRequirement() again, on those rows; computeClearance()
+  5. HelpdeskService.createTicketRow(tx, ...)             the effect, on this transaction
+  6. outcome evidence on the action record and the claim  ticket id, fingerprint, principal chain
+  commit → HelpdeskService.emitTicketCreated()            supportTicket.created, after the commit
+```
+
+A refusal or a failed effect rolls the claim back with everything else. There is no state between "nothing" and "claim, ticket and evidence", so no outcome is unknown. A concurrent executor waits on the unique index and is then given the recorded ticket. A rejection or a cancellation takes the same claim, so exactly one of executed, rejected and cancelled is ever recorded for an action.
+
+A plan step is one action. `prepare()` finds the record a step already has by business, capability, plan step and fingerprint, whether it is PENDING, APPROVED or EXECUTED. That is what makes the plan runner's resume work: the queue files the step's action, a human approves the proposal, `PlanExecutorService.onProposalApproved` sets the step pending, and the queue run that follows admits the approved action instead of filing another. A run after execution is given the recorded ticket. Outside a plan step a request matches an existing record only while that record is still waiting.
+
+A refusal is not a failure of the tool, and three places that count failures are told so:
+
+- `ActionDispatcherService.dispatch` does not retry it, does not count it towards the tool's circuit breaker, and returns `awaitingApproval`.
+- `QueueService.processPlanStep` leaves such a step `awaiting_approval` and the plan `awaiting_input`.
+- `KeyCortexEfferentBridgeService` returns `notExecuted`, and `KeyCortexToolRegistryService.execute` does not score a `notExecuted` result in `ToolOutcomeScore`, count it against the daily limits or cache it under an idempotency key. `AutonomyOrchestratorService` reads that score before a proposal executes, so scoring refusals would block the tool the approvals are waiting to run.
+
+Who may clear an action:
+
+- The requester may confirm their own action if they could do it by hand: `Business.ownerId`, a `Membership`, or `SUPER_ADMIN` (the `BusinessGuard` rule).
+- Anyone else, and any action nobody requested, needs an approval tier at or above the capability tier (`resolveMembershipApprovalTier`, the frozen AUTH-001 rule). An owner with no `Membership` row has tier 0.
+- With no trusted principal, KEY autonomy clears nothing: the action is a proposal for a human.
+
+Not on this path:
+
+- `POST helpdesk/businesses/:id/tickets` (`HelpdeskController`), the human manual operation, calls `HelpdeskService.createTicket` directly.
+- `apps/voice-agent` `transfer_to_human` is a different capability and is unchanged.
+
+Key files:
+
+- `apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts` — `prepare()`, `recordEvidence()`, `admit()`, `voidAction()`, `executeFromTool()`, `confirmAndExecute()`, `sealProposal()`
+- `apps/server/src/modules/key-autonomy/action-boundary/action-envelope.ts` — `buildHelpdeskCreateTicketEnvelope()`, `fingerprintEnvelope()`, `BOUNDARY_CAPABILITIES`
+- `apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts` — `deriveControlRequirement()`, `evidenceKindFor()`, `computeClearance()`, `resolvePrincipalAuthority()`, `EXECUTION_SURFACES`
+- `apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.ts` — `legacyDisposition()`, `compareWithLegacy()`
+- `apps/server/src/modules/key-autonomy/key-action-proposal.service.ts` — seals, approves, rejects, cancels and executes an adopted capability's proposal through the boundary
+- `apps/server/src/modules/ai/flow-orchestrator.service.ts` — `governToolCall()`, `confirmThroughBoundary()`, `executeToolAction()`
+- `apps/server/src/modules/helpdesk/helpdesk.service.ts` — `createTicketRow()`, `emitTicketCreated()`
+- Proof: `apps/server/test/key-action-boundary.integration.test.ts`, `apps/server/test/key-action-boundary-surfaces.integration.test.ts`, `scripts/proof-admission/manifests/action-001-negative-controls.json`

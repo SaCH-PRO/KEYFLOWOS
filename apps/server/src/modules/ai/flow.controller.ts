@@ -30,6 +30,7 @@ export class AiFlowController {
         confirmed: boolean;
         toolName?: string;
         toolArgs?: Record<string, any>;
+        confirmationId?: string;
       };
     },
     @CurrentUser() user: AuthenticatedUser | undefined,
@@ -134,11 +135,14 @@ export class AiFlowController {
     @Param('businessId') businessId: string,
     @Body() body: {
       toolCallId: string;
-      toolName: string;
-      toolArgs: Record<string, any>;
+      toolName?: string;
+      toolArgs?: Record<string, any>;
       confirmed: boolean;
       message?: string;
+      /** Server-issued id of the action being confirmed (KF-EXEC-ACTION-001). */
+      confirmationId?: string;
     },
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
     const result = await this.flow.chat(
       businessId,
@@ -149,7 +153,15 @@ export class AiFlowController {
         confirmed: body.confirmed,
         toolName: body.toolName,
         toolArgs: body.toolArgs,
+        confirmationId: typeof body.confirmationId === 'string' ? body.confirmationId : undefined,
       },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      // The confirming principal. This route passed no user at all, so a
+      // confirmation was attributable to nobody.
+      user?.id,
     );
     return result;
   }
@@ -159,7 +171,8 @@ export class AiFlowController {
   async executePlan(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
-    return this.flow.executePlan(businessId, planId);
+    return this.flow.executePlan(businessId, planId, user?.id);
   }
 }

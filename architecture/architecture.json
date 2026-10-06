@@ -1,7 +1,7 @@
 {
   "meta": {
     "schema": "codebase-architect/v1",
-    "generated": "2026-10-03T00:00:00Z",
+    "generated": "2026-10-05T00:00:00Z",
     "baseline_generated": "2026-08-30T20:45:00Z",
     "source": "baseline exploration output + inventory.py + dependency_scan.py + 2026-08-30 full-domain deep scan; revised 2026-09-25/26 (PR #93) with the INACTIVE platform-convergence successor target and the agent control plane nodes/edges",
     "revisions": [
@@ -24,6 +24,10 @@
       {
         "date": "2026-10-04",
         "change": "PR #120, CHECKPOINT-VALIDATION-017: lib/authority-effects.mjs validates the checkpoint before the fold and lib/reconcile.mjs imports validateState from lib/state.mjs to report an invalid anchored projection; both files are inside the scripts/agent-control node, so no node or edge is added; inventory.json and dependencies.json regenerated"
+      },
+      {
+        "date": "2026-10-05",
+        "change": "KF-EXEC-ACTION-001: key-action-boundary.service.ts node and its edges added for the Capability -> Control -> Clearance boundary, first adoption helpdesk_create_ticket (execution-paths.md section 13); the ai and key-cortex modules reach it and it reads KEY autonomy and policy from the ai module; inventory.json and dependencies.json regenerated"
       }
     ],
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
@@ -496,6 +500,11 @@
       "id": ".agent-control/programme-state.yaml",
       "type": "file",
       "label": "Reviewed programme checkpoint anchored to one #80 authority message; never rewritten from authority"
+    },
+    {
+      "id": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "type": "file",
+      "label": "KEY action boundary: envelope, control requirement, control evidence, clearance and the claim transaction that is the only KEY writer of a SupportTicket (helpdesk_create_ticket)"
     }
   ],
   "edges": [
@@ -1002,6 +1011,26 @@
     {
       "source": "scripts/agent-control",
       "target": ".agent-control/programme-state.yaml",
+      "type": "depends_on"
+    },
+    {
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "target": "module:key-autonomy",
+      "type": "belongs_to"
+    },
+    {
+      "source": "module:ai",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "type": "depends_on"
+    },
+    {
+      "source": "module:key-cortex",
+      "target": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "type": "depends_on"
+    },
+    {
+      "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
+      "target": "module:ai",
       "type": "depends_on"
     }
   ],

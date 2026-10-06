@@ -26,6 +26,12 @@ export interface DispatchResult {
   error?: string;
   dispatchId: string;
   durationMs: number;
+  /**
+   * KF-EXEC-ACTION-001: the KEY action boundary recorded the action and is
+   * waiting for a human to confirm or approve it. Nothing ran. This is not a
+   * failure of the tool.
+   */
+  awaitingApproval?: { actionId: string | null };
 }
 
 interface CircuitState {
@@ -93,6 +99,7 @@ export class ActionDispatcherService {
 
     // Execute with retries
     let lastError: string | undefined;
+    let boundaryAnswer: { actionId?: string | null; disposition?: string } | undefined;
     const retries = ctx.retryCount ?? this.MAX_RETRIES;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -108,6 +115,8 @@ export class ActionDispatcherService {
           ctx.toolName,
           ctx.args,
           ctx.planId && ctx.planStepId ? { planId: ctx.planId, planStepId: ctx.planStepId } : undefined,
+          // KF-EXEC-ACTION-001: the queue worker has a business and no principal.
+          { surface: 'PLAN_QUEUE', planId: ctx.planId ?? null, planStepId: ctx.planStepId ?? null },
         );
 
         const durationMs = Date.now() - startTime;
@@ -158,11 +167,23 @@ export class ActionDispatcherService {
       } catch (err: any) {
         lastError = (err as Error).message;
         this.logger.warn(`Dispatch ${dispatchId} attempt ${attempt + 1} failed: ${lastError}`);
+        // The action boundary answered: the action is waiting for a human or
+        // was refused. Asking again gets the same answer.
+        if ((err as { retryable?: boolean })?.retryable === false) {
+          boundaryAnswer = err as { actionId?: string | null; disposition?: string };
+          break;
+        }
       }
     }
 
     const durationMs = Date.now() - startTime;
-    this.recordFailure(ctx.toolName);
+    // A refusal by the boundary is the boundary working, not the tool failing.
+    // Counting it would open this tool's circuit after five proposals and stop
+    // the sixth from being filed at all.
+    if (!boundaryAnswer) this.recordFailure(ctx.toolName);
+    const awaitingApproval = boundaryAnswer?.disposition?.startsWith('AWAITING')
+      ? { actionId: boundaryAnswer.actionId ?? null }
+      : undefined;
 
     await this.executionLog.logToolExecution(
       ctx.businessId,
@@ -189,9 +210,10 @@ export class ActionDispatcherService {
       reason: lastError,
     });
 
-    await this.runFeedback(ctx, undefined, false, lastError);
+    // Waiting for a human is not an outcome for the feedback loop to learn from.
+    if (!awaitingApproval) await this.runFeedback(ctx, undefined, false, lastError);
 
-    return { success: false, error: lastError, dispatchId, durationMs };
+    return { success: false, error: lastError, dispatchId, durationMs, ...(awaitingApproval ? { awaitingApproval } : {}) };
   }
 
   /**

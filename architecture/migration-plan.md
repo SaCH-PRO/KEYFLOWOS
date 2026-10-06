@@ -166,6 +166,52 @@ completion contract.
 
 ## Changelog
 
+### 2026-10-05 — KEY action boundary, first adoption: helpdesk_create_ticket
+
+- KF-EXEC-ACTION-001. One capability, `helpdesk_create_ticket`, now runs through
+  Capability → Control → Clearance → ExecutionClaim → OutcomeEvidence
+  (`execution-paths.md` §13). Every other tool is unchanged.
+- New files under `apps/server/src/modules/key-autonomy/action-boundary/`:
+  `key-action-boundary.service.ts`, `action-envelope.ts`, `control-clearance.ts`,
+  `shadow-parity.ts`. `KeyActionBoundaryService` is provided and exported by
+  `KeyAutonomyModule` (`dependency-map.md`, "KEY Action Boundary").
+- Schema: migration `20261005170000_key_action_boundary_clearance` adds twelve nullable
+  columns and one index to `key_action_proposals`. No new table: the execution claim is a
+  row in `idempotency_keys` under its existing unique index (`data-model.md`, flow 8).
+- The tool handler in `FlowOrchestratorService.executeToolAction` no longer calls
+  `HelpdeskService.createTicket`. It calls the boundary, whose claim transaction is the
+  only KEY writer of a `SupportTicket`. `HelpdeskService` gains `createTicketRow`, which
+  takes a client so the insert can run on that transaction, and `emitTicketCreated`.
+- Every executor entry (`executeTool`, `executeToolDirectly`, `executeToolByName`,
+  `executeToolDirect`, `executeToolAction`) takes an optional action context. Eleven
+  surfaces declare themselves with it.
+- `KeyActionProposalService` seals a proposal for an adopted capability on create, and
+  approves, rejects, cancels and executes it through the boundary. It evaluates such a
+  proposal under the tool's own name, not `key_autonomy.EXECUTE_TOOL`.
+- A boundary refusal is not treated as the tool failing. `ActionDispatcherService` stops
+  retrying, leaves the circuit breaker alone and returns `awaitingApproval`;
+  `QueueService.processPlanStep` leaves the step `awaiting_approval`;
+  `KeyCortexToolRegistryService.execute` does not score, limit-count or cache a handler
+  result marked `notExecuted`, which the efferent bridge now returns for a boundary answer.
+- `AiOversightService.evaluate` and `getAutonomySettings` take an optional reader, so
+  the boundary can evaluate policy on the rows it has locked. Other callers are unchanged.
+- Web: `FlowPendingConfirmation` carries a server-issued `confirmationId`, and the chat
+  sends a confirmation that has one to the REST route.
+- Behaviour that changes for this tool only: the phone stream cannot create a ticket;
+  inbound conversational, the plan queue, the cortex bridge, custom logic and the pro-auto
+  monitor file a proposal for an approver at tier 2 or above; a plan step and the graph
+  route ask the caller to confirm; a valid `source` argument is written to the ticket.
+- Not changed: the human helpdesk route, the voice agent's `transfer_to_human`, every
+  other capability, and the auto-generated registries (`capability-registry.yaml`,
+  `data-ownership.yaml`, `event-registry.yaml`, `module-registry.yaml`), which were not
+  regenerated.
+- New proof tooling: `scripts/proof-admission/negative-controls.mjs` runs a manifest of
+  defect-restoring mutations and requires the tests each one names to fail.
+- Re-ran `inventory.py` and `dependency_scan.py`; `architecture/inventory.json` and
+  `architecture/dependencies.json` regenerated. `architecture/architecture.json` gains the
+  boundary service node and its four edges.
+- No deployment and no production change.
+
 ### 2026-10-05 — Reviewed re-anchor of the programme checkpoint at RECOVERY-021
 
 - KF-META-STATE-REDUCER-LIVE-001 (PR #120), RECOVERY-021. `.agent-control/programme-state.yaml`

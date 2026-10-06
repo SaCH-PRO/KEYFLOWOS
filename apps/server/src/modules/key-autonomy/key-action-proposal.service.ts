@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -7,6 +7,7 @@ import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
 import { AutonomyOrchestratorService } from './autonomy-orchestrator.service';
+import { ActionNotClearedError, KeyActionBoundaryService } from './action-boundary/key-action-boundary.service';
 import type {
   CreateKeyActionProposalInput,
   KeyActionProposalData,
@@ -28,6 +29,7 @@ export class KeyActionProposalService {
     @Inject(KeyActionExecutorService) private readonly executor: KeyActionExecutorService,
     @Inject(KeyActionGenomePolicyService) private readonly genomePolicy: KeyActionGenomePolicyService,
     @Inject(forwardRef(() => AutonomyOrchestratorService)) private readonly autonomyOrchestrator: AutonomyOrchestratorService,
+    @Inject(KeyActionBoundaryService) private readonly boundary: KeyActionBoundaryService,
   ) {}
 
   async create(
@@ -37,7 +39,13 @@ export class KeyActionProposalService {
   ): Promise<KeyActionProposalData> {
     this.policy.getPolicy(input.actionType);
     const riskLevel = this.policy.riskLevel(input.actionType);
-    const requiresApproval = this.policy.requiresApproval(input.actionType);
+    // KF-EXEC-ACTION-001: a proposal for a capability the action boundary has
+    // adopted is that capability's action record, whoever produced it. It is
+    // sealed here (real capability identity, frozen envelope, fingerprint) so
+    // that an approval has something exact to name. No producer supplies a
+    // trusted requester, so it can only ever be cleared by a human approval.
+    const boundaryColumns = this.boundary.sealProposal(businessId, input, userId ?? null);
+    const requiresApproval = boundaryColumns ? true : this.policy.requiresApproval(input.actionType);
 
     const row = await this.prisma.client.keyActionProposal.create({
       data: {
@@ -69,6 +77,7 @@ export class KeyActionProposalService {
         riskLevel,
         status: 'PENDING',
         requiresApproval,
+        ...(boundaryColumns ?? {}),
       },
     });
 
@@ -125,14 +134,24 @@ export class KeyActionProposalService {
       throw new NotFoundException('Proposal is not pending approval');
     }
 
-    const row = await this.prisma.client.keyActionProposal.update({
-      where: { id: proposalId },
-      data: {
-        status: 'APPROVED',
-        approvedBy: approvedBy ?? null,
-        approvedAt: new Date(),
-      },
-    });
+    // KF-EXEC-ACTION-001: for an adopted capability an approval is control
+    // evidence, not a status. The boundary binds it to the action fingerprint
+    // and to this approver, whose authority it reads on locked rows; an
+    // approval nobody can be named for is not one.
+    let row;
+    if (this.boundary.governs(existing)) {
+      if (!approvedBy) throw new ForbiddenException('An authenticated approver is required for this action');
+      row = await this.boundary.recordEvidence(businessId, proposalId, approvedBy);
+    } else {
+      row = await this.prisma.client.keyActionProposal.update({
+        where: { id: proposalId },
+        data: {
+          status: 'APPROVED',
+          approvedBy: approvedBy ?? null,
+          approvedAt: new Date(),
+        },
+      });
+    }
 
     await this.emitLifecycleEvent(
       businessId,
@@ -164,15 +183,19 @@ export class KeyActionProposalService {
       throw new NotFoundException('Proposal is not pending approval');
     }
 
-    const row = await this.prisma.client.keyActionProposal.update({
-      where: { id: proposalId },
-      data: {
-        status: 'REJECTED',
-        rejectedBy: rejectedBy ?? null,
-        rejectedAt: new Date(),
-        rejectionReason: reason ?? null,
-      },
-    });
+    // For an adopted capability a rejection takes the action's execution
+    // claim, so it cannot land beside an execution of the same action.
+    const row = this.boundary.governs(existing)
+      ? await this.boundary.voidAction(businessId, proposalId, 'REJECTED', rejectedBy ?? null, reason)
+      : await this.prisma.client.keyActionProposal.update({
+          where: { id: proposalId },
+          data: {
+            status: 'REJECTED',
+            rejectedBy: rejectedBy ?? null,
+            rejectedAt: new Date(),
+            rejectionReason: reason ?? null,
+          },
+        });
 
     await this.emitLifecycleEvent(
       businessId,
@@ -200,10 +223,12 @@ export class KeyActionProposalService {
       throw new NotFoundException('Proposal cannot be cancelled');
     }
 
-    const row = await this.prisma.client.keyActionProposal.update({
-      where: { id: proposalId },
-      data: { status: 'CANCELLED' },
-    });
+    const row = this.boundary.governs(existing)
+      ? await this.boundary.voidAction(businessId, proposalId, 'CANCELLED', null)
+      : await this.prisma.client.keyActionProposal.update({
+          where: { id: proposalId },
+          data: { status: 'CANCELLED' },
+        });
 
     await this.emitLifecycleEvent(
       businessId,
@@ -238,7 +263,13 @@ export class KeyActionProposalService {
       throw new NotFoundException('High-risk action requires explicit confirmation');
     }
 
-    const actionKey = `key_autonomy.${proposal.actionType}`;
+    // KF-EXEC-ACTION-001: an EXECUTE_TOOL proposal for an adopted capability
+    // is governed as that capability. Evaluating the wrapper name here meant
+    // the tool's own blocklist entry, module and tier were never consulted.
+    const governed = this.boundary.governs(proposal);
+    const actionKey = governed
+      ? (this.boundary.resolveInvocation(proposal).toolName as string)
+      : `key_autonomy.${proposal.actionType}`;
     const autonomyVerdict = await this.autonomyOrchestrator.evaluateAction(
       businessId,
       actionKey,
@@ -311,6 +342,10 @@ export class KeyActionProposalService {
 
     if (genomeDecision.requiresExtraConfirmation && !confirmGenomeRisk) {
       throw new BadRequestException(genomeDecision.message);
+    }
+
+    if (governed) {
+      return this.executeThroughBoundary(businessId, proposal, executedBy);
     }
 
     await this.prisma.client.keyActionProposal.update({
@@ -390,6 +425,40 @@ export class KeyActionProposalService {
     return this.serialize(row);
   }
 
+  /**
+   * Execute an adopted capability's proposal. There is no EXECUTING write and
+   * no executor plugin: the boundary's claim transaction admits the action,
+   * writes the effect and records the outcome, or refuses and writes nothing.
+   */
+  private async executeThroughBoundary(
+    businessId: string,
+    proposal: KeyActionProposalData,
+    executedBy?: string,
+  ): Promise<KeyActionProposalData> {
+    await this.emitLifecycleEvent(businessId, proposal.id, proposal.actionType, 'key.action.executing', 'NORMAL', {
+      executedBy,
+    });
+
+    try {
+      await this.boundary.admit(businessId, proposal.id, { executedBy: executedBy ?? null, log: true });
+    } catch (err: unknown) {
+      if (!(err instanceof ActionNotClearedError)) throw err;
+      await this.emitLifecycleEvent(businessId, proposal.id, proposal.actionType, 'key.action.failed', 'HIGH', {
+        executedBy,
+        failureReason: err.message,
+        code: err.code,
+      });
+      throw new BadRequestException(err.message);
+    }
+
+    const executed = await this.get(businessId, proposal.id);
+    await this.emitLifecycleEvent(businessId, proposal.id, proposal.actionType, 'key.action.executed', 'HIGH', {
+      executedBy,
+      executionResult: executed.executionResult,
+    });
+    return executed;
+  }
+
   private async emitLifecycleEvent(
     businessId: string,
     proposalId: string,
@@ -454,6 +523,16 @@ export class KeyActionProposalService {
       executedAt: row.executedAt?.toISOString(),
       executionResult: (row.executionResult ?? null) as Record<string, unknown> | null,
       failureReason: row.failureReason,
+      capabilityName: row.capabilityName ?? null,
+      capabilityVersion: row.capabilityVersion ?? null,
+      executionSurface: row.executionSurface ?? null,
+      actionFingerprint: row.actionFingerprint ?? null,
+      controlRequirement: (row.controlRequirement ?? null) as Record<string, unknown> | null,
+      evidenceExpiresAt: row.evidenceExpiresAt?.toISOString() ?? null,
+      requestedBy: row.requestedBy ?? null,
+      proposedBy: row.proposedBy ?? null,
+      executedFor: row.executedFor ?? null,
+      outcomeEvidence: (row.outcomeEvidence ?? null) as Record<string, unknown> | null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };

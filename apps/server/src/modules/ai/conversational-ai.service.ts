@@ -289,10 +289,16 @@ Respond with JSON only:
       return { requiresConfirmation: true };
     }
 
+    // KF-EXEC-ACTION-001: an inbound message has a business and no principal.
+    // The surface is declared so the action boundary can say so; for a
+    // capability it has adopted this throws, and the caller above already
+    // reports a thrown action as one that still needs a human.
     const result = await this.flowOrchestrator.executeToolDirectly(
       businessId,
       action.toolName,
       action.payload,
+      undefined,
+      { surface: 'INBOUND_CONVERSATION' },
     );
 
     return { requiresConfirmation: false };

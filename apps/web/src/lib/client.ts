@@ -5894,6 +5894,12 @@ export interface FlowPendingConfirmation {
   arguments: Record<string, unknown>;
   description: string;
   riskLevel: 'low' | 'medium' | 'high';
+  /**
+   * Server-issued id of the action awaiting confirmation. When present it is
+   * what a confirmation must send back; the server does not execute a tool
+   * name and arguments returned by the client for such an action.
+   */
+  confirmationId?: string;
 }
 
 export interface OnboardingCardData {
@@ -5928,6 +5934,7 @@ export async function sendFlowChat(
     confirmed: boolean;
     toolName?: string;
     toolArgs?: Record<string, unknown>;
+    confirmationId?: string;
   },
   pageContext?: Record<string, unknown>,
   sessionId?: string | null,
@@ -5945,10 +5952,11 @@ export async function confirmFlowAction(
   toolName: string,
   toolArgs: Record<string, unknown>,
   confirmed: boolean,
+  confirmationId?: string,
 ): Promise<ApiResult<FlowChatResponse>> {
   return apiPost<FlowChatResponse>({
     path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/confirm`,
-    body: { toolCallId, toolName, toolArgs, confirmed },
+    body: { toolCallId, toolName, toolArgs, confirmed, ...(confirmationId ? { confirmationId } : {}) },
   });
 }
 

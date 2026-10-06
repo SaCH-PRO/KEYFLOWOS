@@ -246,7 +246,24 @@ export class PhoneVoiceService implements OnModuleInit {
         return this.flow.executeToolByName(businessId, 'bookings_create_booking', mapped);
       }
       case 'helpdesk_create_ticket':
-        return this.flow.executeToolByName(businessId, 'helpdesk_create_ticket', args);
+        // KF-EXEC-ACTION-001: declared as the phone stream, whose business id
+        // is a query-string value on an unauthenticated upgrade. The action
+        // boundary refuses it until stream authentication exists (D1, open
+        // under VOICE). The model is told nothing was done, so it does not
+        // tell the caller a ticket exists.
+        try {
+          return await this.flow.executeToolByName(businessId, 'helpdesk_create_ticket', args, {
+            surface: 'PHONE_STREAM',
+          });
+        } catch (err) {
+          this.logger.warn(
+            `helpdesk_create_ticket refused on ${ctx.callSid}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          return {
+            error:
+              'A support ticket could not be created from this call. Nothing was done. Tell the caller the team will call them back.',
+          };
+        }
       default:
         return { error: `Unknown tool ${name}` };
     }

@@ -34,6 +34,8 @@ export interface FlowStreamChunk {
     description: string;
     arguments: Record<string, unknown>;
     riskLevel: "low" | "medium" | "high";
+    /** Server-issued id of the action awaiting confirmation; sent back with the answer. */
+    confirmationId?: string;
   }>;
   card?: {
     type: "welcome" | "genesis-idea" | "genesis-questions" | "readiness-dashboard" | "template-picker" | "completion-gate";

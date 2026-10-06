@@ -134,6 +134,18 @@ export interface KeyActionProposalData {
   executedAt?: string | null;
   executionResult?: Record<string, unknown> | null;
   failureReason?: string | null;
+
+  // KF-EXEC-ACTION-001: set only on an action record of the action boundary.
+  capabilityName?: string | null;
+  capabilityVersion?: number | null;
+  executionSurface?: string | null;
+  actionFingerprint?: string | null;
+  controlRequirement?: Record<string, unknown> | null;
+  evidenceExpiresAt?: string | null;
+  requestedBy?: string | null;
+  proposedBy?: string | null;
+  executedFor?: string | null;
+  outcomeEvidence?: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
 }
