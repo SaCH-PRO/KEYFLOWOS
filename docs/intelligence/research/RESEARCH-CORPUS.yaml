@@ -1,0 +1,121 @@
+schema_version: 1
+programme: KEYFLOWOS_MULTI_LENS_RND
+status: ACTIVE
+authority: RESEARCH_ONLY
+promotion_requires:
+  - repository_pressure_test
+  - anti_duplication_check
+  - standards_frontier_pressure_test
+  - canonical_finding_or_recommendation
+  - backward_reaudit
+  - convergence
+
+sources:
+  - id: BOOK-WEINBERG-PSYCHOLOGY-COMPUTER-PROGRAMMING
+    title: The Psychology of Computer Programming
+    author: Gerald M. Weinberg
+    first_published: 1971
+    preferred_edition: Silver Anniversary Edition
+    lens: social_and_organizational_cognition
+    status: REPO_PRESSURE_TESTED
+    primary_questions:
+      - How do programmers and teams produce software reality?
+      - How do ego, communication, environment, tools and feedback affect quality?
+      - How should multi-agent development avoid private competing truths?
+
+  - id: BOOK-HERMANS-PROGRAMMERS-BRAIN
+    title: The Programmer's Brain
+    author: Felienne Hermans
+    published: 2021
+    lens: individual_cognition
+    status: QUEUED
+    primary_questions:
+      - How do working memory, long-term memory and cognitive load affect code comprehension?
+      - How should KEY distinguish missing knowledge, retrieval failure, overload and reasoning failure?
+      - How should context be chunked and presented to agents?
+
+  - id: BOOK-MARTIN-CLEAN-CODE
+    title: Clean Code
+    author: Robert C. Martin
+    published: 2008
+    lens: local_code_design
+    status: QUEUED
+    caution: Treat prescriptions as hypotheses; classify empirical support and context dependence.
+
+  - id: BOOK-KLEPPMANN-DDIA
+    title: Designing Data-Intensive Applications
+    author: Martin Kleppmann
+    published: 2017
+    lens: distributed_state_and_truth
+    status: QUEUED
+
+  - id: BOOK-SICP
+    title: Structure and Interpretation of Computer Programs
+    authors:
+      - Harold Abelson
+      - Gerald Jay Sussman
+      - Julie Sussman
+    lens: computational_abstraction_and_interpretation
+    status: QUEUED
+
+  - id: BOOK-NORMAN-DESIGN-EVERYDAY-THINGS
+    title: The Design of Everyday Things
+    author: Don Norman
+    first_published: 1988
+    lens: human_system_interaction
+    status: QUEUED
+
+  - id: BOOK-KAHNEMAN-THINKING-FAST-SLOW
+    title: Thinking, Fast and Slow
+    author: Daniel Kahneman
+    published: 2011
+    lens: judgment_and_decision_making
+    status: QUEUED
+    caution: Re-verify important empirical claims against current replication and methodological literature before adoption.
+
+  - id: BOOK-BROOKS-MYTHICAL-MAN-MONTH
+    title: The Mythical Man-Month
+    author: Frederick P. Brooks Jr.
+    first_published: 1975
+    lens: software_project_dynamics
+    status: QUEUED
+
+  - id: BOOK-PEOPLEWARE
+    title: Peopleware: Productive Projects and Teams
+    authors:
+      - Tom DeMarco
+      - Timothy Lister
+    first_published: 1987
+    lens: team_environment_and_productivity
+    status: QUEUED
+
+  - id: BOOK-KERNIGHAN-PIKE-PRACTICE-PROGRAMMING
+    title: The Practice of Programming
+    authors:
+      - Brian Kernighan
+      - Rob Pike
+    published: 1999
+    lens: pragmatic_engineering
+    status: QUEUED
+
+  - id: BOOK-ALGORITHMS-TO-LIVE-BY
+    title: Algorithms to Live By
+    authors:
+      - Brian Christian
+      - Tom Griffiths
+    published: 2016
+    lens: computational_decision_policy
+    status: QUEUED
+
+  - id: BOOK-TORNHILL-SOFTWARE-DESIGN-XRAYS
+    title: Software Design X-Rays
+    author: Adam Tornhill
+    published: 2018
+    lens: behavioral_code_analysis
+    status: QUEUED
+
+expansion_protocol:
+  default_status: QUEUED
+  duplicate_rule: Search existing lenses, dossiers, kernels, findings and recommendations before allocating a new concept.
+  source_rule: Prefer primary text or authoritative edition metadata for claims about a book.
+  citation_rule: Record chapter/page/section provenance when extracting source claims.
