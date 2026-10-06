@@ -287,7 +287,7 @@ For each source layer and each necessary KEYFLOWOS expansion:
 
 # Current verified programme status
 
-Continuity checkpoint updated after completion of the Layer-10 convergence pass.
+Continuity checkpoint updated after completion of GLOBAL CROSS-LAYER GENAI R&D CONVERGENCE pass 1.
 
 | Layer | Status |
 |---|---|
@@ -488,6 +488,56 @@ Layer-10 implementation direction remains **research-derived only, NOT RELEASED*
 6. threat memory + canaries;
 7. effect-safety hardening.
 
+
+## Global cross-layer convergence
+
+Status: **PASS 1 COMPLETE**.
+
+Canonical synthesis:
+`docs/intelligence/research/GENAI-RD-GLOBAL-CONVERGENCE.md`
+
+Creation commit:
+`13d485f288b4f47fb117a0f6e7aa467162c27f8e`
+
+Durable ledger comment:
+**6010080039**
+
+Global conclusion:
+- the 10-layer research does not justify ten new runtimes or ten new kernels;
+- models, embeddings, vector stores, orchestration frameworks, tool protocols, guardrail models, evaluator libraries and observability products remain replaceable mechanisms around a KEY-owned semantic spine;
+- the canonical spine is:
+  **Constitution/Authority -> Context Genome -> Cognitive Function -> Plan/Procedure -> Capability Contract -> Authority+Guardrails -> Effect Execution -> Evidence/Outcome -> Assurance/Evaluation -> Governed Learning/Promotion**;
+- Flow remains the execution substrate;
+- FLOW_TOOLS remains the capability source of truth;
+- AutonomyOrchestrator remains the canonical action-verdict seam;
+- UnifiedMemoryRetrieval evolves under Context Genome rather than being replaced;
+- ModelGateway remains provider-routing owner;
+- Evidence/Outcome remains real-world effect truth;
+- Assurance/proof-admission remains admission authority;
+- Guardrail detectors can constrain/block/transform but cannot grant business authority.
+
+Highest-priority global gaps:
+1. autonomy-error path can widen execution to all parsed commands;
+2. protected-effect idempotency is not durable across restart/replicas;
+3. no unified indirect-context admission for retrieval/web/tool/MCP/A2A/computer-use results;
+4. current Langfuse legacy ingestion has a 2026-11-16 compatibility deadline;
+5. Context Genome temporal/authority/provenance contracts are not yet implemented as the common semantic substrate;
+6. structured-output capability lowering/fallback provenance remains incomplete;
+7. current eval harness includes vacuous/proxy checks;
+8. ConnectorRegistry/KeyConnector and connected-account truth remain overlapped;
+9. OTel/OpenInference runtime tracing is not yet implemented;
+10. content-aware privacy/DLP is incomplete beyond structured field-name redaction.
+
+Research-derived candidate implementation tranches exist, but none is released:
+A. critical autonomy fail-closed correction;
+B. OTel/current Langfuse compatibility foundation;
+C. CognitiveFunction / structured-output honesty;
+D. Context Genome M1 semantic contract;
+E. capability/effect/account hardening;
+F. evaluation/proof foundation;
+G. context/tool trust-boundary admission;
+H. durable idempotency/compensation/outcome verification.
+
 ## Durable ledger
 
 Detailed research tranches and convergence passes are durably appended to GitHub issue **#153**. Important recent continuity anchors include:
@@ -518,61 +568,40 @@ Detailed research tranches and convergence passes are durably appended to GitHub
 - R&D-10E Presidio — comment id **6009885416**
 - R&D-10F Rebuff — comment id **6009953713**
 - Layer-10 convergence — comment id **6010007429**
+- Global cross-layer convergence pass 1 — comment id **6010080039**
 
 The issue ledger is supporting detail. This file remains the **master chat-rollover / active-frontier continuity map** and must be updated as the programme moves.
 
 # Immediate next frontier
 
-# GLOBAL CROSS-LAYER GENAI R&D CONVERGENCE
+# CONVERGENCE VALIDATION + IMPLEMENTATION PACKET DERIVATION
 
-All 10 canonical source layers have now completed:
-- individual technology research;
-- per-layer comparison with KEYFLOWOS;
-- layer-level convergence.
+Global cross-layer convergence pass 1 is complete.
 
-The programme must now stop behaving like ten isolated technology inventories and synthesize the surviving mechanisms into the smallest coherent KEY/KEYFLOWOS architecture.
+The next legal work is **validation and packet derivation**, still research/control-plane preparation only.
 
-Required global-convergence work:
-1. cross-map every converged Layer-1–10 concept against:
-   - existing owner;
-   - extension point;
-   - missing primitive;
-   - duplicate/overlap;
-   - rejected pattern.
-2. eliminate duplicate conceptual fabrics and ensure one source of truth per concern.
-3. reconcile the 10-layer findings with:
-   - Memory / Context Genome;
-   - Context Engineering;
-   - Cognition / reasoning;
-   - Autonomy / self-correction;
-   - Learning / ingestion;
-   - Development Organism;
-   - Perception / multimodal;
-   - LLMOps / deployment / sovereignty.
-4. produce one dependency/order graph showing which primitives must precede others.
-5. rank live repository gaps by:
+Required next steps:
+1. validate the global convergence map against current live main and existing issue owners;
+2. identify stale/contradictory architecture claims and classify them explicitly;
+3. bind every candidate implementation tranche to an existing canonical owner/issue wherever possible;
+4. avoid creating duplicate programmes or replacement runtimes;
+5. choose the **smallest safe first implementation packet** based on:
    - safety severity;
-   - architectural leverage;
    - dependency centrality;
    - time sensitivity;
-   - implementation blast radius.
-6. distinguish:
-   - already implemented and credible;
-   - partially implemented / semantically incomplete;
-   - declared but non-enforced / no-fake-green gaps;
-   - missing.
-7. decide the minimum external-runtime posture:
-   - native owner;
-   - optional adapter;
-   - benchmark-only;
-   - optional backend;
-   - reject.
-8. derive bounded implementation packets from the convergence, but do not release/execute them until the global architecture is coherent and explicitly authorized.
+   - blast radius;
+   - existing proof coverage;
+6. define exact files/invariants/negative controls/rollback for that packet;
+7. only then release execution through the normal control-plane authority path.
 
-Important live time-bounded defect:
-- current Langfuse legacy trace ingestion remains scheduled to lose Cloud compatibility on **2026-11-16**; global convergence must decide the narrow migration path without turning the observability layer into a vendor-specific rewrite.
+Current first-order packet candidates, NOT RELEASED:
+- critical autonomy fail-closed correction;
+- Langfuse 2026-11-16 compatibility / OTel foundation;
+- CognitiveFunction / structured-output honesty;
+- Context Genome M1 semantic contract;
+- capability/effect/account hardening;
+- evaluation/proof foundation;
+- context/tool trust-boundary admission;
+- durable idempotency/compensation/outcome verification.
 
-Important critical safety defect:
-- current KeyCortex autonomy-error path can widen execution to all parsed commands; global convergence must treat this as a top-priority fail-open correction candidate.
-
-Implementation remains parked until the global cross-layer convergence produces a coherent dependency graph and bounded packets.
+Implementation remains parked until validation resolves ownership/dependency conflicts and a bounded packet is explicitly authorized.
