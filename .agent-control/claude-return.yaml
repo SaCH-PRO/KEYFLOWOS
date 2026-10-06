@@ -1,37 +1,35 @@
-packet_id: KF-EXEC-ACTION-001
-directive_message_id: CG-DIRECTIVE-ACTION-001-IMPLEMENT-001
-directive_comment_id: 5998725089
-authority_lineage:   # every ChatGPT authority message for this implementation phase on #80, oldest first
-  - CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001   # 5998711588
-  - CG-RESUME-ACTION-001-IMPLEMENTATION-001   # 5998716917; HOLD_CLEAR
-  - CG-DIRECTIVE-ACTION-001-IMPLEMENT-001   # 5998725089; PACKET_RELEASE
-  - CG-REVIEW-ACTION-001-SEMANTIC-PASS-002   # 6002264461; the fallback reading of cfb3322c; the current authority
-current_authority_message_id: CG-REVIEW-ACTION-001-SEMANTIC-PASS-002
-current_authority_comment_id: 6002264461
-ack_message_id: CC-ACK-ACTION-001-SEMANTIC-PASS-002
-ack_comment_id: 6002285228
+packet_id: KF-EXEC-AUTH-FAIL-CLOSED-001
+directive_message_id: CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001
+directive_comment_id: 6010541876
+authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
+  - CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001   # 6010541876; PACKET_RELEASE
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011507550; finding AUTH-FC-F1 on 65706fcc
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003   # 6018421547; the fallback reading of 8987f6db; the current authority
+current_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003
+current_authority_comment_id: 6018421547
+ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-003
+ack_comment_id: 6018509327
 prior_ack_message_ids:
-  - CC-ACK-ACTION-001-IMPLEMENT-001   # 5998799162
+  - CC-ACK-GENAI-AUTH-FAIL-CLOSED-001   # 6010899764
+  - CC-ACK-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011551504
 progress_message_ids:
-  - CC-PROGRESS-ACTION-001-IMPLEMENT-001   # 5998907924; the seam map and the readings applied
-  - CC-PROGRESS-ACTION-001-IMPLEMENT-002   # 5999634239; IMPLEMENTING to PROVING
-  - CC-PROGRESS-ACTION-001-IMPLEMENT-003   # 6001987621; the head moved from 92329d04 to cfb3322c
-contradiction_message_ids:
-  - CC-CONTRADICTION-ACTION-001-IMPLEMENT-001   # 6001328832; the primary reviewer could not run; settled by SEMANTIC-PASS-002
+  - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-001   # 6011188304; IMPLEMENTING to PROVING at 65706fcc, and two discoveries
+  - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-002   # 6011325128; workflow results at 65706fcc; the primary reviewer could not run
+  - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-003   # 6012165571; AUTH-FC-F1 corrected; the head moved to 8987f6db
+contradiction_message_ids: []
 # This file is a pre-RETURN record. The RETURN is posted on #80 after every
 # check on the head that carries this file has finished, with no further branch
 # mutation. That RETURN is the final evidence envelope.
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
-previous_return_message_ids:
-  - CC-RETURN-ACTION-001-CHAR
+previous_return_message_ids: []
 never_posted_return_message_ids: []
-source_main: 6fdffc26c7c7748d5c09900535c97c197864ab54
-source_head: cfb3322c9c4ecbbd4bcf75dcdd2945f481c7677d
+source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
+source_head: 8987f6db21a839f90c88e33479768d81cef508e9
 previous_source_heads:
-  - 92329d04eb6dd63a8c477a05dbe9ca6e6cb74b9d   # first semantic commit; the server lint count was ten over its ratchet there
-implementation_branch: impl/kf-exec-action-001-clearance
-pr_number: 147
+  - 65706fcc52f440f9225223040e2ee0ee738e04bb   # first semantic commit; finding AUTH-FC-F1 was raised against it
+implementation_branch: impl/kf-exec-auth-fail-closed-001
+pr_number: 155
 state: PROVING
 health: YELLOW
 scope_changed: false
@@ -43,228 +41,123 @@ merge_authority: false
 implementer: claude
 
 summary: >
-  helpdesk_create_ticket is the first capability to run through the KEY action
-  boundary: real CapabilityContract identity, a server-built frozen envelope
-  bound to a sha256 fingerprint, a ControlRequirement derived from capability,
-  principal authority, KEY autonomy, policy and surface, server-issued
-  ControlEvidence, Clearance computed inside the claim transaction on locked
-  rows, an insert-or-fail ExecutionClaim, the SupportTicket written on the
-  same transaction, and OutcomeEvidence naming the ticket and the principal
-  chain. Every surface that can run the tool reaches one branch of
-  FlowOrchestratorService.executeToolAction, and that branch hands the call to
-  KeyActionBoundaryService. No other capability is touched. No new table:
-  KeyActionProposal is the action record and the claim is an IdempotencyKey row.
+  The KeyCortex query pipeline no longer executes parsed commands when their
+  authority check fails. The executable set starts empty and is assigned once,
+  after every parsed command in the batch has an explicit usable verdict. A
+  thrown check, or a verdict that is not an object with a boolean allowed, a
+  boolean requiresApproval and a tier of manual, supervised or full, leaves
+  the whole batch non-executable, keeps the conversational answer, and is
+  recorded in STEP_5_CHECK_AUTONOMY as authority_check_failed_closed. Two
+  semantic commits and three files. This commit changes only the two control
+  artifacts.
 
 health_reason: >
   YELLOW is about process, not code. The primary reviewer could not run at
-  either semantic head, and several runner jobs on 92329d04 and cfb3322c were
-  cancelled after 910 seconds with no step recorded and no runner assigned.
+  either semantic head. The derived programme projection is stale, because
+  the fold does not know the control_effect values of the two reviews of this
+  packet. The review message that carries the fallback reading does not
+  expose its three evidence fields where the admission path reads them. See
+  admission_notes.
 
 characterization:
-  basis: CC-RETURN-ACTION-001-CHAR (5826241744), accepted by CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001
-  application_drift: none; git diff ad97ea48..6fdffc26 over apps/ and packages/ is empty
-  choke_point: every surface ends in the helpdesk_create_ticket branch of executeToolAction (flow-orchestrator.service.ts:4843 at 6fdffc26)
-  twelfth_reach: autoExecuteToolForMonitoring calls the executor under a pro_auto mode override; it was not numbered in the characterization
-  proposal_producers: nine files build EXECUTE_TOOL proposals and the proposals route accepts one; keyActionProposal.create is called in two places, the proposal service and the boundary
+  basis: the directive's live_defect, re-read at ac3a6384 before editing
+  defect_at_source_main: >
+    autonomyCheckedCommands was initialized from parsedCommands, and the catch
+    around the autonomy loop logged and kept that set, so a thrown check left
+    every parsed command executable.
+  target_blob_at_source_main: 33540d0c07d2affd919246ebb5975ce0bef32109
+  application_drift: none; origin/main is still ac3a6384 and no other packet touched the target files
 
-design:
-  reuse: >
-    CapabilityContractService for identity. KeyActionProposal for the envelope,
-    requirement, evidence, principal chain and outcome (twelve nullable
-    columns, one index). IdempotencyKey for the claim, under its existing
-    unique index. AiOversightService.evaluate for KEY autonomy and policy,
-    with an optional reader so it runs on locked rows. The frozen AUTH-001
-    approval-tier rule. HelpdeskService for the insert.
-  claim_transaction: >
-    Insert the claim. Read the action record and recompute the fingerprint.
-    Lock with FOR SHARE and re-read the autonomy policy rows, the business,
-    and for each principal the user and the membership. Derive the
-    ControlRequirement again and compute Clearance. Insert the ticket. Write
-    the outcome on the action record and the claim. Commit, then emit
-    supportTicket.created.
-  eligibility: >
-    A requester confirms their own action on the BusinessGuard rule: owner,
-    member or SUPER_ADMIN. An approval needs an approval tier at or above the
-    capability tier. STAFF defaults to tier 0. An owner with no Membership
-    row has tier 0, because resolveApproval refuses an approver with no
-    Membership.
-  principalless: >
-    A surface with no trusted principal gets HUMAN_APPROVAL whatever KEY
-    autonomy says. The phone stream and a caller that declares no surface
-    have an untrusted tenant binding and are denied before anything is read
-    or written.
-  plan_step_identity: >
-    A plan step is one action. Its record is found again by business,
-    capability, plan step and fingerprint while it is PENDING, APPROVED or
-    EXECUTED, so the plan runner's resume executes the approved action and a
-    run after execution replays the ticket.
-  refusal_is_not_failure: >
-    The dispatcher does not retry a boundary answer, does not count it
-    towards its circuit breaker and returns awaitingApproval. The queue
-    worker leaves such a step awaiting_approval. The efferent bridge returns
-    notExecuted, and the cortex registry does not score, limit-count or cache
-    a notExecuted result.
-  failure_classification: >
-    FAILED is recorded only when the database deterministically rejected the
-    write or the contact check failed. Any other error rolls back with the
-    claim and leaves the action executable.
-  shadow: >
-    The legacy oversight decision is computed beside the ControlRequirement
-    and stored on the action record. Over 13 surfaces, 5 verdict shapes and 6
-    requester kinds the boundary agrees with the surface in 150 cells, is
-    stricter in 240 and is looser in none.
+implementation:
+  fail_closed_default: the executable set starts empty and is assigned once, after the loop has evaluated every parsed command
+  atomic_batch: the catch assigns nothing, so a failure on a later command keeps no approved prefix
+  unusable_verdict: >
+    isUsableAutonomyVerdict requires an object with a boolean allowed, a
+    boolean requiresApproval and a tier equal to manual, supervised or full.
+    Anything else throws inside the loop and is handled as a failed authority
+    check.
+  no_oracle: >
+    The local fallback verdict is allowed false, requiresApproval true and
+    tier manual, so it stays an ordinary non-executable verdict with outcome
+    evaluated.
+  decision_expression: unchanged from source main
+  evidence: STEP_5_CHECK_AUTONOMY gains outcome (evaluated or authority_check_failed_closed), authorityCheckFailed and authorityCheckError
+  log: the catch logs at error level with the count of executable parsed commands; the old text about using all parsed commands is gone
+  not_touched: AutonomyOrchestratorService, the genome bridge, the executor, streamQuery, schema, FLOW_TOOLS
 
 changed_files:
-  count: 46
+  count: 3
   semantic_commits:
-    - 92329d04eb6dd63a8c477a05dbe9ca6e6cb74b9d   # the boundary
-    - cfb3322c9c4ecbbd4bcf75dcdd2945f481c7677d   # eleven any types removed; no behaviour change
-  boundary:
-    - apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts (new)
-    - apps/server/src/modules/key-autonomy/action-boundary/action-envelope.ts (new)
-    - apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts (new)
-    - apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.ts (new)
+    - 65706fcc52f440f9225223040e2ee0ee738e04bb   # parsed-command autonomy fails closed
+    - 8987f6db21a839f90c88e33479768d81cef508e9   # AUTH-FC-F1; a verdict must state its approval semantics
   server:
-    - apps/server/src/modules/ai/flow-orchestrator.service.ts
-    - apps/server/src/modules/ai/flow.controller.ts
-    - apps/server/src/modules/ai/graph-actions.controller.ts
-    - apps/server/src/modules/ai/action-dispatcher.service.ts
-    - apps/server/src/modules/ai/queue.service.ts
-    - apps/server/src/modules/ai/conversational-ai.service.ts
-    - apps/server/src/modules/ai/ai-oversight.service.ts
-    - apps/server/src/modules/helpdesk/helpdesk.service.ts
-    - apps/server/src/modules/key-autonomy/key-action-proposal.service.ts
-    - apps/server/src/modules/key-autonomy/key-action-proposal.types.ts
-    - apps/server/src/modules/key-autonomy/key-autonomy.module.ts
-    - apps/server/src/modules/key-cortex/key-cortex-action-executor.plugin.ts
-    - apps/server/src/modules/key-cortex/key-cortex-efferent-bridge.service.ts
-    - apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts
-    - apps/server/src/modules/phone-voice/phone-voice.service.ts
-  web:
-    - apps/web/src/lib/client.ts
-    - apps/web/src/components/key/chat/use-key-chat-actions.ts
-    - apps/web/src/components/key/chat/use-key-stream.ts
+    - apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts
   tests:
-    - apps/server/src/modules/key-autonomy/action-boundary/action-envelope.spec.ts (new)
-    - apps/server/src/modules/key-autonomy/action-boundary/control-clearance.spec.ts (new)
-    - apps/server/src/modules/key-autonomy/action-boundary/shadow-parity.spec.ts (new)
-    - apps/server/src/modules/key-autonomy/action-boundary/surface-inventory.spec.ts (new)
-    - apps/server/src/modules/key-autonomy/key-action-proposal.service.spec.ts
-    - apps/server/src/modules/key-cortex/key-cortex-tool-registry.not-executed.spec.ts (new)
-    - apps/server/src/modules/key-cortex/key-cortex-efferent.spec.ts
-    - apps/server/src/modules/ai/queue-step-awaiting-approval.spec.ts (new)
-    - apps/server/src/modules/phone-voice/phone-voice-tool-args.spec.ts
-    - apps/server/test/key-action-boundary.integration.test.ts (new)
-    - apps/server/test/key-action-boundary-surfaces.integration.test.ts (new)
-    - apps/server/test/helpers/key-action-boundary.fixture.js (new)
+    - apps/server/src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts
   proof_tooling:
-    - scripts/proof-admission/negative-controls.mjs (new)
-    - scripts/proof-admission/manifests/action-001-negative-controls.json (new)
-    - scripts/proof-admission/manifests/action-001-real-db.json (new)
-  architecture:
-    - architecture/execution-paths.md
-    - architecture/dependency-map.md
-    - architecture/data-model.md
-    - architecture/migration-plan.md
-    - architecture/architecture.json
-    - architecture/inventory.json (scanner output)
-    - architecture/dependencies.json (scanner output)
-  existing_tests_changed: >
-    Three existing tests were edited. key-action-proposal.service.spec.ts gained
-    the boundary provider its constructor now needs. key-cortex-efferent.spec.ts
-    and phone-voice-tool-args.spec.ts each asserted an exact call shape, and the
-    call now carries the declared surface as one more argument, so the
-    assertion names it. No existing assertion was removed or loosened.
+    - scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json (new)
+  control_only_after_source_head:
+    - .agent-control/active-packet.yaml
+    - .agent-control/claude-return.yaml
+  existing_tests_changed: none removed or loosened; the four existing tests of the spec file are unchanged and 23 were added
 
-schema_migrations:
-  - packages/db/prisma/migrations/20261005170000_key_action_boundary_clearance/migration.sql
-  - packages/db/prisma/schema.prisma
-schema_notes: >
-  Twelve nullable columns and one index on key_action_proposals. No existing
-  row changes. prisma migrate diff between the migrated database and the
-  schema reports one difference, an index name on outbound_deliveries that
-  predates this packet.
+schema_migrations: []
 
 proof_matrix:
-  - obligation: wrapper EXECUTE_TOOL resolves and governs as helpdesk_create_ticket
+  - obligation: AUTH-FC-P01 a thrown authority evaluation leaves zero parsed commands executable
     evidence_scope: semantic_head
-    proof: real-database P1 (5 tests) and the proposal service unit tests; NC-P1-WRAPPER-IDENTITY, NC-P1-WRAPPER-NOT-GOVERNED, NC-P1-LEGACY-EXECUTOR and NC-P1-STATUS-ONLY-APPROVAL are live
+    proof: three tests (the orchestrator throws; a later command throws after an approval; the genome check throws); executeBatch is never called; NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN and NC-AUTH-FC-P01-PARTIAL-PREFIX are live
     result: PROVEN
-  - obligation: mutated parameters invalidate prior ControlEvidence
+  - obligation: AUTH-FC-P01B an unusable or malformed verdict leaves zero parsed commands executable
     evidence_scope: semantic_head
-    proof: real-database P2, one case per material field; NC-P2-FINGERPRINT-DROPS-A-FIELD, NC-P2-EVIDENCE-NOT-BOUND-TO-FINGERPRINT, NC-P2-STORED-FINGERPRINT-NOT-RECHECKED and NC-P2-PRESENTED-ARGUMENTS-NOT-COMPARED are live
+    proof: >
+      Eleven tests. Five from the first head (undefined, null, a string, an
+      object with no allowed, a truthy non-boolean allowed). Five two-command
+      batches where the first verdict is a well-formed allow and the second is
+      allowed true with approval or tier metadata missing or unrecognized. One
+      on the genome path. NC-AUTH-FC-P01B-UNUSABLE-VERDICT-ACCEPTED,
+      NC-AUTH-FC-F1-APPROVAL-SEMANTICS-NOT-REQUIRED,
+      NC-AUTH-FC-F1-REQUIRES-APPROVAL-NOT-VALIDATED and
+      NC-AUTH-FC-F1-TIER-NOT-VALIDATED are live.
     result: PROVEN
-  - obligation: client-resubmitted confirmation toolName and toolArgs cannot execute
+  - obligation: AUTH-FC-P02 the historical fail-open mutation makes the named P01 proof fail by assertion
     evidence_scope: semantic_head
-    proof: real-database P3 through chat() and the confirm route; NC-P3-RESUBMISSION-PASSES-THROUGH, NC-P3-ANYONE-MAY-CONFIRM and NC-P3-CANCEL-SOMEONE-ELSES are live
+    proof: >
+      NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN restores the old initialization. The
+      mutated file compiles, and the named tests fail on the assertion that
+      the executor spy was not called.
     result: PROVEN
-  - obligation: revocation or demotion before claim admission yields zero tickets
+  - obligation: AUTH-FC-P03 the conversational response survives an authority failure
     evidence_scope: semantic_head
-    proof: real-database P4, including two two-connection tests; NC-P4-EVIDENCE-AUTHORITY-NOT-REREAD, NC-P4-MEMBERSHIP-NOT-LOCKED, NC-P4-REQUESTER-AUTHORITY-NOT-REREAD, NC-P4-BANNED-USER-KEEPS-AUTHORITY, NC-P4-OWNER-WITHOUT-MEMBERSHIP-APPROVES and NC-P4-APPROVAL-TIER-IGNORED are live
+    proof: the response returns the model content, carries no action, and the assistant message is saved
     result: PROVEN
-  - obligation: tightened policy or reduced autonomy forces reevaluation or rejection
+  - obligation: AUTH-FC-P04 a valid allowed command keeps its path to the executor
     evidence_scope: semantic_head
-    proof: real-database P5; NC-P5-DECISION-CACHED is live
+    proof: an allowed command reaches executeBatch; a mixed batch executes only the allowed command
     result: PROVEN
-  - obligation: concurrent N-way execution gives exactly one claim and one ticket
+  - obligation: AUTH-FC-P05 denied, manual and approval-required commands stay non-executable
     evidence_scope: semantic_head
-    proof: real-database P6 with twelve concurrent executors; NC-P6-CLAIM-NOT-UNIQUE-PER-ACTION and NC-P6-APPROVAL-STATUS-AS-CLEARANCE are live
+    proof: denied, manual tier, approval required by the verdict, approval required by the command, and no oracle; NC-AUTH-FC-P05-NO-ORACLE-FALLBACK-INCOMPLETE is live
     result: PROVEN
-  - obligation: E3, E4, E5, E7, E8, E9, E10 and E11 cannot bypass the canonical boundary
+  - obligation: AUTH-FC-P06 the evidence names the fail-closed degradation
     evidence_scope: semantic_head
-    proof: real-database P7 through the class that owns each surface, and the source inventory spec; NC-P7-HANDLER-BYPASSES-THE-BOUNDARY, NC-P7-UNDECLARED-CALLER-TRUSTED, NC-P7-DISPATCHER-RETRIES-A-REFUSAL, NC-P7-REFUSAL-SCORED-AS-TOOL-FAILURE, NC-P7-BRIDGE-REPORTS-A-FAILURE, NC-P7-REFUSAL-TRIPS-THE-CIRCUIT-BREAKER and NC-P7-WAITING-STEP-MARKED-FAILED are live
+    proof: the evidence equals the failed-closed record exactly and the log names it; NC-AUTH-FC-P06-FAILURE-REPORTED-AS-EVALUATED is live
     result: PROVEN
-  - obligation: successful OutcomeEvidence names the actual SupportTicket
+  - obligation: finding AUTH-FC-F1 an allowed verdict with no approval semantics is not permission
     evidence_scope: semantic_head
-    proof: real-database P8 and the fixture invariant after every test; NC-P8-EFFECT-NOT-WRITTEN and NC-P8-CONTACT-FROM-ANOTHER-BUSINESS are live
+    proof: the six tests added at 8987f6db; with the 65706fcc validator restored all six fail on the assertion that the executor spy was not called
     result: PROVEN
-  - obligation: rollback or crash before commit remains safely retryable and non-duplicating
+  - obligation: every negative control is live and none is vacuous
     evidence_scope: semantic_head
-    proof: real-database P9; NC-P9-EFFECT-OUTSIDE-THE-TRANSACTION and NC-P9-FAILURE-NOT-RECORDED are live
+    proof: scripts/proof-admission/negative-controls.mjs with the packet manifest; 8 of 8 live, 0 vacuous, runner unchanged
     result: PROVEN
-  - obligation: requestedBy, proposedBy, approvedBy, executedFor and executedBy are preserved
+  - obligation: full applicable server unit suite, typecheck, build and lint ratchet
     evidence_scope: semantic_head
-    proof: real-database P10; NC-P10-EXECUTED-FOR-DROPPED and NC-EXECUTION-LOG-DROPPED are live
+    proof: see tests
     result: PROVEN
-  - obligation: principalless surfaces fail closed or create a human proposal, and the phone stream does not execute
+  - obligation: server integration tests on a database, locally
     evidence_scope: semantic_head
-    proof: real-database Q1 and Q4; NC-Q1-AUTONOMY-SUBSTITUTES-FOR-A-PRINCIPAL and NC-Q4-PHONE-STREAM-TRUSTED are live
-    result: PROVEN
-  - obligation: control evidence expires
-    evidence_scope: semantic_head
-    proof: unit and real-database expiry cases; NC-EVIDENCE-NEVER-EXPIRES is live
-    result: PROVEN
-  - obligation: a plan step is one action across runs
-    evidence_scope: semantic_head
-    proof: real-database plan-step cases; NC-PLAN-STEP-NOT-RESUMED and NC-APPROVED-ACTION-RESUMED-OUTSIDE-A-PLAN-STEP are live
-    result: PROVEN
-  - obligation: UNKNOWN is structurally impossible for the transactional effect
-    evidence_scope: semantic_head
-    proof: after every real-database test the fixture requires that tickets, EXECUTED action records and completed claims are one set and that no claim is left open
-    result: PROVEN
-  - obligation: the new decision runs in shadow beside current oversight and the differences are stated
-    evidence_scope: semantic_head
-    proof: shadow-parity.spec over 390 cells; the per-surface agreement counts were derived by hand before the run
-    result: PROVEN
-  - obligation: the manual helpdesk route and transfer_to_human are not migrated
-    evidence_scope: semantic_head
-    proof: the source inventory spec; apps/voice-agent is not in the diff
-    result: PROVEN
-  - obligation: no skipped required database proof
-    evidence_scope: semantic_head
-    proof: scripts/proof-admission/evaluate.mjs with manifest action-001-real-db.json returned SATISFIED_AT_DECLARED_SCOPE, 106 required and 106 found, sourceSha cfb3322c
-    result: PROVEN
-  - obligation: architecture scanners run where affected
-    evidence_scope: semantic_head
-    proof: inventory.py and dependency_scan.py were run to a fixed point on the committed tree, through node, on a git archive of that tree
-    result: PROVEN
-  - obligation: live status and reconciliation
-    evidence_scope: semantic_head
-    proof: status.mjs --verify read CONSISTENT at 95 of 95, anchored to SEMANTIC-PASS-002
-    result: PROVEN
-  - obligation: web typecheck
-    evidence_scope: semantic_head
-    proof: tsc --noEmit in apps/web stops on a missing Next type library in a checkout with no Next build; the three web files are covered by the web unit suite only
+    proof: not run in the worker session, which has no database for them; the change has no database surface; see ci.previous_head_8987f6db for the hosted run
     result: NOT_RUN
   - obligation: required exact-head workflows and the independent semantic review of the head that carries this file
     evidence_scope: exact_head
@@ -272,72 +165,50 @@ proof_matrix:
     result: PENDING
 
 tests:
-  at: cfb3322c
-  host: Windows 11, Claude worker session, 2026-10-05
-  database: a dedicated local Postgres database, keyflow_action001_proof, built from the 23 migrations of main plus this one; the developer database was not migrated or written
-  real_database:
-    command: vitest run -c vitest.integration.config.ts test/key-action-boundary.integration.test.ts test/key-action-boundary-surfaces.integration.test.ts
-    total: 106
-    passed: 106
+  at: 8987f6db
+  host: Windows 11, Claude worker session of 2026-10-06 that produced the head; reported in CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-003
+  provenance: >
+    The session that wrote this file did not run the suites again. The tree
+    of 8987f6db is unchanged, and this commit touches no file a server test
+    reads. The numbers below are those of the session that produced the head.
+  focused_suite:
+    command: vitest run on key-cortex-query-pipeline.service.spec.ts
+    total: 27
+    passed: 27
     failed: 0
     skipped: 0
   server_unit:
     command: vitest run -c vitest.unit.config.ts
     files: 392
-    total: 3934
-    passed: 3934
+    total: 3957
+    passed: 3957
     failed: 0
     skipped: 0
-  server_integration_all:
-    command: vitest run -c vitest.integration.config.ts
-    files: 25
-    total: 287
-    passed: 287
-    failed: 0
-    skipped: 0
-  server_as_the_test_job_runs_it:
-    command: tsc build, then vitest run in apps/server with REDIS_URL set
-    files: 451
-    total: 4405
-    passed: 4405
-    failed: 0
-    skipped: 0
-    seconds: 207
-  web_unit:
-    command: vitest run in apps/web
-    files: 22
-    total: 210
-    passed: 210
-    failed: 0
-    skipped: 0
-  server_typecheck: clean
-  server_build: clean
-  server_lint: the changed files carry one warning fewer than at 6fdffc26
-  previous_head_92329d04: >
-    Real database 106 of 106. Server unit 3,934 of 3,934. Web 210 of 210. All
-    server integration tests 285 of 287, the two being the boot test in a run
-    with no build and no REDIS_URL. 38 of 38 controls live.
+  server_typecheck: clean, exit 0
+  server_build: clean, exit 0
+  server_lint: 3341 warnings and 0 errors against the 3343 ratchet, exit 0
+  previous_head_65706fcc: >
+    Focused suite 21 of 21. Server unit 3,951 of 3,951. Typecheck and build
+    clean. Lint 3,341 against 3,343. 4 of 4 controls live.
   failed: []
   skipped: []
 
 negative_controls:
-  command: node scripts/proof-admission/negative-controls.mjs --manifest scripts/proof-admission/manifests/action-001-negative-controls.json
-  at: cfb3322c, with that commit checked out and a clean tree before and after
-  manifest_total: 38
-  live: 38
+  command: node scripts/proof-admission/negative-controls.mjs --manifest scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json
+  at: 8987f6db, with a clean tree before and after
+  manifest_total: 8
+  live: 8
   vacuous: 0
   rule: a control is live only when every test it names passed on the clean tree and is reported, by name, as failed with the defect restored
-  first_run_finding: >
-    NC-P7-UNDECLARED-CALLER-TRUSTED was vacuous on its first run. One of the
-    three tests it names did not assert that nothing was written, so it still
-    held with the defect restored. The test was strengthened and the control
-    is live.
-  runner_incident: >
-    Stopping an earlier run with a kill left one mutation applied in
-    control-clearance.ts. It was found by checking that every mutation target
-    occurs exactly once, and restored before anything was committed. The
-    runner now journals the original beside the file and refuses to start if
-    a journal exists.
+  controls:
+    - NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN
+    - NC-AUTH-FC-P01-PARTIAL-PREFIX
+    - NC-AUTH-FC-P01B-UNUSABLE-VERDICT-ACCEPTED
+    - NC-AUTH-FC-P06-FAILURE-REPORTED-AS-EVALUATED
+    - NC-AUTH-FC-F1-APPROVAL-SEMANTICS-NOT-REQUIRED
+    - NC-AUTH-FC-F1-REQUIRES-APPROVAL-NOT-VALIDATED
+    - NC-AUTH-FC-F1-TIER-NOT-VALIDATED
+    - NC-AUTH-FC-P05-NO-ORACLE-FALLBACK-INCOMPLETE
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
@@ -354,176 +225,160 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
     status: PENDING
 
 ci:
-  previous_head_92329d04: >
-    Type Check, Build Server, Build Web, Security Scan, the DAST workflow,
-    GitGuardian and the PR divergence job succeeded. The lint debt ratchet
-    failed at 3,353 warnings against 3,343; that was this packet's and is
-    fixed in cfb3322c. Run Tests was cancelled after 15 minutes with no step
-    recorded and no runner. The two worker proof jobs and the control gate
-    failed on the control artifacts, which were still main's.
-  previous_head_23fb25af: >
-    The first artifact head. Every required workflow produced a result there
-    except the Windows worker proof, which failed in its negative-control
-    step with 155 of 157 controls live. The two that were not live mutate
-    this file: one looks for the DAST sentence now under security, which the
-    file did not contain, and one for a single exact_head scope line, of
-    which the file had two. Both were faults of the artifact, not of the
-    manifest, and the manifest is unchanged. Run Tests, both builds, Type
-    Check, lint, the DAST job, the divergence jobs, the control gate and the
-    portable worker proof all succeeded on that head once a runner took them.
-  previous_head_cfb3322c: >
-    Lint and Security Scan succeeded. Type Check, the DAST job, the PR
-    divergence job and one Threshold resolver run were cancelled after 910
-    seconds with no step recorded and no runner assigned, so Build Server,
-    Build Web and Run Tests were skipped. The cancelled jobs were re-run and
-    were queued when this file was written. The two worker proof jobs and the
-    control gate failed on the control artifacts, which were still main's.
-  runner_capacity: >
-    Jobs cancelled with no step and no runner are not results. If jobs on the
-    head that carries this file end the same way, that is reported as a
-    blocker to the RETURN.
+  previous_head_65706fcc: >
+    CI/CD Pipeline run 37427376360, the DAST workflow run 37427376454 and the
+    two Branch divergence runs succeeded, all attempt 1. Agent Control Gate
+    run 37427376514 and Agent Control Worker Proof run 37427376461 failed on
+    the control artifacts, which were still main's.
+  previous_head_8987f6db: >
+    Read from the live runs when this file was written. CI/CD Pipeline run
+    37433292771 succeeded, attempt 1, with Type Check, Lint, Security Scan,
+    Run Tests, Build Server and Build Web each a success. DAST (HawkScan) run
+    37433292915 succeeded. Branch divergence runs 37433292950 and 37433287918
+    succeeded. Agent Control Gate run 37433292980 failed because
+    active-packet.yaml named another branch. Agent Control Worker Proof run
+    37433292809 failed on the two branch-artifact tests for the same reason.
+    Both failures were the control artifacts of main and are not counted as
+    application results.
+  this_head: PENDING. The workflows run on the head that carries this file and are read from the live runs for the RETURN.
 
 ai_review:
   implementer: claude
   primary: copilot-pull-request-reviewer[bot]
   fallback: chatgpt
   self_review: none; Claude does not review this change
-  primary_at_semantic_head: NOT_RUN, reason quota_exhausted (PR review 5419841668 at cfb3322c); it is never counted towards the gate
-  fallback_at_semantic_head: CG-REVIEW-ACTION-001-SEMANTIC-PASS-002 (6002264461), written by ChatGPT for cfb3322c; see semantic_head_review
+  primary_at_semantic_head: NOT_RUN, reason quota_exhausted (PR review 5425457324 at 8987f6db); it is never counted towards the gate
+  fallback_at_semantic_head: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003 (6018421547), written by ChatGPT for 8987f6db; see semantic_head_review
   at_the_head_that_carries_this_file: PENDING
 
-semantic_head_review:   # the reading of cfb3322c, before this commit; the reading of the head that carries this file is PENDING
-  reviewed_head: cfb3322c9c4ecbbd4bcf75dcdd2945f481c7677d
+semantic_head_review:   # the reading of 8987f6db, before this commit; the reading of the head that carries this file is PENDING
+  reviewed_head: 8987f6db21a839f90c88e33479768d81cef508e9
   reviews:
     - provider: copilot
       reviewer: copilot-pull-request-reviewer[bot]
-      reviewed_head: cfb3322c9c4ecbbd4bcf75dcdd2945f481c7677d
+      reviewed_head: 8987f6db21a839f90c88e33479768d81cef508e9
       outcome: NOT_RUN
       reason: quota_exhausted
       unresolved_substantive_findings: []
-      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/147#pullrequestreview-5419841668
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5425457324
     - provider: chatgpt
       reviewer: chatgpt
-      reviewed_head: cfb3322c9c4ecbbd4bcf75dcdd2945f481c7677d
+      reviewed_head: 8987f6db21a839f90c88e33479768d81cef508e9
       outcome: PASS
       reason: null
       unresolved_substantive_findings: []
-      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6002264461
-      message_id: CG-REVIEW-ACTION-001-SEMANTIC-PASS-002
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6018421547
+      message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003
   primary_text: >
     The bot reviewed nothing. It said it was unable to review this pull
     request because the user who requested it has reached their quota limit.
-    It gave the same answer at 92329d04 (5419380738, 5419383706, 5419387059)
-    and at cfb3322c (5419841668, 5419843470).
+    It gave the same answer at 65706fcc (5424906620) and at 8987f6db
+    (5425457324).
+  earlier_reading: >
+    CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001 (6011507550) read 65706fcc
+    and required a change, finding AUTH-FC-F1. 8987f6db is the correction.
   fallback_reading: >
-    ChatGPT read the main..cfb3322c delta. Its envelope carries reviewed_head
-    cfb3322c, the outcome recorded above and unresolved_substantive_findings
-    0. Claude did not review this change and records the outcome only as
-    ChatGPT wrote it.
+    ChatGPT read main..8987f6db and the 65706fcc..8987f6db correction. Its
+    message records, under a semantic_review mapping, reviewed_head 8987f6db,
+    the outcome recorded above and unresolved_substantive_findings 0, with
+    the primary reviewer NOT_RUN and not counted. Claude did not review this
+    change and records the outcome only as ChatGPT wrote it.
   not_covered: >
     That reading is about the semantic head. The head that carries this file
     differs from it only in the two artifact files, and its own reading is
     PENDING in exact_head_proof.
 
+admission_notes:   # for the reviewer; none of these is resolved or decided here
+  review_evidence_fields: >
+    scripts/agent-control/lib/semantic-review.mjs reads three top-level
+    one-line fields from the cited #80 comment. Read through
+    chatgptReviewEvidence, comment 6018421547 is valid authority and gives
+    null for reviewed_head, for the outcome and for the findings count,
+    because the message nests them under semantic_review and names the
+    outcome key outcome. An admission record citing that comment as
+    evidence_location would fail closed as live_evidence_contradicts. Reported
+    in the ACK (6018509327).
+  derived_projection: >
+    status.mjs --verify reports DERIVED_STATE_STALE_AUTHORITY. The fold stops
+    at CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001 with
+    CONTROL_EFFECT_UNKNOWN for BOUNDED_CORRECTION, and
+    AUTHORIZE_CONTROL_BINDING is not a known effect either.
+    programme-state.yaml is not touched by this packet.
+
 scope_ledger:
   declared:
-    - capability identity from the real CapabilityContract
-    - server-built, frozen, fingerprinted ActionEnvelope
-    - independently derived ControlRequirement
-    - server-issued, fingerprint-bound, expiring ControlEvidence
-    - current exact Clearance, re-read inside the claim transaction
-    - atomic insert-or-fail ExecutionClaim
-    - claim and SupportTicket write in one transaction
-    - durable OutcomeEvidence; explicit failure; UNKNOWN impossible
-    - principalless surfaces E4, E5, E9 and E11 fail closed or propose
-    - E4 denied until stream authentication
-    - W3 manual route untouched; W2 not migrated
-    - shadow run beside current oversight with the differences stated
-    - every reachable surface routed through one boundary
-    - legacy bypasses withdrawn for this capability
-    - the ten required proofs, each with a firing negative control
-  resolved: all fifteen, at cfb3322c
+    - AUTH-FC-P01 exception narrows
+    - AUTH-FC-P01B unusable verdict narrows
+    - AUTH-FC-P02 mutation control
+    - AUTH-FC-P03 conversation survives
+    - AUTH-FC-P04 allowed unchanged
+    - AUTH-FC-P05 denied unchanged
+    - AUTH-FC-P06 honest evidence
+    - finding AUTH-FC-F1
+  resolved: all seven obligations and AUTH-FC-F1, at 8987f6db
   remaining:
     - the required workflows on the head that carries this file
     - the RETURN
     - ChatGPT admission
-  added_inside_the_packet_boundary:
-    - plan-step identity, without which the plan runner's resume never executed an approved action
-    - a boundary refusal is not a tool failure for the dispatcher, the queue worker or the cortex registry
-    - the pro-auto monitor, a twelfth reach of the choke point
-    - a same-business check on the contact a ticket names
-    - the confirm click of the chat goes to the REST route when it carries a boundary id
+  added_inside_the_packet_boundary: []
   deferred: []
   dropped: []
   superseded:
-    - semantic head 92329d04, by cfb3322c
+    - semantic head 65706fcc, by 8987f6db
 
-deviations_from_packet:
-  - >
-    The directive says to run the new decision path in shadow first and
-    withdraw the legacy bypasses after proof. This is one PR: the legacy
-    decision is recorded beside the new one and the differences are proved
-    over the whole matrix, and the same PR enforces the boundary. There is no
-    flag that restores legacy execution, because that flag would be a surface
-    bypass. Stated in CC-PROGRESS-ACTION-001-IMPLEMENT-001, reading 5.
-  - >
-    E6: plan approval is not bound to an action fingerprint, so it is not
-    ControlEvidence. A plan step for this tool asks for confirmation of that
-    action unless KEY autonomy clears it. Stated in the same message, reading 3.
+deviations_from_packet: []
 
 behaviour_changes:
-  - the phone receptionist can no longer take a message as a ticket; it tells the caller the team will call back
-  - inbound conversational, the plan queue, the cortex bridge, custom logic and the pro-auto monitor file a proposal for an approver at tier 2 or above
-  - a plan step over HTTP and the graph route ask the authenticated caller to confirm that action
-  - a chat confirmation carries a server-issued id; a resubmitted tool name and arguments execute nothing
-  - a helpdesk proposal approved before this deploys has no evidence and must be approved again
-  - a valid source argument is written to the ticket
+  - a thrown authority check executes no parsed command; before, it executed all of them
+  - a failure on a later command of a batch executes none of the batch, an approved earlier command included
+  - a verdict that lacks a boolean allowed, a boolean requiresApproval or a recognized tier is a failed check and the batch executes nothing
+  - a verdict whose allowed is truthy but not a boolean no longer approves a command
+  - STEP_5_CHECK_AUTONOMY carries outcome, authorityCheckFailed and authorityCheckError
 
-new_consumers_or_writers:
-  - KeyActionBoundaryService.admit is the only KEY writer of SupportTicket for this capability
-  - KeyActionBoundaryService writes KeyActionProposal rows and IdempotencyKey rows under the key-action-claim prefix
-  - HelpdeskService.createTicketRow is called by the manual createTicket and by the boundary
+new_consumers_or_writers: []
 
 open_findings:   # recorded, not resolved by this packet
-  voice_follow_up: D1 and D8
-  auth_tenant_backward_reaudit: D3, D4 and D6
-  action_follow_up: D2, D5 and D7
-  new:
-    - the shipped chat sends every confirm click to the stream route, which has no field for a confirmation; only a confirmation with a boundary id is routed to REST here, and every other tool is unchanged
-    - no constraint stops a ticket naming another business's contact; the boundary checks it and the human route still does not
-    - KeyCortexToolRegistryService caches a failed handler result under its idempotency key as completed, and a later duplicate is returned as a success
-    - prisma migrate diff reports an index-name difference on outbound_deliveries that predates this packet
-    - the auto-generated registries under architecture/ were not regenerated
+  detect_actions_fallback: >
+    When no parsed command is executable, processQuery runs
+    actionDetectionService.detectActions on the model content and then
+    actionsService.executeActions. That branch has no autonomy check in this
+    file. The same fallback runs when executeBatch throws. What
+    actionsService enforces was not characterized.
+  stream_query: >
+    streamQuery has no parsed-command autonomy step. It sends detected actions
+    to executeBatch with no authority check in this file.
+  supervised_without_approval: >
+    A well-formed verdict of allowed true, requiresApproval false and tier
+    supervised still executes, because the existing decision blocks manual and
+    explicit approval requirements only. Both current producers pair
+    supervised with requiresApproval true. The review keeps this as preserved
+    behaviour and names any tighter rule a separate decision.
+  disposition: the review records all three as outside this packet and not credited as fixed
 
 residual_risks:
   - >
-    The claim transaction uses Prisma's default interactive-transaction
-    limits. An admission that waits on a lock for longer than that fails
-    with nothing recorded and the action stays executable.
+    A failed authority check degrades a command-bearing request to a
+    conversational answer with no effect. A user sees no action taken, and
+    the reason is in the step evidence and the error log only.
   - >
-    A request that is refused at prepare leaves no row. A denial is logged
-    and returned, not stored.
-  - >
-    The three web files changed have no typecheck result from this session.
-  - >
-    The auto-generated data-ownership registry still attributes
-    IdempotencyKey to key-cortex alone.
+    The detectActions fallback above still runs after a fail-closed batch, so
+    this packet does not make the whole request effect-free.
 
 rollback_floor:
-  - revert the two semantic commits; the migration is additive and its columns may stay
-  - an action record written by the boundary is an ordinary KeyActionProposal row to the previous code
+  - the historical executable-on-authority-error behaviour is not a rollback target
+  - prefer an existing hold or disable path for the action-capable Cortex surface, then roll forward
+  - there is no schema or data change to undo
 
 security:
   production_touched: false
   provider_traffic: false
   secrets: none added; no secret appears in a test, a manifest or this file
-  preview_deployment: the PR triggers the repository's own Vercel preview, as every PR does; nothing was deployed by this session
+  preview_deployment: the PR triggers the repository's own preview, as every PR does; nothing was deployed by this session
   local_dast: not run in the worker session, which has no API key and no running application
   dast: DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
 
 unresolved_contradictions: []
-settled_contradictions:
-  - CC-CONTRADICTION-ACTION-001-IMPLEMENT-001   # settled by CG-REVIEW-ACTION-001-SEMANTIC-PASS-002
+settled_contradictions: []
 
 next_action: >
   Wait for every check on the head that carries this file. Read each result

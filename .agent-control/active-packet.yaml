@@ -1,108 +1,171 @@
-packet_id: KF-EXEC-ACTION-001
-directive_message_id: CG-DIRECTIVE-ACTION-001-IMPLEMENT-001
-directive_comment_id: 5998725089
-authority_lineage:   # every ChatGPT authority message for this implementation phase on #80, oldest first
-  - CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001   # 5998711588; accepts the characterization, rules on Q1 to Q6
-  - CG-RESUME-ACTION-001-IMPLEMENTATION-001   # 5998716917; HOLD_CLEAR for KF-EXEC-ACTION-001 only
-  - CG-DIRECTIVE-ACTION-001-IMPLEMENT-001   # 5998725089; PACKET_RELEASE
-  - CG-REVIEW-ACTION-001-SEMANTIC-PASS-002   # 6002264461; the fallback reading of cfb3322c; the current authority
-characterization_return_message_id: CC-RETURN-ACTION-001-CHAR
-characterization_return_comment_id: 5826241744
-in_reply_to: CG-DIRECTIVE-ACTION-001-IMPLEMENT-001
-ack_message_id: CC-ACK-ACTION-001-IMPLEMENT-001
-ack_comment_id: 5998799162
-current_authority_message_id: CG-REVIEW-ACTION-001-SEMANTIC-PASS-002
-current_authority_comment_id: 6002264461
-current_authority_ack_message_id: CC-ACK-ACTION-001-SEMANTIC-PASS-002
-current_authority_ack_comment_id: 6002285228
-pr_number: 147
-source_main: 6fdffc26c7c7748d5c09900535c97c197864ab54
-implementation_branch: impl/kf-exec-action-001-clearance
+packet_id: KF-EXEC-AUTH-FAIL-CLOSED-001
+directive_message_id: CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001
+directive_comment_id: 6010541876
+authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
+  - CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001   # 6010541876; PACKET_RELEASE
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011507550; finding AUTH-FC-F1 on 65706fcc
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003   # 6018421547; the fallback reading of 8987f6db; the current authority
+in_reply_to: CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001
+ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-001
+ack_comment_id: 6010899764
+current_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003
+current_authority_comment_id: 6018421547
+current_authority_ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-003
+current_authority_ack_comment_id: 6018509327
+pr_number: 155
+source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
+implementation_branch: impl/kf-exec-auth-fail-closed-001
 state: PROVING
 health: YELLOW
 scope_changed: false
 production_touched: false
+provider_traffic: false
 programme_credit: PENDING
 merge_authority: false
 review_status: PENDING_CHATGPT_REVIEW
 
 objective: >
-  Implement the first bounded adoption of the canonical
-  Capability -> Control -> Clearance -> ExecutionClaim -> OutcomeEvidence
-  boundary for helpdesk_create_ticket only.
+  Correct the live KeyCortex parsed-command autonomy failure path so any
+  authority evaluation error or unusable verdict fails closed to zero
+  executable parsed commands while preserving normal informational response
+  behavior and existing allowed/denied semantics.
+
+live_defect:
+  source_file: apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts
+  source_blob: 33540d0c07d2affd919246ebb5975ce0bef32109
+  current_behavior: >
+    autonomyCheckedCommands is initialized from parsedCommands. If the autonomy
+    evaluation loop throws, the catch logs "Autonomy check failed, using all
+    parsed commands" and leaves the original parsed set executable. Later,
+    when actions/v2/executor are active, executeBatch receives that set.
+  violated_invariant: Authority uncertainty/error may only narrow capability, never widen it.
+
+hard_invariant: >
+  authority_check_error => post-error executable parsed-command set is empty.
+  More generally, authority uncertainty/error may never increase the executable
+  capability set.
+
+required_semantics:
+  fail_closed_default: >
+    The executable parsed-command accumulator begins empty/non-executable.
+    Parsed commands become executable only after a successful explicit allow
+    verdict that does not require approval and does not carry command-level
+    requiresApproval.
+  atomic_batch_failure: >
+    If autonomy evaluation throws or returns an unusable value for any parsed
+    command in this batch, zero parsed commands from the batch may execute.
+    Do not preserve a partially approved prefix.
+  unavailable_oracle: >
+    Preserve the existing no-oracle behavior as non-executable. Do not invent
+    authority or treat absence of an authority oracle as approval.
+  informational_survival: >
+    An authority-check failure must not unnecessarily destroy the conversational
+    response. Model/informational response may continue with zero parsed-command
+    effects.
+  allowed_path: >
+    A command receiving the existing explicit allowed/non-manual verdict and
+    not requiring command approval continues to the same existing execution path.
+  denied_path: A denied/manual/approval-required command remains non-executable.
+  honest_observability: >
+    The logger and STEP_5_CHECK_AUTONOMY evidence must distinguish an authority
+    evaluation failure/fail-closed degradation from authorization success.
+    Do not summarize a checker exception as zero ordinary denials or as success.
 
 allowed_scope:
-  - helpdesk_create_ticket only, on every reachable surface (E1 to E11 of the accepted characterization)
-  - the shadow decision path beside current oversight, with parity and differences proved
-  - persistence for the envelope, control evidence, execution claim and outcome evidence, reusing or extending an existing semantic owner where one is coherent
-  - withdrawal of legacy execution bypasses for this capability after proof
-  - tests, real-DB proof and negative controls for the above
-  - architecture maps for the seams this touches
+  - apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts
+  - apps/server/src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts
+  - scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json
+  - .agent-control/** only for the existing packet control artifacts
+  - no other semantic/runtime file unless a concrete compile/test dependency makes it unavoidable; if so stop and post CONTRADICTION before widening
 
 prohibited_scope:
-  - production deployment or mutation
+  - schema migration
+  - a new service
+  - a new provider or external dependency
+  - a new workflow or runtime
+  - FLOW_TOOLS or CapabilityContract redesign
+  - AutonomyOrchestrator redesign
+  - Context Genome mutation
+  - broad guardrail refactor
+  - UI work
   - provider traffic
-  - migration of a second capability family
-  - platform programme activation
-  - forensic rebaseline
-  - programme-map refresh without separate authority
-  - silent resolution or dropping of D1 to D8
-  - weakening an existing gate or proof obligation
+  - production deployment or production data mutation
+  - broad cleanup of unrelated KeyCortex action paths
+  - fixing tool-loop, connector, caching, or other ACTION follow-on findings in this packet
   - merge without a later exact-head ChatGPT admission
-  - CapabilityRegistry2, or a wrapper identity replacing the real capability identity
-  - a client-resubmitted approval identity, or an approval boolean treated as Clearance
-  - the authenticated human REST helpdesk create-ticket route (W3) routed through the KEY action boundary
-  - W2 transfer_to_human migrated as helpdesk_create_ticket
 
-architecture_decisions:   # CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001
-  Q1: a surface without a trusted human or service principal may enter the boundary but receives no executable Clearance for this tier-2 action; it fails closed or produces a human-action proposal
-  Q2: option (a); re-read and lock the exact authority dependencies inside the transaction that admits the ExecutionClaim and writes the SupportTicket; covers Membership role/tier and the owner/no-Membership path
-  Q3: W2 transfer_to_human is a distinct capability identity; explicit VOICE/WITHDRAW follow-on work
-  Q4: E4 may be routed into the boundary for proof; execution is denied until stream authentication provides a trusted business and actor binding
-  Q5: the authenticated human REST create-ticket route stays outside the KEY action boundary
-  Q6: D1 and D8 to VOICE; D3, D4 and D6 to an AUTH/TENANT backward re-audit; D2, D5 and D7 are ACTION follow-on findings; none is resolved by this slice
+review_finding_AUTH_FC_F1:   # CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001
+  severity: BLOCKING
+  bounded_correction:
+    - validate boolean allowed, boolean requiresApproval and a recognized tier, or an equivalent predicate that cannot read omitted approval semantics as permission
+    - keep the no-oracle behavior non-executable and ordinary; make its local fallback verdict shape complete if the stricter validator requires it
+    - targeted AUTH-FC-P01B coverage for an allowed true verdict missing approval or tier metadata, with zero execution for the whole batch
+    - a LIVE negative control so weakening the new shape validation makes the named malformed-verdict test fail by assertion
+  scope: the same three semantic and proof files only
 
-invariants:
-  - capability identity is resolved from the real CapabilityContract; EXECUTE_TOOL or a wrapper never substitutes for it
-  - material parameters are built server-side, canonicalized, frozen and bound to a deterministic cryptographic fingerprint (title, description, contactId, priority and the resolved source semantics at minimum)
-  - the ControlRequirement is derived from capability, trusted principal authority, KEY autonomy/readiness, policy and execution surface; the risk tier is an input, not the requirement
-  - ControlEvidence is server-issued, bound to the exact fingerprint and principal, and expires or becomes invalid when its material authority assumptions change
-  - Clearance is computed at admission; Membership/owner authority and policy are re-read inside the claim transaction
-  - the ExecutionClaim is an atomic insert-or-fail identity under a database uniqueness invariant; no check-then-act
-  - the claim admission and the SupportTicket write share one transaction
-  - success has durable OutcomeEvidence naming the actual SupportTicket id and the principal chain; failure is explicit; UNKNOWN is structurally impossible for this transactional effect
-  - E4, E5, E9 and E11 enter the same boundary and cannot execute without a trusted eligible principal
-  - E4 does not execute until trusted stream authentication exists
+current_authorization:   # CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003
+  control_artifacts: AUTHORIZED_TO_BIND
+  semantic_mutation: NOT_AUTHORIZED
+  merge: NOT_AUTHORIZED
 
 proof_obligations:
-  - wrapper EXECUTE_TOOL resolves and governs as helpdesk_create_ticket
-  - mutated parameters invalidate prior ControlEvidence
-  - client-resubmitted confirmation toolName/toolArgs cannot execute
-  - revocation or demotion before claim admission yields zero tickets
-  - tightened policy or reduced autonomy forces reevaluation/rejection
-  - concurrent N-way execution gives exactly one claim and one ticket
-  - E3/E4/E5/E7/E8/E9/E10/E11 cannot bypass the canonical boundary
-  - successful OutcomeEvidence names the actual SupportTicket
-  - rollback/crash before commit remains safely retryable and non-duplicating
-  - requestedBy/proposedBy/approvedBy/executedFor/executedBy are preserved wherever semantically applicable
-  - each substantive invariant has a mutation/negative control that restores the defect and fails its intended proof; zero vacuous controls; no skipped required DB proof
+  AUTH-FC-P01_EXCEPTION_NARROWS: >
+    With one or more parsed executable commands present, autonomy evaluation
+    throws; executorService.executeBatch is not called and zero parsed commands
+    execute.
+  AUTH-FC-P01B_UNUSABLE_NARROWS: >
+    An unusable/malformed autonomy verdict on the executable parsed-command path
+    also leaves zero parsed commands executable.
+  AUTH-FC-P02_MUTATION_CONTROL: >
+    Restore the historical fail-open initialization/behavior using the existing
+    application proof-admission negative-control runner. The specifically named
+    AUTH-FC-P01 proof must then fail by assertion, not compilation, timeout or
+    unrelated suite failure.
+  AUTH-FC-P03_CONVERSATION_SURVIVES: >
+    The same authority failure still permits a normal non-effect informational
+    response to complete.
+  AUTH-FC-P04_ALLOWED_UNCHANGED: >
+    A valid allowed command retains its existing successful path to the executor.
+  AUTH-FC-P05_DENIED_UNCHANGED: >
+    Denied/manual/approval-required commands remain non-executable.
+  AUTH-FC-P06_HONEST_EVIDENCE: >
+    STEP_5_CHECK_AUTONOMY and/or its directly associated structured evidence
+    identifies fail-closed authority-check degradation. A restored fail-open
+    path must not satisfy this proof.
 
-out_of_scope_findings:
-  voice_follow_up: [D1, D8]
-  auth_tenant_backward_reaudit: [D3, D4, D6]
-  action_follow_up: [D2, D5, D7]
+negative_controls:
+  runner: scripts/proof-admission/negative-controls.mjs
+  manifest: scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json
+  no_vacuous_controls: true
+
+rollback:
+  rule: >
+    The historical executable-on-authority-error behavior is a known critical
+    fail-open defect and is not an acceptable rollback target.
+  emergency_behavior: >
+    If this correction itself creates an operational regression, prefer an
+    existing hold/disable path for the action-capable Cortex execution surface
+    and then roll forward. A code revert is acceptable only if it does not
+    restore executable-on-authority-error semantics.
 
 stop_conditions:
-  - the required invariant cannot be achieved without a new canonical primitive (CONTRADICTION)
-  - any architecture decision not already made by the directive or the characterization review (CONTRADICTION)
-  - production access or provider traffic would be required
-  - a second capability family would have to be migrated
+  - current main no longer contains the characterized fail-open branch
+  - another admitted packet modifies either semantic target before implementation starts
+  - fixing the invariant requires redesigning AutonomyOrchestratorService
+  - fixing the invariant requires schema/database changes
+  - the existing application negative-control runner cannot express the required mutation without changing its semantics
+  - any additional architecture decision is required beyond the fail-closed rule above
+  - production/provider access would be required
+  - an existing canonical owner has already corrected the invariant
 
 return_contract: >
-  ACK before substantive work; branch from the exact source_main; map before
-  modifying and enumerate the affected seams; report the exact semantic head
-  and changed files; full applicable test suite; real-DB proof for the
-  transactional and concurrency invariants; every negative control, none
-  vacuous; architecture scanners where affected; live status/reconciliation;
-  independent semantic review at the exact semantic head; the control artifact
-  only after that review passes; RETURN once, with merge_authority false.
+  ACK before substantive work; branch from the exact source_main; characterize
+  the target before editing; keep the three-file semantic and proof write set;
+  report the exact semantic head and changed files; the focused query-pipeline
+  suite; the full applicable server unit suite and the typecheck, build and
+  lint ratchet; the application negative-control manifest with zero vacuous
+  controls; the historical mutation makes the named fail-closed assertion
+  fail; the repository-required workflows on the exact head; an independent
+  reading of the exact semantic head by a reviewer other than the implementer;
+  control artifacts only after that reading; RETURN once, with merge_authority
+  false; no merge before a later exact-head ChatGPT admission.
