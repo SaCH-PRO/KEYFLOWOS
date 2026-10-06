@@ -5436,8 +5436,10 @@ ${triage.standingContext}`;
         return this.getCashflowForecast().forecast(businessId, Math.floor(horizonDays));
       }
 
-      case 'finance_money_moves':
-        return this.getMoneyMoves().generate(businessId);
+      case 'finance_money_moves': {
+        const moves = await this.getMoneyMoves().generate(businessId);
+        return { moves };
+      }
 
       case 'finance_balance_sheet': {
         const asOf = args.asOfDate ? new Date(args.asOfDate) : new Date();
