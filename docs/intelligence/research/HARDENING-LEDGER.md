@@ -29,8 +29,8 @@ No item may be described at a higher maturity than its evidence supports.
 | Development-speed laws | CROSS_DOMAIN_TESTED | speed traces 001-004C | promote individual laws only after architecture anti-duplication |
 | Repository Evolution Analyzer | CONTRACT IDEA ONLY | hotspot traces 002/002B | define machine-readable output + offline extractor |
 | Proof Planner | CONTRACT IDEA ONLY | proof-funnel trace 003 | define proof-profile registry + offline selection prototype |
-| ContextBundle | CONTRACTED | Trace 004-004C + CONTEXT-BUNDLE-SCHEMA.yaml | deterministic offline compiler prototype |
-| Context Compiler | CROSS_DOMAIN DESIGN, NOT IMPLEMENTED | control-plane + TENANT replications | implement research-only offline prototype |
+| ContextBundle | PROTOTYPED (CODE COMMITTED; EXECUTION PROOF PENDING) | Trace 004-004C + schema + compile-context.mjs + 3 fixtures | execute test suite and negative controls in repository runtime |
+| Context Compiler | PROTOTYPED (NOT INTEGRATED) | research-only compile-context.mjs + tests + CONTROL/TENANT/EXTFX fixtures | execute proof suite; fix failures; measure output/context reduction |
 | Claude worker integration | NOT AUTHORIZED | current worker inspected only | do not integrate until compiler proof succeeds |
 | KEY native context capability | RESEARCH DIRECTION | book/repo synthesis | defer until development-system primitive is proven |
 
