@@ -425,41 +425,41 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-09D — DeepEval**
+**R&D-09E — Arize Phoenix**
 
 Layer-9 progress:
 1. LangSmith — COMPLETE first-pass; durable ledger comment id **6009291467**
 2. Langfuse — COMPLETE first-pass; durable ledger comment id **6009369621**
 3. Ragas — COMPLETE first-pass; durable ledger comment id **6009425710**
-4. DeepEval — **ACTIVE NEXT**
-5. Arize Phoenix — pending
+4. DeepEval — COMPLETE first-pass; durable ledger comment id **6009565150**
+5. Arize Phoenix — **ACTIVE NEXT**
 6. W&B Weave — pending
 7. Layer-9 convergence — pending
 
-Key R&D-09C Ragas conclusions:
-- retrieval quality must be decomposed into context precision, context recall, faithfulness/groundedness, response relevance, factual correctness and noise sensitivity rather than collapsed into one RAG score.
-- KEY needs extra blocking dimensions absent from generic RAG metrics: source correctness, tenant isolation, authority eligibility, temporal validity, contradiction handling, citation resolvability and index freshness.
-- current EvalHarnessService suite named memory-retrieval-precision does **not actually measure precision**; it only checks that results are arrays with numeric rankScore values.
-- recall requires immutable reference source/fact sets tied to a dataset revision, tenant fixture, temporal cutoff and index generation.
-- faithfulness is not truth: an answer can be perfectly supported by stale/wrong context and still be business-invalid.
-- SemanticMemoryService/UnifiedMemoryRetrievalService can degrade failures to empty results, so eval must distinguish NO_MATCH from retrieval infrastructure failure.
-- partial retrieval-channel/store failures must be visible in eval inputs/results.
-- hard-coded retrieval weights in UnifiedMemoryRetrievalService need benchmark-driven validation, not assumption.
-- synthetic testset/knowledge-graph generation is useful for multi-hop coverage but cannot be sole admission truth.
-- cross-tenant retrieval, forbidden-source use and other hard safety violations must be zero-tolerance gates, not averaged metrics.
-- current repo has no recovered GraphRAG implementation; graph-aware retrieval remains a supplemental R&D frontier.
+Key R&D-09D DeepEval conclusions:
+- DeepEval's strongest transferable mechanism is treating LLM/agent behavior as local/CI regression tests rather than dashboard-only analytics.
+- KEY should absorb the testing semantics while keeping TypeScript/Vitest and exact-scope proof admission as the canonical application/CI base.
+- G-Eval is useful only for genuinely semantic criteria and requires evaluator prompt/model/config versioning plus calibration.
+- if code can prove a property deterministically, use code instead of an LLM judge.
+- agent evaluation should be decomposed into plan quality/adherence, tool correctness, argument correctness, task completion and step efficiency, with KEY additionally evaluating authority/account/effect correctness.
+- semantic task-completion scores cannot override verified Outcome/Evidence truth.
+- synthetic examples are supplemental coverage, not high-risk admission truth.
+- current proof-admission and proof-mutation system remains stronger than generic threshold testing because it rejects missing/skipped/stale proof and proves the gate detects named defects.
+- semantic evaluators should themselves receive mutation/negative-control tests.
+- stochastic protected cases need repeated-trial/confidence semantics rather than single-run admission.
+- current EvalHarnessService is not yet integrated into CI and lacks dataset/evaluator revision, calibration, trajectory and stochastic semantics.
+- direct DeepEval adoption would add a Python/pytest runtime boundary; any future use should be an optional evaluator adapter, not a second admission authority.
 
-R&D-09D required scope:
-- unit-test-style LLM evaluation;
-- G-Eval and custom criteria;
-- RAG metrics and hallucination/faithfulness;
-- agent/tool/trajectory evals;
-- red teaming/adversarial evaluation if currently supported;
-- synthetic/adversarial datasets;
-- test-case/metric thresholds;
-- CI integration;
-- evaluator/model dependencies;
-- compare DeepEval's pytest-style workflow with KEY's proof-admission and mutation/negative-control harness;
-- determine what execution ergonomics are worth absorbing without making DeepEval a second admission authority.
+R&D-09E required scope:
+- OpenTelemetry-native tracing;
+- OpenInference semantic conventions;
+- LLM/retrieval/tool/agent spans;
+- built-in evaluators and experiment/dataset support;
+- retrieval diagnostics;
+- prompt/model observability;
+- self-host/open-source deployment;
+- production monitoring;
+- compare Phoenix/OpenInference with the OTel direction emerging from LangSmith/Langfuse;
+- determine whether OpenInference is a suitable semantic layer for KEY telemetry without making Phoenix a canonical truth store.
 
-Do not skip ahead to Arize Phoenix or implementation before R&D-09D is complete.
+Do not skip ahead to W&B Weave or implementation before R&D-09E is complete.
