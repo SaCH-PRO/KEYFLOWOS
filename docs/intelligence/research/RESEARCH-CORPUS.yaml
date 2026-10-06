@@ -290,9 +290,12 @@ expansion_protocol:
   - id: RND-FICTIONAL-INTELLIGENCE-GENOME
     title: KEY Fictional Intelligence Genome Programme
     lens: fictional_speculative_intelligence_architecture
-    status: EXTRACTING
+    status: CONVERGING_AND_REPO_PRESSURE_TESTING
     evidence_class: DESIGN_HYPOTHESIS_GENERATOR
     state_file: docs/intelligence/research/fictional-intelligence-genome/CURRENT-STATE.md
+    convergence_file: docs/intelligence/research/fictional-intelligence-genome/GENOME-V0.1-CONVERGENCE.md
+    repository_pressure_test: docs/intelligence/research/fictional-intelligence-genome/GENOME-V0.1-REPO-PRESSURE-TEST.md
+    contribution_ledger: docs/intelligence/research/fictional-intelligence-genome/RESEARCH-CONTRIBUTION-ADOPTION-LEDGER.md
     primary_questions:
       - Which recurring mechanisms across fictional intelligence systems are useful design hypotheses for KEY?
       - Which mechanisms converge independently across references and current repository evidence?
