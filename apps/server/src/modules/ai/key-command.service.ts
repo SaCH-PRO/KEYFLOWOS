@@ -163,8 +163,14 @@ export class KeyCommandService {
     const plan: KeyCommandPlan = { summary: `Plan for ${domain}.${action}`, steps: [] };
 
     if (domain === 'commerce' && action === 'revenue_summary') {
+      // Revenue reporting needs an explicit period/dimension before it can be
+      // moved to finance_revenue_breakdown. Keep the legacy summary until the
+      // intent contract carries those semantics rather than inventing dates.
       plan.steps.push({ tool: 'summarizeRevenue', module: 'commerce', input: {}, riskTier: 'LOW', requiresApproval: false });
     } else if (domain === 'contacts' && action === 'follow_up') {
+      // Canonical follow-up discovery is an organize capability (tier 2), not
+      // equivalent to the legacy read-only recommendation. Do not silently
+      // escalate authority just to remove a fallback.
       plan.steps.push({ tool: 'recommendFollowUps', module: 'contacts', input: {}, riskTier: 'LOW', requiresApproval: false });
     } else if (domain === 'storefront' && action === 'storefront_audit') {
       plan.steps.push({ tool: 'auditStorefront', module: 'storefront', input: {}, riskTier: 'LOW', requiresApproval: false });
