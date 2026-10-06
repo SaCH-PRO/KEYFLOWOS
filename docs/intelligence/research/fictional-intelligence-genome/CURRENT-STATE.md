@@ -433,6 +433,32 @@ C5 cognitive-health/admission audit;
 C9 identity/self-model ownership audit.
 C1 continues under PR #148; C4 belongs to #149; C8 belongs to #152.
 
+## R0/R1 execution checkpoint
+
+Completed durable read-only/control artifacts:
+- R0-A goal-system classification.
+- R0-B capability-registry equivalence control.
+- R0-C health-signal to action-surface matrix.
+- R0-D KEY self-model source-of-truth matrix.
+- R0-E R&D -> PR lineage metadata proposal.
+
+Implementation-review packets now prepared:
+- R1-A Goal Provenance / Goal-System Convergence.
+- R1-B Capability Registry / Fallback Disposal.
+- R1-C Health-to-Control Contract.
+- R1-D KEY Self-Model Read Projection.
+- R1-E Structured Agent Claim / Disagreement Protocol.
+
+No R1 packet is considered implemented. They are bounded handoff specifications for repository workers and require normal control-plane admission, tests, negative controls and runtime proof.
+
+### Newly confirmed repository truths
+- AiGoal and BusinessGoal are disconnected goal systems; GoalTrackerService owns BusinessGoal while KeyCortexPlannerService owns AiGoal/AiPlan.
+- ApprovalRequest shadow-migrates toward KeyActionProposal but remains live.
+- KeyToolRegistryService has 14 hand-registered legacy/parallel capabilities and KeyCommandService still has a fallback path to it.
+- Existing SelfModel is real and already tracks capability/accuracy/calibration/gaps; R1-D extends this owner instead of replacing it.
+- AiOversight governance read failure already fails closed into restricted/degraded state.
+- Homeostasis remains a cognitive-health signal path rather than a direct business-action authority source.
+
 ## Continuity rule
 
 Any future ChatGPT/Claude/Kimi/Codex session continuing this work should:
