@@ -8,6 +8,7 @@ status:
   backward_pressure_test: complete
   implementation_proof_design: complete
   production_implementation: not_authorized
+  programme_scope_correction: rd03_is_one_tranche_of_massive_genai_rd
 frameworks_reviewed:
   - LangChain
   - LangGraph
@@ -54,12 +55,20 @@ confirmed_repository_contradictions:
     summary: awaiting_approval is specialized; generic exact-call durable interrupt is unproven
   - id: COG-L3-08
     summary: cognitive trace evidence is fragmented across logs/events/Langfuse
-next_frontier:
+prepared_but_parked:
   packet: KF-EXEC-COGNITION-001
   name: Executable Cognitive Contracts
-  mode: characterization_then_bounded_implementation_when_authorized
-  first_question: determine a supported provider-neutral JSON-Schema projection path from the executable schema without reintroducing dual-source semantics
+  reason: wider GenAI R&D programme is not yet converged; implementation must not pre-empt remaining research
+next_frontier:
+  id: GENAI-RD-MAP-001
+  name: Master GenAI Research Inventory and Gap Map
+  mode: research_only
+  objective: reconstruct completed, partial and missing GenAI research tranches before choosing the next subject
+programme_continuation:
+  document: docs/intelligence/research/GENAI-RD-MASTER-CONTINUATION.md
 hard_rules:
+  - research_each_subject_individually_before_cross_convergence
+  - retain_discoveries_without_premature_canonization
   - no_second_tool_registry
   - no_second_durable_workflow_owner
   - no_live_provider_requirement_for_cognitive_loop_tests
