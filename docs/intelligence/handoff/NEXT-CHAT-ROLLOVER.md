@@ -32,12 +32,13 @@ Paste this into the next chat if continuity is needed:
 > Known continuity defect: main .agent-control/programme-state.yaml is a derived checkpoint and currently fails closed as DERIVED_STATE_STALE_AUTHORITY relative to newer issue #80 authority. Re-derive it through its existing reducer/control-plane owner; do not hand-edit it from intelligence docs.
 >
 > Immediate order:
-> (1) finish/admit/checkpoint #155;
-> (2) re-derive live programme state;
-> (3) refresh PR #150 against current main/open PRs;
-> (4) integrate #154 then #156 through their research lineage;
-> (5) advance the existing OTel/Langfuse compatibility packet;
-> (6) continue Atlas and Memory/Context by existing dependency/owner rules.
+> (1) complete KF-META-AUTHORITY-EFFECT-COMPAT-001 and replay issue #80 from RECOVERY-021 without skipping;
+> (2) re-derive/checkpoint live programme state through the admitted reducer owner;
+> (3) re-evaluate/admit/checkpoint #155 only after control state is current;
+> (4) refresh PR #150 against current main/open PRs;
+> (5) integrate #154 then #156 through their research lineage;
+> (6) advance the existing OTel/Langfuse compatibility packet;
+> (7) continue Atlas and Memory/Context by existing dependency/owner rules.
 >
 > Preserve no-fake-green, exact-head evidence, MAP BEFORE MODIFYING, no silent rebaseline, and no unauthorized production deploy/mutation/provider effects.
 
