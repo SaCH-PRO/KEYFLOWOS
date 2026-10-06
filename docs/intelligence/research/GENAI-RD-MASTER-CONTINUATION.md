@@ -592,6 +592,43 @@ Release gate:
 Second recommended packet after that:
 **KF-ASSURANCE-OTEL-LANGFUSE-COMPAT-001** under #130 + #151, because of the time-bounded 2026-11-16 Langfuse compatibility deadline.
 
+
+## OTel / Langfuse packet derivation
+
+Status: **READ-ONLY DERIVATION COMPLETE / NOT RELEASED**.
+
+Canonical packet derivation:
+`docs/intelligence/research/GENAI-RD-OTEL-LANGFUSE-PACKET-DERIVATION.md`
+
+Creation commit:
+`5b7948cd3a8ea6eee7b8b7f1bd54d9c94e280aa2`
+
+Durable ledger comment:
+**6010232840**
+
+Candidate:
+**KF-ASSURANCE-OTEL-LANGFUSE-COMPAT-001**
+
+Current official Langfuse guidance was re-verified on 2026-10-06:
+- OpenTelemetry is the supported trace-ingestion path;
+- legacy trace/observation ingestion is removed from Langfuse Cloud on **2026-11-16**;
+- current KEY main still posts to legacy `/api/public/ingestion`.
+
+Packet direction:
+- preserve KEY correlation/session/command lineage;
+- emit OTel/OTLP-compatible AI model-attempt traces;
+- make failed primary attempts and fallbacks visible;
+- keep exporter outages non-fatal but explicitly degraded;
+- metadata-only / privacy-by-default;
+- Langfuse remains an optional exporter, not truth/authority;
+- no full distributed-tracing rewrite in this compatibility packet.
+
+Release order remains:
+1. `KF-EXEC-AUTH-FAIL-CLOSED-001`;
+2. `KF-ASSURANCE-OTEL-LANGFUSE-COMPAT-001`.
+
+Both remain held behind the control-plane release constraint.
+
 ## Durable ledger
 
 Detailed research tranches and convergence passes are durably appended to GitHub issue **#153**. Important recent continuity anchors include:
@@ -624,6 +661,7 @@ Detailed research tranches and convergence passes are durably appended to GitHub
 - Layer-10 convergence — comment id **6010007429**
 - Global cross-layer convergence pass 1 — comment id **6010080039**
 - Convergence validation + packet derivation pass 1 — comment id **6010209031**
+- OTel / Langfuse compatibility packet derivation — comment id **6010232840**
 
 The issue ledger is supporting detail. This file remains the **master chat-rollover / active-frontier continuity map** and must be updated as the programme moves.
 
