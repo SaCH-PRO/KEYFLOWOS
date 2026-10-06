@@ -195,6 +195,81 @@ context/reconcile -> plan/decompose -> authority -> execute -> verify -> correct
 
 The development organism is also an experimental proving ground for capabilities that may later become part of KEY.
 
+## Supplemental cross-cutting tracks added from follow-up GenAI roadmap references
+
+These supplements came from later user-supplied GenAI roadmap/mind-map images. They **extend** the canonical 10-layer source stack and do not replace it, renumber it, or restart completed Layers 1-7.
+
+### Context Engineering
+Dedicated research on how authoritative context is compiled for one cognitive operation:
+available state -> candidate context -> relevance -> authority -> temporal validity -> ordering -> compression -> token budget -> cacheability -> model-specific formatting -> execution -> measured outcome.
+
+Priority topics:
+- context as a budget;
+- ordering and salience;
+- prompt/context caching;
+- compression and summarization;
+- model-specific context layouts;
+- contradiction handling;
+- context poisoning;
+- context failure modes;
+- context-window economics.
+
+This track must strengthen Context Genome rather than create another memory owner.
+
+### Production RAG / Graph Retrieval
+Layer-4/5 work already covers embeddings, hybrid retrieval, reranking and vector stores. The follow-up roadmaps add explicit gaps:
+- ingestion-to-retrieval pipeline evaluation;
+- query rewriting/expansion;
+- grounding;
+- GraphRAG / entity-and-relationship-aware retrieval;
+- fusion of exact, lexical, vector, temporal, graph and metadata channels.
+
+For KEY, GraphRAG is especially relevant because Context Genome/business graph/world-model work already creates structured relationships that generic chunk-only RAG lacks.
+
+### Perception / Multimodal KEY
+Elevate multimodal perception into an explicit cross-cutting R&D track:
+- vision/images/screenshots;
+- document AI / layout / tables;
+- speech-to-text;
+- text-to-speech;
+- realtime voice;
+- calls/audio;
+- screen/computer perception;
+- video/temporal perception where justified.
+
+Perception outputs feed Context Genome/evidence/cognition. They do not become independent canonical truth owners.
+
+### LLMOps / Deployment / Sovereignty
+Dedicated cross-cutting evaluation of:
+- KV-cache engineering;
+- prompt caching;
+- inference caching;
+- monitoring;
+- deployment/CI-CD;
+- managed cloud vs KEY-controlled cloud;
+- on-prem/self-hosted;
+- edge/local/mobile;
+- provider blackout survival;
+- data residency/privacy;
+- cost/latency/availability tradeoffs.
+
+This extends Layer 2 and #137 Cognitive Independence without reopening completed Layer-2 convergence.
+
+### Evals/security additions routed into Layers 9-10
+The later roadmaps reinforce:
+- red teaming;
+- evals in CI;
+- LLM-as-judge limits;
+- prompt injection;
+- agent/tool security;
+- human-in-the-loop;
+- benchmark discipline.
+
+These should be absorbed into canonical Layers 9 and 10 rather than becoming another competing safety/eval stack.
+
+### Explicit non-additions
+Educational prerequisites such as Python, linear algebra, probability, RNN/LSTM, Word2Vec and generic career/job-roadmap material are **not** new KEYFLOWOS R&D tracks unless a later concrete architecture need justifies them.
+
 # Research method
 
 For each source layer and each necessary KEYFLOWOS expansion:
