@@ -105,7 +105,8 @@ Primary:
 - existing/focused `cognitive-triage.service.spec.ts` or nearest current spec
 
 Caller:
-- only the live Flow/chat call site that already invokes `triage(...)`, after exact search on release base.
+- `apps/server/src/modules/ai/flow-orchestrator.service.ts`, the recovered live call site invoking `triage(businessId, message, Boolean(attachments?.length))`.
+- exact release-base search must still confirm no new caller exists before release.
 
 No schema.
 No new service.
