@@ -262,14 +262,16 @@ Important Atlas/architecture claims should carry revision, evidence source and c
 
 ## 7. Immediate execution order
 
-1. Complete PR #155 exact-head proof/admission/checkpoint. Do not widen its semantic scope.
-2. Re-derive live control-plane programme state through the admitted reducer after the #155 authority sequence; eliminate DERIVED_STATE_STALE_AUTHORITY without weakening the gate.
-3. Refresh PR #150 against current main and current open PR inventory.
-4. Integrate PR #154 then #156 through their intended research branch lineage after exact-head/rebase checks; preserve RESEARCH_ONLY status.
-5. Release/derive the existing OTel/Langfuse compatibility packet in the Assurance owner because of the 2026-11-16 compatibility deadline.
-6. Continue the Atlas stack and Memory/Context stack by their existing dependency/ownership rules, not by merging all branches.
-7. Prefer independent low-risk tooling such as the behavioral Git-history architecture projection only when it is bounded, read-only and conflict-free.
-8. For every new packet, use exact current main and re-run MAP BEFORE MODIFYING.
+1. Complete KF-META-AUTHORITY-EFFECT-COMPAT-001 on a separate bounded meta branch from exact current main; do not widen PR #155.
+2. Replay the real issue #80 authority stream from RECOVERY-021 and prove the two historical aliases normalize into existing canonical effects while arbitrary unknown values remain fail-closed.
+3. Re-derive/checkpoint live control-plane programme state through the admitted reducer; eliminate DERIVED_STATE_STALE_AUTHORITY without weakening the gate.
+4. Re-evaluate PR #155 at its exact current head; admit/checkpoint only if semantic review, exact-head proof and restored control state all agree.
+5. Refresh PR #150 against current main and current open PR inventory.
+6. Integrate PR #154 then #156 through their intended research branch lineage after exact-head/rebase checks; preserve RESEARCH_ONLY status.
+7. Release/derive the existing OTel/Langfuse compatibility packet in the Assurance owner because of the 2026-11-16 compatibility deadline.
+8. Continue the Atlas stack and Memory/Context stack by their existing dependency/ownership rules, not by merging all branches.
+9. Prefer independent low-risk tooling such as the behavioral Git-history architecture projection only when it is bounded, read-only and conflict-free.
+10. For every new packet, use exact current main and re-run MAP BEFORE MODIFYING.
 
 ## 8. What convergence means
 
