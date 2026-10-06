@@ -67,7 +67,7 @@ context_integrity:
     - whole_system_convergence_checkpoint
   not_repaired_here:
     - live_agent_control_programme_state
-  control_projection_required_action: rederive_through_existing_reducer_owner_after_active_authority_sequence
+  control_projection_required_action: complete_alias_compat_repair_then_replay_and_rederive_through_existing_reducer_owner
 
 canonical_genai_spine:
   - constitution_authority
@@ -134,8 +134,9 @@ real_provider_traffic_authorized: false
 forensic_rebaseline_authorized: false
 
 next_actions:
-  - complete_exact_head_admission_and_checkpoint_pr_155
+  - complete_kf_meta_authority_effect_compat_001_and_replay_real_issue_80_authority
   - rederive_live_control_plane_programme_state_without_weakening_fail_closed_gate
+  - re_evaluate_exact_head_admission_and_checkpoint_pr_155
   - refresh_pr_150_against_current_main_and_open_pr_inventory
   - integrate_pr_154_then_pr_156_through_research_lineage_preserving_research_only
   - advance_existing_otel_langfuse_compatibility_packet_after_active_safety_packet
