@@ -44,6 +44,8 @@ semantic_context:
     - DATA_DISCLOSURE
     - MOCK_FIDELITY
     - MIGRATION_BACKFILL
+    - AUTHORITY_IDENTITY
+    - ARCHITECTURE_MAP_DRIFT
 unresolved:
   contradictions: []
   unknowns: []

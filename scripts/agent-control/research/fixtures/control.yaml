@@ -31,6 +31,11 @@ semantic_context:
       revision: KF-META-STATE-REDUCER-LIVE-001
       authority_class: EXECUTION_AUTHORITY
       freshness: CURRENT
+    - claim: derived programme state cannot outrank execution authority
+      source: historical control-plane evidence
+      revision: KF-META-STATE-REDUCER-LIVE-001
+      authority_class: HISTORICAL_EVIDENCE
+      freshness: CURRENT
   hotspots:
     - CONTROL_AUTHORITY_STATE
   historical_failure_classes:
@@ -39,6 +44,7 @@ semantic_context:
     - PARSER_CODEC
     - RECOVERY
     - PROOF_VACUITY
+    - OPERATOR_REPRESENTATION
 unresolved:
   contradictions: []
   unknowns: []

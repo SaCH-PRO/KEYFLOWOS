@@ -81,14 +81,30 @@ function selectProfiles(registry, changeClasses) {
   const wanted = new Set(changeClasses);
   const selected = [];
   const covered = new Set();
+
   for (const [id, profile] of Object.entries(registry.profiles ?? {})) {
-    const matches = asArray(profile.change_classes).map(String).filter((c) => wanted.has(c));
-    if (matches.length === 0) continue;
+    const required = asArray(profile.change_classes).map(String);
+
+    // v0 is deliberately fail-closed:
+    // a proof profile is selected only when all of its declared
+    // change classes are present in the task.
+    if (
+      required.length === 0 ||
+      !required.every((changeClass) => wanted.has(changeClass))
+    ) {
+      continue;
+    }
+
     selected.push({ id, profile });
-    matches.forEach((m) => covered.add(m));
+    required.forEach((changeClass) => covered.add(changeClass));
   }
+
   selected.sort((a, b) => a.id.localeCompare(b.id));
-  return { selected, uncovered: changeClasses.filter((c) => !covered.has(c)).sort() };
+
+  return {
+    selected,
+    uncovered: changeClasses.filter((c) => !covered.has(c)).sort(),
+  };
 }
 
 function mergedProof(selected) {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseYaml } from '../../lib/yaml.mjs';
+import { parseYaml, stringifyYaml } from '../../lib/yaml.mjs';
 import { compileContext, compileText } from '../compile-context.mjs';
 
 const ROOT = process.cwd();
@@ -11,6 +11,17 @@ const registry = parseYaml(registryText);
 
 function fixture(name) {
   return fs.readFileSync(path.join(ROOT, 'scripts/agent-control/research/fixtures', name), 'utf8');
+}
+
+function assertTenantProofProfile(out) {
+  assert.ok(
+    out.proof_context.selected_profiles.includes('TENANT_AUTHORITY_DATA_BOUNDARY'),
+  );
+
+  assert.ok(
+    out.proof_context.semantic_proofs.some((proof) => /pagination/i.test(proof)),
+    'TENANT proof profile must retain a pagination semantic proof',
+  );
 }
 
 test('deterministic: same input emits byte-identical YAML', () => {
@@ -27,9 +38,12 @@ test('round trip: emitted YAML parses to the compiled object', () => {
 });
 
 test('TENANT selects the tenant proof profile', () => {
-  const out = compileContext({ fixture: parseYaml(fixture('tenant.yaml')), proofRegistry: registry });
-  assert.ok(out.proof_context.selected_profiles.includes('TENANT_AUTHORITY_DATA_BOUNDARY'));
-  assert.ok(out.proof_context.semantic_proofs.some((x) => /pagination/i.test(x)));
+  const out = compileContext({
+    fixture: parseYaml(fixture('tenant.yaml')),
+    proofRegistry: registry,
+  });
+
+  assertTenantProofProfile(out);
 });
 
 test('CONTROL selects the control proof profile', () => {
@@ -94,7 +108,7 @@ test('reordering equivalent list inputs does not change emitted bytes', () => {
   b.semantic_context.owners.reverse();
   b.semantic_context.historical_failure_classes.reverse();
   const ta = compileText({ fixtureText: fs.readFileSync(path.join(ROOT, 'scripts/agent-control/research/fixtures/tenant.yaml'), 'utf8'), proofRegistryText: registryText });
-  const tb = compileText({ fixtureText: (await import('../../lib/yaml.mjs')).stringifyYaml(b), proofRegistryText: registryText });
+  const tb = compileText({ fixtureText: stringifyYaml(b), proofRegistryText: registryText });
   assert.equal(ta, tb);
 });
 
@@ -104,4 +118,45 @@ test('snapshot SHA mutation changes output', () => {
   f.snapshot.main_sha = 'f'.repeat(40);
   const b = compileContext({ fixture: f, proofRegistry: registry });
   assert.notDeepEqual(a, b);
+});
+
+test('excluded sources preserve source revision and reason for audit', () => {
+  const f = parseYaml(fixture('tenant.yaml'));
+
+  f.excluded.sources = [
+    {
+      source: 'architecture/stale-map.yaml',
+      revision: 'abc123',
+      reason: 'STALE',
+    },
+  ];
+
+  const out = compileContext({ fixture: f, proofRegistry: registry });
+
+  assert.deepEqual(out.excluded.sources, [
+    {
+      source: 'architecture/stale-map.yaml',
+      revision: 'abc123',
+      reason: 'STALE',
+    },
+  ]);
+});
+
+test('negative control: removing a required semantic proof breaks the TENANT expectation', () => {
+  const mutatedRegistry = structuredClone(registry);
+
+  mutatedRegistry.profiles.TENANT_AUTHORITY_DATA_BOUNDARY.semantic_proofs =
+    mutatedRegistry.profiles.TENANT_AUTHORITY_DATA_BOUNDARY.semantic_proofs.filter(
+      (proof) => !/pagination/i.test(proof),
+    );
+
+  const out = compileContext({
+    fixture: parseYaml(fixture('tenant.yaml')),
+    proofRegistry: mutatedRegistry,
+  });
+
+  assert.throws(
+    () => assertTenantProofProfile(out),
+    { name: 'AssertionError' },
+  );
 });
