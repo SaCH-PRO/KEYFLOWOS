@@ -20,7 +20,7 @@ Paste this into the next chat if continuity is needed:
 > 6. exact active PR/branch artifacts
 > 7. affected /architecture maps and journey/kernel/domain dossiers
 >
-> Current active implementation packet at the checkpoint was KF-EXEC-AUTH-FAIL-CLOSED-001, PR #155. Its semantic head 8987f6db21a839f90c88e33479768d81cef508e9 had ChatGPT semantic PASS and the branch advanced to control-only head 26111633bf8ad3245a9f0abc90c75d1f87e1d564 for exact-head admission. Re-resolve live state before acting; do not infer RETURN, merge authority, merge or checkpoint from this snapshot.
+> Current active application packet is KF-EXEC-AUTH-FAIL-CLOSED-001, PR #155. Its semantic head 8987f6db21a839f90c88e33479768d81cef508e9 has ChatGPT semantic PASS and its latest observed control-only head is fdc900b72062391189d31c6994af353ce9dc4e9c with exact-head workflows green. Admission is blocked by stale derived control state, not a known new application-code failure. A separate bounded control-plane repair KF-META-AUTHORITY-EFFECT-COMPAT-001 was released on issue #80 to normalize historical BOUNDED_CORRECTION -> PACKET_CORRECTION and AUTHORIZE_CONTROL_BINDING -> NO_STATE_CHANGE while keeping other unknown effects fail-closed. Re-resolve live state before acting; do not infer merge authority, merge or checkpoint from this snapshot.
 >
 > Main already contains merged PR #120 (live typed state reducer) and PR #147 (first helpdesk_create_ticket Capability -> Control -> Clearance -> ExecutionClaim -> OutcomeEvidence boundary).
 >
