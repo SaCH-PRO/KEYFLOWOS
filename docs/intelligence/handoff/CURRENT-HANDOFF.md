@@ -47,13 +47,15 @@ PR #155
 Branch: impl/kf-exec-auth-fail-closed-001
 Source main: ac3a6384417093f198bcc7d672b0dbc295db137c
 
-At this checkpoint:
+At the latest continuity refresh:
 - semantic head 8987f6db21a839f90c88e33479768d81cef508e9 passed independent ChatGPT semantic review;
-- control binding was authorized;
-- the branch advanced to control-only head 26111633bf8ad3245a9f0abc90c75d1f87e1d564;
-- exact-head checks were still completing.
+- PR #155 is at control-only head fdc900b72062391189d31c6994af353ce9dc4e9c;
+- exact-head workflows at that control head were reported green;
+- admission is blocked by DERIVED_STATE_STALE_AUTHORITY rather than a known new application-code failure;
+- replay from RECOVERY-021 first stops on comment 6011507550 because raw effect BOUNDED_CORRECTION is outside the admitted canonical effect vocabulary, and comment 6018421547 would next expose AUTHORIZE_CONTROL_BINDING;
+- KF-META-AUTHORITY-EFFECT-COMPAT-001 was released as a separate bounded meta repair to map those historical aliases onto existing canonical effects while leaving other unknown effects fail-closed.
 
-Do not infer current state, RETURN, merge authority, merge or checkpoint from this snapshot. Re-read issue #80 and PR #155.
+Re-read issue #80, the compatibility repair, and PR #155 before acting.
 
 ## Why this packet matters
 
