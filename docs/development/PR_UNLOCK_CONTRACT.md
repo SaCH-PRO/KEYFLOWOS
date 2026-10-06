@@ -122,3 +122,55 @@ A positive verdict with no product, KEY, development, or reliability effect is i
 - feed observed deltas into Context Genome / Atlas history.
 
 The staged rollout avoids invalidating an already-running exact-head admission cycle while still making this standard mandatory for subsequent merge candidates.
+
+
+## Optional R&D lineage for architecture-affecting work
+
+Architecture-affecting work that originates in the repository R&D corpus should
+carry enough lineage to answer both directions:
+
+```
+research/source
+  -> observation
+  -> convergence decision
+  -> canonical primitive
+  -> target contract
+  -> implementation PR
+  -> proof
+  -> live evidence
+```
+
+and:
+
+```
+PR/code
+  -> why it exists
+  -> target contract
+  -> canonical primitive
+  -> convergence decision
+  -> research/evidence lineage
+```
+
+The optional `rnd_lineage` mapping may include:
+
+- `programme`;
+- `observations`;
+- `genes` / `anti_genes` where the research programme uses them;
+- `convergence_decisions`;
+- `canonical_primitives`;
+- `target_contracts`;
+- `existing_owner`;
+- `duplicate_risk_checked`;
+- `authority_impact`;
+- `implementation_effect`;
+- validation negative controls / runtime evidence;
+- `supersedes`;
+- unresolved contradictions.
+
+This metadata is provenance, not implementation authority. Research material
+cannot advance a PR to IMPLEMENTED/PROVEN/ADMITTED on its own. Architecture
+allocation should normally resolve `existing_owner` and
+`duplicate_risk_checked` before admission.
+
+Ordinary bug fixes do not need this full R&D lineage unless they allocate or
+reshape architecture because of R&D findings.
