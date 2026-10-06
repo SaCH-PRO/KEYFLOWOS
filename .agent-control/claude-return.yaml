@@ -1,22 +1,26 @@
 packet_id: KF-META-AUTHORITY-EFFECT-COMPAT-001
 directive_message_id: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001
 directive_comment_id: 6025258558
+authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
+  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001   # 6025258558; NO_STATE_CHANGE
+  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE; the current authority
 current_authority_message_id: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
 current_authority_comment_id: 6025392698
 ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-ACK-002
 ack_comment_id: 6025467329
 prior_ack_message_ids:
   - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001   # 6025343912
-# This file is a pre-RETURN record. This first version rides in the semantic
-# commit, which cannot name itself, so source_head below still names the
-# source main. The control-only commit that follows names the semantic head
-# and carries the evidence.
+progress_message_ids: []
+contradiction_message_ids: []
+# This file is a pre-RETURN record. The RETURN is posted on #80 after every
+# check on the head that carries this file has finished, with no further branch
+# mutation. That RETURN is the final evidence envelope.
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
 previous_return_message_ids: []
 never_posted_return_message_ids: []
 source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
-source_head: ac3a6384417093f198bcc7d672b0dbc295db137c
+source_head: 2a3dac19ad84a740632ed388f5c951e41c95906d
 implementation_branch: impl/kf-meta-authority-effect-compat-001
 state: PROVING
 health: YELLOW
@@ -29,18 +33,298 @@ merge_authority: false
 implementer: claude
 
 summary: >
-  Placeholder carried by the semantic commit. The evidence is written by the
-  control-only commit that follows it.
+  Two valid REVIEWs on #80 declared a control_effect outside the canonical
+  vocabulary, and the fold stopped at the first. lib/authority-effects.mjs now
+  has one frozen table, CONTROL_EFFECT_ALIASES, beside readEffect():
+  BOUNDED_CORRECTION is read as PACKET_CORRECTION and
+  AUTHORIZE_CONTROL_BINDING as NO_STATE_CHANGE. The spelling is resolved first
+  and every rule after that is the canonical effect's own. CONTROL_EFFECTS is
+  unchanged, every other unknown token still stops the fold, and the declared
+  spelling is kept only as evidence. The committed checkpoint is untouched and
+  still anchored to RECOVERY-021; from it the fold now reaches the newest
+  authority on #80.
+
+health_reason: >
+  YELLOW is the directive's own health and is about process: this branch
+  rewrites the two artifact files that PR 155 also rewrites, and the outcome
+  for the head that carries this file is not known yet. The code and its local
+  proof have no open failure.
+
+characterization:
+  live_before: >
+    At ac3a6384, status.mjs --verify reported DERIVED_STATE_STALE_AUTHORITY:
+    checkpoint RECOVERY-021 at generation 87, 14 typed effects applied,
+    observed generation 101 of 106, stopped at
+    CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001 (6011507550), generation
+    102, CONTROL_EFFECT_UNKNOWN for BOUNDED_CORRECTION. That is the evidence
+    the directive recovered.
+  anti_duplication: >
+    readEffect() in lib/authority-effects.mjs is the only reader of
+    control_effect. lib/events.mjs reaches it through readEffect() for the
+    HOLD and RESUME wake. No normalization or compatibility seam for effect
+    vocabulary existed anywhere in scripts/agent-control or .github. The alias
+    table is therefore the single owner, and no second reader is added.
+  existing_controls: >
+    The manifest had 157 entries on main. One of them,
+    NC-REDUCER-UNTYPED-INFERRED, targets the line that reads control_effect,
+    and another the type-rule line. The change is written beside those lines,
+    so all 157 entries are byte-for-byte as they were and each mutation target
+    still matches exactly once.
+
+design:
+  seam: >
+    readEffect() reads the declared effect, returns CONTROL_EFFECT_MISSING for
+    none as before, resolves the spelling through CONTROL_EFFECT_ALIASES by
+    exact own key, and hands the canonical effect to readCanonicalEffect(),
+    which holds the unchanged vocabulary check, type rule, health rule,
+    production rule and field rules.
+  evidence: >
+    readEffect() returns declared_effect beside effect, and each entry of the
+    reduction's applied list carries both. applyEffect() reads only effect.
+    The spelling is never written into the projection.
+  type_mismatch_detail: >
+    When an alias rides a type its canonical effect cannot, the detail names
+    both: "HOLD cannot carry PACKET_CORRECTION (declared as
+    BOUNDED_CORRECTION)". For a canonical spelling the detail is as it was.
+  not_done: >
+    No new effect, no new state, no change to CONTROL_EFFECTS, EFFECTS_BY_TYPE
+    or PROJECTED_STATE, no change to the envelope parser, the reconciler, the
+    orchestrator or status.mjs, and no change to programme-state.yaml.
+
+changed_files:
+  count: 10
+  semantic_commits:
+    - 2a3dac19ad84a740632ed388f5c951e41c95906d
+  code:
+    - scripts/agent-control/lib/authority-effects.mjs
+  tests:
+    - scripts/agent-control/tests/authority-effects.spec.mjs
+  controls:
+    - scripts/agent-control/negative-controls.yaml
+  evidence:
+    - scripts/agent-control/fixtures/reducer-recovery-truth.json
+  docs:
+    - docs/development/AGENT_CONTROL_PLANE.md
+  architecture:
+    - architecture/execution-paths.md
+    - architecture/inventory.json (scanner output)
+    - architecture/dependencies.json (scanner output)
+  control_artifacts:
+    - .agent-control/active-packet.yaml
+    - .agent-control/claude-return.yaml
+  existing_tests_changed: >
+    None. The spec's two import lines gained three names. The 75 tests that
+    were in the file, and every assertion in them, are unchanged; 14 tests are
+    added.
+  fixture_change: >
+    3,882 lines added and none removed. The comments list that ends at
+    RECOVERY-021, its _recorded note and its repo block are byte-for-byte as
+    they were. The new after_recovery_021 block holds the 276 real comments
+    after 5993146604 through 6025392698, a live_source digest pair for each,
+    and repository truth for main ac3a6384 and PR 155.
+
+schema_migrations: []
+
+replay:
+  recorded: >
+    From the committed checkpoint, over the frozen recording plus the
+    continuation, the fold applies all 20 authority candidates after the
+    anchor, in #80 order, with consecutive generations, and stops nowhere.
+  applied:   # generation on the live issue read whole; message; comment; effect
+    - 88 CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022 5994182518 NO_STATE_CHANGE
+    - 89 CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023 5994568448 NO_STATE_CHANGE
+    - 90 CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-PASS-024 5995818004 NO_STATE_CHANGE
+    - 91 CG-REVIEW-META-STATE-REDUCER-LIVE-POST-MERGE-CHECKPOINT-026 5998474832 CHECKPOINT
+    - 92 CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001 5998711588 NO_STATE_CHANGE
+    - 93 CG-RESUME-ACTION-001-IMPLEMENTATION-001 5998716917 HOLD_CLEAR
+    - 94 CG-DIRECTIVE-ACTION-001-IMPLEMENT-001 5998725089 PACKET_RELEASE
+    - 95 CG-REVIEW-ACTION-001-SEMANTIC-PASS-002 6002264461 NO_STATE_CHANGE
+    - 96 CG-REVIEW-ATLAS-001-SEMANTIC-PASS-001 6003918300 NO_STATE_CHANGE
+    - 97 CG-REVIEW-ATLAS-MATERIALIZER-001-WINDOWS-PROOF-CORRECTION-001 6003934022 NO_STATE_CHANGE
+    - 98 CG-REVIEW-PR-UNLOCK-CONTRACT-001-SEMANTIC-PASS-001 6004083773 NO_STATE_CHANGE
+    - 99 CG-REVIEW-ACTION-001-ADMISSION-003 6010505575 PACKET_ADMISSION
+    - 100 CG-REVIEW-ACTION-001-POST-MERGE-CHECKPOINT-004 6010515405 CHECKPOINT
+    - 101 CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001 6010541876 PACKET_RELEASE
+    - 102 CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001 6011507550 PACKET_CORRECTION, declared as BOUNDED_CORRECTION
+    - 103 CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003 6018421547 NO_STATE_CHANGE, declared as AUTHORIZE_CONTROL_BINDING
+    - 104 CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004 6022210803 NO_STATE_CHANGE
+    - 105 CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005 6023054785 PACKET_CORRECTION
+    - 106 CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001 6025258558 NO_STATE_CHANGE
+    - 107 CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002 6025392698 NO_STATE_CHANGE
+  effective_projection:
+    active_packet: KF-EXEC-AUTH-FAIL-CLOSED-001
+    state: FIXING_PROOF_FAILURES
+    health: YELLOW
+    implementation_branch: impl/kf-exec-auth-fail-closed-001
+    pr_number: 155
+    source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
+    merge_authority: false
+    merge_authority_marker: null
+    production_touched: false
+    checkpointed: KF-EXEC-K12-001, KF-EXEC-EXTFX-001, KF-EXEC-TENANT-001, KF-EXEC-AUTH-001, KF-EXEC-ACTION-001
+    active_holds: none
+    anchored_to: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002 (6025392698)
+    reconciliation: CONSISTENT with the recorded repository truth, PR 155 open and unmerged on its branch
+    decision: DISPATCH_BUILDER for KF-EXEC-AUTH-FAIL-CLOSED-001 when a builder is available
+  live: >
+    On the working tree of the semantic head, status.mjs --verify against the
+    live issue reported CONSISTENT, 20 typed effects applied, observed
+    generation 107 of 107, the same projection as above. The recording was
+    then compared with the live issue again: all 205 frozen comments and all
+    276 continuation comments parse as the live bodies do, the 276 digests
+    equal the live bodies, no comment on #80 is edited, and no authority
+    candidate was newer than the recording.
+  not_an_authority_message: >
+    The continuation range holds a REVIEW posted from an account outside the
+    allowlist, 5997061944, declaring PACKET_ADMISSION for PR 120. It is
+    recorded and it is not an authority candidate, as before this packet. The
+    test names it so the replay cannot be read as having skipped it.
 
 proof_matrix:
-  - obligation: every proof obligation of the directive, on the semantic head
+  - obligation: exact historical comment 6011507550 folds with canonical PACKET_CORRECTION semantics
     evidence_scope: semantic_head
-    proof: recorded by the control-only commit that follows
-    result: NOT_RUN
+    proof: >
+      "recorded evidence (aliases): the real 6011507550 folds with exactly the
+      PACKET_CORRECTION semantics" compares the projection, field for field,
+      with the same real comment respelled canonically.
+      NC-COMPAT-ALIAS-BOUNDED-CORRECTION-REMOVED and
+      NC-COMPAT-ALIAS-BOUNDED-CORRECTION-CHECKPOINTS are live.
+    result: PROVEN
+  - obligation: exact historical comment 6018421547 folds as NO_STATE_CHANGE and cannot grant merge authority, admission, checkpoint, release, hold or any other programme mutation
+    evidence_scope: semantic_head
+    proof: >
+      "recorded evidence (aliases): the real 6018421547 folds as
+      NO_STATE_CHANGE ..." requires the projection before and after to be
+      equal in everything but the anchor, also when the comment's own envelope
+      claims merge authority, with the referent that PACKET_ADMISSION on the
+      same comment would have admitted PR 155.
+      NC-COMPAT-ALIAS-CONTROL-BINDING-REMOVED and
+      NC-COMPAT-ALIAS-CONTROL-BINDING-ADMITS are live.
+    result: PROVEN
+  - obligation: the fold from RECOVERY-021 reaches the current newest authority without skipping a message
+    evidence_scope: semantic_head
+    proof: >
+      "recorded evidence (aliases): the committed checkpoint folds every
+      authority message from RECOVERY-021 to the newest, none skipped ..."
+      names all 20 applied messages with consecutive generations.
+      NC-COMPAT-REPLAY-AUTHORITY-MISSING and NC-COMPAT-REPLAY-CANDIDATE-SKIPPED
+      are live.
+    result: PROVEN
+  - obligation: current PR 155 remains the active packet and resolves to the state implied by the latest canonical PACKET_CORRECTION
+    evidence_scope: semantic_head
+    proof: the same replay test asserts the programme block, the empty marker, the hold list and the reconciliation against recorded repository truth; the CLI test asserts the orchestrator's decision and the rendered status
+    result: PROVEN
+  - obligation: arbitrary unknown control_effect values still stop with CONTROL_EFFECT_UNKNOWN
+    evidence_scope: semantic_head
+    proof: >
+      18 tokens, near misses and prototype names included, in "NC effect
+      aliases: every other unknown token ..."; and on the real record, either
+      spelling changed by one character. NC-COMPAT-UNKNOWN-TOKEN-GIVEN-MEANING,
+      NC-COMPAT-UNKNOWN-TOKEN-ON-REAL-EVIDENCE and
+      NC-COMPAT-ALIAS-MATCH-NOT-EXACT are live. The 17 existing unfoldable
+      cases are unchanged.
+    result: PROVEN
+  - obligation: an alias on a disallowed message type remains rejected under the canonical target effect's type rules
+    evidence_scope: semantic_head
+    proof: both aliases on HOLD and on RESUME, each compared with its canonical twin; NC-COMPAT-ALIAS-ESCAPES-TYPE-RULE is live
+    result: PROVEN
+  - obligation: an alias is held to every other rule of its canonical effect
+    evidence_scope: semantic_head
+    proof: 11 cases, each stopping for the same reason and in the same words as the canonical twin; NC-COMPAT-ALIAS-ESCAPES-SAFETY-RULE and NC-COMPAT-SPELLING-DRIVES-STATE are live
+    result: PROVEN
+  - obligation: malformed or edited authority remains fail closed
+    evidence_scope: semantic_head
+    proof: an alias beside a second control_effect, an edited alias comment, an outside author, another sender, and an alias only in prose or under another key; the existing malformed, edited and unorderable tests are unchanged
+    result: PROVEN
+  - obligation: no historical #80 comment is edited or deleted
+    evidence_scope: semantic_head
+    proof: the live issue had 0 edited comments at each recording and at the last comparison; the 205 frozen comments are all still present with unchanged metadata; NC-COMPAT-EVIDENCE-RESPELLED shows a respelled recording is caught by the live-source digest
+    result: PROVEN
+  - obligation: no gate is weakened and no existing negative control is removed merely to obtain green
+    evidence_scope: semantic_head
+    proof: the 157 existing manifest entries and the 75 existing tests of the spec are unchanged; no workflow, gate or library other than authority-effects.mjs is touched
+    result: PROVEN
+  - obligation: the seven continuation requirements of CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
+    evidence_scope: semantic_head
+    proof: >
+      "recorded evidence (aliases): the continuation after RECOVERY-021 is
+      complete ..." asserts one order over both segments however they are
+      supplied, no id in both, the first continuation authority strictly after
+      the anchor and adjacent to it, parse-equality with the captured live
+      source by digest, and the anchor at the same generation with or without
+      the continuation. "... the frozen recording is not a current snapshot
+      ..." asserts that nothing but the spec and the mutation manifest names
+      the file.
+    result: PROVEN
+  - obligation: the full portable control-plane suite, and the Windows suite and manifest on this host
+    evidence_scope: semantic_head
+    proof: see tests and negative_controls
+    result: PROVEN
   - obligation: the checks that only the head carrying this file can give
     evidence_scope: exact_head
     proof: see exact_head_proof
     result: PENDING
+
+tests:
+  at: 2a3dac19ad84a740632ed388f5c951e41c95906d
+  host: Windows 11, Node 20.18.1, Claude worker session, 2026-10-06
+  portable_and_windows:
+    command: node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
+    total: 462
+    passed: 462
+    failed: 0
+    skipped: 0
+  portable:
+    command: node --test scripts/agent-control/tests/*.spec.mjs
+    total: 443
+    passed: 443
+    failed: 0
+    skipped: 0
+  reducer_spec:
+    command: node --test scripts/agent-control/tests/authority-effects.spec.mjs
+    total: 89
+    passed: 89
+    failed: 0
+    skipped: 0
+    added: 14
+  dag_validators: validate-dag.mjs and validate-platform-dag.mjs both exit 0
+  on_main_before: 448 in the same two-directory run
+  ci_note: >
+    One existing test needs an authenticated gh and is skipped on runners, so
+    the runner totals will show one skip that this host does not.
+
+negative_controls:
+  manifest: scripts/agent-control/negative-controls.yaml
+  at: 2a3dac19ad84a740632ed388f5c951e41c95906d
+  total: 170
+  live: 170
+  vacuous: 0
+  added: 13
+  existing_unchanged: 157
+  added_ids:
+    - NC-COMPAT-ALIAS-BOUNDED-CORRECTION-REMOVED
+    - NC-COMPAT-ALIAS-CONTROL-BINDING-REMOVED
+    - NC-COMPAT-ALIAS-CONTROL-BINDING-ADMITS
+    - NC-COMPAT-ALIAS-BOUNDED-CORRECTION-CHECKPOINTS
+    - NC-COMPAT-ALIAS-ESCAPES-TYPE-RULE
+    - NC-COMPAT-ALIAS-ESCAPES-SAFETY-RULE
+    - NC-COMPAT-UNKNOWN-TOKEN-GIVEN-MEANING
+    - NC-COMPAT-UNKNOWN-TOKEN-ON-REAL-EVIDENCE
+    - NC-COMPAT-ALIAS-MATCH-NOT-EXACT
+    - NC-COMPAT-SPELLING-DRIVES-STATE
+    - NC-COMPAT-REPLAY-CANDIDATE-SKIPPED
+    - NC-COMPAT-EVIDENCE-RESPELLED
+    - NC-COMPAT-REPLAY-AUTHORITY-MISSING
+  how_each_fails: >
+    Each added control selects exactly one test, and with its defect restored
+    that test fails on an assertion, not on a crash. One of them first failed
+    on a TypeError; the tests now assert that the fold stopped before reading
+    why, and the control was run again.
+  not_added: >
+    No control for the alias table's own-key lookup. Without the guard, a
+    token such as constructor resolves to a value the unchanged vocabulary
+    check still rejects, so no outcome changes and such a control would be
+    vacuous. The behaviour is asserted for five prototype names.
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
@@ -56,9 +340,105 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
   - gate: independent semantic review
     status: PENDING
 
+ai_review:
+  implementer: claude
+  primary: copilot-pull-request-reviewer[bot]
+  fallback: chatgpt
+  self_review: none; Claude does not review this change
+  at_the_semantic_head: PENDING
+  at_the_head_that_carries_this_file: PENDING
+
+scope_ledger:
+  declared: the eleven proof obligations of the directive, its anti-duplication check, and the seven continuation requirements of ACK-002
+  resolved: all of them on the semantic head, as listed in proof_matrix
+  remaining: the outcome of the checks on the head that carries this file, and the reading of the change by a reviewer other than Claude
+  deferred: none
+  dropped: none
+  superseded: none
+
+deviations_from_packet:
+  - >
+    My first ACK said the manifest would carry a control for the own-key
+    lookup. It does not, for the reason under negative_controls.not_added. I
+    corrected this on #80 in the second ACK before writing any control.
+  - >
+    status.mjs is not in the released scope and is unchanged. Its text output
+    shows the count of applied effects, not each spelling. The spelling is in
+    the reduction that status.mjs --json and orchestrate.mjs --json print.
+  - >
+    architecture/migration-plan.md has no entry for this change. Earlier meta
+    packets added one, but the directive releases execution-paths.md and
+    generated artifacts only. architecture.json and dependency-map.md are
+    unchanged because no internal import edge is added; the one new edge is a
+    test importing node:crypto, which the dependency scanner records.
+  - >
+    inventory.json records the two artifact files as they are in the semantic
+    commit. This commit changes those two files only, so their recorded sizes
+    are out of date by the semantic-head rule, as they are on main.
+
+behaviour_changes:
+  - a valid authority message declaring BOUNDED_CORRECTION or AUTHORIZE_CONTROL_BINDING now folds as PACKET_CORRECTION or NO_STATE_CHANGE instead of stopping the fold
+  - readEffect() returns one more field, declared_effect, and each applied entry of a reduction carries it
+  - the CONTROL_EFFECT_TYPE_MISMATCH detail names the declared spelling when it is an alias
+  - nothing else; a HOLD or RESUME wake still requires HOLD_SET or HOLD_CLEAR, which no alias maps to
+
+new_consumers_or_writers: []
+
+open_findings:   # for ChatGPT; none is resolved or acted on by this packet
+  - id: F1
+    about: how this packet's own later authority must be typed
+    detail: >
+      The active packet of the projection is KF-EXEC-AUTH-FAIL-CLOSED-001. A
+      PACKET_ADMISSION, CHECKPOINT or PACKET_CORRECTION naming this meta
+      packet would stop the fold with CONTROL_EFFECT_PACKET_NOT_ACTIVE, and
+      the projection would be stale again. Authority for this packet folds
+      only as NO_STATE_CHANGE, as the directive and ACK-002 are. The merge
+      path does not read the projection, so that typing does not block a
+      merge.
+  - id: F2
+    about: PR 155 after this branch merges
+    detail: >
+      Main moves when this merges. PR 155's two artifacts declare source_main
+      ac3a6384, and the gate requires that value to equal the PR base before a
+      non-draft PR advances. PR 155 also rewrites the same two artifact files
+      as this branch. Both need a control-only update on PR 155 afterwards;
+      its semantic head 8987f6db is not affected. This is path 2 of the
+      contradiction the directive accepted.
+  - id: F3
+    about: the alias table as a precedent
+    detail: >
+      The table makes it cheap to accept a third spelling. The control-plane
+      document now says an alias exists only for a spelling already on #80 and
+      is a reviewed change with the real comment recorded and replayed.
+      Nothing mechanical enforces that.
+  - id: F4
+    about: the recording ages
+    detail: >
+      The continuation ends at 6025392698. Authority posted after it is read
+      from the live issue by status and the orchestrator, and is not in the
+      fixture. The fixture is a regression record for the two spellings, not
+      a mirror of #80.
+
+residual_risks:
+  - the live fold depends on every later authority message being valid and typed; one malformed or untyped message stops it again, as before this packet
+  - the parse-equality digests prove equality with what was captured on 2026-10-06; they cannot show a later deletion on #80, which the control plane already accepts as undetectable from a snapshot
+
+rollback_floor:
+  - revert the semantic commit; the fold then stops at 6011507550 again and the projection reports stale, which is the state of main ac3a6384
+  - no data, schema, workflow or checkpoint change to undo
+
 security:
   production_touched: false
   provider_traffic: false
+  secrets: none added; the recorded bodies are minimized envelope lines of public issue comments
+  network_in_tests: none added; the new tests read the committed fixture only
   dast: DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
 
 unresolved_contradictions: []
+settled_contradictions: []
+
+next_action: >
+  Wait for every check on the head that carries this file. Read each result
+  from the live run. Then post the RETURN on issue 80, once, with
+  merge_authority false, and wait for ChatGPT. Do not merge. Do not touch PR
+  155.
