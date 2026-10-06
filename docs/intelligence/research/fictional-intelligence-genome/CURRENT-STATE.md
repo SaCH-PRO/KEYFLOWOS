@@ -435,6 +435,20 @@ C1 continues under PR #148; C4 belongs to #149; C8 belongs to #152.
 
 ## R0/R1 execution checkpoint
 
+### R1 characterization now completed
+
+- R1-A exact goal convergence matrix: AiGoal is the preferred canonical identity/planning owner; BusinessGoal contains unique quantitative progress semantics that must be migrated/projected rather than discarded. Characterization also found tenant-scoping risk in BusinessGoal progress/action singular updates.
+- R1-B exact legacy capability matrix: the 14-tool legacy registry is a mixture of aliases, specializations and unique capability islands. The KeyCommand fallback cannot be removed safely until canonical equivalents are implemented and proven.
+- R1-E has been integrated into PR #149's parallel-agent design as a structured claim/disagreement protocol.
+- PR #152's unlock contract/template now includes R&D lineage fields so implementation PRs can trace source observations -> genes/primitives -> convergence decisions -> target contracts.
+
+Next execution order:
+1. land bounded tenant-safety correction for BusinessGoal progress/action writers;
+2. implement first proven capability aliases without deleting the fallback;
+3. implement R1-D operational self-model as an additive read projection;
+4. implement R1-C pure health-to-control decision function;
+5. only then perform destructive disposal/migration steps after proof.
+
 Completed durable read-only/control artifacts:
 - R0-A goal-system classification.
 - R0-B capability-registry equivalence control.
