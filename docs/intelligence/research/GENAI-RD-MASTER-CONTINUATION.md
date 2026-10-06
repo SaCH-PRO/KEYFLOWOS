@@ -471,48 +471,48 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-10E — Presidio**
+**R&D-10F — Rebuff**
 
 Layer-10 progress:
 1. NeMo Guardrails — COMPLETE first-pass; durable ledger comment id **6009696796**
 2. Guardrails AI — COMPLETE first-pass; durable ledger comment id **6009734842**
 3. Llama Guard — COMPLETE first-pass; durable ledger comment id **6009792035**
 4. Lakera / Check Point AI Guardrails — COMPLETE first-pass; durable ledger comment id **6009834485**
-5. Presidio — **ACTIVE NEXT**
-6. Rebuff — pending
+5. Presidio — COMPLETE first-pass; durable ledger comment id **6009885416**
+6. Rebuff — **ACTIVE NEXT**
 7. Layer-10 convergence — pending
 
-Key R&D-10D Lakera / Check Point AI Guardrails conclusions:
-- the canonical Lakera item has evolved into the current Check Point AI Security / AI Guardrails product surface.
-- strongest architecture is a managed AI-security screening plane across user input, model output, retrieved/reference content, tool calls, tool responses and tool descriptions.
-- indirect prompt injection is explicitly treated as a retrieval/tool/web/MCP/document problem, reinforcing that all external context channels are untrusted instruction surfaces.
-- agentic systems require per-loop screening and pre-execution tool screening; post-response safety checks are too late once side effects can occur.
-- tool descriptions themselves are a trust boundary and should be screened/re-admitted during MCP/tool discovery and schema drift.
-- Agent Behavior Defense introduces useful trusted-warrant semantics plus deterministic tool allow/deny lists, but semantic action-warrant detection remains defense-in-depth and cannot replace KEY business authority.
-- DLP must cover tool arguments, tool responses, model requests, outputs and telemetry/export destinations, not only final assistant text.
-- Detect -> calibrate -> Enforce is a strong rollout pattern; detect-mode coverage must never be confused with enforcement coverage.
-- detector confidence must remain separate from GuardrailPolicyRevision action decisions.
-- externally editable policies and managed model updates create a revision/provenance problem; KEY must preserve immutable native policy/admission identity.
-- official latency guidance varies with payload size and detector count, so KEY must benchmark realistic per-loop latency rather than rely on one marketing number.
-- current prompt-defense docs claim 100+ languages/scripts, but this does not replace protected Trinidad/Caribbean business-language benchmarks.
-- current runtime protection is primarily text/structured-text; multimodal image/audio protection remains a broader surface.
-- self-hosting supports Kubernetes, Docker and air-gapped deployment, improving sovereignty, but self-hosted API isolation/network security remains the operator's responsibility.
-- SaaS offers regional processing/log controls and PII masking/retention controls, but external security services remain a data-export boundary under KEY privacy policy.
-- no Lakera/Check Point AI Guardrails runtime integration was recovered in KEYFLOWOS.
+Key R&D-10E Presidio conclusions:
+- Presidio is transitioning from Microsoft ownership to the independent community-governed Data Privacy Stack project; new containers now publish under GHCR and old Microsoft Container Registry images are no longer updated.
+- strongest architecture is separation of sensitive-entity detection from purpose-specific transformation.
+- Presidio Analyzer combines regex, deny lists, checksums, NER and contextual recognition; Presidio Anonymizer supports replace, redact, hash, mask, encrypt, custom and reversible decrypt semantics.
+- PII detection and privacy action must remain separate; the same entity can be kept, masked, pseudonymized, encrypted, blocked or redacted depending on surface/destination/purpose.
+- Presidio itself warns automated detection cannot guarantee all sensitive information is found, so detector precision/recall and entity/surface-specific calibration are mandatory.
+- country/language/context-aware recognizers are strong patterns; Trinidad/Caribbean identifiers and business-language cases will require protected/custom local benchmarks rather than assuming generic coverage.
+- reversible pseudonymization is useful for model-context minimization but must preserve reversibility truth, tenant-scoped key/salt semantics and controlled re-association.
+- structured/semi-structured privacy scanning is highly relevant because KEY must protect both sensitive field names and sensitive values hidden in free text.
+- current KEY `deepRedact()` is a strong centralized field-name secret baseline but does not detect free-text PII/secrets in innocently named fields.
+- current Sentry redaction is narrower than the centralized redaction policy and does not provide generalized content-aware telemetry privacy.
+- DocumentIntelligenceService processes PII-rich invoices, receipts, cards, contracts and OCR/text through model paths; future architecture needs explicit provider/data-class eligibility and optional privacy transforms rather than blind redaction or blind export.
+- Presidio Image Redactor remains beta and OCR-dependent; image/document privacy has an OCR-failure plus recognizer-failure chain and metadata requires separate handling.
+- current ContactPrivacyService remains the canonical privacy/deletion domain owner; Presidio-like scanning can find residual free-text PII but cannot replace relational deletion/retention/authorization logic.
+- privacy detection must occur before external model/tool/telemetry/export boundaries because post-hoc redaction cannot undo disclosure.
+- a future privacy primitive should support protected raw evidence plus a safe model/export projection with full transform provenance.
 
-R&D-10E required scope:
-- Microsoft Presidio architecture;
-- PII/entity recognizers;
-- analyzer/anonymizer/image-redactor capabilities;
-- custom recognizers and context-aware recognition;
-- allow/deny/entity lists;
-- masking/redaction/hash/encryption/replacement operators;
-- structured/semi-structured and image/OCR considerations;
-- false positives/false negatives and recognizer confidence;
-- multilingual support;
-- local/self-host deployment and privacy;
-- integration into LLM input/output/retrieval/tool/telemetry pipelines;
-- compare Presidio's deterministic/specialized privacy layer with KEY current regex PII checks, Guardrails AI validators and Lakera DLP;
-- determine whether Presidio-like PII processing should become a native privacy primitive without duplicating canonical business/privacy ownership.
+R&D-10F required scope:
+- current Rebuff project/runtime status and maintenance posture;
+- prompt-injection/jailbreak detection architecture;
+- heuristic/filter layers;
+- vector/database canary mechanisms if still current;
+- prompt-injection signatures/canaries;
+- LLM-based detection;
+- attack correlation/feedback;
+- integration surface and deployment model;
+- false-positive/false-negative behavior;
+- compare Rebuff with Prompt Guard 2 and Lakera prompt defense;
+- determine which multi-layer prompt-injection mechanisms remain valuable even if Rebuff itself is stale/deprecated;
+- identify what KEY should reproduce natively without onboarding Rebuff.
 
-Do not skip ahead to Rebuff or implementation before R&D-10E is complete.
+After 10F: Layer-10 convergence — Guardrails & Safety.
+
+Do not enter global cross-layer convergence before R&D-10F and Layer-10 convergence are complete.
