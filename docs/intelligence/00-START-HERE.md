@@ -103,12 +103,13 @@ implementation and research evidence are recoverable, but continuity/navigation 
 
 ## Immediate order
 
-1. Complete/admit/checkpoint PR #155.
-2. Re-derive live programme state without weakening stale-authority failure.
-3. Refresh the existing PR convergence board #150 against current main and all current open PRs.
-4. Integrate research PR #154 then #156 through their intended lineage, retaining RESEARCH_ONLY status.
-5. Advance the existing OTel/Langfuse compatibility packet because the research records a 2026-11-16 legacy-ingestion deadline.
-6. Continue Atlas, Memory/Context, Assurance, Connector and Learning work by existing ownership/dependency rules.
-7. Re-run MAP BEFORE MODIFYING and backward re-audit whenever a new canonical law changes prior interpretation.
+1. Complete the bounded KF-META-AUTHORITY-EFFECT-COMPAT-001 control-plane repair and replay real issue #80 authority from RECOVERY-021 without skipping any message.
+2. Re-derive/checkpoint live programme state through the admitted reducer owner only after that replay is valid; do not hand-edit programme-state as a substitute.
+3. Re-evaluate/admit/checkpoint PR #155 only against the restored current projection and exact current head.
+4. Refresh the existing PR convergence board #150 against current main and all current open PRs.
+5. Integrate research PR #154 then #156 through their intended lineage, retaining RESEARCH_ONLY status.
+6. Advance the existing OTel/Langfuse compatibility packet because the research records a 2026-11-16 legacy-ingestion deadline.
+7. Continue Atlas, Memory/Context, Assurance, Connector and Learning work by existing ownership/dependency rules.
+8. Re-run MAP BEFORE MODIFYING and backward re-audit whenever a new canonical law changes prior interpretation.
 
 Do not merge everything. Convergence means one coherent model of truth, ownership, authority, evidence and execution with explicit dispositions for every stream.
