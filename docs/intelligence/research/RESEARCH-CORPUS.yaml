@@ -28,7 +28,7 @@ sources:
     author: Felienne Hermans
     published: 2021
     lens: individual_cognition
-    status: QUEUED
+    status: EXTRACTING
     primary_questions:
       - How do working memory, long-term memory and cognitive load affect code comprehension?
       - How should KEY distinguish missing knowledge, retrieval failure, overload and reasoning failure?
@@ -47,7 +47,7 @@ sources:
     author: Martin Kleppmann
     published: 2017
     lens: distributed_state_and_truth
-    status: QUEUED
+    status: TRANSLATED
 
   - id: BOOK-SICP
     title: Structure and Interpretation of Computer Programs
@@ -112,7 +112,7 @@ sources:
     author: Adam Tornhill
     published: 2018
     lens: behavioral_code_analysis
-    status: QUEUED
+    status: TRANSLATED
 
   - id: BOOK-HOFSTADTER-GEB
     title: "Gödel, Escher, Bach: An Eternal Golden Braid"
@@ -230,7 +230,7 @@ sources:
       - David Thomas
       - Andrew Hunt
     lens: developer_efficiency_pragmatism_automation_and_feedback
-    status: QUEUED
+    status: EXTRACTING
     primary_questions:
       - Which practices reduce repeated mental work and shorten feedback loops?
       - How can tracer-bullet development, automation, orthogonality, contracts and fail-fast behavior reduce rework in KEYFLOWOS?
@@ -252,7 +252,7 @@ sources:
     title: A Philosophy of Software Design
     author: John Ousterhout
     lens: complexity_management_deep_modules_and_interface_design
-    status: QUEUED
+    status: EXTRACTING
     primary_questions:
       - Where can KEYFLOWOS hide legitimate complexity behind small stable semantic interfaces?
       - Which modules are shallow wrappers that increase cognitive load?
@@ -263,7 +263,7 @@ sources:
     title: "Refactoring: Improving the Design of Existing Code"
     author: Martin Fowler
     lens: incremental_design_change_and_safe_refactoring
-    status: QUEUED
+    status: TRANSLATED
     primary_questions:
       - How can large architecture changes be decomposed into behavior-preserving transformations?
       - Which refactoring patterns can be safely automated by coding agents?
@@ -273,7 +273,7 @@ sources:
     title: "Test-Driven Development: By Example"
     author: Kent Beck
     lens: test_driven_feedback_and_incremental_design
-    status: QUEUED
+    status: TRANSLATED
     primary_questions:
       - Where does test-first development shorten feedback and force clearer contracts?
       - Which KEYFLOWOS changes benefit from TDD versus characterization-first or integration-first proof?
