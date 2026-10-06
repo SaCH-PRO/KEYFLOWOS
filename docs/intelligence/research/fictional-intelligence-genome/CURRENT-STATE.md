@@ -387,6 +387,52 @@ Candidate references for next tranches:
 - Psycho-Pass deeper legitimacy analysis
 - adversarial social intelligences and deceptive-agent references
 
+## Genome v0.1 convergence checkpoint
+
+KIGP has crossed from broad extraction into systematic convergence.
+
+Durable v0.1 artifacts:
+- GENOME-V0.1-CONVERGENCE.md — G001-G172 compressed into 12 candidate organs with ADOPT/MERGE/DEFER/REJECT/NEEDS_EVIDENCE semantics.
+- GENOME-V0.1-REPO-PRESSURE-TEST.md — live repository comparison; identifies existing owners, genuine gaps, duplicate risks and contradictions.
+- GENOME-V0.1-CANDIDATE-ROUTING.md — bounded candidates C1-C10 routed into existing PR/programme owners without implementation authority.
+
+Candidate organs:
+1. Context / Epistemic Genome
+2. Identity / Self Model
+3. Goal / Commitment / Decision Graph
+4. Cognitive Fabric
+5. Social / Relationship Intelligence
+6. Capability Fabric
+7. Constitutional Authority / Governance
+8. Action / Effect / Intervention
+9. Learning / R&D / Meta-Learning
+10. Multi-Agent / Collective Cognition
+11. Attention / Cognitive Resource Manager
+12. Homeostasis / Resilience / Recovery
+
+Highest-confidence current gaps:
+- contradiction/challenge/supersession semantics;
+- goal/commitment/decision provenance;
+- safe-mode/degraded-autonomy contract;
+- structured multi-agent claim/disagreement protocol;
+- domain-specific memory freshness/lifecycle;
+- R&D -> primitive -> PR -> proof lineage.
+
+Highest duplicate risks:
+- another memory/world graph;
+- another capability registry;
+- another authority/policy engine;
+- another multi-agent runtime;
+- another homeostasis service;
+- another universal relationship graph.
+
+Immediate research-only audit candidates:
+C2 goal/commitment truth audit;
+C3 capability ownership audit;
+C5 cognitive-health/admission audit;
+C9 identity/self-model ownership audit.
+C1 continues under PR #148; C4 belongs to #149; C8 belongs to #152.
+
 ## Continuity rule
 
 Any future ChatGPT/Claude/Kimi/Codex session continuing this work should:
