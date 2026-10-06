@@ -353,3 +353,57 @@ bounded `KF-AGENT-PARALLEL-MVP-001` packet to implement:
 
 This is the minimum change that can materially reduce wall-clock completion time
 without weakening control-plane correctness.
+
+
+## Structured epistemic claim protocol
+
+Parallel workers should not exchange only prose conclusions. Each material finding
+should be representable as a structured claim that can be compared, challenged,
+and admitted independently of worker identity.
+
+Candidate envelope:
+
+```yaml
+claim_id: ...
+packet_id: ...
+worker_id: ...
+finding: ...
+confidence: 0.0
+evidence:
+  - kind: repo|test|runtime|external|inference
+    ref: ...
+    independence_group: ...
+assumptions: []
+dependencies: []
+contradictions: []
+suggested_action: null
+affected_paths: []
+produced_at: ...
+```
+
+This extends, rather than replaces, file and semantic claims. File/semantic
+claims answer **who may mutate what**. Epistemic claims answer **what a worker
+believes it learned and why**.
+
+### Disagreement protocol
+
+1. Normalize competing claims into the same proposition/decision.
+2. Identify the exact assumption or observed fact that differs.
+3. Compare evidence quality, provenance, freshness, and independence.
+4. Seek the cheapest discriminating evidence when doing so is bounded and safe.
+5. Preserve unresolved alternatives rather than fabricate consensus.
+6. Route the evidence set to the serialized admission authority.
+7. Record which claim/evidence set justified the final admission decision.
+
+Hard laws:
+
+- agent count is not evidence strength;
+- several workers repeating one upstream source are one corroboration lineage;
+- builder, reviewer, and admission authority remain distinct roles;
+- worker scratch state does not become durable programme truth automatically;
+- minority hypotheses remain visible while unresolved;
+- no worker may self-promote a claim into canonical state.
+
+Initial rollout should make the envelope optional on ordinary implementation
+packets and mandatory for architecture/contradiction findings that affect
+programme state.
