@@ -2,8 +2,9 @@
 
 Status: ACTIVE TRIAGE
 Board ID: KF-OPEN-PR-CONVERGENCE-001
-Baseline main: 6fdffc26c7c7748d5c09900535c97c197864ab54
+Baseline main at refresh: ac3a6384417093f198bcc7d672b0dbc295db137c
 Created: 2026-10-05
+Refreshed: 2026-10-06
 
 ## Purpose
 
@@ -19,17 +20,27 @@ No PR may remain indefinitely open without a disposition.
 
 ## Current active spine
 
+Recent completed checkpoint:
+- #147 KF-EXEC-ACTION-001 is MERGED/CHECKPOINTED on main at ac3a6384417093f198bcc7d672b0dbc295db137c. It is no longer an open-PR dependency.
+
 | PR | Purpose | Current disposition |
 |---|---|---|
-| #141 | Living System Atlas foundation | ACTIVE FOUNDATION. Preserve and admit first; downstream Atlas stack depends on it. |
-| #142 | deterministic Atlas materializer | ACTIVE / FIX PROOF. Portable proof passes; Windows negative-controls step is red. Diagnose and correct proof failure before admission. |
-| #143 | canonical journey/kernel intelligence import | ACTIVE STACKED. Hold behind #142, then rebase/refresh exact-head proof. |
-| #144 | packet -> journey/kernel semantic index | ACTIVE STACKED. Hold behind #143; preserve no-invented-precision rule. |
-| #145 | verified Atlas -> code links | ACTIVE STACKED. Hold behind #144; preserve observed-vs-inferred distinction. |
-| #146 | Mission Control + Atlas read model/UI | ACTIVE CONTROL PANEL. Hold behind #145; read-only until authority contracts are separately admitted. |
-| #147 | ACTION-001 first real Capability -> Control -> Clearance boundary | ACTIVE CRITICAL PATH. Semantic PASS issued at cfb3322c; Claude has rebound artifacts and exact-head proof is rerunning on current artifact head. |
-| #148 | Memory / Context Genome convergence plan | ACTIVE PLANNING. Existing PRs #127/#134/#112/#136/#128/#105/#75/#38 are now explicitly mapped into this plan. |
-| #149 | Parallel Claude orchestration plan | ACTIVE PLANNING. Existing control PRs #111/#107/#109/#114/#133/#94/#90/#93/#139 are now explicitly mapped into this plan. |
+| #155 | parsed-command autonomy fail-closed safety correction | ACTIVE CRITICAL SAFETY PATH. Semantic head 8987f6db has ChatGPT PASS; latest observed control head fdc900b7 has green exact-head workflows. Admission is blocked by stale derived control state, not by a known new application-code failure. Do not merge until the reducer compatibility repair restores a current projection and admission is re-evaluated. |
+| #157 | whole-system convergence / canonical intelligence continuity | ACTIVE CONTINUITY REPAIR. Refreshes stale START-HERE/CURRENT/HANDOFF/ROLLOVER state. Keep draft while current live control state continues to move and external preview/review checks are incomplete. |
+| #154 | durable multi-lens research corpus | ACTIVE RESEARCH ONLY. Preserve research authority boundary; branch-divergence failures/cancellations are not green. |
+| #156 | cross-converge research corpus with GenAI stack | ACTIVE RESEARCH ONLY, dependent on #154 lineage. No implementation authority. |
+| #152 | PR value/unlock contract | ACTIVE CONTROL-PLANE PLAN/FOUNDATION. U0 is non-blocking; rebase/revalidate against current main before admission. |
+| #149 | parallel Claude orchestration plan | ACTIVE PLANNING. Preserve one serialized admission lane; do not activate multi-worker runtime until control-state correctness is current. |
+| #148 | Memory / Context Genome convergence plan | ACTIVE PLANNING. Reuse #127/#112/#134/#136/#128 rather than add another memory owner. |
+| #141 | Living System Atlas foundation | ACTIVE FOUNDATION. Admit before downstream Atlas stack. |
+| #142 | deterministic Atlas materializer | ACTIVE STACKED. Revalidate proof and parent state before admission. |
+| #143 | canonical journey/kernel intelligence import | ACTIVE STACKED behind #142. |
+| #144 | packet -> journey/kernel semantic index | ACTIVE STACKED behind #143. |
+| #145 | verified Atlas -> code links | ACTIVE STACKED behind #144. |
+| #146 | Mission Control + Atlas read model/UI | ACTIVE STACKED CONTROL PANEL behind #145; read-only until authority contracts are separately admitted. |
+
+Control-plane blocker outside the PR list:
+- KF-META-AUTHORITY-EFFECT-COMPAT-001 is released on issue #80 to normalize the two historical effect aliases that currently block reducer replay. It intentionally has no merge authority and must remain separate from PR #155.
 
 ## Existing work to converge, not duplicate
 
@@ -58,15 +69,15 @@ No PR may remain indefinitely open without a disposition.
 
 ## Immediate work order
 
-1. Finish #147 artifact/exact-head proof and RETURN/admission cycle.
-2. Admit #141 Atlas foundation.
-3. Fix #142 Windows negative-control failure.
-4. Flow #143 -> #145 through stacked proof/admission in order.
-5. Refresh #146 against admitted Atlas parents and continue owner control-panel work.
-6. Rebase/expand #127 into the M0 memory truth audit defined by #148.
-7. Reconcile #111/#107 into the first safe parallel-worker MVP defined by #149.
-8. Audit #132 against #146 and #109 against merged #120; close superseded branches once unique value is extracted.
-9. Characterize remaining older PRs (#114/#112/#94/#93/#91/#90/#75/#63/#38) against current main before any merge.
+1. Complete the bounded authority-effect compatibility repair and replay issue #80 from RECOVERY-021 without skipping authority messages.
+2. Re-derive/checkpoint the live control projection through the admitted reducer owner.
+3. Re-evaluate #155 exact-head admission and checkpoint only if semantic, CI/proof and control-state evidence agree.
+4. Keep #157 current with the live control state, then admit its intelligence-only continuity changes through the canonical intelligence branch.
+5. Rebase/revalidate #152 and #149 against current main before any control-plane adoption.
+6. Admit/rebase the Atlas stack in order #141 -> #146; no child inherits a stale parent green.
+7. Rebase/expand #127 into the M0 memory truth audit defined by #148 and reconcile overlapping memory/cognition/learning PRs.
+8. Integrate #154 then #156 through their intended research lineage while retaining RESEARCH_ONLY status.
+9. Audit superseded/stale PRs (#132/#109/#114/#112/#94/#93/#91/#90/#75/#63/#38) and close only after unique value is extracted.
 
 ## Global invariants
 
