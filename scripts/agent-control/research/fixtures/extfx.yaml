@@ -1,0 +1,53 @@
+snapshot:
+  repository: SaCH-PRO/KEYFLOWOS
+  main_sha: 6fdffc26c7c7748d5c09900535c97c197864ab54
+  task_head_sha: null
+  packet_id: KF-EXEC-EXTFX-001
+  generated_from:
+    - source: historical EXTFX evidence
+      revision: KF-EXEC-EXTFX-001
+task:
+  objective: prove external effect certainty under retries crashes and provider ambiguity
+  change_classes:
+    - EXTERNAL_EFFECT_CHANGE
+    - PROVIDER_EFFECT_CHANGE
+    - RETRY_RECOVERY_CHANGE
+authority:
+  current:
+    source: historical repository evidence
+    identifier: KF-EXEC-EXTFX-001
+    revision: KF-EXEC-EXTFX-001
+    freshness: CURRENT
+  conflicts: []
+semantic_context:
+  owners:
+    - communications
+    - notification delivery
+  execution_paths:
+    - trigger -> effect identity -> provider call -> persistence -> reconciliation
+  invariants:
+    - claim: retries must not duplicate a business effect
+      source: historical EXTFX evidence
+      revision: KF-EXEC-EXTFX-001
+      authority_class: HISTORICAL_EVIDENCE
+      freshness: CURRENT
+  hotspots:
+    - EXT_EFFECT_CERTAINTY
+  historical_failure_classes:
+    - EXTERNAL_EFFECT_AMBIGUITY
+    - IDEMPOTENCY_RETRY
+    - CRASH_RECOVERY
+    - EFFECT_IDENTITY
+unresolved:
+  contradictions: []
+  unknowns: []
+  missing_required_sources: []
+provenance:
+  claims: []
+excluded:
+  sources: []
+research_context:
+  items:
+    - source: Designing Data-Intensive Applications
+      status: TRANSLATED
+      contribution: retries ordering idempotency and reconciliation
