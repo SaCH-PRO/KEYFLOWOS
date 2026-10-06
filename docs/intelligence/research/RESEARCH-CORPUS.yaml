@@ -114,6 +114,116 @@ sources:
     lens: behavioral_code_analysis
     status: QUEUED
 
+  - id: BOOK-HOFSTADTER-GEB
+    title: "Gödel, Escher, Bach: An Eternal Golden Braid"
+    author: Douglas R. Hofstadter
+    lens: self_reference_formal_systems_emergence
+    status: QUEUED
+
+  - id: BOOK-HOFSTADTER-STRANGE-LOOP
+    title: I Am a Strange Loop
+    author: Douglas R. Hofstadter
+    lens: self_reference_identity_emergent_cognition
+    status: QUEUED
+
+  - id: BOOK-LOGICOMIX
+    title: "Logicomix: An Epic Search for Truth"
+    authors: [Apostolos Doxiadis, Christos H. Papadimitriou]
+    lens: formal_logic_foundations_and_human_reasoning
+    status: QUEUED
+
+  - id: BOOK-LITTLE-PROVER
+    title: The Little Prover
+    authors: [Daniel P. Friedman, Carl Eastlund]
+    published: 2015
+    lens: formal_proof_program_correctness
+    status: QUEUED
+    evidence_note: MIT Press describes it as an introduction to inductive proofs about computer programs using a simple proof assistant.
+
+  - id: BOOK-HARDY-MATHEMATICIANS-APOLOGY
+    title: A Mathematician's Apology
+    author: G. H. Hardy
+    first_published: 1940
+    lens: mathematical_aesthetics_creativity_and_design
+    status: QUEUED
+
+  - id: BOOK-BRADEN-WISDOM-CODES
+    title: "The Wisdom Codes: Ancient Words to Rewire Our Brains and Heal Our Hearts"
+    author: Gregg Braden
+    published: 2020
+    lens: comparative_wisdom_language_and_cognition
+    status: QUEUED
+    evidence_class: SPECULATIVE_OR_CONTESTED
+    caution: Preserve as a source of hypotheses/metaphors; independently verify neuroscience and causal claims before any technical adoption.
+
+  - id: BOOK-JAMES-TAO-PROGRAMMING
+    title: The Tao of Programming
+    author: Geoffrey James
+    lens: philosophy_metaphor_and_programming_culture
+    status: QUEUED
+    evidence_class: PHILOSOPHICAL_METAPHOR
+
+  - id: BOOK-TOLOOEE-FIBONACCI-CODEX
+    title: "The Fibonacci Codex: Ascending the Spiral Staircase to God"
+    author: Hossein Tolooee
+    stated_publication: 2025
+    lens: sacred_geometry_numerical_symbolism
+    status: SOURCE_VERIFICATION_REQUIRED
+    evidence_class: SPECULATIVE_OR_METAPHORICAL
+    caution: Bibliographic identity and substantive claims require verification before extraction.
+
+  - id: BOOK-HAIDT-HAPPINESS-HYPOTHESIS
+    title: "The Happiness Hypothesis: Ancient Wisdom Meets Modern Psychology"
+    author: Jonathan Haidt
+    lens: comparative_wisdom_moral_psychology_wellbeing
+    status: QUEUED
+    caution: Re-verify material empirical psychology claims before technical adoption.
+
+  - id: BOOK-SCHNEIDER-CONSTRUCTING-UNIVERSE
+    title: "A Beginner's Guide to Constructing the Universe"
+    author: Michael S. Schneider
+    lens: mathematical_archetypes_geometry_and_pattern
+    status: QUEUED
+    evidence_class: MIXED_MATHEMATICAL_AND_SYMBOLIC
+    caution: Separate demonstrable mathematics from symbolic, metaphysical, or sacred-geometry interpretation.
+
+  - id: TEXT-PANINI-ASHTADHYAYI
+    title: Ashtadhyayi
+    author: Panini
+    lens: generative_grammar_rule_systems_metalanguage
+    status: QUEUED
+    evidence_class: HISTORICAL_PRIMARY_TEXT
+    caution: Study genuine rule-system properties and modern formal-language comparisons; do not assume claims about nervous-system optimization or spiritual cognitive states.
+
+  - id: TEXT-I-CHING
+    title: I Ching / Book of Changes
+    lens: combinatorial_symbol_system_and_historical_binary_comparison
+    status: QUEUED
+    evidence_class: HISTORICAL_AND_COMPARATIVE
+    caution: Distinguish the historical Leibniz/I Ching relationship from claims that the text is literally a modern binary computer or psychological state machine.
+
+  - id: TEXT-SEFER-YETZIRAH
+    title: Sefer Yetzirah
+    lens: historical_symbolic_cosmology_letters_numbers_and_combinatorics
+    status: QUEUED
+    evidence_class: RELIGIOUS_MYSTICAL_PRIMARY_TEXT
+    caution: Treat computational analogies as comparative models unless independently supported.
+
+  - id: BOOK-POWER-OF-KABBALAH
+    title: "The Power of Kabbalah: Technology for the Soul"
+    author: Yehuda Berg
+    lens: spiritual_self_help_using_technology_metaphors
+    status: QUEUED
+    evidence_class: SPIRITUAL_METAPHOR
+    caution: Technology/source-code language is metaphorical and must not be represented as evidence of computational laws of reality.
+
+  - id: SOURCE-ALGORITHMIC-KABBALAH-AI-ZOHAR
+    title: "Algorithmic Kabbalah: AI Through the Zohar"
+    lens: kabbalah_ai_comparative_metaphor
+    status: SOURCE_VERIFICATION_REQUIRED
+    evidence_class: UNVERIFIED_SOURCE
+    caution: Do not attribute claims or treat as a published book until bibliographic identity is independently verified.
+
 expansion_protocol:
   default_status: QUEUED
   duplicate_rule: Search existing lenses, dossiers, kernels, findings and recommendations before allocating a new concept.
