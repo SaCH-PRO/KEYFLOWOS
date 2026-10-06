@@ -425,41 +425,45 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-09E — Arize Phoenix**
+**R&D-09F — W&B Weave**
 
 Layer-9 progress:
 1. LangSmith — COMPLETE first-pass; durable ledger comment id **6009291467**
 2. Langfuse — COMPLETE first-pass; durable ledger comment id **6009369621**
 3. Ragas — COMPLETE first-pass; durable ledger comment id **6009425710**
 4. DeepEval — COMPLETE first-pass; durable ledger comment id **6009565150**
-5. Arize Phoenix — **ACTIVE NEXT**
-6. W&B Weave — pending
+5. Arize Phoenix — COMPLETE first-pass; durable ledger comment id **6009595072**
+6. W&B Weave — **ACTIVE NEXT**
 7. Layer-9 convergence — pending
 
-Key R&D-09D DeepEval conclusions:
-- DeepEval's strongest transferable mechanism is treating LLM/agent behavior as local/CI regression tests rather than dashboard-only analytics.
-- KEY should absorb the testing semantics while keeping TypeScript/Vitest and exact-scope proof admission as the canonical application/CI base.
-- G-Eval is useful only for genuinely semantic criteria and requires evaluator prompt/model/config versioning plus calibration.
-- if code can prove a property deterministically, use code instead of an LLM judge.
-- agent evaluation should be decomposed into plan quality/adherence, tool correctness, argument correctness, task completion and step efficiency, with KEY additionally evaluating authority/account/effect correctness.
-- semantic task-completion scores cannot override verified Outcome/Evidence truth.
-- synthetic examples are supplemental coverage, not high-risk admission truth.
-- current proof-admission and proof-mutation system remains stronger than generic threshold testing because it rejects missing/skipped/stale proof and proves the gate detects named defects.
-- semantic evaluators should themselves receive mutation/negative-control tests.
-- stochastic protected cases need repeated-trial/confidence semantics rather than single-run admission.
-- current EvalHarnessService is not yet integrated into CI and lacks dataset/evaluator revision, calibration, trajectory and stochastic semantics.
-- direct DeepEval adoption would add a Python/pytest runtime boundary; any future use should be an optional evaluator adapter, not a second admission authority.
+Key R&D-09E Arize Phoenix conclusions:
+- the strongest architecture is KEY canonical execution identity -> OpenTelemetry -> OpenInference AI semantic conventions -> replaceable exporters/backends.
+- OpenInference fills the AI-specific semantic gap left by generic OTel with standard span kinds for LLM, EMBEDDING, RETRIEVER, RERANKER, PROMPT, TOOL, AGENT, GUARDRAIL and EVALUATOR.
+- Phoenix itself is best treated as an optional observability/evaluation workbench, not canonical business/evidence truth.
+- current KEY target architecture already names OpenTelemetry, but no recovered runtime OpenTelemetry/OpenInference implementation exists today.
+- existing Cortex correlationId lineage is stronger than the current post-hoc Langfuse trace identity and should be bridged into future traces rather than discarded.
+- KEY correlation IDs and OTel trace IDs need not be literally identical; preserve explicit links/attributes between them.
+- async work such as A2A delegation, triggers and compensation may need span links rather than being forced into a simple tree.
+- auto-instrument provider mechanics, but manually instrument KEY-specific semantic boundaries such as authority decisions, context compile, evidence and outcome verification.
+- OpenInference JS support covers multiple relevant provider/framework paths including OpenAI, Anthropic, Bedrock, MCP and Vercel AI SDK, making it practical for the Node/TypeScript stack.
+- telemetry privacy must remain KEY-owned; OpenInference hiding/masking is defense-in-depth.
+- retriever/reranker spans must carry KEY-specific tenant/source/authority/time/index-generation metadata.
+- evaluator and guardrail spans are valuable observability artifacts but never prove evaluator/guardrail effectiveness by themselves.
 
-R&D-09E required scope:
-- OpenTelemetry-native tracing;
-- OpenInference semantic conventions;
-- LLM/retrieval/tool/agent spans;
-- built-in evaluators and experiment/dataset support;
-- retrieval diagnostics;
-- prompt/model observability;
-- self-host/open-source deployment;
+R&D-09F required scope:
+- W&B Weave trace/span/Call model;
+- object/version lineage;
+- datasets/evaluation/scorers;
+- experiments/model comparison;
+- prompt/model/tool versioning;
+- cost/latency observability;
+- feedback/annotations;
 - production monitoring;
-- compare Phoenix/OpenInference with the OTel direction emerging from LangSmith/Langfuse;
-- determine whether OpenInference is a suitable semantic layer for KEY telemetry without making Phoenix a canonical truth store.
+- OpenTelemetry/interoperability if current;
+- self-host/deployment posture;
+- compare Weave artifact/version lineage with KEY CognitiveFunctionRevision, EvalDatasetRevision and CapabilityRevision;
+- identify mechanisms that add value beyond LangSmith/Langfuse/Phoenix without creating another canonical truth store.
 
-Do not skip ahead to W&B Weave or implementation before R&D-09E is complete.
+After 09F: Layer-9 convergence — Evaluation & Observability.
+
+Do not enter Layer 10 before R&D-09F and Layer-9 convergence are complete.
