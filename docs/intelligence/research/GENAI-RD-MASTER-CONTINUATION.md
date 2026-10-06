@@ -1,83 +1,160 @@
 # KEYFLOWOS — Massive GenAI R&D Programme Continuation Map
 
 Status: PROGRAMME CONTINUITY CORRECTION / RESEARCH FIRST  
-Date: 2026-10-05
+Date: 2026-10-05  
+Origin anchor: user-supplied "THE GEN AI TECH STACK - 2026" 10-layer reference image.
 
-## Why this exists
+## Critical continuity correction
 
-R&D-03 (orchestration/framework convergence) is one tranche inside a much larger GenAI R&D programme for KEY/KEYFLOWOS.
+The massive GenAI R&D programme originated from the user's 10-layer **GEN AI TECH STACK - 2026** reference image.
 
-The governing user instruction is:
+The programme method was to take that stack seriously as a research map: research each layer and its named systems individually, retain transferable discoveries, compare them with KEYFLOWOS and KEY, then cross-analyze/converge after the research set is sufficiently complete.
 
-> research every subject individually, retain discoveries, cross-analyze scientifically and operationally, converge only after the evidence set is mature, and do not jump prematurely into implementation.
+R&D-03 is only **Layer 3 — Orchestration Frameworks**. Its completion must never be interpreted as completion of the wider GenAI programme.
 
-Therefore the prepared COG-001 packet is **parked**. It remains useful design work, but it is not the next programme frontier until the wider GenAI R&D programme reaches the appropriate convergence point.
+Prepared implementation packet `KF-EXEC-COGNITION-001` remains PARKED until the wider research programme reaches an appropriate convergence point.
 
-## Programme objective
+# Source 10-layer stack
 
-Build KEY as a durable, stateful, evidence-driven cognitive system that can eventually function as a highly capable operational "virtual brain" for KEYFLOWOS.
+## Layer 1 — Foundation Models
+Image examples:
+- GPT-5.x
+- Claude Opus 5
+- Gemini 3.x
+- Llama 4
+- DeepSeek V4
+- Qwen 3.x
 
-The research programme is broader than agent orchestration. It spans:
+Research domain:
+model families, reasoning behavior, multimodality, tool use, context, model routing, cost/latency, open vs closed weights, deployment constraints, capability/evaluation evidence.
 
-- cognition and reasoning;
-- context engineering and Context Genome;
-- memory/world-model architecture;
-- agent/runtime architecture;
-- tools/connectors and action fabric;
-- verification, evidence, authority and governance;
-- learning ingestion and adaptive receptors;
-- epistemics, truth, confidence and provenance;
-- autonomy, self-correction and bounded self-improvement;
-- multimodal interaction and external-world coupling;
-- evaluation, observability and assurance;
-- cost, routing, model/provider capability and execution economics;
-- long-horizon state, planning, feedback and recovery.
+## Layer 2 — Model Serving & Inference
+Image examples:
+- vLLM
+- Ollama
+- llama.cpp
+- Groq
+- AWS Bedrock
+- Vertex AI
 
-## Research method
+Research domain:
+serving architecture, local/cloud inference, batching, KV cache, quantization, throughput/latency, routing, failover, portability, provider abstraction, observability and economics.
 
-For each subject:
+## Layer 3 — Orchestration Frameworks
+Image examples:
+- LangChain
+- LangGraph
+- LlamaIndex
+- CrewAI
+- AutoGen
+- Pydantic AI
 
-1. isolate the subject;
-2. study strong reference systems, standards, frameworks, papers and operating models;
-3. extract transferable properties;
-4. classify each discovery against existing KEYFLOWOS kernels and repo reality;
-5. retain discoveries without prematurely canonizing them;
-6. cross-analyze interactions with previous tranches;
-7. run anti-duplication and ownership tests;
-8. only after convergence, design implementation/proof packets.
+KEYFLOWOS research additionally included Microsoft Agent Framework because AutoGen's evolution/successor path made it relevant.
 
-Implementation is downstream of convergence, not a substitute for research.
+Status: **INDIVIDUAL RESEARCH + LAYER CONVERGENCE COMPLETE**.
 
-## Working six-layer frame
+Durable conclusions include:
+- do not add a second agent/workflow runtime;
+- absorb useful architecture natively;
+- preserve existing KEYFLOWOS truth/durability owners;
+- five AI-layer constructs survived backward pressure testing;
+- implementation work is prepared but parked.
 
-The current broad research frame is:
+## Layer 4 — Embeddings & Rerankers
+Image examples:
+- OpenAI Embeddings
+- Cohere Rerank
+- Voyage AI
+- Jina
+- BGE
+- Nomic Embed
 
-### Layer 1 — Cognition
-Reasoning, planning, deliberation, reflection, uncertainty, decomposition, model strategies, structured outputs, decision quality.
+Research domain:
+dense/sparse/hybrid representations, embedding selection, reranking, retrieval quality, multilingual/domain behavior, dimensionality/storage economics, freshness/versioning, evaluation and failure modes.
 
-### Layer 2 — Context Genome
-Context compilation, source selection, compression, relevance, business/person state, provenance, temporal/context windows, world-model projections.
+## Layer 5 — Vector Databases
+Image examples:
+- Pinecone
+- Qdrant
+- Weaviate
+- Milvus
+- Chroma
+- pgvector
 
-### Layer 3 — Agent Runtime / Orchestration
-Agents, delegation, tool-use loops, workflows, checkpoints, interrupts, retries, multi-agent patterns, durable coordination.
+Research domain:
+ANN indexes, filtering, hybrid retrieval, multitenancy, consistency, versioning/deletion, operational complexity, Postgres-native vs specialized stores, and the boundary between retrieval indexes and canonical memory/truth.
 
-Status: **external framework inventory + convergence completed** for LangChain, LangGraph, LlamaIndex, CrewAI, AutoGen, Pydantic AI and Microsoft Agent Framework.
+## Layer 6 — Fine-tuning & Adaptation
+Image examples:
+- Hugging Face
+- PEFT / LoRA
+- Unsloth
+- Axolotl
+- TRL
+- LLaMA-Factory
 
-### Layer 4 — Tool / Connector Fabric
-Capabilities, tools, adapters, MCP, external systems, computers/phones, APIs, messaging, browser/computer use, capability discovery and safe execution.
+Research domain:
+SFT, PEFT/LoRA/QLoRA, preference optimization/RL methods, distillation, continual adaptation, data curation, catastrophic forgetting, eval gates, model ownership and when adaptation is superior/inferior to retrieval/context/tooling.
 
-### Layer 5 — Verification / Governance
-Authority, evidence, proof, evals, policy, traceability, safety, identity, admission, verification, external-effect certainty, operator oversight.
+## Layer 7 — Prompt & Output Control
+Image examples:
+- DSPy
+- Instructor
+- Outlines
+- Guidance
+- BAML
+- Structured Outputs
 
-### Layer 6 — Autonomy / Self-Correction
-Long-horizon autonomy, feedback loops, self-correction, bounded self-improvement, learning from outcomes, recovery, replanning, adaptive policies.
+Research domain:
+prompt programming/optimization, typed outputs, constrained decoding, grammars, schema generation, correction loops, prompt/version provenance, prompt injection boundaries and deterministic contract enforcement.
 
-These layers are analytical frames, not separate runtimes.
+Note: R&D-03/Pydantic AI produced relevant provisional findings here, but that does **not** substitute for a dedicated Layer-7 study.
 
-## Parallel foundational tracks
+## Layer 8 — Tool & Context Protocols
+Image examples:
+- MCP
+- Function calling
+- A2A
+- Computer use
+- Composio
+- Arcade
 
-### Memory / World Model
-Previously identified sequence:
+Research domain:
+tool protocols, capability discovery, context exchange, agent-to-agent protocols, computer/browser/mobile interaction, authentication/authorization, external effect identity, connector lifecycle and interoperability.
+
+This layer strongly intersects KEYFLOWOS Capability Fabric, integrations, phone/computer control and KEY's action surface.
+
+## Layer 9 — Evaluation & Observability
+Image examples:
+- LangSmith
+- Langfuse
+- Ragas
+- DeepEval
+- Arize Phoenix
+- Weights & Biases Weave
+
+Research domain:
+offline/online evals, traces, retrieval eval, agent trajectory eval, LLM-as-judge limits, human evaluation, regression suites, red-team datasets, cost/latency telemetry and proof admission.
+
+## Layer 10 — Guardrails & Safety
+Image examples:
+- NeMo Guardrails
+- Guardrails AI
+- Llama Guard
+- Lakera
+- Presidio
+- Rebuff
+
+Research domain:
+input/output/tool guardrails, policy enforcement, prompt-injection defense, PII/privacy, content classifiers, action safety, authority, least privilege, sandboxing, exfiltration controls, audit and failure containment.
+
+# KEYFLOWOS expansion beyond the source image
+
+The image is the programme's origin map, not the ceiling of the research.
+
+KEY/KEYFLOWOS requires cross-cutting tracks that the 10-layer graphic does not adequately represent:
+
+## Memory / World Model
 M0 Memory Truth Audit
 -> M1 semantic contract
 -> M2 portable Vault protocol
@@ -90,10 +167,10 @@ M0 Memory Truth Audit
 -> M9 sync
 -> M10 Mission Control
 
-Memory must not be reduced to vector retrieval. It must preserve source, claim, identity, revision, confidence, temporal lineage and applicability.
+## Context Genome
+Context compilation, source selection, relevance, compression, provenance, temporal state, authority-sensitive projections, context budgets and world-model views.
 
-### Learning / Ingestion
-Previously identified sequence:
+## Learning / Ingestion
 LEARN-MAP-001
 -> CONTRACT
 -> FEED
@@ -106,54 +183,77 @@ LEARN-MAP-001
 -> PROMOTION
 -> HORIZON
 
-Goal: continuously expand KEY's receptors and evidence acquisition while preventing unverified input from silently becoming canonical truth.
+## Cognition / Reasoning
+Reasoning, planning, decomposition, deliberation, uncertainty, reflection, decision quality, structured cognition and model-strategy selection.
 
-### Development Organism / Autonomous Builder
-Research also covers the autonomous system building KEYFLOWOS itself:
-context/reconcile
--> plan/decompose
--> authority
--> execute
--> verify
--> correct
--> update memory/state
--> repeat.
+## Autonomy / Self-Correction
+Long-horizon agency, replanning, feedback, recovery, bounded self-improvement, outcome learning, delegated agents, budgets and authority inheritance.
 
-Strong primitives developed here should later generalize into KEY rather than remain development-only machinery.
+## Development Organism
+The autonomous system used to build KEYFLOWOS:
+context/reconcile -> plan/decompose -> authority -> execute -> verify -> correct -> update durable state -> repeat.
 
-## Current programme interpretation
+The development organism is also an experimental proving ground for capabilities that may later become part of KEY.
 
-R&D-03 established important architectural lessons, but it does **not** mean "GenAI R&D complete."
+# Research method
 
-It establishes only the Layer-3 orchestration position:
+For each source layer and each necessary KEYFLOWOS expansion:
 
-- no second orchestration runtime;
-- five AI-layer constructs survive;
-- durable truth remains with existing KEYFLOWOS kernels;
-- several cross-kernel protocols are now clearer.
+1. recover what has already been studied;
+2. isolate individual technologies/concepts;
+3. research primary/strong sources;
+4. extract properties and failure modes;
+5. compare with current KEYFLOWOS repository reality;
+6. classify discoveries against existing kernels/contracts;
+7. retain useful findings without premature adoption;
+8. perform layer-level convergence only after individual studies;
+9. perform cross-layer convergence after enough layers mature;
+10. only then authorize bounded implementation.
 
-The prepared implementation work is retained as future convergence output.
+# Current verified programme status
 
-## Immediate next frontier
+| Layer | Status |
+|---|---|
+| 1 Foundation Models | inventory/gap recovery required |
+| 2 Model Serving & Inference | inventory/gap recovery required |
+| 3 Orchestration Frameworks | individual research + convergence complete |
+| 4 Embeddings & Rerankers | inventory/gap recovery required |
+| 5 Vector Databases | inventory/gap recovery required |
+| 6 Fine-tuning & Adaptation | inventory/gap recovery required |
+| 7 Prompt & Output Control | partial spillover findings exist; dedicated inventory required |
+| 8 Tool & Context Protocols | substantial KEYFLOWOS overlap exists; dedicated inventory required |
+| 9 Evaluation & Observability | substantial existing implementation/forensics overlap; dedicated inventory required |
+| 10 Guardrails & Safety | substantial governance/security overlap; dedicated inventory required |
 
-Before implementing COG-001, restore the **master GenAI research inventory** and determine:
+Do not infer "not researched" from "inventory required." Existing prior work must be recovered before assigning completion percentages.
 
-1. which major GenAI subjects have already been individually studied;
-2. which remain unresearched or only partially studied;
-3. which findings are still provisional;
-4. which cross-layer interactions have not yet been pressure-tested;
-5. the exact next research subject in sequence.
+# Immediate next frontier
 
-The next action is therefore **GENAI-RD-MAP-001 — Master Research Inventory & Gap Map**, not production implementation.
+**GENAI-RD-MAP-001 — Master 10-Layer Research Inventory & Gap Map**
 
-## Hard rules
+Required output:
+- exact research already completed for each of the 10 source layers;
+- technologies individually studied;
+- durable artifacts/findings available;
+- partial/spillover research;
+- missing technologies/concepts;
+- stale research needing refresh;
+- cross-cutting KEY-specific tracks;
+- exact next individual research tranche.
 
+Only after that map is reconstructed should the next technology study be selected.
+
+# Hard rules
+
+- the source image's 10 layers remain the origin taxonomy unless research justifies refinement;
+- KEY-specific additions extend the taxonomy rather than silently replacing it;
+- research individual subjects before declaring layer convergence;
+- preserve useful discoveries even when a framework/runtime is rejected;
 - no premature implementation;
 - no framework adoption by reputation;
 - no premature canonization;
-- retain discoveries for later synthesis;
-- distinguish research evidence from accepted architecture;
+- distinguish external research evidence, repository evidence, inference and accepted architecture;
 - one durable truth owner per semantic concern;
-- cross-analyze after individual subject studies;
+- cross-analyze after individual studies;
 - no fake green;
-- implementation packets may be prepared and parked, but do not become the programme frontier until research convergence authorizes them.
+- prepared implementation packets may be parked without becoming the active frontier.
