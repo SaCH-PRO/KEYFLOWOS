@@ -125,13 +125,15 @@ complete the bounded authority-effect compatibility repair, replay the real #80 
 
 ## Next actions
 
-1. Re-resolve PR #155 and issue #80; finish its exact-head admission/checkpoint.
-2. Re-derive the live programme-state projection through the existing reducer owner.
-3. Refresh PR #150 open-PR convergence board against current main and current PR inventory.
-4. Reconcile/integrate research PR #154 then #156 through their intended branch lineage, preserving RESEARCH_ONLY.
-5. Advance the existing OTel/Langfuse compatibility packet once the active safety packet settles.
-6. Continue Atlas and Memory/Context stacks without duplicate owners.
-7. Run backward re-audits when new canonical laws change prior interpretations.
+1. Complete KF-META-AUTHORITY-EFFECT-COMPAT-001 on its separate bounded meta branch.
+2. Prove replay from RECOVERY-021 reaches current authority without skipping messages and leaves PR #155 as the active application packet under canonical effects.
+3. Re-derive/checkpoint the live programme-state projection through the existing reducer owner.
+4. Re-evaluate PR #155 at its exact current head and admit/checkpoint only if semantic review, exact-head proof and restored control state agree.
+5. Refresh PR #150 open-PR convergence board against current main and current PR inventory.
+6. Reconcile/integrate research PR #154 then #156 through their intended branch lineage, preserving RESEARCH_ONLY.
+7. Advance the existing OTel/Langfuse compatibility packet once the active safety packet settles.
+8. Continue Atlas and Memory/Context stacks without duplicate owners.
+9. Run backward re-audits when new canonical laws change prior interpretations.
 
 ## Safety
 
