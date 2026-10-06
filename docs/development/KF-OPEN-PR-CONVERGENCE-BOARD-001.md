@@ -50,13 +50,13 @@ Control-plane blocker outside the PR list:
 | #136 | procedural morphogenesis contracts | REUSE IN MEMORY M8 / procedural learning. Current workflows are green. Do not create a second procedure schema. |
 | #134 | make dormant knowledge ingestion reachable | HOLD / EXTRACT AFTER MEMORY M0-M1. Do not merge chunk/embed-first ingestion before provenance/claim semantics converge. |
 | #133 | assurance / proof obligation compiler | REUSE IN PARALLEL-AGENT ADMISSION after MVP. Current Agent Control Gate was red at its existing head. |
-| #132 | earlier Mission Control read-only dashboard | SUPERSEDED-IN-PART BY #146. Compare unique semantics; preserve useful read-model work, then close rather than merge a second dashboard. |
+| #132 | earlier Mission Control read-only dashboard | CLOSED after supersession audit; #146 preserves the read-only evidence semantics and cache while adding Atlas/current-PR projection. Historical reference only. |
 | #128 | KEY cognitive archaeology + convergence | CANONICAL INTELLIGENCE INPUT. Reconcile into durable intelligence and use for memory/context/cognition work. |
 | #127 | static memory truth audit | REUSE AS MEMORY M0 STARTING POINT. Expand coverage rather than create a second memory scanner. |
 | #114 | proof integrity / no fake green | REBASE OR EXTRACT. High-value laws, but stale/diverged branch and old control artifacts make wholesale merge unsafe. |
 | #112 | context-genome substrate | REASSESS / REUSE AFTER MEMORY M0. Candidate lineage/context implementation; no competing Context Genome types. |
 | #111 | per-packet authority queue | PRIMARY REUSE CANDIDATE FOR MULTI-WORKER DISPATCH. Do not build another queue. |
-| #109 | earlier typed state reducer | SUPERSESSION AUDIT against merged #120. Preserve only semantics not already admitted; likely close after audit. |
+| #109 | earlier typed state reducer | CLOSED after supersession audit; merged #120/current main owns the stronger live reducer and artifact-binding proof. Historical reference only. |
 | #107 | branch roles / divergence semantics | REUSE for packet worktree ownership and branch-role validation. |
 | #105 | Connector Fabric architecture | INPUT TO ingestion/local-first sync/provider ownership. Keep on intelligence branch and reconcile with current architecture. |
 | #94 | old AI review gate | SUPERSESSION / EXTRACTION AUDIT. Current review/admission system evolved beyond it. Preserve missing exact-head reviewer semantics only. |
