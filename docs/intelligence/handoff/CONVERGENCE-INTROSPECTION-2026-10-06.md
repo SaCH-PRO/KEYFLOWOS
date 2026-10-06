@@ -45,12 +45,15 @@ Whole-system stream convergence while the active implementation packet completes
 ### Active implementation frontier
 KF-EXEC-AUTH-FAIL-CLOSED-001, PR #155.
 
-Observed implementation state:
+Observed implementation/control state:
 - main: ac3a6384417093f198bcc7d672b0dbc295db137c;
 - main already contains merged PR #147, KF-EXEC-ACTION-001;
 - PR #155 semantic head 8987f6db21a839f90c88e33479768d81cef508e9 received independent ChatGPT semantic PASS on issue #80;
-- PR #155 then moved to a control-only binding head 26111633bf8ad3245a9f0abc90c75d1f87e1d564;
-- exact-head admission remained in progress at this checkpoint. Do not infer merge authority from this document.
+- PR #155 is observed at control-only head fdc900b72062391189d31c6994af353ce9dc4e9c with exact-head workflows green;
+- admission is blocked by stale derived control state;
+- live fold analysis identifies historical raw effects BOUNDED_CORRECTION at comment 6011507550 and AUTHORIZE_CONTROL_BINDING at comment 6018421547 as compatibility aliases outside the admitted reducer vocabulary;
+- separate bounded packet KF-META-AUTHORITY-EFFECT-COMPAT-001 was released with NO_STATE_CHANGE authority so the repair can occur without replacing the application packet;
+- target normalization is BOUNDED_CORRECTION -> PACKET_CORRECTION and AUTHORIZE_CONTROL_BINDING -> NO_STATE_CHANGE, while other unknown effects remain fail-closed. Do not infer merge authority from this document.
 
 ### Last completed major implementation states
 - KF-META-STATE-REDUCER-LIVE-001: merged through PR #120.
