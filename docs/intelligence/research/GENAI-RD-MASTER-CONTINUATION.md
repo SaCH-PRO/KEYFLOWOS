@@ -471,45 +471,44 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-10C — Llama Guard**
+**R&D-10D — Lakera**
 
 Layer-10 progress:
 1. NeMo Guardrails — COMPLETE first-pass; durable ledger comment id **6009696796**
 2. Guardrails AI — COMPLETE first-pass; durable ledger comment id **6009734842**
-3. Llama Guard — **ACTIVE NEXT**
-4. Lakera — pending
+3. Llama Guard — COMPLETE first-pass; durable ledger comment id **6009792035**
+4. Lakera — **ACTIVE NEXT**
 5. Presidio — pending
 6. Rebuff — pending
 7. Layer-10 convergence — pending
 
-Key R&D-10B Guardrails AI conclusions:
-- Guardrails AI combines structured-output reliability with input/output risk validators, so it overlaps both Layer 7 and Layer 10.
-- its strongest transferable mechanism is an explicit validation-remediation algebra: reask, deterministic fix, filter/redact, refrain, exception, custom handling.
-- KEY should absorb the remediation semantics under native OutputContract/GuardrailPolicy ownership rather than adopt Guardrails AI as a second schema authority.
-- successful repair must preserve original invalid-output provenance; a final valid object cannot erase validation failure history.
-- reask is a new model execution and needs bounded attempts, exact model/evaluator revision, cost/latency and trace lineage.
-- deterministic fixes are appropriate for representation-level normalization, not silent changes to material business meaning such as amounts, identity, permissions or tool intent.
-- FILTER/REDACT must be followed by schema/domain revalidation.
-- NOOP is useful for shadow/telemetry but unacceptable as the default for protected policies.
-- current public validator catalog includes PII, secrets, jailbreak/prompt injection, web sanitization, Llama Guard and provenance validators; these are benchmark candidates, not automatically admitted policies.
-- Guardrails Hub moved to public PyPI validator packages and hosted remote validator inference was shut down on **2026-08-25**; local or operator-hosted inference is now the relevant deployment pattern.
-- core package is Apache-2.0 and validator packages are generally MIT/permissive, but exact package/model/dependency inventory still requires supply-chain review.
-- direct Node/TypeScript fit is limited: the current JS wrapper uses a Python IO bridge and does not support custom validators or automatic reasking, so direct runtime adoption would add complexity.
-- current KEY handwritten OutputContract validation remains shallow/manual, coerceToContract() can hide invalid-generation provenance behind fallback, and Cortex structured output remains markdown/regex parsing with defaults.
-- streaming safety requires explicit release policy; protected content/tool actions cannot be emitted/executed from unvalidated partial output.
-- semantic/ML validators remain EvaluatorRevisions that require calibration, mutation/negative-control proof and explicit fail policy.
+Key R&D-10C Llama Guard conclusions:
+- current flagship is Llama Guard 4 12B; Llama Guard 3 8B, 11B Vision, 1B and 1B INT4 remain relevant benchmark variants.
+- Llama Guard 4 is a multimodal input/output safety classifier, useful as a versioned detector/evaluator under GuardrailPolicyRevision, never as business authority or proof of safety.
+- Meta's MLCommons-aligned taxonomy is useful generic content-risk vocabulary but does not cover KEY-specific tenant/account/approval/payment/effect/device invariants.
+- classifier category and application action must remain separate; KEY decides block/mask/warn/escalate/current-source requirements by surface and business purpose.
+- Meta's own reported evaluation shows material false-negative/false-positive rates, so `safe` cannot mean proven safe and thresholds require local calibration.
+- input filtering and output filtering have different refusal/utility tradeoffs and should be calibrated independently.
+- static classifiers cannot replace current-source/authority/temporal/business-truth verification.
+- Meta explicitly separates Llama Guard from Prompt Guard 2; content-risk detection and prompt/instruction-manipulation detection are distinct security functions.
+- Prompt Guard 2 is adjacent R&D, not a new canonical stack item; its lightweight variants make a safety cascade worth benchmarking later.
+- Llama Guard 3 1B/INT4 is worth benchmarking for low-cost/local/edge moderation, while 12B is the stronger flagship benchmark.
+- multilingual support does not prove Trinidadian/Caribbean business-language or code-switching performance; protected local cases are required.
+- no production Llama Guard/Prompt Guard/PurpleLlama runtime integration was recovered in KEYFLOWOS.
+- current safety result semantics are too coarse for exact category/model/policy/action provenance; no calibrated multimodal/local-regional safety-model lifecycle exists yet.
 
-R&D-10C required scope:
-- current Llama Guard model family/generations and intended safety taxonomy;
-- prompt/input vs response/output classification;
-- policy/category customization;
-- model sizes/deployment/local inference;
-- classifier output semantics and confidence/calibration limits;
-- multilingual coverage;
-- tool/agent safety relevance if current;
-- benchmark/evaluation methodology and known failure modes;
-- licensing/acceptable-use/deployment constraints;
-- compare purpose-built safety models with KEY deterministic rules, Guardrails AI validators and NeMo rails;
-- determine where a Llama Guard-like classifier belongs in GuardrailPolicyRevision without becoming canonical authority.
+R&D-10D required scope:
+- current Lakera Guard architecture/product scope;
+- prompt/instruction-manipulation and indirect-context protection;
+- content/moderation and data-loss-prevention controls if current;
+- API/gateway/SDK deployment model;
+- latency/streaming behavior;
+- rule/policy customization;
+- observability/threat-intelligence mechanisms;
+- agent/tool/MCP security relevance;
+- privacy/data-retention/deployment posture;
+- benchmark evidence and false-positive/false-negative considerations;
+- compare managed AI-security gateway model with KEY native GuardrailPolicyRevision and local classifiers;
+- identify mechanisms worth reproducing natively without onboarding Lakera.
 
-Do not skip ahead to Lakera or implementation before R&D-10C is complete.
+Do not skip ahead to Presidio or implementation before R&D-10D is complete.
