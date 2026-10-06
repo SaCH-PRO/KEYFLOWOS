@@ -389,21 +389,21 @@ The issue ledger is supporting detail. This file remains the **master chat-rollo
 
 # Immediate next frontier
 
-**R&D-08B — Function Calling**
+**R&D-08D — Computer Use**
 
 Layer-8 progress:
 1. MCP — COMPLETE first-pass; durable ledger comment id **6008878520**
-2. Function calling — **ACTIVE NEXT**
-3. A2A — pending
-4. Computer use — pending
+2. Function calling — COMPLETE first-pass; durable ledger comment id **6008938834**
+3. A2A — COMPLETE first-pass; durable ledger comment id **6008959914**
+4. Computer use — **ACTIVE NEXT**
 5. Composio — pending
 6. Arcade — pending
 7. Layer-8 convergence — pending
 
-Key R&D-08A MCP conclusions now durable:
+Key R&D-08A MCP conclusions:
 - MCP is an interoperability protocol adapter over KEY's Capability Fabric, not KEY's internal authority/tool registry.
 - current KEY MCP module direction (remote Streamable HTTP -> Flow bridge) is worth retaining and hardening rather than replacing.
-- current MCP implementation has a real tenant-isolation discrepancy: `listBridgedTools(_businessId)` ignores businessId, server/config caches are global, and `callTool()` receives no businessId despite comments claiming per-business isolation.
+- current MCP implementation has a real tenant-isolation discrepancy: listBridgedTools(_businessId) ignores businessId, server/config caches are global, and callTool() receives no businessId despite comments claiming per-business isolation.
 - static bearer-token/env auth is insufficient for per-business/user connector identity; OAuth/scoped credential lifecycle needs later product-grade treatment.
 - prefix-based read/write risk inference is not sufficient as an authority mechanism.
 - MCP output truncation is a resource bound, not a prompt-injection/security boundary.
@@ -412,20 +412,43 @@ Key R&D-08A MCP conclusions now durable:
 - central API should retain remote-HTTP-only default; local stdio MCP belongs, if ever, in bounded local/developer/device environments.
 - MCP expands available hands, not authority.
 
-R&D-08B required scope:
-- provider-native tool/function calling semantics;
-- schema vs action authority;
-- parallel tool calls;
-- forced/required tool selection;
-- tool-result messages;
-- retries and duplicate effects;
-- argument streaming;
-- provider portability;
-- deterministic tool routers vs model selection;
-- current FLOW_TOOLS + ModelGateway comparison;
-- how function calling differs from MCP and why MCP transport/discovery must not be conflated with model tool-selection semantics.
+Key R&D-08B Function Calling conclusions:
+- model tool calls are proposals; KEY owns validation, authority and effects.
+- provider strict tool schemas are not yet represented in the canonical GatewayToolDefinition contract.
+- canonical provider-level parallelism controls are absent.
+- current Flow executes all individually auto-admitted tool calls with Promise.all, so provider batching can become unsafe parallel write execution without dependency/effect analysis.
+- Anthropic toolChoice none is not faithfully lowered.
+- Anthropic tool results are flattened into user text rather than native structured tool_result blocks.
+- capability effect/idempotency/dependency metadata is needed before safe tool-batch execution.
+- deterministic dispatch should replace LLM selection when intent is already exact.
+- tool-result content remains an untrusted prompt-injection boundary.
 
-Do not skip ahead to A2A or implementation before R&D-08B is complete.
+Key R&D-08C A2A conclusions:
+- A2A is for independent-agent interoperability/delegation, not KEY's internal orchestration truth.
+- current RoleEngine crews and AgentBus are not true independent-agent federation; repo audits explicitly say there are no independent agents behind the current multi-agent label.
+- Agent Cards are capability claims requiring admission, not authority.
+- A2A Tasks are useful for long-running delegated work; Messages are communication while Artifacts are deliverables.
+- remote completion must not become local acceptance without required artifacts/effect evidence.
+- streaming/push updates are projections requiring durable reconciliation and idempotent callback handling.
+- delegation requires a least-context, least-authority envelope with time/cost/data/effect limits.
+- opaque-agent assurance should be outcome/artifact/effect based, not chain-of-thought based.
+- internal AgentBus/Flow remain internal; A2A is a likely external adapter for vendors, other KEY instances, specialized agents and the Development Organism.
+
+R&D-08D required scope:
+- browser/desktop visual control;
+- screenshot/vision grounding;
+- coordinate vs accessibility-tree actions;
+- browser-only vs OS-level control;
+- hostile-page/prompt-injection risk;
+- credentials/session isolation;
+- downloads/uploads;
+- action confirmation;
+- UI drift and recovery;
+- phone/desktop/device boundaries;
+- current browser-use and Windows/device ambitions in KEYFLOWOS;
+- whether computer use should be a governed fallback beneath higher-level APIs/MCP/tools rather than the default integration method.
+
+Do not skip ahead to Composio or implementation before R&D-08D is complete.
 
 # Active implementation posture
 
