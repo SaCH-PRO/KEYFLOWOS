@@ -224,6 +224,62 @@ sources:
     evidence_class: UNVERIFIED_SOURCE
     caution: Do not attribute claims or treat as a published book until bibliographic identity is independently verified.
 
+  - id: BOOK-THOMAS-HUNT-PRAGMATIC-PROGRAMMER
+    title: The Pragmatic Programmer
+    authors:
+      - David Thomas
+      - Andrew Hunt
+    lens: developer_efficiency_pragmatism_automation_and_feedback
+    status: QUEUED
+    primary_questions:
+      - Which practices reduce repeated mental work and shorten feedback loops?
+      - How can tracer-bullet development, automation, orthogonality, contracts and fail-fast behavior reduce rework in KEYFLOWOS?
+      - Which practices can be operationalized in the agent control plane rather than left as human advice?
+    caution: Treat slogans such as DRY and orthogonality as context-dependent design heuristics, not absolute rules.
+
+  - id: BOOK-CSIKSZENTMIHALYI-FLOW
+    title: "Flow: The Psychology of Optimal Experience"
+    author: Mihaly Csikszentmihalyi
+    lens: attention_flow_and_work_state
+    status: QUEUED
+    primary_questions:
+      - What conditions support sustained high-quality problem solving?
+      - What is the agent-system analogue of interruption, unclear goals, delayed feedback and task-skill mismatch?
+      - Can development orchestration reduce cognitive switching and preserve momentum?
+    caution: Human flow-state research may inform developer workflow design; do not anthropomorphize AI agents as literally experiencing flow.
+
+  - id: BOOK-OUSTERHOUT-PHILOSOPHY-SOFTWARE-DESIGN
+    title: A Philosophy of Software Design
+    author: John Ousterhout
+    lens: complexity_management_deep_modules_and_interface_design
+    status: QUEUED
+    primary_questions:
+      - Where can KEYFLOWOS hide legitimate complexity behind small stable semantic interfaces?
+      - Which modules are shallow wrappers that increase cognitive load?
+      - How can information hiding and deep modules reduce agent context requirements?
+    caution: Pressure-test module depth and interface simplicity against domain ownership and observability; hiding complexity must not hide critical truth.
+
+  - id: BOOK-FOWLER-REFACTORING
+    title: "Refactoring: Improving the Design of Existing Code"
+    author: Martin Fowler
+    lens: incremental_design_change_and_safe_refactoring
+    status: QUEUED
+    primary_questions:
+      - How can large architecture changes be decomposed into behavior-preserving transformations?
+      - Which refactoring patterns can be safely automated by coding agents?
+      - How should tests, characterization and rollback evidence gate refactors?
+
+  - id: BOOK-BECK-TDD-BY-EXAMPLE
+    title: "Test-Driven Development: By Example"
+    author: Kent Beck
+    lens: test_driven_feedback_and_incremental_design
+    status: QUEUED
+    primary_questions:
+      - Where does test-first development shorten feedback and force clearer contracts?
+      - Which KEYFLOWOS changes benefit from TDD versus characterization-first or integration-first proof?
+      - How do we prevent green tests from becoming fake evidence?
+    caution: TDD can improve feedback and design discipline but does not guarantee correctness, completeness, or production safety.
+
 expansion_protocol:
   default_status: QUEUED
   duplicate_rule: Search existing lenses, dossiers, kernels, findings and recommendations before allocating a new concept.
