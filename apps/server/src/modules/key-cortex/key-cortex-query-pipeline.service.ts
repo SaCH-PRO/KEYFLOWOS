@@ -435,6 +435,7 @@ export class KeyCortexQueryPipelineService {
             } else {
               autonomyCheck = {
                 allowed: false,
+                tier: 'manual',
                 requiresApproval: true,
                 reason: 'No autonomy oracle available',
               } as AutonomyCheck;
@@ -1652,15 +1653,25 @@ export class KeyCortexQueryPipelineService {
   }
 
   /**
-   * A verdict is usable only when it is an object carrying a boolean `allowed`.
-   * Anything else (nothing returned, a string, a truthy non-boolean) is not an
-   * answer from the authority and must not be read as one.
+   * A verdict is usable only when it is an object that states every field the
+   * execution decision reads: a boolean `allowed`, a boolean `requiresApproval`
+   * and a recognized `tier`. Anything else (nothing returned, a string, a
+   * truthy non-boolean, an `allowed` with the approval semantics left out) is
+   * not an answer from the authority and must not be read as one: an omitted
+   * `requiresApproval` or `tier` is not a statement that no approval is needed.
    */
   private isUsableAutonomyVerdict(verdict: unknown): boolean {
+    if (typeof verdict !== 'object' || verdict === null) {
+      return false;
+    }
+    const { allowed, requiresApproval, tier } = verdict as Record<
+      string,
+      unknown
+    >;
     return (
-      typeof verdict === 'object' &&
-      verdict !== null &&
-      typeof (verdict as { allowed?: unknown }).allowed === 'boolean'
+      typeof allowed === 'boolean' &&
+      typeof requiresApproval === 'boolean' &&
+      (tier === 'manual' || tier === 'supervised' || tier === 'full')
     );
   }
 

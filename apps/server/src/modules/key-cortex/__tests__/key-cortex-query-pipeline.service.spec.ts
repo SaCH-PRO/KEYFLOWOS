@@ -503,6 +503,55 @@ describe('KeyCortexQueryPipelineService parsed-command autonomy fails closed', (
     });
   });
 
+  // AUTH-FC-F1: `allowed: true` is not an approval on its own. The verdict must
+  // also state requiresApproval and a recognized tier; leaving them out is not a
+  // statement that no approval is needed. The malformed verdict is the second of
+  // the batch, after a well-formed approval, so the whole batch is in question.
+  it.each([
+    ['no approval or tier metadata', { allowed: true }],
+    ['no requiresApproval', { allowed: true, tier: 'full' }],
+    ['no tier', { allowed: true, requiresApproval: false }],
+    ['an unrecognized tier', { ...allow, tier: 'autonomous' }],
+    ['a non-boolean requiresApproval', { ...allow, requiresApproval: null }],
+  ])(
+    'AUTH-FC-P01B an allowed verdict with %s leaves zero parsed commands executable',
+    async (_label, verdict) => {
+      const t = setup({ intents: [createInvoice, sendEmail] });
+      t.autonomyOrchestrator.evaluateAction
+        .mockResolvedValueOnce(allow)
+        .mockResolvedValueOnce(verdict as any);
+
+      await t.run();
+
+      expect(t.autonomyOrchestrator.evaluateAction).toHaveBeenCalledTimes(2);
+      expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+      expect(t.executedCommands()).toEqual([]);
+      expect(t.autonomyEvidence()).toEqual({
+        totalCommands: 2,
+        approvedCommands: 0,
+        outcome: 'authority_check_failed_closed',
+        authorityCheckFailed: true,
+        authorityCheckError: 'Unusable autonomy verdict for outreach.send_email',
+        autonomyMap: { 'commerce:create_invoice': true },
+      });
+    },
+  );
+
+  it('AUTH-FC-P01B a genome autonomy verdict of allowed with no approval or tier metadata leaves zero parsed commands executable', async () => {
+    const t = setup({ withOrchestrator: false });
+    mockGenomeBridgeService.checkAutonomy.mockResolvedValue({ allowed: true });
+
+    await t.run({ integrationV2Enabled: true, genomeV3Enabled: true });
+
+    expect(mockGenomeBridgeService.checkAutonomy).toHaveBeenCalledTimes(1);
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.autonomyEvidence()).toMatchObject({
+      approvedCommands: 0,
+      outcome: 'authority_check_failed_closed',
+      authorityCheckFailed: true,
+    });
+  });
+
   it('AUTH-FC-P03 the conversational response completes with no effect when the authority check fails', async () => {
     const t = setup();
     t.autonomyOrchestrator.evaluateAction.mockRejectedValue(new Error('oracle down'));

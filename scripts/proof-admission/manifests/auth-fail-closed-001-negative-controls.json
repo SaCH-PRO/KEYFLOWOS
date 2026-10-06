@@ -53,7 +53,7 @@
     {
       "id": "NC-AUTH-FC-P01B-UNUSABLE-VERDICT-ACCEPTED",
       "obligation": "AUTH-FC-P01B_UNUSABLE_NARROWS",
-      "claim": "A verdict that is not an object with a boolean allowed is a failed authority check. Without that check a truthy non-boolean is read as an approval, and a verdict with no allowed is read as an ordinary denial that keeps the rest of the batch.",
+      "claim": "A verdict that does not state a boolean allowed, a boolean requiresApproval and a recognized tier is a failed authority check. Without that check a truthy non-boolean is read as an approval, an allowed with no approval semantics is read as an approval, and a verdict with no allowed is read as an ordinary denial that keeps the rest of the batch.",
       "mutation": {
         "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
         "find": "            if (!this.isUsableAutonomyVerdict(autonomyCheck)) {",
@@ -62,7 +62,8 @@
       "mustFail": {
         "unit": [
           "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B a verdict whose allowed is truthy but not a boolean leaves zero parsed commands executable",
-          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an unusable verdict (an object without allowed) leaves zero parsed commands executable"
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an unusable verdict (an object without allowed) leaves zero parsed commands executable",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with no approval or tier metadata leaves zero parsed commands executable"
         ]
       }
     },
@@ -79,6 +80,73 @@
         "unit": [
           "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P06 the evidence and the log name a failed authority check as failed closed",
           "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B a verdict whose allowed is truthy but not a boolean leaves zero parsed commands executable"
+        ]
+      }
+    },
+    {
+      "id": "NC-AUTH-FC-F1-APPROVAL-SEMANTICS-NOT-REQUIRED",
+      "obligation": "AUTH-FC-P01B_UNUSABLE_NARROWS",
+      "claim": "AUTH-FC-F1. allowed: true is not an approval unless the verdict also states requiresApproval and a recognized tier. Restoring the validator of 65706fcc, which checked only a boolean allowed, lets a verdict with the approval semantics left out be read as an explicit non-approval-required allow, and the command executes.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "      typeof allowed === 'boolean' &&\n      typeof requiresApproval === 'boolean' &&\n      (tier === 'manual' || tier === 'supervised' || tier === 'full')",
+        "replace": "      typeof allowed === 'boolean'"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with no approval or tier metadata leaves zero parsed commands executable",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with no requiresApproval leaves zero parsed commands executable",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with no tier leaves zero parsed commands executable",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with an unrecognized tier leaves zero parsed commands executable",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with a non-boolean requiresApproval leaves zero parsed commands executable",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B a genome autonomy verdict of allowed with no approval or tier metadata leaves zero parsed commands executable"
+        ]
+      }
+    },
+    {
+      "id": "NC-AUTH-FC-F1-REQUIRES-APPROVAL-NOT-VALIDATED",
+      "obligation": "AUTH-FC-P01B_UNUSABLE_NARROWS",
+      "claim": "AUTH-FC-F1. requiresApproval must be stated as a boolean. Without that check a verdict that omits it, or carries a falsy non-boolean, is read as no approval required.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "      typeof requiresApproval === 'boolean' &&",
+        "replace": "      true &&"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with no requiresApproval leaves zero parsed commands executable",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with a non-boolean requiresApproval leaves zero parsed commands executable"
+        ]
+      }
+    },
+    {
+      "id": "NC-AUTH-FC-F1-TIER-NOT-VALIDATED",
+      "obligation": "AUTH-FC-P01B_UNUSABLE_NARROWS",
+      "claim": "AUTH-FC-F1. tier must be one of manual, supervised or full. Without that check a verdict with no tier, or with a tier this code does not know, is read as not manual.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "      (tier === 'manual' || tier === 'supervised' || tier === 'full')",
+        "replace": "      true"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with no tier leaves zero parsed commands executable",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B an allowed verdict with an unrecognized tier leaves zero parsed commands executable"
+        ]
+      }
+    },
+    {
+      "id": "NC-AUTH-FC-P05-NO-ORACLE-FALLBACK-INCOMPLETE",
+      "obligation": "AUTH-FC-P05_DENIED_UNCHANGED",
+      "claim": "With no authority oracle the local fallback is a complete, ordinary non-executable verdict. If it does not state its tier the stricter validator rejects it and the absence of an oracle is reported as authority_check_failed_closed instead of an ordinary evaluation.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "                allowed: false,\n                tier: 'manual',\n",
+        "replace": "                allowed: false,\n"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P05 no authority oracle stays non-executable and is not reported as a failure"
         ]
       }
     }
