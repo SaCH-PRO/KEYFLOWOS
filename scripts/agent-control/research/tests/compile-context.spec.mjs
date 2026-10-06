@@ -160,3 +160,46 @@ test('negative control: removing a required semantic proof breaks the TENANT exp
     { name: 'AssertionError' },
   );
 });
+
+test('negative control: claim cannot outrank its source authority', () => {
+  const mutated = parseYaml(fixture('tenant.yaml'));
+
+  mutated.semantic_context.invariants[0].source_authority_class =
+    'HISTORICAL_EVIDENCE';
+
+  mutated.semantic_context.invariants[0].authority_class =
+    'EXECUTION_AUTHORITY';
+
+  const out = compileContext({
+    fixture: mutated,
+    proofRegistry: registry,
+  });
+
+  assert.equal(out.health.status, 'INVALID');
+
+  assert.ok(
+    out.health.reasons.some((reason) =>
+      /authority promotion forbidden/i.test(reason),
+    ),
+  );
+});
+
+test('negative control: unknown source authority class is INVALID', () => {
+  const mutated = parseYaml(fixture('tenant.yaml'));
+
+  mutated.semantic_context.invariants[0].source_authority_class =
+    'ALIEN_AUTHORITY';
+
+  const out = compileContext({
+    fixture: mutated,
+    proofRegistry: registry,
+  });
+
+  assert.equal(out.health.status, 'INVALID');
+
+  assert.ok(
+    out.health.reasons.some((reason) =>
+      /unknown source_authority_class/i.test(reason),
+    ),
+  );
+});

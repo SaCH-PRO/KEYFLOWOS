@@ -58,10 +58,21 @@ function normalizeClaim(claim) {
   return {
     claim: String(claim.claim ?? ''),
     source: String(claim.source ?? ''),
-    revision: claim.revision === null || claim.revision === undefined ? null : String(claim.revision),
+    revision:
+      claim.revision === null || claim.revision === undefined
+        ? null
+        : String(claim.revision),
     authority_class: String(claim.authority_class ?? 'RESEARCH_ONLY'),
+    source_authority_class:
+      claim.source_authority_class === null ||
+      claim.source_authority_class === undefined
+        ? null
+        : String(claim.source_authority_class),
     freshness: String(claim.freshness ?? 'UNVERIFIABLE'),
-    confidence: claim.confidence === null || claim.confidence === undefined ? null : Number(claim.confidence),
+    confidence:
+      claim.confidence === null || claim.confidence === undefined
+        ? null
+        : Number(claim.confidence),
   };
 }
 
@@ -120,14 +131,32 @@ function validateClaimAuthority(claim, problems) {
   if (!AUTHORITY_CLASSES.includes(claim.authority_class)) {
     problems.push(`unknown authority_class: ${claim.authority_class}`);
   }
+
+  if (
+    claim.source_authority_class &&
+    !AUTHORITY_CLASSES.includes(claim.source_authority_class)
+  ) {
+    problems.push(
+      `unknown source_authority_class: ${claim.source_authority_class}`,
+    );
+  }
+
   if (!FRESHNESS.includes(claim.freshness)) {
     problems.push(`unknown freshness: ${claim.freshness}`);
   }
+
   if (claim.source_authority_class) {
     const src = AUTHORITY_RANK.get(claim.source_authority_class);
     const projected = AUTHORITY_RANK.get(claim.authority_class);
-    if (src !== undefined && projected !== undefined && projected < src) {
-      problems.push(`authority promotion forbidden for claim from ${claim.source}: ${claim.source_authority_class} -> ${claim.authority_class}`);
+
+    if (
+      src !== undefined &&
+      projected !== undefined &&
+      projected < src
+    ) {
+      problems.push(
+        `authority promotion forbidden for claim from ${claim.source}: ${claim.source_authority_class} -> ${claim.authority_class}`,
+      );
     }
   }
 }
