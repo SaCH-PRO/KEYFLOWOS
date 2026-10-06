@@ -617,3 +617,200 @@ Do not create a universal knowledge graph, truth service or negative-space datab
 The immediate next step is microscopic tracing and classification against live repository paths, followed by convergence into existing owners.
 
 The autonomous R&D arm should use gravity and negative-space observations as trigger signals, autonomously research and converge them, and request permission before any semantic implementation.
+
+
+## 18. Live repository + relevant PR cross-reference (verified 2026-10-06)
+
+This kernel is not based only on prior research artifacts. It has been cross-referenced against the active implementation base and the currently relevant PR topology.
+
+### 18.1 Active implementation base
+
+Current `main` at verification:
+
+`ac3a6384417093f198bcc7d672b0dbc295db137c`
+
+That commit is the merge of PR #147:
+
+- **PR #147 — KF-EXEC-ACTION-001**
+- state: merged;
+- significance: first admitted KEY Capability -> Control -> Clearance -> execution-claim -> outcome-evidence slice for `helpdesk_create_ticket`;
+- relevance to this kernel:
+  - provides a concrete authority/effect/evidence path;
+  - demonstrates that execution attempt, permission and outcome must remain distinct;
+  - provides a live substrate for identifying missing authority, evidence, replay and recovery as negative space;
+  - creates an observable gravity center around Flow / Capability / Action semantics.
+
+Main also contains merged PR #120:
+
+- **PR #120 — KF-META-STATE-REDUCER-LIVE-001**
+- significance:
+  - establishes typed issue #80 authority folding over a reviewed checkpoint;
+  - distinguishes live authority from a derived projection;
+  - directly supports `DERIVED PROJECTION != SOURCE OF TRUTH`;
+  - its fail-closed behavior is a concrete example of epistemic correctness under stale/malformed information.
+
+### 18.2 Active safety frontier
+
+**PR #155 — KF-EXEC-AUTH-FAIL-CLOSED-001**
+- state: open, draft;
+- base: current main `ac3a6384...`;
+- semantic head: `8987f6db21a839f90c88e33479768d81cef508e9`;
+- control head: `26111633bf8ad3245a9f0abc90c75d1f87e1d564`;
+- relevance:
+  - directly validates `ABSENCE != PERMISSION`;
+  - malformed/missing authority fields must not collapse into an executable allow;
+  - exposes dangerous negative space at an authority boundary;
+  - reinforces the epistemic rule that incomplete evidence remains incomplete rather than being coerced into a convenient boolean.
+
+No conclusion in this kernel grants merge authority to PR #155.
+
+### 18.3 Active R&D lineage
+
+**PR #154 — durable multi-lens research corpus**
+- provides the R&D state machine, evidence classes and anti-loss discipline;
+- relevance: supplies the durable research substrate in which this kernel belongs.
+
+**PR #156 — Book x GenAI convergence**
+- head observed at verification: `8eb3dee851ac6a9200c8c33f1cefb0f68d9c6d27`;
+- provides the Structure / Function / Storage optimization kernel and information-velocity / determinization work;
+- relevance:
+  - this kernel is the epistemic / absence / gravity complement to that work;
+  - it must converge into the same existing owners rather than create a separate architecture.
+
+**PR #157 — whole-system convergence / intelligence continuity**
+- this file lives on its head branch;
+- head after the present update becomes the new exact checkpoint for this kernel;
+- relevance:
+  - repairs stale navigation / handoff;
+  - reconciles current main, active safety work, research branches and current programme intelligence;
+  - is the correct place to record this cross-reference without mutating production semantics.
+
+### 18.4 Memory / Context / Knowing-related PRs
+
+**PR #148 — Memory / Context Genome convergence plan**
+- relevance:
+  - portable evidence-grounded world model direction;
+  - canonical-vs-derived memory semantics;
+  - negative-space questions around missing provenance, supersession, conflict and portability;
+  - must remain the memory/context owner rather than this kernel creating another truth or memory system.
+
+**PR #127 — memory truth audit**
+- relevance:
+  - executable/static evidence about current memory stores, writers/readers and authority;
+  - should be reused for Epistemic Trace 002 and negative-space classification.
+
+**PR #112 — shared temporal Context Genome substrate**
+- relevance:
+  - earlier implementation candidate for context/state lineage;
+  - useful archaeology input, not automatically current canonical truth.
+
+**PR #128 — KEY cognitive architecture archaeology**
+- relevance:
+  - evidence for cognitive ownership, duplicated concepts and hidden inference paths;
+  - useful input for cognitive gravity and epistemic-boundary tracing.
+
+### 18.5 Atlas / structural-understanding PR stack
+
+**PRs #141 -> #146**
+- Living System Atlas foundation;
+- deterministic materializer;
+- canonical intelligence import;
+- packet semantic index;
+- code links;
+- Mission Control / Atlas read model.
+
+Relevance:
+- strongest active substrate for observing positive-space topology;
+- can be extended conceptually to expose:
+  - gravity;
+  - missing owners;
+  - missing producers/consumers;
+  - missing proof;
+  - unreachable capabilities;
+  - evidence class;
+  - true/false/unknown negative space.
+- must remain an overlay over repository/intelligence evidence, not become a second truth system.
+
+### 18.6 Assurance / proof / fake-green PRs
+
+**PR #133 — Assurance Fabric**
+- relevance:
+  - proof-class compilation;
+  - direct support for distinguishing missing implementation from missing proof;
+  - useful for NS6 / dangerous-negative-space classification.
+
+**PR #114 — proof integrity / fake green**
+- relevance:
+  - supports `GREEN OVER EMPTY/WRONG INPUT = FALSE POSITIVE SPACE`;
+  - provides existing machinery for vacuity / negative-control reasoning.
+
+**PR #152 — PR Unlock Contract**
+- relevance:
+  - distinguishes planning activity from delivered product capability;
+  - helps classify "apparent positive space" that does not actually unlock reachable behavior;
+  - useful for detecting false negative / false positive space around programme progress.
+
+### 18.7 Learning / procedure / autonomous-capacity PRs
+
+**PR #134 — learning ingestion reachability**
+- relevance:
+  - whether knowledge can enter the system through a real reachable path;
+  - supports missing-producer / missing-consumer classification.
+
+**PR #136 — procedural morphogenesis**
+- relevance:
+  - repeated successful episodes -> candidate procedures;
+  - must preserve `episode != procedure != permission`;
+  - provides the natural downstream owner for recurring R&D procedures after independent promotion.
+
+**PR #139 — KEY native capacity shadow**
+- relevance:
+  - read-only latent-capacity discovery;
+  - candidate signal source for gravity / missing-reachability / negative-space observations;
+  - shadow evidence must not be mistaken for production capability.
+
+### 18.8 Agent-control / autonomous R&D enabling PRs
+
+**PR #149 — parallel orchestration plan**
+- relevance:
+  - coordination gravity;
+  - packet/worktree ownership;
+  - conflict topology;
+  - future parallel R&D execution must reuse this one control plane.
+
+**PR #111 — per-packet dispatch queue**
+- relevance:
+  - candidate substrate for multiple queued R&D/implementation work items;
+  - must not become a second authority system.
+
+**PR #107 — branch-role semantics**
+- relevance:
+  - distinguishes branch roles / provenance and helps prevent research/projection branches from being interpreted as implementation truth.
+
+**PR #150 — open-PR convergence board**
+- relevance:
+  - active mechanism for preventing PR accumulation from becoming hidden compatibility / coordination gravity;
+  - should eventually consume gravity and negative-space findings as disposition evidence.
+
+### 18.9 External-reality / connector PR
+
+**PR #105 — canonical Connector Fabric architecture**
+- relevance:
+  - external source/provider/account reality;
+  - provider ambiguity and reconciliation are important epistemic boundaries;
+  - supports negative-space analysis of unknown external outcomes, missing reconciliation, missing credentials/authority and duplicate connector ownership.
+
+### 18.10 Cross-reference ruling
+
+After cross-referencing current main and the relevant active PR graph, this kernel's core conclusion remains unchanged but is now more strongly grounded:
+
+1. **Do not build a new truth / negative-space / gravity runtime.**
+2. Treat "knowing" as an epistemic contract across existing domain owners, Context Genome, Evidence/Outcome, Atlas and Assurance.
+3. Treat gravity as a derived forensic property of existing topology, history, runtime and coordination evidence.
+4. Treat negative space as an explicit classification layer over expected-vs-observed system behavior.
+5. Use Atlas / Context Genome / Assurance / control-plane artifacts as evidence sources, while preserving their authority classes.
+6. Route implementation candidates through the existing issue #80 control plane and bounded packet mechanism.
+7. Keep research/convergence autonomous where safe, but require existing authority before semantic implementation.
+8. Re-resolve main and the relevant PR heads before every microscopic trace, because open PRs are proposals and may move.
+
+This cross-reference therefore supports the proposed autonomous R&D reflex design rather than requiring a new parallel system.
