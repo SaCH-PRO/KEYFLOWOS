@@ -69,17 +69,18 @@ Historical forensic baseline retained:
 Important correction:
 the forensic baseline was found to be 117 commits behind observed current main. It is forensic/evolutionary evidence only and MUST NOT be used as current implementation truth.
 
-PR #155 state when last checked in this session:
+PR #155 state at the latest continuity refresh:
 - packet: KF-EXEC-AUTH-FAIL-CLOSED-001;
 - open draft PR;
 - semantic head: 8987f6db21a839f90c88e33479768d81cef508e9;
-- control-only head: 26111633bf8ad3245a9f0abc90c75d1f87e1d564;
-- exact-head repository workflows were green where applicable;
-- Claude posted its single RETURN;
-- merge authority was still false;
-- derived programme-state remained stale and correctly failed closed.
+- latest observed control-only head: fdc900b72062391189d31c6994af353ce9dc4e9c;
+- exact-head repository workflows were reported green;
+- merge authority remains false;
+- derived programme-state remains stale and correctly fails closed;
+- replay from RECOVERY-021 first stops at historical raw effect BOUNDED_CORRECTION and would next encounter AUTHORIZE_CONTROL_BINDING;
+- separate bounded meta packet KF-META-AUTHORITY-EFFECT-COMPAT-001 is released to normalize those two historical aliases onto the existing canonical effects without widening the vocabulary.
 
-Do not assume this remains current. Re-resolve live issue #80 and PR #155.
+Do not assume this remains current. Re-resolve live issue #80, the compatibility repair, and PR #155.
 
 ## 4. Speed / information-velocity R&D
 
