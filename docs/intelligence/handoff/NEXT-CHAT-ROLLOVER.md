@@ -12,15 +12,17 @@ Paste this into the next chat if continuity is needed:
 > Observed current main at convergence checkpoint: ac3a6384417093f198bcc7d672b0dbc295db137c
 >
 > First read:
+> 0. PROJECT-SOURCE-BOOTSTRAP.md
 > 1. docs/intelligence/00-START-HERE.md
-> 2. docs/intelligence/handoff/CURRENT-STATE.yaml
-> 3. docs/intelligence/handoff/CURRENT-HANDOFF.md
-> 4. docs/intelligence/handoff/CONVERGENCE-INTROSPECTION-2026-10-06.md
-> 5. newest valid typed authority on issue #80
-> 6. exact active PR/branch artifacts
-> 7. affected /architecture maps and journey/kernel/domain dossiers
+> 2. docs/intelligence/handoff/AGENT-PICKUP.yaml
+> 3. docs/intelligence/handoff/CURRENT-STATE.yaml
+> 4. docs/intelligence/handoff/CURRENT-HANDOFF.md
+> 5. docs/intelligence/handoff/CONVERGENCE-INTROSPECTION-2026-10-06.md
+> 6. newest valid typed authority on issue #80
+> 7. exact active PR/branch artifacts
+> 8. affected /architecture maps and journey/kernel/domain dossiers
 >
-> Current active application packet is KF-EXEC-AUTH-FAIL-CLOSED-001, PR #155. Its semantic head 8987f6db21a839f90c88e33479768d81cef508e9 has ChatGPT semantic PASS and its latest observed control-only head is fdc900b72062391189d31c6994af353ce9dc4e9c with exact-head workflows green. Admission is blocked by stale derived control state, not a known new application-code failure. A separate bounded control-plane repair KF-META-AUTHORITY-EFFECT-COMPAT-001 was released on issue #80 to normalize historical BOUNDED_CORRECTION -> PACKET_CORRECTION and AUTHORIZE_CONTROL_BINDING -> NO_STATE_CHANGE while keeping other unknown effects fail-closed. Re-resolve live state before acting; do not infer merge authority, merge or checkpoint from this snapshot.
+> Current active application packet is KF-EXEC-AUTH-FAIL-CLOSED-001, PR #155. Its semantic head 8987f6db21a839f90c88e33479768d81cef508e9 has ChatGPT semantic PASS and its latest observed control-only head is fdc900b72062391189d31c6994af353ce9dc4e9c with exact-head workflows green. Admission is blocked by stale derived control state, not a known new application-code failure. A separate bounded control-plane repair KF-META-AUTHORITY-EFFECT-COMPAT-001 is implemented as draft PR #159 at last-observed head c7c6105c0f547002f5e134d125d22c1eb35d0f0f with its exact-head workflows observed green. It normalizes historical BOUNDED_CORRECTION -> PACKET_CORRECTION and AUTHORIZE_CONTROL_BINDING -> NO_STATE_CHANGE while keeping other unknown effects fail-closed. Re-resolve live state before acting; do not infer merge authority, merge or checkpoint from this snapshot.
 >
 > Main already contains merged PR #120 (live typed state reducer) and PR #147 (first helpdesk_create_ticket Capability -> Control -> Clearance -> ExecutionClaim -> OutcomeEvidence boundary).
 >
@@ -32,7 +34,7 @@ Paste this into the next chat if continuity is needed:
 > Known continuity defect: main .agent-control/programme-state.yaml is a derived checkpoint and currently fails closed as DERIVED_STATE_STALE_AUTHORITY relative to newer issue #80 authority. Re-derive it through its existing reducer/control-plane owner; do not hand-edit it from intelligence docs.
 >
 > Immediate order:
-> (1) complete KF-META-AUTHORITY-EFFECT-COMPAT-001 and replay issue #80 from RECOVERY-021 without skipping;
+> (1) independently review exact-head PR #159, then admit or correct it without widening authority; after admission replay/re-derive issue #80 from RECOVERY-021 without skipping;
 > (2) re-derive/checkpoint live programme state through the admitted reducer owner;
 > (3) re-evaluate/admit/checkpoint #155 only after control state is current;
 > (4) refresh PR #150 against current main/open PRs;
