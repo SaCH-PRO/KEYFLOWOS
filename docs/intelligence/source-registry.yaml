@@ -1,0 +1,28 @@
+version: 1
+purpose: >
+  Registry of externally mined evidence used by the KEY Continuous Intelligence
+  & Reconciliation Loop. Entries are evidence, not architecture authority.
+
+sources:
+  - source_id: EXT-GITHUB-MATTPOCOCK-SKILLS-001
+    type: github_repository
+    locator: https://github.com/mattpocock/skills
+    owner: mattpocock
+    repository: skills
+    revision: f3fc5632f401156837ee3872f14fe33ccf1024ea
+    retrieved_at: 2026-10-07
+    license: MIT
+    trust: public_prior_art
+    status: MINED
+    report: docs/intelligence/mined-sources/mattpocock-skills.md
+    candidate_domains:
+      - missions
+      - capabilities
+      - orchestration
+      - assurance
+      - context-genome
+      - living-system-atlas
+      - self-development
+    notes:
+      - Patterns are candidates for native adaptation, not runtime dependency adoption.
+      - Historical/external evidence must be reconciled before promotion.
