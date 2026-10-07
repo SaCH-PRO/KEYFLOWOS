@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 97
-last_updated: '2026-10-06'
+analysis_version: 98
+last_updated: '2026-10-07'
 checkpoint_id: KFCI-2026-10-06-01
-status: WHOLE_SYSTEM_CONVERGENCE_RECOVERING
+status: WHOLE_SYSTEM_CONVERGENCE_CONTINUITY_HARDENED_CONTROL_RECOVERING
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
@@ -41,7 +41,9 @@ observed_repository_state:
     packet: KF-META-AUTHORITY-EFFECT-COMPAT-001
     authority_comment: 6025258558
     intended_branch: impl/kf-meta-authority-effect-compat-001
-    state: RELEASED_AWAITING_ACK_OR_IMPLEMENTATION
+    pr: 159
+    head_observed: c7c6105c0f547002f5e134d125d22c1eb35d0f0f
+    state: IMPLEMENTED_EXACT_HEAD_WORKFLOWS_GREEN_AWAITING_EXACT_HEAD_REVIEW
     projected_effect: NO_STATE_CHANGE
     programme_credit: ZERO
     first_blocker_comment: 6011507550
@@ -59,12 +61,15 @@ context_integrity:
     - canonical_start_handoff_files_were_stale_september_snapshots
     - checked_in_main_programme_state_is_stale_relative_to_newer_issue_80_authority
     - open_pr_convergence_board_predates_recent_merge_and_research_streams
+    - live_control_projection_on_main_still_reports_DERIVED_STATE_STALE_AUTHORITY
   repaired_by_this_branch:
     - canonical_intelligence_navigation
     - current_state_snapshot
     - current_handoff
     - next_chat_rollover
     - whole_system_convergence_checkpoint
+    - universal_project_source_bootstrap
+    - machine_readable_cross_agent_pickup
   not_repaired_here:
     - live_agent_control_programme_state
   control_projection_required_action: complete_alias_compat_repair_then_replay_and_rederive_through_existing_reducer_owner
@@ -134,8 +139,8 @@ real_provider_traffic_authorized: false
 forensic_rebaseline_authorized: false
 
 next_actions:
-  - complete_kf_meta_authority_effect_compat_001_and_replay_real_issue_80_authority
-  - rederive_live_control_plane_programme_state_without_weakening_fail_closed_gate
+  - exact_head_review_kf_meta_authority_effect_compat_001_pr_159_and_admit_or_correct_without_widening_authority
+  - after_pr_159_admission_rederive_live_control_plane_programme_state_without_weakening_fail_closed_gate
   - re_evaluate_exact_head_admission_and_checkpoint_pr_155
   - refresh_pr_150_against_current_main_and_open_pr_inventory
   - integrate_pr_154_then_pr_156_through_research_lineage_preserving_research_only
