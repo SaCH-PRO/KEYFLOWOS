@@ -9,14 +9,16 @@ This repository uses GitHub as the durable programme memory. Do not reconstruct 
 
 Before substantial architecture, forensic, research-promotion or implementation work:
 
+0. If entering cold, read `PROJECT-SOURCE-BOOTSTRAP.md` at repository root.
 1. Resolve current main and the exact head of any active PR.
 2. Read AGENTS.md on current main.
-3. Read docs/intelligence/handoff/CURRENT-STATE.yaml.
-4. Read docs/intelligence/handoff/CURRENT-HANDOFF.md.
-5. Read docs/intelligence/handoff/CONVERGENCE-INTROSPECTION-2026-10-06.md.
-6. For implementation/control work, read issue #80 newest valid typed authority and the exact active packet artifacts on the implementation branch.
-7. Read the affected journey/kernel/domain dossiers and relevant /architecture maps at the implementation revision.
-8. For GenAI or research-derived work, read the current research continuation/convergence artifacts, but preserve their RESEARCH_ONLY status until promotion through the control plane.
+3. Read docs/intelligence/handoff/AGENT-PICKUP.yaml.
+4. Read docs/intelligence/handoff/CURRENT-STATE.yaml.
+5. Read docs/intelligence/handoff/CURRENT-HANDOFF.md.
+6. Read docs/intelligence/handoff/CONVERGENCE-INTROSPECTION-2026-10-06.md.
+7. For implementation/control work, read issue #80 newest valid typed authority and the exact active packet artifacts on the implementation branch.
+8. Read the affected journey/kernel/domain dossiers and relevant /architecture maps at the implementation revision.
+9. For GenAI or research-derived work, read the current research continuation/convergence artifacts, but preserve their RESEARCH_ONLY status until promotion through the control plane.
 
 ## Source precedence
 
@@ -51,7 +53,7 @@ At the latest continuity refresh:
 - PR #155 is at control-only head fdc900b72062391189d31c6994af353ce9dc4e9c with exact-head workflows green;
 - admission is intentionally blocked by the derived control projection, not by a known application-code failure;
 - live replay from RECOVERY-021 stops first at historical raw effect BOUNDED_CORRECTION and would next encounter AUTHORIZE_CONTROL_BINDING, neither of which is in the admitted canonical effect vocabulary;
-- bounded control-plane repair KF-META-AUTHORITY-EFFECT-COMPAT-001 was released on issue #80 to normalize only those historical aliases to PACKET_CORRECTION and NO_STATE_CHANGE while preserving all other unknown effects as fail-closed;
+- bounded control-plane repair KF-META-AUTHORITY-EFFECT-COMPAT-001 is implemented as draft PR #159; last observed head c7c6105c0f547002f5e134d125d22c1eb35d0f0f had exact-head workflows green. It normalizes only those historical aliases to PACKET_CORRECTION and NO_STATE_CHANGE while preserving all other unknown effects as fail-closed;
 - merge/checkpoint must not be inferred from this file; re-resolve live issue #80 and PR #155 before acting.
 
 ## Current cross-stream architecture
@@ -103,7 +105,7 @@ implementation and research evidence are recoverable, but continuity/navigation 
 
 ## Immediate order
 
-1. Complete the bounded KF-META-AUTHORITY-EFFECT-COMPAT-001 control-plane repair and replay real issue #80 authority from RECOVERY-021 without skipping any message.
+1. Independently review exact-head PR #159 for KF-META-AUTHORITY-EFFECT-COMPAT-001; admit or correct it without widening authority. After admission, replay/re-derive real issue #80 authority from RECOVERY-021 without skipping any message.
 2. Re-derive/checkpoint live programme state through the admitted reducer owner only after that replay is valid; do not hand-edit programme-state as a substitute.
 3. Re-evaluate/admit/checkpoint PR #155 only against the restored current projection and exact current head.
 4. Refresh the existing PR convergence board #150 against current main and all current open PRs.
