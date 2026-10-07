@@ -1,33 +1,51 @@
 # KEYFLOWOS — Next Chat Rollover
 
-Checkpoint: `PKG-EXTFX-2026-09-19-02`
+Checkpoint: KFCI-2026-10-06-01
 
-Paste the following into the new chat:
+Paste this into the next chat if continuity is needed:
 
-> Continue KEYFLOWOS from the durable repository state. Do not restart or reconstruct K12/EXTFX.
+> Continue KEYFLOWOS from the durable repository state. Do not restart or reconstruct the programme from conversational memory.
 >
-> Repository: `SaCH-PRO/KEYFLOWOS`
-> Forensic baseline: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2`
-> Current main at handoff: `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`
-> Intelligence branch: `docs/keyflow-intelligence-foundation`
+> Repository: SaCH-PRO/KEYFLOWOS
+> Canonical intelligence branch: docs/keyflow-intelligence-foundation
+> Forensic baseline retained: main@8f173bfe79f1418159cf4099ea18b0d60d203ec2
+> Observed current main at convergence checkpoint: ac3a6384417093f198bcc7d672b0dbc295db137c
 >
-> K12 is already merged/proven. KF-EXEC-EXTFX-001 is now admitted and merged via PR #76. Its admitted implementation head is `42177f5639345d29448c50375c0c05b133c076b5`; merge commit is `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`.
+> First read:
+> 0. PROJECT-SOURCE-BOOTSTRAP.md
+> 1. docs/intelligence/00-START-HERE.md
+> 2. docs/intelligence/handoff/AGENT-PICKUP.yaml
+> 3. docs/intelligence/handoff/CURRENT-STATE.yaml
+> 4. docs/intelligence/handoff/CURRENT-HANDOFF.md
+> 5. docs/intelligence/handoff/CONVERGENCE-INTROSPECTION-2026-10-06.md
+> 6. newest valid typed authority on issue #80
+> 7. exact active PR/branch artifacts
+> 8. affected /architecture maps and journey/kernel/domain dossiers
 >
-> Final EXTFX CI run `35469579096` is green: migrations, 4033 server tests, K12 resource/proof admission (16/16 SATISFIED_AT_DECLARED_SCOPE), 210 web tests, server/web builds, server/web typecheck, lint, and security. Branch divergence run `35469579079` is green. DAST workflow run `35469579109` is green at its configuration guard, but HawkScan itself was skipped because DAST is not configured.
+> Current active application packet is KF-EXEC-AUTH-FAIL-CLOSED-001, PR #155. Its semantic head 8987f6db21a839f90c88e33479768d81cef508e9 has ChatGPT semantic PASS and its latest observed control-only head is fdc900b72062391189d31c6994af353ce9dc4e9c with exact-head workflows green. Admission is blocked by stale derived control state, not a known new application-code failure. A separate bounded control-plane repair KF-META-AUTHORITY-EFFECT-COMPAT-001 is implemented as draft PR #159 at last-observed head c7c6105c0f547002f5e134d125d22c1eb35d0f0f with its exact-head workflows observed green. It normalizes historical BOUNDED_CORRECTION -> PACKET_CORRECTION and AUTHORIZE_CONTROL_BINDING -> NO_STATE_CHANGE while keeping other unknown effects fail-closed. Re-resolve live state before acting; do not infer merge authority, merge or checkpoint from this snapshot.
 >
-> Adversarial EXTFX review is admitted at declared scope. The proof set now explicitly covers P01–P16 and the five required deterministic provider-simulator cases. No real provider traffic was sent.
+> Main already contains merged PR #120 (live typed state reducer) and PR #147 (first helpdesk_create_ticket Capability -> Control -> Clearance -> ExecutionClaim -> OutcomeEvidence boundary).
 >
-> First read `docs/intelligence/handoff/CURRENT-STATE.yaml`, `CURRENT-HANDOFF.md`, this rollover, and the EXTFX characterization receipt. Re-resolve live heads before editing.
+> The completed GenAI convergence spine is:
+> Constitution/Authority -> Context Genome -> Cognitive Function -> Plan/Procedure -> Capability Contract -> Authority+Guardrails -> Effect Execution -> Evidence/Outcome -> Assurance/Evaluation -> Governed Learning/Promotion.
 >
-> Do not reopen or reconstruct EXTFX unless new evidence invalidates its proof. No next bounded package is selected at this checkpoint; select from durable intelligence when continuation is authorized.
+> Do not create parallel owners. Memory uses #106/#122/#123/#124 and must reconcile #112/#127/#148. Atlas is the stacked #141-#146 overlay. Development-organism work reuses issue #80 and #111/#107/#149/#152. Assurance owns OTel/OpenInference direction and the time-bound Langfuse compatibility work. Connector PR #105 is input to one connector/account/evidence fabric. Learning/procedures route #134/#136 through existing owners. Research PRs #154/#156 remain RESEARCH_ONLY.
 >
-> Do not send real provider traffic, mutate production data, deploy production, refresh the programme map, restart scheduled architecture cycles, or silently rebaseline the forensic baseline.
+> Known continuity defect: main .agent-control/programme-state.yaml is a derived checkpoint and currently fails closed as DERIVED_STATE_STALE_AUTHORITY relative to newer issue #80 authority. Re-derive it through its existing reducer/control-plane owner; do not hand-edit it from intelligence docs.
+>
+> Immediate order:
+> (1) independently review exact-head PR #159, then admit or correct it without widening authority; after admission replay/re-derive issue #80 from RECOVERY-021 without skipping;
+> (2) re-derive/checkpoint live programme state through the admitted reducer owner;
+> (3) re-evaluate/admit/checkpoint #155 only after control state is current;
+> (4) refresh PR #150 against current main/open PRs;
+> (5) integrate #154 then #156 through their research lineage;
+> (6) advance the existing OTel/Langfuse compatibility packet;
+> (7) continue Atlas and Memory/Context by existing dependency/owner rules.
+>
+> Preserve no-fake-green, exact-head evidence, MAP BEFORE MODIFYING, no silent rebaseline, and no unauthorized production deploy/mutation/provider effects.
 
-## Current state
+## Context integrity
 
-- PR #76: merged.
-- Current main: `dc913c3942c3a2899b31fbbbf7cc7a7da5f78316`.
-- Forensic baseline remains `8f173bfe79f1418159cf4099ea18b0d60d203ec2`.
-- Programme map remains frozen.
-- Scheduled architecture cycles remain halted.
-- Next package: not selected.
+At this rollover checkpoint: FAIL_RECOVERING.
+
+The evidence is recoverable and the canonical intelligence navigation has been repaired on the convergence branch. Live control-plane state still requires re-derivation through its existing owner.

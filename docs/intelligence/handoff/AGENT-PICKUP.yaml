@@ -1,0 +1,124 @@
+schema_version: 1
+project: KEYFLOWOS
+purpose: deterministic_cross_agent_pickup
+status: CONTINUITY_HARDENING
+snapshot_date: '2026-10-07'
+repository: SaCH-PRO/KEYFLOWOS
+
+bootstrap:
+  first_file: PROJECT-SOURCE-BOOTSTRAP.md
+  required_reads:
+    - AGENTS.md
+    - docs/intelligence/00-START-HERE.md
+    - docs/intelligence/handoff/AGENT-PICKUP.yaml
+    - docs/intelligence/handoff/CURRENT-STATE.yaml
+    - docs/intelligence/handoff/CURRENT-HANDOFF.md
+  live_sources:
+    - current_main
+    - exact_active_pr_heads
+    - github_issue_80_newest_valid_typed_authority
+    - exact_head_ci
+
+source_precedence:
+  - current_main_exact_pr_ci
+  - newest_valid_issue_80_authority
+  - canonical_intelligence
+  - revision_pinned_architecture_maps
+  - research_artifacts
+  - open_pr_proposals
+  - historical_plans_and_conversation
+
+observed_snapshot:
+  main:
+    sha: ac3a6384417093f198bcc7d672b0dbc295db137c
+    last_merged_programme_pr: 147
+    warning: re_resolve_before_action
+  active_application_packet:
+    packet_id: KF-EXEC-AUTH-FAIL-CLOSED-001
+    pr: 155
+    branch: impl/kf-exec-auth-fail-closed-001
+    head_observed: fdc900b72062391189d31c6994af353ce9dc4e9c
+    workflows_observed: GREEN
+    merge_authority: false
+  active_control_repair:
+    packet_id: KF-META-AUTHORITY-EFFECT-COMPAT-001
+    pr: 159
+    branch: impl/kf-meta-authority-effect-compat-001
+    head_observed: c7c6105c0f547002f5e134d125d22c1eb35d0f0f
+    workflows_observed: GREEN
+    purpose: repair_historical_control_effect_aliases_without_widening_authority
+    merge_authority: false
+  dependent_open_work:
+    - pr: 158
+      purpose: tenant_scope_business_goal_writes
+      ci_observed: APPLICATION_CI_GREEN_CONTROL_PROOF_RED
+    - pr: 160
+      purpose: canonical_key_command_capability_routing
+      ci_observed: APPLICATION_CI_GREEN_CONTROL_PROOF_RED
+    - pr: 161
+      purpose: canonical_finance_intelligence_capabilities
+      ci_observed: APPLICATION_CI_GREEN_CONTROL_PROOF_RED
+  continuity_convergence:
+    pr: 157
+    branch: docs/kf-convergence-introspection-001
+    purpose: whole_system_continuity_and_convergence
+  research:
+    prs: [154, 156]
+    authority: RESEARCH_ONLY
+
+known_blocker:
+  code: DERIVED_STATE_STALE_AUTHORITY
+  observed_on_issue_80: true
+  meaning: main_control_projection_is_stale_relative_to_newer_valid_authority
+  repair_candidate: PR_159
+  forbidden_shortcuts:
+    - manual_programme_state_edit_as_substitute_for_reducer_repair
+    - weakening_control_gate
+    - skipping_authority_messages
+    - treating_green_application_ci_as_admission
+
+next_dependency_chain:
+  - exact_head_review_PR_159
+  - admit_or_correct_PR_159_under_issue_80_authority
+  - rederive_programme_state_through_existing_reducer_owner
+  - exact_head_recheck_PR_155
+  - admit_or_correct_PR_155
+  - re_evaluate_PRs_158_160_161_against_restored_control_state
+  - converge_continuity_and_research_lineages
+  - continue_existing_KEY_memory_atlas_assurance_connector_learning_owners
+
+context_integrity:
+  status: FAIL_RECOVERING
+  reason: live_control_projection_not_yet_canonicalized_on_main
+  recovery_rule: re_resolve_live_sources_then_follow_dependency_chain
+
+hard_laws:
+  - map_before_modifying
+  - no_fake_green
+  - exact_head_evidence
+  - one_semantic_owner_per_concern
+  - derived_state_is_not_authority
+  - research_is_not_implementation_authority
+  - models_create_intelligence_not_authority
+  - learning_cannot_self_promote
+  - do_not_weaken_gates_to_obtain_green
+  - no_unauthorized_production_or_provider_effects
+
+handoff_required_fields:
+  - source_sha
+  - branch
+  - head_sha
+  - packet_pr_issue
+  - changed
+  - proved
+  - unproved
+  - blockers
+  - scope_ledger
+  - safety_status
+  - exact_next_action
+  - contradictions
+
+agent_rule: >
+  Re-resolve all observed_snapshot values before mutation. This file is a
+  compact pickup index, not execution authority and not a substitute for live
+  GitHub evidence.

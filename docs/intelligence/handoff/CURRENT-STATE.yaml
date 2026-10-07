@@ -1,110 +1,149 @@
 project: KEYFLOWOS
-analysis_version: 96
-last_updated: '2026-09-22'
-checkpoint_id: ACTION-ACTIVE-2026-09-22-01
-status: ACTION_CHARACTERIZATION_RELEASED
+analysis_version: 98
+last_updated: '2026-10-07'
+checkpoint_id: KFCI-2026-10-06-01
+status: WHOLE_SYSTEM_CONVERGENCE_CONTINUITY_HARDENED_CONTROL_RECOVERING
 repository: SaCH-PRO/KEYFLOWOS
 canonical_branch: docs/keyflow-intelligence-foundation
+forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+
+source_precedence:
+  - current_main_exact_pr_ci
+  - newest_valid_issue_80_authority
+  - canonical_intelligence
+  - revision_pinned_architecture_maps
+  - research_artifacts
+  - open_pr_proposals
+  - historical_plans_and_conversation
+
+observed_repository_state:
+  current_main: ac3a6384417093f198bcc7d672b0dbc295db137c
+  main_contains:
+    - packet: KF-META-STATE-REDUCER-LIVE-001
+      pr: 120
+      status: MERGED
+    - packet: KF-EXEC-ACTION-001
+      pr: 147
+      status: MERGED
+  active_packet:
+    packet: KF-EXEC-AUTH-FAIL-CLOSED-001
+    pr: 155
+    branch: impl/kf-exec-auth-fail-closed-001
+    semantic_head: 8987f6db21a839f90c88e33479768d81cef508e9
+    semantic_review: PASS
+    control_binding_head_observed: fdc900b72062391189d31c6994af353ce9dc4e9c
+    state_at_checkpoint: ADMISSION_BLOCKED_CONTROL_STATE
+    exact_head_workflows_observed: GREEN
+    merge_authority: false
+    note: application_semantics_preserved_control_projection_blocks_admission
+
+  control_plane_repair:
+    packet: KF-META-AUTHORITY-EFFECT-COMPAT-001
+    authority_comment: 6025258558
+    intended_branch: impl/kf-meta-authority-effect-compat-001
+    pr: 159
+    head_observed: c7c6105c0f547002f5e134d125d22c1eb35d0f0f
+    state: IMPLEMENTED_EXACT_HEAD_WORKFLOWS_GREEN_AWAITING_EXACT_HEAD_REVIEW
+    projected_effect: NO_STATE_CHANGE
+    programme_credit: ZERO
+    first_blocker_comment: 6011507550
+    first_blocker_raw_effect: BOUNDED_CORRECTION
+    next_unknown_comment: 6018421547
+    next_unknown_raw_effect: AUTHORIZE_CONTROL_BINDING
+    target_aliases:
+      BOUNDED_CORRECTION: PACKET_CORRECTION
+      AUTHORIZE_CONTROL_BINDING: NO_STATE_CHANGE
+    invariant: all_other_unknown_effects_remain_fail_closed
+
+context_integrity:
+  verdict: FAIL_RECOVERING
+  reasons:
+    - canonical_start_handoff_files_were_stale_september_snapshots
+    - checked_in_main_programme_state_is_stale_relative_to_newer_issue_80_authority
+    - open_pr_convergence_board_predates_recent_merge_and_research_streams
+    - live_control_projection_on_main_still_reports_DERIVED_STATE_STALE_AUTHORITY
+  repaired_by_this_branch:
+    - canonical_intelligence_navigation
+    - current_state_snapshot
+    - current_handoff
+    - next_chat_rollover
+    - whole_system_convergence_checkpoint
+    - universal_project_source_bootstrap
+    - machine_readable_cross_agent_pickup
+  not_repaired_here:
+    - live_agent_control_programme_state
+  control_projection_required_action: complete_alias_compat_repair_then_replay_and_rederive_through_existing_reducer_owner
+
+canonical_genai_spine:
+  - constitution_authority
+  - context_genome
+  - cognitive_function
+  - plan_procedure
+  - capability_contract
+  - authority_guardrails
+  - effect_execution
+  - evidence_outcome
+  - assurance_evaluation
+  - governed_learning_promotion
+
+hard_laws:
+  - flow_is_execution_substrate
+  - models_create_intelligence_not_authority
+  - retrieval_creates_candidates_not_truth
+  - guardrails_do_not_grant_business_permission
+  - trace_is_not_outcome
+  - score_is_not_proof
+  - learning_cannot_self_promote
+  - one_semantic_owner_per_concern
+  - no_fake_green
+  - map_before_modifying
+
+streams:
+  action_effect_safety:
+    owner: capability_control_clearance_effect_evidence
+    state: ACTIVE
+    frontier: KF-EXEC-AUTH-FAIL-CLOSED-001
+  memory_context:
+    owner_refs: ['#106', '#122', '#123', '#124']
+    related_prs: [112, 127, 148]
+    disposition: CONVERGE_EXISTING_OWNER
+  atlas_repository_understanding:
+    prs: [141, 142, 143, 144, 145, 146]
+    disposition: STACKED_ADMISSION
+    constraint: overlay_not_second_truth_system
+  development_organism:
+    owner: issue_80_and_admitted_control_plane
+    related_prs: [111, 107, 149, 152, 114, 133]
+    disposition: STRENGTHEN_ONE_CONTROL_PLANE
+  assurance_observability:
+    owner_refs: ['#130', '#151']
+    related_prs: [133]
+    telemetry_direction: OpenTelemetry_OpenInference
+    next_time_bound_gap: Langfuse_legacy_ingestion_2026_11_16
+  connectors_external_reality:
+    related_prs: [105]
+    disposition: RECONCILE_ONE_CAPABILITY_ACCOUNT_EVIDENCE_FABRIC
+  learning_procedures:
+    related_prs: [134, 136]
+    disposition: ROUTE_EXISTING_MEMORY_PROCEDURE_ASSURANCE_OWNERS
+  research_genai:
+    status: GLOBAL_CONVERGENCE_PASS_1_COMPLETE_RESEARCH_ONLY
+  research_multi_lens:
+    prs: [154, 156]
+    status: IMPLEMENTATION_READY_RESEARCH_ONLY
+
 implementation_authorized: true
 production_release_authorized: false
 production_mutations_authorized: false
-forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-current_main: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
-coverage: {journeys: 26, journey_dossiers: 26, kernels: 12, kernel_dossiers: 12, execution_packets: 35}
-package_hardening:
-  total_packets: 35
-  hardened_L2: 4
-  current: KF-EXEC-ACTION-001
-  k12:
-    merged_main_sha: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
-    ci_run: 35295140078
-    server_tests: 4009
-    proof_cases: 16
-    proof_verdict: SATISFIED_AT_DECLARED_SCOPE
-  auth:
-    level: L3
-    implementation_branch: impl/kf-exec-auth-001-effective-authority
-    pull_request: 85
-    pull_request_state: MERGED
-    merged_main_sha: 83b5f98d886e7831bbd2a1aac24f5cbb68701f51
-    final_semantic_head: 2918c093477a6143b86ef41f182fb44f7749633c
-    final_control_head: 41cf1dddeed09a7ff8515189ea6d8b92249f9980
-    final_ci_run: 35763481266
-    final_ci_conclusion: success
-    proof_verdict: ADMITTED_AT_DECLARED_SCOPE
-    production_touched: false
-    status: CHECKPOINTED
-    transferred_to_action:
-      - membership_guard_to_handler_revocation_boundary
-  tenant:
-    level: L3
-    implementation_branch: impl/kf-exec-tenant-001-membership-genesis
-    pull_request: 84
-    pull_request_state: MERGED
-    merged_main_sha: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
-    final_semantic_head: 2bb3c748e2335cf20c887dc8f1be5ddc2222a430
-    final_control_head: 11ea3ffb094308e8c97ccd14648fd6e9c0c05370
-    ci_run: 35533874555
-    ci_conclusion: success
-    proof_verdict: ADMITTED_AT_DECLARED_SCOPE
-    production_touched: false
-    status: CHECKPOINTED
-  extfx:
-    level: L3
-    characterized_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
-    implementation_branch: impl/kf-exec-extfx-001-resend-certainty
-    admitted_implementation_head: 42177f5639345d29448c50375c0c05b133c076b5
-    pull_request: 76
-    pull_request_state: MERGED
-    merged_main_sha: dc913c3942c3a2899b31fbbbf7cc7a7da5f78316
-    final_branch_delta_vs_premerge_main: {ahead: 9, behind: 0}
-    changed_files: 11
-    ci:
-      run: 35469579096
-      conclusion: success
-      security: success
-      lint: success
-      typecheck_server: success
-      typecheck_web: success
-      build_server: success
-      build_web: success
-      migration_application: success
-      server_tests: 4033
-      server_test_files: 433
-      k12_resource_admission: success
-      k12_proof_verdict: SATISFIED_AT_DECLARED_SCOPE
-      k12_proof_cases: 16
-      web_tests: 210
-      web_test_files: 22
-      branch_divergence: success
-      dast_workflow: success
-      dast_scan_configured: false
-    proof_review:
-      verdict: ADMITTED_AT_DECLARED_SCOPE
-      proof_obligations: P01-P16
-      deterministic_provider_simulator_cases: 5
-      provider_traffic_used: false
-    status: ADMITTED_AND_MERGED
-active_frontier:
-  stage: WAVE_A_ACTION
-  status: CHARACTERIZING
-  packet: KF-EXEC-ACTION-001
-  implementation_branch: null
-  pull_request: null
-  health: GREEN
-constraints:
-  - no_production_provider_effects
-  - no_production_data_mutations
-  - no_production_deployment
-  - no_silent_rebaseline
-  - programme_map_refresh_paused
-  - scheduled_cycles_halted
+real_provider_traffic_authorized: false
+forensic_rebaseline_authorized: false
+
 next_actions:
-  - resolve and read the exact canonical KF-EXEC-ACTION-001 packet before semantic edits
-  - characterize current capability/control/clearance execution seams against current main
-  - carry forward AUTH-001 transfer: define and prove the action-admission commit boundary for membership revocation freshness
-  - preserve forensic baseline 8f173bfe79f1418159cf4099ea18b0d60d203ec2
-  - keep production read-only and release unauthorized
-  - do not reopen K12, EXTFX, TENANT, or AUTH unless regression invalidates admitted proof
-  - checkpoint ACTION-001 before Wave B release
-  - keep programme map refresh and scheduled architecture cycles paused
+  - exact_head_review_kf_meta_authority_effect_compat_001_pr_159_and_admit_or_correct_without_widening_authority
+  - after_pr_159_admission_rederive_live_control_plane_programme_state_without_weakening_fail_closed_gate
+  - re_evaluate_exact_head_admission_and_checkpoint_pr_155
+  - refresh_pr_150_against_current_main_and_open_pr_inventory
+  - integrate_pr_154_then_pr_156_through_research_lineage_preserving_research_only
+  - advance_existing_otel_langfuse_compatibility_packet_after_active_safety_packet
+  - continue_atlas_and_memory_stacks_by_existing_dependency_and_owner_rules
+  - use_exact_current_main_and_map_before_modifying_for_every_new_packet

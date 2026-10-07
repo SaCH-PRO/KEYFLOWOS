@@ -1,77 +1,147 @@
 # KeyFlowOS Current Handoff
 
-Checkpoint: `ACTION-ACTIVE-2026-09-22-01`
+Checkpoint: KFCI-2026-10-06-01
+Status: WHOLE-SYSTEM CONVERGENCE / RECOVERING
 
-This is the canonical continuation point. Do **not** restart the programme or reconstruct completed packets.
+This is the canonical semantic continuation point for a new analytical session. Do not restart KEYFLOWOS from scratch.
+
+## Durable memory pointer
+
+For the full consolidated record of the latest speed/determinization + structure/function/storage + R&D freshness + whole-system convergence work, read:
+
+`docs/intelligence/handoff/DURABLE-MEMORY-2026-10-06-SPEED-STRUCTURE-RND-CONVERGENCE.md`
+
+This artifact is continuity evidence only; current code and live authority still outrank it.
+
+## First read
+
+0. PROJECT-SOURCE-BOOTSTRAP.md
+1. docs/intelligence/00-START-HERE.md
+2. docs/intelligence/handoff/AGENT-PICKUP.yaml
+3. docs/intelligence/handoff/CURRENT-STATE.yaml
+4. docs/intelligence/handoff/CONVERGENCE-INTROSPECTION-2026-10-06.md
+5. newest valid typed authority on GitHub issue #80
+6. exact active PR/branch artifacts
+7. affected /architecture maps and journey/kernel/domain dossiers
 
 ## Fixed references
 
-- Repository: `SaCH-PRO/KEYFLOWOS`
-- Forensic baseline: `main@8f173bfe79f1418159cf4099ea18b0d60d203ec2` — unchanged
-- Current main: `83b5f98d886e7831bbd2a1aac24f5cbb68701f51`
-- Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
-- K12: CHECKPOINTED
-- EXTFX: CHECKPOINTED
-- TENANT: CHECKPOINTED
-- AUTH: CHECKPOINTED
-- Production release authorized: **false**
-- Production mutations authorized: **false**
+Repository: SaCH-PRO/KEYFLOWOS
+Canonical intelligence branch: docs/keyflow-intelligence-foundation
+Forensic baseline retained: main@8f173bfe79f1418159cf4099ea18b0d60d203ec2
+Observed current main at checkpoint: ac3a6384417093f198bcc7d672b0dbc295db137c
 
-## AUTH checkpoint
+The forensic baseline is historical comparison evidence. It is not a substitute for re-resolving current main.
 
-KF-EXEC-AUTH-001 is admitted and merged through PR #85.
+## What changed since the stale September handoff
 
-Evidence:
-- merge/main: `83b5f98d886e7831bbd2a1aac24f5cbb68701f51`
-- semantic correction head: `2918c093477a6143b86ef41f182fb44f7749633c`
-- final admitted control head: `41cf1dddeed09a7ff8515189ea6d8b92249f9980`
-- final CI run: `35763481266` — success
-- Agent Control Gate: success
-- Branch divergence: success
-- DAST workflow: success; do not infer live HawkScan execution beyond workflow evidence
-- production touched: no
+- KF-META-STATE-REDUCER-LIVE-001 merged through PR #120.
+- KF-EXEC-ACTION-001 merged through PR #147.
+- Current main therefore contains the first bounded Capability -> Control -> Clearance -> ExecutionClaim -> OutcomeEvidence adoption for helpdesk_create_ticket.
+- The 10-layer GenAI R&D programme completed global convergence and derived bounded implementation candidates.
+- Multi-lens/book research was formalized in PR #154 and cross-converged with GenAI/KEY in PR #156.
+- Living System Atlas, Mission Control, memory/context, assurance, learning and multi-agent orchestration streams now exist as explicit PR stacks/plans and must be converged rather than independently expanded.
 
-Admitted AUTH results:
-- one canonical human module vocabulary used by enforcer/writers/resolver;
-- operations/analytics writer/enforcer divergence repaired;
-- connect recognized but role-default denied;
-- explicit scope value none represented as explicit deny;
-- EffectiveAuthorityResult carries provenance;
-- active JobRole/OrgAssignment contributions are exact-key and Membership-capped;
-- human USER-grant grantor is server-derived;
-- USER grants are bounded by the grantor's current grantable tier at decision time;
-- expired/revoked grants/delegations contribute nothing;
-- authority reads page to exhaustion and fail closed if incomplete;
-- Membership approval-tier compatibility rule is centralized without schema migration;
-- AiSettings operations family is shadow/compared centrally while legacy answer remains authoritative;
-- stale-copy and grantor inventories are report-only and were not run against production.
+## Active implementation packet
 
-Known deferred gap transferred to ACTION-001:
-- Membership revocation is a hard delete with no tombstone/version.
-- AUTH proves decision-time freshness for dated/tombstoned sources only.
-- ACTION-001 must define and prove the action-admission commit boundary so a revocation committed before admission cannot be consumed as stale authority.
+KF-EXEC-AUTH-FAIL-CLOSED-001
+PR #155
+Branch: impl/kf-exec-auth-fail-closed-001
+Source main: ac3a6384417093f198bcc7d672b0dbc295db137c
 
-## Current frontier
+At the latest continuity refresh:
+- semantic head 8987f6db21a839f90c88e33479768d81cef508e9 passed independent ChatGPT semantic review;
+- PR #155 is at control-only head fdc900b72062391189d31c6994af353ce9dc4e9c;
+- exact-head workflows at that control head were reported green;
+- admission is blocked by DERIVED_STATE_STALE_AUTHORITY rather than a known new application-code failure;
+- replay from RECOVERY-021 first stops on comment 6011507550 because raw effect BOUNDED_CORRECTION is outside the admitted canonical effect vocabulary, and comment 6018421547 would next expose AUTHORIZE_CONTROL_BINDING;
+- KF-META-AUTHORITY-EFFECT-COMPAT-001 is implemented as draft PR #159 at last-observed head c7c6105c0f547002f5e134d125d22c1eb35d0f0f with exact-head workflows observed green. It is a separate bounded meta repair to map those historical aliases onto existing canonical effects while leaving other unknown effects fail-closed.
 
-**KF-EXEC-ACTION-001 — Capability -> Control -> Clearance Boundary**
+Re-read issue #80, the compatibility repair, and PR #155 before acting.
 
-Wave: A  
-State: CHARACTERIZING  
-Health: GREEN  
-Dependency: AUTH-001 — satisfied
+## Why this packet matters
 
-Before any semantic ACTION edit:
-1. Resolve the exact canonical ACTION packet from the intelligence branch.
-2. Re-resolve current main.
-3. Characterize the real capability/control/clearance seams and selected-family execution path.
-4. Carry forward the AUTH membership-revocation admission-boundary obligation.
-5. Stop on contradictions rather than inventing action semantics.
+The corrected path enforces the invariant that authority uncertainty/error can narrow executable capability but cannot widen it.
 
-## Active safety constraints
+It is the immediate P0 safety result of the GenAI convergence work.
 
-- No production provider sends.
-- No production data mutation.
-- No production deployment.
-- No silent forensic rebaseline.
-- No programme-map refresh.
-- No restart of scheduled architecture cycles.
+## Whole-system convergence model
+
+Use this canonical spine:
+
+Constitution / Authority
+-> Context Genome
+-> Cognitive Function
+-> Plan / Procedure
+-> Capability Contract
+-> Authority + Guardrails
+-> Effect Execution
+-> Evidence / Outcome
+-> Assurance / Evaluation
+-> Governed Learning / Promotion
+
+Keep these concerns separate:
+DOMAIN STATE
+DERIVED STATE
+EVIDENCE
+CONTROL STATE
+EXECUTION STATE
+BUSINESS OUTCOME
+FINANCIAL TRUTH
+OPERATOR ATTENTION
+AI / LEARNING INTERPRETATION
+
+They may interact but must not silently become interchangeable.
+
+## Current stream dispositions
+
+Memory / Context Genome:
+Use #106/#122/#123/#124. Reconcile #112/#127/#148. No new memory owner.
+
+Atlas / repository understanding:
+Continue #141 -> #146 as a stacked overlay. Generated ownership and diagrams are evidence, not automatic semantic/runtime truth.
+
+Development organism:
+Use issue #80 and the admitted control plane. Reuse #111/#107/#149/#152 and no-fake-green work; do not create a second queue/reducer/reviewer authority.
+
+Assurance / observability:
+Use existing Assurance/Evidence owners. OTel/OpenInference is the vendor-neutral direction. The research records a 2026-11-16 Langfuse legacy-ingestion compatibility deadline.
+
+Connectors:
+Use PR #105 as architecture input and converge overlapping connector/account truth into one fabric.
+
+Learning / procedures:
+Route #134/#136 through memory/procedure/assurance owners. Episode != procedure != permission.
+
+Research:
+PR #154 and #156 remain RESEARCH_ONLY. Research may derive packets but cannot authorize implementation.
+
+## Current continuity defect
+
+The main branch .agent-control/programme-state.yaml is a reviewed derived checkpoint, not authority, and reconciliation currently reports DERIVED_STATE_STALE_AUTHORITY because issue #80 has advanced.
+
+Do not manually rewrite it from this intelligence branch.
+
+Correct next step:
+complete the bounded authority-effect compatibility repair, replay the real #80 sequence from RECOVERY-021 without skipping authority messages, then re-derive/checkpoint through the admitted reducer/control-plane owner. PR #155 admission resumes only after the projection is current.
+
+## Next actions
+
+1. Independently review exact-head PR #159 for KF-META-AUTHORITY-EFFECT-COMPAT-001; admit or correct it without widening authority.
+2. Prove replay from RECOVERY-021 reaches current authority without skipping messages and leaves PR #155 as the active application packet under canonical effects.
+3. Re-derive/checkpoint the live programme-state projection through the existing reducer owner.
+4. Re-evaluate PR #155 at its exact current head and admit/checkpoint only if semantic review, exact-head proof and restored control state agree.
+5. Refresh PR #150 open-PR convergence board against current main and current PR inventory.
+6. Reconcile/integrate research PR #154 then #156 through their intended branch lineage, preserving RESEARCH_ONLY.
+7. Advance the existing OTel/Langfuse compatibility packet once the active safety packet settles.
+8. Continue Atlas and Memory/Context stacks without duplicate owners.
+9. Run backward re-audits when new canonical laws change prior interpretations.
+
+## Safety
+
+No production deployment, production mutation, destructive production action or real provider effect is authorized by this handoff.
+
+No fake green.
+No silent rebaseline.
+No silent programme-map refresh.
+Map before modifying.
