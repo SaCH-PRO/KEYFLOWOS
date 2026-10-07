@@ -15,12 +15,14 @@ This artifact is continuity evidence only; current code and live authority still
 
 ## First read
 
+0. PROJECT-SOURCE-BOOTSTRAP.md
 1. docs/intelligence/00-START-HERE.md
-2. docs/intelligence/handoff/CURRENT-STATE.yaml
-3. docs/intelligence/handoff/CONVERGENCE-INTROSPECTION-2026-10-06.md
-4. newest valid typed authority on GitHub issue #80
-5. exact active PR/branch artifacts
-6. affected /architecture maps and journey/kernel/domain dossiers
+2. docs/intelligence/handoff/AGENT-PICKUP.yaml
+3. docs/intelligence/handoff/CURRENT-STATE.yaml
+4. docs/intelligence/handoff/CONVERGENCE-INTROSPECTION-2026-10-06.md
+5. newest valid typed authority on GitHub issue #80
+6. exact active PR/branch artifacts
+7. affected /architecture maps and journey/kernel/domain dossiers
 
 ## Fixed references
 
@@ -53,7 +55,7 @@ At the latest continuity refresh:
 - exact-head workflows at that control head were reported green;
 - admission is blocked by DERIVED_STATE_STALE_AUTHORITY rather than a known new application-code failure;
 - replay from RECOVERY-021 first stops on comment 6011507550 because raw effect BOUNDED_CORRECTION is outside the admitted canonical effect vocabulary, and comment 6018421547 would next expose AUTHORIZE_CONTROL_BINDING;
-- KF-META-AUTHORITY-EFFECT-COMPAT-001 was released as a separate bounded meta repair to map those historical aliases onto existing canonical effects while leaving other unknown effects fail-closed.
+- KF-META-AUTHORITY-EFFECT-COMPAT-001 is implemented as draft PR #159 at last-observed head c7c6105c0f547002f5e134d125d22c1eb35d0f0f with exact-head workflows observed green. It is a separate bounded meta repair to map those historical aliases onto existing canonical effects while leaving other unknown effects fail-closed.
 
 Re-read issue #80, the compatibility repair, and PR #155 before acting.
 
@@ -125,7 +127,7 @@ complete the bounded authority-effect compatibility repair, replay the real #80 
 
 ## Next actions
 
-1. Complete KF-META-AUTHORITY-EFFECT-COMPAT-001 on its separate bounded meta branch.
+1. Independently review exact-head PR #159 for KF-META-AUTHORITY-EFFECT-COMPAT-001; admit or correct it without widening authority.
 2. Prove replay from RECOVERY-021 reaches current authority without skipping messages and leaves PR #155 as the active application packet under canonical effects.
 3. Re-derive/checkpoint the live programme-state projection through the existing reducer owner.
 4. Re-evaluate PR #155 at its exact current head and admit/checkpoint only if semantic review, exact-head proof and restored control state agree.
