@@ -3,14 +3,15 @@ directive_message_id: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001
 directive_comment_id: 6025258558
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001   # 6025258558; NO_STATE_CHANGE; releases this bounded meta repair
-  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE; approves the continuation block and adds seven requirements for it; the current authority
+  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE; approves the continuation block and adds seven requirements for it
+  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19; the current authority
 in_reply_to: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
 ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001
 ack_comment_id: 6025343912
-current_authority_message_id: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
-current_authority_comment_id: 6025392698
-current_authority_ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-ACK-002
-current_authority_ack_comment_id: 6025467329
+current_authority_message_id: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
+current_authority_comment_id: 6051089263
+current_authority_ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
+current_authority_ack_comment_id: 6051141358
 source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
 implementation_branch: impl/kf-meta-authority-effect-compat-001
 state: PROVING
@@ -87,6 +88,11 @@ continuation_requirements:   # CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
   - the combined replay reaches the newest authority observed by the packet without skipping a candidate
   - generation semantics stay global across the combined evidence
   - the old frozen fixture is never mistaken for a current complete authority snapshot outside the tests that intentionally pin it
+
+current_authorization:   # CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
+  control_artifacts: update the packet artifacts to cite 6051089263; a new control-only head
+  semantic_mutation: NOT_AUTHORIZED
+  merge: NOT_AUTHORIZED
 
 anti_duplication: >
   Before adding code, verify that no existing normalization or compatibility

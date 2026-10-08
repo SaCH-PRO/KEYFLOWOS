@@ -3,21 +3,25 @@ directive_message_id: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001
 directive_comment_id: 6025258558
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001   # 6025258558; NO_STATE_CHANGE
-  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE; the current authority
-current_authority_message_id: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
-current_authority_comment_id: 6025392698
-ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-ACK-002
-ack_comment_id: 6025467329
+  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE
+  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19; the current authority
+current_authority_message_id: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
+current_authority_comment_id: 6051089263
+ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
+ack_comment_id: 6051141358
 prior_ack_message_ids:
   - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001   # 6025343912
-progress_message_ids: []
+  - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025467329
+progress_message_ids:
+  - CC-PROGRESS-META-AUTHORITY-EFFECT-COMPAT-001   # 6025969876; the seven continuation requirements mapped to tests
 contradiction_message_ids: []
 # This file is a pre-RETURN record. The RETURN is posted on #80 after every
 # check on the head that carries this file has finished, with no further branch
 # mutation. That RETURN is the final evidence envelope.
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
-previous_return_message_ids: []
+previous_return_message_ids:
+  - CC-RETURN-META-AUTHORITY-EFFECT-COMPAT-001
 never_posted_return_message_ids: []
 source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
 source_head: 2a3dac19ad84a740632ed388f5c951e41c95906d
@@ -42,13 +46,16 @@ summary: >
   unchanged, every other unknown token still stops the fold, and the declared
   spelling is kept only as evidence. The committed checkpoint is untouched and
   still anchored to RECOVERY-021; from it the fold now reaches the newest
-  authority on #80.
+  authority on #80. One semantic commit. The two commits after it change
+  only control artifacts. This one records the reading of the semantic head
+  that ChatGPT wrote on #80; see semantic_head_review.
 
 health_reason: >
-  YELLOW is the directive's own health and is about process: this branch
+  YELLOW is about process: the primary reviewer could not run, this branch
   rewrites the two artifact files that PR 155 also rewrites, and the outcome
   for the head that carries this file is not known yet. The code and its local
-  proof have no open failure.
+  proof have no open failure. Message 6051089263 states its own health for
+  the semantic head; that value is ChatGPT's and is not copied here.
 
 characterization:
   live_before: >
@@ -326,6 +333,18 @@ negative_controls:
     check still rejects, so no outcome changes and such a control would be
     vacuous. The behaviour is asserted for five prototype names.
 
+previous_head_c7c6105c: >
+  The first artifact head, c7c6105c0f547002f5e134d125d22c1eb35d0f0f, reported
+  in the earlier RETURN (6026363940) from the live runs, all attempt 1. CI/CD
+  Pipeline run 37535555266 succeeded, with Run Tests reporting server 4,405
+  of 4,405 and web 210 of 210. Agent Control Gate run 37535555209 succeeded.
+  Branch divergence runs 37535555233 and 37535546639 succeeded. DAST
+  (HawkScan) run 37535555338 concluded success with every scan step skipped,
+  because HAWK_API_KEY is not set; no scan ran. Agent Control Worker Proof
+  run 37535555247 succeeded, with 170 of 170 controls live and one named
+  skip in each job. The primary reviewer was NOT_RUN there (PR review
+  5434875947).
+
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
     status: PENDING
@@ -345,16 +364,63 @@ ai_review:
   primary: copilot-pull-request-reviewer[bot]
   fallback: chatgpt
   self_review: none; Claude does not review this change
-  at_the_semantic_head: PENDING
+  primary_at_semantic_head: none exists; the semantic commit and the first artifact commit were pushed together, so the bot was asked once, at c7c6105c
+  primary_at_first_artifact_head: NOT_RUN, reason quota_exhausted (PR review 5434875947 at c7c6105c); it is never counted towards the gate
+  fallback_at_semantic_head: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003 (6051089263), written by ChatGPT for 2a3dac19; see semantic_head_review
   at_the_head_that_carries_this_file: PENDING
+
+semantic_head_review:   # the reading of 2a3dac19, before this commit; the reading of the head that carries this file is PENDING
+  reviewed_head: 2a3dac19ad84a740632ed388f5c951e41c95906d
+  reviews:
+    - provider: copilot
+      reviewer: copilot-pull-request-reviewer[bot]
+      reviewed_head: c7c6105c0f547002f5e134d125d22c1eb35d0f0f
+      outcome: NOT_RUN
+      reason: quota_exhausted
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/159#pullrequestreview-5434875947
+    - provider: chatgpt
+      reviewer: chatgpt
+      reviewed_head: 2a3dac19ad84a740632ed388f5c951e41c95906d
+      outcome: PASS
+      reason: null
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6051089263
+      message_id: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
+  primary_text: >
+    The bot reviewed nothing. It said it was unable to review this pull
+    request because the user who requested it has reached their quota limit.
+  primary_head: >
+    The primary entry names c7c6105c, the only head the bot was asked at. It
+    descends from 2a3dac19 and differs from it in
+    .agent-control/claude-return.yaml only, so it carries the same semantics.
+    Once this commit is the PR head, c7c6105c is neither source_head nor the
+    PR head, and an admission record that keeps this entry needs the lineage
+    evidence the evaluator asks for: descends from source_head, ancestor of
+    the PR head, no file changed outside .agent-control.
+  fallback_reading: >
+    ChatGPT read main..2a3dac19 and recorded the reading in message
+    6051089263, in three top-level fields: reviewed_head 2a3dac19, the
+    outcome recorded above and unresolved_substantive_findings 0. The message
+    says it does not rest on the dormant DAST job or on the one test that
+    hosted runners skip. Claude did not review this change and records the
+    outcome only as ChatGPT wrote it.
+  not_covered: >
+    That reading is about the semantic head. The head that carries this file
+    differs from it only in the two artifact files, and its own reading is
+    PENDING in exact_head_proof.
+  record_ownership: >
+    These entries have the shape of the admission record, and they are not
+    that record. The semantic_review block and review_status are written at
+    admission by ChatGPT, and this file carries neither.
 
 scope_ledger:
   declared: the eleven proof obligations of the directive, its anti-duplication check, and the seven continuation requirements of ACK-002
   resolved: all of them on the semantic head, as listed in proof_matrix
-  remaining: the outcome of the checks on the head that carries this file, and the reading of the change by a reviewer other than Claude
+  remaining: the outcome of the checks on the head that carries this file, the RETURN for CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003, and ChatGPT admission
   deferred: none
   dropped: none
-  superseded: none
+  superseded: artifact head c7c6105c, by the head that carries this file
 
 deviations_from_packet:
   - >
@@ -440,5 +506,6 @@ settled_contradictions: []
 next_action: >
   Wait for every check on the head that carries this file. Read each result
   from the live run. Then post the RETURN on issue 80, once, with
-  merge_authority false, and wait for ChatGPT. Do not merge. Do not touch PR
-  155.
+  merge_authority false, in reply to
+  CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003, and wait for
+  ChatGPT. Do not merge. Do not touch PR 155. No semantic or runtime change.
