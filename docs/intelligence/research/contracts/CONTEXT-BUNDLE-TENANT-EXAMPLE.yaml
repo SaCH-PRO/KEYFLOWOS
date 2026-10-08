@@ -1,0 +1,126 @@
+schema_version: 1
+generator:
+  name: context-bundle-prototype
+  version: research-0
+  deterministic: true
+
+snapshot:
+  repository: SaCH-PRO/KEYFLOWOS
+  main_sha: 110532883411007787f62de35e0a951aa1c16cfa
+  task_head_sha: null
+  packet_id: KF-EXEC-TENANT-001
+  generated_from:
+    - source: git-history
+      revision: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+    - source: historical-packet
+      revision: KF-EXEC-TENANT-001
+
+health:
+  status: DEGRADED
+  reasons:
+    - historical reconstruction; not generated from a contemporaneous packet snapshot
+
+task:
+  objective: establish membership-first tenant genesis without guessing ambiguous legacy state
+  change_classes:
+    - AUTHORITY_MIGRATION
+    - TENANT_ISOLATION_CHANGE
+    - DATA_OWNERSHIP_CHANGE
+    - BACKFILL_MIGRATION
+  allowed_scope: []
+  prohibited_scope: []
+  stop_conditions:
+    - ambiguous legacy ownership cannot be deterministically resolved
+    - incomplete tenant-source reads
+    - cross-tenant mutation becomes possible
+
+authority:
+  current:
+    source: historical repository evidence
+    identifier: KF-EXEC-TENANT-001
+    revision: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+    freshness: SUPERSEDED
+  conflicts: []
+
+semantic_context:
+  owners:
+    - identity
+    - tenant membership
+  journeys: []
+  kernels: []
+  execution_paths:
+    - authenticated creation -> Business + founding Membership
+    - discovery -> Membership-first query + owner compatibility arm
+    - backfill -> classify -> deterministic repair only
+  invariants:
+    - claim: every Business creation path establishes a founding OWNER Membership
+      source: historical TENANT packet
+      revision: 1b196d1c74c808baaf0606b608e7fa23da571054
+      authority_class: HISTORICAL_EVIDENCE
+      freshness: SUPERSEDED
+      confidence: 1.0
+    - claim: ambiguous legacy rows are reported rather than guessed
+      source: historical TENANT packet
+      revision: 1b196d1c74c808baaf0606b608e7fa23da571054
+      authority_class: HISTORICAL_EVIDENCE
+      freshness: SUPERSEDED
+      confidence: 1.0
+  hotspots:
+    - TENANT_AUTHORITY_DATA_BOUNDARY
+  historical_failure_classes:
+    - PAGINATION_COMPLETENESS
+    - DATA_DISCLOSURE
+    - MOCK_FIDELITY
+    - MIGRATION_BACKFILL
+    - ARCHITECTURE_MAP_DRIFT
+
+proof_context:
+  reachability_checks:
+    - enumerate all Business constructors
+    - enumerate Business discovery paths
+  fastest_falsification:
+    - force low page size and prove classification is unchanged
+    - exercise non-owner Membership discovery
+  semantic_proofs:
+    - real database tenant isolation
+    - concurrent genesis convergence
+    - ambiguous backfill refusal
+    - explicit safe Business projection
+  adversarial_proofs:
+    - conflicting OWNER beyond first page
+    - cross-tenant update/delete
+    - unresolvable owner
+    - mock query shape matches real nested Membership predicate
+  final_admission:
+    - default full server suite
+    - architecture scanner refresh
+    - exact-head CI
+
+unresolved:
+  contradictions: []
+  unknowns:
+    - claim: this is a retrospective bundle and cannot establish contemporaneous context reduction
+      source: R&D Trace 004C
+      revision: 4cf294cdde6eb7d5ba8038c9a08f731657279e58
+      authority_class: RESEARCH_ONLY
+      freshness: CURRENT
+      confidence: 1.0
+  missing_required_sources: []
+
+provenance:
+  claims: []
+
+excluded:
+  sources: []
+
+research_context:
+  items:
+    - source: The Programmer's Brain
+      status: EXTRACTING
+      contribution: distinguish retrieval failure, overload, representation failure and reasoning failure
+    - source: The Pragmatic Programmer
+      status: EXTRACTING
+      contribution: tracer-style proof and automation of repeated cognition
+    - source: A Philosophy of Software Design
+      status: EXTRACTING
+      contribution: deep task-facing interface that hides retrieval mechanism but not truth

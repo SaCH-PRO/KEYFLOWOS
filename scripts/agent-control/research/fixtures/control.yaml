@@ -1,0 +1,60 @@
+snapshot:
+  repository: SaCH-PRO/KEYFLOWOS
+  main_sha: 110532883411007787f62de35e0a951aa1c16cfa
+  task_head_sha: 6fdffc26c7c7748d5c09900535c97c197864ab54
+  packet_id: KF-META-STATE-REDUCER-LIVE-001
+  generated_from:
+    - source: active-packet
+      revision: KF-META-STATE-REDUCER-LIVE-001
+task:
+  objective: derive programme state from typed authority effects and repository truth
+  change_classes:
+    - CONTROL_PLANE_CHANGE
+    - STATE_MACHINE_CHANGE
+    - AUTHORITY_MIGRATION
+    - RECOVERY_SEMANTICS
+authority:
+  current:
+    source: active-packet authority lineage
+    identifier: CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023
+    revision: 5994568448
+    freshness: CURRENT
+  conflicts: []
+semantic_context:
+  owners:
+    - agent control plane
+  execution_paths:
+    - control envelope -> normalization -> authority effects -> state fold -> programme projection -> admission
+  invariants:
+    - claim: malformed authority fails closed
+      source: active-packet
+      revision: KF-META-STATE-REDUCER-LIVE-001
+      authority_class: EXECUTION_AUTHORITY
+      freshness: CURRENT
+    - claim: derived programme state cannot outrank execution authority
+      source: historical control-plane evidence
+      revision: KF-META-STATE-REDUCER-LIVE-001
+      authority_class: HISTORICAL_EVIDENCE
+      freshness: CURRENT
+  hotspots:
+    - CONTROL_AUTHORITY_STATE
+  historical_failure_classes:
+    - SHAPE_TYPE
+    - IDENTITY
+    - PARSER_CODEC
+    - RECOVERY
+    - PROOF_VACUITY
+    - OPERATOR_REPRESENTATION
+unresolved:
+  contradictions: []
+  unknowns: []
+  missing_required_sources: []
+provenance:
+  claims: []
+excluded:
+  sources: []
+research_context:
+  items:
+    - source: The Pragmatic Programmer
+      status: EXTRACTING
+      contribution: tracer-style characterization and automated repeated cognition
