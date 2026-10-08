@@ -1,0 +1,293 @@
+version: 1
+schema: keyflowos.connector-fabric-provider-matrix/v1
+status: architecture_overlay
+programme_credit: ZERO
+execution_packets_unchanged: 35
+
+capability_families:
+  identity:
+    - contact.resolve
+    - contact.read
+    - contact.create
+    - contact.update
+    - organization.resolve
+  email:
+    - email.search
+    - email.read
+    - email.draft
+    - email.send
+    - email.label
+    - email.archive
+  messaging:
+    - message.search
+    - message.read
+    - message.draft
+    - message.send
+    - message.reply
+    - message.delivery.read
+  calendar:
+    - calendar.read
+    - calendar.availability
+    - calendar.event.create
+    - calendar.event.update
+    - calendar.event.cancel
+  files:
+    - file.search
+    - file.read
+    - file.create
+    - file.update
+    - file.share
+  social:
+    - social.profile.read
+    - social.post.read
+    - social.post.create
+    - social.post.publish
+    - social.comment.read
+    - social.comment.reply
+    - social.analytics.read
+  calling:
+    - call.start
+    - call.receive
+    - call.status.read
+    - call.voicemail.read
+    - call.recording.read
+    - call.transcript.read
+  commerce:
+    - commerce.customer.read
+    - commerce.product.read
+    - commerce.inventory.read
+    - commerce.order.read
+    - commerce.order.fulfill
+    - commerce.refund.request
+  finance:
+    - finance.invoice.read
+    - finance.invoice.create
+    - finance.payment.read
+    - finance.transaction.read
+    - finance.reconcile
+  collaboration:
+    - workspace.channel.read
+    - workspace.message.read
+    - workspace.message.send
+    - workspace.task.create
+  creative:
+    - design.search
+    - design.create
+    - design.export
+    - asset.upload
+    - asset.read
+  development:
+    - dev.repo.read
+    - dev.issue.read
+    - dev.issue.create
+    - dev.pr.read
+    - dev.deployment.read
+    - dev.logs.read
+  device:
+    - device.share.receive
+    - device.contact.read
+    - device.calendar.read
+    - device.notification.read
+    - device.camera.capture
+    - device.file.pick
+    - device.app.launch
+    - device.browser.context.read
+    - device.print
+    - device.scan
+  computer:
+    - computer.file.read
+    - computer.file.write
+    - computer.app.launch
+    - computer.clipboard.read
+    - computer.clipboard.write
+    - computer.ui.inspect
+    - computer.ui.action
+
+providers:
+  google_workspace:
+    priority: foundation
+    surfaces:
+      - Gmail
+      - Calendar
+      - Drive
+      - Docs
+      - Sheets
+      - Slides
+      - Forms
+      - People/Contacts
+      - Tasks
+      - Meet
+      - Google Chat
+      - Business Profile
+    integration_modes: [oauth2, rest, push, watch, delta]
+    packet_owners: [KF-EXEC-INGRESS-001, KF-EXEC-CONNECTOR-001, KF-EXEC-CONVO-001, KF-EXEC-KNOWLEDGE-001, KF-EXEC-GROWTH-001]
+    data_classes: [business_internal, personal_contact_data, communications_content, files]
+    notes:
+      - prefer least-privilege OAuth scopes
+      - use push/watch/delta semantics where official APIs support them
+
+  microsoft_365:
+    priority: foundation
+    surfaces: [Outlook_Mail, Calendar, Contacts, OneDrive, SharePoint, Teams, To_Do, Office_files]
+    integration_modes: [oauth2, microsoft_graph, webhooks, delta]
+    packet_owners: [KF-EXEC-INGRESS-001, KF-EXEC-CONNECTOR-001, KF-EXEC-CONVO-001, KF-EXEC-KNOWLEDGE-001]
+    data_classes: [business_internal, personal_contact_data, communications_content, files]
+
+  meta:
+    priority: foundation
+    surfaces: [WhatsApp_Business, Facebook_Pages, Messenger, Instagram_Professional]
+    integration_modes: [oauth2, graph_api, webhooks]
+    packet_owners: [KF-EXEC-INGRESS-001, KF-EXEC-CONNECTOR-001, KF-EXEC-CONVO-001, KF-EXEC-GROWTH-001]
+    data_classes: [personal_contact_data, communications_content, public_social]
+    high_risk_capabilities: [message.send, social.post.publish]
+
+  openai_chatgpt:
+    priority: foundation
+    surfaces: [ChatGPT, Codex, OpenAI_API]
+    integration_modes: [mcp_server, api, oauth_or_token]
+    packet_owners: [KF-EXEC-ACTION-001, KF-EXEC-CONNECTOR-001, KF-EXEC-KNOWLEDGE-001]
+    rule: external_ai_is_client_or_provider_not_authority
+
+  anthropic_claude:
+    priority: foundation
+    surfaces: [Claude, Claude_Code, Anthropic_API]
+    integration_modes: [mcp, api]
+    packet_owners: [KF-EXEC-ACTION-001, KF-EXEC-CONNECTOR-001]
+    rule: external_ai_is_client_or_provider_not_authority
+
+  browser_extension:
+    priority: foundation
+    surfaces: [Chrome, Edge, Firefox, Safari_later]
+    integration_modes: [extension_api, native_messaging, explicit_page_share]
+    packet_owners: [KF-EXEC-CONNECTOR-001, KF-EXEC-UX-001, KF-EXEC-EXPERIENCE-001]
+    data_classes: [browser_context]
+    high_risk_capabilities: [computer.ui.action]
+    fallback_only: false
+
+  windows_desktop:
+    priority: foundation
+    surfaces: [Windows]
+    integration_modes: [native_agent, native_messaging, ui_automation_fallback, powershell_allowlisted]
+    packet_owners: [KF-EXEC-CONNECTOR-001, KF-EXEC-ACTION-001, KF-EXEC-UX-001, KF-EXEC-OPS-001]
+    forbidden:
+      - unrestricted_shell_to_key
+      - unrestricted_ui_automation_without_user_grant
+
+  android:
+    priority: foundation
+    surfaces: [Android]
+    integration_modes: [native_app, intents, share_target, contacts_provider, notification_listener_opt_in]
+    packet_owners: [KF-EXEC-CONNECTOR-001, KF-EXEC-VOICE-001, KF-EXEC-UX-001]
+    constraints:
+      - sms_and_call_log_follow_os_role_and_store_policy
+      - accessibility_is_high_risk_fallback
+
+  ios_ipados:
+    priority: foundation
+    surfaces: [iPhone, iPad]
+    integration_modes: [native_app, app_intents, shortcuts, share_sheet, callkit]
+    packet_owners: [KF-EXEC-CONNECTOR-001, KF-EXEC-VOICE-001, KF-EXEC-UX-001]
+    constraints:
+      - do_not_assume_unrestricted_messages_access
+      - user_mediated_composition_is_valid_capability
+
+  slack:
+    priority: business
+    surfaces: [Slack]
+    integration_modes: [oauth2, events_api, socket_mode, web_api]
+    packet_owners: [KF-EXEC-CONVO-001, KF-EXEC-CONNECTOR-001, KF-EXEC-PLAYBOOK-001]
+
+  twilio:
+    priority: business
+    surfaces: [Voice, SMS, WhatsApp]
+    integration_modes: [rest, webhooks, status_callbacks]
+    packet_owners: [KF-EXEC-VOICE-001, KF-EXEC-CONVO-001, KF-EXEC-INGRESS-001, KF-EXEC-RECOVERY-001]
+    high_risk_capabilities: [call.start, message.send, call.recording.read]
+
+  shopify:
+    priority: business
+    surfaces: [Admin_GraphQL, Orders, Products, Inventory, Customers, Webhooks]
+    integration_modes: [oauth2, graphql, webhooks]
+    packet_owners: [KF-EXEC-COMMERCE-001, KF-EXEC-CONNECTOR-001, KF-EXEC-INGRESS-001]
+
+  quickbooks:
+    priority: business
+    integration_modes: [oauth2, rest, webhooks]
+    packet_owners: [KF-EXEC-FINANCE-001, KF-EXEC-CONNECTOR-001]
+    data_classes: [financial]
+
+  xero:
+    priority: business
+    integration_modes: [oauth2, rest, webhooks_or_poll]
+    packet_owners: [KF-EXEC-FINANCE-001, KF-EXEC-CONNECTOR-001]
+    data_classes: [financial]
+
+  salesforce:
+    priority: business
+    integration_modes: [oauth2, rest, pubsub, change_data_capture]
+    packet_owners: [KF-EXEC-COMMERCIAL-001, KF-EXEC-CONNECTOR-001, KF-EXEC-INGRESS-001]
+
+  hubspot:
+    priority: business
+    integration_modes: [oauth2, rest, webhooks]
+    packet_owners: [KF-EXEC-COMMERCIAL-001, KF-EXEC-CONNECTOR-001, KF-EXEC-INGRESS-001]
+
+  canva:
+    priority: business
+    integration_modes: [rest, mcp, app_surface]
+    packet_owners: [KF-EXEC-GROWTH-001, KF-EXEC-CONNECTOR-001, KF-EXEC-EXPERIENCE-001]
+
+  github:
+    priority: business
+    integration_modes: [github_app, rest, graphql, webhooks]
+    packet_owners: [KF-EXEC-CONNECTOR-001, KF-EXEC-OPS-001]
+
+  vercel:
+    priority: business
+    integration_modes: [api, webhooks]
+    packet_owners: [KF-EXEC-CONNECTOR-001, KF-EXEC-OPS-001]
+
+  supabase:
+    priority: business
+    integration_modes: [api, postgres, webhooks_realtime]
+    packet_owners: [KF-EXEC-CONNECTOR-001, KF-EXEC-OPS-001]
+
+connector_certification:
+  required:
+    - manifest_schema_valid
+    - auth_scope_least_privilege
+    - tenant_isolation_proven
+    - connector_generation_fencing_proven
+    - revoke_and_reconnect_proven
+    - webhook_signature_or_equivalent_ingress_auth_proven
+    - replay_and_duplicate_handling_proven
+    - rate_limit_and_backoff_proven
+    - provider_timeout_proven
+    - unknown_outcome_reconciliation_proven
+    - malformed_payload_proven
+    - partial_permission_proven
+    - data_class_and_retention_declared
+    - manual_equivalent_declared
+    - approval_and_autonomy_policy_declared
+    - audit_and_observability_proven
+    - negative_control_present
+  device_extra:
+    - permission_revocation_proven
+    - offline_reconnect_proven
+    - local_secret_storage_proven
+    - background_foreground_lifecycle_proven
+
+authority_ladder:
+  - OBSERVE
+  - READ
+  - SUGGEST
+  - DRAFT
+  - EXECUTE_WITH_APPROVAL
+  - AUTONOMOUS_LOW_RISK
+  - AUTONOMOUS_SCOPED
+
+effect_outcomes:
+  - CONFIRMED_SUCCEEDED
+  - CONFIRMED_FAILED
+  - UNKNOWN_OUTCOME
+  - RECONCILIATION_REQUIRED
