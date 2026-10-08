@@ -26,3 +26,28 @@ sources:
     notes:
       - Patterns are candidates for native adaptation, not runtime dependency adoption.
       - Historical/external evidence must be reconciled before promotion.
+
+  - source_id: EXT-GITHUB-GARRYTAN-GSTACK-002
+    type: github_repository
+    locator: https://github.com/garrytan/gstack
+    owner: garrytan
+    repository: gstack
+    revision: f67c478f05d8e0b39339599ad11c91a3478515ae
+    retrieved_at: 2026-10-07
+    license: MIT
+    trust: public_prior_art
+    status: MINED
+    report: docs/intelligence/mined-sources/garrytan-gstack.md
+    candidate_domains:
+      - capabilities
+      - orchestration
+      - assurance
+      - control-plane
+      - context-genome
+      - continuity
+      - developer-experience
+      - self-development
+    notes:
+      - Mine specialist-role, safety-boundary, learning, context and evidence patterns.
+      - Adapt into canonical KEYFLOWOS owners; do not adopt gstack as a runtime dependency.
+      - Local tool hooks are useful prior art but are not sufficient security boundaries.
