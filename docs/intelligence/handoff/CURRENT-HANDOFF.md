@@ -75,3 +75,32 @@ Before any semantic ACTION edit:
 - No silent forensic rebaseline.
 - No programme-map refresh.
 - No restart of scheduled architecture cycles.
+
+
+---
+
+## 2026-10-05 continuity overlay
+
+The historical ACTION checkpoint above remains valuable evidence, but it is **not sufficient as current live implementation state**.
+
+For any new session or worker, recover from:
+- PROJECT-SOURCE-BOOTSTRAP.md
+- docs/intelligence/handoff/ACTIVE-WORK-LEDGER.yaml
+- docs/intelligence/CURRENT-PROGRAMME-LINES-OF-WORK-2026-10-05.md
+- live GitHub repository/PR/issue state
+
+Observed live main at this overlay:
+110532883411007787f62de35e0a951aa1c16cfa
+
+Active current programme families include:
+- control plane / PR #120;
+- memory / PR #127 and issues #122-#126;
+- KEY cognitive architecture / draft PR #128;
+- proof-integrity/security;
+- connector convergence;
+- product/application defects and hardening.
+
+Do not infer that ACTION-001 remains the sole active frontier merely because the older checkpoint says so. Use the active-work ledger plus live repository truth.
+
+The new recovery rule is:
+repository truth -> active work ledger -> current workstream docs -> historical checkpoint evidence.
