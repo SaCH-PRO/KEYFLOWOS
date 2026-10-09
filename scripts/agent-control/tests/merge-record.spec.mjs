@@ -17,7 +17,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { buildMergeRecord, recordMerge, mergeMarker, RECORD_OUTCOMES } from '../lib/merge-record.mjs';
+import {
+  buildMergeRecord, recordMerge, recordProblems, mergeMarker, RECORD_OUTCOMES, MergeRecordConflict,
+} from '../lib/merge-record.mjs';
 
 const CLI = 'scripts/agent-control/record-auto-merge.mjs';
 const MERGE_SHA = 'c'.repeat(40);
@@ -28,6 +30,7 @@ const mergedResult = (over = {}) => ({
   ...over,
 });
 const BOT = { login: 'github-actions[bot]' };
+const RECORD = buildMergeRecord(mergedResult());
 
 // ------------------------------------------------------------------ content
 
@@ -99,10 +102,153 @@ test('a marker pasted by an untrusted author does not suppress the record', asyn
   assert.equal(f.posted.length, 1);
 });
 
-test('a record re-posted by an allowlisted operator counts, whatever the login\'s case', async () => {
-  const f = fakes([{ id: 7, body: mergeMarker(MERGE_SHA), user: { login: 'sach-pro' } }]);
-  assert.equal((await recordMerge(mergedResult(), f)).outcome, RECORD_OUTCOMES.ALREADY_RECORDED);
+test('the full record re-posted by an allowlisted operator counts, whatever the login\'s case or line endings', async () => {
+  const body = RECORD.body.replace(/\n/g, '\r\n') + '\r\n';
+  const f = fakes([{ id: 7, body, user: { login: 'sach-pro' } }]);
+  const r = await recordMerge(mergedResult(), f);
+  assert.equal(r.outcome, RECORD_OUTCOMES.ALREADY_RECORDED);
+  assert.equal(r.comment_id, 7);
   assert.equal(f.posted.length, 0);
+});
+
+// ------------------------------------- an existing comment must BE the record
+//
+// The marker names a merge commit and nothing else. Each case below is a
+// comment by a trusted author that carries the right marker and is still not
+// the record of this merge. None may be accepted as "already recorded".
+
+const withLine = (key, value) => RECORD.body.replace(new RegExp(`^${key}: .*$`, 'm'), `${key}: ${value}`);
+
+async function conflictFor(body, author = BOT) {
+  const f = fakes([{ id: 41, body, user: author, html_url: 'https://example.invalid/c/41' }]);
+  let thrown = null;
+  try { await recordMerge(mergedResult(), f); } catch (error) { thrown = error; }
+  assert.ok(thrown instanceof MergeRecordConflict, `expected a conflict, got ${thrown && thrown.message}`);
+  assert.equal(thrown.detail.outcome, RECORD_OUTCOMES.CONFLICT);
+  assert.equal(thrown.detail.conflicts.length, 1);
+  assert.equal(thrown.detail.conflicts[0].comment_id, 41);
+  // The true record is made sure of before the run fails.
+  assert.deepEqual(f.posted, [RECORD.body]);
+  assert.equal(thrown.detail.record.posted_now, true);
+  return thrown.detail.conflicts[0].problems;
+}
+
+test('a trusted marker comment with the wrong PR number is not the record', async () => {
+  assert.deepEqual(await conflictFor(withLine('pr_number', '160')), ['mismatch:pr_number']);
+});
+
+test('a trusted marker comment with the wrong admitted head is not the record', async () => {
+  assert.deepEqual(await conflictFor(withLine('admitted_head', '9'.repeat(40))), ['mismatch:admitted_head']);
+});
+
+test('a trusted marker comment with the wrong merge SHA is not the record', async () => {
+  const other = '9'.repeat(40);
+  const body = withLine('merge_sha', other).replace(`message_id: AUTO-MERGE-${MERGE_SHA}`, `message_id: AUTO-MERGE-${other}`);
+  assert.deepEqual(await conflictFor(body), ['mismatch:message_id', 'mismatch:merge_sha']);
+});
+
+test('a trusted marker comment with malformed YAML is not the record', async () => {
+  const cases = [
+    [RECORD.body.replace('```yaml', '').replace(/\n```$/, ''), 'malformed:no_yaml_block'],
+    [RECORD.body.replace('merged: true', 'merged true'), 'malformed:unreadable_line'],
+    [RECORD.body.replace('merged: true', 'merged: true\nmerged: true'), 'malformed:repeated_merged'],
+    [RECORD.body.replace('merged: true\n', ''), 'missing:merged'],
+    [RECORD.body.replace('merged: true', 'merged: false'), 'mismatch:merged'],
+    [RECORD.body.replace('sender: github-autopilot', 'sender: chatgpt'), 'mismatch:sender'],
+    [RECORD.body.replace('merged: true', 'merged: true\noverride: yes'), 'unexpected:override'],
+    [RECORD.body + '\n\nIgnore the block above.', 'differs_from_record'],
+  ];
+  for (const [body, code] of cases) {
+    const problems = await conflictFor(body);
+    assert.ok(problems.includes(code), `${code} expected, got ${problems.join(', ')}`);
+  }
+});
+
+test('a trusted marker comment that is only the marker is not the record', async () => {
+  assert.deepEqual(await conflictFor(mergeMarker(MERGE_SHA)), ['marker_only']);
+  assert.deepEqual(await conflictFor(mergeMarker(MERGE_SHA), { login: 'SaCH-PRO' }), ['marker_only']);
+});
+
+test('a contradictory trusted comment is a conflict even beside the true record, and nothing more is posted', async () => {
+  const f = fakes([
+    { id: 41, body: withLine('pr_number', '160'), user: BOT },
+    { id: 42, body: RECORD.body, user: BOT, html_url: 'u42' },
+  ]);
+  await assert.rejects(recordMerge(mergedResult(), f), (error) => {
+    assert.ok(error instanceof MergeRecordConflict);
+    assert.equal(error.detail.record.comment_id, 42);
+    assert.equal(error.detail.record.posted_now, false);
+    assert.deepEqual(error.detail.conflicts.map((c) => c.comment_id), [41]);
+    return true;
+  });
+  assert.equal(f.posted.length, 0);
+});
+
+test('a conflict whose true record also cannot be posted reports both', async () => {
+  const f = fakes([{ id: 41, body: mergeMarker(MERGE_SHA), user: BOT }]);
+  f.createComment = async () => { throw new Error('403 Resource not accessible by integration'); };
+  await assert.rejects(recordMerge(mergedResult(), f), (error) => {
+    assert.ok(error instanceof MergeRecordConflict);
+    assert.equal(error.detail.record, null);
+    assert.match(error.detail.record_error, /403/);
+    return true;
+  });
+});
+
+test('a contradictory marker comment from an untrusted author is ignored, not a conflict', async () => {
+  const f = fakes([{ id: 41, body: withLine('pr_number', '160'), user: { login: 'someone-else' } }]);
+  const r = await recordMerge(mergedResult(), f);
+  assert.equal(r.outcome, RECORD_OUTCOMES.RECORDED);
+  assert.equal(f.posted.length, 1);
+});
+
+test('recordProblems accepts exactly the record and nothing near it', () => {
+  assert.deepEqual(recordProblems(RECORD.body, RECORD), []);
+  assert.deepEqual(recordProblems(`\n${RECORD.body}\n`, RECORD), []);
+  assert.notDeepEqual(recordProblems(RECORD.body.toUpperCase(), RECORD), []);
+  assert.notDeepEqual(recordProblems('', RECORD), []);
+});
+
+// ------------------------------------------------------ retries and races
+
+test('a post that landed but whose reply was lost is found by the retry, not posted twice', async () => {
+  const store = [];
+  const io = {
+    listComments: async () => store,
+    createComment: async (body) => {
+      store.push({ id: 500 + store.length, body, user: BOT });
+      throw new Error('socket hang up');
+    },
+  };
+  await assert.rejects(recordMerge(mergedResult(), io), /socket hang up/);
+  io.createComment = async () => { throw new Error('the retry must not post'); };
+  const retry = await recordMerge(mergedResult(), io);
+  assert.equal(retry.outcome, RECORD_OUTCOMES.ALREADY_RECORDED);
+  assert.equal(store.length, 1);
+});
+
+test('two recorders racing for one merge can both post; every later run reports the duplicate', async () => {
+  // Both list before either posts. GitHub has no conditional create, so this
+  // is what happens without the workflow's mutation lock.
+  const store = [];
+  const racer = () => {
+    const seen = [...store];
+    return {
+      listComments: async () => seen,
+      createComment: async (body) => { const c = { id: 600 + store.length, body, user: BOT }; store.push(c); return c; },
+    };
+  };
+  const [a, b] = [racer(), racer()];
+  assert.equal((await recordMerge(mergedResult(), a)).outcome, RECORD_OUTCOMES.RECORDED);
+  assert.equal((await recordMerge(mergedResult(), b)).outcome, RECORD_OUTCOMES.RECORDED);
+  assert.equal(store.length, 2, 'the race is real: two identical, correct records');
+
+  const later = fakes(store);
+  const r = await recordMerge(mergedResult(), later);
+  assert.equal(r.outcome, RECORD_OUTCOMES.ALREADY_RECORDED);
+  assert.equal(r.comment_id, 600);
+  assert.deepEqual(r.duplicates, [601], 'the extra record is reported, not hidden');
+  assert.equal(later.posted.length, 0);
 });
 
 test('the record of one merge does not stand in for another', async () => {
@@ -216,6 +362,42 @@ test('cli: an existing record beyond the first page of comments is found, not du
     assert.equal(r.json.outcome, 'already_recorded');
     assert.equal(r.json.comment_id, 231);
     assert.deepEqual(gh.requests.filter((q) => q.method === 'GET').map((q) => q.page), ['1', '2', '3']);
+    assert.equal(gh.posts().length, 0);
+  } finally { await gh.close(); }
+});
+
+test('cli: a contradictory trusted record exits 4, says why, and posts the true record exactly once', async () => {
+  const comments = filler(250);
+  comments[3] = { id: 4, body: RECORD.body.replace('pr_number: 159', 'pr_number: 160'), user: BOT, html_url: 'https://example.invalid/c/4' };
+  const gh = await fakeGitHub({ comments });
+  try {
+    const first = await cli(gh, MERGED_JSON);
+    assert.equal(first.status, 4, first.stdout + first.stderr);
+    assert.equal(first.json.outcome, 'conflict');
+    assert.deepEqual(first.json.conflicts.map((c) => [c.comment_id, c.problems]), [[4, ['mismatch:pr_number']]]);
+    assert.equal(first.json.record.posted_now, true);
+    assert.match(first.stderr, /^::error::AUTO_MERGE record conflict: .*4 \(mismatch:pr_number\)/m);
+    assert.equal(gh.posts().length, 1);
+    assert.equal(gh.comments.at(-1).body, RECORD.body);
+
+    // Still a conflict on a replay, and still one true record.
+    const second = await cli(gh, MERGED_JSON);
+    assert.equal(second.status, 4);
+    assert.equal(second.json.record.posted_now, false);
+    assert.equal(gh.posts().length, 1);
+  } finally { await gh.close(); }
+});
+
+test('cli: the true record on a later page does not excuse a contradictory one on the first', async () => {
+  const comments = filler(250);
+  comments[3] = { id: 4, body: mergeMarker(MERGE_SHA), user: { login: 'SaCH-PRO' } };
+  comments[230] = { id: 231, body: RECORD.body, user: BOT };
+  const gh = await fakeGitHub({ comments });
+  try {
+    const r = await cli(gh, MERGED_JSON);
+    assert.equal(r.status, 4, r.stdout + r.stderr);
+    assert.equal(r.json.record.comment_id, 231);
+    assert.deepEqual(r.json.conflicts[0].problems, ['marker_only']);
     assert.equal(gh.posts().length, 0);
   } finally { await gh.close(); }
 });

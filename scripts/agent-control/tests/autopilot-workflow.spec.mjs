@@ -28,6 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseYaml } from '../lib/yaml.mjs';
+import { MUTATION_LOCK } from '../lib/events.mjs';
 
 const WORKFLOW = '.github/workflows/agent-control-autopilot.yml';
 
@@ -236,6 +237,13 @@ test('hourly: an evaluator that exits 0 without a merge to record is a failure, 
   assert.match(r.out, /^::error::PR #159 was merged but its AUTO_MERGE record is not confirmed \(recorder status 3\)$/m);
 });
 
+test('hourly: a record that conflicts with a trusted comment (recorder status 4) fails the job', () => {
+  const r = runStep(HOURLY(), { prs: [159], answers: { 159: merged(159) }, recordStatus: { 159: 4 } });
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /^::error::PR #159 was merged but its AUTO_MERGE record is not confirmed \(recorder status 4\)$/m);
+  assert.doesNotMatch(r.out, /AUTO_MERGE record is on the control room/);
+});
+
 test('hourly: nothing is recorded for an evaluator error', () => {
   const r = runStep(HOURLY(), { prs: [159], answers: { 159: EVALUATOR_ERROR } });
   assert.equal(r.status, 1, r.out);
@@ -296,9 +304,22 @@ test('exact-head: an eligible result that merged nothing passes with nothing rec
 });
 
 test('exact-head: a record that cannot be confirmed fails the step and names the PR', () => {
-  for (const status of [2, 1, 137]) {
+  for (const status of [2, 4, 1, 137]) {
     const r = runStep(RECORD(), { env: recordEnv(159), recordStatus: { 159: status } });
     assert.equal(r.status, 1, `status ${status}: ${r.out}`);
     assert.match(r.out, new RegExp(`^::error::PR #159 was merged but its AUTO_MERGE record is not confirmed \\(recorder status ${status}\\)$`, 'm'));
+  }
+});
+
+test('every job that records a merge holds the one mutation lock, so two recorders cannot race', () => {
+  // Listing and posting are two calls with no conditional create between
+  // them. Serialising the jobs is what keeps a merge to one record.
+  const workflow = parseYaml(fs.readFileSync(WORKFLOW, 'utf8'));
+  const recording = Object.entries(workflow.jobs).filter(([, job]) =>
+    (job.steps || []).some((s) => String(s.run || '').includes('record-auto-merge.mjs')));
+  assert.deepEqual(recording.map(([name]) => name).sort(), ['exact-head-auto-merge', 'hourly-reconcile-open-prs']);
+  for (const [name, job] of recording) {
+    assert.equal(job.concurrency?.group, MUTATION_LOCK, `${name} must hold the mutation lock`);
+    assert.equal(job.concurrency['cancel-in-progress'], false, `${name} must queue, not cancel`);
   }
 });

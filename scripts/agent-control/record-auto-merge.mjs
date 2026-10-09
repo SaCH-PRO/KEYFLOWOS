@@ -7,12 +7,16 @@
  *
  * Exit codes: 0 the record exists (posted now, or already there),
  *             3 the result merged nothing, so there is nothing to record,
- *             2 error -- the record is NOT known to exist.
+ *             2 error -- the record is NOT known to exist,
+ *             4 conflict -- a trusted comment carries this merge's marker but
+ *               is not its record (wrong PR, head or merge commit, or
+ *               malformed). The true record is posted if it was missing, and
+ *               the run still fails: the disagreement needs a person.
  * stdout carries one JSON object describing which of these happened.
  */
 
 import { CONTROL_ISSUE } from './lib/events.mjs';
-import { recordMerge, RECORD_OUTCOMES } from './lib/merge-record.mjs';
+import { recordMerge, RECORD_OUTCOMES, MergeRecordConflict } from './lib/merge-record.mjs';
 
 const token = process.env.GITHUB_TOKEN;
 const repo = process.env.GITHUB_REPOSITORY;
@@ -76,4 +80,11 @@ recordMerge(result, { listComments, createComment })
     process.stdout.write(JSON.stringify(record) + '\n');
     process.exit(record.outcome === RECORD_OUTCOMES.NOT_MERGED ? 3 : 0);
   })
-  .catch((error) => fail(error.message));
+  .catch((error) => {
+    if (!(error instanceof MergeRecordConflict)) fail(error.message);
+    process.stdout.write(JSON.stringify(error.detail) + '\n');
+    // An annotation of its own: the calling step only knows the status.
+    // On stderr, so stdout stays one JSON object.
+    process.stderr.write(`::error::AUTO_MERGE record conflict: ${error.message}\n`);
+    process.exit(4);
+  });

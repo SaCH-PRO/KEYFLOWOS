@@ -428,8 +428,8 @@ negative_controls:
       another AUTO_MERGE for the same merge commit.
     mutation:
       file: scripts/agent-control/lib/merge-record.mjs
-      find: "  if (prior) {"
-      replace: "  if (false) {"
+      find: "  if (!stored) {"
+      replace: "  if (true) {"
     proof_command: node --test --test-name-pattern="a second run adds nothing" scripts/agent-control/tests/merge-record.spec.mjs
     timeout_ms: 120000
 
@@ -439,8 +439,8 @@ negative_controls:
       anyone who can comment could suppress the record of a real merge.
     mutation:
       file: scripts/agent-control/lib/merge-record.mjs
-      find: " && trusted(c));"
-      replace: ");"
+      find: " || !trusted(c)) continue;"
+      replace: ") continue;"
     proof_command: node --test --test-name-pattern="untrusted author" scripts/agent-control/tests/merge-record.spec.mjs
     timeout_ms: 120000
 
@@ -450,8 +450,8 @@ negative_controls:
       with anything else behind it is an error.
     mutation:
       file: scripts/agent-control/lib/merge-record.mjs
-      find: "  if (!created || !created.id || typeof created.body !== 'string' || !created.body.includes(record.marker)) {"
-      replace: "  if (false) {"
+      find: "      if (!created || !created.id || typeof created.body !== 'string' || recordProblems(created.body, record).length !== 0) {"
+      replace: "      if (false) {"
     proof_command: node --test --test-name-pattern="stored something other than the record" scripts/agent-control/tests/merge-record.spec.mjs
     timeout_ms: 120000
 
@@ -475,6 +475,115 @@ negative_controls:
       find: "  process.exit(2);"
       replace: "  process.exit(0);"
     proof_command: node --test --test-name-pattern="a refused post fails" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  # An existing comment counts as the record only when its whole content is
+  # the record of this merge. The next five restore the defect the review of
+  # e7a61d1f found -- any trusted comment carrying the marker was accepted --
+  # and each names the proof that must then fail.
+
+  - id: NC-MERGE-RECORD-REJECTS-WRONG-PR
+    claim: >
+      A trusted marker comment naming a different PR is not accepted as the
+      record of this merge.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="with the wrong PR number" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-REJECTS-WRONG-ADMITTED-HEAD
+    claim: >
+      A trusted marker comment naming a different admitted head is not
+      accepted as the record of this merge.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="with the wrong admitted head" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-REJECTS-WRONG-MERGE-SHA
+    claim: >
+      A trusted marker comment whose fields name a different merge commit is
+      not accepted as the record of this merge.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="with the wrong merge SHA" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-REJECTS-MALFORMED-YAML
+    claim: >
+      A trusted marker comment with no block, an unreadable or repeated line,
+      a missing, altered or extra field, or text around the block is not
+      accepted as the record.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="with malformed YAML" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-REJECTS-MARKER-ONLY
+    claim: >
+      A trusted comment that is only the marker is not accepted as the record.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="that is only the marker" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-CONFLICT-FAILS
+    claim: >
+      A contradictory trusted comment fails the recorder even when the true
+      record exists. Ignored, the control room would hold two trusted
+      statements about one merge with nothing saying so.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "  if (conflicts.length) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="even beside the true record" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-CONFLICT-EXIT-STATUS
+    claim: >
+      A conflict leaves the recorder with a failing status, which both
+      workflow steps turn into a failed job.
+    mutation:
+      file: scripts/agent-control/record-auto-merge.mjs
+      find: "    process.exit(4);"
+      replace: "    process.exit(0);"
+    proof_command: node --test --test-name-pattern="exits 4, says why" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-DUPLICATES-REPORTED
+    claim: >
+      More than one correct record for a merge is reported by every later run.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "  if (records.length > 1) out.duplicates"
+      replace: "  if (false) out.duplicates"
+    proof_command: node --test --test-name-pattern="two recorders racing" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORDERS-HOLD-MUTATION-LOCK
+    claim: >
+      Every job that records a merge holds the single mutation lock. Listing
+      and posting are not atomic, so the lock is what stops two recorders
+      posting for one merge.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: |-
+        # run beside a per-PR event-driven merge.
+            concurrency:
+              group: keyflow-agent-control-mutation
+              cancel-in-progress: false
+      replace: "# run beside a per-PR event-driven merge."
+    proof_command: node --test --test-name-pattern="holds the one mutation lock" scripts/agent-control/tests/autopilot-workflow.spec.mjs
     timeout_ms: 120000
 
   # --- source precedence (CG-DIRECTIVE-META-STATE-RECONCILE-001) ------------
