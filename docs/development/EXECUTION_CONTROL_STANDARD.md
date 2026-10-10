@@ -80,6 +80,41 @@ Rules:
 - A green CI run is not evidence that the declared packet scope was fully resolved.
 - If characterization discovers new required obligations inside the packet boundary, add them to the ledger explicitly.
 
+
+## 4A. PR Unlock Contract
+
+Every pull request or bounded work item intended to reach `main` MUST declare the value it is expected to create in a durable PR Unlock Contract under `docs/development/unlocks/<work-id>.yaml`.
+
+The contract exists to answer **what this change buys KEYFLOWOS**. Passing tests is necessary proof of correctness; it is not by itself proof that the change is worth maintaining.
+
+The contract MUST distinguish:
+- unlock state: `DECLARED | IMPLEMENTED | PROVEN | ADMITTED | LIVE`;
+- classification: planning, architecture, governance, runtime capability, development capability, reliability capability, or debt removal;
+- direct product effect;
+- KEY capability effect;
+- development-system effect;
+- reliability/risk effect;
+- dependencies enabled;
+- semantics or machinery converged/removed;
+- complexity introduced;
+- proof obligations and evidence;
+- net-value verdict and rationale.
+
+Rules:
+- Planning/documentation work MUST report direct runtime effect as `NONE`; it may not claim a live KEY or product capability.
+- A green CI run does not advance an unlock from `IMPLEMENTED` to `PROVEN` unless the proof obligations for the claimed unlock are satisfied.
+- `ADMITTED` means the exact reviewed change has passed the repository's admission contract; it does not mean the capability is live.
+- `LIVE` requires merge plus post-merge verification of the claimed effect.
+- A `POSITIVE` net-value verdict is invalid when every product/KEY/development/reliability effect is `NONE`.
+- Duplicate machinery, unnecessary parallel runtimes, or value-negative complexity MUST be classified rather than hidden behind implementation completeness.
+- Existing open PRs must acquire an unlock contract before becoming merge candidates. The already in-flight ACTION-001 exact-head cycle may complete under its existing contract; if it merges before this standard, record a post-merge backfill rather than invalidating already-collected exact-head proof.
+
+Use `docs/development/PR_UNLOCK_CONTRACT_TEMPLATE.yaml` and validate with:
+
+```bash
+node scripts/agent-control/validate-unlock-contract.mjs docs/development/unlocks/<work-id>.yaml
+```
+
 ## 5. Packet completion contract
 
 A packet MUST NOT be called resolved, complete, admitted, or closed until every applicable condition is YES:
