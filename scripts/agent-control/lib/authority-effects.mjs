@@ -31,7 +31,9 @@
  * newer authority message that:
  *   - is malformed under the AUTHORITY profile (it may be a hold);
  *   - carries no control_effect (meaning is never inferred from prose or ids);
- *   - names an unknown effect, or an effect its message type cannot carry;
+ *   - names an unknown effect, or an effect its message type cannot carry
+ *     (a historical spelling in CONTROL_EFFECT_ALIASES is read as its canonical
+ *     effect first, and is then held to that effect's rules);
  *   - names `programme` or `programme_action` (activation is not a fold);
  *   - lacks a field its effect needs, carries a health outside GREEN/YELLOW/RED,
  *     carries production_touched other than false, or conflicts with the
@@ -67,6 +69,23 @@ export const CONTROL_EFFECTS = Object.freeze([
   'HOLD_SET',
   'HOLD_CLEAR',
 ]);
+
+/**
+ * Historical spellings of an effect, each read as exactly one canonical effect.
+ * (KF-META-AUTHORITY-EFFECT-COMPAT-001; CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001)
+ *
+ * #80 is append-only, and two valid REVIEWs for KF-EXEC-AUTH-FAIL-CLOSED-001
+ * declared an effect outside CONTROL_EFFECTS: 6011507550 wrote
+ * BOUNDED_CORRECTION and 6018421547 wrote AUTHORIZE_CONTROL_BINDING. This is
+ * the only place such a spelling is given meaning. It adds no effect and no
+ * state: readEffect() resolves the spelling here, and every rule after that is
+ * the canonical effect's own. The match is exact; any other unknown token
+ * still stops the fold (CONTROL_EFFECT_UNKNOWN).
+ */
+export const CONTROL_EFFECT_ALIASES = Object.freeze({
+  BOUNDED_CORRECTION: 'PACKET_CORRECTION',
+  AUTHORIZE_CONTROL_BINDING: 'NO_STATE_CHANGE',
+});
 
 /** Why a newer authority message could not be folded. */
 export const EFFECT_PROBLEMS = Object.freeze({
@@ -163,14 +182,27 @@ export function readEffect(message) {
   }
   const effect = field(message, 'control_effect');
   if (effect === null) return { ok: false, ...problem(EFFECT_PROBLEMS.EFFECT_MISSING, 'no control_effect; meaning is never inferred from prose or message ids') };
+  // Own keys only: `constructor` or `__proto__` as an effect is an unknown token, never an alias.
+  const canonical = Object.hasOwn(CONTROL_EFFECT_ALIASES, effect) ? CONTROL_EFFECT_ALIASES[effect] : effect;
+  return readCanonicalEffect(message, canonical, effect);
+}
+
+/**
+ * readEffect() once the declared spelling is resolved. `effect` is the only
+ * name any rule here or in applyEffect() reads; `declared` is what the
+ * message wrote, kept as evidence.
+ */
+function readCanonicalEffect(message, effect, declared) {
   if (!CONTROL_EFFECTS.includes(effect)) return { ok: false, ...problem(EFFECT_PROBLEMS.EFFECT_UNKNOWN, effect) };
   const allowed = EFFECTS_BY_TYPE[message.message_type] || [];
   if (!allowed.includes(effect)) {
-    return { ok: false, ...problem(EFFECT_PROBLEMS.EFFECT_TYPE_MISMATCH, `${message.message_type} cannot carry ${effect}`) };
+    const spelled = declared === effect ? '' : ` (declared as ${declared})`;
+    return { ok: false, ...problem(EFFECT_PROBLEMS.EFFECT_TYPE_MISMATCH, `${message.message_type} cannot carry ${effect}${spelled}`) };
   }
 
   const read = {
     effect,
+    declared_effect: declared,
     packet_id: field(message, 'packet_id'),
     implementation_branch: field(message, 'implementation_branch'),
     source_main: field(message, 'source_main'),
@@ -384,9 +416,9 @@ export function reduceAuthority(checkpoint, authority, options = {}) {
     }
     state = applied.state;
     observed = i + 1;
-    out.applied.push({ ...mark(message, i), effect: read.effect });
+    out.applied.push({ ...mark(message, i), effect: read.effect, declared_effect: read.declared_effect });
   }
   return { ...out, started: true, state, checkpoint_generation: index + 1, observed_generation: observed };
 }
 
-export default { CONTROL_EFFECTS, EFFECT_PROBLEMS, FOLD_NOT_STARTED, coordinateOf, readEffect, applyEffect, reduceAuthority };
+export default { CONTROL_EFFECTS, CONTROL_EFFECT_ALIASES, EFFECT_PROBLEMS, FOLD_NOT_STARTED, coordinateOf, readEffect, applyEffect, reduceAuthority };

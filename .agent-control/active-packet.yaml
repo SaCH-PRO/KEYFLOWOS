@@ -1,108 +1,111 @@
-packet_id: KF-EXEC-ACTION-001
-directive_message_id: CG-DIRECTIVE-ACTION-001-IMPLEMENT-001
-directive_comment_id: 5998725089
-authority_lineage:   # every ChatGPT authority message for this implementation phase on #80, oldest first
-  - CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001   # 5998711588; accepts the characterization, rules on Q1 to Q6
-  - CG-RESUME-ACTION-001-IMPLEMENTATION-001   # 5998716917; HOLD_CLEAR for KF-EXEC-ACTION-001 only
-  - CG-DIRECTIVE-ACTION-001-IMPLEMENT-001   # 5998725089; PACKET_RELEASE
-  - CG-REVIEW-ACTION-001-SEMANTIC-PASS-002   # 6002264461; the fallback reading of cfb3322c; the current authority
-characterization_return_message_id: CC-RETURN-ACTION-001-CHAR
-characterization_return_comment_id: 5826241744
-in_reply_to: CG-DIRECTIVE-ACTION-001-IMPLEMENT-001
-ack_message_id: CC-ACK-ACTION-001-IMPLEMENT-001
-ack_comment_id: 5998799162
-current_authority_message_id: CG-REVIEW-ACTION-001-SEMANTIC-PASS-002
-current_authority_comment_id: 6002264461
-current_authority_ack_message_id: CC-ACK-ACTION-001-SEMANTIC-PASS-002
-current_authority_ack_comment_id: 6002285228
-pr_number: 147
-source_main: 6fdffc26c7c7748d5c09900535c97c197864ab54
-implementation_branch: impl/kf-exec-action-001-clearance
+packet_id: KF-META-AUTHORITY-EFFECT-COMPAT-001
+directive_message_id: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001
+directive_comment_id: 6025258558
+authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
+  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001   # 6025258558; NO_STATE_CHANGE; releases this bounded meta repair
+  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE; approves the continuation block and adds seven requirements for it
+  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19; the current authority
+in_reply_to: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
+ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001
+ack_comment_id: 6025343912
+current_authority_message_id: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
+current_authority_comment_id: 6051089263
+current_authority_ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
+current_authority_ack_comment_id: 6051141358
+source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
+implementation_branch: impl/kf-meta-authority-effect-compat-001
 state: PROVING
 health: YELLOW
 scope_changed: false
 production_touched: false
-programme_credit: PENDING
+provider_traffic: false
+programme_credit: ZERO
 merge_authority: false
 review_status: PENDING_CHATGPT_REVIEW
 
 objective: >
-  Implement the first bounded adoption of the canonical
-  Capability -> Control -> Clearance -> ExecutionClaim -> OutcomeEvidence
-  boundary for helpdesk_create_ticket only.
+  Repair the stale derived projection at the authority-effect boundary. Two
+  valid REVIEWs on #80 declared a control_effect outside the canonical
+  vocabulary, and the fold stopped at the first. Add an explicit,
+  deterministic, fail-closed normalization of exactly those two historical
+  spellings to existing canonical effects. The canonical vocabulary and the
+  state machine do not change.
+
+target_contract:
+  aliases:
+    BOUNDED_CORRECTION: PACKET_CORRECTION
+    AUTHORIZE_CONTROL_BINDING: NO_STATE_CHANGE
+  rule: >
+    The raw declared effect may be kept as diagnostic and reduction evidence.
+    Every state transition flows through the existing canonical effect. Every
+    other unknown token still fails closed.
 
 allowed_scope:
-  - helpdesk_create_ticket only, on every reachable surface (E1 to E11 of the accepted characterization)
-  - the shadow decision path beside current oversight, with parity and differences proved
-  - persistence for the envelope, control evidence, execution claim and outcome evidence, reusing or extending an existing semantic owner where one is coherent
-  - withdrawal of legacy execution bypasses for this capability after proof
-  - tests, real-DB proof and negative controls for the above
-  - architecture maps for the seams this touches
+  - scripts/agent-control/lib/authority-effects.mjs
+  - scripts/agent-control/tests/authority-effects.spec.mjs
+  - scripts/agent-control/negative-controls.yaml where a live anti-regression mutation is needed
+  - scripts/agent-control/fixtures/reducer-recovery-truth.json only if required to replay real #80 evidence
+  - docs/development/AGENT_CONTROL_PLANE.md
+  - architecture/execution-paths.md and generated architecture artifacts only if real scanners require them
+  - .agent-control packet artifacts for this meta repair only
 
 prohibited_scope:
-  - production deployment or mutation
-  - provider traffic
-  - migration of a second capability family
-  - platform programme activation
-  - forensic rebaseline
-  - programme-map refresh without separate authority
-  - silent resolution or dropping of D1 to D8
-  - weakening an existing gate or proof obligation
-  - merge without a later exact-head ChatGPT admission
-  - CapabilityRegistry2, or a wrapper identity replacing the real capability identity
-  - a client-resubmitted approval identity, or an approval boolean treated as Clearance
-  - the authenticated human REST helpdesk create-ticket route (W3) routed through the KEY action boundary
-  - W2 transfer_to_human migrated as helpdesk_create_ticket
-
-architecture_decisions:   # CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001
-  Q1: a surface without a trusted human or service principal may enter the boundary but receives no executable Clearance for this tier-2 action; it fails closed or produces a human-action proposal
-  Q2: option (a); re-read and lock the exact authority dependencies inside the transaction that admits the ExecutionClaim and writes the SupportTicket; covers Membership role/tier and the owner/no-Membership path
-  Q3: W2 transfer_to_human is a distinct capability identity; explicit VOICE/WITHDRAW follow-on work
-  Q4: E4 may be routed into the boundary for proof; execution is denied until stream authentication provides a trusted business and actor binding
-  Q5: the authenticated human REST create-ticket route stays outside the KEY action boundary
-  Q6: D1 and D8 to VOICE; D3, D4 and D6 to an AUTH/TENANT backward re-audit; D2, D5 and D7 are ACTION follow-on findings; none is resolved by this slice
+  - any change to PR 155, its semantic head 8987f6db21a839f90c88e33479768d81cef508e9 or its control head fdc900b72062391189d31c6994af353ce9dc4e9c
+  - a parallel programme state or a new effect made to fit historical wording
+  - editing or deleting any #80 comment
+  - a manual programme-state edit in place of the reducer correction
+  - weakening a gate, or removing an existing negative control
+  - production or provider effects
+  - merge without a separate exact-head REVIEW that grants it
+  - broadening silently if the two aliases do not restore a valid projection
 
 invariants:
-  - capability identity is resolved from the real CapabilityContract; EXECUTE_TOOL or a wrapper never substitutes for it
-  - material parameters are built server-side, canonicalized, frozen and bound to a deterministic cryptographic fingerprint (title, description, contactId, priority and the resolved source semantics at minimum)
-  - the ControlRequirement is derived from capability, trusted principal authority, KEY autonomy/readiness, policy and execution surface; the risk tier is an input, not the requirement
-  - ControlEvidence is server-issued, bound to the exact fingerprint and principal, and expires or becomes invalid when its material authority assumptions change
-  - Clearance is computed at admission; Membership/owner authority and policy are re-read inside the claim transaction
-  - the ExecutionClaim is an atomic insert-or-fail identity under a database uniqueness invariant; no check-then-act
-  - the claim admission and the SupportTicket write share one transaction
-  - success has durable OutcomeEvidence naming the actual SupportTicket id and the principal chain; failure is explicit; UNKNOWN is structurally impossible for this transactional effect
-  - E4, E5, E9 and E11 enter the same boundary and cannot execute without a trusted eligible principal
-  - E4 does not execute until trusted stream authentication exists
+  - CONTROL_EFFECTS is unchanged
+  - an alias is resolved before any rule, and every rule after that is the canonical effect's own, the message-type rule included
+  - AUTHORIZE_CONTROL_BINDING grants no merge authority, admission, checkpoint, release, hold or any other programme mutation
+  - any other unknown control_effect stops the fold with CONTROL_EFFECT_UNKNOWN
+  - malformed or edited authority stays fail closed
+  - the committed checkpoint stays anchored to CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 (5993146604)
 
 proof_obligations:
-  - wrapper EXECUTE_TOOL resolves and governs as helpdesk_create_ticket
-  - mutated parameters invalidate prior ControlEvidence
-  - client-resubmitted confirmation toolName/toolArgs cannot execute
-  - revocation or demotion before claim admission yields zero tickets
-  - tightened policy or reduced autonomy forces reevaluation/rejection
-  - concurrent N-way execution gives exactly one claim and one ticket
-  - E3/E4/E5/E7/E8/E9/E10/E11 cannot bypass the canonical boundary
-  - successful OutcomeEvidence names the actual SupportTicket
-  - rollback/crash before commit remains safely retryable and non-duplicating
-  - requestedBy/proposedBy/approvedBy/executedFor/executedBy are preserved wherever semantically applicable
-  - each substantive invariant has a mutation/negative control that restores the defect and fails its intended proof; zero vacuous controls; no skipped required DB proof
+  - exact historical comment 6011507550 folds with canonical PACKET_CORRECTION semantics
+  - exact historical comment 6018421547 folds as NO_STATE_CHANGE and cannot grant merge authority, admission, checkpoint, release, hold or any other programme mutation
+  - the fold from RECOVERY-021 reaches the current newest authority without skipping a message
+  - current PR 155 remains the active packet and resolves to the state implied by the latest canonical PACKET_CORRECTION
+  - arbitrary unknown control_effect values still stop with CONTROL_EFFECT_UNKNOWN
+  - an alias on a disallowed message type remains rejected under the canonical target effect's type rules
+  - malformed or edited authority remains fail closed
+  - no historical #80 comment is edited or deleted
+  - no gate is weakened and no existing negative control is removed merely to obtain green
+  - run the full portable control-plane suite, and the Windows worker proof and negative controls if this branch changes their substrate
+  - record exact-head CI; skipped proof is never counted as pass
 
-out_of_scope_findings:
-  voice_follow_up: [D1, D8]
-  auth_tenant_backward_reaudit: [D3, D4, D6]
-  action_follow_up: [D2, D5, D7]
+continuation_requirements:   # CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
+  - the replay concatenates the historical recording and the continuation in one deterministic authority order
+  - no duplicate comment ids across the two segments
+  - the first continuation authority coordinate is strictly after RECOVERY-021
+  - every continuation comment used for authority replay is parse-equal to the live #80 source captured for this packet
+  - the combined replay reaches the newest authority observed by the packet without skipping a candidate
+  - generation semantics stay global across the combined evidence
+  - the old frozen fixture is never mistaken for a current complete authority snapshot outside the tests that intentionally pin it
+
+current_authorization:   # CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
+  control_artifacts: update the packet artifacts to cite 6051089263; a new control-only head
+  semantic_mutation: NOT_AUTHORIZED
+  merge: NOT_AUTHORIZED
+
+anti_duplication: >
+  Before adding code, verify that no existing normalization or compatibility
+  seam already owns historical control-effect vocabulary. Prefer one explicit
+  alias table beside readEffect over scattered special cases.
 
 stop_conditions:
-  - the required invariant cannot be achieved without a new canonical primitive (CONTRADICTION)
-  - any architecture decision not already made by the directive or the characterization review (CONTRADICTION)
+  - the two aliases alone do not restore a valid projection; stop at the next exact blocking message and report it
+  - any packet assumption conflicts with evidence (CONTRADICTION)
   - production access or provider traffic would be required
-  - a second capability family would have to be migrated
 
 return_contract: >
-  ACK before substantive work; branch from the exact source_main; map before
-  modifying and enumerate the affected seams; report the exact semantic head
-  and changed files; full applicable test suite; real-DB proof for the
-  transactional and concurrency invariants; every negative control, none
-  vacuous; architecture scanners where affected; live status/reconciliation;
-  independent semantic review at the exact semantic head; the control artifact
-  only after that review passes; RETURN once, with merge_authority false.
+  Return the minimal implementation, the real replay result from RECOVERY-021
+  through current authority, the resulting effective programme projection, all
+  exact-head proof, and any contradiction discovered. Push a draft PR and
+  report the exact semantic head. No merge.
