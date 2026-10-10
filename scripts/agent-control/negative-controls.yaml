@@ -318,6 +318,274 @@ negative_controls:
     proof_command: node --test --test-name-pattern="paused worker" scripts/agent-control/tests/windows/worker-authority.spec.mjs
     timeout_ms: 300000
 
+  # --- the worker's own code, and the evaluator's exit status ----------------
+
+  - id: NC-WORKER-CODE-MISSING-PRECHECK
+    claim: >
+      A worker whose sibling scripts are gone from disk does not poll and does
+      not wake Claude. Without the check a missing evaluator lets a session
+      run that nothing can then judge.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($missing.Count) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="evaluate-run.ps1 is gone" scripts/agent-control/tests/windows/worker-code-missing.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-SELECTOR-NON-DECISION
+    claim: >
+      Selector output that is not a decision is an error. Read as "nothing
+      selected" it would report a broken selector as an idle control room.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($null -eq $selection -or -not ($selection.PSObject.Properties.Name -contains 'reason')) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="unreadable output is not a decision" scripts/agent-control/tests/windows/worker-code-missing.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-AUTOPILOT-HOURLY-STATUS-UNDER-ERREXIT
+    claim: >
+      The hourly sweep reads the evaluator's status where `bash -e` cannot end
+      the step first, so a draft PR is "not eligible" and the next PR is still
+      reconciled. This is the defect that failed every scheduled run.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "json=\"$(PR_NUMBER=\"$pr\" node scripts/agent-control/auto-merge-admitted.mjs --merge)\" || status=$?"
+      replace: "json=\"$(PR_NUMBER=\"$pr\" node scripts/agent-control/auto-merge-admitted.mjs --merge)\"; status=$?"
+    proof_command: node --test --test-name-pattern="a draft PR is not a failure" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AUTOPILOT-EXACT-HEAD-STATUS-UNDER-ERREXIT
+    claim: >
+      The event-driven merge step reads the evaluator's status the same way,
+      so "not eligible" passes the step instead of failing the job.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "json=\"$(node scripts/agent-control/auto-merge-admitted.mjs --merge)\" || status=$?"
+      replace: "json=\"$(node scripts/agent-control/auto-merge-admitted.mjs --merge)\"; status=$?"
+    proof_command: node --test --test-name-pattern="a not-eligible verdict passes" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AUTOPILOT-UNDOCUMENTED-STATUS-FAILS
+    claim: >
+      Only the evaluator's two verdict statuses pass the merge step. A crash
+      or a signal fails it whatever number it left behind.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "0|3) exit 0 ;;"
+      replace: "0|1|3|137) exit 0 ;;"
+    proof_command: node --test --test-name-pattern="any undocumented status" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AUTOPILOT-LISTING-FAILURE-FAILS
+    claim: >
+      A failed PR listing fails the hourly sweep. Swallowed, it is a green run
+      that reconciled nothing.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "| .number')\"; then"
+      replace: "| .number' || true)\"; then"
+    proof_command: node --test --test-name-pattern="a failed PR listing" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  # --- the AUTO_MERGE record --------------------------------------------------
+
+  - id: NC-AUTOPILOT-HOURLY-MERGE-RECORDED
+    claim: >
+      A merge made by the hourly sweep leaves the AUTO_MERGE record. This is
+      the gap the review of 02492807 found: only the event-driven job recorded.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "MERGE_JSON=\"$json\" node scripts/agent-control/record-auto-merge.mjs || recorded=$?"
+      replace: "true"
+    proof_command: node --test --test-name-pattern="a merge is recorded, with that PR" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AUTOPILOT-HOURLY-RECORD-FAILURE-FAILS
+    claim: >
+      A sweep merge whose record cannot be confirmed fails the job and is not
+      reported as recorded.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "if [ \"$recorded\" = \"0\" ]; then"
+      replace: "if true; then"
+    proof_command: node --test --test-name-pattern="a merge whose record fails" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-AUTOPILOT-EXACT-HEAD-RECORD-FAILURE-FAILS
+    claim: >
+      An event-driven merge whose record cannot be confirmed fails its step.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "0) echo \"AUTO_MERGE record is on the control room\" ;;"
+      replace: "0|1|2|137) echo \"AUTO_MERGE record is on the control room\" ;;"
+    proof_command: node --test --test-name-pattern="a record that cannot be confirmed" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-IDEMPOTENT
+    claim: >
+      A merge is recorded once. Without the marker check every replay posts
+      another AUTO_MERGE for the same merge commit.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "  if (!stored) {"
+      replace: "  if (true) {"
+    proof_command: node --test --test-name-pattern="a second run adds nothing" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-UNTRUSTED-MARKER
+    claim: >
+      Only a trusted author's marker counts as an existing record. Otherwise
+      anyone who can comment could suppress the record of a real merge.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: " || !trusted(c)) continue;"
+      replace: ") continue;"
+    proof_command: node --test --test-name-pattern="untrusted author" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-UNCONFIRMED-POST
+    claim: >
+      "Recorded" means the control room returned the stored record. A 2xx
+      with anything else behind it is an error.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "      if (!created || !created.id || typeof created.body !== 'string' || recordProblems(created.body, record).length !== 0) {"
+      replace: "      if (false) {"
+    proof_command: node --test --test-name-pattern="stored something other than the record" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-READS-EVERY-PAGE
+    claim: >
+      The existing-record check reads every page of the control room. Reading
+      one page would re-post any record older than the newest hundred comments.
+    mutation:
+      file: scripts/agent-control/record-auto-merge.mjs
+      find: "    if (batch.length < 100) return items;"
+      replace: "    return items;"
+    proof_command: node --test --test-name-pattern="beyond the first page" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-FAILURE-EXIT-STATUS
+    claim: >
+      A recorder that could not confirm the record exits 2, the status both
+      workflow steps fail on.
+    mutation:
+      file: scripts/agent-control/record-auto-merge.mjs
+      find: "  process.exit(2);"
+      replace: "  process.exit(0);"
+    proof_command: node --test --test-name-pattern="a refused post fails" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  # An existing comment counts as the record only when its whole content is
+  # the record of this merge. The next five restore the defect the review of
+  # e7a61d1f found -- any trusted comment carrying the marker was accepted --
+  # and each names the proof that must then fail.
+
+  - id: NC-MERGE-RECORD-REJECTS-WRONG-PR
+    claim: >
+      A trusted marker comment naming a different PR is not accepted as the
+      record of this merge.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="with the wrong PR number" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-REJECTS-WRONG-ADMITTED-HEAD
+    claim: >
+      A trusted marker comment naming a different admitted head is not
+      accepted as the record of this merge.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="with the wrong admitted head" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-REJECTS-WRONG-MERGE-SHA
+    claim: >
+      A trusted marker comment whose fields name a different merge commit is
+      not accepted as the record of this merge.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="with the wrong merge SHA" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-REJECTS-MALFORMED-YAML
+    claim: >
+      A trusted marker comment with no block, an unreadable or repeated line,
+      a missing, altered or extra field, or text around the block is not
+      accepted as the record.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="with malformed YAML" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-REJECTS-MARKER-ONLY
+    claim: >
+      A trusted comment that is only the marker is not accepted as the record.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "    if (problems.length === 0) records.push(c);"
+      replace: "    if (true) records.push(c);"
+    proof_command: node --test --test-name-pattern="that is only the marker" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-CONFLICT-FAILS
+    claim: >
+      A contradictory trusted comment fails the recorder even when the true
+      record exists. Ignored, the control room would hold two trusted
+      statements about one merge with nothing saying so.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "  if (conflicts.length) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="even beside the true record" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-CONFLICT-EXIT-STATUS
+    claim: >
+      A conflict leaves the recorder with a failing status, which both
+      workflow steps turn into a failed job.
+    mutation:
+      file: scripts/agent-control/record-auto-merge.mjs
+      find: "    process.exit(4);"
+      replace: "    process.exit(0);"
+    proof_command: node --test --test-name-pattern="exits 4, says why" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORD-DUPLICATES-REPORTED
+    claim: >
+      More than one correct record for a merge is reported by every later run.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "  if (records.length > 1) out.duplicates"
+      replace: "  if (false) out.duplicates"
+    proof_command: node --test --test-name-pattern="two recorders racing" scripts/agent-control/tests/merge-record.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-RECORDERS-HOLD-MUTATION-LOCK
+    claim: >
+      Every job that records a merge holds the single mutation lock. Listing
+      and posting are not atomic, so the lock is what stops two recorders
+      posting for one merge.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: |-
+        # run beside a per-PR event-driven merge.
+            concurrency:
+              group: keyflow-agent-control-mutation
+              cancel-in-progress: false
+      replace: "# run beside a per-PR event-driven merge."
+    proof_command: node --test --test-name-pattern="holds the one mutation lock" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
   # --- source precedence (CG-DIRECTIVE-META-STATE-RECONCILE-001) ------------
 
   - id: NC-RECONCILE-GATE-BYPASS
@@ -2022,8 +2290,6 @@ negative_controls:
         if (false) {
     proof_command: node --test --test-name-pattern="the real control artifacts on this branch parse and are bound" scripts/agent-control/tests/yaml.spec.mjs
     timeout_ms: 120000
-
-  # ---- historical effect spellings (KF-META-AUTHORITY-EFFECT-COMPAT-001) ----
 
   - id: NC-COMPAT-ALIAS-BOUNDED-CORRECTION-REMOVED
     claim: >
