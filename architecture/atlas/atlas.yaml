@@ -1,0 +1,117 @@
+atlas_id: KF-ATLAS-001
+version: 0.1.0
+status: FOUNDATION
+baseline_main: 6fdffc26c7c7748d5c09900535c97c197864ab54
+overlay_only: true
+
+evidence_classes:
+  observed: repository or reachable implementation fact
+  accepted: canonical durable architecture decision
+  intended: target direction not yet implementation truth
+  derived: interpretation computed from evidence
+  historical: prior state retained for lineage
+  unknown: unresolved
+
+layers:
+  L0: reality_outcomes
+  L1: product_capabilities
+  L2: journeys
+  L3: kernels
+  L4: key_cognition
+  L5: execution
+  L6: implementation
+  L7: development_system
+  L8: evidence_continuity
+
+views:
+  whole_system: [L0, L1, L4, L7, L8]
+  capabilities: [L1, L6]
+  journeys: [L2, L3, L5, L6]
+  kernels: [L3, L2, L5]
+  key_cognition: [L4, L3, L5, L8]
+  execution: [L5, L6, L0, L8]
+  repository: [L6]
+  development: [L7, L8, L6]
+  evidence: [L8, L0, L5, L6]
+  progress: [L1, L2, L3, L4, L6, L7, L8]
+
+sources:
+  architecture_root: architecture/
+  development_standard: docs/development/EXECUTION_CONTROL_STANDARD.md
+  programme_state: .agent-control/programme-state.yaml
+  intelligence_branch: docs/keyflow-intelligence-foundation
+  intelligence_root: docs/intelligence/
+
+edge_contract:
+  required_fields:
+    - id
+    - source
+    - target
+    - relation
+    - layer
+    - evidence_class
+    - authority
+    - confidence
+  confidence_values: [high, medium, low, unknown]
+  unknown_edges_are_non_authoritative: true
+
+key_loop:
+  - sense
+  - ingest
+  - resolve_identity
+  - remember
+  - model
+  - define_goal
+  - reason
+  - plan
+  - evaluate
+  - govern
+  - act
+  - observe
+  - reconcile
+  - learn
+
+execution_trace:
+  - entry
+  - tenant_and_auth_context
+  - authority_and_capability
+  - domain_command
+  - invariant_checks
+  - transaction
+  - canonical_mutation
+  - event_or_queue
+  - worker_or_listener
+  - external_effect
+  - evidence
+  - reconciliation
+  - projection
+  - downstream_consumer
+  - recovery
+  - feedback
+
+development_loop:
+  - human_direction
+  - canonical_context
+  - bounded_work
+  - agent_execution
+  - branch
+  - proof
+  - pull_request
+  - review
+  - ci_and_gates
+  - admission
+  - merge
+  - post_merge_verify
+  - checkpoint
+
+next_foundation_work:
+  - deterministic_registry_ingestion
+  - journey_and_kernel_materialization
+  - semantic_ownership_review
+  - external_service_topology
+  - code_to_journey_reverse_index
+  - pr_to_architecture_reverse_index
+  - freshness_and_confidence_automation
+  - graph_validation
+  - visualization_ui
+  - atlas_aware_agent_context

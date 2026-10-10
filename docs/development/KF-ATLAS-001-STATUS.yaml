@@ -1,0 +1,63 @@
+packet_id: KF-ATLAS-001
+title: KEYFLOWOS Living System Atlas Foundation
+state: PROVING
+health: GREEN
+scope_changed: false
+production_touched: false
+baseline_main: 6fdffc26c7c7748d5c09900535c97c197864ab54
+implementation_branch: docs/kf-living-system-atlas-001
+pull_request: 141
+pull_request_state: DRAFT
+
+declared_obligations:
+  - define the atlas authority model so maps cannot become a second truth system
+  - define the L0-L8 zoom/layer model
+  - define the KEY cognitive map
+  - define product, journey, kernel, execution, repository, development and evidence views
+  - define machine-readable node and edge contracts
+  - integrate atlas entry points into repository architecture guidance
+  - preserve all current production and application-packet holds
+
+resolved:
+  - authority/evidence classes defined
+  - L0-L8 layers defined
+  - whole-system atlas documented
+  - KEY cognitive loop documented
+  - product/journey/kernel maps documented
+  - microscopic execution trace documented
+  - development/control loop documented
+  - machine-readable atlas manifest added
+  - node/edge record contract added
+  - architecture README points to atlas
+  - AGENTS.md map-before-modifying guidance includes atlas
+
+remaining:
+  - independent review and repository checks
+  - merge only after normal repository admission
+
+deferred_to_next_tranche:
+  - deterministic ingestion of generated architecture registries
+  - materialize canonical journey/kernel IDs from intelligence
+  - semantic ownership review separate from reference-count guesses
+  - external service topology through deployment, permissions, retry and recovery
+  - code-to-journey reverse index
+  - PR-to-architecture reverse index
+  - freshness/confidence automation
+  - atlas graph validator and anti-fabrication checks
+  - visualization UI
+  - atlas-aware context assembly for ChatGPT Claude Code Kimi Code and KEY
+  - admitted-change atlas update hooks
+
+architecture_invariant: >-
+  The atlas is a navigational semantic overlay. It may connect authoritative
+  sources but may not silently replace current code, control-plane state,
+  canonical intelligence, or human decisions.
+
+proof:
+  generated_registries_modified: false
+  production_deployment: false
+  production_data_mutation: false
+  provider_effects: false
+  application_packet_release: false
+
+next_action: run normal review/admission on PR 141; do not merge until proof/admission is green
