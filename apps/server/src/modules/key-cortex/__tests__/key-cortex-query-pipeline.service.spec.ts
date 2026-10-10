@@ -144,10 +144,20 @@ function createPipeline({
   memoryFragments = [],
   router = new AdaptiveRouterService(),
   genomeBridge = mockGenomeBridgeService,
+  connectorService,
+  commandService,
+  executorService,
+  eventService,
+  autonomyOrchestrator,
 }: {
   memoryFragments?: any[];
   router?: AdaptiveRouterService;
   genomeBridge?: any;
+  connectorService?: any;
+  commandService?: any;
+  executorService?: any;
+  eventService?: any;
+  autonomyOrchestrator?: any;
 } = {}) {
   return new KeyCortexQueryPipelineService(
     mockModelGateway as any,
@@ -167,11 +177,16 @@ function createPipeline({
     mockMoodDetectionService as any,
     makeMemoryRetrieval(memoryFragments),
     router,
-    undefined, // connectorService
-    undefined, // commandService
-    undefined, // executorService
+    connectorService,
+    commandService,
+    executorService,
     undefined, // contextV2Service
     genomeBridge,
+    eventService,
+    undefined, // proactive
+    undefined, // trustExplanation
+    undefined, // learningService
+    autonomyOrchestrator,
   );
 }
 
@@ -278,5 +293,397 @@ describe('KeyCortexQueryPipelineService — Phase C wiring', () => {
     const enrichedSystemPrompt = buildMessagesCall[2] as string;
     expect(enrichedSystemPrompt).toContain('=== RELEVANT MEMORY ===');
     expect(enrichedSystemPrompt).toContain('CREATE_TASK');
+  });
+});
+
+// KF-EXEC-AUTH-FAIL-CLOSED-001. Authority uncertainty may only narrow what can
+// execute. Each test drives processQuery through the parsed-command path, the
+// executor boundary (executeBatch) and the STEP_5_CHECK_AUTONOMY evidence.
+describe('KeyCortexQueryPipelineService parsed-command autonomy fails closed', () => {
+  const createInvoice = {
+    module: 'commerce',
+    action: 'create_invoice',
+    parameters: { amount: 100 },
+    requiresApproval: false,
+    naturalLanguage: 'create an invoice',
+  };
+  const sendEmail = {
+    module: 'outreach',
+    action: 'send_email',
+    parameters: { to: 'a@example.com' },
+    requiresApproval: false,
+    naturalLanguage: 'send an email',
+  };
+  const allow = {
+    allowed: true,
+    requiresApproval: false,
+    tier: 'full',
+    confidence: 1,
+    reason: 'policy allows',
+    ruleTrace: [],
+    createdAt: new Date(0),
+  };
+  const deny = { ...allow, allowed: false, reason: 'policy denies' };
+
+  function setup({
+    intents = [createInvoice],
+    withOrchestrator = true,
+  }: { intents?: any[]; withOrchestrator?: boolean } = {}) {
+    const router = new AdaptiveRouterService();
+    vi.spyOn(router, 'route').mockReturnValue({
+      taskCategory: 'general',
+      layers: ['ethics'],
+      promptVariant: 'concise',
+      includeGenomeContext: false,
+      includeMemoryContext: false,
+      includeActions: true,
+      complexity: 'simple',
+      domain: 'general',
+      urgency: 'low',
+      emotionalWeight: 'low',
+      timeHorizon: 'tactical',
+      dataRequirement: 'none',
+    } as any);
+
+    const commandService = {
+      parseIntent: vi.fn().mockResolvedValue(intents),
+      toConnectorCommand: vi.fn((intent: any, businessId: string, userId: string) => ({
+        module: intent.module,
+        action: intent.action,
+        parameters: intent.parameters,
+        businessId,
+        userId,
+      })),
+    };
+    const executorService = {
+      executeBatch: vi.fn(async (commands: any[]) =>
+        commands.map((command) => ({ command, success: true, data: {} })),
+      ),
+    };
+    const eventService = { logEvent: vi.fn().mockResolvedValue(undefined) };
+    const autonomyOrchestrator = {
+      evaluateAction: vi.fn().mockResolvedValue(allow),
+    };
+
+    const pipeline = createPipeline({
+      router,
+      connectorService: { getAllCapabilities: vi.fn().mockReturnValue([]) },
+      commandService,
+      executorService,
+      eventService,
+      autonomyOrchestrator: withOrchestrator ? autonomyOrchestrator : undefined,
+    });
+    const logger = (pipeline as any).logger;
+    const logged = {
+      error: vi.spyOn(logger, 'error').mockImplementation(() => undefined),
+      warn: vi.spyOn(logger, 'warn').mockImplementation(() => undefined),
+      log: vi.spyOn(logger, 'log').mockImplementation(() => undefined),
+    };
+
+    const run = (flags = { integrationV2Enabled: true, genomeV3Enabled: false }) =>
+      pipeline.processQuery(
+        {
+          text: 'Create an invoice',
+          businessId: 'biz-1',
+          userId: 'user-1',
+          enableActions: true,
+        } as any,
+        flags,
+      );
+    const autonomyEvidence = () => {
+      const events = eventService.logEvent.mock.calls
+        .map(([event]: any[]) => event)
+        .filter((event: any) => event.step === 'STEP_5_CHECK_AUTONOMY');
+      expect(events).toHaveLength(1);
+      return events[0].data;
+    };
+    const executedCommands = () =>
+      executorService.executeBatch.mock.calls.flatMap(([commands]: any[]) => commands);
+    const allLogLines = () =>
+      [
+        ...logged.error.mock.calls,
+        ...logged.warn.mock.calls,
+        ...logged.log.mock.calls,
+      ].map(([line]) => String(line));
+
+    return {
+      run,
+      executorService,
+      autonomyOrchestrator,
+      autonomyEvidence,
+      executedCommands,
+      logged,
+      allLogLines,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockContextService.buildContextSnapshot.mockResolvedValue(mockContextSnapshot);
+    mockModelGateway.complete.mockResolvedValue({
+      content: 'Hello',
+      provider: 'openai',
+      model: 'gpt-4o',
+      usage: { totalTokens: 10, estimatedCost: 0.001 },
+      fallbackUsed: false,
+    });
+    mockSessionService.getOrCreateSession.mockResolvedValue(mockSession);
+    mockActionDetectionService.detectActions.mockReturnValue([]);
+    mockActionsService.executeActions.mockResolvedValue([]);
+    mockGenomeBridgeService.checkAutonomy.mockReset();
+  });
+
+  it('AUTH-FC-P01 an autonomy evaluation that throws leaves zero parsed commands executable', async () => {
+    const t = setup();
+    t.autonomyOrchestrator.evaluateAction.mockRejectedValue(new Error('oracle down'));
+
+    await t.run();
+
+    expect(t.autonomyOrchestrator.evaluateAction).toHaveBeenCalledTimes(1);
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.executedCommands()).toEqual([]);
+  });
+
+  it('AUTH-FC-P01 a failure on a later command does not keep the approved prefix', async () => {
+    const t = setup({ intents: [createInvoice, sendEmail] });
+    t.autonomyOrchestrator.evaluateAction
+      .mockResolvedValueOnce(allow)
+      .mockRejectedValueOnce(new Error('oracle down'));
+
+    await t.run();
+
+    expect(t.autonomyOrchestrator.evaluateAction).toHaveBeenCalledTimes(2);
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.executedCommands()).toEqual([]);
+  });
+
+  it('AUTH-FC-P01 a genome autonomy check that throws leaves zero parsed commands executable', async () => {
+    const t = setup({ withOrchestrator: false });
+    mockGenomeBridgeService.checkAutonomy.mockRejectedValue(new Error('genome down'));
+
+    await t.run({ integrationV2Enabled: true, genomeV3Enabled: true });
+
+    expect(mockGenomeBridgeService.checkAutonomy).toHaveBeenCalledTimes(1);
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['a string', 'allowed'],
+    ['an object without allowed', { reason: 'no verdict' }],
+  ])(
+    'AUTH-FC-P01B an unusable verdict (%s) leaves zero parsed commands executable',
+    async (_label, verdict) => {
+      const t = setup({ intents: [createInvoice, sendEmail] });
+      t.autonomyOrchestrator.evaluateAction
+        .mockResolvedValueOnce(allow)
+        .mockResolvedValueOnce(verdict as any);
+
+      await t.run();
+
+      expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+      expect(t.autonomyEvidence()).toMatchObject({
+        approvedCommands: 0,
+        outcome: 'authority_check_failed_closed',
+      });
+    },
+  );
+
+  it('AUTH-FC-P01B a verdict whose allowed is truthy but not a boolean leaves zero parsed commands executable', async () => {
+    const t = setup();
+    t.autonomyOrchestrator.evaluateAction.mockResolvedValue({ allowed: 'true' } as any);
+
+    await t.run();
+
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.autonomyEvidence()).toMatchObject({
+      approvedCommands: 0,
+      outcome: 'authority_check_failed_closed',
+    });
+  });
+
+  // AUTH-FC-F1: `allowed: true` is not an approval on its own. The verdict must
+  // also state requiresApproval and a recognized tier; leaving them out is not a
+  // statement that no approval is needed. The malformed verdict is the second of
+  // the batch, after a well-formed approval, so the whole batch is in question.
+  it.each([
+    ['no approval or tier metadata', { allowed: true }],
+    ['no requiresApproval', { allowed: true, tier: 'full' }],
+    ['no tier', { allowed: true, requiresApproval: false }],
+    ['an unrecognized tier', { ...allow, tier: 'autonomous' }],
+    ['a non-boolean requiresApproval', { ...allow, requiresApproval: null }],
+  ])(
+    'AUTH-FC-P01B an allowed verdict with %s leaves zero parsed commands executable',
+    async (_label, verdict) => {
+      const t = setup({ intents: [createInvoice, sendEmail] });
+      t.autonomyOrchestrator.evaluateAction
+        .mockResolvedValueOnce(allow)
+        .mockResolvedValueOnce(verdict as any);
+
+      await t.run();
+
+      expect(t.autonomyOrchestrator.evaluateAction).toHaveBeenCalledTimes(2);
+      expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+      expect(t.executedCommands()).toEqual([]);
+      expect(t.autonomyEvidence()).toEqual({
+        totalCommands: 2,
+        approvedCommands: 0,
+        outcome: 'authority_check_failed_closed',
+        authorityCheckFailed: true,
+        authorityCheckError: 'Unusable autonomy verdict for outreach.send_email',
+        autonomyMap: { 'commerce:create_invoice': true },
+      });
+    },
+  );
+
+  it('AUTH-FC-P01B a genome autonomy verdict of allowed with no approval or tier metadata leaves zero parsed commands executable', async () => {
+    const t = setup({ withOrchestrator: false });
+    mockGenomeBridgeService.checkAutonomy.mockResolvedValue({ allowed: true });
+
+    await t.run({ integrationV2Enabled: true, genomeV3Enabled: true });
+
+    expect(mockGenomeBridgeService.checkAutonomy).toHaveBeenCalledTimes(1);
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.autonomyEvidence()).toMatchObject({
+      approvedCommands: 0,
+      outcome: 'authority_check_failed_closed',
+      authorityCheckFailed: true,
+    });
+  });
+
+  it('AUTH-FC-P03 the conversational response completes with no effect when the authority check fails', async () => {
+    const t = setup();
+    t.autonomyOrchestrator.evaluateAction.mockRejectedValue(new Error('oracle down'));
+
+    const response = await t.run();
+
+    expect(mockModelGateway.complete).toHaveBeenCalledTimes(1);
+    expect(response.message.role).toBe('assistant');
+    expect(response.message.content).toBe('Hello');
+    expect(response.actions).toEqual([]);
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(mockActionsService.executeActions).not.toHaveBeenCalled();
+    expect(mockSessionService.saveMessage).toHaveBeenCalledWith(
+      'session_1',
+      expect.objectContaining({ role: 'assistant', content: 'Hello' }),
+    );
+  });
+
+  it('AUTH-FC-P04 an explicitly allowed command still reaches the executor', async () => {
+    const t = setup();
+
+    const response = await t.run();
+
+    expect(t.autonomyOrchestrator.evaluateAction).toHaveBeenCalledWith(
+      'biz-1',
+      'commerce.create_invoice',
+      { amount: 100 },
+      expect.objectContaining({ proposedBy: 'user-1' }),
+    );
+    expect(t.executorService.executeBatch).toHaveBeenCalledTimes(1);
+    expect(t.executedCommands()).toEqual([
+      expect.objectContaining({
+        module: 'commerce',
+        action: 'create_invoice',
+        businessId: 'biz-1',
+      }),
+    ]);
+    expect(response.actions).toEqual([
+      expect.objectContaining({ actionType: 'CREATE_INVOICE', status: 'success' }),
+    ]);
+    expect(t.autonomyEvidence()).toMatchObject({
+      totalCommands: 1,
+      approvedCommands: 1,
+      outcome: 'evaluated',
+      authorityCheckFailed: false,
+      authorityCheckError: null,
+      autonomyMap: { 'commerce:create_invoice': true },
+    });
+  });
+
+  it('AUTH-FC-P04 only the allowed command of a mixed batch reaches the executor', async () => {
+    const t = setup({ intents: [createInvoice, sendEmail] });
+    t.autonomyOrchestrator.evaluateAction
+      .mockResolvedValueOnce(allow)
+      .mockResolvedValueOnce(deny);
+
+    await t.run();
+
+    expect(t.executedCommands()).toEqual([
+      expect.objectContaining({ action: 'create_invoice' }),
+    ]);
+    expect(t.autonomyEvidence()).toMatchObject({
+      totalCommands: 2,
+      approvedCommands: 1,
+      outcome: 'evaluated',
+      authorityCheckFailed: false,
+    });
+  });
+
+  it.each([
+    ['denied', deny, createInvoice],
+    ['manual tier', { ...allow, tier: 'manual' }, createInvoice],
+    ['approval required by the verdict', { ...allow, requiresApproval: true }, createInvoice],
+    ['approval required by the command', allow, { ...createInvoice, requiresApproval: true }],
+  ])(
+    'AUTH-FC-P05 a command that is %s stays non-executable',
+    async (_label, verdict, intent) => {
+      const t = setup({ intents: [intent] });
+      t.autonomyOrchestrator.evaluateAction.mockResolvedValue(verdict);
+
+      await t.run();
+
+      expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+      expect(t.autonomyEvidence()).toMatchObject({
+        totalCommands: 1,
+        approvedCommands: 0,
+        outcome: 'evaluated',
+        authorityCheckFailed: false,
+      });
+    },
+  );
+
+  it('AUTH-FC-P05 no authority oracle stays non-executable and is not reported as a failure', async () => {
+    const t = setup({ withOrchestrator: false });
+
+    await t.run();
+
+    expect(mockGenomeBridgeService.checkAutonomy).not.toHaveBeenCalled();
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.autonomyEvidence()).toMatchObject({
+      totalCommands: 1,
+      approvedCommands: 0,
+      outcome: 'evaluated',
+      authorityCheckFailed: false,
+      autonomyMap: { 'commerce:create_invoice': false },
+    });
+  });
+
+  it('AUTH-FC-P06 the evidence and the log name a failed authority check as failed closed', async () => {
+    const t = setup({ intents: [createInvoice, sendEmail] });
+    t.autonomyOrchestrator.evaluateAction
+      .mockResolvedValueOnce(allow)
+      .mockRejectedValueOnce(new Error('oracle down'));
+
+    await t.run();
+
+    expect(t.autonomyEvidence()).toEqual({
+      totalCommands: 2,
+      approvedCommands: 0,
+      outcome: 'authority_check_failed_closed',
+      authorityCheckFailed: true,
+      authorityCheckError: 'oracle down',
+      autonomyMap: { 'commerce:create_invoice': true },
+    });
+    expect(t.logged.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Autonomy check failed, failing closed: 0/2 parsed commands executable: oracle down',
+      ),
+    );
+    expect(t.allLogLines().filter((line) => /commands approved/.test(line))).toEqual([]);
+    expect(
+      t.allLogLines().filter((line) => /using all parsed commands/.test(line)),
+    ).toEqual([]);
   });
 });
