@@ -279,19 +279,12 @@ const nextConfig: NextConfig = {
       { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
     ];
 
-    // Production: long-cache /_next/static so repeat-visit performance
-    // doesn't regress (ported from develop 1c7e6f93).
+    // Production: Next.js/Vercel owns Cache-Control for hashed /_next/static
+    // assets. Overriding it here produces a Next.js warning and can interfere
+    // with framework-managed caching semantics, so only security headers are
+    // applied explicitly.
     if (isProd) {
       return [
-        {
-          source: "/_next/static/(.*)",
-          headers: [
-            {
-              key: "Cache-Control",
-              value: "public, max-age=31536000, immutable",
-            },
-          ],
-        },
         {
           source: "/(.*)",
           headers: securityHeaders,
