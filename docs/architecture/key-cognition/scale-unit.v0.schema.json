@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keyflowos.local/schemas/scale-unit.v0.schema.json",
+  "title": "KEY ScaleUnitContract v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["unitId","scale","boundary","macroState","observability","governance","composition","provenance"],
+  "properties": {
+    "unitId":{"type":"string","minLength":1},
+    "scale":{"enum":["EVENT","ACTION","PROCEDURE","AGENT","TISSUE","DOMAIN","BUSINESS","ORGANIZATION","ECOSYSTEM","WORLD_MODEL","FEDERATION"]},
+    "boundary":{
+      "type":"object","additionalProperties":false,
+      "required":["includes","excludes","internalStateRef"],
+      "properties":{
+        "includes":{"type":"array","items":{"type":"string"}},
+        "excludes":{"type":"array","items":{"type":"string"}},
+        "internalStateRef":{"type":"string","minLength":1}
+      }
+    },
+    "macroState":{
+      "type":"object","additionalProperties":false,
+      "required":["schemaRef","freshness"],
+      "properties":{
+        "schemaRef":{"type":"string","minLength":1},
+        "freshness":{"type":"string","minLength":1},
+        "healthVocabulary":{"type":"array","items":{"type":"string"}}
+      }
+    },
+    "observability":{
+      "type":"object","additionalProperties":false,
+      "required":["signals","drillDownRefs"],
+      "properties":{
+        "signals":{"type":"array","items":{"type":"string"}},
+        "drillDownRefs":{"type":"array","items":{"type":"string"}},
+        "unknownStatePolicy":{"type":"string"}
+      }
+    },
+    "actuation":{
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "capabilities":{"type":"array","items":{"type":"string"}},
+        "effectBoundaries":{"type":"array","items":{"type":"string"}},
+        "feedbackLatencyTarget":{"type":"string"}
+      }
+    },
+    "governance":{
+      "type":"object","additionalProperties":false,
+      "required":["authorityBoundary","invariants","resourceBudget"],
+      "properties":{
+        "authorityBoundary":{"type":"array","items":{"type":"string"}},
+        "invariants":{"type":"array","items":{"type":"string"}},
+        "resourceBudget":{"type":"array","items":{"type":"string"}},
+        "localAutonomy":{"type":"string"}
+      }
+    },
+    "failure":{
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "failureModes":{"type":"array","items":{"type":"string"}},
+        "degradedModes":{"type":"array","items":{"type":"string"}},
+        "recovery":{"type":"array","items":{"type":"string"}}
+      }
+    },
+    "composition":{
+      "type":"object","additionalProperties":false,
+      "required":["peerInterface","promotionCriteria"],
+      "properties":{
+        "peerInterface":{"type":"array","items":{"type":"string"}},
+        "parentInterface":{"type":"array","items":{"type":"string"}},
+        "promotionCriteria":{"type":"array","items":{"type":"string"}},
+        "demotionCriteria":{"type":"array","items":{"type":"string"}}
+      }
+    },
+    "provenance":{
+      "type":"object","additionalProperties":false,
+      "required":["sourceRefs","lineage"],
+      "properties":{
+        "sourceRefs":{"type":"array","items":{"type":"string"}},
+        "lineage":{"type":"array","items":{"type":"string"}},
+        "evidenceRefs":{"type":"array","items":{"type":"string"}}
+      }
+    }
+  }
+}

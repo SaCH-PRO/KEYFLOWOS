@@ -1,0 +1,142 @@
+programme: KF-META-PROCEDURAL-MORPHOGENESIS-001
+version: 0
+mode: OFFLINE_SHADOW_FIRST
+production_effects_authorized: false
+third_party_runtime_authorized: false
+
+laws_under_test:
+  - episode_is_not_procedure
+  - procedure_is_not_permission
+  - evidence_is_not_authority
+  - timing_and_order_are_part_of_correctness
+  - subject_attestation_separation
+  - shared_genome_differentiated_expression
+  - routing_strength_is_not_truth
+  - scale_promotion_requires_trustworthy_contract_and_drilldown
+
+benchmarks:
+  - id: PM-TRACE-MINE-001
+    hypothesis: repeated_issue80_event_traces_can_be_clustered_into_stable_candidate_procedures
+    baseline: manual_human_identification
+    method: process_mining_over_append_only_control_events
+    metrics:
+      - precision_of_candidate_procedure_boundaries
+      - recall_of_known_repeated_workflows
+      - false_merge_rate
+      - false_split_rate
+    falsification:
+      - candidate_clusters_do_not_reproduce_known_workflows_better_than_simple_frequency_grouping
+    safety:
+      - no_candidate_is_activated
+
+  - id: PM-REPLAY-CONTEXT-001
+    hypothesis: context_integrity_loader_can_reconstruct_historical_next_legal_action_without_hidden_chat_state
+    baseline: recorded_accepted_human_decision
+    method: historical_replay
+    metrics:
+      - exact_next_action_match
+      - contradiction_detection_rate
+      - stale_context_detection_rate
+    falsification:
+      - any_high_risk_replay_silently_advances_on_stale_or_conflicting_context
+
+  - id: PM-REPLAY-FINALIZER-001
+    hypothesis: exact_head_finalizer_detects_late_evidence_and_branch_budget_conflicts_before_illegal_mutation
+    baseline: pr120_canon_event
+    method: deterministic_replay_plus_failure_injection
+    metrics:
+      - illegal_transition_prevention
+      - unnecessary_stop_rate
+      - exact_head_binding_accuracy
+    falsification:
+      - not_run_can_satisfy_pass
+      - stale_evidence_is_accepted
+      - branch_budget_conflict_is_ignored
+
+  - id: PM-CONTRADICTION-001
+    hypothesis: contradiction_resolver_can_localize_minimum_conflicting_constraints_and_propose_only_legal_recoveries
+    baseline: pr120_contradiction_010
+    method: historical_replay_with_mutated_constraints
+    metrics:
+      - conflicting_rule_localization
+      - legal_option_precision
+      - minimum_repair_score
+    falsification:
+      - resolver_weakens_invariant_or_infers_authority
+
+  - id: PM-DIFFERENTIATION-001
+    hypothesis: shared_capability_genome_plus_context_signals_can_select_smaller_safer_specialist_phenotypes_than_one_universal_agent
+    baseline: universal_agent_with_full_capability_set
+    method: offline_task_suite
+    metrics:
+      - unnecessary_capability_exposure
+      - task_success
+      - policy_violations
+      - compute_cost
+      - context_size
+    falsification:
+      - specialist_selection_reduces_safety_or_task_success_without_material_cost_benefit
+
+  - id: PM-TISSUE-001
+    hypothesis: repeated_specialist_composition_can_outperform_fixed_monolithic_orchestration_on_multi_domain_tasks
+    baseline: fixed_monolithic_orchestrator
+    method: shadow_comparison
+    metrics:
+      - task_success
+      - handoff_failures
+      - coordination_cost
+      - recovery_rate
+    falsification:
+      - composition_cost_exceeds_benefit_or_creates_untraceable_authority
+
+  - id: PM-ROUTING-001
+    hypothesis: routing_weights_based_on_verified_outcomes_improve_efficiency_without_altering_truth_or_authority
+    baseline: static_routing
+    method: offline_ablation
+    metrics:
+      - success_per_cost
+      - latency
+      - unsafe_route_rate
+      - epistemic_contamination_rate
+    falsification:
+      - frequency_or_path_strength_changes_claim_authority_or_verification
+
+  - id: PM-SCALE-001
+    hypothesis: lower_order_systems_can_be_compressed_into_macro_units_and_reconstructed_to_evidence_with_bounded_loss
+    baseline: full_microstate_only
+    method: compression_and_drilldown_benchmark
+    metrics:
+      - decision_relevant_information_retained
+      - drilldown_completeness
+      - provenance_loss
+      - compression_ratio
+    falsification:
+      - macro_state_hides_material_contradiction_or_cannot_trace_to_source_evidence
+
+  - id: PM-ATTEST-001
+    hypothesis: external_attestations_over_immutable_subjects_reduce_self_invalidating_exact_head_cycles
+    baseline: proof_metadata_embedded_in_mutating_control_artifact
+    method: control_plane_prototype_simulation
+    metrics:
+      - head_mutations_required_for_new_evidence
+      - stale_proof_incidents
+      - provenance_completeness
+      - admission_determinism
+    falsification:
+      - attestation_model_cannot_preserve_equivalent_or_stronger_exact_subject_binding
+
+promotion_gate:
+  requirements:
+    - deterministic_schema_validation
+    - historical_replay
+    - negative_controls
+    - shadow_comparison
+    - provenance_complete
+    - explicit_authority_contract
+    - rollback_or_retirement_path
+  forbidden_shortcuts:
+    - recurrence_implies_permission
+    - llm_confidence_implies_proof
+    - skipped_is_counted_as_passed
+    - route_strength_changes_truth
+    - hidden_chat_context_required
