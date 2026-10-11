@@ -14,7 +14,10 @@
       interactive checkout, with a bounded control prompt;
     - records the processed message id durably and idempotently;
     - stops retrying a directive after two materially identical failures,
-      holds it as HELD_RETRYABLE and escalates once.
+      holds it as HELD_RETRYABLE and escalates once;
+    - counts a failure that happens before Claude is woken too. A network
+      fault (a failed fetch) has its own, larger bound, so a short outage
+      holds nothing and a lasting one is still escalated.
 
   It passes NO credentials. It reuses the developer's existing authenticated
   `gh` and Claude sessions. If either is unavailable it reports
@@ -31,7 +34,7 @@
   but the log.
 
 .PARAMETER Status
-  Print worker status (lock, cursor, auth, install, pause, holds) and exit.
+  Print worker status (locks, cursor, auth, install, pause, holds) and exit.
 
 .PARAMETER Pause
   Durably pause the worker: every tick becomes a no-op until -Resume.
@@ -53,6 +56,17 @@
 .PARAMETER WorktreeRoot
   Where per-wake worktrees are created. Must lie outside the checkout.
   Default: %LOCALAPPDATA%\KEYFLOWOS\worker-worktrees.
+
+.PARAMETER MaxNetworkFailures
+.PARAMETER MinNetworkOutageMinutes
+  A directive is held for a network fault only after this many consecutive
+  identical failures AND this many minutes since the first of them.
+  Defaults: 15 and 30. Overridable so the bound can be proved in seconds.
+
+.PARAMETER LockRoot
+  Where the machine-wide lock lives: one file per repository and control
+  issue, shared by every checkout a worker could be started from.
+  Default: %LOCALAPPDATA%\KEYFLOWOS\locks.
 
 .PARAMETER GhPath
 .PARAMETER ClaudePath
@@ -83,6 +97,9 @@ param(
   [string]$RepoRoot,
   [string]$AuthorizedAuthors = 'SaCH-PRO',
   [string]$WorktreeRoot,
+  [string]$LockRoot,
+  [int]$MaxNetworkFailures = 15,
+  [int]$MinNetworkOutageMinutes = 30,
   [string]$GhPath = 'gh',
   [string]$ClaudePath = 'claude'
 )
@@ -98,6 +115,22 @@ $WorkerContractVersion = 2
 # blocker whose wording changes every run cannot loop either.
 $MaxIdenticalAttempts = 2
 $MaxTotalAttempts = 5
+
+# A failed fetch is different: it is usually the network's fault and ends by
+# itself, so two of them (four minutes at the default interval) must not hold
+# a healthy directive until an operator releases it. But a fetch that never
+# works again (a remote that moved, a credential helper that stopped
+# answering) used to be logged every interval for ever and reach nobody.
+# Network faults are therefore counted apart from the budget above and hold a
+# directive only after $MaxNetworkFailures consecutive identical failures that
+# ALSO span $MinNetworkOutageMinutes (parameters; 15 and 30). Both, because
+# either alone misfires: fifteen ticks of a worker run at a five-second
+# interval is 75 seconds, and two failures either side of a night asleep are
+# hours apart. At the default 120-second interval fifteen failures take 28
+# minutes, so the hold comes on the first failure past half an hour. That is
+# long for a blip and short next to a directive nobody is acting on. A GitHub
+# outage does not get this far: the control issue cannot be read either, and
+# the tick stops before a directive is selected.
 
 # Windows refuses a path of 260 characters unless core.longpaths is set, and a
 # worktree is named after its directive. A long message id therefore made
@@ -124,6 +157,21 @@ $CommentsFile = Join-Path $StateDir 'comments.json'
 $LockFile     = Join-Path $StateDir 'worker.lock'
 $LogFile      = Join-Path $StateDir 'worker.log'
 
+# The lock above is per checkout. This one is per repository and control issue,
+# so it is the same file whichever checkout a worker is started from.
+if (-not $LockRoot) {
+  $base = $env:LOCALAPPDATA
+  if (-not $base) { $base = [System.IO.Path]::GetTempPath() }
+  $LockRoot = Join-Path (Join-Path $base 'KEYFLOWOS') 'locks'
+}
+$LockRoot = [System.IO.Path]::GetFullPath($LockRoot).TrimEnd('\', '/')
+$MachineLockName = 'worker-{0}-issue-{1}.lock' -f [regex]::Replace($Repo.ToLowerInvariant(), '[^a-z0-9._-]', '_'), $IssueNumber
+$MachineLockFile = Join-Path $LockRoot $MachineLockName
+# A lock names a process by PID and start time. The start time is read back
+# from the same clock that wrote it, so the tolerance only has to cover what
+# is lost in writing it down.
+$LockStartToleranceSeconds = 2
+
 # Sub-scripts run under the same PowerShell that runs the worker.
 $PSExe = (Get-Process -Id $PID).Path
 
@@ -146,6 +194,17 @@ function Invoke-Native {
 }
 
 function Get-UtcStamp { (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+
+# ConvertFrom-Json leaves an ISO date a string in Windows PowerShell 5.1 and
+# makes it a DateTime in PowerShell 7; both are read here.
+function ConvertTo-UtcDate {
+  param($Value)
+  if ($Value -is [datetime]) { return $Value.ToUniversalTime() }
+  if (-not $Value) { return $null }
+  try {
+    return [datetime]::Parse([string]$Value, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+  } catch { return $null }
+}
 
 function Get-SafeId {
   param([string]$Id)
@@ -221,9 +280,10 @@ function Get-FailureSignature {
   return (([string]$Reason).ToLowerInvariant() -replace '\s+', ' ').Trim()
 }
 
-function Register-FailedAttempt {
-  param([object]$Directive, [string]$Reason)
-  $signature = Get-FailureSignature -Reason $Reason
+# The directive's ledger entry, made if it has none. An entry written by an
+# earlier worker has no network fields; they are added so both read alike.
+function Get-OrNewAttemptEntry {
+  param([object]$Directive)
   $entry = Get-AttemptEntry -MessageId $Directive.message_id
   if ($null -eq $entry) {
     $entry = [pscustomobject]@{
@@ -239,6 +299,16 @@ function Register-FailedAttempt {
       history            = @()
     }
   }
+  foreach ($field in 'network_failures', 'network_signature', 'network_first_at', 'network_last_at') {
+    if (-not ($entry.PSObject.Properties.Name -contains $field)) { $entry | Add-Member -NotePropertyName $field -NotePropertyValue $null }
+  }
+  return $entry
+}
+
+function Register-FailedAttempt {
+  param([object]$Directive, [string]$Reason)
+  $signature = Get-FailureSignature -Reason $Reason
+  $entry = Get-OrNewAttemptEntry -Directive $Directive
   $consecutive = if ($entry.last_signature -ceq $signature) { [int]$entry.consecutive + 1 } else { 1 }
   $entry.attempts = [int]$entry.attempts + 1
   $entry.consecutive = $consecutive
@@ -256,6 +326,47 @@ function Register-FailedAttempt {
 
   Set-AttemptEntry -Entry $entry
   return $entry
+}
+
+# A network fault before the wake. It is counted in the directive's entry but
+# in fields of its own: it never adds to attempts or consecutive, so an outage
+# cannot spend the directive's two strikes, and Claude was never invoked.
+function Register-NetworkFailure {
+  param([object]$Directive, [string]$Reason)
+  $signature = Get-FailureSignature -Reason $Reason
+  $entry = Get-OrNewAttemptEntry -Directive $Directive
+  $now = (Get-Date).ToUniversalTime()
+  $first = ConvertTo-UtcDate $entry.network_first_at
+  if ($entry.network_signature -cne $signature -or $null -eq $first) {
+    $entry.network_failures = 0
+    $entry.network_first_at = Get-UtcStamp
+    $first = $now
+  }
+  $entry.network_failures = [int]$entry.network_failures + 1
+  $entry.network_signature = $signature
+  $entry.network_last_at = Get-UtcStamp
+
+  $minutes = [int][Math]::Floor(($now - $first).TotalMinutes)
+  if ($entry.network_failures -ge $MaxNetworkFailures -and $minutes -ge $MinNetworkOutageMinutes) {
+    $entry.held = $true
+    $entry.held_reason = "network fault: $($entry.network_failures) consecutive identical failures over $minutes minutes, claude never woken: $signature"
+    $entry.held_at = Get-UtcStamp
+  }
+  Set-AttemptEntry -Entry $entry
+  return $entry
+}
+
+# The tick got past the step that was failing, so the outage is over. An entry
+# that recorded nothing else goes with it.
+function Clear-NetworkFailures {
+  param([string]$MessageId)
+  $entry = Get-AttemptEntry -MessageId $MessageId
+  if ($null -eq $entry -or -not $entry.network_failures) { return }
+  if ([int]$entry.attempts -eq 0) { Remove-AttemptEntry -MessageId $MessageId; return }
+  $entry.network_failures = 0
+  $entry.network_signature = $null
+  $entry.network_first_at = $null
+  Set-AttemptEntry -Entry $entry
 }
 
 function Send-HoldEscalation {
@@ -317,34 +428,143 @@ function Test-InstallContract {
   } catch { return $false }
 }
 
-# --- single-instance lock -------------------------------------------------
+# --- single-instance locks ---------------------------------------------------
 # Guards the constraint "never run two Claude workers for the same packet".
-function Enter-WorkerLock {
-  if (Test-Path $LockFile) {
-    $existing = Get-Content -Path $LockFile -Raw | ConvertFrom-Json
-    $alive = $false
-    if ($existing.pid) {
-      try { $alive = $null -ne (Get-Process -Id $existing.pid -ErrorAction Stop) } catch { $alive = $false }
-    }
-    if ($alive) {
-      Write-WorkerLog 'ERROR' ("another worker is already running (pid {0}); refusing to start a second" -f $existing.pid)
-      return $false
-    }
-    Write-WorkerLog 'WARN' 'removing a stale lock from a worker that is no longer running'
-    Remove-Item -Path $LockFile -Force
+#
+# There are two locks because the first alone did not hold: it lives in the
+# checkout, and two workers started with different -RepoRoot values served one
+# control issue for days, each with its own cursor and attempt ledger. The
+# machine lock is keyed by repository and issue instead.
+#
+# A lock belongs to a process, not to a PID. Windows reuses PIDs, so after an
+# unclean stop the recorded one can be anything at all, and a worker that
+# trusted it refused to start. Each lock records its owner's start time and is
+# held only while a process with that PID and that start time exists.
+
+# Who a lock file names, and whether that process still holds it. $null when
+# there is no file. live = the owner is running; mine = the owner is this
+# process; stale = why a lock that is not live may be removed.
+function Get-LockOwner {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) { return $null }
+  $record = $null
+  try { $record = [System.IO.File]::ReadAllText($Path) | ConvertFrom-Json } catch { $record = $null }
+  $owner = [pscustomobject]@{ pid = 0; repo_root = '(not recorded)'; started = '(not recorded)'; live = $false; mine = $false; stale = 'it names no process' }
+  if ($null -eq $record -or -not $record.pid) { return $owner }
+  $owner.pid = [int]$record.pid
+  if ($record.repo_root) { $owner.repo_root = [string]$record.repo_root }
+  $recorded = ConvertTo-UtcDate $record.process_started_at
+  if ($recorded) { $owner.started = $recorded.ToString('yyyy-MM-ddTHH:mm:ssZ') }
+
+  $process = $null
+  try { $process = Get-Process -Id $owner.pid -ErrorAction Stop } catch { $process = $null }
+  if ($null -eq $process) { $owner.stale = "pid $($owner.pid) is no longer running"; return $owner }
+
+  if ($null -eq $recorded) {
+    # Written by a worker from before start times were recorded, and that
+    # worker may be running now. Its lock means what it always meant: a live
+    # PID holds it. Only this process's own PID cannot be that worker.
+    $owner.live = ($owner.pid -ne $PID)
+    $owner.stale = "pid $($owner.pid) is this process, which did not write it"
+    return $owner
   }
-  @{ pid = $PID; started_at = (Get-Date).ToUniversalTime().ToString('o'); repo_root = $RepoRoot } |
-    ConvertTo-Json | Set-Content -Path $LockFile -Encoding utf8
+
+  $actual = $null
+  try { $actual = $process.StartTime.ToUniversalTime() } catch { $actual = $null }
+  # A process whose start time may not be read (another account's) cannot be
+  # shown to be a different one, so its lock stands.
+  if ($null -eq $actual) { $owner.live = $true; return $owner }
+  $owner.live = ([Math]::Abs(($actual - $recorded).TotalSeconds) -le $LockStartToleranceSeconds)
+  $owner.mine = ($owner.live -and $owner.pid -eq $PID)
+  $owner.stale = "pid $($owner.pid) is now another process: it started $($actual.ToString('yyyy-MM-ddTHH:mm:ssZ')), the lock's owner $($owner.started)"
+  return $owner
+}
+
+function New-LockFile {
+  param([string]$Path)
+  $dir = Split-Path -Parent $Path
+  if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  $record = [ordered]@{
+    pid                = $PID
+    process_started_at = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
+    started_at         = (Get-Date).ToUniversalTime().ToString('o')
+    repo_root          = $RepoRoot
+    repo               = $Repo
+    issue              = $IssueNumber
+  } | ConvertTo-Json
+  # CreateNew fails when the file is already there, so making the file is the
+  # claim itself: two workers cannot both make it.
+  $stream = $null
+  try { $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None) }
+  catch [System.IO.IOException] { return $false }
+  try {
+    $bytes = (New-Object System.Text.UTF8Encoding $false).GetBytes($record)
+    $stream.Write($bytes, 0, $bytes.Length)
+  } finally { $stream.Dispose() }
+  return $true
+}
+
+# Takes the lock at $Path. Returns $null when this process now holds it, or
+# the live owner that does.
+function Enter-LockFile {
+  param([string]$Path, [string]$What)
+  # Reading a stale lock, removing it and making a new one are three steps. Two
+  # starting workers could each remove the other's new lock in between, so the
+  # steps run under one system mutex. It is held for milliseconds and the
+  # system releases it if its holder dies; a host that refuses the mutex still
+  # has the atomic create.
+  $mutex = $null
+  $owned = $false
+  try {
+    $mutex = New-Object System.Threading.Mutex($false, 'Global\KEYFLOWOS-claude-worker-lock')
+    try { $owned = $mutex.WaitOne(30000) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+  } catch { $mutex = $null }
+  try {
+    foreach ($attempt in 1..2) {
+      $owner = Get-LockOwner -Path $Path
+      if ($owner -and $owner.live) { return $owner }
+      if ($owner) {
+        Write-WorkerLog 'WARN' ('removing a stale {0} ({1})' -f $What, $owner.stale)
+        Remove-Item -LiteralPath $Path -Force
+      }
+      if (New-LockFile -Path $Path) { return $null }
+      # Another worker made the file first: read what it wrote, once.
+    }
+    throw "could not take the $What at $Path"
+  } finally {
+    if ($owned) { $mutex.ReleaseMutex() }
+    if ($mutex) { $mutex.Dispose() }
+  }
+}
+
+# Releases a lock only if this process still owns it.
+function Exit-LockFile {
+  param([string]$Path)
+  $owner = Get-LockOwner -Path $Path
+  if ($owner -and $owner.mine) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
+}
+
+function Enter-WorkerLock {
+  $owner = Enter-LockFile -Path $LockFile -What 'lock'
+  if ($owner) {
+    Write-WorkerLog 'ERROR' ("another worker is already running (pid {0}); refusing to start a second" -f $owner.pid)
+    return $false
+  }
+  # A dry run wakes nobody and writes only its log. It may still run beside the
+  # worker that serves the issue from another checkout, as it always could.
+  if ($DryRun) { return $true }
+  $owner = Enter-LockFile -Path $MachineLockFile -What 'machine lock'
+  if ($owner) {
+    Exit-LockFile -Path $LockFile
+    Write-WorkerLog 'ERROR' ("another worker already serves {0} issue {1} on this machine (pid {2}, repo root {3}, started {4}); refusing to start a second" -f $Repo, $IssueNumber, $owner.pid, $owner.repo_root, $owner.started)
+    return $false
+  }
   return $true
 }
 
 function Exit-WorkerLock {
-  if (Test-Path $LockFile) {
-    try {
-      $existing = Get-Content -Path $LockFile -Raw | ConvertFrom-Json
-      if ($existing.pid -eq $PID) { Remove-Item -Path $LockFile -Force }
-    } catch { Remove-Item -Path $LockFile -Force -ErrorAction SilentlyContinue }
-  }
+  Exit-LockFile -Path $MachineLockFile
+  Exit-LockFile -Path $LockFile
 }
 
 # --- auth probes ----------------------------------------------------------
@@ -470,6 +690,35 @@ function New-WorktreeUnavailable {
   return $failure
 }
 
+# A fault of the network's kind: it may end by itself, so it is counted under
+# the larger network bound and never against the directive's two strikes.
+function New-NetworkUnavailable {
+  param([string]$Reason)
+  $failure = New-Object System.InvalidOperationException($Reason)
+  $failure.Data['keyflow_network_reason'] = "network_unavailable: $Reason"
+  return $failure
+}
+
+# The text of a failure nobody classified. It may name a path, and the reason
+# is quoted into a YAML escalation, where a backslash starts an escape.
+function Get-FaultText {
+  param([System.Exception]$Failure)
+  $text = [string]$Failure.Message
+  return $text.Replace('\', '/')
+}
+
+# What kind of failure stopped a wake before Claude ran. Every kind is
+# counted: one that was not classified where it was thrown (the worktree root
+# refused or not creatable) is a local fault and repeats exactly.
+function Get-WakeFault {
+  param([System.Exception]$Failure)
+  $network = $Failure.Data['keyflow_network_reason']
+  if ($network) { return @{ network = $true; reason = [string]$network } }
+  $counted = $Failure.Data['keyflow_attempt_reason']
+  if ($counted) { return @{ network = $false; reason = [string]$counted } }
+  return @{ network = $false; reason = 'wake_setup_failed: ' + (Get-FaultText $Failure) }
+}
+
 function Get-LongestTrackedPathLength {
   param([string]$Base)
   $listing = Invoke-Native git @('-C', $RepoRoot, '-c', 'core.quotepath=false', 'ls-tree', '-r', '--name-only', $Base)
@@ -533,7 +782,8 @@ function New-WakeWorktree {
   $root = Get-WorktreeRoot
   if (-not (Test-Path $root)) { New-Item -ItemType Directory -Path $root -Force | Out-Null }
 
-  if ((Invoke-Native git @('-C', $RepoRoot, 'fetch', 'origin', '--prune', '--quiet')).code -ne 0) { throw 'git fetch origin failed; not waking claude on a stale base' }
+  if ((Invoke-Native git @('-C', $RepoRoot, 'fetch', 'origin', '--prune', '--quiet')).code -ne 0) { throw (New-NetworkUnavailable 'git fetch origin failed; not waking claude on a stale base') }
+  Clear-NetworkFailures -MessageId $Directive.message_id
 
   # A worktree made under the directive's full id is found first, whatever the
   # tree measures now: partial work from an earlier attempt lives there.
@@ -736,19 +986,28 @@ function Invoke-WorkerTick {
     return
   }
 
+  # Nothing between selecting a directive and waking Claude may fail unseen:
+  # whatever stops the wake is counted, so it ends in a wake or in a hold.
   try { $worktree = New-WakeWorktree -Directive $directive }
   catch {
-    $reason = $_.Exception.Data['keyflow_attempt_reason']
-    if (-not $reason) { throw }   # a failed fetch is the network's, and is not counted against the directive
-    Write-WorkerLog 'ERROR' "$reason for $($directive.message_id); claude was not woken"
-    $entry = Register-FailedAttempt -Directive $directive -Reason $reason
+    $fault = Get-WakeFault -Failure $_.Exception
+    $reason = $fault.reason
+    if ($fault.network) {
+      $entry = Register-NetworkFailure -Directive $directive -Reason $reason
+      Write-WorkerLog 'ERROR' "$reason for $($directive.message_id) (network failure $($entry.network_failures); held at $MaxNetworkFailures over $MinNetworkOutageMinutes minutes); claude was not woken"
+    } else {
+      Write-WorkerLog 'ERROR' "$reason for $($directive.message_id); claude was not woken"
+      $entry = Register-FailedAttempt -Directive $directive -Reason $reason
+    }
     if ($entry.held) {
       Write-WorkerLog 'HELD_RETRYABLE' "$($directive.message_id) held after attempt $($entry.attempts): $($entry.held_reason)"
       Send-HoldEscalation -Entry $entry
     }
     return
   }
-  $result = Invoke-ClaudeForDirective -Directive $directive -Worktree $worktree
+  # A wake that throws is a failed run, counted below like any other.
+  try { $result = Invoke-ClaudeForDirective -Directive $directive -Worktree $worktree }
+  catch { $result = @{ ok = $false; reason = 'wake_failed: ' + (Get-FaultText $_.Exception) } }
 
   if ($result.ok) {
     # Record only on success, and only once: a failed run must be retryable,
@@ -816,6 +1075,11 @@ if ($Status) {
   Write-Host ('  install   : {0}' -f $(if (Test-InstallContract) { "contract $WorkerContractVersion" } else { "MISSING for contract $WorkerContractVersion (worker will not wake claude)" }))
   Write-Host ('  paused    : {0}' -f $(if (Test-Path $PauseFile) { 'yes' } else { 'no' }))
   Write-Host ('  lock      : {0}' -f $(if ($locked) { "held ($LockFile)" } else { 'free' }))
+  $machine = Get-LockOwner -Path $MachineLockFile
+  $serving = if ($null -eq $machine) { 'free' }
+    elseif ($machine.live) { "held by pid $($machine.pid) (repo root $($machine.repo_root), started $($machine.started))" }
+    else { "stale, $($machine.stale); the next worker to start reclaims it" }
+  Write-Host ('  machine   : {0} -- {1} issue {2}' -f $serving, $Repo, $IssueNumber)
   Write-Host ('  processed : {0} message(s), last {1}' -f $cursor.processed_message_ids.Count, $lastAt)
   Write-Host ('  held      : {0}' -f $(if ($holds.Count) { ($holds | ForEach-Object { $_.message_id }) -join ', ' } else { 'none' }))
   exit 0

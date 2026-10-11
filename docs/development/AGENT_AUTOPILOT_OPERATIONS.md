@@ -92,8 +92,16 @@ authenticated `gh` and Claude sessions. It stores no credential.
 
 ### Worker safety properties
 
-- **Single instance.** A PID lock prevents two workers driving one packet. A
-  lock whose owner has died is reclaimed automatically.
+- **Single instance.** Two locks prevent two workers driving one packet. One
+  is in the checkout (`.agent-control/.worker/worker.lock`). The other is per
+  repository and control issue for the whole machine
+  (`%LOCALAPPDATA%KEYFLOWOSlocksworker-<owner>_<repo>-issue-<n>.lock`,
+  `-LockRoot` to move it), so a second worker for the same issue refuses to
+  start whichever checkout it is started from. A lock names its owner by PID
+  and process start time. A lock whose owner has died, or whose PID now
+  belongs to another process, is reclaimed automatically with a `WARN`.
+  `-Status` shows both; `-DryRun` and the other modes that never wake Claude
+  take no machine lock.
 - **Idempotent.** Processed `message_id`s are recorded in
   `.agent-control/.worker/cursor.json`. A directive is never processed twice.
   A *failed* run is not recorded, so it stays retryable.
@@ -120,10 +128,17 @@ authenticated `gh` and Claude sessions. It stores no credential.
   the whole message id does not fit, the directory is the head of the id plus
   eight hex digits of its SHA-256 (the same on every attempt). A worktree
   already made under the whole id is found first.
-- **A worktree that cannot be made is a failed attempt.** It is counted like
-  a failed run: two identical failures hold the directive and post one
-  MOMENTUM, and Claude is never woken for it. A failed `git fetch` is not
-  counted; it is retried on the next tick.
+- **Every failure before the wake is counted.** A worktree that cannot be
+  made, or a worktree root that is refused, is counted like a failed run: two
+  identical failures hold the directive and post one MOMENTUM, and Claude is
+  never woken for it.
+- **A network fault has its own bound.** A failed `git fetch` is recorded in
+  the directive's ledger entry (`network_failures`) but is not an attempt and
+  never spends the two strikes. It holds the directive only after 15
+  consecutive identical failures that also span 30 minutes
+  (`-MaxNetworkFailures`, `-MinNetworkOutageMinutes`), then posts one
+  MOMENTUM whose `held_reason` begins `network fault:`. The count starts
+  again on any tick that gets past the fetch, so a short outage holds nothing.
 - **Install contract.** The worker wakes Claude only when
   `.agent-control/.worker/install.json` matches its contract version. An
   autostart left from an older worker stays a no-op (`WAITING_OPERATOR`) until
@@ -142,10 +157,16 @@ changing that checkout to a branch without `scripts/agent-control/` removes
 them from under a running worker. On this machine the pinned checkout is a
 detached worktree under `%LOCALAPPDATA%\KEYFLOWOS\`.
 
-The single-instance lock is per `-RepoRoot`. Two workers started with
-different repo roots do not see each other's lock, cursor or attempt ledger,
-so installing from a new location does not stop a worker already running from
-the old one. Stop the old process first (section 5).
+The cursor and the attempt ledger are per `-RepoRoot`; the machine lock is
+not. A worker started from a new location refuses to start while another one
+serves the same issue, and names that worker's PID and repo root. Stop the old
+process first (section 5).
+
+A worker from before the machine lock existed does not hold it. A new worker
+started from another checkout cannot see that old worker and will start beside
+it. When upgrading, stop every `claude-worker.ps1` process first
+(`Get-CimInstance Win32_Process` filtered on `claude-worker`), then start the
+new one.
 
 ## 4. Turning autonomy off while keeping observation
 
@@ -167,14 +188,20 @@ Agent Control Gate enforces the same contract with or without automation.
 
 | Symptom | Cause | Recovery |
 |---|---|---|
-| Worker will not start, "another worker is already running" | a live worker holds the lock | `-Status` to see it; stop that process or `uninstall-claude-worker.ps1` |
+| Worker will not start, "another worker is already running (pid <n>)" | a live worker holds this checkout's lock | `-Status` to see it; stop that process or `uninstall-claude-worker.ps1` |
+| Worker will not start, "another worker already serves <repo> issue <n> on this machine (pid, repo root, started)" | a live worker started from another checkout holds the machine lock for the same repository and issue | this is the lock working. `-Status` shows the owner on its `machine` line. Keep the worker running from the pinned checkout; stop the other by the PID in the message if it is the wrong one |
+| Worker logs `WARN removing a stale lock (...)` or `removing a stale machine lock (...)` | the lock's owner is gone: `pid <n> is no longer running` after an unclean stop, or `pid <n> is now another process` when Windows reused the PID | nothing to do; the worker took the lock and carries on |
+| `-Status` shows `machine : stale, ...` | the last worker stopped without releasing the machine lock | nothing to do; the next worker to start reclaims it |
 | Worker idle with `WAITING_EXTERNAL_AGENT` | `gh` or `claude` session expired | `gh auth login`, or open Claude Code once to refresh; the worker resumes on the next tick |
 | Worker logs `WAITING_OPERATOR` | no install record for this worker contract | re-run `install-claude-worker.ps1` from the admitted code |
 | Worker logs `WAITING_OPERATOR worker_code_missing` (before this check existed: `Invalid JSON primitive: Windows.` on every tick) | the checkout the worker was started from no longer has the scripts named in `missing=`, usually because it changed branch | the worker is harmless but useless: it polls nothing. Confirm it has no `claude` child process, stop that one process by PID, and run the worker from the pinned checkout (section 3). Its lock, cursor and attempt ledger stay where they are |
 | Worker logs `selector_output_unreadable exit=<n>` | `select-directive.ps1` ran but did not print a decision; `stdout_head` shows what it printed | read `stdout_head` and the exit status. Nothing was selected and Claude was not woken. A mismatch between the worker in memory and the scripts on disk is the usual cause: restart the worker from the pinned checkout |
 | Worker logs `verdict_unreadable exit=<n>` | `evaluate-run.ps1` did not print a verdict for a finished run | the run is counted as failed and stays retryable; the transcript is in `.agent-control/.worker/run-<id>-attempt<n>.json` |
-| Two `claude-worker.ps1` processes | a second install from another `-RepoRoot`; the lock does not span repo roots | `Get-CimInstance Win32_Process` filtered on `claude-worker`; keep the one running from the pinned checkout and stop the other by PID |
-| Worker logs `HELD_RETRYABLE` | two identical failures on one directive | read the MOMENTUM it posted; fix the blocker, then post a newer directive or run `-ReleaseHold <id>` |
+| Two `claude-worker.ps1` processes for one issue | one of them predates the machine lock and does not hold it (or they serve different issues or use different `-LockRoot` values, which is not a fault) | `Get-CimInstance Win32_Process` filtered on `claude-worker`; keep the one running from the pinned checkout and stop the other by PID |
+| Worker logs `HELD_RETRYABLE` | two identical failures on one directive, or a network fault past its bound | read the MOMENTUM it posted; `held_reason` names the fault. Fix the blocker, then post a newer directive or run `-ReleaseHold <id>` |
+| Worker logs `network_unavailable: git fetch origin failed ... (network failure <n>; held at 15 over 30 minutes)` | `git fetch origin` failed in the worker's checkout; Claude was not woken on a stale base | usually an outage that ends by itself: the count resets on the next tick whose fetch works. If it does not end, run `git -C <repo root> fetch origin` by hand to see why (remote URL, credential helper). Past the bound the directive is held and one MOMENTUM is posted; a hold does not lift by itself when the network returns, so `-ReleaseHold <id>` or post a newer directive |
+| Worker logs `wake_setup_failed: ...` | the wake stopped before a worktree was looked for: the worktree root is inside the checkout, or is not a path Windows can hold | Claude was not woken. The second identical failure holds the directive and posts a MOMENTUM. Start the worker with a valid `-WorktreeRoot`, then `-ReleaseHold <id>` |
+| Worker logs `run verdict ... wake_failed: ...` | the wake itself threw, for example the worktree vanished between being made and being entered | counted as a failed run, so it is bounded like one; the text after `wake_failed:` is the error |
 | Worker logs `worktree_unavailable: ...` | the worktree for a directive could not be made: `git worktree add` failed, a directory of that name is in the way and is not a worktree, or the worktree root is too deep to leave room for a name | Claude was not woken. The second identical failure holds the directive and posts a MOMENTUM. Fix the cause (move the directory, use a shorter `-WorktreeRoot`), then `-ReleaseHold <id>` |
 | Before this check existed: `git worktree add failed` on every tick, with an empty `attempts.json` and nothing on #80 | a long message id put the worktree's longest path over 260 characters | upgrade the worker from admitted main; until then a newer directive with a shorter id supersedes the stuck one |
 | Worker logs `kept worktree` | the wake left uncommitted or unpushed work | inspect it under the worktree root; push or discard it, then `git worktree remove <path>` |
