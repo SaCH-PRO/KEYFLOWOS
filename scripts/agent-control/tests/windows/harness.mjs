@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const WORKER = path.resolve('scripts/agent-control/claude-worker.ps1');
 const STUB_GH = path.resolve('scripts/agent-control/fixtures/stub-gh.ps1');
@@ -30,7 +30,11 @@ export function samePath(a, b) {
   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 }
 
-/** origin (bare) + an interactive clone + a worktree root outside it. */
+/**
+ * origin (bare) + an interactive clone + a worktree root outside it. Every
+ * world has its own machine-lock root: the proofs run in parallel, and none
+ * may take or meet the lock of a worker really installed on this machine.
+ */
 export function makeWorld() {
   // realpathSync.native, not realpathSync: a CI runner's temp dir is an 8.3
   // short path (RUNNER~1) that only the native call expands, while PowerShell
@@ -58,6 +62,7 @@ export function makeWorld() {
     tmp,
     root,
     wtRoot,
+    lockRoot: path.join(tmp, 'locks'),
     implSha: git(seed, 'rev-parse', 'HEAD'),
     comments: path.join(tmp, 'comments.json'),
     transcripts: path.join(tmp, 'transcripts.json'),
@@ -118,31 +123,40 @@ export function setTranscripts(world, transcripts) {
   fs.writeFileSync(world.transcripts, JSON.stringify(transcripts), 'utf8');
 }
 
+function workerArgs(world, extra) {
+  return [
+    // world.workerPath lets a proof run a copy of the worker whose
+    // neighbouring scripts it can remove or replace.
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', world.workerPath || WORKER,
+    '-RepoRoot', world.root, '-WorktreeRoot', world.wtRoot, '-LockRoot', world.lockRoot,
+    '-GhPath', STUB_GH, '-ClaudePath', STUB_CLAUDE,
+    ...extra,
+  ];
+}
+
+function workerEnv(world) {
+  return {
+    ...process.env,
+    KF_STUB_COMMENTS: world.comments,
+    KF_STUB_TRANSCRIPTS: world.transcripts,
+    KF_STUB_CLAUDE_LOG: world.claudeLog,
+    KF_STUB_GH_LOG: world.ghLog,
+    ...world.env,
+  };
+}
+
 export function worker(world, ...extra) {
-  const run = spawnSync(
-    'powershell',
-    [
-      // world.workerPath lets a proof run a copy of the worker whose
-      // neighbouring scripts it can remove or replace.
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', world.workerPath || WORKER,
-      '-RepoRoot', world.root, '-WorktreeRoot', world.wtRoot,
-      '-GhPath', STUB_GH, '-ClaudePath', STUB_CLAUDE,
-      ...extra,
-    ],
-    {
-      encoding: 'utf8',
-      timeout: 180000,
-      env: {
-        ...process.env,
-        KF_STUB_COMMENTS: world.comments,
-        KF_STUB_TRANSCRIPTS: world.transcripts,
-        KF_STUB_CLAUDE_LOG: world.claudeLog,
-        KF_STUB_GH_LOG: world.ghLog,
-        ...world.env,
-      },
-    },
-  );
+  const run = spawnSync('powershell', workerArgs(world, extra), { encoding: 'utf8', timeout: 180000, env: workerEnv(world) });
   return { status: run.status, out: (run.stdout || '') + (run.stderr || '') };
+}
+
+/**
+ * The worker as the installed launcher runs it: looping, not -Once. It ticks
+ * once and then sleeps for an hour, so it holds its locks until the proof
+ * stops it. Returns the child process; the caller must stop it.
+ */
+export function startWorker(world, ...extra) {
+  return spawn('powershell', workerArgs(world, ['-IntervalSeconds', '3600', ...extra]), { env: workerEnv(world), stdio: 'ignore' });
 }
 
 export const install = (world) => {
