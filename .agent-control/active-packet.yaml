@@ -6,14 +6,15 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE; approves the continuation block and adds seven requirements for it
   - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19
   - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004   # 6108531988; NO_STATE_CHANGE; integrate with main 7d2619c7
-  - CG-REVIEW-KF159-INTEGRATED-001   # 6109079503; NO_STATE_CHANGE; the fallback reading of f14adec5; the current authority
+  - CG-REVIEW-KF159-INTEGRATED-001   # 6109079503; NO_STATE_CHANGE; the fallback reading of f14adec5
+  - CG-REVIEW-KF159-ADMISSION-RECORD-001   # 6109741134; NO_STATE_CHANGE; accepts the fourth RETURN and orders the admission record; the current authority
 in_reply_to: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
 ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001
 ack_comment_id: 6025343912
-current_authority_message_id: CG-REVIEW-KF159-INTEGRATED-001
-current_authority_comment_id: 6109079503
-current_authority_ack_message_id: CC-ACK-KF159-INTEGRATED-001
-current_authority_ack_comment_id: 6109108101
+current_authority_message_id: CG-REVIEW-KF159-ADMISSION-RECORD-001
+current_authority_comment_id: 6109741134
+current_authority_ack_message_id: CC-ACK-KF159-ADMISSION-RECORD-001
+current_authority_ack_comment_id: 6109766740
 source_main: 7d2619c771cd008f21bae9c60ca348e3deaa07cd
 implementation_branch: impl/kf-meta-authority-effect-compat-001
 state: PROVING
@@ -23,7 +24,8 @@ production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-review_status: PENDING_CHATGPT_REVIEW
+# As CG-REVIEW-KF159-ADMISSION-RECORD-001 (6109741134) declares it. Transcribed, not decided here.
+review_status: ACCEPT_FOR_ADMISSION
 
 objective: >
   Repair the stale derived projection at the authority-effect boundary. Two
@@ -99,15 +101,34 @@ integration_requirements:   # CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRAT
   - full control-plane tests, the 193 mutations, the Windows worker proof, DAG validation, artifact binding and live status.mjs --verify
   - an ordinary push to the existing branch, the PR left draft, then one RETURN
 
-current_authorization:   # CG-REVIEW-KF159-INTEGRATED-001
-  control_artifacts: update the two packet artifacts to cite 6109079503; a new control-only head; source_head stays f14adec5
-  semantic_mutation: NOT_AUTHORIZED; any non-control edit needs a fresh exact-head semantic review
-  programme_credit: NOT_GRANTED
-  admission_or_checkpoint: NOT_GRANTED; a separate decision after the RETURN for the new head
-  state_reanchor: NOT_AUTHORIZED
-  force_push: NOT_AUTHORIZED
-  worker_restart: NOT_AUTHORIZED
+current_authorization:   # CG-REVIEW-KF159-ADMISSION-RECORD-001
+  decision: ACCEPT_FOR_ADMISSION for the bounded, control-only admission-record preparation step; the message says it is not yet READY_TO_MERGE
+  control_artifacts: >
+    one atomic control-only commit on the PR 159 branch that records this
+    decision and the earlier reading 6109079503 in the two packet artifacts;
+    source_main and source_head stay as they are
+  admission_record: >
+    in claude-return.yaml, review_status ACCEPT_FOR_ADMISSION and a top-level
+    semantic_review block with implementer claude and two entries: copilot
+    NOT_RUN, quota_exhausted, at ee642300, PR review 5483187666; chatgpt at
+    f14adec5 with the outcome message 6109079503 states and no unresolved
+    substantive finding. A transcription of ChatGPT's decision, not a review
+    by Claude
+  semantic_mutation: NOT_AUTHORIZED; the reviewed semantic head does not change
+  ready_for_review_transition: NOT_AUTHORIZED; a separate explicit decision
   merge: NOT_AUTHORIZED
+  auto_merge: NOT_AUTHORIZED
+  programme_admission_credit_or_checkpoint: NOT_GRANTED
+  next_packet_release: NOT_AUTHORIZED
+  gate_change: NOT_AUTHORIZED; a skipped test or scan is never converted to proof
+  issue_80_edit: NOT_AUTHORIZED
+  other_prs_and_worktrees: NOT_AUTHORIZED; PR 169, PR 155, PR 168, uncommitted research and other worktrees are not touched
+  production_or_worker_installation: NOT_AUTHORIZED
+  after_the_return: >
+    ChatGPT evaluates the admission record, the current base, the newest run
+    of every required workflow at the exact head, and the order of the
+    non-draft transition. The exact-head evaluator must be eligible before any
+    merge, and its draft-only stop is not admission evidence.
 
 anti_duplication: >
   Before adding code, verify that no existing normalization or compatibility
