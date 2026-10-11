@@ -347,3 +347,27 @@ jobs:
             echo "::error::$failures reconciliation(s) failed unexpectedly"
             exit 1
           fi
+
+      # The recorder runs in the job that merges. If that job dies between the
+      # merge and the record, nothing looks again: the PR is closed and nothing
+      # reads AUTO_MERGE. This step looks again, on every sweep, for every
+      # merge the workflow token ever made, and posts a record that is missing
+      # through the same recorder. It runs even when the sweep above failed,
+      # because a failed record is exactly what it exists to repair. It holds
+      # the job's mutation lock, never merges, and cannot resolve a conflict.
+      - name: Audit AUTO_MERGE records
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          audited=0
+          node scripts/agent-control/audit-merge-records.mjs --reconcile || audited=$?
+          case "$audited" in
+            0) echo "every autopilot merge has its AUTO_MERGE record" ;;
+            5) echo "::error::an autopilot merge still has no AUTO_MERGE record after reconciliation"; exit 1 ;;
+            4) echo "::error::a trusted control-room comment contradicts an AUTO_MERGE record; a person must look"; exit 1 ;;
+            *) echo "::error::the AUTO_MERGE audit did not complete (status $audited)"; exit 1 ;;
+          esac
