@@ -4172,6 +4172,80 @@ export const FLOW_TOOLS: FlowTool[] = [
     },
   },
   {
+    name: 'finance_safe_to_spend',
+    description:
+      'Calculate current safe-to-spend cash after tax, near-term bills, reserves and operating buffer.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Safe-to-spend calculation',
+      fields: {
+        cashBalance: { type: 'number', description: 'Current cash balance' },
+        taxReserved: { type: 'number', description: 'Tax amount reserved' },
+        billsDueNext30Days: { type: 'number', description: 'Bills due in the next 30 days' },
+        operatingBuffer: { type: 'number', description: 'Operating cash buffer' },
+        otherReserves: { type: 'number', description: 'Other active reserves' },
+        safeToSpend: { type: 'number', description: 'Cash considered safe to spend' },
+        currency: { type: 'string', description: 'Business currency' },
+        explanation: { type: 'array', description: 'Calculation explanation and known limitations' },
+      },
+    },
+  },
+  {
+    name: 'finance_cashflow_forecast',
+    description:
+      'Forecast future cash with expected, conservative and optimistic scenarios. This is a projection, not the historical finance_cashflow report.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: {
+      type: 'object',
+      properties: {
+        horizonDays: { type: 'number', description: 'Forecast horizon in days, 1-365 (default 90)' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Forward cash forecast',
+      fields: {
+        generatedAt: { type: 'string', description: 'Forecast generation time' },
+        currency: { type: 'string', description: 'Business currency' },
+        horizonDays: { type: 'number', description: 'Forecast horizon' },
+        openingCash: { type: 'number', description: 'Opening cash' },
+        projectedClosingCash: { type: 'number', description: 'Expected closing cash' },
+        lowestProjectedCash: { type: 'number', description: 'Lowest expected projected cash' },
+        dangerDates: { type: 'array', description: 'Dates where projected cash is below zero' },
+        scenarios: { type: 'object', description: 'Expected, conservative and optimistic series' },
+        inflows: { type: 'array', description: 'Forecast inflow events with probabilities' },
+        outflows: { type: 'array', description: 'Forecast outflow events' },
+        recommendations: { type: 'array', description: 'Forecast-derived recommendations' },
+      },
+    },
+  },
+  {
+    name: 'finance_money_moves',
+    description:
+      'Generate evidence-based candidate money moves from current receivables, quotes, tax, runway and dormant-customer state. Recommendations are not execution authority.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Candidate money moves',
+      fields: {
+        moves: { type: 'array', description: 'Candidate moves with impact, confidence, risk and recommended actions' },
+      },
+    },
+  },
+  {
     name: 'finance_balance_sheet',
     description:
       'Balance sheet as at a date — assets, liabilities and equity with their account lines.',
