@@ -438,6 +438,102 @@ negative_controls:
     proof_command: node --test --test-name-pattern="a failed fetch is the network" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
     timeout_ms: 300000
 
+  # --- one worker per repository and control issue on a machine --------------
+
+  - id: NC-WORKER-LOCK-SPANS-CHECKOUTS
+    claim: >
+      A second worker for the same repository and control issue refuses to
+      start from any checkout. The defect keeps the machine lock in the
+      checkout, which is how two workers served issue 80 for days.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "$MachineLockFile = Join-Path $LockRoot $MachineLockName"
+      replace: "$MachineLockFile = Join-Path $StateDir $MachineLockName"
+    proof_command: node --test --test-name-pattern="two checkouts, one issue" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-LOCK-KEYED-BY-ISSUE
+    claim: >
+      The machine lock is keyed by repository AND control issue. The defect
+      drops the issue, so a worker for one issue shuts out every other.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "$MachineLockName = 'worker-{0}-issue-{1}.lock' -f"
+      replace: "$MachineLockName = 'worker-{0}.lock' -f"
+    proof_command: node --test --test-name-pattern="a different issue number is a different lock" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-LOCK-OWNER-IS-PID-AND-START-TIME
+    claim: >
+      A lock is owned by a PID and a process start time. The defect trusts any
+      live process with the recorded PID, so after an unclean stop and PID
+      reuse the worker refuses to start.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  $owner.live = ([Math]::Abs(($actual - $recorded).TotalSeconds) -le $LockStartToleranceSeconds)"
+      replace: "  $owner.live = $true"
+    proof_command: node --test --test-name-pattern="PID reuse" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-MACHINE-LOCK-DEAD-OWNER-RECLAIMED
+    claim: >
+      A machine lock whose owner has died is reclaimed. The defect lets a dead
+      PID hold it, and no worker could start again until the file was deleted
+      by hand.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($null -eq $process) { $owner.stale ="
+      replace: "  if ($false) { $owner.stale ="
+    proof_command: node --test --test-name-pattern="a stale machine lock from a dead process" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-OLD-FORMAT-LOCK-RESPECTED
+    claim: >
+      A checkout lock written before start times were recorded still holds
+      while its PID lives. The defect treats it as stale, so a new worker
+      would start beside the old one that is still running.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "    $owner.live = ($owner.pid -ne $PID)"
+      replace: "    $owner.live = $false"
+    proof_command: node --test --test-name-pattern="written before start times were recorded" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-MACHINE-LOCK-RELEASED-ON-EXIT
+    claim: >
+      A worker that exits releases the machine lock. The defect leaves it
+      behind on every exit.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  Exit-LockFile -Path $MachineLockFile"
+      replace: "  # the machine lock is left behind"
+    proof_command: node --test --test-name-pattern="both locks are released on a normal exit" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-LOCK-RELEASED-ONLY-BY-OWNER
+    claim: >
+      A process releases only a lock it owns. The defect removes whatever
+      lock is there, so a dry run from another checkout would delete the
+      running worker's machine lock.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($owner -and $owner.mine) { Remove-Item"
+      replace: "  if ($owner) { Remove-Item"
+    proof_command: node --test --test-name-pattern="the modes that never wake claude" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-DRY-RUN-TAKES-NO-MACHINE-LOCK
+    claim: >
+      A dry run wakes nobody and takes no machine lock, so it still runs
+      beside the worker that serves the issue from another checkout. The
+      defect makes it compete for the lock and be refused.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($DryRun) { return $true }"
+      replace: "  if ($false) { return $true }"
+    proof_command: node --test --test-name-pattern="the modes that never wake claude" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
   - id: NC-AUTOPILOT-HOURLY-STATUS-UNDER-ERREXIT
     claim: >
       The hourly sweep reads the evaluator's status where `bash -e` cannot end
