@@ -125,6 +125,7 @@ import { LivekitModule } from './modules/livekit/livekit.module';
 import { ChatwootModule } from './modules/chatwoot/chatwoot.module';
 import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
 import { RiscModule } from './modules/risc/risc.module';
+import { AssuranceModule } from './modules/assurance/assurance.module';
 
 @Module({
   imports: [
@@ -241,6 +242,7 @@ import { RiscModule } from './modules/risc/risc.module';
     RealtimeModule,
     SecurityAuditModule,
     RiscModule,
+    AssuranceModule,
     ContractsModule,
 
     // KeyStore Service Marketplace — Human-powered deliverables platform
