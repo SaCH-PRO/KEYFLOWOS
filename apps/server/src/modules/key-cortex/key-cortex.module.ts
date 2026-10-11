@@ -132,6 +132,7 @@ import { KeyCortexCreativityService } from './key-cortex-creativity.service';
 import { KeyCortexReflectionService } from './key-cortex-reflection.service';
 import { KeyCortexIntuitionService } from './key-cortex-intuition.service';
 import { KeyCortexMetacognitionService } from './key-cortex-metacognition.service';
+import { KeyCortexOperationalSelfModelService } from './key-cortex-operational-self-model.service';
 import { KeyCortexConsciousnessService } from './key-cortex-consciousness.service';
 import { KeyCortexMoodDetectionService } from './key-cortex-mood-detection.service';
 import { KeyCortexSuggestionService } from './key-cortex-suggestion.service';
@@ -227,6 +228,7 @@ import { IdentityModule } from '../identity/identity.module';
 import { CommandModule } from '../command/command.module';
 import { IntegrationHubModule } from '../integration-hub/integration-hub.module';
 import { AuthModule } from '../../core/auth/auth.module';
+import { CapabilitiesModule } from '../capabilities/capabilities.module';
 
 @Module({
   imports: [
@@ -234,6 +236,7 @@ import { AuthModule } from '../../core/auth/auth.module';
     PrismaModule,
     RedisModule,
     AuthModule,
+    CapabilitiesModule,
 
     // HTTP client for external connector calls
     HttpModule,
@@ -333,6 +336,7 @@ import { AuthModule } from '../../core/auth/auth.module';
     KeyCortexReflectionService,
     KeyCortexIntuitionService,
     KeyCortexMetacognitionService,
+    KeyCortexOperationalSelfModelService,
     KeyCortexConsciousnessService,
     KeyCortexSuggestionService,
     KeyCortexGenomeContextService,
@@ -583,6 +587,7 @@ import { AuthModule } from '../../core/auth/auth.module';
     KeyCortexReflectionService,
     KeyCortexIntuitionService,
     KeyCortexMetacognitionService,
+    KeyCortexOperationalSelfModelService,
     KeyCortexConsciousnessService,
     KeyCortexSuggestionService,
     KeyCortexGenomeContextService,
