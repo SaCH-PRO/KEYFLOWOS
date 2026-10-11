@@ -13,6 +13,20 @@ scope:
   superseded: 0
   notes: []
 
+
+unlock_contract:
+  path: ""
+  state: DECLARED
+  classifications: []
+  product_effect: NONE
+  key_effect: NONE
+  development_effect: NONE
+  reliability_effect: NONE
+  net_value_verdict: null
+  proven: false
+  admitted: false
+  live_post_merge_verified: false
+
 completion_contract:
   scope_accounted_for: false
   architecture_invariant_satisfied: false
