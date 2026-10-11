@@ -383,9 +383,99 @@ negative_controls:
       that reconciled nothing.
     mutation:
       file: .github/workflows/agent-control-autopilot.yml
-      find: "| .number')\"; then"
-      replace: "| .number' || true)\"; then"
+      find: "list-open-impl-prs.mjs)\"; then"
+      replace: "list-open-impl-prs.mjs || true)\"; then"
     proof_command: node --test --test-name-pattern="a failed PR listing" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  # --- complete, read-only PR discovery (no wider merge authority) ------------
+
+  - id: NC-DISCOVERY-SWEEP-USES-DISCOVERY
+    claim: >
+      The sweep takes its PR list from complete discovery. `gh pr list`
+      returns the 30 newest open PRs and silently drops the rest.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "listing=\"$(node scripts/agent-control/list-open-impl-prs.mjs)\""
+      replace: "listing=\"$(gh pr list --state open --json number --jq '.[].number')\""
+    proof_command: node --test --test-name-pattern="takes its PR list from discovery" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DISCOVERY-OBSERVE-NEVER-MERGES
+    claim: >
+      A PR outside the merge window is evaluated without --merge. Complete
+      discovery must not become a wider merge authority.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "json=\"$(PR_NUMBER=\"$pr\" node scripts/agent-control/auto-merge-admitted.mjs)\" || status=$?"
+      replace: "json=\"$(PR_NUMBER=\"$pr\" node scripts/agent-control/auto-merge-admitted.mjs --merge)\" || status=$?"
+    proof_command: node --test --test-name-pattern="evaluated WITHOUT --merge" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DISCOVERY-UNREADABLE-MODE-NOT-MERGED
+    claim: >
+      An entry whose mode is not exactly `merge` is never reconciled with
+      merge authority.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "if [ \"$mode\" != \"merge\" ]; then"
+      replace: "if false; then"
+    proof_command: node --test --test-name-pattern="not exactly merge or observe" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DISCOVERY-READS-EVERY-PAGE
+    claim: >
+      Discovery reads every page of open PRs. One page is the truncation this
+      change exists to remove.
+    mutation:
+      file: scripts/agent-control/lib/pr-discovery.mjs
+      find: "    if (batch.length < PER_PAGE) return { prs: all, pages: page };"
+      replace: "    return { prs: all, pages: page };"
+    proof_command: node --test --test-name-pattern="every open PR is listed" scripts/agent-control/tests/pr-discovery.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DISCOVERY-MERGE-WINDOW-NOT-WIDENED
+    claim: >
+      Only an implementation PR among the newest open PRs is in merge mode;
+      the merge-mode set equals what the old 30-PR listing produced.
+    mutation:
+      file: scripts/agent-control/lib/pr-discovery.mjs
+      find: "      mode: index < MERGE_WINDOW ? SWEEP_MODES.MERGE : SWEEP_MODES.OBSERVE,"
+      replace: "      mode: SWEEP_MODES.MERGE,"
+    proof_command: node --test --test-name-pattern="merge-mode set equals what the old" scripts/agent-control/tests/pr-discovery.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DISCOVERY-MERGE-WINDOW-IS-THIRTY
+    claim: >
+      The merge window is 30, the number the sweep was always handed. A larger
+      constant is a wider merge authority and needs its own decision.
+    mutation:
+      file: scripts/agent-control/lib/pr-discovery.mjs
+      find: "export const MERGE_WINDOW = 30;"
+      replace: "export const MERGE_WINDOW = 100;"
+    proof_command: node --test --test-name-pattern="the merge window is the 30 newest" scripts/agent-control/tests/pr-discovery.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DISCOVERY-FORK-PR-EXCLUDED
+    claim: >
+      A fork's PR on an impl/ branch is not handed to the evaluator, which
+      checks the branch name but not the repository it lives in.
+    mutation:
+      file: scripts/agent-control/lib/pr-discovery.mjs
+      find: "    if (String(headRepo || '').toLowerCase() !== String(repo).toLowerCase()) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="a fork PR on an impl/ branch" scripts/agent-control/tests/pr-discovery.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DISCOVERY-INCOMPLETE-LISTING-FAILS
+    claim: >
+      A listing that could not be read in full exits non-zero. Exit 0 with an
+      empty list would be a green sweep that reconciled nothing.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "  process.exit(2);"
+      replace: "  process.exit(0);"
+    proof_command: node --test --test-name-pattern="a failed page exits 2" scripts/agent-control/tests/pr-discovery.spec.mjs
     timeout_ms: 120000
 
   # --- the AUTO_MERGE record --------------------------------------------------
