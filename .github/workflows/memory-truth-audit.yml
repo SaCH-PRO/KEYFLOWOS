@@ -1,0 +1,32 @@
+name: Memory Truth Audit
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/server/src/modules/ai/**'
+      - 'apps/server/src/modules/key-cortex/**'
+      - 'packages/db/prisma/**'
+      - 'scripts/memory-audit/**'
+      - '.github/workflows/memory-truth-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run memory truth audit
+        run: node scripts/memory-audit/memory-truth-audit.mjs
+
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-truth-audit
+          path: .proof/memory-truth-audit.json
+          if-no-files-found: error
