@@ -5,15 +5,17 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001   # 6025258558; NO_STATE_CHANGE
   - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE
   - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19
-  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004   # 6108531988; NO_STATE_CHANGE; integrate with main 7d2619c7; the current authority
-current_authority_message_id: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004
-current_authority_comment_id: 6108531988
-ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004
-ack_comment_id: 6108578719
+  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004   # 6108531988; NO_STATE_CHANGE; integrate with main 7d2619c7
+  - CG-REVIEW-KF159-INTEGRATED-001   # 6109079503; NO_STATE_CHANGE; the fallback reading of f14adec5; the current authority
+current_authority_message_id: CG-REVIEW-KF159-INTEGRATED-001
+current_authority_comment_id: 6109079503
+ack_message_id: CC-ACK-KF159-INTEGRATED-001
+ack_comment_id: 6109108101
 prior_ack_message_ids:
   - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001   # 6025343912
   - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025467329
   - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051141358
+  - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004   # 6108578719
 progress_message_ids:
   - CC-PROGRESS-META-AUTHORITY-EFFECT-COMPAT-001   # 6025969876; the seven continuation requirements mapped to tests
 contradiction_message_ids: []
@@ -25,6 +27,7 @@ return_message_id: null
 previous_return_message_ids:
   - CC-RETURN-META-AUTHORITY-EFFECT-COMPAT-001
   - CC-RETURN-META-AUTHORITY-EFFECT-COMPAT-002
+  - CC-RETURN-META-AUTHORITY-EFFECT-COMPAT-003   # 6109041941; for directive 004, from head ee642300
 never_posted_return_message_ids: []
 source_main: 7d2619c771cd008f21bae9c60ca348e3deaa07cd
 source_head: f14adec5251aa3a69132c336efcb1819fd5b6a95
@@ -47,16 +50,19 @@ summary: >
   7d2619c7 when PR 166 merged, and commit 67fb732a then copied the 23
   negative controls of PR 166 into this branch's manifest without the code
   they mutate. This head integrates main by an ordinary merge commit,
-  f14adec5, which is the new semantic head. Every commit after it changes
-  control artifacts only. The integrated head has not been read by any
-  reviewer; see semantic_head_review.
+  f14adec5, which is the semantic head. Every commit after it changes
+  control artifacts only. This commit is the second of them. It records the
+  reading of f14adec5 that ChatGPT wrote on #80 in message 6109079503; see
+  semantic_head_review. No script, test, manifest, fixture or document
+  changes with it.
 
 health_reason: >
-  YELLOW for three reasons. The semantic head is new and nobody independent
-  has read it. The outcome for the head that carries this file is not known
-  yet. And the unattended worker could not deliver the directive, so this
-  work was done by an operator-started session outside the worker-owned
-  worktree; see delivery. The code and its local proof have no open failure.
+  YELLOW is about process. The primary reviewer could not run at any head of
+  this PR, the outcome for the head that carries this file is not known yet,
+  and the PR is still draft, so the admission step of the gate has never run
+  on it. The code and its local proof have no open failure. Message
+  6109079503 states its own health for the semantic head; that value is
+  ChatGPT's and is not copied here.
 
 integration:
   why: >
@@ -90,6 +96,13 @@ integration:
     RECOVERY-021. No workflow or gate was changed by this packet.
 
 delivery:
+  round: directive 004 only; see this_round for the commit that carries this file
+  this_round: >
+    CG-REVIEW-KF159-INTEGRATED-001 was delivered by the unattended worker. Its
+    id is 30 characters, so the worktree path is inside the limit. This commit
+    was made in the worker-owned worktree named after that id, detached at the
+    branch head, and pushed as HEAD to the branch because the branch is
+    checked out in C:/kf-compat159.
   expected: the directive asked for execution through the unattended worker in its own worktree
   observed: >
     The worker selected the directive at 2026-10-11T11:28:10Z and failed at
@@ -214,6 +227,7 @@ replay:
     - 108 CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003 6051089263 NO_STATE_CHANGE
     - 109 CG-REVIEW-META-CONTROL-LOOP-RECOVERY-SEMANTIC-PASS-001 6092797415 NO_STATE_CHANGE
     - 110 CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004 6108531988 NO_STATE_CHANGE
+    - 111 CG-REVIEW-KF159-INTEGRATED-001 6109079503 NO_STATE_CHANGE
   effective_projection:
     active_packet: KF-EXEC-AUTH-FAIL-CLOSED-001
     state: FIXING_PROOF_FAILURES
@@ -224,14 +238,17 @@ replay:
     merge_authority: false
     production_touched: false
     checkpointed: KF-EXEC-K12-001, KF-EXEC-EXTFX-001, KF-EXEC-TENANT-001, KF-EXEC-AUTH-001, KF-EXEC-ACTION-001
-    anchored_to: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004 (6108531988)
+    anchored_to: CG-REVIEW-KF159-INTEGRATED-001 (6109079503)
     reconciliation: CONSISTENT with the newest authority on issue 80 and with repository truth
   live: >
     On the working tree of the semantic head f14adec5, on 2026-10-11,
     status.mjs --verify against the live issue exited 0 and reported
     CONSISTENT, checkpoint RECOVERY-021 at generation 87, 23 typed effects
     applied, observed generation 110 of 110, anchored to the directive
-    6108531988, with the projection above.
+    6108531988. Run again the same day on ee642300, whose scripts are those
+    of f14adec5, after message 6109079503 was posted: exit 0, CONSISTENT, 24
+    typed effects applied, observed generation 111 of 111, anchored to that
+    message, with the projection above.
   not_an_authority_message: >
     The continuation range holds a REVIEW posted from an account outside the
     allowlist, 5997061944, declaring PACKET_ADMISSION for PR 120. It is
@@ -413,6 +430,18 @@ previous_head_67fb732a: >
   source_head. Agent Control Worker Proof run 38077315718 failed with 462
   tests, 461 passed, 1 skipped, and 170 controls live with 23 vacuous.
 
+previous_head_ee642300: >
+  The first artifact head on the integrated semantic head, reported in the
+  third RETURN (6109041941). Every required workflow succeeded on attempt 1:
+  CI/CD Pipeline 38137007267, Agent Control Gate 38137007303 and again
+  38137056186 after the description edit, Branch divergence 38137007273 and
+  38137004943, Agent Control Worker Proof 38137007256 with 193 of 193
+  controls live (Windows 516 tests, 515 passed, 1 named skip; portable 492
+  tests, 491 passed, 1 named skip), and DAST (HawkScan) 38137007294 with
+  every scan step skipped because HAWK_API_KEY is not set; no scan ran. The
+  PR was draft, so the admission step of the gate did not run. The primary
+  reviewer was NOT_RUN there too (PR review 5483187666).
+
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
     status: PENDING
@@ -432,33 +461,69 @@ ai_review:
   primary: copilot-pull-request-reviewer[bot]
   fallback: chatgpt
   self_review: none; Claude does not review this change
-  at_the_semantic_head_f14adec5: no reading by anyone exists
+  primary_at_semantic_head: none exists; the merge commit and the first artifact commit were pushed together, so the bot was asked once, at ee642300
+  primary_at_first_artifact_head: NOT_RUN, reason quota_exhausted (PR review 5483187666 at ee642300); it is never counted towards the gate
+  fallback_at_semantic_head: CG-REVIEW-KF159-INTEGRATED-001 (6109079503), written by ChatGPT for f14adec5; see semantic_head_review
   at_the_head_that_carries_this_file: PENDING
 
-semantic_head_review:   # of f14adec5; empty because nobody has read it
+semantic_head_review:   # the reading of f14adec5, before this commit; the reading of the head that carries this file is PENDING
   reviewed_head: f14adec5251aa3a69132c336efcb1819fd5b6a95
-  reviews: []
-  why_empty: >
-    The directive requires a fresh independent reading of the integrated
-    head. The earlier reading is of 2a3dac19, an ancestor of this head and
-    not a descendant, so the evaluator's lineage rule does not carry it
-    forward and neither does this file. It is kept under
-    previous_head_2a3dac19 as history.
-  what_a_reader_needs: >
-    main..f14adec5 is the same ten files as main..2a3dac19 was against its
-    own base, with a manifest that now adds to the manifest of PR 166. The
-    alias code and its spec are byte-for-byte unchanged.
+  reviews:
+    - provider: copilot
+      reviewer: copilot-pull-request-reviewer[bot]
+      reviewed_head: ee642300a4cca1196fdc8a40258554eca5289dc0
+      outcome: NOT_RUN
+      reason: quota_exhausted
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/159#pullrequestreview-5483187666
+    - provider: chatgpt
+      reviewer: chatgpt
+      reviewed_head: f14adec5251aa3a69132c336efcb1819fd5b6a95
+      outcome: PASS
+      reason: null
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6109079503
+      message_id: CG-REVIEW-KF159-INTEGRATED-001
+  primary_text: >
+    The bot reviewed nothing. It said it was unable to review this pull
+    request because the user who requested it has reached their quota limit.
+  primary_head: >
+    The primary entry names ee642300, the only head on the integrated
+    semantics the bot was asked at. It descends from f14adec5 and differs
+    from it in the two artifact files only, so it carries the same semantics.
+    Once this commit is the PR head, ee642300 is neither source_head nor the
+    PR head, and an admission record that keeps this entry needs the lineage
+    evidence the evaluator asks for: descends from source_head, ancestor of
+    the PR head, no file changed outside .agent-control.
+  fallback_reading: >
+    ChatGPT read the integrated head and recorded the reading in message
+    6109079503, in three top-level fields: reviewed_head f14adec5, the
+    outcome recorded above and unresolved_substantive_findings 0. The message
+    says it is a reading of that head and not an inheritance of the earlier
+    one for 2a3dac19. It lists what it does not count: the one test that
+    hosted runners skip, the dormant DAST job, and the draft-only run of the
+    gate. Claude did not review this change and records the outcome only as
+    ChatGPT wrote it.
+  earlier_reading: >
+    The reading of 2a3dac19 (6051089263) is not an entry here. 2a3dac19 is an
+    ancestor of f14adec5 and not a descendant, so the lineage rule does not
+    carry it forward. It is kept under previous_head_2a3dac19 as history.
+  not_covered: >
+    That reading is about the semantic head. The head that carries this file
+    differs from it only in the two artifact files, and its own reading is
+    PENDING in exact_head_proof.
   record_ownership: >
-    The semantic_review block and review_status are written at admission by
-    ChatGPT, and this file carries neither.
+    These entries have the shape of the admission record, and they are not
+    that record. The semantic_review block and review_status are written at
+    admission by ChatGPT, and this file carries neither.
 
 scope_ledger:
   declared: the eleven proof obligations of the first directive, the seven continuation requirements of ACK-002, and the integration requirements of directive 004
   resolved: all of them on the semantic head, as listed in proof_matrix
-  remaining: the outcome of the checks on the head that carries this file, an independent reading of f14adec5, the RETURN for directive 004, and ChatGPT admission
+  remaining: the outcome of the checks on the head that carries this file, the RETURN for CG-REVIEW-KF159-INTEGRATED-001, the admission step of the gate once the PR leaves draft, and ChatGPT admission
   deferred: none
   dropped: none
-  superseded: semantic head 2a3dac19 by f14adec5; artifact heads c7c6105c and dc4dcd81 by the head that carries this file
+  superseded: semantic head 2a3dac19 by f14adec5; artifact heads c7c6105c, dc4dcd81 and ee642300 by the head that carries this file
 
 deviations_from_packet:
   - >
@@ -561,7 +626,6 @@ settled_contradictions: []
 next_action: >
   Wait for every check on the head that carries this file. Read each result
   from the live run. Then post the RETURN on issue 80, once, with
-  merge_authority false, in reply to
-  CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004, and
-  wait for ChatGPT. Do not merge. Do not touch PR 155. No further semantic
-  change.
+  merge_authority false, in reply to CG-REVIEW-KF159-INTEGRATED-001, and
+  wait for ChatGPT's separate admission decision. Leave the PR draft. Do not
+  merge. Do not touch PR 155. No further semantic change.
