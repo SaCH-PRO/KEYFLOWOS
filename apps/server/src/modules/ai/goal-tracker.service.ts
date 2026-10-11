@@ -191,18 +191,33 @@ export class GoalTrackerService {
       }
     }
 
-    const updated = await this.prisma.client.businessGoal.update({
-      where: { id: goalId },
+    // The initial read is tenant-scoped, but the write must carry the same
+    // scope too. A prior read is not an authorization token: using only
+    // goalId here reintroduces a cross-tenant write if identifiers leak or a
+    // record changes between read and write.
+    const progressUpdate = await this.prisma.client.businessGoal.updateMany({
+      where: { id: goalId, businessId },
       data: { currentValue },
     });
+    if (progressUpdate.count === 0) return null;
 
-    // Auto-mark as achieved if target reached
+    let updated = await this.prisma.client.businessGoal.findFirst({
+      where: { id: goalId, businessId },
+    });
+    if (!updated) return null;
+
+    // Auto-mark as achieved if target reached. Keep the tenant predicate on
+    // the transition itself, and only emit the event when this call actually
+    // performed the state change.
     if (goal.targetValue && currentValue >= goal.targetValue && goal.status === 'active') {
-      await this.prisma.client.businessGoal.update({
-        where: { id: goalId },
+      const achieved = await this.prisma.client.businessGoal.updateMany({
+        where: { id: goalId, businessId, status: 'active' },
         data: { status: 'achieved' },
       });
-      this.events.emit('goal.achieved', { businessId, goalId });
+      if (achieved.count > 0) {
+        updated = { ...updated, status: 'achieved' };
+        this.events.emit('goal.achieved', { businessId, goalId });
+      }
     }
 
     return { ...updated, progress: this.calculateProgress(currentValue, goal.targetValue, goal.deadline) };
@@ -277,11 +292,14 @@ export class GoalTrackerService {
       }
     }
 
-    // Store suggested actions
-    await this.prisma.client.businessGoal.update({
-      where: { id: goalId },
+    // Store suggested actions with the same tenant scope used to resolve the
+    // goal. The earlier read proves what we observed, not what this write may
+    // mutate.
+    const stored = await this.prisma.client.businessGoal.updateMany({
+      where: { id: goalId, businessId },
       data: { actions: actions as any },
     });
+    if (stored.count === 0) return [];
 
     return actions;
   }
