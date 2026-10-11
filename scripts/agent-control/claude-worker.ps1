@@ -99,6 +99,16 @@ $WorkerContractVersion = 2
 $MaxIdenticalAttempts = 2
 $MaxTotalAttempts = 5
 
+# Windows refuses a path of 260 characters unless core.longpaths is set, and a
+# worktree is named after its directive. A long message id therefore made
+# 'git worktree add' fail on every tick (265 characters for
+# CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004). The
+# worktree's longest tracked path must fit in this budget; the rest of the 260
+# is left for what a session writes beside the tracked files.
+$WorktreePathBudget = 240
+# Below this a shortened name no longer identifies its directive.
+$MinWorktreeNameLength = 16
+
 if (-not $RepoRoot) {
   # Nested Join-Path: Windows PowerShell 5.1 accepts only -Path and -ChildPath.
   $RepoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
@@ -449,26 +459,111 @@ function Resolve-WorktreeBase {
   return 'origin/main'
 }
 
+# A worktree that cannot be made is a failed attempt, not a tick error: the
+# same directive would fail the same way every interval, unseen on the control
+# room. The reason carries no path separators; it is quoted into a YAML
+# escalation.
+function New-WorktreeUnavailable {
+  param([string]$Reason)
+  $failure = New-Object System.InvalidOperationException($Reason)
+  $failure.Data['keyflow_attempt_reason'] = "worktree_unavailable: $Reason"
+  return $failure
+}
+
+function Get-LongestTrackedPathLength {
+  param([string]$Base)
+  $listing = Invoke-Native git @('-C', $RepoRoot, '-c', 'core.quotepath=false', 'ls-tree', '-r', '--name-only', $Base)
+  if ($listing.code -ne 0) { throw (New-WorktreeUnavailable "cannot list the files of $Base") }
+  $longest = 0
+  foreach ($line in $listing.out) { if ($line.Length -gt $longest) { $longest = $line.Length } }
+  return $longest
+}
+
+# Eight hex digits of the SHA-256 of the raw message id. This, not the length
+# of the name's head, is what identifies a directive's shortened worktree: it
+# depends on the id alone.
+function Get-WakeWorktreeTag {
+  param([string]$MessageId)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try { $digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($MessageId)) } finally { $sha.Dispose() }
+  return -join ($digest[0..3] | ForEach-Object { $_.ToString('x2') })
+}
+
+# The directory a NEW worktree for a directive is made in. Its full id whenever
+# the longest tracked path then fits the budget; otherwise the head of the id
+# and its tag, so two long ids that share a head do not collide. How much head
+# fits depends on the base's longest path at that moment, so this is only ever
+# asked when no worktree for the directive exists yet (Find-ShortenedWorktree).
+function Get-WakeWorktreeName {
+  param([string]$MessageId, [string]$Root, [string]$Base)
+  $safe = Get-SafeId $MessageId
+  $room = $WorktreePathBudget - $Root.Length - 2 - (Get-LongestTrackedPathLength -Base $Base)
+  if ($safe.Length -le $room) { return $safe }
+  if ($room -lt $MinWorktreeNameLength) {
+    throw (New-WorktreeUnavailable "the worktree root leaves $room characters for a worktree name at $Base and $MinWorktreeNameLength are needed; use a shorter -WorktreeRoot")
+  }
+  $tag = Get-WakeWorktreeTag $MessageId
+  return $safe.Substring(0, $room - 9) + '-' + $tag
+}
+
+# The shortened worktree an earlier attempt at this directive was given, if
+# one is there. A retry must run where the first attempt left its work, and
+# the name that attempt got cannot be recomputed: the base may have gained or
+# lost its longest path since, which changes how much of the id fits. So the
+# directory is looked for by what does not change -- the tag, and a head that
+# is a prefix of this id -- instead of being derived again.
+function Find-ShortenedWorktree {
+  param([string]$MessageId, [string]$Root)
+  $safe = Get-SafeId $MessageId
+  $tag = Get-WakeWorktreeTag $MessageId
+  $found = @(Get-ChildItem -LiteralPath $Root -Directory -Filter "*-$tag" -ErrorAction SilentlyContinue | Where-Object {
+      $_.Name.Length -gt 9 -and $safe.StartsWith($_.Name.Substring(0, $_.Name.Length - 9), [System.StringComparison]::OrdinalIgnoreCase)
+    })
+  if ($found.Count -gt 1) {
+    # Two directories claim one directive. Choosing one could run the retry
+    # beside the wrong partial work; a person decides.
+    throw (New-WorktreeUnavailable "$($found.Count) worktree directories carry the tag $tag for this directive; refusing to choose between them")
+  }
+  if ($found.Count -eq 1) { return $found[0].FullName }
+  return $null
+}
+
 function New-WakeWorktree {
   param([object]$Directive)
   $root = Get-WorktreeRoot
   if (-not (Test-Path $root)) { New-Item -ItemType Directory -Path $root -Force | Out-Null }
-  $path = Join-Path $root (Get-SafeId $Directive.message_id)
 
   if ((Invoke-Native git @('-C', $RepoRoot, 'fetch', 'origin', '--prune', '--quiet')).code -ne 0) { throw 'git fetch origin failed; not waking claude on a stale base' }
 
+  # A worktree made under the directive's full id is found first, whatever the
+  # tree measures now: partial work from an earlier attempt lives there.
+  $path = Join-Path $root (Get-SafeId $Directive.message_id)
+  $base = $null
+  if (-not (Test-Path $path)) {
+    # Then a shortened one from an earlier attempt, found by its tag. Only a
+    # directive with no worktree at all is given a newly computed name.
+    $earlier = Find-ShortenedWorktree -MessageId $Directive.message_id -Root $root
+    if ($earlier) { $path = $earlier }
+    else {
+      $base = Resolve-WorktreeBase -Directive $Directive
+      $path = Join-Path $root (Get-WakeWorktreeName -MessageId $Directive.message_id -Root $root -Base $base)
+    }
+  }
+  $name = Split-Path -Leaf $path
+
   if (Test-Path $path) {
     if (-not (Test-RegisteredWorktree -Path $path)) {
-      throw "$path exists but is not a worktree of $RepoRoot; refusing to touch it"
+      throw (New-WorktreeUnavailable "$name exists in the worktree root but is not a worktree of this repository; refusing to touch it")
     }
     Write-WorkerLog 'INFO' "reusing worktree $path"
     return @{ path = $path; base = '(reused)' }
   }
 
-  $base = Resolve-WorktreeBase -Directive $Directive
   # Detached, because a branch can be checked out in only one worktree and the
   # interactive checkout may already hold it.
-  if ((Invoke-Native git @('-C', $RepoRoot, 'worktree', 'add', '--detach', $path, $base)).code -ne 0) { throw "git worktree add failed for $path at $base" }
+  if ((Invoke-Native git @('-C', $RepoRoot, 'worktree', 'add', '--detach', $path, $base)).code -ne 0) {
+    throw (New-WorktreeUnavailable "git worktree add failed for $name at $base")
+  }
   Write-WorkerLog 'INFO' "created worktree $path at $base"
   return @{ path = $path; base = $base }
 }
@@ -641,7 +736,18 @@ function Invoke-WorkerTick {
     return
   }
 
-  $worktree = New-WakeWorktree -Directive $directive
+  try { $worktree = New-WakeWorktree -Directive $directive }
+  catch {
+    $reason = $_.Exception.Data['keyflow_attempt_reason']
+    if (-not $reason) { throw }   # a failed fetch is the network's, and is not counted against the directive
+    Write-WorkerLog 'ERROR' "$reason for $($directive.message_id); claude was not woken"
+    $entry = Register-FailedAttempt -Directive $directive -Reason $reason
+    if ($entry.held) {
+      Write-WorkerLog 'HELD_RETRYABLE' "$($directive.message_id) held after attempt $($entry.attempts): $($entry.held_reason)"
+      Send-HoldEscalation -Entry $entry
+    }
+    return
+  }
   $result = Invoke-ClaudeForDirective -Directive $directive -Worktree $worktree
 
   if ($result.ok) {
