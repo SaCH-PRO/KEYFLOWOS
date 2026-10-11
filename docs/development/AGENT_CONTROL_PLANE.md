@@ -537,6 +537,41 @@ The rules:
   must be GREEN, YELLOW, RED or absent. Any other value, AMBER included, fails
   closed before the effect applies (`CONTROL_EFFECT_HEALTH_INVALID`). It is
   never translated.
+- **A historical spelling is an alias, never an effect.** Set by
+  CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001 (packet
+  KF-META-AUTHORITY-EFFECT-COMPAT-001). Two valid REVIEWs for
+  KF-EXEC-AUTH-FAIL-CLOSED-001 declared an effect outside the table above,
+  and #80 is append-only, so they cannot be corrected in place.
+  `CONTROL_EFFECT_ALIASES` in `lib/authority-effects.mjs`, beside
+  `readEffect()`, is the one place such a spelling is given a meaning:
+
+  | Declared on #80 | Read as | First carried by |
+  |---|---|---|
+  | `BOUNDED_CORRECTION` | `PACKET_CORRECTION` | 6011507550, `CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001` |
+  | `AUTHORIZE_CONTROL_BINDING` | `NO_STATE_CHANGE` | 6018421547, `CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003` |
+
+  - The alias is resolved first, and every rule after that is the canonical
+    effect's own: which message types may carry it, the fields it needs, the
+    health and production rules, and what it projects. An alias on a HOLD or a
+    RESUME is `CONTROL_EFFECT_TYPE_MISMATCH`, as its canonical effect would be.
+  - It adds no effect and no state. The vocabulary is still the seven effects
+    in the table, and `AUTHORIZE_CONTROL_BINDING` grants nothing: no
+    admission, checkpoint, release, hold, resume or merge authority, whatever
+    else the message says.
+  - The match is the exact spelling. Any other unknown token, a different
+    case or a near miss included, still stops the fold with
+    `CONTROL_EFFECT_UNKNOWN`.
+  - The spelling is kept as evidence: `readEffect()` returns it as
+    `declared_effect`, and each entry of the reduction's `applied` list
+    carries it beside the canonical `effect`. No state transition reads it,
+    and it is never written into the projection.
+  - New authority uses the canonical names. An alias exists for a spelling
+    that is already on #80; adding one is a reviewed change to that table,
+    with the real comment recorded and replayed, and never a way to accept a
+    new word.
+  - An alias is not a recovery. A malformed message still needs a reviewed
+    re-anchor (below); an alias only applies to a valid envelope whose effect
+    was written in a spelling the table lists.
 - **Production safety is checked on every effect.** No effect projects
   `production_touched`, so any value other than `false` fails closed, holds and
   NO_STATE_CHANGE included (`CONTROL_EFFECT_PRODUCTION_TOUCHED`).
@@ -587,7 +622,8 @@ The rules:
   DERIVED_STATE_STALE_AUTHORITY, with `blocked` naming the message and the
   reason, or AUTHORITY_MALFORMED. A message is unfoldable when it:
   - has no `control_effect`;
-  - has an unknown effect, or one its type cannot carry;
+  - has an unknown effect, or one its type cannot carry (a listed historical
+    spelling counts as its canonical effect);
   - is malformed;
   - names `programme` or `programme_action`;
   - is missing a required field;

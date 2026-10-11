@@ -224,7 +224,12 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           set -uo pipefail
-          json="$(node scripts/agent-control/auto-merge-admitted.mjs --merge)"; status=$?
+          # `shell: bash` runs this script under `bash -e`, so the evaluator's
+          # status must be taken in the same list as the command. Read on a
+          # later line, a non-zero status had already ended the step and "not
+          # eligible" failed the job like an error.
+          status=0
+          json="$(node scripts/agent-control/auto-merge-admitted.mjs --merge)" || status=$?
           echo "$json"
           {
             echo "json<<KFEOF"
@@ -233,41 +238,38 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           # 0 merged, 3 not eligible (an ordinary, expected outcome), 2 error.
           # F5: an evaluator error must fail the job, never look like a no-op.
-          if [ "$status" = "2" ]; then
-            echo "::error::admission evaluator failed"
-            exit 1
-          fi
-          exit 0
+          # Only the two statuses the evaluator documents as a verdict pass;
+          # a crash or a signal is an error whatever number it left behind.
+          case "$status" in
+            0|3) exit 0 ;;
+            *)
+              echo "::error::admission evaluator failed for PR #$PR_NUMBER with status $status"
+              exit 1
+              ;;
+          esac
 
       - name: Record automatic merge
         if: steps.pr.outputs.number != '' && fromJSON(steps.merge.outputs.json).eligible == true
-        uses: actions/github-script@v7
+        shell: bash
         env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
           MERGE_JSON: ${{ steps.merge.outputs.json }}
-        with:
-          script: |
-            const result = JSON.parse(process.env.MERGE_JSON);
-            if (!result.merge || result.merge.merged !== true) { core.info('eligible but not merged'); return; }
-            // Merge identity dedupe, so a replay cannot double-post. (F3)
-            const marker = `<!-- keyflow-autopilot-merge:${result.merge.sha} -->`;
-            const existing = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: 80, per_page: 100,
-            });
-            if (existing.some((c) => c.body && c.body.includes(marker))) return;
-            const body = [
-              marker,
-              '```yaml',
-              'message_id: AUTO-MERGE-' + result.merge.sha,
-              'message_type: AUTO_MERGE',
-              'sender: github-autopilot',
-              'pr_number: ' + result.pr,
-              'admitted_head: ' + result.head_sha,
-              'merged: true',
-              'merge_sha: ' + result.merge.sha,
-              'next_action: post_merge_verify_and_checkpoint',
-              '```',
-            ].join('\n');
-            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: 80, body });
+        # One recorder for both merging jobs (lib/merge-record.mjs), deduped on
+        # the merge commit so a replay cannot double-post. (F3)
+        run: |
+          set -uo pipefail
+          recorded=0
+          node scripts/agent-control/record-auto-merge.mjs || recorded=$?
+          case "$recorded" in
+            0) echo "AUTO_MERGE record is on the control room" ;;
+            3) echo "eligible but not merged; nothing to record" ;;
+            *)
+              echo "::error::PR #$PR_NUMBER was merged but its AUTO_MERGE record is not confirmed (recorder status $recorded)"
+              exit 1
+              ;;
+          esac
 
   hourly-reconcile-open-prs:
     permissions:
@@ -300,15 +302,40 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -uo pipefail
-          mapfile -t prs < <(gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("impl/")) | .number')
+          # A failed listing is not "no open PRs": inside a process
+          # substitution its status was lost and the job passed having
+          # reconciled nothing.
+          if ! listing="$(gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("impl/")) | .number')"; then
+            echo "::error::could not list open pull requests; nothing was reconciled"
+            exit 1
+          fi
+          mapfile -t prs <<< "$listing"
           failures=0
           for pr in "${prs[@]:-}"; do
             [ -z "$pr" ] && continue
             echo "::group::Reconciling PR #$pr"
-            PR_NUMBER="$pr" node scripts/agent-control/auto-merge-admitted.mjs --merge
-            status=$?
+            # `shell: bash` runs this script under `bash -e`. The status is
+            # taken in the same list as the command, so a non-zero evaluator
+            # reaches the `case` below instead of ending the step at the first
+            # PR that is not eligible.
+            status=0
+            json="$(PR_NUMBER="$pr" node scripts/agent-control/auto-merge-admitted.mjs --merge)" || status=$?
+            echo "$json"
             case "$status" in
-              0) echo "PR #$pr merged at its admitted head" ;;
+              0)
+                # A merge here owes the same durable AUTO_MERGE record an
+                # event-driven merge leaves. A record that cannot be confirmed
+                # fails the job: the merge stands, and its missing evidence
+                # must not look like a clean sweep.
+                recorded=0
+                MERGE_JSON="$json" node scripts/agent-control/record-auto-merge.mjs || recorded=$?
+                if [ "$recorded" = "0" ]; then
+                  echo "PR #$pr merged at its admitted head; AUTO_MERGE record is on the control room"
+                else
+                  echo "::error::PR #$pr was merged but its AUTO_MERGE record is not confirmed (recorder status $recorded)"
+                  failures=$((failures+1))
+                fi
+                ;;
               3) echo "PR #$pr not eligible (expected, no action)" ;;
               # F5: an unexpected error is surfaced and fails the job rather
               # than being discarded by `|| true` as the prototype did.

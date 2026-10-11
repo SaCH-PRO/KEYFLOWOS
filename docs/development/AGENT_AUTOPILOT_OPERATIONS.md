@@ -118,6 +118,24 @@ authenticated `gh` and Claude sessions. It stores no credential.
   `.agent-control/.worker/install.json` matches its contract version. An
   autostart left from an older worker stays a no-op (`WAITING_OPERATOR`) until
   `install-claude-worker.ps1` is re-run from admitted code.
+- **Own code checked every tick.** A running worker holds only
+  `claude-worker.ps1` in memory and reads `select-directive.ps1`,
+  `select-directive.mjs` and `evaluate-run.ps1` from disk on each tick. If any
+  is gone it logs `WAITING_OPERATOR worker_code_missing`, does not poll and
+  does not wake Claude. `-Status` shows the same on its `code` line.
+
+### Where to run the worker from
+
+Install and run the worker from a checkout that stays on admitted `main`,
+never from the checkout you work in. The worker's scripts are tracked files:
+changing that checkout to a branch without `scripts/agent-control/` removes
+them from under a running worker. On this machine the pinned checkout is a
+detached worktree under `%LOCALAPPDATA%\KEYFLOWOS\`.
+
+The single-instance lock is per `-RepoRoot`. Two workers started with
+different repo roots do not see each other's lock, cursor or attempt ledger,
+so installing from a new location does not stop a worker already running from
+the old one. Stop the old process first (section 5).
 
 ## 4. Turning autonomy off while keeping observation
 
@@ -142,12 +160,20 @@ Agent Control Gate enforces the same contract with or without automation.
 | Worker will not start, "another worker is already running" | a live worker holds the lock | `-Status` to see it; stop that process or `uninstall-claude-worker.ps1` |
 | Worker idle with `WAITING_EXTERNAL_AGENT` | `gh` or `claude` session expired | `gh auth login`, or open Claude Code once to refresh; the worker resumes on the next tick |
 | Worker logs `WAITING_OPERATOR` | no install record for this worker contract | re-run `install-claude-worker.ps1` from the admitted code |
+| Worker logs `WAITING_OPERATOR worker_code_missing` (before this check existed: `Invalid JSON primitive: Windows.` on every tick) | the checkout the worker was started from no longer has the scripts named in `missing=`, usually because it changed branch | the worker is harmless but useless: it polls nothing. Confirm it has no `claude` child process, stop that one process by PID, and run the worker from the pinned checkout (section 3). Its lock, cursor and attempt ledger stay where they are |
+| Worker logs `selector_output_unreadable exit=<n>` | `select-directive.ps1` ran but did not print a decision; `stdout_head` shows what it printed | read `stdout_head` and the exit status. Nothing was selected and Claude was not woken. A mismatch between the worker in memory and the scripts on disk is the usual cause: restart the worker from the pinned checkout |
+| Worker logs `verdict_unreadable exit=<n>` | `evaluate-run.ps1` did not print a verdict for a finished run | the run is counted as failed and stays retryable; the transcript is in `.agent-control/.worker/run-<id>-attempt<n>.json` |
+| Two `claude-worker.ps1` processes | a second install from another `-RepoRoot`; the lock does not span repo roots | `Get-CimInstance Win32_Process` filtered on `claude-worker`; keep the one running from the pinned checkout and stop the other by PID |
 | Worker logs `HELD_RETRYABLE` | two identical failures on one directive | read the MOMENTUM it posted; fix the blocker, then post a newer directive or run `-ReleaseHold <id>` |
 | Worker logs `kept worktree` | the wake left uncommitted or unpushed work | inspect it under the worktree root; push or discard it, then `git worktree remove <path>` |
 | Same directive processed twice | cursor lost or purged | ids live in `.agent-control/.worker/cursor.json`; restore it or accept one replay — the repository gates still apply |
 | Autopilot posted no AUTO_EVENT | event was not actionable, or was a duplicate | duplicates are suppressed by idempotency key; check the workflow log |
 | `auto-merge-admitted` exits 3 | PR is not eligible — an ordinary outcome | the JSON `reason` names the exact unmet contract |
 | `auto-merge-admitted` exits 2 | evaluator error (auth, API, parse) | the job fails loudly by design; read stderr, fix, re-run |
+| `auto-merge-admitted` exits anything else | the evaluator crashed or was killed | treated exactly like 2: both merging steps pass only on 0 and 3 |
+| A merging job fails with `PR #<n> was merged but its AUTO_MERGE record is not confirmed` | the merge happened; `record-auto-merge.mjs` could not read all of #80, was refused the post, or did not get the stored record back (status 2), or the evaluator exited 0 with no merge in its result (status 3) | the merge stands and is not retried. Confirm the PR is merged, then re-record from the evaluator JSON in the job log: `MERGE_JSON='<that JSON>' GITHUB_TOKEN=$(gh auth token) GITHUB_REPOSITORY=SaCH-PRO/KEYFLOWOS node scripts/agent-control/record-auto-merge.mjs`. It is idempotent on the merge commit, so running it twice posts once. Do not run it while a merging job is in progress: the job holds the mutation lock and a manual run does not, so both could post. That leaves two identical records, which every later run lists under `duplicates` |
+| The same line with `recorder status 4`, and `AUTO_MERGE record conflict` in the log | a comment on #80 by `github-actions[bot]` or an allowlisted author carries this merge's marker but is not its record; the log gives the comment id and what differs (`mismatch:pr_number`, `mismatch:admitted_head`, `mismatch:merge_sha`, `malformed:*`, `missing:*`, `unexpected:*`, `marker_only`, `differs_from_record`) | the true record exists: the recorder posts it before failing. A person must look at the named comment and find out how it was written. Every replay fails the same way while it stands. Never edit #80 comments; ChatGPT decides what happens to it |
+| `hourly-reconcile-open-prs` fails with `could not list open pull requests` | `gh pr list` failed, so no PR was reconciled | fix API access and re-run; the job no longer passes on an empty listing it could not read |
 | `required_check_pending_at_head` | a required run at the head is queued or in progress, even if an older run succeeded | wait for it to finish, then re-evaluate; never merge past it |
 | `required_checks_predate_pr_transition` | a `reopened`, `ready_for_review`, `converted_to_draft`, `renamed` or `base_ref_changed` event is newer than a required workflow's latest run, so a run is owed | wait for the owed run to appear and finish; if it never appears, re-run that workflow at the head |
 | `pr_transitions_unknown` | the evaluator had no PR timeline | fail-closed by design; fix API access and re-run |

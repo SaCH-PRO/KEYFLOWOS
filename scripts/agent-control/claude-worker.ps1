@@ -353,6 +353,34 @@ function Test-ClaudeAuth {
   return @{ ok = $true; detail = "claude $($version.out -join ' ')" }
 }
 
+# --- the worker's own code --------------------------------------------------
+# A running worker holds only this file in memory. The scripts it calls are
+# read from disk on every tick, from the checkout it was started in -- and a
+# checkout can change branch underneath it. powershell.exe answers a missing
+# -File with its banner on stdout and the real error on stderr, which
+# Invoke-Native discards; parsed as JSON that reads "Invalid JSON primitive:
+# Windows." on every tick, with nothing naming the cause.
+$WorkerSubScripts = @('select-directive.ps1', 'select-directive.mjs', 'evaluate-run.ps1')
+
+function Get-MissingWorkerCode {
+  return @($WorkerSubScripts | Where-Object { -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $_) -PathType Leaf) })
+}
+
+# Runs a sibling script and returns its exit code with stdout parsed as JSON,
+# or parsed = $null when stdout was not JSON. It never throws on the output:
+# the caller decides what an unreadable answer means.
+function Invoke-SubScript {
+  param([string]$Name, [string[]]$Arguments)
+  $path = Join-Path $PSScriptRoot $Name
+  $run = Invoke-Native $PSExe (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $path) + $Arguments)
+  $text = (@($run.out) -join "`n").Trim()
+  $parsed = $null
+  try { $parsed = $text | ConvertFrom-Json } catch { $parsed = $null }
+  $head = ($text -replace '\s+', ' ')
+  if ($head.Length -gt 120) { $head = $head.Substring(0, 120) }
+  return [pscustomobject]@{ code = $run.code; parsed = $parsed; head = ($head -replace '"', "'"); script = $path }
+}
+
 # --- control channel ------------------------------------------------------
 # Selection is the command-authority boundary and lives in select-directive.ps1
 # so the rule is proved against fixture comments with exactly this code.
@@ -361,9 +389,13 @@ function Get-PendingDirective {
   if ($view.code -ne 0) { throw 'could not read the control issue' }
   Set-Content -Path $CommentsFile -Value ($view.out -join "`n") -Encoding utf8
 
-  $selector = Join-Path $PSScriptRoot 'select-directive.ps1'
-  $run = Invoke-Native $PSExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $selector, '-CommentsFile', $CommentsFile, '-CursorFile', $CursorFile, '-AuthorizedAuthors', $AuthorizedAuthors)
-  $selection = ($run.out -join "`n") | ConvertFrom-Json
+  $run = Invoke-SubScript 'select-directive.ps1' @('-CommentsFile', $CommentsFile, '-CursorFile', $CursorFile, '-AuthorizedAuthors', $AuthorizedAuthors)
+  $selection = $run.parsed
+  # A decision always carries a reason. Anything else is not the selector
+  # speaking, and is reported as what it was rather than as a JSON error.
+  if ($null -eq $selection -or -not ($selection.PSObject.Properties.Name -contains 'reason')) {
+    throw ('selector_output_unreadable exit={0} script="{1}" stdout_head="{2}"' -f $run.code, $run.script, $run.head)
+  }
   if ($run.code -ne 0) { throw "directive selection failed: $($selection.reason)" }
 
   foreach ($r in @($selection.rejected)) {
@@ -556,12 +588,11 @@ End your final message with exactly one of these lines:
   # So success is decided by an explicit completion marker the woken session
   # must emit. The verdict lives in evaluate-run.ps1 so the same code the
   # worker trusts can be exercised directly against recorded transcripts.
-  $evaluator = Join-Path $PSScriptRoot 'evaluate-run.ps1'
-  $evaluation = Invoke-Native $PSExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $evaluator, '-RunFile', $runFile, '-MessageId', $Directive.message_id)
+  $evaluation = Invoke-SubScript 'evaluate-run.ps1' @('-RunFile', $runFile, '-MessageId', $Directive.message_id)
   $evalOk = $evaluation.code -eq 0
-  try {
-    $verdict = ($evaluation.out -join "`n") | ConvertFrom-Json
-  } catch {
+  $verdict = $evaluation.parsed
+  if ($null -eq $verdict) {
+    Write-WorkerLog 'ERROR' ('verdict_unreadable exit={0} script="{1}" stdout_head="{2}"' -f $evaluation.code, $evaluation.script, $evaluation.head)
     return @{ ok = $false; reason = 'verdict_unreadable' }
   }
   if ($verdict.denial_count -gt 0) {
@@ -572,6 +603,15 @@ End your final message with exactly one of these lines:
 
 function Invoke-WorkerTick {
   if (Test-Path $PauseFile) { Write-WorkerLog 'PAUSED' 'worker is paused (claude-worker.ps1 -Resume to lift it); not polling'; return }
+
+  # Checked before anything is polled or woken: without the selector nothing
+  # may be selected, and without the evaluator a woken session could not be
+  # judged and would be woken again.
+  $missing = @(Get-MissingWorkerCode)
+  if ($missing.Count) {
+    Write-WorkerLog 'WAITING_OPERATOR' ('worker_code_missing dir="{0}" missing="{1}"; the checkout this worker was started from no longer carries its scripts (a branch change?). Not polling and not waking claude. Stop this process and start the worker from a checkout pinned to admitted main.' -f $PSScriptRoot, ($missing -join ','))
+    return
+  }
 
   $gh = Test-GhAuth
   if (-not $gh.ok) { Write-WorkerLog 'WAITING_EXTERNAL_AGENT' $gh.detail; return }
@@ -665,6 +705,8 @@ if ($Status) {
   Write-Host ('  repo root : {0}' -f $RepoRoot)
   Write-Host ('  gh        : {0} -- {1}' -f $(if ($gh.ok) { 'READY' } else { 'WAITING_EXTERNAL_AGENT' }), $gh.detail)
   Write-Host ('  claude    : {0} -- {1}' -f $(if ($claude.ok) { 'READY' } else { 'WAITING_EXTERNAL_AGENT' }), $claude.detail)
+  $missingCode = @(Get-MissingWorkerCode)
+  Write-Host ('  code      : {0}' -f $(if ($missingCode.Count) { "MISSING $($missingCode -join ',') in $PSScriptRoot (worker will not poll)" } else { 'present' }))
   Write-Host ('  install   : {0}' -f $(if (Test-InstallContract) { "contract $WorkerContractVersion" } else { "MISSING for contract $WorkerContractVersion (worker will not wake claude)" }))
   Write-Host ('  paused    : {0}' -f $(if (Test-Path $PauseFile) { 'yes' } else { 'no' }))
   Write-Host ('  lock      : {0}' -f $(if ($locked) { "held ($LockFile)" } else { 'free' }))

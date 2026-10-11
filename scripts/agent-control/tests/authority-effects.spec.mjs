@@ -10,6 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -17,8 +18,8 @@ import { SHAPE_INVALID, STATE_PATH, activeHolds, emptyState, hasProcessed, loadS
 import { parseYaml, stringifyYaml } from '../lib/yaml.mjs';
 import { decide, ACTIONS } from '../lib/orchestrator.mjs';
 import { collectAuthority, reconcile, reconcileProjection, FINDINGS } from '../lib/reconcile.mjs';
-import { reduceAuthority, readEffect, applyEffect, CONTROL_EFFECTS, EFFECT_PROBLEMS, FOLD_NOT_STARTED } from '../lib/authority-effects.mjs';
-import { compareAuthorityOrder, parseEnvelope } from '../lib/control-envelope.mjs';
+import { reduceAuthority, readEffect, applyEffect, coordinateOf, CONTROL_EFFECTS, CONTROL_EFFECT_ALIASES, EFFECT_PROBLEMS, FOLD_NOT_STARTED } from '../lib/authority-effects.mjs';
+import { compareAuthorityOrder, envelopeField, parseEnvelope } from '../lib/control-envelope.mjs';
 import { applicationPacketsOf, reconcileWithTruth } from '../lib/truth.mjs';
 import { DAG_PATH, loadDag } from '../lib/dag.mjs';
 import { ROLES, AGENT_STATUS } from '../lib/adapters.mjs';
@@ -1498,6 +1499,486 @@ test('recorded evidence (recovery): from the new checkpoint later typed authorit
   assert.deepEqual(stopped.reduction.unapplied.map((m) => m.message_id), ['CG-REVIEW-LATER-2', 'CG-REVIEW-LATER-3']);
   assert.deepEqual(codes(stopped), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY, FINDINGS.AUTHORITY_MALFORMED]);
   assert.equal(act(stopped).action, ACTIONS.REPORT_DRIFT);
+});
+
+// ------------------------------------------------------------------ historical effect spellings (KF-META-AUTHORITY-EFFECT-COMPAT-001)
+
+/** The same comment with only its declared effect respelled, so a twin differs in nothing else. */
+function respell(c, from, to) {
+  assert.equal(c.body.split(`control_effect: ${from}`).length, 2, `referent: comment ${c.id} declares ${from} exactly once`);
+  return { ...c, body: c.body.replace(`control_effect: ${from}`, `control_effect: ${to}`) };
+}
+/** A projection without its anchor, to compare everything a NO_STATE_CHANGE must leave alone. */
+const withoutAnchor = ({ authority_basis, ...rest }) => rest;
+const heldAction = () => ({ holds: { 'KF-EXEC-ACTION-001': { active: true, packet_id: 'KF-EXEC-ACTION-001', reason: 'held' } } });
+
+test('effect aliases: the table is explicit, closed and frozen, and no alias names an effect that grants anything', () => {
+  assert.deepEqual({ ...CONTROL_EFFECT_ALIASES }, { BOUNDED_CORRECTION: 'PACKET_CORRECTION', AUTHORIZE_CONTROL_BINDING: 'NO_STATE_CHANGE' });
+  assert.ok(Object.isFrozen(CONTROL_EFFECT_ALIASES));
+  for (const [alias, target] of Object.entries(CONTROL_EFFECT_ALIASES)) {
+    assert.ok(CONTROL_EFFECTS.includes(target), `${alias} is read as a canonical effect`);
+    assert.ok(!CONTROL_EFFECTS.includes(alias), `${alias} is not a new effect`);
+    assert.ok(!Object.hasOwn(CONTROL_EFFECT_ALIASES, target), `${alias} does not chain`);
+    assert.ok(!['PACKET_RELEASE', 'PACKET_ADMISSION', 'CHECKPOINT', 'HOLD_SET', 'HOLD_CLEAR'].includes(target),
+      `${alias} cannot release, admit, checkpoint, hold or resume`);
+  }
+});
+
+test('effect aliases: BOUNDED_CORRECTION folds with exactly the PACKET_CORRECTION semantics, and its spelling is evidence only', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const base = checkpoint(anchor);
+  const alias = typed('REVIEW', 'CG-REVIEW-ALIAS', 'KF-META-P', 'BOUNDED_CORRECTION', { pr_number: 41, health: 'YELLOW', state: 'FIXING_REVIEW_FINDING' });
+  const canon = respell(alias, 'BOUNDED_CORRECTION', 'PACKET_CORRECTION');
+
+  const a = fold(base, [anchor, alias]);
+  const c = fold(base, [anchor, canon]);
+  assert.equal(c.blocked, null, 'referent: the canonical twin folds');
+  assert.deepEqual(a.state, c.state, 'the projection is the canonical one, field for field');
+  assert.deepEqual([c.applied[0].effect, c.applied[0].declared_effect], ['PACKET_CORRECTION', 'PACKET_CORRECTION']);
+  assert.deepEqual(a.applied, [{ ...c.applied[0], declared_effect: 'BOUNDED_CORRECTION' }], 'only the recorded spelling differs');
+  const p = a.state.programme;
+  assert.deepEqual([p.active_packet, p.state, p.health, p.pr_number, p.merge_authority], ['KF-META-P', 'FIXING_PROOF_FAILURES', 'YELLOW', 41, false]);
+  assert.ok(!JSON.stringify(a.state).includes('BOUNDED_CORRECTION'), 'the spelling is never written into the projection');
+  assert.ok(!JSON.stringify(a.state).includes('FIXING_REVIEW_FINDING'), 'nor is the free-vocabulary state');
+
+  const read = readEffect(collectAuthority([alias]).newest);
+  assert.deepEqual([read.ok, read.effect, read.declared_effect], [true, 'PACKET_CORRECTION', 'BOUNDED_CORRECTION']);
+
+  const rec = project(base, [anchor, alias], repo(openPr(41, 'impl/kf-meta-p')));
+  assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
+  assert.equal(act(rec).action, ACTIONS.DISPATCH_BUILDER);
+});
+
+test('effect aliases: AUTHORIZE_CONTROL_BINDING folds as NO_STATE_CHANGE and grants nothing, whatever else the message claims', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const base = checkpoint(anchor, { state: 'FIXING_PROOF_FAILURES', pr_number: 41 }, heldAction());
+  // Everything an admission would carry, on the alias.
+  const claims = { pr_number: 41, merge_authority: 'true', state: 'READY_TO_MERGE', review_status: 'PASS' };
+  const alias = typed('REVIEW', 'CG-REVIEW-BINDING', 'KF-META-P', 'AUTHORIZE_CONTROL_BINDING', claims);
+  const canon = respell(alias, 'AUTHORIZE_CONTROL_BINDING', 'NO_STATE_CHANGE');
+  const pr = repo(openPr(41, 'impl/kf-meta-p'));
+
+  const before = project(base, [anchor], pr);
+  const a = project(base, [anchor, alias], pr);
+  assert.equal(a.consistent, true, JSON.stringify(a.findings));
+  assert.deepEqual(a.reduction.applied.map((x) => [x.effect, x.declared_effect]), [['NO_STATE_CHANGE', 'AUTHORIZE_CONTROL_BINDING']]);
+  assert.deepEqual(a.effective_state, project(base, [anchor, canon], pr).effective_state, 'the projection is the canonical one, field for field');
+  // Only the anchor moves. No admission, checkpoint, release, hold or resume happened.
+  assert.deepEqual(withoutAnchor(a.effective_state), withoutAnchor(before.effective_state));
+  assert.deepEqual(a.effective_state.authority_basis, { message_id: 'CG-REVIEW-BINDING', comment_id: alias.id });
+  const p = a.effective_state.programme;
+  assert.deepEqual([p.state, p.merge_authority, p.checkpointed], ['FIXING_PROOF_FAILURES', false, CHECKPOINTED_BEFORE]);
+  assert.equal(a.effective_state.merge_authority_marker ?? null, null);
+  assert.deepEqual(activeHolds(a.effective_state).map((h) => h.packet_id), ['KF-EXEC-ACTION-001']);
+  assert.equal(act(a).action, act(before).action);
+
+  // Referent: the same message declaring the effect it resembles does grant, so "nothing" above is not vacuous.
+  const admit = project(base, [anchor, respell(alias, 'AUTHORIZE_CONTROL_BINDING', 'PACKET_ADMISSION')], pr);
+  assert.deepEqual([admit.effective_state.programme.state, admit.effective_state.programme.merge_authority], ['READY_TO_MERGE', true]);
+});
+
+const NOT_ALIASES = [
+  'BOUNDED_CORRECTIONS', 'bounded_correction', 'Bounded_Correction', 'BOUNDED-CORRECTION', 'BOUNDED CORRECTION', 'BOUNDED', 'CORRECTION',
+  'PACKET_CORRECTION_BOUNDED', 'AUTHORIZE_CONTROL_BINDINGS', 'authorize_control_binding', 'AUTHORIZE_BINDING', 'CONTROL_BINDING',
+  'AUTHORIZE_MERGE', 'constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf',
+];
+
+test('NC effect aliases: every other unknown token still stops the fold with CONTROL_EFFECT_UNKNOWN', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const base = checkpoint(anchor);
+  const good = typed('REVIEW', 'CG-X', 'KF-META-P', 'BOUNDED_CORRECTION', { pr_number: 41 });
+  const laterTyped = typed('REVIEW', 'CG-LATER', 'KF-META-P', 'PACKET_CORRECTION', { pr_number: 41 });
+  const pr = repo(openPr(41, 'impl/kf-meta-p'));
+  // Referent: with the alias spelled exactly, this very message and the one after it fold.
+  const ok = project(base, [anchor, good, laterTyped], pr);
+  assert.equal(ok.consistent, true, JSON.stringify(ok.findings));
+  assert.equal(ok.reduction.applied.length, 2);
+
+  for (const token of NOT_ALIASES) {
+    const rec = project(base, [anchor, respell(good, 'BOUNDED_CORRECTION', token), laterTyped], pr);
+    assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY], token);
+    assert.deepEqual([rec.reduction.blocked.message_id, rec.reduction.blocked.code, rec.reduction.blocked.detail], ['CG-X', EFFECT_PROBLEMS.EFFECT_UNKNOWN, token]);
+    assert.deepEqual(rec.reduction.unapplied.map((m) => m.message_id), ['CG-X', 'CG-LATER'], `${token}: the typed message after it is not applied`);
+    assert.deepEqual(rec.effective_state, base, `${token}: nothing was applied`);
+    assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, token);
+  }
+});
+
+test('NC effect aliases: an alias on a message type its canonical effect cannot ride is rejected by that effect\'s type rule', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const base = checkpoint(anchor, {}, heldAction());
+  for (const [alias, canonical] of Object.entries(CONTROL_EFFECT_ALIASES)) {
+    for (const type of ['HOLD', 'RESUME']) {
+      const bad = typed(type, 'CG-X', 'KF-EXEC-ACTION-001', alias);
+      const rec = project(base, [anchor, bad], repo());
+      assert.notEqual(rec.reduction.blocked, null, alias + ' on a ' + type + ': the fold must stop');
+      assert.deepEqual([rec.reduction.blocked.code, rec.reduction.blocked.detail],
+        [EFFECT_PROBLEMS.EFFECT_TYPE_MISMATCH, `${type} cannot carry ${canonical} (declared as ${alias})`]);
+      assert.deepEqual(rec.effective_state, base, `${alias} on a ${type}: nothing was applied`);
+      assert.deepEqual(activeHolds(rec.effective_state).map((h) => h.packet_id), ['KF-EXEC-ACTION-001'], `${alias} on a ${type} neither sets nor clears a hold`);
+      assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT);
+      // The canonical effect on the same message is rejected by the same rule.
+      const twin = project(base, [anchor, respell(bad, alias, canonical)], repo());
+      assert.deepEqual([twin.reduction.blocked.code, twin.reduction.blocked.detail], [EFFECT_PROBLEMS.EFFECT_TYPE_MISMATCH, `${type} cannot carry ${canonical}`]);
+    }
+    // Referent: on each type the canonical effect may ride, the alias folds as that effect.
+    for (const type of ['REVIEW', 'DIRECTIVE']) {
+      const out = fold(base, [anchor, typed(type, 'CG-X', 'KF-META-P', alias, { pr_number: 41 })]);
+      assert.equal(out.blocked, null, `${alias} on a ${type}`);
+      assert.deepEqual(out.applied.map((x) => [x.effect, x.declared_effect]), [[canonical, alias]]);
+    }
+  }
+});
+
+test('NC effect aliases: an alias is held to every field, safety and projection rule of its canonical effect', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const plain = checkpoint(anchor);
+  const onPr = checkpoint(anchor, { state: 'FIXING_PROOF_FAILURES', pr_number: 41 });
+  const held = checkpoint(anchor, {}, { holds: { 'KF-META-P': { active: true, packet_id: 'KF-META-P', reason: 'held' } } });
+  const B = 'BOUNDED_CORRECTION';
+  const N = 'AUTHORIZE_CONTROL_BINDING';
+  const cases = [
+    ['a short source_main', plain, B, 'KF-META-P', { pr_number: 41, source_main: 'abc123' }, EFFECT_PROBLEMS.FIELD_MISSING],
+    ['a non-numeric pr_number', plain, B, 'KF-META-P', { pr_number: 'none' }, EFFECT_PROBLEMS.FIELD_MISSING],
+    ['merge_authority yes', plain, B, 'KF-META-P', { pr_number: 41, merge_authority: 'yes' }, EFFECT_PROBLEMS.FIELD_MISSING],
+    ['a packet that is not active', plain, B, 'KF-META-OTHER', { pr_number: 41 }, EFFECT_PROBLEMS.PACKET_NOT_ACTIVE],
+    ['another PR', onPr, B, 'KF-META-P', { pr_number: 42 }, EFFECT_PROBLEMS.PR_CONFLICT],
+    ['a held packet', held, B, 'KF-META-P', { pr_number: 41 }, EFFECT_PROBLEMS.PACKET_HELD],
+    ['health AMBER', plain, B, 'KF-META-P', { pr_number: 41, health: 'AMBER' }, EFFECT_PROBLEMS.HEALTH_INVALID],
+    ['health AMBER', plain, N, 'KF-META-P', { health: 'AMBER' }, EFFECT_PROBLEMS.HEALTH_INVALID],
+    ['production_touched true', plain, B, 'KF-META-P', { pr_number: 41, production_touched: 'true' }, EFFECT_PROBLEMS.PRODUCTION_TOUCHED],
+    ['production_touched true', plain, N, 'KF-META-P', { production_touched: 'true' }, EFFECT_PROBLEMS.PRODUCTION_TOUCHED],
+    ['programme activation', plain, N, 'KF-META-P', { programme: 'KEYFLOWOS_PLATFORM_CONVERGENCE', programme_action: 'ACTIVATE' }, EFFECT_PROBLEMS.PROGRAMME_NOT_FOLDABLE],
+  ];
+  for (const [name, base, alias, packet, extra, code] of cases) {
+    const label = `${alias} with ${name}`;
+    const bad = typed('REVIEW', 'CG-X', packet, alias, extra);
+    const rec = project(base, [anchor, bad], repo());
+    assert.notEqual(rec.reduction.blocked, null, label + ': the fold must stop');
+    assert.equal(rec.reduction.blocked.code, code, label);
+    assert.equal(rec.reduction.blocked.message_id, 'CG-X', label);
+    assert.deepEqual(rec.effective_state, base, `${label}: nothing was applied`);
+    assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, label);
+    // The canonical effect on the same message stops for the same reason, in the same words.
+    const twin = project(base, [anchor, respell(bad, alias, CONTROL_EFFECT_ALIASES[alias])], repo());
+    assert.deepEqual(rec.reduction.blocked, twin.reduction.blocked, label);
+  }
+});
+
+test('NC effect aliases: malformed, edited, unauthorized or prose-only authority carrying an alias stays fail closed', () => {
+  const anchor = authority('DIRECTIVE', 'CG-D', 'KF-META-P');
+  const base = checkpoint(anchor);
+  const pr = repo(openPr(41, 'impl/kf-meta-p'));
+  const good = typed('REVIEW', 'CG-X', 'KF-META-P', 'BOUNDED_CORRECTION', { pr_number: 41 });
+  const same = { id: good.id, at: good.created_at };
+  // Referent: the message as posted folds.
+  assert.equal(project(base, [anchor, good], pr).consistent, true);
+
+  // An alias beside any second control_effect is a repeated key: the envelope is malformed.
+  for (const second of ['PACKET_CORRECTION', 'BOUNDED_CORRECTION', 'PACKET_ADMISSION']) {
+    const repeated = { ...good, body: good.body.replace(/```$/, `control_effect: ${second}\n\`\`\``) };
+    const rec = project(base, [anchor, repeated], pr);
+    assert.notEqual(rec.reduction.blocked, null, second + ': the fold must stop');
+    assert.equal(rec.reduction.blocked.code, EFFECT_PROBLEMS.AUTHORITY_MALFORMED, second);
+    assert.deepEqual(rec.reduction.blocked.detail, ['control_effect (repeated; ambiguous)'], second);
+    assert.deepEqual(rec.effective_state, base, second);
+    assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, second);
+  }
+
+  // An edited comment makes the whole snapshot unverifiable; the fold does not start.
+  const edited = typed('REVIEW', 'CG-X', 'KF-META-P', 'BOUNDED_CORRECTION', { pr_number: 41 }, { ...same, edited: true });
+  const unverified = project(base, [anchor, edited], pr);
+  assert.deepEqual([unverified.reduction.started, unverified.reduction.reason], [false, FOLD_NOT_STARTED.AUTHORITY_UNVERIFIED]);
+  assert.ok(codes(unverified).includes(FINDINGS.AUTHORITY_EDITED), String(codes(unverified)));
+  assert.deepEqual(unverified.effective_state, base);
+  assert.equal(act(unverified).action, ACTIONS.REPORT_DRIFT);
+
+  // An outside author or another sender is not authority at all: nothing folds, the anchor does not move.
+  const outsider = typed('REVIEW', 'CG-X', 'KF-META-P', 'BOUNDED_CORRECTION', { pr_number: 41 }, { ...same, author: 'someone-else' });
+  const claude = typed('REVIEW', 'CG-X', 'KF-META-P', 'BOUNDED_CORRECTION', { pr_number: 41, sender: 'claude' }, same);
+  for (const [name, forged] of [['an outside author', outsider], ['sender claude', claude]]) {
+    const out = fold(base, [anchor, forged]);
+    assert.deepEqual([out.applied, out.blocked, out.generation], [[], null, 1], name);
+    assert.deepEqual(out.state, base, name);
+  }
+
+  // An alias in prose, or indented under another key, is not a declared effect.
+  for (const tail of ['\n\ncontrol_effect BOUNDED_CORRECTION', '\n\nThis is a control_effect: BOUNDED_CORRECTION.', '\ndecision:\n  control_effect: BOUNDED_CORRECTION']) {
+    const prose = authority('REVIEW', 'CG-X', 'KF-META-P', { pr_number: 41 }, same);
+    prose.body += tail;
+    const rec = project(base, [anchor, prose], pr);
+    assert.notEqual(rec.reduction.blocked, null, JSON.stringify(tail) + ': the fold must stop');
+    assert.equal(rec.reduction.blocked.code, EFFECT_PROBLEMS.EFFECT_MISSING, JSON.stringify(tail));
+    assert.deepEqual(rec.effective_state, base, JSON.stringify(tail));
+  }
+});
+
+// The real #80 record after the committed anchor. `comments` in the recording ends at
+// RECOVERY-021 and is pinned above; `after_recovery_021` continues it without changing it.
+const COMPAT_DIRECTIVE = { message_id: 'CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001', comment_id: 6025258558 };
+// The newest authority when the continuation was recorded; it approved the continuation's shape.
+const COMPAT_NEWEST = { message_id: 'CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002', comment_id: 6025392698 };
+/** Authority candidates on live #80 older than the first recorded comment; a recorded generation plus this is the live one. */
+const CANDIDATES_BEFORE_RECORDING = 63;
+const sha256 = (text) => crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+const BOUNDED_REVIEW = { message_id: 'CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001', comment_id: 6011507550 };
+const BINDING_REVIEW = { message_id: 'CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003', comment_id: 6018421547 };
+const AUTH_FC = 'KF-EXEC-AUTH-FAIL-CLOSED-001';
+const MAIN_AC3A = 'ac3a6384417093f198bcc7d672b0dbc295db137c';
+/** Every authority candidate recorded after RECOVERY-021, oldest first: [message, comment, effect, spelling as declared]. */
+const AFTER_021 = [
+  ['CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022', 5994182518, 'NO_STATE_CHANGE'],
+  ['CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023', 5994568448, 'NO_STATE_CHANGE'],
+  ['CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-PASS-024', 5995818004, 'NO_STATE_CHANGE'],
+  ['CG-REVIEW-META-STATE-REDUCER-LIVE-POST-MERGE-CHECKPOINT-026', 5998474832, 'CHECKPOINT'],
+  ['CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001', 5998711588, 'NO_STATE_CHANGE'],
+  ['CG-RESUME-ACTION-001-IMPLEMENTATION-001', 5998716917, 'HOLD_CLEAR'],
+  ['CG-DIRECTIVE-ACTION-001-IMPLEMENT-001', 5998725089, 'PACKET_RELEASE'],
+  ['CG-REVIEW-ACTION-001-SEMANTIC-PASS-002', 6002264461, 'NO_STATE_CHANGE'],
+  ['CG-REVIEW-ATLAS-001-SEMANTIC-PASS-001', 6003918300, 'NO_STATE_CHANGE'],
+  ['CG-REVIEW-ATLAS-MATERIALIZER-001-WINDOWS-PROOF-CORRECTION-001', 6003934022, 'NO_STATE_CHANGE'],
+  ['CG-REVIEW-PR-UNLOCK-CONTRACT-001-SEMANTIC-PASS-001', 6004083773, 'NO_STATE_CHANGE'],
+  ['CG-REVIEW-ACTION-001-ADMISSION-003', 6010505575, 'PACKET_ADMISSION'],
+  ['CG-REVIEW-ACTION-001-POST-MERGE-CHECKPOINT-004', 6010515405, 'CHECKPOINT'],
+  ['CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001', 6010541876, 'PACKET_RELEASE'],
+  [BOUNDED_REVIEW.message_id, BOUNDED_REVIEW.comment_id, 'PACKET_CORRECTION', 'BOUNDED_CORRECTION'],
+  [BINDING_REVIEW.message_id, BINDING_REVIEW.comment_id, 'NO_STATE_CHANGE', 'AUTHORIZE_CONTROL_BINDING'],
+  ['CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004', 6022210803, 'NO_STATE_CHANGE'],
+  ['CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005', 6023054785, 'PACKET_CORRECTION'],
+  [COMPAT_DIRECTIVE.message_id, COMPAT_DIRECTIVE.comment_id, 'NO_STATE_CHANGE'],
+  [COMPAT_NEWEST.message_id, COMPAT_NEWEST.comment_id, 'NO_STATE_CHANGE'],
+].map(([message_id, comment_id, effect, declared_effect = effect]) => ({ message_id, comment_id, effect, declared_effect }));
+
+/** The whole recording: every real comment from the first anchor through the newest authority recorded. */
+function recordedAfter021() {
+  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const later = recorded.after_recovery_021;
+  return { recorded, later, comments: [...recorded.comments, ...later.comments], repo: later.repo };
+}
+/** The recording as #80 stood just before comment `id` was posted. */
+const beforeComment = (comments, id) => comments.filter((c) => c.id < id);
+const throughComment = (comments, id) => comments.filter((c) => c.id <= id);
+const appliedOf = (rec) => rec.reduction.applied.map(({ message_id, comment_id, effect, declared_effect }) => ({ message_id, comment_id, effect, declared_effect }));
+
+test('recorded evidence (aliases): the continuation after RECOVERY-021 is complete, minimized, unedited, and holds both real spellings', () => {
+  const { recorded, later, comments } = recordedAfter021();
+  const ids = later.comments.map((c) => c.id);
+  assert.equal(ids.length, 276);
+  assert.equal(new Set(ids).size, 276);
+  assert.deepEqual(ids, [...ids].sort((a, b) => a - b), 'in comment order');
+  assert.equal(Math.max(...ids), COMPAT_NEWEST.comment_id);
+  // The two segments are one record: the frozen one first, no comment in both, nothing out of order across the boundary.
+  const frozen = recorded.comments.map((c) => c.id);
+  assert.equal(Math.max(...frozen), ANCHOR_021.comment_id, 'the frozen recording still ends at the committed anchor');
+  assert.equal(new Set([...frozen, ...ids]).size, frozen.length + ids.length, 'no comment id is in both segments');
+  assert.deepEqual(comments.map((c) => c.id), [...frozen, ...ids]);
+  assert.deepEqual(comments.map((c) => c.id), [...frozen, ...ids].sort((a, b) => a - b), 'the concatenation is already in comment order');
+  const anchorComment = recorded.comments.at(-1);
+  assert.ok(Date.parse(later.comments[0].created_at) > Date.parse(anchorComment.created_at), 'the first continuation comment was posted after RECOVERY-021');
+
+  // Each minimized body parses exactly as the live #80 body did when it was captured.
+  assert.deepEqual(Object.keys(later.live_source), ids.map(String), 'one live-source record per continuation comment');
+  for (const c of later.comments) {
+    const env = parseEnvelope(c.body);
+    assert.equal(env.keys.reduce((n, key) => n + env.values[key].length, 0), c.body.split('\n').length, `comment ${c.id} is minimized`);
+    assert.equal(c.updated_at, c.created_at, `comment ${c.id} is unedited`);
+    assert.equal(sha256(JSON.stringify(env)), later.live_source[c.id].envelope_sha256, `comment ${c.id} is parse-equal to its live source`);
+    assert.match(later.live_source[c.id].body_sha256, /^[0-9a-f]{64}$/);
+  }
+  // Referent: the digest sees a one-character change to any field the parser reads.
+  const sample = later.comments.find((c) => c.id === BOUNDED_REVIEW.comment_id);
+  assert.notEqual(sha256(JSON.stringify(parseEnvelope(sample.body.replace('BOUNDED_CORRECTION', 'BOUNDED_CORRECTIOM')))), later.live_source[sample.id].envelope_sha256);
+
+  const auth = collectAuthority(comments);
+  assert.equal(auth.verified, true, auth.reason);
+  assert.equal(auth.newest.message_id, COMPAT_NEWEST.message_id);
+  // One deterministic authority order over both segments, and the continuation's first authority is strictly after the anchor.
+  assert.deepEqual(auth.candidates, [...auth.candidates].sort(compareAuthorityOrder));
+  assert.deepEqual(collectAuthority([...later.comments, ...recorded.comments]).candidates.map((m) => m.comment_id), auth.candidates.map((m) => m.comment_id),
+    'the order does not depend on how the segments are supplied');
+  const anchor = auth.messages.find((m) => m.comment_id === ANCHOR_021.comment_id);
+  const firstLater = auth.candidates.find((m) => m.comment_id > ANCHOR_021.comment_id);
+  assert.equal(firstLater.comment_id, AFTER_021[0].comment_id);
+  assert.ok(compareAuthorityOrder(anchor, firstLater) < 0, `${coordinateOf(firstLater)} is after ${coordinateOf(anchor)}`);
+  assert.equal(auth.candidates.indexOf(firstLater), auth.candidates.indexOf(anchor) + 1, 'and nothing sits between them');
+  // Generations are global: the anchor has the same position with or without the continuation.
+  assert.equal(auth.candidates.indexOf(anchor), collectAuthority(recorded.comments).candidates.length - 1);
+  assert.equal(auth.candidates.indexOf(anchor) + 1 + CANDIDATES_BEFORE_RECORDING, 87);
+  // No message after the anchor is malformed: the three malformed ones are the older, pinned evidence.
+  assert.deepEqual(auth.malformed.map((m) => m.comment_id), [CORRECTION_004.comment_id, MEMORY_REVIEW.comment_id, RULING_020.comment_id]);
+  assert.deepEqual(auth.candidates.filter((m) => m.comment_id > ANCHOR_021.comment_id).map((m) => [m.message_id, m.comment_id]),
+    AFTER_021.map((m) => [m.message_id, m.comment_id]));
+  // The two spellings are what #80 carries, each on a valid REVIEW of the same packet.
+  for (const [ref, spelling] of [[BOUNDED_REVIEW, 'BOUNDED_CORRECTION'], [BINDING_REVIEW, 'AUTHORIZE_CONTROL_BINDING']]) {
+    const m = auth.messages.find((x) => x.comment_id === ref.comment_id);
+    assert.deepEqual([m.message_id, m.message_type, m.packet_id, envelopeField(m.envelope, 'control_effect')], [ref.message_id, 'REVIEW', AUTH_FC, spelling]);
+  }
+  // A REVIEW in the range from an account outside the allowlist is recorded and is not authority.
+  const outside = later.comments.find((c) => c.id === 5997061944);
+  assert.equal(outside.user.login, 'Agence-IA-Toulouse');
+  assert.match(outside.body, /^control_effect: PACKET_ADMISSION$/m);
+  assert.ok(!auth.candidates.some((m) => m.comment_id === outside.id));
+  assert.equal(later.repo.main_sha, MAIN_AC3A);
+});
+
+test('recorded evidence (aliases): the frozen recording is not a current snapshot, says so, and nothing but this spec reads the file', () => {
+  const { recorded, later } = recordedAfter021();
+  // Read alone, as the tests that pin it do, it ends at the anchor and folds nothing: it is the past.
+  const alone = reconcileProjection(loadState(process.cwd()), collectAuthority(recorded.comments), recorded.repo, OPTIONS);
+  assert.equal(alone.authority_newest.comment_id, ANCHOR_021.comment_id);
+  assert.deepEqual(alone.reduction.applied, []);
+  assert.equal(alone.effective_state.programme.active_packet, 'KF-META-STATE-REDUCER-LIVE-001', 'a packet that has since been checkpointed');
+  assert.notEqual(recorded.repo.main_sha, later.repo.main_sha, 'and a main that has since moved');
+  // The continuation is a separately named block, described as a continuation and never as a snapshot.
+  assert.match(later._recorded, /^CONTINUATION of `comments`, not a snapshot by itself\. `comments` above is frozen/);
+  // No script, workflow, library or other spec names the file, so no CLI default or job can take it for #80 as it is now.
+  // The mutation manifest names it only as a file to break inside a throwaway worktree.
+  const name = path.basename(RECOVERY);
+  const self = [path.resolve('scripts/agent-control/negative-controls.yaml'), path.resolve('scripts/agent-control/tests/authority-effects.spec.mjs')];
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) return e.name === 'fixtures' || e.name === 'node_modules' ? [] : walk(full);
+    return /\.(mjs|js|ps1|ya?ml|json)$/.test(e.name) ? [full] : [];
+  });
+  const readers = [...walk('scripts'), ...walk('.github')].filter((file) => fs.readFileSync(file, 'utf8').includes(name)).map((file) => path.resolve(file));
+  assert.deepEqual(readers.sort(), self);
+});
+
+test('recorded evidence (aliases): the committed checkpoint folds every authority message from RECOVERY-021 to the newest, none skipped, and PR 155 is the active packet', () => {
+  const { comments, repo: truth } = recordedAfter021();
+  const state = loadState(process.cwd());
+  assert.deepEqual(state.authority_basis, ANCHOR_021, 'referent: the committed checkpoint is still anchored to RECOVERY-021');
+  const rec = reconcileProjection(state, collectAuthority(comments), truth, OPTIONS);
+
+  // Every candidate after the anchor is applied, in #80 order, with its canonical effect.
+  assert.deepEqual(appliedOf(rec), AFTER_021);
+  assert.equal(rec.reduction.blocked, null);
+  assert.deepEqual(rec.reduction.unapplied, []);
+  const first = rec.reduction.checkpoint_generation + 1;
+  assert.deepEqual(rec.reduction.applied.map((a) => a.generation), AFTER_021.map((_, i) => first + i), 'consecutive generations: no message is skipped');
+  assert.equal(rec.reduction.observed_generation, rec.reduction.generation, 'the fold reaches the newest authority');
+  // Generations are global, not reset at the continuation: the anchor is where the frozen recording alone puts it,
+  // and on the live issue, read whole, the anchor is 87 and the newest recorded authority is 107.
+  assert.equal(rec.reduction.checkpoint_generation, collectAuthority(recordedAfter021().recorded.comments).candidates.length);
+  assert.deepEqual([rec.reduction.checkpoint_generation + CANDIDATES_BEFORE_RECORDING, rec.reduction.observed_generation + CANDIDATES_BEFORE_RECORDING], [state.derivation.anchor_generation, 107]);
+  assert.deepEqual(rec.effective_state.authority_basis, COMPAT_NEWEST);
+
+  // The projection is the one the latest canonical PACKET_CORRECTION (ADMISSION-PREP-005) implies.
+  assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
+  const p = rec.effective_state.programme;
+  assert.deepEqual(
+    { active_packet: p.active_packet, state: p.state, health: p.health, source_main: p.source_main, implementation_branch: p.implementation_branch, pr_number: p.pr_number, merge_authority: p.merge_authority, production_touched: p.production_touched },
+    { active_packet: AUTH_FC, state: 'FIXING_PROOF_FAILURES', health: 'YELLOW', source_main: MAIN_AC3A, implementation_branch: 'impl/kf-exec-auth-fail-closed-001', pr_number: 155, merge_authority: false, production_touched: false },
+  );
+  assert.equal(rec.effective_state.merge_authority_marker, null);
+  assert.deepEqual(p.checkpointed, [...CHECKPOINTED_BEFORE, 'KF-EXEC-ACTION-001']);
+  assert.deepEqual(activeHolds(rec.effective_state), [], 'the ACTION-001 hold was cleared by its typed RESUME');
+  assert.deepEqual(truth.pr, { number: 155, state: 'open', merged: false, head_ref: 'impl/kf-exec-auth-fail-closed-001' });
+  assert.equal(act(rec).action, ACTIONS.DISPATCH_BUILDER);
+  assert.equal(act(rec).packet_id, AUTH_FC);
+  // Nothing is written back.
+  assert.deepEqual(loadState(process.cwd()), state);
+});
+
+test('recorded evidence (aliases): the real 6011507550 folds with exactly the PACKET_CORRECTION semantics', () => {
+  const { comments, repo: truth } = recordedAfter021();
+  const state = loadState(process.cwd());
+  const fc = (list) => reconcileProjection(state, collectAuthority(list), truth, OPTIONS);
+  const upTo = throughComment(comments, BOUNDED_REVIEW.comment_id);
+  const real = comments.find((c) => c.id === BOUNDED_REVIEW.comment_id);
+
+  const prior = fc(beforeComment(comments, BOUNDED_REVIEW.comment_id)).effective_state.programme;
+  assert.deepEqual([prior.active_packet, prior.state, prior.health, prior.pr_number], [AUTH_FC, 'CHARACTERIZING', 'GREEN', null], 'referent: the release before it projected no PR');
+
+  const rec = fc(upTo);
+  assert.equal(rec.reduction.blocked, null);
+  assert.deepEqual(appliedOf(rec).at(-1), AFTER_021[14]);
+  const p = rec.effective_state.programme;
+  assert.deepEqual([p.active_packet, p.state, p.health, p.pr_number, p.merge_authority], [AUTH_FC, 'FIXING_PROOF_FAILURES', 'YELLOW', 155, false]);
+  assert.ok(!JSON.stringify(rec.effective_state).includes('BOUNDED_CORRECTION'));
+  assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
+
+  // The same real comment declaring PACKET_CORRECTION gives the same projection, field for field.
+  const canon = fc(upTo.map((c) => (c === real ? respell(real, 'BOUNDED_CORRECTION', 'PACKET_CORRECTION') : c)));
+  assert.deepEqual(rec.effective_state, canon.effective_state);
+  assert.deepEqual(rec.findings, canon.findings);
+});
+
+test('recorded evidence (aliases): the real 6018421547 folds as NO_STATE_CHANGE and grants no admission, checkpoint, release, hold or merge authority', () => {
+  const { comments, repo: truth } = recordedAfter021();
+  const state = loadState(process.cwd());
+  const fc = (list) => reconcileProjection(state, collectAuthority(list), truth, OPTIONS);
+  const upTo = throughComment(comments, BINDING_REVIEW.comment_id);
+  const real = comments.find((c) => c.id === BINDING_REVIEW.comment_id);
+  // What the REVIEW says beside its effect: a passed review, in vocabulary no effect reads.
+  assert.match(real.body, /^state: SEMANTIC_REVIEW_PASSED$/m);
+  assert.match(real.body, /^review_status: PASS$/m);
+
+  const prior = fc(beforeComment(comments, BINDING_REVIEW.comment_id));
+  const rec = fc(upTo);
+  assert.equal(rec.reduction.blocked, null);
+  assert.deepEqual(appliedOf(rec).at(-1), AFTER_021[15]);
+  // Only the anchor moved.
+  assert.deepEqual(withoutAnchor(rec.effective_state), withoutAnchor(prior.effective_state));
+  assert.deepEqual(rec.effective_state.authority_basis, BINDING_REVIEW);
+  const p = rec.effective_state.programme;
+  assert.deepEqual([p.active_packet, p.state, p.pr_number, p.merge_authority], [AUTH_FC, 'FIXING_PROOF_FAILURES', 155, false]);
+  assert.equal(rec.effective_state.merge_authority_marker, null);
+  assert.deepEqual(p.checkpointed, [...CHECKPOINTED_BEFORE, 'KF-EXEC-ACTION-001']);
+  assert.deepEqual(activeHolds(rec.effective_state), []);
+  assert.equal(act(rec).action, act(prior).action);
+
+  // The same real comment declaring NO_STATE_CHANGE gives the same projection.
+  const canon = fc(upTo.map((c) => (c === real ? respell(real, 'AUTHORIZE_CONTROL_BINDING', 'NO_STATE_CHANGE') : c)));
+  assert.deepEqual(rec.effective_state, canon.effective_state);
+  // Even claiming merge authority in its own envelope, it grants none.
+  const claiming = { ...real, body: real.body.replace('merge_authority: false', 'merge_authority: true') };
+  assert.notEqual(claiming.body, real.body);
+  const claimed = fc(upTo.map((c) => (c === real ? claiming : c)));
+  assert.deepEqual(claimed.effective_state, rec.effective_state);
+  // Referent: on the same real comment PACKET_ADMISSION would have admitted PR 155.
+  const admitted = fc(upTo.map((c) => (c === real ? respell(claiming, 'AUTHORIZE_CONTROL_BINDING', 'PACKET_ADMISSION') : c)));
+  assert.deepEqual([admitted.effective_state.programme.state, admitted.effective_state.programme.merge_authority], ['READY_TO_MERGE', true]);
+});
+
+test('NC recorded evidence (aliases): either real spelling, changed by one character, stops the fold at that exact message and skips nothing after it', () => {
+  const { comments, repo: truth } = recordedAfter021();
+  const state = loadState(process.cwd());
+  const ids = AFTER_021.map((m) => m.message_id);
+  for (const [ref, spelling, index] of [[BOUNDED_REVIEW, 'BOUNDED_CORRECTION', 14], [BINDING_REVIEW, 'AUTHORIZE_CONTROL_BINDING', 15]]) {
+    const real = comments.find((c) => c.id === ref.comment_id);
+    const unknown = `${spelling}S`;
+    const rec = reconcileProjection(state, collectAuthority(comments.map((c) => (c === real ? respell(real, spelling, unknown) : c))), truth, OPTIONS);
+    assert.deepEqual(rec.reduction.applied.map((a) => a.message_id), ids.slice(0, index), spelling);
+    assert.notEqual(rec.reduction.blocked, null, spelling + ': the fold must stop');
+    assert.deepEqual([rec.reduction.blocked.message_id, rec.reduction.blocked.comment_id, rec.reduction.blocked.code, rec.reduction.blocked.detail],
+      [ref.message_id, ref.comment_id, EFFECT_PROBLEMS.EFFECT_UNKNOWN, unknown]);
+    // Every later message stays unapplied, the valid canonical ones included.
+    assert.deepEqual(rec.reduction.unapplied.map((m) => m.message_id), ids.slice(index), spelling);
+    assert.deepEqual(codes(rec), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY], spelling);
+    assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT, spelling);
+  }
+});
+
+test('CLI end to end (aliases): orchestrate decides on, and status renders, the recorded #80 read through both spellings and report the PR 155 projection', () => {
+  const { comments, repo: truth } = recordedAfter021();
+  const state = loadState(process.cwd());
+  const out = withBuilder(true, (env) => {
+    const res = cli('scripts/agent-control/orchestrate.mjs', ['--json'], { comments, repo: truth }, env);
+    assert.equal(res.status, 0, res.stderr);
+    return JSON.parse(res.stdout);
+  });
+  assert.equal(out.reconciliation.consistent, true, JSON.stringify(out.reconciliation.findings));
+  assert.deepEqual(out.reconciliation.reduction.applied.map(({ message_id, comment_id, effect, declared_effect }) => ({ message_id, comment_id, effect, declared_effect })), AFTER_021);
+  assert.deepEqual([out.decision.action, out.decision.packet_id], [ACTIONS.DISPATCH_BUILDER, AUTH_FC]);
+
+  const text = renderHuman(buildStatus(process.cwd(), { state: out.reconciliation.effective_state, dag: DAG, registry: [], reconciliation: out.reconciliation }));
+  assert.match(text, /Reconciliation : CONSISTENT/);
+  assert.ok(text.includes('RECOVERY-021 (generation 24); 20 typed effect(s) applied; observed generation 44 of 44'), text);
+  assert.ok(text.includes('State / health : FIXING_PROOF_FAILURES / YELLOW'), text);
+  assert.ok(text.includes('impl/kf-exec-auth-fail-closed-001 / #155'), text);
+  // The fold is never written back: the committed checkpoint is unchanged.
+  assert.deepEqual(loadState(process.cwd()), state);
 });
 
 // ------------------------------------------------------------------ live wiring

@@ -571,7 +571,7 @@ The checkpoint is read and written by `lib/yaml.mjs`. It defines every mapping k
 
 Key files:
 
-- `scripts/agent-control/lib/authority-effects.mjs` — `CONTROL_EFFECTS`, `readEffect()`, `applyEffect()`, `reduceAuthority()`
+- `scripts/agent-control/lib/authority-effects.mjs` — `CONTROL_EFFECTS`, `CONTROL_EFFECT_ALIASES` (historical spellings, each read as one canonical effect before any rule applies), `readEffect()`, `applyEffect()`, `reduceAuthority()`
 - `scripts/agent-control/lib/admission.mjs` — `evaluateAdmission()`, `artifactBindingProblems()`
 - `scripts/agent-control/lib/yaml.mjs` — `parseYaml()`, `stringifyYaml()`
 - `scripts/agent-control/lib/reconcile.mjs` — `reconcileProjection()`, `reconcile()`

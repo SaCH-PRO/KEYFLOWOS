@@ -122,7 +122,9 @@ export function worker(world, ...extra) {
   const run = spawnSync(
     'powershell',
     [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', WORKER,
+      // world.workerPath lets a proof run a copy of the worker whose
+      // neighbouring scripts it can remove or replace.
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', world.workerPath || WORKER,
       '-RepoRoot', world.root, '-WorktreeRoot', world.wtRoot,
       '-GhPath', STUB_GH, '-ClaudePath', STUB_CLAUDE,
       ...extra,
