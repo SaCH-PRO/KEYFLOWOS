@@ -16,6 +16,21 @@ node scripts/agent-control/status.mjs --verify
 # Same, machine readable
 node scripts/agent-control/status.mjs --json
 
+# The local worker: queued, running, blocked (held), failed and completed
+# directives, read from its own state files. Run it from the checkout the
+# worker serves, or point it there. Exit 3 means something is listed under
+# ATTENTION: ERROR_REPEATING (the same error ending tick after tick),
+# QUEUED_BUT_NOT_DELIVERED (a directive offered every tick and never counted),
+# TICKS_STOPPED, PAUSED, WAITING_*, DIRECTIVE_HELD, DIRECTIVE_FAILED_RETRYABLE,
+# STATE_UNREADABLE. The queue is the worker's last snapshot of #80.
+node scripts/agent-control/worker-status.mjs --state-dir="$LOCALAPPDATA/KEYFLOWOS/<pinned checkout>/.agent-control/.worker"
+
+# Open impl/ PRs whose gate main has moved out from under (reads via gh).
+# Exit 3 lists them, with the ones still showing a green run from before main
+# moved. It never repairs: the repair is a merge of main into the branch, which
+# makes a new semantic head and owes a fresh independent review.
+node scripts/agent-control/stale-gates.mjs
+
 # Prove the dependency graph is executable (no deadlock, no cycle)
 node scripts/agent-control/validate-dag.mjs --print-order
 

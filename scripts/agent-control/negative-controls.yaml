@@ -2478,3 +2478,91 @@ negative_controls:
         message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005\nmessage_type: REVIEW\npacket_id: KF-EXEC-AUTH-FAIL-CLOSED-001\nsender: claude
     proof_command: node --test --test-name-pattern="folds every authority message from RECOVERY-021 to the newest, none skipped" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
+
+  # --- observability: the worker's queue, and gates main has moved under ------
+
+  - id: NC-OBSERVE-REPEATING-ERROR-REPORTED
+    claim: >
+      The same error ending tick after tick is reported. This is the signal
+      that was missing while a dead worker logged 1,650 identical errors.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "  return count >= REPEATING_ERROR_TICKS ? {"
+      replace: "  return false ? {"
+    proof_command: node --test --test-name-pattern="the same error ending tick after tick" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-OBSERVE-SILENT-LOOP-REPORTED
+    claim: >
+      A directive that is offered every tick and fails before it is counted
+      shows as queued but not delivered.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "  if (queued.length && repeating) attention.push("
+      replace: "  if (false) attention.push("
+    proof_command: node --test --test-name-pattern="the silent loop" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-OBSERVE-STOPPED-WORKER-REPORTED
+    claim: >
+      A worker that has stopped ticking is flagged.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "  else if (!running && tickAge > STALE_TICK_SECONDS) attention.push("
+      replace: "  else if (false) attention.push("
+    proof_command: node --test --test-name-pattern="stopped ticking, is paused" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-OBSERVE-UNREADABLE-STATE-NOT-EMPTY
+    claim: >
+      State that cannot be parsed is reported as unreadable. Read as empty, a
+      truncated cursor or ledger would look like a worker with nothing wrong.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "    return { present: true, value: null, error: error.message };"
+      replace: "    return { present: true, value: null, error: null };"
+    proof_command: node --test --test-name-pattern="state it cannot read is reported" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ORCHESTRATOR-WAIT-NAMES-ITS-PACKET
+    claim: >
+      A wait for a builder names the packet and the step that is waiting.
+      Published from a runner, the bare probe text hid both.
+    mutation:
+      file: scripts/agent-control/lib/orchestrator.mjs
+      find: "          packet_id: p.active_packet || null,"
+      replace: "          packet_id: null,"
+    proof_command: node --test --test-name-pattern="still names the packet, its state" scripts/agent-control/tests/orchestration.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STALE-GATE-BEHIND-MAIN-DETECTED
+    claim: >
+      An impl PR behind main by a non-control file is reported stale, whatever
+      colour its last gate run shows.
+    mutation:
+      file: scripts/agent-control/lib/stale-gates.mjs
+      find: "  const behind = f.compare.behind_by > 0 && (nonControl.length > 0 || f.compare.truncated);"
+      replace: "  const behind = false;"
+    proof_command: node --test --test-name-pattern="behind main by a non-control file" scripts/agent-control/tests/stale-gates.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STALE-GATE-FAILED-READ-IS-NOT-CURRENT
+    claim: >
+      A PR whose facts could not be read is never reported as not stale.
+    mutation:
+      file: scripts/agent-control/lib/stale-gates.mjs
+      find: "        throw error;"
+      replace: "        return null;"
+    proof_command: node --test --test-name-pattern="any other failed read fails the whole report" scripts/agent-control/tests/stale-gates.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STALE-GATE-REPAIR-KEEPS-FRESH-REVIEW
+    claim: >
+      The repair the detector names always owes a fresh independent review of
+      the new head.
+    mutation:
+      file: scripts/agent-control/lib/stale-gates.mjs
+      find: "a FRESH independent semantic review of the new head is then owed before admission"
+      replace: "the existing review carries over"
+    proof_command: node --test --test-name-pattern="the only repair it names keeps the fresh review" scripts/agent-control/tests/stale-gates.spec.mjs
+    timeout_ms: 120000
