@@ -586,6 +586,83 @@ negative_controls:
     proof_command: node --test --test-name-pattern="holds the one mutation lock" scripts/agent-control/tests/autopilot-workflow.spec.mjs
     timeout_ms: 120000
 
+  # --- the audit that looks again for a missing AUTO_MERGE record -------------
+
+  - id: NC-MERGE-AUDIT-MISSING-DETECTED
+    claim: >
+      An autopilot merge with no record on the control room is reported as
+      missing. An audit that calls everything recorded audits nothing.
+    mutation:
+      file: scripts/agent-control/lib/merge-record-audit.mjs
+      find: "    const state = conflicts.length ? AUDIT_STATES.CONFLICT : records.length ? AUDIT_STATES.RECORDED : AUDIT_STATES.MISSING;"
+      replace: "    const state = AUDIT_STATES.RECORDED;"
+    proof_command: node --test --test-name-pattern="with no record is MISSING" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-ONLY-AUTOPILOT-MERGES
+    claim: >
+      Only a merge the workflow token made owes a record. Treating a person's
+      merge as the autopilot's would post AUTO_MERGE records for merges the
+      autopilot never made.
+    mutation:
+      file: scripts/agent-control/lib/merge-record-audit.mjs
+      find: "    && String(pr?.merged_by?.login || '') === AUTOPILOT_MERGER"
+      replace: "    && true"
+    proof_command: node --test --test-name-pattern="a merge by a person, or of a non-implementation branch" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-DETECTION-NEVER-WRITES
+    claim: >
+      Without --reconcile the audit only reads.
+    mutation:
+      file: scripts/agent-control/audit-merge-records.mjs
+      find: "  if (reconcile && audit.missing.length) {"
+      replace: "  if (audit.missing.length) {"
+    proof_command: node --test --test-name-pattern="without --reconcile, nothing is posted" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-READS-EVERY-PAGE
+    claim: >
+      The audit reads every page of closed PRs and of the control room. One
+      page would miss an old merge, or miss its record and post a second.
+    mutation:
+      file: scripts/agent-control/audit-merge-records.mjs
+      find: "    if (batch.length < PER_PAGE) return items;"
+      replace: "    return items;"
+    proof_command: node --test --test-name-pattern="beyond the first page of closed PRs" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-EXIT-STATUS
+    claim: >
+      A missing record or a conflict leaves the audit with a failing status.
+    mutation:
+      file: scripts/agent-control/audit-merge-records.mjs
+      find: "    process.exit(report.clean ? 0 : report.conflicts.length ? 4 : 5);"
+      replace: "    process.exit(0);"
+    proof_command: node --test --test-name-pattern="a missing record is exit 5" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-RUNS-AFTER-A-FAILED-SWEEP
+    claim: >
+      The audit step runs when the sweep before it failed. A sweep that failed
+      because a record could not be posted is the case the audit repairs.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "        if: ${{ !cancelled() }}"
+      replace: "        if: ${{ success() }}"
+    proof_command: node --test --test-name-pattern="even when the sweep failed" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-STEP-FAILS-THE-JOB
+    claim: >
+      A record still missing after reconciliation fails the job.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "after reconciliation\"; exit 1 ;;"
+      replace: "after reconciliation\"; exit 0 ;;"
+    proof_command: node --test --test-name-pattern="the audit step fails the job" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
   # --- source precedence (CG-DIRECTIVE-META-STATE-RECONCILE-001) ------------
 
   - id: NC-RECONCILE-GATE-BYPASS
