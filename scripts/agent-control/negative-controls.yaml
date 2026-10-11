@@ -2290,3 +2290,191 @@ negative_controls:
         if (false) {
     proof_command: node --test --test-name-pattern="the real control artifacts on this branch parse and are bound" scripts/agent-control/tests/yaml.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-COMPAT-ALIAS-BOUNDED-CORRECTION-REMOVED
+    claim: >
+      The real REVIEW 6011507550 declares BOUNDED_CORRECTION and folds as
+      PACKET_CORRECTION only because the alias table says so. Without that
+      entry the fold stops there with CONTROL_EFFECT_UNKNOWN, which is the
+      stale projection CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001 repairs.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        BOUNDED_CORRECTION: 'PACKET_CORRECTION',
+      replace: |-
+        // BOUNDED_CORRECTION removed
+    proof_command: node --test --test-name-pattern="the real 6011507550 folds with exactly the PACKET_CORRECTION semantics" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-ALIAS-CONTROL-BINDING-REMOVED
+    claim: >
+      The real REVIEW 6018421547 declares AUTHORIZE_CONTROL_BINDING and folds
+      as NO_STATE_CHANGE only because the alias table says so. Without that
+      entry the fold stops there and the later canonical authority is never
+      reached.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        AUTHORIZE_CONTROL_BINDING: 'NO_STATE_CHANGE',
+      replace: |-
+        // AUTHORIZE_CONTROL_BINDING removed
+    proof_command: node --test --test-name-pattern="the real 6018421547 folds as NO_STATE_CHANGE" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-ALIAS-CONTROL-BINDING-ADMITS
+    claim: >
+      AUTHORIZE_CONTROL_BINDING grants nothing. Read as PACKET_ADMISSION, the
+      effect its wording resembles, the real 6018421547 would project PR 155
+      READY_TO_MERGE; the replay of that exact comment catches it.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        AUTHORIZE_CONTROL_BINDING: 'NO_STATE_CHANGE',
+      replace: |-
+        AUTHORIZE_CONTROL_BINDING: 'PACKET_ADMISSION',
+    proof_command: node --test --test-name-pattern="the real 6018421547 folds as NO_STATE_CHANGE" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-ALIAS-BOUNDED-CORRECTION-CHECKPOINTS
+    claim: >
+      BOUNDED_CORRECTION is a correction and nothing more. Read as CHECKPOINT
+      it would close KF-EXEC-AUTH-FAIL-CLOSED-001 on an unmerged PR and credit
+      the programme; the replay of the real 6011507550 catches it.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        BOUNDED_CORRECTION: 'PACKET_CORRECTION',
+      replace: |-
+        BOUNDED_CORRECTION: 'CHECKPOINT',
+    proof_command: node --test --test-name-pattern="the real 6011507550 folds with exactly the PACKET_CORRECTION semantics" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-ALIAS-ESCAPES-TYPE-RULE
+    claim: >
+      An alias is held to the message-type rule of its canonical effect. An
+      alias exempt from that rule would let a HOLD or a RESUME carry a packet
+      correction or a no-op under a historical spelling.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        if (!allowed.includes(effect)) {
+      replace: |-
+        if (declared === effect && !allowed.includes(effect)) {
+    proof_command: node --test --test-name-pattern="an alias on a message type its canonical effect cannot ride" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-ALIAS-ESCAPES-SAFETY-RULE
+    claim: >
+      An alias is held to every rule of its canonical effect, the production
+      rule included. An alias exempt from it would fold authority that says
+      production was touched.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        if (touched !== 'false') {
+      replace: |-
+        if (declared === effect && touched !== 'false') {
+    proof_command: node --test --test-name-pattern="an alias is held to every field, safety and projection rule" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-UNKNOWN-TOKEN-GIVEN-MEANING
+    claim: >
+      Only the two listed spellings are aliases. Reading every other unknown
+      token as NO_STATE_CHANGE would let any misspelt or invented effect
+      advance the anchor silently.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        const canonical = Object.hasOwn(CONTROL_EFFECT_ALIASES, effect) ? CONTROL_EFFECT_ALIASES[effect] : effect;
+      replace: |-
+        const canonical = Object.hasOwn(CONTROL_EFFECT_ALIASES, effect) ? CONTROL_EFFECT_ALIASES[effect] : (CONTROL_EFFECTS.includes(effect) ? effect : 'NO_STATE_CHANGE');
+    proof_command: node --test --test-name-pattern="NC effect aliases: every other unknown token still stops the fold" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-UNKNOWN-TOKEN-ON-REAL-EVIDENCE
+    claim: >
+      On the real #80 record, a spelling one character away from either alias
+      stops the fold at that exact message. The same defect as above is caught
+      there too, by the recorded replay and not only by a synthetic envelope.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        const canonical = Object.hasOwn(CONTROL_EFFECT_ALIASES, effect) ? CONTROL_EFFECT_ALIASES[effect] : effect;
+      replace: |-
+        const canonical = Object.hasOwn(CONTROL_EFFECT_ALIASES, effect) ? CONTROL_EFFECT_ALIASES[effect] : (CONTROL_EFFECTS.includes(effect) ? effect : 'NO_STATE_CHANGE');
+    proof_command: node --test --test-name-pattern="either real spelling, changed by one character" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-ALIAS-MATCH-NOT-EXACT
+    claim: >
+      An alias matches its exact spelling only, as a canonical effect does. A
+      case-insensitive match would accept bounded_correction while
+      packet_correction is still rejected.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        const canonical = Object.hasOwn(CONTROL_EFFECT_ALIASES, effect) ? CONTROL_EFFECT_ALIASES[effect] : effect;
+      replace: |-
+        const canonical = Object.hasOwn(CONTROL_EFFECT_ALIASES, effect.toUpperCase()) ? CONTROL_EFFECT_ALIASES[effect.toUpperCase()] : effect;
+    proof_command: node --test --test-name-pattern="NC effect aliases: every other unknown token still stops the fold" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-SPELLING-DRIVES-STATE
+    claim: >
+      Every state transition flows through the canonical effect. If
+      applyEffect() read the declared spelling instead, an alias would reach
+      the projection as an effect that has no projected state.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+        const { effect, packet_id: packet } = read;
+      replace: |-
+        const { declared_effect: effect, packet_id: packet } = read;
+    proof_command: node --test --test-name-pattern="BOUNDED_CORRECTION folds with exactly the PACKET_CORRECTION semantics, and its spelling is evidence only" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-REPLAY-CANDIDATE-SKIPPED
+    claim: >
+      The replay from RECOVERY-021 applies every authority candidate in order
+      and stops at one it cannot apply. A fold that skipped the unfoldable
+      message would reach the newest authority without either alias and
+      without the message in between.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+            if (!applied.ok) {
+      replace: |-
+            if (!applied.ok) continue;
+                if (false) {
+    proof_command: node --test --test-name-pattern="either real spelling, changed by one character" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-EVIDENCE-RESPELLED
+    claim: >
+      The repair is in the reader, never in the evidence. A recording whose
+      6011507550 was rewritten to the canonical spelling no longer parses as
+      the live #80 comment did, and the digest of the live source catches it.
+    mutation:
+      file: scripts/agent-control/fixtures/reducer-recovery-truth.json
+      find: |-
+        control_effect: BOUNDED_CORRECTION\nsemantic_review:
+      replace: |-
+        control_effect: PACKET_CORRECTION\nsemantic_review:
+    proof_command: node --test --test-name-pattern="the continuation after RECOVERY-021 is complete" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-COMPAT-REPLAY-AUTHORITY-MISSING
+    claim: >
+      The replay names every authority message it applies, so it cannot pass
+      on a record with one left out. With the latest canonical
+      PACKET_CORRECTION (6023054785) no longer authority in the recording, the
+      final projection is unchanged, and only the message-by-message proof
+      notices that the fold did not pass through it.
+    mutation:
+      file: scripts/agent-control/fixtures/reducer-recovery-truth.json
+      find: |-
+        message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005\nmessage_type: REVIEW\npacket_id: KF-EXEC-AUTH-FAIL-CLOSED-001\nsender: chatgpt
+      replace: |-
+        message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005\nmessage_type: REVIEW\npacket_id: KF-EXEC-AUTH-FAIL-CLOSED-001\nsender: claude
+    proof_command: node --test --test-name-pattern="folds every authority message from RECOVERY-021 to the newest, none skipped" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000

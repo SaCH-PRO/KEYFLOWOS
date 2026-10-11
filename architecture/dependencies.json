@@ -108839,6 +108839,13 @@
     {
       "resolved": false,
       "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "specifier": "node:crypto",
+      "target": "node:crypto",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
       "specifier": "node:fs",
       "target": "node:fs",
       "type": "external"
@@ -110504,7 +110511,7 @@
     }
   ],
   "meta": {
-    "edges": 15786,
+    "edges": 15787,
     "nodes": 3861,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"

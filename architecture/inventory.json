@@ -927,9 +927,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 233,
+      "lines": 105,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 21660
+      "size_bytes": 6259
     },
     {
       "extension": ".yaml",
@@ -939,9 +939,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 1582,
+      "lines": 64,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 102265
+      "size_bytes": 2301
     },
     {
       "extension": ".yaml",
@@ -57817,7 +57817,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4213638
+      "size_bytes": 4213840
     },
     {
       "extension": ".md",
@@ -57835,13 +57835,13 @@
       "extension": ".md",
       "lines": 671,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 31523
+      "size_bytes": 31631
     },
     {
       "extension": ".json",
-      "lines": 63504,
+      "lines": 63506,
       "path": "architecture/inventory.json",
-      "size_bytes": 1644211
+      "size_bytes": 1644264
     },
     {
       "extension": ".md",
@@ -59131,9 +59131,9 @@
     },
     {
       "extension": ".md",
-      "lines": 664,
+      "lines": 700,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 32551
+      "size_bytes": 34798
     },
     {
       "extension": ".md",
@@ -61817,9 +61817,9 @@
     },
     {
       "extension": ".json",
-      "lines": 2066,
+      "lines": 5948,
       "path": "scripts/agent-control/fixtures/reducer-recovery-truth.json",
-      "size_bytes": 191829
+      "size_bytes": 497441
     },
     {
       "extension": ".ps1",
@@ -61879,6 +61879,7 @@
     {
       "exports": [
         "CONTROL_EFFECTS",
+        "CONTROL_EFFECT_ALIASES",
         "EFFECT_PROBLEMS",
         "FOLD_NOT_STARTED",
         "applyEffect",
@@ -61892,9 +61893,9 @@
         "./state-machine.mjs",
         "./state.mjs"
       ],
-      "lines": 392,
+      "lines": 424,
       "path": "scripts/agent-control/lib/authority-effects.mjs",
-      "size_bytes": 19181
+      "size_bytes": 20857
     },
     {
       "exports": [
@@ -62186,9 +62187,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 2024,
+      "lines": 2214,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 96786
+      "size_bytes": 106661
     },
     {
       "exports": [],
@@ -62304,14 +62305,15 @@
         "../status.mjs",
         "node:assert/strict",
         "node:child_process",
+        "node:crypto",
         "node:fs",
         "node:os",
         "node:path",
         "node:test"
       ],
-      "lines": 1929,
+      "lines": 2410,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
-      "size_bytes": 121249
+      "size_bytes": 157207
     },
     {
       "exports": [],
@@ -63499,6 +63501,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3463,
     "total_files": 4457,
-    "total_lines": 1146701
+    "total_lines": 1149678
   }
 }
