@@ -165,6 +165,75 @@ test('shortened name: a retry resumes in the same worktree, and another long id 
   }
 });
 
+/** Remove the long path from the branch, as a clean-up commit on the real repository would. */
+function dropLongPath(world) {
+  const scratch = path.join(world.tmp, 'scratch-drop-long-path');
+  git(world.tmp, 'clone', '-q', '-b', 'impl/long-path', path.join(world.tmp, 'origin.git'), scratch);
+  git(scratch, 'rm', '-q', LONG_FILE);
+  git(scratch, 'commit', '-q', '-m', 'drop the long path');
+  git(scratch, 'push', '-q', 'origin', 'impl/long-path');
+}
+
+test('shortened name: a retry still resumes in the first worktree after the base loses its longest path', () => {
+  // How much of the id fits depends on the base's longest tracked path. If a
+  // retry recomputed the name, deleting that path between attempts would give
+  // it a different directory and strand the first attempt's work. Found by
+  // review of 2d012625.
+  requireWindows(assert);
+  const w = makeWorld();
+  try {
+    install(w);
+    longPathBranch(w);
+    setComments(w, [comment({ id: LONG_ID, extra: 'implementation_branch: impl/long-path' })]);
+    setTranscripts(w, [blocked('first'), done(LONG_ID)]);
+    w.env.KF_STUB_CLAUDE_WRITE = 'partial.txt';
+    tick(w);
+    const [a] = invocations(w);
+    assert.ok(a, 'the first attempt woke claude');
+    assert.notEqual(path.basename(a.cwd), LONG_ID, 'the scenario needs a shortened name for the first attempt');
+    assert.ok(fs.existsSync(path.join(a.cwd, 'partial.txt')), 'the first attempt left work behind');
+
+    dropLongPath(w);
+    // With the long path gone the whole id would now fit.
+    assert.ok(path.join(w.wtRoot, LONG_ID, 'README.md').length <= BUDGET, 'the scenario needs the full id to fit after the drop');
+
+    const r = tick(w);
+    const b = invocations(w)[1];
+    assert.ok(b, `the retry did not wake claude\n${r.out}`);
+    assert.ok(samePath(a.cwd, b.cwd), `the retry ran in another worktree: ${a.cwd} then ${b.cwd}`);
+    assert.ok(fs.existsSync(path.join(b.cwd, 'partial.txt')), 'the retry sees the first attempt\'s work');
+    assert.deepEqual(fs.readdirSync(w.wtRoot), [path.basename(a.cwd)], 'no second worktree was made for the directive');
+    assert.deepEqual(cursor(w), [LONG_ID]);
+  } finally {
+    cleanup(w);
+  }
+});
+
+test('shortened name: two directories carrying one directive\'s tag are a counted failure, not a guess', () => {
+  requireWindows(assert);
+  const w = makeWorld();
+  try {
+    install(w);
+    longPathBranch(w);
+    setComments(w, [comment({ id: LONG_ID, extra: 'implementation_branch: impl/long-path' })]);
+    setTranscripts(w, [blocked('first'), done(LONG_ID)]);
+    tick(w);
+    const [a] = invocations(w);
+    const first = path.basename(a.cwd);
+    // A second directory with the same tag and a shorter head of the same id.
+    const twin = first.slice(0, 20) + first.slice(-9);
+    fs.mkdirSync(path.join(w.wtRoot, twin));
+
+    const r = tick(w);
+    assert.equal(invocations(w).length, 1, `claude must not be woken when the worktree is ambiguous\n${r.out}`);
+    assert.match(r.out, /worktree_unavailable: 2 worktree directories carry the tag/);
+    assert.equal(attempts(w).find((e) => e.message_id === LONG_ID).attempts, 2, 'counted in the ledger, so it ends in a hold');
+    assert.deepEqual(cursor(w), []);
+  } finally {
+    cleanup(w);
+  }
+});
+
 test('full-id worktree: one made under the whole id is found again, not replaced by a shortened one', () => {
   requireWindows(assert);
   const w = makeWorld();

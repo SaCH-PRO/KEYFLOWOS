@@ -479,10 +479,21 @@ function Get-LongestTrackedPathLength {
   return $longest
 }
 
-# The directory a directive's worktree lives in. Its full id whenever the
-# longest tracked path then fits the budget; otherwise the head of the id and
-# eight hex digits of its SHA-256, so a retry finds the same directory and two
-# long ids that share a head do not collide.
+# Eight hex digits of the SHA-256 of the raw message id. This, not the length
+# of the name's head, is what identifies a directive's shortened worktree: it
+# depends on the id alone.
+function Get-WakeWorktreeTag {
+  param([string]$MessageId)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try { $digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($MessageId)) } finally { $sha.Dispose() }
+  return -join ($digest[0..3] | ForEach-Object { $_.ToString('x2') })
+}
+
+# The directory a NEW worktree for a directive is made in. Its full id whenever
+# the longest tracked path then fits the budget; otherwise the head of the id
+# and its tag, so two long ids that share a head do not collide. How much head
+# fits depends on the base's longest path at that moment, so this is only ever
+# asked when no worktree for the directive exists yet (Find-ShortenedWorktree).
 function Get-WakeWorktreeName {
   param([string]$MessageId, [string]$Root, [string]$Base)
   $safe = Get-SafeId $MessageId
@@ -491,10 +502,30 @@ function Get-WakeWorktreeName {
   if ($room -lt $MinWorktreeNameLength) {
     throw (New-WorktreeUnavailable "the worktree root leaves $room characters for a worktree name at $Base and $MinWorktreeNameLength are needed; use a shorter -WorktreeRoot")
   }
-  $sha = [System.Security.Cryptography.SHA256]::Create()
-  try { $digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($MessageId)) } finally { $sha.Dispose() }
-  $tag = -join ($digest[0..3] | ForEach-Object { $_.ToString('x2') })
+  $tag = Get-WakeWorktreeTag $MessageId
   return $safe.Substring(0, $room - 9) + '-' + $tag
+}
+
+# The shortened worktree an earlier attempt at this directive was given, if
+# one is there. A retry must run where the first attempt left its work, and
+# the name that attempt got cannot be recomputed: the base may have gained or
+# lost its longest path since, which changes how much of the id fits. So the
+# directory is looked for by what does not change -- the tag, and a head that
+# is a prefix of this id -- instead of being derived again.
+function Find-ShortenedWorktree {
+  param([string]$MessageId, [string]$Root)
+  $safe = Get-SafeId $MessageId
+  $tag = Get-WakeWorktreeTag $MessageId
+  $found = @(Get-ChildItem -LiteralPath $Root -Directory -Filter "*-$tag" -ErrorAction SilentlyContinue | Where-Object {
+      $_.Name.Length -gt 9 -and $safe.StartsWith($_.Name.Substring(0, $_.Name.Length - 9), [System.StringComparison]::OrdinalIgnoreCase)
+    })
+  if ($found.Count -gt 1) {
+    # Two directories claim one directive. Choosing one could run the retry
+    # beside the wrong partial work; a person decides.
+    throw (New-WorktreeUnavailable "$($found.Count) worktree directories carry the tag $tag for this directive; refusing to choose between them")
+  }
+  if ($found.Count -eq 1) { return $found[0].FullName }
+  return $null
 }
 
 function New-WakeWorktree {
@@ -509,8 +540,14 @@ function New-WakeWorktree {
   $path = Join-Path $root (Get-SafeId $Directive.message_id)
   $base = $null
   if (-not (Test-Path $path)) {
-    $base = Resolve-WorktreeBase -Directive $Directive
-    $path = Join-Path $root (Get-WakeWorktreeName -MessageId $Directive.message_id -Root $root -Base $base)
+    # Then a shortened one from an earlier attempt, found by its tag. Only a
+    # directive with no worktree at all is given a newly computed name.
+    $earlier = Find-ShortenedWorktree -MessageId $Directive.message_id -Root $root
+    if ($earlier) { $path = $earlier }
+    else {
+      $base = Resolve-WorktreeBase -Directive $Directive
+      $path = Join-Path $root (Get-WakeWorktreeName -MessageId $Directive.message_id -Root $root -Base $base)
+    }
   }
   $name = Split-Path -Leaf $path
 

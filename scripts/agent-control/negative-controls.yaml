@@ -390,6 +390,30 @@ negative_controls:
     proof_command: node --test --test-name-pattern="one made under the whole id is found again" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
     timeout_ms: 300000
 
+  - id: NC-WORKER-WORKTREE-EARLIER-ATTEMPT-FOUND-BY-TAG
+    claim: >
+      A retry runs in the shortened worktree its first attempt was given, even
+      when the base's longest path has changed since. Recomputing the name
+      gives a different directory and strands the first attempt's work
+      (review of 2d012625).
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "    if ($earlier) { $path = $earlier }"
+      replace: "    if ($false) { $path = $earlier }"
+    proof_command: node --test --test-name-pattern="after the base loses its longest path" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-AMBIGUOUS-TAG-NOT-GUESSED
+    claim: >
+      Two directories carrying one directive's tag are a counted failure. The
+      worker does not pick one and run beside the wrong partial work.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($found.Count -gt 1) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="two directories carrying one directive" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
   - id: NC-WORKER-WORKTREE-FAILURE-COUNTED
     claim: >
       A worktree that cannot be made is a failed attempt. Thrown before the
