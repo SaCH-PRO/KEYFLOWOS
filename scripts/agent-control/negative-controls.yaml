@@ -429,13 +429,112 @@ negative_controls:
   - id: NC-WORKER-FETCH-FAILURE-NOT-COUNTED
     claim: >
       A failed fetch is an outage, not a defect of the directive. Counting it
-      would hold a directive after four minutes offline until an operator
-      released it.
+      against the two-strike budget would hold a directive after four minutes
+      offline until an operator released it. (It is counted, but under the
+      network bound: see the controls below.)
     mutation:
       file: scripts/agent-control/claude-worker.ps1
-      find: "throw 'git fetch origin failed; not waking claude on a stale base'"
+      find: "throw (New-NetworkUnavailable 'git fetch origin failed; not waking claude on a stale base')"
       replace: "throw (New-WorktreeUnavailable 'git fetch origin failed; not waking claude on a stale base')"
     proof_command: node --test --test-name-pattern="a failed fetch is the network" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  # --- every failure before the wake is counted ------------------------------
+
+  - id: NC-WORKER-NETWORK-FAILURE-LEAVES-A-TRACE
+    claim: >
+      A fetch failure is recorded in the directive's ledger entry on every
+      tick. The defect is what shipped: it was thrown past the ledger, logged
+      every interval for ever, and never held or escalated.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "      $entry = Register-NetworkFailure -Directive $directive -Reason $reason"
+      replace: "      throw"
+    proof_command: node --test --test-name-pattern="a failed fetch is the network" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-OUTAGE-HELD
+    claim: >
+      A fetch that keeps failing past the network bound holds the directive
+      and escalates once. The defect counts the failures and never acts on
+      the count.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($entry.network_failures -ge $MaxNetworkFailures -and $minutes -ge $MinNetworkOutageMinutes) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="a fetch that keeps failing" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-HOLD-NEEDS-DURATION
+    claim: >
+      Enough consecutive fetch failures do not hold a directive until they
+      also span the outage time. The defect holds on the count alone, which a
+      worker run at a short interval reaches in seconds.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: " -and $minutes -ge $MinNetworkOutageMinutes) {"
+      replace: ") {"
+    proof_command: node --test --test-name-pattern="a fetch that keeps failing" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-HOLD-NEEDS-COUNT
+    claim: >
+      A long gap between two fetch failures does not hold a directive. The
+      defect holds on elapsed time alone, so two failures either side of a
+      night asleep would count as an outage.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($entry.network_failures -ge $MaxNetworkFailures -and "
+      replace: "  if ("
+    proof_command: node --test --test-name-pattern="an hour apart" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-COUNT-RESETS
+    claim: >
+      A tick that gets past the fetch ends the outage: the network count
+      starts again. The defect never resets it, so short outages days apart
+      add up to a hold.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  Clear-NetworkFailures -MessageId $Directive.message_id"
+      replace: "  # the network count is never reset"
+    proof_command: node --test --test-name-pattern="gets past the fetch" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-FAILURES-SPARE-THE-ATTEMPT-BUDGET
+    claim: >
+      Network failures never add to a directive's attempts. The defect counts
+      each one as an attempt, so the total-attempt backstop holds a healthy
+      directive after five failed fetches.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  $entry.network_failures = [int]$entry.network_failures + 1"
+      replace: "  $entry.network_failures = [int]$entry.network_failures + 1; $entry.attempts = [int]$entry.attempts + 1"
+    proof_command: node --test --test-name-pattern="more fetch failures than the attempt budget" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-SETUP-FAILURE-COUNTED
+    claim: >
+      A failure before the wake that nothing classified (the worktree root
+      cannot be made) is a counted attempt. The defect is what shipped: it
+      was rethrown past the ledger and logged every interval for ever.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  return @{ network = $false; reason = 'wake_setup_failed: ' + (Get-FaultText $Failure) }"
+      replace: "  throw $Failure"
+    proof_command: node --test --test-name-pattern="a worktree root that cannot be made" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-SETUP-FAILURE-REASON-HAS-NO-BACKSLASH
+    claim: >
+      The reason of an unclassified failure is quoted into the YAML
+      escalation, and it can name a Windows path. The defect posts the
+      backslashes, which a YAML reader takes as escapes.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  return $text.Replace("
+      replace: "  return $text #.Replace("
+    proof_command: node --test --test-name-pattern="a worktree root inside the checkout is a counted failure" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
     timeout_ms: 300000
 
   # --- one worker per repository and control issue on a machine --------------

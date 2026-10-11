@@ -14,7 +14,8 @@
  *   - a shortened worktree name is the same on every attempt, and distinct per id
  *   - a worktree made under the full id is still found
  *   - a worktree that cannot be made is a failed attempt: held and escalated once
- *   - a failed fetch is not counted against the directive
+ *   - a failed fetch is not counted against the directive's two strikes
+ *     (it is counted as a network fault: worker-prewake.spec.mjs)
  *
  * The length proofs assert on the path the session really ran in. They do not
  * depend on git failing, so they hold on a host with core.longpaths set.
@@ -336,7 +337,12 @@ test('a failed fetch is the network\'s: it is not counted against the directive 
       assert.match(r.out, /git fetch origin failed/);
     }
     assert.equal(invocations(w).length, 0, 'claude is not woken on a stale base');
-    assert.deepEqual(attempts(w), [], 'an outage must not hold a directive');
+    // Recorded, so a fetch that never works again is seen (worker-prewake.spec.mjs),
+    // but as a network fault: no attempt, no strike, no hold.
+    assert.equal(attempts(w).length, 1, 'the outage left no trace in the ledger');
+    assert.equal(attempts(w)[0].network_failures, 3);
+    assert.equal(attempts(w)[0].attempts, 0, 'a failed fetch was counted as an attempt');
+    assert.equal(attempts(w)[0].held, false, 'an outage must not hold a directive');
     assert.equal(posts(w).length, 0);
 
     // The remote comes back and the same directive runs.
@@ -344,6 +350,7 @@ test('a failed fetch is the network\'s: it is not counted against the directive 
     const r = tick(w);
     assert.equal(invocations(w).length, 1, r.out);
     assert.deepEqual(cursor(w), ['CG-OFFLINE-001']);
+    assert.deepEqual(attempts(w), [], 'the outage is forgotten once the directive is delivered');
   } finally {
     cleanup(w);
   }

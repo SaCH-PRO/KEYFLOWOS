@@ -14,7 +14,10 @@
       interactive checkout, with a bounded control prompt;
     - records the processed message id durably and idempotently;
     - stops retrying a directive after two materially identical failures,
-      holds it as HELD_RETRYABLE and escalates once.
+      holds it as HELD_RETRYABLE and escalates once;
+    - counts a failure that happens before Claude is woken too. A network
+      fault (a failed fetch) has its own, larger bound, so a short outage
+      holds nothing and a lasting one is still escalated.
 
   It passes NO credentials. It reuses the developer's existing authenticated
   `gh` and Claude sessions. If either is unavailable it reports
@@ -54,6 +57,12 @@
   Where per-wake worktrees are created. Must lie outside the checkout.
   Default: %LOCALAPPDATA%\KEYFLOWOS\worker-worktrees.
 
+.PARAMETER MaxNetworkFailures
+.PARAMETER MinNetworkOutageMinutes
+  A directive is held for a network fault only after this many consecutive
+  identical failures AND this many minutes since the first of them.
+  Defaults: 15 and 30. Overridable so the bound can be proved in seconds.
+
 .PARAMETER LockRoot
   Where the machine-wide lock lives: one file per repository and control
   issue, shared by every checkout a worker could be started from.
@@ -89,6 +98,8 @@ param(
   [string]$AuthorizedAuthors = 'SaCH-PRO',
   [string]$WorktreeRoot,
   [string]$LockRoot,
+  [int]$MaxNetworkFailures = 15,
+  [int]$MinNetworkOutageMinutes = 30,
   [string]$GhPath = 'gh',
   [string]$ClaudePath = 'claude'
 )
@@ -104,6 +115,22 @@ $WorkerContractVersion = 2
 # blocker whose wording changes every run cannot loop either.
 $MaxIdenticalAttempts = 2
 $MaxTotalAttempts = 5
+
+# A failed fetch is different: it is usually the network's fault and ends by
+# itself, so two of them (four minutes at the default interval) must not hold
+# a healthy directive until an operator releases it. But a fetch that never
+# works again (a remote that moved, a credential helper that stopped
+# answering) used to be logged every interval for ever and reach nobody.
+# Network faults are therefore counted apart from the budget above and hold a
+# directive only after $MaxNetworkFailures consecutive identical failures that
+# ALSO span $MinNetworkOutageMinutes (parameters; 15 and 30). Both, because
+# either alone misfires: fifteen ticks of a worker run at a five-second
+# interval is 75 seconds, and two failures either side of a night asleep are
+# hours apart. At the default 120-second interval fifteen failures take 28
+# minutes, so the hold comes on the first failure past half an hour. That is
+# long for a blip and short next to a directive nobody is acting on. A GitHub
+# outage does not get this far: the control issue cannot be read either, and
+# the tick stops before a directive is selected.
 
 # Windows refuses a path of 260 characters unless core.longpaths is set, and a
 # worktree is named after its directive. A long message id therefore made
@@ -167,6 +194,17 @@ function Invoke-Native {
 }
 
 function Get-UtcStamp { (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+
+# ConvertFrom-Json leaves an ISO date a string in Windows PowerShell 5.1 and
+# makes it a DateTime in PowerShell 7; both are read here.
+function ConvertTo-UtcDate {
+  param($Value)
+  if ($Value -is [datetime]) { return $Value.ToUniversalTime() }
+  if (-not $Value) { return $null }
+  try {
+    return [datetime]::Parse([string]$Value, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+  } catch { return $null }
+}
 
 function Get-SafeId {
   param([string]$Id)
@@ -242,9 +280,10 @@ function Get-FailureSignature {
   return (([string]$Reason).ToLowerInvariant() -replace '\s+', ' ').Trim()
 }
 
-function Register-FailedAttempt {
-  param([object]$Directive, [string]$Reason)
-  $signature = Get-FailureSignature -Reason $Reason
+# The directive's ledger entry, made if it has none. An entry written by an
+# earlier worker has no network fields; they are added so both read alike.
+function Get-OrNewAttemptEntry {
+  param([object]$Directive)
   $entry = Get-AttemptEntry -MessageId $Directive.message_id
   if ($null -eq $entry) {
     $entry = [pscustomobject]@{
@@ -260,6 +299,16 @@ function Register-FailedAttempt {
       history            = @()
     }
   }
+  foreach ($field in 'network_failures', 'network_signature', 'network_first_at', 'network_last_at') {
+    if (-not ($entry.PSObject.Properties.Name -contains $field)) { $entry | Add-Member -NotePropertyName $field -NotePropertyValue $null }
+  }
+  return $entry
+}
+
+function Register-FailedAttempt {
+  param([object]$Directive, [string]$Reason)
+  $signature = Get-FailureSignature -Reason $Reason
+  $entry = Get-OrNewAttemptEntry -Directive $Directive
   $consecutive = if ($entry.last_signature -ceq $signature) { [int]$entry.consecutive + 1 } else { 1 }
   $entry.attempts = [int]$entry.attempts + 1
   $entry.consecutive = $consecutive
@@ -277,6 +326,47 @@ function Register-FailedAttempt {
 
   Set-AttemptEntry -Entry $entry
   return $entry
+}
+
+# A network fault before the wake. It is counted in the directive's entry but
+# in fields of its own: it never adds to attempts or consecutive, so an outage
+# cannot spend the directive's two strikes, and Claude was never invoked.
+function Register-NetworkFailure {
+  param([object]$Directive, [string]$Reason)
+  $signature = Get-FailureSignature -Reason $Reason
+  $entry = Get-OrNewAttemptEntry -Directive $Directive
+  $now = (Get-Date).ToUniversalTime()
+  $first = ConvertTo-UtcDate $entry.network_first_at
+  if ($entry.network_signature -cne $signature -or $null -eq $first) {
+    $entry.network_failures = 0
+    $entry.network_first_at = Get-UtcStamp
+    $first = $now
+  }
+  $entry.network_failures = [int]$entry.network_failures + 1
+  $entry.network_signature = $signature
+  $entry.network_last_at = Get-UtcStamp
+
+  $minutes = [int][Math]::Floor(($now - $first).TotalMinutes)
+  if ($entry.network_failures -ge $MaxNetworkFailures -and $minutes -ge $MinNetworkOutageMinutes) {
+    $entry.held = $true
+    $entry.held_reason = "network fault: $($entry.network_failures) consecutive identical failures over $minutes minutes, claude never woken: $signature"
+    $entry.held_at = Get-UtcStamp
+  }
+  Set-AttemptEntry -Entry $entry
+  return $entry
+}
+
+# The tick got past the step that was failing, so the outage is over. An entry
+# that recorded nothing else goes with it.
+function Clear-NetworkFailures {
+  param([string]$MessageId)
+  $entry = Get-AttemptEntry -MessageId $MessageId
+  if ($null -eq $entry -or -not $entry.network_failures) { return }
+  if ([int]$entry.attempts -eq 0) { Remove-AttemptEntry -MessageId $MessageId; return }
+  $entry.network_failures = 0
+  $entry.network_signature = $null
+  $entry.network_first_at = $null
+  Set-AttemptEntry -Entry $entry
 }
 
 function Send-HoldEscalation {
@@ -350,17 +440,6 @@ function Test-InstallContract {
 # unclean stop the recorded one can be anything at all, and a worker that
 # trusted it refused to start. Each lock records its owner's start time and is
 # held only while a process with that PID and that start time exists.
-
-# ConvertFrom-Json leaves an ISO date a string in Windows PowerShell 5.1 and
-# makes it a DateTime in PowerShell 7; both are read here.
-function ConvertTo-UtcDate {
-  param($Value)
-  if ($Value -is [datetime]) { return $Value.ToUniversalTime() }
-  if (-not $Value) { return $null }
-  try {
-    return [datetime]::Parse([string]$Value, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
-  } catch { return $null }
-}
 
 # Who a lock file names, and whether that process still holds it. $null when
 # there is no file. live = the owner is running; mine = the owner is this
@@ -611,6 +690,35 @@ function New-WorktreeUnavailable {
   return $failure
 }
 
+# A fault of the network's kind: it may end by itself, so it is counted under
+# the larger network bound and never against the directive's two strikes.
+function New-NetworkUnavailable {
+  param([string]$Reason)
+  $failure = New-Object System.InvalidOperationException($Reason)
+  $failure.Data['keyflow_network_reason'] = "network_unavailable: $Reason"
+  return $failure
+}
+
+# The text of a failure nobody classified. It may name a path, and the reason
+# is quoted into a YAML escalation, where a backslash starts an escape.
+function Get-FaultText {
+  param([System.Exception]$Failure)
+  $text = [string]$Failure.Message
+  return $text.Replace('\', '/')
+}
+
+# What kind of failure stopped a wake before Claude ran. Every kind is
+# counted: one that was not classified where it was thrown (the worktree root
+# refused or not creatable) is a local fault and repeats exactly.
+function Get-WakeFault {
+  param([System.Exception]$Failure)
+  $network = $Failure.Data['keyflow_network_reason']
+  if ($network) { return @{ network = $true; reason = [string]$network } }
+  $counted = $Failure.Data['keyflow_attempt_reason']
+  if ($counted) { return @{ network = $false; reason = [string]$counted } }
+  return @{ network = $false; reason = 'wake_setup_failed: ' + (Get-FaultText $Failure) }
+}
+
 function Get-LongestTrackedPathLength {
   param([string]$Base)
   $listing = Invoke-Native git @('-C', $RepoRoot, '-c', 'core.quotepath=false', 'ls-tree', '-r', '--name-only', $Base)
@@ -674,7 +782,8 @@ function New-WakeWorktree {
   $root = Get-WorktreeRoot
   if (-not (Test-Path $root)) { New-Item -ItemType Directory -Path $root -Force | Out-Null }
 
-  if ((Invoke-Native git @('-C', $RepoRoot, 'fetch', 'origin', '--prune', '--quiet')).code -ne 0) { throw 'git fetch origin failed; not waking claude on a stale base' }
+  if ((Invoke-Native git @('-C', $RepoRoot, 'fetch', 'origin', '--prune', '--quiet')).code -ne 0) { throw (New-NetworkUnavailable 'git fetch origin failed; not waking claude on a stale base') }
+  Clear-NetworkFailures -MessageId $Directive.message_id
 
   # A worktree made under the directive's full id is found first, whatever the
   # tree measures now: partial work from an earlier attempt lives there.
@@ -877,19 +986,28 @@ function Invoke-WorkerTick {
     return
   }
 
+  # Nothing between selecting a directive and waking Claude may fail unseen:
+  # whatever stops the wake is counted, so it ends in a wake or in a hold.
   try { $worktree = New-WakeWorktree -Directive $directive }
   catch {
-    $reason = $_.Exception.Data['keyflow_attempt_reason']
-    if (-not $reason) { throw }   # a failed fetch is the network's, and is not counted against the directive
-    Write-WorkerLog 'ERROR' "$reason for $($directive.message_id); claude was not woken"
-    $entry = Register-FailedAttempt -Directive $directive -Reason $reason
+    $fault = Get-WakeFault -Failure $_.Exception
+    $reason = $fault.reason
+    if ($fault.network) {
+      $entry = Register-NetworkFailure -Directive $directive -Reason $reason
+      Write-WorkerLog 'ERROR' "$reason for $($directive.message_id) (network failure $($entry.network_failures); held at $MaxNetworkFailures over $MinNetworkOutageMinutes minutes); claude was not woken"
+    } else {
+      Write-WorkerLog 'ERROR' "$reason for $($directive.message_id); claude was not woken"
+      $entry = Register-FailedAttempt -Directive $directive -Reason $reason
+    }
     if ($entry.held) {
       Write-WorkerLog 'HELD_RETRYABLE' "$($directive.message_id) held after attempt $($entry.attempts): $($entry.held_reason)"
       Send-HoldEscalation -Entry $entry
     }
     return
   }
-  $result = Invoke-ClaudeForDirective -Directive $directive -Worktree $worktree
+  # A wake that throws is a failed run, counted below like any other.
+  try { $result = Invoke-ClaudeForDirective -Directive $directive -Worktree $worktree }
+  catch { $result = @{ ok = $false; reason = 'wake_failed: ' + (Get-FaultText $_.Exception) } }
 
   if ($result.ok) {
     # Record only on success, and only once: a failed run must be retryable,
