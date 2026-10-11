@@ -16,7 +16,10 @@ vi.mock('../crm-permissions.helper', () => ({ resolveCrmAccess: vi.fn() }));
 type ContactRow = Record<string, unknown> & { custom?: Record<string, unknown> | null };
 
 function makeService(opts: {
+  /** Selected as the paid provider (Apollo). */
   provider: EnrichmentProvider;
+  /** Free fallback provider; defaults to the same fake so existing cases are unaffected. */
+  publicProvider?: EnrichmentProvider;
   /** Row(s) returned by findFirst, in call order. A single value repeats. */
   contact: ContactRow | null | Array<ContactRow | null>;
 }) {
@@ -30,13 +33,18 @@ function makeService(opts: {
   }
   const prisma = { client: { contact: { findFirst, updateMany } } };
   const crm = { updateContact };
-  const svc = new ContactEnrichmentService(prisma as never, crm as never, opts.provider as never);
+  const svc = new ContactEnrichmentService(
+    prisma as never,
+    crm as never,
+    opts.provider as never,
+    (opts.publicProvider ?? opts.provider) as never,
+  );
   return { svc, updateContact, updateMany, findFirst };
 }
 
-function fakeProvider(outcome: ProviderOutcome | null, enabled = true): EnrichmentProvider {
+function fakeProvider(outcome: ProviderOutcome | null, enabled = true, key = 'apollo'): EnrichmentProvider {
   return {
-    key: 'apollo',
+    key,
     enabled,
     enrich: vi.fn().mockResolvedValue(outcome ?? { status: 'no_match' }),
   };
@@ -69,6 +77,20 @@ describe('ContactEnrichmentService', () => {
     expect(out.status).toBe('not_configured');
     expect(provider.enrich).not.toHaveBeenCalled();
     expect(updateContact).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the free public-data provider when Apollo is not configured', async () => {
+    const apollo = fakeProvider(null, false); // paid provider off
+    const publicProvider = fakeProvider({ status: 'match', result: { companyName: 'Acme Inc' } }, true, 'public-data');
+    const { svc, updateContact } = makeService({ provider: apollo, publicProvider, contact: baseContact });
+
+    const out = await svc.enrichContact({ businessId: 'b1', contactId: 'c1' });
+
+    expect(out.status).toBe('enriched');
+    expect(out.provider).toBe('public-data'); // the FREE provider ran, not Apollo
+    expect(publicProvider.enrich).toHaveBeenCalledTimes(1);
+    expect(apollo.enrich).not.toHaveBeenCalled();
+    expect(updateContact.mock.calls[0][0].companyName).toBe('Acme Inc');
   });
 
   it('fills only blank fields and never overwrites existing values', async () => {

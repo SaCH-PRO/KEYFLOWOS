@@ -86,6 +86,7 @@ So the highest-value plugins are the ones filling a **real gap**, not re-impleme
 **Gap it fills:** the CRM stored contacts but never enriched them (company, title, industry, location).
 
 **What shipped** (`apps/server/src/modules/crm/enrichment/`):
+- **Free by default (`PublicDataEnrichmentProvider`)** — company name from the email domain + that company's public homepage (og:site_name/meta) and country, with a domain-derived fallback. **No account, no key, no per-lookup cost**, and it never fabricates person-level data. Apollo is now an *optional paid upgrade* selected only when `APOLLO_API_KEY` is set, behind the same interface — so nobody pays for the baseline.
 - **`EnrichmentProvider`** interface + **`ApolloEnrichmentProvider`** adapter — provider-agnostic by design, so Lusha/ZoomInfo drop in as sibling classes. Apollo talks to `people/match` over HTTP, dark-by-default on `APOLLO_API_KEY`, and never throws (null on miss/error/timeout).
 - **`ContactEnrichmentService`** — two rules: **never overwrite** (fills blank fields only, so enrichment can only add, never contradict), and **go through the real write path** (`CrmService.updateContact`, so normalisation, access control, timeline events and cache invalidation all fire). A `custom.enrichment` stamp records every attempt so a recent-guard spares repeat paid lookups (7-day window, `force` overrides).
 - **`POST crm/businesses/:businessId/contacts/:contactId/enrich`** — manual action under the existing CRM guard stack (Auth + Business + module-scope `crm:write`).
