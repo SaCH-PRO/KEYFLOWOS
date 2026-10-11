@@ -4,15 +4,16 @@ directive_comment_id: 6025258558
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001   # 6025258558; NO_STATE_CHANGE; releases this bounded meta repair
   - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE; approves the continuation block and adds seven requirements for it
-  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19; the current authority
+  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19
+  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004   # 6108531988; NO_STATE_CHANGE; integrate with main 7d2619c7; the current authority
 in_reply_to: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
 ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001
 ack_comment_id: 6025343912
-current_authority_message_id: CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
-current_authority_comment_id: 6051089263
-current_authority_ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
-current_authority_ack_comment_id: 6051141358
-source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
+current_authority_message_id: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004
+current_authority_comment_id: 6108531988
+current_authority_ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004
+current_authority_ack_comment_id: 6108578719
+source_main: 7d2619c771cd008f21bae9c60ca348e3deaa07cd
 implementation_branch: impl/kf-meta-authority-effect-compat-001
 state: PROVING
 health: YELLOW
@@ -89,9 +90,20 @@ continuation_requirements:   # CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
   - generation semantics stay global across the combined evidence
   - the old frozen fixture is never mistaken for a current complete authority snapshot outside the tests that intentionally pin it
 
-current_authorization:   # CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003
-  control_artifacts: update the packet artifacts to cite 6051089263; a new control-only head
-  semantic_mutation: NOT_AUTHORIZED
+integration_requirements:   # CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004
+  - reconcile the candidate with main 7d2619c7 as one coherent source tree, the code of merged PR 166 included
+  - all 193 negative controls apply and each one is live; no control is adjusted or silenced to that end
+  - commits after the semantic head change control artifacts only, and source_main and source_head are the real ones
+  - the integrated semantic head needs its own independent reading; the reading of 2a3dac19 is not approval of it
+  - full control-plane tests, the 193 mutations, the Windows worker proof, DAG validation, artifact binding and live status.mjs --verify
+  - an ordinary push to the existing branch, the PR left draft, then one RETURN
+
+current_authorization:   # CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004
+  semantic_mutation: integration with main 7d2619c7 only; no change to the alias table or its rules
+  control_artifacts: rewrite the two packet artifacts with the new lineage; a control-only head
+  state_reanchor: NOT_AUTHORIZED
+  force_push: NOT_AUTHORIZED
+  worker_restart: NOT_AUTHORIZED
   merge: NOT_AUTHORIZED
 
 anti_duplication: >
