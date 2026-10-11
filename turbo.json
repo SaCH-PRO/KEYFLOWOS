@@ -14,47 +14,125 @@
   ],
   "tasks": {
     "db:generate": {
-      "inputs": ["prisma/schema.prisma", "prisma/migrations/**"]
+      "inputs": [
+        "prisma/schema.prisma",
+        "prisma/migrations/**"
+      ]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck", "@keyflow/db#db:generate"],
+      "dependsOn": [
+        "^typecheck",
+        "@keyflow/db#db:generate"
+      ],
       "outputs": []
     },
     "lint": {
-      "dependsOn": ["^lint"],
+      "dependsOn": [
+        "^lint"
+      ],
       "outputs": []
     },
     "build": {
-      "dependsOn": ["^build", "@keyflow/db#db:generate"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**"
+      ]
     },
     "test:unit": {
-      "dependsOn": ["^build"],
+      "dependsOn": [
+        "^build"
+      ],
       "outputs": []
     },
     "test:smoke": {
-      "dependsOn": ["build"],
+      "dependsOn": [
+        "build"
+      ],
       "cache": false,
       "outputs": []
     },
     "test:integration": {
-      "dependsOn": ["build"],
+      "dependsOn": [
+        "build"
+      ],
       "cache": false,
       "outputs": []
     },
     "test:e2e": {
-      "dependsOn": ["build"],
+      "dependsOn": [
+        "build"
+      ],
       "cache": false,
       "outputs": []
     },
     "start": {
-      "dependsOn": ["build"],
+      "dependsOn": [
+        "build"
+      ],
       "persistent": true,
       "cache": false
     },
     "dev": {
       "persistent": true,
       "cache": false
+    },
+    "web#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "env": [
+        "NEXT_PUBLIC_AI_SUGGEST_URL",
+        "NEXT_PUBLIC_API_BASE_URL",
+        "NEXT_PUBLIC_APP_URL",
+        "NEXT_PUBLIC_BASE_URL",
+        "NEXT_PUBLIC_DEMO_BUSINESS_ID",
+        "NEXT_PUBLIC_DEV_ORIGINS",
+        "NEXT_PUBLIC_ENABLE_DEMO_MODE",
+        "NEXT_PUBLIC_FF_AGENCY_PACK",
+        "NEXT_PUBLIC_FF_BLUEPRINT_POST_ONBOARD",
+        "NEXT_PUBLIC_FF_COMMUNITY",
+        "NEXT_PUBLIC_FF_COMPLIANCE_PACK",
+        "NEXT_PUBLIC_FF_CONTENT_SCHEDULER",
+        "NEXT_PUBLIC_FF_DOCUMENTS",
+        "NEXT_PUBLIC_FF_FOO",
+        "NEXT_PUBLIC_FF_LEARNING",
+        "NEXT_PUBLIC_FF_MARKETPLACE_BROWSING",
+        "NEXT_PUBLIC_FF_SALES_PACK",
+        "NEXT_PUBLIC_FF_SUPPLIER",
+        "NEXT_PUBLIC_FF_WEB_PRESENCE_PACK",
+        "NEXT_PUBLIC_GOOGLE_PAY_ENV",
+        "NEXT_PUBLIC_GOOGLE_PAY_GATEWAY",
+        "NEXT_PUBLIC_GOOGLE_PAY_MERCHANT_ID",
+        "NEXT_PUBLIC_LIVEKIT_URL",
+        "NEXT_PUBLIC_PAYPAL_CLIENT_ID",
+        "NEXT_PUBLIC_SENTRY_DSN",
+        "NEXT_PUBLIC_SENTRY_ENVIRONMENT",
+        "NEXT_PUBLIC_SENTRY_RELEASE",
+        "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE",
+        "NEXT_PUBLIC_SITE_URL",
+        "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**"
+      ]
+    },
+    "@keyflow/db#build": {
+      "dependsOn": [
+        "@keyflow/db#db:generate"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     }
-  }
+  },
+  "globalPassThroughEnv": [
+    "ENABLE_EXPERIMENTAL_COREPACK"
+  ]
 }

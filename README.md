@@ -2,7 +2,7 @@
 
 > The AI-powered business operating system for founders, freelancers, and small teams.
 
-[![Node](https://img.shields.io/badge/node-20.x-339933?logo=node.js)](https://nodejs.org/)
+[![Node](https://img.shields.io/badge/node-24.x-339933?logo=node.js)](https://nodejs.org/)
 [![pnpm](https://img.shields.io/badge/pnpm-9.15.0-F69220?logo=pnpm)](https://pnpm.io/)
 [![NestJS](https://img.shields.io/badge/NestJS-Backend-E0234E?logo=nestjs)](https://nestjs.com/)
 [![Next.js](https://img.shields.io/badge/Next.js-Frontend-000000?logo=next.js)](https://nextjs.org/)
@@ -52,7 +52,7 @@ KEYFLOW OS unifies the tools you need to run a business — CRM, invoicing, book
 
 ### Prerequisites
 
-- Node.js 20.x (see `.nvmrc`)
+- Node.js 24.x (see `.nvmrc`)
 - pnpm 9.15.0
 - PostgreSQL 15+
 - Redis (optional, used for queues/cache)
