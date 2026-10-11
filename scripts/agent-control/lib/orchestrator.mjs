@@ -165,9 +165,18 @@ export function derivedDecision(input) {
     case 'CHARACTERIZING': {
       const builder = selectAdapter(registry, ROLES.BUILDER);
       if (builder.status !== AGENT_STATUS.READY) {
-        return action(ACTIONS.WAIT_EXTERNAL_AGENT, builder.detail || 'no builder adapter is ready', {
+        // The wait must still say WHAT is waiting. Published from a GitHub
+        // runner, where no builder can ever be probed, the bare reason
+        // ("claude is not on PATH") hid the packet and its next legal step
+        // behind something that reads like a fault.
+        return action(ACTIONS.WAIT_EXTERNAL_AGENT, `packet ${p.active_packet || '(none)'} is ${p.state}; builder work is the next legal step, and no builder is ready here: ${builder.detail || 'no builder adapter is ready'}`, {
           role: ROLES.BUILDER,
           status: builder.status,
+          packet_id: p.active_packet || null,
+          packet_state: p.state,
+          pr_number: p.pr_number ?? null,
+          waiting_for: ACTIONS.DISPATCH_BUILDER,
+          builder_detail: builder.detail || null,
         });
       }
       return action(ACTIONS.DISPATCH_BUILDER, `packet is ${p.state}; builder work is the next legal step`, {
