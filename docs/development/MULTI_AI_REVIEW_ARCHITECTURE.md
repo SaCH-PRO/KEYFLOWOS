@@ -117,9 +117,12 @@ role per class instead of one global order:
 | standard | an independent semantic review and the required tests | eligible for automatic merge |
 | lightweight (low-risk) | the required checks, and a proof that only low-risk paths changed | eligible for automatic merge |
 
-For `critical`, a Copilot review is advisory and never sufficient. Whether a
-Copilot `PASS` still counts as the independent semantic review for `standard`,
-as it does today, is the one point left open in section 8.
+For `critical`, a Copilot review is advisory and never sufficient. For
+`standard`, a Copilot `PASS` counts as the independent semantic review only
+when it meets the same exact-head provenance and evidence requirements as any
+other record: bound to the reviewed commit and the review package, reviewer
+identity recorded, every finding dispositioned. A Copilot review that cannot
+show those does not count.
 
 Everything else in the judge stays: head binding, live-evidence equality,
 self-review rejection, contradiction rules.
@@ -295,9 +298,11 @@ Settled by the operator, 2026-10-12:
    Historical records are kept. Kimi stays as a customer-selectable product AI
    provider (section 7).
 
+4. A Copilot review may count for `standard` changes only when the exact-head
+   provenance and evidence requirements are satisfied (3.4). It never counts
+   for `critical`.
+
 Still open:
 
-1. Whether a Copilot `PASS` continues to count as the independent semantic
-   review for `standard` changes, or only a GPT-6 record does.
-2. Whether and when GPT-6 gets its own credential and identity. Until then a
+1. Whether and when GPT-6 gets its own credential and identity. Until then a
    review record is a claim made through the owner account (section 5).
