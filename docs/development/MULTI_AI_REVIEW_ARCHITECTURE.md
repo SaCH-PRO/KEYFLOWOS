@@ -1,7 +1,8 @@
 # Multi-AI development and review architecture
 
 Status: PROPOSAL for independent review. Nothing here is implemented or in
-force. Operator directive of 2026-10-12. Read from `main` `98ee0202`.
+force. Operator directives of 2026-10-12; the decisions they settled are in
+section 8. Read from `main` `98ee0202`.
 
 This document does four things: says what already exists and what is missing,
 gives the smallest design that puts GPT-6 review into the existing control
@@ -21,6 +22,10 @@ control plane.
 | Operator | final authority for sensitive changes and production releases | — |
 
 Kimi Code has no role. See section 7.
+
+No agent authorizes its own critical change. KEY, Claude and GPT-6 may each
+produce evidence for a critical merge or a deployment; none of them may
+authorize one. That authorization is the operator's, explicit, and recorded.
 
 A review is called independent only when its provenance, its inputs, the
 reviewer's identity and the exact commit are recorded (section 4). A second
@@ -106,19 +111,27 @@ The existing three (`reviewed_head`, `semantic_review_outcome`,
 **3.4 Judge (extend `lib/semantic-review.mjs`).** The provider table gains a
 role per class instead of one global order:
 
-| class | counts as the independent review | Copilot |
+| class | required before merge | who merges |
 |---|---|---|
-| critical | a GPT-6 record with full provenance, bound to the head and the package | advisory only; never sufficient |
-| standard | a GPT-6 record; or, as today, Copilot `PASS` with every finding dispositioned | sufficient |
-| lightweight | none required; deterministic checks and a proof that only documentation changed | not required |
+| critical | an independent security review (a GPT-6 record with full provenance, bound to the head and the package) and deterministic evidence: required tests, negative controls, required workflows green at the exact head | the operator, by explicit authorization naming the head |
+| standard | an independent semantic review and the required tests | eligible for automatic merge |
+| lightweight (low-risk) | the required checks, and a proof that only low-risk paths changed | eligible for automatic merge |
+
+For `critical`, a Copilot review is advisory and never sufficient. Whether a
+Copilot `PASS` still counts as the independent semantic review for `standard`,
+as it does today, is the one point left open in section 8.
 
 Everything else in the judge stays: head binding, live-evidence equality,
 self-review rejection, contradiction rules.
 
 **3.5 Merge.** `critical` is never merged by the autopilot: the evaluator
-returns a new not-eligible reason and the operator merges at the printed head
-after the review passes. `standard` and `lightweight` keep today's path. G8 is
-closed in the same change: `ACCEPT_FOR_ADMISSION` stops being merge-eligible.
+returns a new not-eligible reason, and the operator merges at the printed head
+after the review passes, with an authorization that names that head. A
+passing review is a precondition for that authorization, not a substitute for
+it. `standard` keeps today's automatic path. `lightweight` gains one: today a
+branch outside `impl/` has no evaluator merge path at all, so automatic merge
+of low-risk changes is new behaviour and arrives only with P4. G8 is closed in
+the same change: `ACCEPT_FOR_ADMISSION` stops being merge-eligible.
 
 **3.6 Lineage.** The AUTO_MERGE record, and its operator-merge equivalent,
 gain `review_class`, `reviewed_head`, `review_package_sha256` and
@@ -214,7 +227,7 @@ are today's; the rest are new.
 | R9 | `is_author_of_change` and `shares_context_with_author` are both false | `reviewer_not_independent` |
 | R10 | every property in the review request has a result, and none is `fail`; for `critical`, none is `not_assessed` | `property_not_established` |
 | R11 | `verdict.decision` is `APPROVE`, or `APPROVE_WITH_CONDITIONS` with every condition recorded as met by a later control message | `verdict_not_approving` |
-| R12 | for `critical`, the merge is requested by the operator path, not the autopilot | `critical_requires_operator_merge` |
+| R12 | for `critical`, the merge is made on the operator path under an explicit operator authorization naming the head; no control message from KEY, Claude or GPT-6 satisfies this | `critical_requires_operator_merge` |
 | R13 | for `lightweight`, every changed path matches the documentation list | `not_documentation_only` |
 
 Every rule gets a negative control in `negative-controls.yaml` that removes it
@@ -263,15 +276,28 @@ sender is refused — they are what enforces the removal; and every historical
 audit report, plan and specification that names Kimi as its author or
 addressee.
 
-Not decided here: the product's AI model gateway also lists Kimi as a
+Out of scope by decision: the product's AI model gateway lists Kimi as a
 selectable model provider for customers' own AI features. That is a product
-capability, not a development agent. Removing it is a separate product
-decision and is not part of this change.
+capability, not a development agent, and it stays.
 
-## 8. Decisions needed
+## 8. Decisions
 
-1. Whether `critical` changes are always operator-merged (R12), or may be
-   autopilot-merged once a GPT-6 record passes.
-2. Whether Copilot `PASS` remains sufficient for `standard`.
-3. Whether the product's Kimi model provider stays (section 7).
-4. Whether and when GPT-6 gets its own credential and identity.
+Settled by the operator, 2026-10-12:
+
+1. Review is risk-adaptive, as in the table in 3.4: low-risk changes are
+   eligible for automatic merge after the required checks; standard changes
+   after an independent semantic review and the required tests; critical
+   changes need an independent security review and deterministic evidence, and
+   then explicit operator merge authorization.
+2. KEY, Claude and GPT-6 may not self-authorize a critical merge or a
+   deployment.
+3. Kimi Code is excluded from development, orchestration and review.
+   Historical records are kept. Kimi stays as a customer-selectable product AI
+   provider (section 7).
+
+Still open:
+
+1. Whether a Copilot `PASS` continues to count as the independent semantic
+   review for `standard` changes, or only a GPT-6 record does.
+2. Whether and when GPT-6 gets its own credential and identity. Until then a
+   review record is a claim made through the owner account (section 5).
