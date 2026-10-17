@@ -1,22 +1,16 @@
-packet_id: KF-META-AUTHORITY-EFFECT-COMPAT-001
-directive_message_id: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001
-directive_comment_id: 6025258558
+packet_id: KF-META-MERGE-AUTHORITY-001
+directive_message_id: CG-DIR-F9-001
+directive_comment_id: 6240051686
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
-  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001   # 6025258558; NO_STATE_CHANGE; releases this bounded meta repair
-  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE; approves the continuation block and adds seven requirements for it
-  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19
-  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004   # 6108531988; NO_STATE_CHANGE; integrate with main 7d2619c7
-  - CG-REVIEW-KF159-INTEGRATED-001   # 6109079503; NO_STATE_CHANGE; the fallback reading of f14adec5
-  - CG-REVIEW-KF159-ADMISSION-RECORD-001   # 6109741134; NO_STATE_CHANGE; accepts the fourth RETURN and orders the admission record; the current authority
-in_reply_to: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
-ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001
-ack_comment_id: 6025343912
-current_authority_message_id: CG-REVIEW-KF159-ADMISSION-RECORD-001
-current_authority_comment_id: 6109741134
-current_authority_ack_message_id: CC-ACK-KF159-ADMISSION-RECORD-001
-current_authority_ack_comment_id: 6109766740
-source_main: 7d2619c771cd008f21bae9c60ca348e3deaa07cd
-implementation_branch: impl/kf-meta-authority-effect-compat-001
+  - CG-DIR-F9-001   # 6240051686; NO_STATE_CHANGE; releases the bounded F9 merge-authority repair
+in_reply_to: human-operator-plan-completion-20261017
+ack_message_id: CC-ACK-F9-001
+ack_comment_id: 6240199516
+current_authority_message_id: CG-DIR-F9-001
+current_authority_comment_id: 6240051686
+source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
+implementation_branch: impl/kf-meta-merge-authority-001
+pr_number: 181
 state: PROVING
 health: YELLOW
 scope_changed: false
@@ -24,124 +18,74 @@ production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-# As CG-REVIEW-KF159-ADMISSION-RECORD-001 (6109741134) declares it. Transcribed, not decided here.
-review_status: ACCEPT_FOR_ADMISSION
+review_status: PENDING_INDEPENDENT_REVIEW
 
 objective: >
-  Repair the stale derived projection at the authority-effect boundary. Two
-  valid REVIEWs on #80 declared a control_effect outside the canonical
-  vocabulary, and the fold stopped at the first. Add an explicit,
-  deterministic, fail-closed normalization of exactly those two historical
-  spellings to existing canonical effects. The canonical vocabulary and the
-  state machine do not change.
+  Repair existing finding F9 (main's claude-return.yaml; reproduced in
+  docs/intelligence/sessions/2026-10-17-p0-safety-review at 11971802). A
+  readiness status, a semantic PASS, a green workflow or a builder-written
+  merge_authority flag is never by itself merge authority. The exact-head
+  admission evaluator, its second-snapshot recheck and the non-draft gate
+  step must also require one distinct, valid, current ChatGPT grant on #80,
+  bound to the repository, PR, packet, branch, semantic head, final artifact
+  head and base, through one shared predicate.
 
 target_contract:
-  aliases:
-    BOUNDED_CORRECTION: PACKET_CORRECTION
-    AUTHORIZE_CONTROL_BINDING: NO_STATE_CHANGE
-  rule: >
-    The raw declared effect may be kept as diagnostic and reduction evidence.
-    Every state transition flows through the existing canonical effect. Every
-    other unknown token still fails closed.
+  grant: >
+    a valid AUTHORITY-profile REVIEW on this repository's issue #80, from an
+    allowlisted account, in an unedited and completely observed collection,
+    carrying merge_authority: true, review_status: READY_TO_MERGE, a readable
+    control_effect of NO_STATE_CHANGE or PACKET_ADMISSION, and exact values
+    for pr_number, pr_head (final artifact head), source_head (semantic head),
+    source_main (base), packet_id and implementation_branch
+  supersession: >
+    a later valid or malformed authority message about the same PR, packet or
+    branch voids the grant; a later grant replaces it
+  holds: >
+    a HOLD for the packet with no later RESUME for it denies, whether it came
+    before or after the grant; holds on other packets do not apply
+  not_a_grant:
+    - ACCEPT_FOR_ADMISSION
+    - a semantic PASS
+    - NO_STATE_CHANGE alone
+    - the artifact merge_authority field
+    - a global READY_TO_MERGE projection (not required either)
 
 allowed_scope:
-  - scripts/agent-control/lib/authority-effects.mjs
-  - scripts/agent-control/tests/authority-effects.spec.mjs
-  - scripts/agent-control/negative-controls.yaml where a live anti-regression mutation is needed
-  - scripts/agent-control/fixtures/reducer-recovery-truth.json only if required to replay real #80 evidence
-  - docs/development/AGENT_CONTROL_PLANE.md
-  - architecture/execution-paths.md and generated architecture artifacts only if real scanners require them
-  - .agent-control packet artifacts for this meta repair only
+  - scripts/agent-control/auto-merge-admitted.mjs
+  - scripts/agent-control/lib/admission.mjs
+  - scripts/agent-control/lib/merge-grant.mjs (the one shared grant helper)
+  - their tests, helpers and synthetic/redacted fixtures under scripts/agent-control/tests
+  - the non-draft admission step of .github/workflows/agent-control-gate.yml, and the read-only issues permission that step needs to read #80
+  - focused entries in scripts/agent-control/negative-controls.yaml
+  - affected architecture and control-contract documentation
+  - this branch's two packet artifacts
 
 prohibited_scope:
-  - any change to PR 155, its semantic head 8987f6db21a839f90c88e33479768d81cef508e9 or its control head fdc900b72062391189d31c6994af353ce9dc4e9c
-  - a parallel programme state or a new effect made to fit historical wording
+  - the #80 parser, the typed effect vocabulary, the global projection contract, the programme DAG and the checkpoint
+  - PRs 155, 179, 169, 175, 146, 172 and 177
+  - merge, ready-for-review, auto-merge enablement
+  - production, live business data, provider traffic, credentials, deployment
+  - worker, process, install, scheduler, webhook or notifier changes
   - editing or deleting any #80 comment
-  - a manual programme-state edit in place of the reducer correction
-  - weakening a gate, or removing an existing negative control
-  - production or provider effects
-  - merge without a separate exact-head REVIEW that grants it
-  - broadening silently if the two aliases do not restore a valid projection
+  - weakening a gate or removing an existing negative control
 
 invariants:
-  - CONTROL_EFFECTS is unchanged
-  - an alias is resolved before any rule, and every rule after that is the canonical effect's own, the message-type rule included
-  - AUTHORIZE_CONTROL_BINDING grants no merge authority, admission, checkpoint, release, hold or any other programme mutation
-  - any other unknown control_effect stops the fold with CONTROL_EFFECT_UNKNOWN
-  - malformed or edited authority stays fail closed
-  - the committed checkpoint stays anchored to CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 (5993146604)
+  - every existing admission denial keeps its reason; the grant is an additional requirement
+  - independent semantic-review failover, artifact binding, current base, control-only tail, workflow freshness and transition checks stay as they are
+  - the non-draft gate does not run the full evaluator, so it never waits for its own run
+  - the grant names the final artifact head after that artifact exists; the artifact never names the grant
+  - unverifiable, edited, unordered or ambiguous authority denies
 
 proof_obligations:
-  - exact historical comment 6011507550 folds with canonical PACKET_CORRECTION semantics
-  - exact historical comment 6018421547 folds as NO_STATE_CHANGE and cannot grant merge authority, admission, checkpoint, release, hold or any other programme mutation
-  - the fold from RECOVERY-021 reaches the current newest authority without skipping a message
-  - current PR 155 remains the active packet and resolves to the state implied by the latest canonical PACKET_CORRECTION
-  - arbitrary unknown control_effect values still stop with CONTROL_EFFECT_UNKNOWN
-  - an alias on a disallowed message type remains rejected under the canonical target effect's type rules
-  - malformed or edited authority remains fail closed
-  - no historical #80 comment is edited or deleted
-  - no gate is weakened and no existing negative control is removed merely to obtain green
-  - run the full portable control-plane suite, and the Windows worker proof and negative controls if this branch changes their substrate
-  - record exact-head CI; skipped proof is never counted as pass
-
-continuation_requirements:   # CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
-  - the replay concatenates the historical recording and the continuation in one deterministic authority order
-  - no duplicate comment ids across the two segments
-  - the first continuation authority coordinate is strictly after RECOVERY-021
-  - every continuation comment used for authority replay is parse-equal to the live #80 source captured for this packet
-  - the combined replay reaches the newest authority observed by the packet without skipping a candidate
-  - generation semantics stay global across the combined evidence
-  - the old frozen fixture is never mistaken for a current complete authority snapshot outside the tests that intentionally pin it
-
-integration_requirements:   # CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004
-  - reconcile the candidate with main 7d2619c7 as one coherent source tree, the code of merged PR 166 included
-  - all 193 negative controls apply and each one is live; no control is adjusted or silenced to that end
-  - commits after the semantic head change control artifacts only, and source_main and source_head are the real ones
-  - the integrated semantic head needs its own independent reading; the reading of 2a3dac19 is not approval of it
-  - full control-plane tests, the 193 mutations, the Windows worker proof, DAG validation, artifact binding and live status.mjs --verify
-  - an ordinary push to the existing branch, the PR left draft, then one RETURN
-
-current_authorization:   # CG-REVIEW-KF159-ADMISSION-RECORD-001
-  decision: ACCEPT_FOR_ADMISSION for the bounded, control-only admission-record preparation step; the message says it is not yet READY_TO_MERGE
-  control_artifacts: >
-    one atomic control-only commit on the PR 159 branch that records this
-    decision and the earlier reading 6109079503 in the two packet artifacts;
-    source_main and source_head stay as they are
-  admission_record: >
-    in claude-return.yaml, review_status ACCEPT_FOR_ADMISSION and a top-level
-    semantic_review block with implementer claude and two entries: copilot
-    NOT_RUN, quota_exhausted, at ee642300, PR review 5483187666; chatgpt at
-    f14adec5 with the outcome message 6109079503 states and no unresolved
-    substantive finding. A transcription of ChatGPT's decision, not a review
-    by Claude
-  semantic_mutation: NOT_AUTHORIZED; the reviewed semantic head does not change
-  ready_for_review_transition: NOT_AUTHORIZED; a separate explicit decision
-  merge: NOT_AUTHORIZED
-  auto_merge: NOT_AUTHORIZED
-  programme_admission_credit_or_checkpoint: NOT_GRANTED
-  next_packet_release: NOT_AUTHORIZED
-  gate_change: NOT_AUTHORIZED; a skipped test or scan is never converted to proof
-  issue_80_edit: NOT_AUTHORIZED
-  other_prs_and_worktrees: NOT_AUTHORIZED; PR 169, PR 155, PR 168, uncommitted research and other worktrees are not touched
-  production_or_worker_installation: NOT_AUTHORIZED
-  after_the_return: >
-    ChatGPT evaluates the admission record, the current base, the newest run
-    of every required workflow at the exact head, and the order of the
-    non-draft transition. The exact-head evaluator must be eligible before any
-    merge, and its draft-only stop is not admission evidence.
-
-anti_duplication: >
-  Before adding code, verify that no existing normalization or compatibility
-  seam already owns historical control-effect vocabulary. Prefer one explicit
-  alias table beside readEffect over scattered special cases.
+  - rejecting cases for absent, false, null, malformed, forged, edited, stale, revoked and mismatched grants
+  - ambiguous or incomplete authority evidence, active holds, wrong repository/PR/packet/branch/semantic head/artifact head/base, moved head or base
+  - missing independent review, pending/owed/failed workflows, a grant changed between snapshots, ACCEPT_FOR_ADMISSION without a later grant
+  - preserved valid application and meta grants (the PR 159 grant 6111001643 shape), unrelated active-packet separation, review failover, control-only lineage
+  - the real CLI collector and recheck under a synthetic fetch with no network passthrough
+  - live negative controls; the full portable suite; the Windows worker proof; both DAG validators; artifact checks; exact-head workflows
 
 stop_conditions:
-  - the two aliases alone do not restore a valid projection; stop at the next exact blocking message and report it
-  - any packet assumption conflicts with evidence (CONTRADICTION)
+  - main moves off source_main, or newer authority changes the release (CONTRADICTION)
+  - the correction needs scope beyond allowed_scope (CONTRADICTION for that work only)
   - production access or provider traffic would be required
-
-return_contract: >
-  Return the minimal implementation, the real replay result from RECOVERY-021
-  through current authority, the resulting effective programme projection, all
-  exact-head proof, and any contradiction discovered. Push a draft PR and
-  report the exact semantic head. No merge.
