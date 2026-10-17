@@ -1,0 +1,149 @@
+--- a/scripts/agent-control/lib/merge-grant.mjs
++++ b/scripts/agent-control/lib/merge-grant.mjs
+@@ -47,7 +47,7 @@
+  *   - a malformed authority candidate after the grant that is, or may be,
+  *     about the target (any of the three fields unreadable) makes the grant
+  *     ambiguous. A malformed candidate before the grant is superseded by it;
+- *   - a valid HOLD for the target packet with no later valid RESUME for it
++ *   - a valid HOLD for the target packet with no later effect-valid HOLD_CLEAR
+  *     denies, before or after the grant. Holds on other packets do not apply,
+  *     so an unrelated active packet neither blocks this target nor moves.
+  *   - a global READY_TO_MERGE projection is not required, and not read.
+@@ -230,7 +230,10 @@
+   for (const e of valid) {
+     if (!valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
+     if (e.message_type === 'HOLD') hold = e;
+-    else if (e.message_type === 'RESUME') hold = null;
++    else if (e.message_type === 'RESUME') {
++      const effect = readEffect(e);
++      if (effect.ok && effect.effect === 'HOLD_CLEAR') hold = null;
++    }
+   }
+   if (hold) return deny(GRANT_REASONS.HOLD_ACTIVE, { packet_id: t.packet_id, message_id: hold.message_id, comment_id: hold.comment_id });
+ 
+--- a/scripts/agent-control/tests/helpers/synthetic-github.mjs
++++ b/scripts/agent-control/tests/helpers/synthetic-github.mjs
+@@ -6,13 +6,17 @@
+  * request is forwarded to the network, an unexpected request throws, and the
+  * merge PUT is answered here, so no merge ever leaves this process.
+  *
+- * KF_SYNTHETIC_GITHUB  JSON scenario (see merge-cli.spec.mjs)
++ * KF_SYNTHETIC_GITHUB_FILE  file containing the JSON scenario
++ * KF_SYNTHETIC_GITHUB  inline JSON scenario (retained for small review fixtures)
+  * KF_SYNTHETIC_TRACE   file the request trace is written to on exit
+  */
+ import fs from 'node:fs';
+ 
+-const scenario = JSON.parse(process.env.KF_SYNTHETIC_GITHUB || 'null');
+-if (!scenario) throw new Error('KF_SYNTHETIC_GITHUB is required; refusing to run the CLI without the fixture');
++const scenarioText = process.env.KF_SYNTHETIC_GITHUB_FILE
++  ? fs.readFileSync(process.env.KF_SYNTHETIC_GITHUB_FILE, 'utf8')
++  : process.env.KF_SYNTHETIC_GITHUB;
++const scenario = JSON.parse(scenarioText || 'null');
++if (!scenario) throw new Error('A synthetic GitHub scenario is required; refusing to run the CLI without the fixture');
+ 
+ const root = `/repos/${scenario.repo}`;
+ const trace = [];
+--- a/scripts/agent-control/tests/merge-cli.spec.mjs
++++ b/scripts/agent-control/tests/merge-cli.spec.mjs
+@@ -18,7 +18,9 @@
+ import { spawnSync } from 'node:child_process';
+ import { pathToFileURL } from 'node:url';
+ import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
+-import { REPO, HEAD, BASE, SEMANTIC, target, grantComment, followUp, claudeNote } from './helpers/merge-grant-fixture.mjs';
++import { collectAuthority } from '../lib/control-envelope.mjs';
++import { readEffect } from '../lib/authority-effects.mjs';
++import { REPO, HEAD, BASE, SEMANTIC, target, grantComment, followUp, holdComment, claudeNote } from './helpers/merge-grant-fixture.mjs';
+ 
+ const ROOT = path.resolve(process.env.KF_CLI_ROOT || '.');
+ const CLI = path.join(ROOT, 'scripts/agent-control/auto-merge-admitted.mjs');
+@@ -67,6 +69,8 @@
+ function run(s, args, env = {}) {
+   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-merge-cli-'));
+   const tracePath = path.join(dir, 'trace.json');
++  const scenarioPath = path.join(dir, 'scenario.json');
++  fs.writeFileSync(scenarioPath, JSON.stringify(s));
+   const child = spawnSync(process.execPath, ['--import', PRELOAD, CLI, ...args], {
+     encoding: 'utf8',
+     timeout: 60000,
+@@ -77,13 +81,14 @@
+       GITHUB_TOKEN: 'synthetic-token-not-a-credential',
+       GITHUB_REPOSITORY: REPO,
+       PR_NUMBER: '87',
+-      KF_SYNTHETIC_GITHUB: JSON.stringify(s),
++      KF_SYNTHETIC_GITHUB_FILE: scenarioPath,
+       KF_SYNTHETIC_TRACE: tracePath,
+       ...env,
+     },
+   });
+   const trace = fs.existsSync(tracePath) ? JSON.parse(fs.readFileSync(tracePath, 'utf8')) : null;
+   fs.rmSync(dir, { recursive: true, force: true });
++  assert.ifError(child.error);
+   let out = null;
+   try { out = JSON.parse(child.stdout); } catch { /* reported below */ }
+   return { code: child.status, out, stdout: child.stdout, stderr: child.stderr, trace };
+@@ -184,6 +189,64 @@
+   assert.equal(revoked.code, 3);
+   assert.equal(revoked.out.detail.reason, 'merge_grant_superseded');
+   assert.equal(puts(revoked).length, 0);
++  const revokedOnRecheck = run(scenario([[...filler, g], [...filler, g, followUp()]]), ['--merge']);
++  assert.equal(revokedOnRecheck.code, 3);
++  assert.equal(revokedOnRecheck.out.detail.reason, 'merge_grant_superseded');
++  assert.equal(puts(revokedOnRecheck).length, 0);
++  assert.equal(commentReads(revokedOnRecheck).length, 4, 'the second snapshot must also read the revocation page');
++});
++
++const invalidReleases = [
++  ['missing effect', (body) => body.replace('control_effect: HOLD_CLEAR\n', ''), 'CONTROL_EFFECT_MISSING'],
++  ['wrong effect', (body) => body.replace('control_effect: HOLD_CLEAR', 'control_effect: NO_STATE_CHANGE'), 'CONTROL_EFFECT_TYPE_MISMATCH'],
++  ['unknown effect', (body) => body.replace('control_effect: HOLD_CLEAR', 'control_effect: RELEASE_ALL'), 'CONTROL_EFFECT_UNKNOWN'],
++  ['production touched', (body) => body.replace('production_touched: false', 'production_touched: true'), 'CONTROL_EFFECT_PRODUCTION_TOUCHED'],
++  ['invalid health', (body) => body.replace('health: YELLOW', 'health: AMBER'), 'CONTROL_EFFECT_HEALTH_INVALID'],
++];
++
++for (const [name, change, effectCode] of invalidReleases) {
++  test(`NC CLI hold release: ${name} cannot clear an active hold before an exact grant`, () => {
++    const hold = holdComment('HOLD', 'KF-X-001');
++    const resume = holdComment('RESUME', 'KF-X-001');
++    resume.body = change(resume.body);
++    const grant = grantComment();
++    const comments = [hold, resume, grant];
++    const authority = collectAuthority(comments);
++    assert.equal(authority.verified, true);
++    const entry = authority.candidates.find((candidate) => candidate.comment_id === resume.id);
++    assert.deepEqual(entry.problems, [], 'the envelope is valid; the effect is not');
++    assert.equal(readEffect(entry).code, effectCode);
++    const r = run(scenario([comments, comments]), ['--merge']);
++    assert.ok(r.trace, r.stderr);
++    assert.equal(puts(r).length, 0, 'an invalid release must leave the target hold active');
++    assert.equal(r.code, 3);
++    assert.equal(r.out.detail.reason, 'merge_grant_target_held');
++    assert.equal(commentReads(r).length, 1);
++    const gate = run(scenario([comments]), ['--grant-only']);
++    assert.equal(gate.code, 3);
++    assert.equal(gate.out.detail.reason, 'merge_grant_target_held');
++    assert.equal(puts(gate).length, 0);
++  });
++}
++
++test('CLI hold release referent: a valid HOLD_CLEAR permits both snapshots and one SHA-pinned synthetic merge', () => {
++  const comments = [holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()];
++  const r = run(scenario([comments, comments]), ['--merge']);
++  assert.equal(r.code, 0, r.stderr || r.stdout);
++  assert.equal(puts(r).length, 1);
++  assert.equal(puts(r)[0].body.sha, HEAD);
++  assert.equal(commentReads(r).length, 2);
++});
++
++test('CLI hold release isolation: another packet with an invalid release does not block this exact grant', () => {
++  const hold = holdComment('HOLD', 'KF-OTHER-001');
++  const resume = holdComment('RESUME', 'KF-OTHER-001');
++  resume.body = resume.body.replace('control_effect: HOLD_CLEAR', 'control_effect: NO_STATE_CHANGE');
++  const comments = [hold, resume, grantComment()];
++  const r = run(scenario([comments, comments]), ['--merge']);
++  assert.equal(r.code, 0, r.stderr || r.stdout);
++  assert.equal(puts(r).length, 1);
++  assert.equal(commentReads(r).length, 2);
+ });
+ 
+ test('target() in the fixture is the PR this scenario serves', () => {

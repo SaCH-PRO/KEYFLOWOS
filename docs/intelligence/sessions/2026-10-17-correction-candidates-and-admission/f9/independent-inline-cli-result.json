@@ -1,0 +1,19 @@
+{
+  "observed_at": "2026-10-17T22:14:31.640Z",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux"
+  },
+  "scope": "Actual candidate CLI using retained inline KF_SYNTHETIC_GITHUB fixture; all responses supplied in process.",
+  "fixture_path": "/workspace/scratch/f9d52c71cc19/f9-review/results/proper-hold-clear-positive.scenario.json",
+  "exit_code": 0,
+  "snapshots": 2,
+  "synthetic_merge_puts": 1,
+  "eligible": true,
+  "reason": "all_admission_contracts_satisfied",
+  "merge_message": "SYNTHETIC: answered in-process; no merge was sent",
+  "real_network_requests": 0,
+  "real_merges": 0,
+  "candidate_edits": [],
+  "raw_transcript": "not persisted; the real CLI JSON was checked in memory and this summary was written"
+}

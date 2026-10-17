@@ -1,0 +1,221 @@
+{
+  "report_kind": "fresh_frozen_authority_source_and_snapshot_manifest",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "source_files": [
+    {
+      "path": "scripts/agent-control/lib/truth.mjs",
+      "sha": "e293a345874b776431b9c343efa3072519f6a8e6",
+      "size": 5169,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/truth.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/reconcile.mjs",
+      "sha": "8d3c01d1a9c61d823b5839c1609a92112b2d8230",
+      "size": 10894,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/reconcile.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/authority-effects.mjs",
+      "sha": "8a4f68dc4000c709f5b99db670306dbb5e2aaed9",
+      "size": 20857,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/authority-effects.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/control-envelope.mjs",
+      "sha": "bb51643e3aa5554aba2466d709ed61800a5ce88f",
+      "size": 17914,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/control-envelope.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/state.mjs",
+      "sha": "805406412b59e30e3e0ae068b9ae9ab55a18d519",
+      "size": 13917,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/state.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/yaml.mjs",
+      "sha": "0e6b22f1a64980ac065e73a0797ce1929c34aee0",
+      "size": 13753,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/yaml.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/dag.mjs",
+      "sha": "4c602406aa90077cffb07adaccd631d6b09d7119",
+      "size": 8384,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/dag.mjs"
+    },
+    {
+      "path": "scripts/agent-control/select-directive.mjs",
+      "sha": "05e1cfd9fd57e54583b85829d0449c7029384a9d",
+      "size": 5985,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/select-directive.mjs"
+    },
+    {
+      "path": ".agent-control/programme-state.yaml",
+      "sha": "11c1185cdf6ae7e01d7953a74e419854979c961f",
+      "size": 15480,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/.agent-control/programme-state.yaml"
+    },
+    {
+      "path": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "sha": "d3ce1c298f0764ecf67c298bb099d79ec27d2d17",
+      "size": 10617,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml"
+    },
+    {
+      "path": "scripts/agent-control/lib/state-machine.mjs",
+      "sha": "fe3c9948e89bdde2f7069053f19f68222a985eea",
+      "size": 4342,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/state-machine.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/events.mjs",
+      "sha": "0fb689e93894e0621859db7dc867c629df01a372",
+      "size": 13471,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/events.mjs"
+    },
+    {
+      "path": "scripts/agent-control/status.mjs",
+      "sha": "e5795b194a9199119cd7fa420c634e0f54bd962f",
+      "size": 7904,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/status.mjs"
+    },
+    {
+      "path": "scripts/agent-control/validate-dag.mjs",
+      "sha": "3cf5effe11a7bf8c12fb5cb2c5772c1845bc3771",
+      "size": 1049,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/validate-dag.mjs"
+    },
+    {
+      "path": "scripts/agent-control/validate-platform-dag.mjs",
+      "sha": "d7b762feb4c2d1f778752873afb753ea536f3ab9",
+      "size": 1709,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/validate-platform-dag.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/platform-dag.mjs",
+      "sha": "b31f7c3cfb894f99918fb718e8cacad7c3e3e1a2",
+      "size": 18676,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/platform-dag.mjs"
+    },
+    {
+      "path": "docs/development/KEYFLOWOS_PLATFORM_DAG.yaml",
+      "sha": "3c6774f2ae50079162ea35b10963b7f8cbea5a0f",
+      "size": 17788,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/development/KEYFLOWOS_PLATFORM_DAG.yaml"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha": "973b8c6a465177e2ec1941af0bade11428cf7ac9",
+      "size": 13942,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/AGENTS.md"
+    },
+    {
+      "path": "docs/development/EXECUTION_CONTROL_STANDARD.md",
+      "sha": "6ab97a792c16d24ac1501a1ce6e006e4d8d33359",
+      "size": 12691,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/development/EXECUTION_CONTROL_STANDARD.md"
+    },
+    {
+      "path": "docs/development/AGENT_CONTROL_PLANE.md",
+      "sha": "e2b4976846e509a40598087b319e08b35ffaa805",
+      "size": 34798,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/development/AGENT_CONTROL_PLANE.md"
+    },
+    {
+      "path": "scripts/agent-control/lib/momentum.mjs",
+      "sha": "79de77ee7a0ec6ec368f21adb9076e8aa6bb4130",
+      "size": 4564,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/momentum.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/adapters.mjs",
+      "sha": "10bd53544d0b5c585dd2da95caafb89bfe3324ab",
+      "size": 7865,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/adapters.mjs"
+    },
+    {
+      "path": "docs/development/AGENT_AUTOPILOT_POLICY.yaml",
+      "sha": "6029adc2bf0229bfe5874f6ca687c7dc8c755176",
+      "size": 8580,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/development/AGENT_AUTOPILOT_POLICY.yaml"
+    }
+  ],
+  "method_source": {
+    "ref": "9e222e8e3b739fafa539ac0d6f5ff834d4858492",
+    "files": [
+      {
+        "path": "method/docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/replay-authority.mjs",
+        "sha": "488939cd3c5d52dc9bbcbdda58965001f5f02e55",
+        "size": 9232
+      },
+      {
+        "path": "method/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/replay-publication.mjs",
+        "sha": "1a44c305759af4ab222735b4b884b214c3c64f2c",
+        "size": 2386
+      }
+    ]
+  },
+  "comment_snapshot": {
+    "collection_completed_at_utc": "2026-10-17 22:10:54 UTC",
+    "count": 1461,
+    "latest_comment_id": 6241787171,
+    "latest_comment_created_at": "2026-10-17T21:52:26Z",
+    "normalized_sha256": "e63b63494742d269f7efee9bc9b0a345b6cf9501248ad782fd3834a1d491762b",
+    "raw_file_sha256": "60d7c01cb17a1e486846e79eab0707419a6ab33df0824771083ee41c176dd3fc",
+    "hash_method": "SHA-256(JSON.stringify(canonicalComments(...))); unchanged exported replay function.",
+    "known_local_snapshot": "raw/issue80-comments.json",
+    "included_in_curated_package": false,
+    "collection_integrity": {
+      "report_kind": "fresh_authority_collection",
+      "collected_from_utc": "2026-10-17T22:09:12Z",
+      "collected_through_utc": "2026-10-17 22:10:54 UTC",
+      "main_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "main_commit_api_url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/commits/main",
+      "page_sizes": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        61
+      ],
+      "original_total": 1461,
+      "unique_ids": 1461,
+      "overlap_since": "2026-10-17T22:09:12Z",
+      "overlap_count": 0,
+      "collection_end_comment_count": 1461,
+      "collection_start_comment_count": 1461,
+      "complete_at_collection": true,
+      "limit": "API observations are not an atomic server snapshot. Full pagination, count/uniqueness and updated-since overlap checks establish this recorded collection.",
+      "query_sources": {
+        "comments": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?per_page=100&page={1..15}",
+        "updated_since": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?per_page=100&since=2026-10-17T22%3A09%3A12Z",
+        "main": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/commits/main",
+        "ancestry": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/compare/ac3a6384417093f198bcc7d672b0dbc295db137c...98ee0202499ba87fa4ee13d58a2a9075016225bd",
+        "pr": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/pulls/155"
+      }
+    }
+  },
+  "repository_snapshot": {
+    "filename": "repository-truth.json",
+    "normalized_sha256": "dd5169bfc74418025fdf345883dabe09665c3693585deffe7711f16ced3e0a5d",
+    "hash_method": "SHA-256(JSON.stringify(repository-truth.json.snapshot))"
+  },
+  "limits": [
+    "Frozen connector-supplied equivalent; not the live status CLI and not an installed-worker observation.",
+    "All 23 current-main source files and both published replay methods are Git-blob verified before execution.",
+    "Full raw discussion supplied separately; summaries alone cannot replay it.",
+    "No checkpoint, programme map, authority message, admission, ready/merge, production, process or installation mutation."
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "base_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "changed_files": [
+    {
+      "path": "apps/server/src/modules/ai/ai-oversight.service.ts",
+      "base_git_blob": "0a4a2a302c9aac5b619506e9c4df747229920b40",
+      "base_sha256": "68a9899dce573b336d964ec145c01a9da901ec9dc5ac99f1b497f8d96f3b9d88",
+      "candidate_git_blob": "883763fc541e1cc69947d6d2f0103df60e96c0de",
+      "candidate_sha256": "792e5c4e7f01cebfc6c34d9cae92a503d19fcaf053a89af7b8b6bf9de142d484",
+      "base_bytes": 35879,
+      "candidate_bytes": 36089
+    },
+    {
+      "path": "apps/server/src/modules/ai/ai-oversight-fails-closed.spec.ts",
+      "base_git_blob": "66fc615e539df286a8b6256cccf0d2f46db4e1f6",
+      "base_sha256": "be1489605b66661b4fac5bd1f23da7b54803fe8a6799af1673d88dcfecc27f32",
+      "candidate_git_blob": "f66f151c9c880922fa7093d34e81aa71f1c9c02f",
+      "candidate_sha256": "11fb46bea2e228bd815096195cad709a4c0772be9705f9fb11249b32465d357a",
+      "base_bytes": 5898,
+      "candidate_bytes": 10287
+    }
+  ]
+}

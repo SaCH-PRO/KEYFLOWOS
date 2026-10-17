@@ -1,0 +1,461 @@
+{
+  "report_kind": "frozen_current_main_truth_status_and_platform_replay",
+  "executed_at_utc": "2026-10-17T22:12:35.303Z",
+  "node_version": "v24.19.0",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "comment_count": 1461,
+  "comment_normalized_sha256": "e63b63494742d269f7efee9bc9b0a345b6cf9501248ad782fd3834a1d491762b",
+  "exact_entrypoints": [
+    "truth.reconcileWithTruth",
+    "truth.fetchRepoTruth",
+    "status.buildStatus",
+    "dag.proveDrainable",
+    "platform-dag.validatePlatformContract",
+    "platform-dag.platformProgrammeState"
+  ],
+  "collection_is_live_cli": false,
+  "status": {
+    "programme": {
+      "packets_total": 35,
+      "phases_total": 37,
+      "checkpointed": 5,
+      "active": 1,
+      "waiting": 29,
+      "gate_wave": "B"
+    },
+    "active_packet": {
+      "packet_id": "KF-EXEC-AUTH-FAIL-CLOSED-001",
+      "phase": null,
+      "state": "FIXING_PROOF_FAILURES",
+      "health": "YELLOW",
+      "source_main": "ac3a6384417093f198bcc7d672b0dbc295db137c",
+      "branch": "impl/kf-exec-auth-fail-closed-001",
+      "pr_number": 155,
+      "production_touched": false,
+      "merge_authority": false
+    },
+    "hold": null,
+    "holds": [],
+    "contradictions": [],
+    "momentum": {
+      "alarm": false,
+      "reasons": []
+    },
+    "agents": [],
+    "next_dependency_safe": {
+      "key": "KF-EXEC-TIME-001",
+      "packet_id": "KF-EXEC-TIME-001",
+      "phase": null,
+      "wave": "B"
+    },
+    "eligible_count": 1,
+    "projection_drift": {
+      "drift": false,
+      "details": []
+    },
+    "authority_basis": {
+      "message_id": "CG-DIR-F9-001",
+      "comment_id": 6240051686
+    },
+    "reconciliation": {
+      "consistent": true,
+      "findings": [],
+      "reduction": {
+        "started": true,
+        "reason": null,
+        "checkpoint": {
+          "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021",
+          "comment_id": 5993146604
+        },
+        "checkpoint_problems": [],
+        "generation": 118,
+        "checkpoint_generation": 87,
+        "observed_generation": 118,
+        "applied": [
+          {
+            "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022",
+            "comment_id": 5994182518,
+            "generation": 88,
+            "coordinate": "2026-10-05T12:11:40Z#5994182518",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023",
+            "comment_id": 5994568448,
+            "generation": 89,
+            "coordinate": "2026-10-05T12:36:08Z#5994568448",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-PASS-024",
+            "comment_id": 5995818004,
+            "generation": 90,
+            "coordinate": "2026-10-05T13:49:40Z#5995818004",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-POST-MERGE-CHECKPOINT-026",
+            "comment_id": 5998474832,
+            "generation": 91,
+            "coordinate": "2026-10-05T16:18:03Z#5998474832",
+            "effect": "CHECKPOINT",
+            "declared_effect": "CHECKPOINT"
+          },
+          {
+            "message_id": "CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001",
+            "comment_id": 5998711588,
+            "generation": 92,
+            "coordinate": "2026-10-05T16:32:02Z#5998711588",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-RESUME-ACTION-001-IMPLEMENTATION-001",
+            "comment_id": 5998716917,
+            "generation": 93,
+            "coordinate": "2026-10-05T16:32:22Z#5998716917",
+            "effect": "HOLD_CLEAR",
+            "declared_effect": "HOLD_CLEAR"
+          },
+          {
+            "message_id": "CG-DIRECTIVE-ACTION-001-IMPLEMENT-001",
+            "comment_id": 5998725089,
+            "generation": 94,
+            "coordinate": "2026-10-05T16:32:51Z#5998725089",
+            "effect": "PACKET_RELEASE",
+            "declared_effect": "PACKET_RELEASE"
+          },
+          {
+            "message_id": "CG-REVIEW-ACTION-001-SEMANTIC-PASS-002",
+            "comment_id": 6002264461,
+            "generation": 95,
+            "coordinate": "2026-10-05T20:22:43Z#6002264461",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-ATLAS-001-SEMANTIC-PASS-001",
+            "comment_id": 6003918300,
+            "generation": 96,
+            "coordinate": "2026-10-05T21:59:43Z#6003918300",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-ATLAS-MATERIALIZER-001-WINDOWS-PROOF-CORRECTION-001",
+            "comment_id": 6003934022,
+            "generation": 97,
+            "coordinate": "2026-10-05T22:00:29Z#6003934022",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-PR-UNLOCK-CONTRACT-001-SEMANTIC-PASS-001",
+            "comment_id": 6004083773,
+            "generation": 98,
+            "coordinate": "2026-10-05T22:08:06Z#6004083773",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-ACTION-001-ADMISSION-003",
+            "comment_id": 6010505575,
+            "generation": 99,
+            "coordinate": "2026-10-06T06:12:15Z#6010505575",
+            "effect": "PACKET_ADMISSION",
+            "declared_effect": "PACKET_ADMISSION"
+          },
+          {
+            "message_id": "CG-REVIEW-ACTION-001-POST-MERGE-CHECKPOINT-004",
+            "comment_id": 6010515405,
+            "generation": 100,
+            "coordinate": "2026-10-06T06:13:05Z#6010515405",
+            "effect": "CHECKPOINT",
+            "declared_effect": "CHECKPOINT"
+          },
+          {
+            "message_id": "CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001",
+            "comment_id": 6010541876,
+            "generation": 101,
+            "coordinate": "2026-10-06T06:15:16Z#6010541876",
+            "effect": "PACKET_RELEASE",
+            "declared_effect": "PACKET_RELEASE"
+          },
+          {
+            "message_id": "CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001",
+            "comment_id": 6011507550,
+            "generation": 102,
+            "coordinate": "2026-10-06T07:27:11Z#6011507550",
+            "effect": "PACKET_CORRECTION",
+            "declared_effect": "BOUNDED_CORRECTION"
+          },
+          {
+            "message_id": "CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003",
+            "comment_id": 6018421547,
+            "generation": 103,
+            "coordinate": "2026-10-06T14:26:14Z#6018421547",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "AUTHORIZE_CONTROL_BINDING"
+          },
+          {
+            "message_id": "CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004",
+            "comment_id": 6022210803,
+            "generation": 104,
+            "coordinate": "2026-10-06T17:54:31Z#6022210803",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005",
+            "comment_id": 6023054785,
+            "generation": 105,
+            "coordinate": "2026-10-06T18:42:31Z#6023054785",
+            "effect": "PACKET_CORRECTION",
+            "declared_effect": "PACKET_CORRECTION"
+          },
+          {
+            "message_id": "CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001",
+            "comment_id": 6025258558,
+            "generation": 106,
+            "coordinate": "2026-10-06T20:54:06Z#6025258558",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002",
+            "comment_id": 6025392698,
+            "generation": 107,
+            "coordinate": "2026-10-06T21:02:41Z#6025392698",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003",
+            "comment_id": 6051089263,
+            "generation": 108,
+            "coordinate": "2026-10-08T02:42:56Z#6051089263",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-META-CONTROL-LOOP-RECOVERY-SEMANTIC-PASS-001",
+            "comment_id": 6092797415,
+            "generation": 109,
+            "coordinate": "2026-10-10T02:33:45Z#6092797415",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004",
+            "comment_id": 6108531988,
+            "generation": 110,
+            "coordinate": "2026-10-11T11:27:17Z#6108531988",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-KF159-INTEGRATED-001",
+            "comment_id": 6109079503,
+            "generation": 111,
+            "coordinate": "2026-10-11T12:35:30Z#6109079503",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-KF159-ADMISSION-RECORD-001",
+            "comment_id": 6109741134,
+            "generation": 112,
+            "coordinate": "2026-10-11T13:53:05Z#6109741134",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-KF159-EXACT-HEAD-MERGE-AUTH-001",
+            "comment_id": 6111001643,
+            "generation": 113,
+            "coordinate": "2026-10-11T16:12:24Z#6111001643",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-DIRECTIVE-KF159-POSTMERGE-001",
+            "comment_id": 6111022026,
+            "generation": 114,
+            "coordinate": "2026-10-11T16:14:32Z#6111022026",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-DIR-IRP177-REVIEW-001",
+            "comment_id": 6229439023,
+            "generation": 115,
+            "coordinate": "2026-10-17T04:06:38Z#6229439023",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-DIR-HANDOFF-UI-001",
+            "comment_id": 6229570731,
+            "generation": 116,
+            "coordinate": "2026-10-17T04:21:06Z#6229570731",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-REVIEW-KF155-006",
+            "comment_id": 6240050804,
+            "generation": 117,
+            "coordinate": "2026-10-17T19:59:24Z#6240050804",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          },
+          {
+            "message_id": "CG-DIR-F9-001",
+            "comment_id": 6240051686,
+            "generation": 118,
+            "coordinate": "2026-10-17T19:59:30Z#6240051686",
+            "effect": "NO_STATE_CHANGE",
+            "declared_effect": "NO_STATE_CHANGE"
+          }
+        ],
+        "blocked": null,
+        "unapplied": []
+      }
+    },
+    "last_processed_event_key": null,
+    "journal_entries": 0
+  },
+  "application_dag": {
+    "packets_total": 35,
+    "phases_total": 37,
+    "drained": true,
+    "order": [
+      "KF-EXEC-K12-001",
+      "KF-EXEC-EXTFX-001",
+      "KF-EXEC-TENANT-001",
+      "KF-EXEC-AUTH-001",
+      "KF-EXEC-ACTION-001",
+      "KF-EXEC-TIME-001",
+      "KF-EXEC-INGRESS-001",
+      "KF-EXEC-CONNECTOR-001",
+      "KF-EXEC-TEMPORAL-002",
+      "KF-EXEC-RECOVERY-001",
+      "KF-EXEC-CONVO-001",
+      "KF-EXEC-PLAYBOOK-001#foundation",
+      "KF-EXEC-COMMERCIAL-001",
+      "KF-EXEC-BOOKING-001",
+      "KF-EXEC-FINANCE-001",
+      "KF-EXEC-DELIVERYBILL-001",
+      "KF-EXEC-COMMERCE-001",
+      "KF-EXEC-ENTITLE-001",
+      "KF-EXEC-GROWTH-001#foundation",
+      "KF-EXEC-PLAYBOOK-001#convergence",
+      "KF-EXEC-KNOWLEDGE-001",
+      "KF-EXEC-KNOWLEDGE-002",
+      "KF-EXEC-COMMAND-001",
+      "KF-EXEC-PUBLIC-001",
+      "KF-EXEC-SPACE-001",
+      "KF-EXEC-GROWTH-001#closed_loop",
+      "KF-EXEC-VOICE-001",
+      "KF-EXEC-PRIVACY-001",
+      "KF-EXEC-NETWORK-001",
+      "KF-EXEC-UX-001",
+      "KF-EXEC-EXPERIENCE-001",
+      "KF-EXEC-WITHDRAW-001",
+      "KF-EXEC-WITHDRAW-002",
+      "KF-EXEC-MIGRATE-001",
+      "KF-EXEC-INTEGRATED-001",
+      "KF-EXEC-OPS-001",
+      "KF-EXEC-RELEASE-001"
+    ]
+  },
+  "platform_dag": {
+    "packets_total": 63,
+    "phases_total": 63,
+    "drained": true,
+    "file_status": "INACTIVE_SUCCESSOR",
+    "contract_problems": [],
+    "human_gates": 10,
+    "inherited_never_automatic": 14,
+    "authority_state": {
+      "state": "HELD",
+      "reason": "newest message naming this programme lacks envelope fields message_type (PLAN is not DIRECTIVE/REVIEW/HOLD/RESUME), packet_id (absent or null), packet_id (absent), implementation_branch (absent), state (absent), health (absent), scope_changed (absent), packet_id (activation requires a value), implementation_branch (activation requires a value), state (activation requires a value), health (activation requires a value), scope_changed (activation requires a value); failing closed",
+      "decided_by": {
+        "message_id": "CG-PLAN-PLATFORM-CONVERGENCE-001",
+        "message_type": "UNKNOWN",
+        "comment_id": 5826799265,
+        "programme_action": null
+      }
+    }
+  },
+  "read_trace": [
+    {
+      "args": [
+        "api",
+        "--paginate",
+        "--slurp",
+        "repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?per_page=100"
+      ],
+      "response_sha256": "e2fcd9ed71045dddaf00b69d608a2ab1ceb1886d8c8d91f34e29c64ef44145ab",
+      "source": "frozen GitHub connector response"
+    },
+    {
+      "args": [
+        "api",
+        "repos/SaCH-PRO/KEYFLOWOS/commits/main"
+      ],
+      "response_sha256": "5b2aa3eeb3c4138d0e05f0ca9589bb298c076264d4aa3b182bf0eef031e6382e",
+      "source": "frozen GitHub connector response"
+    },
+    {
+      "args": [
+        "api",
+        "repos/SaCH-PRO/KEYFLOWOS/compare/ac3a6384417093f198bcc7d672b0dbc295db137c...98ee0202499ba87fa4ee13d58a2a9075016225bd"
+      ],
+      "response_sha256": "763cc8e779d08270d892e132c9d608d309e59ee29cd53b111bb255de4403d0b7",
+      "source": "frozen GitHub connector response"
+    },
+    {
+      "args": [
+        "api",
+        "repos/SaCH-PRO/KEYFLOWOS/pulls/155"
+      ],
+      "response_sha256": "92b6acace2dc84e73161768d37cc90e142cb0f4bb8fca4ebeb3ffbcdd3994244",
+      "source": "frozen GitHub connector response"
+    },
+    {
+      "args": [
+        "api",
+        "repos/SaCH-PRO/KEYFLOWOS/commits/main"
+      ],
+      "response_sha256": "5b2aa3eeb3c4138d0e05f0ca9589bb298c076264d4aa3b182bf0eef031e6382e",
+      "source": "frozen GitHub connector response"
+    },
+    {
+      "args": [
+        "api",
+        "repos/SaCH-PRO/KEYFLOWOS/compare/ac3a6384417093f198bcc7d672b0dbc295db137c...98ee0202499ba87fa4ee13d58a2a9075016225bd"
+      ],
+      "response_sha256": "763cc8e779d08270d892e132c9d608d309e59ee29cd53b111bb255de4403d0b7",
+      "source": "frozen GitHub connector response"
+    },
+    {
+      "args": [
+        "api",
+        "repos/SaCH-PRO/KEYFLOWOS/pulls/155"
+      ],
+      "response_sha256": "92b6acace2dc84e73161768d37cc90e142cb0f4bb8fca4ebeb3ffbcdd3994244",
+      "source": "frozen GitHub connector response"
+    }
+  ],
+  "agents_observation": "NOT_RUN: empty registry deliberately avoids installed-agent, process and credential probes.",
+  "limits": [
+    "Frozen connector-supplied equivalent; not the live status CLI and not an installed-worker observation.",
+    "All 23 current-main source files and both published replay methods are Git-blob verified before execution.",
+    "Full raw discussion supplied separately; summaries alone cannot replay it.",
+    "No checkpoint, programme map, authority message, admission, ready/merge, production, process or installation mutation."
+  ]
+}

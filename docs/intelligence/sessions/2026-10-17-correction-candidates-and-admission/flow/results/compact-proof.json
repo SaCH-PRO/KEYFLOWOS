@@ -1,0 +1,521 @@
+{
+  "disposition": "LOCAL_CANDIDATE_PROVED_NOT_RELEASED_OR_INTEGRATED",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "runtime": "v24.19.0",
+  "typescript": "5.9.3",
+  "nestjs_common": "11.1.19",
+  "observed_at": "2026-10-17T22:09:30.599Z",
+  "external_network_attempts": 0,
+  "real_database_or_provider_calls": 0,
+  "limits": [
+    "Full unchanged AiOversightService and its policy helpers execute with real Nest exception classes; dependency tokens and all persistence/admin/audit responses are synthetic.",
+    "Governance checks omit the optional caller mode override, matching this selective authoritative-read correction. Caller authority and supervised policy tightening remain separate work.",
+    "The protected-write counterexample writes only the synthetic AiMemory and audit doubles. It does not demonstrate alteration of an AutopilotSettings row or production data.",
+    "TypeScript transpilation is not a whole-project typecheck. No server boot, HTTP route, real database, provider, concurrency, hosted Node20 CI, merge, deployment, or application checkpoint is claimed.",
+    "Baseline and mutant safety failures are intentional counterexamples; successful characterization is not a passing security verdict for main."
+  ],
+  "cases": [
+    {
+      "id": "P1",
+      "title": "typed advisory policy takes precedence over permissive legacy"
+    },
+    {
+      "id": "P2",
+      "title": "typed read failure cannot promote permissive legacy, including a false degraded field"
+    },
+    {
+      "id": "P3",
+      "title": "both reads failing remain restricted"
+    },
+    {
+      "id": "P4",
+      "title": "confirmed typed absence keeps valid legacy support"
+    },
+    {
+      "id": "P5",
+      "title": "failed typed read with malformed legacy remains restricted"
+    },
+    {
+      "id": "P6",
+      "title": "two confirmed absences keep normal defaults"
+    },
+    {
+      "id": "P7",
+      "title": "confirmed typed absence with malformed legacy is degraded"
+    },
+    {
+      "id": "P8",
+      "title": "confirmed typed absence with a legacy read error is degraded"
+    },
+    {
+      "id": "P9",
+      "title": "typed blocklist remains effective over permissive legacy"
+    },
+    {
+      "id": "W1",
+      "title": "admin update after typed read failure makes zero policy and audit writes"
+    },
+    {
+      "id": "W2",
+      "title": "owner update after successful legacy read preserves policy and writes one audit"
+    },
+    {
+      "id": "W3",
+      "title": "non-admin refusal occurs before policy reads and writes"
+    },
+    {
+      "id": "R1",
+      "title": "explicit transaction reader cannot promote legacy after typed read failure"
+    }
+  ],
+  "variants": [
+    {
+      "variant": "unchanged_main",
+      "service_sha256": "68a9899dce573b336d964ec145c01a9da901ec9dc5ac99f1b497f8d96f3b9d88",
+      "total": 13,
+      "passed": 10,
+      "failed": [
+        "P2",
+        "W1",
+        "R1"
+      ],
+      "observations": [
+        {
+          "id": "P1",
+          "passed": true,
+          "mode": "advisory",
+          "degraded": false,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P2",
+          "passed": false,
+          "mode": "pro_auto",
+          "degraded": false,
+          "allowed": true,
+          "writes": 0,
+          "audits": 0,
+          "failure": {
+            "name": "AssertionError",
+            "message": "typed read failure cannot promote permissive legacy, including a false degraded field\n+ actual - expected\n\n+ 'pro_auto'\n- 'restricted'\n",
+            "actual": "pro_auto",
+            "expected": "restricted"
+          }
+        },
+        {
+          "id": "P3",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P4",
+          "passed": true,
+          "mode": "pro_auto",
+          "degraded": false,
+          "allowed": true,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P5",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P6",
+          "passed": true,
+          "mode": "assisted",
+          "degraded": false,
+          "allowed": true,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P7",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P8",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P9",
+          "passed": true,
+          "mode": "pro_auto",
+          "degraded": false,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "W1",
+          "passed": false,
+          "writes": 1,
+          "audits": 1,
+          "error": null,
+          "failure": {
+            "name": "AssertionError",
+            "message": "failed authoritative read must not reach AiMemory.upsert\n\n1 !== 0\n",
+            "actual": 1,
+            "expected": 0
+          }
+        },
+        {
+          "id": "W2",
+          "passed": true,
+          "writes": 1,
+          "audits": 1
+        },
+        {
+          "id": "W3",
+          "passed": true,
+          "writes": 0,
+          "audits": 0,
+          "error": {
+            "name": "ForbiddenException",
+            "status": 403
+          }
+        },
+        {
+          "id": "R1",
+          "passed": false,
+          "allowed": true,
+          "failure": {
+            "name": "AssertionError",
+            "message": "Expected values to be strictly equal:\n\ntrue !== false\n",
+            "actual": true,
+            "expected": false
+          }
+        }
+      ]
+    },
+    {
+      "variant": "candidate",
+      "service_sha256": "792e5c4e7f01cebfc6c34d9cae92a503d19fcaf053a89af7b8b6bf9de142d484",
+      "total": 13,
+      "passed": 13,
+      "failed": [],
+      "observations": [
+        {
+          "id": "P1",
+          "passed": true,
+          "mode": "advisory",
+          "degraded": false,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P2",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P3",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P4",
+          "passed": true,
+          "mode": "pro_auto",
+          "degraded": false,
+          "allowed": true,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P5",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P6",
+          "passed": true,
+          "mode": "assisted",
+          "degraded": false,
+          "allowed": true,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P7",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P8",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P9",
+          "passed": true,
+          "mode": "pro_auto",
+          "degraded": false,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "W1",
+          "passed": true,
+          "writes": 0,
+          "audits": 0,
+          "error": {
+            "name": "ServiceUnavailableException",
+            "status": 503,
+            "message": "AI governance settings could not be read, so they cannot be safely updated. Retry once the database is reachable \u2014 writing now would overwrite your blocked tools and modules with defaults."
+          }
+        },
+        {
+          "id": "W2",
+          "passed": true,
+          "writes": 1,
+          "audits": 1
+        },
+        {
+          "id": "W3",
+          "passed": true,
+          "writes": 0,
+          "audits": 0,
+          "error": {
+            "name": "ForbiddenException",
+            "status": 403
+          }
+        },
+        {
+          "id": "R1",
+          "passed": true,
+          "allowed": false
+        }
+      ]
+    },
+    {
+      "variant": "mutant_restore_unsafe_legacy_return",
+      "service_sha256": "888574f6507fa73b6e841242e212eccef6425a344d29d4ba139c50ccab424579",
+      "total": 13,
+      "passed": 10,
+      "failed": [
+        "P2",
+        "W1",
+        "R1"
+      ],
+      "observations": [
+        {
+          "id": "P1",
+          "passed": true,
+          "mode": "advisory",
+          "degraded": false,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P2",
+          "passed": false,
+          "mode": "pro_auto",
+          "degraded": false,
+          "allowed": true,
+          "writes": 0,
+          "audits": 0,
+          "failure": {
+            "name": "AssertionError",
+            "message": "typed read failure cannot promote permissive legacy, including a false degraded field\n+ actual - expected\n\n+ 'pro_auto'\n- 'restricted'\n",
+            "actual": "pro_auto",
+            "expected": "restricted"
+          }
+        },
+        {
+          "id": "P3",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P4",
+          "passed": true,
+          "mode": "pro_auto",
+          "degraded": false,
+          "allowed": true,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P5",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P6",
+          "passed": true,
+          "mode": "assisted",
+          "degraded": false,
+          "allowed": true,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P7",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P8",
+          "passed": true,
+          "mode": "restricted",
+          "degraded": true,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "P9",
+          "passed": true,
+          "mode": "pro_auto",
+          "degraded": false,
+          "allowed": false,
+          "writes": 0,
+          "audits": 0
+        },
+        {
+          "id": "W1",
+          "passed": false,
+          "writes": 1,
+          "audits": 1,
+          "error": null,
+          "failure": {
+            "name": "AssertionError",
+            "message": "failed authoritative read must not reach AiMemory.upsert\n\n1 !== 0\n",
+            "actual": 1,
+            "expected": 0
+          }
+        },
+        {
+          "id": "W2",
+          "passed": true,
+          "writes": 1,
+          "audits": 1
+        },
+        {
+          "id": "W3",
+          "passed": true,
+          "writes": 0,
+          "audits": 0,
+          "error": {
+            "name": "ForbiddenException",
+            "status": 403
+          }
+        },
+        {
+          "id": "R1",
+          "passed": false,
+          "allowed": true,
+          "failure": {
+            "name": "AssertionError",
+            "message": "Expected values to be strictly equal:\n\ntrue !== false\n",
+            "actual": true,
+            "expected": false
+          }
+        }
+      ]
+    }
+  ],
+  "vitest": [
+    {
+      "variant": "baseline",
+      "total": 12,
+      "passed": 9,
+      "failed": 3,
+      "skipped": 0,
+      "success": false,
+      "failed_tests": [
+        "a governance read that fails does not become a permissive policy does not promote permissive legacy after an unresolved typed-policy read failure",
+        "a governance read that fails does not become a permissive policy applies the same failure rule to an explicit transaction reader",
+        "a settings save never overwrites a policy it could not read refuses policy and audit writes even when legacy succeeds after a typed read failure"
+      ]
+    },
+    {
+      "variant": "candidate",
+      "total": 12,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "failed_tests": []
+    },
+    {
+      "variant": "mutant",
+      "total": 12,
+      "passed": 9,
+      "failed": 3,
+      "skipped": 0,
+      "success": false,
+      "failed_tests": [
+        "a governance read that fails does not become a permissive policy does not promote permissive legacy after an unresolved typed-policy read failure",
+        "a governance read that fails does not become a permissive policy applies the same failure rule to an explicit transaction reader",
+        "a settings save never overwrites a policy it could not read refuses policy and audit writes even when legacy succeeds after a typed read failure"
+      ]
+    },
+    {
+      "variant": "original_spec",
+      "total": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "failed_tests": []
+    }
+  ]
+}

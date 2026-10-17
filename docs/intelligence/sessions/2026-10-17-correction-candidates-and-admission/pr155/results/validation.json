@@ -1,0 +1,389 @@
+{
+  "created_at": "2026-10-17T22:10:53.573Z",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux"
+  },
+  "scope": "Local record preparation and actual unchanged repository pure validators; not application execution or new hosted proof.",
+  "target": {
+    "repository": "SaCH-PRO/KEYFLOWOS",
+    "number": 155,
+    "head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+    "semantic": "fe79181638e373584c3ca3184a39343a132040cd",
+    "base": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+    "branch": "impl/kf-exec-auth-fail-closed-001",
+    "packet": "KF-EXEC-AUTH-FAIL-CLOSED-001"
+  },
+  "status": "LOCAL_UNBOUND_CANDIDATE",
+  "remote_actions": [],
+  "source_files_verified": 18,
+  "cases": 25,
+  "passed": 25,
+  "failed": 0,
+  "limitations": [
+    "The positive binding control uses clearly synthetic review metadata and does not establish a real later admission decision.",
+    "The caller must refresh GitHub authority, PR/base, workflows, lineage and review evidence before publishing.",
+    "The real PR remains draft; no new worker RETURN, ready transition, commit, merge, production or provider effect occurred.",
+    "Pre-F9 admission diagnostics do not independently enforce false merge_authority flags."
+  ],
+  "results": [
+    {
+      "name": "all exported repository sources match exact published Git blobs",
+      "result": "PASS",
+      "detail": {
+        "files": 18,
+        "head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e"
+      }
+    },
+    {
+      "name": "two candidate files satisfy binding, safety and truthful pre-RETURN evidence checks",
+      "result": "PASS",
+      "detail": {
+        "artifact_binding_problems": [],
+        "pre_return_problems": [],
+        "future_proof": [
+          {
+            "gate": "CI/CD Pipeline",
+            "status": "PENDING"
+          },
+          {
+            "gate": "Agent Control Gate",
+            "status": "PENDING"
+          },
+          {
+            "gate": "Branch divergence",
+            "status": "PENDING"
+          },
+          {
+            "gate": "DAST (HawkScan)",
+            "status": "PENDING"
+          },
+          {
+            "gate": "Agent Control Worker Proof",
+            "status": "PENDING"
+          },
+          {
+            "gate": "independent semantic review",
+            "status": "PENDING"
+          }
+        ],
+        "merge_authority": false,
+        "worker_return": null
+      }
+    },
+    {
+      "name": "application scope, original proof obligations and explicit follow-ons remain unchanged",
+      "result": "PASS",
+      "detail": {
+        "scope_changed": false,
+        "semantic_files_changed": 0,
+        "follow_on_findings_preserved": true
+      }
+    },
+    {
+      "name": "actual published draft remains denied",
+      "result": "PASS",
+      "detail": {
+        "eligible": false,
+        "reason": "pr_is_draft",
+        "detail": null
+      }
+    },
+    {
+      "name": "candidate status cannot overcome the real draft barrier",
+      "result": "PASS",
+      "detail": {
+        "eligible": false,
+        "reason": "pr_is_draft",
+        "detail": null
+      }
+    },
+    {
+      "name": "actual provider-neutral evidence satisfies reviewed semantics",
+      "result": "PASS",
+      "detail": {
+        "satisfied": true,
+        "reason": "independent_semantic_review_satisfied",
+        "detail": null,
+        "evidence": {
+          "implementer": "claude",
+          "primary": "NOT_RUN",
+          "passing": [
+            {
+              "provider": "chatgpt",
+              "reviewer": "chatgpt",
+              "reviewed_head": "fe79181638e373584c3ca3184a39343a132040cd",
+              "evidence_location": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "diagnostic only: pre-F9 evaluator ignores false merge flags after simulated ready transition",
+      "result": "PASS",
+      "detail": {
+        "simulation": true,
+        "real_pr_changed": false,
+        "merge_called": false,
+        "verdict": {
+          "eligible": true,
+          "reason": "all_admission_contracts_satisfied",
+          "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+          "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+          "evidence": {
+            "review_status": "ACCEPT_FOR_ADMISSION",
+            "semantic_review": {
+              "implementer": "claude",
+              "primary": "NOT_RUN",
+              "passing": [
+                {
+                  "provider": "chatgpt",
+                  "reviewer": "chatgpt",
+                  "reviewed_head": "fe79181638e373584c3ca3184a39343a132040cd",
+                  "evidence_location": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804"
+                }
+              ]
+            },
+            "source_head": "fe79181638e373584c3ca3184a39343a132040cd",
+            "workflows": [
+              {
+                "workflow": "CI/CD Pipeline",
+                "run_id": 39065353293,
+                "conclusion": "success"
+              },
+              {
+                "workflow": "Agent Control Gate",
+                "run_id": 39065401472,
+                "conclusion": "success"
+              },
+              {
+                "workflow": "Branch divergence",
+                "run_id": 39065353328,
+                "conclusion": "success"
+              },
+              {
+                "workflow": "DAST (HawkScan)",
+                "run_id": 39065353307,
+                "conclusion": "success"
+              },
+              {
+                "workflow": "Agent Control Worker Proof",
+                "run_id": 39065353286,
+                "conclusion": "success"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "synthetic future artifact cannot inherit prior-head successful workflows",
+      "result": "PASS",
+      "detail": {
+        "synthetic_future_sha": true,
+        "verdict": {
+          "eligible": false,
+          "reason": "workflow_runs_not_at_exact_head",
+          "detail": {
+            "missing_at_head": [
+              "CI/CD Pipeline",
+              "Agent Control Gate",
+              "Branch divergence",
+              "DAST (HawkScan)",
+              "Agent Control Worker Proof"
+            ],
+            "head_sha": "ffffffffffffffffffffffffffffffffffffffff",
+            "runs_at_other_heads": [
+              "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "synthetic future artifact without runs stays missing",
+      "result": "PASS",
+      "detail": {
+        "eligible": false,
+        "reason": "missing_workflows",
+        "detail": [
+          "CI/CD Pipeline",
+          "Agent Control Gate",
+          "Branch divergence",
+          "DAST (HawkScan)",
+          "Agent Control Worker Proof"
+        ]
+      }
+    },
+    {
+      "name": "synthetic future artifact with queued required runs stays pending",
+      "result": "PASS",
+      "detail": {
+        "eligible": false,
+        "reason": "required_check_pending_at_head",
+        "detail": [
+          {
+            "workflow": "CI/CD Pipeline",
+            "status": "queued",
+            "run_id": 0
+          },
+          {
+            "workflow": "Agent Control Gate",
+            "status": "queued",
+            "run_id": 1
+          },
+          {
+            "workflow": "Branch divergence",
+            "status": "queued",
+            "run_id": 2
+          },
+          {
+            "workflow": "DAST (HawkScan)",
+            "status": "queued",
+            "run_id": 3
+          },
+          {
+            "workflow": "Agent Control Worker Proof",
+            "status": "queued",
+            "run_id": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic ready transition requires newer transition-triggered checks",
+      "result": "PASS",
+      "detail": {
+        "eligible": false,
+        "reason": "required_checks_predate_pr_transition",
+        "detail": [
+          {
+            "workflow": "Agent Control Gate",
+            "transition": "ready_for_review",
+            "transition_at": "2099-01-01T00:00:00Z",
+            "latest_run_at": "2026-10-17T20:07:46Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "original validator rejects premature proof promotion on the new artifact",
+      "result": "PASS",
+      "detail": {
+        "problems": [
+          "exact_head_proof CI/CD Pipeline must be PENDING before the RETURN; found PROVEN"
+        ]
+      }
+    },
+    {
+      "name": "original semantic validator rejects unavailable primary without live evidence",
+      "result": "PASS",
+      "detail": {
+        "satisfied": false,
+        "reason": "live_evidence_missing",
+        "detail": {
+          "provider": "copilot",
+          "reviewed_head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e"
+        }
+      }
+    },
+    {
+      "name": "original semantic validator rejects edited fallback evidence",
+      "result": "PASS",
+      "detail": {
+        "satisfied": false,
+        "reason": "live_evidence_contradicts_record",
+        "detail": {
+          "provider": "chatgpt",
+          "problems": [
+            "edited"
+          ]
+        }
+      }
+    },
+    {
+      "name": "binding positive control renders only in memory using explicitly synthetic review metadata",
+      "result": "PASS",
+      "detail": {
+        "synthetic": true,
+        "real_comment_exists": false,
+        "files_rendered_in_memory": [
+          ".agent-control/active-packet.yaml",
+          ".agent-control/claude-return.yaml"
+        ],
+        "remote_actions": []
+      }
+    },
+    {
+      "name": "binder rejects current semantic-only review as admission",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "binder rejects moved head",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "binder rejects moved base",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "binder rejects non-draft PR",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "binder rejects edited review",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "binder rejects outside author",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "binder rejects merge grant",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "binder rejects new state-changing effect",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "binder rejects second RETURN consumption",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "binder rejects ambiguous duplicated target",
+      "result": "PASS",
+      "detail": {
+        "rejected": true
+      }
+    }
+  ]
+}

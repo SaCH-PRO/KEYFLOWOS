@@ -1,0 +1,55 @@
+{
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "verified": [
+    {
+      "ref": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "path": "apps/server/src/modules/ai/ai-oversight.service.ts",
+      "sha": "0a4a2a302c9aac5b619506e9c4df747229920b40",
+      "size": 35879,
+      "sha256": "68a9899dce573b336d964ec145c01a9da901ec9dc5ac99f1b497f8d96f3b9d88"
+    },
+    {
+      "ref": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "path": "apps/server/src/modules/ai/ai-oversight-fails-closed.spec.ts",
+      "sha": "66fc615e539df286a8b6256cccf0d2f46db4e1f6",
+      "size": 5898,
+      "sha256": "be1489605b66661b4fac5bd1f23da7b54803fe8a6799af1673d88dcfecc27f32"
+    },
+    {
+      "ref": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "path": "apps/server/src/modules/ai/flow-tool-registry.ts",
+      "sha": "432d7305a0aa3b0f927dd88d3ed29c4e8593b703",
+      "size": 277203,
+      "sha256": "74eca72477f5de8174f6c206c68efac82890cfa4513c4d9c2d023a3728b83787"
+    },
+    {
+      "ref": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "path": "apps/server/src/modules/ai/role-engine.service.ts",
+      "sha": "1fcc399f0f5b0ed1866d5c1172d0053746f7462e",
+      "size": 44231,
+      "sha256": "338f84a37896675c5eabd5c553b477b43e83670dda2461e60e02b1b914fb964c"
+    },
+    {
+      "ref": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "path": "apps/server/src/modules/structure/job-role-policy.service.ts",
+      "sha": "2c17eb3aae825fad06a787687e1b6abf2e5f81d3",
+      "size": 2804,
+      "sha256": "b4bb5230b73cb70fcb6829722c2fefadd14537ae2f31bc994e7b00fb4ca9ae66"
+    },
+    {
+      "ref": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "path": "apps/server/src/core/authority/approval-tier.ts",
+      "sha": "7fe70a774b7278431c5b57e2c767e13f9c1fd298",
+      "size": 2983,
+      "sha256": "4bbf0e5cd7b686b19876fc4fcd7db7e39e9c01ec149c67f9e649e5d75fb34c2f"
+    },
+    {
+      "ref": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "path": "apps/server/src/core/authority/module-vocabulary.ts",
+      "sha": "e609c7641f007d5df2a5059a300b396b15e30391",
+      "size": 7953,
+      "sha256": "912dc91a62b79e9f3c651a19d49442e94e3f68dd94b74a1b3405fa5d65207ae4"
+    }
+  ]
+}

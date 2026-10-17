@@ -1,0 +1,85 @@
+{
+  "run_id": 39071628867,
+  "job_id": 117510274230,
+  "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628867/job/117510274230",
+  "artifact": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+  "checkout_verified": true,
+  "node_version": "v20.18.1",
+  "job_status": "completed",
+  "job_conclusion": "failure",
+  "job_completed_at": "2026-10-17T22:10:37Z",
+  "ordinary_tests": {
+    "total": 554,
+    "passed": 553,
+    "failed": 0,
+    "skipped": 1,
+    "skip_name": "the cursor makes directive processing idempotent",
+    "skip_reason": "needs PowerShell and an authenticated gh"
+  },
+  "negative_controls": {
+    "total": 209,
+    "unique_ids": 209,
+    "live": 208,
+    "vacuous": 1,
+    "vacuous_controls": [
+      {
+        "status": "VACUOUS",
+        "id": "NC-RETURN-ARTIFACT-PASS-PROSE",
+        "detail": "mutation target not found in .agent-control/claude-return.yaml",
+        "log_line": 3050
+      }
+    ],
+    "summary_quote": "208/209 negative controls are live",
+    "exit_code": 1,
+    "control_ids_all_once": true,
+    "manifest_comparison": {
+      "source_head": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+      "source_path": "scripts/agent-control/negative-controls.yaml",
+      "git_blob_sha": "ec689001c6db2e44f206747abd3915442fdb53f3",
+      "sha256": "e6adb41e8ae33c73b265981fae539124780882f1b83f9b13e854c111fe7dd1e0",
+      "expected_ids": 209,
+      "missing_ids": [],
+      "unexpected_ids": [],
+      "every_expected_id_seen_once": true
+    }
+  },
+  "evidence_lines": [
+    {
+      "line_number": 156,
+      "text": "2026-10-17T21:36:29.5666156Z node: v20.18.1"
+    },
+    {
+      "line_number": 2803,
+      "text": "2026-10-17T21:38:17.9922223Z ok 528 - the cursor makes directive processing idempotent # SKIP needs PowerShell and an authenticated gh"
+    },
+    {
+      "line_number": 2938,
+      "text": "2026-10-17T21:38:17.9993362Z # tests 554"
+    },
+    {
+      "line_number": 2940,
+      "text": "2026-10-17T21:38:17.9993984Z # pass 553"
+    },
+    {
+      "line_number": 2941,
+      "text": "2026-10-17T21:38:17.9994263Z # fail 0"
+    },
+    {
+      "line_number": 2943,
+      "text": "2026-10-17T21:38:17.9994829Z # skipped 1"
+    },
+    {
+      "line_number": 3050,
+      "text": "2026-10-17T22:10:32.5182260Z VACUOUS  NC-RETURN-ARTIFACT-PASS-PROSE  mutation target not found in .agent-control/claude-return.yaml"
+    },
+    {
+      "line_number": 3160,
+      "text": "2026-10-17T22:10:32.5248020Z 208/209 negative controls are live"
+    },
+    {
+      "line_number": 3161,
+      "text": "2026-10-17T22:10:32.5269771Z ##[error]Process completed with exit code 1."
+    }
+  ],
+  "interpretation": "Ordinary Windows tests succeeded with one disclosed skip; mutation proof failed because NC-RETURN-ARTIFACT-PASS-PROSE could not find its mutation target in this artifact. This is not 209/209 LIVE and does not resolve either published independent review finding."
+}
