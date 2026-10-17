@@ -11,6 +11,8 @@ Before substantial work, read:
 6. canonical handoff/current-state files
 7. the active packet and latest ChatGPT DIRECTIVE in GitHub issue #80
 
+Items 4 to 6 are not on `main`. `docs/intelligence/CANONICAL-SOURCE.md` says which branch holds each, how to read it without changing your checkout, and which parts are stale. For current state, trust `node scripts/agent-control/status.mjs --verify` and issue #80 over any handoff file.
+
 ## Control room
 
 Canonical agent-to-agent channel:

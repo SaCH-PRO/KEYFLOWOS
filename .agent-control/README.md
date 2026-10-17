@@ -19,16 +19,32 @@ Do not place secrets, provider credentials, production data or large logs here.
 
 ## programme-state.yaml
 
-`programme-state.yaml` is the **canonical live programme control state** — the
-single machine-readable authority for which packet is active, its state and
-health, the resolved source main, holds, unresolved contradictions, the event
-journal and the next legal action.
+`programme-state.yaml` is a **reviewed checkpoint of a derived projection**. It
+is not live state and not authority, and it is expected to be older than the
+newest message on issue #80.
 
-It is advanced from valid events through the state machine, not hand-edited
-while the orchestrator is running. Issue #80 is the append-only event log; the
-intelligence branch is the durable checkpoint projection. Neither is live state.
+Execution authority is the newest valid ChatGPT `DIRECTIVE` / `REVIEW` / `HOLD`
+/ `RESUME` on issue #80. The live programme state is the fold of every typed
+authority message newer than this checkpoint over it:
 
-See "Canonical state authority" in `docs/development/AGENT_CONTROL_PLANE.md`.
+```bash
+node scripts/agent-control/status.mjs --verify
+```
+
+Do not hand-edit this file to bring it up to date. Moving the checkpoint (a
+re-anchor) is a reviewed semantic change authorized by ChatGPT; the reducer's
+proofs pin the current anchor and the recorded history after it.
+
+See "Control-state precedence" and "Typed authority effects" in
+`docs/development/AGENT_CONTROL_PLANE.md`, and
+`docs/intelligence/CANONICAL-SOURCE.md` for where each kind of truth lives.
+
+## active-packet.yaml and claude-return.yaml on `main`
+
+These are per-PR admission artifacts. The gate reads them at an `impl/*` PR's
+head, never from `main`. On `main` they are whatever the last merged `impl/*`
+PR left behind: they describe a packet that has merged, and are not a pointer
+to the active one.
 
 `.worker/` holds local worker runtime state (lock, log, processed-directive
 cursor) and is git-ignored.
