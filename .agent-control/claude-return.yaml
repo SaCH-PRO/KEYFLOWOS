@@ -4,7 +4,7 @@ directive_comment_id: 6240051686
 ack_message_id: CC-ACK-F9-001
 ack_comment_id: 6240199516
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
-source_head: 739414da0c5faeed1bbaf4a20deab27b9cfa18f1
+source_head: b0377a4ca97c8d1f24e75fb7e30036b5bb4fbcb4
 implementation_branch: impl/kf-meta-merge-authority-001
 pr_number: 181
 state: PROVING
@@ -25,6 +25,18 @@ semantic_commits:
     what: shared grant predicate, evaluator, recheck, collector, --grant-only, gate step, tests, controls, docs
   - sha: 739414da0c5faeed1bbaf4a20deab27b9cfa18f1
     what: evaluateGrantGate names its binding check apart, so the existing NC-ADMISSION-ARTIFACTS-UNBOUND target is one line again
+  - sha: b0377a4ca97c8d1f24e75fb7e30036b5bb4fbcb4
+    what: the CLI test hands its scenario to the child in a file; Linux caps one environment string at 131072 bytes
+
+momentum_message_id: CC-MOMENTUM-F9-001
+momentum_comment_id: 6242027082
+
+previous_head_ff49859e:
+  semantic_head: 739414da0c5faeed1bbaf4a20deab27b9cfa18f1
+  failed:
+    - Agent Control Worker Proof 39071628867; Ubuntu CLI pagination test (scenario environment string over the Linux limit); Windows control NC-RETURN-ARTIFACT-PASS-PROSE vacuous because this artifact lacked its target sentence
+    - KEYFLOWOS Agent Autopilot 39071628877 self-test; the same Ubuntu test
+  succeeded: CI/CD Pipeline 39071628897, Agent Control Gate 39071628885, Branch divergence 39071628951, DAST (HawkScan) 39071628881 with its scan steps skipped for want of HAWK_API_KEY
 
 diff_scope:   # source_main..source_head
   - scripts/agent-control/lib/merge-grant.mjs (new, the one shared grant helper)
@@ -65,7 +77,7 @@ characterization:
   line_endings: the probe hashes need an LF checkout; a detached LF worktree of 98ee0202 was used, read only
 
 tests:
-  at: 739414da0c5faeed1bbaf4a20deab27b9cfa18f1
+  at: b0377a4ca97c8d1f24e75fb7e30036b5bb4fbcb4
   host: Windows 11, Node 20.18.1, worker session, 2026-10-17
   portable:
     command: node --test scripts/agent-control/tests/*.spec.mjs
@@ -86,7 +98,8 @@ tests:
   negative_controls:
     command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
     at_57bc4540: 209 total, 208 live, 1 vacuous (NC-ADMISSION-ARTIFACTS-UNBOUND refused an ambiguous target; fixed in 739414da without changing the control)
-    at_739414da: 209 total, 209 live, 0 vacuous
+    at_739414da: 209 total, 209 live, 0 vacuous (local; that run read main's artifact, so NC-RETURN-ARTIFACT-PASS-PROSE was not exercised against this one)
+    at_artifact_head: reported in the RETURN; the run needs the commit that carries this file
   dag_validators: validate-dag.mjs OK (35 packets / 37 phases); validate-platform-dag.mjs OK (63 packets, INACTIVE_SUCCESSOR)
   architecture_scanner: dependency_scan.py run locally; it adds the 11 new agent-control import edges and also shows pre-existing drift (PR 166 files absent from the committed dependencies.json); dependencies.json was not regenerated, as that is a broad artifact refresh outside this scope
   hawkscan: NOT_RUN; HAWK_API_KEY absent and no running application in scope
@@ -152,6 +165,7 @@ rollback_floor:
   - no data, schema, checkpoint or production change to undo
 
 security:
+  dast: DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
   production_touched: false
   provider_traffic: false
   credentials: none created or read; tests use a synthetic token and a fetch that never forwards
