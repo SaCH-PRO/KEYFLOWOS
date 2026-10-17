@@ -67,6 +67,8 @@ const scenario = (comments_by_snapshot, overrides = {}) => ({
 function run(s, args, env = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-merge-cli-'));
   const tracePath = path.join(dir, 'trace.json');
+  const scenarioPath = path.join(dir, 'scenario.json');
+  fs.writeFileSync(scenarioPath, JSON.stringify(s));
   const child = spawnSync(process.execPath, ['--import', PRELOAD, CLI, ...args], {
     encoding: 'utf8',
     timeout: 60000,
@@ -77,11 +79,13 @@ function run(s, args, env = {}) {
       GITHUB_TOKEN: 'synthetic-token-not-a-credential',
       GITHUB_REPOSITORY: REPO,
       PR_NUMBER: '87',
-      KF_SYNTHETIC_GITHUB: JSON.stringify(s),
+      KF_SYNTHETIC_GITHUB_FILE: scenarioPath,
       KF_SYNTHETIC_TRACE: tracePath,
       ...env,
     },
   });
+  // A child that never started is a harness failure, never a denial.
+  if (child.error) throw child.error;
   const trace = fs.existsSync(tracePath) ? JSON.parse(fs.readFileSync(tracePath, 'utf8')) : null;
   fs.rmSync(dir, { recursive: true, force: true });
   let out = null;

@@ -6,13 +6,16 @@
  * request is forwarded to the network, an unexpected request throws, and the
  * merge PUT is answered here, so no merge ever leaves this process.
  *
- * KF_SYNTHETIC_GITHUB  JSON scenario (see merge-cli.spec.mjs)
+ * KF_SYNTHETIC_GITHUB_FILE  file holding the JSON scenario (see merge-cli.spec.mjs).
+ *   A file, not an environment value: Linux caps one environment string at
+ *   128 KiB, and a paginated #80 scenario is larger.
  * KF_SYNTHETIC_TRACE   file the request trace is written to on exit
  */
 import fs from 'node:fs';
 
-const scenario = JSON.parse(process.env.KF_SYNTHETIC_GITHUB || 'null');
-if (!scenario) throw new Error('KF_SYNTHETIC_GITHUB is required; refusing to run the CLI without the fixture');
+const source = process.env.KF_SYNTHETIC_GITHUB_FILE;
+const scenario = source ? JSON.parse(fs.readFileSync(source, 'utf8')) : null;
+if (!scenario) throw new Error('KF_SYNTHETIC_GITHUB_FILE is required; refusing to run the CLI without the fixture');
 
 const root = `/repos/${scenario.repo}`;
 const trace = [];
