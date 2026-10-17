@@ -2,7 +2,7 @@
 
 Status: operator-confirmed intent and continuation checkpoint. This document preserves the plan accepted in conversation; it is not a new execution DAG, a production grant, or activation of draft PR177. Runtime/PR/CI are implementation truth; valid #80 authority controls execution; this document records intent and dated evidence.
 
-Latest execution follow-through: [F9 acknowledgement, worker reviews and proof closeout](../sessions/2026-10-17-worker-review-followthrough/README.md). The dated publication snapshot below is preserved; the later session records subsequent observations and the current queue without changing these capability phases.
+Latest execution follow-through: [F9 correction findings, completed #155 proof and #172 review](../sessions/2026-10-17-f9-review-and-proof-closeout/README.md), following [F9 acknowledgement and worker reviews](../sessions/2026-10-17-worker-review-followthrough/README.md). The dated publication snapshot below is preserved; the later session records subsequent observations and the current queue without changing these capability phases.
 
 ## Goal and two scoreboards
 
