@@ -2478,3 +2478,96 @@ negative_controls:
         message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005\nmessage_type: REVIEW\npacket_id: KF-EXEC-AUTH-FAIL-CLOSED-001\nsender: claude
     proof_command: node --test --test-name-pattern="folds every authority message from RECOVERY-021 to the newest, none skipped" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
+
+  # KF-META-HANDOFF-MONITOR-001: the read-only handoff viewer. The server-side
+  # controls (guards, cached reads) need installed dependencies and live in
+  # scripts/proof-admission/manifests/handoff-monitor-negative-controls.json.
+
+  - id: NC-HANDOFF-WRONG-REFERENCE-ACCEPTED
+    claim: >
+      A reply belongs to the request its in_reply_to names, never to every
+      request of the same packet. Correlating by packet id attaches an ACK
+      that names another request.
+    mutation:
+      file: scripts/agent-control/lib/handoff-projector.mjs
+      find: "  const direct = repliesTo.get(request.message_id) || [];"
+      replace: "  const direct = [...repliesTo.values()].flat().filter((m) => m.packet_id === request.packet_id);"
+    proof_command: node --test --test-name-pattern="never attaches by packet or PR" scripts/agent-control/tests/handoff-monitor.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-HANDOFF-WRONG-RECIPIENT-ACCEPTED
+    claim: >
+      Only the addressed responder can acknowledge or return a request. An ACK
+      or RETURN from another sender is a mismatch, not delivery.
+    mutation:
+      file: scripts/agent-control/lib/handoff-projector.mjs
+      find: "if (!senderMatch(reply.sender, expectedSender)) return"
+      replace: "if (false) return"
+    proof_command: node --test --test-name-pattern="from another sender are mismatched" scripts/agent-control/tests/handoff-monitor.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-HANDOFF-CHANGED-HEAD-ACCEPTED
+    claim: >
+      A review RETURN for a different semantic head is not a return of the
+      request, and its outcome is not shown as the request's review.
+    mutation:
+      file: scripts/agent-control/lib/handoff-projector.mjs
+      find: "if (revisionHead && head && head !== revisionHead) return"
+      replace: "if (false) return"
+    proof_command: node --test --test-name-pattern="changed semantic head is not a return" scripts/agent-control/tests/handoff-monitor.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-HANDOFF-STALE-TIME-LAUNDERED
+    claim: >
+      A failed collection never advances last_success_at. Stamping the old
+      snapshot as freshly collected on failure would show stale data as FRESH.
+    mutation:
+      file: scripts/agent-control/lib/handoff-collector.mjs
+      find: "      meta.lastOutcome = err?.code === 'NOT_CONFIGURED' ? 'NOT_CONFIGURED' : 'FAILED';"
+      replace: "      if (committed) committed.lastSuccessAt = startedAt; meta.lastOutcome = err?.code === 'NOT_CONFIGURED' ? 'NOT_CONFIGURED' : 'FAILED';"
+    proof_command: node --test --test-name-pattern="keeps the last good snapshot and its success time" scripts/agent-control/tests/handoff-monitor.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-HANDOFF-NON-GET-REQUEST
+    claim: >
+      The live GitHub transport only ever sends GET.
+    mutation:
+      file: scripts/agent-control/lib/handoff-collector.mjs
+      find: "          method: 'GET',"
+      replace: "          method: 'POST',"
+    proof_command: node --test --test-name-pattern="the live transport sends GET only" scripts/agent-control/tests/handoff-monitor.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-HANDOFF-REQUEST-ALLOWLIST-OPEN
+    claim: >
+      The collector reaches only issue #80 and PR pages of this repository; a
+      URL taken from a comment or another path is refused before any request.
+    mutation:
+      file: scripts/agent-control/lib/handoff-collector.mjs
+      find: "  if (!ALLOWED_PATH.test(url.pathname)) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="the request allowlist admits only" scripts/agent-control/tests/handoff-monitor.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-HANDOFF-UNSAFE-SOURCE-LINK
+    claim: >
+      Only this repository's GitHub pages become links; javascript: and other
+      hosts stay text.
+    mutation:
+      file: scripts/agent-control/lib/handoff-projector.mjs
+      find: "  return SAFE_SOURCE_URL.test(value) ? value : null;"
+      replace: "  return value;"
+    proof_command: node --test --test-name-pattern="source links are only this repository" scripts/agent-control/tests/handoff-monitor.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-HANDOFF-MERGE-GRANT-SYNTHESIZED
+    claim: >
+      Merge authority is read only from a valid PACKET_ADMISSION authority
+      message. A non-authority PROGRESS that says merge_authority: true grants
+      nothing.
+    mutation:
+      file: scripts/agent-control/lib/handoff-projector.mjs
+      find: "const grant = receipts.find((m) => m.authority.status === 'VALID'"
+      replace: "const grant = receipts.find((m) => m.review.merge_authority === true || m.authority.status === 'VALID'"
+    proof_command: node --test --test-name-pattern="merge authority is read only from a valid PACKET_ADMISSION" scripts/agent-control/tests/handoff-monitor.spec.mjs
+    timeout_ms: 120000
