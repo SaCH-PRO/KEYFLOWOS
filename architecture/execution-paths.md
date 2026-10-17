@@ -565,6 +565,18 @@ auto-merge-admitted.mjs
       → review status, safety, source_main / source_head / control-only tail
       → evaluateSemanticReview() (lib/semantic-review.mjs)
       → proof, then the required workflows at the exact head
+      → last, evaluateMergeGrant() (lib/merge-grant.mjs) over every comment of this
+        repository's issue #80: the newest valid authority message about the PR,
+        packet or branch must be a ChatGPT REVIEW with merge_authority true,
+        review_status READY_TO_MERGE and NO_STATE_CHANGE or PACKET_ADMISSION,
+        bound exactly to pr_number, packet_id, implementation_branch, source_head,
+        pr_head and source_main; no valid HOLD on the packet without a later RESUME;
+        no malformed candidate after it that may be about the target (F9)
+  → with --merge, the same complete collection again, and recheckBeforeMerge():
+    same head, same base, same grant; then one merge call pinned to the head
+auto-merge-admitted.mjs --grant-only (non-draft step of the Agent Control Gate)
+  → the PR, both artifacts, issue #80 → evaluateGrantGate(): binding, then the
+    same grant predicate; never the workflow runs, so the gate never waits on itself
 ```
 
 The checkpoint is read and written by `lib/yaml.mjs`. It defines every mapping key as an own property and writes a key in the form its parser reads back as the same key, so a hold keyed by any non-blank packet id survives a save and reload.
@@ -572,7 +584,8 @@ The checkpoint is read and written by `lib/yaml.mjs`. It defines every mapping k
 Key files:
 
 - `scripts/agent-control/lib/authority-effects.mjs` — `CONTROL_EFFECTS`, `CONTROL_EFFECT_ALIASES` (historical spellings, each read as one canonical effect before any rule applies), `readEffect()`, `applyEffect()`, `reduceAuthority()`
-- `scripts/agent-control/lib/admission.mjs` — `evaluateAdmission()`, `artifactBindingProblems()`
+- `scripts/agent-control/lib/admission.mjs` — `evaluateAdmission()`, `evaluateGrantGate()`, `recheckBeforeMerge()`, `artifactBindingProblems()`
+- `scripts/agent-control/lib/merge-grant.mjs` — `evaluateMergeGrant()`, `sameGrant()`: the one predicate for a distinct, current #80 merge grant
 - `scripts/agent-control/lib/yaml.mjs` — `parseYaml()`, `stringifyYaml()`
 - `scripts/agent-control/lib/reconcile.mjs` — `reconcileProjection()`, `reconcile()`
 - `scripts/agent-control/lib/truth.mjs` — `gatherTruth()`, `reconcileWithTruth()`

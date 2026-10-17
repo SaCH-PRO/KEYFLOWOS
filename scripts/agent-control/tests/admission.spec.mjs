@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { evaluateAdmission, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
+import { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
 import { SEMANTIC_REVIEW_REASONS } from '../lib/semantic-review.mjs';
 import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
 import { parseYaml } from '../lib/yaml.mjs';
+import { GRANT_REASONS } from '../lib/merge-grant.mjs';
+import { grantComment, followUp, target as grantTarget } from './helpers/merge-grant-fixture.mjs';
 
 const HEAD = 'a'.repeat(40);
 const BASE = 'b'.repeat(40);
@@ -21,7 +23,37 @@ const greenRuns = (sha = HEAD) =>
     created_at: '2026-09-23T10:00:00Z',
   }));
 
-const admissible = (overrides = {}) => ({
+/**
+ * The #80 grant for a snapshot's own PR, packet, branch, semantic head, head
+ * and base (F9). admissible() supplies it unless control_comments is given,
+ * so every contract below is still tested on its own, with the grant present.
+ */
+const grantFor = (snapshot, fields = {}) => {
+  const t = grantTarget({
+    repository: snapshot.repository,
+    pr_number: snapshot.pr.number,
+    packet_id: snapshot.ret.packet_id,
+    implementation_branch: snapshot.pr.head_ref,
+    source_head: snapshot.ret.source_head,
+    pr_head: snapshot.pr.head_sha,
+    base_sha: snapshot.pr.base_sha,
+  });
+  // Quoted, so an id such as `null` or `a: b` is named as the text it is.
+  const quote = (v) => (typeof v === 'string' ? JSON.stringify(v) : v);
+  return grantComment({ packet_id: quote(t.packet_id), implementation_branch: quote(t.implementation_branch), ...fields }, {}, t);
+};
+
+/** A snapshot with the grant for its own PR in place of whatever it carried. */
+const withOwnGrant = (snapshot) => ({ ...snapshot, control_comments: [grantFor(snapshot)] });
+
+const admissible = (overrides = {}) => {
+  const snapshot = admissibleWithoutGrant(overrides);
+  if (!Object.hasOwn(overrides, 'control_comments')) snapshot.control_comments = [grantFor(snapshot)];
+  return snapshot;
+};
+
+const admissibleWithoutGrant = (overrides = {}) => ({
+  repository: 'o/r',
   pr: { number: 87, state: 'open', draft: false, head_sha: HEAD, base_sha: BASE, head_ref: 'impl/x' },
   active: { packet_id: 'KF-X-001', implementation_branch: 'impl/x', pr_number: 87, source_main: BASE, production_touched: false },
   ret: {
@@ -180,7 +212,8 @@ test('NC identity types: a packet id or branch that is not a string binds nothin
   // in one artifact and `packet_id: "1"` in the other compared equal.
   const base = admissible();
   const one = (side, overrides) => evaluateAdmission({ ...base, [side]: { ...base[side], ...overrides } });
-  const both = (overrides) => evaluateAdmission({ ...base, active: { ...base.active, ...overrides }, ret: { ...base.ret, ...overrides } });
+  // The grant follows the artifacts' packet id, so only the binding is under test.
+  const both = (overrides) => evaluateAdmission(withOwnGrant({ ...base, active: { ...base.active, ...overrides }, ret: { ...base.ret, ...overrides } }));
   const file = { active: 'active-packet.yaml', ret: 'claude-return.yaml' };
   const notStrings = [1, 0, -1, 1.5, NaN, true, false, {}, { id: 'KF-X-001' }, [], ['KF-X-001']];
 
@@ -237,7 +270,7 @@ test("the binding is packet-agnostic: any packet id and branch bind when they ar
   const base = admissible();
   for (const [packet, branch, number] of [['KF-META-P', 'impl/kf-meta-p', 7], ['a: b', 'impl/anything', 120], ['__proto__', 'impl/p', 1]]) {
     const own = { packet_id: packet, implementation_branch: branch, pr_number: number };
-    const snapshot = { ...base, pr: { ...base.pr, head_ref: branch, number }, active: { ...base.active, ...own }, ret: { ...base.ret, ...own } };
+    const snapshot = withOwnGrant({ ...base, pr: { ...base.pr, head_ref: branch, number }, active: { ...base.active, ...own }, ret: { ...base.ret, ...own } });
     assert.deepEqual(artifactBindingProblems(snapshot), [], packet);
     assert.equal(evaluateAdmission(snapshot).eligible, true, packet);
   }
@@ -515,8 +548,154 @@ test('NC recheck before merge: a head that moved between the snapshots stops the
 });
 
 test('recheck before merge: two eligible snapshots at the same head and base allow the merge', () => {
-  const v = recheckBeforeMerge(evaluateAdmission(admissible()), evaluateAdmission(admissible()));
+  // One #80 collection read twice: the same grant in both snapshots.
+  const snapshot = admissible();
+  const v = recheckBeforeMerge(evaluateAdmission(snapshot), evaluateAdmission({ ...snapshot }));
   assert.equal(v.eligible, true);
+  assert.equal(v.merge_grant.comment_id, snapshot.control_comments[0].id);
+});
+
+// ------------------------------------------------------------ MERGE AUTHORITY (F9)
+// KF-META-MERGE-AUTHORITY-001 (CG-DIR-F9-001). Before the repair, every case
+// below was eligible: READY_STATUSES took either status and nothing read a
+// grant (docs/intelligence/sessions/2026-10-17-p0-safety-review/f9).
+
+test('NC F9 matrix: no artifact status or artifact grant field is merge authority without the #80 grant', () => {
+  const values = [undefined, false, null, 0, 'false', 'true', true];
+  let cases = 0;
+  for (const status of ['ACCEPT_FOR_ADMISSION', 'READY_TO_MERGE']) {
+    for (const flag of values) {
+      const base = admissible({ control_comments: [] });
+      const v = evaluateAdmission({
+        ...base,
+        active: { ...base.active, merge_authority: flag },
+        ret: { ...base.ret, review_status: status, merge_authority: flag },
+      });
+      assert.equal(v.eligible, false, `${status} ${String(flag)}`);
+      assert.equal(v.reason, ADMISSION_REASONS.MERGE_GRANT_NOT_SATISFIED, `${status} ${String(flag)}`);
+      assert.equal(v.detail.reason, GRANT_REASONS.ABSENT, `${status} ${String(flag)}`);
+      cases += 1;
+    }
+  }
+  assert.equal(cases, 14);
+  // Referent: the same snapshot with its own grant is eligible, whatever the artifact flag says.
+  const granted = admissible();
+  assert.equal(evaluateAdmission({ ...granted, ret: { ...granted.ret, review_status: 'ACCEPT_FOR_ADMISSION', merge_authority: false } }).eligible, true);
+});
+
+test('NC F9: an unobserved #80 collection is not an absent grant that a default could fill', () => {
+  const { control_comments, ...snapshot } = admissible();
+  const v = evaluateAdmission(snapshot);
+  assert.equal(v.reason, ADMISSION_REASONS.MERGE_GRANT_NOT_SATISFIED);
+  assert.equal(v.detail.reason, GRANT_REASONS.AUTHORITY_UNVERIFIED);
+});
+
+test('NC F9: the grant is checked last, so every other contract keeps its own reason without one', () => {
+  const ungranted = (overrides) => admissible({ control_comments: [], ...overrides });
+  const base = ungranted();
+  assert.equal(evaluateAdmission(ungranted({ pr: { ...base.pr, draft: true } })).reason, ADMISSION_REASONS.PR_IS_DRAFT);
+  assert.equal(evaluateAdmission({ ...base, ret: { ...base.ret, review_status: 'CORRECTION_REQUIRED' } }).reason, ADMISSION_REASONS.REVIEW_NOT_READY);
+  assert.equal(evaluateAdmission({ ...base, pr: { ...base.pr, base_sha: 'd'.repeat(40) } }).reason, ADMISSION_REASONS.SOURCE_MAIN_DRIFT);
+  assert.equal(evaluateAdmission({ ...base, semantic_review_live: { copilot: [], chatgpt: [] } }).reason, ADMISSION_REASONS.SEMANTIC_REVIEW_NOT_SATISFIED);
+  const pending = [...greenRuns(), { id: 905, name: 'Agent Control Gate', head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
+  assert.equal(evaluateAdmission({ ...base, workflow_runs: pending }).reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
+  const failed = greenRuns().map((r) => (r.name === 'CI/CD Pipeline' ? { ...r, conclusion: 'failure' } : r));
+  assert.equal(evaluateAdmission({ ...base, workflow_runs: failed }).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
+  // ...and a valid grant does not lift any of them.
+  const granted = admissible();
+  assert.equal(evaluateAdmission({ ...granted, pr: { ...granted.pr, draft: true } }).reason, ADMISSION_REASONS.PR_IS_DRAFT);
+  assert.equal(evaluateAdmission({ ...granted, semantic_review_live: { copilot: [], chatgpt: [] } }).reason, ADMISSION_REASONS.SEMANTIC_REVIEW_NOT_SATISFIED);
+  assert.equal(evaluateAdmission({ ...granted, workflow_runs: pending }).reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
+});
+
+test('NC F9: a grant for another PR, packet, head or base, or a revoked grant, does not admit', () => {
+  const base = admissible();
+  const cases = [
+    [{ pr_head: '"' + 'd'.repeat(40) + '"' }, GRANT_REASONS.BINDING_MISMATCH],
+    [{ source_main: 'd'.repeat(40) }, GRANT_REASONS.BINDING_MISMATCH],
+    [{ source_head: HEAD }, GRANT_REASONS.BINDING_MISMATCH],
+    [{ review_status: 'ACCEPT_FOR_ADMISSION' }, GRANT_REASONS.NOT_A_GRANT],
+    [{ merge_authority: 'false' }, GRANT_REASONS.NOT_A_GRANT],
+  ];
+  for (const [fields, reason] of cases) {
+    const v = evaluateAdmission({ ...base, control_comments: [grantFor(base, fields)] });
+    assert.equal(v.reason, ADMISSION_REASONS.MERGE_GRANT_NOT_SATISFIED, JSON.stringify(fields));
+    assert.equal(v.detail.reason, reason, JSON.stringify(fields));
+  }
+  const revoked = evaluateAdmission({ ...base, control_comments: [...base.control_comments, followUp()] });
+  assert.equal(revoked.detail.reason, GRANT_REASONS.SUPERSEDED);
+  // A grant for the PR at the previous head is stale once the head moved.
+  const moved = 'd'.repeat(40);
+  const atMoved = {
+    ...base,
+    pr: { ...base.pr, head_sha: moved },
+    workflow_runs: greenRuns(moved),
+    reviewed_head_lineage: { [HEAD]: { descends_from_source_head: true, ancestor_of_pr_head: true, non_control_files: [] } },
+  };
+  assert.equal(evaluateAdmission(atMoved).detail.reason, GRANT_REASONS.BINDING_MISMATCH);
+  assert.equal(evaluateAdmission(withOwnGrant(atMoved)).eligible, true, 'referent: a grant at the moved head admits it');
+});
+
+test('NC F9 recheck: a grant revoked, replaced or removed between the two snapshots stops the merge', () => {
+  const snapshot = admissible();
+  const first = evaluateAdmission(snapshot);
+  assert.equal(first.eligible, true);
+  // Revoked: the second snapshot sees a later message about this PR.
+  const revoked = recheckBeforeMerge(first, evaluateAdmission({ ...snapshot, control_comments: [...snapshot.control_comments, followUp()] }));
+  assert.equal(revoked.reason, ADMISSION_REASONS.MERGE_GRANT_NOT_SATISFIED);
+  assert.equal(revoked.detail.reason, GRANT_REASONS.SUPERSEDED);
+  // Replaced: a different, equally valid grant is a changed decision.
+  const replaced = recheckBeforeMerge(first, evaluateAdmission({ ...snapshot, control_comments: [...snapshot.control_comments, grantFor(snapshot)] }));
+  assert.equal(replaced.eligible, false);
+  assert.equal(replaced.reason, ADMISSION_REASONS.GRANT_CHANGED_BEFORE_MERGE);
+  // An eligible verdict that carries no grant cannot be rechecked into a merge.
+  const { merge_grant, ...bare } = first;
+  assert.equal(recheckBeforeMerge(bare, evaluateAdmission(snapshot)).reason, ADMISSION_REASONS.GRANT_CHANGED_BEFORE_MERGE);
+});
+
+test('NC F9 gate step: the non-draft step requires the #80 grant through --grant-only, not the artifact status alone', () => {
+  // A Windows checkout may carry CRLF; the step is the same text.
+  const gate = fs.readFileSync('.github/workflows/agent-control-gate.yml', 'utf8').replace(/\r\n/g, '\n');
+  const start = gate.indexOf('- name: Require ChatGPT admission before non-draft merge readiness');
+  const end = gate.indexOf('- name: Summary');
+  assert.ok(start > 0 && end > start, 'the non-draft step exists');
+  const step = gate.slice(start, end);
+  assert.match(step, /if: steps\.scope\.outputs\.required == 'true' && github\.event\.pull_request\.draft == false/);
+  // The grant check runs, and its exit status decides the step.
+  assert.match(step, /\n\s+grant="\$\(node scripts\/agent-control\/auto-merge-admitted\.mjs --grant-only\)" \|\| grant_status=\$\?\n/);
+  assert.match(step, /if \[ "\$grant_status" -ne 0 \]; then\n[^\n]*\n\s+exit 1\n/);
+  // Bound to the event's own head and base.
+  assert.match(step, /EXPECTED_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(step, /EXPECTED_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(step, /PR_NUMBER: \$\{\{ github\.event\.pull_request\.number \}\}/);
+  // Never the full evaluator: it waits for this gate's own successful run.
+  assert.doesNotMatch(step, /auto-merge-admitted\.mjs(?! --grant-only)/);
+  // The source_main and status checks it had are still there.
+  assert.match(step, /READY_TO_MERGE\|ACCEPT_FOR_ADMISSION\)/);
+  assert.match(step, /must be revalidated against the current PR base SHA/);
+  // Reading #80 needs the issues read permission, and no write permission is added.
+  const permissions = gate.slice(gate.indexOf('permissions:'), gate.indexOf('jobs:'));
+  assert.match(permissions, /\n\s+issues: read\n/);
+  assert.doesNotMatch(permissions, /write/);
+});
+
+test('grant gate: the non-draft check reads the PR, its artifacts and the grant, and never the workflow runs', () => {
+  const snapshot = admissible();
+  const gate = evaluateGrantGate({ ...snapshot, workflow_runs: undefined, semantic_review_live: undefined });
+  assert.equal(gate.eligible, true);
+  assert.equal(gate.merge_grant.comment_id, snapshot.control_comments[0].id);
+  // It cannot wait on its own run: a pending gate run at the head is not its input.
+  const pending = [{ id: 906, name: 'Agent Control Gate', head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
+  assert.equal(evaluateGrantGate({ ...snapshot, workflow_runs: pending }).eligible, true);
+  for (const [comments, reason] of [[[], GRANT_REASONS.ABSENT], [null, GRANT_REASONS.AUTHORITY_UNVERIFIED], [[grantFor(snapshot, { review_status: 'ACCEPT_FOR_ADMISSION' })], GRANT_REASONS.NOT_A_GRANT]]) {
+    const v = evaluateGrantGate({ ...snapshot, control_comments: comments });
+    assert.equal(v.reason, ADMISSION_REASONS.MERGE_GRANT_NOT_SATISFIED);
+    assert.equal(v.detail.reason, reason);
+  }
+  // Artifact binding still comes first: another packet's artifacts are not bound.
+  const stale = { packet_id: 'KF-OTHER-009', implementation_branch: 'impl/kf-other-009', pr_number: 41 };
+  assert.equal(evaluateGrantGate({ ...snapshot, active: { ...snapshot.active, ...stale }, ret: { ...snapshot.ret, ...stale } }).reason, ADMISSION_REASONS.ARTIFACTS_NOT_BOUND);
+  assert.equal(evaluateGrantGate({ ...snapshot, pr: { ...snapshot.pr, state: 'closed' } }).reason, ADMISSION_REASONS.PR_NOT_OPEN);
 });
 
 test('NC merge path shape: auto-merge re-collects and rechecks the complete snapshot before the merge call', () => {

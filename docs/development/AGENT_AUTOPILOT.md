@@ -95,6 +95,13 @@ The evaluator requires all of:
 - the latest runs of CI/CD Pipeline, Agent Control Gate, Branch divergence and
   DAST (HawkScan) are successful **at the exact PR head** — green runs at any
   other sha are reported as a stale head, not treated as satisfied;
+- the independent semantic review is satisfied, and the PR timeline owes no
+  re-run;
+- a distinct ChatGPT merge grant on issue #80 for this exact PR, packet,
+  branch, semantic head, final head and base is current, and it is the same
+  grant in both snapshots. The artifact `review_status` lets evaluation
+  continue; it is not the grant. ACCEPT_FOR_ADMISSION and a semantic PASS are
+  never the grant (F9; "The merge grant" in AGENT_CONTROL_PLANE.md);
 - the squash merge is issued with the current head SHA, so a changed head fails
   rather than merging a different tree.
 

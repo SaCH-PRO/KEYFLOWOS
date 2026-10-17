@@ -10,6 +10,7 @@
 
 import { REQUIRED_WORKFLOWS } from './events.mjs';
 import { evaluateSemanticReview } from './semantic-review.mjs';
+import { evaluateMergeGrant, sameGrant } from './merge-grant.mjs';
 
 export const ADMISSION_REASONS = Object.freeze({
   PR_NOT_OPEN: 'pr_not_open',
@@ -32,11 +33,50 @@ export const ADMISSION_REASONS = Object.freeze({
   TRANSITIONS_UNKNOWN: 'pr_transitions_unknown',
   CHECKS_PREDATE_TRANSITION: 'required_checks_predate_pr_transition',
   SEMANTIC_REVIEW_NOT_SATISFIED: 'semantic_review_not_satisfied',
+  MERGE_GRANT_NOT_SATISFIED: 'merge_grant_not_satisfied',
   CHANGED_BEFORE_MERGE: 'admission_changed_before_merge',
+  GRANT_CHANGED_BEFORE_MERGE: 'merge_grant_changed_before_merge',
   ELIGIBLE: 'all_admission_contracts_satisfied',
 });
 
+/**
+ * The artifact statuses that let evaluation continue. The artifact is written
+ * by the builder, so passing here is never merge authority: that is the
+ * separate #80 grant checked last (lib/merge-grant.mjs; F9).
+ */
 const READY_STATUSES = new Set(['READY_TO_MERGE', 'ACCEPT_FOR_ADMISSION']);
+
+/** The grant target of a PR and its own artifacts. */
+function grantTarget(snapshot) {
+  const { pr = {}, ret = {} } = snapshot;
+  return {
+    repository: snapshot.repository,
+    pr_number: pr.number,
+    packet_id: ret.packet_id,
+    implementation_branch: pr.head_ref,
+    source_head: ret.source_head,
+    pr_head: pr.head_sha,
+    base_sha: pr.base_sha,
+  };
+}
+
+/**
+ * The non-draft gate's check: the PR's own artifacts, then the shared grant
+ * predicate. Workflow runs are not read, so the gate never waits for itself.
+ * Every other contract stays with evaluateAdmission().
+ *
+ * @param {object} snapshot {pr, active, ret, repository, control_comments, authors?}
+ */
+export function evaluateGrantGate(snapshot) {
+  const { pr = {}, active = {}, ret = {} } = snapshot;
+  if (pr.state !== 'open') return fail(ADMISSION_REASONS.PR_NOT_OPEN, pr.state);
+  if (!String(pr.head_ref || '').startsWith('impl/')) return fail(ADMISSION_REASONS.NOT_IMPL_BRANCH, pr.head_ref);
+  const unbound = artifactBindingProblems({ pr, active, ret });
+  if (unbound.length) return fail(ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, unbound);
+  const grant = evaluateMergeGrant(snapshot.control_comments ?? null, grantTarget(snapshot), { authors: snapshot.authors });
+  if (!grant.granted) return fail(ADMISSION_REASONS.MERGE_GRANT_NOT_SATISFIED, { reason: grant.reason, detail: grant.detail });
+  return { eligible: true, reason: grant.reason, head_sha: pr.head_sha, base_sha: pr.base_sha, merge_grant: grant.grant };
+}
 
 /**
  * PR timeline events that re-run required workflows at an unchanged head, and
@@ -141,6 +181,9 @@ export function artifactBindingProblems({ pr = {}, active = {}, ret = {} } = {})
  *   pr_transitions: [{event, created_at}] from the PR timeline
  *   semantic_review_live: {copilot: [...], chatgpt: [...]} (lib/semantic-review.mjs)
  *   reviewed_head_lineage: {[sha]: {descends_from_source_head, ancestor_of_pr_head, non_control_files}}
+ *   repository: 'owner/name' the PR and its control issue belong to
+ *   control_comments: every raw comment of that repository's issue #80
+ *     (lib/merge-grant.mjs); absent means no grant was observed
  */
 export function evaluateAdmission(snapshot) {
   const { pr = {}, active = {}, ret = {}, ancestry = {}, contradictions = [] } = snapshot;
@@ -257,16 +300,28 @@ export function evaluateAdmission(snapshot) {
     return fail(ADMISSION_REASONS.WORKFLOWS_NOT_GREEN, notGreen.map((n) => ({ workflow: n, conclusion: latest.get(n).conclusion })));
   }
 
+  // --- merge authority (F9) ------------------------------------------------
+  // Last, so every contract above keeps its own reason. Everything above is
+  // necessary; none of it is the decision to merge. That is a distinct, valid,
+  // current ChatGPT grant on #80 for this exact PR, packet, branch, semantic
+  // head, final head and base.
+  const grant = evaluateMergeGrant(snapshot.control_comments ?? null, grantTarget(snapshot), { authors: snapshot.authors });
+  if (!grant.granted) {
+    return fail(ADMISSION_REASONS.MERGE_GRANT_NOT_SATISFIED, { reason: grant.reason, detail: grant.detail });
+  }
+
   return {
     eligible: true,
     reason: ADMISSION_REASONS.ELIGIBLE,
     head_sha: pr.head_sha,
     base_sha: pr.base_sha,
+    merge_grant: grant.grant,
     evidence: {
       review_status: ret.review_status,
       semantic_review: review.evidence,
       source_head: ret.source_head,
       workflows: REQUIRED_WORKFLOWS.map((n) => ({ workflow: n, run_id: latest.get(n).id ?? null, conclusion: 'success' })),
+      merge_grant: grant.grant,
     },
   };
 }
@@ -276,6 +331,8 @@ export function evaluateAdmission(snapshot) {
  * snapshots: one to decide, one taken immediately before the merge call. Both
  * must be eligible for the same head and base; anything that changed between
  * them (a new run, a transition, a moved head or base) blocks the merge.
+ * So does a grant that changed: the second snapshot must rest on the very
+ * same #80 grant, at the same binding, as the first (F9).
  */
 export function recheckBeforeMerge(first, second) {
   if (!first?.eligible) return first;
@@ -286,7 +343,11 @@ export function recheckBeforeMerge(first, second) {
       second: { head_sha: second.head_sha, base_sha: second.base_sha },
     });
   }
+  if (!sameGrant(first.merge_grant, second.merge_grant)) {
+    const id = (g) => (g ? { message_id: g.message_id, comment_id: g.comment_id } : null);
+    return fail(ADMISSION_REASONS.GRANT_CHANGED_BEFORE_MERGE, { first: id(first.merge_grant), second: id(second.merge_grant) });
+  }
   return second;
 }
 
-export default { evaluateAdmission, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS };
+export default { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS };
