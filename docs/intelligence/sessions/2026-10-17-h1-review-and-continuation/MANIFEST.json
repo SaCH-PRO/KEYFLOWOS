@@ -6,19 +6,51 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "ec2ab0844e03a8b2c787578c5fd28c0c28ab541035d584705d2638db5ac5e068"
+      "sha256": "9af6e9d708e6c18ee4feae3f51b3ee9f7bce05ebd6b05df00d0f3701cc691a31"
+    },
+    {
+      "path": "control/authority-replay-result.json",
+      "sha256": "6e92e02e5ad8bde3239cad570194537fbc5bee3d435c818a66019dee5405f66c"
     },
     {
       "path": "control/f9-directive.md",
       "sha256": "efe5e170fc927364a5d7fd6d5ea51af11cc7177ef11bc31c80778bbfa3ff7b25"
     },
     {
+      "path": "control/h1-receipt.md",
+      "sha256": "d4a9e660a2a9d0a0c5acb7ea7da34ee67f4d9b84da593813b3885cde76c5db8c"
+    },
+    {
       "path": "control/parser-checks.json",
       "sha256": "68323fa2c8b079b0b908e3d49849bbe55d3b34e1871dfe373bf9e5b6b337b367"
     },
     {
+      "path": "control/pr155-record-test-evidence.json",
+      "sha256": "d9db6bf5a312890436796092a1bb4969524c75afee542bf16ca0e6244ad876f0"
+    },
+    {
+      "path": "control/pr155-record-validation-node20.json",
+      "sha256": "50f21a678fd2ef0009553cabfd71ca29658ddfd220b019c975d12fa5b778c0d8"
+    },
+    {
       "path": "control/pr155-review.md",
       "sha256": "15f76cb1e9441282a9a4ca4d7d758f95b3814e58fcf011b45e0c5dce3a33fec3"
+    },
+    {
+      "path": "control/publication-receipts.json",
+      "sha256": "754049b4455d8eee326071731694b12d5ddacb7e6764d3ee9c3f2013c98f3d29"
+    },
+    {
+      "path": "control/replay-publication.mjs",
+      "sha256": "a22fb445c71fad4f9c1d68eb7c1e980cec400c97d39ed3732158a29189a4cbbb"
+    },
+    {
+      "path": "control/repository-truth.json",
+      "sha256": "2adef06c14a461c554a08542fc7a990ff552bf9aef4795ef2ea4209a7d723780"
+    },
+    {
+      "path": "control/source-and-snapshot-manifest.json",
+      "sha256": "f4b83c3f43812013c8a79655c67251bb79da855575e4b1ee7ee1d65b08fc303f"
     },
     {
       "path": "proof/ci-run-snapshot.json",
@@ -72,5 +104,11 @@
       "path": "proof/run-results.json",
       "sha256": "675bb0fbbccb317bb4cde37df8e5039392546bfc65267311aa3db4df40898229"
     }
-  ]
+  ],
+  "last_updated_at": "2026-10-17T20:08:59.450433+00:00",
+  "publication_record": "control/publication-receipts.json",
+  "accepted_plan": {
+    "path": "../../handoff/ACCEPTED-CAPABILITY-ROADMAP-2026-10-17.md",
+    "sha256": "2f3c9fd72ef9ccd23358b64e927790b722bb6606156f5b6ed1af45ea20697882"
+  }
 }

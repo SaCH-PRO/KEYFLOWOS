@@ -52,7 +52,11 @@ PR177's eight IRP workstreams remain draft/inactive tracking until its independe
 - P2: IRP06 one verified UI→context/memory→reasoning→capability→permission→effect→evidence→learning flow; IRP07 controlled lead→contact→booking→invoice→simulated payment→ledger→follow-up, including duplicates/failures/tenant proof.
 - P3: IRP08 operational/release evidence, authorized observations/rehearsals, restore/rollback and final qualification.
 
-Immediate control sequence: consume H1 return with independent CHANGES_REQUIRED evidence and retain its correction scope; formalize #155's already completed narrow review and settle obsolete re-anchor instructions; dispatch bounded F9 repair as the next worker task. H1 correction is queued explicitly while P0 executes. #155 admission remains separate and is not made blanket-dependent on F9. Worker integration, Flow safety and remaining product dependencies retain their owners.
+The immediate control sequence is published: [H1 receipt6240049267](https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240049267) consumes the return with seven CHANGES_REQUIRED groups; [review6240050804](https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804) records #155's narrow semantic PASS and settles its obsolete re-anchor contradiction; [directive6240051686](https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240051686) releases the bounded F9 repair as the next worker task. F9 acknowledgement was not present in the 1,436-comment publication snapshot. H1 correction remains queued while P0 executes. #155 admission remains separate and is not made blanket-dependent on F9. Worker integration, Flow safety and remaining product dependencies retain their owners.
+
+The fresh publication replay applies all 31 effects after the generation87 checkpoint and reaches generation118/118, CONSISTENT, with no active holds or merge authority. The application remains KF-EXEC-AUTH-FAIL-CLOSED-001 / FIXING_PROOF_FAILURES / YELLOW because both newly published authority messages deliberately use NO_STATE_CHANGE. PR177's stale historical ACTION-hold premise was corrected in author commit `dc6d2c57fab20dda789a97c26c9980f6b6947b8e`; its independent re-review and inactive status remain explicit.
+
+PR155's semantic review and contradiction ruling are now transcribed in control-only artifact `b30acfa7dcd4fdf96c67747ff8c4a66e4026937e`. Its reviewed semantic head remains fe791816. New artifact-head CI and the separate admission/integration decisions remain; draft and false merge-authority flags are preserved.
 
 Current dated refs and executed evidence are in [the session review](../sessions/2026-10-17-h1-review-and-continuation/README.md). Re-resolve live heads/authority before acting. Do not infer worker liveness from a GitHub-hosted runner missing Claude on PATH.
 
@@ -61,6 +65,8 @@ Current dated refs and executed evidence are in [the session review](../sessions
 At meaningful transitions report: work done; current snapshot; plan forward; phase/wave; actual next action. Distinguish implemented, tested, independently reviewed, admitted, merged, post-merge verified and checkpointed. A failed probe is evidence; do not change its requirement to create green. No untouched obligation disappears behind a narrow passing test. Prefer integrated product outcomes as foundations stabilize.
 
 Use one existing quiet continuation task; do not create duplicate notifications or revive obsolete phase-specific watchers. It should inspect current evidence, perform applicable already-authorized bounded actions, preserve exact-head independent review and checkpointing, and notify only for new material outcomes or a concrete human-only blocker. Never claim an ACK/RETURN or local worker liveness that was not observed.
+
+The existing task was updated and confirmed enabled on 17 October, retaining its two-hour cadence. It now performs applicable authorized continuation work and uses the reporting format above. A recurring task is not proof of continuous worker execution or a guarantee that separately gated decisions can be completed unattended.
 
 ## Full completion acceptance
 
