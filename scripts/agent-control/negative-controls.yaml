@@ -2604,6 +2604,34 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC hold" scripts/agent-control/tests/merge-grant.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-F9-INVALID-RESUME-RELEASES-HOLD
+    claim: >
+      Only a RESUME whose effect readEffect reads as HOLD_CLEAR releases a
+      target hold. Releasing on any envelope-valid RESUME is the defect in PR
+      181 review 5560243413 (P1).
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          else if (e.message_type === 'RESUME' && releasesHold(e)) hold = null;
+      replace: |-
+          else if (e.message_type === 'RESUME') hold = null;
+    proof_command: node --test --test-name-pattern="NC hold release" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-INVALID-RESUME-RELEASES-HOLD
+    claim: >
+      Through the real CLI, an invalid RESUME before an exact grant leaves the
+      hold active and makes no merge call; with the defect restored the
+      synthetic merge PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          else if (e.message_type === 'RESUME' && releasesHold(e)) hold = null;
+      replace: |-
+          else if (e.message_type === 'RESUME') hold = null;
+    proof_command: node --test --test-name-pattern="NC CLI hold release" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
   - id: NC-F9-PROVENANCE-NOT-CHECKED
     claim: >
       A grant is read only from the target repository's control issue; a

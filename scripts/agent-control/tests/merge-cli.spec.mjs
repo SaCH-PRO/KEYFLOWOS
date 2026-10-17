@@ -18,7 +18,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
-import { REPO, HEAD, BASE, SEMANTIC, target, grantComment, followUp, claudeNote } from './helpers/merge-grant-fixture.mjs';
+import { REPO, HEAD, BASE, SEMANTIC, target, grantComment, followUp, holdComment, claudeNote } from './helpers/merge-grant-fixture.mjs';
 
 const ROOT = path.resolve(process.env.KF_CLI_ROOT || '.');
 const CLI = path.join(ROOT, 'scripts/agent-control/auto-merge-admitted.mjs');
@@ -188,6 +188,57 @@ test('NC CLI: the #80 read follows pagination, so a grant on a later page is fou
   assert.equal(revoked.code, 3);
   assert.equal(revoked.out.detail.reason, 'merge_grant_superseded');
   assert.equal(puts(revoked).length, 0);
+  // Seen only by the second snapshot, on its second page.
+  const revokedOnRecheck = run(scenario([[...filler, g], [...filler, g, followUp()]]), ['--merge']);
+  assert.equal(revokedOnRecheck.code, 3);
+  assert.equal(revokedOnRecheck.out.detail.reason, 'merge_grant_superseded');
+  assert.equal(puts(revokedOnRecheck).length, 0);
+  assert.equal(commentReads(revokedOnRecheck).length, 4, 'two pages in each snapshot');
+});
+
+// PR 181 review 5560243413 P1, through the real CLI: an envelope-valid RESUME
+// whose effect is not a valid HOLD_CLEAR must leave the target held.
+const invalidReleases = [
+  ['missing effect', (b) => b.replace('control_effect: HOLD_CLEAR\n', '')],
+  ['wrong effect', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: NO_STATE_CHANGE')],
+  ['unknown effect', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: RELEASE_ALL')],
+  ['production touched', (b) => b.replace('production_touched: false', 'production_touched: true')],
+  ['invalid health', (b) => b.replace('health: YELLOW', 'health: AMBER')],
+];
+
+for (const [name, change] of invalidReleases) {
+  test(`NC CLI hold release: ${name} cannot clear an active hold before an exact grant`, () => {
+    const resume = holdComment('RESUME', 'KF-X-001');
+    resume.body = change(resume.body);
+    const comments = [holdComment('HOLD', 'KF-X-001'), resume, grantComment()];
+    const r = run(scenario([comments, comments]), ['--merge']);
+    assert.ok(r.trace, r.stderr);
+    assert.equal(puts(r).length, 0, 'an invalid release must leave the target hold active');
+    assert.equal(r.code, 3);
+    assert.equal(r.out.detail.reason, 'merge_grant_target_held');
+    const gate = run(scenario([comments]), ['--grant-only']);
+    assert.equal(gate.code, 3);
+    assert.equal(gate.out.detail.reason, 'merge_grant_target_held');
+    assert.equal(puts(gate).length, 0);
+  });
+}
+
+test('CLI hold release referent: a valid HOLD_CLEAR then an exact grant gives both snapshots and one SHA-pinned synthetic merge', () => {
+  const comments = [holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()];
+  const r = run(scenario([comments, comments]), ['--merge']);
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.equal(puts(r).length, 1);
+  assert.equal(puts(r)[0].body.sha, HEAD);
+  assert.equal(commentReads(r).length, 2);
+});
+
+test('CLI hold release isolation: an invalid release for another packet does not block this exact grant', () => {
+  const resume = holdComment('RESUME', 'KF-OTHER-001');
+  resume.body = resume.body.replace('control_effect: HOLD_CLEAR', 'control_effect: NO_STATE_CHANGE');
+  const comments = [holdComment('HOLD', 'KF-OTHER-001'), resume, grantComment()];
+  const r = run(scenario([comments, comments]), ['--merge']);
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.equal(puts(r).length, 1);
 });
 
 test('target() in the fixture is the PR this scenario serves', () => {

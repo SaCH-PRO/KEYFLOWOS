@@ -47,8 +47,10 @@
  *   - a malformed authority candidate after the grant that is, or may be,
  *     about the target (any of the three fields unreadable) makes the grant
  *     ambiguous. A malformed candidate before the grant is superseded by it;
- *   - a valid HOLD for the target packet with no later valid RESUME for it
- *     denies, before or after the grant. Holds on other packets do not apply,
+ *   - a valid HOLD for the target packet with no later RESUME for it whose
+ *     effect readEffect() reads as HOLD_CLEAR denies, before or after the
+ *     grant. A RESUME with a missing, unknown or other effect, or one the
+ *     effect reader rejects, releases nothing. Holds on other packets do not apply,
  *     so an unrelated active packet neither blocks this target nor moves.
  *   - a global READY_TO_MERGE projection is not required, and not read.
  *
@@ -146,6 +148,12 @@ function onTargetIssue(entry, repository) {
 
 const field = (entry, key) => envelopeField(entry.envelope, key);
 
+/** Whether a RESUME carries the one effect that clears a hold, as readEffect() reads it. */
+function releasesHold(entry) {
+  const effect = readEffect(entry);
+  return effect.ok && effect.effect === 'HOLD_CLEAR';
+}
+
 /** Why a message that is about the target is not a grant for it, or null. */
 function grantProblems(entry, t) {
   const problems = [];
@@ -230,7 +238,10 @@ export function evaluateMergeGrant(comments, target, options = {}) {
   for (const e of valid) {
     if (!valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
     if (e.message_type === 'HOLD') hold = e;
-    else if (e.message_type === 'RESUME') hold = null;
+    // Only the effect that releases a hold releases it. An envelope-valid
+    // RESUME whose effect readEffect() rejects, or reads as anything but
+    // HOLD_CLEAR, leaves the hold in place (PR 181 review 5560243413, P1).
+    else if (e.message_type === 'RESUME' && releasesHold(e)) hold = null;
   }
   if (hold) return deny(GRANT_REASONS.HOLD_ACTIVE, { packet_id: t.packet_id, message_id: hold.message_id, comment_id: hold.comment_id });
 

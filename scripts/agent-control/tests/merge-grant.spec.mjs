@@ -8,6 +8,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateMergeGrant, sameGrant, GRANT_REASONS } from '../lib/merge-grant.mjs';
+import { collectAuthority } from '../lib/control-envelope.mjs';
+import { readEffect } from '../lib/authority-effects.mjs';
 import {
   REPO, HEAD, BASE, SEMANTIC, target, body, grantFields, comment, grantComment, followUp, holdComment, claudeNote,
 } from './helpers/merge-grant-fixture.mjs';
@@ -235,6 +237,38 @@ test('NC hold: a valid HOLD on the target packet with no later RESUME denies, be
   assert.equal(verdict([holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()]).granted, true);
   // A grant then a HOLD then a RESUME still needs a new grant: the RESUME is newer.
   assert.equal(reasonOf([grantComment(), holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001')]), GRANT_REASONS.SUPERSEDED);
+});
+
+// PR 181 review 5560243413 P1: an envelope-valid RESUME is not a release unless
+// its effect is a valid HOLD_CLEAR, as readEffect() reads it.
+const invalidReleases = [
+  ['missing effect', (b) => b.replace('control_effect: HOLD_CLEAR\n', ''), 'CONTROL_EFFECT_MISSING'],
+  ['wrong effect', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: NO_STATE_CHANGE'), 'CONTROL_EFFECT_TYPE_MISMATCH'],
+  ['unknown effect', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: RELEASE_ALL'), 'CONTROL_EFFECT_UNKNOWN'],
+  ['production touched', (b) => b.replace('production_touched: false', 'production_touched: true'), 'CONTROL_EFFECT_PRODUCTION_TOUCHED'],
+  ['invalid health', (b) => b.replace('health: YELLOW', 'health: AMBER'), 'CONTROL_EFFECT_HEALTH_INVALID'],
+];
+
+test('NC hold release: a RESUME whose effect is not a valid HOLD_CLEAR leaves the target hold active', () => {
+  for (const [name, change, code] of invalidReleases) {
+    const hold = holdComment('HOLD', 'KF-X-001');
+    const resume = holdComment('RESUME', 'KF-X-001');
+    resume.body = change(resume.body);
+    const comments = [hold, resume, grantComment()];
+    // The envelope is valid, so collectAuthority keeps it; only the effect is wrong.
+    const entry = collectAuthority(comments).candidates.find((c) => c.comment_id === resume.id);
+    assert.deepEqual(entry.problems, [], name);
+    assert.equal(readEffect(entry).code, code, name);
+    const v = verdict(comments);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
+    assert.equal(v.detail.comment_id, hold.id, name);
+  }
+  // Referent: the same sequence with a valid HOLD_CLEAR grants.
+  assert.equal(verdict([holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()]).granted, true);
+  // An invalid release for another packet neither blocks nor helps this one.
+  const other = holdComment('RESUME', 'KF-OTHER-001');
+  other.body = other.body.replace('control_effect: HOLD_CLEAR', 'control_effect: NO_STATE_CHANGE');
+  assert.equal(verdict([holdComment('HOLD', 'KF-OTHER-001'), other, grantComment()]).granted, true);
 });
 
 test('the PR 159 shape: a bounded meta grant with NO_STATE_CHANGE grants for its own PR only', () => {

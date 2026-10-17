@@ -570,7 +570,7 @@ auto-merge-admitted.mjs
         packet or branch must be a ChatGPT REVIEW with merge_authority true,
         review_status READY_TO_MERGE and NO_STATE_CHANGE or PACKET_ADMISSION,
         bound exactly to pr_number, packet_id, implementation_branch, source_head,
-        pr_head and source_main; no valid HOLD on the packet without a later RESUME;
+        pr_head and source_main; no valid HOLD on the packet without a later RESUME that readEffect() reads as HOLD_CLEAR;
         no malformed candidate after it that may be about the target (F9)
   → with --merge, the same complete collection again, and recheckBeforeMerge():
     same head, same base, same grant; then one merge call pinned to the head

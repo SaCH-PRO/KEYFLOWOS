@@ -336,8 +336,11 @@ target's.
   the target denies (`merge_grant_ambiguous_authority`). That includes one
   whose packet, PR or branch field is unreadable. A malformed candidate
   before the grant is superseded by it.
-- A valid HOLD on the target packet with no later valid RESUME for that
-  packet denies, whichever side of the grant it falls.
+- A valid HOLD on the target packet denies, whichever side of the grant it
+  falls, until a later RESUME for that packet whose effect `readEffect()`
+  reads as `HOLD_CLEAR`. A RESUME with a missing, unknown or other effect,
+  `production_touched` other than false, or a health outside the vocabulary
+  releases nothing.
 - Authority about other packets neither blocks nor moves the target.
 
 The binding is acyclic. The grant names the final artifact head, so it is
