@@ -305,6 +305,9 @@
     "apps/web/src/app/admin/events",
     "apps/web/src/app/admin/feature-flags",
     "apps/web/src/app/admin/login",
+    "apps/web/src/app/admin/mission-control",
+    "apps/web/src/app/admin/mission-control/handoffs",
+    "apps/web/src/app/admin/mission-control/handoffs/_components",
     "apps/web/src/app/admin/system",
     "apps/web/src/app/admin/users",
     "apps/web/src/app/api",
@@ -927,9 +930,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 105,
+      "lines": 147,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 6259
+      "size_bytes": 9347
     },
     {
       "extension": ".yaml",
@@ -939,9 +942,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 64,
+      "lines": 716,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 2301
+      "size_bytes": 39439
     },
     {
       "extension": ".yaml",
@@ -3281,9 +3284,9 @@
     },
     {
       "extension": ".yml",
-      "lines": 322,
+      "lines": 349,
       "path": ".github/workflows/agent-control-autopilot.yml",
-      "size_bytes": 12492
+      "size_bytes": 13906
     },
     {
       "extension": ".yml",
@@ -6210,11 +6213,13 @@
         "./admin-event.controller",
         "./admin-user.controller",
         "./gdpr-purge.service",
+        "./handoff-monitor.controller",
+        "./handoff-monitor.service",
         "@nestjs/common"
       ],
-      "lines": 18,
+      "lines": 24,
       "path": "apps/server/src/modules/admin-platform/admin-platform.module.ts",
-      "size_bytes": 604
+      "size_bytes": 881
     },
     {
       "exports": [
@@ -6243,6 +6248,63 @@
       "lines": 171,
       "path": "apps/server/src/modules/admin-platform/gdpr-purge.service.ts",
       "size_bytes": 7041
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "../../core/auth/admin-token.util",
+        "../../core/auth/auth.middleware",
+        "../../core/auth/supabase-auth.service",
+        "../../core/prisma/prisma.service",
+        "../../core/redis/redis.constants",
+        "./handoff-monitor.controller",
+        "./handoff-monitor.service",
+        "@nestjs/common",
+        "@nestjs/testing",
+        "node:path",
+        "supertest",
+        "vitest"
+      ],
+      "lines": 222,
+      "path": "apps/server/src/modules/admin-platform/handoff-monitor.controller.spec.ts",
+      "size_bytes": 10629
+    },
+    {
+      "exports": [
+        "HandoffMonitorController"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "../../core/auth/admin.guard",
+        "../../core/auth/auth.guard",
+        "./handoff-monitor.service",
+        "@nestjs/common"
+      ],
+      "lines": 51,
+      "path": "apps/server/src/modules/admin-platform/handoff-monitor.controller.ts",
+      "size_bytes": 1641
+    },
+    {
+      "exports": [
+        "BROWSER_REFRESH_HINT_MS",
+        "EsmImporter",
+        "HandoffMonitorMode",
+        "HandoffMonitorService",
+        "HandoffSnapshotQuery",
+        "HandoffSnapshotResponse",
+        "resolveSharedModuleDir"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "@nestjs/common",
+        "node:fs",
+        "node:path",
+        "node:url"
+      ],
+      "lines": 175,
+      "path": "apps/server/src/modules/admin-platform/handoff-monitor.service.ts",
+      "size_bytes": 7266
     },
     {
       "exports": [
@@ -32266,6 +32328,16 @@
       "size_bytes": 2192
     },
     {
+      "exports": [],
+      "extension": ".cjs",
+      "imports": [
+        "reflect-metadata"
+      ],
+      "lines": 142,
+      "path": "apps/server/test/handoff-monitor-loopback.cjs",
+      "size_bytes": 7043
+    },
+    {
       "exports": [
         "deferred",
         "sleep"
@@ -32765,6 +32837,18 @@
       "lines": 90,
       "path": "apps/web/README.md",
       "size_bytes": 7803
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "@playwright/test",
+        "node:fs",
+        "node:path"
+      ],
+      "lines": 167,
+      "path": "apps/web/e2e/admin-handoffs.spec.ts",
+      "size_bytes": 9027
     },
     {
       "exports": [],
@@ -33433,9 +33517,9 @@
         "react",
         "sonner"
       ],
-      "lines": 138,
+      "lines": 140,
       "path": "apps/web/src/app/admin/layout.tsx",
-      "size_bytes": 5742
+      "size_bytes": 5854
     },
     {
       "exports": [
@@ -33476,6 +33560,67 @@
       "lines": 135,
       "path": "apps/web/src/app/admin/login/page.tsx",
       "size_bytes": 5452
+    },
+    {
+      "exports": [
+        "Badge",
+        "SourceBar",
+        "SourceLink",
+        "TaskDetail",
+        "TaskList",
+        "UnmatchedList",
+        "reviewTone",
+        "stageTone",
+        "time"
+      ],
+      "extension": ".tsx",
+      "imports": [
+        "@/lib/api/handoff-monitor",
+        "@/lib/utils",
+        "lucide-react"
+      ],
+      "lines": 342,
+      "path": "apps/web/src/app/admin/mission-control/handoffs/_components/handoff-panels.tsx",
+      "size_bytes": 17251
+    },
+    {
+      "exports": [
+        "RouteError"
+      ],
+      "extension": ".tsx",
+      "imports": [
+        "@/components/ui/route-error-fallback"
+      ],
+      "lines": 6,
+      "path": "apps/web/src/app/admin/mission-control/handoffs/error.tsx",
+      "size_bytes": 267
+    },
+    {
+      "exports": [
+        "Loading"
+      ],
+      "extension": ".tsx",
+      "imports": [
+        "@/components/ui/page-skeleton"
+      ],
+      "lines": 5,
+      "path": "apps/web/src/app/admin/mission-control/handoffs/loading.tsx",
+      "size_bytes": 128
+    },
+    {
+      "exports": [
+        "AdminHandoffs"
+      ],
+      "extension": ".tsx",
+      "imports": [
+        "./_components/handoff-panels",
+        "@/lib/api/handoff-monitor",
+        "lucide-react",
+        "react"
+      ],
+      "lines": 148,
+      "path": "apps/web/src/app/admin/mission-control/handoffs/page.tsx",
+      "size_bytes": 6962
     },
     {
       "exports": [
@@ -55762,6 +55907,30 @@
     },
     {
       "exports": [
+        "HANDOFF_STAGES",
+        "HandoffChainMessage",
+        "HandoffEvidence",
+        "HandoffFreshness",
+        "HandoffMessageSummary",
+        "HandoffReference",
+        "HandoffSnapshot",
+        "HandoffStage",
+        "HandoffStageName",
+        "HandoffTaskSummary",
+        "HandoffUnmatched",
+        "HandoffView",
+        "safeHandoffUrl"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "@/lib/api"
+      ],
+      "lines": 199,
+      "path": "apps/web/src/lib/api/handoff-monitor.ts",
+      "size_bytes": 6313
+    },
+    {
+      "exports": [
         "IntegrationConnection",
         "IntegrationDashboard",
         "IntegrationProvider",
@@ -57821,9 +57990,9 @@
     },
     {
       "extension": ".md",
-      "lines": 132,
+      "lines": 144,
       "path": "architecture/dependency-map.md",
-      "size_bytes": 8755
+      "size_bytes": 9634
     },
     {
       "extension": ".yaml",
@@ -57833,9 +58002,9 @@
     },
     {
       "extension": ".md",
-      "lines": 671,
+      "lines": 698,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 31631
+      "size_bytes": 33989
     },
     {
       "extension": ".json",
@@ -59119,9 +59288,9 @@
     },
     {
       "extension": ".md",
-      "lines": 200,
+      "lines": 226,
       "path": "docs/development/AGENT_AUTOPILOT_OPERATIONS.md",
-      "size_bytes": 15019
+      "size_bytes": 19259
     },
     {
       "extension": ".yaml",
@@ -59146,6 +59315,12 @@
       "lines": 53,
       "path": "docs/development/EXECUTION_PACKET_STATUS_TEMPLATE.yaml",
       "size_bytes": 1184
+    },
+    {
+      "extension": ".md",
+      "lines": 201,
+      "path": "docs/development/HANDOFF_MONITOR.md",
+      "size_bytes": 11676
     },
     {
       "extension": ".md",
@@ -61793,15 +61968,27 @@
     },
     {
       "extension": ".ps1",
-      "lines": 689,
+      "lines": 731,
       "path": "scripts/agent-control/claude-worker.ps1",
-      "size_bytes": 29852
+      "size_bytes": 32453
     },
     {
       "extension": ".ps1",
       "lines": 90,
       "path": "scripts/agent-control/evaluate-run.ps1",
       "size_bytes": 3162
+    },
+    {
+      "extension": ".json",
+      "lines": 55,
+      "path": "scripts/agent-control/fixtures/handoff-hostile.json",
+      "size_bytes": 4548
+    },
+    {
+      "extension": ".json",
+      "lines": 90,
+      "path": "scripts/agent-control/fixtures/handoff-irp177.json",
+      "size_bytes": 23533
     },
     {
       "extension": ".json",
@@ -61832,6 +62019,18 @@
       "lines": 23,
       "path": "scripts/agent-control/fixtures/stub-gh.ps1",
       "size_bytes": 1039
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/handoff-collector.mjs",
+        "./lib/handoff-fixture-transport.mjs",
+        "./lib/handoff-projector.mjs"
+      ],
+      "lines": 49,
+      "path": "scripts/agent-control/handoff-snapshot.mjs",
+      "size_bytes": 2197
     },
     {
       "extension": ".ps1",
@@ -61984,6 +62183,81 @@
       "lines": 315,
       "path": "scripts/agent-control/lib/events.mjs",
       "size_bytes": 13471
+    },
+    {
+      "exports": [
+        "CollectionError",
+        "DEFAULT_CONFIG",
+        "GITHUB_API_ORIGIN",
+        "PER_PAGE",
+        "allowedRequest",
+        "createGithubTransport",
+        "createHandoffMonitor"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./handoff-projector.mjs"
+      ],
+      "lines": 435,
+      "path": "scripts/agent-control/lib/handoff-collector.mjs",
+      "size_bytes": 18693
+    },
+    {
+      "exports": [
+        "createFixtureTransport",
+        "loadFixture"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./handoff-collector.mjs",
+        "node:crypto",
+        "node:fs"
+      ],
+      "lines": 75,
+      "path": "scripts/agent-control/lib/handoff-fixture-transport.mjs",
+      "size_bytes": 3271
+    },
+    {
+      "exports": [
+        "CONTROL_ISSUE",
+        "REPOSITORY",
+        "REQUEST_TYPES",
+        "SENDER_ALIASES",
+        "SNAPSHOT_SCHEMA",
+        "STAGES",
+        "WORKER_AVAILABILITY",
+        "controlCommentUrl",
+        "projectHandoffs",
+        "readMessage",
+        "redactCredentials",
+        "safeSourceUrl",
+        "viewOf"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./control-envelope.mjs"
+      ],
+      "lines": 836,
+      "path": "scripts/agent-control/lib/handoff-projector.mjs",
+      "size_bytes": 36409
+    },
+    {
+      "exports": [
+        "MergeRecordConflict",
+        "RECORD_AUTHORS",
+        "RECORD_OUTCOMES",
+        "buildMergeRecord",
+        "mergeMarker",
+        "recordProblems"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./control-envelope.mjs",
+        "./events.mjs"
+      ],
+      "lines": 195,
+      "path": "scripts/agent-control/lib/merge-record.mjs",
+      "size_bytes": 8560
     },
     {
       "exports": [
@@ -62187,9 +62461,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 2214,
+      "lines": 2573,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 106661
+      "size_bytes": 124197
     },
     {
       "exports": [],
@@ -62234,6 +62508,17 @@
       "lines": 145,
       "path": "scripts/agent-control/proof-mutation.mjs",
       "size_bytes": 5854
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/events.mjs",
+        "./lib/merge-record.mjs"
+      ],
+      "lines": 90,
+      "path": "scripts/agent-control/record-auto-merge.mjs",
+      "size_bytes": 3624
     },
     {
       "exports": [
@@ -62319,6 +62604,23 @@
       "exports": [],
       "extension": ".mjs",
       "imports": [
+        "../lib/events.mjs",
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 325,
+      "path": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "size_bytes": 16302
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
         "../lib/control-envelope.mjs",
         "../lib/reconcile.mjs",
         "../lib/state.mjs",
@@ -62375,6 +62677,22 @@
       "size_bytes": 31582
     },
     {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/handoff-collector.mjs",
+        "../lib/handoff-fixture-transport.mjs",
+        "../lib/handoff-projector.mjs",
+        "node:assert/strict",
+        "node:path",
+        "node:test",
+        "node:url"
+      ],
+      "lines": 687,
+      "path": "scripts/agent-control/tests/handoff-monitor.spec.mjs",
+      "size_bytes": 33614
+    },
+    {
       "exports": [
         "branchPr"
       ],
@@ -62397,6 +62715,20 @@
       "lines": 39,
       "path": "scripts/agent-control/tests/helpers/powershell.mjs",
       "size_bytes": 1465
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/merge-record.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:http",
+        "node:test"
+      ],
+      "lines": 464,
+      "path": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "size_bytes": 21507
     },
     {
       "exports": [],
@@ -62554,9 +62886,9 @@
         "node:os",
         "node:path"
       ],
-      "lines": 164,
+      "lines": 166,
       "path": "scripts/agent-control/tests/windows/harness.mjs",
-      "size_bytes": 6380
+      "size_bytes": 6526
     },
     {
       "exports": [],
@@ -62588,6 +62920,21 @@
       "lines": 107,
       "path": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
       "size_bytes": 3590
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../helpers/powershell.mjs",
+        "./harness.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 128,
+      "path": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "size_bytes": 5623
     },
     {
       "exports": [],
@@ -63180,6 +63527,12 @@
     },
     {
       "extension": ".json",
+      "lines": 51,
+      "path": "scripts/proof-admission/manifests/handoff-monitor-negative-controls.json",
+      "size_bytes": 2852
+    },
+    {
+      "extension": ".json",
       "lines": 26,
       "path": "scripts/proof-admission/manifests/k12-self.json",
       "size_bytes": 1539
@@ -63465,15 +63818,16 @@
   "meta": {
     "extensions": {
       "": 14,
+      ".cjs": 1,
       ".css": 2,
       ".csv": 23,
       ".example": 1,
       ".html": 8,
       ".ico": 1,
       ".js": 11,
-      ".json": 41,
-      ".md": 564,
-      ".mjs": 76,
+      ".json": 44,
+      ".md": 565,
+      ".mjs": 86,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
@@ -63487,10 +63841,10 @@
       ".svg": 6,
       ".template": 1,
       ".toml": 2,
-      ".ts": 2143,
+      ".ts": 2148,
       ".tsbuildinfo": 1,
       ".tsv": 1,
-      ".tsx": 1233,
+      ".tsx": 1237,
       ".txt": 7,
       ".xlsx": 1,
       ".xsd": 39,
@@ -63499,8 +63853,8 @@
     },
     "root": ".",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3463,
-    "total_files": 4457,
-    "total_lines": 1149678
+    "source_files": 3483,
+    "total_files": 4481,
+    "total_lines": 1156013
   }
 }
