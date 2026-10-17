@@ -1,0 +1,26 @@
+[
+  {
+    "output": "original-43-tests.tap",
+    "exit_code": 0,
+    "command": [
+      "/tmp/node-v20.18.1-linux-x64/bin/node",
+      "scripts/agent-control/tests/handoff-monitor.spec.mjs"
+    ]
+  },
+  {
+    "output": "review-8-expected-failures.tap",
+    "exit_code": 1,
+    "command": [
+      "/tmp/node-v20.18.1-linux-x64/bin/node",
+      "/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs"
+    ]
+  },
+  {
+    "output": "pagination-age-results.jsonl",
+    "exit_code": 0,
+    "command": [
+      "/tmp/node-v20.18.1-linux-x64/bin/node",
+      "/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/reproduce-pagination-age.mjs"
+    ]
+  }
+]

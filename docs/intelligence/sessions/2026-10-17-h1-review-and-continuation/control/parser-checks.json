@@ -1,0 +1,136 @@
+{
+  "basis": "Local draft-envelope checks only; not a live authority replay and nothing posted",
+  "baselineValidation": {
+    "ok": true,
+    "problems": []
+  },
+  "rows": [
+    {
+      "file": "h1-receipt.md",
+      "syntheticMetadata": true,
+      "envelopeProblems": [],
+      "authorityVerified": true,
+      "authorityProblems": null,
+      "effect": null,
+      "applicationStateUnchanged": null,
+      "appliedStateValid": null,
+      "selector": {
+        "selected": null,
+        "reason": "no_actionable_message",
+        "rejected": []
+      },
+      "semanticReview": null
+    },
+    {
+      "file": "pr155-review.md",
+      "syntheticMetadata": true,
+      "envelopeProblems": [],
+      "authorityVerified": true,
+      "authorityProblems": [],
+      "effect": {
+        "ok": true,
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE",
+        "packet_id": "KF-EXEC-AUTH-FAIL-CLOSED-001",
+        "implementation_branch": "impl/kf-exec-auth-fail-closed-001",
+        "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+        "pr_number": "155",
+        "health": "YELLOW",
+        "merge_authority": "false"
+      },
+      "applicationStateUnchanged": true,
+      "appliedStateValid": {
+        "ok": true,
+        "problems": []
+      },
+      "selector": {
+        "selected": {
+          "message_id": "CG-REVIEW-KF155-006",
+          "message_type": "REVIEW",
+          "packet_id": "KF-EXEC-AUTH-FAIL-CLOSED-001",
+          "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+          "implementation_branch": "impl/kf-exec-auth-fail-closed-001",
+          "created_at": "2026-10-17T20:00:01Z",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-9000000001",
+          "author": "SaCH-PRO"
+        },
+        "reason": "selected",
+        "rejected": []
+      },
+      "semanticReview": {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-9000000001",
+        "valid": true,
+        "problems": [],
+        "reviewed_head": "fe79181638e373584c3ca3184a39343a132040cd",
+        "outcome": "PASS",
+        "unresolved_substantive_findings": 0
+      }
+    },
+    {
+      "file": "f9-directive.md",
+      "syntheticMetadata": true,
+      "envelopeProblems": [],
+      "authorityVerified": true,
+      "authorityProblems": [],
+      "effect": {
+        "ok": true,
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE",
+        "packet_id": "KF-META-MERGE-AUTHORITY-001",
+        "implementation_branch": "impl/kf-meta-merge-authority-001",
+        "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+        "pr_number": null,
+        "health": "YELLOW",
+        "merge_authority": "false"
+      },
+      "applicationStateUnchanged": true,
+      "appliedStateValid": {
+        "ok": true,
+        "problems": []
+      },
+      "selector": {
+        "selected": {
+          "message_id": "CG-DIR-F9-001",
+          "message_type": "DIRECTIVE",
+          "packet_id": "KF-META-MERGE-AUTHORITY-001",
+          "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+          "implementation_branch": "impl/kf-meta-merge-authority-001",
+          "created_at": "2026-10-17T20:00:02Z",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-9000000002",
+          "author": "SaCH-PRO"
+        },
+        "reason": "selected",
+        "rejected": []
+      },
+      "semanticReview": null
+    }
+  ],
+  "recipientChatgptStillSelects": {
+    "selected": {
+      "message_id": "CG-REVIEW-KF155-006",
+      "message_type": "REVIEW",
+      "packet_id": "KF-EXEC-AUTH-FAIL-CLOSED-001",
+      "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "implementation_branch": "impl/kf-exec-auth-fail-closed-001",
+      "created_at": "2026-10-17T20:00:01Z",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-9000000001",
+      "author": "SaCH-PRO"
+    },
+    "reason": "selected",
+    "rejected": []
+  },
+  "sequenceSelection": {
+    "selected": {
+      "message_id": "CG-DIR-F9-001",
+      "message_type": "DIRECTIVE",
+      "packet_id": "KF-META-MERGE-AUTHORITY-001",
+      "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "implementation_branch": "impl/kf-meta-merge-authority-001",
+      "created_at": "2026-10-17T20:00:02Z",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-9000000002",
+      "author": "SaCH-PRO"
+    },
+    "reason": "selected",
+    "rejected": []
+  }
+}

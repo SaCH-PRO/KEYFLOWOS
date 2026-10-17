@@ -1,0 +1,4 @@
+{"case":"ETAG_NEW_PAGE_LINK_IGNORED","before_full":101,"after_full":100,"after_retry":100,"coverage":{"status":"PARTIAL","mode":"FULL","pages":1,"pages_not_modified":1,"comments_observed":100,"comments_expected":101,"deletions_detected":0,"reason":"GitHub reports 101 comments; 100 were read","pulls_requested":0,"pull_errors":[]},"fetched_page2":false}
+{"case":"PROGRESS_AGE_FROZEN","actual_age_seconds":3660,"displayed_age_seconds":60,"freshness":"FRESH","last_success_at":"2026-10-17T06:11:00.000Z","observed_at":"2026-10-17T05:11:00.000Z"}
+{"case":"PRODUCED_PR_NEVER_COLLECTED","task_pr":null,"return_pr":500,"pulls_requested":0,"current_revision":"UNKNOWN"}
+Additional collector cases reproduced against unchanged PR #179 modules.

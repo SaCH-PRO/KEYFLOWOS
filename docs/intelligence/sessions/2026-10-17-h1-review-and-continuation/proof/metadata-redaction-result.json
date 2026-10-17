@@ -1,0 +1,12 @@
+{
+  "outcome": "DEFECT_REPRODUCED",
+  "fakeTokenPattern": "ghp_ followed by 36 literal X characters (noncredential)",
+  "field": "RETURN reviewer_model",
+  "bodyRedacted": true,
+  "redactionsCount": 1,
+  "messageStillUsable": true,
+  "projectedClaimedModelContainsUnredactedToken": true,
+  "apiViewContainsUnredactedToken": true,
+  "renderedTaskDetailContainsUnredactedToken": true,
+  "note": "Exact-head projector and actual TaskDetail/panels/client source, transpiled and React server rendered. Only icons and styling helper stubbed. Synthetic replacement of a fixture field; no real secret, API or production access."
+}
