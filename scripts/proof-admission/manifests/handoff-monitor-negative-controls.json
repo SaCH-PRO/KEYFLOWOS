@@ -1,0 +1,51 @@
+{
+  "manifestVersion": 1,
+  "packageId": "KF-META-HANDOFF-MONITOR-001",
+  "description": "Server-side negative controls for the handoff snapshot endpoint. Each restores one access defect and names the endpoint tests that must then fail. Run with scripts/proof-admission/negative-controls.mjs from a worktree with installed dependencies and built workspace packages; no database is used.",
+  "proofs": {
+    "endpoint": {
+      "cwd": "apps/server",
+      "runner": "apps/server/node_modules/vitest/vitest.mjs",
+      "args": ["run", "src/modules/admin-platform/handoff-monitor.controller.spec.ts"]
+    }
+  },
+  "controls": [
+    {
+      "id": "NC-HANDOFF-ADMIN-GUARD-REMOVED",
+      "obligation": "SUPER_ADMIN only",
+      "claim": "Authenticated users who are not SUPER_ADMIN (an admin token with role USER or ADMIN, a Supabase tenant owner) are refused before the service or its cache is reached.",
+      "mutation": {
+        "file": "apps/server/src/modules/admin-platform/handoff-monitor.controller.ts",
+        "find": "@UseGuards(AuthGuard, AdminGuard)",
+        "replace": "@UseGuards(AuthGuard)"
+      },
+      "mustFail": {
+        "endpoint": [
+          "GET /api/admin/mission-control/handoffs refuses an admin token with role USER before the service is reached",
+          "GET /api/admin/mission-control/handoffs refuses an admin token with role ADMIN before the service is reached",
+          "GET /api/admin/mission-control/handoffs refuses a Supabase tenant owner (platform role USER) before the service is reached",
+          "GET /api/admin/mission-control/handoffs still refuses an admin token with role USER after an admin has warmed the cache",
+          "GET /api/admin/mission-control/handoffs still refuses a Supabase tenant owner (platform role USER) after an admin has warmed the cache"
+        ]
+      }
+    },
+    {
+      "id": "NC-HANDOFF-GUARDS-REMOVED",
+      "obligation": "unauthenticated and cached reads",
+      "claim": "A request without a valid credential is refused before data retrieval, including after a SUPER_ADMIN request has warmed the cache.",
+      "mutation": {
+        "file": "apps/server/src/modules/admin-platform/handoff-monitor.controller.ts",
+        "find": "@UseGuards(AuthGuard, AdminGuard)",
+        "replace": "// guards removed"
+      },
+      "mustFail": {
+        "endpoint": [
+          "GET /api/admin/mission-control/handoffs refuses no credential before the service is reached",
+          "GET /api/admin/mission-control/handoffs refuses an unverifiable bearer token before the service is reached",
+          "GET /api/admin/mission-control/handoffs still refuses no credential after an admin has warmed the cache",
+          "GET /api/admin/mission-control/handoffs still refuses an expired SUPER_ADMIN admin token after an admin has warmed the cache"
+        ]
+      }
+    }
+  ]
+}

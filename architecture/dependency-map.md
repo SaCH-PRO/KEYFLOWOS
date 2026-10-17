@@ -89,6 +89,18 @@ normalize-event.mjs, orchestrate.mjs → lib/events.mjs → lib/authority-effect
 
 `authority-effects.mjs` does no I/O. `truth.mjs` alone reads #80 and repository truth through `gh`.
 
+## Owner Console → Agent Control Projector
+
+KF-META-HANDOFF-MONITOR-001 (`execution-paths.md` §14) adds the server's only dependency on `scripts/agent-control`. It is a runtime native `import()` of file URLs, not a compile-time import, because the server emits CommonJS and these modules are ESM. The scanners therefore do not record it as an edge:
+
+```
+apps/server/.../admin-platform/handoff-monitor.service.ts ⇢ scripts/agent-control/lib/handoff-projector.mjs, handoff-collector.mjs (and handoff-fixture-transport.mjs in fixture mode)
+handoff-collector.mjs → handoff-projector.mjs → control-envelope.mjs
+handoff-fixture-transport.mjs → handoff-collector.mjs (allowedRequest)
+```
+
+The agent-control modules import nothing from the server or web. The production server image copies only `dist/`, so this edge is unresolved there and the endpoint reports UNAVAILABLE.
+
 ## KEY Action Boundary
 
 KF-EXEC-ACTION-001 (`execution-paths.md` §13). `KeyActionBoundaryService` is provided and exported by `KeyAutonomyModule`.

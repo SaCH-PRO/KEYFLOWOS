@@ -669,3 +669,30 @@ Key files:
 - `apps/server/src/modules/ai/flow-orchestrator.service.ts` — `governToolCall()`, `confirmThroughBoundary()`, `executeToolAction()`
 - `apps/server/src/modules/helpdesk/helpdesk.service.ts` — `createTicketRow()`, `emitTicketCreated()`
 - Proof: `apps/server/test/key-action-boundary.integration.test.ts`, `apps/server/test/key-action-boundary-surfaces.integration.test.ts`, `scripts/proof-admission/manifests/action-001-negative-controls.json`
+
+## 14. Owner Console: Agent Handoff Viewer (read-only, issue #80)
+
+KF-META-HANDOFF-MONITOR-001 (scope issue #178, H1). Runbook: `docs/development/HANDOFF_MONITOR.md`.
+
+```
+/admin/mission-control/handoffs (web, SUPER_ADMIN-gated admin layout; polls ~15 s while visible)
+  -> apps/web/src/lib/api/handoff-monitor.ts  fetchHandoffSnapshot() -> apiGet (Bearer admin/Supabase token)
+  -> GET /api/admin/mission-control/handoffs
+       AuthMiddleware -> AuthGuard -> AdminGuard (SUPER_ADMIN)   refused before the service or its cache
+       HandoffMonitorController -> HandoffMonitorService.snapshot()
+         default off (no KEYFLOW_HANDOFF_MONITOR_GITHUB_TOKEN -> NOT_CONFIGURED, no request)
+         native dynamic import of scripts/agent-control/lib/*.mjs (absent from the production image -> UNAVAILABLE)
+         -> handoff-collector.mjs createHandoffMonitor().read()   in-memory cache, coalesced, backoff
+              -> GET api.github.com /repos/SaCH-PRO/KEYFLOWOS/{issues/80, issues/80/comments, pulls/<n>} only
+         -> handoff-projector.mjs projectHandoffs() -> viewOf()
+              -> control-envelope.mjs (the one #80 parser, unchanged)
+```
+
+Each request has six separately evidenced stages: POSTED, ACKNOWLEDGED, WORKING_LAST_OBSERVED, RETURNED, RETURN_CONSUMED and DECISION_RECORDED. Review outcome, revision validity, merge authority and confidence are separate fields. Correlation is by explicit reference only. Nothing on this path writes to GitHub, the database or control state, and nothing it outputs is read as authority.
+
+### Key symbols / files
+- `scripts/agent-control/lib/handoff-projector.mjs` — `projectHandoffs()`, `viewOf()`, `SENDER_ALIASES`, `safeSourceUrl()`, `redactCredentials()`
+- `scripts/agent-control/lib/handoff-collector.mjs` — `allowedRequest()`, `createGithubTransport()`, `collectOnce()`, `createHandoffMonitor()`
+- `apps/server/src/modules/admin-platform/handoff-monitor.controller.ts`, `handoff-monitor.service.ts` (registered in `AdminPlatformModule`)
+- `apps/web/src/app/admin/mission-control/handoffs/page.tsx`, `_components/handoff-panels.tsx`
+- Proof: `scripts/agent-control/tests/handoff-monitor.spec.mjs`, `apps/server/src/modules/admin-platform/handoff-monitor.controller.spec.ts`, `apps/server/test/handoff-monitor-loopback.cjs`, `apps/web/e2e/admin-handoffs.spec.ts`, the `NC-HANDOFF-*` controls
