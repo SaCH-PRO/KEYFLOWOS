@@ -1,0 +1,42 @@
+{
+  "report_kind": "frozen_repository_truth_observation",
+  "collection_completed_at_utc": "2026-10-17 05:59:38 UTC",
+  "snapshot": {
+    "verified": true,
+    "main_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+    "source_main_on_main": true,
+    "pr": {
+      "number": 155,
+      "state": "open",
+      "merged": false,
+      "head_ref": "impl/kf-exec-auth-fail-closed-001"
+    }
+  },
+  "source_evidence": {
+    "main": {
+      "url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/branches/main",
+      "sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd"
+    },
+    "pr155": {
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155",
+      "number": 155,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd"
+    },
+    "ancestry": {
+      "url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/compare/ac3a6384417093f198bcc7d672b0dbc295db137c...98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "status": "ahead",
+      "ahead_by": 5,
+      "behind_by": 0,
+      "base_commit": "ac3a6384417093f198bcc7d672b0dbc295db137c",
+      "merge_base_commit": "ac3a6384417093f198bcc7d672b0dbc295db137c"
+    }
+  },
+  "limits": [
+    "GitHub GET observation only; no production or worker access.",
+    "This recorded snapshot is frozen for replay; a later decision must refresh source refs and authority."
+  ]
+}

@@ -1,0 +1,202 @@
+{
+  "recorded_at_utc": "2026-10-17 20:08:04 UTC",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "evidence_branch": "docs/kf-p0-safety-review-20261017",
+  "evidence_parent": "37009d605828a11b2589be1725a7e8b5b44d0e9f",
+  "h1_review": {
+    "id": 5559790458,
+    "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/179#pullrequestreview-5559790458",
+    "state": "COMMENTED",
+    "submitted_at": "2026-10-17T19:58:57Z",
+    "author": "SaCH-PRO",
+    "commit_id": "b9baa28f7b637e6f0f6a3a0dddbc8418570c1ce5",
+    "body_exactly_matched": true
+  },
+  "posted_control_comments": [
+    {
+      "id": 6240049267,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240049267",
+      "created_at": "2026-10-17T19:59:16Z",
+      "updated_at": "2026-10-17T19:59:16Z",
+      "author": "SaCH-PRO",
+      "exact_body_matched": true,
+      "unedited": true,
+      "body_sha256": "d4a9e660a2a9d0a0c5acb7ea7da34ee67f4d9b84da593813b3885cde76c5db8c"
+    },
+    {
+      "id": 6240050804,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804",
+      "created_at": "2026-10-17T19:59:24Z",
+      "updated_at": "2026-10-17T19:59:24Z",
+      "author": "SaCH-PRO",
+      "exact_body_matched": true,
+      "unedited": true,
+      "body_sha256": "15f76cb1e9441282a9a4ca4d7d758f95b3814e58fcf011b45e0c5dce3a33fec3"
+    },
+    {
+      "id": 6240051686,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240051686",
+      "created_at": "2026-10-17T19:59:30Z",
+      "updated_at": "2026-10-17T19:59:30Z",
+      "author": "SaCH-PRO",
+      "exact_body_matched": true,
+      "unedited": true,
+      "body_sha256": "efe5e170fc927364a5d7fd6d5ea51af11cc7177ef11bc31c80778bbfa3ff7b25"
+    }
+  ],
+  "control_comment_body_files": [
+    "h1-receipt.md",
+    "pr155-review.md",
+    "f9-directive.md"
+  ],
+  "authority_replay": {
+    "file": "authority-replay-result.json",
+    "runtime": "v20.18.1",
+    "comments": 1436,
+    "generation": 118,
+    "observed_generation": 118,
+    "post_checkpoint_applied": 31,
+    "consistent": true,
+    "unapplied": [],
+    "active_holds": [],
+    "merge_authority": false,
+    "selected_directive": "CG-DIR-F9-001",
+    "installed_worker_observed": false
+  },
+  "pr155_evidence": {
+    "commit": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+    "parent": "a597c692fcb102de558dd832d88738c0402f69a2",
+    "semantic_head": "fe79181638e373584c3ca3184a39343a132040cd",
+    "remote_blobs_verified": true,
+    "semantic_to_artifact_tail_control_only": true,
+    "draft": true,
+    "admission": "PENDING",
+    "merge_authority": false,
+    "files": [
+      {
+        "path": ".agent-control/active-packet.yaml",
+        "blob": "551b94f2aa00badde4f595eacfb367a2d4aebc04"
+      },
+      {
+        "path": ".agent-control/claude-return.yaml",
+        "blob": "c17375994395ea4ca6d3b32cdc0d1e11d9e3f508"
+      }
+    ],
+    "proof": [
+      "pr155-record-validation-node20.json",
+      "pr155-record-test-evidence.json"
+    ],
+    "scope": "Two packet artifacts only; root validation before commit, remote contents and lineage verified after publication. No new artifact-head CI pass inferred."
+  },
+  "pr177_author_correction": {
+    "commit": "dc6d2c57fab20dda789a97c26c9980f6b6947b8e",
+    "parent": "c03603c00ae432a61d717e9439f8ae425d5ecfda",
+    "path": "docs/development/KEYFLOWOS_INTEGRATED_EXECUTION_RECOVERY_PROGRAMME.md",
+    "blob": "11676a5fdf8b51e0307dca7d0ed7e2c3faf4175d",
+    "remote_content_verified": true,
+    "independent_review": "STILL_REQUIRED",
+    "programme_status": "INACTIVE",
+    "worker_assignment_emitted": false
+  },
+  "existing_continuation": {
+    "update_confirmed": true,
+    "title": "KEYFLOWOS Plan Continuation",
+    "enabled": true,
+    "cadence": "every 2 hours",
+    "cadence_unchanged": true,
+    "updated_at": "2026-10-17T20:00:49.536672+00:00",
+    "duplicate_task_created": false,
+    "notifications": "New material outcomes or a concrete human-only blocker",
+    "limit": "Configured recurring execution; not proof of continuous worker liveness or future completion."
+  },
+  "workflow_observation": {
+    "pr155_head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+    "snapshot": [
+      {
+        "id": 39065353307,
+        "name": "DAST (HawkScan)",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353307"
+      },
+      {
+        "id": 39065353315,
+        "name": "Agent Control Gate",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353315"
+      },
+      {
+        "id": 39065353286,
+        "name": "Agent Control Worker Proof",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353286"
+      },
+      {
+        "id": 39065353293,
+        "name": "CI/CD Pipeline",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353293"
+      },
+      {
+        "id": 39065353328,
+        "name": "Branch divergence",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353328"
+      },
+      {
+        "id": 39065349377,
+        "name": "Branch divergence",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065349377"
+      }
+    ],
+    "limit": "Initial post-publication snapshot; reread exact-head results before admission."
+  },
+  "remaining_integration_obligation": {
+    "pr": 180,
+    "run": 39064708171,
+    "head": "37009d605828a11b2589be1725a7e8b5b44d0e9f",
+    "conclusion": "failure",
+    "workflow": "Branch divergence",
+    "reason": "Push workflow compares the inherited intelligence stack with main; it does not use PR180's declared base for this run.",
+    "unique_main": 143,
+    "unique_evidence": 706,
+    "differing_files": 728,
+    "actual_pr_base_unique": 0,
+    "actual_pr_head_unique": 2,
+    "actual_pr_files_at_that_head": 65,
+    "scope": "All 65 actual PR files at that head are documentation. File-count and inherited stack disposition remain required; no gate change or retarget performed."
+  },
+  "f9_handoff": {
+    "directive_id": 6240051686,
+    "ack_observed": false,
+    "latest_inspected_issue_event": 6240153741,
+    "latest_inspected_event_created_at": "2026-10-17T20:07:03Z",
+    "limit": "No ACK present in the complete publication snapshot or inspected incremental tail. Hosted runner PATH is not installed-worker liveness."
+  },
+  "completion": {
+    "application_checkpointed": 5,
+    "application_packets": 35,
+    "whole_product_percentage": null,
+    "new_application_credit": 0
+  },
+  "next_actions": [
+    "Consume F9 ACK/RETURN and independently review its exact semantics and proof.",
+    "Collect PR155 new-artifact CI and make the separate admission decision at an appropriate handoff.",
+    "Retain all seven H1 correction groups for the next bounded H1 correction.",
+    "Obtain independent re-review of corrected PR177 without displacing the current worker.",
+    "Resolve scoped intelligence-branch integration through PR convergence."
+  ]
+}

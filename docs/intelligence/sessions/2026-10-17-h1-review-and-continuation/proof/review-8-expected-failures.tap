@@ -1,0 +1,189 @@
+TAP version 13
+# Subtest: a canonical effect rejection cannot render a valid merge grant
+not ok 1 - a canonical effect rejection cannot render a valid merge grant
+  ---
+  duration_ms: 10.241165
+  location: '/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:34:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected "actual" to be strictly unequal to:
+    
+    'GRANTED'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'GRANTED'
+  actual: 'GRANTED'
+  operator: 'notStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:40:10)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:527:18)
+    node:internal/test_runner/harness:255:12
+    node:internal/process/task_queues:140:7
+    AsyncResource.runInAsyncScope (node:async_hooks:206:9)
+    AsyncResource.runMicrotask (node:internal/process/task_queues:137:8)
+  ...
+# Subtest: a newer explicit correction does not leave the earlier grant displayed as current
+not ok 2 - a newer explicit correction does not leave the earlier grant displayed as current
+  ---
+  duration_ms: 0.901823
+  location: '/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:43:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected "actual" to be strictly unequal to:
+    
+    'GRANTED'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'GRANTED'
+  actual: 'GRANTED'
+  operator: 'notStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:48:10)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:527:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:527:7)
+  ...
+# Subtest: a delayed edit must invalidate cached authority even below the global latest timestamp
+not ok 3 - a delayed edit must invalidate cached authority even below the global latest timestamp
+  ---
+  duration_ms: 4.846222
+  location: '/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:51:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'AUTHORITY_EDITED'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'AUTHORITY_EDITED'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:62:10)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:527:7)
+  ...
+# Subtest: a new next-page link on 304 remains traversable on full resync
+not ok 4 - a new next-page link on 304 remains traversable on full resync
+  ---
+  duration_ms: 13.048024
+  location: '/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:65:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'PARTIAL'
+    - 'COMPLETE'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'COMPLETE'
+  actual: 'PARTIAL'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:78:10)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:527:7)
+  ...
+# Subtest: partial PR collection cannot advance overall success time and erase known-good facts
+not ok 5 - partial PR collection cannot advance overall success time and erase known-good facts
+  ---
+  duration_ms: 1.917864
+  location: '/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:82:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '2026-10-17T05:12:00.000Z'
+    - '2026-10-17T05:11:00.000Z'
+                      ^
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: '2026-10-17T05:11:00.000Z'
+  actual: '2026-10-17T05:12:00.000Z'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:91:10)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:527:7)
+  ...
+# Subtest: partial count mismatch retains the previous complete handoff snapshot
+not ok 6 - partial count mismatch retains the previous complete handoff snapshot
+  ---
+  duration_ms: 1.747101
+  location: '/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:95:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'POSTED'
+    - 'RETURNED'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'RETURNED'
+  actual: 'POSTED'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:106:10)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:527:7)
+  ...
+# Subtest: last-observed age advances with time on successful unchanged refreshes
+not ok 7 - last-observed age advances with time on successful unchanged refreshes
+  ---
+  duration_ms: 1.218231
+  location: '/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:109:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    60 !== 3660
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 3660
+  actual: 60
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:116:10)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:527:7)
+  ...
+# Subtest: a correlated implementation RETURN supplies its newly created PR for truth collection
+not ok 8 - a correlated implementation RETURN supplies its newly created PR for truth collection
+  ---
+  duration_ms: 1.015671
+  location: '/tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:119:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/keyflow-continuation-docs/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs:123:10)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:527:7)
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 0
+# fail 8
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 44.188134

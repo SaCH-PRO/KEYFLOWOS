@@ -1,0 +1,137 @@
+{
+  "packageId": "KF-EXEC-AUTH-FAIL-CLOSED-001",
+  "total": 8,
+  "live": 8,
+  "vacuous": 0,
+  "baselines": {
+    "unit": {
+      "tests": 27,
+      "passed": 27,
+      "skipped": 0,
+      "failed": 0,
+      "clean": true
+    }
+  },
+  "results": [
+    {
+      "id": "NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN",
+      "claim": "The executable parsed-command set starts empty, so an authority check that throws leaves nothing executable. Restoring the historical initialization from parsedCommands makes every parsed command executable again on error.",
+      "live": true,
+      "proofs": {
+        "unit": {
+          "named": 5,
+          "named_failed": 5,
+          "not_failed": [],
+          "total_failed": 5,
+          "seconds": 6
+        }
+      },
+      "detail": "negative control is live"
+    },
+    {
+      "id": "NC-AUTH-FC-P01-PARTIAL-PREFIX",
+      "claim": "The batch is atomic: commands approved before a failing evaluation are not kept. Publishing each approval as it is made keeps the approved prefix executable.",
+      "live": true,
+      "proofs": {
+        "unit": {
+          "named": 2,
+          "named_failed": 2,
+          "not_failed": [],
+          "total_failed": 2,
+          "seconds": 6
+        }
+      },
+      "detail": "negative control is live"
+    },
+    {
+      "id": "NC-AUTH-FC-P01B-UNUSABLE-VERDICT-ACCEPTED",
+      "claim": "A verdict that does not state a boolean allowed, a boolean requiresApproval and a recognized tier is a failed authority check. Without that check a truthy non-boolean is read as an approval, an allowed with no approval semantics is read as an approval, and a verdict with no allowed is read as an ordinary denial that keeps the rest of the batch.",
+      "live": true,
+      "proofs": {
+        "unit": {
+          "named": 3,
+          "named_failed": 3,
+          "not_failed": [],
+          "total_failed": 3,
+          "seconds": 6
+        }
+      },
+      "detail": "negative control is live"
+    },
+    {
+      "id": "NC-AUTH-FC-P06-FAILURE-REPORTED-AS-EVALUATED",
+      "claim": "STEP_5_CHECK_AUTONOMY names a failed authority check as authority_check_failed_closed. Reporting it with the outcome of an ordinary evaluation hides the failure behind zero approvals.",
+      "live": true,
+      "proofs": {
+        "unit": {
+          "named": 2,
+          "named_failed": 2,
+          "not_failed": [],
+          "total_failed": 2,
+          "seconds": 6
+        }
+      },
+      "detail": "negative control is live"
+    },
+    {
+      "id": "NC-AUTH-FC-F1-APPROVAL-SEMANTICS-NOT-REQUIRED",
+      "claim": "AUTH-FC-F1. allowed: true is not an approval unless the verdict also states requiresApproval and a recognized tier. Restoring the validator of 65706fcc, which checked only a boolean allowed, lets a verdict with the approval semantics left out be read as an explicit non-approval-required allow, and the command executes.",
+      "live": true,
+      "proofs": {
+        "unit": {
+          "named": 6,
+          "named_failed": 6,
+          "not_failed": [],
+          "total_failed": 6,
+          "seconds": 5
+        }
+      },
+      "detail": "negative control is live"
+    },
+    {
+      "id": "NC-AUTH-FC-F1-REQUIRES-APPROVAL-NOT-VALIDATED",
+      "claim": "AUTH-FC-F1. requiresApproval must be stated as a boolean. Without that check a verdict that omits it, or carries a falsy non-boolean, is read as no approval required.",
+      "live": true,
+      "proofs": {
+        "unit": {
+          "named": 2,
+          "named_failed": 2,
+          "not_failed": [],
+          "total_failed": 2,
+          "seconds": 5
+        }
+      },
+      "detail": "negative control is live"
+    },
+    {
+      "id": "NC-AUTH-FC-F1-TIER-NOT-VALIDATED",
+      "claim": "AUTH-FC-F1. tier must be one of manual, supervised or full. Without that check a verdict with no tier, or with a tier this code does not know, is read as not manual.",
+      "live": true,
+      "proofs": {
+        "unit": {
+          "named": 2,
+          "named_failed": 2,
+          "not_failed": [],
+          "total_failed": 2,
+          "seconds": 6
+        }
+      },
+      "detail": "negative control is live"
+    },
+    {
+      "id": "NC-AUTH-FC-P05-NO-ORACLE-FALLBACK-INCOMPLETE",
+      "claim": "With no authority oracle the local fallback is a complete, ordinary non-executable verdict. If it does not state its tier the stricter validator rejects it and the absence of an oracle is reported as authority_check_failed_closed instead of an ordinary evaluation.",
+      "live": true,
+      "proofs": {
+        "unit": {
+          "named": 1,
+          "named_failed": 1,
+          "not_failed": [],
+          "total_failed": 1,
+          "seconds": 5
+        }
+      },
+      "detail": "negative control is live"
+    }
+  ]
+}

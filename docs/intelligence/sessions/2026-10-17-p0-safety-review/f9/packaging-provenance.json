@@ -1,0 +1,82 @@
+{
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "purpose": "PORTABLE_PACKAGING_OF_EXISTING_READ_ONLY_F9_EVIDENCE",
+  "transformed_original_scripts": [
+    {
+      "path": "probe.mjs",
+      "original_sha256": "0b66199bd53e0637e996b1fc58e6d0b3cc25dd8abde6e8a25c058b7c84a31158",
+      "packaged_sha256": "910dd6d37840f0817a7bd993b026831ef0f06ef0e0c8c63c7acd175f60420c85",
+      "change_scope": "Explicit source/output paths, source pinning, and subprocess launch error detection only; synthetic fixtures and diagnostic assertions preserved."
+    },
+    {
+      "path": "network-fixture.mjs",
+      "original_sha256": "ef1a3d97da6a69fc2062df9bdcc24313a1f01dd0a1ccdec2e4e8c46e8e0d92c2",
+      "packaged_sha256": "553d7ade3a10395b7766f9dab184ed9ea0675d9acb4b42664e8f01909b5827e5",
+      "change_scope": "Explicit source/output paths, source pinning, and subprocess launch error detection only; synthetic fixtures and diagnostic assertions preserved."
+    },
+    {
+      "path": "run-cli-probe.mjs",
+      "original_sha256": "894de91b8a5504997c838b147ed07b272a3c0d29b865cfa2e3ecf988012b914f",
+      "packaged_sha256": "d64babe09abb58b4668d91903f0b9f3367f538f04491543a1fb240c0c95db919",
+      "change_scope": "Explicit source/output paths, source pinning, and subprocess launch error detection only; synthetic fixtures and diagnostic assertions preserved."
+    }
+  ],
+  "recorded_files_copied_byte_for_byte": [
+    {
+      "path": "recorded/cli-probe-result.json",
+      "sha256": "62cdc53a1793cf41227d0464e2e0bf6a957854deefa656da51db65f90e241481"
+    },
+    {
+      "path": "recorded/cli-request-trace.json",
+      "sha256": "91b4cf185b73e01a8bdbb873e87338baaa911b9a5ae4ab6f60caf119712c86c9"
+    },
+    {
+      "path": "recorded/cli-source-result.json",
+      "sha256": "392954c3e259cf0b616a05a480529c1fa70eed7a0cc9d76f81cdbf33d7ca0f75"
+    },
+    {
+      "path": "recorded/existing-admission-tests.log",
+      "sha256": "7e5df35a614c3e8199addd4f9d2033a0c4c5c5a09ce73a701966d96c523fefb2"
+    },
+    {
+      "path": "recorded/gate-step-result.json",
+      "sha256": "5700088d825b9eaa316d30cc913c913ca8a2697d41c62990c22df195206379cc"
+    },
+    {
+      "path": "recorded/probe-output.json",
+      "sha256": "71574c2114075982781a493fc7f7d7b837b018f62550c448a714a1a236141968"
+    },
+    {
+      "path": "recorded/probe-result.json",
+      "sha256": "135c70d196bcd8f5d17db1bad4bc9088d831dd2a1cb66faac7b9c3d969339c80"
+    },
+    {
+      "path": "recorded/source-provenance.json",
+      "sha256": "41c900293d76800a2281c6afb95548d55cc39864de8c97d2660572960f1682cf"
+    }
+  ],
+  "gate_wrapper": "No original standalone gate wrapper was retained. gate-step-probe.mjs extracts the exact pinned step, substitutes only the synthetic base SHA and reproduces the three existing result cases.",
+  "packaging_support_files": [
+    {
+      "path": "probe-config.mjs",
+      "sha256": "60cf3efac4430b374a0a8b0bf67bcba9edc4ad50c540706fef8ae64a244a4969"
+    },
+    {
+      "path": "gate-step-probe.mjs",
+      "sha256": "46c8f7f99c2f71ed53fed8565f1a1c0775536c26d985b3a7abb8fa754c532c5b"
+    },
+    {
+      "path": "source-manifest.json",
+      "sha256": "e58d584b38a8d38dc696cce473209358ac84211eb35c62cc144df0abfaee7f7b"
+    },
+    {
+      "path": "README.md",
+      "sha256": "7f40afc94d455f849d61265dd3f19991c6c4c17222c391f58464149c9924502b"
+    }
+  ],
+  "log_storage": {
+    "original": "recorded/existing-admission-tests.log",
+    "packaged_as": "recorded/existing-admission-tests.json",
+    "representation": "Lossless UTF-8 stdout string; decoding and writing stdout reproduces original bytes and SHA-256 including trailing blank lines."
+  }
+}

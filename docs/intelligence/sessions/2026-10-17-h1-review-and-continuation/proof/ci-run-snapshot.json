@@ -1,0 +1,120 @@
+{
+  "observed_at": "2026-10-17T19:56:00Z",
+  "note": "Workflow-run conclusions only. Skipped steps and builder proof remain separately qualified.",
+  "pull_requests": [
+    {
+      "pr": 179,
+      "runs": [
+        {
+          "id": 39006498173,
+          "name": "CI/CD Pipeline",
+          "head_sha": "b9baa28f7b637e6f0f6a3a0dddbc8418570c1ce5",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39006498173"
+        },
+        {
+          "id": 39006498063,
+          "name": "Agent Control Gate",
+          "head_sha": "b9baa28f7b637e6f0f6a3a0dddbc8418570c1ce5",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39006498063"
+        },
+        {
+          "id": 39006498030,
+          "name": "Branch divergence",
+          "head_sha": "b9baa28f7b637e6f0f6a3a0dddbc8418570c1ce5",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39006498030"
+        },
+        {
+          "id": 39006498066,
+          "name": "KEYFLOWOS Agent Autopilot",
+          "head_sha": "b9baa28f7b637e6f0f6a3a0dddbc8418570c1ce5",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39006498066"
+        },
+        {
+          "id": 39006498019,
+          "name": "DAST (HawkScan)",
+          "head_sha": "b9baa28f7b637e6f0f6a3a0dddbc8418570c1ce5",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39006498019"
+        },
+        {
+          "id": 39006498003,
+          "name": "Agent Control Worker Proof",
+          "head_sha": "b9baa28f7b637e6f0f6a3a0dddbc8418570c1ce5",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39006498003"
+        },
+        {
+          "id": 39006473538,
+          "name": "Branch divergence",
+          "head_sha": "b9baa28f7b637e6f0f6a3a0dddbc8418570c1ce5",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39006473538"
+        }
+      ]
+    },
+    {
+      "pr": 155,
+      "runs": [
+        {
+          "id": 38162875351,
+          "name": "Agent Control Gate",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875351"
+        },
+        {
+          "id": 38162875391,
+          "name": "Branch divergence",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391"
+        },
+        {
+          "id": 38162875383,
+          "name": "DAST (HawkScan)",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875383"
+        },
+        {
+          "id": 38162875348,
+          "name": "CI/CD Pipeline",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348"
+        },
+        {
+          "id": 38162875434,
+          "name": "Agent Control Worker Proof",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875434"
+        },
+        {
+          "id": 38162871838,
+          "name": "Branch divergence",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838"
+        }
+      ]
+    }
+  ]
+}
