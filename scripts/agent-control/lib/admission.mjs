@@ -71,8 +71,10 @@ export function evaluateGrantGate(snapshot) {
   const { pr = {}, active = {}, ret = {} } = snapshot;
   if (pr.state !== 'open') return fail(ADMISSION_REASONS.PR_NOT_OPEN, pr.state);
   if (!String(pr.head_ref || '').startsWith('impl/')) return fail(ADMISSION_REASONS.NOT_IMPL_BRANCH, pr.head_ref);
-  const unbound = artifactBindingProblems({ pr, active, ret });
-  if (unbound.length) return fail(ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, unbound);
+  // Named apart from evaluateAdmission's own check, so a negative control
+  // aimed at that line still names exactly one line.
+  const gateUnbound = artifactBindingProblems({ pr, active, ret });
+  if (gateUnbound.length) return fail(ADMISSION_REASONS.ARTIFACTS_NOT_BOUND, gateUnbound);
   const grant = evaluateMergeGrant(snapshot.control_comments ?? null, grantTarget(snapshot), { authors: snapshot.authors });
   if (!grant.granted) return fail(ADMISSION_REASONS.MERGE_GRANT_NOT_SATISFIED, { reason: grant.reason, detail: grant.detail });
   return { eligible: true, reason: grant.reason, head_sha: pr.head_sha, base_sha: pr.base_sha, merge_grant: grant.grant };
