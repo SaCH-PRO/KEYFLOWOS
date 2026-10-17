@@ -2,6 +2,8 @@
 
 Status: **CHANGES_REQUIRED for H1.** Seven substantive correction groups. Evidence and continuation checkpoint; no admission, merge grant, application completion credit or production claim.
 
+Later continuation is recorded in [the worker review and F9 follow-through session](../2026-10-17-worker-review-followthrough/README.md). It includes the subsequent F9 ACK, #169/#175 reviews and #155 check closeout. The earlier snapshots and proof below retain their original observation times.
+
 The operator accepted continued execution of the existing plan toward its full acceptance contract. This session advances actual review and dispatch; it does not replace the programme DAG or activate draft PR177. The preserved plan is [the accepted capability roadmap](../../handoff/ACCEPTED-CAPABILITY-ROADMAP-2026-10-17.md).
 
 ## Revision and scope

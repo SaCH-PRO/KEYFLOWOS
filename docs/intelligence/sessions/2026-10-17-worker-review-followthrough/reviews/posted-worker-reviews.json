@@ -1,0 +1,60 @@
+[
+  {
+    "review": {
+      "id": 5559896104,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/169#pullrequestreview-5559896104",
+      "commit_id": "7aa3c1910075a02287b0815867026a500187594f",
+      "state": "COMMENTED",
+      "body": "## Independent ChatGPT review \u2014 CHANGES_REQUIRED\n\nReviewed current semantic head `7aa3c1910075a02287b0815867026a500187594f`. The prior retry-after-base-path-change correction is present. One additional P2 finding remains: a shortened worktree name is treated as a directive identity without a full ownership binding. The inline finding supplies two actual colliding IDs and the source path to reuse.\n\n### Evidence and limits\n\n- Independently recomputed the SHA-256 tags and shortened directory names for the two distinct IDs. Traced the current PowerShell source from lookup through repository registration and invocation. **No Windows worker tick was executed in this review.**\n- Inspected actual [Worker Proof run 38161878707](https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38161878707): Node 20.18.1 Windows **510 passed, 0 failed, 1 skipped**; **188/188 live negative controls**. Ubuntu **477 passed, 0 failed, 1 skipped**. The named authenticated-`gh` cursor test is skipped in each hosted job; local zero-skip totals do not replace these logs.\n- The current-head [Copilot review 5484329501](https://github.com/SaCH-PRO/KEYFLOWOS/pull/169#pullrequestreview-5484329501) is **NOT_RUN / quota unavailable**, not PASS. The earlier Claude sub-session review at `2d012625` was explicitly non-independent and was not a review of this head.\n- Seven exact-head workflow runs succeeded. Draft/non-implementation gate steps and the actual HawkScan scan were skipped. Those badges are not admission or dynamic-security proof.\n\n### Scope and next acceptance\n\nKeep this repair in the existing #169 worktree-path scope. Prove full-ID ownership before shortened-tree reuse, including the deterministic collision, while retaining the fixed retry behavior when the longest tracked path changes. Existing whole-ID and ambiguous-match behavior must remain covered.\n\nPersistent pre-wake/fetch failures and cross-checkout coordination already belong to stacked [PR #175](https://github.com/SaCH-PRO/KEYFLOWOS/pull/175); they are not duplicate new findings against #169. Revalidate the corrected head against current main, then review #175's dependent revision.\n\nThis is a GitHub **COMMENT** review carrying a substantive CHANGES_REQUIRED result because the connected account owns the PR. It is not a typed #80 authority event, worker reassignment, admission, merge grant or installed-worker result. F9 remains the current assignment. PR stays draft/unmerged; application credit remains zero.",
+      "submitted_at": "2026-10-17T20:20:53Z",
+      "author": "SaCH-PRO"
+    },
+    "inline_comments": [
+      {
+        "id": 4304342983,
+        "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/169#discussion_r4304342983",
+        "commit_id": "7aa3c1910075a02287b0815867026a500187594f",
+        "path": "scripts/agent-control/claude-worker.ps1",
+        "position": 85,
+        "original_position": 85,
+        "body": "**[P2] Verify full directive ownership before reusing a shortened worktree**\n\nThe 8-hex tag is only the first four SHA-256 bytes. These two distinct valid IDs both produce `86c85112`:\n\n```text\nCG-DIRECTIVE-LONG-PACKET-NAME-LONG-PACKET-NAME-INTEGRATION-CORRECTION-081631\nCG-DIRECTIVE-LONG-PACKET-NAME-LONG-PACKET-NAME-INTEGRATION-CORRECTION-095457\n```\n\nBoth have length 76 and share their first 70 characters. With room 32, both directory names are `CG-DIRECTIVE-LONG-PACKE-86c85112`. More generally, every shortened prefix of these IDs satisfies the current prefix check.\n\nIf the first directive leaves a retained worktree, this function accepts it as the second directive's sole match. `New-WakeWorktree` at lines 545\u2013559 then bypasses base resolution and reuses it; `Test-RegisteredWorktree` only verifies membership in this repository, not ownership by the complete directive ID. `Invoke-ClaudeForDirective` changes into that directory before waking Claude. Failed attempts and dirty successful attempts can retain partial work, so the later task can execute in the earlier task's tree.\n\nBind ownership to the complete raw directive ID or full digest before reuse. A conflicting ID must receive a distinct owned worktree or a counted refusal. Use this pair as a deterministic retained-partial-work regression, preserving same-ID retry reuse after base path changes and ambiguous-match rejection.\n\nThe collision computation was executed locally; the routing consequence follows from the exact source. A Windows worker-tick reproduction was not run here.",
+        "created_at": "2026-10-17T20:20:53Z",
+        "updated_at": "2026-10-17T20:20:53Z",
+        "author": "SaCH-PRO"
+      }
+    ],
+    "root_verification": {
+      "commit_and_body_match_prepared": true,
+      "inline_body_matches_prepared": true
+    }
+  },
+  {
+    "review": {
+      "id": 5559896456,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/175#pullrequestreview-5559896456",
+      "commit_id": "09d00c3e03af1d31b2e4df93aaa4cf062718f4ec",
+      "state": "COMMENTED",
+      "body": "## Independent ChatGPT review \u2014 CHANGES_REQUIRED\n\nReviewed current semantic head `09d00c3e03af1d31b2e4df93aaa4cf062718f4ec`, stacked on #169 at `7aa3c191`. One P2 finding remains in the machine-lock acquisition path: failure to acquire the coordinating mutex does not prevent the stale-lock reclaim transaction.\n\n### Evidence and limits\n\n- Traced `Enter-LockFile`, `Get-LockOwner`, `New-LockFile` and `Enter-WorkerLock` at this exact head. The inline finding gives a concrete two-starter interleaving when mutex construction/acquisition fails or times out. **No Windows contention reproduction or installed-worker test was executed in this review.**\n- Inspected actual [Worker Proof run 38172351521](https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38172351521): Node 20.18.1 Windows **526 passed, 0 failed, 1 skipped**; **204/204 live negative controls**. Ubuntu **477 passed, 0 failed, 1 skipped**. Both hosted jobs skip the named authenticated-`gh` cursor test.\n- The four-starter test exercises successful mutex operation; it does not force the failure or timeout branch. The PR body already discloses the missing acquisition-atomicity negative control.\n- The current-head [Copilot review 5484828496](https://github.com/SaCH-PRO/KEYFLOWOS/pull/175#pullrequestreview-5484828496) is **NOT_RUN / quota unavailable**, not PASS.\n- Four exact-head workflow runs succeeded. This stacked branch did not receive the main-target CI/CD or HawkScan runs. Integration against current main remains owed.\n\n### Scope and next acceptance\n\nCorrect the acquisition failure path within this existing worker-coordination scope. Prove constructor/acquisition failure and timeout cannot reclaim a lock or wake a second worker, while preserving normal concurrent-start, stale-owner, pre-wake failure, and network retry behavior. Keep the #169 shortened-worktree ownership correction with #169 and then review the resulting dependent #175 head.\n\nAny eventual merge must respect dependency order and exact revised-head checks. The separately controlled first worker upgrade must stop old workers because the old version does not participate in the machine lock; this review does not authorize or perform that upgrade.\n\nThis is a GitHub **COMMENT** review carrying a substantive CHANGES_REQUIRED result because the connected account owns the PR. It is not a typed #80 authority event, worker reassignment, admission, merge grant or claim of an observed installed-worker failure. F9 remains the current assignment. PR stays draft/unmerged; application credit remains zero.",
+      "submitted_at": "2026-10-17T20:20:57Z",
+      "author": "SaCH-PRO"
+    },
+    "inline_comments": [
+      {
+        "id": 4304343195,
+        "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/175#discussion_r4304343195",
+        "commit_id": "09d00c3e03af1d31b2e4df93aaa4cf062718f4ec",
+        "path": "scripts/agent-control/claude-worker.ps1",
+        "position": 299,
+        "original_position": 299,
+        "body": "**[P2] Refuse stale-lock reclamation unless the coordinating mutex was acquired**\n\n`WaitOne(30000)` may return false, and the outer catch may also leave `$owned` false. Both paths still enter the read/remove/create loop. The atomic `CreateNew` operation does not protect the preceding stale-read/delete transaction.\n\nTwo starters from different checkouts can both read the same stale machine-lock owner. A deletes that stale file, creates its own fresh lock and returns success. B then executes its already-decided unconditional `Remove-Item`, deleting A's fresh lock, and creates its own. Both workers have returned success from acquisition. The file stream is closed before `New-LockFile` returns, so it does not prevent B's later removal.\n\nRequire successful mutex ownership before this transaction, or use another mechanism that serializes the complete reclaim operation. On mutex construction/acquisition failure or timeout, fail closed without deleting a lock or waking Claude. Add targeted failure/timeout proof and live negative controls while retaining the existing successful concurrent-start and stale-owner tests.\n\nThis is a source-control-flow finding with a concrete interleaving, not a locally observed Windows race. The current four-starter test covers the normal mutex path and does not exercise either failure branch.",
+        "created_at": "2026-10-17T20:20:57Z",
+        "updated_at": "2026-10-17T20:20:57Z",
+        "author": "SaCH-PRO"
+      }
+    ],
+    "root_verification": {
+      "commit_and_body_match_prepared": true,
+      "inline_body_matches_prepared": true
+    }
+  }
+]
