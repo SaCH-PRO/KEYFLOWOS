@@ -6,15 +6,16 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011507550; finding AUTH-FC-F1 on 65706fcc
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003   # 6018421547; the fallback reading of 8987f6db; authorized the control binding
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022210803; the same reading with its three evidence fields at top level
-  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023054785; PACKET_CORRECTION; ordered a re-anchor of programme-state.yaml; the newest ChatGPT message for this packet
-in_reply_to: CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023054785; historical re-anchor order, superseded by review 006
+  - CG-REVIEW-KF155-006   # 6240050804; exact semantic evidence and explicit contradiction ruling; NO_STATE_CHANGE
+in_reply_to: CG-REVIEW-KF155-006
 ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-001
 ack_comment_id: 6010899764
-current_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
-current_authority_comment_id: 6023054785
+current_authority_message_id: CG-REVIEW-KF155-006
+current_authority_comment_id: 6240050804
 current_authority_ack_message_id: null
-current_authority_response_message_id: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
-current_authority_response_comment_id: 6023151885
+current_authority_response_message_id: null
+current_authority_response_comment_id: null
 last_acked_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
 last_acked_authority_ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
 last_acked_authority_ack_comment_id: 6022283475
@@ -26,7 +27,7 @@ health: YELLOW
 scope_changed: false
 production_touched: false
 provider_traffic: false
-programme_credit: PENDING
+programme_credit: ZERO
 merge_authority: false
 review_status: PENDING_CHATGPT_REVIEW
 
@@ -39,7 +40,7 @@ objective: >
 live_defect:
   source_file: apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts
   source_blob: 33540d0c07d2affd919246ebb5975ce0bef32109
-  current_behavior: >
+  current_behavior: >   # characterized main baseline from the original directive, before this packet correction
     autonomyCheckedCommands is initialized from parsedCommands. If the autonomy
     evaluation loop throws, the catch logs "Autonomy check failed, using all
     parsed commands" and leaves the original parsed set executable. Later,
@@ -112,8 +113,8 @@ review_finding_AUTH_FC_F1:   # CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001
 current_authorization:
   integration_with_main:
     authorized_by: the human operator, in an interactive session on 2026-10-11
-    control_room_message: none; issue 80 carries no ChatGPT message for this packet after 6023054785
-    what: an ordinary git merge of main 98ee0202 into this branch, then one commit that changes only the two control artifacts
+    control_room_message: no prior directive or pre-mutation ACK; later review CG-REVIEW-KF155-006 accepts the integration baseline and preserves that historical deviation
+    what: the historical ordinary git merge fe791816 of main 98ee0202, followed by the two-artifact commit a597c692; completed and reported in RETURN 6112455909
   semantic_mutation: NOT_AUTHORIZED; the three semantic and proof files of this packet are unchanged
   merge: NOT_AUTHORIZED
   ready_for_review: NOT_AUTHORIZED
@@ -179,3 +180,23 @@ return_contract: >
   reading of the exact semantic head by a reviewer other than the implementer;
   control artifacts only after that reading; RETURN once, with merge_authority
   false; no merge before a later exact-head ChatGPT admission.
+
+# This is the packet's review record, not the global worker selector state.
+review_record_update:
+  actor: chatgpt
+  authority_message_id: CG-REVIEW-KF155-006
+  authority_comment_id: 6240050804
+  authority_url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804
+  prepared_from_artifact_head: a597c692fcb102de558dd832d88738c0402f69a2
+  scope: control-only evidence transcription; no application, proof, or scope changes
+  semantic_evidence: recorded in claude-return.yaml under semantic_head_review
+  admission: PENDING; no ACCEPT_FOR_ADMISSION or READY_TO_MERGE decision is recorded
+  worker_action: none; current separately released F9 assignment is unchanged
+  draft_transition: NOT_AUTHORIZED
+  merge: NOT_AUTHORIZED
+  production_or_provider_effects: NOT_AUTHORIZED
+  historical_authority_response:
+    message_id: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
+    comment_id: 6023151885
+    disposition: settled by CG-REVIEW-KF155-006; the old re-anchor order is unnecessary after merged PR 159
+  historical_process_deviation: the operator-authorized main integration had no prior issue 80 directive or pre-mutation ACK; review 006 accepts its baseline without inventing either
