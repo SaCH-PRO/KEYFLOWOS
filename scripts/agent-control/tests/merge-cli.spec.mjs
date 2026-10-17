@@ -208,9 +208,14 @@ const invalidReleases = [
 
 for (const [name, change] of invalidReleases) {
   test(`NC CLI hold release: ${name} cannot clear an active hold before an exact grant`, () => {
+    // In #80 order: the HOLD, then the RESUME, then the grant. Each fixture
+    // call is newer than the last, so they are made in that order; a RESUME
+    // made first would be older than the HOLD and prove nothing.
+    const hold = holdComment('HOLD', 'KF-X-001');
     const resume = holdComment('RESUME', 'KF-X-001');
     resume.body = change(resume.body);
-    const comments = [holdComment('HOLD', 'KF-X-001'), resume, grantComment()];
+    const comments = [hold, resume, grantComment()];
+    assert.ok(Date.parse(hold.created_at) < Date.parse(resume.created_at), 'the RESUME follows the HOLD');
     const r = run(scenario([comments, comments]), ['--merge']);
     assert.ok(r.trace, r.stderr);
     assert.equal(puts(r).length, 0, 'an invalid release must leave the target hold active');
@@ -233,9 +238,10 @@ test('CLI hold release referent: a valid HOLD_CLEAR then an exact grant gives bo
 });
 
 test('CLI hold release isolation: an invalid release for another packet does not block this exact grant', () => {
+  const hold = holdComment('HOLD', 'KF-OTHER-001');
   const resume = holdComment('RESUME', 'KF-OTHER-001');
   resume.body = resume.body.replace('control_effect: HOLD_CLEAR', 'control_effect: NO_STATE_CHANGE');
-  const comments = [holdComment('HOLD', 'KF-OTHER-001'), resume, grantComment()];
+  const comments = [hold, resume, grantComment()];
   const r = run(scenario([comments, comments]), ['--merge']);
   assert.equal(r.code, 0, r.stderr || r.stdout);
   assert.equal(puts(r).length, 1);
