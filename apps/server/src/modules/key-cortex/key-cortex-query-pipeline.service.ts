@@ -39,6 +39,7 @@ import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
 import { KeyCortexCommandService } from './key-cortex-command.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
+import { mapCortexBatchResult, unverifiedCortexBatchAction } from './key-cortex-batch-result.mapper';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexGenomeBridgeService, AutonomyCheck } from './key-cortex-genome-bridge.service';
@@ -805,25 +806,16 @@ export class KeyCortexQueryPipelineService {
               ),
             );
 
-            const results = await (this.executorService as any).executeBatch(
+            // BatchResult is an object with nested ExecutionRecord results.
+            // Never run legacy actions after the v2 executor may have written.
+            const batch = await this.executorService.executeBatch(
               connectorCommands,
-              { businessId: query.businessId, userId: query.userId },
+              { sourceInfo: { businessId: query.businessId, userId: query.userId } },
             );
-
-            executedActions = results.map((result: any) => ({
-              actionType: (result.command.action
-                .toUpperCase()
-                .replace(/\s+/g, '_') ?? 'EXECUTE_TOOL') as CortexActionType,
-              status: result.success ? 'success' : 'error',
-              description: result.success
-                ? `Executed ${result.command.action} on ${result.command.module}`
-                : `Failed: ${result.error ?? 'Unknown error'}`,
-              result: result.success
-                ? (result.data as Record<string, unknown>)
-                : undefined,
-              error: result.error,
-              requiresApproval: false,
-            }));
+            executedActions = mapCortexBatchResult(batch);
+            if (batch.stoppedEarly) {
+              this.logger.warn(`[processQuery][${correlationId}] v2 batch stopped early; trailing commands were not attempted`);
+            }
 
             assistantMessage.metadata!.actionsTriggered = executedActions;
             this.logger.log(
@@ -833,16 +825,10 @@ export class KeyCortexQueryPipelineService {
             this.logger.error(
               `[processQuery][${correlationId}] v2 execution failed: ${err instanceof Error ? err.message : String(err)}`,
             );
-            const detectedActions = await this.actionDetectionService.detectActions(
-              completionResult.content ?? '',
-            );
-            if (detectedActions.length > 0) {
-              executedActions = await this.actionsService.executeActions(
-                detectedActions,
-                session as any,
-              );
-              assistantMessage.metadata!.actionsTriggered = executedActions;
-            }
+            // Result-shaping failures occur after possible effects. Do not
+            // retry through another executor without inspecting the audit.
+            executedActions = [unverifiedCortexBatchAction()];
+            assistantMessage.metadata!.actionsTriggered = executedActions;
           }
         } else {
           const detectedActions = query.enableActions
@@ -1473,20 +1459,14 @@ export class KeyCortexQueryPipelineService {
               timestamp: new Date(),
               correlationId,
             }));
-            const results = await (this.executorService as any).executeBatch(
+            const batch = await this.executorService.executeBatch(
               connectorCommands,
-              { businessId: query.businessId, userId: query.userId },
+              { sourceInfo: { businessId: query.businessId, userId: query.userId } },
             );
-            executedActions = results.map(
-              (r: any) =>
-                ({
-                  actionType: r.command.action.toUpperCase() as CortexActionType,
-                  status: r.success ? 'success' : 'error',
-                  description: r.success
-                    ? `Executed ${r.command.action}`
-                    : `Failed: ${r.error ?? ''}`,
-                }) as CortexActionResult,
-            );
+            executedActions = mapCortexBatchResult(batch);
+            if (batch.stoppedEarly) {
+              this.logger.warn(`[streamQuery][${correlationId}] v2 batch stopped early; trailing commands were not attempted`);
+            }
 
             if (flags.genomeV3Enabled && this.genomeBridgeService) {
               for (const action of executedActions) {
@@ -1503,11 +1483,15 @@ export class KeyCortexQueryPipelineService {
                 );
               }
             }
-          } catch {
-            executedActions = await this.actionsService.executeActions(
-              detectedActions,
-              session as any,
+          } catch (err: unknown) {
+            // A completed v2 batch must never be replayed by a legacy backend
+            // because result shaping, audit or reporting raised an exception.
+            this.logger.error(
+              `[streamQuery][${correlationId}] v2 batch outcome unavailable: ${err instanceof Error ? err.message : String(err)}`,
             );
+            if (executedActions.length === 0) {
+              executedActions = [unverifiedCortexBatchAction()];
+            }
           }
         } else {
           executedActions = await this.actionsService.executeActions(
