@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "pull_request": 155,
+  "packet_id": "KF-EXEC-AUTH-FAIL-CLOSED-001",
+  "semantic_review_outcome": "PASS",
+  "unresolved_substantive_findings": [],
+  "reviewed_head": "fe79181638e373584c3ca3184a39343a132040cd",
+  "current_artifact_head": "a597c692fcb102de558dd832d88738c0402f69a2",
+  "base_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "previous_reviewed_semantic_head": "8987f6db21a839f90c88e33479768d81cef508e9",
+  "review_scope": "Parsed-command authority boundary in KeyCortexQueryPipelineService.query(), changed unit tests and negative controls, and adjacent reachability/producer contracts sufficient to assess this packet.",
+  "authority": {
+    "admission_verdict": "Not supplied by this semantic review; current control-plane gates remain separate.",
+    "merge_authority": false,
+    "draft_transition_authority": false,
+    "production_authority": false,
+    "remote_mutations_performed": false,
+    "retained_implementation_edits": false
+  },
+  "reviewed_diff": {
+    "files": [
+      ".agent-control/active-packet.yaml",
+      ".agent-control/claude-return.yaml",
+      "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+      "apps/server/src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts",
+      "scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json"
+    ],
+    "semantic_files_identical_between_previous_review_and_current_artifact": true,
+    "semantic_files_identical_between_reviewed_head_and_current_artifact": true,
+    "diff_check_passed": true,
+    "interpretation": "Fresh review and execution against the integrated artifact tree; earlier PASS was not automatically carried forward."
+  },
+  "supported_conclusions": [
+    "The parsed-command executable accumulator starts empty and is published only after every authority evaluation finishes successfully.",
+    "A thrown evaluation or structurally unusable verdict leaves the entire parsed batch non-executable, including an otherwise approved prefix.",
+    "A usable verdict requires boolean allowed, boolean requiresApproval, and a recognized tier.",
+    "The absent-oracle fallback is a complete ordinary denying verdict, distinct in evidence from a failed authority check.",
+    "Existing explicit allow, deny, manual and approval-required decisions are preserved within this boundary."
+  ],
+  "verification": {
+    "focused_original_suite": {
+      "exit_code": 0,
+      "tests": 27,
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0
+    },
+    "negative_controls": {
+      "exit_code": 0,
+      "baseline_passed": 27,
+      "total": 8,
+      "live": 8,
+      "vacuous": 0
+    },
+    "direct_historical_mutation": {
+      "wrapper_exit_code": 0,
+      "expected_test_exit_code": 1,
+      "failed_assertions": 1,
+      "failure": "AssertionError: expected \"spy\" to not be called at all, but actually been called 1 times",
+      "target_test": "AUTH-FC-P01 an autonomy evaluation that throws leaves zero parsed commands executable",
+      "source_restored": true
+    },
+    "original_checkout_clean_after_review": true,
+    "disposable_clone_tracked_diff_clean_after_mutation_restoration": true,
+    "prerequisite_typescript_builds_passed": [
+      "packages/shared",
+      "packages/db"
+    ],
+    "full_application_build_or_typecheck_run": false,
+    "full_server_suite_run": false,
+    "live_database_or_provider_workflows_run": false,
+    "tests_rerun_during_evidence_packaging": false
+  },
+  "environment": {
+    "local_node": "24.19.0",
+    "repository_node": "20.18.1",
+    "repository_pnpm": "9.15.0",
+    "vitest": "2.1.9",
+    "typescript": "5.9.3",
+    "prisma_generated_client": "6.19.2",
+    "dependency_install": "Isolated npm installation with explicit direct versions selected from pnpm-lock.yaml, --ignore-scripts; not a full frozen pnpm dependency tree.",
+    "test_configuration": "Original vitest.unit.config.ts, focused spec, mutation manifest and mutation runner.",
+    "original_checkout": "/tmp/keyflow-pr155-review",
+    "disposable_clone": "/tmp/kf155-probes/repo",
+    "isolated_dependencies": "/tmp/kf155-probes/deps"
+  },
+  "limitations": [
+    {
+      "id": "NODE_RUNTIME_DIFFERENCE",
+      "description": "Local Node 24.19.0 execution is not evidence of execution under repository/CI Node 20.18.1. No full monorepo frozen installation or full application build was performed."
+    },
+    {
+      "id": "PARSED_BATCH_ONLY",
+      "description": "This packet does not establish a request-wide prohibition on all effects after parsed-command authority failure. Later tool-loop, text-detection fallback and streaming paths remain separate. Adjacent ActionsService and Executor have authority checks, but the original parsed-batch failure is not propagated as a request-wide prohibition."
+    },
+    {
+      "id": "PREEXISTING_EXECUTE_BATCH_CONTRACT",
+      "description": "The focused fixture returns an array from executeBatch, while the real executor returns BatchResult. Existing pipeline results.map calls do not match that real return shape. This is unchanged by PR155; the passing allow test proves boundary invocation, not successful handling of real BatchResult or end-to-end execution."
+    },
+    {
+      "id": "EXISTING_SUPERVISED_POLICY",
+      "description": "A structurally valid allowed:true, requiresApproval:false, tier:supervised verdict remains executable. Current inspected producers pair supervised with approval required. A stricter cross-field rule would be a separate policy change."
+    },
+    {
+      "id": "INFORMATIONAL_FIXTURE_SCOPE",
+      "description": "The informational survival fixture uses plain Hello with an empty detector; it does not establish behavior for arbitrary model output."
+    },
+    {
+      "id": "PROCESS_GATES_SEPARATE",
+      "description": "No inference is made about live CI, current packet admission, merge readiness, or broad Flow/KEY safety from these narrow offline results."
+    }
+  ],
+  "evidence": [
+    {
+      "path": "/tmp/kf155-probes/focused-original-report.json",
+      "bytes": 12034,
+      "sha256": "bf83b1f5a6e99f5e72992189b1b115c7e5849e800ce0ea543567d69e1f6305de"
+    },
+    {
+      "path": "/tmp/kf155-probes/negative-controls-report.json",
+      "bytes": 4766,
+      "sha256": "3f24571c1d25d80accdb7e20c626af3c3cab3f7ee88c83baf7cbb75669faa41e"
+    },
+    {
+      "path": "/tmp/kf155-probes/historical-assertion-report.json",
+      "bytes": 13658,
+      "sha256": "5b996b2740ec119132866f1da5c7306de95a20306b539f78d1eff161573b4531"
+    }
+  ],
+  "export_allowlist": [
+    "README.md",
+    "review-summary.json",
+    "focused-original-report.json",
+    "negative-controls-report.json",
+    "historical-assertion-report.json"
+  ],
+  "export_exclusions": [
+    "deps",
+    "repo",
+    "node_modules",
+    "generated clients",
+    "build outputs",
+    "transient logs"
+  ]
+}

@@ -1,0 +1,67 @@
+[
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/pulls/1"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/contents/.agent-control/active-packet.yaml?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/contents/.agent-control/claude-return.yaml?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/compare/cccccccccccccccccccccccccccccccccccccccc...aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/actions/runs?head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&per_page=100"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/pulls/1/reviews?per_page=100&page=1"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/issues/1/events?per_page=100&page=1"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/pulls/1"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/contents/.agent-control/active-packet.yaml?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/contents/.agent-control/claude-return.yaml?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/compare/cccccccccccccccccccccccccccccccccccccccc...aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/actions/runs?head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&per_page=100"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/pulls/1/reviews?per_page=100&page=1"
+  },
+  {
+    "method": "GET",
+    "path": "/repos/local/f9-fixture/issues/1/events?per_page=100&page=1"
+  },
+  {
+    "method": "PUT",
+    "path": "/repos/local/f9-fixture/pulls/1/merge",
+    "body": {
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "merge_method": "squash",
+      "commit_title": "Synthetic F9 only"
+    }
+  }
+]
