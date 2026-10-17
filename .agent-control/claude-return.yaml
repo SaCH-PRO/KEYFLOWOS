@@ -4,7 +4,7 @@ directive_comment_id: 6240051686
 ack_message_id: CC-ACK-F9-001
 ack_comment_id: 6240199516
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
-source_head: b0377a4ca97c8d1f24e75fb7e30036b5bb4fbcb4
+source_head: 3022dcda84ad1b656b549fe64e513624562fac14
 implementation_branch: impl/kf-meta-merge-authority-001
 pr_number: 181
 state: PROVING
@@ -27,6 +27,21 @@ semantic_commits:
     what: evaluateGrantGate names its binding check apart, so the existing NC-ADMISSION-ARTIFACTS-UNBOUND target is one line again
   - sha: b0377a4ca97c8d1f24e75fb7e30036b5bb4fbcb4
     what: the CLI test hands its scenario to the child in a file; Linux caps one environment string at 131072 bytes
+  - sha: 3022dcda84ad1b656b549fe64e513624562fac14
+    what: only a RESUME whose effect readEffect reads as HOLD_CLEAR releases a target hold (PR 181 review 5560243413 P1); five invalid releases, referent, isolation and second-snapshot later-page revocation cases; two controls
+
+review_findings:   # independent ChatGPT PR reviews; the outcome of the gate itself is for the RETURN and ChatGPT
+  - review: 5560243413 (at ff49859e, semantics 739414da)
+    p1: an envelope-valid RESUME without a valid HOLD_CLEAR effect released a target hold; addressed in 3022dcda, thread 4304638418
+    p2: the Linux pagination spawn failure; addressed in b0377a4c; the reviewer resolved thread 4304638419 at 05cabd2e
+  - review: 5560482917 (at 05cabd2e, semantics b0377a4c)
+    detail: P1 still open there; its candidate patch was read and the same rule implemented, with the tests adapted to this harness
+  - copilot: 5560029945, 5560210648 and 5560417789 are NOT_RUN, quota exhausted
+
+previous_head_05cabd2e:
+  semantic_head: b0377a4ca97c8d1f24e75fb7e30036b5bb4fbcb4
+  workflows: CI/CD Pipeline 39075479094, Agent Control Gate 39075479085, Branch divergence 39075479116, DAST (HawkScan) 39075479093, Agent Control Worker Proof 39075479109 and the Autopilot self-test 39075479083 concluded success; the gate's non-draft step and the DAST scan steps were skipped; one authenticated-gh cursor skip per platform; 209 of 209 controls LIVE on Windows
+  superseded_by: 3022dcda, because review 5560482917 kept P1 open at that head
 
 momentum_message_id: CC-MOMENTUM-F9-001
 momentum_comment_id: 6242027082
@@ -47,7 +62,7 @@ diff_scope:   # source_main..source_head
   - scripts/agent-control/tests/admission.spec.mjs
   - scripts/agent-control/tests/helpers/merge-grant-fixture.mjs (new, synthetic)
   - scripts/agent-control/tests/helpers/synthetic-github.mjs (new, synthetic fetch preload)
-  - scripts/agent-control/negative-controls.yaml (16 entries added, none changed or removed)
+  - scripts/agent-control/negative-controls.yaml (18 entries added, none changed or removed)
   - .github/workflows/agent-control-gate.yml (the non-draft step, and issues read permission)
   - docs/development/AGENT_CONTROL_PLANE.md
   - docs/development/AGENT_AUTOPILOT.md
@@ -58,7 +73,7 @@ implementation_decisions:
   - grant: a valid AUTHORITY-profile REVIEW from an allowlisted author, merge_authority true, review_status READY_TO_MERGE, control_effect read by readEffect as NO_STATE_CHANGE or PACKET_ADMISSION, bound exactly to pr_number, packet_id, implementation_branch, source_head, pr_head and source_main; its URL must be on the target repository's issue 80, and a repository field, when present, must name the target
   - ordering: the newest valid message about the target (same packet, PR or branch) must be the grant; anything later voids it, and only a new grant restores it
   - ambiguity: a malformed authority candidate after the grant that is, or may be, about the target denies; one before it is superseded by it
-  - holds: a valid HOLD for the target packet without a later valid RESUME denies, before or after the grant; holds on other packets do not apply
+  - holds: a valid HOLD for the target packet denies, before or after the grant, until a later RESUME whose effect readEffect reads as HOLD_CLEAR; holds on other packets do not apply
   - no global READY_TO_MERGE projection is required or read, so a meta repair does not move or wait on the active application packet
   - the grant is checked last in evaluateAdmission, so every earlier denial keeps its reason; the artifact review_status check is kept as it was
   - recheckBeforeMerge requires the same grant (comment id, message id, binding) in both snapshots
@@ -77,23 +92,23 @@ characterization:
   line_endings: the probe hashes need an LF checkout; a detached LF worktree of 98ee0202 was used, read only
 
 tests:
-  at: b0377a4ca97c8d1f24e75fb7e30036b5bb4fbcb4
+  at: 3022dcda84ad1b656b549fe64e513624562fac14
   host: Windows 11, Node 20.18.1, worker session, 2026-10-17
   portable:
     command: node --test scripts/agent-control/tests/*.spec.mjs
-    total: 530
-    passed: 530
+    total: 538
+    passed: 538
     failed: 0
     skipped: 0
   portable_and_windows:
     command: KF_REQUIRE_POWERSHELL=1 node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
-    total: 554
-    passed: 554
+    total: 562
+    passed: 562
     failed: 0
     skipped: 0
   focused:
-    merge_grant_spec: 21/21
-    merge_cli_spec: 10/10 (real CLI, synthetic fetch preload, no passthrough)
+    merge_grant_spec: 22/22
+    merge_cli_spec: 17/17 (real CLI, synthetic fetch preload, no passthrough)
     admission_spec: 46/46 (39 original, 7 added)
   negative_controls:
     command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
@@ -136,7 +151,11 @@ proof_matrix:
   - obligation: live negative controls, none vacuous, none removed
     evidence_scope: semantic_head
     result: PROVEN
-    proof: 209/209 at 739414da
+    proof: 209/209 at 739414da and at 05cabd2e; the 211-entry manifest of 3022dcda is reported in the RETURN
+  - obligation: an envelope-valid RESUME without a valid HOLD_CLEAR effect never releases a target hold (review 5560243413 P1)
+    evidence_scope: semantic_head
+    result: PROVEN
+    proof: merge-grant.spec.mjs NC hold release; merge-cli.spec.mjs NC CLI hold release (five cases, --merge and --grant-only); NC-F9-INVALID-RESUME-RELEASES-HOLD and NC-F9-CLI-INVALID-RESUME-RELEASES-HOLD
   - obligation: every required workflow and the independent review at the PR head
     evidence_scope: exact_head
     result: PENDING
