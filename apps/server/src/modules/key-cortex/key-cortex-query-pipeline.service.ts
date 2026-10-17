@@ -405,8 +405,11 @@ export class KeyCortexQueryPipelineService {
         })),
       });
 
-      let autonomyCheckedCommands = parsedCommands;
+      // Fail closed: nothing parsed is executable until the whole batch has been
+      // evaluated. An authority error may only narrow this set, never widen it.
+      let autonomyCheckedCommands: typeof parsedCommands = [];
       const autonomyResults: Record<string, AutonomyVerdict | AutonomyCheck> = {};
+      let autonomyCheckError: string | null = null;
 
       if (parsedCommands.length > 0) {
         try {
@@ -432,9 +435,14 @@ export class KeyCortexQueryPipelineService {
             } else {
               autonomyCheck = {
                 allowed: false,
+                tier: 'manual',
                 requiresApproval: true,
                 reason: 'No autonomy oracle available',
               } as AutonomyCheck;
+            }
+
+            if (!this.isUsableAutonomyVerdict(autonomyCheck)) {
+              throw new Error(`Unusable autonomy verdict for ${actionKey}`);
             }
 
             autonomyResults[`${cmd.module}:${cmd.action}`] = autonomyCheck;
@@ -462,8 +470,11 @@ export class KeyCortexQueryPipelineService {
             `[processQuery][${correlationId}] Autonomy check: ${approvedCommands.length}/${parsedCommands.length} commands approved`,
           );
         } catch (err: any) {
-          this.logger.warn(
-            `[processQuery][${correlationId}] Autonomy check failed, using all parsed commands: ${err instanceof Error ? err.message : String(err)}`,
+          // The batch is atomic: commands approved before the failure are not
+          // kept, because autonomyCheckedCommands is only assigned above.
+          autonomyCheckError = err instanceof Error ? err.message : String(err);
+          this.logger.error(
+            `[processQuery][${correlationId}] Autonomy check failed, failing closed: ${autonomyCheckedCommands.length}/${parsedCommands.length} parsed commands executable: ${autonomyCheckError}`,
           );
         }
       }
@@ -471,6 +482,12 @@ export class KeyCortexQueryPipelineService {
       await this.logEvent(correlationId, 'STEP_5_CHECK_AUTONOMY', {
         totalCommands: parsedCommands.length,
         approvedCommands: autonomyCheckedCommands.length,
+        outcome:
+          autonomyCheckError === null
+            ? 'evaluated'
+            : 'authority_check_failed_closed',
+        authorityCheckFailed: autonomyCheckError !== null,
+        authorityCheckError: autonomyCheckError,
         autonomyMap: Object.fromEntries(
           Object.entries(autonomyResults).map(([k, v]) => [k, v.allowed]),
         ),
@@ -1633,6 +1650,29 @@ export class KeyCortexQueryPipelineService {
         // Non-critical
       }
     }
+  }
+
+  /**
+   * A verdict is usable only when it is an object that states every field the
+   * execution decision reads: a boolean `allowed`, a boolean `requiresApproval`
+   * and a recognized `tier`. Anything else (nothing returned, a string, a
+   * truthy non-boolean, an `allowed` with the approval semantics left out) is
+   * not an answer from the authority and must not be read as one: an omitted
+   * `requiresApproval` or `tier` is not a statement that no approval is needed.
+   */
+  private isUsableAutonomyVerdict(verdict: unknown): boolean {
+    if (typeof verdict !== 'object' || verdict === null) {
+      return false;
+    }
+    const { allowed, requiresApproval, tier } = verdict as Record<
+      string,
+      unknown
+    >;
+    return (
+      typeof allowed === 'boolean' &&
+      typeof requiresApproval === 'boolean' &&
+      (tier === 'manual' || tier === 'supervised' || tier === 'full')
+    );
   }
 
   // ── Safety helpers ────────────────────────────────────────

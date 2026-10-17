@@ -1,22 +1,27 @@
-packet_id: KF-META-AUTHORITY-EFFECT-COMPAT-001
-directive_message_id: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001
-directive_comment_id: 6025258558
+packet_id: KF-EXEC-AUTH-FAIL-CLOSED-001
+directive_message_id: CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001
+directive_comment_id: 6010541876
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
-  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001   # 6025258558; NO_STATE_CHANGE; releases this bounded meta repair
-  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE; approves the continuation block and adds seven requirements for it
-  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19
-  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004   # 6108531988; NO_STATE_CHANGE; integrate with main 7d2619c7
-  - CG-REVIEW-KF159-INTEGRATED-001   # 6109079503; NO_STATE_CHANGE; the fallback reading of f14adec5
-  - CG-REVIEW-KF159-ADMISSION-RECORD-001   # 6109741134; NO_STATE_CHANGE; accepts the fourth RETURN and orders the admission record; the current authority
-in_reply_to: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
-ack_message_id: CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001
-ack_comment_id: 6025343912
-current_authority_message_id: CG-REVIEW-KF159-ADMISSION-RECORD-001
-current_authority_comment_id: 6109741134
-current_authority_ack_message_id: CC-ACK-KF159-ADMISSION-RECORD-001
-current_authority_ack_comment_id: 6109766740
-source_main: 7d2619c771cd008f21bae9c60ca348e3deaa07cd
-implementation_branch: impl/kf-meta-authority-effect-compat-001
+  - CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001   # 6010541876; PACKET_RELEASE
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011507550; finding AUTH-FC-F1 on 65706fcc
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003   # 6018421547; the fallback reading of 8987f6db; authorized the control binding
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022210803; the same reading with its three evidence fields at top level
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023054785; historical re-anchor order, superseded by review 006
+  - CG-REVIEW-KF155-006   # 6240050804; exact semantic evidence and explicit contradiction ruling; NO_STATE_CHANGE
+in_reply_to: CG-REVIEW-KF155-006
+ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-001
+ack_comment_id: 6010899764
+current_authority_message_id: CG-REVIEW-KF155-006
+current_authority_comment_id: 6240050804
+current_authority_ack_message_id: null
+current_authority_response_message_id: null
+current_authority_response_comment_id: null
+last_acked_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
+last_acked_authority_ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
+last_acked_authority_ack_comment_id: 6022283475
+pr_number: 155
+source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
+implementation_branch: impl/kf-exec-auth-fail-closed-001
 state: PROVING
 health: YELLOW
 scope_changed: false
@@ -24,124 +29,174 @@ production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-# As CG-REVIEW-KF159-ADMISSION-RECORD-001 (6109741134) declares it. Transcribed, not decided here.
-review_status: ACCEPT_FOR_ADMISSION
+review_status: PENDING_CHATGPT_REVIEW
 
 objective: >
-  Repair the stale derived projection at the authority-effect boundary. Two
-  valid REVIEWs on #80 declared a control_effect outside the canonical
-  vocabulary, and the fold stopped at the first. Add an explicit,
-  deterministic, fail-closed normalization of exactly those two historical
-  spellings to existing canonical effects. The canonical vocabulary and the
-  state machine do not change.
+  Correct the live KeyCortex parsed-command autonomy failure path so any
+  authority evaluation error or unusable verdict fails closed to zero
+  executable parsed commands while preserving normal informational response
+  behavior and existing allowed/denied semantics.
 
-target_contract:
-  aliases:
-    BOUNDED_CORRECTION: PACKET_CORRECTION
-    AUTHORIZE_CONTROL_BINDING: NO_STATE_CHANGE
-  rule: >
-    The raw declared effect may be kept as diagnostic and reduction evidence.
-    Every state transition flows through the existing canonical effect. Every
-    other unknown token still fails closed.
+live_defect:
+  source_file: apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts
+  source_blob: 33540d0c07d2affd919246ebb5975ce0bef32109
+  current_behavior: >   # characterized main baseline from the original directive, before this packet correction
+    autonomyCheckedCommands is initialized from parsedCommands. If the autonomy
+    evaluation loop throws, the catch logs "Autonomy check failed, using all
+    parsed commands" and leaves the original parsed set executable. Later,
+    when actions/v2/executor are active, executeBatch receives that set.
+  violated_invariant: Authority uncertainty/error may only narrow capability, never widen it.
+
+hard_invariant: >
+  authority_check_error => post-error executable parsed-command set is empty.
+  More generally, authority uncertainty/error may never increase the executable
+  capability set.
+
+required_semantics:
+  fail_closed_default: >
+    The executable parsed-command accumulator begins empty/non-executable.
+    Parsed commands become executable only after a successful explicit allow
+    verdict that does not require approval and does not carry command-level
+    requiresApproval.
+  atomic_batch_failure: >
+    If autonomy evaluation throws or returns an unusable value for any parsed
+    command in this batch, zero parsed commands from the batch may execute.
+    Do not preserve a partially approved prefix.
+  unavailable_oracle: >
+    Preserve the existing no-oracle behavior as non-executable. Do not invent
+    authority or treat absence of an authority oracle as approval.
+  informational_survival: >
+    An authority-check failure must not unnecessarily destroy the conversational
+    response. Model/informational response may continue with zero parsed-command
+    effects.
+  allowed_path: >
+    A command receiving the existing explicit allowed/non-manual verdict and
+    not requiring command approval continues to the same existing execution path.
+  denied_path: A denied/manual/approval-required command remains non-executable.
+  honest_observability: >
+    The logger and STEP_5_CHECK_AUTONOMY evidence must distinguish an authority
+    evaluation failure/fail-closed degradation from authorization success.
+    Do not summarize a checker exception as zero ordinary denials or as success.
 
 allowed_scope:
-  - scripts/agent-control/lib/authority-effects.mjs
-  - scripts/agent-control/tests/authority-effects.spec.mjs
-  - scripts/agent-control/negative-controls.yaml where a live anti-regression mutation is needed
-  - scripts/agent-control/fixtures/reducer-recovery-truth.json only if required to replay real #80 evidence
-  - docs/development/AGENT_CONTROL_PLANE.md
-  - architecture/execution-paths.md and generated architecture artifacts only if real scanners require them
-  - .agent-control packet artifacts for this meta repair only
+  - apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts
+  - apps/server/src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts
+  - scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json
+  - .agent-control/** only for the existing packet control artifacts
+  - no other semantic/runtime file unless a concrete compile/test dependency makes it unavoidable; if so stop and post CONTRADICTION before widening
 
 prohibited_scope:
-  - any change to PR 155, its semantic head 8987f6db21a839f90c88e33479768d81cef508e9 or its control head fdc900b72062391189d31c6994af353ce9dc4e9c
-  - a parallel programme state or a new effect made to fit historical wording
-  - editing or deleting any #80 comment
-  - a manual programme-state edit in place of the reducer correction
-  - weakening a gate, or removing an existing negative control
-  - production or provider effects
-  - merge without a separate exact-head REVIEW that grants it
-  - broadening silently if the two aliases do not restore a valid projection
+  - schema migration
+  - a new service
+  - a new provider or external dependency
+  - a new workflow or runtime
+  - FLOW_TOOLS or CapabilityContract redesign
+  - AutonomyOrchestrator redesign
+  - Context Genome mutation
+  - broad guardrail refactor
+  - UI work
+  - provider traffic
+  - production deployment or production data mutation
+  - broad cleanup of unrelated KeyCortex action paths
+  - fixing tool-loop, connector, caching, or other ACTION follow-on findings in this packet
+  - merge without a later exact-head ChatGPT admission
 
-invariants:
-  - CONTROL_EFFECTS is unchanged
-  - an alias is resolved before any rule, and every rule after that is the canonical effect's own, the message-type rule included
-  - AUTHORIZE_CONTROL_BINDING grants no merge authority, admission, checkpoint, release, hold or any other programme mutation
-  - any other unknown control_effect stops the fold with CONTROL_EFFECT_UNKNOWN
-  - malformed or edited authority stays fail closed
-  - the committed checkpoint stays anchored to CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 (5993146604)
+review_finding_AUTH_FC_F1:   # CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001
+  severity: BLOCKING
+  bounded_correction:
+    - validate boolean allowed, boolean requiresApproval and a recognized tier, or an equivalent predicate that cannot read omitted approval semantics as permission
+    - keep the no-oracle behavior non-executable and ordinary; make its local fallback verdict shape complete if the stricter validator requires it
+    - targeted AUTH-FC-P01B coverage for an allowed true verdict missing approval or tier metadata, with zero execution for the whole batch
+    - a LIVE negative control so weakening the new shape validation makes the named malformed-verdict test fail by assertion
+  scope: the same three semantic and proof files only
+
+current_authorization:
+  integration_with_main:
+    authorized_by: the human operator, in an interactive session on 2026-10-11
+    control_room_message: no prior directive or pre-mutation ACK; later review CG-REVIEW-KF155-006 accepts the integration baseline and preserves that historical deviation
+    what: the historical ordinary git merge fe791816 of main 98ee0202, followed by the two-artifact commit a597c692; completed and reported in RETURN 6112455909
+  semantic_mutation: NOT_AUTHORIZED; the three semantic and proof files of this packet are unchanged
+  merge: NOT_AUTHORIZED
+  ready_for_review: NOT_AUTHORIZED
 
 proof_obligations:
-  - exact historical comment 6011507550 folds with canonical PACKET_CORRECTION semantics
-  - exact historical comment 6018421547 folds as NO_STATE_CHANGE and cannot grant merge authority, admission, checkpoint, release, hold or any other programme mutation
-  - the fold from RECOVERY-021 reaches the current newest authority without skipping a message
-  - current PR 155 remains the active packet and resolves to the state implied by the latest canonical PACKET_CORRECTION
-  - arbitrary unknown control_effect values still stop with CONTROL_EFFECT_UNKNOWN
-  - an alias on a disallowed message type remains rejected under the canonical target effect's type rules
-  - malformed or edited authority remains fail closed
-  - no historical #80 comment is edited or deleted
-  - no gate is weakened and no existing negative control is removed merely to obtain green
-  - run the full portable control-plane suite, and the Windows worker proof and negative controls if this branch changes their substrate
-  - record exact-head CI; skipped proof is never counted as pass
+  AUTH-FC-P01_EXCEPTION_NARROWS: >
+    With one or more parsed executable commands present, autonomy evaluation
+    throws; executorService.executeBatch is not called and zero parsed commands
+    execute.
+  AUTH-FC-P01B_UNUSABLE_NARROWS: >
+    An unusable/malformed autonomy verdict on the executable parsed-command path
+    also leaves zero parsed commands executable.
+  AUTH-FC-P02_MUTATION_CONTROL: >
+    Restore the historical fail-open initialization/behavior using the existing
+    application proof-admission negative-control runner. The specifically named
+    AUTH-FC-P01 proof must then fail by assertion, not compilation, timeout or
+    unrelated suite failure.
+  AUTH-FC-P03_CONVERSATION_SURVIVES: >
+    The same authority failure still permits a normal non-effect informational
+    response to complete.
+  AUTH-FC-P04_ALLOWED_UNCHANGED: >
+    A valid allowed command retains its existing successful path to the executor.
+  AUTH-FC-P05_DENIED_UNCHANGED: >
+    Denied/manual/approval-required commands remain non-executable.
+  AUTH-FC-P06_HONEST_EVIDENCE: >
+    STEP_5_CHECK_AUTONOMY and/or its directly associated structured evidence
+    identifies fail-closed authority-check degradation. A restored fail-open
+    path must not satisfy this proof.
 
-continuation_requirements:   # CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
-  - the replay concatenates the historical recording and the continuation in one deterministic authority order
-  - no duplicate comment ids across the two segments
-  - the first continuation authority coordinate is strictly after RECOVERY-021
-  - every continuation comment used for authority replay is parse-equal to the live #80 source captured for this packet
-  - the combined replay reaches the newest authority observed by the packet without skipping a candidate
-  - generation semantics stay global across the combined evidence
-  - the old frozen fixture is never mistaken for a current complete authority snapshot outside the tests that intentionally pin it
+negative_controls:
+  runner: scripts/proof-admission/negative-controls.mjs
+  manifest: scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json
+  no_vacuous_controls: true
 
-integration_requirements:   # CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004
-  - reconcile the candidate with main 7d2619c7 as one coherent source tree, the code of merged PR 166 included
-  - all 193 negative controls apply and each one is live; no control is adjusted or silenced to that end
-  - commits after the semantic head change control artifacts only, and source_main and source_head are the real ones
-  - the integrated semantic head needs its own independent reading; the reading of 2a3dac19 is not approval of it
-  - full control-plane tests, the 193 mutations, the Windows worker proof, DAG validation, artifact binding and live status.mjs --verify
-  - an ordinary push to the existing branch, the PR left draft, then one RETURN
-
-current_authorization:   # CG-REVIEW-KF159-ADMISSION-RECORD-001
-  decision: ACCEPT_FOR_ADMISSION for the bounded, control-only admission-record preparation step; the message says it is not yet READY_TO_MERGE
-  control_artifacts: >
-    one atomic control-only commit on the PR 159 branch that records this
-    decision and the earlier reading 6109079503 in the two packet artifacts;
-    source_main and source_head stay as they are
-  admission_record: >
-    in claude-return.yaml, review_status ACCEPT_FOR_ADMISSION and a top-level
-    semantic_review block with implementer claude and two entries: copilot
-    NOT_RUN, quota_exhausted, at ee642300, PR review 5483187666; chatgpt at
-    f14adec5 with the outcome message 6109079503 states and no unresolved
-    substantive finding. A transcription of ChatGPT's decision, not a review
-    by Claude
-  semantic_mutation: NOT_AUTHORIZED; the reviewed semantic head does not change
-  ready_for_review_transition: NOT_AUTHORIZED; a separate explicit decision
-  merge: NOT_AUTHORIZED
-  auto_merge: NOT_AUTHORIZED
-  programme_admission_credit_or_checkpoint: NOT_GRANTED
-  next_packet_release: NOT_AUTHORIZED
-  gate_change: NOT_AUTHORIZED; a skipped test or scan is never converted to proof
-  issue_80_edit: NOT_AUTHORIZED
-  other_prs_and_worktrees: NOT_AUTHORIZED; PR 169, PR 155, PR 168, uncommitted research and other worktrees are not touched
-  production_or_worker_installation: NOT_AUTHORIZED
-  after_the_return: >
-    ChatGPT evaluates the admission record, the current base, the newest run
-    of every required workflow at the exact head, and the order of the
-    non-draft transition. The exact-head evaluator must be eligible before any
-    merge, and its draft-only stop is not admission evidence.
-
-anti_duplication: >
-  Before adding code, verify that no existing normalization or compatibility
-  seam already owns historical control-effect vocabulary. Prefer one explicit
-  alias table beside readEffect over scattered special cases.
+rollback:
+  rule: >
+    The historical executable-on-authority-error behavior is a known critical
+    fail-open defect and is not an acceptable rollback target.
+  emergency_behavior: >
+    If this correction itself creates an operational regression, prefer an
+    existing hold/disable path for the action-capable Cortex execution surface
+    and then roll forward. A code revert is acceptable only if it does not
+    restore executable-on-authority-error semantics.
 
 stop_conditions:
-  - the two aliases alone do not restore a valid projection; stop at the next exact blocking message and report it
-  - any packet assumption conflicts with evidence (CONTRADICTION)
-  - production access or provider traffic would be required
+  - current main no longer contains the characterized fail-open branch
+  - another admitted packet modifies either semantic target before implementation starts
+  - fixing the invariant requires redesigning AutonomyOrchestratorService
+  - fixing the invariant requires schema/database changes
+  - the existing application negative-control runner cannot express the required mutation without changing its semantics
+  - any additional architecture decision is required beyond the fail-closed rule above
+  - production/provider access would be required
+  - an existing canonical owner has already corrected the invariant
 
 return_contract: >
-  Return the minimal implementation, the real replay result from RECOVERY-021
-  through current authority, the resulting effective programme projection, all
-  exact-head proof, and any contradiction discovered. Push a draft PR and
-  report the exact semantic head. No merge.
+  ACK before substantive work; branch from the exact source_main; characterize
+  the target before editing; keep the three-file semantic and proof write set;
+  report the exact semantic head and changed files; the focused query-pipeline
+  suite; the full applicable server unit suite and the typecheck, build and
+  lint ratchet; the application negative-control manifest with zero vacuous
+  controls; the historical mutation makes the named fail-closed assertion
+  fail; the repository-required workflows on the exact head; an independent
+  reading of the exact semantic head by a reviewer other than the implementer;
+  control artifacts only after that reading; RETURN once, with merge_authority
+  false; no merge before a later exact-head ChatGPT admission.
+
+# This is the packet's review record, not the global worker selector state.
+review_record_update:
+  actor: chatgpt
+  authority_message_id: CG-REVIEW-KF155-006
+  authority_comment_id: 6240050804
+  authority_url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804
+  prepared_from_artifact_head: a597c692fcb102de558dd832d88738c0402f69a2
+  scope: control-only evidence transcription; no application, proof, or scope changes
+  semantic_evidence: recorded in claude-return.yaml under semantic_head_review
+  admission: PENDING; no ACCEPT_FOR_ADMISSION or READY_TO_MERGE decision is recorded
+  worker_action: none; current separately released F9 assignment is unchanged
+  draft_transition: NOT_AUTHORIZED
+  merge: NOT_AUTHORIZED
+  production_or_provider_effects: NOT_AUTHORIZED
+  historical_authority_response:
+    message_id: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
+    comment_id: 6023151885
+    disposition: settled by CG-REVIEW-KF155-006; the old re-anchor order is unnecessary after merged PR 159
+  historical_process_deviation: the operator-authorized main integration had no prior issue 80 directive or pre-mutation ACK; review 006 accepts its baseline without inventing either

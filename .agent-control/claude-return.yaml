@@ -1,499 +1,334 @@
-packet_id: KF-META-AUTHORITY-EFFECT-COMPAT-001
-directive_message_id: CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001
-directive_comment_id: 6025258558
+packet_id: KF-EXEC-AUTH-FAIL-CLOSED-001
+directive_message_id: CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001
+directive_comment_id: 6010541876
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
-  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001   # 6025258558; NO_STATE_CHANGE
-  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025392698; NO_STATE_CHANGE
-  - CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051089263; NO_STATE_CHANGE; the fallback reading of 2a3dac19
-  - CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004   # 6108531988; NO_STATE_CHANGE; integrate with main 7d2619c7
-  - CG-REVIEW-KF159-INTEGRATED-001   # 6109079503; NO_STATE_CHANGE; the fallback reading of f14adec5
-  - CG-REVIEW-KF159-ADMISSION-RECORD-001   # 6109741134; NO_STATE_CHANGE; accepts the fourth RETURN and orders the admission record; the current authority
-current_authority_message_id: CG-REVIEW-KF159-ADMISSION-RECORD-001
-current_authority_comment_id: 6109741134
-ack_message_id: CC-ACK-KF159-ADMISSION-RECORD-001
-ack_comment_id: 6109766740
+  - CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001   # 6010541876; PACKET_RELEASE
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011507550; finding AUTH-FC-F1 on 65706fcc
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003   # 6018421547; the fallback reading of 8987f6db; authorized the control binding
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022210803; the same reading with its three evidence fields at top level
+  - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023054785; historical re-anchor order, superseded by review 006
+  - CG-REVIEW-KF155-006   # 6240050804; exact semantic evidence and explicit contradiction ruling; NO_STATE_CHANGE
+current_authority_message_id: CG-REVIEW-KF155-006
+current_authority_comment_id: 6240050804
+ack_message_id: null
+ack_comment_id: null
 prior_ack_message_ids:
-  - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-001   # 6025343912
-  - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-ACK-002   # 6025467329
-  - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003   # 6051141358
-  - CC-ACK-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004   # 6108578719
-  - CC-ACK-KF159-INTEGRATED-001   # 6109108101
+  - CC-ACK-GENAI-AUTH-FAIL-CLOSED-001   # 6010899764
+  - CC-ACK-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011551504
+  - CC-ACK-GENAI-AUTH-FAIL-CLOSED-003   # 6018509327
+  - CC-ACK-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022283475
 progress_message_ids:
-  - CC-PROGRESS-META-AUTHORITY-EFFECT-COMPAT-001   # 6025969876; the seven continuation requirements mapped to tests
-contradiction_message_ids: []
+  - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-001   # 6011188304; IMPLEMENTING to PROVING at 65706fcc, and two discoveries
+  - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-002   # 6011325128; workflow results at 65706fcc; the primary reviewer could not run
+  - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-003   # 6012165571; AUTH-FC-F1 corrected; the head moved to 8987f6db
+contradiction_message_ids:
+  - CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023151885; the answer to 6023054785; no branch mutation
 # This file is a pre-RETURN record. The RETURN is posted on #80 after every
 # check on the head that carries this file has finished, with no further branch
 # mutation. That RETURN is the final evidence envelope.
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
 previous_return_message_ids:
-  - CC-RETURN-META-AUTHORITY-EFFECT-COMPAT-001
-  - CC-RETURN-META-AUTHORITY-EFFECT-COMPAT-002
-  - CC-RETURN-META-AUTHORITY-EFFECT-COMPAT-003   # 6109041941; for directive 004, from head ee642300
-  - CC-RETURN-META-AUTHORITY-EFFECT-COMPAT-004   # 6109668086; for CG-REVIEW-KF159-INTEGRATED-001, from head 565429bd
+  - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-001
+  - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-002
+  - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-003
 never_posted_return_message_ids: []
-source_main: 7d2619c771cd008f21bae9c60ca348e3deaa07cd
-source_head: f14adec5251aa3a69132c336efcb1819fd5b6a95
-implementation_branch: impl/kf-meta-authority-effect-compat-001
+source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
+source_head: fe79181638e373584c3ca3184a39343a132040cd
+previous_source_heads:
+  - 65706fcc52f440f9225223040e2ee0ee738e04bb   # first semantic commit; finding AUTH-FC-F1 was raised against it
+  - 8987f6db21a839f90c88e33479768d81cef508e9   # the correction of AUTH-FC-F1; historical independent reading, superseded for admission by the fe791816 reading in review 6240050804
+previous_source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
+implementation_branch: impl/kf-exec-auth-fail-closed-001
+pr_number: 155
 state: PROVING
 health: YELLOW
 scope_changed: false
 production_touched: false
 provider_traffic: false
-# ChatGPT's value, from CG-REVIEW-KF159-ADMISSION-RECORD-001 (6109741134). See admission_record.
-review_status: ACCEPT_FOR_ADMISSION
+review_status: PENDING_CHATGPT_REVIEW
 programme_credit: ZERO
 merge_authority: false
 implementer: claude
 
 summary: >
-  The alias repair is unchanged: lib/authority-effects.mjs has one frozen
-  table, CONTROL_EFFECT_ALIASES, beside readEffect(), reading
-  BOUNDED_CORRECTION as PACKET_CORRECTION and AUTHORIZE_CONTROL_BINDING as
-  NO_STATE_CHANGE. What changed is the tree it sits in. Main moved to
-  7d2619c7 when PR 166 merged, and commit 67fb732a then copied the 23
-  negative controls of PR 166 into this branch's manifest without the code
-  they mutate. This head integrates main by an ordinary merge commit,
-  f14adec5, which is the semantic head. Every commit after it changes
-  control artifacts only. This commit is the third of them. It transcribes
-  the decision ChatGPT wrote on #80 in message 6109741134: the review status
-  above, and the semantic_review block with the two entries that message
-  names. See admission_record. No script, test, manifest, fixture or
-  document changes with it.
+  Control-only evidence update by ChatGPT under review 6240050804. The
+  application semantics remain fe791816, and the source base remains
+  98ee0202. The current packet review and the disposition of the old
+  re-anchor contradiction are recorded below. The earlier builder RETURN
+  at a597c692 is historical evidence. This pre-RETURN record claims no
+  future artifact identity or post-check result; exact_head_proof remains
+  PENDING. The PR
+  stays draft, review_status stays PENDING_CHATGPT_REVIEW, and no merge
+  grant, ready transition, new worker task or production effect is granted.
 
 health_reason: >
-  YELLOW is about process. The primary reviewer could not run at any head of
-  this PR, the outcome for the head that carries this file is not known yet,
-  and the PR is still draft, so the admission step of the gate has never run
-  on it. The code and its local proof have no open failure. Messages
-  6109079503 and 6109741134 state their own health; that value is ChatGPT's
-  and is not copied here.
+  YELLOW for process/admission work remaining. Review 6240050804 supplies
+  current semantic evidence and settles contradiction 6023151885. A future
+  control-only artifact head still needs its own workflow evidence and
+  final admission decision. No failure of the bounded parsed-command
+  correction is asserted by this pending admission state. F9 remains a
+  separate control-plane correction and is not a new review prerequisite.
 
-admission_record:
-  decided_by: chatgpt
-  decision_message_id: CG-REVIEW-KF159-ADMISSION-RECORD-001
-  decision_comment: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6109741134
-  decision_effect: NO_STATE_CHANGE
-  in_reply_to: the fourth RETURN, issue comment 6109668086, from head 565429bd
-  review_status_declared: ACCEPT_FOR_ADMISSION
-  transcribed_by: claude
-  what_it_is: >
-    A mechanical record of a decision ChatGPT made. Claude decided nothing
-    here and reviewed nothing. The values of review_status and of the
-    semantic_review block are the ones message 6109741134 gives.
-  what_the_decision_accepts: >
-    The fourth RETURN and the unchanged integrated semantics f14adec5, for the
-    bounded, control-only step of preparing this record.
-  what_the_decision_does_not_grant:
-    - a merge, by anyone or by automation
-    - a ready-for-review transition; the PR stays draft
-    - READY_TO_MERGE; the message says this is not yet that
-    - programme admission, a programme checkpoint or programme credit
-    - the release of any other packet
-  still_required: >
-    A separate explicit decision by ChatGPT before the PR leaves draft or is
-    merged, after it has read the RETURN for the head that carries this file.
-  what_the_repository_reads: >
-    lib/admission.mjs and the non-draft step of the gate workflow read
-    ACCEPT_FOR_ADMISSION exactly as they read READY_TO_MERGE, and neither
-    reads merge_authority. With this record on the PR head, the draft flag is
-    what keeps the automated merge path from running. See open finding F9.
-
+# Historical integration performed by Claude on 2026-10-11; no integration is performed by this record update.
 integration:
+  authorized_by: the human operator, in an interactive session on 2026-10-11; no issue 80 directive names this work
   why: >
-    At 67fb732a the branch sat on ac3a6384 and its manifest named 193
-    controls. 23 of them belong to PR 166 and mutate files this branch did
-    not have, so each was VACUOUS (run 38077315718: 170 live, 23 vacuous).
-    The gate compares source_head with the synthetic merge checkout, so it
-    also saw the manifest edit and every file of PR 166 as non-control
-    changes after 2a3dac19 (run 38077315710).
+    The gate compares source_head with the synthetic merge of the PR and its
+    base. With main at 98ee0202, the files of PR 166 and PR 159 are
+    non-control changes after 8987f6db, and both artifact files conflict
+    with main's, which describe KF-META-AUTHORITY-EFFECT-COMPAT-001.
   what: >
-    git merge of origin/main 7d2619c7 into the branch. No conflict. No
-    rebase and no force push; 2a3dac19, c7c6105c, dc4dcd81 and 67fb732a are
-    all still ancestors of the head.
-  manifest: >
-    The merged manifest is byte-for-byte the manifest of 67fb732a. It is the
-    manifest of main 7d2619c7 with 188 lines added and none removed: 193
-    ids, 193 unique, the 180 of main and the 13 NC-COMPAT controls.
-  alias_code: >
-    scripts/agent-control/lib/authority-effects.mjs and
-    scripts/agent-control/tests/authority-effects.spec.mjs are byte-for-byte
-    as they are at 2a3dac19. Main did not touch either file.
+    git merge of origin/main 98ee0202499ba87fa4ee13d58a2a9075016225bd into the branch, as merge commit
+    fe79181638e373584c3ca3184a39343a132040cd, parents fdc900b7 and 98ee0202. No rebase, no reset and no
+    force push; 65706fcc, 8987f6db, 26111633 and fdc900b7 are all still
+    ancestors of the head.
+  conflicts: >
+    Two, both whole-file: .agent-control/active-packet.yaml and
+    .agent-control/claude-return.yaml. This packet's versions were kept
+    byte-for-byte as they are at fdc900b7. Nothing else conflicted.
   from_main: >
-    The ten files of PR 166 arrive exactly as they are on main: the autopilot
-    workflow, AGENT_AUTOPILOT_OPERATIONS.md, claude-worker.ps1,
-    lib/merge-record.mjs, record-auto-merge.mjs, three specs, the Windows
-    harness and the manifest. Against main this head differs in the same ten
-    files as before the merge.
+    Seventeen files outside .agent-control arrive exactly as they are on
+    main: the autopilot workflow, three architecture maps, two documents
+    under docs/development, claude-worker.ps1, the reducer fixture,
+    lib/authority-effects.mjs, lib/merge-record.mjs, record-auto-merge.mjs,
+    the control-plane manifest, four specs and the Windows harness. Main did
+    not change any file under apps or packages between ac3a6384 and 98ee0202.
+  packet_files: >
+    The three semantic and proof files of this packet are byte-for-byte as
+    they are at 8987f6db. Against main the merge commit differs in those
+    three files and the two control artifacts and in nothing else.
   not_done: >
-    No control was edited, retargeted or removed. No test was changed. The
-    checkpoint in programme-state.yaml is untouched and still anchored to
-    RECOVERY-021. No workflow or gate was changed by this packet.
-
-delivery:
-  round: directive 004 only; see this_round for the commit that carries this file
-  this_round: >
-    CG-REVIEW-KF159-ADMISSION-RECORD-001 was delivered by the unattended
-    worker, as CG-REVIEW-KF159-INTEGRATED-001 was. Its id is 36 characters, so
-    the worktree path is inside the limit. This commit was made in the
-    worker-owned worktree named after that id, detached at the branch head,
-    and pushed as HEAD to the branch because the branch is checked out in
-    C:/kf-compat159.
-  expected: the directive asked for execution through the unattended worker in its own worktree
-  observed: >
-    The worker selected the directive at 2026-10-11T11:28:10Z and failed at
-    git worktree add on that tick and on the next. The worktree directory is
-    named after the message id, the id is 68 characters, and the resulting
-    path plus the longest path in the repository is 265 characters, over the
-    Windows limit of 260. The same command at a scratch path of that length
-    fails with Filename too long and succeeds at 113 characters.
-  second_defect: >
-    The failure is thrown before the attempt ledger is written, so it is
-    never counted, held or escalated. The worker retries every 120 seconds.
-  consequence: >
-    An interactive Claude session started by the operator did the work in
-    C:/kf-compat159, a new worktree holding this branch. The ACK (6108578719)
-    states this deviation.
-  untouched: the worker process, its checkout, its state files, every other worktree and the human research checkout
-  not_fixed_here: both worker defects are code on main and outside this packet
+    No test, gate, control or workflow was edited, retargeted or removed.
+    programme-state.yaml is untouched. Nothing was pushed, no issue 80
+    message was posted and the PR was not edited by the session that made
+    these two commits on 2026-10-11. The later parent session published
+    them and RETURN 6112455909; this paragraph preserves the original
+    worker-session boundary, not an outstanding push task.
+  session: an interactive Claude session in C:/kf-auth155, a new worktree holding this branch; no other worktree and no running process was touched
 
 characterization:
-  live_before: >
-    At ac3a6384, status.mjs --verify reported DERIVED_STATE_STALE_AUTHORITY:
-    checkpoint RECOVERY-021 at generation 87, 14 typed effects applied,
-    observed generation 101 of 106, stopped at
-    CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001 (6011507550), generation
-    102, CONTROL_EFFECT_UNKNOWN for BOUNDED_CORRECTION. Main 7d2619c7 does not
-    carry the alias table either, so the same stop applies there.
-  anti_duplication: >
-    readEffect() in lib/authority-effects.mjs is the only reader of
-    control_effect. lib/events.mjs reaches it through readEffect() for the
-    HOLD and RESUME wake. PR 166 adds no reader of control_effect:
-    lib/merge-record.mjs and record-auto-merge.mjs do not import
-    authority-effects.mjs. The alias table is still the single owner.
-  existing_controls: >
-    All 180 entries of main's manifest are byte-for-byte as they are on main,
-    and each mutation target still matches as it does there.
+  basis: the directive's live_defect, re-read at ac3a6384 before editing
+  defect_at_source_main: >
+    autonomyCheckedCommands was initialized from parsedCommands, and the catch
+    around the autonomy loop logged and kept that set, so a thrown check left
+    every parsed command executable.
+  target_blob_at_source_main: 33540d0c07d2affd919246ebb5975ce0bef32109
+  application_drift: >
+    At ac3a6384, when the change was written, none. Main is now 98ee0202.
+    git diff ac3a6384..98ee0202 lists no file under apps or packages, and
+    the blob of the target service file on main is still
+    33540d0c07d2affd919246ebb5975ce0bef32109.
 
-design:
-  seam: >
-    readEffect() reads the declared effect, returns CONTROL_EFFECT_MISSING for
-    none as before, resolves the spelling through CONTROL_EFFECT_ALIASES by
-    exact own key, and hands the canonical effect to readCanonicalEffect(),
-    which holds the unchanged vocabulary check, type rule, health rule,
-    production rule and field rules.
-  evidence: >
-    readEffect() returns declared_effect beside effect, and each entry of the
-    reduction's applied list carries both. applyEffect() reads only effect.
-    The spelling is never written into the projection.
-  type_mismatch_detail: >
-    When an alias rides a type its canonical effect cannot, the detail names
-    both: "HOLD cannot carry PACKET_CORRECTION (declared as
-    BOUNDED_CORRECTION)". For a canonical spelling the detail is as it was.
-  not_done: >
-    No new effect, no new state, no change to CONTROL_EFFECTS, EFFECTS_BY_TYPE
-    or PROJECTED_STATE, no change to the envelope parser, the reconciler, the
-    orchestrator or status.mjs, and no change to programme-state.yaml.
+implementation:
+  fail_closed_default: the executable set starts empty and is assigned once, after the loop has evaluated every parsed command
+  atomic_batch: the catch assigns nothing, so a failure on a later command keeps no approved prefix
+  unusable_verdict: >
+    isUsableAutonomyVerdict requires an object with a boolean allowed, a
+    boolean requiresApproval and a tier equal to manual, supervised or full.
+    Anything else throws inside the loop and is handled as a failed authority
+    check.
+  no_oracle: >
+    The local fallback verdict is allowed false, requiresApproval true and
+    tier manual, so it stays an ordinary non-executable verdict with outcome
+    evaluated.
+  decision_expression: unchanged from source main
+  evidence: STEP_5_CHECK_AUTONOMY gains outcome (evaluated or authority_check_failed_closed), authorityCheckFailed and authorityCheckError
+  log: the catch logs at error level with the count of executable parsed commands; the old text about using all parsed commands is gone
+  not_touched: AutonomyOrchestratorService, the genome bridge, the executor, streamQuery, schema, FLOW_TOOLS
 
 changed_files:
-  against: main 7d2619c771cd008f21bae9c60ca348e3deaa07cd
-  count: 10
+  count: 3
+  count_basis: files that differ from main 98ee0202 outside .agent-control at the semantic head
   semantic_commits:
-    - 2a3dac19ad84a740632ed388f5c951e41c95906d   # the alias repair
-    - 67fb732a9ed26ee4578bc07308bc293f595f6c84   # manifest only; the 23 controls of PR 166, pushed by the owner
-    - f14adec5251aa3a69132c336efcb1819fd5b6a95   # merge of main 7d2619c7; the semantic head
-  code:
-    - scripts/agent-control/lib/authority-effects.mjs
+    - 65706fcc52f440f9225223040e2ee0ee738e04bb   # parsed-command autonomy fails closed
+    - 8987f6db21a839f90c88e33479768d81cef508e9   # AUTH-FC-F1; a verdict must state its approval semantics
+    - fe79181638e373584c3ca3184a39343a132040cd   # merge of main 98ee0202; no edit to the three files below
+  server:
+    - apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts
   tests:
-    - scripts/agent-control/tests/authority-effects.spec.mjs
-  controls:
-    - scripts/agent-control/negative-controls.yaml
-  evidence:
-    - scripts/agent-control/fixtures/reducer-recovery-truth.json
-  docs:
-    - docs/development/AGENT_CONTROL_PLANE.md
-  architecture:
-    - architecture/execution-paths.md
-    - architecture/inventory.json (scanner output at 2a3dac19)
-    - architecture/dependencies.json (scanner output at 2a3dac19)
-  control_artifacts:
+    - apps/server/src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts
+  proof_tooling:
+    - scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json (new)
+  control_only_after_source_head:
     - .agent-control/active-packet.yaml
     - .agent-control/claude-return.yaml
-  existing_tests_changed: >
-    None. The spec's two import lines gained three names. The 75 tests that
-    were in the file, and every assertion in them, are unchanged; 14 tests are
-    added. The specs that came with PR 166 are as they are on main.
-  fixture_change: >
-    3,882 lines added and none removed. The comments list that ends at
-    RECOVERY-021, its _recorded note and its repo block are byte-for-byte as
-    they were. The after_recovery_021 block holds the 276 real comments
-    after 5993146604 through 6025392698, a live_source digest pair for each,
-    and repository truth for main ac3a6384 and PR 155. It was not extended by
-    the integration.
+  existing_tests_changed: none removed or loosened; the four existing tests of the spec file are unchanged and 23 were added
 
 schema_migrations: []
 
-replay:
-  recorded: >
-    From the committed checkpoint, over the frozen recording plus the
-    continuation, the fold applies all 20 authority candidates after the
-    anchor, in #80 order, with consecutive generations, and stops nowhere.
-  applied:   # generation on the live issue read whole; message; comment; effect
-    - 88 CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022 5994182518 NO_STATE_CHANGE
-    - 89 CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023 5994568448 NO_STATE_CHANGE
-    - 90 CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-PASS-024 5995818004 NO_STATE_CHANGE
-    - 91 CG-REVIEW-META-STATE-REDUCER-LIVE-POST-MERGE-CHECKPOINT-026 5998474832 CHECKPOINT
-    - 92 CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001 5998711588 NO_STATE_CHANGE
-    - 93 CG-RESUME-ACTION-001-IMPLEMENTATION-001 5998716917 HOLD_CLEAR
-    - 94 CG-DIRECTIVE-ACTION-001-IMPLEMENT-001 5998725089 PACKET_RELEASE
-    - 95 CG-REVIEW-ACTION-001-SEMANTIC-PASS-002 6002264461 NO_STATE_CHANGE
-    - 96 CG-REVIEW-ATLAS-001-SEMANTIC-PASS-001 6003918300 NO_STATE_CHANGE
-    - 97 CG-REVIEW-ATLAS-MATERIALIZER-001-WINDOWS-PROOF-CORRECTION-001 6003934022 NO_STATE_CHANGE
-    - 98 CG-REVIEW-PR-UNLOCK-CONTRACT-001-SEMANTIC-PASS-001 6004083773 NO_STATE_CHANGE
-    - 99 CG-REVIEW-ACTION-001-ADMISSION-003 6010505575 PACKET_ADMISSION
-    - 100 CG-REVIEW-ACTION-001-POST-MERGE-CHECKPOINT-004 6010515405 CHECKPOINT
-    - 101 CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001 6010541876 PACKET_RELEASE
-    - 102 CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001 6011507550 PACKET_CORRECTION, declared as BOUNDED_CORRECTION
-    - 103 CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003 6018421547 NO_STATE_CHANGE, declared as AUTHORIZE_CONTROL_BINDING
-    - 104 CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004 6022210803 NO_STATE_CHANGE
-    - 105 CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005 6023054785 PACKET_CORRECTION
-    - 106 CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001 6025258558 NO_STATE_CHANGE
-    - 107 CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002 6025392698 NO_STATE_CHANGE
-  after_the_recording:   # read from the live issue only; not in the fixture
-    - 108 CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003 6051089263 NO_STATE_CHANGE
-    - 109 CG-REVIEW-META-CONTROL-LOOP-RECOVERY-SEMANTIC-PASS-001 6092797415 NO_STATE_CHANGE
-    - 110 CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004 6108531988 NO_STATE_CHANGE
-    - 111 CG-REVIEW-KF159-INTEGRATED-001 6109079503 NO_STATE_CHANGE
-    - 112 CG-REVIEW-KF159-ADMISSION-RECORD-001 6109741134 NO_STATE_CHANGE
-  effective_projection:
-    active_packet: KF-EXEC-AUTH-FAIL-CLOSED-001
-    state: FIXING_PROOF_FAILURES
-    health: YELLOW
-    implementation_branch: impl/kf-exec-auth-fail-closed-001
-    pr_number: 155
-    source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
-    merge_authority: false
-    production_touched: false
-    checkpointed: KF-EXEC-K12-001, KF-EXEC-EXTFX-001, KF-EXEC-TENANT-001, KF-EXEC-AUTH-001, KF-EXEC-ACTION-001
-    anchored_to: CG-REVIEW-KF159-ADMISSION-RECORD-001 (6109741134)
-    reconciliation: CONSISTENT with the newest authority on issue 80 and with repository truth
-  live: >
-    On the working tree of the semantic head f14adec5, on 2026-10-11,
-    status.mjs --verify against the live issue exited 0 and reported
-    CONSISTENT, checkpoint RECOVERY-021 at generation 87, 23 typed effects
-    applied, observed generation 110 of 110, anchored to the directive
-    6108531988. Run again the same day on ee642300, whose scripts are those
-    of f14adec5, after message 6109079503 was posted: exit 0, CONSISTENT, 24
-    typed effects applied, observed generation 111 of 111, anchored to that
-    message. Run a third time that day on 565429bd, again with the scripts of
-    f14adec5, after message 6109741134 was posted: exit 0, CONSISTENT, 25
-    typed effects applied, observed generation 112 of 112, anchored to that
-    message, with the projection above.
-  not_an_authority_message: >
-    The continuation range holds a REVIEW posted from an account outside the
-    allowlist, 5997061944, declaring PACKET_ADMISSION for PR 120. It is
-    recorded and it is not an authority candidate, as before this packet. The
-    test names it so the replay cannot be read as having skipped it.
-
 proof_matrix:
-  - obligation: exact historical comment 6011507550 folds with canonical PACKET_CORRECTION semantics
+  - obligation: AUTH-FC-P01 a thrown authority evaluation leaves zero parsed commands executable
+    evidence_scope: semantic_head
+    proof: three tests (the orchestrator throws; a later command throws after an approval; the genome check throws); executeBatch is never called; NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN and NC-AUTH-FC-P01-PARTIAL-PREFIX are live
+    result: PROVEN
+  - obligation: AUTH-FC-P01B an unusable or malformed verdict leaves zero parsed commands executable
     evidence_scope: semantic_head
     proof: >
-      "recorded evidence (aliases): the real 6011507550 folds with exactly the
-      PACKET_CORRECTION semantics" compares the projection, field for field,
-      with the same real comment respelled canonically.
-      NC-COMPAT-ALIAS-BOUNDED-CORRECTION-REMOVED and
-      NC-COMPAT-ALIAS-BOUNDED-CORRECTION-CHECKPOINTS are live.
+      Eleven tests. Five from the first head (undefined, null, a string, an
+      object with no allowed, a truthy non-boolean allowed). Five two-command
+      batches where the first verdict is a well-formed allow and the second is
+      allowed true with approval or tier metadata missing or unrecognized. One
+      on the genome path. NC-AUTH-FC-P01B-UNUSABLE-VERDICT-ACCEPTED,
+      NC-AUTH-FC-F1-APPROVAL-SEMANTICS-NOT-REQUIRED,
+      NC-AUTH-FC-F1-REQUIRES-APPROVAL-NOT-VALIDATED and
+      NC-AUTH-FC-F1-TIER-NOT-VALIDATED are live.
     result: PROVEN
-  - obligation: exact historical comment 6018421547 folds as NO_STATE_CHANGE and cannot grant merge authority, admission, checkpoint, release, hold or any other programme mutation
+  - obligation: AUTH-FC-P02 the historical fail-open mutation makes the named P01 proof fail by assertion
     evidence_scope: semantic_head
     proof: >
-      "recorded evidence (aliases): the real 6018421547 folds as
-      NO_STATE_CHANGE ..." requires the projection before and after to be
-      equal in everything but the anchor, also when the comment's own envelope
-      claims merge authority. NC-COMPAT-ALIAS-CONTROL-BINDING-REMOVED and
-      NC-COMPAT-ALIAS-CONTROL-BINDING-ADMITS are live.
+      NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN restores the old initialization. The
+      mutated file compiles, and the named tests fail on the assertion that
+      the executor spy was not called.
     result: PROVEN
-  - obligation: the fold from RECOVERY-021 reaches the current newest authority without skipping a message
+  - obligation: AUTH-FC-P03 the conversational response survives an authority failure
+    evidence_scope: semantic_head
+    proof: the response returns the model content, carries no action, and the assistant message is saved
+    result: PROVEN
+  - obligation: AUTH-FC-P04 a valid allowed command keeps its path to the executor
+    evidence_scope: semantic_head
+    proof: an allowed command reaches executeBatch; a mixed batch executes only the allowed command
+    result: PROVEN
+  - obligation: AUTH-FC-P05 denied, manual and approval-required commands stay non-executable
+    evidence_scope: semantic_head
+    proof: denied, manual tier, approval required by the verdict, approval required by the command, and no oracle; NC-AUTH-FC-P05-NO-ORACLE-FALLBACK-INCOMPLETE is live
+    result: PROVEN
+  - obligation: AUTH-FC-P06 the evidence names the fail-closed degradation
+    evidence_scope: semantic_head
+    proof: the evidence equals the failed-closed record exactly and the log names it; NC-AUTH-FC-P06-FAILURE-REPORTED-AS-EVALUATED is live
+    result: PROVEN
+  - obligation: finding AUTH-FC-F1 an allowed verdict with no approval semantics is not permission
+    evidence_scope: semantic_head
+    proof: the six tests added at 8987f6db; with the 65706fcc validator restored all six fail on the assertion that the executor spy was not called
+    result: PROVEN
+  - obligation: every negative control is live and none is vacuous
+    evidence_scope: semantic_head
+    proof: scripts/proof-admission/negative-controls.mjs with the packet manifest, run again at fe791816; 8 of 8 live, 0 vacuous, runner unchanged; see negative_controls
+    result: PROVEN
+  - obligation: full applicable server unit suite, typecheck, build and lint ratchet
     evidence_scope: semantic_head
     proof: >
-      The recorded replay names all 20 applied messages with consecutive
-      generations; NC-COMPAT-REPLAY-AUTHORITY-MISSING and
-      NC-COMPAT-REPLAY-CANDIDATE-SKIPPED are live. The live fold on this head
-      reaches generation 110 of 110.
-    result: PROVEN
-  - obligation: current PR 155 remains the active packet and resolves to the state implied by the latest canonical PACKET_CORRECTION
+      At fe791816 the unit suite and the typecheck were run; the server build
+      and the lint ratchet were not. See tests, including the one timeout in
+      the first of the two unit runs.
+    result: PARTIAL
+  - obligation: server integration tests on a database, locally
     evidence_scope: semantic_head
-    proof: the replay test asserts the programme block, the empty marker, the hold list and the reconciliation against recorded repository truth; the live projection on this head is the same packet and state
-    result: PROVEN
-  - obligation: arbitrary unknown control_effect values still stop with CONTROL_EFFECT_UNKNOWN
+    proof: not run in the original 2026-10-11 local worker session, which used no database; the change has no database surface; later hosted evidence is recorded under ci.previous_head_a597c692
+    result: NOT_RUN
+  - obligation: the merge with main changes nothing this packet proves
     evidence_scope: semantic_head
     proof: >
-      18 tokens, near misses and prototype names included; and on the real
-      record, either spelling changed by one character.
-      NC-COMPAT-UNKNOWN-TOKEN-GIVEN-MEANING,
-      NC-COMPAT-UNKNOWN-TOKEN-ON-REAL-EVIDENCE and
-      NC-COMPAT-ALIAS-MATCH-NOT-EXACT are live.
+      git diff 8987f6db fe791816 over apps and scripts/proof-admission is empty;
+      the focused suite has the same 27 tests and the unit suite the same
+      3,957 tests in 392 files as at 8987f6db; the control-plane suite of
+      main runs on the merged tree. See tests and integration.
     result: PROVEN
-  - obligation: an alias on a disallowed message type remains rejected under the canonical target effect's type rules
-    evidence_scope: semantic_head
-    proof: both aliases on HOLD and on RESUME, each compared with its canonical twin; NC-COMPAT-ALIAS-ESCAPES-TYPE-RULE is live
-    result: PROVEN
-  - obligation: an alias is held to every other rule of its canonical effect
-    evidence_scope: semantic_head
-    proof: 11 cases, each stopping for the same reason and in the same words as the canonical twin; NC-COMPAT-ALIAS-ESCAPES-SAFETY-RULE and NC-COMPAT-SPELLING-DRIVES-STATE are live
-    result: PROVEN
-  - obligation: malformed or edited authority remains fail closed
-    evidence_scope: semantic_head
-    proof: an alias beside a second control_effect, an edited alias comment, an outside author, another sender, and an alias only in prose or under another key; the existing malformed, edited and unorderable tests are unchanged
-    result: PROVEN
-  - obligation: no historical #80 comment is edited or deleted
-    evidence_scope: semantic_head
-    proof: this packet edits and deletes nothing on issue 80; NC-COMPAT-EVIDENCE-RESPELLED shows a respelled recording is caught by the live-source digest
-    result: PROVEN
-  - obligation: no gate is weakened and no existing negative control is removed merely to obtain green
-    evidence_scope: semantic_head
-    proof: the 180 manifest entries of main are unchanged and none is removed; the workflows and libraries that differ from 2a3dac19 are the ones merged PR 166 changed on main, taken as they are there
-    result: PROVEN
-  - obligation: the seven continuation requirements of CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002
-    evidence_scope: semantic_head
-    proof: the two continuation tests of the reducer spec, unchanged since 2a3dac19 and run again on this head
-    result: PROVEN
-  - obligation: the candidate and main 7d2619c7 are one coherent source tree and all 193 negative controls are live
-    evidence_scope: semantic_head
-    proof: see integration, tests and negative_controls
-    result: PROVEN
-  - obligation: commits after the semantic head change control artifacts only
-    evidence_scope: semantic_head
-    proof: git diff --name-only f14adec5..HEAD outside .agent-control is empty, on the branch and on a merge with main 7d2619c7
-    result: PROVEN
-  - obligation: the checks that only the head carrying this file can give
+  - obligation: required exact-head workflows and the independent semantic review of the head that carries this file
     evidence_scope: exact_head
-    proof: see exact_head_proof
+    proof: see exact_head_proof and semantic_head_review
     result: PENDING
 
 tests:
-  at: f14adec5251aa3a69132c336efcb1819fd5b6a95
-  host: Windows 11, Node 20.18.1, interactive Claude session, 2026-10-11
-  portable_and_windows:
+  at: fe79181638e373584c3ca3184a39343a132040cd
+  host: Windows 11, Node 20.18.1, pnpm 9.15.0, interactive Claude session in C:/kf-auth155, 2026-10-11
+  provenance: >
+    These historical results were produced by the Claude session of
+    2026-10-11 on fe791816, after pnpm install --frozen-lockfile,
+    pnpm db:generate and builds of @keyflow/shared, @keyflow/db and
+    @keyflow/api. That session repeated its control-plane suite before
+    committing a597c692. This metadata update does not repeat or relabel
+    those executions as tests of its future artifact head.
+  focused_suite:
+    command: npx vitest run src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts (in apps/server)
+    total: 27
+    passed: 27
+    failed: 0
+    skipped: 0
+  server_unit:
+    command: npx vitest run -c vitest.unit.config.ts (in apps/server)
+    runs: 2
+    first_run:
+      files: 392
+      total: 3957
+      passed: 3956
+      failed: 1
+      skipped: 0
+      failure: >
+        src/core/scheduling/safe-interval.spec.ts, "runGuarded contains a
+        rejected promise", timed out at 5000 ms. The file is not touched by
+        this packet or by the merge. Other commands of this session were
+        running on the host at the same time. The file alone then ran 10 of
+        10.
+    second_run:
+      files: 392
+      total: 3957
+      passed: 3957
+      failed: 0
+      skipped: 0
+      note: run with nothing else running in the session
+    reading: the timeout is reported as observed and is not explained beyond that; it was not investigated
+  server_typecheck: npx tsc --noEmit in apps/server, exit 0
+  server_build: NOT_RUN by the original 2026-10-11 local worker session at fe791816
+  server_lint: NOT_RUN by the original 2026-10-11 local worker session at fe791816
+  server_integration: NOT_RUN by the original 2026-10-11 local worker session at fe791816
+  web: NOT_RUN by the original 2026-10-11 local worker session at fe791816; neither the packet nor the integration changed apps/web
+  control_plane:
     command: KF_REQUIRE_POWERSHELL=1 node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
     total: 516
     passed: 516
     failed: 0
     skipped: 0
-  portable:
-    command: node --test scripts/agent-control/tests/*.spec.mjs
-    total: 492
-    passed: 492
-    failed: 0
-    skipped: 0
-  reducer_spec:
-    command: node --test scripts/agent-control/tests/authority-effects.spec.mjs
-    total: 89
-    passed: 89
-    failed: 0
-    skipped: 0
-    added: 14
-  dag_validators: >
-    validate-dag.mjs exits 0 with 35 packets and 37 phases;
-    validate-platform-dag.mjs exits 0 with 63 packets.
-  arithmetic: main 7d2619c7 has 502 in the same two-directory run; this branch adds 14
-  ci_note: >
-    One existing test needs an authenticated gh and is skipped on runners, so
-    the runner totals will show one skip that this host does not.
+    note: >
+      Main's own suite on the merged tree. Its two branch-artifact tests read
+      this branch's artifacts. One existing test needs an authenticated gh
+      and is skipped on runners, so runner totals may show one skip that this
+      host does not.
+  dag_validator: node scripts/agent-control/validate-dag.mjs exits 0 with 35 packets and 37 phases
+  manifest_target_scan: >
+    Original 2026-10-11 scan of scripts/agent-control/negative-controls.yaml
+    before committing a597c692: 193
+    controls, 193 unique ids, 193 mutations. 192 targets occur exactly once
+    in their file. One, NC-MISSING-AUTH-IS-WAITING in lib/adapters.mjs,
+    occurs twice and declares replace_all, as it does on main. The manifest
+    is byte-for-byte main's. The control-plane manifest itself was not run.
+  previous_head_8987f6db: >
+    From the worker session of 2026-10-06 that produced that head: focused
+    suite 27 of 27; server unit 3,957 of 3,957 in 392 files; typecheck and
+    build clean; lint 3,341 warnings against the 3,343 ratchet; 8 of 8
+    controls live.
+  previous_head_65706fcc: >
+    Focused suite 21 of 21. Server unit 3,951 of 3,951. Typecheck and build
+    clean. Lint 3,341 against 3,343. 4 of 4 controls live.
+  failed: 0
+  skipped: 0
+  counter_scope: final local semantic-head runs reported above; future artifact-head checks remain PENDING
+  historical_failed_runs:
+    - one timeout in the first of two unit runs; preserved in server_unit.first_run; the later run and isolated rerun are separate observations
+  hosted_skip_scope: hosted skips are disclosed in ci.previous_head_a597c692 and must be re-read at any later artifact head
 
 negative_controls:
-  manifest: scripts/agent-control/negative-controls.yaml
-  at: f14adec5251aa3a69132c336efcb1819fd5b6a95
-  command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
-  total: 193
-  live: 193
+  command: node scripts/proof-admission/negative-controls.mjs --manifest scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json
+  at: fe791816, with a clean tree before and after
+  environment: >
+    The runner starts vitest by its entry file, so NODE_PATH was set to
+    node_modules/.pnpm/node_modules, as pnpm's own shim does. A first
+    attempt without it produced no report and the runner called all eight
+    controls vacuous for that reason; that attempt is not counted. The
+    runner and the manifest are unchanged.
+  manifest_total: 8
+  live: 8
   vacuous: 0
-  from_main: 180
-  added_by_this_packet: 13
-  added_ids:
-    - NC-COMPAT-ALIAS-BOUNDED-CORRECTION-REMOVED
-    - NC-COMPAT-ALIAS-CONTROL-BINDING-REMOVED
-    - NC-COMPAT-ALIAS-CONTROL-BINDING-ADMITS
-    - NC-COMPAT-ALIAS-BOUNDED-CORRECTION-CHECKPOINTS
-    - NC-COMPAT-ALIAS-ESCAPES-TYPE-RULE
-    - NC-COMPAT-ALIAS-ESCAPES-SAFETY-RULE
-    - NC-COMPAT-UNKNOWN-TOKEN-GIVEN-MEANING
-    - NC-COMPAT-UNKNOWN-TOKEN-ON-REAL-EVIDENCE
-    - NC-COMPAT-ALIAS-MATCH-NOT-EXACT
-    - NC-COMPAT-SPELLING-DRIVES-STATE
-    - NC-COMPAT-REPLAY-CANDIDATE-SKIPPED
-    - NC-COMPAT-EVIDENCE-RESPELLED
-    - NC-COMPAT-REPLAY-AUTHORITY-MISSING
-  before_integration: at 67fb732a, 170 live and 23 vacuous (run 38077315718)
-  artifact_controls: >
-    Three controls mutate this file. They were run again on the commit that
-    carries it, because the manifest run above is of the semantic head.
-  not_added: >
-    No control for the alias table's own-key lookup. Without the guard, a
-    token such as constructor resolves to a value the unchanged vocabulary
-    check still rejects, so no outcome changes and such a control would be
-    vacuous. The behaviour is asserted for five prototype names.
-
-previous_head_2a3dac19:
-  what: the first semantic head, the alias repair on main ac3a6384
-  local: 462 tests and 170 of 170 controls on 2026-10-06
-  review: >
-    ChatGPT read main..2a3dac19 and recorded the reading in
-    CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003 (6051089263):
-    reviewed_head 2a3dac19, outcome PASS, unresolved_substantive_findings 0.
-    The primary reviewer was NOT_RUN, reason quota_exhausted, the one time it
-    was asked, at c7c6105c (PR review 5434875947).
-  limit: >
-    That reading is of 2a3dac19 only. It is not a reading of f14adec5 and is
-    not offered as one.
-
-previous_head_c7c6105c: >
-  The first artifact head, reported in the first RETURN (6026363940). CI/CD
-  Pipeline run 37535555266 succeeded. Agent Control Gate run 37535555209
-  succeeded. Agent Control Worker Proof run 37535555247 succeeded, with 170
-  of 170 controls live and one named skip in each job. DAST (HawkScan) run
-  37535555338 concluded success with every scan step skipped, because
-  HAWK_API_KEY is not set; no scan ran.
-
-previous_head_dc4dcd81: >
-  The second artifact head, reported in the second RETURN (6051588697). Every
-  required workflow succeeded on attempt 1: CI/CD Pipeline 37720063231, Agent
-  Control Gate 37720063235, Branch divergence 37720063330, Agent Control
-  Worker Proof 37720063284 with 170 of 170 controls live, and DAST (HawkScan)
-  37720063255 with no scan run. The primary reviewer was NOT_RUN there too
-  (PR review 5450818796).
-
-previous_head_67fb732a: >
-  Pushed by the owner on 2026-10-10. Manifest only. CI/CD Pipeline succeeded.
-  Agent Control Gate run 38077315710 failed on non-control files after
-  source_head. Agent Control Worker Proof run 38077315718 failed with 462
-  tests, 461 passed, 1 skipped, and 170 controls live with 23 vacuous.
-
-previous_head_ee642300: >
-  The first artifact head on the integrated semantic head, reported in the
-  third RETURN (6109041941). Every required workflow succeeded on attempt 1:
-  CI/CD Pipeline 38137007267, Agent Control Gate 38137007303 and again
-  38137056186 after the description edit, Branch divergence 38137007273 and
-  38137004943, Agent Control Worker Proof 38137007256 with 193 of 193
-  controls live (Windows 516 tests, 515 passed, 1 named skip; portable 492
-  tests, 491 passed, 1 named skip), and DAST (HawkScan) 38137007294 with
-  every scan step skipped because HAWK_API_KEY is not set; no scan ran. The
-  PR was draft, so the admission step of the gate did not run. The primary
-  reviewer was NOT_RUN there too (PR review 5483187666).
-
-previous_head_565429bd: >
-  The second artifact head on the integrated semantic head, reported in the
-  fourth RETURN (6109668086). Every required workflow succeeded on attempt 1:
-  CI/CD Pipeline 38140593879 (server 4405 tests, web 210 tests), Agent
-  Control Gate 38140593836 and again 38140619827 after the description edit,
-  Branch divergence 38140593923 and 38140590562, Agent Control Worker Proof
-  38140593925 with 193 of 193 controls live (Windows 516 tests, 515 passed,
-  1 named skip; portable 492 tests, 491 passed, 1 named skip), and DAST
-  (HawkScan) 38140593840 with every scan step skipped because HAWK_API_KEY
-  is not set; no scan ran. The PR was draft, so the admission step of the
-  gate did not run. The primary reviewer was NOT_RUN there too (PR review
-  5483349908). ChatGPT accepted that RETURN in message 6109741134.
+  rule: a control is live only when every test it names passed on the clean tree and is reported, by name, as failed with the defect restored
+  controls:
+    - NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN
+    - NC-AUTH-FC-P01-PARTIAL-PREFIX
+    - NC-AUTH-FC-P01B-UNUSABLE-VERDICT-ACCEPTED
+    - NC-AUTH-FC-P06-FAILURE-REPORTED-AS-EVALUATED
+    - NC-AUTH-FC-F1-APPROVAL-SEMANTICS-NOT-REQUIRED
+    - NC-AUTH-FC-F1-REQUIRES-APPROVAL-NOT-VALIDATED
+    - NC-AUTH-FC-F1-TIER-NOT-VALIDATED
+    - NC-AUTH-FC-P05-NO-ORACLE-FALLBACK-INCOMPLETE
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
@@ -509,208 +344,272 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
   - gate: independent semantic review
     status: PENDING
 
+ci:
+  previous_head_65706fcc: >
+    CI/CD Pipeline run 37427376360, the DAST workflow run 37427376454 and the
+    two Branch divergence runs succeeded, all attempt 1. Agent Control Gate
+    run 37427376514 and Agent Control Worker Proof run 37427376461 failed on
+    the control artifacts, which were still main's.
+  previous_head_8987f6db: >
+    Historical live-run reading for 8987f6db retained from the prior
+    artifact. CI/CD Pipeline run
+    37433292771 succeeded, attempt 1, with Type Check, Lint, Security Scan,
+    Run Tests, Build Server and Build Web each a success. DAST (HawkScan) run
+    37433292915 succeeded. Branch divergence runs 37433292950 and 37433287918
+    succeeded. Agent Control Gate run 37433292980 failed because
+    active-packet.yaml named another branch. Agent Control Worker Proof run
+    37433292809 failed on the two branch-artifact tests for the same reason.
+    Both failures were the control artifacts of main and are not counted as
+    application results.
+  previous_head_26111633: >
+    The first artifact head, reported in the earlier RETURN (6019191970) from
+    the live runs, all attempt 1. CI/CD Pipeline run 37480235161 succeeded,
+    with Run Tests reporting server 4,428 of 4,428 and web 210 of 210. Agent
+    Control Gate run 37480234895 succeeded. Branch divergence runs
+    37480234928 and 37480229449 succeeded. DAST (HawkScan) run 37480235001
+    succeeded. Agent Control Worker Proof run 37480234966 succeeded, with 157
+    of 157 controls live and one named skip in each job. The primary reviewer
+    was NOT_RUN there too (PR review 5430020110).
+  previous_head_fdc900b7: >
+    The second artifact head, on semantic head 8987f6db. Its outcomes are in
+    the second RETURN (6022780184) and were not read again by the session
+    of 2026-10-11. That head sat on main ac3a6384, so those outcomes
+    say nothing about the merged tree.
+  previous_head_a597c692:
+    source_head: fe79181638e373584c3ca3184a39343a132040cd
+    artifact_head: a597c692fcb102de558dd832d88738c0402f69a2
+    return_message_id: CC-RETURN-GENAI-AUTH-FAIL-CLOSED-003
+    return_comment_id: 6112455909
+    return_url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6112455909
+    independent_evidence: https://github.com/SaCH-PRO/KEYFLOWOS/blob/11971802fdada7e0e41fac39e178f1e441c4e882/docs/intelligence/sessions/2026-10-17-p0-safety-review/README.md
+    workflows:
+      - CI/CD Pipeline 38162875348 succeeded; server 4428/4428 and web 210/210
+      - Agent Control Gate 38162875351 succeeded; non-draft admission step skipped
+      - Branch divergence 38162875391 succeeded
+      - DAST (HawkScan) 38162875383 concluded success with scan steps skipped; no dynamic scan occurred
+      - Agent Control Worker Proof 38162875434 succeeded; Windows 515/516 and Ubuntu 491/492, zero failed and one authenticated-gh cursor skip on each platform
+    negative_controls: 193/193 control-plane controls live in the Windows hosted log; the packet's eight controls were separately reproduced locally
+    applicability: historical evidence at the named artifact; not workflow evidence for a future head
+  this_head: PENDING. The workflows run on the head that carries this file once it is on the remote, and are read from the live runs for the RETURN.
+
 ai_review:
   implementer: claude
   primary: copilot-pull-request-reviewer[bot]
   fallback: chatgpt
-  self_review: none; Claude does not review this change
-  primary_at_semantic_head: none exists; the merge commit and the first artifact commit were pushed together, so the bot was asked once, at ee642300
-  primary_at_first_artifact_head: NOT_RUN, reason quota_exhausted (PR review 5483187666 at ee642300); it is never counted towards the gate
-  primary_at_second_artifact_head: NOT_RUN, reason quota_exhausted (PR review 5483349908 at 565429bd); it is never counted towards the gate
-  fallback_at_semantic_head: CG-REVIEW-KF159-INTEGRATED-001 (6109079503), written by ChatGPT for f14adec5; see semantic_review
+  self_review: none; Claude authored the application change, ChatGPT records its separate reading
+  at_the_semantic_head_fe791816: review 6240050804, recorded under semantic_head_review
   at_the_head_that_carries_this_file: PENDING
+  record_owner: chatgpt
+  admission_state: PENDING; the top-level semantic_review block is reserved for the separate admission record
 
-# The admission record of lib/semantic-review.mjs, written here because
-# CG-REVIEW-KF159-ADMISSION-RECORD-001 (6109741134) orders it, with the two
-# entries that message names. It is about the semantic head f14adec5. The gate
-# entry for the head that carries this file is PENDING in exact_head_proof.
-semantic_review:
+semantic_head_review:
   implementer: claude
+  reviewed_head: fe79181638e373584c3ca3184a39343a132040cd
+  record_kind: EVIDENCE_RECORDED_NOT_ADMISSION
   reviews:
     - provider: copilot
       reviewer: copilot-pull-request-reviewer[bot]
-      reviewed_head: ee642300a4cca1196fdc8a40258554eca5289dc0
+      reviewed_head: a597c692fcb102de558dd832d88738c0402f69a2
       outcome: NOT_RUN
       reason: quota_exhausted
       unresolved_substantive_findings: []
-      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/159#pullrequestreview-5483187666
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5484373795
     - provider: chatgpt
       reviewer: chatgpt
-      reviewed_head: f14adec5251aa3a69132c336efcb1819fd5b6a95
+      reviewed_head: fe79181638e373584c3ca3184a39343a132040cd
       outcome: PASS
       reason: null
       unresolved_substantive_findings: []
-      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6109079503
-      message_id: CG-REVIEW-KF159-INTEGRATED-001
-
-semantic_review_notes:   # prose about the record above; no part of the record
-  reviewed_semantics: f14adec5251aa3a69132c336efcb1819fd5b6a95
-  primary_text: >
-    The bot reviewed nothing. It said it was unable to review this pull
-    request because the user who requested it has reached their quota limit.
-  primary_head: >
-    The primary entry names ee642300, the only head on the integrated
-    semantics the bot was asked at. It descends from f14adec5 and differs
-    from it in the two artifact files only, so it carries the same semantics.
-    ee642300 is neither source_head nor the PR head, so this entry needs the
-    lineage evidence the evaluator asks for: descends from source_head,
-    ancestor of the PR head, no file changed outside .agent-control. The
-    evaluator takes that from the compare API. Message 6109741134 names this
-    head and this PR review for the entry, and asks that the lineage
-    requirement be kept.
-  fallback_reading: >
-    ChatGPT read the integrated head and recorded the reading in message
-    6109079503, in three top-level fields: reviewed_head f14adec5, the
-    outcome recorded above and unresolved_substantive_findings 0. The message
-    says it is a reading of that head and not an inheritance of the earlier
-    one for 2a3dac19. It lists what it does not count: the one test that
-    hosted runners skip, the dormant DAST job, and the draft-only run of the
-    gate. Claude did not review this change and records the outcome only as
-    ChatGPT wrote it.
-  earlier_reading: >
-    The reading of 2a3dac19 (6051089263) is not an entry here. 2a3dac19 is an
-    ancestor of f14adec5 and not a descendant, so the lineage rule does not
-    carry it forward. It is kept under previous_head_2a3dac19 as history.
-  not_covered: >
-    That reading is about the semantic head. The head that carries this file
-    differs from it only in the two artifact files, and its own reading is
-    PENDING in exact_head_proof.
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804
+  boundary: parsed-command authority exception and unusable-verdict narrowing only; whole-request effects and other Flow/Cortex paths are not credited as fixed
+  lineage_required_at_admission: >
+    a597c692 must remain a descendant of fe791816 and an ancestor of the
+    admitted PR head, with no non-control tail. The final artifact head is
+    established by Git after this record is committed; no self SHA is stored.
+  previous_head_8987f6db:
+    reviewed_head: 8987f6db21a839f90c88e33479768d81cef508e9
+    reviews:
+      - provider: copilot
+        reviewer: copilot-pull-request-reviewer[bot]
+        reviewed_head: 8987f6db21a839f90c88e33479768d81cef508e9
+        outcome: NOT_RUN
+        reason: quota_exhausted
+        unresolved_substantive_findings: []
+        evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5425457324
+      - provider: chatgpt
+        reviewer: chatgpt
+        reviewed_head: 8987f6db21a839f90c88e33479768d81cef508e9
+        outcome: PASS
+        reason: null
+        unresolved_substantive_findings: []
+        evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6022210803
+        message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
+    note: >
+      Copied unchanged from the artifact at fdc900b7. CORRECTION-001
+      (6011507550) read 65706fcc and raised AUTH-FC-F1; 8987f6db corrected
+      it; 6018421547 and then 6022210803 recorded ChatGPT's reading of
+      8987f6db with the bot unable to run.
   record_ownership: >
-    The semantic_review block and review_status belong to ChatGPT. Until this
-    commit the file carried neither, and held these two entries under
-    semantic_head_review. Message 6109741134 decides both values and orders
-    Claude to write them down, so the entries moved into the block unchanged.
-    Claude is the implementer, appears in no entry, and added no judgement of
-    its own.
-  later_primary_attempt: >
-    The bot was asked again at 565429bd and could not run, for the same quota
-    reason (PR review 5483349908). Message 6109741134 names the entry at
-    ee642300 for the record, so that later attempt is history under
-    previous_head_565429bd and is no entry.
+    ChatGPT transcribes review 6240050804 here without changing admission
+    status. At a separate admission decision, ChatGPT records semantic_review
+    at top level together with the chosen review_status after the applicable
+    checks. This evidence block does not itself grant admission or merge.
+
+admission_notes:
+  current_packet_authority:
+    message_id: CG-REVIEW-KF155-006
+    comment_id: 6240050804
+    url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804
+    effect: NO_STATE_CHANGE
+    disposition: SEMANTIC_PASS_AND_REANCHOR_CONTRADICTION_SETTLED
+  reanchor_disposition: >
+    Review 006 supersedes the re-anchor instruction in 6023054785 as
+    unnecessary after the separately merged alias correction in PR 159.
+    Contradiction 6023151885 is settled; its scope objection was valid.
+    Neither comment is edited or erased, and no checkpoint is changed.
+  derived_projection: >
+    The current packet remains FIXING_PROOF_FAILURES in the derived
+    programme projection. Review 006 uses NO_STATE_CHANGE and this file
+    does not change that projection or claim packet admission. The latest
+    worker assignment is separate from this packet-specific review record.
+  base_sha: both source_main values equal the observed PR base 98ee0202499ba87fa4ee13d58a2a9075016225bd; recheck before publishing and admission
+  preparation_parent: a597c692fcb102de558dd832d88738c0402f69a2
+  future_artifact_head: null
+  final_head_rule: future artifact identity is observed after commit; all changes after fe791816 must remain under .agent-control
+  pending_admission: >
+    The controlling REVIEW records SEMANTIC_PASS, not ACCEPT_FOR_ADMISSION
+    or READY_TO_MERGE. Keep this PR draft and its status pending. Re-read
+    new artifact-head workflows and evidence before the separate decision.
+  f9_containment: >
+    Main's evaluator currently conflates ACCEPT_FOR_ADMISSION and
+    READY_TO_MERGE and does not independently enforce artifact grant flags.
+    Pending review_status and draft are both retained. An eventual ready
+    transition requires a distinct applicable exact-target decision.
+  worker_assignment: no Claude mutation or new task; F9 remains the separately released assignment
+  review_evidence_fields: review 6240050804 supplies reviewed_head fe791816, semantic_review_outcome PASS and unresolved_substantive_findings 0 at top level
 
 scope_ledger:
-  declared: the eleven proof obligations of the first directive, the seven continuation requirements of ACK-002, and the integration requirements of directive 004
-  resolved: all of them on the semantic head, as listed in proof_matrix
-  remaining: the outcome of the checks on the head that carries this file, the RETURN for CG-REVIEW-KF159-ADMISSION-RECORD-001, ChatGPT's separate decision on the ready transition and the merge, the admission step of the gate once the PR leaves draft, and the exact-head evaluator
-  deferred: none
-  dropped: none
-  superseded: semantic head 2a3dac19 by f14adec5; artifact heads c7c6105c, dc4dcd81, ee642300 and 565429bd by the head that carries this file
+  declared:
+    - AUTH-FC-P01 exception narrows
+    - AUTH-FC-P01B unusable verdict narrows
+    - AUTH-FC-P02 mutation control
+    - AUTH-FC-P03 conversation survives
+    - AUTH-FC-P04 allowed unchanged
+    - AUTH-FC-P05 denied unchanged
+    - AUTH-FC-P06 honest evidence
+    - finding AUTH-FC-F1
+    - integration with main 98ee0202, on the operator's authority
+  resolved:
+    - the seven bounded proof obligations and AUTH-FC-F1 as reported at fe791816, subject to the proof scope and limits below
+    - fresh semantic evidence at fe791816 recorded by review 6240050804
+    - re-anchor contradiction 6023151885 explicitly settled by the same review
+    - prior artifact a597c692 pushed and returned as CC-RETURN-GENAI-AUTH-FAIL-CLOSED-003
+  remaining:
+    - root review and publication of this control-only evidence update, if accepted
+    - the required workflows and applicable proof on the future artifact head
+    - inspection and disposition of actual failed, skipped or unavailable proof on that head
+    - final post-check evidence and separate ChatGPT admission decision
+    - distinct exact-target merge decision and post-transition exact-head evaluator if integration is later authorized
+    - merge, post-merge verification and durable checkpoint; none is claimed here
+  added_inside_the_packet_boundary: []
+  deferred: []
+  dropped: []
+  superseded:
+    - semantic head 65706fcc, by 8987f6db
+    - semantic head 8987f6db, by fe791816
+    - artifact heads 26111633 and fdc900b7, by a597c692; that head remains immutable prior evidence
 
 deviations_from_packet:
   - >
-    Directive 004 says to work only in the worker-owned worktree. The worker
-    could not create it. The work was done in C:/kf-compat159 by an
-    interactive session the operator started. See delivery.
+    The integration had no prior directive on issue 80. The human
+    operator authorized it in the 2026-10-11 interactive session. No ACK
+    was posted before the two commits were made. They were then local and
+    unpushed, and were later published and reported in RETURN 6112455909.
+    Review 6240050804 accepts that baseline without inventing a prior
+    directive or ACK.
   - >
-    Local characterization (the merge, the suite, the DAG validators and the
-    live fold) ran before the ACK was posted, on an unpushed commit. Nothing
-    was pushed before the ACK.
+    The merge brings seventeen files of main into the branch history. They
+    are main's own, unedited, and are not part of this packet's write set.
   - >
-    The architecture maps were not regenerated for the merge. PR 166 added
-    files on main without regenerating them, so inventory.json does not list
-    lib/merge-record.mjs or record-auto-merge.mjs on main or here. Running
-    the scanners would change files outside the integration.
-  - >
-    status.mjs is not in the released scope and is unchanged. Its text output
-    shows the count of applied effects, not each spelling.
-  - >
-    architecture/migration-plan.md has no entry for this change, as at
-    2a3dac19.
+    The architecture maps were not regenerated for the merge; they are
+    main's.
 
 behaviour_changes:
-  - a valid authority message declaring BOUNDED_CORRECTION or AUTHORIZE_CONTROL_BINDING folds as PACKET_CORRECTION or NO_STATE_CHANGE instead of stopping the fold
-  - readEffect() returns one more field, declared_effect, and each applied entry of a reduction carries it
-  - the CONTROL_EFFECT_TYPE_MISMATCH detail names the declared spelling when it is an alias
-  - nothing else from this packet; the behaviour PR 166 changed is already on main
+  - a thrown authority check executes no parsed command; before, it executed all of them
+  - a failure on a later command of a batch executes none of the batch, an approved earlier command included
+  - a verdict that lacks a boolean allowed, a boolean requiresApproval or a recognized tier is a failed check and the batch executes nothing
+  - a verdict whose allowed is truthy but not a boolean no longer approves a command
+  - STEP_5_CHECK_AUTONOMY carries outcome, authorityCheckFailed and authorityCheckError
 
 new_consumers_or_writers: []
 
-open_findings:   # for ChatGPT; none is resolved or acted on by this packet
-  - id: F1
-    about: how this packet's own later authority must be typed
-    detail: >
-      The active packet of the projection is KF-EXEC-AUTH-FAIL-CLOSED-001. A
-      PACKET_ADMISSION, CHECKPOINT or PACKET_CORRECTION naming this meta
-      packet would stop the fold with CONTROL_EFFECT_PACKET_NOT_ACTIVE.
-      Authority for this packet folds only as NO_STATE_CHANGE, as directive
-      004 is.
-  - id: F2
-    about: PR 155 after main moved
-    detail: >
-      PR 155 sits on ac3a6384 and its checks last ran on 2026-10-06. Merged
-      with main 7d2619c7, the ten files of PR 166 are non-control changes
-      after its source_head 8987f6db, so its gate will stop the same way this
-      branch's did when it next runs. It also rewrites the same two artifact
-      files as this branch. It needs main merged in and its artifacts
-      rewritten, which makes a new semantic head there too. Doing that once,
-      after this branch merges, avoids doing it twice.
-  - id: F3
-    about: the alias table as a precedent
-    detail: >
-      The table makes it cheap to accept a third spelling. The control-plane
-      document says an alias exists only for a spelling already on #80 and is
-      a reviewed change with the real comment recorded and replayed. Nothing
-      mechanical enforces that.
-  - id: F4
-    about: the recording ages
-    detail: >
-      The continuation ends at 6025392698. Authority posted after it is read
-      from the live issue by status and the orchestrator, and is not in the
-      fixture.
-  - id: F5
-    about: the gate and a moving main
-    detail: >
-      The gate checks out the synthetic merge of the PR with its base and
-      diffs source_head against it. Every merge to main that changes a
-      non-control file therefore stops the gate of every open impl PR until
-      that PR merges main and declares a new semantic head, which in turn
-      needs a new independent reading. That is what happened here and will
-      happen to PR 155. Whether that cost is intended is a question for
-      authority; this packet changes no gate.
-  - id: F6
-    about: worker delivery
-    detail: >
-      A directive whose message id is long enough cannot be delivered by the
-      worker on this host, and the failure is silent on issue 80. See
-      delivery. It needs a bounded change to claude-worker.ps1 on main.
-  - id: F9
-    about: what ACCEPT_FOR_ADMISSION means to the repository
-    detail: >
-      Message 6109741134 separates ACCEPT_FOR_ADMISSION from READY_TO_MERGE
-      and grants no merge. The repository does not separate them:
-      READY_STATUSES in lib/admission.mjs holds both, the non-draft step of
-      the gate workflow takes either, and nothing on the merge path reads
-      merge_authority. The autopilot runs auto-merge-admitted.mjs with
-      --merge. So with this record on the PR head, the draft flag is the one
-      thing that keeps PR 159 out of the automated merge, and marking the PR
-      ready for review is in effect the merge decision. This packet changes
-      no gate and leaves the PR draft. Stated in the ACK (6109766740) before
-      this commit.
+open_findings:
+  detect_actions_fallback: >
+    The text-action fallback can still run after a parsed-command failure.
+    The fresh review traced separate checks in actions/executor; the first
+    batch failure is not a request-wide prohibition. This packet proves
+    narrowing of parsed commands at its boundary only.
+  stream_query: >
+    streamQuery is outside the changed parsed-command autonomy stage.
+    Existing executor authorization does not make this packet a proof of
+    every streaming or request-wide effect path.
+  executor_result_shape: >
+    The real executeBatch returns BatchResult with a results field, whereas
+    the query pipeline calls map on the returned value and the focused
+    fixture uses an array. This pre-existing integration mismatch is a
+    separate correction; the allowed-path proof stops at the executor call.
+  supervised_without_approval: >
+    A structurally valid allowed true, requiresApproval false, supervised
+    verdict preserves the existing executable behavior. Current producers
+    pair supervised with approval. A tighter cross-field rule is separate.
+  flow_authority: >
+    The shipped Flow route has separately owned selective primary-policy
+    read failure and client-supplied job-role authority findings. Neither is
+    widened into this packet or credited as corrected.
+  evidence: https://github.com/SaCH-PRO/KEYFLOWOS/blob/11971802fdada7e0e41fac39e178f1e441c4e882/docs/intelligence/sessions/2026-10-17-p0-safety-review/README.md
+  disposition: all listed follow-ons are preserved outside this packet's narrow accepted semantics
 
 residual_risks:
-  - the live fold depends on every later authority message being valid and typed; one malformed or untyped message stops it again, as before this packet
-  - the parse-equality digests prove equality with what was captured on 2026-10-06; they cannot show a later deletion on #80
-  - the merge commit has two parents, so a reader of main..f14adec5 must read the tree difference and not only the first-parent history
+  - >
+    A failed authority check leaves zero parsed commands executable. The
+    focused informational fixture can still complete a conversation, but
+    request-wide absence of all effects is not established. Degradation is
+    visible in step evidence and the error log, not a dedicated user notice.
+  - >
+    The detectActions fallback above still runs after a fail-closed batch, so
+    this packet does not make the whole request effect-free.
 
 rollback_floor:
-  - before merge, the branch can return to 67fb732a by reverting the merge commit and the artifact commit; nothing was rewritten
-  - after merge, revert the alias repair; the fold then stops at 6011507550 again and the projection reports stale, which is the state of main 7d2619c7
-  - no data, schema, workflow or checkpoint change to undo
+  - before merge to main, the branch can return to fdc900b7 by reverting the artifact commit and the merge commit; nothing was rewritten
+  - the historical executable-on-authority-error behaviour is not a rollback target
+  - prefer an existing hold or disable path for the action-capable Cortex surface, then roll forward
+  - there is no schema or data change to undo
 
 security:
   production_touched: false
   provider_traffic: false
-  secrets: none added; the recorded bodies are minimized envelope lines of public issue comments
-  network_in_tests: none added; the new tests read the committed fixture only
+  secrets: none added; no secret appears in a test, a manifest or this file
+  preview_deployment: the PR triggers the repository's own preview, as every PR does; nothing was deployed by this session
+  local_dast: not run in the worker session, which has no API key and no running application
   dast: DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
 
 unresolved_contradictions: []
-settled_contradictions: []
+
+settled_contradictions:
+  - message_id: CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005
+    comment_id: 6023151885
+    original_review_comment_id: 6023054785
+    about: the ordered re-anchor would exceed packet scope and alter semantic/proof files
+    settled_by: CG-REVIEW-KF155-006
+    settled_by_comment_id: 6240050804
+    evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804
+    disposition: original scope objection upheld; re-anchor order superseded as unnecessary after merged PR 159; no re-anchor performed
 
 next_action: >
-  Wait for every check on the head that carries this file. Read each result
-  from the live run. Then post the RETURN on issue 80, once, with
-  merge_authority false, in reply to CG-REVIEW-KF159-ADMISSION-RECORD-001,
-  and wait for ChatGPT's separate decision on the ready transition and the
-  merge. Leave the PR draft. Do not merge. Do not touch PR 155, PR 168 or
-  PR 169. No further semantic change.
+  ChatGPT inspects this control-only preparation and may publish it on the
+  unchanged packet branch. Observe the resulting artifact head and re-read
+  its checks. Keep the PR draft, status pending and merge_authority false.
+  No source mutation, ready transition, merge or Claude assignment is
+  requested. A separate admission decision and any integration must use
+  their own current evidence; do not inherit future-head CI from a597c692.
+
