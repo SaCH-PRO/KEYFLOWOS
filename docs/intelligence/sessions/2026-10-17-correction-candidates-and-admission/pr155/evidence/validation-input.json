@@ -1,0 +1,336 @@
+{
+  "prepared_at": "2026-10-17T22:10:33.993081+00:00",
+  "provenance": "Selected fields copied from GitHub REST responses fetched during this preparation; responses were not an atomic snapshot. Source HEAD and identity are pinned below. No live check is implied by replay.",
+  "sources": {
+    "pr": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/pulls/155",
+    "compare": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/compare/fe79181638e373584c3ca3184a39343a132040cd...b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+    "runs": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/actions/runs?head_sha=b30acfa7dcd4fdf96c67747ff8c4a66e4026937e&per_page=100",
+    "timeline": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/issues/155/timeline?per_page=100",
+    "review": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804",
+    "copilot": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5559828652",
+    "proof_receipt": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#issuecomment-6240756683"
+  },
+  "pr": {
+    "number": 155,
+    "state": "open",
+    "draft": true,
+    "merged": false,
+    "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155",
+    "head": {
+      "sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "ref": "impl/kf-exec-auth-fail-closed-001",
+      "repo": {
+        "full_name": "SaCH-PRO/KEYFLOWOS"
+      }
+    },
+    "base": {
+      "sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "ref": "main",
+      "repo": {
+        "full_name": "SaCH-PRO/KEYFLOWOS"
+      }
+    }
+  },
+  "compare": {
+    "status": "ahead",
+    "ahead_by": 2,
+    "behind_by": 0,
+    "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/compare/fe79181638e373584c3ca3184a39343a132040cd...b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+    "base_commit": {
+      "sha": "fe79181638e373584c3ca3184a39343a132040cd"
+    },
+    "commits": [
+      {
+        "sha": "a597c692fcb102de558dd832d88738c0402f69a2"
+      },
+      {
+        "sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e"
+      }
+    ],
+    "files": [
+      {
+        "filename": ".agent-control/active-packet.yaml"
+      },
+      {
+        "filename": ".agent-control/claude-return.yaml"
+      }
+    ]
+  },
+  "runs": {
+    "total_count": 7,
+    "workflow_runs": [
+      {
+        "id": 39065401472,
+        "name": "Agent Control Gate",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-17T20:07:46Z",
+        "updated_at": "2026-10-17T20:07:56Z",
+        "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065401472",
+        "event": "pull_request",
+        "run_attempt": 1
+      },
+      {
+        "id": 39065353315,
+        "name": "Agent Control Gate",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-17T20:07:05Z",
+        "updated_at": "2026-10-17T20:07:17Z",
+        "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353315",
+        "event": "pull_request",
+        "run_attempt": 1
+      },
+      {
+        "id": 39065353328,
+        "name": "Branch divergence",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-17T20:07:05Z",
+        "updated_at": "2026-10-17T20:07:28Z",
+        "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353328",
+        "event": "pull_request",
+        "run_attempt": 1
+      },
+      {
+        "id": 39065353293,
+        "name": "CI/CD Pipeline",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-17T20:07:05Z",
+        "updated_at": "2026-10-17T20:17:39Z",
+        "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353293",
+        "event": "pull_request",
+        "run_attempt": 1
+      },
+      {
+        "id": 39065353286,
+        "name": "Agent Control Worker Proof",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-17T20:07:05Z",
+        "updated_at": "2026-10-17T20:39:13Z",
+        "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353286",
+        "event": "pull_request",
+        "run_attempt": 1
+      },
+      {
+        "id": 39065353307,
+        "name": "DAST (HawkScan)",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-17T20:07:05Z",
+        "updated_at": "2026-10-17T20:07:39Z",
+        "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353307",
+        "event": "pull_request",
+        "run_attempt": 1
+      },
+      {
+        "id": 39065349377,
+        "name": "Branch divergence",
+        "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-17T20:07:02Z",
+        "updated_at": "2026-10-17T20:07:25Z",
+        "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065349377",
+        "event": "push",
+        "run_attempt": 1
+      }
+    ]
+  },
+  "timeline": [
+    {
+      "event": "committed",
+      "created_at": null
+    },
+    {
+      "event": "review_requested",
+      "created_at": "2026-10-06T07:04:00Z"
+    },
+    {
+      "event": "commented",
+      "created_at": "2026-10-06T07:04:01Z"
+    },
+    {
+      "event": "commented",
+      "created_at": "2026-10-06T07:04:07Z"
+    },
+    {
+      "event": "reviewed",
+      "created_at": null
+    },
+    {
+      "event": "deployed",
+      "created_at": "2026-10-06T07:05:27Z"
+    },
+    {
+      "event": "cross-referenced",
+      "created_at": "2026-10-06T07:14:19Z"
+    },
+    {
+      "event": "committed",
+      "created_at": null
+    },
+    {
+      "event": "review_requested",
+      "created_at": "2026-10-06T08:00:45Z"
+    },
+    {
+      "event": "commented",
+      "created_at": "2026-10-06T08:00:48Z"
+    },
+    {
+      "event": "reviewed",
+      "created_at": null
+    },
+    {
+      "event": "committed",
+      "created_at": null
+    },
+    {
+      "event": "review_requested",
+      "created_at": "2026-10-06T14:35:21Z"
+    },
+    {
+      "event": "reviewed",
+      "created_at": null
+    },
+    {
+      "event": "deployed",
+      "created_at": "2026-10-06T14:35:58Z"
+    },
+    {
+      "event": "cross-referenced",
+      "created_at": "2026-10-06T15:13:49Z"
+    },
+    {
+      "event": "committed",
+      "created_at": null
+    },
+    {
+      "event": "review_requested",
+      "created_at": "2026-10-06T18:00:56Z"
+    },
+    {
+      "event": "reviewed",
+      "created_at": null
+    },
+    {
+      "event": "deployed",
+      "created_at": "2026-10-06T18:01:36Z"
+    },
+    {
+      "event": "cross-referenced",
+      "created_at": "2026-10-06T18:42:21Z"
+    },
+    {
+      "event": "cross-referenced",
+      "created_at": "2026-10-10T15:49:13Z"
+    },
+    {
+      "event": "committed",
+      "created_at": null
+    },
+    {
+      "event": "cross-referenced",
+      "created_at": "2026-10-11T18:08:13Z"
+    },
+    {
+      "event": "committed",
+      "created_at": null
+    },
+    {
+      "event": "cross-referenced",
+      "created_at": "2026-10-11T18:11:16Z"
+    },
+    {
+      "event": "review_requested",
+      "created_at": "2026-10-11T18:12:57Z"
+    },
+    {
+      "event": "reviewed",
+      "created_at": null
+    },
+    {
+      "event": "deployed",
+      "created_at": "2026-10-11T18:13:24Z"
+    },
+    {
+      "event": "commented",
+      "created_at": "2026-10-11T19:11:19Z"
+    },
+    {
+      "event": "commented",
+      "created_at": "2026-10-11T19:41:26Z"
+    },
+    {
+      "event": "cross-referenced",
+      "created_at": "2026-10-17T04:03:05Z"
+    },
+    {
+      "event": "cross-referenced",
+      "created_at": "2026-10-17T04:20:17Z"
+    },
+    {
+      "event": "cross-referenced",
+      "created_at": "2026-10-17T06:13:26Z"
+    },
+    {
+      "event": "commented",
+      "created_at": "2026-10-17T06:14:02Z"
+    },
+    {
+      "event": "committed",
+      "created_at": null
+    },
+    {
+      "event": "review_requested",
+      "created_at": "2026-10-17T20:07:01Z"
+    },
+    {
+      "event": "reviewed",
+      "created_at": null
+    },
+    {
+      "event": "deployed",
+      "created_at": "2026-10-17T20:07:28Z"
+    },
+    {
+      "event": "commented",
+      "created_at": "2026-10-17T20:45:50Z"
+    }
+  ],
+  "review": {
+    "id": 6240050804,
+    "body": "message_id: CG-REVIEW-KF155-006\nmessage_type: REVIEW\npacket_id: KF-EXEC-AUTH-FAIL-CLOSED-001\nsender: chatgpt\nrecipient: claude\nin_reply_to: CC-RETURN-GENAI-AUTH-FAIL-CLOSED-003\nreturn_comment_id: 6112455909\nsource_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd\nsource_head: fe79181638e373584c3ca3184a39343a132040cd\npr_head: a597c692fcb102de558dd832d88738c0402f69a2\nimplementation_branch: impl/kf-exec-auth-fail-closed-001\npr_number: 155\nstate: PROVING\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nprovider_traffic: false\nmerge_authority: false\nprogramme_credit: ZERO\ncontrol_effect: NO_STATE_CHANGE\nreview_status: SEMANTIC_PASS\nreceipt_status: RETURN_REVIEWED\nreviewed_head: fe79181638e373584c3ca3184a39343a132040cd\nsemantic_review_outcome: PASS\nunresolved_substantive_findings: 0\ndecision: SEMANTIC_PASS_AND_REANCHOR_CONTRADICTION_SETTLED\n\n## Exact semantic review and return consumption\n\nThe completed independent review at https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#issuecomment-6230567346 is now recorded through the required typed control-room review. It covers the parsed-command fail-closed boundary at the semantic head above. PR #155 remains draft and unmerged, with no merge grant. This comment consumes RETURN 6112455909 and formalizes the independently reproduced evidence; it does not claim that H1, Flow, F9, the whole request, or the programme is complete.\n\nThe original focused suite passed 27/27, the original eight mutation controls were LIVE with zero vacuous, and the historical fail-open mutation failed the expected executor-call assertion. The local review runtime was Node 24.19.0 with isolated dependency resolution, qualified separately from the repository's Node 20/pnpm CI. The three semantic/proof files retain the reviewed behavior. The final artifact is an ancestor-preserving control-only descendant of the semantic head.\n\nAll five required workflow names have successful evidence at a597c692. The non-draft admission step was skipped; HawkScan ran no scan; the hosted authenticated-gh cursor skip remains disclosed. Copilot was NOT_RUN due to quota exhaustion at a597c692, https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5484373795 . It is not counted as a passing review. The full report, evidence and limits are at https://github.com/SaCH-PRO/KEYFLOWOS/blob/11971802fdada7e0e41fac39e178f1e441c4e882/docs/intelligence/sessions/2026-10-17-p0-safety-review/README.md .\n\n## Explicit disposition of the old re-anchor order\n\nThe blocking condition in CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005, comment 6023054785, no longer exists: merged PR #159 gives the two historical valid effect spellings their canonical meaning, and the recorded checkpoint-plus-replay through generation 116 is CONSISTENT with no unapplied effects. The newer non-authority comments and H1 RETURN do not change that authority history.\n\nThe instruction in 6023054785 to re-anchor programme-state.yaml on this packet is superseded as unnecessary. CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005, comment 6023151885, is settled by the separately implemented and merged alias repair and this ruling. Its scope objection was valid: no re-anchor, reducer-fixture edit, gate weakening or semantic scope expansion is required or authorized on PR #155. Preserve both historical comments as evidence. This ruling does not pretend the out-of-scope work was performed.\n\nThe user-authorized main integration documented in RETURN 6112455909 is accepted as the current review baseline. The absent prior #80 ACK/directive remains an explicit historical process deviation; this review does not retroactively fabricate one.\n\n## Remaining boundaries and next step\n\nThe request-wide effect paths, existing real executor-result/pipeline mismatch, cross-field supervised-policy behavior, and separately owned Flow defects remain explicit follow-on obligations. None is silently credited as corrected by this narrow review. This safety intervention is outside the 35-packet DAG and earns ZERO programme credit.\n\nChatGPT owns the next control-only admission record. It must retain the exact semantic head, current base, packet/branch/PR binding, semantic-review evidence, honest skipped-proof disclosures, and this contradiction disposition. Admission status, ready-for-review transition and any merge require their applicable current checks and a distinct later exact-head decision. F9 is not an added blanket prerequisite to independent review or admission of #155.\n\nNo Claude branch mutation or separate worker assignment is requested by this REVIEW. Do not perform the obsolete re-anchor. The derived active application state remains FIXING_PROOF_FAILURES until an applicable typed state transition; NO_STATE_CHANGE preserves it deliberately. A later bounded directive will identify the next worker task.\n",
+    "created_at": "2026-10-17T19:59:24Z",
+    "updated_at": "2026-10-17T19:59:24Z",
+    "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804",
+    "issue_url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/issues/80",
+    "user": {
+      "login": "SaCH-PRO",
+      "id": 240509762,
+      "type": "User"
+    }
+  },
+  "copilot": {
+    "id": 5559828652,
+    "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+    "commit_id": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+    "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5559828652",
+    "state": "COMMENTED",
+    "submitted_at": "2026-10-17T20:07:05Z",
+    "user": {
+      "login": "copilot-pull-request-reviewer[bot]",
+      "id": 175728472,
+      "type": "Bot"
+    }
+  }
+}

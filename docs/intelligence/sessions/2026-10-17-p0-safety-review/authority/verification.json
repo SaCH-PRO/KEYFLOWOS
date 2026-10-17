@@ -1,0 +1,21 @@
+{
+  "verification_kind": "local_offline_package_verification",
+  "checks": {
+    "exit_zero": true,
+    "consistent": true,
+    "generation_116": true,
+    "observed_116": true,
+    "applied_exactly_matches_original": true,
+    "programme_exactly_matches_original": true,
+    "all_12_source_hashes_match": true,
+    "active_holds_empty": true,
+    "stale_hold_description_exposed": true,
+    "formal_ruling_still_owed": true,
+    "wrong_snapshot_rejected": true
+  },
+  "wrong_snapshot_failure": "Authority replay failed: Comment snapshot mismatch: this runner reproduces the frozen observation, not a later or edited snapshot. count=0 digest=4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "remote_calls_during_runner": false,
+  "source_files_changed": false,
+  "executed_at_utc": "2026-10-17T06:08:21.313Z",
+  "node_version": "v24.19.0"
+}

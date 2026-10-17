@@ -1,0 +1,71 @@
+{
+  "basis": "Preparation only. Patched files are not the current PR artifact. No future SHA or CI result is asserted.",
+  "runtime": "v20.18.1",
+  "pr": {
+    "number": 155,
+    "state": "open",
+    "draft": true,
+    "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+    "head_ref": "impl/kf-exec-auth-fail-closed-001",
+    "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd"
+  },
+  "artifactBindingProblems": [],
+  "preReturnEvidenceProblems": [],
+  "semanticEvidence": {
+    "satisfied": true,
+    "reason": "independent_semantic_review_satisfied",
+    "detail": null,
+    "evidence": {
+      "implementer": "claude",
+      "primary": "NOT_RUN",
+      "passing": [
+        {
+          "provider": "chatgpt",
+          "reviewer": "chatgpt",
+          "reviewed_head": "fe79181638e373584c3ca3184a39343a132040cd",
+          "evidence_location": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804"
+        }
+      ]
+    }
+  },
+  "admissionDraftBarrier": {
+    "eligible": false,
+    "reason": "pr_is_draft",
+    "detail": null
+  },
+  "admissionPendingStatusBarrier": {
+    "eligible": false,
+    "reason": "review_not_ready",
+    "detail": "PENDING_CHATGPT_REVIEW"
+  },
+  "topLevelSemanticReviewPresent": false,
+  "activeReviewStatus": "PENDING_CHATGPT_REVIEW",
+  "returnReviewStatus": "PENDING_CHATGPT_REVIEW",
+  "semanticHead": "fe79181638e373584c3ca3184a39343a132040cd",
+  "grantFlags": {
+    "active": false,
+    "ret": false
+  },
+  "unresolvedContradictions": [],
+  "settledContradictions": [
+    {
+      "message_id": "CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005",
+      "comment_id": 6023151885,
+      "original_review_comment_id": 6023054785,
+      "about": "the ordered re-anchor would exceed packet scope and alter semantic/proof files",
+      "settled_by": "CG-REVIEW-KF155-006",
+      "settled_by_comment_id": 6240050804,
+      "evidence_location": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804",
+      "disposition": "original scope objection upheld; re-anchor order superseded as unnecessary after merged PR 159; no re-anchor performed"
+    }
+  ],
+  "testsCounters": {
+    "failed": 0,
+    "skipped": 0,
+    "scope": "final local semantic-head runs reported above; future artifact-head checks remain PENDING"
+  },
+  "filesChanged": [
+    ".agent-control/active-packet.yaml",
+    ".agent-control/claude-return.yaml"
+  ]
+}

@@ -1,0 +1,225 @@
+TAP version 13
+# Subtest: the real PR \#177 chain: returned, consumed, CHANGES_REQUIRED, six findings, no merge grant, liveness UNKNOWN
+ok 1 - the real PR \#177 chain: returned, consumed, CHANGES_REQUIRED, six findings, no merge grant, liveness UNKNOWN
+  ---
+  duration_ms: 6.701685
+  ...
+# Subtest: request -> ACK -> RETURN -> receipt reaches every stage; the referent of the negative cases below
+ok 2 - request -> ACK -> RETURN -> receipt reaches every stage; the referent of the negative cases below
+  ---
+  duration_ms: 1.409664
+  ...
+# Subtest: a PASS RETURN is PASS and CHANGES_REQUIRED never becomes PASS
+ok 3 - a PASS RETURN is PASS and CHANGES_REQUIRED never becomes PASS
+  ---
+  duration_ms: 1.391978
+  ...
+# Subtest: no ACK: a RETURN is still RETURNED, with the missing ACK shown as a gap
+ok 4 - no ACK: a RETURN is still RETURNED, with the missing ACK shown as a gap
+  ---
+  duration_ms: 0.755006
+  ...
+# Subtest: nothing returned: the responder is pending, and an old ACK is not liveness
+ok 5 - nothing returned: the responder is pending, and an old ACK is not liveness
+  ---
+  duration_ms: 0.435434
+  ...
+# Subtest: progress is last-observed evidence with an age, never present liveness
+ok 6 - progress is last-observed evidence with an age, never present liveness
+  ---
+  duration_ms: 0.638754
+  ...
+# Subtest: clock skew: progress dated after the observation is age 0 and flagged
+ok 7 - clock skew: progress dated after the observation is age 0 and flagged
+  ---
+  duration_ms: 0.459879
+  ...
+# Subtest: an ACK and RETURN from another sender are mismatched, not delivery
+ok 8 - an ACK and RETURN from another sender are mismatched, not delivery
+  ---
+  duration_ms: 0.664232
+  ...
+# Subtest: a reply naming another request never attaches by packet or PR
+ok 9 - a reply naming another request never attaches by packet or PR
+  ---
+  duration_ms: 1.186253
+  ...
+# Subtest: a reply with no reference at all stays unmatched, even with the same packet and PR
+ok 10 - a reply with no reference at all stays unmatched, even with the same packet and PR
+  ---
+  duration_ms: 0.383917
+  ...
+# Subtest: wrong PR is mismatched
+ok 11 - wrong PR is mismatched
+  ---
+  duration_ms: 0.310699
+  ...
+# Subtest: a RETURN for a changed semantic head is not a return of this request
+ok 12 - a RETURN for a changed semantic head is not a return of this request
+  ---
+  duration_ms: 0.632304
+  ...
+# Subtest: an implementation RETURN reports the head it produced without a false match
+ok 13 - an implementation RETURN reports the head it produced without a false match
+  ---
+  duration_ms: 0.33847
+  ...
+# Subtest: a RETURN whose ack_ref names a different ACK is rejected
+ok 14 - a RETURN whose ack_ref names a different ACK is rejected
+  ---
+  duration_ms: 0.442524
+  ...
+# Subtest: a reply posted before the request is not a reply to it
+ok 15 - a reply posted before the request is not a reply to it
+  ---
+  duration_ms: 0.355806
+  ...
+# Subtest: historical sender spellings match the Claude role at MEDIUM confidence; others do not
+ok 16 - historical sender spellings match the Claude role at MEDIUM confidence; others do not
+  ---
+  duration_ms: 0.594788
+  ...
+# Subtest: return without a receipt is awaiting ChatGPT, and refreshing the viewer never consumes it
+ok 17 - return without a receipt is awaiting ChatGPT, and refreshing the viewer never consumes it
+  ---
+  duration_ms: 6.868781
+  ...
+# Subtest: a receipt from the responder itself is context, not consumption
+ok 18 - a receipt from the responder itself is context, not consumption
+  ---
+  duration_ms: 0.923705
+  ...
+# Subtest: a receipt whose two references disagree is rejected
+ok 19 - a receipt whose two references disagree is rejected
+  ---
+  duration_ms: 0.706154
+  ...
+# Subtest: a receipt naming only return_comment_id is consumption
+ok 20 - a receipt naming only return_comment_id is consumption
+  ---
+  duration_ms: 0.628929
+  ...
+# Subtest: merge authority is read only from a valid PACKET_ADMISSION, never synthesized
+ok 21 - merge authority is read only from a valid PACKET_ADMISSION, never synthesized
+  ---
+  duration_ms: 1.057633
+  ...
+# Subtest: a duplicated request id attributes no reply to either comment
+ok 22 - a duplicated request id attributes no reply to either comment
+  ---
+  duration_ms: 0.624372
+  ...
+# Subtest: a duplicated RETURN id is not a return
+ok 23 - a duplicated RETURN id is not a return
+  ---
+  duration_ms: 0.596572
+  ...
+# Subtest: duplicate deliveries of one comment and out-of-order arrival give the same projection
+ok 24 - duplicate deliveries of one comment and out-of-order arrival give the same projection
+  ---
+  duration_ms: 1.958314
+  ...
+# Subtest: two deliveries of one id that disagree are treated as an edit
+ok 25 - two deliveries of one id that disagree are treated as an edit
+  ---
+  duration_ms: 0.630161
+  ...
+# Subtest: an edited RETURN is not evidence; an edited request makes the authority record unverifiable
+ok 26 - an edited RETURN is not evidence; an edited request makes the authority record unverifiable
+  ---
+  duration_ms: 1.134236
+  ...
+# Subtest: an amended autopilot status is a bot amendment, not edited authority
+ok 27 - an amended autopilot status is a bot amendment, not edited authority
+  ---
+  duration_ms: 0.990083
+  ...
+# Subtest: a malformed reply (repeated key) is not usable evidence
+ok 28 - a malformed reply (repeated key) is not usable evidence
+  ---
+  duration_ms: 0.408864
+  ...
+# Subtest: a receipt naming a RETURN that is missing from the record stays unmatched
+ok 29 - a receipt naming a RETURN that is missing from the record stays unmatched
+  ---
+  duration_ms: 0.363818
+  ...
+# Subtest: source links are only this repository on github.com; credentials are redacted
+ok 30 - source links are only this repository on github.com; credentials are redacted
+  ---
+  duration_ms: 0.623562
+  ...
+# Subtest: the view bounds the feed and returns one task chain with bodies
+ok 31 - the view bounds the feed and returns one task chain with bodies
+  ---
+  duration_ms: 1.990822
+  ...
+# Subtest: collection paginates completely with GET only and allowlisted targets
+ok 32 - collection paginates completely with GET only and allowlisted targets
+  ---
+  duration_ms: 11.627414
+  ...
+# Subtest: a failed page with no prior snapshot is PARTIAL with no success time
+ok 33 - a failed page with no prior snapshot is PARTIAL with no success time
+  ---
+  duration_ms: 4.622211
+  ...
+# Subtest: a failure after success keeps the last good snapshot and its success time, then goes STALE
+ok 34 - a failure after success keeps the last good snapshot and its success time, then goes STALE
+  ---
+  duration_ms: 1.152283
+  ...
+# Subtest: rate limiting backs off until the reset without calling GitHub again
+ok 35 - rate limiting backs off until the reset without calling GitHub again
+  ---
+  duration_ms: 0.951426
+  ...
+# Subtest: a 304 confirms the fetch without changing event times or the generation
+ok 36 - a 304 confirms the fetch without changing event times or the generation
+  ---
+  duration_ms: 1.376815
+  ...
+# Subtest: concurrent reads share one refresh and reads inside the refresh window hit the cache
+ok 37 - concurrent reads share one refresh and reads inside the refresh window hit the cache
+  ---
+  duration_ms: 0.952868
+  ...
+# Subtest: deletions and missed comments are found by count check and full resync
+ok 38 - deletions and missed comments are found by count check and full resync
+  ---
+  duration_ms: 1.245981
+  ...
+# Subtest: an incremental pass picks up edits; an older copy never overwrites a newer one
+ok 39 - an incremental pass picks up edits; an older copy never overwrites a newer one
+  ---
+  duration_ms: 1.168837
+  ...
+# Subtest: more pages than the bound is never COMPLETE
+ok 40 - more pages than the bound is never COMPLETE
+  ---
+  duration_ms: 4.514962
+  ...
+# Subtest: a restarted monitor starts empty and rebuilds from GitHub
+ok 41 - a restarted monitor starts empty and rebuilds from GitHub
+  ---
+  duration_ms: 0.566557
+  ...
+# Subtest: the request allowlist admits only this repository, issue \#80 and PR pages
+ok 42 - the request allowlist admits only this repository, issue \#80 and PR pages
+  ---
+  duration_ms: 0.539597
+  ...
+# Subtest: the live transport sends GET only, keeps the credential in the header and out of errors
+ok 43 - the live transport sends GET only, keeps the credential in the header and out of errors
+  ---
+  duration_ms: 1.212041
+  ...
+1..43
+# tests 43
+# suites 0
+# pass 43
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 87.890581

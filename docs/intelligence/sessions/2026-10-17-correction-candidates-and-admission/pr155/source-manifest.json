@@ -1,0 +1,114 @@
+{
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "source_head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+  "files": [
+    {
+      "path": ".agent-control/README.md",
+      "git_blob_sha": "bea8a67d1cbf0a5c17712cb90ea41ee078b26c1c",
+      "bytes": 1833,
+      "sha256": "2a5edd45f2e96d144741e718b940e25edacd9798feb88164eae25ebd06a4d97a"
+    },
+    {
+      "path": ".agent-control/active-packet.yaml",
+      "git_blob_sha": "551b94f2aa00badde4f595eacfb367a2d4aebc04",
+      "bytes": 11304,
+      "sha256": "bac2a95e3949dc2d734bb879c95be58c6b78294c612f4800c536261424a1dd33"
+    },
+    {
+      "path": ".agent-control/claude-return.yaml",
+      "git_blob_sha": "c17375994395ea4ca6d3b32cdc0d1e11d9e3f508",
+      "bytes": 34275,
+      "sha256": "3b2f291bf3a602f56b459c4a353bae6de7a6d884ac5abf788bee78cc34461f8a"
+    },
+    {
+      "path": ".github/workflows/agent-control-gate.yml",
+      "git_blob_sha": "6f970c4730bf6ad0abea11dbf49c7a9b06a35255",
+      "bytes": 5280,
+      "sha256": "cf346ccefd5dfb39e4fcaa59e9e9450d423a00f69b5da83a564dadcd4ae597bc"
+    },
+    {
+      "path": "docs/development/AGENT_CONTROL_PLANE.md",
+      "git_blob_sha": "e2b4976846e509a40598087b319e08b35ffaa805",
+      "bytes": 34798,
+      "sha256": "1184cef4b9a17f745e6d824c00dce8bc61b6db6ae2aa1ade7433045732c88e00"
+    },
+    {
+      "path": "docs/development/EXECUTION_CONTROL_STANDARD.md",
+      "git_blob_sha": "6ab97a792c16d24ac1501a1ce6e006e4d8d33359",
+      "bytes": 12691,
+      "sha256": "88d32d9c167ea6ea33724def209056a967483b82d08393eb6a882419f10bfee1"
+    },
+    {
+      "path": "scripts/agent-control/lib/admission.mjs",
+      "git_blob_sha": "bf68b153b1b4a69aa36df147a9cea69a500e51d5",
+      "bytes": 13822,
+      "sha256": "2d96c2f27ad3271eb52eb6692a16fc574ebda6eda260804196787c07f448baa5"
+    },
+    {
+      "path": "scripts/agent-control/lib/authority-effects.mjs",
+      "git_blob_sha": "8a4f68dc4000c709f5b99db670306dbb5e2aaed9",
+      "bytes": 20857,
+      "sha256": "a9315d67a83b5db78193428cade678770cafa3e04867d8edd2dbf7f62e3124ae"
+    },
+    {
+      "path": "scripts/agent-control/lib/control-envelope.mjs",
+      "git_blob_sha": "bb51643e3aa5554aba2466d709ed61800a5ce88f",
+      "bytes": 17914,
+      "sha256": "e852d145ae6fa71a997bc0672036142a4b5687a2cb8c0c38c4473bacc91b57c2"
+    },
+    {
+      "path": "scripts/agent-control/lib/events.mjs",
+      "git_blob_sha": "0fb689e93894e0621859db7dc867c629df01a372",
+      "bytes": 13471,
+      "sha256": "d1f4b1e17190145f659716c6575c54c0721e20ee5d48f8813728eac09e2ebcb8"
+    },
+    {
+      "path": "scripts/agent-control/lib/return-evidence.mjs",
+      "git_blob_sha": "beefccb0b1f36b380ae74ced7f5f777e04f109f6",
+      "bytes": 8876,
+      "sha256": "7e3d0ddfda04faef2a51ee32713fface9fcc93d6f8187556aa6a670c17b10c8d"
+    },
+    {
+      "path": "scripts/agent-control/lib/semantic-review.mjs",
+      "git_blob_sha": "3d95ba7737602ef5acda809e1803fdac0a0ce4ad",
+      "bytes": 19513,
+      "sha256": "c1932178b4ddc76434395e975db24b708ee5c7604ed14620cf51f7f66eacd5a0"
+    },
+    {
+      "path": "scripts/agent-control/lib/state-machine.mjs",
+      "git_blob_sha": "fe3c9948e89bdde2f7069053f19f68222a985eea",
+      "bytes": 4342,
+      "sha256": "d18a193cc1cb701020347d66e0d63e2a6bc87f8276b49a2382cb04888e8ca4f7"
+    },
+    {
+      "path": "scripts/agent-control/lib/state.mjs",
+      "git_blob_sha": "805406412b59e30e3e0ae068b9ae9ab55a18d519",
+      "bytes": 13917,
+      "sha256": "1937d42bd0c08127bbc5e0ca29615be941e964584fa3d9e99e829af67c7a6232"
+    },
+    {
+      "path": "scripts/agent-control/lib/yaml.mjs",
+      "git_blob_sha": "0e6b22f1a64980ac065e73a0797ce1929c34aee0",
+      "bytes": 13753,
+      "sha256": "6f39df92fffb0ad0342b8323b364e0f9ccf5908d0e67968b20f250db56c35159"
+    },
+    {
+      "path": "scripts/agent-control/tests/helpers/branch-pr.mjs",
+      "git_blob_sha": "658943fd4c26d3c8d212479dba9268727095bb1c",
+      "bytes": 1025,
+      "sha256": "1719523aeeddd5e8af52b9bf12381f085ee05d50f605c44dbbd13b4a7cc10667"
+    },
+    {
+      "path": "scripts/agent-control/tests/return-evidence.spec.mjs",
+      "git_blob_sha": "c7c852d350a00fb6edeb24851608a7c63ba6f02b",
+      "bytes": 13673,
+      "sha256": "cad539f340a824e3e7a6febdfbc881dc47a76ae59611eed1f09e6708820d8aa4"
+    },
+    {
+      "path": "scripts/agent-control/tests/semantic-review.spec.mjs",
+      "git_blob_sha": "5fa933eb4e30ffdeb5dbc2ceee6646fd0390b26d",
+      "bytes": 25417,
+      "sha256": "c6f88279088f361334f91efc46f88126e052bef5cdddaeca168ff66c38e423fc"
+    }
+  ]
+}

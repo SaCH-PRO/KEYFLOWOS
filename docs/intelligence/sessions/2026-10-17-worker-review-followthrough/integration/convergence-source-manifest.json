@@ -1,0 +1,775 @@
+{
+  "schema_version": 1,
+  "recommendation": "Use existing PR173 main-to-intelligence pointer; minimum incremental edit is CANONICAL-SOURCE.md only",
+  "state": "READ_ONLY_RECOMMENDATION_PREPARED",
+  "remote_mutations": false,
+  "source_provenance": {
+    "pr": 173,
+    "branch": "docs/kf-canonical-load-path-001",
+    "commit": "842aa4acfd110c9595bb7229c4788dcb6394d771",
+    "tree": "930764ec7e1d05201c9263003cd4b66b224f809f",
+    "path": "docs/intelligence/CANONICAL-SOURCE.md",
+    "blob": "5f3b072e0c21d90f5130ac9b079755e59d70e34c",
+    "original_local_path": "original/CANONICAL-SOURCE.md",
+    "prepared_local_path": "prepared/CANONICAL-SOURCE.md"
+  },
+  "placeholders": {
+    "__PR180_FULL_SHA__": "Forthcoming verified 40-hex PR180 head containing every linked destination",
+    "__FOLLOWTHROUGH_SESSION_PATH__": "Repository-relative path to followthrough session README.md, including docs/intelligence/sessions/...; no leading slash"
+  },
+  "prepublication_checks": [
+    "Resolve both placeholders everywhere",
+    "Verify all pinned destinations at final PR180 head",
+    "Revalidate live PR173 head before additive update",
+    "Retain draft and require independent revised-head integration review"
+  ],
+  "minimum_incremental_paths": [
+    "docs/intelligence/CANONICAL-SOURCE.md"
+  ],
+  "existing_pr173_paths": [
+    {
+      "path": ".agent-control/README.md",
+      "status": "modified",
+      "blob_sha": "c5eb674710b3ce453c476f04a6a858c34b035b55"
+    },
+    {
+      "path": "CLAUDE.md",
+      "status": "modified",
+      "blob_sha": "6ae63f56f54f3a9474d3e2beef1c7ddc2f600d81"
+    },
+    {
+      "path": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "status": "modified",
+      "blob_sha": "77cda5accc77eaa79d718c45e83dce22d9091652"
+    },
+    {
+      "path": "docs/intelligence/CANONICAL-SOURCE.md",
+      "status": "added",
+      "blob_sha": "5f3b072e0c21d90f5130ac9b079755e59d70e34c"
+    },
+    {
+      "path": "docs/intelligence/packages/KF-EXEC-TIME-001/ADMISSION-PREPARATION.md",
+      "status": "added",
+      "blob_sha": "976827862645b4ec27a1a3056e9bc40be5cc2607"
+    }
+  ],
+  "owners": [
+    {
+      "pr": 173,
+      "head": "842aa4acfd110c9595bb7229c4788dcb6394d771",
+      "concern": "main-to-intelligence pointer",
+      "draft": true
+    },
+    {
+      "pr": 157,
+      "head": "5d64ecdb46b1a9e8b22a9db5c33e318f99f9c120",
+      "concern": "START-HERE and broad continuity",
+      "draft": true,
+      "freeze_comment": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/157#issuecomment-6025536547",
+      "freeze_lifting_found": false
+    },
+    {
+      "pr": 107,
+      "head": "367fe7433b4e685c5e4c03c1e4c48b17e897663a",
+      "concern": "branch roles and base-aware comparison",
+      "draft": true,
+      "mergeable": false
+    },
+    {
+      "pr": 150,
+      "head": "f630f13f38dfc54c5d09dd132ded23938bd55477",
+      "concern": "open-PR convergence disposition",
+      "draft": true
+    },
+    {
+      "pr": 180,
+      "head": "e8905778afb58ddb52bc9b5e857bc6daae0657ae",
+      "concern": "October17 roadmap and evidence",
+      "draft": true
+    }
+  ],
+  "divergence": {
+    "thresholds": {
+      "max_commits": 25,
+      "max_files": 50,
+      "max_lines": 0
+    },
+    "main_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+    "foundation_sha": "f406d15c12d56e3758b517161f8e7c2ddc30424a",
+    "pr180_vs_main": {
+      "head": "e8905778afb58ddb52bc9b5e857bc6daae0657ae",
+      "main_unique": 143,
+      "head_unique": 707,
+      "files": 736,
+      "run_id": 39065514689,
+      "job_id": 117492255056,
+      "result": "FAIL",
+      "logs_inspected": true,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065514689"
+    },
+    "pr180_vs_foundation": {
+      "base_unique": 0,
+      "head_unique": 3,
+      "files": 73,
+      "all_added": true,
+      "result_under_unchanged_thresholds": "FAIL_FILES"
+    },
+    "foundation_vs_main": {
+      "main_unique": 143,
+      "foundation_unique": 704
+    },
+    "pr157_vs_current_foundation": {
+      "ref_a": "f406d15c12d56e3758b517161f8e7c2ddc30424a",
+      "sha_a": "f406d15c12d56e3758b517161f8e7c2ddc30424a",
+      "ref_b": "5d64ecdb46b1a9e8b22a9db5c33e318f99f9c120",
+      "sha_b": "5d64ecdb46b1a9e8b22a9db5c33e318f99f9c120",
+      "commits_unique_to_a": 1,
+      "commits_unique_to_b": 30,
+      "files_changed": 13,
+      "insertions": 3069,
+      "deletions": 516,
+      "thresholds": {
+        "max_commits": 25,
+        "max_files": 50,
+        "max_lines": 0
+      },
+      "exceeded": [
+        "commits-on-5d64ecdb46b1a9e8b22a9db5c33e318f99f9c120:30>25"
+      ]
+    },
+    "pr173_vs_main": {
+      "main_unique": 0,
+      "head_unique": 1,
+      "files": 5,
+      "result": "PASS",
+      "locally_executed": true
+    },
+    "compare_main_api_file_list_limit": 300,
+    "pr180_file_count_source": "Hosted divergence job for736; exact PR files and foundation comparison for73"
+  },
+  "future_path_extraction": {
+    "status": "ALTERNATIVE_ONLY_NOT_CREATED_OR_ASSIGNED",
+    "owner_pr": 180,
+    "first": {
+      "scope": "P0 dated evidence",
+      "file_count": 46
+    },
+    "second": {
+      "scope": "Accepted roadmap and H1 continuation",
+      "file_count": 27,
+      "depends_on_first": true
+    },
+    "requirements": [
+      "Use current-main history, not inherited intelligence ancestry",
+      "Preserve exact blobs and provenance",
+      "Separate scopes and sequential main integration keep each under50 files",
+      "Independently review each exact head",
+      "Explicitly preserve historical PR180 disposition"
+    ],
+    "dependency_source": {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/replay-publication.mjs",
+      "line": 7,
+      "import": "../../2026-10-17-p0-safety-review/authority/replay-authority.mjs"
+    }
+  },
+  "pr180_added_files": [
+    {
+      "path": "docs/intelligence/handoff/ACCEPTED-CAPABILITY-ROADMAP-2026-10-17.md",
+      "status": "added",
+      "blob_sha": "dcf4a7799b5103507f7db4b75d66467e5a727f68",
+      "additions": 75,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/MANIFEST.json",
+      "status": "added",
+      "blob_sha": "cfde22d601fc767d52943d0d1b13fdf6613e4707",
+      "additions": 114,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/README.md",
+      "status": "added",
+      "blob_sha": "cfefaf534f23ed0be92a21336047d2054935b801",
+      "additions": 70,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/authority-replay-result.json",
+      "status": "added",
+      "blob_sha": "b1ecfb45708ba822473067545d71fd39b465c1d8",
+      "additions": 549,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/f9-directive.md",
+      "status": "added",
+      "blob_sha": "976450672126fe0a6ea34f5dc3f47688c560e73f",
+      "additions": 59,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/h1-receipt.md",
+      "status": "added",
+      "blob_sha": "99996015d4e47902bb7dec9d46fae9b64752e76c",
+      "additions": 35,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/parser-checks.json",
+      "status": "added",
+      "blob_sha": "41baaeb1c15bb4f94d8e1a7891961f1aa42b8d6d",
+      "additions": 136,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/pr155-record-test-evidence.json",
+      "status": "added",
+      "blob_sha": "1c24bfd9ffa0e0981496de2785a99419aef8b25b",
+      "additions": 49,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/pr155-record-validation-node20.json",
+      "status": "added",
+      "blob_sha": "52f6ab75ba14ed305e867f0a1ee86f60d61454bf",
+      "additions": 71,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/pr155-review.md",
+      "status": "added",
+      "blob_sha": "2ef736e72b64a949e5a8e27e046d4a233b7ad338",
+      "additions": 50,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/publication-receipts.json",
+      "status": "added",
+      "blob_sha": "dbe8a2032568e8179065470d28f9e2a48e78965a",
+      "additions": 202,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/replay-publication.mjs",
+      "status": "added",
+      "blob_sha": "1a44c305759af4ab222735b4b884b214c3c64f2c",
+      "additions": 43,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/repository-truth.json",
+      "status": "added",
+      "blob_sha": "142f9139e00f8ff6659c29c292884c79155a0549",
+      "additions": 31,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/source-and-snapshot-manifest.json",
+      "status": "added",
+      "blob_sha": "1f58a2055b2739ba89ddba6d53aa7e921cfc37c8",
+      "additions": 86,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/ci-run-snapshot.json",
+      "status": "added",
+      "blob_sha": "6883a3ccd969505eb0170c55e02e61881227d719",
+      "additions": 120,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/disconnect-result.json",
+      "status": "added",
+      "blob_sha": "f8a7c450267e81f138072d110fda0f19d4bb62f0",
+      "additions": 37,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/metadata-redaction-result.json",
+      "status": "added",
+      "blob_sha": "0529e218ea45de4ca9bf9b3f0a87ed4938be64a7",
+      "additions": 12,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/original-43-tests.tap",
+      "status": "added",
+      "blob_sha": "fafeca6523db30b6f2429407c40506ca159b1a4d",
+      "additions": 225,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/package-lock.json",
+      "status": "added",
+      "blob_sha": "9bde5aa87e8a5e752e6901ba4e2a1dcbb56a35eb",
+      "additions": 851,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/package.json",
+      "status": "added",
+      "blob_sha": "4a0fc93c52304a4ce56261c66e74c72fa7990dcf",
+      "additions": 9,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/pagination-age-results.jsonl",
+      "status": "added",
+      "blob_sha": "4533a1558881795309bc1d361d12f3767fd6758c",
+      "additions": 4,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/regression-expectations.spec.mjs",
+      "status": "added",
+      "blob_sha": "c6b76e731873d8031bff9ce8714c6bfed2cd5a02",
+      "additions": 125,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/repro-disconnect.cjs",
+      "status": "added",
+      "blob_sha": "f15291954b5cfedb9b0b545b8b77cb9a7412adbf",
+      "additions": 123,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/repro-metadata-redaction.cjs",
+      "status": "added",
+      "blob_sha": "8373a73b931f8a8adaa4668d68c4678821af4857",
+      "additions": 63,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/reproduce-pagination-age.mjs",
+      "status": "added",
+      "blob_sha": "492134719f3ad7563929f06709f1596713ff6b53",
+      "additions": 77,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/review-8-expected-failures.tap",
+      "status": "added",
+      "blob_sha": "051af1aad88a290fa199d45f1c9db11b1ad3db5b",
+      "additions": 189,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/proof/run-results.json",
+      "status": "added",
+      "blob_sha": "0bed9ecc6fbaade4b447f8c69eea1ae5a073b54d",
+      "additions": 26,
+      "deletions": 0,
+      "tranche": "ROADMAP_H1_27"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/MANIFEST.json",
+      "status": "added",
+      "blob_sha": "f817e5c9e506f6ddbab80853dc75873ca0e05f3d",
+      "additions": 280,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/README.md",
+      "status": "added",
+      "blob_sha": "9780149d9fe8c0471ea081163ac53a730547b2bd",
+      "additions": 224,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/README.md",
+      "status": "added",
+      "blob_sha": "21b6c3271c16f2a11a7fab2395536071657bdeb5",
+      "additions": 83,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/authority-replay-summary.json",
+      "status": "added",
+      "blob_sha": "31c8226f3fdcf250dd6504bc18c9c45dfefe6c56",
+      "additions": 758,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/pr155-ci-evidence.json",
+      "status": "added",
+      "blob_sha": "c0f38b3cd6ebe6fb369817693e28fde95d86357d",
+      "additions": 821,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/replay-authority.mjs",
+      "status": "added",
+      "blob_sha": "488939cd3c5d52dc9bbcbdda58965001f5f02e55",
+      "additions": 168,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/repository-truth.json",
+      "status": "added",
+      "blob_sha": "01ec35e80186982c7375c1a1d5dfb89eea62efa6",
+      "additions": 42,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/source-and-snapshot-manifest.json",
+      "status": "added",
+      "blob_sha": "20591d4ff0482e3db973fb135b720c53ce57588d",
+      "additions": 86,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/verification.json",
+      "status": "added",
+      "blob_sha": "fe72d00926331706aff37e0e46be243d57ed71f6",
+      "additions": 21,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/README.md",
+      "status": "added",
+      "blob_sha": "6f19807ed0c56a770966b98238f5299ee23f65b0",
+      "additions": 48,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/gate-step-probe.mjs",
+      "status": "added",
+      "blob_sha": "8b099931f71fdbc8f9f31eb9af8731c0978cef9b",
+      "additions": 53,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/network-fixture.mjs",
+      "status": "added",
+      "blob_sha": "543c8b71125e7cf78d540f41abcb861424b70165",
+      "additions": 37,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/packaging-provenance.json",
+      "status": "added",
+      "blob_sha": "af4c914ec0d674bcaec9aacb31f161da335e0a35",
+      "additions": 82,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/portability-results/cli-probe-result.json",
+      "status": "added",
+      "blob_sha": "c234a8bd461dafae1b1e638a1cc3c61f737641d1",
+      "additions": 68,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/portability-results/cli-request-trace.json",
+      "status": "added",
+      "blob_sha": "2e15db9430d7f2b2b044ebc4237fdea86ac7b7c3",
+      "additions": 67,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/portability-results/cli-source-result.json",
+      "status": "added",
+      "blob_sha": "990f7ea7942286f9e77aa7009e03e0bd16496464",
+      "additions": 1,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/portability-results/gate-step-extracted.sh",
+      "status": "added",
+      "blob_sha": "364ae2cccbe3d98ad856d431eb7625eae6a2f4b3",
+      "additions": 21,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/portability-results/gate-step-result.json",
+      "status": "added",
+      "blob_sha": "ede024d0a4194b5d1125549c6710708bf79498d1",
+      "additions": 28,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/portability-results/portability-validation.json",
+      "status": "added",
+      "blob_sha": "121092c95c767239f1d2b01724938fcdbec8163d",
+      "additions": 75,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/portability-results/probe-result.json",
+      "status": "added",
+      "blob_sha": "d9d7edc71822e95e3f3593e48eb972dc68b66b37",
+      "additions": 128,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/probe-config.mjs",
+      "status": "added",
+      "blob_sha": "e9160e04770d879aa99696994a35dd5e9fbb91ff",
+      "additions": 49,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/probe.mjs",
+      "status": "added",
+      "blob_sha": "99a2fc51daac3a2bbb9b75c78d7bfcf3a71d0e87",
+      "additions": 57,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/recorded/cli-probe-result.json",
+      "status": "added",
+      "blob_sha": "c234a8bd461dafae1b1e638a1cc3c61f737641d1",
+      "additions": 68,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/recorded/cli-request-trace.json",
+      "status": "added",
+      "blob_sha": "2e15db9430d7f2b2b044ebc4237fdea86ac7b7c3",
+      "additions": 67,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/recorded/cli-source-result.json",
+      "status": "added",
+      "blob_sha": "990f7ea7942286f9e77aa7009e03e0bd16496464",
+      "additions": 1,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/recorded/existing-admission-tests.json",
+      "status": "added",
+      "blob_sha": "f118db901334e04fa9a6b63b5804481bac3773e1",
+      "additions": 6,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/recorded/gate-step-result.json",
+      "status": "added",
+      "blob_sha": "ede024d0a4194b5d1125549c6710708bf79498d1",
+      "additions": 28,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/recorded/probe-output.json",
+      "status": "added",
+      "blob_sha": "0d47b4773f281b0abce26a7977133f09b9029d75",
+      "additions": 128,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/recorded/probe-result.json",
+      "status": "added",
+      "blob_sha": "d9d7edc71822e95e3f3593e48eb972dc68b66b37",
+      "additions": 128,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/recorded/source-provenance.json",
+      "status": "added",
+      "blob_sha": "c9c33d50fd16de5e04476df952a968fa45f516b9",
+      "additions": 29,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/run-cli-probe.mjs",
+      "status": "added",
+      "blob_sha": "578a48c53b40b0996621b50a2e1bead65fd2f44b",
+      "additions": 20,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/f9/source-manifest.json",
+      "status": "added",
+      "blob_sha": "675019c076ea6c184c8df2f3e267ee38280a62b7",
+      "additions": 53,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/flow/README.md",
+      "status": "added",
+      "blob_sha": "7c7313f520f83c94be9d9f635f800fd22a7ed9bb",
+      "additions": 45,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/flow/flow-policy-probe-result.json",
+      "status": "added",
+      "blob_sha": "3c2e7bc8c598368731f7e0cedf4a79be65f42d39",
+      "additions": 126,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/flow/flow-policy-probes.cjs",
+      "status": "added",
+      "blob_sha": "0a7a58eae40da2126a12310b14565289cf3fe04d",
+      "additions": 157,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/flow/peer-review.md",
+      "status": "added",
+      "blob_sha": "b4e29f596ea8c070d9afc2249042802c35d07d96",
+      "additions": 60,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/pr155/README.md",
+      "status": "added",
+      "blob_sha": "12e126ab00bae7d7d0058c9e867af455982de5bc",
+      "additions": 176,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/pr155/focused-original-report.json",
+      "status": "added",
+      "blob_sha": "0591d6fc6fc0a97f7fc9046a7a4e5edf26df327f",
+      "additions": 1,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/pr155/historical-assertion-report.json",
+      "status": "added",
+      "blob_sha": "379ee892ae5939a3e8282f18a7a21b1d1f524778",
+      "additions": 1,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/pr155/negative-controls-report.json",
+      "status": "added",
+      "blob_sha": "401689f26f745429ce9e2340782505ba7c9553da",
+      "additions": 137,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/pr155/review-summary.json",
+      "status": "added",
+      "blob_sha": "4e7c0c0602b535d1854f26627c0aa7f74277881f",
+      "additions": 146,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/transport/README.md",
+      "status": "added",
+      "blob_sha": "78987f1b921e9a5df1efcfba2aa70cd2cf5f38da",
+      "additions": 23,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/transport/check-progress-shape.mjs",
+      "status": "added",
+      "blob_sha": "491b03f2fa2d42d088bcc09e0e53335eede1d0b3",
+      "additions": 52,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/transport/issue80-progress.md",
+      "status": "added",
+      "blob_sha": "7b9f58277ba989872c106aec51aa630b9bf0d6c4",
+      "additions": 38,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/transport/pr155-review-evidence.md",
+      "status": "added",
+      "blob_sha": "9b9f4b889bb5cea2e3f7db59ac86395db02e2950",
+      "additions": 38,
+      "deletions": 0,
+      "tranche": "P0_46"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-p0-safety-review/transport/progress-shape-result.json",
+      "status": "added",
+      "blob_sha": "f193bc528d8cd047d7efa3b968de1ade1cc568f8",
+      "additions": 27,
+      "deletions": 0,
+      "tranche": "P0_46"
+    }
+  ],
+  "sources": [
+    "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/branch-hygiene-policy.md",
+    "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/.github/workflows/branch-divergence.yml",
+    "https://github.com/SaCH-PRO/KEYFLOWOS/pull/173#issuecomment-6112656949",
+    "https://github.com/SaCH-PRO/KEYFLOWOS/pull/157#issuecomment-6025536547",
+    "https://github.com/SaCH-PRO/KEYFLOWOS/blob/f630f13f38dfc54c5d09dd132ded23938bd55477/docs/development/KF-OPEN-PR-CONVERGENCE-BOARD-001.md"
+  ],
+  "verification_limits": [
+    "No full current-head PR173 semantic review performed in this task",
+    "No evidence scripts or application tests run",
+    "No claimed live worker assignment",
+    "No remote writes, branches, retargets, archives, new PRs or authority posts"
+  ]
+}
+

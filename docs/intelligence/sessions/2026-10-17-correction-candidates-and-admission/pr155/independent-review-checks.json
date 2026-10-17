@@ -1,0 +1,95 @@
+{
+  "independent_reviewer": "flow_safety_prepare",
+  "reviewed_at": "2026-10-17T22:16:50.545Z",
+  "runtime": "v24.19.0",
+  "target": {
+    "repository": "SaCH-PRO/KEYFLOWOS",
+    "number": 155,
+    "head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+    "semantic": "fe79181638e373584c3ca3184a39343a132040cd",
+    "base": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+    "branch": "impl/kf-exec-auth-fail-closed-001",
+    "packet": "KF-EXEC-AUTH-FAIL-CLOSED-001"
+  },
+  "checks": [
+    {
+      "name": "Pinned repository sources retain all 18 Git blob identities",
+      "passed": true,
+      "detail": {
+        "verified_files": 18
+      }
+    },
+    {
+      "name": "Fresh GitHub identities agree with the prepared head, base, draft state and exact control-only lineage",
+      "passed": true,
+      "detail": {
+        "head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "base": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+        "semantic": "fe79181638e373584c3ca3184a39343a132040cd",
+        "review_id": 6240050804,
+        "copilot_review_id": 5559828652
+      }
+    },
+    {
+      "name": "Actual candidate preserves declared invariants, allowed and prohibited scope, original proof and unresolved follow-ons",
+      "passed": true,
+      "detail": {
+        "scope_unchanged": true,
+        "return_reconsumption": false
+      }
+    },
+    {
+      "name": "Future artifact proof remains pending and previous artifact outcomes are explicitly historical",
+      "passed": true,
+      "detail": {
+        "future_proof_entries": 6
+      }
+    },
+    {
+      "name": "Synthetic binding control keeps all false authority flags and creates no new RETURN or future SHA",
+      "passed": true,
+      "detail": {
+        "synthetic_only": true,
+        "real_comment_exists": false,
+        "remote_actions": []
+      }
+    },
+    {
+      "name": "A fresh-looking copy of semantic-only review 006 still cannot serve as admission",
+      "passed": true,
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "A later admission envelope cannot consume the already-consumed RETURN again",
+      "passed": true,
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "Binder rejects wrong repository and moved source identity despite matching PR number",
+      "passed": true,
+      "detail": {
+        "rejected": true
+      }
+    },
+    {
+      "name": "Prematurely promoted exact-artifact proof is rejected before binding",
+      "passed": true,
+      "detail": {
+        "rejected": true
+      }
+    }
+  ],
+  "passed": 9,
+  "failed": 0,
+  "remote_actions": [],
+  "source_edits": [],
+  "candidate_sha256": {
+    ".agent-control/active-packet.yaml": "d4744fc37e8527f2befb835b3b6680152e7b9eff9896198f7b765e29a0131e81",
+    ".agent-control/claude-return.yaml": "1dc6fa56d4daff3913cd662e847da0b6ff9f409d5e35adcd2149a6bce5ad6645"
+  },
+  "scope": "Preparation-package review only; no live admission, merge, worker state or application acceptance"
+}

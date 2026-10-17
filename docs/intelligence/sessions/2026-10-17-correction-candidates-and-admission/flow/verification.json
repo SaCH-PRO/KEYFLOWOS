@@ -1,0 +1,31 @@
+{
+  "patch_applies_to_exact_base": true,
+  "applied_files_match_candidate": true,
+  "changed_paths": [
+    "apps/server/src/modules/ai/ai-oversight.service.ts",
+    "apps/server/src/modules/ai/ai-oversight-fails-closed.spec.ts"
+  ],
+  "verified_pinned_files_after_proof": 18,
+  "baseline_safety_failures": [
+    "P2",
+    "W1",
+    "R1"
+  ],
+  "candidate_failures": [],
+  "mutation_safety_failures": [
+    "P2",
+    "W1",
+    "R1"
+  ],
+  "no_original_test_assertions_removed": true,
+  "production_touched": false,
+  "remote_writes": false,
+  "fresh_package_materializer_executed": true,
+  "fresh_package_matrix_matches_original_execution": true,
+  "fresh_package_vitest_candidate": {
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0
+  },
+  "publishable_reproduction_source_files": 7
+}

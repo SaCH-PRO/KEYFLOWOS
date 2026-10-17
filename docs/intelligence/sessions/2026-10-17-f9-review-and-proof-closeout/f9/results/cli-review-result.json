@@ -1,0 +1,243 @@
+{
+  "artifact": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+  "semantic": "739414da0c5faeed1bbaf4a20deab27b9cfa18f1",
+  "base": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "node": "v24.19.0",
+  "platform": "linux",
+  "source_changed": false,
+  "real_network_calls": 0,
+  "real_merge_calls": 0,
+  "credentials": "synthetic only",
+  "interpretation": "Counterexample reproduced; exit 0 of this review runner confirms characterization, not safety approval.",
+  "cases": [
+    {
+      "name": "hold-alone-denial",
+      "code": 3,
+      "out": {
+        "eligible": false,
+        "reason": "merge_grant_not_satisfied",
+        "detail": {
+          "reason": "merge_grant_target_held",
+          "detail": {
+            "packet_id": "KF-X-001",
+            "message_id": "CG-HOLD-SYNTHETIC-KF-X-001",
+            "comment_id": 7000000001
+          }
+        },
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "title": "synthetic",
+        "pr": 87
+      },
+      "merge_puts": 0,
+      "comment_reads": 1,
+      "snapshots": 1,
+      "scenario_bytes": 5144
+    },
+    {
+      "name": "proper-hold-clear-positive",
+      "code": 0,
+      "out": {
+        "eligible": true,
+        "reason": "all_admission_contracts_satisfied",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "merge_grant": {
+          "message_id": "CG-REVIEW-SYNTHETIC-MERGE-AUTH-001",
+          "comment_id": 7000000005,
+          "created_at": "2026-10-17T12:00:05Z",
+          "url": "https://api.github.com/repos/o/r/issues/comments/7000000005",
+          "effect": "NO_STATE_CHANGE",
+          "binding": {
+            "repository": "o/r",
+            "pr_number": 87,
+            "packet_id": "KF-X-001",
+            "implementation_branch": "impl/x",
+            "source_head": "cccccccccccccccccccccccccccccccccccccccc",
+            "pr_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        "evidence": {
+          "review_status": "ACCEPT_FOR_ADMISSION",
+          "semantic_review": {
+            "implementer": "claude",
+            "primary": "PASS",
+            "passing": [
+              {
+                "provider": "copilot",
+                "reviewer": "copilot-pull-request-reviewer[bot]",
+                "reviewed_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "evidence_location": "https://github.com/o/r/pull/87#pullrequestreview-1"
+              }
+            ]
+          },
+          "source_head": "cccccccccccccccccccccccccccccccccccccccc",
+          "workflows": [
+            {
+              "workflow": "CI/CD Pipeline",
+              "run_id": 100,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "Agent Control Gate",
+              "run_id": 101,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "Branch divergence",
+              "run_id": 102,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "DAST (HawkScan)",
+              "run_id": 103,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "Agent Control Worker Proof",
+              "run_id": 104,
+              "conclusion": "success"
+            }
+          ],
+          "merge_grant": {
+            "message_id": "CG-REVIEW-SYNTHETIC-MERGE-AUTH-001",
+            "comment_id": 7000000005,
+            "created_at": "2026-10-17T12:00:05Z",
+            "url": "https://api.github.com/repos/o/r/issues/comments/7000000005",
+            "effect": "NO_STATE_CHANGE",
+            "binding": {
+              "repository": "o/r",
+              "pr_number": 87,
+              "packet_id": "KF-X-001",
+              "implementation_branch": "impl/x",
+              "source_head": "cccccccccccccccccccccccccccccccccccccccc",
+              "pr_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          }
+        },
+        "title": "synthetic",
+        "pr": 87,
+        "merge": {
+          "merged": true,
+          "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "message": "SYNTHETIC: answered in-process; no merge was sent"
+        }
+      },
+      "merge_puts": 1,
+      "comment_reads": 2,
+      "snapshots": 2,
+      "scenario_bytes": 6266
+    },
+    {
+      "name": "invalid-resume-no-state-change",
+      "code": 0,
+      "out": {
+        "eligible": true,
+        "reason": "all_admission_contracts_satisfied",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "merge_grant": {
+          "message_id": "CG-REVIEW-SYNTHETIC-MERGE-AUTH-001",
+          "comment_id": 7000000008,
+          "created_at": "2026-10-17T12:00:08Z",
+          "url": "https://api.github.com/repos/o/r/issues/comments/7000000008",
+          "effect": "NO_STATE_CHANGE",
+          "binding": {
+            "repository": "o/r",
+            "pr_number": 87,
+            "packet_id": "KF-X-001",
+            "implementation_branch": "impl/x",
+            "source_head": "cccccccccccccccccccccccccccccccccccccccc",
+            "pr_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        "evidence": {
+          "review_status": "ACCEPT_FOR_ADMISSION",
+          "semantic_review": {
+            "implementer": "claude",
+            "primary": "PASS",
+            "passing": [
+              {
+                "provider": "copilot",
+                "reviewer": "copilot-pull-request-reviewer[bot]",
+                "reviewed_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "evidence_location": "https://github.com/o/r/pull/87#pullrequestreview-1"
+              }
+            ]
+          },
+          "source_head": "cccccccccccccccccccccccccccccccccccccccc",
+          "workflows": [
+            {
+              "workflow": "CI/CD Pipeline",
+              "run_id": 100,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "Agent Control Gate",
+              "run_id": 101,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "Branch divergence",
+              "run_id": 102,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "DAST (HawkScan)",
+              "run_id": 103,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "Agent Control Worker Proof",
+              "run_id": 104,
+              "conclusion": "success"
+            }
+          ],
+          "merge_grant": {
+            "message_id": "CG-REVIEW-SYNTHETIC-MERGE-AUTH-001",
+            "comment_id": 7000000008,
+            "created_at": "2026-10-17T12:00:08Z",
+            "url": "https://api.github.com/repos/o/r/issues/comments/7000000008",
+            "effect": "NO_STATE_CHANGE",
+            "binding": {
+              "repository": "o/r",
+              "pr_number": 87,
+              "packet_id": "KF-X-001",
+              "implementation_branch": "impl/x",
+              "source_head": "cccccccccccccccccccccccccccccccccccccccc",
+              "pr_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          }
+        },
+        "title": "synthetic",
+        "pr": 87,
+        "merge": {
+          "merged": true,
+          "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "message": "SYNTHETIC: answered in-process; no merge was sent"
+        }
+      },
+      "merge_puts": 1,
+      "comment_reads": 2,
+      "snapshots": 2,
+      "scenario_bytes": 6276,
+      "resume_authority_valid": true,
+      "resume_effect": {
+        "ok": false,
+        "code": "CONTROL_EFFECT_TYPE_MISMATCH",
+        "detail": "RESUME cannot carry NO_STATE_CHANGE"
+      },
+      "safety_requirement": {
+        "passed": false,
+        "name": "AssertionError",
+        "message": "an invalid RESUME must not clear the active hold\n\n1 !== 0\n",
+        "actual": 1,
+        "expected": 0
+      }
+    }
+  ]
+}

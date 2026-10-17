@@ -1,0 +1,177 @@
+[
+  {
+    "path": "source/scripts/agent-control/lib/truth.mjs",
+    "git_blob_sha": "e293a345874b776431b9c343efa3072519f6a8e6",
+    "sha256": "c0e704a10b0d005c00d3d7b5379028ae9593c84e1a6eb876d530235b4b04e46d",
+    "bytes": 5169,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/reconcile.mjs",
+    "git_blob_sha": "8d3c01d1a9c61d823b5839c1609a92112b2d8230",
+    "sha256": "9516bc871a6c58947f2192df98fdeba3c89281f2e5202d05ed5f65f5e8f81f6b",
+    "bytes": 10894,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/authority-effects.mjs",
+    "git_blob_sha": "8a4f68dc4000c709f5b99db670306dbb5e2aaed9",
+    "sha256": "a9315d67a83b5db78193428cade678770cafa3e04867d8edd2dbf7f62e3124ae",
+    "bytes": 20857,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/control-envelope.mjs",
+    "git_blob_sha": "bb51643e3aa5554aba2466d709ed61800a5ce88f",
+    "sha256": "e852d145ae6fa71a997bc0672036142a4b5687a2cb8c0c38c4473bacc91b57c2",
+    "bytes": 17914,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/state.mjs",
+    "git_blob_sha": "805406412b59e30e3e0ae068b9ae9ab55a18d519",
+    "sha256": "1937d42bd0c08127bbc5e0ca29615be941e964584fa3d9e99e829af67c7a6232",
+    "bytes": 13917,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/yaml.mjs",
+    "git_blob_sha": "0e6b22f1a64980ac065e73a0797ce1929c34aee0",
+    "sha256": "6f39df92fffb0ad0342b8323b364e0f9ccf5908d0e67968b20f250db56c35159",
+    "bytes": 13753,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/dag.mjs",
+    "git_blob_sha": "4c602406aa90077cffb07adaccd631d6b09d7119",
+    "sha256": "a3e52ef983411cf0fb538fc5a80cb5b3b792e44fc2ff495cfd83d1a9e09485aa",
+    "bytes": 8384,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/select-directive.mjs",
+    "git_blob_sha": "05e1cfd9fd57e54583b85829d0449c7029384a9d",
+    "sha256": "e26b11a9f6a1a418135490393500378cae667c0d5aa3c85d07e6a6a7fb3ee211",
+    "bytes": 5985,
+    "unchanged": true
+  },
+  {
+    "path": "source/.agent-control/programme-state.yaml",
+    "git_blob_sha": "11c1185cdf6ae7e01d7953a74e419854979c961f",
+    "sha256": "e1d935a9cd96d3ff29389aff40631aee213c67ae13f8931e000062c60fb56147",
+    "bytes": 15480,
+    "unchanged": true
+  },
+  {
+    "path": "source/docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+    "git_blob_sha": "d3ce1c298f0764ecf67c298bb099d79ec27d2d17",
+    "sha256": "6de953246095b966b4939c9bf2bf9d82ae807c114cb64869fec66ef103ca39ab",
+    "bytes": 10617,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/state-machine.mjs",
+    "git_blob_sha": "fe3c9948e89bdde2f7069053f19f68222a985eea",
+    "sha256": "d18a193cc1cb701020347d66e0d63e2a6bc87f8276b49a2382cb04888e8ca4f7",
+    "bytes": 4342,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/events.mjs",
+    "git_blob_sha": "0fb689e93894e0621859db7dc867c629df01a372",
+    "sha256": "d1f4b1e17190145f659716c6575c54c0721e20ee5d48f8813728eac09e2ebcb8",
+    "bytes": 13471,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/status.mjs",
+    "git_blob_sha": "e5795b194a9199119cd7fa420c634e0f54bd962f",
+    "sha256": "80365dbd0dfcea2bdfc48be5ac53a5b647e94b3974064685d740e5af52ea5974",
+    "bytes": 7904,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/validate-dag.mjs",
+    "git_blob_sha": "3cf5effe11a7bf8c12fb5cb2c5772c1845bc3771",
+    "sha256": "6e8d5b500468c413197648ac56aa2b47fc36ec7b3d0e3fa62bd13899075b6636",
+    "bytes": 1049,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/validate-platform-dag.mjs",
+    "git_blob_sha": "d7b762feb4c2d1f778752873afb753ea536f3ab9",
+    "sha256": "08b13354c029f7f312f151f973833e2ada7cbe8ca2961f0b84637a12bc55d812",
+    "bytes": 1709,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/platform-dag.mjs",
+    "git_blob_sha": "b31f7c3cfb894f99918fb718e8cacad7c3e3e1a2",
+    "sha256": "d22f5915aa31b4e23bdd5c4792948856ae7f749ed74ef84709db3c70df354781",
+    "bytes": 18676,
+    "unchanged": true
+  },
+  {
+    "path": "source/docs/development/KEYFLOWOS_PLATFORM_DAG.yaml",
+    "git_blob_sha": "3c6774f2ae50079162ea35b10963b7f8cbea5a0f",
+    "sha256": "54f38361ca3dfaf925c976270941a1337f429cea6f16517441c08a1e2bd5f510",
+    "bytes": 17788,
+    "unchanged": true
+  },
+  {
+    "path": "source/AGENTS.md",
+    "git_blob_sha": "973b8c6a465177e2ec1941af0bade11428cf7ac9",
+    "sha256": "ed8ea47291ae585c4594cad508228036dfe8b7f4e165cfc993749c15d3e3c9b5",
+    "bytes": 13942,
+    "unchanged": true
+  },
+  {
+    "path": "source/docs/development/EXECUTION_CONTROL_STANDARD.md",
+    "git_blob_sha": "6ab97a792c16d24ac1501a1ce6e006e4d8d33359",
+    "sha256": "88d32d9c167ea6ea33724def209056a967483b82d08393eb6a882419f10bfee1",
+    "bytes": 12691,
+    "unchanged": true
+  },
+  {
+    "path": "source/docs/development/AGENT_CONTROL_PLANE.md",
+    "git_blob_sha": "e2b4976846e509a40598087b319e08b35ffaa805",
+    "sha256": "1184cef4b9a17f745e6d824c00dce8bc61b6db6ae2aa1ade7433045732c88e00",
+    "bytes": 34798,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/momentum.mjs",
+    "git_blob_sha": "79de77ee7a0ec6ec368f21adb9076e8aa6bb4130",
+    "sha256": "4876561e81aec4ee70a6935aedfbcaf8edde5c0d882de7d3a64d2e05e7949f02",
+    "bytes": 4564,
+    "unchanged": true
+  },
+  {
+    "path": "source/scripts/agent-control/lib/adapters.mjs",
+    "git_blob_sha": "10bd53544d0b5c585dd2da95caafb89bfe3324ab",
+    "sha256": "a0eea6f2d6f566cc06c7d055935a79e6a7b5cc31fc4969549e79462beea9adb1",
+    "bytes": 7865,
+    "unchanged": true
+  },
+  {
+    "path": "source/docs/development/AGENT_AUTOPILOT_POLICY.yaml",
+    "git_blob_sha": "6029adc2bf0229bfe5874f6ca687c7dc8c755176",
+    "sha256": "ac02980a5da9e5c529ae4184bc003803ab9c4beee77209e7548daca7ece5ed04",
+    "bytes": 8580,
+    "unchanged": true
+  },
+  {
+    "path": "method/docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/replay-authority.mjs",
+    "git_blob_sha": "488939cd3c5d52dc9bbcbdda58965001f5f02e55",
+    "sha256": "ee2a5989cef91478e3d6edecf2b45c33695a141e2ff1a483015be02a7e0f1290",
+    "bytes": 9232,
+    "unchanged": true
+  },
+  {
+    "path": "method/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/replay-publication.mjs",
+    "git_blob_sha": "1a44c305759af4ab222735b4b884b214c3c64f2c",
+    "sha256": "a22fb445c71fad4f9c1d68eb7c1e980cec400c97d39ed3732158a29189a4cbbb",
+    "bytes": 2386,
+    "unchanged": true
+  }
+]

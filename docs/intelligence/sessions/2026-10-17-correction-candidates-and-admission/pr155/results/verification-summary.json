@@ -1,0 +1,31 @@
+{
+  "binder_rejection": {
+    "input": "actual semantic-only review 6240050804",
+    "cli_exit_code": 2,
+    "stderr": "review predates the inspected proof closeout",
+    "output_directory_created": false
+  },
+  "original_contract_tests": {
+    "tests": 50,
+    "pass": 50,
+    "fail": 0,
+    "skipped": 0,
+    "transcript": {
+      "path": "results/original-contract-tests.tap",
+      "sha256": "adc0cc63dedf7f3bd6d7c70a38363ce6f16349d817c490baa0a6c84e8de00954",
+      "bytes": 11640,
+      "publication": "omitted; retained locally"
+    }
+  },
+  "candidate_checks": {
+    "total": 25,
+    "passed": 25,
+    "failed": 0
+  },
+  "source_files_verified": 18,
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux"
+  },
+  "remote_actions": []
+}

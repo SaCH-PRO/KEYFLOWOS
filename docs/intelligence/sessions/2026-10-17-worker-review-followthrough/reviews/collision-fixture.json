@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "finding_id": "KF169-P2-01",
+  "head_sha": "7aa3c1910075a02287b0815867026a500187594f",
+  "message_ids": [
+    "CG-DIRECTIVE-LONG-PACKET-NAME-LONG-PACKET-NAME-INTEGRATION-CORRECTION-081631",
+    "CG-DIRECTIVE-LONG-PACKET-NAME-LONG-PACKET-NAME-INTEGRATION-CORRECTION-095457"
+  ],
+  "message_id_lengths": [76, 76],
+  "full_sha256": [
+    "86c85112d1beb8ae6f7868382ded26f0e05cdc3137d90b4d37f01b13581b9caa",
+    "86c851121e321937dd2b8e1a5782563a5844233e91df774af938ee029d6e20ba"
+  ],
+  "shared_tag": "86c85112",
+  "name_room": 32,
+  "shortened_name": "CG-DIRECTIVE-LONG-PACKE-86c85112",
+  "shortened_name_length": 32,
+  "both_ids_pass_name_prefix_check": true,
+  "provenance": {
+    "fixture_discovered_by": "root",
+    "root_fixture_path": "/tmp/kf169-root-review/tag-collision.json",
+    "independently_recomputed_by": "/root/h1_collector_review",
+    "executed": "Node SHA-256 UTF-8 computation, first eight hexadecimal digits, safe-ID normalization, name construction for room 32, and prefix-match check",
+    "not_executed": ["Windows worker tick", "PowerShell worktree creation/reuse", "installed worker interaction"]
+  },
+  "executed_calculation_javascript": "import {createHash} from 'node:crypto';\nconst ids = ['CG-DIRECTIVE-LONG-PACKET-NAME-LONG-PACKET-NAME-INTEGRATION-CORRECTION-081631','CG-DIRECTIVE-LONG-PACKET-NAME-LONG-PACKET-NAME-INTEGRATION-CORRECTION-095457'];\nconst room=32;\nconst tag=id=>createHash('sha256').update(id,'utf8').digest('hex').slice(0,8);\nfor (const id of ids) {\n const safe=id.replace(/[^A-Za-z0-9._-]/g,'_');\n const name=safe.slice(0,room-9)+'-'+tag(id);\n console.log(JSON.stringify({id,length:id.length,tag:tag(id),name,nameLength:name.length,rawIdentityAccepted:id.startsWith(name.slice(0,-9))}));\n}\n"
+}

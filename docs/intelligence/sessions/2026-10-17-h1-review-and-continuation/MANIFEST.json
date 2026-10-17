@@ -1,0 +1,114 @@
+{
+  "recorded_at": "2026-10-17T19:56:26Z",
+  "base_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "reviewed_semantics": "1539ac53d4c5c740898de695d9b35ae3c5bdacf6",
+  "artifact_head": "b9baa28f7b637e6f0f6a3a0dddbc8418570c1ce5",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "9af6e9d708e6c18ee4feae3f51b3ee9f7bce05ebd6b05df00d0f3701cc691a31"
+    },
+    {
+      "path": "control/authority-replay-result.json",
+      "sha256": "6e92e02e5ad8bde3239cad570194537fbc5bee3d435c818a66019dee5405f66c"
+    },
+    {
+      "path": "control/f9-directive.md",
+      "sha256": "efe5e170fc927364a5d7fd6d5ea51af11cc7177ef11bc31c80778bbfa3ff7b25"
+    },
+    {
+      "path": "control/h1-receipt.md",
+      "sha256": "d4a9e660a2a9d0a0c5acb7ea7da34ee67f4d9b84da593813b3885cde76c5db8c"
+    },
+    {
+      "path": "control/parser-checks.json",
+      "sha256": "68323fa2c8b079b0b908e3d49849bbe55d3b34e1871dfe373bf9e5b6b337b367"
+    },
+    {
+      "path": "control/pr155-record-test-evidence.json",
+      "sha256": "d9db6bf5a312890436796092a1bb4969524c75afee542bf16ca0e6244ad876f0"
+    },
+    {
+      "path": "control/pr155-record-validation-node20.json",
+      "sha256": "50f21a678fd2ef0009553cabfd71ca29658ddfd220b019c975d12fa5b778c0d8"
+    },
+    {
+      "path": "control/pr155-review.md",
+      "sha256": "15f76cb1e9441282a9a4ca4d7d758f95b3814e58fcf011b45e0c5dce3a33fec3"
+    },
+    {
+      "path": "control/publication-receipts.json",
+      "sha256": "754049b4455d8eee326071731694b12d5ddacb7e6764d3ee9c3f2013c98f3d29"
+    },
+    {
+      "path": "control/replay-publication.mjs",
+      "sha256": "a22fb445c71fad4f9c1d68eb7c1e980cec400c97d39ed3732158a29189a4cbbb"
+    },
+    {
+      "path": "control/repository-truth.json",
+      "sha256": "2adef06c14a461c554a08542fc7a990ff552bf9aef4795ef2ea4209a7d723780"
+    },
+    {
+      "path": "control/source-and-snapshot-manifest.json",
+      "sha256": "f4b83c3f43812013c8a79655c67251bb79da855575e4b1ee7ee1d65b08fc303f"
+    },
+    {
+      "path": "proof/ci-run-snapshot.json",
+      "sha256": "674f8707119403d764e90f64a8f0870ad5da9fa95d75d811b5375118ae8bbdd1"
+    },
+    {
+      "path": "proof/disconnect-result.json",
+      "sha256": "ee0be69c37b9bd700eed74d1b035521d107969c46065260cc3ec28183d81b67d"
+    },
+    {
+      "path": "proof/metadata-redaction-result.json",
+      "sha256": "1dd94bc5bda4e704d190b8a9d55312075fd0613eaa570a3d677e75f7c75edf04"
+    },
+    {
+      "path": "proof/original-43-tests.tap",
+      "sha256": "09e568488689031d75c0b7c3d75b9dae98cb7b3ad320877897d84a66f5add7c8"
+    },
+    {
+      "path": "proof/package-lock.json",
+      "sha256": "b5f82fe971ab9465e63bebba99ed3f51dda1a934fe8e72d397ad1fa30660a8e8"
+    },
+    {
+      "path": "proof/package.json",
+      "sha256": "5433b2727c5a4895327e25f24c3b5d7f2c864e188ace5ccb42348d775351c4cd"
+    },
+    {
+      "path": "proof/pagination-age-results.jsonl",
+      "sha256": "8865ae79938462b273f3e8a25d8db704f2ab4073431f687764c22fa654856b73"
+    },
+    {
+      "path": "proof/regression-expectations.spec.mjs",
+      "sha256": "12df682e859020a8a9565620c7c7a91cd11c006084b7cc6f1094417ee654e696"
+    },
+    {
+      "path": "proof/repro-disconnect.cjs",
+      "sha256": "47115941b66588c68cd90151957c1fd9e8785035418ba2f233cf8f697285b788"
+    },
+    {
+      "path": "proof/repro-metadata-redaction.cjs",
+      "sha256": "9a5c58b276a12bf58a8e9e5596b9cf005e24437dfdd2df3667339a332162a64d"
+    },
+    {
+      "path": "proof/reproduce-pagination-age.mjs",
+      "sha256": "416c49913a1896fe0b9261bd97fff618ba29aa50334f3c194d5512dceee9d2a4"
+    },
+    {
+      "path": "proof/review-8-expected-failures.tap",
+      "sha256": "8de33ec269f7e995f8a669f00305a5737bda74f45fd1c469e3018289163504a6"
+    },
+    {
+      "path": "proof/run-results.json",
+      "sha256": "675bb0fbbccb317bb4cde37df8e5039392546bfc65267311aa3db4df40898229"
+    }
+  ],
+  "last_updated_at": "2026-10-17T20:08:59.450433+00:00",
+  "publication_record": "control/publication-receipts.json",
+  "accepted_plan": {
+    "path": "../../handoff/ACCEPTED-CAPABILITY-ROADMAP-2026-10-17.md",
+    "sha256": "2f3c9fd72ef9ccd23358b64e927790b722bb6606156f5b6ed1af45ea20697882"
+  }
+}

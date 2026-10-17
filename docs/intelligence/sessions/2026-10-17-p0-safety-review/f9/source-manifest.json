@@ -1,0 +1,53 @@
+{
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "sources": [
+    {
+      "path": "scripts/agent-control/auto-merge-admitted.mjs",
+      "sha256": "ce0e3bbc0d9b2a5d3872b50ad0277244551a1458858ae120ff7296abe75c05f2"
+    },
+    {
+      "path": "scripts/agent-control/lib/admission.mjs",
+      "sha256": "2d96c2f27ad3271eb52eb6692a16fc574ebda6eda260804196787c07f448baa5"
+    },
+    {
+      "path": "scripts/agent-control/lib/events.mjs",
+      "sha256": "d1f4b1e17190145f659716c6575c54c0721e20ee5d48f8813728eac09e2ebcb8"
+    },
+    {
+      "path": "scripts/agent-control/lib/semantic-review.mjs",
+      "sha256": "c1932178b4ddc76434395e975db24b708ee5c7604ed14620cf51f7f66eacd5a0"
+    },
+    {
+      "path": "scripts/agent-control/lib/authority-effects.mjs",
+      "sha256": "a9315d67a83b5db78193428cade678770cafa3e04867d8edd2dbf7f62e3124ae"
+    },
+    {
+      "path": "scripts/agent-control/lib/control-envelope.mjs",
+      "sha256": "e852d145ae6fa71a997bc0672036142a4b5687a2cb8c0c38c4473bacc91b57c2"
+    },
+    {
+      "path": "scripts/agent-control/lib/state-machine.mjs",
+      "sha256": "d18a193cc1cb701020347d66e0d63e2a6bc87f8276b49a2382cb04888e8ca4f7"
+    },
+    {
+      "path": "scripts/agent-control/lib/state.mjs",
+      "sha256": "1937d42bd0c08127bbc5e0ca29615be941e964584fa3d9e99e829af67c7a6232"
+    },
+    {
+      "path": "scripts/agent-control/lib/yaml.mjs",
+      "sha256": "6f39df92fffb0ad0342b8323b364e0f9ccf5908d0e67968b20f250db56c35159"
+    },
+    {
+      "path": ".github/workflows/agent-control-gate.yml",
+      "sha256": "cf346ccefd5dfb39e4fcaa59e9e9450d423a00f69b5da83a564dadcd4ae597bc"
+    },
+    {
+      "path": ".github/workflows/agent-control-autopilot.yml",
+      "sha256": "fcef2db6af8adb17e216788bc36ddc8070d7a7fdfc95ca8f4a8db736363a7b23"
+    },
+    {
+      "path": "scripts/agent-control/tests/admission.spec.mjs",
+      "sha256": "cff698533df21c2a305f0d8f8067b46c7112169fdf14fdfa7941b2b8c090adae"
+    }
+  ]
+}
