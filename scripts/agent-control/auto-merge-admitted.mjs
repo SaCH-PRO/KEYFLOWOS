@@ -20,6 +20,16 @@
  *     The merge happens only if both verdicts are eligible at the same head
  *     and base (PR 103 was merged while a newly triggered gate run was pending).
  *
+ * KF-META-MERGE-AUTHORITY-001 (F9) adds:
+ *   - every snapshot reads all of this repository's issue #80 comments, and
+ *     nothing is eligible without a distinct, valid, current ChatGPT grant
+ *     for this exact PR, packet, branch, semantic head, final head and base
+ *     (lib/merge-grant.mjs). The recheck also requires the same grant;
+ *   - --grant-only: the PR, its artifacts and the grant, nothing else. The
+ *     non-draft step of the Agent Control Gate runs this, because the full
+ *     evaluator waits for that gate's own successful run. EXPECTED_HEAD_SHA
+ *     and EXPECTED_BASE_SHA, when set, must equal the live PR.
+ *
  * Without --merge this is the pre-merge check every merge must pass, manual
  * merges included (docs/development/AGENT_CONTROL_PLANE.md).
  *
@@ -27,7 +37,7 @@
  */
 
 import { parseYaml } from './lib/yaml.mjs';
-import { evaluateAdmission, recheckBeforeMerge } from './lib/admission.mjs';
+import { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge } from './lib/admission.mjs';
 import { CONTROL_ISSUE } from './lib/events.mjs';
 import { copilotReviewEvidence, chatgptReviewEvidence } from './lib/semantic-review.mjs';
 
@@ -35,6 +45,12 @@ const token = process.env.GITHUB_TOKEN;
 const repo = process.env.GITHUB_REPOSITORY;
 const prNumber = Number(process.env.PR_NUMBER || 0);
 const wantMerge = process.argv.includes('--merge');
+const grantOnly = process.argv.includes('--grant-only');
+
+if (wantMerge && grantOnly) {
+  process.stderr.write('--merge and --grant-only are exclusive\n');
+  process.exit(2);
+}
 
 if (!token || !repo || !prNumber) {
   process.stderr.write('GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER are required\n');
@@ -128,6 +144,37 @@ async function reviewedHeadLineage(ret, headSha) {
   return lineage;
 }
 
+/** Every comment on this repository's control issue; the grant is read from nowhere else. */
+const controlComments = () => apiAll(`/repos/${repo}/issues/${CONTROL_ISSUE}/comments`);
+
+const prIdentity = (pr) => ({
+  number: pr.number,
+  state: pr.state,
+  draft: pr.draft,
+  head_sha: pr.head.sha,
+  base_sha: pr.base.sha,
+  head_ref: pr.head.ref,
+});
+
+/** The non-draft gate's verdict: PR, artifacts and grant only. */
+async function evaluateGrantNow() {
+  const pr = await api(`/repos/${repo}/pulls/${prNumber}`);
+  const identity = { head_sha: pr.head.sha, base_sha: pr.base.sha };
+  const expected = { head_sha: process.env.EXPECTED_HEAD_SHA || null, base_sha: process.env.EXPECTED_BASE_SHA || null };
+  for (const key of ['head_sha', 'base_sha']) {
+    if (expected[key] !== null && expected[key] !== identity[key]) {
+      return { eligible: false, reason: 'pr_moved_since_event', expected, ...identity };
+    }
+  }
+  const [active, ret, control_comments] = await Promise.all([
+    readControlFile(pr.head.sha, '.agent-control/active-packet.yaml'),
+    readControlFile(pr.head.sha, '.agent-control/claude-return.yaml'),
+    controlComments(),
+  ]);
+  if (!active || !ret) return { eligible: false, reason: 'control_artifacts_missing', ...identity };
+  return { ...evaluateGrantGate({ pr: prIdentity(pr), active, ret, repository: repo, control_comments }), ...identity };
+}
+
 /** One complete, freshly fetched admission verdict for the PR. */
 async function evaluateNow() {
   const pr = await api(`/repos/${repo}/pulls/${prNumber}`);
@@ -169,22 +216,18 @@ async function evaluateNow() {
     created_at: r.created_at,
   }));
 
-  const [reviews, events, chatgpt, lineage] = await Promise.all([
+  const [reviews, events, chatgpt, lineage, control_comments] = await Promise.all([
     apiAll(`/repos/${repo}/pulls/${prNumber}/reviews`),
     apiAll(`/repos/${repo}/issues/${prNumber}/events`),
     chatgptEvidence(ret),
     ret.source_head ? reviewedHeadLineage(ret, pr.head.sha) : {},
+    controlComments(),
   ]);
 
   const verdict = evaluateAdmission({
-    pr: {
-      number: pr.number,
-      state: pr.state,
-      draft: pr.draft,
-      head_sha: pr.head.sha,
-      base_sha: pr.base.sha,
-      head_ref: pr.head.ref,
-    },
+    pr: prIdentity(pr),
+    repository: repo,
+    control_comments,
     active,
     ret,
     ancestry,
@@ -203,6 +246,7 @@ async function evaluateNow() {
 }
 
 async function main() {
+  if (grantOnly) return { ...(await evaluateGrantNow()), pr: prNumber, mode: 'grant-only' };
   const first = await evaluateNow();
   if (!first.eligible || !wantMerge) return { ...first, pr: prNumber };
 

@@ -2478,3 +2478,220 @@ negative_controls:
         message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005\nmessage_type: REVIEW\npacket_id: KF-EXEC-AUTH-FAIL-CLOSED-001\nsender: claude
     proof_command: node --test --test-name-pattern="folds every authority message from RECOVERY-021 to the newest, none skipped" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
+
+  # ---------------------------------------------------------------- F9
+  # KF-META-MERGE-AUTHORITY-001 (CG-DIR-F9-001). A readiness status, a
+  # semantic PASS, a green workflow or the builder's merge_authority line is
+  # never merge authority by itself; each control restores one way the
+  # distinct #80 grant could stop mattering.
+
+  - id: NC-F9-ADMISSION-GRANT-NOT-CHECKED
+    claim: >
+      The exact-head evaluator requires the #80 grant. Without that check,
+      ACCEPT_FOR_ADMISSION with false artifact grants is eligible again: the
+      F9 matrix.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+          if (!grant.granted) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC F9 matrix" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-ACCEPT-FOR-ADMISSION-AS-GRANT
+    claim: >
+      ACCEPT_FOR_ADMISSION is acceptance of a record, never the merge
+      decision. A grant must say READY_TO_MERGE.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (field(entry, 'review_status') !== GRANT_REVIEW_STATUS) {
+      replace: |-
+          if (![GRANT_REVIEW_STATUS, 'ACCEPT_FOR_ADMISSION'].includes(field(entry, 'review_status'))) {
+    proof_command: node --test --test-name-pattern="NC ACCEPT_FOR_ADMISSION is acceptance" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-MERGE-AUTHORITY-NOT-READ
+    claim: >
+      A grant says merge_authority true in the authority message itself;
+      false, null, absent or any other spelling is not a grant.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (field(entry, 'merge_authority') !== 'true') problems.push
+      replace: |-
+          if (false) problems.push
+    proof_command: node --test --test-name-pattern="NC grant false/null/malformed" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-NO-STATE-CHANGE-ALONE
+    claim: >
+      NO_STATE_CHANGE is allowed on a grant only beside the explicit grant
+      fields; an effect that readEffect cannot read, or any other effect, is
+      not a grant.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          else if (!GRANT_EFFECTS.includes(effect.effect)) problems.push
+      replace: |-
+          else if (false) problems.push
+    proof_command: node --test --test-name-pattern="NC NO_STATE_CHANGE alone" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-FINAL-HEAD-NOT-BOUND
+    claim: >
+      The grant names the final artifact head. A grant for the previous head
+      is stale once the head moves.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (found !== want) problems.push({ field: key, expected: want, found });
+      replace: |-
+          if (found !== want && key !== 'pr_head') problems.push({ field: key, expected: want, found });
+    proof_command: node --test --test-name-pattern="NC newly moved head or base" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-BASE-NOT-BOUND
+    claim: >
+      The grant names the base. A grant for the previous main is stale once
+      the base moves.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (found !== want) problems.push({ field: key, expected: want, found });
+      replace: |-
+          if (found !== want && key !== 'source_main') problems.push({ field: key, expected: want, found });
+    proof_command: node --test --test-name-pattern="NC newly moved head or base" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-REVOCATION-IGNORED
+    claim: >
+      The newest valid message about the target must be the grant. Reading the
+      newest grant instead lets a later revocation pass unseen.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          const newest = about[about.length - 1];
+      replace: |-
+          const newest = about.filter((e) => grantProblems(e, t).length === 0).pop() ?? about[about.length - 1];
+    proof_command: node --test --test-name-pattern="NC revoked" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-AMBIGUOUS-AUTHORITY-IGNORED
+    claim: >
+      A malformed authority candidate after the grant that is or may be about
+      the target makes the grant ambiguous; it is never skipped.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (later.length) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC ambiguous" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-HOLD-IGNORED
+    claim: >
+      A valid HOLD on the target packet with no later RESUME denies, even when
+      it came before the grant.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (hold) return deny(GRANT_REASONS.HOLD_ACTIVE
+      replace: |-
+          if (false) return deny(GRANT_REASONS.HOLD_ACTIVE
+    proof_command: node --test --test-name-pattern="NC hold" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-PROVENANCE-NOT-CHECKED
+    claim: >
+      A grant is read only from the target repository's control issue; a
+      comment whose URL is elsewhere is not one.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (!onTargetIssue(newest, t.repository)) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC provenance" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-RECHECK-GRANT-NOT-COMPARED
+    claim: >
+      The second snapshot must rest on the same grant as the first; a grant
+      replaced between them is a changed decision.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: |-
+          if (!sameGrant(first.merge_grant, second.merge_grant)) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC F9 recheck" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-RECHECK-REMOVED
+    claim: >
+      Through the real CLI, a grant revoked between the two snapshots stops
+      the merge call; merging on the first snapshot alone would not.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: |-
+          const verdict = recheckBeforeMerge(first, await evaluateNow());
+      replace: |-
+          const verdict = first;
+    proof_command: node --test --test-name-pattern="NC CLI recheck: a grant revoked" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-CLI-NO-GRANT-INPUT
+    claim: >
+      The real CLI hands the #80 comments it collected to the evaluator; an
+      evaluator given none must not merge, so a collector that drops them is
+      caught by the referent and the gate check alike.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: |-
+          const controlComments = () => apiAll(`/repos/${repo}/issues/${CONTROL_ISSUE}/comments`);
+      replace: |-
+          const controlComments = async () => [];
+    proof_command: node --test --test-name-pattern="CLI referent" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-GATE-GRANT-STEP-REMOVED
+    claim: >
+      The non-draft gate step requires the grant; with the --grant-only call
+      gone it reads the builder's status alone again.
+    mutation:
+      file: .github/workflows/agent-control-gate.yml
+      find: |-
+          grant="$(node scripts/agent-control/auto-merge-admitted.mjs --grant-only)" || grant_status=$?
+      replace: |-
+          grant='{}'
+    proof_command: node --test --test-name-pattern="NC F9 gate step" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-GATE-RUNS-FULL-EVALUATOR
+    claim: >
+      The gate step never runs the full evaluator, which waits for this gate's
+      own successful run.
+    mutation:
+      file: .github/workflows/agent-control-gate.yml
+      find: |-
+          grant="$(node scripts/agent-control/auto-merge-admitted.mjs --grant-only)" || grant_status=$?
+      replace: |-
+          grant="$(node scripts/agent-control/auto-merge-admitted.mjs)" || grant_status=$?
+    proof_command: node --test --test-name-pattern="NC F9 gate step" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-GATE-GRANT-ONLY-READS-RUNS
+    claim: >
+      --grant-only reads the PR, its artifacts and #80 and nothing that would
+      make the gate wait on itself.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: |-
+          if (grantOnly) return { ...(await evaluateGrantNow()), pr: prNumber, mode: 'grant-only' };
+      replace: |-
+          if (grantOnly) { await api(`/repos/${repo}/actions/runs?head_sha=x&per_page=100`); return { ...(await evaluateGrantNow()), pr: prNumber, mode: 'grant-only' }; }
+    proof_command: node --test --test-name-pattern="CLI --grant-only: the gate check" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
