@@ -11,7 +11,7 @@
 - `docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml` projects the canonical 35-packet execution board held on `docs/keyflow-intelligence-foundation`. **This document does not edit that DAG, introduce executable nodes, confer packet credit, or release work.**
 - Follow `AGENTS.md`, `CLAUDE.md`, `docs/development/EXECUTION_CONTROL_STANDARD.md` and `docs/development/AGENT_CONTROL_PLANE.md`. Map before modifying; maintain complete scope ledgers; stop on contradictions; prove failures and effects, not only green CI.
 - `architecture/os/OS.md` records scheduled OS cycles as HALTED. This programme does not restart them. No production mutation, real provider traffic, deployment, merge or installed-worker change is authorized by this document.
-- Claude Code implements bounded approved changes; GPT-6/ChatGPT independently reviews; existing deterministic GitHub controls validate; the human operator authorizes critical merges and production. PR #176's reviewer architecture remains a proposal. Kimi Code is excluded from development/review, but remains separate from customer-selectable product providers.
+- Claude Code implements bounded approved changes; ChatGPT reviews Claude-authored work and Claude reviews ChatGPT-authored work under the operator-directed cross-review rule in section 7. Existing deterministic GitHub controls validate; the human operator authorizes critical merges and production. PR #176's reviewer architecture remains a proposal, and this routing rule does not modify its unmerged code or the existing executable gates. Kimi Code is excluded from development/review, but remains separate from customer-selectable product providers.
 - Historic handoffs, PR plans and outdated production reports are not live truth. Re-resolve main, issue #80 and current artifacts before any task.
 
 ## 2. Eight work packages: ownership, links and exit proof
@@ -102,3 +102,25 @@ Keep two evidence-based scoreboards: **autonomous development system** (authorit
 **Proposed first implementation action, not yet released:** a surgical F9 fail-closed merge-authority patch, separately authorized under the *existing* control plane. In parallel continue read-only KEY security, PR, worker, memory, and infrastructure characterization. The currently authorized #155 packet is not replaced or automatically released anew.
 
 **This document's completion means only that an inactive, reviewable programme plan exists on a documentation PR.** It changes no runtime, worker, control authority, active DAG, pipeline or deployment.
+
+## 7. Standing independent-review routing — operator direction, 2026-10-17
+
+The operator requested that independent reviews be sent between ChatGPT and Claude whenever needed. Use the existing GitHub control room (#80), PR discussions and worker transport; do not require the operator to copy routine review requests between chats when that transport is available.
+
+| Author of the change under review | Review destination |
+|---|---|
+| Claude Code | ChatGPT, in a separate review context |
+| ChatGPT | Claude Code, in a separate review context |
+| Both contributed substantive changes | Identify contributions explicitly; neither may independently approve a portion they authored. Obtain a genuinely uninvolved reviewer/context for each affected scope, or leave independent review BLOCKED. |
+
+**Review package:** Supply the exact repository, PR, base SHA, semantic/head SHA, complete scoped diff, governing packet and constraints, acceptance criteria, relevant surrounding files, test/CI evidence (including skips), and unresolved findings. The reviewer re-fetches the sources and records their own result rather than merely endorsing the author's explanation.
+
+**Handoff loop:** Author requests review -> other model acknowledges -> reads the exact sources -> returns PASS, CHANGES_REQUIRED or BLOCKED/NOT_RUN with file/line evidence and unassessed areas -> author corrects within authorized scope -> other model re-reviews the new semantic head. Changes requiring wider scope return to the existing authority process. Do not iterate indefinitely: repeated failure without progress triggers the execution standard's momentum/contradiction rule.
+
+**Independence and provenance:** Record authoring model, actual reviewer model/version when known, interface/session reference, reviewed SHA and whether the reviewer contributed to the change. A second run by the same authoring model, a fabricated reviewer label, or GitHub account identity alone does not establish cross-model independent review. Read-only reviewer feedback is distinct from authoring a correction. A reviewer that implements a substantive correction cannot independently approve its own changed scope.
+
+**Delivery truth:** Track REQUESTED, ACKNOWLEDGED, RETURNED and ADMISSION_DECIDED separately. A posted request is not proof the other model has received or completed it. Missing worker/reviewer availability remains a visible blocker. Claude's RETURN is evidence for ChatGPT to consume on its next active review turn; this document does not create a continuously running ChatGPT service or a new scheduler.
+
+**Authority boundary:** Cross-review routes evidence, not merge permission. A PASS never authorizes merge, deployment, programme activation or production effects. Existing executable review gates are unchanged; a review they cannot represent must be retained as evidence and reported as an admission gap, not relabelled to fit. Critical merge/release decisions remain with the human operator. The programme itself remains inactive.
+
+**First application:** PR #177 was authored by ChatGPT and is to be sent to Claude for an exact-head, read-only review. Claude should report findings on the PR and return the result through #80, without editing this proposal, creating implementation changes or advancing its merge state.
