@@ -340,7 +340,10 @@ target's.
   falls, until a later RESUME for that packet whose effect `readEffect()`
   reads as `HOLD_CLEAR`. A RESUME with a missing, unknown or other effect,
   `production_touched` other than false, or a health outside the vocabulary
-  releases nothing.
+  releases nothing. Neither does a `HOLD_CLEAR` for another packet, one older
+  than the HOLD, or a RESUME that is not valid authority (outside the
+  allowlist, not from chatgpt, or malformed). A later HOLD needs its own later
+  release.
 - Authority about other packets neither blocks nor moves the target.
 
 The binding is acyclic. The grant names the final artifact head, so it is

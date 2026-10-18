@@ -2632,6 +2632,75 @@ negative_controls:
     proof_command: node --test --test-name-pattern="NC CLI hold release" scripts/agent-control/tests/merge-cli.spec.mjs
     timeout_ms: 180000
 
+  - id: NC-F9-RELEASE-WRONG-PACKET
+    claim: >
+      A HOLD_CLEAR releases only the hold on its own packet. Letting a RESUME
+      for another packet into the hold loop releases the target hold.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (!valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
+      replace: |-
+          if (e.message_type !== 'RESUME' && !valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
+    proof_command: node --test --test-name-pattern="NC hold release binding" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-RELEASE-WRONG-PACKET
+    claim: >
+      Through the real CLI, a valid HOLD_CLEAR for another packet leaves the
+      target held and makes no merge call; with the packet binding dropped
+      for RESUME the synthetic merge PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (!valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
+      replace: |-
+          if (e.message_type !== 'RESUME' && !valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
+    proof_command: node --test --test-name-pattern="NC CLI hold release binding" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-RELEASE-ORDER-BLIND
+    claim: >
+      A release counts only after the HOLD it clears. Releasing on any valid
+      HOLD_CLEAR for the packet anywhere on #80 lets an older RESUME clear a
+      newer HOLD, and lets a release survive a later re-HOLD.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (hold) return deny(GRANT_REASONS.HOLD_ACTIVE
+      replace: |-
+          if (hold && !valid.some((x) => x.message_type === 'RESUME' && releasesHold(x) && valuesOf(x, 'packet_id').includes(t.packet_id))) return deny(GRANT_REASONS.HOLD_ACTIVE
+    proof_command: node --test --test-name-pattern="NC hold release order" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-RELEASE-ORDER-BLIND
+    claim: >
+      Through the real CLI, a HOLD_CLEAR older than the HOLD leaves the
+      target held and makes no merge call; with an order-blind release the
+      synthetic merge PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (hold) return deny(GRANT_REASONS.HOLD_ACTIVE
+      replace: |-
+          if (hold && !valid.some((x) => x.message_type === 'RESUME' && releasesHold(x) && valuesOf(x, 'packet_id').includes(t.packet_id))) return deny(GRANT_REASONS.HOLD_ACTIVE
+    proof_command: node --test --test-name-pattern="NC CLI hold release order" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-CLI-RECHECK-HOLD
+    claim: >
+      Through the real CLI, a HOLD on the target posted between the two
+      snapshots stops the merge call; merging on the first snapshot alone
+      would not.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: |-
+          const verdict = recheckBeforeMerge(first, await evaluateNow());
+      replace: |-
+          const verdict = first;
+    proof_command: node --test --test-name-pattern="NC CLI recheck: a HOLD posted" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
   - id: NC-F9-PROVENANCE-NOT-CHECKED
     claim: >
       A grant is read only from the target repository's control issue; a

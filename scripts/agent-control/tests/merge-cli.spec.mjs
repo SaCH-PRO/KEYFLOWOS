@@ -204,6 +204,9 @@ const invalidReleases = [
   ['unknown effect', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: RELEASE_ALL')],
   ['production touched', (b) => b.replace('production_touched: false', 'production_touched: true')],
   ['invalid health', (b) => b.replace('health: YELLOW', 'health: AMBER')],
+  ['programme field', (b) => b.replace('control_effect: HOLD_CLEAR\n', 'control_effect: HOLD_CLEAR\nprogramme_action: ACTIVATE\n')],
+  ['hold effect on a RESUME', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: HOLD_SET')],
+  ['production untouched not stated', (b) => b.replace('production_touched: false', 'production_touched: null')],
 ];
 
 for (const [name, change] of invalidReleases) {
@@ -245,6 +248,45 @@ test('CLI hold release isolation: an invalid release for another packet does not
   const r = run(scenario([comments, comments]), ['--merge']);
   assert.equal(r.code, 0, r.stderr || r.stdout);
   assert.equal(puts(r).length, 1);
+});
+
+// A valid HOLD_CLEAR releases only its own packet's hold, and only a hold that
+// came before it; the merge call stays at zero otherwise (both modes).
+function assertHeldThroughCli(comments) {
+  const r = run(scenario([comments, comments]), ['--merge']);
+  assert.ok(r.trace, r.stderr);
+  assert.equal(puts(r).length, 0, 'the target hold must stay active: no merge call');
+  assert.equal(r.code, 3);
+  assert.equal(r.out.detail.reason, 'merge_grant_target_held');
+  const gate = run(scenario([comments]), ['--grant-only']);
+  assert.equal(gate.code, 3);
+  assert.equal(gate.out.detail.reason, 'merge_grant_target_held');
+  assert.equal(puts(gate).length, 0);
+}
+
+test('NC CLI hold release binding: a valid HOLD_CLEAR for another packet leaves the target held and makes no merge call', () => {
+  const hold = holdComment('HOLD', 'KF-X-001');
+  const elsewhere = holdComment('RESUME', 'KF-OTHER-001');
+  assert.ok(Date.parse(hold.created_at) < Date.parse(elsewhere.created_at), 'the RESUME follows the HOLD');
+  assertHeldThroughCli([hold, elsewhere, grantComment()]);
+});
+
+test('NC CLI hold release order: a HOLD_CLEAR older than the HOLD leaves the target held and makes no merge call', () => {
+  const early = holdComment('RESUME', 'KF-X-001');
+  const hold = holdComment('HOLD', 'KF-X-001');
+  assert.ok(Date.parse(early.created_at) < Date.parse(hold.created_at), 'the RESUME precedes the HOLD');
+  assertHeldThroughCli([early, hold, grantComment()]);
+});
+
+test('NC CLI recheck: a HOLD posted between the snapshots stops the merge call', () => {
+  const g = grantComment();
+  const r = run(scenario([[g], [g, holdComment('HOLD', 'KF-X-001')]]), ['--merge']);
+  assert.ok(r.trace, r.stderr);
+  assert.equal(puts(r).length, 0);
+  assert.equal(r.code, 3, r.stderr);
+  assert.equal(r.out.reason, 'merge_grant_not_satisfied');
+  assert.equal(r.out.detail.reason, 'merge_grant_superseded');
+  assert.equal(commentReads(r).length, 2, 'the HOLD is seen by the second snapshot');
 });
 
 test('target() in the fixture is the PR this scenario serves', () => {

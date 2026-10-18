@@ -247,6 +247,9 @@ const invalidReleases = [
   ['unknown effect', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: RELEASE_ALL'), 'CONTROL_EFFECT_UNKNOWN'],
   ['production touched', (b) => b.replace('production_touched: false', 'production_touched: true'), 'CONTROL_EFFECT_PRODUCTION_TOUCHED'],
   ['invalid health', (b) => b.replace('health: YELLOW', 'health: AMBER'), 'CONTROL_EFFECT_HEALTH_INVALID'],
+  ['programme field', (b) => b.replace('control_effect: HOLD_CLEAR\n', 'control_effect: HOLD_CLEAR\nprogramme_action: ACTIVATE\n'), 'CONTROL_EFFECT_PROGRAMME_NOT_FOLDABLE'],
+  ['hold effect on a RESUME', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: HOLD_SET'), 'CONTROL_EFFECT_TYPE_MISMATCH'],
+  ['production untouched not stated', (b) => b.replace('production_touched: false', 'production_touched: null'), 'CONTROL_EFFECT_PRODUCTION_TOUCHED'],
 ];
 
 test('NC hold release: a RESUME whose effect is not a valid HOLD_CLEAR leaves the target hold active', () => {
@@ -269,6 +272,67 @@ test('NC hold release: a RESUME whose effect is not a valid HOLD_CLEAR leaves th
   const other = holdComment('RESUME', 'KF-OTHER-001');
   other.body = other.body.replace('control_effect: HOLD_CLEAR', 'control_effect: NO_STATE_CHANGE');
   assert.equal(verdict([holdComment('HOLD', 'KF-OTHER-001'), other, grantComment()]).granted, true);
+});
+
+// A release is bound to the held packet and to #80 order, as the fold in
+// authority-effects.mjs binds it: a HOLD_CLEAR for another packet, or one older
+// than the HOLD it would clear, releases nothing. Every fixture call is newer
+// than the last, so each case is built in the #80 order it asserts.
+test('NC hold release binding: a valid HOLD_CLEAR for another packet leaves the target hold active', () => {
+  const hold = holdComment('HOLD', 'KF-X-001');
+  const elsewhere = holdComment('RESUME', 'KF-OTHER-001');
+  const comments = [hold, elsewhere, grantComment()];
+  // The release is valid in every respect but its packet.
+  const entry = collectAuthority(comments).candidates.find((c) => c.comment_id === elsewhere.id);
+  assert.deepEqual(entry.problems, []);
+  const read = readEffect(entry);
+  assert.equal(read.ok, true);
+  assert.equal(read.effect, 'HOLD_CLEAR');
+  assert.equal(read.packet_id, 'KF-OTHER-001');
+  assert.ok(Date.parse(hold.created_at) < Date.parse(elsewhere.created_at), 'the RESUME follows the HOLD');
+  const v = verdict(comments);
+  assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE);
+  assert.equal(v.detail.comment_id, hold.id);
+  // Referent: the same release naming the held packet grants.
+  assert.equal(verdict([holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()]).granted, true);
+});
+
+test('NC hold release order: a HOLD_CLEAR older than the HOLD, or before a re-HOLD, releases nothing', () => {
+  const early = holdComment('RESUME', 'KF-X-001');
+  const hold = holdComment('HOLD', 'KF-X-001');
+  assert.ok(Date.parse(early.created_at) < Date.parse(hold.created_at), 'the RESUME precedes the HOLD');
+  const stale = verdict([early, hold, grantComment()]);
+  assert.equal(stale.reason, GRANT_REASONS.HOLD_ACTIVE);
+  assert.equal(stale.detail.comment_id, hold.id);
+  const first = holdComment('HOLD', 'KF-X-001');
+  const release = holdComment('RESUME', 'KF-X-001');
+  const again = holdComment('HOLD', 'KF-X-001');
+  const rehold = verdict([first, release, again, grantComment()]);
+  assert.equal(rehold.reason, GRANT_REASONS.HOLD_ACTIVE);
+  assert.equal(rehold.detail.comment_id, again.id, 'the second HOLD is the active one');
+  // Referent: a release after the re-HOLD grants.
+  const cycle = [holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()];
+  assert.equal(verdict(cycle).granted, true);
+});
+
+test('NC hold release authority: a RESUME that is not valid authority releases nothing', () => {
+  const variants = [
+    ['outside the allowlist', (c) => { c.user = { login: 'someone-else' }; }],
+    ['not from chatgpt', (c) => { c.body = c.body.replace('sender: chatgpt', 'sender: claude'); }],
+    ['malformed (effect repeated)', (c) => { c.body = c.body.replace('control_effect: HOLD_CLEAR\n', 'control_effect: HOLD_CLEAR\ncontrol_effect: HOLD_CLEAR\n'); }],
+  ];
+  for (const [name, change] of variants) {
+    const hold = holdComment('HOLD', 'KF-X-001');
+    const resume = holdComment('RESUME', 'KF-X-001');
+    change(resume);
+    const comments = [hold, resume, grantComment()];
+    const authority = collectAuthority(comments);
+    assert.equal(authority.verified, true, name);
+    assert.equal(authority.messages.some((m) => m.comment_id === resume.id), false, `${name}: not valid authority`);
+    const v = verdict(comments);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
+    assert.equal(v.detail.comment_id, hold.id, name);
+  }
 });
 
 test('the PR 159 shape: a bounded meta grant with NO_STATE_CHANGE grants for its own PR only', () => {
