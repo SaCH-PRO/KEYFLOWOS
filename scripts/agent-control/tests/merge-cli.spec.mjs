@@ -269,6 +269,78 @@ test('NC CLI hold release binding: a valid HOLD_CLEAR for another packet leaves 
   const elsewhere = holdComment('RESUME', 'KF-OTHER-001');
   assert.ok(Date.parse(hold.created_at) < Date.parse(elsewhere.created_at), 'the RESUME follows the HOLD');
   assertHeldThroughCli([hold, elsewhere, grantComment()]);
+  // ...even when that release names the target's PR and branch.
+  const held = holdComment('HOLD', 'KF-X-001');
+  const byReference = holdComment('RESUME', 'KF-OTHER-001', {}, { pr_number: 87, implementation_branch: 'impl/x' });
+  assertHeldThroughCli([held, byReference, grantComment()]);
+});
+
+/** The CLI denies with `reason` in both modes and makes no merge call. */
+function assertDeniedThroughCli(comments, reason) {
+  const r = run(scenario([comments, comments]), ['--merge']);
+  assert.ok(r.trace, r.stderr);
+  assert.equal(puts(r).length, 0, `no merge call: ${reason}`);
+  assert.equal(r.code, 3, r.stderr);
+  assert.equal(r.out.detail.reason, reason);
+  const gate = run(scenario([comments]), ['--grant-only']);
+  assert.equal(gate.code, 3, gate.stderr);
+  assert.equal(gate.out.detail.reason, reason);
+  assert.equal(puts(gate).length, 0);
+  return r;
+}
+
+/** The CLI grants in both modes and makes exactly one SHA-pinned synthetic merge call. */
+function assertMergedThroughCli(comments) {
+  const r = run(scenario([comments, comments]), ['--merge']);
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.equal(puts(r).length, 1);
+  assert.equal(puts(r)[0].body.sha, HEAD);
+  const gate = run(scenario([comments]), ['--grant-only']);
+  assert.equal(gate.code, 0, gate.stderr || gate.stdout);
+  assert.equal(puts(gate).length, 0);
+}
+
+// CG-REV-F9-003 (F9-H1): a malformed HOLD on the target before the grant holds
+// it through the real CLI. Each case is built in #80 order.
+test('NC CLI malformed hold: a malformed target HOLD before an exact grant makes no merge call in either mode', () => {
+  for (const fields of [{ scope_changed: undefined }, { message_type: ['REVIEW', 'HOLD'] }, { packet_id: undefined, scope_changed: undefined }]) {
+    const hold = holdComment('HOLD', 'KF-X-001', {}, fields);
+    const r = assertDeniedThroughCli([hold, grantComment()], 'merge_grant_target_held');
+    assert.equal(r.out.detail.detail.comment_id, hold.id, JSON.stringify(fields));
+  }
+});
+
+test('CLI malformed hold referent: a malformed target HOLD, then a valid HOLD_CLEAR, then an exact grant merges once', () => {
+  assertMergedThroughCli([holdComment('HOLD', 'KF-X-001', {}, { scope_changed: undefined }), holdComment('RESUME', 'KF-X-001'), grantComment()]);
+});
+
+test('NC CLI hold duplicate: HOLD, HOLD, RESUME and an exact grant makes no merge call in either mode', () => {
+  const comments = [holdComment('HOLD', 'KF-X-001'), holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()];
+  assertDeniedThroughCli(comments, 'merge_grant_hold_duplicate');
+});
+
+test('CLI hold duplicate referent: HOLD, HOLD_CLEAR, HOLD, HOLD_CLEAR and an exact grant merges once', () => {
+  assertMergedThroughCli([holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()]);
+});
+
+// CG-REV-F9-003 Q3, through the real CLI: a HOLD under another packet that
+// names the target's PR or branch holds it until its own packet's release.
+for (const [identity, fields] of [['PR', { pr_number: 87 }], ['branch', { implementation_branch: 'impl/x' }]]) {
+  test(`NC CLI hold by ${identity}: a HOLD under another packet naming the target ${identity} makes no merge call; its own release merges once`, () => {
+    assertDeniedThroughCli([holdComment('HOLD', 'KF-OTHER-001', {}, fields), grantComment()], 'merge_grant_target_held');
+    assertMergedThroughCli([holdComment('HOLD', 'KF-OTHER-001', {}, fields), holdComment('RESUME', 'KF-OTHER-001'), grantComment()]);
+  });
+}
+
+test('NC CLI hold cross-packet release: the target\'s own HOLD_CLEAR, or one naming the target PR, does not release another packet\'s hold on it', () => {
+  assertDeniedThroughCli([holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 }), holdComment('RESUME', 'KF-X-001'), grantComment()], 'merge_grant_target_held');
+  assertDeniedThroughCli([
+    holdComment('HOLD', 'KF-OTHER-001', {}, { implementation_branch: 'impl/x' }),
+    holdComment('RESUME', 'KF-THIRD-001', {}, { pr_number: 87, implementation_branch: 'impl/x' }),
+    grantComment(),
+  ], 'merge_grant_target_held');
+  // A genuinely unrelated HOLD does not block.
+  assertMergedThroughCli([holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 999, implementation_branch: 'impl/else' }), grantComment()]);
 });
 
 test('NC CLI hold release order: a HOLD_CLEAR older than the HOLD leaves the target held and makes no merge call', () => {

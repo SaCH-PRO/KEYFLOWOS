@@ -335,16 +335,43 @@ target's.
 - A malformed authority candidate after the grant that is, or may be, about
   the target denies (`merge_grant_ambiguous_authority`). That includes one
   whose packet, PR or branch field is unreadable. A malformed candidate
-  before the grant is superseded by it.
-- A valid HOLD on the target packet denies, whichever side of the grant it
-  falls, until a later RESUME for that packet whose effect `readEffect()`
-  reads as `HOLD_CLEAR`. A RESUME with a missing, unknown or other effect,
-  `production_touched` other than false, or a health outside the vocabulary
-  releases nothing. Neither does a `HOLD_CLEAR` for another packet, one older
-  than the HOLD, or a RESUME that is not valid authority (outside the
-  allowlist, not from chatgpt, or malformed). A later HOLD needs its own later
-  release.
-- Authority about other packets neither blocks nor moves the target.
+  before the grant is superseded by it, unless it is a hold claim.
+- Holds are read over every candidate, valid or malformed, in #80 order
+  (CG-REV-F9-003). A hold claim is a candidate whose `message_type` is not
+  exactly one of DIRECTIVE, REVIEW or RESUME: a HOLD, or a type that cannot
+  be read (absent, repeated or undeclared). Every `message_type` value is
+  read, so a repeat cannot hide a HOLD behind a REVIEW. A hold claim holds
+  the target when its packet is the target's or cannot be read, or when it
+  names the target's PR number or implementation branch under another packet.
+- A hold denies, whichever side of the grant it falls, until a later valid
+  RESUME whose effect `readEffect()` reads as `HOLD_CLEAR` for the hold's own
+  packet. For a hold whose packet cannot be read, that is the target's packet.
+  These release nothing:
+  - a RESUME with a missing, unknown or other effect;
+  - one with `production_touched` other than false;
+  - one with a health present and outside GREEN/YELLOW/RED. A null or blank
+    health is absent, as `readEffect()` reads it;
+  - a `HOLD_CLEAR` for another packet, including one that names only the
+    target's PR or branch;
+  - one older than the HOLD;
+  - a RESUME that is not valid authority (outside the allowlist, not from
+    chatgpt, or malformed).
+
+  Packet ids match exactly as written: case and whitespace are other packets.
+  A later HOLD needs its own later release.
+- A second hold claim on a packet that is already held, with no valid
+  `HOLD_CLEAR` between them, denies (`merge_grant_hold_duplicate`) whatever
+  follows. This is HOLD_DUPLICATE in the canonical fold, which stops there.
+  No later RESUME is read as curing it: that history needs separately
+  reviewed reconciliation. HOLD, HOLD_CLEAR, HOLD, HOLD_CLEAR is not a
+  duplicate.
+- Authority about other packets neither blocks nor moves the target. That
+  includes a hold claim on another readable packet that names neither the
+  target's PR nor its branch.
+- RESUME provenance is as in the fold. The predicate reads only the target
+  repository's issue #80, from the caller, and only allowlisted authors. A
+  RESUME's comment URL and any body `repository:` field are not release
+  conditions, and no authentication is inferred from them.
 
 The binding is acyclic. The grant names the final artifact head, so it is
 posted after that commit exists. The artifact never names the grant and is

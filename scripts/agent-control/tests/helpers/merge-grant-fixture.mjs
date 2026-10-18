@@ -106,8 +106,8 @@ export function followUp(fields = {}, options = {}, t = target()) {
   }), options);
 }
 
-/** A HOLD or RESUME for a packet. */
-export function holdComment(type, packet, options = {}) {
+/** A HOLD or RESUME for a packet; `fields` adds or overrides body fields. */
+export function holdComment(type, packet, options = {}, fields = {}) {
   return comment(body({
     message_id: `CG-${type}-SYNTHETIC-${packet}`,
     message_type: type,
@@ -120,6 +120,7 @@ export function holdComment(type, packet, options = {}) {
     scope_changed: 'false',
     production_touched: 'false',
     control_effect: type === 'HOLD' ? 'HOLD_SET' : 'HOLD_CLEAR',
+    ...fields,
   }), options);
 }
 

@@ -293,8 +293,235 @@ test('NC hold release binding: a valid HOLD_CLEAR for another packet leaves the 
   const v = verdict(comments);
   assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE);
   assert.equal(v.detail.comment_id, hold.id);
+  // Naming the target's PR and branch does not make another packet's
+  // HOLD_CLEAR a release of this one: a release is keyed by its packet.
+  const held = holdComment('HOLD', 'KF-X-001');
+  const byReference = holdComment('RESUME', 'KF-OTHER-001', {}, { pr_number: 87, implementation_branch: 'impl/x' });
+  const referenced = [held, byReference, grantComment()];
+  const read2 = readEffect(collectAuthority(referenced).candidates.find((c) => c.comment_id === byReference.id));
+  assert.equal(read2.ok, true);
+  assert.equal(read2.effect, 'HOLD_CLEAR');
+  assert.equal(read2.pr_number, '87');
+  const v2 = verdict(referenced);
+  assert.equal(v2.reason, GRANT_REASONS.HOLD_ACTIVE, 'a release that names the target PR and branch under another packet');
+  assert.equal(v2.detail.comment_id, held.id);
   // Referent: the same release naming the held packet grants.
   assert.equal(verdict([holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()]).granted, true);
+});
+
+test('NC hold release exact packet: a HOLD_CLEAR whose packet differs in case or whitespace releases nothing', () => {
+  for (const written of ['kf-x-001', '"KF-X-001 "', '"KF-X-001\\t"']) {
+    const hold = holdComment('HOLD', 'KF-X-001');
+    const resume = holdComment('RESUME', 'KF-X-001', {}, { packet_id: written });
+    const comments = [hold, resume, grantComment()];
+    const read = readEffect(collectAuthority(comments).candidates.find((c) => c.comment_id === resume.id));
+    assert.equal(read.ok, true, written);
+    assert.notEqual(read.packet_id, 'KF-X-001', written);
+    const v = verdict(comments);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, written);
+    assert.equal(v.detail.comment_id, hold.id, written);
+  }
+  // Referent: the exact id releases.
+  assert.equal(verdict([holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001', {}, { packet_id: 'KF-X-001' }), grantComment()]).granted, true);
+});
+
+test('hold release health (Q1): a blank health is absent and releases; a present health outside the vocabulary does not', () => {
+  const blank = holdComment('RESUME', 'KF-X-001', {}, { health: null });
+  assert.match(blank.body, /^health: $/m);
+  const hold = holdComment('HOLD', 'KF-X-001');
+  const release = holdComment('RESUME', 'KF-X-001', {}, { health: null });
+  const comments = [hold, release, grantComment()];
+  const entry = collectAuthority(comments).candidates.find((c) => c.comment_id === release.id);
+  assert.deepEqual(entry.problems, []);
+  const read = readEffect(entry);
+  assert.equal(read.ok, true);
+  assert.equal(read.health, null);
+  assert.equal(verdict(comments).granted, true);
+  // Distinguishing negative: the same release with a present, invalid health.
+  const hold2 = holdComment('HOLD', 'KF-X-001');
+  const amber = holdComment('RESUME', 'KF-X-001', {}, { health: 'AMBER' });
+  const v = verdict([hold2, amber, grantComment()]);
+  assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE);
+  assert.equal(v.detail.comment_id, hold2.id);
+});
+
+test('hold release provenance (Q4): a body repository field or URL is not a RESUME release condition, as in the fold', () => {
+  const variants = [
+    ['repository field naming another repository', { repository: 'someone/else' }, ''],
+    ['repository field naming the target', { repository: REPO }, ''],
+    ['a URL in the body', {}, 'Posted from https://github.com/someone/else/issues/80#issuecomment-1'],
+  ];
+  for (const [name, fields, prose] of variants) {
+    const hold = holdComment('HOLD', 'KF-X-001');
+    const release = holdComment('RESUME', 'KF-X-001', {}, fields);
+    if (prose) release.body += `\n${prose}\n`;
+    assert.equal(verdict([hold, release, grantComment()]).granted, true, name);
+  }
+  // The RESUME still has to be valid authority from an allowlisted account.
+  const hold = holdComment('HOLD', 'KF-X-001');
+  const forged = holdComment('RESUME', 'KF-X-001', { author: 'mallory' }, { repository: REPO });
+  assert.equal(reasonOf([hold, forged, grantComment()]), GRANT_REASONS.HOLD_ACTIVE);
+});
+
+// CG-REV-F9-003 (F9-H1, Option A): holds are read over every candidate,
+// malformed ones included, so a malformed HOLD before the grant is not
+// superseded by it.
+const malformedHolds = [
+  ['scope_changed omitted', { scope_changed: undefined }],
+  ['health repeated', { health: ['YELLOW', 'RED'] }],
+  ['packet repeated with the target first', { packet_id: ['KF-X-001', 'KF-OTHER-001'] }],
+];
+
+test('NC malformed hold: a malformed HOLD on the target before the grant holds it until a later valid HOLD_CLEAR', () => {
+  for (const [name, fields] of malformedHolds) {
+    const hold = holdComment('HOLD', 'KF-X-001', {}, fields);
+    const comments = [hold, grantComment()];
+    const entry = collectAuthority(comments).candidates.find((c) => c.comment_id === hold.id);
+    assert.ok(entry, `${name}: a candidate`);
+    assert.notDeepEqual(entry.problems, [], `${name}: malformed`);
+    const v = verdict(comments);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
+    assert.equal(v.detail.comment_id, hold.id, name);
+    assert.equal(v.detail.malformed, true, name);
+    // Referent: a later valid HOLD_CLEAR for the target packet releases it.
+    const released = [holdComment('HOLD', 'KF-X-001', {}, fields), holdComment('RESUME', 'KF-X-001'), grantComment()];
+    assert.equal(verdict(released).granted, true, `${name}: released`);
+  }
+  // A malformed re-HOLD after a release holds again (built in #80 order).
+  const first = holdComment('HOLD', 'KF-X-001');
+  const release = holdComment('RESUME', 'KF-X-001');
+  const again = holdComment('HOLD', 'KF-X-001', {}, { scope_changed: undefined });
+  const cycle = [first, release, again, grantComment()];
+  const v = verdict(cycle);
+  assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE);
+  assert.equal(v.detail.comment_id, again.id);
+});
+
+test('NC malformed hold type: a repeated, lower-case, undeclared or absent type from chatgpt is a hold claim', () => {
+  const types = [
+    ['a HOLD repeated behind a REVIEW', ['REVIEW', 'HOLD']],
+    ['a HOLD repeated behind a RESUME', ['RESUME', 'HOLD']],
+    ['lower case', 'hold'],
+    ['undeclared', 'PAUSE'],
+    ['absent', undefined],
+  ];
+  for (const [name, type] of types) {
+    const hold = holdComment('HOLD', 'KF-X-001', {}, { message_type: type });
+    const comments = [hold, grantComment()];
+    const entry = collectAuthority(comments).candidates.find((c) => c.comment_id === hold.id);
+    assert.ok(entry, `${name}: a candidate`);
+    assert.notDeepEqual(entry.problems, [], `${name}: malformed`);
+    const v = verdict(comments);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
+    assert.equal(v.detail.comment_id, hold.id, name);
+  }
+});
+
+test('NC malformed hold packet: a malformed hold claim whose packet cannot be read holds the target', () => {
+  for (const [name, packet] of [['absent', undefined], ['blank', null], ['repeated, other packets', ['KF-OTHER-001', 'KF-OTHER-002']]]) {
+    const hold = holdComment('HOLD', 'KF-X-001', {}, { packet_id: packet, scope_changed: undefined });
+    const v = verdict([hold, grantComment()]);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
+    assert.equal(v.detail.comment_id, hold.id, name);
+    assert.equal(v.detail.packet_id, 'KF-X-001', `${name}: released only by the target packet`);
+    // Only a later valid HOLD_CLEAR for the target packet releases it.
+    const other = [holdComment('HOLD', 'KF-X-001', {}, { packet_id: packet, scope_changed: undefined }), holdComment('RESUME', 'KF-OTHER-001'), grantComment()];
+    assert.equal(reasonOf(other), GRANT_REASONS.HOLD_ACTIVE, `${name}: another packet's release`);
+    const own = [holdComment('HOLD', 'KF-X-001', {}, { packet_id: packet, scope_changed: undefined }), holdComment('RESUME', 'KF-X-001'), grantComment()];
+    assert.equal(verdict(own).granted, true, `${name}: the target's release`);
+  }
+});
+
+test('malformed hold scope: the rules CG-REV-F9-003 kept still hold', () => {
+  // A malformed HOLD on another readable packet that names neither the target PR nor branch does not apply.
+  const elsewhere = holdComment('HOLD', 'KF-OTHER-001', {}, { scope_changed: undefined });
+  assert.equal(verdict([elsewhere, grantComment()]).granted, true);
+  // A malformed REVIEW about the target before the grant is still superseded by it.
+  const review = comment(body({ ...grantFields({ message_id: 'M1', merge_authority: 'false' }), health: ['GREEN', 'RED'] }));
+  assert.equal(verdict([review, grantComment()]).granted, true);
+  // A malformed RESUME releases nothing, and before the grant it holds nothing either.
+  const resume = holdComment('RESUME', 'KF-X-001', {}, { scope_changed: undefined });
+  assert.equal(verdict([resume, grantComment()]).granted, true);
+  const hold = holdComment('HOLD', 'KF-X-001');
+  const bad = holdComment('RESUME', 'KF-X-001', {}, { scope_changed: undefined });
+  assert.equal(reasonOf([hold, bad, grantComment()]), GRANT_REASONS.HOLD_ACTIVE);
+  // A malformed HOLD on the target after the grant is still ambiguous, as before.
+  assert.equal(reasonOf([grantComment(), holdComment('HOLD', 'KF-X-001', {}, { scope_changed: undefined })]), GRANT_REASONS.AMBIGUOUS);
+});
+
+// CG-REV-F9-003 Q2: a second hold on a held packet is HOLD_DUPLICATE in the
+// canonical fold. The predicate denies by name and reads no later RESUME as
+// curing it.
+test('NC hold duplicate: HOLD, HOLD and a later RESUME denies by name; HOLD, HOLD_CLEAR, HOLD, HOLD_CLEAR grants', () => {
+  const first = holdComment('HOLD', 'KF-X-001');
+  const second = holdComment('HOLD', 'KF-X-001');
+  const v = verdict([first, second, holdComment('RESUME', 'KF-X-001'), grantComment()]);
+  assert.equal(v.reason, GRANT_REASONS.HOLD_DUPLICATE);
+  assert.equal(v.detail.packet_id, 'KF-X-001');
+  assert.equal(v.detail.hold.comment_id, first.id);
+  assert.equal(v.detail.duplicate.comment_id, second.id);
+  // Two RESUMEs do not cure it either.
+  const twice = [holdComment('HOLD', 'KF-X-001'), holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()];
+  assert.equal(reasonOf(twice), GRANT_REASONS.HOLD_DUPLICATE);
+  // A malformed hold claim on the held packet is a second hold too.
+  const malformed = [holdComment('HOLD', 'KF-X-001'), holdComment('HOLD', 'KF-X-001', {}, { scope_changed: undefined }), holdComment('RESUME', 'KF-X-001'), grantComment()];
+  assert.equal(reasonOf(malformed), GRANT_REASONS.HOLD_DUPLICATE);
+  // A HOLD on a packet that already holds the target by reference is a duplicate on that packet.
+  const byReference = [holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 }), holdComment('HOLD', 'KF-OTHER-001'), holdComment('RESUME', 'KF-OTHER-001'), grantComment()];
+  assert.equal(verdict(byReference).detail.packet_id, 'KF-OTHER-001');
+  assert.equal(reasonOf(byReference), GRANT_REASONS.HOLD_DUPLICATE);
+  // Referent: a release between the two holds makes it a re-HOLD, which its own release clears.
+  const cycle = [holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()];
+  assert.equal(verdict(cycle).granted, true);
+  // Duplicate holds on an unrelated packet are not this target's to judge.
+  const unrelated = [holdComment('HOLD', 'KF-OTHER-001'), holdComment('HOLD', 'KF-OTHER-001'), grantComment()];
+  assert.equal(verdict(unrelated).granted, true);
+});
+
+// CG-REV-F9-003 Q3: a valid HOLD that names the target by packet, PR or branch
+// holds it, whatever its own packet. Only a later valid HOLD_CLEAR for the
+// HOLD's own packet releases it.
+function assertHoldByReference(fields) {
+  const hold = holdComment('HOLD', 'KF-OTHER-001', {}, fields);
+  const comments = [hold, grantComment()];
+  assert.deepEqual(collectAuthority(comments).candidates.find((c) => c.comment_id === hold.id).problems, []);
+  const v = verdict(comments);
+  assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE);
+  assert.equal(v.detail.comment_id, hold.id);
+  assert.equal(v.detail.packet_id, 'KF-OTHER-001');
+  // Referent: its own packet's later HOLD_CLEAR releases it.
+  assert.equal(verdict([holdComment('HOLD', 'KF-OTHER-001', {}, fields), holdComment('RESUME', 'KF-OTHER-001'), grantComment()]).granted, true);
+}
+
+test('NC hold by PR: a valid HOLD under another packet that names the target PR number holds the target', () => {
+  assertHoldByReference({ pr_number: 87 });
+});
+
+test('NC hold by branch: a valid HOLD under another packet that names the target branch holds the target', () => {
+  assertHoldByReference({ implementation_branch: 'impl/x' });
+});
+
+test('NC hold cross-packet release: only the HOLD\'s own packet releases it, never the target\'s or a reference', () => {
+  for (const fields of [{ pr_number: 87 }, { implementation_branch: 'impl/x' }]) {
+    const hold = holdComment('HOLD', 'KF-OTHER-001', {}, fields);
+    const targets = holdComment('RESUME', 'KF-X-001');
+    const v = verdict([hold, targets, grantComment()]);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, `the target packet's release: ${JSON.stringify(fields)}`);
+    assert.equal(v.detail.comment_id, hold.id);
+    const hold2 = holdComment('HOLD', 'KF-OTHER-001', {}, fields);
+    const reference = holdComment('RESUME', 'KF-THIRD-001', {}, { pr_number: 87, implementation_branch: 'impl/x' });
+    const v2 = verdict([hold2, reference, grantComment()]);
+    assert.equal(v2.reason, GRANT_REASONS.HOLD_ACTIVE, `a release naming the target PR and branch: ${JSON.stringify(fields)}`);
+    assert.equal(v2.detail.comment_id, hold2.id);
+  }
+  // Both holds active: each needs its own release.
+  const both = [holdComment('HOLD', 'KF-X-001'), holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 }), holdComment('RESUME', 'KF-X-001'), grantComment()];
+  assert.equal(reasonOf(both), GRANT_REASONS.HOLD_ACTIVE);
+  const cleared = [holdComment('HOLD', 'KF-X-001'), holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 }), holdComment('RESUME', 'KF-X-001'), holdComment('RESUME', 'KF-OTHER-001'), grantComment()];
+  assert.equal(verdict(cleared).granted, true);
+  // A genuinely unrelated HOLD stays unrelated.
+  const unrelated = holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 999, implementation_branch: 'impl/else' });
+  assert.equal(verdict([unrelated, grantComment()]).granted, true);
 });
 
 test('NC hold release order: a HOLD_CLEAR older than the HOLD, or before a re-HOLD, releases nothing', () => {

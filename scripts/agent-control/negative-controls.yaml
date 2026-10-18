@@ -2612,9 +2612,9 @@ negative_controls:
     mutation:
       file: scripts/agent-control/lib/merge-grant.mjs
       find: |-
-          else if (e.message_type === 'RESUME' && releasesHold(e)) hold = null;
+          if (e.message_type === 'RESUME' && releasesHold(e)) active.delete(field(e, 'packet_id'));
       replace: |-
-          else if (e.message_type === 'RESUME') hold = null;
+          if (e.message_type === 'RESUME') active.delete(field(e, 'packet_id'));
     proof_command: node --test --test-name-pattern="NC hold release" scripts/agent-control/tests/merge-grant.spec.mjs
     timeout_ms: 120000
 
@@ -2626,22 +2626,22 @@ negative_controls:
     mutation:
       file: scripts/agent-control/lib/merge-grant.mjs
       find: |-
-          else if (e.message_type === 'RESUME' && releasesHold(e)) hold = null;
+          if (e.message_type === 'RESUME' && releasesHold(e)) active.delete(field(e, 'packet_id'));
       replace: |-
-          else if (e.message_type === 'RESUME') hold = null;
+          if (e.message_type === 'RESUME') active.delete(field(e, 'packet_id'));
     proof_command: node --test --test-name-pattern="NC CLI hold release" scripts/agent-control/tests/merge-cli.spec.mjs
     timeout_ms: 180000
 
   - id: NC-F9-RELEASE-WRONG-PACKET
     claim: >
       A HOLD_CLEAR releases only the hold on its own packet. Letting a RESUME
-      for another packet into the hold loop releases the target hold.
+      for another packet release the target hold is the defect.
     mutation:
       file: scripts/agent-control/lib/merge-grant.mjs
       find: |-
-          if (!valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
+          active.delete(field(e, 'packet_id'));
       replace: |-
-          if (e.message_type !== 'RESUME' && !valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
+          active.clear();
     proof_command: node --test --test-name-pattern="NC hold release binding" scripts/agent-control/tests/merge-grant.spec.mjs
     timeout_ms: 120000
 
@@ -2653,9 +2653,9 @@ negative_controls:
     mutation:
       file: scripts/agent-control/lib/merge-grant.mjs
       find: |-
-          if (!valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
+          active.delete(field(e, 'packet_id'));
       replace: |-
-          if (e.message_type !== 'RESUME' && !valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
+          active.clear();
     proof_command: node --test --test-name-pattern="NC CLI hold release binding" scripts/agent-control/tests/merge-cli.spec.mjs
     timeout_ms: 180000
 
@@ -2700,6 +2700,212 @@ negative_controls:
           const verdict = first;
     proof_command: node --test --test-name-pattern="NC CLI recheck: a HOLD posted" scripts/agent-control/tests/merge-cli.spec.mjs
     timeout_ms: 180000
+
+  # CG-REV-F9-003: F9-H1 (Option A), Q2 and Q3.
+  - id: NC-F9-MALFORMED-HOLD-SKIPPED
+    claim: >
+      Holds are read over every candidate. Skipping malformed candidates in
+      the hold pass lets a malformed target HOLD before the grant be
+      superseded by it (F9-H1).
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (claimsHold(e)) {
+      replace: |-
+          if (claimsHold(e) && e.problems.length === 0) {
+    proof_command: node --test --test-name-pattern="NC malformed hold:" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-MALFORMED-HOLD-SKIPPED
+    claim: >
+      Through the real CLI, a malformed target HOLD before an exact grant
+      makes no merge call in either mode; with malformed candidates skipped
+      in the hold pass the synthetic merge PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (claimsHold(e)) {
+      replace: |-
+          if (claimsHold(e) && e.problems.length === 0) {
+    proof_command: node --test --test-name-pattern="NC CLI malformed hold:" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-MALFORMED-HOLD-TYPE-FIRST-ONLY
+    claim: >
+      Every message_type value is read. Reading only the type the collector
+      chose lets a HOLD repeated behind a REVIEW or RESUME pass as a
+      supersedable non-hold.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          const types = valuesOf(entry, 'message_type');
+      replace: |-
+          const types = [entry.message_type];
+    proof_command: node --test --test-name-pattern="NC malformed hold type" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-MALFORMED-HOLD-PACKET-UNREAD
+    claim: >
+      A hold claim whose packet cannot be read holds the target, and only the
+      target packet's later HOLD_CLEAR releases it.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (readablePacket(entry) === null) return true;
+      replace: |-
+          if (readablePacket(entry) === null) return false;
+    proof_command: node --test --test-name-pattern="NC malformed hold packet" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-HOLD-DUPLICATE-CURED
+    claim: >
+      A second hold on a held packet is HOLD_DUPLICATE in the canonical fold
+      and denies by name. Letting a later lone RESUME cure it is the defect
+      CG-REV-F9-003 Q2 forbids.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (active.has(key)) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC hold duplicate" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-HOLD-DUPLICATE-CURED
+    claim: >
+      Through the real CLI, HOLD, HOLD, RESUME and an exact grant makes no
+      merge call in either mode; with duplicates ignored the synthetic merge
+      PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (active.has(key)) {
+      replace: |-
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC CLI hold duplicate" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-HOLD-BY-PR-IGNORED
+    claim: >
+      A valid HOLD under another packet that names the target PR number holds
+      the target (CG-REV-F9-003 Q3).
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          return concerns(entry, t);
+      replace: |-
+          return valuesOf(entry, 'packet_id').includes(t.packet_id) || valuesOf(entry, 'implementation_branch').includes(t.implementation_branch);
+    proof_command: node --test --test-name-pattern="NC hold by PR" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-HOLD-BY-PR-IGNORED
+    claim: >
+      Through the real CLI, a HOLD under another packet that names the target
+      PR number makes no merge call in either mode.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          return concerns(entry, t);
+      replace: |-
+          return valuesOf(entry, 'packet_id').includes(t.packet_id) || valuesOf(entry, 'implementation_branch').includes(t.implementation_branch);
+    proof_command: node --test --test-name-pattern="NC CLI hold by PR" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-HOLD-BY-BRANCH-IGNORED
+    claim: >
+      A valid HOLD under another packet that names the target implementation
+      branch holds the target (CG-REV-F9-003 Q3).
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          return concerns(entry, t);
+      replace: |-
+          return valuesOf(entry, 'packet_id').includes(t.packet_id) || valuesOf(entry, 'pr_number').includes(t.pr_number);
+    proof_command: node --test --test-name-pattern="NC hold by branch" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-HOLD-BY-BRANCH-IGNORED
+    claim: >
+      Through the real CLI, a HOLD under another packet that names the target
+      branch makes no merge call in either mode.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          return concerns(entry, t);
+      replace: |-
+          return valuesOf(entry, 'packet_id').includes(t.packet_id) || valuesOf(entry, 'pr_number').includes(t.pr_number);
+    proof_command: node --test --test-name-pattern="NC CLI hold by branch" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-CROSS-PACKET-RELEASE
+    claim: >
+      A hold that names the target under another packet is released only by
+      that packet's HOLD_CLEAR. Letting the target packet's own HOLD_CLEAR
+      release every hold on the target is the defect.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          active.delete(field(e, 'packet_id'));
+      replace: |-
+          { active.delete(field(e, 'packet_id')); if (field(e, 'packet_id') === t.packet_id) active.clear(); }
+    proof_command: node --test --test-name-pattern="NC hold cross-packet release" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-CROSS-PACKET-RELEASE
+    claim: >
+      Through the real CLI, the target packet's HOLD_CLEAR does not release
+      another packet's hold on the target; with it releasing every hold the
+      synthetic merge PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          active.delete(field(e, 'packet_id'));
+      replace: |-
+          { active.delete(field(e, 'packet_id')); if (field(e, 'packet_id') === t.packet_id) active.clear(); }
+    proof_command: node --test --test-name-pattern="NC CLI hold cross-packet release" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-RELEASE-BY-REFERENCE
+    claim: >
+      Naming the target PR or branch is never release authority. A release
+      keyed by concerns() instead of the HOLD_CLEAR's own packet releases the
+      target hold through another packet's RESUME.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          active.delete(field(e, 'packet_id'));
+      replace: |-
+          { active.delete(field(e, 'packet_id')); if (concerns(e, t)) active.delete(t.packet_id); }
+    proof_command: node --test --test-name-pattern="NC hold release binding" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-RELEASE-BY-REFERENCE
+    claim: >
+      Through the real CLI, another packet's HOLD_CLEAR that names the target
+      PR and branch leaves the target held; with a concerns()-keyed release
+      the synthetic merge PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          active.delete(field(e, 'packet_id'));
+      replace: |-
+          { active.delete(field(e, 'packet_id')); if (concerns(e, t)) active.delete(t.packet_id); }
+    proof_command: node --test --test-name-pattern="NC CLI hold release binding" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-RELEASE-PACKET-INEXACT
+    claim: >
+      A release matches its packet id exactly as written. A case- or
+      whitespace-folded match releases the target hold through another
+      packet's HOLD_CLEAR.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          active.delete(field(e, 'packet_id'));
+      replace: |-
+          active.delete(String(field(e, 'packet_id')).trim().toUpperCase());
+    proof_command: node --test --test-name-pattern="NC hold release exact packet" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
 
   - id: NC-F9-PROVENANCE-NOT-CHECKED
     claim: >

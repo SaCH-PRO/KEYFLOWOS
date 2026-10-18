@@ -46,12 +46,33 @@
  *     current binding restores it;
  *   - a malformed authority candidate after the grant that is, or may be,
  *     about the target (any of the three fields unreadable) makes the grant
- *     ambiguous. A malformed candidate before the grant is superseded by it;
- *   - a valid HOLD for the target packet with no later RESUME for it whose
- *     effect readEffect() reads as HOLD_CLEAR denies, before or after the
- *     grant. A RESUME with a missing, unknown or other effect, or one the
- *     effect reader rejects, releases nothing. Holds on other packets do not apply,
- *     so an unrelated active packet neither blocks this target nor moves.
+ *     ambiguous. A malformed candidate before the grant is superseded by it,
+ *     unless it is a hold claim (below);
+ *   - holds are read over every candidate, valid or malformed, in #80 order
+ *     (CG-REV-F9-003). A hold claim is a candidate whose message_type is not
+ *     exactly one of DIRECTIVE, REVIEW or RESUME: a HOLD, or a type that
+ *     cannot be read (absent, repeated, undeclared). It holds the target when
+ *     its packet is the target's or cannot be read, or when it names the
+ *     target's PR number or implementation branch under another packet. It
+ *     denies before or after the grant until a later valid RESUME whose
+ *     effect readEffect() reads as HOLD_CLEAR for the hold's own packet
+ *     (the target's, when the hold's packet cannot be read). A RESUME with a
+ *     missing, unknown or other effect, one the effect reader rejects, one
+ *     for another packet, or one that names the target's PR or branch only,
+ *     releases nothing. Packet ids match exactly, as written;
+ *   - a second hold claim on a packet that is already held, with no valid
+ *     HOLD_CLEAR between them, is HOLD_DUPLICATE in the canonical fold. It
+ *     denies (merge_grant_hold_duplicate) whatever follows: a later RESUME
+ *     is not read as curing it, and the history needs separately reviewed
+ *     reconciliation. HOLD, HOLD_CLEAR, HOLD, HOLD_CLEAR is not a duplicate;
+ *   - a hold claim on another readable packet that names neither the
+ *     target's PR nor its branch does not apply, so an unrelated active
+ *     packet neither blocks this target nor moves.
+ *   - a RESUME is read as readEffect() reads it, and nothing more: a null or
+ *     blank health is absent, and only a health present and outside
+ *     GREEN/YELLOW/RED is rejected. Its comment URL and any body
+ *     `repository:` field are not release conditions, as in the fold; the
+ *     caller supplies only the target repository's issue #80;
  *   - a global READY_TO_MERGE projection is not required, and not read.
  *
  * Fail closed: an unobserved, edited, edit-unknown or unordered collection
@@ -82,6 +103,7 @@ export const GRANT_REASONS = Object.freeze({
   PROVENANCE: 'merge_grant_provenance_not_target_repository',
   AMBIGUOUS: 'merge_grant_ambiguous_authority',
   HOLD_ACTIVE: 'merge_grant_target_held',
+  HOLD_DUPLICATE: 'merge_grant_hold_duplicate',
   GRANTED: 'merge_grant_valid',
 });
 
@@ -152,6 +174,39 @@ const field = (entry, key) => envelopeField(entry.envelope, key);
 function releasesHold(entry) {
   const effect = readEffect(entry);
   return effect.ok && effect.effect === 'HOLD_CLEAR';
+}
+
+const NOT_A_HOLD = Object.freeze(['DIRECTIVE', 'REVIEW', 'RESUME']);
+
+/**
+ * True when a candidate claims HOLD or its type cannot be read: every
+ * message_type value is read, so a repeat cannot hide a HOLD behind a REVIEW.
+ * A valid candidate has one type, so for it this is message_type === 'HOLD'.
+ */
+function claimsHold(entry) {
+  const types = valuesOf(entry, 'message_type');
+  return !(types.length === 1 && NOT_A_HOLD.includes(types[0]));
+}
+
+/** The one readable packet a message names, or null. */
+function readablePacket(entry) {
+  const packets = valuesOf(entry, 'packet_id');
+  return packets.length === 1 && packets[0] !== null && packets[0].trim() !== '' ? packets[0] : null;
+}
+
+/**
+ * The packet whose later valid HOLD_CLEAR releases this hold: its own, or the
+ * target's when its packet cannot be read.
+ */
+const releaseKey = (entry, t) => readablePacket(entry) ?? t.packet_id;
+
+/**
+ * Whether a hold claim applies to the target: its packet is the target's or
+ * cannot be read, or it names the target's PR or branch (CG-REV-F9-003 Q3).
+ */
+function holdsTarget(entry, t) {
+  if (readablePacket(entry) === null) return true;
+  return concerns(entry, t);
 }
 
 /** Why a message that is about the target is not a grant for it, or null. */
@@ -234,16 +289,41 @@ export function evaluateMergeGrant(comments, target, options = {}) {
     return deny(GRANT_REASONS.AMBIGUOUS, later.map((e) => ({ message_id: e.message_id, comment_id: e.comment_id, problems: e.problems })));
   }
 
-  let hold = null;
-  for (const e of valid) {
-    if (!valuesOf(e, 'packet_id').includes(t.packet_id)) continue;
-    if (e.message_type === 'HOLD') hold = e;
+  // Every candidate, malformed ones included, in #80 order (CG-REV-F9-003).
+  // Active holds are keyed by the packet whose HOLD_CLEAR releases them.
+  const active = new Map();
+  for (const e of ordered) {
+    if (claimsHold(e)) {
+      const key = releaseKey(e, t);
+      // A second hold on a held packet is HOLD_DUPLICATE in the canonical
+      // fold, which stops there. No later RESUME is read as curing it.
+      if (active.has(key)) {
+        const first = active.get(key);
+        return deny(GRANT_REASONS.HOLD_DUPLICATE, {
+          packet_id: key,
+          hold: { message_id: first.message_id, comment_id: first.comment_id },
+          duplicate: { message_id: e.message_id, comment_id: e.comment_id, malformed: e.problems.length > 0 },
+        });
+      }
+      if (holdsTarget(e, t)) active.set(key, e);
+      continue;
+    }
+    if (e.problems.length > 0) continue;
     // Only the effect that releases a hold releases it. An envelope-valid
     // RESUME whose effect readEffect() rejects, or reads as anything but
     // HOLD_CLEAR, leaves the hold in place (PR 181 review 5560243413, P1).
-    else if (e.message_type === 'RESUME' && releasesHold(e)) hold = null;
+    // It releases only the hold keyed by its own packet, exactly as written.
+    if (e.message_type === 'RESUME' && releasesHold(e)) active.delete(field(e, 'packet_id'));
   }
-  if (hold) return deny(GRANT_REASONS.HOLD_ACTIVE, { packet_id: t.packet_id, message_id: hold.message_id, comment_id: hold.comment_id });
+  const hold = [...active.values()].pop() ?? null;
+  const held = hold && {
+    packet_id: releaseKey(hold, t),
+    message_id: hold.message_id,
+    comment_id: hold.comment_id,
+    malformed: hold.problems.length > 0,
+    active: [...active].map(([packet, h]) => ({ packet_id: packet, message_id: h.message_id, comment_id: h.comment_id })),
+  };
+  if (hold) return deny(GRANT_REASONS.HOLD_ACTIVE, held);
 
   return {
     granted: true,
