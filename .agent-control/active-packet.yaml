@@ -6,6 +6,10 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
 in_reply_to: human-operator-plan-completion-20261017
 ack_message_id: CC-ACK-F9-001
 ack_comment_id: 6240199516
+continuation:   # operator instruction in session, 2026-10-18; no new #80 authority, same directive, owner and branch
+  ack_message_id: CC-ACK-F9-002
+  ack_comment_id: 6244594284
+  operator_instruction: human-operator-f9-unblock-20261018
 current_authority_message_id: CG-DIR-F9-001
 current_authority_comment_id: 6240051686
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
@@ -42,8 +46,12 @@ target_contract:
     a later valid or malformed authority message about the same PR, packet or
     branch voids the grant; a later grant replaces it
   holds: >
-    a HOLD for the packet with no later RESUME for it denies, whether it came
-    before or after the grant; holds on other packets do not apply
+    a HOLD for the packet denies, whether it came before or after the grant,
+    until a later RESUME for that packet whose effect readEffect reads as
+    HOLD_CLEAR (PR 181 review 5560243413, P1); a RESUME with any other or an
+    invalid effect, one for another packet, one older than the HOLD, or one
+    that is not valid authority releases nothing; holds on other packets do
+    not apply
   not_a_grant:
     - ACCEPT_FOR_ADMISSION
     - a semantic PASS
