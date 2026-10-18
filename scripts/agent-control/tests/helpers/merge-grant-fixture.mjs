@@ -2,7 +2,8 @@
  * Synthetic issue #80 comments for the merge-grant predicate (F9).
  * REST shape, as auto-merge-admitted.mjs reads them. Every value is
  * synthetic; nothing here was copied from a live comment except the field
- * layout of the PR 159 grant (6111001643), which grantBody() mirrors.
+ * layout of the PR 159 grant (6111001643), which grantBody() mirrors, and
+ * the public body of PLAN 5826799265 (PLAN_5826799265_BODY, below).
  */
 
 export const REPO = 'o/r';
@@ -123,6 +124,72 @@ export function holdComment(type, packet, options = {}, fields = {}) {
     ...fields,
   }), options);
 }
+
+/** A valid DIRECTIVE about the target: the start of its lifetime on #80. */
+export const directiveComment = (fields = {}, options = {}, t = target()) => followUp({
+  message_id: 'CG-DIRECTIVE-SYNTHETIC-001',
+  message_type: 'DIRECTIVE',
+  state: 'IMPLEMENTING',
+  review_status: undefined,
+  ...fields,
+}, options, t);
+
+/**
+ * The one comment on the real SaCH-PRO/KEYFLOWOS issue #80 that the H1
+ * correction read as a global hold (CC-CONTRADICTION-F9-002, 6245748866):
+ * comment 5826799265, posted 2026-09-25T04:34:19Z by SaCH-PRO, never edited.
+ * Its body is copied byte for byte from the public comment (LF only); its id
+ * and times are the real ones, so it sorts before every synthetic comment, as
+ * it precedes every later packet on #80. It has no packet_id, pr_number or
+ * implementation_branch, so collectAuthority keeps it as a malformed
+ * candidate, and its PLAN type makes it a hold claim.
+ */
+export const PLAN_5826799265_BODY = [
+  '```yaml',
+  'message_id: CG-PLAN-PLATFORM-CONVERGENCE-001',
+  'message_type: PLAN',
+  'sender: chatgpt',
+  'source_main: ad97ea48841a0a4acb13f9a170bae0e07159d6f4',
+  'programme: KEYFLOWOS_PLATFORM_CONVERGENCE',
+  'programme_status: INACTIVE_SUCCESSOR',
+  'branch: docs/platform-convergence-programme',
+  'commit: ddae797290e8edb806f7f4e4f2445ec9678c00e4',
+  'pr: 93',
+  'production_touched: false',
+  'authority_effect: NONE',
+  '',
+  'purpose: >',
+  '  Durable repository memory for the phased platform/workflow convergence programme.',
+  '  It defines ChatGPT architecture/admission, Claude primary implementation, GitHub',
+  '  Copilot continuous exact-head review, deterministic CI proof, human-only production',
+  '  gates, and the successor machine-readable platform DAG.',
+  '',
+  'activation: >',
+  '  This PLAN is intentionally non-authoritative and MUST NOT supersede the current',
+  '  DIRECTIVE/HOLD state. The successor programme activates only through a later valid',
+  '  ChatGPT DIRECTIVE or RESUME after the current control loop permits advancement.',
+  '',
+  'canonical_files:',
+  '  - docs/development/KEYFLOWOS_PLATFORM_CONVERGENCE_PROGRAMME.md',
+  '  - docs/development/KEYFLOWOS_PLATFORM_DAG.yaml',
+  '  - docs/development/KEYFLOWOS_AUTONOMOUS_AGENT_ROLES.md',
+  '',
+  'copilot_contract: >',
+  '  Every semantic PR/push is reviewed; substantive findings must be exact-head',
+  '  resolved or rejected with evidence before Claude RETURN / ChatGPT admission.',
+  '```',
+].join('\n');
+
+/**
+ * Comment 5826799265 as REST returns it, on the fixture repository. With
+ * `options.created_at` (and an id) the same envelope can be placed later in
+ * #80 order, for the at-or-after-floor case.
+ */
+export const realPlanComment = (options = {}) => comment(PLAN_5826799265_BODY, {
+  id: 5826799265,
+  created_at: '2026-09-25T04:34:19Z',
+  ...options,
+});
 
 /** A non-authority Claude message, as ACK/RETURN are. */
 export const claudeNote = (type = 'RETURN', options = {}, t = target()) => comment(body({

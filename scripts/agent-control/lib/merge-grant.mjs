@@ -60,6 +60,17 @@
  *     missing, unknown or other effect, one the effect reader rejects, one
  *     for another packet, or one that names the target's PR or branch only,
  *     releases nothing. Packet ids match exactly, as written;
+ *   - the target's lifetime starts at its floor: the first valid authority
+ *     message about it, in #80 order (CG-REV-F9-004, A1). A hold claim whose
+ *     packet cannot be read and which names none of the target's packet, PR
+ *     or branch holds nothing for the target when it is older than the floor,
+ *     and is not a hold for the duplicate rule below. At or after the floor,
+ *     before or after the grant, it holds as above. A claim on a readable
+ *     packet, or one naming the target, keeps its scope whatever its age. So
+ *     the 2026-09-25 non-authoritative PLAN 5826799265, which has no packet,
+ *     is not a permanent global hold; the stated cost is that a packet-less
+ *     malformed HOLD posted before a packet's first valid authority does not
+ *     hold that packet;
  *   - a second hold claim on a packet that is already held, with no valid
  *     HOLD_CLEAR between them, is HOLD_DUPLICATE in the canonical fold. It
  *     denies (merge_grant_hold_duplicate) whatever follows: a later RESUME
@@ -291,9 +302,14 @@ export function evaluateMergeGrant(comments, target, options = {}) {
 
   // Every candidate, malformed ones included, in #80 order (CG-REV-F9-003).
   // Active holds are keyed by the packet whose HOLD_CLEAR releases them.
+  // The target's lifetime starts at its first valid authority message
+  // (CG-REV-F9-004, A1): a hold claim older than that, whose packet cannot be
+  // read and which names nothing of the target, holds nothing for it.
+  const floor = ordered.indexOf(about[0]);
   const active = new Map();
-  for (const e of ordered) {
+  for (const [index, e] of ordered.entries()) {
     if (claimsHold(e)) {
+      if (index < floor && readablePacket(e) === null && !concerns(e, t)) continue;
       const key = releaseKey(e, t);
       // A second hold on a held packet is HOLD_DUPLICATE in the canonical
       // fold, which stops there. No later RESUME is read as curing it.

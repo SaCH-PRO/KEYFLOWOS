@@ -2998,3 +2998,197 @@ negative_controls:
           if (grantOnly) { await api(`/repos/${repo}/actions/runs?head_sha=x&per_page=100`); return { ...(await evaluateGrantNow()), pr: prNumber, mode: 'grant-only' }; }
     proof_command: node --test --test-name-pattern="CLI --grant-only: the gate check" scripts/agent-control/tests/merge-cli.spec.mjs
     timeout_ms: 180000
+
+  # CG-REV-F9-004: the A1 lifetime bound, and the CC-PROGRESS-F9-PROBE-001 pins.
+  - id: NC-F9-A1-LIFETIME-GLOBAL
+    claim: >
+      A packet-less hold claim older than the target's first valid authority
+      holds nothing for it. Without the bound, the real non-authoritative
+      PLAN 5826799265 (2026-09-25) holds every later packet for ever
+      (CC-CONTRADICTION-F9-002).
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (index < floor && readablePacket(e) === null && !concerns(e, t)) continue;
+      replace: |-
+          // lifetime bound removed
+    proof_command: node --test --test-name-pattern="NC real history .A1." scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-A1-LIFETIME-GLOBAL
+    claim: >
+      Through the real CLI, PLAN 5826799265 before the target's DIRECTIVE and
+      an exact grant merges once; without the lifetime bound it never merges.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (index < floor && readablePacket(e) === null && !concerns(e, t)) continue;
+      replace: |-
+          // lifetime bound removed
+    proof_command: node --test --test-name-pattern="NC CLI real history .A1." scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-A1-FLOOR-AT-GRANT
+    claim: >
+      The floor is the target's first valid authority message, not the grant.
+      Anchoring it at the grant lets a packet-less claim posted inside the
+      target's lifetime, before the grant, hold nothing.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          const floor = ordered.indexOf(about[0]);
+      replace: |-
+          const floor = ordered.indexOf(newest);
+    proof_command: node --test --test-name-pattern="NC lifetime floor .A1. .b." scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-A1-FLOOR-AT-GRANT
+    claim: >
+      Through the real CLI, a packet-less claim after the target's DIRECTIVE
+      and before an exact grant makes no merge call; with the floor at the
+      grant the synthetic merge PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          const floor = ordered.indexOf(about[0]);
+      replace: |-
+          const floor = ordered.indexOf(newest);
+    proof_command: node --test --test-name-pattern="NC CLI lifetime floor .A1." scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-A1-FLOOR-UNBOUNDED
+    claim: >
+      The bound applies only before the floor. Dropping the position test
+      exempts every packet-less claim, at any time, from holding the target.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (index < floor && readablePacket(e) === null && !concerns(e, t)) continue;
+      replace: |-
+          if (readablePacket(e) === null && !concerns(e, t)) continue;
+    proof_command: node --test --test-name-pattern="NC lifetime floor .A1. .b." scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-A1-NAMED-CLAIM-SKIPPED
+    claim: >
+      A claim older than the floor that names the target by packet, PR or
+      branch keeps its scope. Exempting it by its unreadable packet alone lets
+      a packet-less HOLD naming the target PR or branch hold nothing.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (index < floor && readablePacket(e) === null && !concerns(e, t)) continue;
+      replace: |-
+          if (index < floor && readablePacket(e) === null) continue;
+    proof_command: node --test --test-name-pattern="NC lifetime floor .A1. .c." scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-A1-READABLE-CLAIM-SKIPPED
+    claim: >
+      The bound is for claims whose packet cannot be read. Extending it to a
+      readable-packet claim older than the floor hides a duplicate hold on a
+      packet that holds the target.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (index < floor && readablePacket(e) === null && !concerns(e, t)) continue;
+      replace: |-
+          if (index < floor && !concerns(e, t)) continue;
+    proof_command: node --test --test-name-pattern="NC lifetime floor .A1. .d." scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-HOLD-EFFECT-GATED
+    claim: >
+      A HOLD holds by its type (COV-HOLD-01). Counting an envelope-valid HOLD
+      only when readEffect() accepts its effect, the symmetric twin of the
+      RESUME rule, lets a HOLD with a missing, unknown or unfoldable effect
+      hold nothing.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (claimsHold(e)) {
+      replace: |-
+          if (claimsHold(e) && (e.problems.length > 0 || readEffect(e).ok)) {
+    proof_command: node --test --test-name-pattern="NC hold effect:" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-HOLD-EFFECT-GATED
+    claim: >
+      Through the real CLI, an envelope-valid HOLD with no control_effect and
+      an exact grant makes no merge call; with HOLDs gated on readEffect() the
+      synthetic merge PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (claimsHold(e)) {
+      replace: |-
+          if (claimsHold(e) && (e.problems.length > 0 || readEffect(e).ok)) {
+    proof_command: node --test --test-name-pattern="NC CLI hold effect" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  - id: NC-F9-MALFORMED-RESUME-RAW-RELEASE
+    claim: >
+      A malformed RESUME releases nothing, even when its effect and packet read
+      as one HOLD_CLEAR for the target (COV-HOLD-04). Reading the raw fields
+      of a malformed RESUME releases the hold.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          if (e.problems.length > 0) continue;
+      replace: |-
+          if (e.problems.length > 0) { if (field(e, 'message_type') === 'RESUME' && field(e, 'control_effect') === 'HOLD_CLEAR') active.delete(field(e, 'packet_id')); continue; }
+    proof_command: node --test --test-name-pattern="NC hold release authority" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-RELEASE-EFFECT-CASE
+    claim: >
+      A release reads control_effect exactly (COV-HOLD-05). Folding its case
+      makes hold_clear a release.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          CONTROL_EFFECT_ALIASES[effect] : effect;
+      replace: |-
+          CONTROL_EFFECT_ALIASES[effect] : effect.toUpperCase();
+    proof_command: node --test --test-name-pattern="NC hold release:" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-RELEASE-HEALTH-CASE
+    claim: >
+      A release reads health exactly (COV-HOLD-06). Folding its case makes a
+      RESUME with health yellow a release.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          !HEALTH.includes(read.health)
+      replace: |-
+          !HEALTH.includes(read.health.toUpperCase())
+    proof_command: node --test --test-name-pattern="NC hold release:" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-RELEASE-PROGRAMME-KEY
+    claim: >
+      A RESUME with a programme key is not foldable, as one with
+      programme_action is not (COV-HOLD-07). Reading only programme_action
+      makes it a release.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          for (const key of ['programme', 'programme_action'])
+      replace: |-
+          for (const key of ['programme_action'])
+    proof_command: node --test --test-name-pattern="NC hold release:" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-RELEASE-PRODUCTION-CASE
+    claim: >
+      A release needs production_touched exactly false (COV-HOLD-08). Folding
+      its case makes production_touched False a release.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+          if (touched !== 'false') {
+      replace: |-
+          if (String(touched).toLowerCase() !== 'false') {
+    proof_command: node --test --test-name-pattern="NC hold release:" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000

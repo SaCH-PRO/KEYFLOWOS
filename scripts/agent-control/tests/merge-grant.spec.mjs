@@ -12,6 +12,7 @@ import { collectAuthority } from '../lib/control-envelope.mjs';
 import { readEffect } from '../lib/authority-effects.mjs';
 import {
   REPO, HEAD, BASE, SEMANTIC, target, body, grantFields, comment, grantComment, followUp, holdComment, claudeNote,
+  directiveComment, realPlanComment, PLAN_5826799265_BODY,
 } from './helpers/merge-grant-fixture.mjs';
 
 const OTHER = 'd'.repeat(40);
@@ -250,6 +251,11 @@ const invalidReleases = [
   ['programme field', (b) => b.replace('control_effect: HOLD_CLEAR\n', 'control_effect: HOLD_CLEAR\nprogramme_action: ACTIVATE\n'), 'CONTROL_EFFECT_PROGRAMME_NOT_FOLDABLE'],
   ['hold effect on a RESUME', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: HOLD_SET'), 'CONTROL_EFFECT_TYPE_MISMATCH'],
   ['production untouched not stated', (b) => b.replace('production_touched: false', 'production_touched: null'), 'CONTROL_EFFECT_PRODUCTION_TOUCHED'],
+  // COV-HOLD-05 to 08 (CC-PROGRESS-F9-PROBE-001): the release reads each value exactly.
+  ['effect in lower case', (b) => b.replace('control_effect: HOLD_CLEAR', 'control_effect: hold_clear'), 'CONTROL_EFFECT_UNKNOWN'],
+  ['health in lower case', (b) => b.replace('health: YELLOW', 'health: yellow'), 'CONTROL_EFFECT_HEALTH_INVALID'],
+  ['programme key', (b) => b.replace('control_effect: HOLD_CLEAR\n', 'control_effect: HOLD_CLEAR\nprogramme: KEYFLOWOS_PLATFORM_CONVERGENCE\n'), 'CONTROL_EFFECT_PROGRAMME_NOT_FOLDABLE'],
+  ['production untouched capitalised', (b) => b.replace('production_touched: false', 'production_touched: False'), 'CONTROL_EFFECT_PRODUCTION_TOUCHED'],
 ];
 
 test('NC hold release: a RESUME whose effect is not a valid HOLD_CLEAR leaves the target hold active', () => {
@@ -310,7 +316,7 @@ test('NC hold release binding: a valid HOLD_CLEAR for another packet leaves the 
 });
 
 test('NC hold release exact packet: a HOLD_CLEAR whose packet differs in case or whitespace releases nothing', () => {
-  for (const written of ['kf-x-001', '"KF-X-001 "', '"KF-X-001\\t"']) {
+  for (const written of ['kf-x-001', 'KF-x-001', '"KF-X-001 "', '" KF-X-001"', '"KF-X-001\\t"']) {
     const hold = holdComment('HOLD', 'KF-X-001');
     const resume = holdComment('RESUME', 'KF-X-001', {}, { packet_id: written });
     const comments = [hold, resume, grantComment()];
@@ -417,17 +423,20 @@ test('NC malformed hold type: a repeated, lower-case, undeclared or absent type 
   }
 });
 
+// Each case starts the target's lifetime with its DIRECTIVE, so the claim is
+// at or after the floor (CG-REV-F9-004, A1).
 test('NC malformed hold packet: a malformed hold claim whose packet cannot be read holds the target', () => {
   for (const [name, packet] of [['absent', undefined], ['blank', null], ['repeated, other packets', ['KF-OTHER-001', 'KF-OTHER-002']]]) {
+    const directive = directiveComment();
     const hold = holdComment('HOLD', 'KF-X-001', {}, { packet_id: packet, scope_changed: undefined });
-    const v = verdict([hold, grantComment()]);
+    const v = verdict([directive, hold, grantComment()]);
     assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
     assert.equal(v.detail.comment_id, hold.id, name);
     assert.equal(v.detail.packet_id, 'KF-X-001', `${name}: released only by the target packet`);
     // Only a later valid HOLD_CLEAR for the target packet releases it.
-    const other = [holdComment('HOLD', 'KF-X-001', {}, { packet_id: packet, scope_changed: undefined }), holdComment('RESUME', 'KF-OTHER-001'), grantComment()];
+    const other = [directiveComment(), holdComment('HOLD', 'KF-X-001', {}, { packet_id: packet, scope_changed: undefined }), holdComment('RESUME', 'KF-OTHER-001'), grantComment()];
     assert.equal(reasonOf(other), GRANT_REASONS.HOLD_ACTIVE, `${name}: another packet's release`);
-    const own = [holdComment('HOLD', 'KF-X-001', {}, { packet_id: packet, scope_changed: undefined }), holdComment('RESUME', 'KF-X-001'), grantComment()];
+    const own = [directiveComment(), holdComment('HOLD', 'KF-X-001', {}, { packet_id: packet, scope_changed: undefined }), holdComment('RESUME', 'KF-X-001'), grantComment()];
     assert.equal(verdict(own).granted, true, `${name}: the target's release`);
   }
 });
@@ -447,6 +456,174 @@ test('malformed hold scope: the rules CG-REV-F9-003 kept still hold', () => {
   assert.equal(reasonOf([hold, bad, grantComment()]), GRANT_REASONS.HOLD_ACTIVE);
   // A malformed HOLD on the target after the grant is still ambiguous, as before.
   assert.equal(reasonOf([grantComment(), holdComment('HOLD', 'KF-X-001', {}, { scope_changed: undefined })]), GRANT_REASONS.AMBIGUOUS);
+});
+
+// COV-HOLD-01 (CC-PROGRESS-F9-PROBE-001): a HOLD holds by its type. An
+// envelope-valid HOLD whose effect readEffect() rejects is still a hold.
+test('NC hold effect: an envelope-valid HOLD whose effect readEffect rejects still holds the target', () => {
+  const variants = [
+    ['missing effect', (b) => b.replace('control_effect: HOLD_SET\n', ''), 'CONTROL_EFFECT_MISSING'],
+    ['invalid health', (b) => b.replace('health: YELLOW', 'health: AMBER'), 'CONTROL_EFFECT_HEALTH_INVALID'],
+    ['production touched', (b) => b.replace('production_touched: false', 'production_touched: true'), 'CONTROL_EFFECT_PRODUCTION_TOUCHED'],
+    ['production untouched not stated', (b) => b.replace('production_touched: false', 'production_touched: null'), 'CONTROL_EFFECT_PRODUCTION_TOUCHED'],
+    ['programme field', (b) => b.replace('control_effect: HOLD_SET\n', 'control_effect: HOLD_SET\nprogramme_action: ACTIVATE\n'), 'CONTROL_EFFECT_PROGRAMME_NOT_FOLDABLE'],
+    ['release effect on a HOLD', (b) => b.replace('control_effect: HOLD_SET', 'control_effect: HOLD_CLEAR'), 'CONTROL_EFFECT_TYPE_MISMATCH'],
+    ['effect in lower case', (b) => b.replace('control_effect: HOLD_SET', 'control_effect: hold_set'), 'CONTROL_EFFECT_UNKNOWN'],
+  ];
+  for (const [name, change, code] of variants) {
+    const hold = holdComment('HOLD', 'KF-X-001');
+    hold.body = change(hold.body);
+    const comments = [hold, grantComment()];
+    const entry = collectAuthority(comments).candidates.find((c) => c.comment_id === hold.id);
+    assert.deepEqual(entry.problems, [], `${name}: envelope-valid`);
+    assert.equal(readEffect(entry).code, code, name);
+    const v = verdict(comments);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
+    assert.equal(v.detail.comment_id, hold.id, name);
+    assert.equal(v.detail.malformed, false, name);
+    // Referent: its own packet's later valid HOLD_CLEAR releases it.
+    const again = holdComment('HOLD', 'KF-X-001');
+    again.body = change(again.body);
+    assert.equal(verdict([again, holdComment('RESUME', 'KF-X-001'), grantComment()]).granted, true, `${name}: released`);
+  }
+});
+
+// CG-REV-F9-004 (A1): the target's lifetime starts at its floor, the first
+// valid authority message about it in #80 order. A hold claim older than the
+// floor, whose packet cannot be read and which names nothing of the target,
+// holds nothing for it. Every case is built in the #80 order it asserts.
+test('NC real history (A1): PLAN 5826799265, older than the target, is not a hold on it; after the floor it is', () => {
+  const plan = realPlanComment();
+  assert.equal(plan.body, PLAN_5826799265_BODY);
+  assert.equal(plan.body.length, 1327, 'the public body, byte for byte');
+  assert.equal(plan.body.includes('\r'), false);
+  const elsewhere = directiveComment({ message_id: 'CG-DIRECTIVE-SYNTHETIC-OTHER', packet_id: 'KF-OTHER-001', pr_number: 41, implementation_branch: 'impl/other' });
+  const directive = directiveComment();
+  const comments = [plan, elsewhere, directive, grantComment()];
+  const authority = collectAuthority(comments);
+  assert.equal(authority.verified, true);
+  const entry = authority.candidates.find((c) => c.comment_id === 5826799265);
+  assert.ok(entry, 'the PLAN is an authority candidate');
+  assert.notDeepEqual(entry.problems, [], 'malformed');
+  assert.deepEqual(entry.envelope.values.message_type, ['PLAN'], 'a hold claim by its type');
+  assert.equal(Object.hasOwn(entry.envelope.values, 'packet_id'), false, 'no packet');
+  assert.equal(authority.candidates.indexOf(entry), 0, 'first in #80 order');
+  const v = verdict(comments);
+  assert.equal(v.granted, true, JSON.stringify(v.detail));
+  assert.equal(v.reason, GRANT_REASONS.GRANTED);
+  // The target's own later HOLD and release are not a duplicate of the PLAN.
+  const cycle = [realPlanComment(), directiveComment(), holdComment('HOLD', 'KF-X-001'), holdComment('RESUME', 'KF-X-001'), grantComment()];
+  assert.equal(verdict(cycle).granted, true, 'HOLD, HOLD_CLEAR in the target lifetime');
+  const held = [realPlanComment(), directiveComment(), holdComment('HOLD', 'KF-X-001'), grantComment()];
+  assert.equal(reasonOf(held), GRANT_REASONS.HOLD_ACTIVE, 'a true target hold still holds');
+  // Distinguishing negative: the identical envelope after the floor holds the target.
+  const floor = directiveComment();
+  const late = realPlanComment({ id: undefined, created_at: undefined });
+  const after = [floor, late, grantComment()];
+  const h = verdict(after);
+  assert.equal(h.reason, GRANT_REASONS.HOLD_ACTIVE);
+  assert.equal(h.detail.comment_id, late.id);
+  assert.equal(h.detail.packet_id, 'KF-X-001');
+  assert.equal(h.detail.malformed, true);
+});
+
+// Hold claims whose packet cannot be read and which name nothing of the target.
+const packetlessClaims = [
+  ['the PLAN 5826799265 envelope', () => realPlanComment({ id: undefined, created_at: undefined })],
+  ['a HOLD with no packet', () => holdComment('HOLD', 'KF-X-001', {}, { packet_id: undefined, scope_changed: undefined })],
+  ['a HOLD with a blank packet', () => holdComment('HOLD', 'KF-X-001', {}, { packet_id: null })],
+  ['a HOLD with repeated other packets', () => holdComment('HOLD', 'KF-X-001', {}, { packet_id: ['KF-OTHER-001', 'KF-OTHER-002'] })],
+  ['an untyped claim with no packet', () => holdComment('HOLD', 'KF-X-001', {}, { message_type: undefined, packet_id: undefined })],
+];
+
+test('NC lifetime floor (A1) (a): a packet-less claim older than the target\'s first valid authority does not hold it', () => {
+  for (const [name, make] of packetlessClaims) {
+    const claim = make();
+    const comments = [claim, directiveComment(), grantComment()];
+    const entry = collectAuthority(comments).candidates.find((c) => c.comment_id === claim.id);
+    assert.ok(entry, `${name}: a candidate`);
+    assert.notDeepEqual(entry.problems, [], `${name}: malformed`);
+    assert.equal(verdict(comments).granted, true, name);
+    // With the grant as the target's only message, the claim is older than the floor too.
+    assert.equal(verdict([make(), grantComment()]).granted, true, `${name}: before a lone grant`);
+  }
+});
+
+test('NC lifetime floor (A1) (b): the identical claim at or after the target\'s first valid authority holds it before a later grant', () => {
+  for (const [name, make] of packetlessClaims) {
+    const directive = directiveComment();
+    const claim = make();
+    const v = verdict([directive, claim, grantComment()]);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
+    assert.equal(v.detail.comment_id, claim.id, name);
+    assert.equal(v.detail.packet_id, 'KF-X-001', `${name}: released only by the target packet`);
+    // The floor is the first valid message about the target, whatever its type.
+    const review = followUp();
+    const claim2 = make();
+    assert.equal(reasonOf([review, claim2, grantComment()]), GRANT_REASONS.HOLD_ACTIVE, `${name}: after a REVIEW`);
+    // A claim between two target messages is inside the lifetime.
+    assert.equal(reasonOf([directiveComment(), followUp(), make(), grantComment()]), GRANT_REASONS.HOLD_ACTIVE, `${name}: mid-lifetime`);
+    // After the grant it is ambiguous, as before.
+    assert.equal(reasonOf([directiveComment(), grantComment(), make()]), GRANT_REASONS.AMBIGUOUS, `${name}: after the grant`);
+  }
+});
+
+test('NC lifetime floor (A1) (c): a claim older than the floor that names the target by packet, PR or branch still holds it', () => {
+  const named = [
+    ['a malformed HOLD on the target packet', { scope_changed: undefined }, 'KF-X-001'],
+    ['a packet-less HOLD naming the target PR', { packet_id: undefined, pr_number: 87 }, 'KF-X-001'],
+    ['a packet-less HOLD naming the target branch', { packet_id: undefined, implementation_branch: 'impl/x' }, 'KF-X-001'],
+    ['a HOLD whose repeated packet includes the target', { packet_id: ['KF-OTHER-001', 'KF-X-001'] }, 'KF-X-001'],
+    ['a malformed HOLD under another packet naming the target PR', { packet_id: 'KF-OTHER-001', pr_number: 87, scope_changed: undefined }, 'KF-OTHER-001'],
+    ['a malformed HOLD under another packet naming the target branch', { packet_id: 'KF-OTHER-001', implementation_branch: 'impl/x', scope_changed: undefined }, 'KF-OTHER-001'],
+  ];
+  for (const [name, fields, key] of named) {
+    const claim = holdComment('HOLD', 'KF-X-001', {}, fields);
+    const comments = [claim, directiveComment(), grantComment()];
+    assert.notDeepEqual(collectAuthority(comments).candidates.find((c) => c.comment_id === claim.id).problems, [], `${name}: malformed`);
+    const v = verdict(comments);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
+    assert.equal(v.detail.comment_id, claim.id, name);
+    assert.equal(v.detail.packet_id, key, name);
+  }
+  // A valid HOLD naming the target is itself about the target, so it is the floor.
+  const valid = holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 });
+  assert.equal(reasonOf([valid, directiveComment(), grantComment()]), GRANT_REASONS.HOLD_ACTIVE, 'a valid HOLD naming the target PR');
+});
+
+test('NC lifetime floor (A1) (d): an unrelated readable-packet HOLD does not block, and keeps its duplicate rule', () => {
+  for (const fields of [{}, { scope_changed: undefined }]) {
+    const before = [holdComment('HOLD', 'KF-OTHER-001', {}, fields), directiveComment(), grantComment()];
+    assert.equal(verdict(before).granted, true, `before the floor: ${JSON.stringify(fields)}`);
+    const after = [directiveComment(), holdComment('HOLD', 'KF-OTHER-001', {}, fields), grantComment()];
+    assert.equal(verdict(after).granted, true, `after the floor: ${JSON.stringify(fields)}`);
+  }
+  // The bound is for packet-less claims only: a readable claim older than the
+  // floor still counts as a second hold on a packet that holds the target.
+  const first = holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87, scope_changed: undefined });
+  const second = holdComment('HOLD', 'KF-OTHER-001', {}, { scope_changed: undefined });
+  const v = verdict([first, second, directiveComment(), holdComment('RESUME', 'KF-OTHER-001'), grantComment()]);
+  assert.equal(v.reason, GRANT_REASONS.HOLD_DUPLICATE);
+  assert.equal(v.detail.hold.comment_id, first.id);
+  assert.equal(v.detail.duplicate.comment_id, second.id);
+});
+
+test('NC lifetime floor (A1) (e): only a later effect-valid HOLD_CLEAR for the hold\'s own packet releases a lifetime claim', () => {
+  for (const [name, make] of packetlessClaims) {
+    // The RESUME is built after the floor and the claim, so it is newer than both.
+    const release = (packet, fields = {}) => [directiveComment(), make(), holdComment('RESUME', packet, {}, fields), grantComment()];
+    assert.equal(reasonOf(release('KF-OTHER-001')), GRANT_REASONS.HOLD_ACTIVE, `${name}: another packet's release`);
+    assert.equal(reasonOf(release('KF-OTHER-001', { pr_number: 87, implementation_branch: 'impl/x' })), GRANT_REASONS.HOLD_ACTIVE, `${name}: a release by reference`);
+    assert.equal(reasonOf(release('KF-X-001', { health: 'AMBER' })), GRANT_REASONS.HOLD_ACTIVE, `${name}: an effect-invalid release`);
+    assert.equal(reasonOf(release('KF-X-001', { scope_changed: undefined })), GRANT_REASONS.HOLD_ACTIVE, `${name}: a malformed release`);
+    assert.equal(verdict(release('KF-X-001')).granted, true, `${name}: the target's release`);
+    // A release older than the claim releases nothing.
+    const early = [directiveComment(), holdComment('RESUME', 'KF-X-001'), make(), grantComment()];
+    assert.equal(reasonOf(early), GRANT_REASONS.HOLD_ACTIVE, `${name}: an older release`);
+    // A second claim in the lifetime with no release between is a duplicate.
+    const twice = [directiveComment(), make(), make(), holdComment('RESUME', 'KF-X-001'), grantComment()];
+    assert.equal(reasonOf(twice), GRANT_REASONS.HOLD_DUPLICATE, `${name}: twice`);
+  }
 });
 
 // CG-REV-F9-003 Q2: a second hold on a held packet is HOLD_DUPLICATE in the
@@ -547,8 +724,12 @@ test('NC hold release authority: a RESUME that is not valid authority releases n
     ['outside the allowlist', (c) => { c.user = { login: 'someone-else' }; }],
     ['not from chatgpt', (c) => { c.body = c.body.replace('sender: chatgpt', 'sender: claude'); }],
     ['malformed (effect repeated)', (c) => { c.body = c.body.replace('control_effect: HOLD_CLEAR\n', 'control_effect: HOLD_CLEAR\ncontrol_effect: HOLD_CLEAR\n'); }],
+    // COV-HOLD-04: malformed elsewhere, so the effect and packet still read as one HOLD_CLEAR for the target.
+    ['malformed (scope_changed omitted)', (c) => { c.body = c.body.replace('scope_changed: false\n', ''); }, true],
+    ['malformed (health repeated)', (c) => { c.body = c.body.replace('health: YELLOW\n', 'health: YELLOW\nhealth: RED\n'); }, true],
+    ['malformed (unmatched quote)', (c) => { c.body = c.body.replace('state: BLOCKED', 'state: "BLOCKED'); }, true],
   ];
-  for (const [name, change] of variants) {
+  for (const [name, change, readable] of variants) {
     const hold = holdComment('HOLD', 'KF-X-001');
     const resume = holdComment('RESUME', 'KF-X-001');
     change(resume);
@@ -556,6 +737,13 @@ test('NC hold release authority: a RESUME that is not valid authority releases n
     const authority = collectAuthority(comments);
     assert.equal(authority.verified, true, name);
     assert.equal(authority.messages.some((m) => m.comment_id === resume.id), false, `${name}: not valid authority`);
+    if (readable) {
+      const entry = authority.candidates.find((c) => c.comment_id === resume.id);
+      assert.notDeepEqual(entry.problems, [], `${name}: malformed`);
+      assert.deepEqual(entry.envelope.values.message_type, ['RESUME'], `${name}: one readable type`);
+      assert.deepEqual(entry.envelope.values.control_effect, ['HOLD_CLEAR'], `${name}: one readable HOLD_CLEAR`);
+      assert.deepEqual(entry.envelope.values.packet_id, ['KF-X-001'], `${name}: the target packet`);
+    }
     const v = verdict(comments);
     assert.equal(v.reason, GRANT_REASONS.HOLD_ACTIVE, name);
     assert.equal(v.detail.comment_id, hold.id, name);

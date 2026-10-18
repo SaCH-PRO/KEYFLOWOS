@@ -343,6 +343,17 @@ target's.
   read, so a repeat cannot hide a HOLD behind a REVIEW. A hold claim holds
   the target when its packet is the target's or cannot be read, or when it
   names the target's PR number or implementation branch under another packet.
+- The target's lifetime starts at its floor: its first valid authority
+  message (packet, PR or branch), in #80 order (CG-REV-F9-004, A1). A hold
+  claim whose packet cannot be read, and which names none of the target's
+  packet, PR or branch, holds nothing for the target when it is older than
+  the floor. It does not count as a hold for the duplicate rule either. At or
+  after the floor, it holds, before or after the grant. A claim on a readable
+  packet, or one that names the target, keeps its scope whatever its age.
+  This keeps the 2026-09-25 non-authoritative PLAN 5826799265, which has no
+  packet, from being a permanent hold on every later packet. The cost, stated
+  rather than hidden: a packet-less malformed HOLD posted before a packet's
+  first valid authority does not hold that packet.
 - A hold denies, whichever side of the grant it falls, until a later valid
   RESUME whose effect `readEffect()` reads as `HOLD_CLEAR` for the hold's own
   packet. For a hold whose packet cannot be read, that is the target's packet.

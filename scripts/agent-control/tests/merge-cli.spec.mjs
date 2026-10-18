@@ -18,7 +18,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
-import { REPO, HEAD, BASE, SEMANTIC, target, grantComment, followUp, holdComment, claudeNote } from './helpers/merge-grant-fixture.mjs';
+import {
+  REPO, HEAD, BASE, SEMANTIC, target, grantComment, followUp, holdComment, claudeNote, directiveComment, realPlanComment,
+} from './helpers/merge-grant-fixture.mjs';
 
 const ROOT = path.resolve(process.env.KF_CLI_ROOT || '.');
 const CLI = path.join(ROOT, 'scripts/agent-control/auto-merge-admitted.mjs');
@@ -303,11 +305,68 @@ function assertMergedThroughCli(comments) {
 // CG-REV-F9-003 (F9-H1): a malformed HOLD on the target before the grant holds
 // it through the real CLI. Each case is built in #80 order.
 test('NC CLI malformed hold: a malformed target HOLD before an exact grant makes no merge call in either mode', () => {
-  for (const fields of [{ scope_changed: undefined }, { message_type: ['REVIEW', 'HOLD'] }, { packet_id: undefined, scope_changed: undefined }]) {
+  for (const fields of [{ scope_changed: undefined }, { message_type: ['REVIEW', 'HOLD'] }]) {
     const hold = holdComment('HOLD', 'KF-X-001', {}, fields);
     const r = assertDeniedThroughCli([hold, grantComment()], 'merge_grant_target_held');
     assert.equal(r.out.detail.detail.comment_id, hold.id, JSON.stringify(fields));
   }
+  // A claim with no packet holds within the target's lifetime (CG-REV-F9-004, A1).
+  const directive = directiveComment();
+  const packetless = holdComment('HOLD', 'KF-X-001', {}, { packet_id: undefined, scope_changed: undefined });
+  const r = assertDeniedThroughCli([directive, packetless, grantComment()], 'merge_grant_target_held');
+  assert.equal(r.out.detail.detail.comment_id, packetless.id);
+});
+
+// COV-HOLD-01: an envelope-valid HOLD whose effect readEffect() rejects still holds.
+test('NC CLI hold effect: an envelope-valid HOLD with no readable effect makes no merge call in either mode', () => {
+  const hold = holdComment('HOLD', 'KF-X-001');
+  hold.body = hold.body.replace('control_effect: HOLD_SET\n', '');
+  const r = assertDeniedThroughCli([hold, grantComment()], 'merge_grant_target_held');
+  assert.equal(r.out.detail.detail.comment_id, hold.id);
+  assert.equal(r.out.detail.detail.malformed, false);
+});
+
+// CG-REV-F9-004 (A1), through the real CLI. Each case is built in #80 order.
+test('NC CLI real history (A1): PLAN 5826799265 older than the target merges once; the same envelope after the floor makes no merge call', () => {
+  assertMergedThroughCli([
+    realPlanComment(),
+    directiveComment({ message_id: 'CG-DIRECTIVE-SYNTHETIC-OTHER', packet_id: 'KF-OTHER-001', pr_number: 41, implementation_branch: 'impl/other' }),
+    directiveComment(),
+    grantComment(),
+  ]);
+  const directive = directiveComment();
+  const late = realPlanComment({ id: undefined, created_at: undefined });
+  const r = assertDeniedThroughCli([directive, late, grantComment()], 'merge_grant_target_held');
+  assert.equal(r.out.detail.detail.comment_id, late.id);
+});
+
+test('NC CLI lifetime floor (A1): only packet-less claims older than the floor are out of scope; named, lifetime and unreleased claims make no merge call', () => {
+  const packetless = () => holdComment('HOLD', 'KF-X-001', {}, { packet_id: undefined, scope_changed: undefined });
+  // (a) older than the floor: merges once.
+  assertMergedThroughCli([packetless(), directiveComment(), grantComment()]);
+  // (b) at or after the floor, before the grant: held.
+  assertDeniedThroughCli([directiveComment(), packetless(), grantComment()], 'merge_grant_target_held');
+  // (c) older than the floor but naming the target PR or branch: held.
+  for (const fields of [{ pr_number: 87 }, { implementation_branch: 'impl/x' }]) {
+    assertDeniedThroughCli([holdComment('HOLD', 'KF-X-001', {}, { packet_id: undefined, ...fields }), directiveComment(), grantComment()], 'merge_grant_target_held');
+  }
+  // (d) an unrelated readable-packet HOLD: merges once.
+  assertMergedThroughCli([directiveComment(), holdComment('HOLD', 'KF-OTHER-001', {}, { scope_changed: undefined }), grantComment()]);
+  // (e) another packet's release leaves it held; the target's own release merges once.
+  assertDeniedThroughCli([directiveComment(), packetless(), holdComment('RESUME', 'KF-OTHER-001'), grantComment()], 'merge_grant_target_held');
+  assertMergedThroughCli([directiveComment(), packetless(), holdComment('RESUME', 'KF-X-001'), grantComment()]);
+});
+
+test('NC CLI recheck (A1): a packet-less claim posted between the snapshots stops the merge call', () => {
+  const directive = directiveComment();
+  const g = grantComment();
+  const r = run(scenario([[directive, g], [directive, g, realPlanComment({ id: undefined, created_at: undefined })]]), ['--merge']);
+  assert.ok(r.trace, r.stderr);
+  assert.equal(puts(r).length, 0);
+  assert.equal(r.code, 3, r.stderr);
+  assert.equal(r.out.reason, 'merge_grant_not_satisfied');
+  assert.equal(r.out.detail.reason, 'merge_grant_ambiguous_authority');
+  assert.equal(commentReads(r).length, 2, 'the claim is seen by the second snapshot');
 });
 
 test('CLI malformed hold referent: a malformed target HOLD, then a valid HOLD_CLEAR, then an exact grant merges once', () => {
