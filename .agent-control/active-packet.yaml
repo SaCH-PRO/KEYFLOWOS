@@ -4,6 +4,7 @@ directive_comment_id: 6240051686
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIR-F9-001   # 6240051686; NO_STATE_CHANGE; releases the bounded F9 merge-authority repair
   - CG-REV-F9-003   # 6245277310; NO_STATE_CHANGE; CHANGES_REQUIRED; rules on CC-CONTRADICTION-F9-001 (Option A, Q1 to Q5); a bounded correction under CG-DIR-F9-001
+  - CG-REV-F9-004   # 6248791378; NO_STATE_CHANGE; CHANGES_REQUIRED; rules on CC-CONTRADICTION-F9-002 (Option A1, the lifetime bound); CG-REV-F9-003 stands
 in_reply_to: human-operator-plan-completion-20261017
 ack_message_id: CC-ACK-F9-001
 ack_comment_id: 6240199516
@@ -19,8 +20,13 @@ correction:   # the ruling on the contradiction; same directive, owner, branch a
   review_comment_id: 6245277310
   ack_message_id: CC-ACK-F9-003
   ack_comment_id: 6245305974
-current_authority_message_id: CG-REV-F9-003
-current_authority_comment_id: 6245277310
+lifetime:   # the ruling on CC-CONTRADICTION-F9-002 (6245748866); same directive, owner, branch and PR
+  review_message_id: CG-REV-F9-004
+  review_comment_id: 6248791378
+  ack_message_id: CC-ACK-F9-004
+  ack_comment_id: 6248842451
+current_authority_message_id: CG-REV-F9-004
+current_authority_comment_id: 6248791378
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
 implementation_branch: impl/kf-meta-merge-authority-001
 pr_number: 181
@@ -70,7 +76,10 @@ target_contract:
     (merge_grant_hold_duplicate) whatever follows (Q2). A null or blank
     health is absent, as readEffect reads it (Q1); RESUME provenance is the
     fold's (Q4). A hold claim on another readable packet that names neither
-    the target PR nor branch does not apply
+    the target PR nor branch does not apply. A claim whose packet cannot be
+    read and which names nothing of the target holds nothing for it when it
+    is older than the target's first valid authority message, the floor, and
+    holds at or after the floor (CG-REV-F9-004, A1)
   not_a_grant:
     - ACCEPT_FOR_ADMISSION
     - a semantic PASS
@@ -111,6 +120,7 @@ proof_obligations:
   - preserved valid application and meta grants (the PR 159 grant 6111001643 shape), unrelated active-packet separation, review failover, control-only lineage
   - the real CLI collector and recheck under a synthetic fetch with no network passthrough
   - "CG-REV-F9-003: malformed hold claims before the grant (H1), duplicate holds (Q2), holds naming the target by packet, PR or branch and cross-packet or by-reference releases (Q3), a blank-health release (Q1) and RESUME provenance (Q4), pure and through the real CLI in --merge and --grant-only with zero unauthorized PUTs, each with a live negative control"
+  - "CG-REV-F9-004: a real-history regression on PLAN 5826799265's envelope and ordering; paired lifetime cases (a)-(e) pure and through the real CLI in both modes with zero merge PUTs; the COV-HOLD-01, 04 and 05-09 pins; each with a distinguishing live negative control; a replay of the complete current #80 history"
   - live negative controls; the full portable suite; the Windows worker proof; both DAG validators; artifact checks; exact-head workflows
 
 stop_conditions:
