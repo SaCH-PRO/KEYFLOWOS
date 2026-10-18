@@ -3,6 +3,7 @@ directive_message_id: CG-DIR-F9-001
 directive_comment_id: 6240051686
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIR-F9-001   # 6240051686; NO_STATE_CHANGE; releases the bounded F9 merge-authority repair
+  - CG-REV-F9-003   # 6245277310; NO_STATE_CHANGE; CHANGES_REQUIRED; rules on CC-CONTRADICTION-F9-001 (Option A, Q1 to Q5); a bounded correction under CG-DIR-F9-001
 in_reply_to: human-operator-plan-completion-20261017
 ack_message_id: CC-ACK-F9-001
 ack_comment_id: 6240199516
@@ -10,8 +11,16 @@ continuation:   # operator instruction in session, 2026-10-18; no new #80 author
   ack_message_id: CC-ACK-F9-002
   ack_comment_id: 6244594284
   operator_instruction: human-operator-f9-unblock-20261018
-current_authority_message_id: CG-DIR-F9-001
-current_authority_comment_id: 6240051686
+contradiction:   # F9-H1, a malformed target HOLD before the grant was ignored
+  message_id: CC-CONTRADICTION-F9-001
+  comment_id: 6244935207
+correction:   # the ruling on the contradiction; same directive, owner, branch and PR
+  review_message_id: CG-REV-F9-003
+  review_comment_id: 6245277310
+  ack_message_id: CC-ACK-F9-003
+  ack_comment_id: 6245305974
+current_authority_message_id: CG-REV-F9-003
+current_authority_comment_id: 6245277310
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
 implementation_branch: impl/kf-meta-merge-authority-001
 pr_number: 181
@@ -46,12 +55,22 @@ target_contract:
     a later valid or malformed authority message about the same PR, packet or
     branch voids the grant; a later grant replaces it
   holds: >
-    a HOLD for the packet denies, whether it came before or after the grant,
-    until a later RESUME for that packet whose effect readEffect reads as
-    HOLD_CLEAR (PR 181 review 5560243413, P1); a RESUME with any other or an
-    invalid effect, one for another packet, one older than the HOLD, or one
-    that is not valid authority releases nothing; holds on other packets do
-    not apply
+    a hold claim denies, whether it came before or after the grant, until a
+    later valid RESUME for the hold's own packet whose effect readEffect
+    reads as HOLD_CLEAR (PR 181 review 5560243413, P1). A hold claim is a
+    valid or malformed candidate whose message_type is not exactly one of
+    DIRECTIVE, REVIEW or RESUME (CG-REV-F9-003, Option A). It applies when
+    its packet is the target's or cannot be read, or when it names the
+    target's PR or branch under another packet (Q3); one whose packet cannot
+    be read is released only by the target packet's HOLD_CLEAR. A RESUME
+    with any other or an invalid effect, one for another packet (even one
+    naming the target PR or branch), one older than the HOLD, or one that is
+    not valid authority releases nothing; packet ids match exactly. A second
+    hold on a held packet with no release between denies by name
+    (merge_grant_hold_duplicate) whatever follows (Q2). A null or blank
+    health is absent, as readEffect reads it (Q1); RESUME provenance is the
+    fold's (Q4). A hold claim on another readable packet that names neither
+    the target PR nor branch does not apply
   not_a_grant:
     - ACCEPT_FOR_ADMISSION
     - a semantic PASS
@@ -72,7 +91,7 @@ allowed_scope:
 prohibited_scope:
   - the #80 parser, the typed effect vocabulary, the global projection contract, the programme DAG and the checkpoint
   - PRs 155, 179, 169, 175, 146, 172 and 177
-  - merge, ready-for-review, auto-merge enablement
+  - merge, ready-for-review, auto-merge enablement; PR 181 stays draft and its bootstrap merge is not authorized (CG-REV-F9-003 Q5)
   - production, live business data, provider traffic, credentials, deployment
   - worker, process, install, scheduler, webhook or notifier changes
   - editing or deleting any #80 comment
@@ -91,6 +110,7 @@ proof_obligations:
   - missing independent review, pending/owed/failed workflows, a grant changed between snapshots, ACCEPT_FOR_ADMISSION without a later grant
   - preserved valid application and meta grants (the PR 159 grant 6111001643 shape), unrelated active-packet separation, review failover, control-only lineage
   - the real CLI collector and recheck under a synthetic fetch with no network passthrough
+  - "CG-REV-F9-003: malformed hold claims before the grant (H1), duplicate holds (Q2), holds naming the target by packet, PR or branch and cross-packet or by-reference releases (Q3), a blank-health release (Q1) and RESUME provenance (Q4), pure and through the real CLI in --merge and --grant-only with zero unauthorized PUTs, each with a live negative control"
   - live negative controls; the full portable suite; the Windows worker proof; both DAG validators; artifact checks; exact-head workflows
 
 stop_conditions:

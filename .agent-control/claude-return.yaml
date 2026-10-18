@@ -6,8 +6,14 @@ ack_comment_id: 6240199516
 continuation_ack_message_id: CC-ACK-F9-002
 continuation_ack_comment_id: 6244594284
 operator_instruction: human-operator-f9-unblock-20261018
+contradiction_message_id: CC-CONTRADICTION-F9-001
+contradiction_comment_id: 6244935207
+correction_review_message_id: CG-REV-F9-003
+correction_review_comment_id: 6245277310
+correction_ack_message_id: CC-ACK-F9-003
+correction_ack_comment_id: 6245305974
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
-source_head: 7f6a5fa360385b10eeb371585bcfae1b75e778e5
+source_head: a9a0581862e20b93f618045561319868b3a3f6f9
 implementation_branch: impl/kf-meta-merge-authority-001
 pr_number: 181
 state: PROVING
@@ -37,6 +43,8 @@ semantic_commits:
     what: the CLI hold cases are built in #80 order (HOLD, then RESUME); at 72cf7948 the RESUME was older than the HOLD, so NC-F9-CLI-INVALID-RESUME-RELEASES-HOLD was VACUOUS (local run, 211 total, 210 live)
   - sha: 7f6a5fa360385b10eeb371585bcfae1b75e778e5
     what: the operator-listed hold controls that were missing (CC-ACK-F9-002); wrong-packet release, out-of-order release and re-HOLD, a HOLD between the two snapshots, three more invalid RESUMEs and RESUMEs that are not valid authority, pure and through the real CLI with zero synthetic merge PUTs asserted; five negative controls; one doc sentence; no runtime file changed
+  - sha: a9a0581862e20b93f618045561319868b3a3f6f9
+    what: the CG-REV-F9-003 correction in merge-grant.mjs only; the hold pass reads malformed hold claims (F9-H1, Option A), denies a duplicate hold by name (Q2) and applies holds naming the target PR or branch until their own packet's release (Q3); 18 tests (11 pure, 7 real CLI in both modes with zero PUTs), including the by-reference release, exact packet ids, blank health (Q1) and RESUME provenance (Q4); 15 controls added, 4 re-pointed; control-plane doc; admission.mjs, auto-merge-admitted.mjs and the gate workflow unchanged
 
 review_findings:   # independent ChatGPT PR reviews; the outcome of the gate itself is for the RETURN and ChatGPT
   - review: 5560243413 (at ff49859e, semantics 739414da)
@@ -47,6 +55,15 @@ review_findings:   # independent ChatGPT PR reviews; the outcome of the gate its
   - copilot: 5560029945, 5560210648 and 5560417789 are NOT_RUN, quota exhausted
   - copilot: 5560754987 (at 77103b26) is NOT_RUN, quota exhausted
   - chatgpt: no review of semantics 3022dcda or e69b69f4 was posted before this head; CC-RETURN-F9-001 (6243914615) was unanswered when CC-ACK-F9-002 was posted
+  - chatgpt: CG-REV-F9-003 (6245277310, at a63d40be, semantics 7f6a5fa3) CHANGES_REQUIRED on F9-H1; Option A approved with fail-closed targeting; Q1 keep canonical health reading; Q2 fail closed on a fold-invalid duplicate HOLD; Q3 a HOLD naming the target by packet, PR or branch holds it until its own packet's HOLD_CLEAR; Q4 keep RESUME provenance; Q5 bootstrap merge not authorized, PR stays draft
+  - copilot: 5561167283 (at a63d40be) is NOT_RUN, quota exhausted
+  - independent: no independent semantic review exists of 7f6a5fa3 or of this semantic head
+
+previous_head_a63d40be:
+  semantic_head: 7f6a5fa360385b10eeb371585bcfae1b75e778e5
+  contradiction: CC-CONTRADICTION-F9-001 (6244935207), F9-H1; exact-head proof PROGRESS 6245112366
+  workflows: CI/CD Pipeline 39091406706, Agent Control Gate 39091406688, Branch divergence 39091406638, DAST (HawkScan) 39091406733, Agent Control Worker Proof 39091406623 and the Autopilot self-test 39091406614 concluded success; the gate's non-draft step and every DAST scan step were skipped; 216/216 controls LIVE on hosted Windows
+  superseded_by: a9a0581862e20b93f618045561319868b3a3f6f9, the CG-REV-F9-003 correction; no RETURN was posted for a63d40be
 
 previous_head_77103b26:
   semantic_head: e69b69f45e8b348c93eb285b64925f1452ebfb60
@@ -78,7 +95,7 @@ diff_scope:   # source_main..source_head
   - scripts/agent-control/tests/admission.spec.mjs
   - scripts/agent-control/tests/helpers/merge-grant-fixture.mjs (new, synthetic)
   - scripts/agent-control/tests/helpers/synthetic-github.mjs (new, synthetic fetch preload)
-  - scripts/agent-control/negative-controls.yaml (23 entries added, none changed or removed)
+  - scripts/agent-control/negative-controls.yaml (38 entries added, none of main's changed or removed; four branch entries, NC-F9-INVALID-RESUME-RELEASES-HOLD, NC-F9-RELEASE-WRONG-PACKET and their two CLI twins, were re-pointed to the moved release line with the same ids, claims, defects and proofs)
   - .github/workflows/agent-control-gate.yml (the non-draft step, and issues read permission)
   - docs/development/AGENT_CONTROL_PLANE.md
   - docs/development/AGENT_AUTOPILOT.md
@@ -89,9 +106,12 @@ implementation_decisions:
   - grant: a valid AUTHORITY-profile REVIEW from an allowlisted author, merge_authority true, review_status READY_TO_MERGE, control_effect read by readEffect as NO_STATE_CHANGE or PACKET_ADMISSION, bound exactly to pr_number, packet_id, implementation_branch, source_head, pr_head and source_main; its URL must be on the target repository's issue 80, and a repository field, when present, must name the target
   - ordering: the newest valid message about the target (same packet, PR or branch) must be the grant; anything later voids it, and only a new grant restores it
   - ambiguity: a malformed authority candidate after the grant that is, or may be, about the target denies; one before it is superseded by it
-  - holds: a valid HOLD for the target packet denies, before or after the grant, until a later RESUME whose effect readEffect reads as HOLD_CLEAR; holds on other packets do not apply
-  - hold release binding and order: a release counts only for its own packet and only after the HOLD it clears; a HOLD_CLEAR for another packet, one older than the HOLD, or a RESUME that is not valid authority releases nothing, and a later HOLD needs its own later release. For valid authority a repeated key is malformed, so the hold loop's packet filter and readEffect read the same single packet_id
-  - the predicate reads all of #80 with no checkpoint anchor, so it does not take over the fold's stopping conflicts (HOLD_DUPLICATE, HOLD_MISMATCH), which would let one stray historical RESUME deny forever; a second HOLD on a held packet stays held until a later valid HOLD_CLEAR, and a HOLD_CLEAR with no hold before it changes nothing (unchanged since 3022dcda)
+  - holds (CG-REV-F9-003): the hold pass reads every candidate, valid or malformed, in #80 order. A hold claim is a candidate whose message_type values are not exactly one of DIRECTIVE, REVIEW or RESUME (a HOLD, or an absent, repeated or undeclared type), so a HOLD repeated behind a REVIEW is still a claim. It holds the target when its packet is the target's or cannot be read, or when it names the target's pr_number or implementation_branch under another packet (Q3); a hold claim on another readable packet naming neither does not apply
+  - hold release: only a later valid RESUME whose effect readEffect reads as HOLD_CLEAR for the hold's own packet releases it, matched exactly as written; a hold whose packet cannot be read is keyed to the target packet. A HOLD_CLEAR for another packet (including one that names the target PR or branch), one older than the HOLD, or a RESUME that is not valid authority releases nothing, and a later HOLD needs its own later release
+  - duplicate (Q2): a second hold claim on a packet already held, with no release between, is merge_grant_hold_duplicate and denies whatever follows; no later RESUME cures it. This replaces the decision recorded since 3022dcda (a second HOLD stayed held until one HOLD_CLEAR), as CG-REV-F9-003 ruled. A HOLD_CLEAR with no hold before it still changes nothing, and the global fold is unchanged
+  - Q1: readEffect is unchanged; a null or blank RESUME health is absent and releases, a present health outside GREEN/YELLOW/RED does not
+  - Q4: RESUME provenance is unchanged; a body repository field or URL is not a release condition, and no authentication is inferred from it
+  - malformed candidates that are not hold claims (a malformed REVIEW, DIRECTIVE or RESUME) are still superseded by a later grant and release nothing; after the grant, any malformed candidate that may be about the target is still ambiguous
   - no global READY_TO_MERGE projection is required or read, so a meta repair does not move or wait on the active application packet
   - the grant is checked last in evaluateAdmission, so every earlier denial keeps its reason; the artifact review_status check is kept as it was
   - recheckBeforeMerge requires the same grant (comment id, message id, binding) in both snapshots
@@ -116,24 +136,26 @@ continuation_characterization:   # read-only checks before CC-ACK-F9-002, intera
   other_hold_consumers: the fold (authority-effects.mjs) releases only through readEffect and applyEffect; select-directive.mjs never selects a HOLD or RESUME; status.mjs and claude-worker.ps1 release no hold
 
 tests:
-  at: 7f6a5fa360385b10eeb371585bcfae1b75e778e5
-  host: Windows 11, Node 20.18.1, interactive session, 2026-10-18
+  at: a9a0581862e20b93f618045561319868b3a3f6f9
+  host: Windows 11, Node 20.18.1, local worker session for CG-REV-F9-003, 2026-10-18
   portable:
     command: node --test scripts/agent-control/tests/*.spec.mjs
-    total: 547
-    passed: 547
+    total: 565
+    passed: 565
     failed: 0
     skipped: 0
   portable_and_windows:
-    command: KF_REQUIRE_POWERSHELL=1 node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
-    total: 571
-    passed: 571
+    command: node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
+    total: 589
+    passed: 589
     failed: 0
     skipped: 0
   focused:
-    merge_grant_spec: 25/25 (22 before, 3 added)
-    merge_cli_spec: 23/23 (17 before, 6 added; real CLI, synthetic fetch preload, no passthrough)
-    admission_spec: 46/46 (39 original, 7 added)
+    merge_grant_spec: 36/36 (25 before, 11 added)
+    merge_cli_spec: 30/30 (23 before, 7 added; real CLI, synthetic fetch preload, no passthrough)
+    admission_spec: 46/46 (unchanged)
+  f9_controls_at_semantic_head: proof-mutation.mjs over the 38 NC-F9 entries of this manifest at a9a05818; 38 LIVE, 0 VACUOUS
+  previous_at_7f6a5fa3: portable 547/547, portable and Windows 571/571, 0 skipped
   negative_controls:
     command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
     at_57bc4540: 209 total, 208 live, 1 vacuous (NC-ADMISSION-ARTIFACTS-UNBOUND refused an ambiguous target; fixed in 739414da without changing the control)
@@ -145,9 +167,11 @@ tests:
   dag_validators: validate-dag.mjs OK (35 packets / 37 phases); validate-platform-dag.mjs OK (63 packets, INACTIVE_SUCCESSOR)
   return_evidence_spec: 17/17
   status_verify_continuation: CONSISTENT, observed generation 118 of 118, anchored to CG-DIR-F9-001, 2026-10-18
+  status_verify_correction: CONSISTENT, observed generation 119 of 119, anchored to CG-REV-F9-003 (6245277310), 2026-10-18
+  dag_validators_correction: validate-dag.mjs OK (35 packets / 37 phases); validate-platform-dag.mjs OK (63 packets, INACTIVE_SUCCESSOR)
   architecture_scanner: dependency_scan.py run locally; it adds the 11 new agent-control import edges and also shows pre-existing drift (PR 166 files absent from the committed dependencies.json); dependencies.json was not regenerated, as that is a broad artifact refresh outside this scope
   architecture_scanner_continuation: dependency_scan.py over LF archives of scripts/ at e69b69f4 and 7f6a5fa3 gives 136 nodes and 358 edges both, 0 added and 0 removed
-  hawkscan: NOT_RUN; HAWK_API_KEY absent and no running application in scope; 7f6a5fa3 changes tests, controls and one doc sentence only
+  hawkscan: NOT_RUN; HAWK_API_KEY absent and no running application in scope; a9a05818 changes the CLI-side grant predicate, tests, controls and docs only, no served route
 
 proof_matrix:
   - obligation: rejecting cases for absent, false, null, malformed, forged, edited, stale, revoked and mismatched grants
@@ -181,7 +205,7 @@ proof_matrix:
   - obligation: live negative controls, none vacuous, none removed
     evidence_scope: semantic_head
     result: PROVEN
-    proof: 209/209 at 739414da and at 05cabd2e; 211/211 at 77103b26; the 216-entry manifest of 7f6a5fa3 is reported in the RETURN
+    proof: 209/209 at 739414da and at 05cabd2e; 211/211 at 77103b26; 216/216 at a63d40be (local and hosted Windows); 38/38 NC-F9 entries at a9a05818; the full 231-entry manifest at the artifact head is reported in the RETURN
   - obligation: an envelope-valid RESUME without a valid HOLD_CLEAR effect never releases a target hold (review 5560243413 P1)
     evidence_scope: semantic_head
     result: PROVEN
@@ -190,6 +214,22 @@ proof_matrix:
     evidence_scope: semantic_head
     result: PROVEN
     proof: merge-grant.spec.mjs NC hold release binding, NC hold release order, NC hold release authority; merge-cli.spec.mjs NC CLI hold release binding, NC CLI hold release order and NC CLI recheck with a HOLD posted, each counting synthetic merge PUTs; NC-F9-RELEASE-WRONG-PACKET, NC-F9-CLI-RELEASE-WRONG-PACKET, NC-F9-RELEASE-ORDER-BLIND, NC-F9-CLI-RELEASE-ORDER-BLIND and NC-F9-CLI-RECHECK-HOLD
+  - obligation: "CG-REV-F9-003 H1: a malformed hold claim on the target before the grant (missing field, repeated field, repeated or unreadable type, unreadable packet) denies until a later valid HOLD_CLEAR for the target packet; a malformed REVIEW before the grant is still superseded; a malformed HOLD on another readable packet does not block"
+    evidence_scope: semantic_head
+    result: PROVEN
+    proof: merge-grant.spec.mjs NC malformed hold, NC malformed hold type, NC malformed hold packet, malformed hold scope; merge-cli.spec.mjs NC CLI malformed hold (both modes, 0 PUTs) and its referent (1 PUT); NC-F9-MALFORMED-HOLD-SKIPPED, NC-F9-CLI-MALFORMED-HOLD-SKIPPED, NC-F9-MALFORMED-HOLD-TYPE-FIRST-ONLY, NC-F9-MALFORMED-HOLD-PACKET-UNREAD
+  - obligation: "CG-REV-F9-003 Q2: HOLD, HOLD and a later RESUME denies as merge_grant_hold_duplicate; HOLD, HOLD_CLEAR, HOLD, HOLD_CLEAR grants"
+    evidence_scope: semantic_head
+    result: PROVEN
+    proof: merge-grant.spec.mjs NC hold duplicate; merge-cli.spec.mjs NC CLI hold duplicate (both modes, 0 PUTs) and its referent (1 PUT); NC-F9-HOLD-DUPLICATE-CURED, NC-F9-CLI-HOLD-DUPLICATE-CURED
+  - obligation: "CG-REV-F9-003 Q3: a valid HOLD naming the target by packet, PR or branch holds it until its own packet's later HOLD_CLEAR; the target packet's HOLD_CLEAR or a release naming only the target PR or branch releases nothing; an unrelated HOLD does not block"
+    evidence_scope: semantic_head
+    result: PROVEN
+    proof: merge-grant.spec.mjs NC hold (packet), NC hold by PR, NC hold by branch, NC hold cross-packet release, NC hold release binding; merge-cli.spec.mjs NC CLI hold by PR, NC CLI hold by branch, NC CLI hold cross-packet release, NC CLI hold release binding (both modes, 0 PUTs; referents 1 PUT); NC-F9-HOLD-BY-PR-IGNORED, NC-F9-HOLD-BY-BRANCH-IGNORED, their CLI twins, NC-F9-CROSS-PACKET-RELEASE, NC-F9-CLI-CROSS-PACKET-RELEASE, NC-F9-RELEASE-BY-REFERENCE, NC-F9-CLI-RELEASE-BY-REFERENCE
+  - obligation: "CG-REV-F9-003 Q1 and Q4, and exact packet ids: a blank RESUME health releases and AMBER does not; a body repository field or URL is not a release condition; a HOLD_CLEAR whose packet differs in case or whitespace releases nothing"
+    evidence_scope: semantic_head
+    result: PROVEN
+    proof: merge-grant.spec.mjs hold release health (Q1), hold release provenance (Q4), NC hold release exact packet; NC-F9-RELEASE-PACKET-INEXACT
   - obligation: every required workflow and the independent review at the PR head
     evidence_scope: exact_head
     result: PENDING
@@ -205,6 +245,11 @@ findings:
       as authority.
 
 residual_risks:
+  - a duplicate hold on a packet that holds the target denies permanently in this predicate (Q2); the predicate has no reconciliation path, so clearing it needs separately reviewed authority outside F9
+  - a malformed hold claim whose packet cannot be read holds every target the predicate evaluates, and for each target only a later valid HOLD_CLEAR for that target's own packet releases it. Where that packet has no hold the fold can see, the canonical fold reads such a HOLD_CLEAR as HOLD_MISMATCH. This is fail-closed by design (CG-REV-F9-003 Option A) but costs liveness; the predicate never writes the fold
+  - a hold claim is keyed by its packet text exactly as written; a HOLD whose packet differs from the target's only in case or whitespace, and which names neither the target PR nor branch, does not apply
+  - RESUME provenance is the fold's (Q4); the RESUME comment URL and body repository field are not checked, so the caller must supply only the target repository's issue 80, as the CLI does
+  - "Q5: main's pre-F9 evaluator never reads #80 grants, so until this repair is on main, draft is the only stop; any one-off human merge needs a separate exact-head decision and a verified F9-aware grant check immediately before the SHA-pinned merge"
   - the second snapshot's #80 read is not atomic with the SHA-pinned merge call; a comment posted in that window is seen only by the next evaluation
   - every authority comment comes from one shared account; the allowlist attests the account, not which agent wrote it
   - a deleted #80 comment cannot be detected from a snapshot
