@@ -18,8 +18,12 @@ lifetime_review_message_id: CG-REV-F9-004
 lifetime_review_comment_id: 6248791378
 lifetime_ack_message_id: CC-ACK-F9-004
 lifetime_ack_comment_id: 6248842451
+chronology_review_message_id: CG-REV-F9-005
+chronology_review_comment_id: 6315149276
+chronology_ack_message_id: CC-ACK-F9-005
+chronology_ack_comment_id: 6315277076
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
-source_head: 7eb3a155dddaefa3bb6beb65ce71564c9499bebf
+source_head: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
 implementation_branch: impl/kf-meta-merge-authority-001
 pr_number: 181
 state: PROVING
@@ -34,6 +38,7 @@ return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
 previous_return_message_ids:
   - CC-RETURN-F9-001
+  - CC-RETURN-F9-002   # 6249425702; for CG-REV-F9-004, from head bb2479a1; answered by CG-REV-F9-005 CHANGES_REQUIRED
 never_posted_return_message_ids: []
 
 semantic_commits:
@@ -53,6 +58,8 @@ semantic_commits:
     what: the CG-REV-F9-003 correction in merge-grant.mjs only; the hold pass reads malformed hold claims (F9-H1, Option A), denies a duplicate hold by name (Q2) and applies holds naming the target PR or branch until their own packet's release (Q3); 18 tests (11 pure, 7 real CLI in both modes with zero PUTs), including the by-reference release, exact packet ids, blank health (Q1) and RESUME provenance (Q4); 15 controls added, 4 re-pointed; control-plane doc; admission.mjs, auto-merge-admitted.mjs and the gate workflow unchanged
   - sha: 7eb3a155dddaefa3bb6beb65ce71564c9499bebf
     what: the CG-REV-F9-004 A1 lifetime bound in merge-grant.mjs only (one condition in the hold pass, floor = the target's first valid authority message); a real-history regression on the public envelope of PLAN 5826799265, paired cases (a)-(e) pure and through the real CLI in both modes with zero merge PUTs, a second-snapshot case, and the CC-PROGRESS-F9-PROBE-001 pins COV-HOLD-01, 04 and 05-09; two fixtures whose packet-less claim preceded every target message now start with the target DIRECTIVE; 11 tests (7 pure, 4 real CLI), 14 controls added, none changed; control-plane doc; parser, readEffect, fold, admission.mjs, auto-merge-admitted.mjs and the gate workflow unchanged
+  - sha: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
+    what: the CG-REV-F9-005 per-packet hold chronology in merge-grant.mjs only; every hold claim in scope is recorded on its packet whether or not it holds the target yet, a duplicate denies by name when its packet holds the target at any point (both orderings), a duplicate on a packet that never concerns the target still grants, and whether an unreleased hold holds the target is judged per hold; 3 tests (1 pure with both orderings, after the floor, a malformed first hold, no release and three referents; 2 real CLI in both modes with zero merge PUTs on denial), 2 controls added, none changed, every existing control's find string kept; one doc bullet and the file header; parser, readEffect, fold, admission.mjs, auto-merge-admitted.mjs and the gate workflow unchanged
 
 review_findings:   # independent ChatGPT PR reviews; the outcome of the gate itself is for the RETURN and ChatGPT
   - review: 5560243413 (at ff49859e, semantics 739414da)
@@ -126,6 +133,7 @@ implementation_decisions:
   - hold release: only a later valid RESUME whose effect readEffect reads as HOLD_CLEAR for the hold's own packet releases it, matched exactly as written; a hold whose packet cannot be read is keyed to the target packet. A HOLD_CLEAR for another packet (including one that names the target PR or branch), one older than the HOLD, or a RESUME that is not valid authority releases nothing, and a later HOLD needs its own later release
   - duplicate (Q2): a second hold claim on a packet already held, with no release between, is merge_grant_hold_duplicate and denies whatever follows; no later RESUME cures it. This replaces the decision recorded since 3022dcda (a second HOLD stayed held until one HOLD_CLEAR), as CG-REV-F9-003 ruled. A HOLD_CLEAR with no hold before it still changes nothing, and the global fold is unchanged
   - lifetime (CG-REV-F9-004, A1): the floor is the target's first valid authority message (packet, PR or branch) in #80 order, about[0], never a timestamp, grant or projection. A hold claim whose packet cannot be read and which names none of the target's packet, PR or branch, in any repeated value, holds nothing for the target when it is strictly older than the floor, and is not a hold for the duplicate rule. At or after the floor it holds before or after the grant; readable-packet and target-naming claims keep their scope at any age. Releases, duplicates, binding, supersession and post-grant ambiguity are unchanged. Stated cost, as ruled: a packet-less malformed HOLD posted before a packet's first valid authority does not hold that packet
+  - chronology (CG-REV-F9-005): the hold pass keeps a per-packet chronology of every hold claim in scope, keyed by the packet whose HOLD_CLEAR releases it, whether or not the claim holds the target yet. A packet is relevant to the target when any of its holds in the chronology holds the target. A second hold on a packet with no release between is recorded as that packet's duplicate; it denies merge_grant_hold_duplicate when the packet is relevant, in either ordering of an unrelated hold and a target-naming hold, whatever follows, and no later release cures it. A duplicate on a packet that never concerns the target is not this target's to judge. Whether an unreleased hold holds the target is judged per hold (Q3), so a packet's released target hold followed by an unrelated hold on it holds nothing. One stated change of reason, both denials: HOLD(other, unrelated), HOLD(other, names the target), grant with no release read merge_grant_target_held at bb2479a1 and reads merge_grant_hold_duplicate now, as the canonical fold would stop there
   - Q1: readEffect is unchanged; a null or blank RESUME health is absent and releases, a present health outside GREEN/YELLOW/RED does not
   - Q4: RESUME provenance is unchanged; a body repository field or URL is not a release condition, and no authentication is inferred from it
   - malformed candidates that are not hold claims (a malformed REVIEW, DIRECTIVE or RESUME) are still superseded by a later grant and release nothing; after the grant, any malformed candidate that may be about the target is still ambiguous
@@ -184,6 +192,14 @@ tests:
     at_77103b26: 211 total, 211 live, 0 vacuous (hosted Windows job 117540827025)
     drafts_before_7f6a5fa3: the five new controls applied by hand to a scratch copy; each find target occurs once, each proof held unmutated and failed mutated on exactly its own test
     at_artifact_head: reported in the RETURN; the run needs the commit that carries this file
+    at_6b071fbf: >
+      proof-mutation.mjs --ref HEAD over the 42 entries whose mutation targets
+      merge-grant.mjs (the 40 of bb2479a1 and the 2 added): 42 LIVE, 0 VACUOUS,
+      Linux container, 2026-10-21. Every existing find string in that file is
+      unchanged by 6b071fbf, so NC-F9-HOLD-DUPLICATE-CURED, NC-F9-HOLD-IGNORED,
+      NC-F9-RELEASE-ORDER-BLIND and their CLI twins still bite. The full
+      245-entry manifest and the Windows worker proof run on the hosted
+      workflows at the exact head
   dag_validators: validate-dag.mjs OK (35 packets / 37 phases); validate-platform-dag.mjs OK (63 packets, INACTIVE_SUCCESSOR)
   return_evidence_spec: 17/17
   status_verify_continuation: CONSISTENT, observed generation 118 of 118, anchored to CG-DIR-F9-001, 2026-10-18
@@ -194,6 +210,49 @@ tests:
   architecture_scanner: dependency_scan.py run locally; it adds the 11 new agent-control import edges and also shows pre-existing drift (PR 166 files absent from the committed dependencies.json); dependencies.json was not regenerated, as that is a broad artifact refresh outside this scope
   architecture_scanner_continuation: dependency_scan.py over LF archives of scripts/ at e69b69f4 and 7f6a5fa3 gives 136 nodes and 358 edges both, 0 added and 0 removed
   hawkscan: NOT_RUN; HAWK_API_KEY absent and no running application in scope; 7eb3a155 changes the CLI-side grant predicate, tests, controls and docs only, no served route
+
+tests_chronology:   # CG-REV-F9-005, at the semantic head 6b071fbf
+  at: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
+  host: Linux container, Node 22.22.0, interactive Claude session assigned by the operator, 2026-10-21
+  reproduction_before_the_fix: >
+    At bb2479a1, with the PR's own fixture builders and no network, the
+    sequence HOLD(KF-OTHER-001, names nothing of the target), HOLD(KF-OTHER-001,
+    pr_number 87), RESUME(KF-OTHER-001), exact grant read merge_grant_valid;
+    with the floor DIRECTIVE first, the same; without the RESUME,
+    merge_grant_target_held. The opposite ordering read
+    merge_grant_hold_duplicate, as the spec pins.
+  focused:
+    merge_grant_spec: 44/44 (43 before, 1 added)
+    merge_cli_spec: 36/36 (34 before, 2 added; real CLI, synthetic fetch preload, no passthrough)
+    admission_spec: 46/46 (unchanged)
+  portable:
+    command: node --test scripts/agent-control/tests/*.spec.mjs
+    total: 579
+    passed: 541
+    failed: 0
+    skipped: 38
+    skip_reason: the 38 skips need PowerShell or an authenticated gh, neither present in this container; they are NOT_RUN here and run in the hosted Windows worker proof
+  windows_suite: NOT_RUN here (no PowerShell); the hosted Agent Control Worker Proof runs it on the exact head
+  dag_validators: validate-dag.mjs OK (35 packets / 37 phases); validate-platform-dag.mjs OK (63 packets, INACTIVE_SUCCESSOR)
+  status_verify: NOT_RUN here; status.mjs needs an authenticated gh, which this container lacks; the replay below reads the same live issue through the API
+  real_history_replay: >
+    evaluateMergeGrant at 6b071fbf over all 1,539 comments of the real #80
+    (16 API pages fetched at about 12:00Z on 2026-10-21, through CC-ACK-F9-005
+    6315277076, held in a scratch file outside the repository), target bound
+    to PR 181, this packet and branch, base 98ee0202: collectAuthority
+    verified, 121 candidates, 7 malformed; the only hold claim is 5826799265
+    (PLAN), older than the floor CG-DIR-F9-001. With one synthetic exactly
+    bound grant: merge_grant_valid. Without it: merge_grant_not_a_grant
+    (CG-REV-F9-005 is the newest message about the target). A synthetic
+    packet-less HOLD inside the lifetime before the grant:
+    merge_grant_target_held. The same HOLD after the grant:
+    merge_grant_ambiguous_authority. The REVIEW's defect sequence appended to
+    the real history, HOLD(KF-OTHER-999, unrelated), HOLD(KF-OTHER-999,
+    pr_number 181), RESUME(KF-OTHER-999), grant: merge_grant_hold_duplicate
+    on KF-OTHER-999. With a release between the two holds: merge_grant_valid.
+    Two unrelated holds on another packet: merge_grant_valid.
+  negative_controls_chronology: see negative_controls.at_6b071fbf
+  hawkscan: NOT_RUN; HAWK_API_KEY absent; no served route changed
 
 proof_matrix:
   - obligation: rejecting cases for absent, false, null, malformed, forged, edited, stale, revoked and mismatched grants
@@ -268,6 +327,18 @@ proof_matrix:
     evidence_scope: exact_head
     result: PENDING
     proof: see exact_head_proof
+  - obligation: "CG-REV-F9-005: every hold claim in scope enters the per-packet chronology; a duplicate on a packet that holds the target at any point denies by name in either ordering; unrelated-packet isolation, release and re-HOLD cycles, the A1 floor and every earlier ruling preserved; regression pure and through the real CLI in both modes with zero merge PUTs; one distinguishing live control; replay of the complete current #80"
+    evidence_scope: semantic_head
+    result: PROVEN
+    proof: >
+      merge-grant.spec.mjs "NC hold chronology (F9-005)" (both orderings by PR
+      and by branch, after the floor, a malformed first hold, no release, and
+      the release-between, never-concerns and released-then-unrelated
+      referents); merge-cli.spec.mjs "NC CLI hold chronology (F9-005)" and its
+      referent, zero PUTs on denial in --merge and --grant-only; controls
+      NC-F9-HOLD-CHRONOLOGY-FORGOTTEN and NC-F9-CLI-HOLD-CHRONOLOGY-FORGOTTEN
+      live; the 40 existing merge-grant controls live; see tests_chronology
+      for the real-history replay and the suite
 
 findings:
   - id: F9

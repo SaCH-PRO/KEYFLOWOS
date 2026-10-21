@@ -5,6 +5,7 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-DIR-F9-001   # 6240051686; NO_STATE_CHANGE; releases the bounded F9 merge-authority repair
   - CG-REV-F9-003   # 6245277310; NO_STATE_CHANGE; CHANGES_REQUIRED; rules on CC-CONTRADICTION-F9-001 (Option A, Q1 to Q5); a bounded correction under CG-DIR-F9-001
   - CG-REV-F9-004   # 6248791378; NO_STATE_CHANGE; CHANGES_REQUIRED; rules on CC-CONTRADICTION-F9-002 (Option A1, the lifetime bound); CG-REV-F9-003 stands
+  - CG-REV-F9-005   # 6315149276; NO_STATE_CHANGE; CHANGES_REQUIRED on CC-RETURN-F9-002; the per-packet hold chronology defect at bb2479a1; CG-REV-F9-003 and CG-REV-F9-004 stand
 in_reply_to: human-operator-plan-completion-20261017
 ack_message_id: CC-ACK-F9-001
 ack_comment_id: 6240199516
@@ -25,8 +26,17 @@ lifetime:   # the ruling on CC-CONTRADICTION-F9-002 (6245748866); same directive
   review_comment_id: 6248791378
   ack_message_id: CC-ACK-F9-004
   ack_comment_id: 6248842451
-current_authority_message_id: CG-REV-F9-004
-current_authority_comment_id: 6248791378
+chronology:   # the ruling on CC-RETURN-F9-002 (6249425702); same directive, owner, branch and PR
+  review_message_id: CG-REV-F9-005
+  review_comment_id: 6315149276
+  ack_message_id: CC-ACK-F9-005
+  ack_comment_id: 6315277076
+  writer: >
+    An interactive Claude session assigned by the operator on 2026-10-21,
+    stated in the ACK; the local Windows worker does not act on
+    CG-REV-F9-005. Pushes are plain fast-forwards to the branch.
+current_authority_message_id: CG-REV-F9-005
+current_authority_comment_id: 6315149276
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
 implementation_branch: impl/kf-meta-merge-authority-001
 pr_number: 181
