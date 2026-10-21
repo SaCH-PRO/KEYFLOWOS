@@ -10,8 +10,11 @@ from playwright.async_api import async_playwright, Route
 import re
 
 BASE_URL = "http://localhost:5000"
-EMAIL = "keyflowos.tt@gmail.com"
-PASSWORD = "S@chin1997"
+# Audit login is read from the environment; never commit a credential here.
+EMAIL = os.environ.get("KEYFLOWOS_AUDIT_EMAIL", "")
+PASSWORD = os.environ.get("KEYFLOWOS_AUDIT_PASSWORD", "")
+if not EMAIL or not PASSWORD:
+    raise SystemExit("Set KEYFLOWOS_AUDIT_EMAIL and KEYFLOWOS_AUDIT_PASSWORD before running this audit.")
 OUT_DIR = "audit-output"
 
 ROUTES = [
