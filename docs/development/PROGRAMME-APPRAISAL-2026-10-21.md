@@ -12,7 +12,7 @@ This document is evidence and opinion. It carries no control effect, releases no
 4. Since 1 September, 73 commits on main touch the control plane and 18 touch the application. Thirteen of sixteen recent packets are meta.
 5. The merge evaluator has merged exactly one PR (159). PRs 120 and 147 were merged by hand (GitHub `merged_by` field).
 6. Three gates are not real today: DAST never scans (no key) yet is required; Copilot has been out of quota at every head; F9 makes ACCEPT_FOR_ADMISSION equal to READY_TO_MERGE in `lib/admission.mjs`.
-7. The last merge of any kind was 11 October. Twenty draft PRs are open. The newest ChatGPT message is CG-REV-F9-004 (6248791378, 18 October). CC-RETURN-F9-002 (6249425702) is waiting for review.
+7. The last merge of any kind was 11 October. 53 PRs are open, 47 of them drafts (corrected 2026-10-21; the first edition said twenty). The newest ChatGPT message is CG-REV-F9-004 (6248791378, 18 October). CC-RETURN-F9-002 (6249425702) is waiting for review, and section 9 records a reproduced defect in that head.
 8. Since 11 October the autopilot has posted the heartbeat "claude is not on PATH" 143 times. That is 22 percent of all #80 traffic in the period studied.
 9. On main the LLM-parsed command path in `key-cortex-query-pipeline.service.ts` still fails open. PR 155 fixes it and has been draft since 6 October.
 10. Recommended order: unstick the loop this week (F9, worker path, gate hygiene), ship PR 155, relax the freeze rules, then give product hardening a credited lane.
@@ -111,7 +111,7 @@ KEYFLOWOS_PLATFORM_CONVERGENCE: 63 packets in groups P0 to P11, near-linear (lon
 | Meta packets merged | 6 (AUTO, CONTROL-PARSER, STATE-RECONCILE-002, AI-REVIEW-FAILOVER, STATE-REDUCER-LIVE, AUTHORITY-EFFECT-COMPAT) |
 | Merges in October | 5 (4 control plane, 1 application) |
 | Last merge of any kind | 2026-10-11 |
-| Open draft PRs | 20 |
+| Open PRs | 53, of which 47 draft and 6 ready (full listing on 2026-10-21; the first edition read one page of twenty) |
 | Issue #80 comments | 1,526 |
 
 ## 4. The ChatGPT, GitHub, Claude loop
@@ -219,8 +219,8 @@ Estimates assume one human operator relaying ChatGPT plus one Claude worker. Dif
 ### Step 3, the following quarter: run the programme at a rate that can finish
 
 - Loosen the wave gate for packets whose dependencies are already met (KNOWLEDGE, PRIVACY). Medium, 2 days.
-- Collapse 35 packets toward about 15 by merging wave C and D domain packets that touch the same modules. Medium, 1 week of planning.
-- Bring kernels and journeys onto main or drop them from the acceptance contract. Low, 1 day.
+- Consolidate coordination of wave C and D domain packets that touch the same modules, keeping every acceptance obligation and its evidence trail. A smaller denominator is not progress. Medium, 1 week of planning.
+- Bring kernels and journeys onto main. Their location is a continuity defect to repair, not a reason to drop the obligation. Low, 1 day.
 - Keep the first three groups of the platform DAG and archive the rest until they are needed.
 
 ### Time to a usable product
@@ -244,3 +244,46 @@ Estimates assume one human operator relaying ChatGPT plus one Claude worker. Dif
 - Produced on 2026-10-20 and 2026-10-21 from main `98ee0202`, the open PRs, issue #80 pages 13 to 16, the committed fixture, and local runs of the portable test suite (492 tests, 0 failures, 38 environment skips) and the mutation proof (171 of 193 live on Linux; the 22 others need PowerShell and were 193 of 193 on the Windows runner at the merged head).
 - Not verified: branch protection settings, the current production host and database, the Windows-only proof suite, and the kernel and journey documents in full (they live on a side branch).
 - Three parallel read-only investigations (product, programme structure, control plane) fed this document. Every number above was taken from a file, a command, or a GitHub API field named here.
+
+## 9. Corrections after ChatGPT's review, 2026-10-21
+
+ChatGPT read the first edition, checked its claims against the live repository, and relayed a review through the operator. It has not been posted on #80 as a control message. Claude verified the points below and amends the document accordingly. Where the two disagree, this section is the current statement.
+
+### 9.1 PR 181 has a reproducible defect; the draft SEMANTIC_PASS is withdrawn
+
+ChatGPT reported one HOLD-ordering case in which the current PR 181 head (bb2479a1, semantic 7eb3a155) permits a grant that the F9 contract (CG-REV-F9-003, Q2 and Q3) requires it to deny. Claude reproduced it on 2026-10-21 against the real predicate in `scripts/agent-control/lib/merge-grant.mjs` at that head, using the PR's own fixture builders, with no network.
+
+| Sequence on #80, oldest first | Required | Actual at bb2479a1 |
+|---|---|---|
+| HOLD on another packet that names nothing of the target; a second HOLD on that same packet naming the target PR; that packet's valid HOLD_CLEAR; an exact grant | merge_grant_hold_duplicate | merge_grant_valid (defect) |
+| The same two HOLDs in the opposite order, then the release and the grant | merge_grant_hold_duplicate | merge_grant_hold_duplicate (already pinned by the spec) |
+| The same first two HOLDs with no release | merge_grant_target_held | merge_grant_target_held |
+
+Cause, visible at lines 311 to 324 of the file: a hold claim is recorded in the active map only when it already holds the target, so the first HOLD on the packet is forgotten before the second HOLD connects that packet to the target. The later release then clears a history that the canonical fold would have stopped as HOLD_DUPLICATE. The existing 43 merge-grant tests pass because none pins this ordering.
+
+Consequence: the disposition for the current head is CHANGES_REQUIRED, not SEMANTIC_PASS. The companion draft bundle is amended. The correction belongs to the existing F9 owner and packet: keep every readable-packet hold in per-packet chronology before deciding whether it affects the target, keep unrelated-packet isolation (two HOLDs on a packet that never concerns the target still grant), keep legitimate release and re-HOLD cycles, add the regression for both orderings, then fresh proof and an independent review tied to the new head.
+
+### 9.2 Figures corrected
+
+- Open PRs: 53, of which 47 draft. The first edition said twenty because it read one page of the listing.
+- "4 of 35 versus 5 of 35": the committed `programme-state.yaml` is a reviewed historical checkpoint by design, and valid newer authority is folded over it at read time. A stored 4 is not by itself a reducer fault. The real problem is that older handoff and board documents still point readers at obsolete work without naming the current continuation point.
+- "5 of 35" is a count of packets, not of effort, completeness or production readiness. Packets differ in scope and some checkpoints certify a bounded slice.
+- The schedule estimates in section 6 are provisional. Thirty packets at two to three per week is 10 to 15 weeks of packet throughput under simplifying assumptions; the nine to twelve month figure bundles unequal effort, blocked dependencies and operational work and is not a calibrated forecast.
+
+### 9.3 Proposed shortcuts, with the conditions ChatGPT attached
+
+- Reusing integration evidence when "the diff since base touches no file the PR touches" is too weak. Shared permissions, schemas, interfaces, dependencies, configuration and event contracts can change a PR's behaviour without touching its files. Reuse must depend on the effect of the base change, with the proposed integration validated against the current base.
+- Reducing the packet count does not reduce the work. Consolidating coordination is fine only when every outstanding acceptance obligation keeps a disposition and an evidence trail.
+- Routes with no navigation link are not thereby unreachable or disposable; retiring one of the two AI stacks needs a traced map of responsibilities and consumers first.
+- Journey and kernel obligations are not removed because their documents live on another branch. Bringing them onto main is the repair.
+- Removing DAST from the required workflows is acceptable only if the uncovered security obligation stays visible elsewhere. A skipped scan is never passing evidence.
+- A reviewer must actually complete a review of the revision in question. Marking a review as non-independent is accurate labelling, not a substitute for the missing review.
+- The checkpoint refresh is a reviewed reconciliation preserving the anchor, later valid effects and current holds, not an edit of "4" to "5".
+- Product hardening earns visible credit by mapping to existing obligations or an explicit programme amendment, not by adding arbitrary credit inside the fixed 35-packet denominator.
+
+### 9.4 What ChatGPT confirmed
+
+- The central diagnosis: the development system consumes too much effort while product delivery stays blocked.
+- The fail-open autonomy path on main in `key-cortex-query-pipeline.service.ts`, which makes PR 155 a product-safety priority with admission, merge and deployment as separate decisions.
+- That skipped scans and not-run reviews are missing evidence, and that a hosted runner lacking the Claude binary says nothing about the separate Windows worker.
+- The priority order P0 (merge safety and KEY execution security, F9 and PR 155), P1 (reliable engineering execution, PR 169 then PR 175 in sequence), P2 (a governed KEY action flow and the lead to contact to booking to invoice to payment to ledger to follow-up journey), P3 (operational qualification), as the accepted 17 October roadmap already states.

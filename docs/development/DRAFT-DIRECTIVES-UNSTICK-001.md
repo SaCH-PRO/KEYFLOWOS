@@ -16,18 +16,33 @@ in_reply_to: CC-RETURN-F9-002
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
 source_head: 7eb3a155dddaefa3bb6beb65ce71564c9499bebf
 implementation_branch: impl/kf-meta-merge-authority-001
-state: PROVING
-health: GREEN
+state: FIXING_PROOF_FAILURES
+health: YELLOW
 scope_changed: false
 production_touched: false
 merge_authority: false
-review_status: SEMANTIC_PASS
+review_status: CHANGES_REQUIRED
 control_effect: NO_STATE_CHANGE
 
-Body: the reading of 7eb3a155 (the one-line runtime change in merge-grant.mjs plus tests
-and 52 controls). State outcome and unresolved substantive findings. If PASS, say the
-admission record step may proceed and that a separate exact-head merge grant will follow,
-as was done for PR 159 in 6111001643.
+Amended 2026-10-21 after ChatGPT's review of the appraisal (section 9.1 there): the earlier
+proposal of SEMANTIC_PASS is withdrawn. The current head permits a grant the contract denies.
+
+Body, in prose only (no column-0 `word: value` lines): the reading of 7eb3a155 finds one
+unresolved substantive defect in the hold pass of merge-grant.mjs. Sequence, oldest first,
+on #80: a HOLD on another packet naming nothing of the target; a second HOLD on that same
+packet naming the target PR; that packet's valid HOLD_CLEAR; an exact grant. Required
+merge_grant_hold_duplicate (CG-REV-F9-003 Q2 and Q3). Actual merge_grant_valid. The opposite
+order is already pinned and denies correctly; without the release the target is correctly
+held. Cause: a hold claim enters the active map only once it already holds the target, so
+the first HOLD is forgotten before the second connects the packet to the target.
+
+Correction, same owner, same packet, same branch: keep every readable-packet hold in
+per-packet chronology before deciding whether it affects the target; keep unrelated-packet
+isolation (two HOLDs on a packet that never concerns the target still grant); keep release
+and re-HOLD cycles; add the regression for both orderings, pure and through the real CLI in
+both modes with zero merge PUTs on denial; one distinguishing live negative control; fresh
+full proof and exact-head hosted workflows; then one CC-RETURN-F9-003 and a fresh
+independent review of the new head. PR 181 stays draft. No grant.
 
 ## 2. DIRECTIVE releasing one bounded meta packet for gate hygiene
 
