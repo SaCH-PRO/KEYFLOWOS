@@ -22,6 +22,10 @@ chronology_review_message_id: CG-REV-F9-005
 chronology_review_comment_id: 6315149276
 chronology_ack_message_id: CC-ACK-F9-005
 chronology_ack_comment_id: 6315277076
+semantic_pass_review_message_id: CG-REV-F9-006
+semantic_pass_review_comment_id: 6324501015
+semantic_pass_ack_message_id: CC-ACK-F9-006
+semantic_pass_ack_comment_id: 6324616806
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
 source_head: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
 implementation_branch: impl/kf-meta-merge-authority-001
@@ -39,6 +43,7 @@ return_message_id: null
 previous_return_message_ids:
   - CC-RETURN-F9-001
   - CC-RETURN-F9-002   # 6249425702; for CG-REV-F9-004, from head bb2479a1; answered by CG-REV-F9-005 CHANGES_REQUIRED
+  - CC-RETURN-F9-003   # 6316392827; for CG-REV-F9-005, from artifact head eecab6d7, semantic 6b071fbf; answered by CG-REV-F9-006 SEMANTIC_PASS (6324501015)
 never_posted_return_message_ids: []
 
 semantic_commits:
@@ -74,7 +79,17 @@ review_findings:   # independent ChatGPT PR reviews; the outcome of the gate its
   - copilot: 5561167283 (at a63d40be) is NOT_RUN, quota exhausted
   - copilot: 5561344911 (at ad118d32) is NOT_RUN, quota exhausted
   - chatgpt: CG-REV-F9-004 (6248791378, at ad118d32, semantics a9a05818) CHANGES_REQUIRED; answers CC-CONTRADICTION-F9-002 by approving Option A1 (lifetime anchor) as the sole additional H1 narrowing; Option A and Q1-Q5 of CG-REV-F9-003 unchanged; no RETURN for ad118d32
-  - independent: no independent semantic review exists of 7f6a5fa3, a9a05818 or this semantic head
+  - independent: no independent semantic review exists of 7f6a5fa3, a9a05818 or 7eb3a155
+  - chatgpt: CG-REV-F9-005 (6315149276, at bb2479a1, semantics 7eb3a155) CHANGES_REQUIRED on CC-RETURN-F9-002; the per-packet hold chronology defect (HOLD other unrelated, HOLD other naming the target, release, grant read merge_grant_target_held, the contract requires merge_grant_hold_duplicate); CG-REV-F9-003 and CG-REV-F9-004 stand; corrected in 6b071fbf
+  - copilot: 5599316193 (at eecab6d7) is NOT_RUN, quota exhausted
+  - chatgpt: CG-REV-F9-006 (6324501015, at eecab6d7, semantics 6b071fbf) SEMANTIC_PASS on CC-RETURN-F9-003 (6316392827); zero unresolved substantive findings; both HOLD orderings tracked, a duplicate not cured by a later release, unrelated packets isolated, A1 floor and Q1-Q5 kept; not a grant, admission, ready transition, HOLD_CLEAR, checkpoint or release; Q5 still controls bootstrap; the gh-cursor skip, status.mjs --verify, an actual DAST scan and the Copilot review stay NOT_RUN and are not promoted to proof; the worker HELD message does not reverse the review or establish a grant
+  - independent: the independent semantic review of 6b071fbf is CG-REV-F9-006; its semantic_review record is written at admission, as the contract says
+
+previous_head_eecab6d7:
+  semantic_head: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
+  return: CC-RETURN-F9-003 (6316392827); reviewed by CG-REV-F9-006 (6324501015) SEMANTIC_PASS
+  workflows: Agent Control Worker Proof 39596320666 (Windows 603 tests, 602 passed, 1 skipped, 247/247 negative controls LIVE; Ubuntu 579 tests, 578 passed, 1 skipped), CI/CD Pipeline 39596320669, Agent Control Gate 39596320656 and 39596491594, Branch divergence 39596313118 and 39596320690 and the Autopilot self-test 39596320703 concluded success; DAST (HawkScan) 39596320667 concluded success with every scan step skipped; Copilot review 5599316193 NOT_RUN, quota exhausted
+  superseded_by: the control-only commit that records CG-REV-F9-006 in the lineage; the semantic head is unchanged
 
 previous_head_ad118d32:
   semantic_head: a9a0581862e20b93f618045561319868b3a3f6f9
@@ -386,4 +401,4 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
   - gate: Agent Control Worker Proof
     status: PENDING
   - gate: independent semantic review
-    status: PENDING
+    status: PENDING   # for this head; the semantic head 6b071fbf it carries was reviewed SEMANTIC_PASS by CG-REV-F9-006 (6324501015), Copilot 5599316193 NOT_RUN quota exhausted; the semantic_review record is written at admission
