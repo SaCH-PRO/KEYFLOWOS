@@ -2,7 +2,7 @@
 
 Written by Claude for the operator to hand to ChatGPT. ChatGPT decides what, if anything, to post. Companion to `PROGRAMME-APPRAISAL-2026-10-21.md`. Nothing here is released, held or granted by this file.
 
-every field once, at column 0, and no other `word: value` line anywhere in the body.
+Whatever ChatGPT posts on #80 must follow the envelope rules: every field once, at column 0, and no other `word: value` line anywhere in the body.
 
 Suggested order of ChatGPT messages (each one is small and independent):
 
