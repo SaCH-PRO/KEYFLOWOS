@@ -423,3 +423,15 @@ test('NC CLI recheck: a HOLD posted between the snapshots stops the merge call',
 test('target() in the fixture is the PR this scenario serves', () => {
   assert.deepEqual(target(), { repository: REPO, pr_number: pr.number, packet_id: 'KF-X-001', implementation_branch: pr.head_ref, source_head: SEMANTIC, pr_head: HEAD, base_sha: BASE });
 });
+
+// CG-REV-F9-005, through the real CLI: per-packet hold chronology.
+test('NC CLI hold chronology (F9-005): HOLD(other, unrelated), HOLD(other, names target PR), its release and an exact grant makes no merge call in either mode', () => {
+  const comments = [holdComment('HOLD', 'KF-OTHER-001'), holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 }), holdComment('RESUME', 'KF-OTHER-001'), grantComment()];
+  assertDeniedThroughCli(comments, 'merge_grant_hold_duplicate');
+  const byBranch = [holdComment('HOLD', 'KF-OTHER-001'), holdComment('HOLD', 'KF-OTHER-001', {}, { implementation_branch: 'impl/x' }), holdComment('RESUME', 'KF-OTHER-001'), grantComment()];
+  assertDeniedThroughCli(byBranch, 'merge_grant_hold_duplicate');
+});
+
+test('CLI hold chronology referent (F9-005): a release between the two holds, then the target-naming re-HOLD and its release, merges once', () => {
+  assertMergedThroughCli([holdComment('HOLD', 'KF-OTHER-001'), holdComment('RESUME', 'KF-OTHER-001'), holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 }), holdComment('RESUME', 'KF-OTHER-001'), grantComment()]);
+});

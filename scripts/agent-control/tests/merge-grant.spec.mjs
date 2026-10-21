@@ -778,3 +778,56 @@ test('sameGrant compares the grant identity and its binding, and nothing else', 
   assert.equal(sameGrant(a, null), false);
   assert.equal(sameGrant(null, null), false);
 });
+
+// CG-REV-F9-005: per-packet hold chronology. Every hold claim in scope is
+// recorded on its packet whether or not it holds the target yet, so a first
+// hold is never forgotten before a later hold on that packet names the
+// target. A duplicate denies by name when the packet holds the target at any
+// point; a packet that never concerns the target is not this target's to judge.
+test('NC hold chronology (F9-005): a HOLD on another packet naming nothing of the target, then a HOLD on that packet naming the target, is a duplicate whatever follows', () => {
+  for (const fields of [{ pr_number: 87 }, { implementation_branch: 'impl/x' }]) {
+    const label = JSON.stringify(fields);
+    // Built in #80 order: the unrelated hold first, the target-naming hold second.
+    const first = holdComment('HOLD', 'KF-OTHER-001');
+    const second = holdComment('HOLD', 'KF-OTHER-001', {}, fields);
+    const v = verdict([first, second, holdComment('RESUME', 'KF-OTHER-001'), grantComment()]);
+    assert.equal(v.reason, GRANT_REASONS.HOLD_DUPLICATE, `first unrelated, second names the target: ${label}`);
+    assert.equal(v.detail.packet_id, 'KF-OTHER-001');
+    assert.equal(v.detail.hold.comment_id, first.id);
+    assert.equal(v.detail.duplicate.comment_id, second.id);
+    assert.equal(v.detail.duplicate.malformed, false);
+    // The opposite order denies the same way, naming the same two comments.
+    const a = holdComment('HOLD', 'KF-OTHER-001', {}, fields);
+    const b = holdComment('HOLD', 'KF-OTHER-001');
+    const m = verdict([a, b, holdComment('RESUME', 'KF-OTHER-001'), grantComment()]);
+    assert.equal(m.reason, GRANT_REASONS.HOLD_DUPLICATE, `first names the target, second unrelated: ${label}`);
+    assert.equal(m.detail.hold.comment_id, a.id);
+    assert.equal(m.detail.duplicate.comment_id, b.id);
+    // After the floor, and with two releases, the same.
+    const c = holdComment('HOLD', 'KF-OTHER-001');
+    const d = holdComment('HOLD', 'KF-OTHER-001', {}, fields);
+    assert.equal(reasonOf([directiveComment(), c, d, holdComment('RESUME', 'KF-OTHER-001'), holdComment('RESUME', 'KF-OTHER-001'), grantComment()]), GRANT_REASONS.HOLD_DUPLICATE, `after the floor: ${label}`);
+    // A malformed first hold on the readable packet is still its first hold.
+    const e = holdComment('HOLD', 'KF-OTHER-001', {}, { scope_changed: undefined });
+    const f = holdComment('HOLD', 'KF-OTHER-001', {}, fields);
+    const w = verdict([e, f, holdComment('RESUME', 'KF-OTHER-001'), grantComment()]);
+    assert.equal(w.reason, GRANT_REASONS.HOLD_DUPLICATE, `malformed first hold: ${label}`);
+    assert.equal(w.detail.hold.comment_id, e.id);
+    // Without any release the duplicate still denies by name, not merely as a hold.
+    const g = holdComment('HOLD', 'KF-OTHER-001');
+    const h = holdComment('HOLD', 'KF-OTHER-001', {}, fields);
+    assert.equal(reasonOf([g, h, grantComment()]), GRANT_REASONS.HOLD_DUPLICATE, `no release: ${label}`);
+  }
+  // Referent: a release between the two holds makes the second a re-HOLD, which its own release clears.
+  const cycle = [holdComment('HOLD', 'KF-OTHER-001'), holdComment('RESUME', 'KF-OTHER-001'), holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 }), holdComment('RESUME', 'KF-OTHER-001'), grantComment()];
+  assert.equal(verdict(cycle).granted, true, 'release between the two holds');
+  // Referent: two holds on a packet that never concerns the target still grant.
+  const unrelated = [holdComment('HOLD', 'KF-OTHER-001'), holdComment('HOLD', 'KF-OTHER-001'), grantComment()];
+  assert.equal(verdict(unrelated).granted, true, 'a packet that never concerns the target');
+  // Referent: a released target hold, then an unrelated hold on the same packet, holds nothing (per-hold, Q3).
+  const later = [holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 }), holdComment('RESUME', 'KF-OTHER-001'), holdComment('HOLD', 'KF-OTHER-001'), grantComment()];
+  assert.equal(verdict(later).granted, true, 'an unrelated hold after the target hold was released');
+  // An unreleased unrelated hold on the packet is still not reported as holding the target.
+  const unreleased = [holdComment('HOLD', 'KF-OTHER-001'), grantComment()];
+  assert.equal(verdict(unreleased).granted, true, 'one unrelated hold');
+});

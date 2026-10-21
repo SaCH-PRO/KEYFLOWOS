@@ -376,6 +376,16 @@ target's.
   No later RESUME is read as curing it: that history needs separately
   reviewed reconciliation. HOLD, HOLD_CLEAR, HOLD, HOLD_CLEAR is not a
   duplicate.
+- The chronology is kept per packet, for every hold claim in scope, whether
+  or not that claim holds the target yet (CG-REV-F9-005). A packet's first
+  hold is never forgotten before a later hold on the same packet names the
+  target's PR or branch, so the two orderings deny alike: a hold naming
+  nothing of the target followed by one naming it, and the reverse, are both
+  a duplicate on that packet, and its later release clears nothing. A
+  duplicate on a packet that never holds the target is not this target's to
+  judge. Whether an unreleased hold holds the target is still judged per
+  hold, so a packet's released target hold followed by an unrelated hold on
+  it does not hold the target.
 - Authority about other packets neither blocks nor moves the target. That
   includes a hold claim on another readable packet that names neither the
   target's PR nor its branch.

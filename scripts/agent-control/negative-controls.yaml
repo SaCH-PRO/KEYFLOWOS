@@ -3192,3 +3192,34 @@ negative_controls:
           if (String(touched).toLowerCase() !== 'false') {
     proof_command: node --test --test-name-pattern="NC hold release:" scripts/agent-control/tests/merge-grant.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-F9-HOLD-CHRONOLOGY-FORGOTTEN
+    claim: >
+      Every hold claim in scope enters the per-packet chronology (CG-REV-F9-005).
+      Recording a hold only once it already holds the target forgets the
+      first hold on a packet before a later hold on that packet names the
+      target PR or branch, so that packet's release then clears a history the
+      canonical fold stops as HOLD_DUPLICATE, and the grant goes through.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          active.set(key, e);
+      replace: |-
+          if (holdsTarget(e, t)) active.set(key, e);
+    proof_command: node --test --test-name-pattern="NC hold chronology" scripts/agent-control/tests/merge-grant.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-F9-CLI-HOLD-CHRONOLOGY-FORGOTTEN
+    claim: >
+      Through the real CLI, HOLD(other packet, unrelated), HOLD(same packet,
+      names the target PR), its release and an exact grant makes no merge
+      call in either mode; with the first hold forgotten the synthetic merge
+      PUT happens.
+    mutation:
+      file: scripts/agent-control/lib/merge-grant.mjs
+      find: |-
+          active.set(key, e);
+      replace: |-
+          if (holdsTarget(e, t)) active.set(key, e);
+    proof_command: node --test --test-name-pattern="NC CLI hold chronology" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000

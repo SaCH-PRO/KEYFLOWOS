@@ -75,7 +75,12 @@
  *     HOLD_CLEAR between them, is HOLD_DUPLICATE in the canonical fold. It
  *     denies (merge_grant_hold_duplicate) whatever follows: a later RESUME
  *     is not read as curing it, and the history needs separately reviewed
- *     reconciliation. HOLD, HOLD_CLEAR, HOLD, HOLD_CLEAR is not a duplicate;
+ *     reconciliation. HOLD, HOLD_CLEAR, HOLD, HOLD_CLEAR is not a duplicate.
+ *     The chronology is per packet and records every hold claim in scope,
+ *     whether or not it holds the target yet (CG-REV-F9-005), so both
+ *     orderings of an unrelated hold and a target-naming hold on one packet
+ *     deny alike; a duplicate on a packet that never holds the target is not
+ *     this target's to judge;
  *   - a hold claim on another readable packet that names neither the
  *     target's PR nor its branch does not apply, so an unrelated active
  *     packet neither blocks this target nor moves.
@@ -306,22 +311,25 @@ export function evaluateMergeGrant(comments, target, options = {}) {
   // (CG-REV-F9-004, A1): a hold claim older than that, whose packet cannot be
   // read and which names nothing of the target, holds nothing for it.
   const floor = ordered.indexOf(about[0]);
-  const active = new Map();
+  // Every hold claim in scope enters the per-packet chronology, keyed by the
+  // packet whose HOLD_CLEAR releases it, whether or not it holds the target
+  // yet (CG-REV-F9-005): the first hold on a packet is never forgotten
+  // before a later hold on that packet connects it to the target.
+  const active = new Map(); // packet -> its unreleased hold claim
+  const duplicates = new Map(); // packet -> the first second hold on it with no release between
+  const relevant = new Set(); // packets with at least one hold claim that holds the target
   for (const [index, e] of ordered.entries()) {
     if (claimsHold(e)) {
       if (index < floor && readablePacket(e) === null && !concerns(e, t)) continue;
       const key = releaseKey(e, t);
+      if (holdsTarget(e, t)) relevant.add(key);
       // A second hold on a held packet is HOLD_DUPLICATE in the canonical
       // fold, which stops there. No later RESUME is read as curing it.
       if (active.has(key)) {
-        const first = active.get(key);
-        return deny(GRANT_REASONS.HOLD_DUPLICATE, {
-          packet_id: key,
-          hold: { message_id: first.message_id, comment_id: first.comment_id },
-          duplicate: { message_id: e.message_id, comment_id: e.comment_id, malformed: e.problems.length > 0 },
-        });
+        if (!duplicates.has(key)) duplicates.set(key, { first: active.get(key), duplicate: e });
+        continue;
       }
-      if (holdsTarget(e, t)) active.set(key, e);
+      active.set(key, e);
       continue;
     }
     if (e.problems.length > 0) continue;
@@ -331,13 +339,27 @@ export function evaluateMergeGrant(comments, target, options = {}) {
     // It releases only the hold keyed by its own packet, exactly as written.
     if (e.message_type === 'RESUME' && releasesHold(e)) active.delete(field(e, 'packet_id'));
   }
-  const hold = [...active.values()].pop() ?? null;
+  // A duplicate denies by name when its packet holds the target at any point
+  // in the chronology, whichever of the two holds names the target and
+  // whatever came after them. Duplicates on packets that never concern the
+  // target are not this target's to judge.
+  for (const [key, { first, duplicate }] of duplicates) {
+    if (!relevant.has(key)) continue;
+    return deny(GRANT_REASONS.HOLD_DUPLICATE, {
+      packet_id: key,
+      hold: { message_id: first.message_id, comment_id: first.comment_id },
+      duplicate: { message_id: duplicate.message_id, comment_id: duplicate.comment_id, malformed: duplicate.problems.length > 0 },
+    });
+  }
+  // Whether an unreleased hold holds the target is judged per hold (Q3).
+  const holding = [...active].filter(([, h]) => holdsTarget(h, t));
+  const hold = holding.length ? holding[holding.length - 1][1] : null;
   const held = hold && {
     packet_id: releaseKey(hold, t),
     message_id: hold.message_id,
     comment_id: hold.comment_id,
     malformed: hold.problems.length > 0,
-    active: [...active].map(([packet, h]) => ({ packet_id: packet, message_id: h.message_id, comment_id: h.comment_id })),
+    active: holding.map(([packet, h]) => ({ packet_id: packet, message_id: h.message_id, comment_id: h.comment_id })),
   };
   if (hold) return deny(GRANT_REASONS.HOLD_ACTIVE, held);
 
