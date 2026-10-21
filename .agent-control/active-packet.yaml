@@ -6,7 +6,8 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REV-F9-003   # 6245277310; NO_STATE_CHANGE; CHANGES_REQUIRED; rules on CC-CONTRADICTION-F9-001 (Option A, Q1 to Q5); a bounded correction under CG-DIR-F9-001
   - CG-REV-F9-004   # 6248791378; NO_STATE_CHANGE; CHANGES_REQUIRED; rules on CC-CONTRADICTION-F9-002 (Option A1, the lifetime bound); CG-REV-F9-003 stands
   - CG-REV-F9-005   # 6315149276; NO_STATE_CHANGE; CHANGES_REQUIRED on CC-RETURN-F9-002; the per-packet hold chronology defect at bb2479a1; CG-REV-F9-003 and CG-REV-F9-004 stand
-  - CG-REV-F9-006   # 6324501015; NO_STATE_CHANGE; SEMANTIC_PASS on CC-RETURN-F9-003 at semantic 6b071fbf, artifact eecab6d7; zero unresolved substantive findings; not a grant, admission, ready transition, HOLD_CLEAR, checkpoint or release; CG-REV-F9-003 Q5 still controls bootstrap; the current authority
+  - CG-REV-F9-006   # 6324501015; NO_STATE_CHANGE; SEMANTIC_PASS on CC-RETURN-F9-003 at semantic 6b071fbf, artifact eecab6d7; zero unresolved substantive findings; not a grant, admission, ready transition, HOLD_CLEAR, checkpoint or release; CG-REV-F9-003 Q5 still controls bootstrap; the human-readable independent review
+  - CG-REVIEW-KF181-ADMISSION-RECORD-001   # 6325784397; NO_STATE_CHANGE; ACCEPT_FOR_ADMISSION; answers CC-ACK-F9-006; carries the machine-readable semantic evidence (reviewed_head 6b071fbf, semantic_review_outcome PASS, zero unresolved substantive findings) and orders this admission record; not PACKET_ADMISSION, a ready transition, a merge grant or bootstrap authorization; the current authority
 in_reply_to: human-operator-plan-completion-20261017
 ack_message_id: CC-ACK-F9-001
 ack_comment_id: 6240199516
@@ -48,8 +49,20 @@ semantic_pass:   # the independent review of CC-RETURN-F9-003 (6316392827); same
     CW-MOMENTUM-HELD-CG-REV-F9-005 (6323205536) is two failed invocations
     and reached nothing on the branch. The semantic_review block and the
     return artifact's review_status line wait for the admission record.
-current_authority_message_id: CG-REV-F9-006
-current_authority_comment_id: 6324501015
+admission_record:   # the admission-record instruction; same directive, owner, branch and PR; one control-only commit
+  review_message_id: CG-REVIEW-KF181-ADMISSION-RECORD-001
+  review_comment_id: 6325784397
+  ack_message_id: CC-ACK-KF181-ADMISSION-RECORD-001
+  ack_comment_id: 6325893209
+  writer: >
+    The same interactive session, single writer, plain fast-forward push.
+    The record cites 6325784397 as the ChatGPT evidence, because the live
+    reader finds no semantic_review_outcome in 6324501015. The evaluator's
+    newest-run-by-name selection at ecc34383 read four cancelled runs tied
+    at the same second as their successful twins; the evaluator is not
+    changed by this record, and the new head's runs are reported as read.
+current_authority_message_id: CG-REVIEW-KF181-ADMISSION-RECORD-001
+current_authority_comment_id: 6325784397
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
 implementation_branch: impl/kf-meta-merge-authority-001
 pr_number: 181
@@ -60,7 +73,7 @@ production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-review_status: SEMANTIC_PASS   # declared by CG-REV-F9-006 for 6b071fbf; claude-return.yaml keeps PENDING_CHATGPT_REVIEW until the admission record sets it
+review_status: ACCEPT_FOR_ADMISSION   # ordered by CG-REVIEW-KF181-ADMISSION-RECORD-001 (6325784397); not READY_TO_MERGE, not a grant
 
 objective: >
   Repair existing finding F9 (main's claude-return.yaml; reproduced in

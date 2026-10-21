@@ -26,6 +26,10 @@ semantic_pass_review_message_id: CG-REV-F9-006
 semantic_pass_review_comment_id: 6324501015
 semantic_pass_ack_message_id: CC-ACK-F9-006
 semantic_pass_ack_comment_id: 6324616806
+admission_record_review_message_id: CG-REVIEW-KF181-ADMISSION-RECORD-001
+admission_record_review_comment_id: 6325784397
+admission_record_ack_message_id: CC-ACK-KF181-ADMISSION-RECORD-001
+admission_record_ack_comment_id: 6325893209
 source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
 source_head: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
 implementation_branch: impl/kf-meta-merge-authority-001
@@ -37,7 +41,7 @@ production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: ACCEPT_FOR_ADMISSION   # CG-REVIEW-KF181-ADMISSION-RECORD-001 (6325784397); the semantic_review block below is written in the same commit; not READY_TO_MERGE and not a grant
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
 previous_return_message_ids:
@@ -83,13 +87,23 @@ review_findings:   # independent ChatGPT PR reviews; the outcome of the gate its
   - chatgpt: CG-REV-F9-005 (6315149276, at bb2479a1, semantics 7eb3a155) CHANGES_REQUIRED on CC-RETURN-F9-002; the per-packet hold chronology defect (HOLD other unrelated, HOLD other naming the target, release, grant read merge_grant_target_held, the contract requires merge_grant_hold_duplicate); CG-REV-F9-003 and CG-REV-F9-004 stand; corrected in 6b071fbf
   - copilot: 5599316193 (at eecab6d7) is NOT_RUN, quota exhausted
   - chatgpt: CG-REV-F9-006 (6324501015, at eecab6d7, semantics 6b071fbf) SEMANTIC_PASS on CC-RETURN-F9-003 (6316392827); zero unresolved substantive findings; both HOLD orderings tracked, a duplicate not cured by a later release, unrelated packets isolated, A1 floor and Q1-Q5 kept; not a grant, admission, ready transition, HOLD_CLEAR, checkpoint or release; Q5 still controls bootstrap; the gh-cursor skip, status.mjs --verify, an actual DAST scan and the Copilot review stay NOT_RUN and are not promoted to proof; the worker HELD message does not reverse the review or establish a grant
-  - independent: the independent semantic review of 6b071fbf is CG-REV-F9-006; its semantic_review record is written at admission, as the contract says
+  - independent: the independent semantic review of 6b071fbf is CG-REV-F9-006; the live reader finds no semantic_review_outcome in it, so the machine-readable evidence is the admission-record REVIEW below
+  - copilot: 5605095877 (at ecc34383) is NOT_RUN, quota exhausted
+  - chatgpt: CG-REVIEW-KF181-ADMISSION-RECORD-001 (6325784397, at ecc34383, semantics 6b071fbf) ACCEPT_FOR_ADMISSION; answers CC-ACK-F9-006; carries reviewed_head 6b071fbf, semantic_review_outcome PASS and unresolved_substantive_findings 0 at column zero; orders this admission record with the Copilot NOT_RUN citation at eecab6d7; notes that the evaluator's newest-run-by-name selection reads cancelled runs at ecc34383; not PACKET_ADMISSION, a ready transition, a merge grant or bootstrap authorization; Q5 stands
+
+previous_head_ecc34383:
+  semantic_head: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
+  record: the control-only commit that put CG-REV-F9-006 in the lineage; ACK CC-ACK-F9-006 (6324616806); no RETURN was posted for ecc34383
+  workflows: each required workflow has a completed successful run at this head (CI/CD Pipeline 39661803448, Agent Control Gate 39661881297 with 39661803601 and 39661801921, Branch divergence 39661803045 and 39661793724, DAST (HawkScan) 39661803219 with every scan step skipped, Agent Control Worker Proof 39661803307) and, for four of them, a cancelled twin created in the same second (CI/CD Pipeline 39661801932, Branch divergence 39661802004, DAST 39661801913, Agent Control Worker Proof 39661801885) because the push and a PR description edit landed at 19:27:30Z and the concurrency rule cancelled the first set
+  evaluator_selection: a read-only reproduction of evaluateAdmission's newest-run-by-name loop over the REST list (15 runs, cancelled twins listed first within the tie) selects the cancelled run for those four workflows, so the evaluator would not read this head as green; reported, not repaired, in this record (CG-REVIEW-KF181-ADMISSION-RECORD-001)
+  copilot: 5605095877 NOT_RUN, quota exhausted
+  superseded_by: the admission-record commit; the semantic head is unchanged
 
 previous_head_eecab6d7:
   semantic_head: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
   return: CC-RETURN-F9-003 (6316392827); reviewed by CG-REV-F9-006 (6324501015) SEMANTIC_PASS
   workflows: Agent Control Worker Proof 39596320666 (Windows 603 tests, 602 passed, 1 skipped, 247/247 negative controls LIVE; Ubuntu 579 tests, 578 passed, 1 skipped), CI/CD Pipeline 39596320669, Agent Control Gate 39596320656 and 39596491594, Branch divergence 39596313118 and 39596320690 and the Autopilot self-test 39596320703 concluded success; DAST (HawkScan) 39596320667 concluded success with every scan step skipped; Copilot review 5599316193 NOT_RUN, quota exhausted
-  superseded_by: the control-only commit that records CG-REV-F9-006 in the lineage; the semantic head is unchanged
+  superseded_by: ecc34383, the control-only commit that records CG-REV-F9-006 in the lineage; the semantic head is unchanged
 
 previous_head_ad118d32:
   semantic_head: a9a0581862e20b93f618045561319868b3a3f6f9
@@ -389,6 +403,25 @@ security:
   provider_traffic: false
   credentials: none created or read; tests use a synthetic token and a fetch that never forwards
 
+semantic_review:   # CG-REVIEW-KF181-ADMISSION-RECORD-001; judged by lib/semantic-review.mjs against the live PR reviews, the cited #80 comment and the compare-API lineage of eecab6d7
+  implementer: claude
+  reviews:
+    - provider: copilot
+      reviewer: copilot-pull-request-reviewer[bot]
+      reviewed_head: eecab6d770f396028149a49147296fe8258f4c26
+      outcome: NOT_RUN
+      reason: quota_exhausted
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/181#pullrequestreview-5599316193
+    - provider: chatgpt
+      reviewer: chatgpt
+      reviewed_head: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
+      outcome: PASS
+      reason: null
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6325784397
+      message_id: CG-REVIEW-KF181-ADMISSION-RECORD-001
+
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
     status: PENDING
@@ -401,4 +434,4 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
   - gate: Agent Control Worker Proof
     status: PENDING
   - gate: independent semantic review
-    status: PENDING   # for this head; the semantic head 6b071fbf it carries was reviewed SEMANTIC_PASS by CG-REV-F9-006 (6324501015), Copilot 5599316193 NOT_RUN quota exhausted; the semantic_review record is written at admission
+    status: PENDING   # for this head; the semantic head 6b071fbf it carries was reviewed SEMANTIC_PASS by CG-REV-F9-006 (6324501015) with the machine-readable evidence in 6325784397; Copilot 5599316193 NOT_RUN quota exhausted; see semantic_review
