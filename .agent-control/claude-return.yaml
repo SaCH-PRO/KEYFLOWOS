@@ -41,7 +41,7 @@ production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-review_status: ACCEPT_FOR_ADMISSION   # CG-REVIEW-KF181-ADMISSION-RECORD-001 (6325784397); the semantic_review block below is written in the same commit; not READY_TO_MERGE and not a grant
+review_status: ACCEPT_FOR_ADMISSION
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
 previous_return_message_ids:

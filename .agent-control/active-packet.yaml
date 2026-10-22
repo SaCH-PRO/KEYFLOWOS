@@ -73,7 +73,7 @@ production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-review_status: ACCEPT_FOR_ADMISSION   # ordered by CG-REVIEW-KF181-ADMISSION-RECORD-001 (6325784397); not READY_TO_MERGE, not a grant
+review_status: ACCEPT_FOR_ADMISSION
 
 objective: >
   Repair existing finding F9 (main's claude-return.yaml; reproduced in
