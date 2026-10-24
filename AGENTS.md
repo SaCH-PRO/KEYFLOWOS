@@ -146,6 +146,7 @@ Required rules:
 - Every meaningful update reports health as `GREEN / PROGRESSING`, `YELLOW / FRICTION`, or `RED / BLOCKED`.
 - Trigger a momentum report after 6 substantive operations without a state transition, after 2 materially identical failed attempts, after 2 CI failures without a new root cause, or whenever activity could be mistaken for progress.
 - Maintain an explicit scope ledger: declared, resolved, remaining, deferred, dropped, superseded. Nothing may silently disappear because tests pass.
+- Every PR intended to reach `main` must declare and prove its PR Unlock Contract (`docs/development/PR_UNLOCK_CONTRACT.md`); green tests alone do not establish net-positive progress.
 - A packet is not complete until its completion contract is satisfied: scope accounted for, invariant satisfied, implementation complete or N/A, proof passed, failure cases tested, regressions/CI green, no unexplained deferrals, merged, post-merge verified, and durable handoff updated.
 - Separate code/architecture health from process/admission health.
 - A failing gate is information. Do not weaken tests, gates, branch thresholds, or proof obligations merely to obtain green status.

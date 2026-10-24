@@ -1,0 +1,57 @@
+version: 1
+work_id: ""
+implementation_branch: ""
+pr_number: null
+state: DECLARED
+
+classifications: []
+
+product:
+  effect: NONE
+  claim: ""
+
+key:
+  effect: NONE
+  claim: ""
+  dimensions: []
+
+development:
+  effect: NONE
+  claim: ""
+
+reliability:
+  effect: NONE
+  claim: ""
+
+enables: []
+converges: []
+complexity_cost: []
+
+proof:
+  obligations: []
+  evidence: []
+
+post_merge_verified: false
+
+net_value:
+  verdict: null
+  rationale: ""
+
+# Optional for architecture-affecting work originating in repository R&D.
+rnd_lineage:
+  programme: null
+  observations: []
+  genes: []
+  anti_genes: []
+  convergence_decisions: []
+  canonical_primitives: []
+  target_contracts: []
+  existing_owner: null
+  duplicate_risk_checked: false
+  authority_impact: none
+  implementation_effect: null
+  validation:
+    negative_controls: []
+    runtime_evidence: []
+  supersedes: []
+  open_contradictions: []
