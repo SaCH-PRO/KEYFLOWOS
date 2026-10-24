@@ -7,6 +7,8 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  # Read-only: the non-draft step reads the #80 merge grant (F9).
+  issues: read
 
 jobs:
   agent-control:
@@ -99,9 +101,20 @@ jobs:
             exit 1
           fi
 
+      # The artifact status below is written by the builder, so it is never the
+      # merge decision. The step also requires the distinct #80 ChatGPT grant
+      # for this exact PR, packet, branch, semantic head, final head and base,
+      # through the predicate the merger uses (lib/merge-grant.mjs; F9). It
+      # runs --grant-only, never the full evaluator: that one waits for this
+      # gate's own successful run.
       - name: Require ChatGPT admission before non-draft merge readiness
         if: steps.scope.outputs.required == 'true' && github.event.pull_request.draft == false
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           RETURN=".agent-control/claude-return.yaml"
@@ -124,6 +137,14 @@ jobs:
               exit 1
               ;;
           esac
+
+          grant_status=0
+          grant="$(node scripts/agent-control/auto-merge-admitted.mjs --grant-only)" || grant_status=$?
+          echo "$grant"
+          if [ "$grant_status" -ne 0 ]; then
+            echo "::error::Non-draft impl/* PR requires a valid, current #80 ChatGPT merge grant for this exact PR, packet, branch, semantic head, head and base (exit $grant_status)"
+            exit 1
+          fi
 
       - name: Summary
         shell: bash

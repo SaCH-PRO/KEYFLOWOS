@@ -276,7 +276,149 @@ A packet PR is merge-eligible only when:
   `converted_to_draft`, `renamed` or `base_ref_changed` transition newer than a
   workflow's latest run means GitHub is about to create a run the list may not
   show yet;
-- no unresolved contradiction or unexplained defer/drop remains.
+- no unresolved contradiction or unexplained defer/drop remains;
+- a distinct ChatGPT merge grant for this exact target is current on issue #80
+  (see "The merge grant"). Everything above is necessary, and none of it is
+  the decision to merge.
+
+### The merge grant
+
+(KF-META-MERGE-AUTHORITY-001, CG-DIR-F9-001; repairs finding F9)
+
+Before this repair, `READY_STATUSES` in `lib/admission.mjs` took
+`ACCEPT_FOR_ADMISSION` exactly as it took `READY_TO_MERGE`. The non-draft gate
+step took either, and nothing on the merge path read a grant. With an accepted
+record on a PR head, the draft flag was the one thing between that record and
+the automated merge, so leaving draft was in effect the merge decision.
+
+A readiness status, a semantic PASS, a green workflow or the builder-written
+`merge_authority:` line of an artifact is never merge authority by itself. The
+grant is a separate ChatGPT message, read by one predicate,
+`evaluateMergeGrant()` in `scripts/agent-control/lib/merge-grant.mjs`. The
+evaluator calls it last, in both snapshots, and so does the non-draft gate
+step. It reads control fields only through `lib/control-envelope.mjs` and the
+effect only through `readEffect()`. Neither changes.
+
+A grant is a valid authority message on the target repository's issue #80 that:
+
+- is a `REVIEW` from an allowlisted account, in an unedited, completely
+  observed and orderable collection (`collectAuthority()`; any edit to an
+  allowlisted comment makes every grant unverifiable, as it does every other
+  authority);
+- carries `merge_authority: true` and `review_status: READY_TO_MERGE`.
+  `ACCEPT_FOR_ADMISSION` accepts a record and is never the decision; the
+  repository needs a later, distinct grant;
+- carries a `control_effect:` that `readEffect()` reads as `NO_STATE_CHANGE`
+  or `PACKET_ADMISSION`, with `production_touched: false`;
+- names its target exactly, each in its own field: `pr_number`, `packet_id`,
+  `implementation_branch`, `source_head` (the semantic head), `pr_head` (the
+  final artifact head) and `source_main` (the base). A `repository:` field,
+  when present, names the target too, and the comment's own URL must be on
+  that repository's control issue.
+
+`NO_STATE_CHANGE` is allowed so that a bounded meta repair can be merged
+without moving the active application packet. The PR 159 grant
+(`CG-REVIEW-KF159-EXACT-HEAD-MERGE-AUTH-001`, comment 6111001643) is the
+shape. `NO_STATE_CHANGE` alone is not a grant: every field above is still
+required. No global `READY_TO_MERGE` projection is required, and the
+programme projection is not read.
+
+Ordering, holds and revocation are target-scoped. A message is about the
+target when its `packet_id`, `pr_number` or `implementation_branch` is the
+target's.
+
+- The newest valid authority message about the target must be the grant. A
+  later one of any kind voids it: a REVIEW without the grant, a
+  `CHANGES_REQUIRED`, a HOLD or a new DIRECTIVE. Only a new grant at the
+  current binding restores it, and a RESUME after a HOLD is itself newer, so
+  the grant is posted after the RESUME.
+- A malformed authority candidate after the grant that is, or may be, about
+  the target denies (`merge_grant_ambiguous_authority`). That includes one
+  whose packet, PR or branch field is unreadable. A malformed candidate
+  before the grant is superseded by it, unless it is a hold claim.
+- Holds are read over every candidate, valid or malformed, in #80 order
+  (CG-REV-F9-003). A hold claim is a candidate whose `message_type` is not
+  exactly one of DIRECTIVE, REVIEW or RESUME: a HOLD, or a type that cannot
+  be read (absent, repeated or undeclared). Every `message_type` value is
+  read, so a repeat cannot hide a HOLD behind a REVIEW. A hold claim holds
+  the target when its packet is the target's or cannot be read, or when it
+  names the target's PR number or implementation branch under another packet.
+- The target's lifetime starts at its floor: its first valid authority
+  message (packet, PR or branch), in #80 order (CG-REV-F9-004, A1). A hold
+  claim whose packet cannot be read, and which names none of the target's
+  packet, PR or branch, holds nothing for the target when it is older than
+  the floor. It does not count as a hold for the duplicate rule either. At or
+  after the floor, it holds, before or after the grant. A claim on a readable
+  packet, or one that names the target, keeps its scope whatever its age.
+  This keeps the 2026-09-25 non-authoritative PLAN 5826799265, which has no
+  packet, from being a permanent hold on every later packet. The cost, stated
+  rather than hidden: a packet-less malformed HOLD posted before a packet's
+  first valid authority does not hold that packet.
+- A hold denies, whichever side of the grant it falls, until a later valid
+  RESUME whose effect `readEffect()` reads as `HOLD_CLEAR` for the hold's own
+  packet. For a hold whose packet cannot be read, that is the target's packet.
+  These release nothing:
+  - a RESUME with a missing, unknown or other effect;
+  - one with `production_touched` other than false;
+  - one with a health present and outside GREEN/YELLOW/RED. A null or blank
+    health is absent, as `readEffect()` reads it;
+  - a `HOLD_CLEAR` for another packet, including one that names only the
+    target's PR or branch;
+  - one older than the HOLD;
+  - a RESUME that is not valid authority (outside the allowlist, not from
+    chatgpt, or malformed).
+
+  Packet ids match exactly as written: case and whitespace are other packets.
+  A later HOLD needs its own later release.
+- A second hold claim on a packet that is already held, with no valid
+  `HOLD_CLEAR` between them, denies (`merge_grant_hold_duplicate`) whatever
+  follows. This is HOLD_DUPLICATE in the canonical fold, which stops there.
+  No later RESUME is read as curing it: that history needs separately
+  reviewed reconciliation. HOLD, HOLD_CLEAR, HOLD, HOLD_CLEAR is not a
+  duplicate.
+- The chronology is kept per packet, for every hold claim in scope, whether
+  or not that claim holds the target yet (CG-REV-F9-005). A packet's first
+  hold is never forgotten before a later hold on the same packet names the
+  target's PR or branch, so the two orderings deny alike: a hold naming
+  nothing of the target followed by one naming it, and the reverse, are both
+  a duplicate on that packet, and its later release clears nothing. A
+  duplicate on a packet that never holds the target is not this target's to
+  judge. Whether an unreleased hold holds the target is still judged per
+  hold, so a packet's released target hold followed by an unrelated hold on
+  it does not hold the target.
+- Authority about other packets neither blocks nor moves the target. That
+  includes a hold claim on another readable packet that names neither the
+  target's PR nor its branch.
+- RESUME provenance is as in the fold. The predicate reads only the target
+  repository's issue #80, from the caller, and only allowlisted authors. A
+  RESUME's comment URL and any body `repository:` field are not release
+  conditions, and no authentication is inferred from them.
+
+The binding is acyclic. The grant names the final artifact head, so it is
+posted after that commit exists. The artifact never names the grant and is
+never rewritten to carry its own SHA. The order is: control-only artifact
+commit; grant on #80; ready-for-review transition; the non-draft gate run;
+then the evaluator. A head or base that moves after the grant makes it stale,
+and a new grant is needed.
+
+The non-draft step of the Agent Control Gate runs
+`auto-merge-admitted.mjs --grant-only`. That mode reads the PR, its two
+artifacts and #80, and applies artifact binding and the same predicate. It
+never reads workflow runs, because the full evaluator waits for this gate's
+own successful run. It must also match the event's head and base
+(`EXPECTED_HEAD_SHA`, `EXPECTED_BASE_SHA`). The step runs the PR's own copy
+of the script, as every `pull_request` step does. The authoritative check is
+the evaluator, which the autopilot runs from trusted main.
+
+Residual limits, stated rather than claimed away:
+
+- The second snapshot is the last read before the SHA-pinned merge call. A
+  #80 comment posted after that read is not atomic with the call. A
+  revocation in that window is seen only by the next evaluation, and the pin
+  protects the tree, not the authority.
+- Every authority comment is posted from one shared GitHub account. The
+  allowlist attests the account, not which agent wrote the words.
+- A comment deleted from #80 cannot be detected from a snapshot.
 
 ### Every merge goes through the exact-head evaluator
 
@@ -676,9 +818,12 @@ The rules:
   projection advances work. No broad programme-map refresh is authorized by
   this layer.
 - The exact-head merge path (`auto-merge-admitted.mjs`) does not read
-  programme-state. It gates on the PR's own control artifacts and live PR/CI
-  state, so a stale projection cannot cause a merge, and a merged PR cannot be
-  merged twice (`pr_not_open`).
+  programme-state. It gates on the PR's own control artifacts, live PR/CI
+  state and the target-scoped #80 merge grant (see "The merge grant"). A
+  stale projection cannot cause a merge, and a merged PR cannot be merged
+  twice (`pr_not_open`). Folding a `PACKET_ADMISSION` with
+  `merge_authority: true` projects the packet, but the projection is not the
+  grant the merge path reads.
 
 
 ## Successor platform/workflow convergence programme
