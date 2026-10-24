@@ -114,6 +114,16 @@ authenticated `gh` and Claude sessions. It stores no credential.
   (`-WorktreeRoot` to change it; it may not be inside the checkout). The worker
   keeps a worktree that has uncommitted changes or commits on no remote. It
   logs `kept worktree` and never deletes that work.
+- **Worktree names fit the path limit.** Windows refuses a path of 260
+  characters unless `core.longpaths` is set. The worker measures the longest
+  tracked path of the worktree's base and keeps it within 240 characters. When
+  the whole message id does not fit, the directory is the head of the id plus
+  eight hex digits of its SHA-256 (the same on every attempt). A worktree
+  already made under the whole id is found first.
+- **A worktree that cannot be made is a failed attempt.** It is counted like
+  a failed run: two identical failures hold the directive and post one
+  MOMENTUM, and Claude is never woken for it. A failed `git fetch` is not
+  counted; it is retried on the next tick.
 - **Install contract.** The worker wakes Claude only when
   `.agent-control/.worker/install.json` matches its contract version. An
   autostart left from an older worker stays a no-op (`WAITING_OPERATOR`) until
@@ -165,6 +175,8 @@ Agent Control Gate enforces the same contract with or without automation.
 | Worker logs `verdict_unreadable exit=<n>` | `evaluate-run.ps1` did not print a verdict for a finished run | the run is counted as failed and stays retryable; the transcript is in `.agent-control/.worker/run-<id>-attempt<n>.json` |
 | Two `claude-worker.ps1` processes | a second install from another `-RepoRoot`; the lock does not span repo roots | `Get-CimInstance Win32_Process` filtered on `claude-worker`; keep the one running from the pinned checkout and stop the other by PID |
 | Worker logs `HELD_RETRYABLE` | two identical failures on one directive | read the MOMENTUM it posted; fix the blocker, then post a newer directive or run `-ReleaseHold <id>` |
+| Worker logs `worktree_unavailable: ...` | the worktree for a directive could not be made: `git worktree add` failed, a directory of that name is in the way and is not a worktree, or the worktree root is too deep to leave room for a name | Claude was not woken. The second identical failure holds the directive and posts a MOMENTUM. Fix the cause (move the directory, use a shorter `-WorktreeRoot`), then `-ReleaseHold <id>` |
+| Before this check existed: `git worktree add failed` on every tick, with an empty `attempts.json` and nothing on #80 | a long message id put the worktree's longest path over 260 characters | upgrade the worker from admitted main; until then a newer directive with a shorter id supersedes the stuck one |
 | Worker logs `kept worktree` | the wake left uncommitted or unpushed work | inspect it under the worktree root; push or discard it, then `git worktree remove <path>` |
 | Same directive processed twice | cursor lost or purged | ids live in `.agent-control/.worker/cursor.json`; restore it or accept one replay — the repository gates still apply |
 | Autopilot posted no AUTO_EVENT | event was not actionable, or was a duplicate | duplicates are suppressed by idempotency key; check the workflow log |

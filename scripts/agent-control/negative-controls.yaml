@@ -343,6 +343,101 @@ negative_controls:
     proof_command: node --test --test-name-pattern="unreadable output is not a decision" scripts/agent-control/tests/windows/worker-code-missing.spec.mjs
     timeout_ms: 300000
 
+  - id: NC-WORKER-WORKTREE-PATH-BUDGET
+    claim: >
+      A worktree is named after its directive, and a long id put the
+      repository's longest tracked path past what Windows allows, so the worker
+      could not deliver the directive at all (2026-10-11). The defect names the
+      worktree after the whole id whatever its length.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($safe.Length -le $room) { return $safe }"
+      replace: "  if ($true) { return $safe }"
+    proof_command: node --test --test-name-pattern="a long directive id still gets a worktree" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-NAME-STABLE
+    claim: >
+      A shortened worktree name is derived from the message id alone, so a retry
+      resumes where the last attempt stopped. The defect derives it from
+      something that changes on every tick.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "$digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($MessageId))"
+      replace: "$digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes([guid]::NewGuid().ToString()))"
+    proof_command: node --test --test-name-pattern="a retry resumes in the same worktree" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-NAME-DISTINCT
+    claim: >
+      Two long ids that share a head get two worktrees. The defect drops the
+      digest, so a second directive would run in the first one's worktree.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  return $safe.Substring(0, $room - 9) + '-' + $tag"
+      replace: "  return $safe.Substring(0, $room - 9) + '-00000000'"
+    proof_command: node --test --test-name-pattern="another long id gets its own" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-FULL-ID-REUSED
+    claim: >
+      A worktree made under the whole id by an earlier attempt is found again,
+      so its partial work is not stranded beside a new shortened one.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if (-not (Test-Path $path)) {"
+      replace: "  if ($true) {"
+    proof_command: node --test --test-name-pattern="one made under the whole id is found again" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-EARLIER-ATTEMPT-FOUND-BY-TAG
+    claim: >
+      A retry runs in the shortened worktree its first attempt was given, even
+      when the base's longest path has changed since. Recomputing the name
+      gives a different directory and strands the first attempt's work
+      (review of 2d012625).
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "    if ($earlier) { $path = $earlier }"
+      replace: "    if ($false) { $path = $earlier }"
+    proof_command: node --test --test-name-pattern="after the base loses its longest path" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-AMBIGUOUS-TAG-NOT-GUESSED
+    claim: >
+      Two directories carrying one directive's tag are a counted failure. The
+      worker does not pick one and run beside the wrong partial work.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($found.Count -gt 1) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="two directories carrying one directive" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-FAILURE-COUNTED
+    claim: >
+      A worktree that cannot be made is a failed attempt. Thrown before the
+      ledger it was retried every interval for ever and never reached the
+      control room. The defect stops recording it.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "    $entry = Register-FailedAttempt -Directive $directive -Reason $reason"
+      replace: "    $entry = [pscustomobject]@{ held = $false }"
+    proof_command: node --test --test-name-pattern="a worktree that cannot be made is counted" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-FETCH-FAILURE-NOT-COUNTED
+    claim: >
+      A failed fetch is an outage, not a defect of the directive. Counting it
+      would hold a directive after four minutes offline until an operator
+      released it.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "throw 'git fetch origin failed; not waking claude on a stale base'"
+      replace: "throw (New-WorktreeUnavailable 'git fetch origin failed; not waking claude on a stale base')"
+    proof_command: node --test --test-name-pattern="a failed fetch is the network" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
   - id: NC-AUTOPILOT-HOURLY-STATUS-UNDER-ERREXIT
     claim: >
       The hourly sweep reads the evaluator's status where `bash -e` cannot end
