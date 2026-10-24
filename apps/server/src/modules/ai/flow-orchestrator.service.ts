@@ -24,6 +24,9 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiOversightService, type GovernanceDecision } from './ai-oversight.service';
 import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
 import { FinanceAccountsService } from '../finance/finance-accounts.service';
+import { SafeToSpendService } from '../finance/safe-to-spend.service';
+import { CashflowForecastService } from '../finance/cashflow-forecast.service';
+import { MoneyMovesService } from '../finance/money-moves.service';
 import { BankMatchingService } from '../finance/bank-matching.service';
 import { FinanceCoaService } from '../finance/finance-coa.service';
 import { PostingService } from '../finance/posting.service';
@@ -699,6 +702,15 @@ export class FlowOrchestratorService {
   }
   private getFinanceAccounts() {
     return this.moduleRef.get(FinanceAccountsService, { strict: false });
+  }
+  private getSafeToSpend() {
+    return this.moduleRef.get(SafeToSpendService, { strict: false });
+  }
+  private getCashflowForecast() {
+    return this.moduleRef.get(CashflowForecastService, { strict: false });
+  }
+  private getMoneyMoves() {
+    return this.moduleRef.get(MoneyMovesService, { strict: false });
   }
   private getFinanceCoa() {
     return this.moduleRef.get(FinanceCoaService, { strict: false });
@@ -5406,6 +5418,27 @@ ${triage.standingContext}`;
       case 'finance_cashflow': {
         const { from, to } = this.parseReportRange(args.from, args.to);
         return this.getLedgerReporting().getCashflow(businessId, from, to, this.parseBasis(args.basis));
+      }
+
+      // Forward-looking finance intelligence uses the same domain services as
+      // the Finance screen and the legacy KEY registry. These are distinct from
+      // finance_cashflow: one is a historical ledger report; the forecast is a
+      // projection. Keeping them as separate canonical capabilities prevents a
+      // semantic alias from turning prediction into observed fact.
+      case 'finance_safe_to_spend':
+        return this.getSafeToSpend().calculate(businessId);
+
+      case 'finance_cashflow_forecast': {
+        const horizonDays = Number(args.horizonDays ?? 90);
+        if (!Number.isFinite(horizonDays) || horizonDays < 1 || horizonDays > 365) {
+          throw new Error(`horizonDays must be between 1 and 365 — got ${JSON.stringify(args.horizonDays)}`);
+        }
+        return this.getCashflowForecast().forecast(businessId, Math.floor(horizonDays));
+      }
+
+      case 'finance_money_moves': {
+        const moves = await this.getMoneyMoves().generate(businessId);
+        return { moves };
       }
 
       case 'finance_balance_sheet': {
