@@ -305,14 +305,43 @@ jobs:
           # A failed listing is not "no open PRs": inside a process
           # substitution its status was lost and the job passed having
           # reconciled nothing.
-          if ! listing="$(gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("impl/")) | .number')"; then
+          #
+          # Discovery reads EVERY open PR (lib/pr-discovery.mjs); `gh pr list`
+          # returned only the 30 newest. Each line is `<number> <mode>`:
+          #   merge   -- inside the 30-PR window the sweep has always had;
+          #              reconciled exactly as before.
+          #   observe -- outside it; evaluated WITHOUT --merge and reported.
+          # Complete discovery widens what the sweep sees, not what it may
+          # merge. Widening the merge window is a decision for authority.
+          if ! listing="$(node scripts/agent-control/list-open-impl-prs.mjs)"; then
             echo "::error::could not list open pull requests; nothing was reconciled"
             exit 1
           fi
           mapfile -t prs <<< "$listing"
           failures=0
-          for pr in "${prs[@]:-}"; do
-            [ -z "$pr" ] && continue
+          for entry in "${prs[@]:-}"; do
+            [ -z "$entry" ] && continue
+            pr="${entry%% *}"
+            mode="${entry##* }"
+            if [ "$mode" = "observe" ]; then
+              echo "::group::Observing PR #$pr (outside the merge window)"
+              status=0
+              json="$(PR_NUMBER="$pr" node scripts/agent-control/auto-merge-admitted.mjs)" || status=$?
+              echo "$json"
+              case "$status" in
+                0) echo "::warning::PR #$pr is eligible but outside the sweep's merge window; it was NOT merged" ;;
+                3) echo "PR #$pr not eligible (observed only, no action)" ;;
+                *) echo "::error::PR #$pr evaluator failed with status $status"; failures=$((failures+1)) ;;
+              esac
+              echo "::endgroup::"
+              continue
+            fi
+            # Anything that is not exactly `merge` is never treated as it.
+            if [ "$mode" != "merge" ]; then
+              echo "::error::discovery returned an unreadable entry: $entry"
+              failures=$((failures+1))
+              continue
+            fi
             echo "::group::Reconciling PR #$pr"
             # `shell: bash` runs this script under `bash -e`. The status is
             # taken in the same list as the command, so a non-zero evaluator

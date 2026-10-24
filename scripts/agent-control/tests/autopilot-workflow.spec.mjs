@@ -62,9 +62,11 @@ function step(job, name) {
 const HOURLY = () => step('hourly-reconcile-open-prs', 'Reconcile every open implementation PR');
 const EXACT = () => step('exact-head-auto-merge', 'Merge only an exactly admitted head');
 
+// The sweep no longer lists PRs through gh. If a step calls it, that is a
+// regression to the 30-PR listing, and it must show.
 const STUB_GH = `#!/usr/bin/env bash
-if [ -f "$KF_STUB_DIR/gh-fails" ]; then echo "gh: HTTP 502" >&2; exit 1; fi
-cat "$KF_STUB_DIR/prs"
+echo "gh was called: $*" >> "$KF_STUB_DIR/gh-calls"
+exit 99
 `;
 
 // Stands in for both scripts the steps run. As the evaluator: one JSON object
@@ -72,6 +74,12 @@ cat "$KF_STUB_DIR/prs"
 // it was handed and exits with the status chosen for that PR (default 0).
 const STUB_NODE = `#!/usr/bin/env bash
 case "$1" in
+  *list-open-impl-prs.mjs)
+    # As discovery: \`<number> <mode>\` lines, or status 2 with an EMPTY stdout.
+    if [ -f "$KF_STUB_DIR/discovery-fails" ]; then echo "open pull request discovery failed: 502" >&2; exit 2; fi
+    cat "$KF_STUB_DIR/prs"
+    exit 0
+    ;;
   *record-auto-merge.mjs)
     printf '%s\\n' "$MERGE_JSON" >> "$KF_STUB_DIR/records"
     pr="$(printf '%s' "$MERGE_JSON" | sed -n 's/.*"pr":\\([0-9]*\\).*/\\1/p')"
@@ -91,15 +99,18 @@ exit "$(sed -n 1p "$answer")"
  * Runs a step's script as GitHub would. `answers` maps a PR number to the
  * evaluator's [exit status, stdout] for it.
  */
-function runStep(script, { prs = [], answers = {}, ghFails = false, recordStatus = {}, env = {} } = {}) {
+function runStep(script, { prs = [], observe = [], entries = null, answers = {}, ghFails = false, recordStatus = {}, env = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-autopilot-'));
   try {
     const bin = path.join(dir, 'bin');
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, 'gh'), STUB_GH, { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'node'), STUB_NODE, { mode: 0o755 });
-    fs.writeFileSync(path.join(dir, 'prs'), prs.map((n) => `${n}\n`).join(''));
-    if (ghFails) fs.writeFileSync(path.join(dir, 'gh-fails'), '');
+    // `prs` are inside the merge window, `observe` outside it; `entries`
+    // gives the raw lines when a test needs something discovery never prints.
+    const lines = entries || [...prs.map((n) => `${n} merge`), ...observe.map((n) => `${n} observe`)];
+    fs.writeFileSync(path.join(dir, 'prs'), lines.map((l) => `${l}\n`).join(''));
+    if (ghFails) fs.writeFileSync(path.join(dir, 'discovery-fails'), '');
     for (const [pr, [status, stdout]] of Object.entries(answers)) {
       fs.writeFileSync(path.join(dir, `pr-${pr}`), `${status}\n${stdout}\n`);
     }
@@ -125,7 +136,11 @@ function runStep(script, { prs = [], answers = {}, ghFails = false, recordStatus
     assert.equal(run.error, undefined, `bash must be runnable: ${run.error && run.error.message}`);
     const callsFile = path.join(dir, 'calls');
     const recordsFile = path.join(dir, 'records');
+    const callLines = fs.existsSync(callsFile) ? fs.readFileSync(callsFile, 'utf8').split(/\r?\n/).filter(Boolean) : [];
     return {
+      // Every evaluator call: which PR, and whether it was allowed to merge.
+      calls: callLines.map((l) => ({ pr: Number(l.split(' ')[0]), merge: l.split(' ').includes('--merge') })),
+      ghCalled: fs.existsSync(path.join(dir, 'gh-calls')),
       // What the recorder was handed, one evaluator result per call, in order.
       records: fs.existsSync(recordsFile)
         ? fs.readFileSync(recordsFile, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l))
@@ -195,6 +210,53 @@ test('hourly: no open impl PR is a clean no-op', () => {
   const r = runStep(HOURLY(), { prs: [] });
   assert.equal(r.status, 0, r.out);
   assert.deepEqual(r.evaluated, []);
+});
+
+// ---------------------------------- hourly sweep: complete, read-only discovery
+
+test('hourly: the sweep takes its PR list from discovery, not from gh', () => {
+  const r = runStep(HOURLY(), { prs: [162], answers: { 162: DRAFT } });
+  assert.equal(r.status, 0, r.out);
+  assert.equal(r.ghCalled, false, 'gh pr list returns only the 30 newest open PRs');
+  assert.ok(HOURLY().includes('node scripts/agent-control/list-open-impl-prs.mjs'));
+});
+
+test('hourly: a PR outside the merge window is evaluated WITHOUT --merge, inside it WITH', () => {
+  const r = runStep(HOURLY(), { prs: [162, 159], observe: [94, 63], answers: { 162: DRAFT, 159: NOT_ADMITTED, 94: NOT_ADMITTED, 63: DRAFT } });
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(r.calls, [
+    { pr: 162, merge: true }, { pr: 159, merge: true },
+    { pr: 94, merge: false }, { pr: 63, merge: false },
+  ]);
+  assert.match(r.out, /PR #94 not eligible \(observed only, no action\)/);
+});
+
+test('hourly: an eligible PR outside the merge window is reported and NOT merged or recorded', () => {
+  // Without --merge the evaluator exits 0 for an eligible PR and merges nothing.
+  const eligible = [0, JSON.stringify({ eligible: true, head_sha: 'b'.repeat(40), pr: 94 })];
+  const r = runStep(HOURLY(), { prs: [162], observe: [94], answers: { 162: DRAFT, 94: eligible } });
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(r.calls.find((c) => c.pr === 94), { pr: 94, merge: false });
+  assert.deepEqual(r.records, [], 'nothing merged, so nothing is recorded as a merge');
+  assert.match(r.out, /^::warning::PR #94 is eligible but outside the sweep's merge window; it was NOT merged$/m);
+  assert.doesNotMatch(r.out, /PR #94 merged at its admitted head/);
+});
+
+test('hourly: an evaluator error on an observed PR fails the job and the sweep still finishes', () => {
+  const r = runStep(HOURLY(), { prs: [162], observe: [94, 63], answers: { 162: DRAFT, 94: EVALUATOR_ERROR, 63: DRAFT } });
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /^::error::PR #94 evaluator failed with status 2$/m);
+  assert.deepEqual(r.calls.map((c) => c.pr), [162, 94, 63]);
+});
+
+test('hourly: an entry that is not exactly merge or observe is an error and is never evaluated', () => {
+  for (const entry of ['94', '94 MERGE', '94 merge-all', '94 ']) {
+    const r = runStep(HOURLY(), { entries: [entry, '162 merge'], answers: { 162: DRAFT, 94: merged(94) } });
+    assert.equal(r.status, 1, `${JSON.stringify(entry)}: ${r.out}`);
+    assert.match(r.out, /^::error::discovery returned an unreadable entry/m);
+    assert.deepEqual(r.calls, [{ pr: 162, merge: true }], 'the unreadable entry is skipped, the rest still reconciled');
+    assert.deepEqual(r.records, []);
+  }
 });
 
 // ------------------------------------------- hourly sweep: the merge record
