@@ -8,19 +8,23 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022210803; the same reading with its three evidence fields at top level
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023054785; historical re-anchor order, superseded by review 006
   - CG-REVIEW-KF155-006   # 6240050804; exact semantic evidence and explicit contradiction ruling; NO_STATE_CHANGE
-in_reply_to: CG-REVIEW-KF155-006
+  - CG-DIR-KF155-INTEGRATION-PREFLIGHT-001   # 6377588599; NO_STATE_CHANGE; read-only integration preflight after the F9 squash b1948d27; answered by CC-PROGRESS-KF155-INTEGRATION-PREFLIGHT-001 (6377690235)
+  - CG-DIR-KF155-INTEGRATION-001   # 6378173450; NO_STATE_CHANGE; authorizes the ordinary merge of main b1948d27 (commit M) and one control-only artifact commit (A); no rebase, ready transition, admission, merge or credit; the current authority
+in_reply_to: CG-DIR-KF155-INTEGRATION-001
 ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-001
 ack_comment_id: 6010899764
-current_authority_message_id: CG-REVIEW-KF155-006
-current_authority_comment_id: 6240050804
-current_authority_ack_message_id: null
+current_authority_message_id: CG-DIR-KF155-INTEGRATION-001
+current_authority_comment_id: 6378173450
+current_authority_ack_message_id: CC-ACK-KF155-INTEGRATION-001
+current_authority_ack_comment_id: 6378224563
 current_authority_response_message_id: null
 current_authority_response_comment_id: null
-last_acked_authority_message_id: CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
-last_acked_authority_ack_message_id: CC-ACK-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004
-last_acked_authority_ack_comment_id: 6022283475
+last_acked_authority_message_id: CG-DIR-KF155-INTEGRATION-001
+last_acked_authority_ack_message_id: CC-ACK-KF155-INTEGRATION-001
+last_acked_authority_ack_comment_id: 6378224563
 pr_number: 155
-source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
+source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
+previous_source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd   # the base from the 2026-10-11 integration until the F9 squash; before it, ac3a6384417093f198bcc7d672b0dbc295db137c
 implementation_branch: impl/kf-exec-auth-fail-closed-001
 state: PROVING
 health: YELLOW
@@ -110,8 +114,12 @@ review_finding_AUTH_FC_F1:   # CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001
     - a LIVE negative control so weakening the new shape validation makes the named malformed-verdict test fail by assertion
   scope: the same three semantic and proof files only
 
-current_authorization:
+current_authorization:   # CG-DIR-KF155-INTEGRATION-001
   integration_with_main:
+    authorized_by: CG-DIR-KF155-INTEGRATION-001 (6378173450), after the read-only preflight CG-DIR-KF155-INTEGRATION-PREFLIGHT-001 (6377588599) and CC-PROGRESS-KF155-INTEGRATION-PREFLIGHT-001 (6377690235); acknowledged in CC-ACK-KF155-INTEGRATION-001 (6378224563) before any branch write
+    what: an ordinary git merge of main b1948d2797e1bae3660a3d7173abb75397e05aad into this branch as commit 26c1094311d761fd3adce5da39fa105ef7252ea8 (M), conflicts resolved only in the two control artifacts to this branch's record, then one commit (A) that changes only the two control artifacts
+    not_authorized: rebase, force push, scope expansion, modification of main, ready_for_review, admission, merge, hold release, production or provider effect, schema change, programme credit
+  historical_integration_2026_10_11:
     authorized_by: the human operator, in an interactive session on 2026-10-11
     control_room_message: no prior directive or pre-mutation ACK; later review CG-REVIEW-KF155-006 accepts the integration baseline and preserves that historical deviation
     what: the historical ordinary git merge fe791816 of main 98ee0202, followed by the two-artifact commit a597c692; completed and reported in RETURN 6112455909
@@ -200,3 +208,17 @@ review_record_update:
     comment_id: 6023151885
     disposition: settled by CG-REVIEW-KF155-006; the old re-anchor order is unnecessary after merged PR 159
   historical_process_deviation: the operator-authorized main integration had no prior issue 80 directive or pre-mutation ACK; review 006 accepts its baseline without inventing either
+
+# The integration of 2026-10-24, under CG-DIR-KF155-INTEGRATION-001.
+integration_record_update:
+  actor: claude
+  authority_message_id: CG-DIR-KF155-INTEGRATION-001
+  authority_comment_id: 6378173450
+  authority_url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6378173450
+  prepared_from_artifact_head: b30acfa7dcd4fdf96c67747ff8c4a66e4026937e
+  merge_commit: 26c1094311d761fd3adce5da39fa105ef7252ea8   # M; parents b30acfa7 and b1948d27; the new semantic head
+  scope: the merge commit M and this control-only commit; no application, proof, workflow or scope change
+  admission: PENDING; no ACCEPT_FOR_ADMISSION or READY_TO_MERGE decision is recorded
+  draft_transition: NOT_AUTHORIZED
+  merge: NOT_AUTHORIZED
+  production_or_provider_effects: NOT_AUTHORIZED

@@ -8,19 +8,23 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022210803; the same reading with its three evidence fields at top level
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023054785; historical re-anchor order, superseded by review 006
   - CG-REVIEW-KF155-006   # 6240050804; exact semantic evidence and explicit contradiction ruling; NO_STATE_CHANGE
-current_authority_message_id: CG-REVIEW-KF155-006
-current_authority_comment_id: 6240050804
-ack_message_id: null
-ack_comment_id: null
+  - CG-DIR-KF155-INTEGRATION-PREFLIGHT-001   # 6377588599; NO_STATE_CHANGE; read-only integration preflight after the F9 squash b1948d27; answered by CC-PROGRESS-KF155-INTEGRATION-PREFLIGHT-001 (6377690235)
+  - CG-DIR-KF155-INTEGRATION-001   # 6378173450; NO_STATE_CHANGE; authorizes the ordinary merge of main b1948d27 (commit M) and one control-only artifact commit (A); no rebase, ready transition, admission, merge or credit; the current authority
+current_authority_message_id: CG-DIR-KF155-INTEGRATION-001
+current_authority_comment_id: 6378173450
+ack_message_id: CC-ACK-KF155-INTEGRATION-001
+ack_comment_id: 6378224563
 prior_ack_message_ids:
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-001   # 6010899764
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011551504
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-003   # 6018509327
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022283475
+  - CC-ACK-KF155-INTEGRATION-PREFLIGHT-001   # 6377690047; read-only preflight accepted, no branch write
 progress_message_ids:
   - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-001   # 6011188304; IMPLEMENTING to PROVING at 65706fcc, and two discoveries
   - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-002   # 6011325128; workflow results at 65706fcc; the primary reviewer could not run
   - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-003   # 6012165571; AUTH-FC-F1 corrected; the head moved to 8987f6db
+  - CC-PROGRESS-KF155-INTEGRATION-PREFLIGHT-001   # 6377690235; read-only preflight of the merge of main b1948d27; conflict inventory and the M plus A plan
 contradiction_message_ids:
   - CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023151885; the answer to 6023054785; no branch mutation
 # This file is a pre-RETURN record. The RETURN is posted on #80 after every
@@ -33,12 +37,13 @@ previous_return_message_ids:
   - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-002
   - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-003
 never_posted_return_message_ids: []
-source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
-source_head: fe79181638e373584c3ca3184a39343a132040cd
+source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
+source_head: 26c1094311d761fd3adce5da39fa105ef7252ea8
 previous_source_heads:
   - 65706fcc52f440f9225223040e2ee0ee738e04bb   # first semantic commit; finding AUTH-FC-F1 was raised against it
   - 8987f6db21a839f90c88e33479768d81cef508e9   # the correction of AUTH-FC-F1; historical independent reading, superseded for admission by the fe791816 reading in review 6240050804
-previous_source_main: ac3a6384417093f198bcc7d672b0dbc295db137c
+  - fe79181638e373584c3ca3184a39343a132040cd   # the merge of main 98ee0202; read by review 6240050804; superseded as semantic head by the merge of main b1948d27
+previous_source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd   # from the 2026-10-11 integration to this one; before it, ac3a6384417093f198bcc7d672b0dbc295db137c
 implementation_branch: impl/kf-exec-auth-fail-closed-001
 pr_number: 155
 state: PROVING
@@ -52,26 +57,68 @@ merge_authority: false
 implementer: claude
 
 summary: >
-  Control-only evidence update by ChatGPT under review 6240050804. The
-  application semantics remain fe791816, and the source base remains
-  98ee0202. The current packet review and the disposition of the old
-  re-anchor contradiction are recorded below. The earlier builder RETURN
-  at a597c692 is historical evidence. This pre-RETURN record claims no
-  future artifact identity or post-check result; exact_head_proof remains
-  PENDING. The PR
-  stays draft, review_status stays PENDING_CHATGPT_REVIEW, and no merge
-  grant, ready transition, new worker task or production effect is granted.
+  The application change is unchanged. The KeyCortex query pipeline does not
+  execute parsed commands when their authority check fails: the executable
+  set starts empty and is assigned once, after every parsed command in the
+  batch has an explicit usable verdict. What changed is the tree the change
+  sits in. Main moved from 98ee0202 to b1948d27 (the F9 squash of PR 181), so
+  this head integrates main by an ordinary merge commit, 26c10943, which is
+  the new semantic head, under CG-DIR-KF155-INTEGRATION-001. The one commit
+  after it changes the two control artifacts only. Nobody independent has
+  read the integrated head; the reading of fe791816 in review 6240050804 is
+  historical evidence. This pre-RETURN record claims no post-check result;
+  exact_head_proof remains PENDING. The PR stays draft, review_status stays
+  PENDING_CHATGPT_REVIEW, and no merge grant, ready transition or production
+  effect is granted.
 
 health_reason: >
-  YELLOW for process/admission work remaining. Review 6240050804 supplies
-  current semantic evidence and settles contradiction 6023151885. A future
-  control-only artifact head still needs its own workflow evidence and
-  final admission decision. No failure of the bounded parsed-command
-  correction is asserted by this pending admission state. F9 remains a
-  separate control-plane correction and is not a new review prerequisite.
+  YELLOW for three reasons, none of them an open failure in the code. The
+  semantic head is new and has no independent reading. The outcome for the
+  head that carries this file is not known. The server typecheck, unit
+  suite, build and lint were not all run locally at the new head; see tests.
+  No failure of the bounded parsed-command correction is asserted by this
+  pending state.
 
-# Historical integration performed by Claude on 2026-10-11; no integration is performed by this record update.
 integration:
+  authorized_by: CG-DIR-KF155-INTEGRATION-001 (6378173450), after CG-DIR-KF155-INTEGRATION-PREFLIGHT-001 (6377588599) and the read-only preflight CC-PROGRESS-KF155-INTEGRATION-PREFLIGHT-001 (6377690235); acknowledged in CC-ACK-KF155-INTEGRATION-001 (6378224563) before the branch was written
+  why: >
+    Main moved from 98ee0202 to b1948d27 when PR 181 (F9) was squash-merged
+    on 2026-10-24. The gate compares source_head with the PR's synthetic
+    merge, so the F9 files were non-control changes after fe791816, and
+    both artifact files conflicted with main's, which describe
+    KF-META-MERGE-AUTHORITY-001.
+  what: >
+    git merge --no-ff of main b1948d2797e1bae3660a3d7173abb75397e05aad into the branch, as merge commit
+    26c1094311d761fd3adce5da39fa105ef7252ea8 (M), parents b30acfa7 and b1948d27. No rebase, no reset and no
+    force push; every earlier commit of the branch is still an ancestor.
+  conflicts: >
+    Two, both in .agent-control: active-packet.yaml and claude-return.yaml.
+    This packet's versions were kept byte-for-byte as they are at b30acfa7;
+    F9's packet record was not imported. Nothing else conflicted and nothing
+    else was hand-edited.
+  from_main: >
+    Thirteen files outside .agent-control arrive exactly as they are on
+    main b1948d27: the gate workflow, lib/merge-grant.mjs (new),
+    lib/admission.mjs, auto-merge-admitted.mjs, negative-controls.yaml (54
+    F9 controls added), admission.spec.mjs, merge-grant.spec.mjs (new),
+    merge-cli.spec.mjs (new), two test helpers (new), AGENT_CONTROL_PLANE.md,
+    AGENT_AUTOPILOT.md and architecture/execution-paths.md. Main did not
+    change any file under apps or packages between 98ee0202 and b1948d27.
+  packet_files: >
+    The three semantic and proof files of this packet are byte-for-byte as
+    they are at b30acfa7, and so at 8987f6db. Against main the merge commit
+    differs in those three files and the two control artifacts and in
+    nothing else; git diff fe791816..26c10943 over apps and
+    scripts/proof-admission is empty.
+  not_done: >
+    No test, gate, control or workflow was edited, retargeted or removed.
+    programme-state.yaml is untouched. No ready transition, admission
+    record, merge or hold release. The F9 parser-hardening and tied-run
+    proposals stay outside this PR.
+  session: a detached worktree of the Claude session that wrote this file, on 2026-10-24; no other worktree or running process was touched
+
+# Historical integration performed by Claude on 2026-10-11; preserved as recorded at b30acfa7.
+historical_integration_2026_10_11:
   authorized_by: the human operator, in an interactive session on 2026-10-11; no issue 80 directive names this work
   why: >
     The gate compares source_head with the synthetic merge of the PR and its
@@ -115,8 +162,8 @@ characterization:
     every parsed command executable.
   target_blob_at_source_main: 33540d0c07d2affd919246ebb5975ce0bef32109
   application_drift: >
-    At ac3a6384, when the change was written, none. Main is now 98ee0202.
-    git diff ac3a6384..98ee0202 lists no file under apps or packages, and
+    At ac3a6384, when the change was written, none. Main is now b1948d27.
+    git diff ac3a6384..b1948d27 lists no file under apps or packages, and
     the blob of the target service file on main is still
     33540d0c07d2affd919246ebb5975ce0bef32109.
 
@@ -139,11 +186,12 @@ implementation:
 
 changed_files:
   count: 3
-  count_basis: files that differ from main 98ee0202 outside .agent-control at the semantic head
+  count_basis: files that differ from main b1948d27 outside .agent-control at the semantic head
   semantic_commits:
     - 65706fcc52f440f9225223040e2ee0ee738e04bb   # parsed-command autonomy fails closed
     - 8987f6db21a839f90c88e33479768d81cef508e9   # AUTH-FC-F1; a verdict must state its approval semantics
     - fe79181638e373584c3ca3184a39343a132040cd   # merge of main 98ee0202; no edit to the three files below
+    - 26c1094311d761fd3adce5da39fa105ef7252ea8   # merge of main b1948d27; no edit to the three files below
   server:
     - apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts
   tests:
@@ -203,14 +251,16 @@ proof_matrix:
     result: PROVEN
   - obligation: every negative control is live and none is vacuous
     evidence_scope: semantic_head
-    proof: scripts/proof-admission/negative-controls.mjs with the packet manifest, run again at fe791816; 8 of 8 live, 0 vacuous, runner unchanged; see negative_controls
+    proof: scripts/proof-admission/negative-controls.mjs with the packet manifest, run again at 26c10943; 8 of 8 live, 0 vacuous, runner unchanged; see negative_controls
     result: PROVEN
   - obligation: full applicable server unit suite, typecheck, build and lint ratchet
     evidence_scope: semantic_head
     proof: >
-      At fe791816 the unit suite and the typecheck were run; the server build
-      and the lint ratchet were not. See tests, including the one timeout in
-      the first of the two unit runs.
+      At 26c10943, locally: the focused suite ran; the typecheck result is
+      recorded under tests.server_typecheck; the unit suite, build and lint
+      were not run locally. At fe791816 the unit suite and typecheck were
+      run; see tests.previous_head_fe791816. The hosted CI/CD Pipeline at
+      the head that carries this file is an exact-head gate and PENDING.
     result: PARTIAL
   - obligation: server integration tests on a database, locally
     evidence_scope: semantic_head
@@ -219,10 +269,11 @@ proof_matrix:
   - obligation: the merge with main changes nothing this packet proves
     evidence_scope: semantic_head
     proof: >
-      git diff 8987f6db fe791816 over apps and scripts/proof-admission is empty;
-      the focused suite has the same 27 tests and the unit suite the same
-      3,957 tests in 392 files as at 8987f6db; the control-plane suite of
-      main runs on the merged tree. See tests and integration.
+      git diff 8987f6db 26c10943 over apps and scripts/proof-admission is
+      empty, as was git diff 8987f6db fe791816; the focused suite has the
+      same 27 tests at 26c10943 and the eight packet controls are live there;
+      the portable control-plane suite of main b1948d27 runs on the merged
+      tree with zero failures. See tests, negative_controls and integration.
     result: PROVEN
   - obligation: required exact-head workflows and the independent semantic review of the head that carries this file
     evidence_scope: exact_head
@@ -230,105 +281,159 @@ proof_matrix:
     result: PENDING
 
 tests:
-  at: fe79181638e373584c3ca3184a39343a132040cd
-  host: Windows 11, Node 20.18.1, pnpm 9.15.0, interactive Claude session in C:/kf-auth155, 2026-10-11
+  at: 26c1094311d761fd3adce5da39fa105ef7252ea8
+  host: Linux container of the Claude session that wrote this file, Node 22.22.0, pnpm 9.15.0, 2026-10-24; the repository pins Node 20.18.1, so pnpm install --frozen-lockfile ran with the engine check relaxed
   provenance: >
-    These historical results were produced by the Claude session of
-    2026-10-11 on fe791816, after pnpm install --frozen-lockfile,
-    pnpm db:generate and builds of @keyflow/shared, @keyflow/db and
-    @keyflow/api. That session repeated its control-plane suite before
-    committing a597c692. This metadata update does not repeat or relabel
-    those executions as tests of its future artifact head.
+    Every number below was produced by the session that wrote this file, on
+    the merge commit 26c10943, after pnpm install --frozen-lockfile, pnpm
+    db:generate and builds of @keyflow/shared, @keyflow/db and @keyflow/api,
+    with a clean tree before and after. The hosted workflows for the head
+    that carries this file are exact-head gates and PENDING.
   focused_suite:
     command: npx vitest run src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts (in apps/server)
     total: 27
     passed: 27
     failed: 0
     skipped: 0
-  server_unit:
-    command: npx vitest run -c vitest.unit.config.ts (in apps/server)
-    runs: 2
-    first_run:
-      files: 392
-      total: 3957
-      passed: 3956
-      failed: 1
-      skipped: 0
-      failure: >
-        src/core/scheduling/safe-interval.spec.ts, "runGuarded contains a
-        rejected promise", timed out at 5000 ms. The file is not touched by
-        this packet or by the merge. Other commands of this session were
-        running on the host at the same time. The file alone then ran 10 of
-        10.
-    second_run:
-      files: 392
-      total: 3957
-      passed: 3957
+  server_typecheck: npx tsc --noEmit in apps/server, exit 0, with NODE_OPTIONS=--max-old-space-size=8192; a first run at the default heap aborted on heap exhaustion before finishing, not on a type error
+  server_unit: NOT_RUN locally at this head; the hosted CI/CD Pipeline runs it and is PENDING
+  server_build: NOT_RUN locally at this head
+  server_lint: NOT_RUN locally at this head
+  server_integration: NOT_RUN locally at this head; the change has no database surface
+  web: NOT_RUN locally at this head; neither the packet nor the integration changes a file under apps/web
+  control_plane:
+    command: node --test scripts/agent-control/tests/*.spec.mjs (the portable suite of main b1948d27, on the merged tree)
+    total: 579
+    passed: 541
+    failed: 0
+    skipped: 38
+    skipped_reason: 37 Windows-only tests skip when PowerShell is absent, as it is in this container; one needs PowerShell and an authenticated gh. The Windows suite, scripts/agent-control/tests/windows, was not run here.
+    note: >
+      The suite includes the two branch-artifact tests, which read this
+      branch's artifacts, and the F9 suites inherited from main
+      (merge-grant, merge-cli and the extended admission spec).
+  control_plane_manifest: NOT_RUN locally; 247 controls on the merged manifest (193 before F9 plus 54 F9 controls); the hosted Windows proof job runs it
+  dag_validators: validate-dag.mjs exits 0 with 35 packets and 37 phases; validate-platform-dag.mjs exits 0 with 63 packets
+  failed: 0
+  skipped: 38
+  counter_scope: local semantic-head runs at 26c10943 reported above; artifact-head checks remain PENDING
+  previous_head_fe791816:
+    at: fe79181638e373584c3ca3184a39343a132040cd
+    host: Windows 11, Node 20.18.1, pnpm 9.15.0, interactive Claude session in C:/kf-auth155, 2026-10-11
+    provenance: >
+      These historical results were produced by the Claude session of
+      2026-10-11 on fe791816, after pnpm install --frozen-lockfile,
+      pnpm db:generate and builds of @keyflow/shared, @keyflow/db and
+      @keyflow/api. That session repeated its control-plane suite before
+      committing a597c692. This metadata update does not repeat or relabel
+      those executions as tests of its future artifact head.
+    focused_suite:
+      command: npx vitest run src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts (in apps/server)
+      total: 27
+      passed: 27
       failed: 0
       skipped: 0
-      note: run with nothing else running in the session
-    reading: the timeout is reported as observed and is not explained beyond that; it was not investigated
-  server_typecheck: npx tsc --noEmit in apps/server, exit 0
-  server_build: NOT_RUN by the original 2026-10-11 local worker session at fe791816
-  server_lint: NOT_RUN by the original 2026-10-11 local worker session at fe791816
-  server_integration: NOT_RUN by the original 2026-10-11 local worker session at fe791816
-  web: NOT_RUN by the original 2026-10-11 local worker session at fe791816; neither the packet nor the integration changed apps/web
-  control_plane:
-    command: KF_REQUIRE_POWERSHELL=1 node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
-    total: 516
-    passed: 516
+    server_unit:
+      command: npx vitest run -c vitest.unit.config.ts (in apps/server)
+      runs: 2
+      first_run:
+        files: 392
+        total: 3957
+        passed: 3956
+        failed: 1
+        skipped: 0
+        failure: >
+          src/core/scheduling/safe-interval.spec.ts, "runGuarded contains a
+          rejected promise", timed out at 5000 ms. The file is not touched by
+          this packet or by the merge. Other commands of this session were
+          running on the host at the same time. The file alone then ran 10 of
+          10.
+      second_run:
+        files: 392
+        total: 3957
+        passed: 3957
+        failed: 0
+        skipped: 0
+        note: run with nothing else running in the session
+      reading: the timeout is reported as observed and is not explained beyond that; it was not investigated
+    server_typecheck: npx tsc --noEmit in apps/server, exit 0
+    server_build: NOT_RUN by the original 2026-10-11 local worker session at fe791816
+    server_lint: NOT_RUN by the original 2026-10-11 local worker session at fe791816
+    server_integration: NOT_RUN by the original 2026-10-11 local worker session at fe791816
+    web: NOT_RUN by the original 2026-10-11 local worker session at fe791816; neither the packet nor the integration changed apps/web
+    control_plane:
+      command: KF_REQUIRE_POWERSHELL=1 node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs
+      total: 516
+      passed: 516
+      failed: 0
+      skipped: 0
+      note: >
+        Main's own suite on the merged tree. Its two branch-artifact tests read
+        this branch's artifacts. One existing test needs an authenticated gh
+        and is skipped on runners, so runner totals may show one skip that this
+        host does not.
+    dag_validator: node scripts/agent-control/validate-dag.mjs exits 0 with 35 packets and 37 phases
+    manifest_target_scan: >
+      Original 2026-10-11 scan of scripts/agent-control/negative-controls.yaml
+      before committing a597c692: 193
+      controls, 193 unique ids, 193 mutations. 192 targets occur exactly once
+      in their file. One, NC-MISSING-AUTH-IS-WAITING in lib/adapters.mjs,
+      occurs twice and declares replace_all, as it does on main. The manifest
+      is byte-for-byte main's. The control-plane manifest itself was not run.
+    previous_head_8987f6db: >
+      From the worker session of 2026-10-06 that produced that head: focused
+      suite 27 of 27; server unit 3,957 of 3,957 in 392 files; typecheck and
+      build clean; lint 3,341 warnings against the 3,343 ratchet; 8 of 8
+      controls live.
+    previous_head_65706fcc: >
+      Focused suite 21 of 21. Server unit 3,951 of 3,951. Typecheck and build
+      clean. Lint 3,341 against 3,343. 4 of 4 controls live.
     failed: 0
     skipped: 0
-    note: >
-      Main's own suite on the merged tree. Its two branch-artifact tests read
-      this branch's artifacts. One existing test needs an authenticated gh
-      and is skipped on runners, so runner totals may show one skip that this
-      host does not.
-  dag_validator: node scripts/agent-control/validate-dag.mjs exits 0 with 35 packets and 37 phases
-  manifest_target_scan: >
-    Original 2026-10-11 scan of scripts/agent-control/negative-controls.yaml
-    before committing a597c692: 193
-    controls, 193 unique ids, 193 mutations. 192 targets occur exactly once
-    in their file. One, NC-MISSING-AUTH-IS-WAITING in lib/adapters.mjs,
-    occurs twice and declares replace_all, as it does on main. The manifest
-    is byte-for-byte main's. The control-plane manifest itself was not run.
-  previous_head_8987f6db: >
-    From the worker session of 2026-10-06 that produced that head: focused
-    suite 27 of 27; server unit 3,957 of 3,957 in 392 files; typecheck and
-    build clean; lint 3,341 warnings against the 3,343 ratchet; 8 of 8
-    controls live.
-  previous_head_65706fcc: >
-    Focused suite 21 of 21. Server unit 3,951 of 3,951. Typecheck and build
-    clean. Lint 3,341 against 3,343. 4 of 4 controls live.
-  failed: 0
-  skipped: 0
-  counter_scope: final local semantic-head runs reported above; future artifact-head checks remain PENDING
-  historical_failed_runs:
-    - one timeout in the first of two unit runs; preserved in server_unit.first_run; the later run and isolated rerun are separate observations
-  hosted_skip_scope: hosted skips are disclosed in ci.previous_head_a597c692 and must be re-read at any later artifact head
+    counter_scope: final local semantic-head runs reported above; future artifact-head checks remain PENDING
+    historical_failed_runs:
+      - one timeout in the first of two unit runs; preserved in server_unit.first_run; the later run and isolated rerun are separate observations
+    hosted_skip_scope: hosted skips are disclosed in ci.previous_head_a597c692 and must be re-read at any later artifact head
 
 negative_controls:
-  command: node scripts/proof-admission/negative-controls.mjs --manifest scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json
-  at: fe791816, with a clean tree before and after
-  environment: >
-    The runner starts vitest by its entry file, so NODE_PATH was set to
-    node_modules/.pnpm/node_modules, as pnpm's own shim does. A first
-    attempt without it produced no report and the runner called all eight
-    controls vacuous for that reason; that attempt is not counted. The
-    runner and the manifest are unchanged.
+  command: NODE_PATH=node_modules/.pnpm/node_modules node scripts/proof-admission/negative-controls.mjs --manifest scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json
+  at: 26c1094311d761fd3adce5da39fa105ef7252ea8, with a clean tree before and after
+  baseline: 27 tests, 0 not passing
   manifest_total: 8
   live: 8
   vacuous: 0
   rule: a control is live only when every test it names passed on the clean tree and is reported, by name, as failed with the defect restored
-  controls:
-    - NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN
-    - NC-AUTH-FC-P01-PARTIAL-PREFIX
-    - NC-AUTH-FC-P01B-UNUSABLE-VERDICT-ACCEPTED
-    - NC-AUTH-FC-P06-FAILURE-REPORTED-AS-EVALUATED
-    - NC-AUTH-FC-F1-APPROVAL-SEMANTICS-NOT-REQUIRED
-    - NC-AUTH-FC-F1-REQUIRES-APPROVAL-NOT-VALIDATED
-    - NC-AUTH-FC-F1-TIER-NOT-VALIDATED
-    - NC-AUTH-FC-P05-NO-ORACLE-FALLBACK-INCOMPLETE
+  named_failures_with_defect_restored:
+    - NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN: 5 of 5
+    - NC-AUTH-FC-P01-PARTIAL-PREFIX: 2 of 2
+    - NC-AUTH-FC-P01B-UNUSABLE-VERDICT-ACCEPTED: 3 of 3
+    - NC-AUTH-FC-P06-FAILURE-REPORTED-AS-EVALUATED: 2 of 2
+    - NC-AUTH-FC-F1-APPROVAL-SEMANTICS-NOT-REQUIRED: 6 of 6
+    - NC-AUTH-FC-F1-REQUIRES-APPROVAL-NOT-VALIDATED: 2 of 2
+    - NC-AUTH-FC-F1-TIER-NOT-VALIDATED: 2 of 2
+    - NC-AUTH-FC-P05-NO-ORACLE-FALLBACK-INCOMPLETE: 1 of 1
+  previous_head_fe791816:
+    command: node scripts/proof-admission/negative-controls.mjs --manifest scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json
+    at: fe791816, with a clean tree before and after
+    environment: >
+      The runner starts vitest by its entry file, so NODE_PATH was set to
+      node_modules/.pnpm/node_modules, as pnpm's own shim does. A first
+      attempt without it produced no report and the runner called all eight
+      controls vacuous for that reason; that attempt is not counted. The
+      runner and the manifest are unchanged.
+    manifest_total: 8
+    live: 8
+    vacuous: 0
+    rule: a control is live only when every test it names passed on the clean tree and is reported, by name, as failed with the defect restored
+    controls:
+      - NC-AUTH-FC-P02-HISTORICAL-FAIL-OPEN
+      - NC-AUTH-FC-P01-PARTIAL-PREFIX
+      - NC-AUTH-FC-P01B-UNUSABLE-VERDICT-ACCEPTED
+      - NC-AUTH-FC-P06-FAILURE-REPORTED-AS-EVALUATED
+      - NC-AUTH-FC-F1-APPROVAL-SEMANTICS-NOT-REQUIRED
+      - NC-AUTH-FC-F1-REQUIRES-APPROVAL-NOT-VALIDATED
+      - NC-AUTH-FC-F1-TIER-NOT-VALIDATED
+      - NC-AUTH-FC-P05-NO-ORACLE-FALLBACK-INCOMPLETE
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
@@ -390,6 +495,17 @@ ci:
       - Agent Control Worker Proof 38162875434 succeeded; Windows 515/516 and Ubuntu 491/492, zero failed and one authenticated-gh cursor skip on each platform
     negative_controls: 193/193 control-plane controls live in the Windows hosted log; the packet's eight controls were separately reproduced locally
     applicability: historical evidence at the named artifact; not workflow evidence for a future head
+  previous_head_b30acfa7:
+    source_head: fe79181638e373584c3ca3184a39343a132040cd
+    artifact_head: b30acfa7dcd4fdf96c67747ff8c4a66e4026937e
+    return_message_id: null   # no RETURN was posted for b30acfa7; its runs are recorded in PR 155 comment 6240756683
+    workflows:
+      - CI/CD Pipeline 39065353293 succeeded
+      - Agent Control Gate 39065353315, 39065401472 and 39074828933 succeeded; draft, so the non-draft step did not run
+      - Branch divergence 39065353328 (pull_request) and 39065349377 (push) succeeded
+      - DAST (HawkScan) 39065353307 concluded success with scan steps skipped; no dynamic scan occurred
+      - Agent Control Worker Proof 39065353286 succeeded; one authenticated-gh skip on each platform
+    applicability: historical evidence at that artifact head, on base 98ee0202, before main carried F9; not workflow evidence for the head that carries this file
   this_head: PENDING. The workflows run on the head that carries this file once it is on the remote, and are read from the live runs for the RETURN.
 
 ai_review:
@@ -398,6 +514,7 @@ ai_review:
   fallback: chatgpt
   self_review: none; Claude authored the application change, ChatGPT records its separate reading
   at_the_semantic_head_fe791816: review 6240050804, recorded under semantic_head_review
+  at_the_semantic_head_26c10943: PENDING; no independent reader has read the integrated head
   at_the_head_that_carries_this_file: PENDING
   record_owner: chatgpt
   admission_state: PENDING; the top-level semantic_review block is reserved for the separate admission record
@@ -406,6 +523,7 @@ semantic_head_review:
   implementer: claude
   reviewed_head: fe79181638e373584c3ca3184a39343a132040cd
   record_kind: EVIDENCE_RECORDED_NOT_ADMISSION
+  integrated_head_26c10943: not yet reviewed; the reviews below are evidence about fe791816 and are not a reading of 26c10943
   reviews:
     - provider: copilot
       reviewer: copilot-pull-request-reviewer[bot]
@@ -423,9 +541,10 @@ semantic_head_review:
       evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804
   boundary: parsed-command authority exception and unusable-verdict narrowing only; whole-request effects and other Flow/Cortex paths are not credited as fixed
   lineage_required_at_admission: >
-    a597c692 must remain a descendant of fe791816 and an ancestor of the
-    admitted PR head, with no non-control tail. The final artifact head is
-    established by Git after this record is committed; no self SHA is stored.
+    26c10943 must remain an ancestor of the admitted PR head, with no
+    non-control tail after it, and fe791816, a597c692 and b30acfa7 remain
+    its ancestors. The final artifact head is established by Git after this
+    record is committed; no self SHA is stored.
   previous_head_8987f6db:
     reviewed_head: 8987f6db21a839f90c88e33479768d81cef508e9
     reviews:
@@ -457,11 +576,17 @@ semantic_head_review:
 
 admission_notes:
   current_packet_authority:
+    message_id: CG-DIR-KF155-INTEGRATION-001
+    comment_id: 6378173450
+    url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6378173450
+    effect: NO_STATE_CHANGE
+    disposition: INTEGRATION_MUTATION_AUTHORIZED; commits M and A only
+  semantic_review_authority:
     message_id: CG-REVIEW-KF155-006
     comment_id: 6240050804
     url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804
     effect: NO_STATE_CHANGE
-    disposition: SEMANTIC_PASS_AND_REANCHOR_CONTRADICTION_SETTLED
+    disposition: SEMANTIC_PASS_AND_REANCHOR_CONTRADICTION_SETTLED; about fe791816
   reanchor_disposition: >
     Review 006 supersedes the re-anchor instruction in 6023054785 as
     unnecessary after the separately merged alias correction in PR 159.
@@ -472,20 +597,23 @@ admission_notes:
     programme projection. Review 006 uses NO_STATE_CHANGE and this file
     does not change that projection or claim packet admission. The latest
     worker assignment is separate from this packet-specific review record.
-  base_sha: both source_main values equal the observed PR base 98ee0202499ba87fa4ee13d58a2a9075016225bd; recheck before publishing and admission
-  preparation_parent: a597c692fcb102de558dd832d88738c0402f69a2
+  base_sha: both source_main values equal main b1948d2797e1bae3660a3d7173abb75397e05aad, which is the PR base after the F9 squash; recheck before publishing and admission
+  preparation_parent: b30acfa7dcd4fdf96c67747ff8c4a66e4026937e
   future_artifact_head: null
-  final_head_rule: future artifact identity is observed after commit; all changes after fe791816 must remain under .agent-control
+  final_head_rule: future artifact identity is observed after commit; all changes after 26c10943 must remain under .agent-control
   pending_admission: >
     The controlling REVIEW records SEMANTIC_PASS, not ACCEPT_FOR_ADMISSION
     or READY_TO_MERGE. Keep this PR draft and its status pending. Re-read
     new artifact-head workflows and evidence before the separate decision.
   f9_containment: >
-    Main's evaluator currently conflates ACCEPT_FOR_ADMISSION and
-    READY_TO_MERGE and does not independently enforce artifact grant flags.
-    Pending review_status and draft are both retained. An eventual ready
-    transition requires a distinct applicable exact-target decision.
-  worker_assignment: no Claude mutation or new task; F9 remains the separately released assignment
+    Main b1948d27 carries F9: the non-draft gate step and the evaluator
+    require a distinct #80 merge grant bound to the exact final head, and
+    ACCEPT_FOR_ADMISSION alone no longer reaches a merge. This branch now
+    carries the same gate workflow, so its non-draft step would fail closed
+    on review_status PENDING_CHATGPT_REVIEW. Pending review_status and draft
+    are both retained. The draft-only gate run at the head that carries
+    this file does not execute the non-draft grant step.
+  worker_assignment: the F9 assignment is closed (CG-REV-F9-012); this packet's integration under CG-DIR-KF155-INTEGRATION-001 is the current Claude assignment
   review_evidence_fields: review 6240050804 supplies reviewed_head fe791816, semantic_review_outcome PASS and unresolved_substantive_findings 0 at top level
 
 scope_ledger:
@@ -499,14 +627,17 @@ scope_ledger:
     - AUTH-FC-P06 honest evidence
     - finding AUTH-FC-F1
     - integration with main 98ee0202, on the operator's authority
+    - integration with main b1948d27, under CG-DIR-KF155-INTEGRATION-001
   resolved:
     - the seven bounded proof obligations and AUTH-FC-F1 as reported at fe791816, subject to the proof scope and limits below
     - fresh semantic evidence at fe791816 recorded by review 6240050804
     - re-anchor contradiction 6023151885 explicitly settled by the same review
     - prior artifact a597c692 pushed and returned as CC-RETURN-GENAI-AUTH-FAIL-CLOSED-003
+    - read-only integration preflight reported in CC-PROGRESS-KF155-INTEGRATION-PREFLIGHT-001 and accepted by CG-DIR-KF155-INTEGRATION-001
+    - the ordinary merge of main b1948d27 as 26c10943, with the byte identities checked before the commit
   remaining:
-    - root review and publication of this control-only evidence update, if accepted
-    - the required workflows and applicable proof on the future artifact head
+    - the required workflows and applicable proof on the head that carries this file
+    - an independent reading of the integrated semantic head 26c10943
     - inspection and disposition of actual failed, skipped or unavailable proof on that head
     - final post-check evidence and separate ChatGPT admission decision
     - distinct exact-target merge decision and post-transition exact-head evaluator if integration is later authorized
@@ -518,6 +649,8 @@ scope_ledger:
     - semantic head 65706fcc, by 8987f6db
     - semantic head 8987f6db, by fe791816
     - artifact heads 26111633 and fdc900b7, by a597c692; that head remains immutable prior evidence
+    - semantic head fe791816, by 26c10943 (the merge of main b1948d27)
+    - artifact head b30acfa7, by the head that carries this file
 
 deviations_from_packet:
   - >
@@ -533,6 +666,11 @@ deviations_from_packet:
   - >
     The architecture maps were not regenerated for the merge; they are
     main's.
+  - >
+    The second integration, the merge of main b1948d27, followed a
+    directive on issue 80 and an ACK posted before the branch was written.
+    It brings thirteen F9 files of main into the branch history. They are
+    main's own, unedited, and are not part of this packet's write set.
 
 behaviour_changes:
   - a thrown authority check executes no parsed command; before, it executed all of them
@@ -580,7 +718,7 @@ residual_risks:
     this packet does not make the whole request effect-free.
 
 rollback_floor:
-  - before merge to main, the branch can return to fdc900b7 by reverting the artifact commit and the merge commit; nothing was rewritten
+  - before merge to main, the branch can return to b30acfa7 by reverting this artifact commit and the merge commit 26c10943, and to fdc900b7 by also reverting a597c692, b30acfa7 and fe791816; nothing was rewritten
   - the historical executable-on-authority-error behaviour is not a rollback target
   - prefer an existing hold or disable path for the action-capable Cortex surface, then roll forward
   - there is no schema or data change to undo
@@ -606,10 +744,9 @@ settled_contradictions:
     disposition: original scope objection upheld; re-anchor order superseded as unnecessary after merged PR 159; no re-anchor performed
 
 next_action: >
-  ChatGPT inspects this control-only preparation and may publish it on the
-  unchanged packet branch. Observe the resulting artifact head and re-read
-  its checks. Keep the PR draft, status pending and merge_authority false.
-  No source mutation, ready transition, merge or Claude assignment is
-  requested. A separate admission decision and any integration must use
-  their own current evidence; do not inherit future-head CI from a597c692.
-
+  Push this head to the existing branch, keep the PR draft, read the five
+  required workflows at this head from the live runs, and post one RETURN
+  or CONTRADICTION on #80 under CG-DIR-KF155-INTEGRATION-001. Then an
+  independent reading of 26c10943 and a separate ChatGPT admission decision
+  with their own evidence. No ready transition, merge grant, merge or
+  programme credit is requested.
