@@ -67,6 +67,32 @@ describe('a record id from a request is not a tenant scope', () => {
     ).toBe(true);
   });
 
+  it('goal-tracker updateProgress keeps every BusinessGoal mutation tenant-scoped', () => {
+    const body = methodBody(read('modules/ai/goal-tracker.service.ts'), 'updateProgress');
+    const writes = [...body.matchAll(/businessGoal\.(update|updateMany|delete|deleteMany)\s*\(\s*\{([\s\S]*?)\n\s*\}\s*\)/g)];
+
+    expect(writes.length, 'updateProgress should persist calculated progress').toBeGreaterThan(0);
+    for (const write of writes) {
+      expect(
+        /where:\s*\{[^}]*businessId/.test(write[2]),
+        `updateProgress has an unscoped BusinessGoal ${write[1]} mutation`,
+      ).toBe(true);
+    }
+  });
+
+  it('goal-tracker suggestActions keeps every BusinessGoal mutation tenant-scoped', () => {
+    const body = methodBody(read('modules/ai/goal-tracker.service.ts'), 'suggestActions');
+    const writes = [...body.matchAll(/businessGoal\.(update|updateMany|delete|deleteMany)\s*\(\s*\{([\s\S]*?)\n\s*\}\s*\)/g)];
+
+    expect(writes.length, 'suggestActions should persist suggested actions').toBeGreaterThan(0);
+    for (const write of writes) {
+      expect(
+        /where:\s*\{[^}]*businessId/.test(write[2]),
+        `suggestActions has an unscoped BusinessGoal ${write[1]} mutation`,
+      ).toBe(true);
+    }
+  });
+
   it('project-planner updatePlan cannot be handed a new tenant by the body', () => {
     const body = methodBody(read('modules/projects/project-planner.service.ts'), 'updatePlan');
 
