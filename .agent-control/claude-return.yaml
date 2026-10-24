@@ -9,24 +9,31 @@ authority_lineage:   # every ChatGPT authority message for this packet on #80, o
   - CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023054785; historical re-anchor order, superseded by review 006
   - CG-REVIEW-KF155-006   # 6240050804; exact semantic evidence and explicit contradiction ruling; NO_STATE_CHANGE
   - CG-DIR-KF155-INTEGRATION-PREFLIGHT-001   # 6377588599; NO_STATE_CHANGE; read-only integration preflight after the F9 squash b1948d27; answered by CC-PROGRESS-KF155-INTEGRATION-PREFLIGHT-001 (6377690235)
-  - CG-DIR-KF155-INTEGRATION-001   # 6378173450; NO_STATE_CHANGE; authorizes the ordinary merge of main b1948d27 (commit M) and one control-only artifact commit (A); no rebase, ready transition, admission, merge or credit; the current authority
-current_authority_message_id: CG-DIR-KF155-INTEGRATION-001
-current_authority_comment_id: 6378173450
-ack_message_id: CC-ACK-KF155-INTEGRATION-001
-ack_comment_id: 6378224563
+  - CG-DIR-KF155-INTEGRATION-001   # 6378173450; NO_STATE_CHANGE; authorizes the ordinary merge of main b1948d27 (commit M) and one control-only artifact commit (A); no rebase, ready transition, admission, merge or credit
+  - CG-REV-KF155-INTEGRATION-002   # 6379332364; NO_STATE_CHANGE; rules on CC-CONTRADICTION-KF155-INTEGRATION-001 (6379143072) and authorizes the one-line artifact repair B (02bf32b9) that made the NC-RETURN-ARTIFACT-PREMATURE-ID target unique again
+  - CG-REV-KF155-INTEGRATION-003   # 6390482572; NO_STATE_CHANGE; receipt RETURN_REVIEWED of CC-RETURN-GENAI-AUTH-FAIL-CLOSED-004; independent reading of M 26c10943 with semantic_review_outcome PASS and 0 unresolved substantive findings; authorizes this control-only admission-record preparation only, not admission; the current authority
+current_authority_message_id: CG-REV-KF155-INTEGRATION-003
+current_authority_comment_id: 6390482572
+ack_message_id: CC-ACK-KF155-INTEGRATION-003
+ack_comment_id: 6390543318
 prior_ack_message_ids:
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-001   # 6010899764
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001   # 6011551504
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-003   # 6018509327
   - CC-ACK-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004   # 6022283475
   - CC-ACK-KF155-INTEGRATION-PREFLIGHT-001   # 6377690047; read-only preflight accepted, no branch write
+  - CC-ACK-KF155-INTEGRATION-001   # 6378224563; commits M and A
+  - CC-ACK-KF155-INTEGRATION-002   # 6379457042; commit B
 progress_message_ids:
   - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-001   # 6011188304; IMPLEMENTING to PROVING at 65706fcc, and two discoveries
   - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-002   # 6011325128; workflow results at 65706fcc; the primary reviewer could not run
   - CC-PROGRESS-GENAI-AUTH-FAIL-CLOSED-003   # 6012165571; AUTH-FC-F1 corrected; the head moved to 8987f6db
   - CC-PROGRESS-KF155-INTEGRATION-PREFLIGHT-001   # 6377690235; read-only preflight of the merge of main b1948d27; conflict inventory and the M plus A plan
+  - CC-PROGRESS-KF155-INTEGRATION-001   # 6378362856; M and A pushed as 65832bc6
+  - CC-PROGRESS-KF155-INTEGRATION-002   # 6379577810; B pushed as 02bf32b9 after the local gates
 contradiction_message_ids:
   - CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005   # 6023151885; the answer to 6023054785; no branch mutation
+  - CC-CONTRADICTION-KF155-INTEGRATION-001   # 6379143072; the Worker Proof failure at 65832bc6 (246 of 247 controls live); ruled on by CG-REV-KF155-INTEGRATION-002, which authorized B
 # This file is a pre-RETURN record. The RETURN is posted on #80 after every
 # check on the head that carries this file has finished, with no further branch
 # mutation. That RETURN is the final evidence envelope.
@@ -36,6 +43,7 @@ previous_return_message_ids:
   - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-001
   - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-002
   - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-003
+  - CC-RETURN-GENAI-AUTH-FAIL-CLOSED-004   # 6380219053; posted for artifact head 02bf32b9 under CG-DIR-KF155-INTEGRATION-001 and CG-REV-KF155-INTEGRATION-002; receipt RETURN_REVIEWED by CG-REV-KF155-INTEGRATION-003 (6390482572)
 never_posted_return_message_ids: []
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 source_head: 26c1094311d761fd3adce5da39fa105ef7252ea8
@@ -63,9 +71,13 @@ summary: >
   batch has an explicit usable verdict. What changed is the tree the change
   sits in. Main moved from 98ee0202 to b1948d27 (the F9 squash of PR 181), so
   this head integrates main by an ordinary merge commit, 26c10943, which is
-  the new semantic head, under CG-DIR-KF155-INTEGRATION-001. The one commit
-  after it changes the two control artifacts only. Nobody independent has
-  read the integrated head; the reading of fe791816 in review 6240050804 is
+  the new semantic head, under CG-DIR-KF155-INTEGRATION-001. Every commit
+  after it (A, B and this one) changes the two control artifacts only.
+  ChatGPT read the integrated head independently in review 6390482572,
+  semantic_review_outcome PASS with 0 unresolved substantive findings, and
+  received RETURN 004; that record is transcribed here under semantic_review
+  as admission-record preparation, while the admission decision itself is
+  separate and pending. The reading of fe791816 in review 6240050804 is
   historical evidence. This pre-RETURN record claims no post-check result;
   exact_head_proof remains PENDING. The PR stays draft, review_status stays
   PENDING_CHATGPT_REVIEW, and no merge grant, ready transition or production
@@ -73,8 +85,8 @@ summary: >
 
 health_reason: >
   YELLOW for three reasons, none of them an open failure in the code. The
-  semantic head is new and has no independent reading. The outcome for the
-  head that carries this file is not known. The server typecheck, unit
+  admission decision on this record is separate and not yet made. The
+  outcome for the head that carries this file is not known. The server typecheck, unit
   suite, build and lint were not all run locally at the new head; see tests.
   No failure of the bounded parsed-command correction is asserted by this
   pending state.
@@ -506,6 +518,32 @@ ci:
       - DAST (HawkScan) 39065353307 concluded success with scan steps skipped; no dynamic scan occurred
       - Agent Control Worker Proof 39065353286 succeeded; one authenticated-gh skip on each platform
     applicability: historical evidence at that artifact head, on base 98ee0202, before main carried F9; not workflow evidence for the head that carries this file
+  previous_head_65832bc6:
+    source_head: 26c1094311d761fd3adce5da39fa105ef7252ea8
+    artifact_head: 65832bc6c267fe2a06e24c6d574fa61a5f3b8227
+    return_posted: false   # the Worker Proof failure below was reported as CC-CONTRADICTION-KF155-INTEGRATION-001 (6379143072) instead
+    workflows:
+      - CI/CD Pipeline 40051300356 succeeded; the Security Scan job's two steps are continue-on-error (pnpm audit exited 1 with 306 advisories in main's lockfile; trufflehog scanned 0 chunks because the base ref could not be resolved)
+      - Agent Control Gate 40051300355 succeeded; draft, so the non-draft grant step did not run
+      - Branch divergence 40051300333 (pull_request) and 40051297322 (push) succeeded
+      - DAST (HawkScan) 40051300349 concluded success with every scan step skipped; no dynamic scan occurred
+      - Agent Control Worker Proof 40051300334 FAILED; Windows suite 603 tests, 602 passed, 1 authenticated-gh skip, then 246 of 247 negative controls live because NC-RETURN-ARTIFACT-PREMATURE-ID found its mutation target twice in this file (the ci.previous_head_b30acfa7 record spelled it); Ubuntu job 579 tests, 578 passed, 1 skip
+    applicability: historical evidence at that artifact head; the failure was repaired by the one-line commit B under CG-REV-KF155-INTEGRATION-002
+  previous_head_02bf32b9:
+    source_head: 26c1094311d761fd3adce5da39fa105ef7252ea8
+    artifact_head: 02bf32b930edf2592e9ebd182c3960ab07403e3e
+    return_message_id: CC-RETURN-GENAI-AUTH-FAIL-CLOSED-004
+    return_comment_id: 6380219053
+    return_url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6380219053
+    receipt: RETURN_REVIEWED by CG-REV-KF155-INTEGRATION-003 (6390482572)
+    workflows:
+      - CI/CD Pipeline 40060379022 succeeded, six jobs; the Security Scan job's two steps are continue-on-error (trufflehog scanned 0 chunks and 0 bytes because the base ref main could not be resolved; the dependency audit ran against the same lockfile as 65832bc6, where it exited 1 with 306 advisories)
+      - Agent Control Gate 40060379034 and 40060400336 succeeded (two pull_request runs at one head after the PR description was updated a minute after the push); draft, so the non-draft grant step did not run in either
+      - Branch divergence 40060379041 (pull_request) and 40060374372 (push) succeeded
+      - DAST (HawkScan) 40060379046 concluded success with all eleven scan steps skipped; no dynamic scan occurred; NOT_RUN
+      - Agent Control Worker Proof 40060379049 succeeded; Windows suite 603 tests, 602 passed, 1 authenticated-gh skip; 247 of 247 negative controls live; Ubuntu job 579 tests, 578 passed, 1 skip; validate-dag OK
+    primary_reviewer: Copilot was requested at this head and answered unable to review for insufficient remaining quota (PR review 5636727516); it also did so at 65832bc6 (5636247931)
+    applicability: historical evidence at that artifact head, the head RETURN 004 reported; not workflow evidence for the head that carries this file
   this_head: PENDING. The workflows run on the head that carries this file once it is on the remote, and are read from the live runs for the RETURN.
 
 ai_review:
@@ -514,16 +552,55 @@ ai_review:
   fallback: chatgpt
   self_review: none; Claude authored the application change, ChatGPT records its separate reading
   at_the_semantic_head_fe791816: review 6240050804, recorded under semantic_head_review
-  at_the_semantic_head_26c10943: PENDING; no independent reader has read the integrated head
+  at_the_semantic_head_26c10943: review 6390482572 (CG-REV-KF155-INTEGRATION-003), semantic_review_outcome PASS, 0 unresolved substantive findings; recorded at top level under semantic_review
   at_the_head_that_carries_this_file: PENDING
-  record_owner: chatgpt
-  admission_state: PENDING; the top-level semantic_review block is reserved for the separate admission record
+  record_owner: chatgpt; transcribed by claude under the authority of 6390482572
+  admission_state: PREPARED, NOT DECIDED; the top-level semantic_review block is written under CG-REV-KF155-INTEGRATION-003 as admission-record preparation, and review_status stays PENDING_CHATGPT_REVIEW until the separate admission decision
+
+# The admission record, prepared under CG-REV-KF155-INTEGRATION-003 (6390482572).
+# Shape per lib/semantic-review.mjs: implementer plus one review entry per
+# provider at a head that carries the admitted semantics. review_status is not
+# changed by this record; the admission decision is separate.
+semantic_review:
+  implementer: claude
+  record_authority: CG-REV-KF155-INTEGRATION-003 (6390482572); admission-record preparation only, not admission
+  prepared_from_artifact_head: 02bf32b930edf2592e9ebd182c3960ab07403e3e
+  reviews:
+    - provider: copilot
+      reviewer: copilot-pull-request-reviewer[bot]
+      reviewed_head: 02bf32b930edf2592e9ebd182c3960ab07403e3e
+      outcome: NOT_RUN
+      reason: quota_exhausted
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5636727516
+    - provider: chatgpt
+      reviewer: chatgpt
+      reviewed_head: 26c1094311d761fd3adce5da39fa105ef7252ea8
+      outcome: PASS
+      reason: null
+      unresolved_substantive_findings: []
+      evidence_location: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6390482572
+      message_id: CG-REV-KF155-INTEGRATION-003
+  lineage_note: >
+    02bf32b9 descends from 26c10943 and differs from it only under
+    .agent-control (commits A and B), so it carries the admitted semantics
+    under the contract's lineage rule; the evaluator derives that from Git at
+    evaluation time, nothing here asserts it for the head that carries this
+    file.
+  live_evidence_caveat: >
+    The bot's review body at 02bf32b9 reads "insufficient remaining quota".
+    lib/semantic-review.mjs on main b1948d27 derives the machine reason
+    quota_exhausted only from the older wording "reached their quota limit",
+    so its live check would report not_run_reason_not_evidenced for this entry
+    until that pattern is added under separate authority. The entry records
+    what the bot said; it does not change the library, which is outside this
+    packet's write set.
 
 semantic_head_review:
   implementer: claude
   reviewed_head: fe79181638e373584c3ca3184a39343a132040cd
   record_kind: EVIDENCE_RECORDED_NOT_ADMISSION
-  integrated_head_26c10943: not yet reviewed; the reviews below are evidence about fe791816 and are not a reading of 26c10943
+  integrated_head_26c10943: read by review 6390482572 (CG-REV-KF155-INTEGRATION-003), semantic_review_outcome PASS, 0 unresolved substantive findings; that reading is recorded at top level under semantic_review; the reviews below are evidence about fe791816
   reviews:
     - provider: copilot
       reviewer: copilot-pull-request-reviewer[bot]
@@ -576,12 +653,30 @@ semantic_head_review:
 
 admission_notes:
   current_packet_authority:
+    message_id: CG-REV-KF155-INTEGRATION-003
+    comment_id: 6390482572
+    url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6390482572
+    effect: NO_STATE_CHANGE
+    disposition: SEMANTIC_PASS_AUTHORIZE_CONTROL_ONLY_ADMISSION_PREPARATION; this commit only
+  integration_authority:
     message_id: CG-DIR-KF155-INTEGRATION-001
     comment_id: 6378173450
     url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6378173450
     effect: NO_STATE_CHANGE
     disposition: INTEGRATION_MUTATION_AUTHORIZED; commits M and A only
+  corrective_authority:
+    message_id: CG-REV-KF155-INTEGRATION-002
+    comment_id: 6379332364
+    url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6379332364
+    effect: NO_STATE_CHANGE
+    disposition: one-line artifact repair B only
   semantic_review_authority:
+    message_id: CG-REV-KF155-INTEGRATION-003
+    comment_id: 6390482572
+    url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6390482572
+    effect: NO_STATE_CHANGE
+    disposition: independent reading of M 26c10943, semantic_review_outcome PASS, 0 unresolved substantive findings
+  historical_semantic_review_authority_fe791816:
     message_id: CG-REVIEW-KF155-006
     comment_id: 6240050804
     url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804
@@ -598,13 +693,22 @@ admission_notes:
     does not change that projection or claim packet admission. The latest
     worker assignment is separate from this packet-specific review record.
   base_sha: both source_main values equal main b1948d2797e1bae3660a3d7173abb75397e05aad, which is the PR base after the F9 squash; recheck before publishing and admission
-  preparation_parent: b30acfa7dcd4fdf96c67747ff8c4a66e4026937e
+  preparation_parent: 02bf32b930edf2592e9ebd182c3960ab07403e3e
   future_artifact_head: null
   final_head_rule: future artifact identity is observed after commit; all changes after 26c10943 must remain under .agent-control
   pending_admission: >
-    The controlling REVIEW records SEMANTIC_PASS, not ACCEPT_FOR_ADMISSION
-    or READY_TO_MERGE. Keep this PR draft and its status pending. Re-read
-    new artifact-head workflows and evidence before the separate decision.
+    The controlling REVIEW records SEMANTIC_PASS and authorizes this
+    admission-record preparation, not ACCEPT_FOR_ADMISSION or
+    READY_TO_MERGE. Keep this PR draft and its status pending. Re-read the
+    workflows at the head that carries this file and the live #80
+    authority before the separate admission decision.
+  primary_reviewer_reason_pattern: >
+    The admission contract's live check recognizes Copilot's unavailability
+    reason only from the wording "reached their quota limit"; the bot now
+    writes "insufficient remaining quota" (PR reviews 5636247931 and
+    5636727516). Until lib/semantic-review.mjs learns the new wording under
+    its own authority, the live check cannot evidence the quota reason for
+    the fallback, whatever this record says. Reported, not repaired here.
   f9_containment: >
     Main b1948d27 carries F9: the non-draft gate step and the evaluator
     require a distinct #80 merge grant bound to the exact final head, and
@@ -613,8 +717,8 @@ admission_notes:
     on review_status PENDING_CHATGPT_REVIEW. Pending review_status and draft
     are both retained. The draft-only gate run at the head that carries
     this file does not execute the non-draft grant step.
-  worker_assignment: the F9 assignment is closed (CG-REV-F9-012); this packet's integration under CG-DIR-KF155-INTEGRATION-001 is the current Claude assignment
-  review_evidence_fields: review 6240050804 supplies reviewed_head fe791816, semantic_review_outcome PASS and unresolved_substantive_findings 0 at top level
+  worker_assignment: the F9 assignment is closed (CG-REV-F9-012); this packet's admission-record preparation under CG-REV-KF155-INTEGRATION-003 is the current Claude assignment
+  review_evidence_fields: review 6390482572 supplies reviewed_head 26c10943, semantic_review_outcome PASS and unresolved_substantive_findings 0 at top level; review 6240050804 supplied the same three fields for fe791816
 
 scope_ledger:
   declared:
@@ -635,9 +739,11 @@ scope_ledger:
     - prior artifact a597c692 pushed and returned as CC-RETURN-GENAI-AUTH-FAIL-CLOSED-003
     - read-only integration preflight reported in CC-PROGRESS-KF155-INTEGRATION-PREFLIGHT-001 and accepted by CG-DIR-KF155-INTEGRATION-001
     - the ordinary merge of main b1948d27 as 26c10943, with the byte identities checked before the commit
+    - the one-line artifact repair B under CG-REV-KF155-INTEGRATION-002, with its hosted results recorded under ci.previous_head_02bf32b9
+    - RETURN 004 (6380219053) received and the independent reading of 26c10943 recorded by CG-REV-KF155-INTEGRATION-003
   remaining:
     - the required workflows and applicable proof on the head that carries this file
-    - an independent reading of the integrated semantic head 26c10943
+    - the Copilot unavailability wording that the admission contract's live check does not yet recognize; a separate authority decides
     - inspection and disposition of actual failed, skipped or unavailable proof on that head
     - final post-check evidence and separate ChatGPT admission decision
     - distinct exact-target merge decision and post-transition exact-head evaluator if integration is later authorized
@@ -650,7 +756,8 @@ scope_ledger:
     - semantic head 8987f6db, by fe791816
     - artifact heads 26111633 and fdc900b7, by a597c692; that head remains immutable prior evidence
     - semantic head fe791816, by 26c10943 (the merge of main b1948d27)
-    - artifact head b30acfa7, by the head that carries this file
+    - artifact head b30acfa7, by 65832bc6
+    - artifact heads 65832bc6 and 02bf32b9, by the head that carries this file
 
 deviations_from_packet:
   - >
@@ -718,7 +825,7 @@ residual_risks:
     this packet does not make the whole request effect-free.
 
 rollback_floor:
-  - before merge to main, the branch can return to b30acfa7 by reverting this artifact commit and the merge commit 26c10943, and to fdc900b7 by also reverting a597c692, b30acfa7 and fe791816; nothing was rewritten
+  - before merge to main, the branch can return to b30acfa7 by reverting the artifact commits A, B and this one and the merge commit 26c10943, and to fdc900b7 by also reverting a597c692, b30acfa7 and fe791816; nothing was rewritten
   - the historical executable-on-authority-error behaviour is not a rollback target
   - prefer an existing hold or disable path for the action-capable Cortex surface, then roll forward
   - there is no schema or data change to undo
@@ -746,7 +853,7 @@ settled_contradictions:
 next_action: >
   Push this head to the existing branch, keep the PR draft, read the five
   required workflows at this head from the live runs, and post one RETURN
-  or CONTRADICTION on #80 under CG-DIR-KF155-INTEGRATION-001. Then an
-  independent reading of 26c10943 and a separate ChatGPT admission decision
-  with their own evidence. No ready transition, merge grant, merge or
-  programme credit is requested.
+  or CONTRADICTION on #80 under CG-REV-KF155-INTEGRATION-003. Then the
+  separate ChatGPT admission decision with its own evidence, which also
+  decides the Copilot wording gap noted above. No ready transition, merge
+  grant, merge or programme credit is requested.
