@@ -498,7 +498,7 @@ ci:
   previous_head_b30acfa7:
     source_head: fe79181638e373584c3ca3184a39343a132040cd
     artifact_head: b30acfa7dcd4fdf96c67747ff8c4a66e4026937e
-    return_message_id: null   # no RETURN was posted for b30acfa7; its runs are recorded in PR 155 comment 6240756683
+    return_posted: false   # no RETURN was posted for b30acfa7; its runs are recorded in PR 155 comment 6240756683
     workflows:
       - CI/CD Pipeline 39065353293 succeeded
       - Agent Control Gate 39065353315, 39065401472 and 39074828933 succeeded; draft, so the non-draft step did not run
