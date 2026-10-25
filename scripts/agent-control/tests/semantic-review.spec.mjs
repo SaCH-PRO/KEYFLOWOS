@@ -497,3 +497,114 @@ test('NC missing evidence fails closed at every level', () => {
   assert.equal(judge([copilotNotRun(), chatgptPass()], { live: live([]) }).reason, R.LIVE_EVIDENCE_MISSING);
   assert.equal(judge([copilotNotRun(), chatgptPass({ outcome: 'LGTM' })]).reason, R.OUTCOME_INVALID);
 });
+
+// ------------------------------------------- KF-META-AI-REVIEW-QUOTA-WORDING-001
+//
+// On 2026-10-24 the bot's unavailable body changed its wording. PR 155 reviews
+// 5636247931 (at 65832bc6) and 5636727516 (at 02bf32b9) read "insufficient
+// remaining quota", which the one known pattern did not recognize, so a true
+// quota NOT_RUN derived no reason and the live check refused the fallback
+// (CC-RETURN-GENAI-AUTH-FAIL-CLOSED-005, CG-REV-KF155-ADMISSION-004).
+
+const PR155_QUOTA_BODY =
+  'Copilot was unable to review this pull request because the user who requested the review has insufficient remaining quota.';
+const PR155_M = '26c1094311d761fd3adce5da39fa105ef7252ea8'; // PR 155 semantic head M
+const PR155_B = '02bf32b930edf2592e9ebd182c3960ab07403e3e'; // PR 155 artifact head B, reviewed by the bot
+const PR155_QUOTA_URL = 'https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5636727516';
+const PR155_CHATGPT_URL = 'https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6390482572';
+
+// GET /repos/SaCH-PRO/KEYFLOWOS/pulls/155/reviews, the review at B (trimmed).
+const PR155_REST_QUOTA = {
+  id: 5636727516,
+  user: { login: 'copilot-pull-request-reviewer[bot]', type: 'Bot' },
+  commit_id: PR155_B,
+  html_url: PR155_QUOTA_URL,
+  body: PR155_QUOTA_BODY,
+};
+
+test('the PR 155 Copilot wording derives quota_exhausted, and the older wording still does', () => {
+  const e = copilotReviewEvidence(PR155_REST_QUOTA);
+  assert.equal(e.status, 'NOT_RUN');
+  assert.equal(e.reason, 'quota_exhausted');
+  assert.equal(e.commit_id, PR155_B);
+  assert.equal(e.url, PR155_QUOTA_URL);
+  assert.equal(copilotReviewEvidence(PR103_QUOTA).reason, 'quota_exhausted');
+  assert.equal(copilotReviewEvidence(PR104_REST_QUOTA).reason, 'quota_exhausted');
+  // An unknown unavailable body still derives nothing.
+  assert.equal(copilotReviewEvidence(copilotAt(A, REVIEW_URL(7), UNKNOWN_UNAVAILABLE)).reason, null);
+});
+
+test('NC near-match wording: only the exact phrase is a quota reason, and a body without "unable to review" is not unavailability', () => {
+  const nearMisses = [
+    'Copilot was unable to review this pull request because the user who requested the review has insufficient quota remaining.',
+    'Copilot was unable to review this pull request because the user who requested the review has an insufficient remaining-quota balance.',
+    'Copilot was unable to review this pull request because the user who requested the review has sufficient remaining quota.',
+    'Copilot was unable to review this pull request because quota.',
+    'Copilot was unable to review this pull request because the user who requested the review has insufficientremaining quota.',
+  ];
+  for (const body of nearMisses) {
+    const e = copilotReviewEvidence(copilotAt(A, REVIEW_URL(21), body));
+    assert.equal(e.status, 'NOT_RUN', body);
+    assert.equal(e.reason, null, body);
+  }
+  // The phrase inside a body that does not say the bot was unable to review
+  // is a review that ran, not a quota-based unavailability.
+  const ran = copilotReviewEvidence(copilotAt(S, REVIEW_URL(22), 'Copilot reviewed this pull request. The user who requested the review has insufficient remaining quota for further reviews.\n\n**Findings:** 0'));
+  assert.equal(ran.status, 'REVIEWED');
+  assert.equal(ran.reason, null);
+  assert.equal(ran.findings, 0);
+});
+
+test('NC impostor and uncited or wrong-head new-wording evidence cannot authorize the fallback', () => {
+  // A User account with the bot login is not Copilot evidence at all.
+  assert.equal(copilotReviewEvidence({ ...PR155_REST_QUOTA, user: { login: 'copilot-pull-request-reviewer[bot]', type: 'User' } }), null);
+  const impostorLive = { copilot: [copilotReviewEvidence({ ...PR155_REST_QUOTA, user: { login: 'copilot-pull-request-reviewer[bot]', type: 'User' } })].filter(Boolean), chatgpt: [chatgptReviewEvidence(reviewComment({ head: PR155_M, findings: '0' }))] };
+  const record155 = (copilotOver = {}) => [
+    copilotNotRun({ reviewed_head: PR155_B, evidence_location: PR155_QUOTA_URL, ...copilotOver }),
+    chatgptPass({ reviewed_head: PR155_M }),
+  ];
+  const lineage = { [PR155_B]: { descends_from_source_head: true, ancestor_of_pr_head: true, non_control_files: [] } };
+  const judge155 = (reviews, live) => evaluateSemanticReview({ record: { implementer: 'claude', reviews }, source_head: PR155_M, pr_head: 'c'.repeat(40), lineage, live });
+  assert.equal(judge155(record155(), impostorLive).reason, R.LIVE_EVIDENCE_MISSING);
+  // Genuine new-wording evidence at B, but the record cites another URL.
+  const genuine = { copilot: [copilotReviewEvidence(PR155_REST_QUOTA)], chatgpt: [chatgptReviewEvidence(reviewComment({ head: PR155_M, findings: '0' }))] };
+  assert.equal(judge155(record155({ evidence_location: REVIEW_URL(99) }), genuine).reason, R.LIVE_EVIDENCE_MISSING);
+  // The record names a head the bot did not answer at.
+  assert.equal(judge155(record155({ reviewed_head: PR155_M }), genuine).reason, R.LIVE_EVIDENCE_MISSING);
+  // And the recorded reason must still be the one the body states.
+  const v = judge155(record155({ reason: 'service_unavailable' }), genuine);
+  assert.equal(v.reason, R.LIVE_EVIDENCE_CONTRADICTS);
+  assert.deepEqual(v.detail, { provider: 'copilot', recorded_reason: 'service_unavailable', live_reason: 'quota_exhausted' });
+});
+
+test('PR 155 as it truly is: the new-wording NOT_RUN at B and the ChatGPT PASS of M satisfy the semantic-review predicate only', () => {
+  // The record commit C wrote, and live evidence shaped from the real PR
+  // review and the real #80 REVIEW CG-REV-KF155-INTEGRATION-003 (reviewed_head
+  // M, outcome PASS, 0 findings), with B's lineage proof as the evaluator
+  // derives it from Git.
+  const record = {
+    implementer: 'claude',
+    reviews: [
+      copilotNotRun({ reviewed_head: PR155_B, evidence_location: PR155_QUOTA_URL }),
+      chatgptPass({ reviewed_head: PR155_M, evidence_location: PR155_CHATGPT_URL }),
+    ],
+  };
+  const comment = { ...reviewComment({ head: PR155_M, findings: '0' }), html_url: PR155_CHATGPT_URL };
+  const v = evaluateSemanticReview({
+    record,
+    source_head: PR155_M,
+    pr_head: 'c'.repeat(40),
+    lineage: { [PR155_B]: { descends_from_source_head: true, ancestor_of_pr_head: true, non_control_files: [] } },
+    live: { copilot: [copilotReviewEvidence(PR155_REST_QUOTA)], chatgpt: [chatgptReviewEvidence(comment)] },
+  });
+  assert.equal(v.satisfied, true, JSON.stringify(v));
+  assert.equal(v.reason, R.SATISFIED);
+  assert.equal(v.evidence.primary, 'NOT_RUN');
+  assert.deepEqual(v.evidence.passing, [{ provider: 'chatgpt', reviewer: 'chatgpt', reviewed_head: PR155_M, evidence_location: PR155_CHATGPT_URL }]);
+  // This is the review predicate alone. It carries no admission or merge
+  // verdict: review_status, the grant and the exact-head gates are judged
+  // separately by evaluateAdmission and the merge-grant evaluator.
+  assert.equal('eligible' in v, false);
+  assert.equal('merge' in v, false);
+  assert.equal('review_status' in v, false);
+});
