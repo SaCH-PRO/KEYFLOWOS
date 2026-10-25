@@ -15,7 +15,7 @@ origin:   # the defect was found and reported on another packet; this packet is 
   specializes: KF-META-AI-REVIEW-FAILOVER-001, the provider-neutral semantic-review evidence contract
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 implementation_branch: impl/kf-meta-ai-review-quota-wording-001
-pr_number: null
+pr_number: 184
 state: PROVING
 health: YELLOW
 scope_changed: false

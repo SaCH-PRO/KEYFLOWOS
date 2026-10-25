@@ -20,7 +20,7 @@ never_posted_return_message_ids: []
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 source_head: 3b2e209ef6475290df5b44c7d898596ea3e95693
 implementation_branch: impl/kf-meta-ai-review-quota-wording-001
-pr_number: null
+pr_number: 184
 state: PROVING
 health: YELLOW
 scope_changed: false
@@ -194,8 +194,8 @@ unresolved_contradictions: []
 settled_contradictions: []
 
 next_action: >
-  Push this head to the new branch, open a draft PR from the exact base,
-  bind the PR number in one control-only commit, read the five required
-  workflows at that head from the live runs, and post one RETURN or
-  CONTRADICTION on #80 under CG-DIR-AI-REVIEW-QUOTA-WORDING-001. No merge,
-  ready transition or credit is requested.
+  The branch is pushed and draft PR 184 is open from the exact base
+  b1948d27; this control-only commit binds the PR number. Read the five
+  required workflows at this head from the live runs, and post one RETURN
+  or CONTRADICTION on #80 under CG-DIR-AI-REVIEW-QUOTA-WORDING-001. No
+  merge, ready transition or credit is requested.
