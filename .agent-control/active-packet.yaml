@@ -2,14 +2,17 @@ packet_id: KF-META-AI-REVIEW-QUOTA-WORDING-001
 directive_message_id: CG-DIR-AI-REVIEW-QUOTA-WORDING-001
 directive_comment_id: 6398243906
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
-  - CG-DIR-AI-REVIEW-QUOTA-WORDING-001   # 6398243906; NO_STATE_CHANGE; exact-base implementation and proof authorized; no merge, ready transition or credit; the current authority
-in_reply_to: CG-DIR-AI-REVIEW-QUOTA-WORDING-001
-ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-001
-ack_comment_id: 6398316967
-current_authority_message_id: CG-DIR-AI-REVIEW-QUOTA-WORDING-001
-current_authority_comment_id: 6398243906
-current_authority_ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-001
-current_authority_ack_comment_id: 6398316967
+  - CG-DIR-AI-REVIEW-QUOTA-WORDING-001   # 6398243906; NO_STATE_CHANGE; exact-base implementation and proof authorized; no merge, ready transition or credit
+  - CG-REV-AI-REVIEW-QUOTA-WORDING-001   # 6399663147; NO_STATE_CHANGE; receipt RETURN_REVIEWED of 6398809330; independent reading of S 3b2e209e with 0 unresolved substantive findings; authorizes only the control-only admission-record preparation; no admission, merge grant, ready transition or credit; the current authority
+in_reply_to: CG-REV-AI-REVIEW-QUOTA-WORDING-001
+ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-002
+ack_comment_id: 6399848165
+prior_ack_message_ids:
+  - CC-ACK-AI-REVIEW-QUOTA-WORDING-001   # 6398316967; implementation of S under the directive
+current_authority_message_id: CG-REV-AI-REVIEW-QUOTA-WORDING-001
+current_authority_comment_id: 6399663147
+current_authority_ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-002
+current_authority_ack_comment_id: 6399848165
 origin:   # the defect was found and reported on another packet; this packet is its separate repair
   evidenced_by: PR 155's fifth RETURN (#80 comment 6391360955) and CG-REV-KF155-ADMISSION-004 (6398240103)
   specializes: KF-META-AI-REVIEW-FAILOVER-001, the provider-neutral semantic-review evidence contract
@@ -44,6 +47,7 @@ allowed_scope:
   - scripts/agent-control/negative-controls.yaml: exactly one new control that removes the entry and names a test that then fails
   - docs/development/AGENT_CONTROL_PLANE.md: only if a contract note became inaccurate (none did; not touched)
   - .agent-control/active-packet.yaml and .agent-control/claude-return.yaml of this packet
+  - under CG-REV-AI-REVIEW-QUOTA-WORDING-001, those two artifacts only: the top-level semantic_review admission record, lineage, receipts and retained disclosures
 
 prohibited_scope:
   - any keyword-only or inferred quota matcher; any new reason vocabulary
@@ -65,6 +69,7 @@ proof_obligations:
   - PR 155's real record with live-shaped evidence satisfies the evidence contract's predicate alone, carrying no admission or merge verdict
   - the new negative control is live and non-vacuous; the hosted Windows manifest reports 248 of 248 live
   - the five required workflows at the final artifact head, with their real skips and security disclosures
+  - the top-level semantic_review record satisfies the evidence contract's predicate against live evidence at the head that carries it (the predicate alone; admission is a separate decision)
 
 stop_conditions:
   - main moves from b1948d27 before the push
@@ -72,17 +77,20 @@ stop_conditions:
   - any existing control goes vacuous or any existing test fails
   - the change would need more than the one entry to work
 
-current_authorization:   # CG-DIR-AI-REVIEW-QUOTA-WORDING-001
-  implementation: AUTHORIZED; one semantic commit and the control-only artifact commits that bind it
-  merge: NOT_AUTHORIZED
+current_authorization:   # CG-REV-AI-REVIEW-QUOTA-WORDING-001 (6399663147)
+  implementation: COMPLETE at S 3b2e209e under CG-DIR-AI-REVIEW-QUOTA-WORDING-001; no further semantic change is authorized
+  admission_record_preparation: AUTHORIZED; one control-only commit touching the two artifacts of this packet
+  admission: NOT_DECIDED; needs a separate exact-head ChatGPT admission review
+  merge_grant: NOT_ISSUED; F9 needs a distinct grant bound to PR, packet, branch, semantic head, final head and base
+  merge: NOT_AUTHORIZED; the human operator owns any merge execution
   ready_for_review: NOT_AUTHORIZED
 
 return_contract: >
-  ACK before any write; branch from exactly source_main in a clean isolated
-  worktree; one semantic commit; control-only artifact commits; draft PR
-  from the exact base; the semantic-review and admission specs, the full
-  portable suite, the new live mutation control, the full hosted Windows
-  manifest at 248 of 248, both DAG validators, the five required workflows
-  at the final head with every skip and limitation disclosed; one RETURN
-  or CONTRADICTION naming commit ids, branch, head, base and run ids, with
-  merge_authority false; no merge before a separate ChatGPT decision.
+  ACK before any write; a clean isolated worktree at exactly the PR head;
+  one control-only commit touching only the two artifacts, pushed without
+  force; the return-evidence and yaml specs on the new head; the
+  semantic-review predicate re-run on the record with live evidence; the
+  five required workflows at the new head with the hosted Windows manifest
+  at 248 of 248 and every skip and limitation disclosed; one RETURN or
+  CONTRADICTION naming commit ids, branch, head, base and run ids, with
+  merge_authority false; no admission, ready transition or merge.
