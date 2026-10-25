@@ -205,5 +205,9 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, st
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().then((code) => process.exit(code));
+  // Natural termination, never process.exit(): the status is kept, and the one
+  // large stdout write drains into the pipe before the process ends. A forced
+  // exit right after that write can end the process with part of the list
+  // still unwritten, and exit 0 (SWEEP-IO-001: 65,536 of 85,000 bytes on Linux).
+  main().then((code) => { process.exitCode = code; });
 }
