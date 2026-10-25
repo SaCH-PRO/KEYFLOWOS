@@ -84,7 +84,8 @@ correction_scope:   # CG-REV-AUTOPILOT-SWEEP-COVERAGE-001 (6399669819), as ruled
     - scripts/agent-control/negative-controls.yaml: one control appended, NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT, restoring exactly the old forced-exit line and running that test by name; the 251 existing controls and their targets untouched, for 252
   control_only_commits_after_d:
     - .agent-control/active-packet.yaml and .agent-control/claude-return.yaml naming D, the lineage through 6400454898, the original S and RETURN 6399172592 with its receipt, and every disclosed NOT_RUN, failed and skipped result
-    - the review authorized one such commit; E 083663e7 failed the gate's artifact validation on an inline comment in claude-return.yaml's source_head line, so a second control-only commit removes it and records the failure; D stays the semantic head and nothing pushed was amended
+    - the review authorized one such commit; E 083663e7 failed the gate's artifact validation on an inline comment in claude-return.yaml's source_head line, so E2 e91f7eb5 removed it and recorded the failure
+    - E2's hosted Windows manifest reported 251 of 252 because claude-return.yaml carried two proof_matrix entries scoped exact_head, the duplicated target of NC-RETURN-ARTIFACT-MISSING-SCOPE; a third control-only commit merges them and records that outcome; D stays the semantic head and nothing pushed was amended
   prohibited_by_the_review:
     - any change to GraphQL pagination, the consistency predicates, the workflow, the evaluator, the recorder, the mutation lock, F9 merge grants, PR 184, PR 155, production or providers
     - amending pushed commits, rebase, force push

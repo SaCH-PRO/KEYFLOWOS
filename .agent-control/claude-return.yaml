@@ -34,6 +34,7 @@ previous_source_head: 04860185c0c5bb8d30963b165821446afb8710e6   # S, read by 63
 previous_artifact_heads:
   - d71fbcd0ab215d1db8615a93583cc67d35f0638e   # A2, the head RETURN 6399172592 reported
   - 083663e77315b6a67fcba343bfe69dd8e4be27af   # E, the first control-only commit after D; its gate run failed on an inline comment in this file's source_head line; see ci
+  - e91f7eb5839702e5e3ab0a5362465f2a3fce9492   # E2, the second; its hosted Windows manifest reported 251 of 252 because this file carried two proof_matrix entries scoped exact_head, so one artifact-resident control's target occurred twice; see ci
 implementation_branch: impl/kf-meta-autopilot-sweep-coverage-001
 pr_number: 185
 state: PROVING
@@ -195,13 +196,9 @@ proof_matrix:
     evidence_scope: semantic_head
     proof: see negative_controls; the 251 controls of S are unchanged at D, and the full manifest is the hosted Windows job's
     result: PROVEN
-  - obligation: the two legs on a Linux host, and the 252-control manifest on hosted Windows at 252 of 252 with zero vacuous
+  - obligation: required exact-head workflows and the independent semantic review of the head that carries this file, including the pipe test's two legs on the hosted Linux job and the 252-control manifest on hosted Windows at 252 of 252 with zero vacuous
     evidence_scope: exact_head
-    proof: the hosted jobs at the head that carries this file; see exact_head_proof
-    result: PENDING
-  - obligation: required exact-head workflows and the independent semantic review of the head that carries this file
-    evidence_scope: exact_head
-    proof: see exact_head_proof
+    proof: see exact_head_proof; the hosted jobs at the head that carries this file
     result: PENDING
 
 tests:
@@ -233,6 +230,7 @@ negative_controls:
   existing: the 251 controls of S kept with every field unchanged at D
   manifest_at_d_local: proof-mutation.mjs on a six-control subset manifest at D (the retargeted listing-failure control, the four NC-SWEEP controls of S and the new forced-exit control), local Windows, 6 of 6 live, zero vacuous
   manifest_hosted: the Windows job at the head that carries this file; its count is read for the RETURN
+  manifest_hosted_at_e2: 251 of 252, the one vacuity being the artifact's own duplicated exact_head entry, corrected in this file; see ci.previous_head_e91f7eb5
 
 io_evidence:   # real versus modeled, measured in this session unless marked otherwise
   native_windows_pipe_with_defect: >
@@ -276,6 +274,28 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
 
 ci:
   this_head: PENDING. The workflows run on the head that carries this file once it is on the remote, and are read from the live runs for the RETURN.
+  previous_head_e91f7eb5839702e5e3ab0a5362465f2a3fce9492:
+    what_it_was: the second control-only commit after D, pushed 17:27:29Z; superseded by the commit that carries this file
+    agent_control_gate: run 40216558694 success (job 121238843964); Validate control artifacts success; the non-draft step skipped because the PR is draft
+    ci_cd_pipeline: run 40216558683 success at 17:39:38Z; six jobs, every step success; the Security Scan job's continue-on-error steps: pnpm audit --audit-level high exited 1 with 306 vulnerabilities (29 low, 135 moderate, 125 high, 17 critical); trufflehog 3.99.7 scanned 0 chunks and 0 bytes, "no base refs succeeded for base: main"; both pre-existing on main
+    branch_divergence: run 40216558682 success with "Fail when thresholds exceeded" skipped; the push-event run 40216555554 success
+    dast_hawkscan: run 40216558681 conclusion success with no scan; the guard ran and every scan step was skipped; NOT_RUN
+    agent_control_worker_proof: >
+      run 40216558697 FAILURE. Portable job 121238894981 success: 606 tests,
+      605 pass, 0 fail, 1 skipped (the authenticated-gh test), both pipe legs
+      ok on Linux, DAG OK. Windows job 121238894849: the Portable and Windows
+      proofs step success with 630 tests, 629 pass, 0 fail, 1 skipped (the
+      same test), both pipe legs ok; the Negative controls step failure at
+      18:23:16Z with 251 of 252 live. NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT
+      LIVE, the four NC-SWEEP controls and NC-AUTOPILOT-LISTING-FAILURE-FAILS
+      LIVE; one VACUOUS, NC-RETURN-ARTIFACT-MISSING-SCOPE, "mutation target
+      occurs 2 times in .agent-control/claude-return.yaml; refusing an
+      ambiguous edit", because this file then carried two proof_matrix entries
+      scoped exact_head and that control's target is the exact_head
+      evidence_scope line, which must occur once. A bookkeeping vacuity in the
+      artifact, not a defect in D or in any control's proof.
+    autopilot_observation: run 40216558703 success, self-test only; not a required workflow
+    copilot: review 5644346469 at e91f7eb5, "insufficient remaining quota", NOT_RUN
   previous_head_083663e77315b6a67fcba343bfe69dd8e4be27af:
     what_it_was: the first control-only commit after D, pushed 17:20:48Z; superseded by the commit that carries this file
     agent_control_gate: run 40216018128 failure at 17:21:02Z in "Validate control artifacts": claude-return.yaml source_head is not a commit available in this PR history, because the line read as "4ba75dce...   # D, the corrective semantic head; parent d71fbcd0"; the artifacts' identities and binding were otherwise as they are here
@@ -328,12 +348,16 @@ scope_ledger:
 
 deviations_from_packet:
   - >
-    The review authorized one control-only commit after D. There are two.
+    The review authorized one control-only commit after D. There are three.
     E 083663e7 failed the repository gate's artifact validation because its
     source_head line carried an inline comment, which the gate's sed reads as
-    part of the SHA; this commit removes that comment and records the
-    failure. Nothing outside .agent-control changed after D, so D is still
-    the semantic head, and no pushed commit was amended or force-pushed.
+    part of the SHA. E2 e91f7eb5 removed the comment, but its hosted Windows
+    manifest reported 251 of 252: this file then carried two proof_matrix
+    entries scoped exact_head, so the NC-RETURN-ARTIFACT-MISSING-SCOPE target
+    occurred twice and the runner refused the ambiguous edit. This commit
+    merges them into one entry and records both outcomes. Nothing outside
+    .agent-control changed after D, so D is still the semantic head, and no
+    pushed commit was amended or force-pushed.
 
 behaviour_changes:
   - the hourly sweep's candidate list is complete for every open impl/* PR, or the job fails before any evaluator runs; nothing changes for the event-driven path
