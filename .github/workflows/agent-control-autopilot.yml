@@ -305,7 +305,9 @@ jobs:
           # A failed listing is not "no open PRs": inside a process
           # substitution its status was lost and the job passed having
           # reconciled nothing.
-          if ! listing="$(gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("impl/")) | .number')"; then
+          # Candidates come from a paged GraphQL enumeration, not `gh pr list`, whose default page of 30 hid 14 of the 21 open impl/* PRs on 2026-10-24 while this job reported a clean sweep.
+          # The lister prints nothing unless its enumeration is complete and internally consistent, and exits 2 otherwise.
+          if ! listing="$(node scripts/agent-control/list-open-impl-prs.mjs)"; then
             echo "::error::could not list open pull requests; nothing was reconciled"
             exit 1
           fi

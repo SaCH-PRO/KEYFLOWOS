@@ -108,6 +108,24 @@ The evaluator requires all of:
 The Agent Control Gate independently proves the semantic-head/control-tail
 contract. This package lives on `impl/*` and is therefore subject to it.
 
+### The hourly sweep's candidate list
+
+The scheduled reconcile evaluates every open `impl/*` PR. Its candidates come
+from `scripts/agent-control/list-open-impl-prs.mjs`, which pages the GraphQL
+API in pages of 100 until `hasNextPage` is false and prints the `impl/*` PR
+numbers only after a complete, internally consistent enumeration: every node
+well formed, no PR number or cursor seen twice, the page count bounded, and
+the number of nodes equal to the `totalCount` the API reported. That equality
+is evidence of one consistent read, not a transactional snapshot: a PR opened
+or closed between pages shows up as a duplicate or a count mismatch, which is
+retried once as a whole enumeration and otherwise fails the job before any
+evaluator runs. A duplicated page is never collapsed into success. The
+previous `gh pr list` call returned its default page of 30, and on 2026-10-24
+that hid 14 of the 21 open `impl/*` PRs behind the 30 newest of 52 open PRs
+while the sweep reported a clean run (KF-META-AUTOPILOT-SWEEP-COVERAGE-001).
+The per-PR evaluator still rechecks live eligibility, head and base, so the
+listing never decides a merge on its own.
+
 ## Concurrency
 
 Observation and mutation are separated deliberately.
@@ -223,6 +241,7 @@ recovery.
 - `scripts/agent-control/orchestrate.mjs` — next-legal-action entry point (reconciles first).
 - `scripts/agent-control/status.mjs` — machine/human programme status (`--verify` reconciles).
 - `scripts/agent-control/auto-merge-admitted.mjs` — exact-head admission evaluator.
+- `scripts/agent-control/list-open-impl-prs.mjs` — the hourly sweep's paged, consistency-checked candidate list.
 - `scripts/agent-control/normalize-event.mjs` — event classifier.
 - `scripts/agent-control/validate-dag.mjs` — DAG executability proof.
 - `scripts/agent-control/proof-mutation.mjs` + `negative-controls.yaml` — negative controls.
