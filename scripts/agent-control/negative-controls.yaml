@@ -383,8 +383,8 @@ negative_controls:
       that reconciled nothing.
     mutation:
       file: .github/workflows/agent-control-autopilot.yml
-      find: "| .number')\"; then"
-      replace: "| .number' || true)\"; then"
+      find: "list-open-impl-prs.mjs)\"; then"
+      replace: "list-open-impl-prs.mjs || true)\"; then"
     proof_command: node --test --test-name-pattern="a failed PR listing" scripts/agent-control/tests/autopilot-workflow.spec.mjs
     timeout_ms: 120000
 
@@ -3223,3 +3223,55 @@ negative_controls:
           if (holdsTarget(e, t)) active.set(key, e);
     proof_command: node --test --test-name-pattern="NC CLI hold chronology" scripts/agent-control/tests/merge-cli.spec.mjs
     timeout_ms: 180000
+
+  # --- the hourly sweep's candidate list (KF-META-AUTOPILOT-SWEEP-COVERAGE-001)
+
+  - id: NC-SWEEP-DEFAULT-LIMIT-RESTORED
+    claim: >
+      The hourly sweep lists its candidates through the paged lister, never
+      through `gh pr list`, whose default page of 30 hid 14 of the 21 open
+      impl/* PRs on 2026-10-24 while the sweep reported a clean run.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "if ! listing=\"$(node scripts/agent-control/list-open-impl-prs.mjs)\"; then"
+      replace: "if ! listing=\"$(gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith(\"impl/\")) | .number')\"; then"
+    proof_command: node --test --test-name-pattern="the candidates come from the paged lister" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-TOTALCOUNT-UNCHECKED
+    claim: >
+      An enumeration that collected fewer pull requests than the API's own
+      totalCount is incomplete and fails. Without the check, a short read is a
+      shorter candidate list and the sweep is clean having missed PRs.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "if (nodes.length !== totalCount) {"
+      replace: "if (false) {"
+    proof_command: node --test --test-name-pattern="fewer nodes than totalCount" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-PAGE-ERROR-PARTIAL
+    claim: >
+      A failed page after a successful one fails the whole listing. Nothing
+      collected so far is printed: a partial list would reconcile the first
+      page and silently skip the rest.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "const page = await fetchPage(fetchImpl, { token, owner, name, cursor });"
+      replace: |-
+        let page;
+            try { page = await fetchPage(fetchImpl, { token, owner, name, cursor }); } catch { return { totalCount: nodes.length, nodes, pages }; }
+    proof_command: node --test --test-name-pattern="HTTP failure on the second page" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-DUPLICATES-COUNTED
+    claim: >
+      A pull request number seen twice is churn or a re-read page and fails
+      the enumeration. Skipping the repeat instead would let a duplicated page
+      deduplicate to exactly totalCount and pass as complete.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "if (seenNumbers.has(node.number)) throw new ListingError(LISTING_ERRORS.DUPLICATE, `PR #${node.number} listed twice`);"
+      replace: "if (seenNumbers.has(node.number)) continue;"
+    proof_command: node --test --test-name-pattern="duplicated page cannot be deduplicated" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 120000

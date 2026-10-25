@@ -62,8 +62,12 @@ function step(job, name) {
 const HOURLY = () => step('hourly-reconcile-open-prs', 'Reconcile every open implementation PR');
 const EXACT = () => step('exact-head-auto-merge', 'Merge only an exactly admitted head');
 
+// `gh` records every invocation. The hourly sweep must not list through it:
+// its default page of 30 is the defect KF-META-AUTOPILOT-SWEEP-COVERAGE-001
+// removed. Should a step call it anyway, it answers with the fixture.
 const STUB_GH = `#!/usr/bin/env bash
-if [ -f "$KF_STUB_DIR/gh-fails" ]; then echo "gh: HTTP 502" >&2; exit 1; fi
+echo "$*" >> "$KF_STUB_DIR/gh-calls"
+if [ -f "$KF_STUB_DIR/listing-fails" ]; then echo "gh: HTTP 502" >&2; exit 1; fi
 cat "$KF_STUB_DIR/prs"
 `;
 
@@ -72,6 +76,13 @@ cat "$KF_STUB_DIR/prs"
 // it was handed and exits with the status chosen for that PR (default 0).
 const STUB_NODE = `#!/usr/bin/env bash
 case "$1" in
+  *list-open-impl-prs.mjs)
+    # The paged lister: the fixture's numbers on stdout, or (listing-fails)
+    # its documented failure -- nothing on stdout, one line on stderr, exit 2.
+    if [ -f "$KF_STUB_DIR/listing-fails" ]; then echo "list-open-impl-prs: http: HTTP 502" >&2; exit 2; fi
+    cat "$KF_STUB_DIR/prs"
+    exit 0
+    ;;
   *record-auto-merge.mjs)
     printf '%s\\n' "$MERGE_JSON" >> "$KF_STUB_DIR/records"
     pr="$(printf '%s' "$MERGE_JSON" | sed -n 's/.*"pr":\\([0-9]*\\).*/\\1/p')"
@@ -89,9 +100,9 @@ exit "$(sed -n 1p "$answer")"
 
 /**
  * Runs a step's script as GitHub would. `answers` maps a PR number to the
- * evaluator's [exit status, stdout] for it.
+ * evaluator's [exit status, stdout] for it; `prs` is what the lister answers.
  */
-function runStep(script, { prs = [], answers = {}, ghFails = false, recordStatus = {}, env = {} } = {}) {
+function runStep(script, { prs = [], answers = {}, listingFails = false, recordStatus = {}, env = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-autopilot-'));
   try {
     const bin = path.join(dir, 'bin');
@@ -99,7 +110,7 @@ function runStep(script, { prs = [], answers = {}, ghFails = false, recordStatus
     fs.writeFileSync(path.join(bin, 'gh'), STUB_GH, { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'node'), STUB_NODE, { mode: 0o755 });
     fs.writeFileSync(path.join(dir, 'prs'), prs.map((n) => `${n}\n`).join(''));
-    if (ghFails) fs.writeFileSync(path.join(dir, 'gh-fails'), '');
+    if (listingFails) fs.writeFileSync(path.join(dir, 'listing-fails'), '');
     for (const [pr, [status, stdout]] of Object.entries(answers)) {
       fs.writeFileSync(path.join(dir, `pr-${pr}`), `${status}\n${stdout}\n`);
     }
@@ -125,7 +136,10 @@ function runStep(script, { prs = [], answers = {}, ghFails = false, recordStatus
     assert.equal(run.error, undefined, `bash must be runnable: ${run.error && run.error.message}`);
     const callsFile = path.join(dir, 'calls');
     const recordsFile = path.join(dir, 'records');
+    const ghCallsFile = path.join(dir, 'gh-calls');
     return {
+      // Every `gh` invocation the step made, as its argument line.
+      ghCalls: fs.existsSync(ghCallsFile) ? fs.readFileSync(ghCallsFile, 'utf8').split(/\r?\n/).filter(Boolean) : [],
       // What the recorder was handed, one evaluator result per call, in order.
       records: fs.existsSync(recordsFile)
         ? fs.readFileSync(recordsFile, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l))
@@ -185,10 +199,30 @@ test('hourly: a status the evaluator never documents is a failure, not an inelig
 });
 
 test('hourly: a failed PR listing fails the job instead of reconciling nothing', () => {
-  const r = runStep(HOURLY(), { prs: [162], answers: { 162: merged(162) }, ghFails: true });
+  const r = runStep(HOURLY(), { prs: [162], answers: { 162: merged(162) }, listingFails: true });
   assert.equal(r.status, 1, r.out);
   assert.deepEqual(r.evaluated, []);
+  assert.match(r.out, /list-open-impl-prs: http: HTTP 502/, 'the lister\'s own diagnostic stays in the log');
   assert.match(r.out, /^::error::could not list open pull requests/m);
+});
+
+test('hourly: the candidates come from the paged lister, and gh pr list is not consulted', () => {
+  // 2026-10-24: 52 open PRs, 21 on impl/* heads, and `gh pr list` showed the
+  // 30 newest. The lister answers with every impl/* PR, and the sweep must
+  // reconcile each one, including the ones a 30-PR page would have hidden.
+  const prs = Array.from({ length: 40 }, (_, i) => 101 + i);
+  const answers = Object.fromEntries(prs.map((pr) => [pr, DRAFT]));
+  const r = runStep(HOURLY(), { prs, answers });
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(r.evaluated, prs, 'every listed PR is evaluated, beyond the 30th included');
+  assert.deepEqual(r.ghCalls, [], 'the sweep never lists through gh, whose default page is 30');
+});
+
+test('hourly: the listing is read once, before any evaluator runs, and in the lister\'s order', () => {
+  const r = runStep(HOURLY(), { prs: [155, 160, 162], answers: { 155: DRAFT, 160: merged(160), 162: NOT_ADMITTED } });
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(r.evaluated, [155, 160, 162]);
+  assert.match(r.out, /PR #160 merged at its admitted head/);
 });
 
 test('hourly: no open impl PR is a clean no-op', () => {
