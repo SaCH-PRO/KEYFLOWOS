@@ -82,8 +82,9 @@ correction_scope:   # CG-REV-AUTOPILOT-SWEEP-COVERAGE-001 (6399669819), as ruled
     - scripts/agent-control/list-open-impl-prs.mjs: the entrypoint line only; process.exit replaced by process.exitCode and natural termination with the same 0 or 2 status, plus four comment lines; no change to the query, paging, consistency predicates, retry, output format or stderr lines
     - scripts/agent-control/tests/list-open-impl-prs.spec.mjs: one regression test that spawns the actual CLI file as a child with fetch stubbed through a test-only --import preload written to a temporary directory and reads its real stdout pipe under a paused reader; two independent legs, (1) the native OS pipe and (2) a preload sink that delivers each process.stdout.write to the real pipe on a later macrotask and returns false; each leg asserts exit 0, no signal, exactly the 5,000 expected 16-digit ids in order and byte-for-byte stdout of 85,000 bytes; bounded by a 30 s kill timer, a reader that always resumes on its own timer, and temporary-directory cleanup
     - scripts/agent-control/negative-controls.yaml: one control appended, NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT, restoring exactly the old forced-exit line and running that test by name; the 251 existing controls and their targets untouched, for 252
-  control_only_commit_e:
+  control_only_commits_after_d:
     - .agent-control/active-packet.yaml and .agent-control/claude-return.yaml naming D, the lineage through 6400454898, the original S and RETURN 6399172592 with its receipt, and every disclosed NOT_RUN, failed and skipped result
+    - the review authorized one such commit; E 083663e7 failed the gate's artifact validation on an inline comment in claude-return.yaml's source_head line, so a second control-only commit removes it and records the failure; D stays the semantic head and nothing pushed was amended
   prohibited_by_the_review:
     - any change to GraphQL pagination, the consistency predicates, the workflow, the evaluator, the recorder, the mutation lock, F9 merge grants, PR 184, PR 155, production or providers
     - amending pushed commits, rebase, force push

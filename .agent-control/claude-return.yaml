@@ -28,9 +28,12 @@ previous_return_message_ids:
   - CC-RETURN-AUTOPILOT-SWEEP-COVERAGE-001   # 6399172592; for S 04860185 at artifact head d71fbcd0; receipt RETURN_REVIEWED by 6399669819 with CHANGES_REQUIRED
 never_posted_return_message_ids: []
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: 4ba75dcec1251c85eb4b4931e2515b8723cf3d0a   # D, the corrective semantic head; parent d71fbcd0
+source_head: 4ba75dcec1251c85eb4b4931e2515b8723cf3d0a
+source_head_note: D, the corrective semantic head, parent d71fbcd0. The line above carries no inline comment, because the repository gate reads the whole rest of that line as the SHA.
 previous_source_head: 04860185c0c5bb8d30963b165821446afb8710e6   # S, read by 6399669819
-previous_artifact_head: d71fbcd0ab215d1db8615a93583cc67d35f0638e   # A2, the head RETURN 6399172592 reported
+previous_artifact_heads:
+  - d71fbcd0ab215d1db8615a93583cc67d35f0638e   # A2, the head RETURN 6399172592 reported
+  - 083663e77315b6a67fcba343bfe69dd8e4be27af   # E, the first control-only commit after D; its gate run failed on an inline comment in this file's source_head line; see ci
 implementation_branch: impl/kf-meta-autopilot-sweep-coverage-001
 pr_number: 185
 state: PROVING
@@ -273,6 +276,14 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
 
 ci:
   this_head: PENDING. The workflows run on the head that carries this file once it is on the remote, and are read from the live runs for the RETURN.
+  previous_head_083663e77315b6a67fcba343bfe69dd8e4be27af:
+    what_it_was: the first control-only commit after D, pushed 17:20:48Z; superseded by the commit that carries this file
+    agent_control_gate: run 40216018128 failure at 17:21:02Z in "Validate control artifacts": claude-return.yaml source_head is not a commit available in this PR history, because the line read as "4ba75dce...   # D, the corrective semantic head; parent d71fbcd0"; the artifacts' identities and binding were otherwise as they are here
+    branch_divergence: run 40216018140 success; the push-event run 40216014494 success
+    dast_hawkscan: run 40216018137 conclusion success with no scan, as at d71fbcd0; NOT_RUN
+    autopilot_observation: run 40216018132 success, self-test only; not a required workflow
+    ci_cd_pipeline: run 40216018127 in progress when this commit was written; superseded, not evidence
+    agent_control_worker_proof: run 40216018118 in progress when this commit was written; superseded, not evidence
   previous_head_d71fbcd0ab215d1db8615a93583cc67d35f0638e:
     reported_by: RETURN 6399172592; independently read by 6399669819
     ci_cd_pipeline: run 40201300044 success; the Security Scan job's two steps are continue-on-error: trufflehog 3.99.7 scanned 0 chunks and 0 bytes because the checkout cannot resolve the base ref main, and pnpm audit exited 1 with 306 vulnerabilities (29 low, 135 moderate, 125 high, 17 critical); both pre-existing on main, neither this packet's
@@ -315,7 +326,14 @@ scope_ledger:
   superseded:
     - the forced-exit entrypoint of S, by D
 
-deviations_from_packet: []
+deviations_from_packet:
+  - >
+    The review authorized one control-only commit after D. There are two.
+    E 083663e7 failed the repository gate's artifact validation because its
+    source_head line carried an inline comment, which the gate's sed reads as
+    part of the SHA; this commit removes that comment and records the
+    failure. Nothing outside .agent-control changed after D, so D is still
+    the semantic head, and no pushed commit was amended or force-pushed.
 
 behaviour_changes:
   - the hourly sweep's candidate list is complete for every open impl/* PR, or the job fails before any evaluator runs; nothing changes for the event-driven path
@@ -366,9 +384,9 @@ authority_notes:
   branch_checkout: the branch is checked out in the interactive session's worktree at d71fbcd0 with a clean tree, so this session pushes by ref without force
 
 next_action: >
-  Push D and E by ref without force after re-checking main, the remote tip
-  and #80. Read every step of the five required runs at E from the live
-  runs, with the Windows manifest count and both legs on the Ubuntu job.
-  Post one RETURN or CONTRADICTION under 6400454898 naming D, E, the run
-  ids and the real versus modeled IO results. No merge, ready transition,
-  dispatch, HOLD release or credit.
+  Push this control-only commit by ref without force after re-checking
+  main, the remote tip and #80. Read every step of the five required runs
+  at this head from the live runs, with the Windows manifest count and both
+  legs on the Ubuntu job. Post one RETURN or CONTRADICTION under 6400454898
+  naming D, the artifact heads, the run ids and the real versus modeled IO
+  results. No merge, ready transition, dispatch, HOLD release or credit.
