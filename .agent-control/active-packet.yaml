@@ -3,16 +3,18 @@ directive_message_id: CG-DIR-AI-REVIEW-QUOTA-WORDING-001
 directive_comment_id: 6398243906
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIR-AI-REVIEW-QUOTA-WORDING-001   # 6398243906; NO_STATE_CHANGE; exact-base implementation and proof authorized; no merge, ready transition or credit
-  - CG-REV-AI-REVIEW-QUOTA-WORDING-001   # 6399663147; NO_STATE_CHANGE; receipt RETURN_REVIEWED of 6398809330; independent reading of S 3b2e209e with 0 unresolved substantive findings; authorizes only the control-only admission-record preparation; no admission, merge grant, ready transition or credit; the current authority
-in_reply_to: CG-REV-AI-REVIEW-QUOTA-WORDING-001
-ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-002
-ack_comment_id: 6399848165
+  - CG-REV-AI-REVIEW-QUOTA-WORDING-001   # 6399663147; NO_STATE_CHANGE; receipt RETURN_REVIEWED of 6398809330; independent reading of S 3b2e209e with 0 unresolved substantive findings; authorized only the control-only admission-record preparation
+  - CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002   # 6400449273; NO_STATE_CHANGE; receipt RETURN_REVIEWED of 6400290175; exact-head admission decision at artifact head f2a7db95: ACCEPT_FOR_ADMISSION, no merge grant; authorizes only this control-only admission-status commit; the current authority
+in_reply_to: CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002
+ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-003
+ack_comment_id: 6400503954
 prior_ack_message_ids:
   - CC-ACK-AI-REVIEW-QUOTA-WORDING-001   # 6398316967; implementation of S under the directive
-current_authority_message_id: CG-REV-AI-REVIEW-QUOTA-WORDING-001
-current_authority_comment_id: 6399663147
-current_authority_ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-002
-current_authority_ack_comment_id: 6399848165
+  - CC-ACK-AI-REVIEW-QUOTA-WORDING-002   # 6399848165; admission-record preparation under 6399663147
+current_authority_message_id: CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002
+current_authority_comment_id: 6400449273
+current_authority_ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-003
+current_authority_ack_comment_id: 6400503954
 origin:   # the defect was found and reported on another packet; this packet is its separate repair
   evidenced_by: PR 155's fifth RETURN (#80 comment 6391360955) and CG-REV-KF155-ADMISSION-004 (6398240103)
   specializes: KF-META-AI-REVIEW-FAILOVER-001, the provider-neutral semantic-review evidence contract
@@ -26,7 +28,7 @@ production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: ACCEPT_FOR_ADMISSION
 
 objective: >
   Let the semantic-review evidence contract recognize the wording GitHub's
@@ -48,6 +50,7 @@ allowed_scope:
   - docs/development/AGENT_CONTROL_PLANE.md: only if a contract note became inaccurate (none did; not touched)
   - .agent-control/active-packet.yaml and .agent-control/claude-return.yaml of this packet
   - under CG-REV-AI-REVIEW-QUOTA-WORDING-001, those two artifacts only: the top-level semantic_review admission record, lineage, receipts and retained disclosures
+  - under CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002, those two artifacts only: the bare review_status value, lineage and receipts, the retained f2a7db95 outcomes and disclosures
 
 prohibited_scope:
   - any keyword-only or inferred quota matcher; any new reason vocabulary
@@ -77,13 +80,15 @@ stop_conditions:
   - any existing control goes vacuous or any existing test fails
   - the change would need more than the one entry to work
 
-current_authorization:   # CG-REV-AI-REVIEW-QUOTA-WORDING-001 (6399663147)
+current_authorization:   # CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002 (6400449273)
   implementation: COMPLETE at S 3b2e209e under CG-DIR-AI-REVIEW-QUOTA-WORDING-001; no further semantic change is authorized
-  admission_record_preparation: AUTHORIZED; one control-only commit touching the two artifacts of this packet
-  admission: NOT_DECIDED; needs a separate exact-head ChatGPT admission review
-  merge_grant: NOT_ISSUED; F9 needs a distinct grant bound to PR, packet, branch, semantic head, final head and base
-  merge: NOT_AUTHORIZED; the human operator owns any merge execution
+  admission_record_preparation: COMPLETE at artifact head f2a7db95 under CG-REV-AI-REVIEW-QUOTA-WORDING-001 (6399663147)
+  admission: ACCEPT_FOR_ADMISSION, decided by 6400449273 at artifact head f2a7db95 for S 3b2e209e; acceptance of the record, not READY_TO_MERGE, not PACKET_ADMISSION, not a grant
+  admission_status_commit: AUTHORIZED; exactly one control-only commit touching the two artifacts of this packet, which is the commit that carries this file
+  merge_grant: NOT_ISSUED; F9 needs a distinct exact-head ChatGPT REVIEW bound to PR, packet, branch, semantic head, the FINAL artifact head (not f2a7db95) and base
+  merge: NOT_AUTHORIZED; the human operator alone performs any later authorized merge under its explicit conditions
   ready_for_review: NOT_AUTHORIZED
+  bootstrap_dependency: trusted main b1948d27 carries the old Copilot quota recognizer, so its merge evaluator cannot independently validate this packet's newly recognized phrasing; a separate exact-head bootstrap and merge-readiness decision with a justified operator-only path and fresh no-competing-merger evidence is requested after this commit's RETURN; no bypass, ready transition, merge PUT or HOLD release
 
 return_contract: >
   ACK before any write; a clean isolated worktree at exactly the PR head;
@@ -92,5 +97,7 @@ return_contract: >
   semantic-review predicate re-run on the record with live evidence; the
   five required workflows at the new head with the hosted Windows manifest
   at 248 of 248 and every skip and limitation disclosed; one RETURN or
-  CONTRADICTION naming commit ids, branch, head, base and run ids, with
-  merge_authority false; no admission, ready transition or merge.
+  CONTRADICTION naming the immutable new artifact SHA, branch, base and
+  run ids, with merge_authority false; then a request for the separate
+  exact-head bootstrap and merge-readiness decision; no ready transition,
+  merge, bypass or HOLD release.

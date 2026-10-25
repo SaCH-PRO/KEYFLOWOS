@@ -3,13 +3,15 @@ directive_message_id: CG-DIR-AI-REVIEW-QUOTA-WORDING-001
 directive_comment_id: 6398243906
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIR-AI-REVIEW-QUOTA-WORDING-001   # 6398243906; NO_STATE_CHANGE; exact-base implementation and proof authorized; no merge
-  - CG-REV-AI-REVIEW-QUOTA-WORDING-001   # 6399663147; NO_STATE_CHANGE; receipt RETURN_REVIEWED of 6398809330; independent reading of S 3b2e209e, outcome PASS, 0 unresolved substantive findings; authorizes this control-only admission-record preparation only, not admission and no merge grant; the current authority
-current_authority_message_id: CG-REV-AI-REVIEW-QUOTA-WORDING-001
-current_authority_comment_id: 6399663147
-ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-002
-ack_comment_id: 6399848165
+  - CG-REV-AI-REVIEW-QUOTA-WORDING-001   # 6399663147; NO_STATE_CHANGE; receipt RETURN_REVIEWED of 6398809330; independent reading of S 3b2e209e, outcome PASS, 0 unresolved substantive findings; authorized the control-only admission-record preparation only
+  - CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002   # 6400449273; NO_STATE_CHANGE; receipt RETURN_REVIEWED of 6400290175; exact-head admission decision at artifact head f2a7db95 for S 3b2e209e: ACCEPT_FOR_ADMISSION, no merge grant; authorizes only this control-only admission-status commit; the current authority
+current_authority_message_id: CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002
+current_authority_comment_id: 6400449273
+ack_message_id: CC-ACK-AI-REVIEW-QUOTA-WORDING-003
+ack_comment_id: 6400503954
 prior_ack_message_ids:
   - CC-ACK-AI-REVIEW-QUOTA-WORDING-001   # 6398316967; implementation of S under the directive
+  - CC-ACK-AI-REVIEW-QUOTA-WORDING-002   # 6399848165; admission-record preparation under 6399663147
 progress_message_ids:
   - CC-PROGRESS-AI-REVIEW-QUOTA-WORDING-001   # 6398515014; S, A1 and A2 pushed, draft PR 184 open
 contradiction_message_ids: []
@@ -20,6 +22,7 @@ return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
 previous_return_message_ids:
   - CC-RETURN-AI-REVIEW-QUOTA-WORDING-001   # 6398809330; posted for artifact head 14129d59 under the directive; receipt RETURN_REVIEWED by 6399663147
+  - CC-RETURN-AI-REVIEW-QUOTA-WORDING-002   # 6400290175; posted for artifact head f2a7db95 under 6399663147; receipt RETURN_REVIEWED by 6400449273
 never_posted_return_message_ids: []
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 source_head: 3b2e209ef6475290df5b44c7d898596ea3e95693
@@ -30,7 +33,7 @@ health: YELLOW
 scope_changed: false
 production_touched: false
 provider_traffic: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: ACCEPT_FOR_ADMISSION
 programme_credit: ZERO
 merge_authority: false
 implementer: claude
@@ -41,20 +44,24 @@ summary: >
   cannot review for quota, "insufficient remaining quota", derives the
   existing machine reason quota_exhausted, as "reached their quota limit"
   already did. Four tests and one negative control prove the entry and its
-  boundaries. Nothing else in the evidence contract changes. This head adds
-  only the admission-record preparation that 6399663147 authorized: the
-  top-level semantic_review block transcribes that reading of S and the live
-  primary-reviewer NOT_RUN citation. It decides nothing. This pre-RETURN
-  record claims no post-check result; exact_head_proof remains PENDING. The
-  PR is draft, review_status stays PENDING_CHATGPT_REVIEW, and no admission,
-  merge grant, ready transition or credit is granted.
+  boundaries. Nothing else in the evidence contract changes. Artifact head
+  f2a7db95 added the admission-record preparation that 6399663147
+  authorized: the top-level semantic_review block transcribing that reading
+  of S and the live primary-reviewer NOT_RUN citation. This head records the
+  separate exact-head admission decision 6400449273, which accepted that
+  record for admission: review_status is ACCEPT_FOR_ADMISSION, acceptance of
+  the record and not READY_TO_MERGE, not PACKET_ADMISSION and not a grant.
+  This pre-RETURN record claims no post-check result; exact_head_proof
+  remains PENDING for this head. The PR is draft, merge_authority is false,
+  and no merge grant, ready transition or credit is granted.
 
 health_reason: >
   YELLOW because the outcome for the head that carries this file is not
-  known, because admission is a separate decision still to be made, and
-  because the change exists to unblock another packet's admission (PR 155),
-  which needs this one merged and its own fresh evidence first. No failure
-  is asserted.
+  known, because trusted main's evaluator carries the old recognizer and
+  cannot itself validate this packet's phrasing (a bootstrap dependency that
+  needs a separate exact-head decision), and because the change exists to
+  unblock another packet's admission (PR 155), which needs this one merged
+  and its own fresh evidence first. No failure is asserted.
 
 characterization:
   basis: CG-DIR-AI-REVIEW-QUOTA-WORDING-001, read at b1948d27 before editing
@@ -94,7 +101,8 @@ changed_files:
   control_only_commits_after_source_head:
     - c329c97bbf94c6fe1846869fc0d36afe98c9e489   # A1; packet artifacts, pr_number null
     - 14129d59c11411bbd7c203b8e7feda906f487f99   # A2; pr_number 184; the head RETURN 6398809330 reported and 6399663147 read
-    - the commit that carries this file   # A3; admission-record preparation under 6399663147; the two artifacts only
+    - f2a7db95f269008df807bcb9d3d6c41499b863c9   # A3; admission-record preparation under 6399663147; the two artifacts only; the head 6400449273 accepted for admission
+    - the commit that carries this file   # A4; admission-status record under 6400449273; the two artifacts only
   existing_tests_changed: none removed or loosened; 33 existing tests in the spec are unchanged and 4 were added
 
 schema_migrations: []
@@ -134,14 +142,14 @@ tests:
   windows_suite: NOT_RUN in that session; the hosted Windows job is the evidence
   at_this_head: >
     This head changes only the two artifacts, so no proof target outside
-    .agent-control differs from 14129d59 or from S. The return-evidence and
-    yaml specs read this file and are reported for this head in the RETURN,
-    with the semantic-review predicate re-run on this record.
+    .agent-control differs from f2a7db95, 14129d59 or S. The return-evidence
+    and yaml specs read this file and are reported for this head in the
+    RETURN, with the semantic-review predicate re-run on this record.
 
 negative_controls:
   new: NC-SR-COPILOT-INSUFFICIENT-QUOTA-UNRECOGNIZED removes the entry and names the test "the PR 155 Copilot wording derives quota_exhausted"
   manual_check: in a scratch copy with the entry removed, the named test fails with actual null where quota_exhausted is expected
-  manifest_at_source_head: 226 of 248 live in the Linux container, the 22 vacuous controls being the 16 NC-WORKER and 6 NC-SELECTOR controls whose tests skip without PowerShell; see previous_head_14129d59 under ci for the hosted Windows manifest
+  manifest_at_source_head: 226 of 248 live in the Linux container, the 22 vacuous controls being the 16 NC-WORKER and 6 NC-SELECTOR controls whose tests skip without PowerShell; see previous_head_14129d59 and previous_head_f2a7db95 under ci for the hosted Windows manifest
   existing: 247 controls unchanged, targets unchanged
   at_this_head: unchanged; this head edits no control, no target file outside .agent-control, and keeps each artifact-resident target string exactly once
 
@@ -181,6 +189,27 @@ ci:
     autopilot_observation: run 40199554638 was cancelled six seconds after creation by its concurrency group with no job executed; not one of the five required workflows; no AUTO_EVENT or state change resulted
     primary_reviewer: Copilot was requested at this head and answered unable to review for insufficient remaining quota (PR review 5643520330); it also did so at c329c97b (5643517423)
     applicability: historical evidence at that artifact head, the head RETURN 6398809330 reported; not workflow evidence for the head that carries this file
+  previous_head_f2a7db95f269008df807bcb9d3d6c41499b863c9:
+    source_head: 3b2e209ef6475290df5b44c7d898596ea3e95693
+    artifact_head: f2a7db95f269008df807bcb9d3d6c41499b863c9
+    return_message_id: CC-RETURN-AI-REVIEW-QUOTA-WORDING-002
+    return_comment_id: 6400290175
+    return_url: https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6400290175
+    receipt: RETURN_REVIEWED by CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002 (6400449273), which read these runs independently and accepted the record for admission at this head
+    workflows:
+      - CI/CD Pipeline 40210088175 succeeded, six jobs; the Security Scan job's two steps are continue-on-error, so their conclusions are not evidence (job 121219255927)
+      - Agent Control Gate 40210088160 succeeded; draft, so the non-draft grant step was skipped
+      - Branch divergence 40210088210 (pull_request) and 40210085308 (push) succeeded
+      - DAST (HawkScan) 40210088138 concluded success with every scan step skipped; no dynamic scan occurred; NOT_RUN
+      - Agent Control Worker Proof 40210088129 succeeded; Windows job 121219255900, 607 tests, 606 passed, 0 failed, 1 authenticated-gh skip, 248 of 248 negative controls live with 0 vacuous, including NC-SR-COPILOT-INSUFFICIENT-QUOTA-UNRECOGNIZED and the three artifact-resident controls against that head's own claude-return.yaml; Ubuntu job 121219255588, 583 tests, 582 passed, 1 skip; validate-dag OK
+    security_disclosures:
+      - dependency audit exited 1 with 306 vulnerabilities (29 low, 135 moderate, 125 high, 17 critical) under continue-on-error; pre-existing on main, no dependency changed by this packet; not a security pass and not waived
+      - TruffleHog 3.99.7 scanned 0 chunks and 0 bytes because the checkout could not resolve the base ref main, under continue-on-error; not a secret scan and not waived
+      - HawkScan NOT_RUN at that head, as above
+    autopilot_observation: run 40210088141 succeeded with the self-test only; the mutating jobs were skipped for the pull_request event; not one of the five required workflows and not merge evidence
+    primary_reviewer: Copilot was requested at that head and answered unable to review for insufficient remaining quota (PR review 5644062006); NOT_RUN at every head of this PR
+    semantic_review_predicate: this branch's evaluateSemanticReview on the committed record with live evidence at PR head f2a7db95 answered satisfied, independent_semantic_review_satisfied (RETURN 6400290175); the evidence-contract predicate alone, judged by this branch's library
+    applicability: historical evidence at that artifact head, the head RETURN 6400290175 reported and 6400449273 accepted for admission; not workflow evidence for the head that carries this file
   this_head: PENDING. The workflows run on the head that carries this file once it is on the remote, and are read from the live runs for the RETURN.
 
 ai_review:
@@ -192,7 +221,7 @@ ai_review:
   fallback_at_the_semantic_head_3b2e209e: comment 6399663147; reviewed_head 3b2e209e, semantic_review_outcome PASS, unresolved_substantive_findings 0; recorded at top level under semantic_review
   at_the_head_that_carries_this_file: PENDING
   record_owner: chatgpt; transcribed by claude under the authority of 6399663147
-  admission_state: PREPARED, NOT DECIDED; the top-level semantic_review block is written as admission-record preparation, and review_status stays PENDING_CHATGPT_REVIEW until a separate exact-head admission decision
+  admission_state: ACCEPT_FOR_ADMISSION, decided by CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002 (6400449273) at artifact head f2a7db95 for S 3b2e209e; acceptance of the record, not READY_TO_MERGE, not PACKET_ADMISSION and not a merge grant; the record itself is unchanged by this head
 
 # The admission record, prepared under CG-REV-AI-REVIEW-QUOTA-WORDING-001
 # (6399663147). Shape per lib/semantic-review.mjs: implementer plus one review
@@ -240,6 +269,16 @@ semantic_review:
     independent_semantic_review_satisfied. That is the evidence-contract
     predicate alone. It is not admission, and the RETURN reports the same
     predicate at the head that carries this file.
+  admission_decision: >
+    CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002 (6400449273) accepted this
+    record for admission at artifact head f2a7db95, reading the live PR, the
+    compare from 14129d59, the five required runs and the Windows and
+    security logs independently. That decision sets review_status to
+    ACCEPT_FOR_ADMISSION in the head that carries this file. It is not a
+    merge grant; a grant must be a separate exact-head ChatGPT REVIEW naming
+    the final artifact head, and trusted main's evaluator cannot validate
+    this packet's phrasing until this packet is on main (bootstrap
+    dependency; see active-packet.yaml current_authorization).
 
 scope_ledger:
   declared:
@@ -247,10 +286,11 @@ scope_ledger:
     - the control-only admission-record preparation authorized by 6399663147
   resolved:
     - an independent reading of S 3b2e209e (6399663147, received at its scope)
+    - the exact-head admission decision for the record at f2a7db95 (6400449273, ACCEPT_FOR_ADMISSION, no grant)
   remaining:
     - the required workflows on the head that carries this file
-    - a separate exact-head admission review by ChatGPT
-    - a distinct F9 merge grant bound to PR, packet, branch, semantic head, final head and base, and any merge, which the human operator executes
+    - a separate exact-head bootstrap and merge-readiness decision, since trusted main's evaluator carries the old recognizer
+    - a distinct F9 merge grant bound to PR, packet, branch, semantic head, the final artifact head and base, and any merge, which the human operator executes
   added_inside_the_packet_boundary: []
   deferred: []
   dropped: []
@@ -291,6 +331,8 @@ next_action: >
   Push this control-only head to the existing branch without force, keep
   the PR draft, read the five required workflows at this head from the live
   runs, re-run the semantic-review predicate on this record, and post one
-  RETURN or CONTRADICTION on #80 under CG-REV-AI-REVIEW-QUOTA-WORDING-001.
-  Then a separate ChatGPT exact-head admission review. No ready transition,
-  admission, merge grant, merge or programme credit is requested.
+  RETURN or CONTRADICTION on #80 under
+  CG-REV-AI-REVIEW-QUOTA-WORDING-ADMISSION-002 naming this head's SHA. Then
+  request the separate exact-head bootstrap and merge-readiness decision
+  with fresh no-competing-merger evidence. No ready transition, merge PUT,
+  bypass, HOLD release, merge grant or programme credit is requested.
