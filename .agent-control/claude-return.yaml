@@ -3,26 +3,34 @@ directive_message_id: CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002
 directive_comment_id: 6398248874
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIR-AUTOPILOT-SWEEP-COVERAGE-001   # 6390486860; NO_STATE_CHANGE; characterization only
-  - CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002   # 6398248874; NO_STATE_CHANGE; exact-base implementation and proof authorized; no merge; the current authority
-current_authority_message_id: CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002
-current_authority_comment_id: 6398248874
-ack_message_id: CC-ACK-AUTOPILOT-SWEEP-COVERAGE-002
-ack_comment_id: 6398317190
+  - CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002   # 6398248874; NO_STATE_CHANGE; exact-base implementation and proof authorized; no merge
+  - CG-REV-AUTOPILOT-SWEEP-COVERAGE-001   # 6399669819; NO_STATE_CHANGE; REVIEW of RETURN 6399172592: receipt RETURN_REVIEWED; CHANGES_REQUIRED on S 04860185, finding SWEEP-IO-001; corrective D and control-only E authorized; no merge grant
+  - CG-REV-AUTOPILOT-SWEEP-COVERAGE-002   # 6400454898; NO_STATE_CHANGE; rules on CONTRADICTION 6399954655: Option A approved; one new control for 252; CHANGES_REQUIRED governs until a fresh independent reading of D; the current authority
+current_authority_message_id: CG-REV-AUTOPILOT-SWEEP-COVERAGE-002
+current_authority_comment_id: 6400454898
+ack_message_id: CC-ACK-AUTOPILOT-SWEEP-COVERAGE-003
+ack_comment_id: 6400567585
 prior_ack_message_ids:
   - CC-ACK-AUTOPILOT-SWEEP-COVERAGE-001   # 6390543483, for the characterization directive
+  - CC-ACK-AUTOPILOT-SWEEP-COVERAGE-002   # 6398317190, for the implementation directive
 progress_message_ids:
   - CC-PROGRESS-AUTOPILOT-SWEEP-COVERAGE-001   # 6390607657; the read-only characterization and proposal
   - CC-PROGRESS-AUTOPILOT-SWEEP-COVERAGE-002   # 6398515210; worktree created, semantic head committed locally
-contradiction_message_ids: []
+  - CC-PROGRESS-AUTOPILOT-SWEEP-COVERAGE-003   # 6398738941; branch pushed, draft PR 185 open, the required runs started at d71fbcd0
+contradiction_message_ids:
+  - CC-CONTRADICTION-AUTOPILOT-SWEEP-COVERAGE-001   # 6399954655; the authorized regression proof could not make its control live on hosted Windows through the native pipe alone; ruled on by 6400454898 (Option A); settled
 # This file is a pre-RETURN record. The RETURN is posted on #80 after every
 # check on the head that carries this file has finished, with no further branch
 # mutation. That RETURN is the final evidence envelope.
 return_status: AWAITING_POSTCHECK_RETURN
 return_message_id: null
-previous_return_message_ids: []
+previous_return_message_ids:
+  - CC-RETURN-AUTOPILOT-SWEEP-COVERAGE-001   # 6399172592; for S 04860185 at artifact head d71fbcd0; receipt RETURN_REVIEWED by 6399669819 with CHANGES_REQUIRED
 never_posted_return_message_ids: []
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: 04860185c0c5bb8d30963b165821446afb8710e6
+source_head: 4ba75dcec1251c85eb4b4931e2515b8723cf3d0a   # D, the corrective semantic head; parent d71fbcd0
+previous_source_head: 04860185c0c5bb8d30963b165821446afb8710e6   # S, read by 6399669819
+previous_artifact_head: d71fbcd0ab215d1db8615a93583cc67d35f0638e   # A2, the head RETURN 6399172592 reported
 implementation_branch: impl/kf-meta-autopilot-sweep-coverage-001
 pr_number: 185
 state: PROVING
@@ -30,32 +38,81 @@ health: YELLOW
 scope_changed: false
 production_touched: false
 provider_traffic: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: CHANGES_REQUIRED
+review_status_basis: >
+  CG-REV-AUTOPILOT-SWEEP-COVERAGE-002 (6400454898): CHANGES_REQUIRED on S
+  04860185 governs until a fresh independent reading of D. D is that
+  correction; its reading has not been given, and this record claims none.
 programme_credit: ZERO
 merge_authority: false
 implementer: claude
 
 summary: >
-  The hourly sweep lists its candidates through a new paged GraphQL lister
-  instead of gh pr list, whose default page of 30 hid 14 of the 21 open
-  impl/* PRs on 2026-10-24 while the job reported a clean run. The lister
-  prints the impl/* numbers only after a complete, internally consistent
-  enumeration; churn is retried once as a whole and otherwise fails the job
-  before any evaluator runs; a duplicated page is never collapsed into
-  success. Twenty-two lister tests, two workflow-step tests and four
-  negative controls prove it. This pre-RETURN record claims no post-check
-  result; exact_head_proof remains PENDING. The PR is draft, review_status
-  stays PENDING_CHATGPT_REVIEW and no merge, ready transition or credit is
-  granted.
+  Correction of finding SWEEP-IO-001 on the hourly sweep's candidate lister.
+  The CLI entrypoint ended with process.exit right after the one large
+  stdout write, so under pipe backpressure the process could end with part
+  of the candidate list unwritten and exit 0; the reviewer measured 65,536
+  of 85,000 bytes on Linux. D sets process.exitCode and ends naturally with
+  the same status, so the write drains first. One regression test spawns
+  the actual CLI and reads its real stdout pipe in two legs, the native OS
+  pipe and a test-only sink that models a POSIX pipe under backpressure;
+  one negative control restores the forced exit, for 252. On Windows the
+  control is live through the modeled leg, because the native stdout pipe
+  there is blocking and shows no loss; on Linux both legs fail with the
+  defect restored. The listing logic, query, consistency predicates,
+  workflow, evaluator, recorder and lock are unchanged from S. This
+  pre-RETURN record claims no result for the head that carries it;
+  exact_head_proof stays PENDING, PR 185 stays draft under CHANGES_REQUIRED,
+  and no merge, ready transition or credit is granted.
 
 health_reason: >
   YELLOW because the outcome for the head that carries this file is not
-  known, and because the fix cannot be observed on main until a separately
-  authorized merge and a delivered schedule event; the delivery of schedule
-  events remains a separate limitation. No failure is asserted.
+  known; because the fix cannot be observed on main until a separately
+  authorized merge and a delivered schedule event; and because PR 184 is
+  ahead in admission order, so a later main will need an ordinary
+  integration, a new semantic-head reading and fresh exact-head proof here.
+  No failure is asserted.
+
+correction:   # SWEEP-IO-001; CG-REV-AUTOPILOT-SWEEP-COVERAGE-001 (6399669819), ruled Option A by 6400454898
+  finding: >
+    scripts/agent-control/list-open-impl-prs.mjs ended with
+    main().then((code) => process.exit(code)). main writes the whole list to
+    stdout once and resolves, and the forced exit in the next microtask can
+    discard the part of that write a pipe under backpressure has not taken.
+    The reviewer reproduced the pattern on Node 22 with a slow pipe reader
+    and a 5,000-item, 16-digit list: 65,536 of 85,000 bytes, exit 0. The
+    suite at S injected stdout in memory and never crossed the real
+    CLI-to-pipe boundary.
+  accepted: true
+  fix_at_d: >
+    The entrypoint sets process.exitCode to main's 0 or 2 and lets the
+    process end on its own, so the pending write drains before exit. Four
+    comment lines above it name the reason. No other line of the lister
+    changed; the query, paging, consistency predicates, retry, output
+    format and stderr lines are those of S.
+  why_the_first_proof_stopped: >
+    The negative controls run only in the hosted Windows job. On Windows,
+    Node gives a stdout pipe a blocking handle with synchronous writes, so
+    the forced exit loses nothing there: the CONTRADICTION measured 85,000
+    of 85,000 bytes with the defect in place, through a real pipe with a
+    paused reader. A control proven only through the native pipe would have
+    been VACUOUS on the manifest's only platform.
+  option_a_as_built: >
+    One regression test with two legs, each a separate child process
+    running the actual CLI file with fetch stubbed through a --import
+    preload that the test writes to a temporary directory. Leg 1 is the
+    native OS pipe. Leg 2 adds a test-only sink in the preload: each
+    process.stdout.write reaches the real pipe on a later macrotask and
+    returns false, the deterministic model of a POSIX pipe under
+    backpressure. Both legs assert exit 0, no signal, the 5,000 expected
+    16-digit ids in order, and byte-for-byte stdout of 85,000 bytes. The
+    reader is held paused until the child announces its summary on stderr
+    plus 150 ms, resumes on its own timer within 5 s regardless, and a 30 s
+    kill timer ends a hung child and fails the test. Nothing shipped reads
+    the preload's environment variables, and the workflow is unchanged.
 
 characterization:
-  basis: CG-DIR-AUTOPILOT-SWEEP-COVERAGE-001 and 002, read at b1948d27; #80 comment 6390607657
+  basis: CG-DIR-AUTOPILOT-SWEEP-COVERAGE-001 and 002, read at b1948d27; #80 comment 6390607657; CG-REV-AUTOPILOT-SWEEP-COVERAGE-001 and 002 for the correction
   defect_at_source_main: >
     The hourly step listed candidates with gh pr list --state open --json
     number,headRefName and a jq filter on impl/. Without --limit, gh returns
@@ -68,16 +125,21 @@ characterization:
     success; the later scheduled runs carried the same line.
 
 implementation:
-  lister: scripts/agent-control/list-open-impl-prs.mjs; GraphQL pullRequests states OPEN, first 100, after cursor, ordered by creation; GITHUB_TOKEN or GH_TOKEN and GITHUB_REPOSITORY from the job; page cap 50; one whole retry on duplicate or count mismatch; exit 2 with nothing on stdout on any failure
-  workflow: the gh pr list line in the hourly step replaced by node scripts/agent-control/list-open-impl-prs.mjs inside the existing if-guard, with explanatory comments; the existing failure path ("could not list open pull requests; nothing was reconciled", exit 1) reused
+  lister: scripts/agent-control/list-open-impl-prs.mjs; GraphQL pullRequests states OPEN, first 100, after cursor, ordered by creation; GITHUB_TOKEN or GH_TOKEN and GITHUB_REPOSITORY from the job; page cap 50; one whole retry on duplicate or count mismatch; exit 2 with nothing on stdout on any failure; at D the entrypoint sets process.exitCode and ends naturally
+  workflow: unchanged since S; the gh pr list line in the hourly step replaced by node scripts/agent-control/list-open-impl-prs.mjs inside the existing if-guard, with two explanatory comments; the existing failure path ("could not list open pull requests; nothing was reconciled", exit 1) reused
   correction_built_in: the earlier proposal to collapse duplicates by number was dropped; a duplicate is refused, and equality with totalCount is recorded as internal consistency, not a snapshot
-  not_touched: auto-merge-admitted.mjs, record-auto-merge.mjs, lib/admission.mjs, lib/merge-grant.mjs, the mutation lock, triggers, permissions, every other job and workflow, PR 155
+  not_touched: auto-merge-admitted.mjs, record-auto-merge.mjs, lib/admission.mjs, lib/merge-grant.mjs, the mutation lock, triggers, permissions, every other job and workflow, PR 155, PR 184; at D also docs/development/AGENT_AUTOPILOT.md, which is outside the review's inventory
 
 changed_files:
   count: 6
-  count_basis: files that differ from main b1948d27 outside .agent-control at the semantic head
+  count_basis: files that differ from main b1948d27 outside .agent-control at D
   semantic_commits:
-    - 04860185c0c5bb8d30963b165821446afb8710e6   # the lister, the workflow line, the tests, the controls and the doc note
+    - 04860185c0c5bb8d30963b165821446afb8710e6   # S: the lister, the workflow line, the tests, the controls and the doc note
+    - 4ba75dcec1251c85eb4b4931e2515b8723cf3d0a   # D: the entrypoint, the pipe regression test, one control; 3 files, 176 insertions, 2 deletions
+  d_touches:
+    - scripts/agent-control/list-open-impl-prs.mjs   # 6 lines: the entrypoint line and four comment lines
+    - scripts/agent-control/tests/list-open-impl-prs.spec.mjs   # 155 lines: imports, the preload source, the child runner, the assertions and the two-leg test
+    - scripts/agent-control/negative-controls.yaml   # 17 lines: NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT appended
   workflow:
     - .github/workflows/agent-control-autopilot.yml
   scripts:
@@ -92,7 +154,7 @@ changed_files:
   control_only_after_source_head:
     - .agent-control/active-packet.yaml
     - .agent-control/claude-return.yaml
-  existing_tests_changed: none removed or loosened; in autopilot-workflow.spec.mjs the harness flag ghFails became listingFails and the failed-listing test additionally checks the lister's stderr line; two tests added; 22 tests in the new spec
+  existing_tests_changed: none removed or loosened at D; the 22 lister tests and the 22 workflow tests of S are as they were, and one test with two legs is added
   shared_file_with_the_open_quota_packet: scripts/agent-control/negative-controls.yaml is also edited by impl/kf-meta-ai-review-quota-wording-001 in a disjoint region; whichever merges second needs re-integration and fresh exact-head proof
 
 schema_migrations: []
@@ -100,47 +162,100 @@ schema_migrations: []
 proof_matrix:
   - obligation: 52 open PRs over two pages list every impl/* candidate including those past the 30th; more than 30 on one page; zero candidates; ascending order; prefix exactness
     evidence_scope: semantic_head
-    proof: tests "52 open PRs over two pages", "more than 30 impl/* PRs on a single page", "a complete enumeration with no impl/* PR", "the numbers are ascending", "only the impl/ prefix qualifies"
+    proof: tests "52 open PRs over two pages", "more than 30 impl/* PRs on a single page", "a complete enumeration with no impl/* PR", "the numbers are ascending", "only the impl/ prefix qualifies"; re-run at D
     result: PROVEN
   - obligation: duplicate number, duplicated page, fewer nodes than totalCount, totalCount changing between pages, repeated or empty cursor, the page cap, malformed shapes, GraphQL errors, HTTP 502 on page two, network and non-JSON failures each fail with nothing on stdout
     evidence_scope: semantic_head
-    proof: the NC tests of list-open-impl-prs.spec.mjs; "NC: churn on every attempt fails after the bounded retry, with nothing on stdout"
+    proof: the NC tests of list-open-impl-prs.spec.mjs; "NC: churn on every attempt fails after the bounded retry, with nothing on stdout"; re-run at D
     result: PROVEN
   - obligation: churn is retried once as a whole enumeration from the first page; a non-churn failure is not retried
     evidence_scope: semantic_head
-    proof: tests "churn is retried as a whole enumeration once" and "a non-churn failure is not retried"
+    proof: tests "churn is retried as a whole enumeration once" and "a non-churn failure is not retried"; re-run at D
     result: PROVEN
   - obligation: the workflow step evaluates every listed PR beyond the 30th, never lists through gh, and evaluates nothing when the lister fails
     evidence_scope: semantic_head
-    proof: autopilot-workflow.spec.mjs tests "the candidates come from the paged lister", "the listing is read once, before any evaluator", "a failed PR listing fails the job"
+    proof: autopilot-workflow.spec.mjs tests "the candidates come from the paged lister", "the listing is read once, before any evaluator", "a failed PR listing fails the job"; unchanged at D and re-run there
     result: PROVEN
-  - obligation: the four new negative controls and the retargeted listing-failure control are live; no existing control changed its claim or proof
+  - obligation: the actual CLI, run as a child, delivers its whole candidate list through a real stdout pipe held under backpressure and exits 0, through the native OS pipe and through the modeled asynchronous sink, 5,000 ids and 85,000 bytes exactly
     evidence_scope: semantic_head
-    proof: see negative_controls for the manifest run at this head
+    proof: list-open-impl-prs.spec.mjs "NC: the CLI drains its stdout pipe before it exits", both legs, at D on native Windows with Node 20.18.1; see io_evidence
     result: PROVEN
+  - obligation: with the forced exit restored, that test fails, and the failing leg is the one the control relies on for each platform
+    evidence_scope: semantic_head
+    proof: a scratch copy of D with line 212 restored to process.exit, on Windows; leg 1 ok, leg 2 not ok with "0 of 85000 bytes reached the pipe" at exit 0; see io_evidence and negative_controls
+    result: PROVEN
+  - obligation: NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT and the five controls of S are live under proof-mutation at D
+    evidence_scope: semantic_head
+    proof: proof-mutation.mjs on a six-control subset manifest at D (the retargeted listing-failure control, the four NC-SWEEP controls of S and the new forced-exit control), local Windows, 6 of 6 live, zero vacuous
+    result: PROVEN
+  - obligation: the four controls of S and the retargeted listing-failure control are live; no existing control changed its claim or proof
+    evidence_scope: semantic_head
+    proof: see negative_controls; the 251 controls of S are unchanged at D, and the full manifest is the hosted Windows job's
+    result: PROVEN
+  - obligation: the two legs on a Linux host, and the 252-control manifest on hosted Windows at 252 of 252 with zero vacuous
+    evidence_scope: exact_head
+    proof: the hosted jobs at the head that carries this file; see exact_head_proof
+    result: PENDING
   - obligation: required exact-head workflows and the independent semantic review of the head that carries this file
     evidence_scope: exact_head
     proof: see exact_head_proof
     result: PENDING
 
 tests:
-  at: 04860185c0c5bb8d30963b165821446afb8710e6
-  host: Linux container of the Claude session that wrote this file, Node 22.22.0, 2026-10-25; no PowerShell
-  lister_spec: 22 tests, 22 pass, 0 fail
-  workflow_spec: autopilot-workflow.spec.mjs 22 tests, 22 pass, 0 fail (20 existing plus 2 new)
-  portable_suite: node --test scripts/agent-control/tests/*.spec.mjs; 603 tests, 565 pass, 0 fail, 38 skip (37 PowerShell-dependent, 1 authenticated gh)
+  at: 4ba75dcec1251c85eb4b4931e2515b8723cf3d0a
+  host: Windows 11, Node 20.18.1, PowerShell 5.1 present, gh authenticated; the local worker's worktree for 6400454898, 2026-10-25
+  failed: 0
+  skipped: 0
+  lister_spec: 25 reported (23 top-level, two of them the pipe test's legs), 25 pass, 0 fail
+  portable_and_windows_suites: node --test scripts/agent-control/tests/*.spec.mjs scripts/agent-control/tests/windows/*.spec.mjs at D; 630 tests reported (628 top-level plus the pipe test's two legs), 630 pass, 0 fail, 0 skipped, about 116 s; the authenticated-gh test ran because this machine's gh is authenticated
   dag_validators: validate-dag OK (35 packets, 37 phases); validate-platform-dag OK (63 packets)
-  windows_suite: NOT_RUN locally; the hosted Windows job is the evidence
+  subset_manifest: proof-mutation.mjs on a six-control subset manifest at D (the retargeted listing-failure control, the four NC-SWEEP controls of S and the new forced-exit control), local Windows, 6 of 6 live, zero vacuous
+  full_manifest: NOT_RUN locally; the hosted Windows job at the head that carries this file is the evidence, expected at 252 of 252
+  linux: >
+    NOT_RUN locally; no Linux host in this session. The native-pipe loss on
+    Linux is the reviewer's measurement (65,536 of 85,000 with the defect).
+    The fixed test's two legs on Linux are run by the hosted Ubuntu job at
+    the head that carries this file.
 
 negative_controls:
-  new:
+  count: 252
+  new_at_d:
+    - NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT restores main().then((code) => process.exit(code)) and runs "drains its stdout pipe before it exits"; live on Windows through leg 2, the modeled sink, not through native pipe loss; on Linux both legs fail with the defect restored
+  new_at_s:
     - NC-SWEEP-DEFAULT-LIMIT-RESTORED restores the gh pr list line; fails "the candidates come from the paged lister"
     - NC-SWEEP-TOTALCOUNT-UNCHECKED disables the count comparison; fails "fewer nodes than totalCount"
     - NC-SWEEP-PAGE-ERROR-PARTIAL returns what was collected on a failed page; fails "HTTP failure on the second page"
     - NC-SWEEP-DUPLICATES-COUNTED skips a repeated number instead of refusing it; fails "duplicated page cannot be deduplicated"
-  retargeted: NC-AUTOPILOT-LISTING-FAILURE-FAILS finds and replaces the new listing line; claim, proof and name unchanged
-  manifest_at_source_head: see the RETURN; the local run of the full 251-control manifest is reported there with the PowerShell-dependent controls as the runner reports them on this machine
-  existing: 247 controls kept; 246 unchanged in every field and 1 retargeted as above
+  retargeted_at_s: NC-AUTOPILOT-LISTING-FAILURE-FAILS finds and replaces the new listing line; claim, proof and name unchanged
+  existing: the 251 controls of S kept with every field unchanged at D
+  manifest_at_d_local: proof-mutation.mjs on a six-control subset manifest at D (the retargeted listing-failure control, the four NC-SWEEP controls of S and the new forced-exit control), local Windows, 6 of 6 live, zero vacuous
+  manifest_hosted: the Windows job at the head that carries this file; its count is read for the RETURN
+
+io_evidence:   # real versus modeled, measured in this session unless marked otherwise
+  native_windows_pipe_with_defect: >
+    85,000 of 85,000 bytes, exit 0: leg 1 ok in the scratch copy of D with
+    the forced exit restored. The CONTRADICTION measured the same at
+    d71fbcd0 with 0 ms and 300 ms reader pauses. No native Windows loss is
+    observed or claimed; Node gives the stdout pipe a blocking handle with
+    synchronous writes there.
+  modeled_sink_with_defect_windows: >
+    0 of 85,000 bytes, exit 0: leg 2 not ok, "modeled asynchronous stdout:
+    0 of 85000 bytes reached the pipe". The forced exit in the microtask
+    after main() resolves runs before the macrotask that would deliver the
+    write, so the whole list is lost and the status is still 0. This is the
+    silent truncation the finding describes, and the leg the control is
+    live through on Windows.
+  fixed_d_windows: >
+    Both legs ok: 85,000 of 85,000 bytes and the 5,000 ids in order, exit 0;
+    leg 1 about 190 ms, leg 2 about 150 ms.
+  native_linux_pipe_with_defect: >
+    65,536 of 85,000 bytes, exit 0: the reviewer's measurement (6399669819),
+    the kernel pipe's 64 KiB; not re-measured here, no Linux host.
+  fixed_d_linux: >
+    PENDING; the hosted Ubuntu job at the head that carries this file runs
+    both legs on the fixed code. The manifest, which restores the defect,
+    runs only on Windows, so the control's liveness on Linux rests on the
+    reviewer's measurement and the 64 KiB pipe, not on a hosted run.
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline
@@ -158,36 +273,53 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
 
 ci:
   this_head: PENDING. The workflows run on the head that carries this file once it is on the remote, and are read from the live runs for the RETURN.
+  previous_head_d71fbcd0ab215d1db8615a93583cc67d35f0638e:
+    reported_by: RETURN 6399172592; independently read by 6399669819
+    ci_cd_pipeline: run 40201300044 success; the Security Scan job's two steps are continue-on-error: trufflehog 3.99.7 scanned 0 chunks and 0 bytes because the checkout cannot resolve the base ref main, and pnpm audit exited 1 with 306 vulnerabilities (29 low, 135 moderate, 125 high, 17 critical); both pre-existing on main, neither this packet's
+    agent_control_gate: run 40201300042 success; the non-draft admission step skipped because the PR is draft, so the run says nothing about the grant path
+    branch_divergence: run 40201300100 success; "Fail when thresholds exceeded" skipped because no threshold was exceeded; the push-event run 40201296626 also success
+    dast_hawkscan: run 40201300043 conclusion success with no scan; DAST unconfigured, every scan step skipped; NOT_RUN, not a DAST pass
+    agent_control_worker_proof: run 40201300057 success; portable job 121193027691 602 pass, 0 fail, 1 skipped (authenticated gh); Windows job 121193028020 627 tests, 626 pass, 0 fail, 1 skipped; negative controls 251 of 251 live, zero VACUOUS
+    autopilot_observation: run 40201300050 cancelled by the observe concurrency group two seconds after creation; not a required workflow; no AUTO_EVENT and no state change
+    copilot: review 5643621990 at d71fbcd0, "insufficient remaining quota", NOT_RUN
+    intermediate_head_6ac183a7: runs cancelled by the A2 push except Gate 40201295772 and the autopilot observation 40201295738; superseded, not evidence
 
 ai_review:
   implementer: claude
   primary: copilot-pull-request-reviewer[bot]
   fallback: chatgpt
-  self_review: none; Claude authored the change and no reviewer has read it yet
-  at_the_semantic_head: PENDING
+  self_review: none; Claude authored S and D, and no reviewer has read D
+  at_s_04860185: CHANGES_REQUIRED by 6399669819 (chatgpt), one unresolved substantive finding, SWEEP-IO-001, which D answers; Copilot NOT_RUN at d71fbcd0 (5643621990, insufficient remaining quota)
+  at_d: PENDING
   at_the_head_that_carries_this_file: PENDING
   record_owner: chatgpt
   admission_state: PENDING; the semantic_review block is written only at a separate admission decision
 
 scope_ledger:
   declared:
-    - a complete, consistency-checked candidate list for the hourly sweep, its tests, four controls, a doc note
+    - a complete, consistency-checked candidate list for the hourly sweep, its tests, four controls, a doc note (S)
+    - the SWEEP-IO-001 correction, natural termination of the lister, the two-leg pipe regression test, one control (D)
   resolved: []
   remaining:
     - the required workflows on the head that carries this file
-    - an independent reading of the semantic head
-    - a separate ChatGPT review and any merge decision
+    - an independent reading of D
+    - a separate ChatGPT decision on admission and any merge
+    - after PR 184 merges, an ordinary ancestor-preserving integration of the new main here, a new semantic-head reading and fresh exact-head proof
     - after a merge, the first delivered scheduled run on main showing the full enumerated scope and each evaluator outcome
-  added_inside_the_packet_boundary: []
+  added_inside_the_packet_boundary:
+    - SWEEP-IO-001 (6399669819), the CLI-to-pipe boundary, which the proofs at S did not cross
   deferred:
     - GitHub's delayed or missing schedule events; a separate limitation, not addressed here
   dropped:
     - collapsing duplicates by number (proposed in the characterization, withdrawn under the directive's correction)
+  superseded:
+    - the forced-exit entrypoint of S, by D
 
 deviations_from_packet: []
 
 behaviour_changes:
   - the hourly sweep's candidate list is complete for every open impl/* PR, or the job fails before any evaluator runs; nothing changes for the event-driven path
+  - the lister ends naturally instead of by process.exit; its exit status and its output are the same, and its stdout drains on every platform
 
 new_consumers_or_writers:
   - scripts/agent-control/list-open-impl-prs.mjs reads the GraphQL API with the job token (read-only); it writes nothing
@@ -201,24 +333,42 @@ residual_risks:
     The bounded guarantee is one consistent enumeration, not a snapshot;
     a PR whose number was never served on any page cannot be detected by
     the count check if the API's totalCount omits it too.
+  - >
+    Leg 2 proves the drain by construction, a deferred write surviving to
+    the pipe, and it is the only leg that can fail on Windows; a Windows
+    loss mode outside the blocking stdout handle is not known and would not
+    be caught by leg 1.
+  - >
+    The manifest restores the defect only on hosted Windows, so leg 1's
+    failure with the defect on Linux is the reviewer's measurement and the
+    64 KiB pipe, not a hosted run; the hosted Ubuntu job runs both legs on
+    the fixed code only.
 
 rollback_floor:
-  - the branch can return to b1948d27 by reverting the semantic commit and the artifact commits; nothing was rewritten
+  - D can be reverted alone, leaving S as reviewed; the branch can return to b1948d27 by reverting S, D and the artifact commits; nothing was rewritten
   - there is no schema or data change to undo; the workflow change is one step's listing line
 
 security:
   production_touched: false
   provider_traffic: false
-  secrets: none added; the lister uses the job's own GITHUB_TOKEN
+  secrets: none added; the lister uses the job's own GITHUB_TOKEN; the test child gets a synthetic token and none of the test process's environment beyond PATH and SystemRoot
   preview_deployment: the PR triggers the repository's own preview, as every PR does; nothing was deployed by this session
   dast: DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
 
 unresolved_contradictions: []
-settled_contradictions: []
+settled_contradictions:
+  - CC-CONTRADICTION-AUTOPILOT-SWEEP-COVERAGE-001 (6399954655), settled by 6400454898 with Option A
+
+authority_notes:
+  owner: the local worker's session for 6400454898, worktree CG-REV-AUTOPILOT-SWEEP-COVERAGE-002, detached at d71fbcd0 then D; it ACKed first (6400567585) and is the only writer of PR 185 for this correction
+  interactive_session: owns PR 184 under its ACK 6400503954 and disclaims PR 185
+  worker_held_record: 6399703375 left in place; -ReleaseHold not called; this REVIEW superseded the held directive as the worker's resume mechanism
+  branch_checkout: the branch is checked out in the interactive session's worktree at d71fbcd0 with a clean tree, so this session pushes by ref without force
 
 next_action: >
-  The branch is pushed and draft PR 185 is open from the exact base
-  b1948d27; this control-only commit binds the PR number. Read the five
-  required workflows at this head from the live runs, and post one RETURN
-  or CONTRADICTION on #80 under CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002. No
-  merge, ready transition or credit is requested.
+  Push D and E by ref without force after re-checking main, the remote tip
+  and #80. Read every step of the five required runs at E from the live
+  runs, with the Windows manifest count and both legs on the Ubuntu job.
+  Post one RETURN or CONTRADICTION under 6400454898 naming D, E, the run
+  ids and the real versus modeled IO results. No merge, ready transition,
+  dispatch, HOLD release or credit.

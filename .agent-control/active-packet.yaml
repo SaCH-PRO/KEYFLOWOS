@@ -3,14 +3,19 @@ directive_message_id: CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002
 directive_comment_id: 6398248874
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIR-AUTOPILOT-SWEEP-COVERAGE-001   # 6390486860; NO_STATE_CHANGE; read-only characterization authorized; answered by CC-PROGRESS-AUTOPILOT-SWEEP-COVERAGE-001 (6390607657)
-  - CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002   # 6398248874; NO_STATE_CHANGE; exact-base implementation and proof authorized with one correction; no merge, ready transition or credit; the current authority
-in_reply_to: CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002
-ack_message_id: CC-ACK-AUTOPILOT-SWEEP-COVERAGE-002
-ack_comment_id: 6398317190
-current_authority_message_id: CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002
-current_authority_comment_id: 6398248874
-current_authority_ack_message_id: CC-ACK-AUTOPILOT-SWEEP-COVERAGE-002
-current_authority_ack_comment_id: 6398317190
+  - CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002   # 6398248874; NO_STATE_CHANGE; exact-base implementation and proof authorized with one correction; no merge, ready transition or credit; answered by RETURN 6399172592
+  - CG-REV-AUTOPILOT-SWEEP-COVERAGE-001   # 6399669819; NO_STATE_CHANGE; REVIEW of that RETURN: receipt RETURN_REVIEWED, CHANGES_REQUIRED on S 04860185 for finding SWEEP-IO-001, corrective semantic commit D and control-only commit E authorized, no merge grant; answered by CC-CONTRADICTION-AUTOPILOT-SWEEP-COVERAGE-001 (6399954655)
+  - CG-REV-AUTOPILOT-SWEEP-COVERAGE-002   # 6400454898; NO_STATE_CHANGE; rules on the CONTRADICTION: Option A approved, one new control for 252, CHANGES_REQUIRED governs until a fresh independent reading of D; the current authority
+in_reply_to: CG-REV-AUTOPILOT-SWEEP-COVERAGE-002
+ack_message_id: CC-ACK-AUTOPILOT-SWEEP-COVERAGE-003
+ack_comment_id: 6400567585
+prior_ack_message_ids:
+  - CC-ACK-AUTOPILOT-SWEEP-COVERAGE-001   # 6390543483, for the characterization directive
+  - CC-ACK-AUTOPILOT-SWEEP-COVERAGE-002   # 6398317190, for the implementation directive
+current_authority_message_id: CG-REV-AUTOPILOT-SWEEP-COVERAGE-002
+current_authority_comment_id: 6400454898
+current_authority_ack_message_id: CC-ACK-AUTOPILOT-SWEEP-COVERAGE-003
+current_authority_ack_comment_id: 6400567585
 origin:   # the defect was found while observing the restored autopilot; this packet is its separate repair
   evidenced_by: scheduled run 40079991941 evaluated 7 impl/* PRs of the 21 open on 2026-10-24; characterized in #80 comment 6390607657
   not_a_merge_defect: the direction is fail-safe; an unlisted PR cannot be merged by the sweep, and the per-PR event path is unaffected
@@ -24,7 +29,11 @@ production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-review_status: PENDING_CHATGPT_REVIEW
+review_status: CHANGES_REQUIRED
+review_status_basis: >
+  CG-REV-AUTOPILOT-SWEEP-COVERAGE-002 (6400454898): CHANGES_REQUIRED on S
+  04860185 governs until a fresh independent reading of the corrective
+  semantic head D. This artifact records D and asks for that reading.
 
 objective: >
   Make the hourly sweep's candidate list complete. The scheduled reconcile
@@ -32,8 +41,9 @@ objective: >
   of 30, so impl/* PRs beyond the 30 newest were never evaluated and the
   job reported a clean run. The candidates now come from a paged GraphQL
   enumeration that prints nothing unless it is complete and internally
-  consistent. The evaluator, the recorder, the lock and every trigger and
-  permission stay as they are.
+  consistent, and the lister ends naturally so that what it prints drains
+  into the pipe before the process ends. The evaluator, the recorder, the
+  lock and every trigger and permission stay as they are.
 
 live_defect:
   where: .github/workflows/agent-control-autopilot.yml, job hourly-reconcile-open-prs, the listing line
@@ -50,7 +60,7 @@ bounded_guarantee: >
   runs. A duplicated page is never collapsed into success. Each per-PR
   evaluator still rechecks live eligibility, head and base at execution.
 
-allowed_scope:
+allowed_scope:   # CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002, as issued; S 04860185 is its implementation
   - .github/workflows/agent-control-autopilot.yml: the one listing line in the hourly step and its explanatory comments; nothing else in the file
   - scripts/agent-control/list-open-impl-prs.mjs: new paged, validated, consistency-checked lister
   - scripts/agent-control/tests/list-open-impl-prs.spec.mjs: new injected-fetch proofs
@@ -59,6 +69,39 @@ allowed_scope:
   - docs/development/AGENT_AUTOPILOT.md: a small accurate note on candidate enumeration and its bounded guarantee
   - .agent-control/active-packet.yaml and .agent-control/claude-return.yaml of this packet
 
+correction_scope:   # CG-REV-AUTOPILOT-SWEEP-COVERAGE-001 (6399669819), as ruled by CG-REV-AUTOPILOT-SWEEP-COVERAGE-002 (6400454898); finding SWEEP-IO-001
+  finding: >
+    The CLI entrypoint ended with main().then((code) => process.exit(code)).
+    main writes the whole candidate list to stdout once and resolves, and the
+    forced exit in the next microtask can discard the part of that write a
+    pipe under backpressure has not taken. The reviewer reproduced the
+    pattern on Node 22 with a slow pipe reader and a 5,000-item, 16-digit
+    list: 65,536 of 85,000 bytes received, exit 0. The suite at S injected
+    stdout in memory and never crossed the real CLI-to-pipe boundary.
+  semantic_commit_d:   # a direct descendant of the artifact head d71fbcd0; three files
+    - scripts/agent-control/list-open-impl-prs.mjs: the entrypoint line only; process.exit replaced by process.exitCode and natural termination with the same 0 or 2 status, plus four comment lines; no change to the query, paging, consistency predicates, retry, output format or stderr lines
+    - scripts/agent-control/tests/list-open-impl-prs.spec.mjs: one regression test that spawns the actual CLI file as a child with fetch stubbed through a test-only --import preload written to a temporary directory and reads its real stdout pipe under a paused reader; two independent legs, (1) the native OS pipe and (2) a preload sink that delivers each process.stdout.write to the real pipe on a later macrotask and returns false; each leg asserts exit 0, no signal, exactly the 5,000 expected 16-digit ids in order and byte-for-byte stdout of 85,000 bytes; bounded by a 30 s kill timer, a reader that always resumes on its own timer, and temporary-directory cleanup
+    - scripts/agent-control/negative-controls.yaml: one control appended, NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT, restoring exactly the old forced-exit line and running that test by name; the 251 existing controls and their targets untouched, for 252
+  control_only_commit_e:
+    - .agent-control/active-packet.yaml and .agent-control/claude-return.yaml naming D, the lineage through 6400454898, the original S and RETURN 6399172592 with its receipt, and every disclosed NOT_RUN, failed and skipped result
+  prohibited_by_the_review:
+    - any change to GraphQL pagination, the consistency predicates, the workflow, the evaluator, the recorder, the mutation lock, F9 merge grants, PR 184, PR 155, production or providers
+    - amending pushed commits, rebase, force push
+    - ready_for_review, merge, merger dispatch, HOLD release (-ReleaseHold), erasing the HELD record 6399703375, production, provider or schema change, programme credit
+    - docs/development/AGENT_AUTOPILOT.md is not in the review's inventory and is not changed by D
+  evidence_labels_required: >
+    The hosted Windows manifest must report 252 of 252 live and zero
+    vacuous, stating that this IO defect is mutation-proven on Windows by the
+    test-only asynchronous sink (leg 2), not by native Windows pipe loss.
+    Leg 1 is expected to pass on Linux and Windows after the fix and claims
+    no native Windows failure. Real and modeled IO results are reported
+    separately.
+  ownership: >
+    One owner ACKs before writing. The local worker's session ACKed first
+    (CC-ACK-AUTOPILOT-SWEEP-COVERAGE-003, 6400567585); the interactive
+    session's own ACK for PR 184 (6400503954) disclaims PR 185. The worker's
+    HELD record 6399703375 is left in place and -ReleaseHold is not called.
+
 prohibited_scope:
   - gh pr list --limit, gh api --paginate, or any listing that emits candidates before the enumeration is complete
   - auto-merge-admitted.mjs, record-auto-merge.mjs, lib/admission.mjs, lib/merge-grant.mjs, F9 authority semantics, the mutation lock, any trigger or permission, any other workflow
@@ -66,8 +109,9 @@ prohibited_scope:
   - merge, auto-merge, manual dispatch of merge-capable automation, ready_for_review, HOLD release, production or provider effect, schema change, programme credit
 
 invariants:
-  - every existing control stays in the manifest, functional; the count rises from 247 to 251
+  - every existing control stays in the manifest, functional; the count rose from 247 to 251 at S and from 251 to 252 at D
   - a listing failure of any kind leaves zero evaluator calls and fails the job with the existing error line
+  - the lister's exit status is 0 on a complete consistent enumeration and 2 on any failure, before and after D; D changes only how the process ends
   - the sweep on main keeps its current behaviour until a separately authorized merge
 
 proof_obligations:
@@ -75,28 +119,33 @@ proof_obligations:
   - more than 30 open PRs on one page; zero impl/* candidates; deterministic ascending order
   - duplicate PR number, repeated cursor, inconsistent totalCount, malformed nodes, GraphQL errors, HTTP 502 on page two, null next cursor with hasNextPage, the page cap: each fails with nothing on stdout
   - the workflow step evaluates nothing when the listing fails, evaluates every listed PR when it succeeds, and never lists through gh
-  - the four new negative controls are live and name the test each fails; the hosted Windows manifest reports 251 of 251 live
-  - the five required workflows at the final artifact head, with their real skips and security disclosures
+  - the four controls of S are live and name the test each fails
+  - the regression test's two legs at D: exit 0, no signal, the 5,000 ids in order, 85,000 bytes exactly, on native Windows locally and on the hosted Linux and Windows jobs
+  - NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT live, and the 252-control hosted Windows manifest at 252 of 252 with zero vacuous
+  - the five required workflows at the final artifact head E, with their real skips and security disclosures; no NOT_RUN or quota skip read as a pass
 
 stop_conditions:
   - main moves from b1948d27 before the push
   - the branch is claimed by another writer, or a HOLD applies
   - any existing control goes vacuous or any existing test fails
   - the change would need a job, trigger, permission or evaluator change to work
+  - the worker's authentication fails again: stop with an accurate CONTRADICTION, never retry indefinitely
 
-current_authorization:   # CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002
-  implementation: AUTHORIZED; one semantic commit and the control-only artifact commits that bind it
+current_authorization:   # CG-REV-AUTOPILOT-SWEEP-COVERAGE-002
+  implementation: AUTHORIZED for the correction only; one semantic commit D on the existing branch, a direct descendant of d71fbcd0, then one control-only commit E
   merge: NOT_AUTHORIZED
   ready_for_review: NOT_AUTHORIZED
-  ordering: after the quota-wording packet (CG-DIR-AI-REVIEW-QUOTA-WORDING-001) was pushed; its own worktree, no shared tree
+  admission: NOT_DECIDED; CHANGES_REQUIRED governs until a fresh independent reading of D
+  ordering: PR 184 is first in admission priority; after any earlier merge this branch needs an ordinary ancestor-preserving integration of the new main, a new semantic-head reading and fresh exact-head proof; the b1948d27 proof is not reused silently
 
 return_contract: >
-  ACK before any write; branch from exactly source_main in a clean isolated
-  worktree created after re-reading main and #80; one semantic commit;
-  control-only artifact commits; draft PR from the exact base; focused and
-  full portable tests, both DAG validators, the four new controls live, the
-  full hosted Windows manifest at 251 of 251, the five required workflows
-  at the final head with every skip and limitation disclosed and no NOT_RUN
-  or quota skip read as PASS; one RETURN or CONTRADICTION naming the PR
-  number, commit ids, branch, heads, base and run ids, with merge_authority
-  false; no merge before a separate ChatGPT decision.
+  ACK before any write; work in a clean isolated worktree at the bound head
+  after re-reading main and #80; one semantic commit D; one control-only
+  commit E; no amend of pushed commits, no rebase, no force push; focused
+  tests, portable and Windows suites, both DAG validators, the new control
+  live, the full hosted Windows manifest at 252 of 252 with zero vacuous,
+  the five required workflows at E with every skip and limitation disclosed
+  and no NOT_RUN or quota skip read as a pass; one RETURN or CONTRADICTION
+  naming the PR number, D, E, branch, heads, base, run ids and the real
+  versus modeled IO results, with merge_authority false; no merge before a
+  separate ChatGPT decision.
