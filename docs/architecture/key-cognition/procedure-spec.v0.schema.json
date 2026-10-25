@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keyflowos.local/schemas/procedure-spec.v0.schema.json",
+  "title": "KEY ProcedureSpec v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["procedureId","version","purpose","applicability","context","governance","steps","termination","evaluation","lineage"],
+  "properties": {
+    "procedureId": {"type":"string","minLength":1},
+    "version": {"type":"string","pattern":"^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "purpose": {"type":"string","minLength":1},
+    "status": {"enum":["CANDIDATE","SPECIFIED","SHADOW","EVALUATED","BOUNDED_AUTONOMY","PROMOTED","QUARANTINED","RETIRED"]},
+    "applicability": {
+      "type":"object","additionalProperties":false,
+      "required":["initiationPredicates","excludedConditions"],
+      "properties":{
+        "initiationPredicates":{"type":"array","items":{"type":"string"}},
+        "excludedConditions":{"type":"array","items":{"type":"string"}}
+      }
+    },
+    "context": {
+      "type":"object","additionalProperties":false,
+      "required":["requiredScopes","freshness"],
+      "properties":{
+        "requiredScopes":{"type":"array","items":{"enum":["BUSINESS","PROJECT","PROGRAMME","AGENT","WORKFLOW","USER","TASK"]},"uniqueItems":true},
+        "freshness":{"type":"array","items":{"type":"string"}},
+        "memoryViews":{"type":"array","items":{"type":"string"}}
+      }
+    },
+    "governance": {
+      "type":"object","additionalProperties":false,
+      "required":["riskTier","authorityClass","autonomyLevel","forbiddenEffects"],
+      "properties":{
+        "riskTier":{"enum":["R0","R1","R2","R3","R4"]},
+        "authorityClass":{"type":"string","minLength":1},
+        "autonomyLevel":{"enum":["MANUAL","ADVISORY","SHADOW","CANARY","BOUNDED","ACTIVE"]},
+        "approvals":{"type":"array","items":{"type":"string"}},
+        "forbiddenEffects":{"type":"array","items":{"type":"string"}}
+      }
+    },
+    "capabilities":{"type":"array","items":{"type":"string"},"uniqueItems":true},
+    "steps": {
+      "type":"array","minItems":1,
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["id","kind","operation","onFailure"],
+        "properties":{
+          "id":{"type":"string","minLength":1},
+          "kind":{"enum":["DETERMINISTIC","REASONING","HUMAN_GATE","WAIT","EVALUATION"]},
+          "operation":{"type":"string","minLength":1},
+          "requires":{"type":"array","items":{"type":"string"}},
+          "evidence":{"type":"array","items":{"type":"string"}},
+          "timeoutSeconds":{"type":"integer","minimum":1},
+          "retry":{"type":"object","properties":{"maxAttempts":{"type":"integer","minimum":0},"backoff":{"type":"string"}},"additionalProperties":false},
+          "onFailure":{"enum":["STOP","ESCALATE","COMPENSATE","RETRY","MARK_UNKNOWN"]}
+        }
+      }
+    },
+    "integrity": {
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "invariants":{"type":"array","items":{"type":"string"}},
+        "idempotency":{"type":"array","items":{"type":"string"}},
+        "provenanceRequirements":{"type":"array","items":{"type":"string"}},
+        "contradictionRules":{"type":"array","items":{"type":"string"}}
+      }
+    },
+    "termination": {
+      "type":"object","additionalProperties":false,
+      "required":["success","terminalOutcomes"],
+      "properties":{
+        "success":{"type":"array","items":{"type":"string"}},
+        "stopConditions":{"type":"array","items":{"type":"string"}},
+        "terminalOutcomes":{"type":"array","items":{"enum":["SUCCESS","FAILURE","PARTIAL","UNKNOWN","BLOCKED_EXTERNAL","CONTRADICTION","ABORTED","REVOKED"]},"uniqueItems":true}
+      }
+    },
+    "recovery": {
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "compensation":{"type":"array","items":{"type":"string"}},
+        "reconciliation":{"type":"array","items":{"type":"string"}},
+        "escalation":{"type":"array","items":{"type":"string"}}
+      }
+    },
+    "evaluation": {
+      "type":"object","additionalProperties":false,
+      "required":["evaluator","metrics","negativeControls"],
+      "properties":{
+        "evaluator":{"type":"string","minLength":1},
+        "metrics":{"type":"array","items":{"type":"string"}},
+        "acceptanceThresholds":{"type":"array","items":{"type":"string"}},
+        "negativeControls":{"type":"array","items":{"type":"string"}}
+      }
+    },
+    "lineage": {
+      "type":"object","additionalProperties":false,
+      "required":["derivedFrom"],
+      "properties":{
+        "derivedFrom":{"type":"array","items":{"type":"string"}},
+        "supersedes":{"type":["string","null"]},
+        "supersededBy":{"type":["string","null"]},
+        "evidenceEpisodes":{"type":"array","items":{"type":"string"}}
+      }
+    }
+  }
+}

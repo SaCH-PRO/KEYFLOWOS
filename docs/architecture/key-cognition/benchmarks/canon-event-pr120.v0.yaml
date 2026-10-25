@@ -1,0 +1,63 @@
+episode_id: CANON-PR120-LATE-EVIDENCE-001
+kind: CONTROL_CONTRADICTION
+status: BENCHMARK
+subject:
+  type: semantic_head
+  id: 1a536eadf1f11c61cfd4f64c830a4c6c2a33570c
+context:
+  repository: SaCH-PRO/KEYFLOWOS
+  pull_request: 120
+  branch: impl/kf-meta-state-reducer-live-001
+  base_main: 110532883411007787f62de35e0a951aa1c16cfa
+  branch_commit_cap: 25
+actors:
+  - human_owner
+  - chatgpt_authority_reviewer
+  - claude_bounded_worker
+  - copilot_independent_reviewer
+  - github_actions_proof_system
+sequence:
+  - semantic_head_stabilized
+  - copilot_review_not_run_quota_exhausted
+  - control_artifact_created_before_fallback_review
+  - chatgpt_fallback_semantic_pass_arrived
+  - existing_artifact_became_incomplete_for_required_evidence
+  - second_commit_would_exceed_branch_cap
+  - worker_reported_contradiction_and_stopped
+  - authority_selected_force_with_lease_artifact_replacement
+  - artifact_replaced_without_semantic_change
+  - exact_head_proof_restarted
+constraints:
+  - semantic_head_must_remain_immutable
+  - not_run_is_never_pass
+  - exact_head_evidence_only
+  - branch_commit_cap_25
+  - no_production_effect
+  - no_merge_authority
+contradiction:
+  statement: required_late_evidence_needed_recording_but_a_new_commit_was_not_legal
+  legal_recovery_chosen: replace_existing_control_artifact_with_force_with_lease
+  minimum_relation_repaired: control_artifact_to_review_evidence_binding
+outcomes:
+  semantic_behavior_changed: false
+  production_touched: false
+  historical_evidence_preserved: true
+  new_head: 0a793c0bc58a99b6e879e80d605b1f388783da9a
+learning_labels:
+  - timing_order_correctness
+  - contradiction_as_state
+  - minimum_recovery
+  - exact_head_binding
+  - subject_attestation_separation_candidate
+  - procedure_compilation_candidate
+candidate_procedures:
+  - ContextIntegrityLoader
+  - ExactHeadFinalizer
+  - ContradictionResolver
+negative_controls:
+  - not_run_counted_as_pass
+  - stale_review_accepted
+  - semantic_head_mutated_to_store_review
+  - unexpected_remote_head_force_overwritten
+  - branch_cap_silently_ignored
+  - old_green_checks_inherited_after_head_replacement
