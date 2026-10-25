@@ -3275,3 +3275,20 @@ negative_controls:
       replace: "if (seenNumbers.has(node.number)) continue;"
     proof_command: node --test --test-name-pattern="duplicated page cannot be deduplicated" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT
+    claim: >
+      The lister ends by natural termination (process.exitCode), so the
+      candidate list it wrote drains into the stdout pipe before the process
+      ends. A forced process.exit right after the write can end the process
+      with part of the list unwritten and exit 0 (SWEEP-IO-001; 65,536 of
+      85,000 bytes on Linux). On Windows the native stdout pipe is blocking
+      and cannot show the loss, so there this control is live through the
+      test's modeled asynchronous stdout leg; on Linux both legs fail with
+      the defect restored.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "main().then((code) => { process.exitCode = code; });"
+      replace: "main().then((code) => process.exit(code));"
+    proof_command: node --test --test-name-pattern="drains its stdout pipe before it exits" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 180000

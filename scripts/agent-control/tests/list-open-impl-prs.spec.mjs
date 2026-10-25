@@ -8,11 +8,19 @@
  * enumeration is complete and internally consistent.
  *
  * Every test injects `fetch`. Nothing reaches the network, and what is
- * asserted is what the lister printed, returned, or refused.
+ * asserted is what the lister printed, returned, or refused. The last test
+ * runs the actual CLI file as a child process and reads its real stdout pipe
+ * (SWEEP-IO-001); its fetch is injected through a test-only preload.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   PAGE_SIZE,
   MAX_PAGES,
@@ -341,4 +349,149 @@ test('an error that is not a ListingError still exits 2 with nothing on stdout',
   assert.equal(run.code, 2);
   assert.equal(run.stdout, '');
   assert.match(run.stderr, /http: request failed: fetch is broken/);
+});
+
+// ------------------------------------------------------------- the CLI-to-pipe boundary (SWEEP-IO-001)
+//
+// Everything above injects stdout in memory. The sweep consumes the real
+// process's stdout through a pipe, and that boundary has its own defect: a
+// process.exit() right after the one large write ends the process with part
+// of the list still unwritten, and exit 0. On Linux the kernel pipe takes
+// 65,536 bytes of an 85,000-byte write and the rest is lost. On Windows, Node
+// gives a stdout pipe a blocking handle with synchronous writes, so the
+// native pipe cannot show the loss; the second leg below models a POSIX pipe
+// under backpressure deterministically on every platform, and it is the leg
+// through which the negative control is live on Windows.
+
+const CLI_PATH = fileURLToPath(new URL('../list-open-impl-prs.mjs', import.meta.url));
+
+/** 5,000 open impl/* PRs with 16-digit numbers over 50 pages, the page cap exactly: 85,000 bytes of stdout. */
+const PIPE_CASE = Object.freeze({ total: MAX_PAGES * PAGE_SIZE, from: 1_000_000_000_000_000 });
+const PIPE_EXPECTED_NUMBERS = Object.freeze(Array.from({ length: PIPE_CASE.total }, (_, i) => PIPE_CASE.from + i));
+const PIPE_EXPECTED_TEXT = `${PIPE_EXPECTED_NUMBERS.join('\n')}\n`;
+const PIPE_EXPECTED_BYTES = Buffer.byteLength(PIPE_EXPECTED_TEXT);
+
+/**
+ * Test-only preload for the child. It answers the lister's GraphQL requests
+ * from memory, and, when KF_LISTER_TEST_ASYNC_STDOUT is 1, delivers every
+ * process.stdout.write to the real pipe on a later macrotask and reports
+ * backpressure (returns false), which is what a POSIX pipe does once its
+ * buffer is full. Nothing shipped reads these variables; the file exists only
+ * in a temporary directory for the duration of one child.
+ */
+const PRELOAD_SOURCE = `
+const TOTAL = Number(process.env.KF_LISTER_TEST_TOTAL);
+const FROM = Number(process.env.KF_LISTER_TEST_FROM);
+const PAGE = Number(process.env.KF_LISTER_TEST_PAGE);
+globalThis.fetch = async (url, init) => {
+  const { variables } = JSON.parse(init.body);
+  const pageIndex = variables.cursor === null ? 0 : Number(variables.cursor.slice('cursor-'.length));
+  const start = pageIndex * PAGE;
+  const end = Math.min(start + PAGE, TOTAL);
+  const nodes = [];
+  for (let i = start; i < end; i += 1) nodes.push({ number: FROM + i, headRefName: 'impl/kf-' + (FROM + i), isDraft: true });
+  const last = end >= TOTAL;
+  const body = { data: { repository: { pullRequests: {
+    totalCount: TOTAL,
+    pageInfo: { hasNextPage: !last, endCursor: last ? null : 'cursor-' + (pageIndex + 1) },
+    nodes,
+  } } } };
+  return { status: 200, json: async () => body };
+};
+if (process.env.KF_LISTER_TEST_ASYNC_STDOUT === '1') {
+  const realWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk, encoding, callback) => {
+    setImmediate(() => realWrite(chunk, encoding, callback));
+    return false;
+  };
+}
+`;
+
+const CHILD_KILL_MS = 30_000;
+const READER_RESUME_AT_LATEST_MS = 5_000;
+const READER_RESUME_AFTER_SUMMARY_MS = 150;
+
+/**
+ * Runs the actual CLI as a child whose stdout is a real pipe. The reader is
+ * held paused until the child has announced its result on stderr (the
+ * summary line precedes the stdout write), plus a margin, so the one large
+ * write meets a reader that is not consuming; it always resumes on its own
+ * timer, so a correct child can never deadlock against the test, and a hung
+ * child is killed and reported. Returns exactly what the pipe delivered.
+ */
+async function runCliThroughPipe({ asyncStdout }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-lister-pipe-'));
+  const preload = path.join(dir, 'preload.mjs');
+  fs.writeFileSync(preload, PRELOAD_SOURCE);
+  const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, CLI_PATH], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    // Only what Node needs to start; nothing of this process's credentials.
+    env: {
+      SystemRoot: process.env.SystemRoot,
+      PATH: process.env.PATH,
+      GITHUB_TOKEN: 'synthetic-token-not-a-credential',
+      GITHUB_REPOSITORY: REPO,
+      KF_LISTER_TEST_TOTAL: String(PIPE_CASE.total),
+      KF_LISTER_TEST_FROM: String(PIPE_CASE.from),
+      KF_LISTER_TEST_PAGE: String(PAGE_SIZE),
+      ...(asyncStdout ? { KF_LISTER_TEST_ASYNC_STDOUT: '1' } : {}),
+    },
+  });
+  const timers = [];
+  let killed = false;
+  let resumed = false;
+  const resume = () => {
+    if (resumed) return;
+    resumed = true;
+    child.stdout.resume();
+  };
+  try {
+    const chunks = [];
+    let stderr = '';
+    child.stdout.pause();
+    child.stdout.on('data', (chunk) => chunks.push(chunk));
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+      if (!resumed && /impl\/\* candidate\(s\)/.test(stderr)) {
+        timers.push(setTimeout(resume, READER_RESUME_AFTER_SUMMARY_MS));
+      }
+    });
+    timers.push(setTimeout(resume, READER_RESUME_AT_LATEST_MS));
+    timers.push(setTimeout(() => { killed = true; child.kill('SIGKILL'); resume(); }, CHILD_KILL_MS));
+    const [code, signal] = await once(child, 'close');
+    return { code, signal, killed, stdout: Buffer.concat(chunks), stderr };
+  } finally {
+    for (const timer of timers) clearTimeout(timer);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function assertCompletePipeDelivery(leg, run) {
+  assert.equal(run.killed, false, `${leg}: the child hung and was killed; stderr: ${run.stderr}`);
+  assert.equal(run.signal, null, `${leg}: the child ended by signal ${run.signal}; stderr: ${run.stderr}`);
+  assert.equal(run.code, 0, `${leg}: exit ${run.code}; stderr: ${run.stderr}`);
+  assert.match(run.stderr, /5000 open pull requests over 50 page\(s\), 5000 impl\/\* candidate\(s\), attempt 1/, `${leg}: the summary line`);
+  // Byte-for-byte: the whole ordered list reached the pipe, not a prefix that still parses.
+  assert.equal(run.stdout.length, PIPE_EXPECTED_BYTES, `${leg}: ${run.stdout.length} of ${PIPE_EXPECTED_BYTES} bytes reached the pipe`);
+  assert.equal(run.stdout.toString('utf8'), PIPE_EXPECTED_TEXT, `${leg}: stdout differs from the expected list`);
+  const numbers = run.stdout.toString('utf8').split('\n').slice(0, -1).map(Number);
+  assert.equal(numbers.length, PIPE_CASE.total, `${leg}: candidate count`);
+  assert.deepEqual(numbers, PIPE_EXPECTED_NUMBERS, `${leg}: candidate identities and order`);
+}
+
+test('NC: the CLI drains its stdout pipe before it exits: 5,000 candidates reach a paused reader complete, exit 0', async (t) => {
+  // Leg 1, the native OS pipe. With the forced exit restored this leg fails on
+  // Linux (65,536 of 85,000 bytes) and passes on Windows, whose stdout pipe is
+  // blocking; it is not evidence of native Windows loss and does not claim it.
+  await t.test('drains its stdout pipe before it exits: native OS pipe', async () => {
+    assertCompletePipeDelivery('native OS pipe', await runCliThroughPipe({ asyncStdout: false }));
+  });
+  // Leg 2, the modeled POSIX pipe under backpressure: each write reaches the
+  // real pipe on a later macrotask. A forced exit in the microtask after
+  // main() resolves runs first and the list never reaches the pipe, on every
+  // platform; natural termination lets the write drain, then exits with the
+  // same status. This is the leg through which the control is live on Windows.
+  await t.test('drains its stdout pipe before it exits: modeled asynchronous stdout (test-only preload sink)', async () => {
+    assertCompletePipeDelivery('modeled asynchronous stdout', await runCliThroughPipe({ asyncStdout: true }));
+  });
 });
