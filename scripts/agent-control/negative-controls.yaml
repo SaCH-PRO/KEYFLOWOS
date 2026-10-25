@@ -1367,6 +1367,23 @@ negative_controls:
     proof_command: node --test --test-name-pattern="real PR 103 Copilot reviews" scripts/agent-control/tests/semantic-review.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-SR-COPILOT-INSUFFICIENT-QUOTA-UNRECOGNIZED
+    claim: >
+      The bot's current unavailable wording, "insufficient remaining quota"
+      (PR 155 reviews 5636247931 and 5636727516), derives the machine reason
+      quota_exhausted, so a truthfully recorded quota NOT_RUN is evidenced
+      live and the approved fallback can be judged
+      (KF-META-AI-REVIEW-QUOTA-WORDING-001). With the entry removed the body
+      is NOT_RUN with no reason, as it was before the correction.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+        Object.freeze({ pattern: /\binsufficient remaining quota\b/i, reason: 'quota_exhausted' }),
+      replace: |-
+        // (entry removed by the negative control)
+    proof_command: node --test --test-name-pattern="PR 155 Copilot wording" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-SR-STALE-HEAD
     claim: >
       A review of any commit that does not carry exactly the admitted semantics
