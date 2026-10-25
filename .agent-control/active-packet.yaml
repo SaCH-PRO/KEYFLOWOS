@@ -16,7 +16,7 @@ origin:   # the defect was found while observing the restored autopilot; this pa
   not_a_merge_defect: the direction is fail-safe; an unlisted PR cannot be merged by the sweep, and the per-PR event path is unaffected
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 implementation_branch: impl/kf-meta-autopilot-sweep-coverage-001
-pr_number: null
+pr_number: 185
 state: PROVING
 health: YELLOW
 scope_changed: false

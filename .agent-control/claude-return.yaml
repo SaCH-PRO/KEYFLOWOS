@@ -24,7 +24,7 @@ never_posted_return_message_ids: []
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 source_head: 04860185c0c5bb8d30963b165821446afb8710e6
 implementation_branch: impl/kf-meta-autopilot-sweep-coverage-001
-pr_number: null
+pr_number: 185
 state: PROVING
 health: YELLOW
 scope_changed: false
@@ -217,8 +217,8 @@ unresolved_contradictions: []
 settled_contradictions: []
 
 next_action: >
-  Push this head to the branch, open a draft PR from the exact base, bind
-  the PR number in one control-only commit, read the five required
-  workflows at that head from the live runs, and post one RETURN or
-  CONTRADICTION on #80 under CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002. No merge,
-  ready transition or credit is requested.
+  The branch is pushed and draft PR 185 is open from the exact base
+  b1948d27; this control-only commit binds the PR number. Read the five
+  required workflows at this head from the live runs, and post one RETURN
+  or CONTRADICTION on #80 under CG-DIR-AUTOPILOT-SWEEP-COVERAGE-002. No
+  merge, ready transition or credit is requested.
