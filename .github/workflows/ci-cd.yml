@@ -91,6 +91,10 @@ jobs:
       - name: Type check web
         run: cd apps/web && npx tsc --noEmit
 
+      # Readiness must reject a degraded JSON body even when HTTP status is 200.
+      - name: Verify launch health contract
+        run: node --test scripts/tests/verify-up-body.spec.mjs
+
   # Lint is a DEBT RATCHET, and nothing depends on it.
   #
   # It used to be the first step of lint-and-typecheck, which every other job
