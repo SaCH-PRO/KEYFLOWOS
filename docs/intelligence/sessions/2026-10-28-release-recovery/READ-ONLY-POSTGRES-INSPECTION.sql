@@ -1,9 +1,16 @@
--- KEYFLOWOS: 2026-10-28 read-only production schema observation
--- Run against the intended, verified DB with least-privilege diagnostic access.
+-- KEYFLOWOS: 2026-10-28 CONNECTED SUPABASE-ONLY read-only observation.
+-- NOT a generic production/VPS inspection script. The connected Supabase
+-- project is NOT established as the application's running production DB.
+-- Run ONLY against the specifically identified connected Supabase project,
+-- with authorized least-privilege diagnostic SELECT access. Do not use this
+-- script unchanged on the standalone VPS PostgreSQL database: it assumes
+-- Supabase roles anon/authenticated, auth.users, and named public app tables.
 -- These SELECT statements return aggregates, migration *names*, extension
 -- names and catalog metadata only. No account content, secrets or customer rows.
 -- SQL is NOT a migration and grants no permissions.
--- Historical observations must be rerun and timestamped for each release.
+-- For actual production: verify the live host, auth provider and database
+-- identity first; devise a separate, schema-aware read-only inspection plan.
+-- Historical observations must be rerun, target-labeled and timestamped.
 
 -- 1. Timestamp / server version.
 SELECT now() AS observed_at, current_database() AS database_name,
