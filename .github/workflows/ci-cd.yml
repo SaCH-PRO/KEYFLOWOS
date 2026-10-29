@@ -190,6 +190,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v3
@@ -209,14 +211,39 @@ jobs:
         run: pnpm audit --audit-level high
         continue-on-error: true
 
+      - name: Verify secret scan contract
+        run: node --test scripts/security/tests/secret-scan-contract.spec.mjs
+
+      # A full checkout keeps both exact commit identities available to the
+      # scanner. Fail closed when either endpoint is absent or the diff is empty.
+      - name: Require usable secret scan range
+        shell: bash
+        env:
+          SCAN_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          SCAN_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SCAN_BASE" ] || [ -z "$SCAN_HEAD" ]; then
+            echo "::error::Secret-scan commit range is missing."
+            exit 1
+          fi
+          git cat-file -e "$SCAN_BASE^{commit}" || { echo "::error::Secret scan base is unavailable."; exit 1; }
+          git cat-file -e "$SCAN_HEAD^{commit}" || { echo "::error::Secret scan head is unavailable."; exit 1; }
+          changed_files="$(git diff --name-only "$SCAN_BASE" "$SCAN_HEAD")"
+          if [ -z "$changed_files" ]; then
+            echo "::error::Secret scan would examine an empty commit difference."
+            exit 1
+          fi
+
       - name: Secret scanning (trufflehog)
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@69734591624d2afb8e152fcc8f3c2325ab577dae
         with:
           path: ./
-          base: main
-          head: HEAD
-          extra_args: --debug --only-verified
-        continue-on-error: true
+          version: '3.99.7'
+          # Let the action derive event-specific commit SHAs; never use literal
+          # local branch names such as 'main' which may not exist in checkout.
+          # The pinned action already adds --fail internally; duplicating it aborts the scanner.
+          extra_args: --only-verified --fail-on-scan-errors
 
   build-server:
     name: Build Server
