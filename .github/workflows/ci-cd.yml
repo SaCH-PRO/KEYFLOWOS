@@ -93,7 +93,7 @@ jobs:
 
       # Readiness must reject a degraded JSON body even when HTTP status is 200.
       - name: Verify launch health contract
-        run: node --test scripts/tests/verify-up-body.spec.mjs
+        run: node --test scripts/tests/verify-up-body.spec.mjs scripts/tests/verify-up-shell.spec.mjs
 
   # Lint is a DEBT RATCHET, and nothing depends on it.
   #
