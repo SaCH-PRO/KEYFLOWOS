@@ -33,7 +33,9 @@ function securityContractProblems(workflow) {
   if (/continue-on-error:\s*true/.test(scan)) problems.push('secret-scan errors must not be swallowed');
   if (/^\s*(base|head):/m.test(scan)) problems.push('hardcoded TruffleHog refs override event-specific commit SHA discovery');
   if (!/--fail-on-scan-errors(?:\s|$)/.test(scan)) problems.push('scan-source errors must fail the job');
-  if (!/--fail(?:\s|$)/.test(scan)) problems.push('verified secret findings must fail the job');
+  // The pinned action injects --fail; duplicating it aborts the scanner.
+  if (/--fail(?:\s|$)/.test(scan)) problems.push('duplicate --fail aborts scan');
+  if (!/uses: trufflesecurity\/trufflehog@69734591624d2afb8e152fcc8f3c2325ab577dae/.test(scan)) problems.push('intrinsic --fail action pin required');
   if (!/version:\s*['"]?3\.99\.7/.test(scan)) problems.push('scanner version must be pinned');
   return problems;
 }
@@ -46,9 +48,10 @@ test('negative controls: restoring any old false-green mechanism makes the contr
   const mutations = [
     ['shallow checkout', source.replace('fetch-depth: 0', 'fetch-depth: 1')],
     ['hardcoded base', source.replace("version: '3.99.7'", "base: main\n          version: '3.99.7'")],
-    ['swallowed failure', source.replace('extra_args: --only-verified --fail --fail-on-scan-errors', 'extra_args: --only-verified --fail --fail-on-scan-errors\n        continue-on-error: true')],
-    ['scan error ignored', source.replace('--fail --fail-on-scan-errors', '--fail')],
-    ['secrets not blocking', source.replace('--only-verified --fail --fail-on-scan-errors', '--only-verified --fail-on-scan-errors')],
+    ['swallowed failure', source.replace('extra_args: --only-verified --fail-on-scan-errors', 'extra_args: --only-verified --fail-on-scan-errors\n        continue-on-error: true')],
+    ['scan error ignored', source.replace('--only-verified --fail-on-scan-errors', '--only-verified')],
+    ['duplicate --fail', source.replace('--only-verified --fail-on-scan-errors', '--only-verified --fail --fail-on-scan-errors')],
+    ['unpinned action', source.replace('trufflesecurity/trufflehog@69734591624d2afb8e152fcc8f3c2325ab577dae', 'trufflesecurity/trufflehog@main')],
     ['no nonempty check', source.replace('git diff --name-only', 'git status --porcelain')],
     ['no executable test', source.replace('node --test scripts/security/tests/secret-scan-contract.spec.mjs', 'echo tests-skipped')],
   ];
