@@ -242,7 +242,8 @@ jobs:
           version: '3.99.7'
           # Let the action derive event-specific commit SHAs; never use literal
           # local branch names such as 'main' which may not exist in checkout.
-          extra_args: --only-verified --fail --fail-on-scan-errors
+          # The pinned action already adds --fail internally; duplicating it aborts the scanner.
+          extra_args: --only-verified --fail-on-scan-errors
 
   build-server:
     name: Build Server
