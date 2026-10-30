@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { Test } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, NotFoundException, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { describe, beforeAll, afterAll, beforeEach, it, expect, vi } from 'vitest';
 import { CrmController } from '../src/modules/crm/crm.controller';
@@ -94,6 +94,21 @@ const crmServiceMock = {
   addTask: vi.fn(),
 };
 
+// CrmStatsService is mocked here on purpose: this file proves routing, guards and
+// what the controller forwards, not persistence or the record-level visibility
+// predicate. The real predicate over a real database is proved separately in
+// contacts-visibility.integration.test.ts (KF-PRODUCT-CONTACTS-PILOT-001).
+const crmStatsMock = {
+  getCacheMetrics: () => ({}),
+  contactDetail: vi.fn(),
+};
+
+const journeyMock = {
+  getContactCrossJourney: vi.fn().mockResolvedValue({ summary: 'stub', timeline: [] }),
+  generateAiInsight: vi.fn().mockResolvedValue(null),
+  getContactHealthMetrics: vi.fn().mockResolvedValue({}),
+};
+
 const flowServiceMock = {
   getFlowIntelligence: vi.fn().mockResolvedValue({ insights: [] }),
 };
@@ -120,13 +135,13 @@ describe('CRM e2e', () => {
         { provide: SubscriptionsService, useValue: subscriptionsMock },
         { provide: CrmService, useValue: crmServiceMock },
         { provide: CrmTimelineService, useValue: { addTask: vi.fn().mockResolvedValue({ id: 'task_1' }) } },
-        { provide: CrmStatsService, useValue: { getCacheMetrics: () => ({}) } },
+        { provide: CrmStatsService, useValue: crmStatsMock },
         { provide: CrmImportService, useValue: {} },
         { provide: CrmPlaybookService, useValue: {} },
         { provide: CrmFlowService, useValue: flowServiceMock },
         { provide: CrmActionsService, useValue: {} },
         { provide: CrmRevenueService, useValue: {} },
-        { provide: CrmJourneyService, useValue: {} },
+        { provide: CrmJourneyService, useValue: journeyMock },
         { provide: CrmDuplicateDetectionService, useValue: {} },
         { provide: CrmDataQualityService, useValue: {} },
         { provide: CrmSavedViewsService, useValue: {} },
@@ -330,5 +345,62 @@ describe('CRM e2e', () => {
       .get('/crm/businesses/biz_1/flow-intelligence')
       .expect(200);
     expect(flowServiceMock.getFlowIntelligence).toHaveBeenCalledWith('biz_1');
+  });
+
+  // KF-PRODUCT-CONTACTS-PILOT-001: the detail and dossier routes must hand the
+  // authenticated actor to CrmStatsService.contactDetail so record-level
+  // visibility (resolveCrmAccess + visibilityClause) can be applied in the row
+  // query. Before the correction both routes passed only { businessId, contactId }.
+  describe('contact detail routes forward the authenticated actor for record-level visibility', () => {
+    const detail = {
+      contact: { id: 'contact_7', businessId: 'biz_1', visibility: 'TEAM' },
+      events: [], notes: [], tasks: [], invoices: [], bookings: [], meta: null, customFieldValues: [],
+    };
+
+    it('GET contact detail passes req.user.id as actorUserId', async () => {
+      crmStatsMock.contactDetail.mockResolvedValueOnce(detail);
+      const res = await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_7')
+        .expect(200);
+      expect(res.body.contact.id).toBe('contact_7');
+      expect(crmStatsMock.contactDetail).toHaveBeenCalledTimes(1);
+      expect(crmStatsMock.contactDetail).toHaveBeenCalledWith({
+        businessId: 'biz_1',
+        contactId: 'contact_7',
+        actorUserId: 'user_1',
+      });
+    });
+
+    it('GET contact dossier passes req.user.id as actorUserId', async () => {
+      crmStatsMock.contactDetail.mockResolvedValueOnce({ ...detail, contact: { ...detail.contact, id: 'contact_8' } });
+      const res = await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_8/dossier')
+        .expect(200);
+      expect(res.body.contact.id).toBe('contact_8');
+      expect(crmStatsMock.contactDetail).toHaveBeenCalledWith({
+        businessId: 'biz_1',
+        contactId: 'contact_8',
+        actorUserId: 'user_1',
+      });
+    });
+
+    it('GET contact detail fails closed as 404 with no record fields when the service hides the record', async () => {
+      crmStatsMock.contactDetail.mockRejectedValueOnce(new NotFoundException('Contact not found'));
+      const res = await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_private')
+        .expect(404);
+      expect(res.body.contact).toBeUndefined();
+      expect(res.body.notes).toBeUndefined();
+      expect(res.body.meta).toBeUndefined();
+    });
+
+    it('GET contact dossier fails closed as 404 when the underlying detail is hidden', async () => {
+      crmStatsMock.contactDetail.mockRejectedValueOnce(new NotFoundException('Contact not found'));
+      const res = await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_private/dossier')
+        .expect(404);
+      expect(res.body.contact).toBeUndefined();
+      expect(res.body.notes).toBeUndefined();
+    });
   });
 });
