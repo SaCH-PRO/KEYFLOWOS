@@ -1,0 +1,278 @@
+{
+  "schema_version": "0.1",
+  "status": "REVIEW_WORKING_MODEL_NOT_CANONICAL",
+  "source_main": "b1948d2797e1bae3660a3d7173abb75397e05aad",
+  "audit_date": "2026-10-29",
+  "claim_count": 11,
+  "claims": [
+    {
+      "id": "KF-REC-DEV-001",
+      "name": "Repository maps and task routing",
+      "system": "DEVELOPMENT_SYSTEM",
+      "kind": "accepted_repository_workflow",
+      "description": "Architecture map before significant edits; deterministic inventory/dependency scans; module responsibility, public interfaces, ownership confidence, execution paths; maps updated after changes.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/main/.agents/skills/codebase-architect/SKILL.md",
+          "ref": "b1948d2797e1bae3660a3d7173abb75397e05aad"
+        },
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/main/.agents/skills/codebase-architect/references/mapping-standard.md",
+          "blob_sha": "aa8ad98cee925db2b76442493905bd76f42628bc"
+        }
+      ],
+      "authority_status": "ACCEPTED_REPOSITORY_INSTRUCTION",
+      "implementation_status": "PRESENT_IN_MAIN_INSTRUCTIONS_AND_SCANNERS",
+      "proof_status": "RUNTIME_AND_AGENT_USAGE_NOT_VERIFIED",
+      "target_disposition": "RETAIN_AND_VERIFY",
+      "uncertainties": [
+        "Generated maps may be stale",
+        "File-reference frequency does not establish semantic ownership"
+      ]
+    },
+    {
+      "id": "KF-REC-DEV-002",
+      "name": "Living System Atlas overlay and materializer",
+      "system": "SHARED",
+      "kind": "proposed_architecture",
+      "description": "Cross-layer graph relating products, KEY cognition, journeys/kernels, runtime execution, repository sources, development controls, and evidence; graph materializer must carry provenance and avoid promoting inferred data ownership.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/141",
+          "ref": "0e5545394d5be1e5d94eee09af87ea2b68a4aeba"
+        },
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/142",
+          "ref": "a38837b28174b2203d1cc8705f78aca39d21cbe6"
+        }
+      ],
+      "authority_status": "PROPOSED_DRAFT_OPEN",
+      "implementation_status": "BRANCH_ONLY_CANDIDATE",
+      "proof_status": "BRANCH_CODE_AND_TESTS_EXIST_BUT_CURRENT_EXACT_HEAD_EXECUTION_NOT_VERIFIED",
+      "target_disposition": "RECONCILE_WITH_EXISTING_ARCHITECTURE_OWNERS",
+      "uncertainties": [
+        "PR142 stacked on PR141",
+        "PR142 control artifact diff missing one patch in GitHub response",
+        "Owner/graph freshness not yet proven",
+        "No current-main adoption"
+      ]
+    },
+    {
+      "id": "KF-REC-DEV-003",
+      "name": "Deterministic ContextBundle compiler",
+      "system": "DEVELOPMENT_SYSTEM",
+      "kind": "research_prototype",
+      "description": "Compile bounded task context deterministically from explicit source revisions, authority classes, freshness, proof profiles, and conflicts without granting authority or adding a memory database.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/154",
+          "ref": "2f3a200122fe01568d6f0d6e22b0fcb99db54593"
+        },
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/2f3a200122fe01568d6f0d6e22b0fcb99db54593/docs/intelligence/research/traces/DEVELOPMENT-SPEED-TRACE-004E-CONTEXT-COMPILER-EXECUTION-PROOF.md",
+          "blob_sha": "55727677837144c90c3aee2e46b61869e7d72622"
+        },
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/156",
+          "ref": "8eb3dee851ac6a9200c8c33f1cefb0f68d9c6d27"
+        }
+      ],
+      "authority_status": "RESEARCH_ONLY_HELD",
+      "implementation_status": "OFFLINE_BRANCH_PROTOTYPE_NOT_LIVE",
+      "proof_status": "HISTORICAL_RECORDED_16_OF_16_OFFLINE_TESTS_36_OF_36_CURATED_CONTEXT_ITEMS_NOT_INDEPENDENTLY_RERUN",
+      "target_disposition": "REVIEW_FOR_BOUNDED_PROMOTION_AFTER_MEASURED_PILOT",
+      "uncertainties": [
+        "Historical test used disclosed composite runtime dependency YAML codec",
+        "No measured speed/quality benefit in live agents",
+        "Proof-profile semantics and worker write-set collision unresolved"
+      ]
+    },
+    {
+      "id": "KF-REC-DEV-004",
+      "name": "Read-only ContextBundle V1 worker insertion",
+      "system": "DEVELOPMENT_SYSTEM",
+      "kind": "proposed_integration",
+      "description": "Add deterministic control snapshot to Claude worker prompt without replacing required document reads or issue-80 authority; generate in memory/stdout to avoid dirty worktrees; fail closed on missing required authority.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/8eb3dee851ac6a9200c8c33f1cefb0f68d9c6d27/docs/intelligence/research/traces/CONTEXT-COMPILER-LIVE-TRACE-001.md",
+          "blob_sha": "4674d87fc07309330ceeeb36e3170ae2f3627e70"
+        }
+      ],
+      "authority_status": "IMPLEMENTATION_READY_RESEARCH_HELD",
+      "implementation_status": "NOT_INTEGRATED",
+      "proof_status": "DESIGN_OBLIGATIONS_DEFINED_NOT_LIVE_PROVED",
+      "target_disposition": "HOLD_FOR_EXACT_MAIN_REBINDING_AND_EXISTING_OWNER_REVIEW",
+      "uncertainties": [
+        "Worker evolved after inspected October main",
+        "No execution grant",
+        "No production/live dry-run proof"
+      ]
+    },
+    {
+      "id": "KF-REC-DEV-005",
+      "name": "Skills-first existing-harness benchmark",
+      "system": "DEVELOPMENT_SYSTEM",
+      "kind": "experiment_proposal",
+      "description": "Compare baseline task-specific instructions (B0), versioned skills on same harness (B1), optional evidence-aware context assembly (B2) under fixed models/tools/authority with safety negative controls.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/167",
+          "ref": "92d0b1c4da60b7af4f8c91ed2bc498e06afc4605"
+        },
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/92d0b1c4da60b7af4f8c91ed2bc498e06afc4605/docs/intelligence/KEY-SKILLS-FIRST-HARNESS-PILOT-20261010.json",
+          "blob_sha": "c42d4b93f626d05f7b7657fc93b5d6a1ccd33919"
+        }
+      ],
+      "authority_status": "RESEARCH_ONLY",
+      "implementation_status": "PILOT_MANIFEST_DRAFT_OPEN_PR",
+      "proof_status": "NOT_RUN",
+      "target_disposition": "RUN_CONTROLLED_OFFLINE_BENCHMARK_IF_AUTHORIZED",
+      "uncertainties": [
+        "No demonstrated performance uplift",
+        "Do not grant skills any new permission",
+        "Potential collision with #135 and #151"
+      ]
+    },
+    {
+      "id": "KF-REC-DEV-006",
+      "name": "Git-history behavioral hotspot analytics",
+      "system": "DEVELOPMENT_SYSTEM",
+      "kind": "research_candidate",
+      "description": "Offline change frequency/co-change/churn analyzer proposed to guide context selection, test impact and refactoring priorities; correlations cannot establish authority or architectural defect.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/8eb3dee851ac6a9200c8c33f1cefb0f68d9c6d27/docs/intelligence/research/BOOK-GENAI-IMPLEMENTATION-READINESS.md",
+          "blob_sha": "e09f911338e734d84d448cd8ef16e9254042278c"
+        }
+      ],
+      "authority_status": "IMPLEMENTATION_READY_RESEARCH",
+      "implementation_status": "NOT_VERIFIED_AS_IMPLEMENTED",
+      "proof_status": "TEST_CONTRACT_PROPOSED",
+      "target_disposition": "OFFLINE_FIRST_UNDER_EXISTING_ARCHITECTURE_TOOLING",
+      "uncertainties": [
+        "Change coupling is not semantic ownership",
+        "No measured speed gains"
+      ]
+    },
+    {
+      "id": "KF-REC-HIST-007",
+      "name": "Historical project-thread harvesting",
+      "system": "SHARED",
+      "kind": "historical_recovery_candidate",
+      "description": "Harvest export transcripts into normalized evidence, redaction, deduplication, source coverage and dispositions; no promotion of chat content to architectural authority.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/163",
+          "ref": "a683080bf11abf086eef409255b38ef6cde584c2"
+        },
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/a683080bf11abf086eef409255b38ef6cde584c2/docs/intelligence/historical-reconciliation/KF-HIR-001.md",
+          "blob_sha": "2c88988e7baf76032c9214e2645dd6f023dfcb88"
+        }
+      ],
+      "authority_status": "DRAFT_OPEN",
+      "implementation_status": "BRANCH_ONLY_HARVESTER",
+      "proof_status": "NOT_RERUN",
+      "target_disposition": "REUSE_EXISTING_HARVESTER_AS_INPUT_WHEN_HISTORICAL_EXPORT_AVAILABLE",
+      "uncertainties": [
+        "Full ChatGPT Project thread corpus not enumerable from repository",
+        "Missing private/uncommitted records cannot be silently declared recovered"
+      ]
+    },
+    {
+      "id": "KF-REC-RND-008",
+      "name": "Continuous research and historical reconciliation loop",
+      "system": "SHARED",
+      "kind": "proposed_research_loop",
+      "description": "Discover/acquire/mine/provenance/reconcile/impact-map/test/learn loop, reuse existing KnowledgeIngestionService and Atlas/Genome, do not auto-promote external ideas or create parallel memory stores.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/165",
+          "ref": "d2ae6a30e735e80a19161eb43a7c51873eccdfaa"
+        },
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/d2ae6a30e735e80a19161eb43a7c51873eccdfaa/docs/intelligence/CONTINUOUS_INTELLIGENCE_RECONCILIATION_LOOP.md",
+          "blob_sha": "3a9cb9907df8d41cd2e1044e9c125cf99fcc16f3"
+        }
+      ],
+      "authority_status": "DOC_PROPOSAL_DRAFT_OPEN",
+      "implementation_status": "NOT_AN_AUTOMATIC_RUNNING_LOOP",
+      "proof_status": "NOT_TESTED",
+      "target_disposition": "INTEGRATE_WITH_EXISTING_OWNERS_AFTER_CONVERGENCE",
+      "uncertainties": [
+        "Continuous triggers not deployed",
+        "Knowledge ingestion owner reachability must be traced"
+      ]
+    },
+    {
+      "id": "KF-REC-KEY-009",
+      "name": "KEY cognitive archaeology and candidate seven-kernel model",
+      "system": "KEY",
+      "kind": "provisional_research",
+      "description": "Converge Mind/Soul/Evolution, memory, cognitive methods, authority, reality/epistemic integrity and hybrid reasoning; avoid biological metaphors becoming unnecessary independent runtimes.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/128",
+          "ref": "ea5c1983bfc7e841ecbd9a121cabf8d0a102ee83"
+        }
+      ],
+      "authority_status": "PROVISIONAL_AND_CONTESTED",
+      "implementation_status": "RESEARCH_DOC_ONLY",
+      "proof_status": "REVIEW_FOUND_KERNEL_NAMESPACE_AND_CONTINUITY_CONTRADICTIONS",
+      "target_disposition": "RECONCILE_WITH_EXISTING_CANONICAL_KERNEL_TAXONOMY",
+      "uncertainties": [
+        "Proposed cognitive K1-K7 IDs conflict with canonical K1-K12",
+        "Not a new accepted architecture"
+      ]
+    },
+    {
+      "id": "KF-REC-DEV-010",
+      "name": "Legacy repository anti-fragmentation guard",
+      "system": "DEVELOPMENT_SYSTEM",
+      "kind": "historical_candidate",
+      "description": "Historical branch naming and pre-push guard proposal to prevent proliferation; changed 56 files including unrelated work.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/19",
+          "ref": "ab3a54f28ddd6fac44c21f9566e4b726c6e61fd1"
+        }
+      ],
+      "authority_status": "CLOSED_UNMERGED",
+      "implementation_status": "NOT_CANONICAL",
+      "proof_status": "NO_CURRENT_ADOPTION_PROOF",
+      "target_disposition": "PRESERVE_INTENT_AND_RECONCILE_WITH_NEWER_BRANCH_HYGIENE",
+      "uncertainties": [
+        "Legacy branch requirements develop/cursor/* are not the current agreed control standard",
+        "Mixed write set"
+      ]
+    },
+    {
+      "id": "KF-REC-DEV-011",
+      "name": "Complete PR inventory and supersession ledger",
+      "system": "DEVELOPMENT_SYSTEM",
+      "kind": "draft_tooling",
+      "description": "PR #150 read-only convergence board and extracted PR #168 paginated inventory; needed to classify each candidate without silent disappearance or stale counts.",
+      "sources": [
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/150",
+          "ref": "f630f13f38dfc54c5d09dd132ded23938bd55477"
+        },
+        {
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/168",
+          "ref": "07554f234b5e7957414568371ece0e1e775239c3"
+        }
+      ],
+      "authority_status": "DRAFT_OPEN",
+      "implementation_status": "READ_ONLY_SOURCE_BRANCH_CANDIDATE",
+      "proof_status": "TEST_EXECUTION_NOT_CURRENTLY_VERIFIED",
+      "target_disposition": "REUSE_PR_INVENTORY_APPROACH_AND_REFRESH_CURRENT_COUNT",
+      "uncertainties": [
+        "October 10 count 39 open is historical; current verified count 57 open",
+        "PR #150 branch divergence exceeded threshold",
+        "PR #168 extraction not authorized for merge"
+      ]
+    }
+  ]
+}
