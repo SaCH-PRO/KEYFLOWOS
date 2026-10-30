@@ -95,14 +95,33 @@ Do not invent a new REST surface or tRPC requirement for this packet. Determine 
 | CT-P11 | Existing \`crm.e2e.test.ts\` + real DB integration fixture | Existing mock test still passes, real persistence and guards proven |
 | CT-P12 | Browser smoke through new contact → list → edit → refresh | User-visible correct state with screenshot/video or other direct evidence |
 
-## 8. Known blockers / questions before v1 spec acceptance
+## 8. Implementer verification and blocker disposition (October 29, 2026)
 
-1. **Potential staff detail visibility gap:** verify \`CrmStatsService.assertContact\` and all detail endpoints against record-level access requirements. This is a bounded security investigation, not permission to alter all CRM.
-2. **Audit atomicity:** \`CrmService.auditContact\` is fire-and-forget. Establish which audit source is mandatory for mutation and whether failures create missing evidence.
-3. **HTTP mock ≠ DB proof:** current \`crm.e2e.test.ts\` mocks CrmService; require test DB fixture and browser flow.
-4. **Form/server firstName disagreement:** frontend requires firstName; backend create DTO optional. Decide specification based on actual product design before edits.
-5. **No direct staging run in this session:** connection, deployed commit, secrets, DB state, acceptance proofs UNKNOWN.
-6. Confirm current branch and authoritative packet before any implementation: \`main\` may have advanced after 2026-10-29.
+**Implementer report:** Claude read CONTACTS-v1 against main@b1948d2797e1bae3660a3d7173abb75397e05aad and reported all nine recorded blob anchors and 14 files matching. This is a code-review result, not an executed test suite. ChatGPT subsequently inspected the source snippets and the existing real-database integration-test fixture; it did not run the application or database tests.
+
+| Blocker / disposition | Status | Verified by implementer — SHA and line | Follow-up |
+|---|---|---|---|
+| 1. Contact detail visibility | **CONFIRMED BY CODE READING**; CT-P06 runtime FAIL not yet reproduced | Claude reported verified. Independently read \`crm.controller.ts\` blob \`7074e121\` lines **322–330**; \`crm-stats.service.ts\` blob \`f381a383\` lines **149–158, 571–573**; \`crm-permissions.helper.ts\` blob \`784a79f0\` visibilityClause | Detail receives no actor and applies only tenant predicate. Create negative control for STAFF crm_view=owned/PRIVATE and make smallest fail-closed fix after authorized directive. Do not infer a cross-tenant bypass. |
+| 2. Audit propagation | **CONFIRMED CODE DEFECT / DECISION GATED** | Claude reported unawaited contact mutation call sites. Independently read \`crm.service.ts\` blob \`f21bea05\` lines **148–169, 492, 812, 862, 969, 1072, 1433–1442, 1675–1735**; \`contact-audit.service.ts\` blob \`9673b331\` lines **142–169** | **Correction to implementer summary:** even notes/tasks' syntactic \`await this.auditContact(...)\` does NOT await the database write because helper returns \`void\` and calls \`void this.contactAudit.write(...)\`. The writer also logs/swallows failure. Await alone does not make audit mandatory or atomic. Operator decision required on audit evidence contract; design durable proof and failure injection. |
+| 3. Existing HTTP tests | **CONFIRMED MOCKED; REAL-DB FIXTURE EXISTS** | \`apps/server/test/crm.e2e.test.ts\` blob \`cb7eb75a\` service mock near **82–96**, HTTP cases **190–328**; \`tenant-scope-extension.integration.test.ts\` blob \`2f55e3e0\` lines **1–49**; \`tenant-membership-boundary.integration.test.ts\` blob \`85518758\` lines **1–55** | Use existing DATABASE_URL + pgvector/pg16 CI real-DB pattern; new test file is a new **test case**, not a new test framework. Test fixture existence does not establish that this Contacts test passes. |
+| 4. firstName web/server mismatch | **CONFIRMED BY CODE READING / DECISION GATED** | \`create-contact.dto.ts\` blob \`31b2a0f0\` lines **12–17** has \`@IsOptional() firstName?: string\`; \`contact-form.tsx\` blob \`4c73765f\` line **52** uses \`z.string().min(1,...)\` | Choose whether manual REST route requires firstName or permits an identifiable email/phone-only contact. Do not narrow internal \`CrmService.createContact\` blindly: Google Forms/connector ingestion can supply null firstName. |
+| 5. End-to-end staging | **UNVERIFIED / BLOCKED ON ENVIRONMENT** | No pinned executed real-DB/browser log supplied | CT-P12 requires staging, synthetic identities, exact release SHA and screenshots/HTTP/DB proof; no production mutations. |
+| 6. Current source and authority | **PREFLIGHT REQUIRED** | main bound to \`b1948d27\` for code review; issue #80 carries concurrent meta packets and holds | Freshly resolve main, worktree lock, #80 authority and relevant PR overlaps before any worker writes. A documentation update or issue #186 alone does not grant merge or deploy rights. |
+
+### Security finding in precise terms
+
+- AuthGuard, BusinessGuard, and ModuleScopeGuard protect the detail controller at the business/module level.
+- The list flow passes actorUserId to \`CrmService.listContacts\`, which applies \`visibilityClause\`.
+- Detail \`CrmStatsService.contactDetail\` is invoked without actorUserId and calls \`assertContact\`, whose predicate is \`{id, businessId, deletedAt: null}\`, then loads related rows. A member with crm/read can therefore be *authorized at the business/module level* without passing the intended per-contact PRIVATE/owned visibility test.
+- **Expected fix:** filter/check the specific Contact row using the *same effective visibility logic as list* before related data queries. Prefer 404 on an invisible row to avoid an existence oracle. Preserve valid OWNER/ADMIN/STAFF/read-only cases and existing tenant guard. Exact code and response status require worker characterization.
+- **Evidence boundary:** confirmed by source and access-control reasoning; exploit reproduction and patch regression remain NOT_RUN.
+
+### Proposed operator decisions (not silently approved)
+
+- **DEC-CONTACTS-001:** Should the *manual REST create route* reject missing/blank firstName to agree with current web form, or support identifiable name-less contacts with a different UI rule? Preserve service/internal-ingestion compatibility. **Current status: PENDING_OPERATOR_APPROVAL.**
+- **DEC-CONTACTS-002:** Is ContactAuditEntry a required durably committed part of a contact mutation, or a best-effort secondary report alongside another durable/transactional audit source? If required, merely awaiting a helper that swallows exceptions is insufficient; use transaction/outbox/error propagation and real failure-injection proof appropriate to exact existing owner. **Current status: PENDING_OPERATOR_APPROVAL.**
+
+See \`docs/reconstruction/product/DECISION-LEDGER-CONTACTS-001.md\` for alternatives, impact and a proposed default, not authority.
 
 ## 9. Implementation approach and boundaries
 
@@ -113,6 +132,10 @@ Do not invent a new REST surface or tRPC requirement for this packet. Determine 
 **Phase C — independent proof:** rerun tests on exact PR head, review negative controls, report omissions and fresh source SHAs. Existing governance and issue #80 authorization continue to apply.
 
 **Phase D — user journey proof:** staging journey at deployed SHA, real DB state proof, tenant negative controls, browser result and persistence, cost ledger. Mark PASS only on independently reviewed evidence.
+
+## Delivery authority update
+
+This document is not a directive. The immediate implementation release, if any, is limited to the separately published issue-80 DIRECTIVE and its exact declared write set. Section 10 below is the complete *candidate* pilot, not automatic authority to edit firstName/audit. The two operator decisions remain deferred until explicit authorization.
 
 ## 10. Delivery packet candidate for Claude Code / Kimi Code
 
