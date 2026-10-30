@@ -1498,9 +1498,17 @@ export class CrmController {
   async getContactDossier(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    const [detail, story, insight, health] = await Promise.all([
-      this.crmStats.contactDetail({ businessId, contactId }),
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    // Authorization and the visible row come first. A request the caller may
+    // not make never starts the journey, AI-insight or health lookups, which
+    // read the same contact's related data.
+    const detail = await this.crmStats.contactDetail({ businessId, contactId, actorUserId });
+    const [story, insight, health] = await Promise.all([
       this.journey.getContactCrossJourney(businessId, contactId),
       this.journey.generateAiInsight(businessId, contactId),
       this.journey.getContactHealthMetrics(businessId, contactId),
