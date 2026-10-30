@@ -163,55 +163,8 @@ beforeAll(async () => {
   const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
 
-  await cleanup(); // in case a prior run aborted
-
-  // ---- identities -------------------------------------------------------
-  for (const [id, role] of [
-    [ID.owner, 'USER'], [ID.admin, 'USER'], [ID.staffAll, 'USER'], [ID.staffOwned, 'USER'],
-    [ID.staffNoCrm, 'USER'], [ID.other, 'USER'], [ID.nomember, 'USER'], [ID.superAdmin, 'SUPER_ADMIN'],
-  ] as const) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role } });
-  }
-
-  // ---- tenants ----------------------------------------------------------
-  await db.business.create({ data: { id: ID.bizA, name: 'TCV Biz A', ownerId: ID.owner } });
-  await db.business.create({ data: { id: ID.bizB, name: 'TCV Biz B', ownerId: ID.other } });
-
-  // ---- real memberships -------------------------------------------------
-  const m = async (user: string, biz: string, role: string, permissionScopes?: Record<string, string>) =>
-    db.membership.create({ data: { id: `${P}m_${user.slice(P.length)}_${biz.slice(P.length)}`, userId: user, businessId: biz, role, permissionScopes: permissionScopes ?? undefined } });
-  await m(ID.owner, ID.bizA, 'OWNER');
-  await m(ID.admin, ID.bizA, 'ADMIN');
-  await m(ID.staffAll, ID.bizA, 'STAFF', { crm: 'read' });
-  await m(ID.staffOwned, ID.bizA, 'STAFF', { crm: 'read', crm_view: 'owned' });
-  await m(ID.staffNoCrm, ID.bizA, 'STAFF', { crm: 'none' });
-  await m(ID.other, ID.bizB, 'OWNER');
-
-  // ---- contacts ---------------------------------------------------------
-  const c = async (id: string, biz: string, visibility: string, ownerId: string | null, extra: Record<string, unknown> = {}) =>
-    db.contact.create({ data: { id, businessId: biz, firstName: id, visibility, ownerId, ...extra } });
-  await c(ID.cTeamOwner, ID.bizA, 'TEAM', ID.owner);
-  await c(ID.cTeamStaffAll, ID.bizA, 'TEAM', ID.staffAll);
-  await c(ID.cTeamUnowned, ID.bizA, 'TEAM', null);
-  await c(ID.cSharedVis, ID.bizA, 'SHARED', ID.owner);
-  await c(ID.cPrivOwner, ID.bizA, 'PRIVATE', ID.owner);
-  await c(ID.cPrivStaffAll, ID.bizA, 'PRIVATE', ID.staffAll);
-  await c(ID.cPrivStaffOwned, ID.bizA, 'PRIVATE', ID.staffOwned);
-  await c(ID.cPrivSharedToOwned, ID.bizA, 'PRIVATE', ID.owner);
-  await c(ID.cPrivSharedToAdmin, ID.bizA, 'PRIVATE', ID.owner);
-  await c(ID.cDeleted, ID.bizA, 'TEAM', ID.owner, { deletedAt: new Date() });
-  await c(ID.cB, ID.bizB, 'TEAM', ID.other);
-
-  // ---- explicit shares --------------------------------------------------
-  await db.contactShare.create({ data: { id: `${P}share_owned`, businessId: ID.bizA, contactId: ID.cPrivSharedToOwned, userId: ID.staffOwned, createdBy: ID.owner } });
-  await db.contactShare.create({ data: { id: `${P}share_admin`, businessId: ID.bizA, contactId: ID.cPrivSharedToAdmin, userId: ID.admin, createdBy: ID.owner } });
-
-  // ---- sensitive child rows on the foreign PRIVATE contact --------------
-  await db.contactNote.create({ data: { id: ID.note, businessId: ID.bizA, contactId: ID.cPrivOwner, body: SENSITIVE_NOTE, authorId: ID.owner } });
-  await db.contactEvent.create({ data: { id: ID.event, businessId: ID.bizA, contactId: ID.cPrivOwner, type: SENSITIVE_EVENT_TYPE, data: { marker: SENSITIVE_EVENT_TYPE } } });
-  await db.contactTask.create({ data: { id: ID.task, businessId: ID.bizA, contactId: ID.cPrivOwner, title: SENSITIVE_TASK } });
-
-  // ---- the real HTTP path -----------------------------------------------
+  // ---- the real HTTP path (wired before any row is seeded, so a wiring
+  // fault is reported as itself and not as a seeding failure) -------------
   const moduleRef = await Test.createTestingModule({
     controllers: [CrmController],
     providers: [
@@ -281,6 +234,54 @@ beforeAll(async () => {
     },
   });
   statsRecorder = new CrmStatsService({ client: recordingClient } as any, {} as any, {} as any);
+
+  await cleanup(); // in case a prior run aborted
+
+  // ---- identities -------------------------------------------------------
+  for (const [id, role] of [
+    [ID.owner, 'USER'], [ID.admin, 'USER'], [ID.staffAll, 'USER'], [ID.staffOwned, 'USER'],
+    [ID.staffNoCrm, 'USER'], [ID.other, 'USER'], [ID.nomember, 'USER'], [ID.superAdmin, 'SUPER_ADMIN'],
+  ] as const) {
+    await db.user.create({ data: { id, email: `${id}@test.local`, role } });
+  }
+
+  // ---- tenants ----------------------------------------------------------
+  await db.business.create({ data: { id: ID.bizA, name: 'TCV Biz A', ownerId: ID.owner } });
+  await db.business.create({ data: { id: ID.bizB, name: 'TCV Biz B', ownerId: ID.other } });
+
+  // ---- real memberships -------------------------------------------------
+  const m = async (user: string, biz: string, role: string, permissionScopes?: Record<string, string>) =>
+    db.membership.create({ data: { id: `${P}m_${user.slice(P.length)}_${biz.slice(P.length)}`, userId: user, businessId: biz, role, permissionScopes: permissionScopes ?? undefined } });
+  await m(ID.owner, ID.bizA, 'OWNER');
+  await m(ID.admin, ID.bizA, 'ADMIN');
+  await m(ID.staffAll, ID.bizA, 'STAFF', { crm: 'read' });
+  await m(ID.staffOwned, ID.bizA, 'STAFF', { crm: 'read', crm_view: 'owned' });
+  await m(ID.staffNoCrm, ID.bizA, 'STAFF', { crm: 'none' });
+  await m(ID.other, ID.bizB, 'OWNER');
+
+  // ---- contacts ---------------------------------------------------------
+  const c = async (id: string, biz: string, visibility: string, ownerId: string | null, extra: Record<string, unknown> = {}) =>
+    db.contact.create({ data: { id, businessId: biz, firstName: id, visibility, ownerId, ...extra } });
+  await c(ID.cTeamOwner, ID.bizA, 'TEAM', ID.owner);
+  await c(ID.cTeamStaffAll, ID.bizA, 'TEAM', ID.staffAll);
+  await c(ID.cTeamUnowned, ID.bizA, 'TEAM', null);
+  await c(ID.cSharedVis, ID.bizA, 'SHARED', ID.owner);
+  await c(ID.cPrivOwner, ID.bizA, 'PRIVATE', ID.owner);
+  await c(ID.cPrivStaffAll, ID.bizA, 'PRIVATE', ID.staffAll);
+  await c(ID.cPrivStaffOwned, ID.bizA, 'PRIVATE', ID.staffOwned);
+  await c(ID.cPrivSharedToOwned, ID.bizA, 'PRIVATE', ID.owner);
+  await c(ID.cPrivSharedToAdmin, ID.bizA, 'PRIVATE', ID.owner);
+  await c(ID.cDeleted, ID.bizA, 'TEAM', ID.owner, { deletedAt: new Date() });
+  await c(ID.cB, ID.bizB, 'TEAM', ID.other);
+
+  // ---- explicit shares --------------------------------------------------
+  await db.contactShare.create({ data: { id: `${P}share_owned`, businessId: ID.bizA, contactId: ID.cPrivSharedToOwned, userId: ID.staffOwned, createdBy: ID.owner } });
+  await db.contactShare.create({ data: { id: `${P}share_admin`, businessId: ID.bizA, contactId: ID.cPrivSharedToAdmin, userId: ID.admin, createdBy: ID.owner } });
+
+  // ---- sensitive child rows on the foreign PRIVATE contact --------------
+  await db.contactNote.create({ data: { id: ID.note, businessId: ID.bizA, contactId: ID.cPrivOwner, body: SENSITIVE_NOTE, authorId: ID.owner } });
+  await db.contactEvent.create({ data: { id: ID.event, businessId: ID.bizA, contactId: ID.cPrivOwner, type: SENSITIVE_EVENT_TYPE, data: { marker: SENSITIVE_EVENT_TYPE } } });
+  await db.contactTask.create({ data: { id: ID.task, businessId: ID.bizA, contactId: ID.cPrivOwner, title: SENSITIVE_TASK } });
 }, 120_000);
 
 afterAll(async () => {
