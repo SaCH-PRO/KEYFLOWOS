@@ -6,7 +6,8 @@ in_reply_to: CG-DIR-WORKER-OWNERSHIP-RESEARCH-001   # relayed in session; not a 
 kind: DOCUMENT_ONLY_PROPOSAL
 author: cloud Claude session (claude/elegant-curie-7azpsb)
 anchor_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-status: SUBMITTED_FOR_INDEPENDENT_CHATGPT_REVIEW
+status: REVISION_2_SUBMITTED_FOR_INDEPENDENT_CHATGPT_REVIEW
+revision: 2   # answers PR #191 review 5707140581, findings 1-7
 publication_authority: CG-AUTH-WORKER-OWNERSHIP-PROPOSAL-001   # documentation publication only; relayed in session
 implementation_authorized: false
 merge_authority: false
@@ -24,10 +25,12 @@ The root cause is not a bug in one function. It is that the control plane has **
 The minimal correction is three small, independent changes:
 
 1. **A worker identity in the envelope.** Directives and reviews addressed to Claude name an `assigned_worker`; every Claude message names its `worker`. ACK ids become unique per worker.
-2. **Worker-side filtering.** The selector refuses a message assigned to another worker, and refuses a directive another worker has already ACKed.
+2. **Worker-side filtering.** The selector refuses a message assigned to another worker, and refuses a directive its assigned worker has already ACKed. An ACK from any worker other than the assigned one is a protocol violation, never a claim.
 3. **Holds consulted at the wake.** The local worker reads the reducer's active packet holds before waking Claude, so a ChatGPT HOLD on a packet is honoured by the worker and not only by the state projection.
 
-Each is backward compatible by construction: the `worker` fields are optional in the parser, so no historical #80 message becomes malformed, and a worker with no configured identity behaves exactly as today.
+Each is backward compatible by construction: the `worker` fields are optional in the parser, so no historical #80 message becomes malformed, and a worker with no configured identity behaves exactly as today. Compatibility is not safety: until the activation gate in §11 is passed, the fleet is exactly as exposed to collision as it was on 2026-10-30, and the interim one-writer rule stands.
+
+The ACK claim is collision *prevention*, a deterministic claim order with a window of seconds. It is not mutual exclusion. Where exclusion is required, the proposal names the one atomic primitive available today, create-only creation of the implementation branch ref, and the second check every executor must make immediately before its first mutation (§6).
 
 ## 2. Evidence: the incident, from the record
 
@@ -149,7 +152,9 @@ A worker id is a stable string the operator assigns, for example `local-windows-
 - If `workerId` is unset: behaviour identical to today (no new rejection reasons). This is the compatibility default.
 - If the decisive message has `assigned_worker` and it is not `workerId`: select nothing, reason `assigned_to_other_worker:<id>`. **Select nothing, not an older message**: the newest authority still governs; it is simply not this worker's.
 - If the decisive message has no `assigned_worker`: select it when `requireAssignment` is false (migration period), otherwise reason `unassigned_directive`.
-- **Claim check.** Among the comments newer than the decisive message, any ACK whose `in_reply_to` is the decisive `message_id` and whose `worker` is set and differs from `workerId` makes the message `claimed_by_other_worker:<id>`. First valid ACK wins the packet. This reads non-authority messages for one purpose only, with their own validation: `sender: claude`, allowlisted author, `message_type: ACK`, `worker` present. It never promotes an ACK to authority.
+- **Claim check (finding 1).** Among the comments newer than the decisive message, an ACK is a *claim* only when all of these hold: `message_type: ACK`, `sender: claude`, allowlisted author, `in_reply_to` equal to the decisive `message_id`, `worker` present, **and `worker` equal to the decisive message's `assigned_worker`** (or to the `assigned_worker` of a later TRANSFER review for the same packet, §6). A claim by the assigned worker makes the message `claimed_by_assigned_worker` for every other worker, and `claimed_by_self` for the assigned one (which may resume). An ACK whose `worker` is anyone else is **not a claim**: it is logged `ack_from_unassigned_worker:<id>`, it never blocks the assigned worker, and the assigned worker's own ACK must name it so ChatGPT can rule on the stray executor. First-valid-ACK ordering therefore decides only between repeated ACKs of the *assigned* worker, never between workers. The check reads non-authority messages for this one purpose and never promotes an ACK to authority.
+- **Self-reported identity (finding 1).** `worker:` is written by the worker itself, and every executor today posts through the same allowlisted GitHub account, so the author proves the operator's account, not the machine or session. The minimal design therefore prevents *accidental* collision between honest workers; it does not prevent a worker that lies about its id. Two attestation options are available if that stronger property is wanted, neither selected here: (a) one GitHub identity per worker (a machine user, deploy key or App installation), with the allowlist becoming a map from author to worker id, so attribution is authenticated by GitHub; (b) a per-worker signing key whose public half is registered in the policy file and whose signature over `message_id|packet_id|worker` appears in the ACK, verified by the selector. Option (a) needs no new code path; option (b) needs one.
+- **Second check before mutation (finding 3).** A claim read at wake time is stale by the time a session edits a file. The woken session, and an interactive session equally, re-reads #80 **immediately before its first source mutation and again immediately before each push**. If a conflicting claim, a TRANSFER review, a HOLD on the packet, or a newer authority message assigned elsewhere has appeared, it stops with no mutation and posts one CONTRADICTION naming what it found. If #80 cannot be read at that moment (rate limit, outage, unverifiable record), it **does not mutate**: an unreadable channel is a BLOCKED result, never a licence. This is the rule that bounds the window the ACK lease leaves open.
 
 `claude-worker.ps1`:
 
@@ -163,15 +168,19 @@ Interactive and cloud sessions follow the same two rules by protocol text (`CLAU
 
 `claude-worker.ps1`, `Invoke-WorkerTick`, after `Get-PendingDirective` and before the attempt-ledger check:
 
-- Run `node scripts/agent-control/status.mjs --json --verify` (already allowlisted tooling) and read `holds`.
-- If any active hold names the selected `packet_id`: do not wake, log `PACKET_HELD_BY_AUTHORITY`, post nothing (the reducer's hold is already the durable record). Retry next tick; a RESUME lifts it.
-- If `--verify` reports the authority record unverifiable (an edited comment, order ambiguity): do not wake, log the reason. This matches the selector's own fail-closed stance.
+- Run `node scripts/agent-control/status.mjs --json --verify` (already allowlisted tooling). The read is **safety critical** and fails closed on every path (finding 5):
+  - the process exits non-zero, or stdout is not JSON, or the JSON lacks `holds` as an array: do not wake, log `hold_check_unreadable`;
+  - `reconciliation` is `null` (the projection was not verified) or `reconciliation.consistent` is not `true`: do not wake, log `hold_check_unverified` with `reconciliation.findings`; this covers an edited or unordered #80 record, a stale checkpoint and an unreadable repository truth, because `reconcileWithTruth` reports each of those as inconsistency;
+  - `projection_drift.drift` is `true`: do not wake, log `hold_check_drift`;
+  - any entry of `holds` with `active !== false` whose `packet_id` equals the selected `packet_id`: do not wake, log `PACKET_HELD_BY_AUTHORITY`, post nothing (the reducer's hold is already the durable record); retry next tick, a RESUME lifts it;
+  - the selected `packet_id` matches no hold and no active packet in the projection (the NO_STATE_CHANGE case, §3.7): the hold check **passes with a disclosure** logged as `packet_not_projected`, because today such packets are legitimately absent from the projection. After §9.1 is decided this becomes a refusal.
+- The same check runs again inside the woken session immediately before its first source mutation (§5.2, second check), since authority can change between wake and edit.
 
 And one clarification, documentation only: `HELD_RETRYABLE` is a **retry bound on one message**, not a stop. The operator's durable stop is `-Pause`. `AGENT_AUTOPILOT.md` "Bounded retry" and the MOMENTUM template text ("Post a newer ChatGPT DIRECTIVE or REVIEW (it supersedes this one)") should say "a newer message for this packet". Whether a newer message for a *different* packet should wake a worker that is retry-held on another is a policy choice; today it does, and the reducer hold in 5.3 is the correct instrument when the operator wants the worker to stay away from a packet.
 
 ## 6. Exclusive packet ownership: the lease model
 
-**What the ACK lease is, and is not.** It is an immediate collision-prevention mechanism: a deterministic claim order that every executor can read, so a second worker learns within one GitHub round trip that the packet is taken and stops without mutating. It is **not** an atomic ownership guarantee. Two workers that each read #80, each see no claim, and each post an ACK seconds apart have both "acquired" the lease in their own view; the record resolves the loser only on their next read, and a worker that has already started mutating in that window has mutated under a claim it did not hold. The window is seconds rather than the nineteen minutes of the incident, and the loser's obligation is to stop and post one STOP line, so the damage is bounded and visible. A stronger guarantee needs a compare-and-set primitive that fails for the second caller at the moment of the attempt. One such primitive already exists in the system and is noted in §7-B: creating the directive's `implementation_branch` on origin is atomic per ref, so the first `git push origin HEAD:refs/heads/<branch>` of a new ref succeeds and the second is refused by GitHub. Whether to layer that under the ACK claim, or to move ownership into the reducer (§7-A, after §9.1), is a decision this proposal presents and does not take.
+**What the ACK lease is, and is not.** It is an immediate collision-prevention mechanism: a deterministic claim order that every executor can read, so a second worker learns within one GitHub round trip that the packet is taken and stops without mutating. It is **not** an atomic ownership guarantee. Two workers that each read #80, each see no claim, and each post an ACK seconds apart have both "acquired" the lease in their own view; the record resolves the loser only on their next read, and a worker that has already started mutating in that window has mutated under a claim it did not hold. The window is seconds rather than the nineteen minutes of the incident, and the loser's obligation is to stop and post one STOP line, so the damage is bounded and visible. A stronger guarantee needs a compare-and-create primitive that fails for the second caller at the moment of the attempt. **A plain `git push origin HEAD:refs/heads/<branch>` is not that primitive** (finding 3): when the ref already exists and the pushed commit descends from it, the push is an ordinary fast-forward and succeeds. Two create-only forms exist: `git push --force-with-lease=refs/heads/<branch>: origin HEAD:refs/heads/<branch>`, where the empty expected value means the ref must not exist, and the REST call `POST /repos/{owner}/{repo}/git/refs`, which answers 422 when the ref exists. Either gives exclusion at the ref, enforced by GitHub, not by what the caller read. The protocol this proposal recommends for review is: ACK (the readable claim), then create-only creation of the directive's `implementation_branch` before any source mutation, then the pre-mutation re-check. A worker whose create fails has lost, posts one STOP line, and never pushes. The test in §8 must prove the loser's commits never reach origin, and only a live test against a scratch ref proves the hosted behaviour; the offline tests are model checks. Whether to adopt this layering, or to move ownership into the reducer (§7-A, after §9.1), is a decision this proposal presents and does not take.
 
 The claim itself is the ACK. No new store is needed; issue #80 is already append-only, ordered, and the source every executor reads.
 
@@ -182,10 +191,22 @@ The claim itself is the ACK. No new store is needed; issue #80 is already append
 | How it is acquired | by posting that ACK; the §5.2 claim check makes a later ACK from another worker invalid, and that worker stops |
 | Duplicate ACK | the second worker treats its own ACK as void, posts one STOP line naming the holder, and does no mutation. Exactly what the ruling of 01:07 asked for, made automatic |
 | How it ends | RETURN, CLOSE, a CONTRADICTION that stops the packet, or a REVIEW that reassigns |
-| Reassignment | a REVIEW naming `assigned_worker: <new id>` and `lease_action: TRANSFER` with `in_reply_to` the original directive. The new worker's ACK references the review; the old holder stops on reading it |
+| Reassignment | a REVIEW naming `assigned_worker: <new id>` and `lease_action: TRANSFER` with `in_reply_to` the original directive. The new worker's ACK carries `in_reply_to` the review **and** `lease_of` the original directive id, so claim lineage stays packet-scoped; the old holder stops at its next pre-mutation re-check |
+| What a newer REVIEW means (finding 4) | one of three things, decided by its fields, never by recency: a **continuation** (same `packet_id`, same `assigned_worker`, no `lease_action`): the holder keeps the lease and processes it; a **transfer** (`lease_action: TRANSFER`); or **unrelated** (another `packet_id`): it does not touch this lease at all. A REVIEW with a different `assigned_worker` and no `lease_action` is malformed for this packet and fails closed |
 | Expiry | none by clock. A silent worker is handled by reassignment, which ChatGPT already does by review. A clock-based expiry would let two workers race at the boundary, which is the defect being fixed |
 | Worker crash | the lease persists in the record. The same worker resumes by posting a continuation ACK (`lease_action: RESUME`) referencing its own prior ACK; its cursor and ledger are unchanged. A different worker needs a TRANSFER review |
 | Worktree and branch | the lease names neither. The branch is the directive's `implementation_branch`; a worker that finds the branch already on origin with commits it did not make treats that as a competing writer and posts CONTRADICTION, which both ACKs already promised to do |
+
+### 6.1 Two assigned workers and the newest-only selector (finding 4)
+
+`selectDirective` wakes only for the **newest** authority message on #80 (§3.2). With two live workers that rule starves one of them: worker A is retrying or awaiting a correction on packet P, ChatGPT posts a directive for packet Q assigned to B, and A's selector now sees a newest message that is not its own and selects nothing, even if a REVIEW for P that A must act on sits one message older. The one-worker design never met this case.
+
+Two options, presented for decision:
+
+- **Per-worker lane.** A worker selects the newest *actionable message assigned to it* that is not in its cursor, provided no newer message governs that packet (a HOLD on it, a TRANSFER away from it, a RESUME, or an unassigned legacy message during migration). Messages assigned to other workers are invisible to it rather than blocking. This keeps "newest authority governs" per packet, which is where authority is keyed in the reducer anyway, and drops it per channel.
+- **Keep newest-only.** Simpler, already proven, and ChatGPT sequences directives so that each worker's next message is the newest when that worker needs it. This is manual coordination of a different kind, and it is the thing the directive says must not be permanent.
+
+Tests 29-31 in §8 cover both. The proposal does not select; the per-worker lane is the one consistent with safe parallel autonomy.
 
 What this does not solve: two workers posting ACKs within the same few seconds. #80 orders by `created_at` then comment id, so the record still picks one; the loser learns on its next read. The window is the GitHub round trip, seconds, versus the nineteen minutes of the incident.
 
@@ -194,7 +215,7 @@ What this does not solve: two workers posting ACKs within the same few seconds. 
 | Approach | Cost | What it buys | Why not first |
 |---|---|---|---|
 | **A. Lease in `programme-state.yaml`** (a `writer` field set by the reducer from ACKs) | reducer change, new fold rule, checkpoint schema bump | machine-checkable lease in the projection | ACKs are deliberately non-authority (§3.1); folding them changes the reducer's trust model. And NO_STATE_CHANGE packets never enter the projection (§3.7). Good second step once §9.1 is settled |
-| **B. Branch creation as the lease** (first `git push origin impl/<branch>` wins; others must find it absent) | none | cheap, already half-practised | both workers checked before either pushed; and a cloud session pinned to another branch name never collides. Keep as a secondary check, not the lease |
+| **B. Create-only ref creation as the exclusion step** (`--force-with-lease=<ref>:` or REST create-ref; a plain push is not create-only) | small: one push flag and one test | genuine atomic exclusion at the implementation branch, enforced by GitHub | it protects the branch, not the packet: a cloud session pinned to another branch name never contends for the ref. Recommended **under** the ACK claim (§6), not instead of it |
 | **C. One worker per packet by operator practice** (pause the local worker before relaying to a cloud session) | none | works today | relies on memory; this incident is what forgetting looks like. Keep as interim rule until §5 ships |
 | **D. Per-packet GitHub label or sub-issue as a lock** | new objects, new permissions, new parser input | visible in the UI | more surface than §6 and a second source of truth beside #80 |
 | **E. Remove the second executor path** (cloud sessions never execute packets) | none | no collision | throws away the parallel capacity the operator wants; the directive's goal is parallel execution that is safe by design |
@@ -236,6 +257,18 @@ All in `scripts/agent-control/tests/`, Node test runner, no network. Negative co
 **Documentation gate**
 21. `worker.spec.mjs` already parses the policy file and the worker; add an assertion that `AGENT_AUTOPILOT_POLICY.yaml` `worker.identities` is non-empty when `require_assignment` is true.
 
+**Race and recovery (finding 6).** Everything above and below that runs offline is a **model check** of the selector and worker logic against recorded comment fixtures. It proves ordering and fail-closed behaviour; it does not prove GitHub-hosted atomicity. Only test 28 does.
+22. Simultaneous claims: fixtures where the assigned worker and a stray worker ACK within the same second; the stray ACK is `ack_from_unassigned_worker`, the assigned worker's claim stands regardless of which comment id is lower.
+23. Simultaneous *assigned* claims (two processes of the same assigned worker id, the host-lock-bypassed case): both ACK; each pre-mutation re-check sees two claims of the same worker id with different `message_id`s; the rule is the lower comment id proceeds and the other stops; test both sides.
+24. Reassignment during execution: worker A holds the lease and has local edits; a TRANSFER review to B appears; A's pre-mutation re-check (or pre-push re-check) finds it, A stops with no push and posts CONTRADICTION; B's ACK carries `lease_of` the original directive.
+25. Stale remote read: the comments snapshot fed to the selector predates a newer ACK; the `--verify` reconciliation reports the record inconsistent; no wake. A second fixture where the snapshot is fresh but the hold check's `reconciliation` is `null`: no wake.
+26. GitHub unavailable at the pre-mutation check: the session reports BLOCKED and the worktree shows no modified file.
+27. Post-ACK crash and restart: worker exits after ACK, before any commit; restart with the same id; selector returns `claimed_by_self`; the session posts a continuation ACK with `lease_action: RESUME`; a restart under a *different* worker id yields `claimed_by_assigned_worker` and no wake.
+28. **Live, hosted, scratch ref:** two processes race to create `refs/heads/scratch/ownership-<run id>` with the create-only push form; exactly one succeeds; the loser's exit is non-zero and its commit is absent from origin. Run in the Windows worker proof workflow against the repository itself, then the ref is deleted. This is the only test that proves atomicity.
+29. Per-worker lane: A assigned P, B assigned Q, Q's directive newest; A's selector still selects the newest message assigned to A for P when nothing newer governs P.
+30. Per-worker lane, governed: as 29 but a HOLD on P is newer than A's message; A selects nothing.
+31. Newest-only (if kept): the same fixtures document the starvation so the choice is made on evidence.
+
 ## 9. Contradictions with existing contracts
 
 1. **NO_STATE_CHANGE as a release channel, unresolved.** The reducer's single-active-packet rule (`PACKET_IN_FLIGHT`, 305-310) is the only state-level exclusivity the plane has. The Contacts directive carried `NO_STATE_CHANGE` precisely so that it would not be refused by that rule while KF-META-AUTOPILOT-SWEEP-COVERAGE-001 was in flight (§3.7). The result is a packet that is live in practice and absent from the projection: no `active_packet`, no state, no hold target, no place for an owner. Two architectural decisions are possible; **this proposal presents both and selects neither**:
@@ -254,7 +287,7 @@ All in `scripts/agent-control/tests/`, Node test runner, no network. Negative co
 | Component | Effect of §5 | Risk |
 |---|---|---|
 | `control-envelope.mjs` parser | none to `REQUIRED_ENVELOPE`; two optional fields read on demand | nil; every historical message parses as before |
-| `select-directive.mjs` | new optional inputs; default path byte-identical | covered by test 5 |
+| `select-directive.mjs` | new optional inputs; default path byte-identical | covered by test 5; byte-identical means *not yet safer*, see §11 step 3 |
 | `select-directive.ps1` wrapper | passes `-WorkerId` through | trivial |
 | `claude-worker.ps1` | new parameter, one new tick step, prompt text, install record field | contract version bump to 3 so an un-reinstalled worker stays a no-op (`Test-InstallContract` 302-308 already enforces this) |
 | `authority-effects.mjs`, `state-machine.mjs`, `reconcile.mjs`, `events.mjs` | **no change** | the reducer never reads ACKs; leases stay off the projection until §9.1 is decided |
@@ -264,14 +297,14 @@ All in `scripts/agent-control/tests/`, Node test runner, no network. Negative co
 
 ## 11. Migration and rollback
 
-**Migration, three steps, each a bounded packet:**
-1. Parser and selector with tests 1-10, `workerId` unset by default. Zero behaviour change in production. Ship first because it is pure and fully testable offline.
-2. Worker: `-WorkerId`, claim check in the prompt, hold check at the wake, contract version 3, tests 11-20. Reinstall the local worker with its id. During this step ChatGPT starts writing `assigned_worker` on every Claude-directed message; `requireAssignment` stays false.
-3. Flip `requireAssignment` true in the policy once every live worker has an id. Update issue #80's body, `CLAUDE.md`, `AGENT_CONTROL_PLANE.md`, `AGENT_AUTOPILOT.md`, `AGENT_AUTOPILOT_OPERATIONS.md`.
+**Migration, three steps, each a bounded packet. Steps 1 and 2 are compatibility work and are not collision-safe (finding 2); only the gate in step 3 is.**
+1. Parser and selector with tests 1-10 and 22-27, `workerId` unset by default. Zero behaviour change in production. Ship first because it is pure and fully testable offline.
+2. Worker: `-WorkerId`, claim and pre-mutation checks in the prompt, hold check at the wake, create-only ref creation if adopted, contract version 3, tests 11-20 and 28. Reinstall the local worker with its id. During this step ChatGPT writes `assigned_worker` on every Claude-directed message; `requireAssignment` stays false, so an unassigned directive is still actionable by any worker. **The fleet is still exposed during this step.**
+3. **Activation gate.** `requireAssignment` flips to true only when, in one operator action: every live worker is enrolled with an id and runs contract 3 (`-Status` shows both); every worker is paused for the flip; the policy file and issue #80's body carry the new contract; and ChatGPT confirms it will assign every Claude-directed message from then on. From this point a directive with no `assigned_worker` is `unassigned_directive` for every worker and wakes nobody: **fail closed, not legacy**. The interactive-session rule (`CLAUDE.md`) changes in the same commit. Only after this gate may the rollout be described as collision-safe.
 
-**Rollback:** each step reverts independently. Step 1 is inert. Step 2 reverts by reinstalling contract 2. Step 3 reverts by flipping the flag. A worker on the new contract reading a directive with no `assigned_worker` during a rollback selects it (legacy path), so a half-rolled-back fleet does not deadlock.
+**Rollback (finding 7).** Steps are *technically* reversible, but a rollback to legacy selection while two or more workers are live reopens the 2026-10-30 hazard exactly. So rollback has its own gate: **either the whole fleet is paused, or exactly one worker is live**, before any step is reverted, and the rollback is recorded on #80. Step 1 reverts inertly. Step 2 reverts by reinstalling contract 2 under that gate. Step 3 reverts by flipping the flag under that gate, after which an unassigned directive is actionable again and the interim rule below is back in force. A half-rolled-back fleet never deadlocks, because a contract-3 worker reading an unassigned directive during rollback selects it; that is why the gate matters.
 
-**Interim rule until step 2 ships:** one live Claude executor at a time. Pause the local worker (`-Pause`) before relaying any directive to a cloud session, and resume it after that session posts RETURN or STOP. Record the pause in the ACK.
+**Interim rule until the step-3 gate is passed:** one live Claude executor at a time. Pause the local worker (`-Pause`) before relaying any directive to a cloud session, and resume it after that session posts RETURN or STOP. Record the pause in the ACK.
 
 ## 12. Implementation boundaries and dependencies
 
