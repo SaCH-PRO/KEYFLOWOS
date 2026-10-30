@@ -1,0 +1,232 @@
+{
+  "schema_version": "0.1",
+  "source_main": "b1948d2797e1bae3660a3d7173abb75397e05aad",
+  "status": "PROVISIONAL_PRODUCT_CLAIMS_NOT_FINAL_CANON",
+  "claim_count": 14,
+  "claims": [
+    {
+      "id": "KF-PROD-001",
+      "name": "Unified tenant-scoped business OS",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "ACCEPTED_VISION_CANDIDATE",
+      "target_disposition": "RETAIN",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/KEYFLOWOS_APP_SPEC.md",
+        "revision": "ed0f2a5f332c745877c5354375fd94396846ac0a"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/modules/CONTACTS-v1.md"
+    },
+    {
+      "id": "KF-PROD-002",
+      "name": "Manual business-workflow parity and optional KEY",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "ACCEPTED_POLICY_CANDIDATE",
+      "target_disposition": "RETAIN",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/KEYFLOWOS_APP_SPEC.md",
+        "revision": "ed0f2a5f332c745877c5354375fd94396846ac0a"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/modules/CONTACTS-v1.md"
+    },
+    {
+      "id": "KF-PROD-003",
+      "name": "Tenanted business and identity onboarding",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "RELEASE_0_TARGET",
+      "target_disposition": "KEEP",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/KEYFLOWOS_APP_SPEC.md",
+        "revision": "ed0f2a5f332c745877c5354375fd94396846ac0a"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/modules/CONTACTS-v1.md"
+    },
+    {
+      "id": "KF-PROD-004",
+      "name": "Contact creation, listing, detail, editing, persistence",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "RELEASE_0_TARGET",
+      "target_disposition": "KEEP",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/apps/server/src/modules/crm/crm.controller.ts",
+        "revision": "7074e1214ecdb7b552c223e04d8a7bf1875ba0d7"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/modules/CONTACTS-v1.md"
+    },
+    {
+      "id": "KF-PROD-005",
+      "name": "Staff CRM record-level visibility and tenant isolation",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "SECURITY_INVARIANT",
+      "target_disposition": "VERIFY_AND_REPAIR_IF_FAILED",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/apps/server/src/modules/crm/crm-permissions.helper.ts",
+        "revision": "784a79f0d6d485a44bef196e5aa6ae5d4633c2dc"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/modules/CONTACTS-v1.md"
+    },
+    {
+      "id": "KF-PROD-006",
+      "name": "Contact timeline and durable audit evidence",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "SECURITY_BUSINESS_RECORD_INVARIANT",
+      "target_disposition": "VERIFY",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/apps/server/src/modules/crm/crm.service.ts",
+        "revision": "f21bea05cb71f122ac114e5688301f683f9dd089"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/modules/CONTACTS-v1.md"
+    },
+    {
+      "id": "KF-PROD-007",
+      "name": "Quote and invoice customer workflow",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "RELEASE_0_TARGET",
+      "target_disposition": "KEEP",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/KEYFLOWOS_APP_SPEC.md",
+        "revision": "ed0f2a5f332c745877c5354375fd94396846ac0a"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/modules/CONTACTS-v1.md"
+    },
+    {
+      "id": "KF-PROD-008",
+      "name": "Manual payment, balance, ledger and audit truth",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "RELEASE_0_TARGET",
+      "target_disposition": "KEEP",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/KEYFLOWOS_APP_SPEC.md",
+        "revision": "ed0f2a5f332c745877c5354375fd94396846ac0a"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/modules/CONTACTS-v1.md"
+    },
+    {
+      "id": "KF-PROD-009",
+      "name": "Customer-facing public commercial results",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "PRODUCT_OUTCOME",
+      "target_disposition": "KEEP",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/INFORMATION_ARCHITECTURE.md",
+        "revision": "91d72eb8af683bfc9bd89c02f8097e8fb6762a4a"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/modules/CONTACTS-v1.md"
+    },
+    {
+      "id": "KF-PROD-010",
+      "name": "Cockpit, operating workspaces, business configuration",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "INTENDED_UI",
+      "target_disposition": "MERGE_AND_DECIDE_NAVIGATION",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/INFORMATION_ARCHITECTURE.md",
+        "revision": "91d72eb8af683bfc9bd89c02f8097e8fb6762a4a"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/V1-MODULE-SCOPE.md"
+    },
+    {
+      "id": "KF-PROD-011",
+      "name": "Composable Playbooks with bounded action authority",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "LONG_TERM_VISION",
+      "target_disposition": "DEFER_BUILDER_V1",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/KEYFLOWOS_AUTOMATION_BOT_FLOW_AGENT_MASTER_PLAN.md",
+        "revision": "f9227eedac403433fc72fc181a480085be43dcde"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/V1-MODULE-SCOPE.md"
+    },
+    {
+      "id": "KF-PROD-012",
+      "name": "Bookings/calendar service customer flow",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "PRODUCT_VISION",
+      "target_disposition": "NEXT_SLICE",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/KEYFLOWOS_APP_SPEC.md",
+        "revision": "ed0f2a5f332c745877c5354375fd94396846ac0a"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/V1-MODULE-SCOPE.md"
+    },
+    {
+      "id": "KF-PROD-013",
+      "name": "Caribbean-localized business default and financial context",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "INTENDED_MARKET",
+      "target_disposition": "KEEP",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/packages/db/prisma/schema.prisma",
+        "revision": "d8b5b1c70a02478fab7528916a55b8b5d2bea101"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/V1-MODULE-SCOPE.md"
+    },
+    {
+      "id": "KF-PROD-014",
+      "name": "Existing REST API primary customer path",
+      "system": "KEYFLOWOS",
+      "claim_category": "PRODUCT",
+      "authority_status": "CURRENT_IMPLEMENTATION_OBSERVATION",
+      "target_disposition": "RETAIN_AND_TEST",
+      "source": {
+        "uri": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/b1948d2797e1bae3660a3d7173abb75397e05aad/docs/KEYFLOWOS_APP_SPEC.md",
+        "revision": "ed0f2a5f332c745877c5354375fd94396846ac0a"
+      },
+      "implementation_status": "REQUIRES_EXACT_HEAD_REACHABILITY_PROOF",
+      "proof_status": "NOT_PROVED_BY_RECONSTRUCTION",
+      "related_issue": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/186",
+      "detail_target": "docs/reconstruction/product/V1-MODULE-SCOPE.md"
+    }
+  ]
+}
