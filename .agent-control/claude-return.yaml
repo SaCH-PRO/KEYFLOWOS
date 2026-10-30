@@ -4,9 +4,9 @@ directive_comment_id: 6511958809
 ack_message_id: CC-ACK-PRODUCT-CONTACTS-VISIBILITY-001
 ack_comment_id: 6512133384
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: b1948d2797e1bae3660a3d7173abb75397e05aad
+source_head: 37b072b0d7e7c7085d27fbdfd2d1741b3237719c
 implementation_branch: impl/kf-product-contacts-visibility-001
-state: CHARACTERIZING
+state: PROVING
 health: YELLOW
 scope_changed: false
 production_touched: false
@@ -20,9 +20,13 @@ previous_return_message_ids: []
 never_posted_return_message_ids: []
 
 summary: >
-  ACK state. The branch was created from the pinned main b1948d27 in the
-  worker worktree; no source file has been modified yet. Characterization of
-  the detail path and its consumers is recorded below.
+  Pre-fix head, by design. The semantic head (815e61ab, then 37b072b0 which
+  only reorders the suite's wiring ahead of its seeding) carries the two test
+  files only, so the hosted real-database job records the defect before the
+  fix lands: the new real-database suite's two NEGATIVE CONTROL cases and
+  three of the six new mocked controller cases are expected to fail here. The
+  fix in the two product files follows as the next semantic commit with its
+  own artifact.
 
 characterization:
   main_at_ack: b1948d2797e1bae3660a3d7173abb75397e05aad (origin/main re-resolved at ACK time, equal to source_main)
@@ -40,16 +44,32 @@ characterization:
   interface_decision: actorUserId is added as an optional parameter, so no consumer outside the write set needs an interface change
   environment: the local Docker daemon is not running and starting it needs an approval an unattended worker cannot give; no native PostgreSQL is installed; the hosted CI service database (pgvector/pg16, migrations applied by db:deploy, pnpm test:ci) is the real-database environment for this packet
 
-changed_files: []
+changed_files:
+  - apps/server/test/contacts-visibility.integration.test.ts (new; real-database suite through the real guard path, plus the service under a model-access recorder)
+  - apps/server/test/crm.e2e.test.ts (old cases unchanged; six mocked controller regressions for the detail route added)
 schema_migrations: []
 
 tests:
-  commands: []
-  passed: []
-  failed: []
-  skipped: []
+  commands:
+    - "apps/server: node node_modules/vitest/vitest.mjs run test/crm.e2e.test.ts (Windows 11, Node 20.18.1, no database, pre-fix tree at 815e61ab)"
+  passed:
+    - "crm.e2e.test.ts at 815e61ab: 14 of 17 (the 11 pre-existing cases and three of the six new detail cases)"
+  failed:
+    - "crm.e2e.test.ts at 815e61ab, the controller-level pre-fix negative control, 3 of 17: 'hands the authenticated actor to the detail service' (first failure, test/crm.e2e.test.ts:362, the spy received { businessId, contactId } without actorUserId); 'still reaches the detail service, with the actor, for a read-only member'; 'the handler itself refuses a request that carries no user id, even if every guard were bypassed' (a TypeError reached the stubbed service instead of a 401)"
+  skipped:
+    - "contacts-visibility.integration.test.ts at 37b072b0: NOT_RUN on this host, no PostgreSQL reachable (Docker daemon down, no native server); the local run compiles the Nest module and initializes the app, then the first database write fails and vitest reports its 23 cases skipped; it runs in the hosted CI test job at this head, where its two NEGATIVE CONTROL cases are expected to fail and the rest to hold"
+    - "server typecheck (tsc --noEmit, apps/server) at 815e61ab: exit 0; the tree's src is unchanged at 37b072b0"
 
-negative_controls: []
+negative_controls:
+  - id: NC-CONTACTS-DETAIL-ACTOR-NOT-HANDED
+    claim: the detail route hands the caller's identity to the service
+    observed_at_815e61ab: FAILS as intended (crm.e2e.test.ts:362), the route hands none
+  - id: NC-CONTACTS-DETAIL-FOREIGN-PRIVATE
+    claim: STAFF view-all cannot open another member's PRIVATE contact; nothing of it is disclosed
+    observed_at_815e61ab: NOT_RUN locally; expected to FAIL in the hosted real-database job at this head
+  - id: NC-CONTACTS-SERVICE-CHILD-ROWS-AFTER-CHECK
+    claim: a forbidden PRIVATE row is not found and no child row is read
+    observed_at_815e61ab: NOT_RUN locally; expected to FAIL in the hosted real-database job at this head
 new_consumers_or_writers: []
 deviations_from_packet: []
 rollback_floor:
@@ -58,8 +78,17 @@ open_questions:
   - whether the dossier route (crm.controller.ts:1489-1511), which reads the same service without an actor, is inside this packet's objective; it is not changed without a ruling
 evidence_refs:
   - https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6511958809
+  - https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6512133384
 
 proof_matrix:
+  - obligation: one failing pre-fix negative control, with the exact first failure recorded
+    evidence_scope: semantic_head
+    result: PARTIAL
+    proof: the controller-level control is observed locally (tests.failed); the real-database controls run in the hosted job at this head and are reported in the RETURN
+  - obligation: fresh post-fix tests on the real database through the HTTP guard path, without mocking the authorization boundary
+    evidence_scope: semantic_head
+    result: NOT_RUN
+    proof: this head is pre-fix by design; the fix is the next semantic commit
   - obligation: every required workflow and the independent review at the PR head
     evidence_scope: exact_head
     result: PENDING
@@ -69,7 +98,8 @@ security:
   dast: DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN.
   production_touched: false
   provider_traffic: false
-  credentials: none created or read
+  credentials: none created or read; the suite seeds synthetic tcv_ identities and hard-deletes them
+  hawkscan_local: NOT_RUN; no running application in this worktree and no HAWK_API_KEY
 
 exact_head_proof:   # the head that carries this file; PENDING until the RETURN reports the outcome
   - gate: CI/CD Pipeline

@@ -10,7 +10,7 @@ current_authority_message_id: CG-DIR-PRODUCT-CONTACTS-VISIBILITY-001
 current_authority_comment_id: 6511958809
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 implementation_branch: impl/kf-product-contacts-visibility-001
-state: CHARACTERIZING
+state: PROVING
 health: YELLOW
 scope_changed: false
 production_touched: false
