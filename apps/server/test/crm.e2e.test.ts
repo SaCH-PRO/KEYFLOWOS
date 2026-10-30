@@ -111,6 +111,14 @@ const crmStatsMock = {
   contactDetail: vi.fn(),
 };
 
+// The dossier's collaborators. Recording stubs: the claim under test is that a
+// denied dossier never invokes them, not what they compute.
+const journeyMock = {
+  getContactCrossJourney: vi.fn(),
+  generateAiInsight: vi.fn(),
+  getContactHealthMetrics: vi.fn(),
+};
+
 const subscriptionsMock = {
   checkLimit: vi.fn().mockResolvedValue({ allowed: true, current: 0, limit: 1000, upgradeTo: 'PRO' }),
 };
@@ -139,7 +147,7 @@ describe('CRM e2e', () => {
         { provide: CrmFlowService, useValue: flowServiceMock },
         { provide: CrmActionsService, useValue: {} },
         { provide: CrmRevenueService, useValue: {} },
-        { provide: CrmJourneyService, useValue: {} },
+        { provide: CrmJourneyService, useValue: journeyMock },
         { provide: CrmDuplicateDetectionService, useValue: {} },
         { provide: CrmDataQualityService, useValue: {} },
         { provide: CrmSavedViewsService, useValue: {} },
@@ -184,6 +192,9 @@ describe('CRM e2e', () => {
     );
     flowServiceMock.getFlowIntelligence.mockResolvedValue({ insights: [] });
     crmStatsMock.contactDetail.mockImplementation(async () => detailPayload());
+    journeyMock.getContactCrossJourney.mockResolvedValue({ summary: 'journey-summary', timeline: [] });
+    journeyMock.generateAiInsight.mockResolvedValue(null);
+    journeyMock.getContactHealthMetrics.mockResolvedValue({ score: 1 });
     subscriptionsMock.checkLimit.mockResolvedValue({
       allowed: true,
       current: 0,
@@ -413,6 +424,54 @@ describe('CRM e2e', () => {
       await expect(
         Promise.resolve().then(() => controller.getContactDetail('biz_1', 'contact_1', { user: {} })),
       ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        Promise.resolve().then(() => controller.getContactDossier('biz_1', 'contact_1', { user: undefined })),
+      ).rejects.toMatchObject({ status: 401 });
+    });
+  });
+
+  // KF-PRODUCT-CONTACTS-PILOT-001, CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001: the
+  // dossier route shares the detail service. Mocked; the real-database proof
+  // is contacts-visibility.integration.test.ts.
+  describe('GET contact dossier (guarded controller regressions)', () => {
+    it('hands the actor to the detail service and only then consults the journey collaborators', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_1/dossier')
+        .expect(200);
+      expect(res.body.contact.id).toBe('contact_1');
+      expect(res.body.summary).toBe('journey-summary');
+      expect(crmStatsMock.contactDetail).toHaveBeenCalledWith({
+        businessId: 'biz_1',
+        contactId: 'contact_1',
+        actorUserId: 'user_1',
+      });
+      for (const fn of [journeyMock.getContactCrossJourney, journeyMock.generateAiInsight, journeyMock.getContactHealthMetrics]) {
+        expect(fn).toHaveBeenCalledTimes(1);
+        expect(fn).toHaveBeenCalledWith('biz_1', 'contact_1');
+      }
+    });
+
+    it('a dossier the detail service refuses is 404, carries no record, and never invokes the journey collaborators', async () => {
+      crmStatsMock.contactDetail.mockRejectedValueOnce(new NotFoundException('Contact not found'));
+      const res = await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_private/dossier')
+        .expect(404);
+      expect(res.body.message).toBe('Contact not found');
+      for (const key of ['contact', 'notes', 'tasks', 'meta', 'summary', 'timeline', 'insight', 'health']) {
+        expect(res.body).not.toHaveProperty(key);
+      }
+      expect(journeyMock.getContactCrossJourney).not.toHaveBeenCalled();
+      expect(journeyMock.generateAiInsight).not.toHaveBeenCalled();
+      expect(journeyMock.getContactHealthMetrics).not.toHaveBeenCalled();
+    });
+
+    it('does not reach the detail service or the collaborators for a non-member', async () => {
+      prisma.memberships = [];
+      await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_1/dossier')
+        .expect(403);
+      expect(crmStatsMock.contactDetail).not.toHaveBeenCalled();
+      expect(journeyMock.getContactCrossJourney).not.toHaveBeenCalled();
     });
   });
 });

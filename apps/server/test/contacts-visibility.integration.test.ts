@@ -80,6 +80,26 @@ let app: any;
 let statsRecorder: any;           // CrmStatsService over a model-access recorder
 let touched: string[] = [];       // prisma models touched through the recorder
 
+// The dossier route's collaborators (CrmJourneyService). They are not the
+// authorization boundary; the claim under test is that a denied dossier never
+// invokes them, so they are recorders, not the real service (whose AI insight
+// would also be provider traffic).
+let journeyCalls: string[] = [];
+const journeyRecorder = {
+  getContactCrossJourney: async (_businessId: string, contactId: string) => {
+    journeyCalls.push(`cross:${contactId}`);
+    return { summary: 'tcv-journey-summary', timeline: [] };
+  },
+  generateAiInsight: async (_businessId: string, contactId: string) => {
+    journeyCalls.push(`insight:${contactId}`);
+    return null;
+  },
+  getContactHealthMetrics: async (_businessId: string, contactId: string) => {
+    journeyCalls.push(`health:${contactId}`);
+    return { score: 0 };
+  },
+};
+
 const bizAContacts = [
   ID.cTeamOwner, ID.cTeamStaffAll, ID.cTeamUnowned, ID.cSharedVis, ID.cPrivOwner,
   ID.cPrivStaffAll, ID.cPrivStaffOwned, ID.cPrivSharedToOwned, ID.cPrivSharedToAdmin,
@@ -110,6 +130,11 @@ function list(actor: string, businessId = ID.bizA) {
   return request(app.getHttpServer())
     .get(`/crm/businesses/${businessId}/contacts?take=100`)
     .set('x-test-user', actor);
+}
+
+function dossier(actor: string | null, contactId: string, businessId = ID.bizA) {
+  const req = request(app.getHttpServer()).get(`/crm/businesses/${businessId}/contacts/${contactId}/dossier`);
+  return actor ? req.set('x-test-user', actor) : req;
 }
 
 /** A denied response must carry no record and none of the sensitive child data. */
@@ -194,7 +219,7 @@ beforeAll(async () => {
       { provide: CrmPlaybookService, useValue: {} },
       { provide: CrmActionsService, useValue: {} },
       { provide: CrmRevenueService, useValue: {} },
-      { provide: CrmJourneyService, useValue: {} },
+      { provide: CrmJourneyService, useValue: journeyRecorder },
       { provide: CrmDuplicateDetectionService, useValue: {} },
       { provide: CrmDataQualityService, useValue: {} },
       { provide: CrmSavedViewsService, useValue: {} },
@@ -459,6 +484,58 @@ describe('GET contact detail through the real guard path', () => {
     expect(await db.contactEvent.count({ where: { contactId: ID.cPrivOwner } })).toBe(1);
     expect(await db.contactTask.count({ where: { contactId: ID.cPrivOwner } })).toBe(1);
     expect(await db.contactShare.count({ where: { businessId: ID.bizA } })).toBe(2);
+  });
+});
+
+describe('GET contact dossier through the real guard path', () => {
+  it('rejects a request with no identity (401) and a member of another tenant (403) before any lookup', async () => {
+    journeyCalls = [];
+    const anon = await dossier(null, ID.cTeamOwner);
+    expect(anon.status).toBe(401);
+    const other = await dossier(ID.other, ID.cTeamOwner);
+    expect(other.status).toBe(403);
+    expectNoDisclosure(anon.body);
+    expectNoDisclosure(other.body);
+    expect(journeyCalls).toEqual([]);
+  });
+
+  it("NEGATIVE CONTROL (pre-fix FAIL expected): STAFF view-all cannot open another member's PRIVATE dossier, nothing is disclosed, and the journey collaborators are never invoked", async () => {
+    journeyCalls = [];
+    const res = await dossier(ID.staffAll, ID.cPrivOwner);
+    expect(res.status).toBe(404);
+    expect(res.body.message).toBe('Contact not found');
+    expectNoDisclosure(res.body);
+    for (const key of ['meta', 'summary', 'timeline', 'insight', 'health']) {
+      expect(res.body).not.toHaveProperty(key);
+    }
+    expect(journeyCalls).toEqual([]);
+  });
+
+  it("an owned-view STAFF member is denied another member's TEAM dossier without any collaborator call", async () => {
+    journeyCalls = [];
+    const res = await dossier(ID.staffOwned, ID.cTeamOwner);
+    expect(res.status).toBe(404);
+    expectNoDisclosure(res.body);
+    expect(journeyCalls).toEqual([]);
+  });
+
+  it('the owner receives the PRIVATE dossier with its child rows, and each collaborator is consulted exactly once', async () => {
+    journeyCalls = [];
+    const res = await dossier(ID.owner, ID.cPrivOwner);
+    expect(res.status).toBe(200);
+    expect(res.body.contact.id).toBe(ID.cPrivOwner);
+    expect(res.body.notes.map((n: any) => n.body)).toEqual([SENSITIVE_NOTE]);
+    expect(res.body.tasks.map((t: any) => t.title)).toEqual([SENSITIVE_TASK]);
+    expect(res.body.summary).toBe('tcv-journey-summary');
+    expect([...journeyCalls].sort()).toEqual([`cross:${ID.cPrivOwner}`, `health:${ID.cPrivOwner}`, `insight:${ID.cPrivOwner}`]);
+  });
+
+  it('a STAFF member opens their own PRIVATE dossier (positive control for the scoped path)', async () => {
+    journeyCalls = [];
+    const res = await dossier(ID.staffAll, ID.cPrivStaffAll);
+    expect(res.status).toBe(200);
+    expect(res.body.contact.id).toBe(ID.cPrivStaffAll);
+    expect(journeyCalls).toHaveLength(3);
   });
 });
 
