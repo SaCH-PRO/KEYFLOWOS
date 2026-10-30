@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCacheService } from './crm-cache.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
 
 export type TopOpenDeal = {
   id: string;
@@ -568,8 +569,41 @@ export class CrmStatsService {
     return { groups: groups.slice(0, 20) };
   }
 
-  async contactDetail(params: { businessId: string; contactId: string }) {
-    const contact = await this.assertContact(params.businessId, params.contactId);
+  /**
+   * Resolve a contact for the detail and dossier routes with RECORD-level access.
+   *
+   * The list route AND's `visibilityClause` onto its query (crm.service.ts
+   * listContacts). Until KF-PRODUCT-CONTACTS-PILOT-001 the detail route resolved
+   * the row by `{ id, businessId, deletedAt: null }` alone, so a "my book" member,
+   * or a view-all member on another person's PRIVATE record, could read by id what
+   * the list hid, together with its notes, tasks, invoices and bookings.
+   *
+   * With an actor, the same `resolveCrmAccess` / `visibilityClause` semantics the
+   * list uses are applied in the SAME query that fetches the row, before any child
+   * row is read. A row the actor may not see resolves exactly like a missing row,
+   * `NotFoundException('Contact not found')`, the established not-found policy, so
+   * a forbidden record is not distinguishable from a nonexistent id.
+   *
+   * Without an actor (system and automation callers through
+   * `CrmService.contactDetail`) behaviour is unchanged: tenant and soft-delete only.
+   */
+  private async assertContactVisibleTo(businessId: string, contactId: string, actorUserId?: string) {
+    if (!actorUserId) return this.assertContact(businessId, contactId);
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const visClause = visibilityClause(access, actorUserId);
+    const contact = await this.prisma.client.contact.findFirst({
+      where: visClause
+        ? { ...contactWhereWithId(businessId, contactId), AND: [visClause] }
+        : contactWhereWithId(businessId, contactId),
+    });
+    if (!contact) {
+      throw new NotFoundException('Contact not found');
+    }
+    return contact;
+  }
+
+  async contactDetail(params: { businessId: string; contactId: string; actorUserId?: string }) {
+    const contact = await this.assertContactVisibleTo(params.businessId, params.contactId, params.actorUserId);
     const [events, notes, tasks, invoices, bookings, customFieldValues] = await Promise.all([
       this.prisma.client.contactEvent.findMany({
         where: { businessId: params.businessId, contactId: params.contactId },

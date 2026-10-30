@@ -326,8 +326,10 @@ export class CrmController {
   getContactDetail(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.crmStats.contactDetail({ businessId, contactId });
+    // Record-level visibility: the actor is applied in the row query (KF-PRODUCT-CONTACTS-PILOT-001).
+    return this.crmStats.contactDetail({ businessId, contactId, actorUserId: req?.user?.id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1490,9 +1492,11 @@ export class CrmController {
   async getContactDossier(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
     const [detail, story, insight, health] = await Promise.all([
-      this.crmStats.contactDetail({ businessId, contactId }),
+      // Same record-level visibility as the detail route; a hidden record fails the whole dossier closed.
+      this.crmStats.contactDetail({ businessId, contactId, actorUserId: req?.user?.id }),
       this.journey.getContactCrossJourney(businessId, contactId),
       this.journey.generateAiInsight(businessId, contactId),
       this.journey.getContactHealthMetrics(businessId, contactId),
