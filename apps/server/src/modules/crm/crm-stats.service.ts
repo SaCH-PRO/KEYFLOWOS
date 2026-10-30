@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCacheService } from './crm-cache.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
 
 export type TopOpenDeal = {
   id: string;
@@ -146,10 +147,29 @@ export class CrmStatsService {
     return 'Unnamed';
   }
 
-  private async assertContact(businessId: string, contactId: string) {
-    const contact = await this.prisma.client.contact.findFirst({
-      where: contactWhereWithId(businessId, contactId),
-    });
+  /**
+   * Resolve one contact the way the list path does.
+   *
+   * With an actor, the row must satisfy the actor's effective CRM visibility
+   * (`resolveCrmAccess` + `visibilityClause`, the same rule `listContacts`
+   * applies) as well as the tenant predicate. A row the actor may not see is
+   * reported exactly like an absent one, so a forbidden PRIVATE record is
+   * never disclosed, and nothing related to it is read.
+   *
+   * Without an actor the tenant predicate alone applies, as before. That is
+   * the system context: automation, the flow executor and the KEY adapter
+   * reach this through `CrmService.contactDetail` with no caller identity.
+   */
+  private async assertContact(businessId: string, contactId: string, actorUserId?: string) {
+    const where: Prisma.ContactWhereInput = { ...contactWhereWithId(businessId, contactId) };
+    if (actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+      const visClause = visibilityClause(access, actorUserId);
+      if (visClause) {
+        where.AND = [visClause];
+      }
+    }
+    const contact = await this.prisma.client.contact.findFirst({ where });
     if (!contact) {
       throw new NotFoundException('Contact not found');
     }
@@ -568,8 +588,13 @@ export class CrmStatsService {
     return { groups: groups.slice(0, 20) };
   }
 
-  async contactDetail(params: { businessId: string; contactId: string }) {
-    const contact = await this.assertContact(params.businessId, params.contactId);
+  /**
+   * Contact detail projection. `actorUserId` is the caller whose CRM
+   * visibility bounds the lookup (the HTTP route always supplies it); omitted
+   * only by system-context callers, which keep the tenant-only predicate.
+   */
+  async contactDetail(params: { businessId: string; contactId: string; actorUserId?: string }) {
+    const contact = await this.assertContact(params.businessId, params.contactId, params.actorUserId);
     const [events, notes, tasks, invoices, bookings, customFieldValues] = await Promise.all([
       this.prisma.client.contactEvent.findMany({
         where: { businessId: params.businessId, contactId: params.contactId },

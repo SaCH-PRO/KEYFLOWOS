@@ -1,165 +1,108 @@
-packet_id: KF-META-MERGE-AUTHORITY-001
-directive_message_id: CG-DIR-F9-001
-directive_comment_id: 6240051686
+packet_id: KF-PRODUCT-CONTACTS-PILOT-001
+directive_message_id: CG-DIR-PRODUCT-CONTACTS-VISIBILITY-001
+directive_comment_id: 6511958809
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
-  - CG-DIR-F9-001   # 6240051686; NO_STATE_CHANGE; releases the bounded F9 merge-authority repair
-  - CG-REV-F9-003   # 6245277310; NO_STATE_CHANGE; CHANGES_REQUIRED; rules on CC-CONTRADICTION-F9-001 (Option A, Q1 to Q5); a bounded correction under CG-DIR-F9-001
-  - CG-REV-F9-004   # 6248791378; NO_STATE_CHANGE; CHANGES_REQUIRED; rules on CC-CONTRADICTION-F9-002 (Option A1, the lifetime bound); CG-REV-F9-003 stands
-  - CG-REV-F9-005   # 6315149276; NO_STATE_CHANGE; CHANGES_REQUIRED on CC-RETURN-F9-002; the per-packet hold chronology defect at bb2479a1; CG-REV-F9-003 and CG-REV-F9-004 stand
-  - CG-REV-F9-006   # 6324501015; NO_STATE_CHANGE; SEMANTIC_PASS on CC-RETURN-F9-003 at semantic 6b071fbf, artifact eecab6d7; zero unresolved substantive findings; not a grant, admission, ready transition, HOLD_CLEAR, checkpoint or release; CG-REV-F9-003 Q5 still controls bootstrap; the human-readable independent review
-  - CG-REVIEW-KF181-ADMISSION-RECORD-001   # 6325784397; NO_STATE_CHANGE; ACCEPT_FOR_ADMISSION; answers CC-ACK-F9-006; carries the machine-readable semantic evidence (reviewed_head 6b071fbf, semantic_review_outcome PASS, zero unresolved substantive findings) and orders this admission record; not PACKET_ADMISSION, a ready transition, a merge grant or bootstrap authorization; the current authority
-in_reply_to: human-operator-plan-completion-20261017
-ack_message_id: CC-ACK-F9-001
-ack_comment_id: 6240199516
-continuation:   # operator instruction in session, 2026-10-18; no new #80 authority, same directive, owner and branch
-  ack_message_id: CC-ACK-F9-002
-  ack_comment_id: 6244594284
-  operator_instruction: human-operator-f9-unblock-20261018
-contradiction:   # F9-H1, a malformed target HOLD before the grant was ignored
-  message_id: CC-CONTRADICTION-F9-001
-  comment_id: 6244935207
-correction:   # the ruling on the contradiction; same directive, owner, branch and PR
-  review_message_id: CG-REV-F9-003
-  review_comment_id: 6245277310
-  ack_message_id: CC-ACK-F9-003
-  ack_comment_id: 6245305974
-lifetime:   # the ruling on CC-CONTRADICTION-F9-002 (6245748866); same directive, owner, branch and PR
-  review_message_id: CG-REV-F9-004
-  review_comment_id: 6248791378
-  ack_message_id: CC-ACK-F9-004
-  ack_comment_id: 6248842451
-chronology:   # the ruling on CC-RETURN-F9-002 (6249425702); same directive, owner, branch and PR
-  review_message_id: CG-REV-F9-005
-  review_comment_id: 6315149276
-  ack_message_id: CC-ACK-F9-005
-  ack_comment_id: 6315277076
+  - CG-DIR-PRODUCT-CONTACTS-VISIBILITY-001   # 6511958809; NO_STATE_CHANGE; IMPLEMENTATION_AUTHORIZED; releases the bounded row-level visibility correction only
+  - CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001   # 6512387171; NO_STATE_CHANGE; names this worktree, ACK 6512133384, the impl branch and PR 190 as the sole writer; stops the cloud session (claude/elegant-curie-7azpsb at 740df74, retained read-only); adds the dossier route to the objective with a fail-closed ordering; write set unchanged; scope_changed true
+in_reply_to: implementer-contacts-v1-review-20261029
+ack_message_id: CC-ACK-PRODUCT-CONTACTS-VISIBILITY-001
+ack_comment_id: 6512133384
+ownership:   # CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001
+  review_message_id: CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001
+  review_comment_id: 6512387171
+  cloud_ack_comment_id: 6512085527
+  cloud_state_comment_id: 6512304034
+  cloud_stop_comment_id: 6512456746
+  retained_cloud_branch: claude/elegant-curie-7azpsb
+  retained_cloud_head: 740df74e4b87d9839867245739564c9bf7941087
+  ack_message_id: CC-ACK-PRODUCT-CONTACTS-OWNERSHIP-002
+  ack_comment_id: 6512838291
   writer: >
-    An interactive Claude session assigned by the operator on 2026-10-21,
-    stated in the ACK; the local Windows worker does not act on
-    CG-REV-F9-005. Pushes are plain fast-forwards to the branch.
-semantic_pass:   # the independent review of CC-RETURN-F9-003 (6316392827); same directive, owner, branch and PR; no work released
-  review_message_id: CG-REV-F9-006
-  review_comment_id: 6324501015
-  reviewed_head: 6b071fbf5ca1efd591def8ba8a1c8035ab0a6e89
-  ack_message_id: CC-ACK-F9-006
-  ack_comment_id: 6324616806
-  writer: >
-    The same interactive session as for CG-REV-F9-005 recorded the REVIEW
-    in this lineage with one control-only commit; the local worker's
-    CW-MOMENTUM-HELD-CG-REV-F9-005 (6323205536) is two failed invocations
-    and reached nothing on the branch. The semantic_review block and the
-    return artifact's review_status line wait for the admission record.
-admission_record:   # the admission-record instruction; same directive, owner, branch and PR; one control-only commit
-  review_message_id: CG-REVIEW-KF181-ADMISSION-RECORD-001
-  review_comment_id: 6325784397
-  ack_message_id: CC-ACK-KF181-ADMISSION-RECORD-001
-  ack_comment_id: 6325893209
-  writer: >
-    The same interactive session, single writer, plain fast-forward push.
-    The record cites 6325784397 as the ChatGPT evidence, because the live
-    reader finds no semantic_review_outcome in 6324501015. The evaluator's
-    newest-run-by-name selection at ecc34383 read four cancelled runs tied
-    at the same second as their successful twins; the evaluator is not
-    changed by this record, and the new head's runs are reported as read.
-current_authority_message_id: CG-REVIEW-KF181-ADMISSION-RECORD-001
-current_authority_comment_id: 6325784397
-source_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd
-implementation_branch: impl/kf-meta-merge-authority-001
-pr_number: 181
+    The worker session in worktree CG-DIR-PRODUCT-CONTACTS-VISIBILITY-001 is
+    the sole writer. The cloud branch is reference only; nothing from it is
+    fetched, grafted or cherry-picked. Pushes are plain fast-forwards.
+current_authority_message_id: CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001
+current_authority_comment_id: 6512387171
+source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
+implementation_branch: impl/kf-product-contacts-visibility-001
+pr_number: 190
 state: PROVING
 health: YELLOW
-scope_changed: false
+scope_changed: true
+scope_change_authority: CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001
 production_touched: false
 provider_traffic: false
 programme_credit: ZERO
 merge_authority: false
-review_status: ACCEPT_FOR_ADMISSION
+review_status: IMPLEMENTATION_AUTHORIZED
 
 objective: >
-  Repair existing finding F9 (main's claude-return.yaml; reproduced in
-  docs/intelligence/sessions/2026-10-17-p0-safety-review at 11971802). A
-  readiness status, a semantic PASS, a green workflow or a builder-written
-  merge_authority flag is never by itself merge authority. The exact-head
-  admission evaluator, its second-snapshot recheck and the non-draft gate
-  step must also require one distinct, valid, current ChatGPT grant on #80,
-  bound to the repository, PR, packet, branch, semantic head, final artifact
-  head and base, through one shared predicate.
+  Contacts pilot, bounded row-level visibility security correction only. Make an
+  ordinary STAFF member who can access the CRM module but is not authorized to
+  view another person's PRIVATE or unshared owned contact fail closed on GET
+  contact detail and, by CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001, on GET contact
+  dossier, while preserving legitimate OWNER, admin, TEAM, SHARED, owned,
+  explicitly shared and cross-tenant behaviour. The dossier check fails closed
+  before the journey, AI-insight and health lookups start. The gap is
+  code-confirmed on main b1948d27: both routes call CrmStatsService.contactDetail
+  without actor identity, and its assertContact filters by businessId, id and
+  deletedAt only. This packet does not advance the 35-packet programme, reset
+  the active AUTH packet, grant a merge, approve a deployment or alter any
+  worker lock.
 
-target_contract:
-  grant: >
-    a valid AUTHORITY-profile REVIEW on this repository's issue #80, from an
-    allowlisted account, in an unedited and completely observed collection,
-    carrying merge_authority: true, review_status: READY_TO_MERGE, a readable
-    control_effect of NO_STATE_CHANGE or PACKET_ADMISSION, and exact values
-    for pr_number, pr_head (final artifact head), source_head (semantic head),
-    source_main (base), packet_id and implementation_branch
-  supersession: >
-    a later valid or malformed authority message about the same PR, packet or
-    branch voids the grant; a later grant replaces it
-  holds: >
-    a hold claim denies, whether it came before or after the grant, until a
-    later valid RESUME for the hold's own packet whose effect readEffect
-    reads as HOLD_CLEAR (PR 181 review 5560243413, P1). A hold claim is a
-    valid or malformed candidate whose message_type is not exactly one of
-    DIRECTIVE, REVIEW or RESUME (CG-REV-F9-003, Option A). It applies when
-    its packet is the target's or cannot be read, or when it names the
-    target's PR or branch under another packet (Q3); one whose packet cannot
-    be read is released only by the target packet's HOLD_CLEAR. A RESUME
-    with any other or an invalid effect, one for another packet (even one
-    naming the target PR or branch), one older than the HOLD, or one that is
-    not valid authority releases nothing; packet ids match exactly. A second
-    hold on a held packet with no release between denies by name
-    (merge_grant_hold_duplicate) whatever follows (Q2). A null or blank
-    health is absent, as readEffect reads it (Q1); RESUME provenance is the
-    fold's (Q4). A hold claim on another readable packet that names neither
-    the target PR nor branch does not apply. A claim whose packet cannot be
-    read and which names nothing of the target holds nothing for it when it
-    is older than the target's first valid authority message, the floor, and
-    holds at or after the floor (CG-REV-F9-004, A1)
-  not_a_grant:
-    - ACCEPT_FOR_ADMISSION
-    - a semantic PASS
-    - NO_STATE_CHANGE alone
-    - the artifact merge_authority field
-    - a global READY_TO_MERGE projection (not required either)
+evidence:
+  route: apps/server/src/modules/crm/crm.controller.ts, blob 7074e121 lines 322-330 (detail) and 1489-1511 (dossier)
+  service: apps/server/src/modules/crm/crm-stats.service.ts, blob f381a383 lines 149-158 and 571-573
+  permissions: apps/server/src/modules/crm/crm-permissions.helper.ts (resolveCrmAccess, visibilityClause)
+  classification: within-tenant row-level authorization gap, confirmed by code reading; not an executed exploit and not a cross-tenant bypass
+  reference_docs:
+    - https://github.com/SaCH-PRO/KEYFLOWOS/blob/docs/keyflow-reconstruction-20261029/docs/reconstruction/product/modules/CONTACTS-v1.md
+    - https://github.com/SaCH-PRO/KEYFLOWOS/blob/docs/keyflow-reconstruction-20261029/docs/reconstruction/product/DECISION-LEDGER-CONTACTS-001.md
 
 allowed_scope:
-  - scripts/agent-control/auto-merge-admitted.mjs
-  - scripts/agent-control/lib/admission.mjs
-  - scripts/agent-control/lib/merge-grant.mjs (the one shared grant helper)
-  - their tests, helpers and synthetic/redacted fixtures under scripts/agent-control/tests
-  - the non-draft admission step of .github/workflows/agent-control-gate.yml, and the read-only issues permission that step needs to read #80
-  - focused entries in scripts/agent-control/negative-controls.yaml
-  - affected architecture and control-contract documentation
+  - apps/server/src/modules/crm/crm.controller.ts (the detail route and, by the ruling, the dossier route)
+  - apps/server/src/modules/crm/crm-stats.service.ts
+  - apps/server/test/crm.e2e.test.ts (add or repair guarded controller regressions, retaining the old cases)
+  - apps/server/test/contacts-visibility.integration.test.ts (one new real-database integration test using the existing DATABASE_URL and pgvector fixture conventions, synthetic scoped identities and cleanup)
   - this branch's two packet artifacts
 
+read_only_scope:
+  - CRM permission helpers, tenant and Prisma extensions, membership and identity models, UI and API, existing integration fixtures, control and test configuration
+  - the retained cloud branch claude/elegant-curie-7azpsb, as an implementation reference only
+
 prohibited_scope:
-  - the #80 parser, the typed effect vocabulary, the global projection contract, the programme DAG and the checkpoint
-  - PRs 155, 179, 169, 175, 146, 172 and 177
-  - merge, ready-for-review, auto-merge enablement; PR 181 stays draft and its bootstrap merge is not authorized (CG-REV-F9-003 Q5)
-  - production, live business data, provider traffic, credentials, deployment
-  - worker, process, install, scheduler, webhook or notifier changes
-  - editing or deleting any #80 comment
-  - weakening a gate or removing an existing negative control
+  - apps/server/src/modules/crm/crm-permissions.helper.ts (no modification without a fresh directive)
+  - apps/server/src/modules/crm/dto/create-contact.dto.ts and any firstName requirement (DEC-CONTACTS-001 pending operator approval)
+  - apps/server/src/modules/crm/crm.service.ts and privacy/contact-audit.service.ts audit semantics (DEC-CONTACTS-002 pending operator approval)
+  - a duplicate CRM module, a new schema or migration, a new API path, a new authorization source, new PR or worker infrastructure, third-party dependencies
+  - any route beyond the detail and dossier routes; a full Contacts CRUD rewrite
+  - PR 155, PR 184, PR 185 and the active meta packets
+  - production, staging or production deploy, real or paid provider traffic, unsafe DB writes, branch rebase or force push, task reallocation
+  - grafting or cherry-picking the cloud branch; a second PR
+  - merge, ready transition, grant, release, HOLD clear, programme credit
 
 invariants:
-  - every existing admission denial keeps its reason; the grant is an additional requirement
-  - independent semantic-review failover, artifact binding, current base, control-only tail, workflow freshness and transition checks stay as they are
-  - the non-draft gate does not run the full evaluator, so it never waits for its own run
-  - the grant names the final artifact head after that artifact exists; the artifact never names the grant
-  - unverifiable, edited, unordered or ambiguous authority denies
+  - record-level access for detail and dossier is enforced before related events, notes, tasks, invoices or bookings are fetched
+  - the dossier awaits authorization and the visible detail first; a denied request never invokes the journey, AI-insight or health collaborators
+  - the detail path reuses resolveCrmAccess and visibilityClause; no independent rule is invented
+  - a forbidden PRIVATE record is not disclosed; the established not-found policy is preserved
+  - OWNER, admin, TEAM, SHARED, owned, explicitly shared and cross-tenant behaviour is preserved
+  - system-context consumers of CrmStatsService.contactDetail keep their interface; no live consumer outside the write set is changed
+  - the existing crm.e2e.test.ts mocked behaviour stays separate from the real-database proof
 
 proof_obligations:
-  - rejecting cases for absent, false, null, malformed, forged, edited, stale, revoked and mismatched grants
-  - ambiguous or incomplete authority evidence, active holds, wrong repository/PR/packet/branch/semantic head/artifact head/base, moved head or base
-  - missing independent review, pending/owed/failed workflows, a grant changed between snapshots, ACCEPT_FOR_ADMISSION without a later grant
-  - preserved valid application and meta grants (the PR 159 grant 6111001643 shape), unrelated active-packet separation, review failover, control-only lineage
-  - the real CLI collector and recheck under a synthetic fetch with no network passthrough
-  - "CG-REV-F9-003: malformed hold claims before the grant (H1), duplicate holds (Q2), holds naming the target by packet, PR or branch and cross-packet or by-reference releases (Q3), a blank-health release (Q1) and RESUME provenance (Q4), pure and through the real CLI in --merge and --grant-only with zero unauthorized PUTs, each with a live negative control"
-  - "CG-REV-F9-004: a real-history regression on PLAN 5826799265's envelope and ordering; paired lifetime cases (a)-(e) pure and through the real CLI in both modes with zero merge PUTs; the COV-HOLD-01, 04 and 05-09 pins; each with a distinguishing live negative control; a replay of the complete current #80 history"
-  - live negative controls; the full portable suite; the Windows worker proof; both DAG validators; artifact checks; exact-head workflows
+  - one failing pre-fix negative control, with the exact first failure recorded
+  - fresh post-fix tests on the real database through the HTTP guard path where feasible, without mocking the authorization boundary
+  - "cases: OWNER and ADMIN, STAFF view-all with another's TEAM, STAFF owned-view, PRIVATE owned and foreign, explicit shares, no membership, read-only scope, another tenant, deleted contacts, sensitive linked child rows; forbidden detail fails while permitted list and detail stay consistent"
+  - a dossier denial test proving forbidden requests never invoke the journey, AI-insight and health collaborators
+  - focused existing tests, typecheck and the required CI with honest skipped and NOT_RUN disclosures
+  - exact fixtures and database environment recorded; production never connected to or mutated
+  - tests, branch and commit SHAs, evidence, scope ledger, branch and worktree ownership, security and review findings and the remaining blocked CT-P01 to CT-P12 items recorded
+  - a small DRAFT PR against main with implementation and return artifacts; RETURN with exact semantic and artifact heads and current CI evidence
 
 stop_conditions:
-  - main moves off source_main, or newer authority changes the release (CONTRADICTION)
-  - the correction needs scope beyond allowed_scope (CONTRADICTION for that work only)
+  - main moves off source_main, a relevant HOLD applies, authority is ambiguous, or the branch or worktree conflicts with existing ownership (CONTRADICTION, no mutation)
+  - the cloud writer is active again, or the PR head moves without this session (CONTRADICTION, no mutation)
+  - another live consumer requires an interface change outside the approved write set (bounded expansion request, no change)
+  - scope, proof, branch head or authority changes (one bounded CONTRADICTION)
   - production access or provider traffic would be required
