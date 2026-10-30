@@ -9,12 +9,14 @@ ownership_review_message_id: CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001
 ownership_review_comment_id: 6512387171
 ownership_ack_message_id: CC-ACK-PRODUCT-CONTACTS-OWNERSHIP-002
 ownership_ack_comment_id: 6512838291
+progress_2_message_id: CC-PROGRESS-PRODUCT-CONTACTS-VISIBILITY-002
+progress_2_comment_id: 6512936707
 cloud_ack_comment_id: 6512085527
 cloud_stop_comment_id: 6512456746
 retained_cloud_branch: claude/elegant-curie-7azpsb
 retained_cloud_head: 740df74e4b87d9839867245739564c9bf7941087
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: 12c34b4a31c6438196bd70cfe3ac691042435fba
+source_head: b8565e0403ff5a02378dff15fe934271c124679a
 implementation_branch: impl/kf-product-contacts-visibility-001
 pr_number: 190
 state: PROVING
@@ -32,13 +34,18 @@ previous_return_message_ids: []
 never_posted_return_message_ids: []
 
 summary: >
-  Second pre-fix head, by design, for the dossier route the ruling added. The
-  semantic head 12c34b4a carries the detail fix (4857780c) and the dossier
-  tests only; the dossier correction in crm.controller.ts follows as the next
-  semantic commit. The hosted real-database job at this head is expected to
-  hold every detail case and fail the dossier cases tagged NEGATIVE CONTROL,
-  and the mocked file to fail its three dossier cases. The first pre-fix head
-  e59856d0 recorded the detail defect (previous_head_e59856d0).
+  GET contact detail and GET contact dossier now apply the caller's effective
+  CRM visibility (resolveCrmAccess + visibilityClause, the rule the list
+  already applies) to the row lookup before any child row is read, and answer
+  a forbidden row exactly like an absent one. The dossier awaits the visible
+  detail first; its journey, AI-insight and health collaborators start only
+  after the row is allowed. Two product files changed; the system-context
+  callers keep their interface through an optional parameter. Each defect was
+  first recorded on the hosted real database at a tests-first head
+  (previous_head_e59856d0 for the detail route, previous_head_14977221 for the
+  dossier), then corrected. The real-database suite is BLOCKED on this host and
+  runs only in the hosted job, so its post-fix result for this head is reported
+  in the RETURN.
 
 semantic_commits:
   - sha: 815e61ab8604cfa5eda138d68deab37c2c02f338
@@ -46,72 +53,77 @@ semantic_commits:
   - sha: 37b072b0d7e7c7085d27fbdfd2d1741b3237719c
     what: the real-database suite wires its Nest module before seeding, so a wiring fault reports as itself; no assertion changed
   - sha: 4857780c6a1385f96f21743d4ddd2fcabefaa657
-    what: the detail fix in crm-stats.service.ts (optional actorUserId; assertContact ANDs visibilityClause into the row lookup) and crm.controller.ts (the detail route hands req.user.id; refuses a request with no identity); committed locally before this session read the ruling, never pushed until after CC-ACK-PRODUCT-CONTACTS-OWNERSHIP-002
+    what: the detail fix in crm-stats.service.ts (optional actorUserId; assertContact ANDs visibilityClause into the row lookup) and crm.controller.ts (the detail route hands req.user.id; refuses a request with no identity); committed locally before this session read the ruling, pushed only after CC-ACK-PRODUCT-CONTACTS-OWNERSHIP-002
   - sha: 12c34b4a31c6438196bd70cfe3ac691042435fba
     what: the dossier negative controls in both test files (recording journey stubs; denial never invokes the collaborators), committed before the dossier correction
+  - sha: b8565e0403ff5a02378dff15fe934271c124679a
+    what: the dossier correction in crm.controller.ts; getContactDossier hands req.user.id, awaits contactDetail first, and starts the three collaborators only after the row is allowed; response shape unchanged
 
 diff_scope:   # source_main..source_head
   - apps/server/src/modules/crm/crm-stats.service.ts (+37 -5)
-  - apps/server/src/modules/crm/crm.controller.ts (+12 -2, the detail route; the dossier route is unchanged at this head)
-  - apps/server/test/contacts-visibility.integration.test.ts (new)
-  - apps/server/test/crm.e2e.test.ts (old cases unchanged; two mocks widened, one header-gated middleware branch, nine cases added)
+  - apps/server/src/modules/crm/crm.controller.ts (+22 -4, the detail and dossier routes and one import)
+  - apps/server/test/contacts-visibility.integration.test.ts (new, 28 cases)
+  - apps/server/test/crm.e2e.test.ts (old 11 cases unchanged; two mocks widened, one header-gated middleware branch, nine cases added)
 unchanged_owners: crm-permissions.helper.ts, crm.service.ts, privacy/contact-audit.service.ts, every DTO, the schema, every other route, every internal consumer of CrmService.contactDetail
 
 characterization:
   main_at_ack: b1948d2797e1bae3660a3d7173abb75397e05aad (origin/main re-resolved at ACK time and again at 01:38Z after the ruling, equal to source_main)
-  newest_authority: CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001 (6512387171), unedited; after it only the cloud STOP 6512456746 and autopilot receipts; no HOLD names this packet
-  branch_ownership: this worktree is the sole writer by the ruling; PR 190 head was e59856d0 at the ruling and at CC-ACK-PRODUCT-CONTACTS-OWNERSHIP-002; the cloud branch is retained at 740df74 and was never fetched into this worktree
+  newest_authority: CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001 (6512387171), unedited; after it only the cloud STOP 6512456746, this session's messages and autopilot receipts; no HOLD names this packet
+  branch_ownership: this worktree is the sole writer by the ruling; PR 190 head was e59856d0 at the ruling and at CC-ACK-PRODUCT-CONTACTS-OWNERSHIP-002; every later push is this session's plain fast-forward; the cloud branch is retained at 740df74 and was never fetched into this worktree
   file_ownership: no open PR (59 scanned through the GitHub GraphQL API before the ACK) changes crm.controller.ts, crm-stats.service.ts, crm-permissions.helper.ts, crm.e2e.test.ts or a contacts-visibility test
-  detail_route_before: crm.controller.ts getContactDetail (lines 322-331) passed businessId and contactId only; req.user was not read
+  detail_route_before: crm.controller.ts getContactDetail (lines 322-331 on main) passed businessId and contactId only; req.user was not read
   dossier_route_before: crm.controller.ts getContactDossier (lines 1489-1511 on main) evaluated contactDetail, getContactCrossJourney, generateAiInsight and getContactHealthMetrics inside one Promise.all with no actor, so a denied contact still started the three collaborators
-  detail_service_before: crm-stats.service.ts contactDetail (571-681) called the private assertContact (149-157), whose predicate was contactWhereWithId (id, businessId, deletedAt null), then loaded events, notes, tasks, invoices, bookings and custom field values
+  detail_service_before: crm-stats.service.ts contactDetail (571-681 on main) called the private assertContact (149-157), whose predicate was contactWhereWithId (id, businessId, deletedAt null), then loaded events, notes, tasks, invoices, bookings and custom field values
   list_path: crm.service.ts listContacts (214-299) resolves access with resolveCrmAccess when actorUserId is present and ANDs visibilityClause into the Contact where clause; the fix reuses exactly these two helpers
   consumers_of_contact_detail:
-    - crm.controller.ts:330 GET /crm/businesses/:businessId/contacts/:contactId (hands the actor since 4857780c)
-    - crm.controller.ts:1503 GET /crm/businesses/:businessId/contacts/:contactId/dossier (in the objective by the ruling; corrected in the next semantic commit)
-    - crm.service.ts:1649 CrmService.contactDetail, a pass-through wrapper outside the write set; its callers automation/automation.service.ts:106, flow/automation-executor.service.ts (7 sites), flow/cross-module-agent.service.ts (2), key-cortex/adapters/crm-adapter.service.ts:41 are system-context callers with no actor; their interface is unchanged (the parameter is optional) and every call site still compiles (tsc exit 0)
+    - crm.controller.ts getContactDetail, GET /crm/businesses/:businessId/contacts/:contactId (hands the actor since 4857780c)
+    - crm.controller.ts getContactDossier, GET /crm/businesses/:businessId/contacts/:contactId/dossier (hands the actor and awaits the row first since b8565e04)
+    - crm.service.ts:1649 CrmService.contactDetail, a pass-through wrapper outside the write set; its callers automation/automation.service.ts:106, flow/automation-executor.service.ts (7 sites), flow/cross-module-agent.service.ts (2), key-cortex/adapters/crm-adapter.service.ts:41 are system-context callers with no actor; their interface is unchanged (the parameter is optional) and every call site still compiles (tsc exit 0 at b8565e04)
   environment: the local Docker daemon is not running and starting it needs an approval an unattended worker cannot give; no native PostgreSQL is installed; the hosted CI service database (pgvector/pg16, migrations applied by db:deploy, pnpm test:ci) is the real-database environment for this packet
 
-changed_files:
-  - apps/server/src/modules/crm/crm-stats.service.ts
-  - apps/server/src/modules/crm/crm.controller.ts
-  - apps/server/test/contacts-visibility.integration.test.ts (new)
-  - apps/server/test/crm.e2e.test.ts
-schema_migrations: []
+implementation_decisions:
+  - the row-level check lives in the service's assertContact, before the Promise.all that reads child rows, so a forbidden row reads nothing related to it; the recorder test observes this rather than argues it
+  - actorUserId is optional so the pass-through wrapper and its system-context callers are not changed; both HTTP routes always supply it, and refuse a request with no identity with the same UnauthorizedException BusinessGuard uses
+  - a forbidden row raises the existing NotFoundException('Contact not found'), the same answer as an absent id, so no existence oracle is created; the directive's not-found policy is kept
+  - the dossier awaits contactDetail before its Promise.all of the three collaborators, as the ruling requires; the response shape is unchanged
+  - ADMIN without explicit scopes keeps today's semantics (viewAll, so other members' PRIVATE rows stay hidden unless shared), because that is what visibilityClause already returns for the list; no new rule
+  - the real-database suite keeps CrmRateLimitGuard real and stubs only services the detail, dossier and list routes never call, plus the journey service as recorders because its non-invocation is the dossier claim (and its AI insight would be provider traffic); identity is attached from the seeded user row by a header middleware, the one step the Supabase-verifying AuthMiddleware would otherwise need a provider for
+  - "the controllers' req parameter is typed as a user-bearing request object rather than any, so the lint ratchet sees no new warning"
+  - the cloud branch was read as a description in its STOP message only; nothing from it was fetched, grafted or cherry-picked
 
-tests:   # local, Windows 11, Node 20.18.1
+tests:   # local, Windows 11, Node 20.18.1, at b8565e04 unless stated
   commands:
     - "apps/server: node node_modules/vitest/vitest.mjs run test/crm.e2e.test.ts"
     - "apps/server: node ../../node_modules/typescript/bin/tsc --noEmit -p tsconfig.json"
     - "apps/server: node node_modules/eslint/bin/eslint.js src/modules/crm/crm.controller.ts src/modules/crm/crm-stats.service.ts (and the same files from origin/main for the baseline)"
     - "apps/server: node node_modules/vitest/vitest.mjs run test/contacts-visibility.integration.test.ts (collect and wiring only; no database)"
   passed:
-    - "crm.e2e.test.ts at 12c34b4a with the controller as committed (detail fixed, dossier not yet): 17 of 20; the 11 pre-existing cases and the six detail cases hold"
-    - "server typecheck at 4857780c: exit 0; src is unchanged at 12c34b4a"
-    - "eslint at 4857780c: crm.controller.ts 37 warnings, crm-stats.service.ts 1 warning, 0 errors; identical counts to origin/main (37 and 1), so no net-new warning for the ratchet"
-  failed:
-    - "crm.e2e.test.ts at 12c34b4a, the dossier pre-fix negative control, 3 of 20: 'hands the actor to the detail service and only then consults the journey collaborators' (443:42, the spy received { businessId, contactId } and no actorUserId); 'a dossier the detail service refuses is 404, carries no record, and never invokes the journey collaborators' (463:54, getContactCrossJourney was invoked once although the detail was refused); the direct-handler case (427:7, getContactDossier did not refuse a request with no user id)"
+    - "crm.e2e.test.ts at b8565e04: 20 of 20 (11 pre-existing, 9 added); 17 of 20 at 12c34b4a and 14 of 17 at 815e61ab, before each correction"
+    - "server typecheck at b8565e04: exit 0 (also exit 0 at 815e61ab and 4857780c)"
+    - "eslint at b8565e04: crm.controller.ts 37 warnings, crm-stats.service.ts 1 warning, 0 errors; identical counts to origin/main (37 and 1), so no net-new warning for the ratchet"
+  failed: []
   skipped:
-    - "contacts-visibility.integration.test.ts at 12c34b4a: NOT_RUN on this host, no PostgreSQL reachable (Docker daemon down, no native server); the local run compiles the Nest module with the journey recorder and initializes the app, then the first database write fails and vitest reports its 28 cases skipped; its result for this head comes from the hosted test job, where the dossier cases tagged NEGATIVE CONTROL are expected to fail and every detail case to hold"
+    - "contacts-visibility.integration.test.ts at b8565e04: NOT_RUN on this host, no PostgreSQL reachable (Docker daemon down, no native server); the local run compiles the Nest module with the journey recorder and initializes the app, then the first database write fails and vitest reports its 28 cases skipped; the suite's result for this head comes from the hosted test job and is reported in the RETURN"
     - "HawkScan: NOT_RUN locally; no running application in this worktree and no HAWK_API_KEY"
+    - "architecture scanners (.agents/skills/codebase-architect/scripts): NOT_RUN; no module, controller, router, package, interface, event, integration or entity was added, removed or renamed (one optional parameter on an existing method, one route reordered its awaits), so the architecture map is unchanged by this packet"
 
-negative_controls:
+negative_controls:   # each observed on the hosted real database at its tests-first head; see previous_head_e59856d0 and previous_head_14977221
   - id: NC-CONTACTS-DETAIL-ACTOR-NOT-HANDED
     claim: the detail route hands the caller's identity to the service
     pre_fix: FAILS as intended (crm.e2e.test.ts:362), locally at 815e61ab and on the hosted job at e59856d0
-    post_fix: holds locally at 4857780c and 12c34b4a; hosted at this head
+    post_fix: holds locally at b8565e04 and on the hosted job at 14977221; hosted at this head
   - id: NC-CONTACTS-DETAIL-FOREIGN-PRIVATE
     claim: STAFF view-all cannot open another member's PRIVATE contact through the real guard path; nothing of it is disclosed
     pre_fix: FAILS as intended on the hosted real database at e59856d0 (contacts-visibility.integration.test.ts:394:24, expected 200 to be 404); the first failure in file order is the ADMIN case at 379:50, contact tcv_cPrivOwner, expected 200 to be 404
-    post_fix: NOT_RUN locally (no database); hosted at this head
+    post_fix: holds on the hosted real database at 14977221 (every detail case, 26 of 28); hosted at this head
   - id: NC-CONTACTS-SERVICE-CHILD-ROWS-AFTER-CHECK
     claim: a forbidden PRIVATE row is not found and no child row is read
     pre_fix: FAILS as intended on the hosted real database at e59856d0 (contacts-visibility.integration.test.ts:485:122, the promise resolved with the contact and its seven child sets instead of rejecting)
-    post_fix: NOT_RUN locally (no database); hosted at this head
+    post_fix: holds on the hosted real database at 14977221; hosted at this head
   - id: NC-CONTACTS-DOSSIER-COLLABORATORS-BEFORE-CHECK
     claim: a dossier the caller may not read is 404 with no record and never invokes the journey, AI-insight or health collaborators
-    pre_fix: FAILS as intended locally at 12c34b4a with the controller as committed (crm.e2e.test.ts:463:54, the collaborator was invoked once although the detail was refused); the real-database dossier cases run on the hosted job at this head, where they are expected to fail
-    post_fix: holds locally in the mocked file with the dossier correction applied in the working tree (20 of 20); the correction is the next semantic commit
+    pre_fix: FAILS as intended on the hosted real database at 14977221 (contacts-visibility.integration.test.ts:505:24, expected 200 to be 404; and 517:24 for the owned-view TEAM dossier) and locally in the mocked file at 12c34b4a (crm.e2e.test.ts:463:54, getContactCrossJourney was invoked once although the detail was refused)
+    post_fix: holds locally in the mocked file at b8565e04 (20 of 20); NOT_RUN locally on the real database; hosted at this head
 
 previous_head_e59856d0:
   semantic_head: 37b072b0d7e7c7085d27fbdfd2d1741b3237719c
@@ -120,15 +132,62 @@ previous_head_e59856d0:
   contacts_visibility_at_e59856d0: "23 cases, 14 held, 9 failed: ADMIN cannot open other members' PRIVATE rows (379:50, contact tcv_cPrivOwner, expected 200 to be 404; the first failure); NEGATIVE CONTROL STAFF view-all foreign PRIVATE (394:24, expected 200 to be 404); STAFF view-all denied rows shared to or owned by others (402:50); STAFF crm_view=owned (415:50); no existence oracle (423:30); detail and list agree (446:114); non-member actor refused by the service (477:122); NEGATIVE CONTROL service forbidden PRIVATE row (485:122, promise resolved instead of rejecting); absent reads like forbidden (494:30). The 14 that held pre-fix are the guard-level and positive cases: fixture sanity, 401 with no identity, 403 with no membership, 403 across tenants both ways, 403 without CRM scope, 404 for another tenant's id, the other tenant's positive control, the soft-deleted contact, OWNER and SUPER_ADMIN with child rows, STAFF view-all on TEAM, SHARED and own PRIVATE rows, denied reads mutate nothing, the system context, and the permitted actor's child sets"
   crm_e2e_at_e59856d0: "17 cases, 14 held, 3 failed: hands the authenticated actor (362:42), read-only member with the actor (376:42), the handler refuses a request with no user id (410:7); identical to the local pre-fix run at 815e61ab"
   other_workflows: "Agent Control Gate 40983639180 success; Branch divergence 40983639303 success; DAST (HawkScan) 40983639214 success with every scan step skipped (no HAWK_API_KEY); Agent Control Worker Proof 40983639091 success (Windows job 123829389337 completed 01:36:47Z, Ubuntu job 123829389648)"
-  superseded_by: 4857780c, the detail fix, then 12c34b4a, the dossier tests
+  superseded_by: 4857780c, the detail fix
+
+previous_head_14977221:
+  semantic_head: 12c34b4a31c6438196bd70cfe3ac691042435fba
+  purpose: the second pre-fix head, red by design for the dossier only; the detail fix 4857780c plus the dossier negative controls in both test files
+  hosted_test_job: "CI/CD Pipeline run 40987882526, job Run Tests 123843907654, concluded failure as intended at 01:55:29Z on 2026-10-30; Lint, Type Check and Security Scan jobs succeeded; vitest: 452 files, 450 passed, 2 failed; 4442 tests, 4437 passed, 5 failed, all 5 the dossier cases; the test step executed, nothing was skipped"
+  contacts_visibility_at_14977221: "28 cases, 26 held, 2 failed: NEGATIVE CONTROL STAFF view-all foreign PRIVATE dossier (505:24, expected 200 to be 404) and owned-view STAFF denied another member's TEAM dossier (517:24, expected 200 to be 404). Every detail case that failed at e59856d0 held here with the detail fix, including both detail negative controls, the recorder, the oracle and the list/detail agreement"
+  crm_e2e_at_14977221: "20 cases, 17 held, 3 failed: the direct dossier handler did not refuse a request with no user id (427:7); the dossier did not hand the actor (443:42); the refused dossier still invoked getContactCrossJourney once (463:54), the discriminating control for the ordering requirement; identical to the local run at 12c34b4a with the controller as committed"
+  other_workflows: "Agent Control Gate 40987882500 success; Branch divergence 40987882543 success; DAST (HawkScan) 40987882523 success with every scan step skipped; Agent Control Worker Proof 40987882506 was in progress when the correction was pushed and is reported in the RETURN as the push left it"
+  superseded_by: b8565e04, the dossier correction
+
+ct_matrix:   # CONTACTS-v1.md section 7, disposition at this head
+  - id: CT-P01
+    disposition: NOT_ADDRESSED
+    reason: contact creation is outside this packet's write set and no staging database is authorized
+  - id: CT-P02
+    disposition: PARTIAL
+    reason: the OWNER opens every seeded row through the real detail and dossier routes and the real list shows the same rows; the rows are seeded, not created through POST
+  - id: CT-P03
+    disposition: NOT_ADDRESSED
+    reason: edit and re-read are outside the write set
+  - id: CT-P04
+    disposition: PARTIAL
+    reason: the read half is covered by path and by id in both directions (403 from BusinessGuard, 404 for a foreign id under the right path); list and PATCH by the other tenant are not covered here
+  - id: CT-P05
+    disposition: PARTIAL
+    reason: the mocked crm.e2e.test.ts already refuses a read-only member's create (403); no real-database mutation case is in this packet
+  - id: CT-P06
+    disposition: COVERED_PENDING_HOSTED_RESULT
+    reason: the core of this packet; the detail case failed pre-fix at e59856d0 and held at 14977221; the dossier case failed pre-fix at 14977221 and runs post-fix at this head
+  - id: CT-P07
+    disposition: NOT_ADDRESSED
+    reason: input validation and DEC-CONTACTS-001 are outside the write set
+  - id: CT-P08
+    disposition: NOT_ADDRESSED
+    reason: duplicate and replay handling is outside the write set
+  - id: CT-P09
+    disposition: NOT_ADDRESSED
+    reason: audit evidence is DEC-CONTACTS-002, outside the write set
+  - id: CT-P10
+    disposition: PARTIAL
+    reason: the suite runs with no AI, messaging or payment key configured and the detail, dossier and list routes answer; other modules are not exercised
+  - id: CT-P11
+    disposition: PARTIAL
+    reason: the existing mocked file still holds and the real-database fixture proves the guards and the seeded rows for detail, dossier and list; create, edit and delete persistence are not in this packet
+  - id: CT-P12
+    disposition: BLOCKED
+    reason: a browser smoke needs a deployed staging SHA and synthetic identities; not authorized by this directive
 
 findings:
   - id: CV-F1
     status: FIXED_PENDING_REVIEW
     detail: the detail route and service applied the tenant predicate only; a member with CRM read could open another member's PRIVATE contact and its child rows by id
   - id: CV-F2
-    status: IN_OBJECTIVE_BY_RULING
-    detail: "GET .../contacts/:contactId/dossier calls the same service without an actor inside one Promise.all with the journey, AI-insight and health lookups; the correction awaits the visible detail first and starts the collaborators only then; tests at this head, correction in the next semantic commit"
+    status: FIXED_PENDING_REVIEW
+    detail: "the dossier route called the same service without an actor inside one Promise.all with the journey, AI-insight and health lookups; it now awaits the visible detail first and starts the collaborators only then (CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001)"
   - id: CV-F3
     status: DISCLOSED_NOT_CHANGED
     detail: "the sibling contact-scoped read routes (events, notes, tasks by contact, journey, cross-journey, story, revenue-summary, health-metrics, relationships, network, best-channel, playbook, conversations and their summary and insights, conversation-context, data-quality) also pass businessId and contactId only, so a member who may not see a contact can still read its child data through them; a separate directive is needed"
@@ -137,12 +196,20 @@ findings:
     detail: "packages/api/src/routers/crm.ts contactDetail (tRPC) applies assertBusinessAccess only; same class, separate surface"
   - id: CV-F5
     status: OBSERVED
-    detail: "an ADMIN without explicit permissionScopes cannot open other members' PRIVATE rows unless shared, because visibilityClause only bypasses for OWNER and SUPER_ADMIN; the detail now matches the list, which already behaved this way; whether that is the intended product rule is for the owner"
+    detail: "an ADMIN without explicit permissionScopes cannot open other members' PRIVATE rows unless shared, because visibilityClause only bypasses for OWNER and SUPER_ADMIN; the detail and dossier now match the list, which already behaved this way; whether that is the intended product rule is for the owner"
+
+residual_risks:
+  - system-context callers (automation, the flow executor, the KEY adapter) still read any contact of the tenant with no actor; that is their existing contract and is outside this packet
+  - the fix bounds the detail and dossier rows only; the sibling routes in CV-F3 are unchanged
+  - the hosted suite's identity attachment is a header over the real user row, not a verified token; token verification is the Supabase middleware's responsibility and is covered by its own tests
+  - the real-database suite shares the CI database with the other real-database suites; its rows are prefixed tcv_ and hard-deleted before and after, so a parallel suite seeing them is the only overlap, and none reads that prefix
+  - the dossier's three collaborators still run for a permitted caller with businessId and contactId only, as before; their own row scoping is outside this packet
 
 deviations_from_packet:
-  - two pre-fix heads instead of one (e59856d0 for the detail route, this head for the dossier route the ruling added), each disclosed and each followed by its correction
+  - two pre-fix heads instead of one (e59856d0 for the detail route, 14977221 for the dossier route the ruling added), each disclosed and each followed by its correction; eight commits in total
   - the detail fix 4857780c was committed locally before this session read the ruling; it was not pushed until after CC-ACK-PRODUCT-CONTACTS-OWNERSHIP-002
   - the real-database negative controls were executed on the hosted CI database, not locally; BLOCKED locally, not a pass
+  - the Agent Control Worker Proof run at 14977221 was still in progress when the correction was pushed; the final head has its own run
   - no HawkScan run; the directive's gate for it is the hosted workflow at this head
 new_consumers_or_writers: []
 rollback_floor:
@@ -156,8 +223,10 @@ evidence_refs:
   - https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6512362341
   - https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6512387171
   - https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6512838291
+  - https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6512936707
   - https://github.com/SaCH-PRO/KEYFLOWOS/pull/190
   - https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/40983639335/job/123830718624
+  - https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/40987882526/job/123843907654
 
 scope_ledger:
   declared:
@@ -172,14 +241,14 @@ scope_ledger:
     - a draft PR with implementation and return artifacts; RETURN with the heads and ownership
   resolved:
     - characterization and consumer inventory
-    - the detail fix in the two product files
-    - the pre-fix negative controls for the detail route, observed on the hosted real database at e59856d0 and locally for the controller
-    - the dossier negative controls written and committed; observed locally for the controller
-    - local typecheck, lint and e2e
+    - the detail fix and the dossier correction in the two product files
+    - the pre-fix negative controls for both routes, observed on the hosted real database at e59856d0 and 14977221 and locally for the controller
+    - the real-database suite and the e2e regressions, written and committed
+    - local typecheck, lint and e2e at b8565e04
     - the draft PR; single-writer ownership confirmed and acknowledged
+    - the post-fix real-database result for the detail route at 14977221
   remaining:
-    - the hosted run at this head (dossier pre-fix evidence)
-    - the dossier correction, its artifact, the hosted runs at the final head, the RETURN
+    - the hosted runs at this head (the post-fix real-database result for the dossier) and the RETURN
   deferred: []
   dropped: []
   superseded: []
@@ -188,35 +257,35 @@ proof_matrix:
   - obligation: one failing pre-fix negative control, with the exact first failure recorded
     evidence_scope: semantic_head
     result: PROVEN
-    proof: the hosted test job 123830718624 at e59856d0 (previous_head_e59856d0) and the local run at 815e61ab; first failure contacts-visibility.integration.test.ts:379:50, contact tcv_cPrivOwner, expected 200 to be 404; the dossier control at this head is in negative_controls
+    proof: the hosted test job 123830718624 at e59856d0 (previous_head_e59856d0) and the local run at 815e61ab; first failure contacts-visibility.integration.test.ts:379:50, contact tcv_cPrivOwner, expected 200 to be 404; the dossier control at 14977221 (previous_head_14977221) and locally at 12c34b4a
   - obligation: record-level access is enforced before related rows are read, reusing resolveCrmAccess and visibilityClause, with no existence disclosure
     evidence_scope: semantic_head
-    result: PARTIAL
-    proof: the code at 4857780c reads the row through the same two helpers as the list and raises the same NotFoundException; the recorder and oracle cases ran pre-fix at e59856d0 (both failed there as intended) and run post-fix in the hosted job at this head
+    result: PROVEN
+    proof: the code at 4857780c reads the row through the same two helpers as the list and raises the same NotFoundException; the recorder, oracle and foreign-PRIVATE cases failed pre-fix at e59856d0 and held on the hosted real database at 14977221 with the same service code this head carries
   - obligation: post-fix tests on the real database through the HTTP guard path, without mocking the authorization boundary, covering the directive's cases
     evidence_scope: semantic_head
-    result: PENDING
-    proof: BLOCKED on this host (no PostgreSQL); the hosted test job at this head runs contacts-visibility.integration.test.ts for the detail cases, and the final head runs it for the dossier
+    result: PARTIAL
+    proof: the detail cases held on the hosted real database at 14977221 (26 of 28, every detail case); the two dossier cases run post-fix in the hosted job at this head and are reported in the RETURN; BLOCKED on this host (no PostgreSQL)
   - obligation: the dossier fails closed before its collaborators start, with a denial test proving they are never invoked
     evidence_scope: semantic_head
     result: PARTIAL
-    proof: the mocked denial case fails at this head as intended (463:54) and holds with the correction applied locally; the correction and its hosted real-database run are the next head
+    proof: the mocked denial case failed at 12c34b4a as intended (463:54) and holds at b8565e04 (20 of 20); the real-database dossier cases failed at 14977221 as intended and run post-fix in the hosted job at this head
   - obligation: preserved OWNER, admin, TEAM, SHARED, owned, explicitly shared and cross-tenant behaviour
     evidence_scope: semantic_head
-    result: PARTIAL
-    proof: the positive and guard-level cases held on the hosted real database pre-fix at e59856d0 (14 of 23) and the mocked file holds locally; the post-fix real-database run is at this head
+    result: PROVEN
+    proof: the positive and guard-level cases held on the hosted real database at e59856d0 (14 of 23) and at 14977221 (every detail case, 26 of 28, with the detail fix); the owner's and a member's own dossier cases run at this head
   - obligation: guarded controller regressions in crm.e2e.test.ts with the old cases retained
     evidence_scope: semantic_head
-    result: PARTIAL
-    proof: 17 of 20 at this head with the three dossier cases failing by design; the 11 pre-existing cases are unchanged
+    result: PROVEN
+    proof: 20 of 20 locally at b8565e04; the 11 pre-existing cases are unchanged and held at every head
   - obligation: focused existing tests, typecheck and lint, with honest disclosures
     evidence_scope: semantic_head
     result: PROVEN
-    proof: tsc --noEmit exit 0 and eslint at the main baseline counts; the real-database suite NOT_RUN locally is disclosed under tests.skipped
+    proof: tsc --noEmit exit 0 and eslint at the main baseline counts at b8565e04; the real-database suite NOT_RUN locally is disclosed under tests.skipped
   - obligation: no live consumer outside the write set needs an interface change
     evidence_scope: semantic_head
     result: PROVEN
-    proof: actorUserId is optional; every caller of CrmService.contactDetail compiles unchanged (tsc exit 0) and the system-context case held on the hosted real database at e59856d0
+    proof: actorUserId is optional; every caller of CrmService.contactDetail compiles unchanged (tsc exit 0) and the system-context case held on the hosted real database at e59856d0 and 14977221
   - obligation: every required workflow and the independent review at the PR head
     evidence_scope: exact_head
     result: PENDING
