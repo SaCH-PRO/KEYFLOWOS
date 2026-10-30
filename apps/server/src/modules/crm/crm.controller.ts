@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req, Res, Sse, UploadedFile, UseGuards, UseInterceptors, Logger } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req, Res, Sse, UnauthorizedException, UploadedFile, UseGuards, UseInterceptors, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Observable } from 'rxjs';
@@ -326,8 +326,16 @@ export class CrmController {
   getContactDetail(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.crmStats.contactDetail({ businessId, contactId });
+    // The caller's identity bounds the lookup: the detail row must satisfy the
+    // same CRM visibility the list applies. The guards above already refuse a
+    // request without a user; this keeps the route closed if they ever do not.
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return this.crmStats.contactDetail({ businessId, contactId, actorUserId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
