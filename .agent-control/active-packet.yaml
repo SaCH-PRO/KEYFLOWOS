@@ -3,16 +3,33 @@ directive_message_id: CG-DIR-PRODUCT-CONTACTS-VISIBILITY-001
 directive_comment_id: 6511958809
 authority_lineage:   # every ChatGPT authority message for this packet on #80, oldest first
   - CG-DIR-PRODUCT-CONTACTS-VISIBILITY-001   # 6511958809; NO_STATE_CHANGE; IMPLEMENTATION_AUTHORIZED; releases the bounded row-level visibility correction only
+  - CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001   # 6512387171; NO_STATE_CHANGE; names this worktree, ACK 6512133384, the impl branch and PR 190 as the sole writer; stops the cloud session (claude/elegant-curie-7azpsb at 740df74, retained read-only); adds the dossier route to the objective with a fail-closed ordering; write set unchanged; scope_changed true
 in_reply_to: implementer-contacts-v1-review-20261029
 ack_message_id: CC-ACK-PRODUCT-CONTACTS-VISIBILITY-001
 ack_comment_id: 6512133384
-current_authority_message_id: CG-DIR-PRODUCT-CONTACTS-VISIBILITY-001
-current_authority_comment_id: 6511958809
+ownership:   # CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001
+  review_message_id: CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001
+  review_comment_id: 6512387171
+  cloud_ack_comment_id: 6512085527
+  cloud_state_comment_id: 6512304034
+  cloud_stop_comment_id: 6512456746
+  retained_cloud_branch: claude/elegant-curie-7azpsb
+  retained_cloud_head: 740df74e4b87d9839867245739564c9bf7941087
+  ack_message_id: CC-ACK-PRODUCT-CONTACTS-OWNERSHIP-002
+  ack_comment_id: 6512838291
+  writer: >
+    The worker session in worktree CG-DIR-PRODUCT-CONTACTS-VISIBILITY-001 is
+    the sole writer. The cloud branch is reference only; nothing from it is
+    fetched, grafted or cherry-picked. Pushes are plain fast-forwards.
+current_authority_message_id: CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001
+current_authority_comment_id: 6512387171
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 implementation_branch: impl/kf-product-contacts-visibility-001
+pr_number: 190
 state: PROVING
 health: YELLOW
-scope_changed: false
+scope_changed: true
+scope_change_authority: CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001
 production_touched: false
 provider_traffic: false
 programme_credit: ZERO
@@ -23,15 +40,18 @@ objective: >
   Contacts pilot, bounded row-level visibility security correction only. Make an
   ordinary STAFF member who can access the CRM module but is not authorized to
   view another person's PRIVATE or unshared owned contact fail closed on GET
-  contact detail, while preserving legitimate OWNER, admin, TEAM, SHARED, owned,
-  explicitly shared and cross-tenant behaviour. The gap is code-confirmed on main
-  b1948d27: the GET detail route calls CrmStatsService.contactDetail without
-  actor identity, and its assertContact filters by businessId, id and deletedAt
-  only. This packet does not advance the 35-packet programme, reset the active
-  AUTH packet, grant a merge, approve a deployment or alter any worker lock.
+  contact detail and, by CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001, on GET contact
+  dossier, while preserving legitimate OWNER, admin, TEAM, SHARED, owned,
+  explicitly shared and cross-tenant behaviour. The dossier check fails closed
+  before the journey, AI-insight and health lookups start. The gap is
+  code-confirmed on main b1948d27: both routes call CrmStatsService.contactDetail
+  without actor identity, and its assertContact filters by businessId, id and
+  deletedAt only. This packet does not advance the 35-packet programme, reset
+  the active AUTH packet, grant a merge, approve a deployment or alter any
+  worker lock.
 
 evidence:
-  route: apps/server/src/modules/crm/crm.controller.ts, blob 7074e121 lines 322-330
+  route: apps/server/src/modules/crm/crm.controller.ts, blob 7074e121 lines 322-330 (detail) and 1489-1511 (dossier)
   service: apps/server/src/modules/crm/crm-stats.service.ts, blob f381a383 lines 149-158 and 571-573
   permissions: apps/server/src/modules/crm/crm-permissions.helper.ts (resolveCrmAccess, visibilityClause)
   classification: within-tenant row-level authorization gap, confirmed by code reading; not an executed exploit and not a cross-tenant bypass
@@ -40,7 +60,7 @@ evidence:
     - https://github.com/SaCH-PRO/KEYFLOWOS/blob/docs/keyflow-reconstruction-20261029/docs/reconstruction/product/DECISION-LEDGER-CONTACTS-001.md
 
 allowed_scope:
-  - apps/server/src/modules/crm/crm.controller.ts
+  - apps/server/src/modules/crm/crm.controller.ts (the detail route and, by the ruling, the dossier route)
   - apps/server/src/modules/crm/crm-stats.service.ts
   - apps/server/test/crm.e2e.test.ts (add or repair guarded controller regressions, retaining the old cases)
   - apps/server/test/contacts-visibility.integration.test.ts (one new real-database integration test using the existing DATABASE_URL and pgvector fixture conventions, synthetic scoped identities and cleanup)
@@ -48,19 +68,22 @@ allowed_scope:
 
 read_only_scope:
   - CRM permission helpers, tenant and Prisma extensions, membership and identity models, UI and API, existing integration fixtures, control and test configuration
+  - the retained cloud branch claude/elegant-curie-7azpsb, as an implementation reference only
 
 prohibited_scope:
   - apps/server/src/modules/crm/crm-permissions.helper.ts (no modification without a fresh directive)
   - apps/server/src/modules/crm/dto/create-contact.dto.ts and any firstName requirement (DEC-CONTACTS-001 pending operator approval)
   - apps/server/src/modules/crm/crm.service.ts and privacy/contact-audit.service.ts audit semantics (DEC-CONTACTS-002 pending operator approval)
   - a duplicate CRM module, a new schema or migration, a new API path, a new authorization source, new PR or worker infrastructure, third-party dependencies
-  - a broad route or privacy sweep beyond the two named owners; a full Contacts CRUD rewrite
+  - any route beyond the detail and dossier routes; a full Contacts CRUD rewrite
   - PR 155, PR 184, PR 185 and the active meta packets
   - production, staging or production deploy, real or paid provider traffic, unsafe DB writes, branch rebase or force push, task reallocation
+  - grafting or cherry-picking the cloud branch; a second PR
   - merge, ready transition, grant, release, HOLD clear, programme credit
 
 invariants:
-  - record-level access for detail is enforced before related events, notes, tasks, invoices or bookings are fetched
+  - record-level access for detail and dossier is enforced before related events, notes, tasks, invoices or bookings are fetched
+  - the dossier awaits authorization and the visible detail first; a denied request never invokes the journey, AI-insight or health collaborators
   - the detail path reuses resolveCrmAccess and visibilityClause; no independent rule is invented
   - a forbidden PRIVATE record is not disclosed; the established not-found policy is preserved
   - OWNER, admin, TEAM, SHARED, owned, explicitly shared and cross-tenant behaviour is preserved
@@ -71,13 +94,15 @@ proof_obligations:
   - one failing pre-fix negative control, with the exact first failure recorded
   - fresh post-fix tests on the real database through the HTTP guard path where feasible, without mocking the authorization boundary
   - "cases: OWNER and ADMIN, STAFF view-all with another's TEAM, STAFF owned-view, PRIVATE owned and foreign, explicit shares, no membership, read-only scope, another tenant, deleted contacts, sensitive linked child rows; forbidden detail fails while permitted list and detail stay consistent"
+  - a dossier denial test proving forbidden requests never invoke the journey, AI-insight and health collaborators
   - focused existing tests, typecheck and the required CI with honest skipped and NOT_RUN disclosures
   - exact fixtures and database environment recorded; production never connected to or mutated
-  - tests, branch and commit SHAs, evidence, scope ledger, security and review findings and the remaining blocked CT-P01 to CT-P12 items recorded
+  - tests, branch and commit SHAs, evidence, scope ledger, branch and worktree ownership, security and review findings and the remaining blocked CT-P01 to CT-P12 items recorded
   - a small DRAFT PR against main with implementation and return artifacts; RETURN with exact semantic and artifact heads and current CI evidence
 
 stop_conditions:
   - main moves off source_main, a relevant HOLD applies, authority is ambiguous, or the branch or worktree conflicts with existing ownership (CONTRADICTION, no mutation)
+  - the cloud writer is active again, or the PR head moves without this session (CONTRADICTION, no mutation)
   - another live consumer requires an interface change outside the approved write set (bounded expansion request, no change)
   - scope, proof, branch head or authority changes (one bounded CONTRADICTION)
   - production access or provider traffic would be required
