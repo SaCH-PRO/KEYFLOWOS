@@ -54,6 +54,11 @@
       "packet": "R0-13-CT-PERSISTENCE-PROOF"
     },
     {
+      "prefix": "k13b_",
+      "owner": "apps/server/test/contacts-import-write-scope.integration.test.ts",
+      "packet": "R0-13 / R0-13b-CT-IMPORT-ACTOR"
+    },
+    {
       "prefix": "k17a_",
       "owner": "apps/server/test/payments-manual.integration.test.ts",
       "packet": "R0-17-PAYMENT-TX-INTEGRITY"
@@ -228,10 +233,6 @@
     {
       "file": "apps/server/test/token-encryption-coverage.integration.test.ts",
       "reason": "Reads schema.prisma and the encryption extension's coverage; touches no rows."
-    },
-    {
-      "file": "apps/server/test/contacts-import-write-scope.integration.test.ts",
-      "reason": "Holds only it.todo hand-offs from R0-13 (import routes pass no actor: ST-1/ST-2); it writes no fixtures. It gets a registered prefix when its cases become real."
     }
   ]
 }
