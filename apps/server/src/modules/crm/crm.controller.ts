@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req, Res, Sse, UploadedFile, UseGuards, UseInterceptors, Logger } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req, Res, Sse, UnauthorizedException, UploadedFile, UseGuards, UseInterceptors, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Observable } from 'rxjs';
@@ -328,8 +328,14 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    // Record-level visibility: the actor is applied in the row query (KF-PRODUCT-CONTACTS-PILOT-001).
-    return this.crmStats.contactDetail({ businessId, contactId, actorUserId: req?.user?.id });
+    // The caller's identity bounds the lookup: the detail row must satisfy the
+    // same CRM visibility the list applies. The guards above already refuse a
+    // request without a user; this keeps the route closed if they ever do not.
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return this.crmStats.contactDetail({ businessId, contactId, actorUserId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1494,9 +1500,15 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    const [detail, story, insight, health] = await Promise.all([
-      // Same record-level visibility as the detail route; a hidden record fails the whole dossier closed.
-      this.crmStats.contactDetail({ businessId, contactId, actorUserId: req?.user?.id }),
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    // Authorization and the visible row come first. A request the caller may
+    // not make never starts the journey, AI-insight or health lookups, which
+    // read the same contact's related data.
+    const detail = await this.crmStats.contactDetail({ businessId, contactId, actorUserId });
+    const [story, insight, health] = await Promise.all([
       this.journey.getContactCrossJourney(businessId, contactId),
       this.journey.generateAiInsight(businessId, contactId),
       this.journey.getContactHealthMetrics(businessId, contactId),

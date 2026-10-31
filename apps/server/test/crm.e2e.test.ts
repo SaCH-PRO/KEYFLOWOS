@@ -94,23 +94,29 @@ const crmServiceMock = {
   addTask: vi.fn(),
 };
 
-// CrmStatsService is mocked here on purpose: this file proves routing, guards and
-// what the controller forwards, not persistence or the record-level visibility
-// predicate. The real predicate over a real database is proved separately in
-// contacts-visibility.integration.test.ts (KF-PRODUCT-CONTACTS-PILOT-001).
+const flowServiceMock = {
+  getFlowIntelligence: vi.fn().mockResolvedValue({ insights: [] }),
+};
+
+// Mocked: these cases prove what the CONTROLLER hands the detail service and
+// how it surfaces the service's answer. The row-level rule itself is proven
+// against the real database in contacts-visibility.integration.test.ts.
+const detailPayload = () => ({
+  contact: { id: 'contact_1', businessId: 'biz_1', visibility: 'PRIVATE' },
+  events: [], notes: [], tasks: [], invoices: [], bookings: [], customFieldValues: [],
+  meta: {},
+});
 const crmStatsMock = {
   getCacheMetrics: () => ({}),
   contactDetail: vi.fn(),
 };
 
+// The dossier's collaborators. Recording stubs: the claim under test is that a
+// denied dossier never invokes them, not what they compute.
 const journeyMock = {
-  getContactCrossJourney: vi.fn().mockResolvedValue({ summary: 'stub', timeline: [] }),
-  generateAiInsight: vi.fn().mockResolvedValue(null),
-  getContactHealthMetrics: vi.fn().mockResolvedValue({}),
-};
-
-const flowServiceMock = {
-  getFlowIntelligence: vi.fn().mockResolvedValue({ insights: [] }),
+  getContactCrossJourney: vi.fn(),
+  generateAiInsight: vi.fn(),
+  getContactHealthMetrics: vi.fn(),
 };
 
 const subscriptionsMock = {
@@ -163,7 +169,11 @@ describe('CRM e2e', () => {
 
     app = moduleRef.createNestApplication();
     app.use((req: any, _res: any, next: any) => {
-      req.user = { id: 'user_1', role: 'OWNER' };
+      // `x-test-anonymous: 1` leaves the request without an identity, as the
+      // real AuthMiddleware does for a missing or invalid token.
+      if (req.headers['x-test-anonymous'] !== '1') {
+        req.user = { id: 'user_1', role: 'OWNER' };
+      }
       next();
     });
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
@@ -181,6 +191,10 @@ describe('CRM e2e', () => {
       crmServiceMock.contacts.filter((c: any) => c.businessId === input.businessId),
     );
     flowServiceMock.getFlowIntelligence.mockResolvedValue({ insights: [] });
+    crmStatsMock.contactDetail.mockImplementation(async () => detailPayload());
+    journeyMock.getContactCrossJourney.mockResolvedValue({ summary: 'journey-summary', timeline: [] });
+    journeyMock.generateAiInsight.mockResolvedValue(null);
+    journeyMock.getContactHealthMetrics.mockResolvedValue({ score: 1 });
     subscriptionsMock.checkLimit.mockResolvedValue({
       allowed: true,
       current: 0,
@@ -347,60 +361,117 @@ describe('CRM e2e', () => {
     expect(flowServiceMock.getFlowIntelligence).toHaveBeenCalledWith('biz_1');
   });
 
-  // KF-PRODUCT-CONTACTS-PILOT-001: the detail and dossier routes must hand the
-  // authenticated actor to CrmStatsService.contactDetail so record-level
-  // visibility (resolveCrmAccess + visibilityClause) can be applied in the row
-  // query. Before the correction both routes passed only { businessId, contactId }.
-  describe('contact detail routes forward the authenticated actor for record-level visibility', () => {
-    const detail = {
-      contact: { id: 'contact_7', businessId: 'biz_1', visibility: 'TEAM' },
-      events: [], notes: [], tasks: [], invoices: [], bookings: [], meta: null, customFieldValues: [],
-    };
-
-    it('GET contact detail passes req.user.id as actorUserId', async () => {
-      crmStatsMock.contactDetail.mockResolvedValueOnce(detail);
+  // KF-PRODUCT-CONTACTS-PILOT-001: the guarded detail route. Mocked service;
+  // the real row-level rule is contacts-visibility.integration.test.ts.
+  describe('GET contact detail (guarded controller regressions)', () => {
+    it('hands the authenticated actor to the detail service', async () => {
       const res = await request(app.getHttpServer())
-        .get('/crm/businesses/biz_1/contacts/contact_7')
+        .get('/crm/businesses/biz_1/contacts/contact_1')
         .expect(200);
-      expect(res.body.contact.id).toBe('contact_7');
+      expect(res.body.contact.id).toBe('contact_1');
       expect(crmStatsMock.contactDetail).toHaveBeenCalledTimes(1);
       expect(crmStatsMock.contactDetail).toHaveBeenCalledWith({
         businessId: 'biz_1',
-        contactId: 'contact_7',
+        contactId: 'contact_1',
         actorUserId: 'user_1',
       });
     });
 
-    it('GET contact dossier passes req.user.id as actorUserId', async () => {
-      crmStatsMock.contactDetail.mockResolvedValueOnce({ ...detail, contact: { ...detail.contact, id: 'contact_8' } });
-      const res = await request(app.getHttpServer())
-        .get('/crm/businesses/biz_1/contacts/contact_8/dossier')
+    it('still reaches the detail service, with the actor, for a read-only member', async () => {
+      prisma.memberships = [
+        { userId: 'user_1', businessId: 'biz_1', role: 'STAFF', permissionScopes: { crm: 'read' } },
+      ];
+      await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_1')
         .expect(200);
-      expect(res.body.contact.id).toBe('contact_8');
-      expect(crmStatsMock.contactDetail).toHaveBeenCalledWith({
-        businessId: 'biz_1',
-        contactId: 'contact_8',
-        actorUserId: 'user_1',
-      });
+      expect(crmStatsMock.contactDetail).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: 'biz_1', contactId: 'contact_1', actorUserId: 'user_1' }),
+      );
     });
 
-    it('GET contact detail fails closed as 404 with no record fields when the service hides the record', async () => {
+    it('surfaces the service not-found as 404 without a record in the body', async () => {
       crmStatsMock.contactDetail.mockRejectedValueOnce(new NotFoundException('Contact not found'));
       const res = await request(app.getHttpServer())
         .get('/crm/businesses/biz_1/contacts/contact_private')
         .expect(404);
-      expect(res.body.contact).toBeUndefined();
-      expect(res.body.notes).toBeUndefined();
-      expect(res.body.meta).toBeUndefined();
+      expect(res.body.message).toBe('Contact not found');
+      expect(res.body).not.toHaveProperty('contact');
+      expect(res.body).not.toHaveProperty('notes');
     });
 
-    it('GET contact dossier fails closed as 404 when the underlying detail is hidden', async () => {
+    it('does not reach the detail service for a non-member', async () => {
+      prisma.memberships = [];
+      await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_1')
+        .expect(403);
+      expect(crmStatsMock.contactDetail).not.toHaveBeenCalled();
+    });
+
+    it('does not reach the detail service when no identity is attached', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_1')
+        .set('x-test-anonymous', '1');
+      expect([401, 403]).toContain(res.status);
+      expect(crmStatsMock.contactDetail).not.toHaveBeenCalled();
+    });
+
+    it('the handler itself refuses a request that carries no user id, even if every guard were bypassed', async () => {
+      const stubs = Array.from({ length: 18 }, () => ({}));
+      const controller = new (CrmController as any)(...stubs);
+      await expect(
+        Promise.resolve().then(() => controller.getContactDetail('biz_1', 'contact_1', { user: undefined })),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        Promise.resolve().then(() => controller.getContactDetail('biz_1', 'contact_1', { user: {} })),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        Promise.resolve().then(() => controller.getContactDossier('biz_1', 'contact_1', { user: undefined })),
+      ).rejects.toMatchObject({ status: 401 });
+    });
+  });
+
+  // KF-PRODUCT-CONTACTS-PILOT-001, CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001: the
+  // dossier route shares the detail service. Mocked; the real-database proof
+  // is contacts-visibility.integration.test.ts.
+  describe('GET contact dossier (guarded controller regressions)', () => {
+    it('hands the actor to the detail service and only then consults the journey collaborators', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_1/dossier')
+        .expect(200);
+      expect(res.body.contact.id).toBe('contact_1');
+      expect(res.body.summary).toBe('journey-summary');
+      expect(crmStatsMock.contactDetail).toHaveBeenCalledWith({
+        businessId: 'biz_1',
+        contactId: 'contact_1',
+        actorUserId: 'user_1',
+      });
+      for (const fn of [journeyMock.getContactCrossJourney, journeyMock.generateAiInsight, journeyMock.getContactHealthMetrics]) {
+        expect(fn).toHaveBeenCalledTimes(1);
+        expect(fn).toHaveBeenCalledWith('biz_1', 'contact_1');
+      }
+    });
+
+    it('a dossier the detail service refuses is 404, carries no record, and never invokes the journey collaborators', async () => {
       crmStatsMock.contactDetail.mockRejectedValueOnce(new NotFoundException('Contact not found'));
       const res = await request(app.getHttpServer())
         .get('/crm/businesses/biz_1/contacts/contact_private/dossier')
         .expect(404);
-      expect(res.body.contact).toBeUndefined();
-      expect(res.body.notes).toBeUndefined();
+      expect(res.body.message).toBe('Contact not found');
+      for (const key of ['contact', 'notes', 'tasks', 'meta', 'summary', 'timeline', 'insight', 'health']) {
+        expect(res.body).not.toHaveProperty(key);
+      }
+      expect(journeyMock.getContactCrossJourney).not.toHaveBeenCalled();
+      expect(journeyMock.generateAiInsight).not.toHaveBeenCalled();
+      expect(journeyMock.getContactHealthMetrics).not.toHaveBeenCalled();
+    });
+
+    it('does not reach the detail service or the collaborators for a non-member', async () => {
+      prisma.memberships = [];
+      await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/contact_1/dossier')
+        .expect(403);
+      expect(crmStatsMock.contactDetail).not.toHaveBeenCalled();
+      expect(journeyMock.getContactCrossJourney).not.toHaveBeenCalled();
     });
   });
 });
