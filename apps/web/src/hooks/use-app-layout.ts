@@ -14,6 +14,7 @@ import {
   refreshWorkspace,
   getCachedBusiness,
   isSuperAdmin,
+  BUSINESS_CHANGED_EVENT,
 } from "@/lib/workspace";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import {
@@ -303,11 +304,19 @@ export function useAppLayout(): AppLayoutState {
       }
     };
     init();
+    // Once per mount, not per pathname: re-resolving on every navigation is
+    // what used to put a chosen business back to the bootstrap default (M03).
+    // A deliberate switch (selectBusiness) announces itself instead.
+    const onBusinessChanged = () => {
+      void init();
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
     return () => {
       canceled = true;
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, router]);
+  }, []);
 
   const fetchNotifications = useCallback(async () => {
     const businessId = getStoredBusinessId();

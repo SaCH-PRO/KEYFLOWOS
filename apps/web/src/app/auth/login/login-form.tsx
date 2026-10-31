@@ -21,7 +21,13 @@ import {
   Loader2,
 } from "lucide-react";
 import { bootstrapIdentity, identityLogin, identityResendVerification } from "@/lib/client";
-import { setStoredToken, setStoredBusinessId, setStoredRefreshToken } from "@/lib/workspace";
+import {
+  setStoredToken,
+  setStoredBusinessId,
+  setStoredRefreshToken,
+  getStoredBusinessId,
+  restoreBusinessChoice,
+} from "@/lib/workspace";
 import {
   generateCodeVerifier,
   generateCodeChallenge,
@@ -158,6 +164,9 @@ export default function LoginForm() {
       }
       const draft = JSON.parse(window.localStorage.getItem("kf_profile_draft") || "{}");
       const referralCode = window.localStorage.getItem("kf_referral_code") || undefined;
+      // Bootstrap answers with the oldest owned business and stores it; keep
+      // the business this browser had chosen when it is still a membership.
+      const previousBusinessId = getStoredBusinessId();
       const bootstrap = await bootstrapIdentity({
         email, firstName: draft.firstName, lastName: draft.lastName,
         phone: draft.phone, company: draft.company, username: draft.username,
@@ -165,6 +174,7 @@ export default function LoginForm() {
       });
       if (bootstrap.data?.business?.id) {
         setStoredBusinessId(bootstrap.data.business.id);
+        if (!bootstrap.data.isNewBusiness) await restoreBusinessChoice(previousBusinessId);
       } else if (bootstrap.error) { throw new Error(bootstrap.error); }
       else { throw new Error("Could not create workspace. Please try again."); }
       router.push(fromPath);
