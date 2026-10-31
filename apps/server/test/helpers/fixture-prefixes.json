@@ -174,6 +174,11 @@
       "legacy": true
     },
     {
+      "prefix": "v21a_",
+      "owner": "apps/server/test/structure-authority-ceiling.integration.test.ts",
+      "packet": "V1-21-AUTH-JOBROLE-CEILING"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

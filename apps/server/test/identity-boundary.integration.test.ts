@@ -73,9 +73,13 @@
  *         role route. The invite is now bounded by the inviter's own authority
  *         (identity.service.ts inviteTeamMember): above it, 403 and nothing is
  *         created; the OWNER and a SUPER_ADMIN are not bounded.
- *   CR-1  the structure routes copy a JobRole's permissions and tier onto any
- *         membership in the business, the caller's own included
- *         (structure.service.ts createAssignment; V1-21).
+ *   CR-1  FIXED by V1-21-AUTH-JOBROLE-CEILING (its cases assert the required
+ *         behaviour; see "CR-1 (fixed …)" below). The structure routes copied
+ *         a JobRole's permissions and tier onto any membership in the
+ *         business, the caller's own included (structure.service.ts
+ *         createAssignment). A JobRole is now vocabulary-validated and bounded
+ *         by its author, and an assignment's sync by the assigner's own
+ *         authority: above it, 403 and nothing changes.
  *   ST-2  FIXED by R0-ID-F2-ADMIN-TOKEN-LOCAL-USER (its cases assert the
  *         required behaviour; see "ST-2 (fixed …)" below). The admin-token
  *         branch attached verifyAdminToken's result directly: no revocation
@@ -230,7 +234,7 @@ const ID = {
   staffC: `${P}staffC`,           // STAFF of bizD: { crm: read, crm_view: owned, crm_edit/crm_delete: none, crm_reassign: false } (ST-F3)
   adminW: `${P}adminW`,           // ADMIN of bizD restricted by the OWNER: { crm: read, team: write }, tier 0 (ST-F4 fix)
   accomplice: `${P}accomplice`,   // User row only; adminW's invite of it is refused, the OWNER's succeeds (ST-F4 fix)
-  adminJ: `${P}adminJ`,           // ADMIN of bizD, role-default scopes (team: write) (OPEN DEFECT CR-1)
+  adminJ: `${P}adminJ`,           // ADMIN of bizD, role-default scopes (team: write) (CR-1 fix)
   staffD: `${P}staffD`,           // STAFF of bizD, role-default scopes (settings: none) (ST-3)
   adminS: `${P}adminS`,           // ADMIN of bizD, ADMIN defaults with settings: write (ST-3 fix, D-11 owner-only)
   relogin: `${P}relogin`,         // STAFF of bizD; logs out, then the login marker clear (ST-4)
@@ -379,7 +383,7 @@ const routes = {
   crmContacts: (id: string) => `/crm/businesses/${id}/contacts?take=5`,
   /** A read gated on settings:read (IntelligenceController.listRules). */
   settingsRead: (id: string) => `/intelligence/businesses/${id}/rules`,
-  /** Structure routes, gated on team:write (OPEN DEFECT CR-1). */
+  /** Structure routes, gated on team:write (CR-1, fixed by V1-21-AUTH-JOBROLE-CEILING). */
   orgUnits: (id: string) => `/structure/businesses/${id}/org-units`,
   jobRoles: (id: string) => `/structure/businesses/${id}/job-roles`,
   assignments: (id: string) => `/structure/businesses/${id}/assignments`,
@@ -467,7 +471,7 @@ async function cleanup() {
     `DELETE FROM autopilot_settings WHERE business_id LIKE ${LIKE_P}`,
     // PATCH /identity/businesses/:id mirrors some fields into the blueprint (ST-3 case avoids them; defensive).
     `DELETE FROM business_blueprints WHERE business_id LIKE ${LIKE_P}`,
-    // OPEN DEFECT CR-1 creates an org unit, a job role and an assignment in bizD.
+    // The CR-1 cases create an org unit and job roles in bizD (and, were the fix to regress, an assignment).
     `DELETE FROM org_assignments WHERE business_id LIKE ${LIKE_P}`,
     `DELETE FROM job_roles WHERE business_id LIKE ${LIKE_P}`,
     `DELETE FROM org_units WHERE business_id LIKE ${LIKE_P}`,
@@ -1063,8 +1067,8 @@ describe('team routes — ModuleScopeGuard over the real membership rows', () =>
 // and self-target. The review repairs after this block extend the same rules
 // to PATCH .../permissions; of the two sibling team:write paths that reached
 // the ST-1 outcome, the invite is closed (ST-F4, fixed by
-// V1-07-AUTH-INVITE-CEILING) and structure assignments are pinned as OPEN
-// DEFECT CR-1, both at the end of this file.
+// V1-07-AUTH-INVITE-CEILING) and so are structure job roles and assignments
+// (CR-1, fixed by V1-21-AUTH-JOBROLE-CEILING), both at the end of this file.
 // ---------------------------------------------------------------------------
 
 /** The membership row exactly as Postgres stores it, so "unchanged" means byte-identical. */
@@ -2061,11 +2065,17 @@ describe('OPEN DEFECT CR-2 — logout never revokes the Supabase sessions', () =
 // it.todo is gone; the OWNER positive control shows the invite is bounded, not
 // closed.
 //
-// OPEN DEFECT CR-1 — the ST-1 outcome through the sibling team:write structure
-// routes (R0-ID-F1-ROLE-ROUTE-AUTHORITY review); its fix belongs to the queued
-// V1-21-AUTH-JOBROLE-CEILING. The reproduction pins today's behaviour and turns
-// red when its fix lands. Both blocks run last and use their own fixtures
-// (adminW, accomplice, adminJ), because CR-1 leaves adminJ escalated.
+// CR-1 — FIXED by V1-21-AUTH-JOBROLE-CEILING. The "OPEN DEFECT CR-1
+// reproduced" case pinned the ST-1 outcome through the sibling team:write
+// structure routes (R0-ID-F1-ROLE-ROUTE-AUTHORITY review): a default ADMIN
+// (adminJ) authored a JobRole with team:admin at tier 4 and assigned it to
+// itself, then passed the role route's team:admin gate. It now asserts the
+// behaviour its it.todo required (each step refused with 403, the membership
+// byte-identical) and the it.todo is gone. The OWNER positive control shows
+// the job-role route is bounded, not closed; the DTO case proves the
+// vocabulary at the built server's ValidationPipe. The full case matrix is in
+// structure-authority-ceiling.integration.test.ts. Both blocks run last and
+// use their own fixtures (adminW, accomplice, adminJ).
 // ---------------------------------------------------------------------------
 /** A User created by an invite has a generated id, so it is found by its (prefixed) email. */
 const freshInviteEmail = (tag: string) => email(`${P}invite_${tag}`);
@@ -2141,42 +2151,61 @@ describe('ST-F4 (fixed, V1-07-AUTH-INVITE-CEILING) — the invite route applies 
   });
 });
 
-describe('OPEN DEFECT CR-1 — the structure routes (team:write) copy a JobRole’s permissions and tier onto any membership, the caller’s own included', () => {
-  it('OPEN DEFECT CR-1 reproduced — a default ADMIN (team:write) raises itself to team:admin at tier 4 through job-roles + assignments, then passes the gate this packet added', async () => {
+describe('CR-1 (fixed, V1-21-AUTH-JOBROLE-CEILING) — the structure routes (team:write) cannot copy a JobRole above the caller onto any membership, the caller’s own included', () => {
+  it('CR-1 — a default ADMIN (team:write) tries to raise itself to team:admin at tier 4 through job-roles + assignments: each step 403, its membership byte-identical, and the role route still refuses it', async () => {
     const t = T[ID.adminJ];
     // Before: the role route is closed to a team:write member.
     const before = await call('patch', routes.member(ID.bizD, ID.mStaffP), t, { role: 'STAFF' });
     expect(before.status, JSON.stringify(before.body)).toBe(403);
+    const adminJBefore = await membershipRowText(ID.mAdminJ);
 
     const unit = await call('post', routes.orgUnits(ID.bizD), t, { name: `${P}unit_cr1` });
     expect(unit.status, JSON.stringify(unit.body)).toBe(201);
+    // 1. Authoring the escalation is refused: a JobRole is bounded by its author.
     const jobRole = await call('post', routes.jobRoles(ID.bizD), t, {
       name: `${P}jobrole_cr1`,
       permissions: { ...ROLE_DEFAULT_SCOPES.OWNER },
       defaultApprovalTier: 4,
     });
-    expect(jobRole.status, JSON.stringify(jobRole.body)).toBe(201);
+    expect(jobRole.status, JSON.stringify(jobRole.body)).toBe(403);
+    expect(JSON.stringify(jobRole.body)).toContain('You cannot grant more authority than your own');
+    expect(await db.jobRole.count({ where: { businessId: ID.bizD, name: `${P}jobrole_cr1` } })).toBe(0);
+
+    // 2. The same role authored by the OWNER is created (positive control: bounded, not closed) ...
+    const ownerRole = await call('post', routes.jobRoles(ID.bizD), T[ID.ownerD], {
+      name: `${P}jobrole_cr1_owner`,
+      permissions: { ...ROLE_DEFAULT_SCOPES.OWNER },
+      defaultApprovalTier: 4,
+    });
+    expect(ownerRole.status, JSON.stringify(ownerRole.body)).toBe(201);
+    // ... and the ADMIN still cannot sync it onto its own membership.
     const assign = await call('post', routes.assignments(ID.bizD), t, {
       membershipId: ID.mAdminJ,
       userId: ID.adminJ,
       orgUnitId: unit.body.id,
-      jobRoleId: jobRole.body.id,
+      jobRoleId: ownerRole.body.id,
     });
-    expect(assign.status, JSON.stringify(assign.body)).toBe(201);
+    expect(assign.status, JSON.stringify(assign.body)).toBe(403);
+    expect(JSON.stringify(assign.body)).toContain('You cannot grant more authority than your own');
+    expect(await membershipRowText(ID.mAdminJ)).toBe(adminJBefore);
+    expect(await db.orgAssignment.count({ where: { membershipId: ID.mAdminJ } })).toBe(0);
 
-    const row = await db.membership.findUnique({ where: { id: ID.mAdminJ } });
-    expect(row.permissionScopes).toMatchObject({ team: 'admin' });
-    expect(row.maxApprovalTier).toBe(4);
-    // After: team:admin at tier 4 — the role route now admits it.
+    // After: still team:write at tier 3, so the role route still refuses it, and so does its self-target (ST-F1).
     const after = await call('patch', routes.member(ID.bizD, ID.mStaffP), t, { role: 'STAFF' });
-    expect(after.status, JSON.stringify(after.body)).toBe(200);
-    // The identity routes still refuse its self-target (ST-F1 holds); the escalation came from elsewhere.
+    expect(after.status, JSON.stringify(after.body)).toBe(403);
     expect((await call('patch', routes.perms(ID.bizD, ID.mAdminJ), t, { scopes: { crm: 'read' }, maxApprovalTier: 0 })).status).toBe(403);
   });
 
-  it.todo(
-    'REQUIRED (V1-21-AUTH-JOBROLE-CEILING; structure.service.ts, structure.controller.ts, job-role DTOs — outside this write set): JobRole ' +
-      'permissions are vocabulary-validated and capped by the grantor, and an assignment cannot sync a JobRole above the assigner’s own ' +
-      'authority onto a membership, nor onto the assigner’s own — the escalation above answers 403 with the membership unchanged',
-  );
+  it('CR-1 — the built server refuses a JobRole outside the canonical vocabulary at its ValidationPipe, for the OWNER too: a KEY tool-family key, a level that is not one, a tier above 4 (400, nothing created)', async () => {
+    const name = `${P}jobrole_cr1_invalid`;
+    for (const body of [
+      { name, permissions: { finance: 'write' } },
+      { name, permissions: { crm: 'owner' } },
+      { name, permissions: { crm: 'read' }, defaultApprovalTier: 5 },
+    ]) {
+      const res = await call('post', routes.jobRoles(ID.bizD), T[ID.ownerD], body);
+      expect(res.status, `${JSON.stringify(body)} -> ${JSON.stringify(res.body)}`).toBe(400);
+    }
+    expect(await db.jobRole.count({ where: { businessId: ID.bizD, name } })).toBe(0);
+  });
 });
