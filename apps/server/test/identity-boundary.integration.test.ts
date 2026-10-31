@@ -41,8 +41,11 @@
  * The child also gets a test-only ADMIN_JWT_SECRET so the second branch — the
  * admin-token fallback — is exercised too. Until R0-ID-F2-ADMIN-TOKEN-LOCAL-USER
  * AB-P02 did NOT hold there (ST-2 below); that branch now runs the same
- * resolveLocalUser checks, reads the role from the User row, and refuses a
- * subject with no User row.
+ * resolveLocalUser row checks (deletedAt, bannedAt), reads the role from the
+ * User row, and refuses a subject with no User row. Its logout revocation is
+ * the admin token's own issue-time cutoff (POST /api/admin/auth/logout), not
+ * the per-user marker POST /identity/logout sets (review finding F1: honouring
+ * that marker locked the admin out of every later admin login for 24h).
  *
  * OPEN DEFECTS (review of this packet; NOT fixed here — every fix is in source
  * outside this proof packet's write set, so each is reproduced by an
@@ -73,13 +76,22 @@
  *         required behaviour; see "ST-2 (fixed …)" below). The admin-token
  *         branch attached verifyAdminToken's result directly: no revocation
  *         marker, no deletedAt/bannedAt, role from the token
- *         (auth.middleware.ts).
+ *         (auth.middleware.ts). NOT CLOSED on two sibling paths, each pinned
+ *         below: POST /identity/logout does not revoke an admin token (ST-4,
+ *         admin tokens), and the KEY Cortex WebSocket admin-token path still
+ *         skips every local-user check (ST-2-WS).
+ *   ST-2-WS key-cortex-ws-auth.service.ts authenticateSocket takes the role
+ *         from an admin token and checks neither deletedAt, bannedAt nor the
+ *         marker, and verifyBusinessMembership lets SUPER_ADMIN into any
+ *         tenant's socket; its Supabase path falls back to USER on a DB error.
  *   ST-3  PATCH /identity/businesses/:id has no ModuleScopeGuard: a
  *         settings:none member rewrites the tenant profile
  *         (identity.controller.ts updateBusiness).
  *   ST-4  the revocation marker is per user with no iat cutoff and
  *         POST /identity/login deletes it, so a pre-logout token is admitted
- *         again after the next login (identity.controller.ts login).
+ *         again after the next login (identity.controller.ts login). For admin
+ *         tokens POST /identity/logout revokes nothing at all: it never writes
+ *         the admin cutoff (admin:user:<id>:revokedAt).
  *   CR-2  logout's Supabase global sign-out passes the user id where auth-js
  *         admin.signOut expects the user's access JWT, so it never revokes
  *         anything (identity.controller.ts logout, supabase-admin.service.ts
@@ -108,7 +120,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { existsSync, readFileSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createHmac } from 'node:crypto';
+import { createHmac, scryptSync } from 'node:crypto';
 import { config as loadEnv, parse as parseEnv, populate as populateEnv } from 'dotenv';
 import request from 'supertest';
 import { Redis } from 'ioredis';
@@ -131,6 +143,15 @@ const ENTRY = path.join(SERVER_DIR, 'dist', 'main.js');
 const JWT_SECRET = 'ab04-identity-boundary-test-jwt-secret-not-real';
 /** Test-only admin-token secret (enables the ST-2 branch). Distinct from JWT_SECRET. Not a real secret. */
 const ADMIN_JWT_SECRET = 'ab04-identity-boundary-test-admin-secret-not-real';
+/**
+ * Test-only admin login credentials for the adminTok fixture, so POST
+ * /api/admin/auth/login runs in the child (review finding F1: admin logout,
+ * then admin login). Hash format as AdminAuthService.verifyPassword reads it:
+ * `<salt>:<scrypt(password, salt, 64) hex>`. Not real credentials.
+ */
+const ADMIN_PASSWORD = 'ab04-identity-boundary-test-admin-password-not-real';
+const ADMIN_PASSWORD_SALT = 'ab04identityboundarysalt';
+const ADMIN_PASSWORD_HASH = `${ADMIN_PASSWORD_SALT}:${scryptSync(ADMIN_PASSWORD, ADMIN_PASSWORD_SALT, 64).toString('hex')}`;
 
 /**
  * PROVIDER ISOLATION OF THE CHILD (CR-1).
@@ -227,6 +248,8 @@ const email = (id: string) => `${id}@ab04.test.local`;
 /** CRM ownership sub-permissions restricting a member to "my book", with no reassign and no delete (ST-F3). */
 const CRM_OWNED_ONLY = { crm_view: 'owned', crm_edit: 'owned', crm_reassign: 'false', crm_delete: 'none' };
 const revocationKey = (userId: string) => `auth:revoked:user:${userId}`;
+/** The admin token's own issue-time cutoff, written by POST /api/admin/auth/logout (no TTL). */
+const adminCutoffKey = (userId: string) => `admin:user:${userId}:revokedAt`;
 const ALL_USERS = [
   ID.owner, ID.admin, ID.staff, ID.staffNoTeam, ID.ownerB, ID.deleted, ID.banned, ID.revoked, ID.noRow,
   ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin, ID.adminTok,
@@ -388,7 +411,15 @@ async function cleanup() {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort: cascades cover most of these */ }
   }
   if (redis) {
-    try { await redis.del(...ALL_USERS.map(revocationKey)); } catch { /* best-effort */ }
+    try { await redis.del(...ALL_USERS.map(revocationKey), ...ALL_USERS.map(adminCutoffKey)); } catch { /* best-effort */ }
+    // POST /api/admin/auth/login is limited to 5 a minute per IP (RateLimitGuard
+    // key rate_limit:<ip>:global:login); clear the loopback window this suite
+    // used so an immediate re-run is not refused with 429.
+    try {
+      const keys = await redis.keys('rate_limit:*:global:login');
+      const loopback = keys.filter((k: string) => k.includes('127.0.0.1') || k.includes(':::1:'));
+      if (loopback.length) await redis.del(...loopback);
+    } catch { /* best-effort */ }
   }
   const left = await db.$queryRawUnsafe(
     `SELECT (SELECT count(*)::int FROM businesses WHERE id LIKE ${LIKE_P}) AS businesses, ` +
@@ -468,6 +499,10 @@ function childEnv(port: number): Record<string, string> {
     // Every other case is unaffected: none of their tokens carries an
     // ADMIN_JWT_SECRET signature.
     ADMIN_JWT_SECRET,
+    // Admin login for the adminTok fixture only (F1 cases). validateCredentials
+    // matches this email and then reads the adminTok User row.
+    ADMIN_EMAIL: email(ID.adminTok),
+    ADMIN_PASSWORD_HASH,
     RATE_LIMIT_MAX_REQUESTS: '100000',
   };
 }
@@ -1255,11 +1290,19 @@ describe('ST-1 review repairs — PATCH .../permissions obeys the role route’s
 //
 // The three "OPEN DEFECT ST-2 reproduced" cases that pinned the defect were
 // rewritten to the behaviour their it.todo required: the admin-token fallback
-// of AuthMiddleware.use runs the same resolveLocalUser path as a Supabase
-// token (revocation marker, User.deletedAt, User.bannedAt) and takes the role
-// from the User row, never from the token. Unlike a Supabase token, an admin
-// token whose subject has no User row is refused: there is no bootstrap window
-// for an admin identity (AdminAuthService only issues one for an existing row).
+// of AuthMiddleware.use runs the same resolveLocalUser row checks as a Supabase
+// token (User.deletedAt, User.bannedAt) and takes the role from the User row,
+// never from the token. Unlike a Supabase token, an admin token whose subject
+// has no User row is refused: there is no bootstrap window for an admin
+// identity (AdminAuthService only issues one for an existing row).
+//
+// Review repair (F1): the admin branch no longer honours the per-user logout
+// marker. That marker has no issue time and only POST /identity/login clears
+// it, so after a logout through POST /identity/logout every token a later
+// POST /api/admin/auth/login issued was refused for 24h. An admin token is
+// revoked by its own issue-time cutoff (POST /api/admin/auth/logout). That
+// POST /identity/logout revokes nothing for an admin token is pinned below as
+// OPEN DEFECT ST-4 (admin tokens); it is the ST-4 fix packet's to close.
 // ---------------------------------------------------------------------------
 describe('ST-2 (fixed) — the admin-token branch of AuthMiddleware applies the same AB-P02 checks as a Supabase token', () => {
   // Issued by the production issuer while the User row is SUPER_ADMIN.
@@ -1333,17 +1376,64 @@ describe('ST-2 (fixed) — the admin-token branch of AuthMiddleware applies the 
     await expectAdminServed('ban and delete cleared');
   });
 
-  it('ST-2 — the logout revocation marker is checked: after POST /identity/logout the admin token is refused with 401', async () => {
+  /** POST /api/admin/auth/login with the adminTok credentials; returns the fresh token. */
+  async function adminLogin(label: string): Promise<string> {
+    const login = await call('post', '/api/admin/auth/login', null, { email: email(ID.adminTok), password: ADMIN_PASSWORD });
+    expect(login.status, `${label}: ${JSON.stringify(login.body)}`).toBe(201);
+    expect(login.body.user).toEqual({ id: ID.adminTok, email: email(ID.adminTok), role: 'SUPER_ADMIN' });
+    expect(typeof login.body.accessToken).toBe('string');
+    return login.body.accessToken as string;
+  }
+
+  /** The admin panel identity read and the SUPER_ADMIN cross-tenant read, for a given admin token. */
+  async function expectTokenServed(token: string, label: string) {
+    const me = await call('get', '/api/admin/auth/me', token);
+    expect(me.status, `${label}: ${JSON.stringify(me.body)}`).toBe(200);
+    expect(me.body).toEqual({ id: ID.adminTok, email: email(ID.adminTok), role: 'SUPER_ADMIN' });
+    const biz = await call('get', routes.biz(ID.bizB), token);
+    expect(biz.status, `${label}: ${JSON.stringify(biz.body)}`).toBe(200);
+    expect(biz.body.name).toBe(BIZ_B_NAME);
+  }
+
+  it('F1 — after POST /identity/logout (the app shell logout, sent with the admin token) a fresh POST /api/admin/auth/login token is served; the marker still refuses the Supabase token', async () => {
     expect(adminToken, 'the positive control mints the token').not.toBe('');
     await resetToActiveSuperAdmin();
     await expectAdminServed('before logout');
     const out = await call('post', '/identity/logout', adminToken);
     expect(out.status, JSON.stringify(out.body)).toBe(201);
     expect(await redis!.get(revocationKey(ID.adminTok))).toBe('1');
-    await expectAdminRefused(adminToken, 'after logout, admin token');
-    // The same user's Supabase token is refused by that marker.
-    const me = await call('get', routes.me, T[ID.adminTok]);
-    expect(me.status).toBe(401);
+    // The marker still does its job on the Supabase branch.
+    await expectIdentityRefused(T[ID.adminTok], 'after logout, Supabase token');
+
+    // Admin login again. Nothing on this path clears the marker — before the
+    // repair every token it issued was refused here with 401 for 24h.
+    const fresh = await adminLogin('admin login after /identity/logout');
+    expect(fresh).not.toBe(adminToken);
+    await expectTokenServed(fresh, 'fresh admin token after /identity/logout');
+    expect(await redis!.get(revocationKey(ID.adminTok)), 'served with the marker still set').toBe('1');
+  });
+
+  it('OPEN DEFECT ST-4 (admin tokens) reproduced — POST /identity/logout does not revoke an admin token issued before it: the pre-logout token is still served', async () => {
+    expect(adminToken, 'the positive control mints the token').not.toBe('');
+    await resetToActiveSuperAdmin();
+    // Pins today's behaviour (the same as before R0-ID-F2): /identity/logout
+    // writes only the per-user marker, which the admin branch does not read,
+    // and never the admin cutoff. Turns red when the ST-4 fix lands.
+    expect(await redis!.get(revocationKey(ID.adminTok))).toBe('1');
+    expect(await redis!.get(adminCutoffKey(ID.adminTok))).toBeNull();
+    await expectTokenServed(adminToken, 'pre-logout admin token after /identity/logout');
+  });
+
+  it("ST-2 — the admin token's own revocation holds: after POST /api/admin/auth/logout the pre-logout admin token is refused with 401, and a later admin login is served", async () => {
+    expect(adminToken, 'the positive control mints the token').not.toBe('');
+    await resetToActiveSuperAdmin();
+    const out = await call('post', '/api/admin/auth/logout', adminToken);
+    expect(out.status, JSON.stringify(out.body)).toBe(201);
+    expect(await redis!.get(adminCutoffKey(ID.adminTok))).not.toBeNull();
+    await expectAdminRefused(adminToken, 'after admin logout, pre-logout admin token');
+
+    const fresh = await adminLogin('admin login after /api/admin/auth/logout');
+    await expectTokenServed(fresh, 'fresh admin token after /api/admin/auth/logout');
   });
 
   it('ST-2 — an admin token whose subject has no User row is refused with 401 (no bootstrap window for an admin identity), and no row is created', async () => {
@@ -1411,6 +1501,22 @@ describe('OPEN DEFECT ST-4 — the revocation marker has no iat cutoff, and logi
     'REQUIRED (fix packet; identity.controller.ts login/logout + auth.middleware.ts, outside this write set): an access token issued before ' +
       'POST /identity/logout stays refused after a later POST /identity/login (revocation keyed on issue time, not a per-user flag the login deletes). ' +
       'The full login leg needs Supabase signInWithPassword and cannot run in this provider-free suite',
+  );
+
+  it.todo(
+    'REQUIRED (ST-4 fix packet; identity.controller.ts logout + auth.middleware.ts / admin-token.util.ts, outside this write set): POST /identity/logout ' +
+      'revokes admin tokens by issue time too — the pre-logout admin token answers 401 (the "OPEN DEFECT ST-4 (admin tokens)" case turns red), a token from a ' +
+      'later POST /api/admin/auth/login is served, and a later POST /identity/login does not bring the pre-logout admin token back. buildAdminToken sets iat ' +
+      'and exp in MILLISECONDS, not the JWT seconds a Supabase cutoff compares against',
+  );
+});
+
+describe('OPEN DEFECT ST-2-WS — the KEY Cortex WebSocket admin-token path skips the local-user checks', () => {
+  it.todo(
+    'REQUIRED (follow-up packet; key-cortex-ws-auth.service.ts, outside this write set): authenticateSocket applies the AuthMiddleware local-user ' +
+      'checks to both token kinds — an admin token takes its role from the User row and is refused when the row is missing, deletedAt or bannedAt is set ' +
+      '(and the Supabase path also on the logout marker); a Postgres failure refuses instead of falling back to USER — so verifyBusinessMembership ' +
+      'never admits a demoted, deleted or banned SUPER_ADMIN into another tenant’s socket',
   );
 });
 

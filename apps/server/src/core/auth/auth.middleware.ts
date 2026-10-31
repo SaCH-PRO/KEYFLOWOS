@@ -15,15 +15,24 @@ import { REDIS_CLIENT } from '../redis/redis.constants';
  *     (`SupabaseAuthService.getUserFromToken`); if that does not verify, as an
  *     admin local-auth token (`verifyAdminToken`: HMAC with ADMIN_JWT_SECRET,
  *     plus its own jti / revokedAt checks).
- *   - EITHER WAY the verified subject then passes the same local-user checks
- *     (`resolveLocalUser`): the logout revocation marker, User.deletedAt and
- *     User.bannedAt. The role attached is the one on our Prisma `User` row,
- *     never a claim in either token, so role changes take effect immediately.
- *     A Supabase subject with no row yet is attached as USER (the bootstrap
- *     window, see resolveLocalUser); an admin-token subject with no row is
- *     refused — AdminAuthService only issues those tokens for an existing row.
+ *   - EITHER WAY the verified subject then passes the local-user checks
+ *     (`resolveLocalUser`): User.deletedAt and User.bannedAt. The role attached
+ *     is the one on our Prisma `User` row, never a claim in either token, so
+ *     role changes take effect immediately. A Supabase subject with no row yet
+ *     is attached as USER (the bootstrap window, see resolveLocalUser); an
+ *     admin-token subject with no row is refused — AdminAuthService only
+ *     issues those tokens for an existing row.
  *     (Until R0-ID-F2-ADMIN-TOKEN-LOCAL-USER the admin branch attached the
  *     token's own claims and skipped every one of these checks — ST-2.)
+ *   - Logout revocation differs by token kind. A Supabase token is refused
+ *     while the per-user marker `auth:revoked:user:<id>` (POST /identity/logout)
+ *     is set. An admin token is revoked by its own issue-time cutoff
+ *     (`admin:user:<id>:revokedAt`, POST /api/admin/auth/logout, checked in
+ *     verifyAdminToken), NOT by that marker: the marker carries no issue time
+ *     and only POST /identity/login clears it, so honouring it refused every
+ *     token a later POST /api/admin/auth/login issued, for 24h. Making
+ *     POST /identity/logout revoke admin tokens by issue time is the ST-4 fix
+ *     (identity.controller.ts), outside this middleware.
  *   - On success, attach `req.user = { id, email, role }`.
  *   - On any failure / missing token, leave `req.user` unset. Downstream
  *     guards/controllers decide whether the route requires authentication
@@ -89,15 +98,21 @@ export class AuthMiddleware implements NestMiddleware {
         // Fallback: try admin local-auth token (HMAC-JWT signed with ADMIN_JWT_SECRET).
         // The token establishes WHO the subject is; whether that subject may
         // still be here, and with which role, is the User row's answer — the
-        // same resolveLocalUser checks as the Supabase branch (ST-2). An admin
-        // identity has no bootstrap window, so a missing row is refused too.
+        // same resolveLocalUser row checks as the Supabase branch (ST-2). An
+        // admin identity has no bootstrap window, so a missing row is refused
+        // too. Its logout revocation is verifyAdminToken's issue-time cutoff,
+        // not the per-user marker: see the class comment (nothing on the admin
+        // login path clears that marker, so honouring it locked the admin out).
         const adminUser = await verifyAdminToken(token, this.redis);
         if (adminUser) {
-          const localUser = await this.resolveLocalUser(adminUser.id, { requireRow: true });
+          const localUser = await this.resolveLocalUser(adminUser.id, {
+            requireRow: true,
+            honourLogoutMarker: false,
+          });
           if (!localUser) {
             this.logger.warn(
               { userId: adminUser.id },
-              'Admin token valid but local user is missing, deleted, banned, or revoked — rejecting',
+              'Admin token valid but local user is missing, deleted, or banned — rejecting',
             );
             next();
             return;
@@ -160,14 +175,23 @@ export class AuthMiddleware implements NestMiddleware {
    * it: an admin identity is only ever issued for an existing User row
    * (AdminAuthService.validateCredentials), so it has no bootstrap window, and
    * defaulting a vanished admin to USER would keep a deleted account attached.
+   *
+   * `honourLogoutMarker: false` skips the revocation marker. The admin-token
+   * branch passes it. The marker is a per-user flag with no issue time, and only
+   * POST /identity/login clears it. When the admin branch honoured it, an admin
+   * who logged out through POST /identity/logout was refused on every token
+   * POST /api/admin/auth/login issued afterwards, for 24h. Admin tokens are
+   * revoked by issue time instead (`admin:user:<id>:revokedAt`, checked in
+   * verifyAdminToken).
    */
   private async resolveLocalUser(
     userId: string,
-    opts: { requireRow?: boolean } = {},
+    opts: { requireRow?: boolean; honourLogoutMarker?: boolean } = {},
   ): Promise<{ role: string } | null> {
     if (!this.prisma?.client) {
       return null;
     }
+    const honourLogoutMarker = opts.honourLogoutMarker ?? true;
 
     // Revocation is checked BEFORE the row lookup on purpose: it must apply to
     // the no-row case too, or logging out would stop protecting a user whose
@@ -196,18 +220,20 @@ export class AuthMiddleware implements NestMiddleware {
     //                         banned, and that IS the authoritative control.
     //                         Still fail closed. The app cannot serve anything
     //                         meaningful without the database anyway.
-    let revoked: string | null = null;
-    try {
-      revoked = await this.redis.get(`auth:revoked:user:${userId}`);
-    } catch (redisErr) {
-      // warn, not debug: this is a real security degradation and should be
-      // visible without turning on verbose logging.
-      this.logger.warn(
-        `Revocation check unavailable (${(redisErr as Error).message}) — proceeding on the database checks alone. Logged-out tokens stay valid until expiry while this persists.`,
-      );
-    }
-    if (revoked) {
-      return null;
+    if (honourLogoutMarker) {
+      let revoked: string | null = null;
+      try {
+        revoked = await this.redis.get(`auth:revoked:user:${userId}`);
+      } catch (redisErr) {
+        // warn, not debug: this is a real security degradation and should be
+        // visible without turning on verbose logging.
+        this.logger.warn(
+          `Revocation check unavailable (${(redisErr as Error).message}) — proceeding on the database checks alone. Logged-out tokens stay valid until expiry while this persists.`,
+        );
+      }
+      if (revoked) {
+        return null;
+      }
     }
 
     try {

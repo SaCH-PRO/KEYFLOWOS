@@ -203,11 +203,14 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
    * ST-2 (R0-ID-F2-ADMIN-TOKEN-LOCAL-USER). When Supabase does not verify the
    * token, the middleware falls back to an admin HMAC token. That branch used to
    * attach verifyAdminToken's result as-is: role from the TOKEN, and none of the
-   * resolveLocalUser checks, so a deleted, banned or logged-out admin kept
-   * access and a demoted one kept SUPER_ADMIN. It now runs the same
-   * resolveLocalUser path, takes the role from the User row, and — unlike a
-   * Supabase token — refuses a subject with no User row (no bootstrap window
-   * for an admin identity).
+   * resolveLocalUser checks, so a deleted or banned admin kept access and a
+   * demoted one kept SUPER_ADMIN. It now runs the same resolveLocalUser row
+   * checks, takes the role from the User row, and — unlike a Supabase token —
+   * refuses a subject with no User row (no bootstrap window for an admin
+   * identity). Its logout revocation is the admin token's own issue-time
+   * cutoff (admin:user:<id>:revokedAt), not the per-user Supabase logout marker
+   * (review finding F1: honouring that marker locked the admin out of every
+   * later admin login for 24h).
    */
   describe('admin-token fallback (ST-2): the same local-user checks as a Supabase token', () => {
     const ADMIN_SECRET = 'auth-middleware-spec-admin-secret-not-real';
@@ -224,12 +227,14 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
 
     /**
      * Supabase rejects the token, so only the admin branch can attach. Redis
-     * answers per key: the admin-token jti / revokedAt keys are never revoked
-     * here, so a refusal can only come from the local-user checks under test.
+     * answers per key: the admin-token jti key is never revoked here, and the
+     * admin cutoff (admin:user:<id>:revokedAt) is set only when a case passes
+     * adminRevokedAt, so any other refusal comes from the local-user checks.
      */
     function adminMiddleware(opts: {
       row?: { role: string; deletedAt: Date | null; bannedAt: Date | null } | null;
       userRevoked?: boolean;
+      adminRevokedAt?: number;
       lookup?: () => Promise<unknown>;
     } = {}) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
@@ -241,7 +246,11 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
       const redis: any = {
-        get: vi.fn(async (key: string) => (key === `auth:revoked:user:${ADMIN.id}` && opts.userRevoked ? '1' : null)),
+        get: vi.fn(async (key: string) => {
+          if (key === `auth:revoked:user:${ADMIN.id}`) return opts.userRevoked ? '1' : null;
+          if (key === `admin:user:${ADMIN.id}:revokedAt`) return opts.adminRevokedAt === undefined ? null : String(opts.adminRevokedAt);
+          return null;
+        }),
         set: () => Promise.resolve('OK'),
       };
       return { mw: new AuthMiddleware(supabaseAuth, prisma, redis), prisma, redis };
@@ -280,10 +289,27 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
       expect(await run(mw)).toBeUndefined();
     });
 
-    it('does not attach when the logout revocation marker is present', async () => {
-      const { mw, redis } = adminMiddleware({ userRevoked: true });
-      expect(await run(mw)).toBeUndefined();
-      expect(redis.get).toHaveBeenCalledWith(`auth:revoked:user:${ADMIN.id}`);
+    it('F1: the per-user logout marker does not refuse an admin token — it has no issue time and nothing on the admin login path clears it', async () => {
+      // POST /identity/logout sets auth:revoked:user:<id> for 24h; only
+      // POST /identity/login (Supabase) deletes it. Honouring it here refused
+      // every token a later POST /api/admin/auth/login issued, for 24h.
+      const { mw, redis, prisma } = adminMiddleware({ userRevoked: true });
+      expect(await run(mw)).toEqual({ id: ADMIN.id, email: ADMIN.email, role: 'SUPER_ADMIN' });
+      expect(redis.get).not.toHaveBeenCalledWith(`auth:revoked:user:${ADMIN.id}`);
+      // The row checks still ran.
+      expect(prisma.client.user.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('an admin token issued before the admin cutoff (admin:user:<id>:revokedAt, POST /api/admin/auth/logout) is refused without reading the User row', async () => {
+      const token = buildAdminToken(ADMIN, ADMIN_SECRET);
+      const { mw, prisma } = adminMiddleware({ adminRevokedAt: Date.now() + 1 });
+      expect(await run(mw, token)).toBeUndefined();
+      expect(prisma.client.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('an admin token issued after the admin cutoff is attached: admin logout followed by admin login does not lock the admin out', async () => {
+      const { mw } = adminMiddleware({ adminRevokedAt: Date.now() - 1000 });
+      expect(await run(mw, buildAdminToken(ADMIN, ADMIN_SECRET))).toEqual({ id: ADMIN.id, email: ADMIN.email, role: 'SUPER_ADMIN' });
     });
 
     it('does not attach when the subject has no User row (no bootstrap window for an admin token)', async () => {
