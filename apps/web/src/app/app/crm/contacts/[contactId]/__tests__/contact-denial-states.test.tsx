@@ -59,16 +59,31 @@ function jsonResponse(status: number, body: unknown, statusText = "OK"): Respons
   } as unknown as Response;
 }
 
-/** Answer the contact detail read; anything else the screen asks for is a 404. */
+/** The business the signed-in member belongs to (seeded as kf_business_id). */
+const MEMBER_BUSINESS = "biz_1";
+const DETAIL_PATH = `/crm/businesses/${MEMBER_BUSINESS}/contacts/c_1`;
+
+/**
+ * Answer the contact detail read the way the server's guards do. BusinessGuard
+ * refuses any business the member does not belong to with 403 "No access to
+ * this business" before the handler runs, so only the member's own business
+ * reaches `detailResponse`. Matching the path suffix alone let a read sent to
+ * the demo tenant pass the readable control (review F2). Anything else the
+ * screen asks for is a 404. Returns the requested pathnames.
+ */
 function stubDetail(detailResponse: () => Response) {
+  const requested: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(url, "http://localhost");
-    if (pathname.endsWith("/contacts/c_1")) return detailResponse();
+    requested.push(pathname);
+    const tenant = pathname.match(/\/businesses\/([^/]+)\//)?.[1];
+    if (tenant && tenant !== MEMBER_BUSINESS) return forbidden();
+    if (pathname.endsWith(DETAIL_PATH)) return detailResponse();
     return jsonResponse(404, { message: "Not stubbed" }, "Not Found");
   });
   vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+  return { fetchMock, detailReads: () => requested.filter((p) => p.includes("/contacts/c_1")) };
 }
 
 const notFound = () => jsonResponse(404, { statusCode: 404, message: "Contact not found", error: "Not Found" }, "Not Found");
@@ -114,7 +129,7 @@ describe("contact detail: not-found, no-access and failure are different states"
   beforeEach(() => {
     window.localStorage.clear();
     window.localStorage.setItem("kf_token", "token-a");
-    window.localStorage.setItem("kf_business_id", "biz_1");
+    window.localStorage.setItem("kf_business_id", MEMBER_BUSINESS);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -170,7 +185,7 @@ describe("contact detail: not-found, no-access and failure are different states"
   });
 
   it("control: a readable contact renders its record fields and no unavailable state", async () => {
-    stubDetail(found);
+    const { detailReads } = stubDetail(found);
     renderDetail();
 
     expect(await screen.findByText("Lifetime Value")).toBeInTheDocument();
@@ -178,5 +193,65 @@ describe("contact detail: not-found, no-access and failure are different states"
     expect(screen.queryByText("Contact not found")).not.toBeInTheDocument();
     expect(screen.queryByText(/do not have access/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(detailReads()).toEqual([DETAIL_PATH]);
+  });
+});
+
+/**
+ * Review ST-1 / F1: ContactDetailProvider calls fetchContactDetail(contactId)
+ * with no businessId, and the client defaulted that to DEFAULT_BUSINESS_ID
+ * ("biz_demo"). BusinessGuard refuses a real member there, so every member,
+ * owners included, was told "You do not have access to this contact" on a
+ * contact they may read. The read must be bound to the member's stored
+ * business, and with no business there is no request to send at all.
+ */
+describe("contact detail: the read is bound to the member's business", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("kf_token", "token-a");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("requests /crm/businesses/<stored business>/contacts/:id and shows the record, not a denial", async () => {
+    window.localStorage.setItem("kf_business_id", MEMBER_BUSINESS);
+    const { detailReads } = stubDetail(found);
+    renderDetail();
+
+    expect(await screen.findByText("Lifetime Value")).toBeInTheDocument();
+    expect(detailReads()).toEqual([DETAIL_PATH]);
+    expect(screen.queryByTestId("contact-unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText(/do not have access/i)).not.toBeInTheDocument();
+  });
+
+  it("follows the stored business: a business the member does not belong to is an honest denial", async () => {
+    window.localStorage.setItem("kf_business_id", "biz_other");
+    const { detailReads } = stubDetail(found);
+    renderDetail();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveAttribute("data-state", "denied");
+    expect(detailReads()).toEqual(["/crm/businesses/biz_other/contacts/c_1"]);
+    expectNoRecordFields();
+  });
+
+  it("with no stored business and demo mode off: no request, a load failure, not a denial and not the demo tenant", async () => {
+    const { detailReads } = stubDetail(found);
+    const { container } = renderDetail();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveAttribute("data-state", "failed");
+    expect(alert).toHaveTextContent(/no business selected/i);
+    expect(screen.queryByText(/do not have access/i)).not.toBeInTheDocument();
+    expect(detailReads()).toEqual([]);
+    expectNoRecordFields();
+    expect(container.querySelector(".animate-pulse")).toBeNull();
   });
 });

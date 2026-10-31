@@ -214,3 +214,26 @@ describe("contacts list screen: a 403/401 renders a denial, never 'No contacts y
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Known gaps outside this packet's write set (review F3, ST-2). Each is a
+ * follow-up packet, recorded here so the denial invariant is not read as
+ * holding for every contacts view. Not a regression: both predate the packet.
+ */
+describe("contacts views not yet covered by the denial state (follow-up)", () => {
+  // F3: pipeline-tab-content.tsx passes loadError only to PipelineContactList.
+  // FocusView ('Nothing needs attention'), DatabaseTable ('No contacts found')
+  // and the kanban view read the same hook state and never see loadError.
+  it.todo(
+    "focus, table and kanban views render the denial on a 403/401 instead of their empty copy " +
+      "(needs pipeline-tab-content.tsx, focus-view.tsx, database-table.tsx: outside the R0-CT-05 write set)",
+  );
+
+  // ST-2: use-database-state.ts loadServerContacts ignores `error`, then falls
+  // back to the IndexedDB 'keyflowos_contacts' cache, which is keyed by neither
+  // user nor business and is not purged on logout.
+  it.todo(
+    "table view: a refused read shows a denial, never rows from the unkeyed IndexedDB cache of another user or tenant " +
+      "(needs use-database-state.ts and contacts-db.ts: outside the R0-CT-05 write set)",
+  );
+});
