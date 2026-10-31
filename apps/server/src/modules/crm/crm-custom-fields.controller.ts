@@ -109,8 +109,9 @@ export class CrmCustomFieldsController {
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/custom-field-values')
   getContactValues(
+    @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
   ) {
-    return this.values.getValuesForContact(contactId);
+    return this.values.getValuesForContact(businessId, contactId);
   }
 }

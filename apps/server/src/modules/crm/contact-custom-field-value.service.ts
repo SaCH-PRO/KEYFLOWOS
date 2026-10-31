@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface ContactCustomFieldValueInput {
@@ -11,7 +11,19 @@ export interface ContactCustomFieldValueInput {
 export class ContactCustomFieldValueService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getValuesForContact(contactId: string) {
+  /**
+   * Values of one contact, read through the path tenant. ContactCustomFieldValue
+   * carries no businessId, so the tenant is bound through the contact: a contact
+   * of another tenant answers exactly like an absent one (404), before any value
+   * is read.
+   */
+  async getValuesForContact(businessId: string, contactId: string) {
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+
     return this.prisma.client.contactCustomFieldValue.findMany({
       where: { contactId },
       include: { definition: true },
