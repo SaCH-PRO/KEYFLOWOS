@@ -854,4 +854,206 @@ describe('ModelGatewayService', () => {
       expect(decision.fallbackUsed).toBe(false);
     });
   });
+
+  // R0-07-OPTIONAL-SVC-VISIBLE: AI is an optional service. With no provider to
+  // dispatch to, the gateway refuses with a structured 503 an HTTP client can
+  // branch on, instead of a plain Error that the exception filter turns into 500.
+  describe('Optional AI fails visibly (R0-07)', () => {
+    /** Every variable isProviderAvailable reads, cleared. */
+    const NO_PROVIDER_ENV: Record<string, null> = {
+      AI_INTEGRATIONS_OPENAI_API_KEY: null,
+      ANTHROPIC_API_KEY: null,
+      XAI_API_KEY: null,
+      KIMI_API_KEY: null,
+      GOOGLE_API_KEY: null,
+      GEMINI_API_KEY: null,
+      NATIVE_AI_API_KEY: null,
+      KEYFLOW_NATIVE_AI_URL: null,
+      OPENROUTER_API_KEY: null,
+      OLLAMA_BASE_URL: null,
+    };
+
+    function spyAllProviders(svc: ModelGatewayService) {
+      const calls: string[] = [];
+      for (const method of ['callOpenAi', 'callAnthropic', 'callXai', 'callKimi', 'callGoogle', 'callNative', 'callOpensource']) {
+        (svc as any)[method] = vi.fn(async () => {
+          calls.push(method);
+          throw new Error(`${method} must not be called`);
+        });
+      }
+      (svc as any).routingTableLoaded = true;
+      (svc as any).delay = vi.fn().mockResolvedValue(undefined);
+      return calls;
+    }
+
+    async function rejection(promise: Promise<unknown>): Promise<any> {
+      try {
+        await promise;
+      } catch (err) {
+        return err;
+      }
+      throw new Error('expected the dispatch to be refused');
+    }
+
+    it('complete() with no provider configured rejects with a structured 503 {code: provider_not_configured, service: ai} and calls no provider', async () => {
+      const svc = createService(NO_PROVIDER_ENV);
+      const calls = spyAllProviders(svc);
+
+      const err = await rejection(svc.complete(baseRequest({ taskCategory: 'general' })));
+
+      expect(typeof err.getStatus).toBe('function');
+      expect(err.getStatus()).toBe(503);
+      expect(err.getResponse()).toMatchObject({ code: 'provider_not_configured', service: 'ai' });
+      expect(err.message).toMatch(/No AI providers available/);
+      expect(calls).toEqual([]);
+      expect(mockLLMCostService.recordCost).not.toHaveBeenCalled();
+    });
+
+    it('complete() whose configured providers are all circuit-open rejects with a structured 503 {code: provider_unavailable}', async () => {
+      const svc = createService();
+      const calls = spyAllProviders(svc);
+      for (const provider of ['openai', 'anthropic', 'xai', 'kimi', 'google', 'native', 'opensource'] as AiProvider[]) {
+        (svc as any).circuitBreakers.set(provider, {
+          failures: 3,
+          lastFailureAt: new Date(),
+          openUntil: new Date(Date.now() + 60_000),
+        });
+      }
+
+      const err = await rejection(svc.complete(baseRequest({ taskCategory: 'general' })));
+
+      expect(err.getStatus()).toBe(503);
+      expect(err.getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'ai' });
+      expect(calls).toEqual([]);
+    });
+
+    it('a configured provider that fails keeps its own error: a provider failure is not reported as not-configured', async () => {
+      const svc = createService({ ...NO_PROVIDER_ENV, ANTHROPIC_API_KEY: 'test-anthropic-key' });
+      spyAllProviders(svc);
+      (svc as any).callAnthropic = vi.fn().mockRejectedValue(new Error('Anthropic API error (401): invalid x-api-key'));
+
+      const err = await rejection(svc.complete(baseRequest({ taskCategory: 'general' })));
+
+      expect(err.message).toBe('Anthropic API error (401): invalid x-api-key');
+      expect(typeof err.getStatus).not.toBe('function');
+    });
+
+    it('streamComplete() with no provider configured yields one error chunk carrying code provider_not_configured', async () => {
+      const svc = createService(NO_PROVIDER_ENV);
+      const calls = spyAllProviders(svc);
+
+      const chunks: any[] = [];
+      for await (const chunk of svc.streamComplete(baseRequest({ taskCategory: 'general' }))) chunks.push(chunk);
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toMatchObject({ type: 'error', code: 'provider_not_configured' });
+      expect(chunks[0].error).toMatch(/No AI providers available/);
+      expect(calls).toEqual([]);
+    });
+  });
+
+  // R0-07 review ST-1: provider_unavailable is only honest if one tenant's
+  // failures cannot open another tenant's circuit. A circuit belongs to the
+  // credential that failed: the platform's env key has one per provider, and
+  // every business-supplied (BYOK) key has its own.
+  describe('Circuit breakers are per credential (R0-07 review ST-1)', () => {
+    const PLATFORM_OPENAI_ONLY: Record<string, string | null> = {
+      AI_INTEGRATIONS_OPENAI_API_KEY: 'platform-openai-key',
+      ANTHROPIC_API_KEY: null,
+      XAI_API_KEY: null,
+      KIMI_API_KEY: null,
+      GOOGLE_API_KEY: null,
+      GEMINI_API_KEY: null,
+      NATIVE_AI_API_KEY: null,
+      KEYFLOW_NATIVE_AI_URL: null,
+      OPENROUTER_API_KEY: null,
+      OLLAMA_BASE_URL: null,
+    };
+    const OK = {
+      content: 'ok',
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, estimatedCost: 0 },
+    };
+
+    /** Preferences per business; the gateway's own lookup is replaced so each tenant's BYOK key is exact. */
+    function withTenants(svc: ModelGatewayService, byokOpenai: Record<string, string>) {
+      (svc as any).routingTableLoaded = true;
+      (svc as any).delay = vi.fn().mockResolvedValue(undefined);
+      (svc as any).getPreferences = vi.fn(async (businessId: string) => (
+        byokOpenai[businessId] ? { aiMode: 'balanced', byokOpenai: byokOpenai[businessId] } : { aiMode: 'balanced' }
+      ));
+    }
+
+    it('a business whose own BYOK key is revoked opens only its own circuit: another business on the platform key is still served', async () => {
+      const svc = createService(PLATFORM_OPENAI_ONLY);
+      withTenants(svc, { 'tenant-A': 'tenant-A-revoked-key' });
+      const keysUsed: Array<string | undefined> = [];
+      (svc as any).callOpenAi = vi.fn(async (_m: unknown, _model: unknown, _req: unknown, byokKey?: string) => {
+        keysUsed.push(byokKey);
+        if (byokKey === 'tenant-A-revoked-key') throw new Error('OpenAI API error (401): Incorrect API key provided');
+        return OK;
+      });
+
+      for (let i = 0; i < 3; i++) {
+        await expect(svc.complete(baseRequest({ businessId: 'tenant-A' }))).rejects.toThrow(/401/);
+      }
+      // Tenant A's credential is now circuit-open, so its next call is refused without a call.
+      const refused = await svc.complete(baseRequest({ businessId: 'tenant-A' })).catch((e) => e);
+      expect(refused.getStatus()).toBe(503);
+      expect(refused.getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'ai' });
+      expect(keysUsed).toEqual(['tenant-A-revoked-key', 'tenant-A-revoked-key', 'tenant-A-revoked-key']);
+
+      // Tenant B, on the platform key, is unaffected.
+      const served = await svc.complete(baseRequest({ businessId: 'tenant-B' }));
+      expect(served).toMatchObject({ provider: 'openai', content: 'ok' });
+      expect(keysUsed[3]).toBeUndefined();
+      const platform = (svc as any).circuitBreakers.get('openai');
+      expect(platform.failures).toBe(0);
+      expect(platform.openUntil).toBeNull();
+      expect(svc.getProviderHealth().find((h) => h.provider === 'openai')!.circuitOpen).toBe(false);
+      // The per-credential circuit is keyed by a digest, never by the key itself.
+      expect([...(svc as any).byokCircuitBreakers.keys()].join('|')).not.toContain('tenant-A-revoked-key');
+    });
+
+    it('a business with a working BYOK key is served while the platform key is circuit-open, and its success does not reset the platform circuit', async () => {
+      const svc = createService(PLATFORM_OPENAI_ONLY);
+      withTenants(svc, { 'tenant-C': 'tenant-C-working-key' });
+      const platform = (svc as any).circuitBreakers.get('openai');
+      platform.failures = 3;
+      platform.openUntil = new Date(Date.now() + 60_000);
+      const callOpenAi = vi.fn(async () => OK);
+      (svc as any).callOpenAi = callOpenAi;
+
+      const served = await svc.complete(baseRequest({ businessId: 'tenant-C' }));
+      expect(served).toMatchObject({ provider: 'openai', content: 'ok' });
+      expect(callOpenAi).toHaveBeenCalledTimes(1);
+      expect((callOpenAi.mock.calls[0] as unknown[])[3]).toBe('tenant-C-working-key');
+      expect(platform.failures).toBe(3);
+      expect(platform.openUntil).not.toBeNull();
+
+      // A business on the platform key still sees the platform circuit open.
+      const refused = await svc.complete(baseRequest({ businessId: 'tenant-D' })).catch((e) => e);
+      expect(refused.getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'ai' });
+      expect(callOpenAi).toHaveBeenCalledTimes(1);
+    });
+
+    it('streamComplete() records a BYOK stream failure on that key\'s circuit, not the platform one', async () => {
+      const svc = createService(PLATFORM_OPENAI_ONLY);
+      withTenants(svc, { 'tenant-E': 'tenant-E-revoked-key' });
+      (svc as any).streamOpenAi = vi.fn(async function* () {
+        throw new Error('OpenAI API error (401): Incorrect API key provided');
+      });
+
+      for (let i = 0; i < 3; i++) {
+        const chunks: any[] = [];
+        for await (const chunk of svc.streamComplete(baseRequest({ businessId: 'tenant-E' }))) chunks.push(chunk);
+        expect(chunks.at(-1)).toMatchObject({ type: 'error' });
+      }
+
+      const platform = (svc as any).circuitBreakers.get('openai');
+      expect(platform.failures).toBe(0);
+      expect(platform.openUntil).toBeNull();
+      expect((svc as any).isProviderAvailable('openai', { aiMode: 'balanced' })).toBe(true);
+      expect((svc as any).isProviderAvailable('openai', { aiMode: 'balanced', byokOpenai: 'tenant-E-revoked-key' })).toBe(false);
+    });
+  });
 });

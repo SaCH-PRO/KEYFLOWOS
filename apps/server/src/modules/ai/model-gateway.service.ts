@@ -1,6 +1,6 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
 import { LLMCostService } from './llm-cost.service';
@@ -117,7 +117,24 @@ export interface StreamChunk {
   fallbackUsed?: boolean;
   fallbackProvider?: AiProvider;
   error?: string;
+  /** On an error chunk emitted because no provider could be dispatched to (R0-07): the 503 body's code. */
+  code?: AiUnavailableCode;
 }
+
+/**
+ * Why AI dispatch was refused before any provider was called (R0-07). AI is an
+ * optional service: with nothing to dispatch to, complete() throws a 503 whose
+ * body carries one of these codes and `service: 'ai'`, which the global filter
+ * renders as { statusCode: 503, code, message, details: { service: 'ai' } }.
+ *
+ *   provider_not_configured  no candidate provider has a key (env or BYOK) or URL
+ *   provider_unavailable     candidates are configured but the circuit of every credential
+ *                            dispatch would use (platform env key or the business's BYOK key)
+ *                            is open
+ *
+ * A provider that was called and failed is neither: its own error propagates.
+ */
+export type AiUnavailableCode = 'provider_not_configured' | 'provider_unavailable';
 
 export interface ProviderHealth {
   provider: AiProvider;
@@ -576,7 +593,18 @@ export class ModelGatewayService {
   private readonly openai: OpenAI;
   private readonly providerClients = new Map<AiProvider, { configured: boolean }>();
   private readonly providerMetrics = new Map<AiProvider, ProviderMetrics>();
+  /** Circuits of the platform's env keys, one per provider. */
   private readonly circuitBreakers = new Map<AiProvider, CircuitBreakerState>();
+  /**
+   * Circuits of business-supplied (BYOK) keys, one per credential (R0-07 review
+   * ST-1). A circuit belongs to the credential that failed: a business that
+   * saves a revoked or junk key opens only that key's circuit, so it can never
+   * make the platform key - or another business's key - look unavailable, and a
+   * failing platform key does not stop a business whose own key works. Keyed by
+   * provider and a SHA-256 digest of the key, never the key itself. An entry is
+   * dropped on success and when its cooldown expires; the map is capped.
+   */
+  private readonly byokCircuitBreakers = new Map<string, CircuitBreakerState>();
   private readonly preferencesCache = new Map<string, { data: AiPreferences; expiresAt: number }>();
   private readonly encryptionKey: Buffer;
   private readonly byokEncryptionAvailable: boolean;
@@ -588,6 +616,7 @@ export class ModelGatewayService {
   private static readonly RETRY_DELAY_MS = 500;
   private static readonly CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
   private static readonly CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+  private static readonly MAX_BYOK_CIRCUITS = 10_000;
   private static readonly ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 
   constructor(
@@ -825,7 +854,24 @@ export class ModelGatewayService {
       }
     }
 
-    throw lastError || new Error('No AI providers available');
+    throw lastError || this.noProviderAvailable(effectiveCandidates, preferences);
+  }
+
+  /**
+   * The structured 503 for a dispatch that found nothing to call (R0-07). The
+   * message keeps its old prefix, 'No AI providers available', for log readers.
+   */
+  private noProviderAvailable(
+    candidates: Array<{ provider: AiProvider }>,
+    preferences: AiPreferences,
+  ): ServiceUnavailableException {
+    const code: AiUnavailableCode = candidates.some((c) => this.isProviderConfigured(c.provider, preferences))
+      ? 'provider_unavailable'
+      : 'provider_not_configured';
+    const message = code === 'provider_not_configured'
+      ? 'No AI providers available: no AI provider is configured for this deployment or business'
+      : 'No AI providers available: every configured AI provider is temporarily unavailable';
+    return new ServiceUnavailableException({ code, service: 'ai', message, error: 'Service Unavailable' });
   }
 
   private async recordCostFromResponse(
@@ -987,7 +1033,7 @@ export class ModelGatewayService {
         }
 
         const latencyMs = Date.now() - startTime;
-        this.recordProviderSuccess(candidate.provider, latencyMs);
+        this.recordProviderSuccess(candidate.provider, latencyMs, preferences);
 
         const usage = lastUsageChunk?.usage ?? {
           promptTokens: 0,
@@ -1014,16 +1060,24 @@ export class ModelGatewayService {
         return;
       } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(candidate.provider);
+        this.recordProviderError(candidate.provider, preferences);
         this.logger.error(
           `Stream provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
         );
       }
     }
 
+    if (lastError) {
+      yield { type: 'error', error: lastError.message, fallbackUsed, fallbackProvider };
+      return;
+    }
+    // Nothing was dispatched: the same refusal complete() throws, as a chunk.
+    const refusal = this.noProviderAvailable(effectiveCandidates, preferences);
+    const body = refusal.getResponse() as { code: AiUnavailableCode };
     yield {
       type: 'error',
-      error: lastError?.message || 'No AI providers available',
+      error: refusal.message,
+      code: body.code,
       fallbackUsed,
       fallbackProvider,
     };
@@ -1816,6 +1870,33 @@ export class ModelGatewayService {
   }
 
   private isProviderAvailable(provider: AiProvider, preferences: AiPreferences): boolean {
+    return this.isProviderConfigured(provider, preferences) && !this.isCircuitOpen(provider, preferences);
+  }
+
+  /** The business's own key for this provider, which dispatch uses in place of the platform's. */
+  private byokKeyFor(provider: AiProvider, preferences: AiPreferences): string | undefined {
+    switch (provider) {
+      case 'openai': return preferences.byokOpenai;
+      case 'anthropic': return preferences.byokAnthropic;
+      case 'xai': return preferences.byokXai;
+      case 'kimi': return preferences.byokKimi;
+      case 'google': return preferences.byokGoogle;
+      case 'native': return preferences.byokNative;
+      default: return undefined;
+    }
+  }
+
+  /**
+   * The BYOK circuit id of the credential a dispatch to this provider would use,
+   * or null when it would use the platform's env key (circuit: `circuitBreakers`).
+   */
+  private byokCircuitId(provider: AiProvider, preferences?: AiPreferences): string | null {
+    const key = preferences ? this.byokKeyFor(provider, preferences) : undefined;
+    return key ? `${provider}:${createHash('sha256').update(key).digest('hex')}` : null;
+  }
+
+  /** A key (env or BYOK) or base URL exists for this provider; says nothing about its circuit. */
+  private isProviderConfigured(provider: AiProvider, preferences: AiPreferences): boolean {
     let configured = false;
     if (provider === 'openai') {
       configured = !!(preferences.byokOpenai || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
@@ -1839,11 +1920,16 @@ export class ModelGatewayService {
       configured = !!(process.env.OPENROUTER_API_KEY || process.env.OLLAMA_BASE_URL);
     }
 
-    return configured && !this.isCircuitOpen(provider);
+    return configured;
   }
 
-  private isCircuitOpen(provider: AiProvider): boolean {
-    const state = this.circuitBreakers.get(provider);
+  /**
+   * Whether the circuit of the credential a dispatch would use is open. Without
+   * preferences (provider health), the platform key's circuit.
+   */
+  private isCircuitOpen(provider: AiProvider, preferences?: AiPreferences): boolean {
+    const byokId = this.byokCircuitId(provider, preferences);
+    const state = byokId ? this.byokCircuitBreakers.get(byokId) : this.circuitBreakers.get(provider);
     if (!state) return false;
 
     if (state.openUntil && state.openUntil.getTime() > Date.now()) {
@@ -1852,8 +1938,12 @@ export class ModelGatewayService {
 
     // Reset expired open state
     if (state.openUntil && state.openUntil.getTime() <= Date.now()) {
-      state.openUntil = null;
-      state.failures = 0;
+      if (byokId) {
+        this.byokCircuitBreakers.delete(byokId);
+      } else {
+        state.openUntil = null;
+        state.failures = 0;
+      }
     }
 
     return false;
@@ -1873,7 +1963,7 @@ export class ModelGatewayService {
         const result = await this.callProvider(request, provider, model, preferences);
         const latencyMs = Date.now() - startTime;
 
-        this.recordProviderSuccess(provider, latencyMs);
+        this.recordProviderSuccess(provider, latencyMs, preferences);
 
         return {
           ...result,
@@ -1884,7 +1974,7 @@ export class ModelGatewayService {
         };
       } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(provider);
+        this.recordProviderError(provider, preferences);
 
         if (this.isRetryable(lastError) && attempt < ModelGatewayService.MAX_RETRIES) {
           await this.delay(ModelGatewayService.RETRY_DELAY_MS * (attempt + 1));
@@ -2651,7 +2741,7 @@ export class ModelGatewayService {
 
       let reason: string | undefined;
       if (!available) {
-        reason = this.isCircuitOpen(provider)
+        reason = this.isCircuitOpen(provider, preferences)
           ? 'Temporarily unavailable after repeated failures'
           : 'No API key configured';
       }
@@ -2971,7 +3061,12 @@ export class ModelGatewayService {
     return result;
   }
 
-  private recordProviderSuccess(provider: AiProvider, latencyMs: number): void {
+  /**
+   * A call succeeded. With the dispatch's preferences, the success resets the
+   * circuit of the credential that was used (a BYOK success never resets the
+   * platform key's circuit); without them, the platform key's.
+   */
+  private recordProviderSuccess(provider: AiProvider, latencyMs: number, preferences?: AiPreferences): void {
     const metrics = this.providerMetrics.get(provider);
     if (metrics) {
       metrics.totalCalls++;
@@ -2982,6 +3077,11 @@ export class ModelGatewayService {
     }
 
     // Reset circuit breaker on success
+    const byokId = this.byokCircuitId(provider, preferences);
+    if (byokId) {
+      this.byokCircuitBreakers.delete(byokId);
+      return;
+    }
     const circuit = this.circuitBreakers.get(provider);
     if (circuit) {
       circuit.failures = 0;
@@ -2989,7 +3089,12 @@ export class ModelGatewayService {
     }
   }
 
-  private recordProviderError(provider: AiProvider): void {
+  /**
+   * A call failed. With the dispatch's preferences, the failure counts against
+   * the circuit of the credential that was used (R0-07 review ST-1): a BYOK
+   * key's failures open only that key's circuit. Without them, the platform's.
+   */
+  private recordProviderError(provider: AiProvider, preferences?: AiPreferences): void {
     const metrics = this.providerMetrics.get(provider);
     if (metrics) {
       metrics.totalCalls++;
@@ -2997,7 +3102,22 @@ export class ModelGatewayService {
       metrics.lastErrorAt = new Date();
     }
 
-    const circuit = this.circuitBreakers.get(provider);
+    const byokId = this.byokCircuitId(provider, preferences);
+    let circuit: CircuitBreakerState | undefined;
+    if (byokId) {
+      circuit = this.byokCircuitBreakers.get(byokId);
+      if (!circuit) {
+        if (this.byokCircuitBreakers.size >= ModelGatewayService.MAX_BYOK_CIRCUITS) {
+          // Oldest first (Map keeps insertion order).
+          const oldest = this.byokCircuitBreakers.keys().next().value;
+          if (oldest !== undefined) this.byokCircuitBreakers.delete(oldest);
+        }
+        circuit = { failures: 0, lastFailureAt: null, openUntil: null };
+        this.byokCircuitBreakers.set(byokId, circuit);
+      }
+    } else {
+      circuit = this.circuitBreakers.get(provider);
+    }
     if (circuit) {
       circuit.failures++;
       circuit.lastFailureAt = new Date();
@@ -3005,7 +3125,7 @@ export class ModelGatewayService {
       if (circuit.failures >= ModelGatewayService.CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
         circuit.openUntil = new Date(Date.now() + ModelGatewayService.CIRCUIT_BREAKER_COOLDOWN_MS);
         this.logger.warn(
-          `Circuit breaker opened for ${provider} until ${circuit.openUntil.toISOString()}`,
+          `Circuit breaker opened for ${provider}${byokId ? " (a business's own key)" : ''} until ${circuit.openUntil.toISOString()}`,
         );
       }
     }
