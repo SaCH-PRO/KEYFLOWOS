@@ -44,6 +44,11 @@
       "legacy": true
     },
     {
+      "prefix": "k07a_",
+      "owner": "apps/server/test/optional-services-fail-visibly.integration.test.ts",
+      "packet": "R0-07-OPTIONAL-SVC-VISIBLE"
+    },
+    {
       "prefix": "k12a_",
       "owner": "apps/server/test/contact-scoped-tenancy.integration.test.ts",
       "packet": "R0-12-CT-TENANT-ROUTES"

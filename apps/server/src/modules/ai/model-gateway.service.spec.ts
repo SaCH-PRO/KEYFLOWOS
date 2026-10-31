@@ -854,4 +854,101 @@ describe('ModelGatewayService', () => {
       expect(decision.fallbackUsed).toBe(false);
     });
   });
+
+  // R0-07-OPTIONAL-SVC-VISIBLE: AI is an optional service. With no provider to
+  // dispatch to, the gateway refuses with a structured 503 an HTTP client can
+  // branch on, instead of a plain Error that the exception filter turns into 500.
+  describe('Optional AI fails visibly (R0-07)', () => {
+    /** Every variable isProviderAvailable reads, cleared. */
+    const NO_PROVIDER_ENV: Record<string, null> = {
+      AI_INTEGRATIONS_OPENAI_API_KEY: null,
+      ANTHROPIC_API_KEY: null,
+      XAI_API_KEY: null,
+      KIMI_API_KEY: null,
+      GOOGLE_API_KEY: null,
+      GEMINI_API_KEY: null,
+      NATIVE_AI_API_KEY: null,
+      KEYFLOW_NATIVE_AI_URL: null,
+      OPENROUTER_API_KEY: null,
+      OLLAMA_BASE_URL: null,
+    };
+
+    function spyAllProviders(svc: ModelGatewayService) {
+      const calls: string[] = [];
+      for (const method of ['callOpenAi', 'callAnthropic', 'callXai', 'callKimi', 'callGoogle', 'callNative', 'callOpensource']) {
+        (svc as any)[method] = vi.fn(async () => {
+          calls.push(method);
+          throw new Error(`${method} must not be called`);
+        });
+      }
+      (svc as any).routingTableLoaded = true;
+      (svc as any).delay = vi.fn().mockResolvedValue(undefined);
+      return calls;
+    }
+
+    async function rejection(promise: Promise<unknown>): Promise<any> {
+      try {
+        await promise;
+      } catch (err) {
+        return err;
+      }
+      throw new Error('expected the dispatch to be refused');
+    }
+
+    it('complete() with no provider configured rejects with a structured 503 {code: provider_not_configured, service: ai} and calls no provider', async () => {
+      const svc = createService(NO_PROVIDER_ENV);
+      const calls = spyAllProviders(svc);
+
+      const err = await rejection(svc.complete(baseRequest({ taskCategory: 'general' })));
+
+      expect(typeof err.getStatus).toBe('function');
+      expect(err.getStatus()).toBe(503);
+      expect(err.getResponse()).toMatchObject({ code: 'provider_not_configured', service: 'ai' });
+      expect(err.message).toMatch(/No AI providers available/);
+      expect(calls).toEqual([]);
+      expect(mockLLMCostService.recordCost).not.toHaveBeenCalled();
+    });
+
+    it('complete() whose configured providers are all circuit-open rejects with a structured 503 {code: provider_unavailable}', async () => {
+      const svc = createService();
+      const calls = spyAllProviders(svc);
+      for (const provider of ['openai', 'anthropic', 'xai', 'kimi', 'google', 'native', 'opensource'] as AiProvider[]) {
+        (svc as any).circuitBreakers.set(provider, {
+          failures: 3,
+          lastFailureAt: new Date(),
+          openUntil: new Date(Date.now() + 60_000),
+        });
+      }
+
+      const err = await rejection(svc.complete(baseRequest({ taskCategory: 'general' })));
+
+      expect(err.getStatus()).toBe(503);
+      expect(err.getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'ai' });
+      expect(calls).toEqual([]);
+    });
+
+    it('a configured provider that fails keeps its own error: a provider failure is not reported as not-configured', async () => {
+      const svc = createService({ ...NO_PROVIDER_ENV, ANTHROPIC_API_KEY: 'test-anthropic-key' });
+      spyAllProviders(svc);
+      (svc as any).callAnthropic = vi.fn().mockRejectedValue(new Error('Anthropic API error (401): invalid x-api-key'));
+
+      const err = await rejection(svc.complete(baseRequest({ taskCategory: 'general' })));
+
+      expect(err.message).toBe('Anthropic API error (401): invalid x-api-key');
+      expect(typeof err.getStatus).not.toBe('function');
+    });
+
+    it('streamComplete() with no provider configured yields one error chunk carrying code provider_not_configured', async () => {
+      const svc = createService(NO_PROVIDER_ENV);
+      const calls = spyAllProviders(svc);
+
+      const chunks: any[] = [];
+      for await (const chunk of svc.streamComplete(baseRequest({ taskCategory: 'general' }))) chunks.push(chunk);
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toMatchObject({ type: 'error', code: 'provider_not_configured' });
+      expect(chunks[0].error).toMatch(/No AI providers available/);
+      expect(calls).toEqual([]);
+    });
+  });
 });
