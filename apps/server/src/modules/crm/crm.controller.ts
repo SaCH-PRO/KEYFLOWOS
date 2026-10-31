@@ -446,7 +446,8 @@ export class CrmController {
     if (!Array.isArray(body.contactIds) || body.contactIds.length > 100) {
       throw new HttpException('contactIds must be an array of at most 100 items', 400);
     }
-    return this.crm.bulkDeleteContacts({ businessId, contactIds: body.contactIds, actorUserId: req?.user?.id });
+    const audit = this.userAuditContext(req);
+    return this.crm.bulkDeleteContacts({ businessId, contactIds: body.contactIds, actorUserId: req?.user?.id }, audit);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

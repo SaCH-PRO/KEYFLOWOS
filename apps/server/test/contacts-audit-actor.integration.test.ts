@@ -447,3 +447,212 @@ describe('system-context callers keep recording the SYSTEM actor', () => {
     expect(audits[0].changedFields).toEqual(['tags']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Review repairs (ST-1, ST-2, ST-3). Each was reproduced against the real
+// database before the fix; the cases tagged NEGATIVE CONTROL fail on the
+// packet head they repair.
+// ---------------------------------------------------------------------------
+
+const RID = {
+  reassigner: `${P}reassigner`, // STAFF of bizA, crm: write + crm_reassign 'true'
+  ownerB: `${P}ownerB`, // OWNER of bizB, no membership in bizA
+  bizB: `${P}bizB`,
+};
+
+let seq = 0;
+/** A live bizA contact seeded directly (no route traffic), owned by `ownerId`. */
+async function seedContact(ownerId: string | null = ID.owner) {
+  seq += 1;
+  return db.contact.create({
+    data: { id: `${P}c_repair_${seq}`, businessId: ID.bizA, firstName: `${P}Repair${seq}`, ownerId },
+  });
+}
+
+/** Every ContactEvent / ContactAuditEntry naming the contact, in ANY tenant. */
+async function contactTraces(contactId: string) {
+  const [contactEvents, audits] = await Promise.all([
+    db.contactEvent.count({ where: { contactId } }),
+    db.contactAuditEntry.count({ where: { contactId } }),
+  ]);
+  return { contactEvents, audits };
+}
+
+async function liveRow(contactId: string) {
+  const rows: Array<{ owner_id: string | null; deleted_at: Date | null }> = await db.$queryRawUnsafe(
+    'SELECT owner_id, deleted_at FROM contacts WHERE id = $1', contactId,
+  );
+  return rows[0];
+}
+
+function bulkDel(bizId: string, actor: string, contactIds: string[]) {
+  return request(app.getHttpServer())
+    .delete(`/crm/businesses/${bizId}/contacts/bulk`)
+    .set('x-test-user', actor)
+    .send({ contactIds });
+}
+
+describe('ST-1: PATCH cannot reassign a contact without the reassign permission', () => {
+  beforeAll(async () => {
+    await db.user.create({ data: { id: RID.reassigner, email: `${RID.reassigner}@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: {
+        id: `${P}m_reassigner_bizA`, userId: RID.reassigner, businessId: ID.bizA, role: 'STAFF',
+        permissionScopes: { crm: 'write', crm_reassign: 'true' },
+      },
+    });
+  });
+
+  it('NEGATIVE CONTROL: a write-scoped staff member (reassign false) PATCHing ownerId to themself is refused 403 and nothing is written', async () => {
+    const contact = await seedContact(ID.owner);
+    const before = await traceCounts();
+    const res = await patch(ID.staff, contact.id, { ownerId: ID.staff });
+    expect(res.status).toBe(403);
+    await settle();
+    expect(await traceCounts()).toEqual(before);
+    expect((await liveRow(contact.id)).owner_id).toBe(ID.owner);
+  });
+
+  it('NEGATIVE CONTROL: the refusal also covers a reassignment bundled with an ordinary edit (no partial write)', async () => {
+    const contact = await seedContact(ID.owner);
+    const before = await traceCounts();
+    const res = await patch(ID.staff, contact.id, { ownerId: ID.staff, jobTitle: 'Bundled' });
+    expect(res.status).toBe(403);
+    await settle();
+    expect(await traceCounts()).toEqual(before);
+    const row = await db.contact.findFirst({ where: { id: contact.id }, select: { ownerId: true, jobTitle: true } });
+    expect(row).toEqual({ ownerId: ID.owner, jobTitle: null });
+  });
+
+  it('the same staff member may resend the CURRENT owner with an edit: not a reassignment, 200, recorded as updated', async () => {
+    const contact = await seedContact(ID.owner);
+    const res = await patch(ID.staff, contact.id, { ownerId: ID.owner, jobTitle: 'Unchanged owner' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: contact.id, ownerId: ID.owner, jobTitle: 'Unchanged owner' });
+    const updated = await auditEntries(contact.id, 'updated');
+    expect(updated).toHaveLength(1);
+    expect(updated[0].actor).toEqual({ type: 'USER', id: ID.staff });
+    await settle();
+    expect(await db.contactAuditEntry.count({ where: { contactId: contact.id, action: 'reassigned' } })).toBe(0);
+  });
+
+  it('a staff member granted crm_reassign may reassign through PATCH, recorded as reassigned by that member', async () => {
+    const contact = await seedContact(ID.owner);
+    const res = await patch(RID.reassigner, contact.id, { ownerId: RID.reassigner });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: contact.id, ownerId: RID.reassigner });
+    const audits = await auditEntries(contact.id, 'reassigned');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].actor).toEqual({ type: 'USER', id: RID.reassigner });
+    expect(audits[0].reason).toContain(ID.owner);
+    expect(audits[0].reason).toContain(RID.reassigner);
+  });
+
+  it('the business owner may always reassign through PATCH', async () => {
+    const contact = await seedContact(null);
+    const res = await patch(ID.owner, contact.id, { ownerId: ID.staff });
+    expect(res.status).toBe(200);
+    expect((await liveRow(contact.id)).owner_id).toBe(ID.staff);
+    const audits = await auditEntries(contact.id, 'reassigned');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].actor).toEqual({ type: 'USER', id: ID.owner });
+  });
+});
+
+describe('ST-2: two concurrent DELETEs of one contact delete it once', () => {
+  it('NEGATIVE CONTROL: of two concurrent DELETEs one is 200 and one 404, with exactly one contact.deleted event and one deleted audit entry (3 rounds)', async () => {
+    for (let round = 0; round < 3; round += 1) {
+      const contact = await seedContact(ID.owner);
+      const [a, b] = await Promise.all([del(ID.owner, contact.id), del(ID.owner, contact.id)]);
+      expect([a.status, b.status].sort()).toEqual([200, 404]);
+
+      expect(await events(contact.id, 'contact.deleted')).toHaveLength(1);
+      expect(await auditEntries(contact.id, 'deleted')).toHaveLength(1);
+      await settle();
+      expect(await contactTraces(contact.id)).toEqual({ contactEvents: 1, audits: 1 });
+      expect((await liveRow(contact.id)).deleted_at).toBeInstanceOf(Date);
+    }
+  });
+
+  it('a sequential repeat DELETE stays 404 and writes nothing', async () => {
+    const contact = await seedContact(ID.owner);
+    expect((await del(ID.owner, contact.id)).status).toBe(200);
+    await auditEntries(contact.id, 'deleted');
+    await settle();
+    const before = await contactTraces(contact.id);
+    expect((await del(ID.owner, contact.id)).status).toBe(404);
+    await settle();
+    expect(await contactTraces(contact.id)).toEqual(before);
+  });
+});
+
+describe('ST-3: bulk delete writes traces only for the rows it deleted, naming the requester', () => {
+  beforeAll(async () => {
+    await db.user.create({ data: { id: RID.ownerB, email: `${RID.ownerB}@test.local`, role: 'USER' } });
+    await db.business.create({ data: { id: RID.bizB, name: 'TCA Biz B', ownerId: RID.ownerB } });
+    await db.membership.create({ data: { id: `${P}m_ownerB_bizB`, userId: RID.ownerB, businessId: RID.bizB, role: 'OWNER' } });
+  });
+
+  it('NEGATIVE CONTROL: another tenant’s owner bulk-deleting a bizA contact id through bizB: deleted 0, the contact stays live and NO event or audit row is written in either tenant', async () => {
+    const foreign = await seedContact(ID.owner);
+    const bizBEventsBefore = await db.contactEvent.count({ where: { businessId: RID.bizB } });
+    const bizBAuditsBefore = await db.contactAuditEntry.count({ where: { businessId: RID.bizB } });
+
+    const res = await bulkDel(RID.bizB, RID.ownerB, [foreign.id]);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deleted: 0 });
+    await settle();
+
+    expect((await liveRow(foreign.id)).deleted_at).toBeNull();
+    expect(await contactTraces(foreign.id)).toEqual({ contactEvents: 0, audits: 0 });
+    expect(await db.contactEvent.count({ where: { businessId: RID.bizB } })).toBe(bizBEventsBefore);
+    expect(await db.contactAuditEntry.count({ where: { businessId: RID.bizB } })).toBe(bizBAuditsBefore);
+  });
+
+  it('NEGATIVE CONTROL: the bizA owner’s bulk delete records the owner on every contact.deleted event and bulk_deleted audit entry; a missing id gets nothing', async () => {
+    const one = await seedContact(ID.owner);
+    const two = await seedContact(ID.staff);
+    const missing = `${P}c_missing`;
+
+    const res = await bulkDel(ID.bizA, ID.owner, [one.id, two.id, missing]);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deleted: 2 });
+
+    for (const c of [one, two]) {
+      expect((await liveRow(c.id)).deleted_at).toBeInstanceOf(Date);
+      const deleted = await events(c.id, 'contact.deleted');
+      expect(deleted).toHaveLength(1);
+      expect(deleted[0]).toMatchObject({ actorType: 'USER', actorId: ID.owner, data: { bulk: true } });
+      const audits = await auditEntries(c.id, 'bulk_deleted');
+      expect(audits).toHaveLength(1);
+      expect(audits[0].actor).toEqual({ type: 'USER', id: ID.owner });
+    }
+    await settle();
+    expect(await contactTraces(missing)).toEqual({ contactEvents: 0, audits: 0 });
+  });
+
+  it('a repeat bulk delete of already-deleted ids deletes 0 and writes nothing', async () => {
+    const contact = await seedContact(ID.owner);
+    expect((await bulkDel(ID.bizA, ID.owner, [contact.id])).body).toEqual({ deleted: 1 });
+    await auditEntries(contact.id, 'bulk_deleted');
+    await settle();
+    const before = await contactTraces(contact.id);
+
+    const again = await bulkDel(ID.bizA, ID.owner, [contact.id]);
+    expect(again.status).toBe(200);
+    expect(again.body).toEqual({ deleted: 0 });
+    await settle();
+    expect(await contactTraces(contact.id)).toEqual(before);
+  });
+
+  it('system-context bulk delete (no audit context) keeps the SYSTEM actor and attributes no user', async () => {
+    const contact = await seedContact(ID.owner);
+    expect(await crm.bulkDeleteContacts({ businessId: ID.bizA, contactIds: [contact.id] })).toEqual({ deleted: 1 });
+    const deleted = await events(contact.id, 'contact.deleted');
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0].actorId).toBeNull();
+    const audits = await auditEntries(contact.id, 'bulk_deleted');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].actor).toEqual({ type: 'SYSTEM' });
+  });
+});

@@ -726,8 +726,9 @@ export class CrmService {
     actorUserId?: string;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
+    let access: CrmAccess | null = null;
     if (input.actorUserId) {
-      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
       if (!access.isOwner && !access.isSuperAdmin) {
         if (access.editScope === 'none') {
           throw new ForbiddenException('You do not have permission to edit contacts');
@@ -840,6 +841,14 @@ export class CrmService {
       if (!existingContact) {
         throw new NotFoundException('Contact not found');
       }
+      // Changing the owner through PATCH is a reassignment and needs the same
+      // permission as reassignContacts. Resending the current owner is not.
+      // Checked against the row read in this transaction, before any write.
+      // (A null ownerId is written as "unchanged", see `data` above.)
+      const changesOwner = input.ownerId != null && input.ownerId !== existingContact.ownerId;
+      if (changesOwner && access && !access.isOwner && !access.isSuperAdmin && !access.reassign) {
+        throw new ForbiddenException('You do not have permission to reassign contacts');
+      }
 
       const updatedContact = await tx.contact.update({
         where: { id: input.contactId },
@@ -927,14 +936,29 @@ export class CrmService {
         }
       }
     }
-    await this.timeline.logEvent(
-      input.businessId,
-      input.contactId,
-      'contact.deleted',
-      { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() },
-      { actorType: 'USER', source: 'crm', ...this.eventActor(_audit) },
-    );
-    const deleted = await this.prisma.client.contact.update({ where: { id: input.contactId }, data: { deletedAt: new Date() } });
+    const deleted = await this.prisma.client.$transaction(async (tx) => {
+      // Claim the live row: the UPDATE re-checks `deletedAt IS NULL` under the
+      // row lock, so of two concurrent deletes only one matches and the other
+      // is refused like any already-deleted contact, writing no event.
+      const claimed = await tx.contact.update({
+        where: contactWhereWithId(input.businessId, input.contactId),
+        data: { deletedAt: new Date() },
+      }).catch((err: unknown) => {
+        if ((err as { code?: unknown } | null)?.code === 'P2025') {
+          throw new NotFoundException('Contact not found');
+        }
+        throw err;
+      });
+      await this.timeline.logEvent(
+        input.businessId,
+        input.contactId,
+        'contact.deleted',
+        { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() },
+        { actorType: 'USER', source: 'crm', ...this.eventActor(_audit) },
+        tx,
+      );
+      return claimed;
+    });
     this.auditContact({
       businessId: input.businessId,
       contactId: input.contactId,
@@ -1140,11 +1164,22 @@ export class CrmService {
         }
       }
     }
-    const eventOps = input.contactIds.map((cid) =>
-      this.timeline.logEvent(input.businessId, cid, 'contact.deleted', { bulk: true }),
+    // Delete first, scoped to this tenant's live rows, and learn exactly which
+    // rows this call deleted. Only those get an event and an audit entry: an id
+    // from another tenant, a missing id, or one already deleted (including by a
+    // concurrent request) gets no trace.
+    const deletedRows = await this.prisma.client.contact.updateManyAndReturn({
+      where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
+      data: { deletedAt: new Date() },
+      select: { id: true },
+    });
+    const deletedIds = deletedRows.map((row) => row.id);
+    const eventMeta = this.eventActor(_audit);
+    const eventOps = deletedIds.map((cid) =>
+      this.timeline.logEvent(input.businessId, cid, 'contact.deleted', { bulk: true }, eventMeta),
     );
     await Promise.allSettled(eventOps);
-    for (const cid of input.contactIds) {
+    for (const cid of deletedIds) {
       this.auditContact({
         businessId: input.businessId,
         contactId: cid,
@@ -1152,13 +1187,9 @@ export class CrmService {
         ctx: _audit,
       });
     }
-    const result = await this.prisma.client.contact.updateMany({
-      where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
-      data: { deletedAt: new Date() },
-    });
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
-    return { deleted: result.count };
+    return { deleted: deletedIds.length };
   }
 
   /**
