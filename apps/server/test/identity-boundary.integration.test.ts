@@ -76,14 +76,17 @@
  *         required behaviour; see "ST-2 (fixed …)" below). The admin-token
  *         branch attached verifyAdminToken's result directly: no revocation
  *         marker, no deletedAt/bannedAt, role from the token
- *         (auth.middleware.ts). NOT CLOSED on one sibling path, pinned below:
- *         the KEY Cortex WebSocket admin-token path still skips every
- *         local-user check (ST-2-WS). (POST /identity/logout not revoking an
- *         admin token was the admin half of ST-4, fixed with it.)
- *   ST-2-WS key-cortex-ws-auth.service.ts authenticateSocket takes the role
- *         from an admin token and checks neither deletedAt, bannedAt nor the
- *         marker, and verifyBusinessMembership lets SUPER_ADMIN into any
- *         tenant's socket; its Supabase path falls back to USER on a DB error.
+ *         (auth.middleware.ts). Its sibling path on the KEY Cortex WebSocket is
+ *         closed too (ST-2-WS). (POST /identity/logout not revoking an admin
+ *         token was the admin half of ST-4, fixed with it.)
+ *   ST-2-WS FIXED by R0-ID-F6-WS-ADMIN-TOKEN (its cases open a real socket;
+ *         see "ST-2-WS (fixed …)" below). key-cortex-ws-auth.service.ts
+ *         authenticateSocket took the role from an admin token and checked
+ *         neither deletedAt, bannedAt nor the logout marker, so with
+ *         verifyBusinessMembership's SUPER_ADMIN bypass a demoted, deleted or
+ *         banned SUPER_ADMIN opened any tenant's socket; its Supabase path fell
+ *         back to USER on a DB error. It now takes AuthMiddleware's decision
+ *         for the same bearer token.
  *   ST-3  FIXED by R0-09-ID-HARDEN (owner ruling D-11; its cases assert the
  *         required behaviour; see "ST-3 (fixed …)" below). PATCH
  *         /identity/businesses/:id had only AuthGuard and BusinessGuard, so a
