@@ -153,6 +153,90 @@ export class PaymentsService {
     return { client, ordersController };
   }
 
+  /**
+   * V1-46b-TOKEN-PAY-COMPLETE (M34, review ST-1; D-07: token links only) —
+   * the invoice a customer pay-link token opens, resolved ONLY through an
+   * active, unexpired PaymentLink of the invoice's own tenant: the resolver
+   * the token pay read and intent use (CommerceService.getPaymentLinkByToken,
+   * V1-48/V1-46). Behind it, the same shareable gate as that read: a DRAFT,
+   * VOID, FAILED, PENDING or soft-deleted invoice reads as absent. Every
+   * refusal is one 404 body, the one an unknown token gets, and nothing
+   * downstream (no provider, no row) is reached.
+   */
+  private async payLinkInvoice(token: string): Promise<{ invoiceId: string; businessId: string }> {
+    const link = await this.commerceService.getPaymentLinkByToken(token);
+    if (!link) throw new NotFoundException('Invoice not found');
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: link.invoiceId, businessId: link.businessId, deletedAt: null },
+      select: { status: true },
+    });
+    if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
+    return { invoiceId: link.invoiceId, businessId: link.businessId };
+  }
+
+  /**
+   * V1-46b (ST-1): the anonymous bare-id routes (status, gateway list, the
+   * generic checkout's invoice payables) answer like an unknown id once every
+   * link of the invoice is revoked or expired (CommerceService.
+   * isBareIdPublicAccessOpen). Unknown and closed share one 404 body.
+   */
+  private async assertBareIdInvoiceOpen(invoiceId: string): Promise<void> {
+    if (!(await this.commerceService.isBareIdPublicAccessOpen(invoiceId))) {
+      throw new NotFoundException('Invoice not found');
+    }
+  }
+
+  /** V1-46b: the pay page's status poll, by the token (the five keys of getInvoicePaymentStatus). */
+  async getInvoicePaymentStatusByToken(token: string) {
+    const { invoiceId } = await this.payLinkInvoice(token);
+    return this.invoicePaymentStatus(invoiceId);
+  }
+
+  /** V1-46b: the gateways the token's business accepts. */
+  async getGatewaysByToken(token: string): Promise<GatewayInfo[]> {
+    const { businessId } = await this.payLinkInvoice(token);
+    return this.getAvailableGateways(businessId);
+  }
+
+  /**
+   * V1-46b: the bare-id gateway list (GET invoice/:invoiceId/gateways). It
+   * answered a plain Error (500) for an unknown id; unknown and a closed id
+   * now answer one 404 (assertBareIdInvoiceOpen).
+   */
+  async getGatewaysForInvoice(invoiceId: string): Promise<GatewayInfo[]> {
+    await this.assertBareIdInvoiceOpen(invoiceId);
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { businessId: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    return this.getAvailableGateways(invoice.businessId);
+  }
+
+  /**
+   * V1-46b: a Stripe, WiPay or PayPal checkout for the token's invoice. The
+   * per-provider work is createInvoiceCheckout, unchanged (payable gate,
+   * return-URL allow-list, provider request); only the invoice comes from the
+   * token instead of a bare id in the path.
+   */
+  async createCheckoutByToken(
+    token: string,
+    input: { gateway: 'stripe' | 'paypal' | 'wipay'; returnUrl?: string; successUrl?: string; cancelUrl?: string },
+  ) {
+    const { invoiceId } = await this.payLinkInvoice(token);
+    return this.createInvoiceCheckout(invoiceId, input.gateway, input.returnUrl, input.successUrl, input.cancelUrl);
+  }
+
+  /**
+   * V1-46b: the PayPal capture for the token's invoice. The invoice is the
+   * token's, never one named by the caller (the bare route took
+   * `body.invoiceId`, so any order could be captured against any invoice).
+   */
+  async capturePaypalOrderByToken(token: string, orderId: string) {
+    const { invoiceId } = await this.payLinkInvoice(token);
+    return this.capturePaypalOrder(orderId, invoiceId);
+  }
+
   async getAvailableGateways(businessId: string): Promise<GatewayInfo[]> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -963,8 +1047,23 @@ export class PaymentsService {
    * unknown id answered 404 — the distinction and the amount were both new
    * disclosures (main answered `[]` for either). Non-shareable now answers
    * exactly like unknown.
+   *
+   * V1-46b (ST-1): and so does an invoice whose links are all revoked or
+   * expired (assertBareIdInvoiceOpen). The pay page polls the token route
+   * (getInvoicePaymentStatusByToken), which serves the same five keys.
    */
   async getInvoicePaymentStatus(invoiceId: string): Promise<{
+    status: string;
+    paid: number;
+    remaining: number;
+    currency: string;
+    lastPaymentAt: Date | null;
+  }> {
+    await this.assertBareIdInvoiceOpen(invoiceId);
+    return this.invoicePaymentStatus(invoiceId);
+  }
+
+  private async invoicePaymentStatus(invoiceId: string): Promise<{
     status: string;
     paid: number;
     remaining: number;
@@ -1619,6 +1718,8 @@ export class PaymentsService {
         input.payableType === 'mass_comm'
           ? await this.resolveMassCommInvoiceId(input.payableId)
           : input.payableId;
+      // V1-46b (ST-1): an anonymous bare-id invoice checkout closes with the invoice's links.
+      await this.assertBareIdInvoiceOpen(invoiceId);
       return this.createInvoiceCheckout(
         invoiceId,
         input.gateway,
@@ -1663,6 +1764,7 @@ export class PaymentsService {
       if (!attendee.paymentId) {
         throw new BadRequestException('Attendee does not have a payable invoice');
       }
+      await this.assertBareIdInvoiceOpen(attendee.paymentId);
       return this.createInvoiceCheckout(
         attendee.paymentId,
         input.gateway,

@@ -1118,24 +1118,19 @@ export class CommerceController {
   // ========== INVOICE EMAIL / REMINDER / RECEIPT ==========
 
   /**
-   * Build the standardized public invoice URL (uses payment-link token if
-   * available, falls back to the invoice id under the same /public/invoice
-   * path so the frontend has one canonical place to render).
+   * Build the standardized public invoice URL, /public/invoice/<token>.
+   * createPaymentLink throws for PAID/VOID invoices; for those (e.g. the
+   * resend-receipt flow) the previously-issued token is surfaced so the
+   * customer can revisit the invoice page. Only the known "paid or voided"
+   * refusal is swallowed — other failures bubble up.
+   *
+   * V1-46b-TOKEN-PAY-COMPLETE (CR-01): the logic moved, unchanged, to
+   * CommerceService.publicInvoiceUrl, so every producer of a customer
+   * invoice URL (these emails, the flow reminders, KEY's invoice_sent and
+   * autopilot payment recovery) builds the same token link.
    */
   private async buildPublicInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
-    // createPaymentLink throws for PAID/VOID invoices; for those (e.g. the
-    // resend-receipt flow) we still want to surface the previously-issued
-    // token so the customer can revisit the invoice page. Only the known
-    // "paid or voided" refusal is swallowed — other failures bubble up.
-    try {
-      const link = await this.commerce.createPaymentLink(invoiceId, businessId);
-      return `${appUrl()}/public/invoice/${link.token}`;
-    } catch (err: any) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!/paid or voided/i.test(msg)) throw err;
-      const existing = await this.commerce.findAnyPaymentLink(invoiceId, businessId);
-      return existing ? `${appUrl()}/public/invoice/${existing.token}` : null;
-    }
+    return this.commerce.publicInvoiceUrl(invoiceId, businessId);
   }
 
   private buildInvoiceEmailContext(
@@ -1634,14 +1629,14 @@ export class CommerceController {
   // V1-46-PUB-PAY-LINK-TOKEN-GATE (M34; D-07: token links only, the bare-id
   // pay page is retired). The customer pay page's read and its offline intent
   // are keyed by the pay-link token, so deactivating or expiring a link stops
-  // those two. It does NOT yet stop someone who opened the page once: the
-  // read returns the invoice id (the provider checkouts need it), and the
-  // id-keyed public routes still answer that id after the link is gone — the
-  // bare-id read below, and payments.controller.ts's gateway list, status,
-  // Stripe / PayPal / WiPay checkouts and PayPal capture (review ST-1; outside
-  // this packet's write set). M34 stays open until those are token-keyed and
-  // the id leaves this read. Two bare routes are retired and two token routes
-  // take their place (the public-surface ledger stays at 11):
+  // those two. V1-46b-TOKEN-PAY-COMPLETE (review ST-1) finished the boundary:
+  // the read no longer returns the invoice id, the gateway list, status,
+  // Stripe / PayPal / WiPay checkouts and PayPal capture are token routes of
+  // payments.controller.ts, and the id-keyed public routes (the bare-id read
+  // below, the bare status and gateway list, the generic checkout) answer an
+  // unknown-id 404 once every link of the invoice is revoked or expired
+  // (CommerceService.isBareIdPublicAccessOpen). Two bare routes are retired
+  // and two token routes take their place (the public-surface ledger stays at 11):
   //   GET  payment-links/:token          -> retired. It handed the invoice id to
   //                                         /pay/link/[token], which downgraded
   //                                         to /pay/:invoiceId.
@@ -1649,10 +1644,10 @@ export class CommerceController {
   //                                         id could record an intent whatever
   //                                         became of the link.
   // The bare-id public read GET invoices/:invoiceId keeps its redacted
-  // projection (KF-REVENUE-AUTH-PROJECTION-001) for anyone holding the id:
-  // the embeddable widgets/pay/[invoiceId] page still reads it (review ST-2),
-  // so its anonymous branch can go only once that page is retired or keyed by
-  // the token. The operator app reads the tenant-bound route (R0-QI-01).
+  // projection (KF-REVENUE-AUTH-PROJECTION-001) only while the invoice has a
+  // live link or never had one (release0-journey step 6 pins the latter);
+  // widgets/pay/[invoiceId] no longer reads it (retired, review ST-2). The
+  // operator app reads the tenant-bound route (R0-QI-01).
   // What stands in for a guard on both token routes: the token IS the
   // credential (24 crypto-random bytes, V1-48; unknown, inactive, expired and
   // foreign-tenant links answer one 404) plus the rate limit.

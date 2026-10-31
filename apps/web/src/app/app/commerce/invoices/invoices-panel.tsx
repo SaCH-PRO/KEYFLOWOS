@@ -348,19 +348,25 @@ export default function InvoicesPanel({
   );
 
   // Builds the canonical public invoice URL via the server payment-link
-  // endpoint so the same token works across email/WhatsApp/copy. Falls back
-  // to the local /pay/:id route only if the API is unreachable.
-  async function buildPublicInvoiceUrl(invoiceId: string): Promise<string> {
+  // endpoint so the same token works across email/WhatsApp/copy.
+  // V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): there is no
+  // fallback any more. It was the bare-id /pay/:id page, which is retired, so
+  // a link that cannot be issued (a paid or void invoice, the API down) is an
+  // error the operator sees, never a dead URL handed to the customer.
+  async function buildPublicInvoiceUrl(invoiceId: string): Promise<string | null> {
+    if (!businessId) return null;
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    if (!businessId) return `${origin}/pay/${invoiceId}`;
     const { data } = await createInvoicePaymentLink(businessId, invoiceId);
-    if (data?.token) return `${origin}/public/invoice/${data.token}`;
-    return `${origin}/pay/${invoiceId}`;
+    return data?.token ? `${origin}/public/invoice/${data.token}` : null;
   }
 
   async function copyPaymentLink(invoiceId: string) {
     try {
       const link = await buildPublicInvoiceUrl(invoiceId);
+      if (!link) {
+        setInvoiceError("Could not create a payment link for this invoice");
+        return;
+      }
       await navigator.clipboard.writeText(link);
       setCopiedLink(invoiceId);
       setTimeout(() => setCopiedLink(null), 2000);
@@ -372,6 +378,10 @@ export default function InvoicesPanel({
 
   async function shareViaWhatsApp(inv: Invoice) {
     const link = await buildPublicInvoiceUrl(inv.id);
+    if (!link) {
+      setInvoiceError("Could not create a payment link for this invoice");
+      return;
+    }
     const contactName = inv.contact
       ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim()
       : "there";

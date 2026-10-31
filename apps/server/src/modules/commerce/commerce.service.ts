@@ -23,6 +23,7 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { appUrl } from '../../core/config/runtime-urls';
 
 /**
  * The full operator shape of an invoice: every payment row (reference, notes,
@@ -620,12 +621,52 @@ export class CommerceService {
    * The shareable gate is the same for both readers: on main the route
    * answered null for DRAFT/VOID to everyone, and this packet does not widen
    * what the route serves.
+   *
+   * V1-46b-TOKEN-PAY-COMPLETE (M34, D-07: token links only): the projection
+   * branch also passes the bare-id link gate (`isBareIdPublicAccessOpen`), so
+   * once every link of the invoice is revoked or expired the id no longer
+   * opens it: the same null, so the same 404 as an unknown id. The operator
+   * branch is unchanged.
    */
   async getInvoiceForViewer(invoiceId: string, viewer?: { id?: string; role?: string } | null) {
     if (viewer?.id && (await this.viewerMayReadInvoiceAsOperator(invoiceId, viewer.id, viewer.role))) {
       return this.getInvoiceWithBusiness(invoiceId, true);
     }
-    return this.getInvoicePublicView(invoiceId);
+    const view = await this.getInvoicePublicView(invoiceId);
+    if (!view || !(await this.isBareIdPublicAccessOpen(invoiceId))) return null;
+    return view;
+  }
+
+  /**
+   * V1-46b-TOKEN-PAY-COMPLETE (M34, review ST-1; D-07: token links only) —
+   * the gate every anonymous bare-id invoice route passes: the public read
+   * (GET /commerce/invoices/:id, non-operator branch), the status poll and
+   * gateway list of payments.controller.ts, and the generic checkout's
+   * invoice payables. The customer pays through the token routes; the id
+   * alone must not outlive the link the business revoked.
+   *
+   * Closed (false) for an unknown invoice and for one whose own-tenant links
+   * are ALL inactive or past their expiry: revoking or letting the link lapse
+   * then stops the bare-id routes too, not only the token routes. Open while
+   * the invoice has a live link, and for an invoice that never had a link,
+   * which keeps the KF-REVENUE-AUTH-PROJECTION-001 answer pinned by
+   * release0-journey step 6 (a separate decision; no link was revoked there).
+   * A link row of another tenant (M31: no FK ties the two) is not one of this
+   * invoice's links in either direction.
+   */
+  async isBareIdPublicAccessOpen(invoiceId: string): Promise<boolean> {
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { businessId: true },
+    });
+    if (!invoice) return false;
+    const links = await this.prisma.client.paymentLink.findMany({
+      where: { invoiceId, businessId: invoice.businessId },
+      select: { active: true, expiresAt: true },
+    });
+    if (links.length === 0) return true;
+    const now = new Date();
+    return links.some((l) => l.active && (!l.expiresAt || l.expiresAt > now));
   }
 
   /**
@@ -682,10 +723,10 @@ export class CommerceService {
    * controller turns into the same 404 as an unknown id.
    *
    * V1-46: the bare-id pay page is retired (D-07); the customer pay page at
-   * /pay/link/[token] reads this same projection through
-   * `getPayPageByToken`. The bare-id route keeps serving it to anyone holding
-   * the id, revoked link or not, because widgets/pay/[invoiceId] still reads
-   * it (review ST-1/ST-2).
+   * /pay/link/[token] reads this same projection, less the invoice id,
+   * through `getPayPageByToken`. V1-46b: the bare-id route serves it only
+   * while `isBareIdPublicAccessOpen` holds (getInvoiceForViewer), and
+   * widgets/pay/[invoiceId] no longer reads it (retired).
    */
   async getInvoicePublicView(invoiceId: string) {
     const invoice = await this.prisma.client.invoice.findUnique({
@@ -2930,6 +2971,34 @@ export class CommerceService {
   }
 
   /**
+   * The customer's public invoice URL, `<app>/public/invoice/<token>`: the
+   * invoice's live pay link, minted when it has none (createPaymentLink). A
+   * PAID or VOID invoice cannot get a new link, so the most recent one it was
+   * given is handed out again (findAnyPaymentLink), or null when it never had
+   * one. Any other refusal (unknown invoice, another tenant's) is thrown.
+   *
+   * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the single
+   * place a customer-facing invoice URL is built. The invoice emails
+   * (send-email, reminder, resend-receipt in commerce.controller.ts), the
+   * overdue and due-soon reminders (flow.listener), KEY's invoice_sent
+   * (flow-orchestrator) and autopilot payment recovery (delegation-loop) all
+   * use it; none of them emits a bare /pay/<invoiceId> URL any more.
+   */
+  async publicInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
+    try {
+      const link = await this.createPaymentLink(invoiceId, businessId);
+      return `${appUrl()}/public/invoice/${link.token}`;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Only the known "paid or voided" refusal is swallowed; the three callers
+      // that match on this text are unchanged (R0-D3).
+      if (!/paid or voided/i.test(msg)) throw err;
+      const existing = await this.findAnyPaymentLink(invoiceId, businessId);
+      return existing ? `${appUrl()}/public/invoice/${existing.token}` : null;
+    }
+  }
+
+  /**
    * V1-48-PUBLIC-TOKEN-VIEW (M34): the pay-link token is the customer's whole
    * credential, so it is 24 crypto-random bytes (32 base64url characters),
    * the same as a quote's view token. It is passed explicitly on create; the
@@ -3106,19 +3175,23 @@ export class CommerceService {
    * of another tenant, and an invoice the projection does not share (DRAFT,
    * VOID, FAILED, PENDING, deleted), read as absent.
    *
-   * Review ST-1: the projection carries the invoice `id`, which the page needs
-   * for the provider checkouts of payments.controller.ts (still keyed by the
-   * id, outside this packet). Whoever has read it once keeps the id-keyed
-   * public routes after the link is revoked or expires, so this read is not
-   * yet the whole revocation boundary; the id leaves it once those routes
-   * take the token.
+   * V1-46b-TOKEN-PAY-COMPLETE (review ST-1, TG-16): the read no longer
+   * carries the invoice `id`. The page needed it only for the provider
+   * checkouts, the gateway list and the PayPal capture, which are now keyed
+   * by the token too (payments.controller.ts, public/invoice-link/:token/...),
+   * so a customer never learns the id and a revoked link leaves them nothing
+   * to call; the bare-id routes close behind a revoked link as well
+   * (isBareIdPublicAccessOpen). `businessId` stays: the tenant key is public
+   * and the page's presence tracker reads it.
    */
   async getPayPageByToken(token: string) {
     const link = await this.getPaymentLinkByToken(token);
     if (!link) return null;
     const view = await this.getInvoicePublicView(link.invoiceId);
     if (!view || view.businessId !== link.businessId) return null;
-    return view;
+    const projection: Omit<NonNullable<typeof view>, 'id'> & { id?: string } = { ...view };
+    delete projection.id;
+    return projection;
   }
 
   /**

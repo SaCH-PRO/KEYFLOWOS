@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, Optional, OnModuleInit, OnModuleDestroy, NotFoundException, forwardRef } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
@@ -7,6 +8,7 @@ import { TransactionalEmailService } from '../notifications/transactional-email.
 import { ClientMomentumService } from '../momentum/client-momentum.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CrmTimelineService } from '../crm/crm-timeline.service';
+import { CommerceService } from '../commerce/commerce.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
 
 const MOMENTUM_SWEEP_HOUR = 6;
@@ -107,7 +109,32 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
     @Optional() @Inject(ClientMomentumService) private readonly momentumService: ClientMomentumService | null,
+    // AutopilotModule does not import CommerceModule; CommerceService is
+    // resolved at call time, as FlowOrchestratorService resolves it.
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
+
+  private getCommerce(): CommerceService {
+    return this.moduleRef.get(CommerceService, { strict: false });
+  }
+
+  /**
+   * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the
+   * customer's link in a payment-recovery email is /public/invoice/<token>,
+   * built exactly as the operator's send-email builds it
+   * (CommerceService.publicInvoiceUrl: the live link, or a new one). This sent
+   * /pay/<invoiceId>, the retired bare-id page. A link that cannot be issued
+   * leaves the email without a button (the template renders none), never a
+   * bare-id URL.
+   */
+  private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
+    try {
+      return (await this.getCommerce().publicInvoiceUrl(invoiceId, businessId)) ?? undefined;
+    } catch (e) {
+      Logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`, DelegationLoopService.name);
+      return undefined;
+    }
+  }
 
   onModuleInit() {
     this.intervalRef = setInterval(() => {
@@ -662,8 +689,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
       if (!needsApproval && invoice.contact.email && window.allowed) {
         try {
-          const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
-          const invoiceUrl = `${appUrl}/pay/${invoice.id}`;
+          const invoiceUrl = await this.customerInvoiceUrl(invoice.id, businessId);
 
           await this.emailService.send({
             businessId,

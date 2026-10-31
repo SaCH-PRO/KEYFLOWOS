@@ -1,9 +1,33 @@
 import { Body, Controller, Get, Headers, Inject, Logger, Param, Post, Query, RawBodyRequest, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { PaymentsService } from './payments.service';
-import { PrismaService } from '../../core/prisma/prisma.service';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 
+/**
+ * V1-46b-TOKEN-PAY-COMPLETE (M34, review ST-1; D-07, ruled 2026-10-31: token
+ * links only). Every payment route the customer pay page (/pay/link/[token])
+ * calls is keyed by the pay-link token and resolves the invoice ONLY through
+ * an active, unexpired PaymentLink of the invoice's own tenant, so a revoked
+ * or expired link stops the status poll, the gateway list, the provider
+ * checkouts and the PayPal capture as it stops the pay read and the intent:
+ *
+ *   GET  public/invoice-link/:token/status                   five keys (20/min)
+ *   GET  public/invoice-link/:token/gateways                 the tenant's gateways (20/min)
+ *   POST public/invoice-link/:token/checkout                 { gateway: stripe | wipay | paypal, ... } (5/min)
+ *   POST public/invoice-link/:token/paypal/capture/:orderId  captured against the token's invoice (5/min)
+ *
+ * They replace the bare-id per-provider routes (POST invoice/:invoiceId/
+ * {stripe, wipay, paypal/create-order} and POST paypal/capture/:orderId with
+ * the invoice id in the body), which are retired. The bare-id status, the
+ * gateway list and the generic checkout stay (KF-REVENUE-AUTH-PROJECTION-001
+ * and release0-journey pin them) and answer an unknown-id 404 once every link
+ * of the invoice is revoked or expired. Provider webhooks and the WiPay
+ * callback are keyed by the provider's own event and are unchanged. What
+ * stands in for a guard on the token routes: the token IS the credential
+ * (24 crypto-random bytes, V1-48; every refusal is one 404) plus the rate
+ * limit. The public-surface ledger stays at 11: four token routes in, four
+ * bare-id routes out.
+ */
 @Controller('payments')
 @UseGuards(PublicRateLimitGuard)
 export class PaymentsController {
@@ -11,27 +35,33 @@ export class PaymentsController {
 
   constructor(
     @Inject(PaymentsService) private readonly payments: PaymentsService,
-    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
+  // V1-46b: unknown and closed ids answer one 404 (it was a plain Error, 500, for an unknown id).
   @PublicRateLimit(20, 60_000)
   @Get('invoice/:invoiceId/gateways')
   async getGateways(@Param('invoiceId') invoiceId: string) {
-    const invoice = await this.prisma.client.invoice.findUnique({
-      where: { id: invoiceId },
-      select: { businessId: true },
-    });
-    if (!invoice) throw new Error('Invoice not found');
-    return this.payments.getAvailableGateways(invoice.businessId);
+    return this.payments.getGatewaysForInvoice(invoiceId);
+  }
+
+  @PublicRateLimit(20, 60_000)
+  @Get('public/invoice-link/:token/gateways')
+  async getGatewaysByToken(@Param('token') token: string) {
+    return this.payments.getGatewaysByToken(token);
   }
 
   @PublicRateLimit(5, 60_000)
-  @Post('invoice/:invoiceId/wipay')
-  async createWipayCheckout(
-    @Param('invoiceId') invoiceId: string,
-    @Body() body: { returnUrl: string },
+  @Post('public/invoice-link/:token/checkout')
+  async createCheckoutByToken(
+    @Param('token') token: string,
+    @Body() body: { gateway: 'stripe' | 'paypal' | 'wipay'; returnUrl?: string; successUrl?: string; cancelUrl?: string },
   ) {
-    return this.payments.createWipayCheckout(invoiceId, body.returnUrl);
+    return this.payments.createCheckoutByToken(token, {
+      gateway: body?.gateway,
+      returnUrl: body?.returnUrl,
+      successUrl: body?.successUrl,
+      cancelUrl: body?.cancelUrl,
+    });
   }
 
   @PublicRateLimit(20, 60_000)
@@ -41,18 +71,12 @@ export class PaymentsController {
   }
 
   @PublicRateLimit(5, 60_000)
-  @Post('invoice/:invoiceId/paypal/create-order')
-  async createPaypalOrder(@Param('invoiceId') invoiceId: string) {
-    return this.payments.createPaypalOrder(invoiceId);
-  }
-
-  @PublicRateLimit(5, 60_000)
-  @Post('paypal/capture/:orderId')
-  async capturePaypalOrder(
+  @Post('public/invoice-link/:token/paypal/capture/:orderId')
+  async capturePaypalOrderByToken(
+    @Param('token') token: string,
     @Param('orderId') orderId: string,
-    @Body() body: { invoiceId: string },
   ) {
-    return this.payments.capturePaypalOrder(orderId, body.invoiceId);
+    return this.payments.capturePaypalOrderByToken(token, orderId);
   }
 
   @Get('paypal/setup')
@@ -63,20 +87,18 @@ export class PaymentsController {
   // KF-REVENUE-AUTH-PROJECTION-001 (G5): public and previously unthrottled —
   // without a decorator the class-level guard returns true. Now limited like
   // the sibling gateways route, and the service answers with a projection
-  // instead of raw Payment rows.
+  // instead of raw Payment rows. V1-46b: closed (404) once every link of the
+  // invoice is revoked or expired; the pay page polls the token route below.
   @PublicRateLimit(20, 60_000)
   @Get('invoice/:invoiceId/status')
   async getInvoicePaymentStatus(@Param('invoiceId') invoiceId: string) {
     return this.payments.getInvoicePaymentStatus(invoiceId);
   }
 
-  @PublicRateLimit(5, 60_000)
-  @Post('invoice/:invoiceId/stripe')
-  async createStripeCheckout(
-    @Param('invoiceId') invoiceId: string,
-    @Body() body: { successUrl: string; cancelUrl: string },
-  ) {
-    return this.payments.createStripeCheckout(invoiceId, body.successUrl, body.cancelUrl);
+  @PublicRateLimit(20, 60_000)
+  @Get('public/invoice-link/:token/status')
+  async getPaymentStatusByToken(@Param('token') token: string) {
+    return this.payments.getInvoicePaymentStatusByToken(token);
   }
 
   @PublicRateLimit(5, 60_000)

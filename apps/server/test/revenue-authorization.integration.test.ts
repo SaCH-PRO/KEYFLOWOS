@@ -1323,3 +1323,50 @@ describe('Review repairs: the projection carries the public business profile (RC
     expectNoCanary(res.body);
   });
 });
+
+// =============================================================================
+// V1-46b-TOKEN-PAY-COMPLETE (M34; D-07, ruled 2026-10-31 by the owner: token
+// links only, the bare-id pay page is retired). No pin above changed: the
+// anonymous bare-id cases (RA-G5-01..06, PC-01, PC-10, RR-ST3-*, RR-ST4-01,
+// RR-RCR1-02, RR-RCR2-01) read rva_invSent, which has a live link (tokSent)
+// beside its expired one, or invoices with no own-tenant link at all (invPaid,
+// the DRAFT and VOID fixtures, unknown ids), and the new contract still
+// answers those exactly as before. What it adds is the case none of them
+// covered: an invoice whose every link is revoked or expired is closed on the
+// bare-id public routes, so the id alone no longer outlives the link.
+// =============================================================================
+describe('V1-46b: the anonymous bare-id branch closes behind revoked links (D-07)', () => {
+  it('RA-V46B-01: an invoice whose only link was deactivated, or whose links have all expired, answers the unknown-id 404 on the public view, the status poll and the gateway list; the owner still reads the full shape', async () => {
+    await clearStatusRouteRateLimit();
+    const unknownView = await publicInvoice(`${P}nope_v46b`);
+    const unknownStatus = await publicStatus(`${P}nope_v46b`);
+    const unknownGateways = await agent().get(`/payments/invoice/${P}nope_v46b/gateways`);
+    for (const res of [unknownView, unknownStatus, unknownGateways]) expect(res.status).toBe(404);
+
+    for (const [tag, link] of [
+      ['v46b_revoked', { active: false }],
+      ['v46b_expired', { active: true, expiresAt: new Date('2020-01-01T00:00:00.000Z') }],
+    ] as const) {
+      const copy = await createCopy(tag, { status: 'SENT' });
+      // Open while it has no link (the KF-REVENUE-AUTH-PROJECTION-001 answer, unchanged).
+      expect((await publicInvoice(copy)).status, `${tag}: no link yet`).toBe(200);
+      await db.paymentLink.create({ data: { id: `${P}link_${tag}`, token: `${P}tok_${tag}`, invoiceId: copy, businessId: ID.bizA, ...link } });
+
+      const view = await publicInvoice(copy);
+      expect(view.status, `${tag}: view`).toBe(404);
+      expect(stripVolatile(view.body), `${tag}: view body`).toEqual(stripVolatile(unknownView.body));
+      const status = await publicStatus(copy);
+      expect(status.status, `${tag}: status`).toBe(404);
+      expect(stripVolatile(status.body), `${tag}: status body`).toEqual(stripVolatile(unknownStatus.body));
+      const gateways = await agent().get(`/payments/invoice/${copy}/gateways`);
+      expect(gateways.status, `${tag}: gateways`).toBe(404);
+      expect(stripVolatile(gateways.body), `${tag}: gateways body`).toEqual(stripVolatile(unknownGateways.body));
+
+      // The operator (revenue:read on the invoice's tenant) is unchanged.
+      const asOwner = await withActor(agent().get(`/commerce/invoices/${copy}`), ID.ownerA);
+      expect(asOwner.status, `${tag}: owner`).toBe(200);
+      expect(Array.isArray(asOwner.body.payments), `${tag}: owner shape`).toBe(true);
+      expect(await invoiceStatus(copy)).toBe('SENT');
+    }
+  });
+});

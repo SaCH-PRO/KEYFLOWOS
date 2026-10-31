@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, forwardRef } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { appUrl } from '../../core/config/runtime-urls';
 import {
@@ -25,6 +25,7 @@ import {
 import { BookingsService } from '../bookings/bookings.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinancialCopilotService } from '../commerce/financial-copilot.service';
+import { CommerceService } from '../commerce/commerce.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 
 @Injectable()
@@ -37,8 +38,27 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(FinancialCopilotService) private readonly financialCopilot: FinancialCopilotService,
     @Inject(TransactionalEmailService) private readonly transactionalEmail: TransactionalEmailService,
+    @Inject(forwardRef(() => CommerceService)) private readonly commerce: CommerceService,
   ) {
     this.logger.log(`FlowListener created, prisma=${!!this.prisma}`);
+  }
+
+  /**
+   * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the customer's
+   * invoice URL for a reminder, /public/invoice/<token> through
+   * CommerceService.publicInvoiceUrl (the send-email path: the live link, or
+   * a new one). The overdue reminder sent /pay/<invoiceId>, the retired
+   * bare-id page; the due-soon reminder sent /invoices/<invoiceId>, which no
+   * web route serves. A link that cannot be issued leaves the reminder
+   * without a button (the templates render none) rather than failing it.
+   */
+  private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
+    try {
+      return (await this.commerce.publicInvoiceUrl(invoiceId, businessId)) ?? undefined;
+    } catch (e) {
+      this.logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`);
+      return undefined;
+    }
   }
 
   onModuleInit() {
@@ -167,7 +187,7 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
       total: inv.total,
       currency: inv.currency,
       dueDate: inv.dueDate,
-      invoiceUrl: `${appUrl()}/pay/${inv.id}`,
+      invoiceUrl: await this.customerInvoiceUrl(inv.id, payload.businessId),
       daysOverdue,
     });
   }
@@ -577,8 +597,7 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
         });
         if (alreadySent) continue;
 
-        const base = appUrl();
-        const invoiceUrl = base ? `${base}/invoices/${inv.id}` : undefined;
+        const invoiceUrl = await this.customerInvoiceUrl(inv.id, inv.businessId);
 
         await this.sendCustomerNotification(inv.businessId, 'invoice_due_soon', inv.contact, {
           invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
@@ -660,8 +679,8 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
       })
       .catch(() => null);
     if (!inv?.contact?.email) return;
-    const base = appUrl();
-    const retryUrl = base ? `${base}/invoices/${inv.id}/pay` : undefined;
+    // V1-46b (CR-01): the retry link is the token link; /invoices/<id>/pay is served by no web route.
+    const retryUrl = await this.customerInvoiceUrl(inv.id, payload.businessId);
     await this.sendCustomerNotification(
       payload.businessId,
       'payment_failed',

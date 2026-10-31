@@ -19,12 +19,12 @@
  *     pre-V1-48 link rotates its token), the page says the payment was
  *     received or submitted, not that the link is invalid (review CR-02).
  *
- * The provider checkouts, the gateway list and the PayPal capture are routes
- * of payments.controller.ts, still keyed by the invoice id; this page calls
- * them only with the id the live-token read returned, so a revoked link
- * shows the error state and offers none of them. The routes themselves still
- * answer that id after the link is revoked (review ST-1, outside this
- * packet's write set): this page is not yet the whole revocation boundary.
+ * V1-46b-TOKEN-PAY-COMPLETE (review ST-1): the status poll, the gateway
+ * list, the Stripe / WiPay / PayPal checkouts and the PayPal capture are the
+ * token routes of payments.controller.ts (/payments/public/invoice-link/
+ * :token/..., through lib/client.ts), so every call this page makes is keyed
+ * by the token and stops when the link is revoked or expires. The token read
+ * no longer returns the invoice id, and the page never uses one.
  */
 
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";
@@ -35,6 +35,13 @@ import { apiGet, apiPost, API_BASE } from "@/lib/api";
 import { pickBusinessId } from "@/app/_lib/presence-sdk";
 import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 import { formatPrice } from "@/lib/format";
+import {
+  capturePayLinkPaypalOrder,
+  createPayLinkCheckout,
+  getPayLinkGateways,
+  getPayLinkStatus,
+  type PayLinkCheckoutBody,
+} from "@/lib/client";
 import { PublicPageState } from "@/components/ui/public-page-state";
 import {
   CheckCircle2,
@@ -80,8 +87,8 @@ type Business = {
   metaData?: Record<string, unknown> | null;
 };
 
+// V1-46b (TG-16): the token read carries no invoice id; the page needs none.
 type Invoice = {
-  id: string;
   /** The tenant key the projection carries for the presence tracker. */
   businessId?: string;
   invoiceNumber: string;
@@ -241,8 +248,6 @@ function TokenPaymentPageInner() {
   const intentPath = `/commerce/public/invoice-link/${encodeURIComponent(token)}/payment-intent`;
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
-  // The id the live-token read returned; the payments routes are keyed by it.
-  const invoiceId = invoice?.id ?? null;
   const paypalCaptured = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -275,10 +280,13 @@ function TokenPaymentPageInner() {
     if (stripeReturn === "success") {
       let cancelled = false;
       const poll = async (attempt = 0) => {
-        const res = await apiGet<Invoice>(payPath);
+        const res = await getPayLinkStatus(token);
         if (cancelled) return;
         if (res.data?.status === "PAID") {
-          setInvoice(res.data);
+          const fresh = await apiGet<Invoice>(payPath);
+          if (cancelled) return;
+          if (fresh.data) setInvoice(fresh.data);
+          else if (linkGone(fresh)) setTokenGone(true);
           setPaid(true);
           setShowConfetti(true);
           return;
@@ -296,7 +304,7 @@ function TokenPaymentPageInner() {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- transient toast feedback: surface the Stripe-cancel return-URL state into the page error banner once on mount
       setError("Stripe payment was cancelled.");
     }
-  }, [stripeReturn, payPath]);
+  }, [stripeReturn, payPath, token]);
 
   useEffect(() => {
     if (wipayStatus && wipayOrderId) {
@@ -323,17 +331,15 @@ function TokenPaymentPageInner() {
   }, [wipayStatus, wipayOrderId, payPath]);
 
   // PayPal returns here with its order token (`?token=`, distinct from the
-  // pay-link token in the path). The capture route is keyed by the invoice
-  // id, so it waits for the live-token read and runs once.
+  // pay-link token in the path). V1-46b: the capture is keyed by the pay-link
+  // token (the server records it against that link's invoice), so it runs
+  // once, without waiting for the invoice read.
   useEffect(() => {
-    if (paypalToken && invoiceId && !paypalCaptured.current) {
+    if (paypalToken && !paypalCaptured.current) {
       paypalCaptured.current = true;
       const capturePaypal = async () => {
         setStep("processing");
-        const res = await apiPost<{ id: string; status: string }>({
-          path: `/payments/paypal/capture/${paypalToken}`,
-          body: { invoiceId },
-        });
+        const res = await capturePayLinkPaypalOrder(token, paypalToken);
         if (res.data?.status === "COMPLETED") {
           setPaid(true);
           setShowConfetti(true);
@@ -348,7 +354,7 @@ function TokenPaymentPageInner() {
       };
       capturePaypal();
     }
-  }, [paypalToken, invoiceId, payPath]);
+  }, [paypalToken, token, payPath]);
 
   useEffect(() => {
     const loadInvoice = async () => {
@@ -364,9 +370,7 @@ function TokenPaymentPageInner() {
         return;
       }
       const loaded = invoiceRes.data;
-      const gatewayRes = await apiGet<{ gateways: Gateway[] }>(
-        `/payments/invoice/${encodeURIComponent(loaded.id)}/gateways`,
-      );
+      const gatewayRes = await getPayLinkGateways(token);
 
       setInvoice(loaded);
       if (loaded.status === "PAID") {
@@ -374,14 +378,14 @@ function TokenPaymentPageInner() {
       }
 
       if (gatewayRes.data) {
-        const gwList = Array.isArray(gatewayRes.data) ? gatewayRes.data : (gatewayRes.data as { gateways?: typeof gateways }).gateways || [];
+        const gwList: Gateway[] = Array.isArray(gatewayRes.data) ? gatewayRes.data : (gatewayRes.data as { gateways?: Gateway[] }).gateways || [];
         setGateways(gwList);
       }
 
       setLoading(false);
     };
     loadInvoice();
-  }, [payPath]);
+  }, [payPath, token]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.PaymentRequest) return;
@@ -489,6 +493,22 @@ function TokenPaymentPageInner() {
     setStep("review");
   }, [invoice, intentPath]);
 
+  /**
+   * V1-46b: every provider checkout goes through the token route. A 404 means
+   * the link was deactivated or expired since the page loaded.
+   */
+  const startCheckout = useCallback(async (body: PayLinkCheckoutBody) => {
+    const res = await createPayLinkCheckout(token, body);
+    if (res.rawError?.statusCode === 404) {
+      setInvoice(null);
+      setError(LINK_UNAVAILABLE);
+      setPaying(false);
+      setStep("review");
+      return null;
+    }
+    return res;
+  }, [token]);
+
   const handleWipayPay = useCallback(async () => {
     if (!invoice) return;
     setPaying(true);
@@ -496,32 +516,30 @@ function TokenPaymentPageInner() {
 
     const currentUrl = window.location.origin + window.location.pathname;
 
-    const res = await apiPost<{ redirectUrl: string }>({
-      path: `/payments/invoice/${encodeURIComponent(invoice.id)}/wipay`,
-      body: { returnUrl: currentUrl },
-    });
+    const res = await startCheckout({ gateway: "wipay", returnUrl: currentUrl });
+    if (!res) return;
+    const redirectUrl = res.data?.type === "redirect" ? res.data.redirectUrl : null;
 
-    if (res.error || !res.data?.redirectUrl) {
+    if (res.error || !redirectUrl) {
       setError(res.error || "Failed to initiate payment");
       setPaying(false);
       setStep("review");
       return;
     }
 
-    window.location.href = res.data.redirectUrl;
-  }, [invoice]);
+    window.location.href = redirectUrl;
+  }, [invoice, startCheckout]);
 
   const handlePaypalPay = useCallback(async () => {
     if (!invoice) return;
     setPaying(true);
     setStep("processing");
 
-    const orderRes = await apiPost<{ orderId: string }>({
-      path: `/payments/invoice/${encodeURIComponent(invoice.id)}/paypal/create-order`,
-      body: {},
-    });
+    const orderRes = await startCheckout({ gateway: "paypal" });
+    if (!orderRes) return;
+    const orderId = orderRes.data?.type === "paypal_order" ? orderRes.data.orderId : null;
 
-    if (orderRes.error || !orderRes.data?.orderId) {
+    if (orderRes.error || !orderId) {
       setError(orderRes.error || "Failed to create PayPal order");
       setPaying(false);
       setStep("review");
@@ -532,9 +550,9 @@ function TokenPaymentPageInner() {
     const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "";
     const isLive = paypalClientId.startsWith("A");
     const paypalBase = isLive ? "https://www.paypal.com" : "https://www.sandbox.paypal.com";
-    const approvalUrl = `${paypalBase}/checkoutnow?token=${orderRes.data.orderId}&return=${returnUrl}`;
+    const approvalUrl = `${paypalBase}/checkoutnow?token=${orderId}&return=${returnUrl}`;
     window.location.href = approvalUrl;
-  }, [invoice]);
+  }, [invoice, startCheckout]);
 
   const handleStripePay = useCallback(async () => {
     if (!invoice) return;
@@ -545,20 +563,19 @@ function TokenPaymentPageInner() {
     const successUrl = `${baseUrl}?stripe=success`;
     const cancelUrl = `${baseUrl}?stripe=cancel`;
 
-    const res = await apiPost<{ redirectUrl: string }>({
-      path: `/payments/invoice/${encodeURIComponent(invoice.id)}/stripe`,
-      body: { successUrl, cancelUrl },
-    });
+    const res = await startCheckout({ gateway: "stripe", successUrl, cancelUrl });
+    if (!res) return;
+    const redirectUrl = res.data?.type === "redirect" ? res.data.redirectUrl : null;
 
-    if (res.error || !res.data?.redirectUrl) {
+    if (res.error || !redirectUrl) {
       setError(res.error || "Failed to initiate Stripe payment");
       setPaying(false);
       setStep("review");
       return;
     }
 
-    window.location.href = res.data.redirectUrl;
-  }, [invoice]);
+    window.location.href = redirectUrl;
+  }, [invoice, startCheckout]);
 
   const handleOfflinePayment = useCallback(async (method: "bank_transfer" | "cash") => {
     if (!invoice) return;

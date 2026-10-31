@@ -211,6 +211,20 @@ export default function InvoiceDetailPage() {
     });
   };
 
+  // V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the token link
+  // or an error. The fallback was the retired bare-id /pay/:id page, so a
+  // paid or void invoice copied a dead link.
+  const copyPaymentLink = async () => {
+    if (!businessId || !invoice) return;
+    const { data, error: linkError } = await createInvoicePaymentLink(businessId, invoice.id);
+    if (!data?.token) {
+      toast.error(linkError ?? "Could not create a payment link for this invoice");
+      return;
+    }
+    await navigator.clipboard.writeText(`${window.location.origin}/public/invoice/${data.token}`);
+    toast.success("Copied");
+  };
+
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>;
   if (error || !invoice) return (
     <div className="max-w-4xl mx-auto py-20 text-center">
@@ -255,7 +269,7 @@ export default function InvoiceDetailPage() {
           <div className="relative group">
             <button className="inline-flex items-center gap-1.5 px-3 h-9 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"><MoreHorizontal className="w-3.5 h-3.5" /></button>
             <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border bg-popover shadow-lg py-1 hidden group-hover:block">
-              <DropdownItem icon={LinkIcon} label="Copy payment link" show onClick={async () => { if (!businessId) return; const res = await createInvoicePaymentLink(businessId, invoice.id); const url = res.data?.token ? window.location.origin + "/public/invoice/" + res.data.token : window.location.origin + "/pay/" + invoice.id; navigator.clipboard.writeText(url); toast.success("Copied"); }} />
+              <DropdownItem icon={LinkIcon} label="Copy payment link" show onClick={copyPaymentLink} />
               <DropdownItem icon={Printer} label="Print / PDF" show onClick={() => window.print()} />
               {invoice.status === "PAID" && <DropdownItem icon={Receipt} label="Resend receipt" show onClick={() => resendInvoiceReceipt(businessId!, invoice.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} />}
               {canEdit && <DropdownItem icon={CheckCircle} label="Mark paid" show onClick={handleMarkPaid} loading={actionLoading.paid} />}
@@ -419,7 +433,7 @@ export default function InvoiceDetailPage() {
             {canSend && <ActionButton icon={Send} label="Send invoice" onClick={handleSend} loading={actionLoading.send} primary />}
             {canRemind && <ActionButton icon={Bell} label="Send reminder" onClick={handleSendReminder} />}
             {canRecordPayment && <ActionButton icon={DollarSign} label="Record payment" onClick={() => setShowPaymentForm(true)} />}
-            <ActionButton icon={LinkIcon} label="Copy payment link" onClick={async () => { if (!businessId) return; const { data } = await createInvoicePaymentLink(businessId, invoice.id); const url = data?.token ? window.location.origin + "/public/invoice/" + data.token : window.location.origin + "/pay/" + invoice.id; navigator.clipboard.writeText(url); toast.success("Copied"); }} />
+            <ActionButton icon={LinkIcon} label="Copy payment link" onClick={copyPaymentLink} />
             <ActionButton icon={Printer} label="Print / PDF" onClick={() => window.print()} />
             {canEdit && <ActionButton icon={CheckCircle} label="Mark paid" onClick={handleMarkPaid} loading={actionLoading.paid} />}
             {canVoid && <ActionButton icon={Ban} label="Void invoice" onClick={handleVoid} loading={actionLoading.void} />}

@@ -1344,6 +1344,32 @@ describe('the widget pay page and the producers (V1-46b, ST-2, CR-01)', () => {
     expect(mail.sent[0].templateData.invoiceUrl).toBe(await liveLinkUrl(ID.invDueSoon));
   });
 
+  it("TG-18g: the payment-failed email's retry link (flow.listener), which pointed at the non-existent /invoices/<id>/pay, is /public/invoice/<token>", async () => {
+    const mail = emailRecorder();
+    const listener = Object.assign(Object.create(FlowListenerRef.prototype), {
+      prisma: {
+        client: {
+          invoice: {
+            findFirst: async () => ({
+              id: ID.invKeySend,
+              invoiceNumber: 'V46A-FAILED',
+              total: TOTAL,
+              currency: 'TTD',
+              contact: { id: ID.contactA, firstName: 'V46a', lastName: 'Customer', email: `${P}failed@test.local` },
+            }),
+          },
+        },
+      },
+      transactionalEmail: { send: mail.send },
+      commerce,
+      logger: quietLogger,
+    });
+    await listener.handlePaymentFailedCustomerNotif({ businessId: ID.bizA, invoiceId: ID.invKeySend, amount: TOTAL, currency: 'TTD', error: 'declined' });
+    expect(mail.sent).toHaveLength(1);
+    expect(mail.sent[0].type).toBe('payment_failed');
+    expect(mail.sent[0].templateData.retryUrl).toBe(`${appUrl()}/public/invoice/${LINK_OF[ID.invKeySend].token}`);
+  });
+
   it('TG-18f: the shared helper gives a settled invoice its existing link (findAnyPaymentLink, as resend-receipt does), never a bare-id URL', async () => {
     const url = await commerce.publicInvoiceUrl(ID.invPaid, ID.bizA);
     expect(url).toBe(`${appUrl()}/public/invoice/${LINK_OF[ID.invPaid].token}`);
