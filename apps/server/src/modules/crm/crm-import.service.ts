@@ -235,6 +235,17 @@ export class CrmImportService {
     return normalized;
   }
 
+  /**
+   * Every import entry point takes `actorUserId`, the requesting member. With
+   * it, a member who may not create contacts is refused 403 before an import
+   * job is opened, a link fetched or the vision model called, and each row goes
+   * through findOrCreateContact with that actor (merged only into contacts the
+   * member may edit; a collision answers the visibility-bounded 409).
+   */
+  private async assertImportAllowed(businessId: string, actorUserId?: string) {
+    if (actorUserId) await this.crm.assertCanCreateContacts(businessId, actorUserId);
+  }
+
   async createFileImport(params: {
     businessId: string;
     sourceType: 'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf';
@@ -242,7 +253,9 @@ export class CrmImportService {
     sourceUrl?: string;
     fileBuffer?: Buffer;
     ocrText?: string;
+    actorUserId?: string;
   }) {
+    await this.assertImportAllowed(params.businessId, params.actorUserId);
     const importJob = await this.prisma.client.contactImport.create({
       data: {
         businessId: params.businessId,
@@ -276,6 +289,7 @@ export class CrmImportService {
             businessId: params.businessId,
             importId: importJob.id,
             recordId: record.id,
+            actorUserId: params.actorUserId,
           });
           processed += 1;
         } catch (error: any) {
@@ -354,7 +368,8 @@ export class CrmImportService {
     }
   }
 
-  async createLinkImport(params: { businessId: string; sourceUrl: string }) {
+  async createLinkImport(params: { businessId: string; sourceUrl: string; actorUserId?: string }) {
+    await this.assertImportAllowed(params.businessId, params.actorUserId);
     this.validateImportUrl(params.sourceUrl);
 
     const importRecord = await this.prisma.client.contactImport.create({
@@ -423,7 +438,7 @@ export class CrmImportService {
           },
         });
 
-        const contact = await this.crm.findOrCreateContact(params.businessId, contactInput);
+        const contact = await this.crm.findOrCreateContact(params.businessId, contactInput, params.actorUserId);
         if (contact) {
           created++;
         }
@@ -455,6 +470,7 @@ export class CrmImportService {
     businessId: string;
     importId: string;
     recordId: string;
+    actorUserId?: string;
   }) {
     const record = await this.prisma.client.contactImportContact.findUnique({
       where: { id: params.recordId },
@@ -481,7 +497,7 @@ export class CrmImportService {
       source: 'import',
       sourceDetail: record.import.sourceType,
     };
-    const contact = await this.crm.findOrCreateContact(record.import.businessId, contactInput);
+    const contact = await this.crm.findOrCreateContact(record.import.businessId, contactInput, params.actorUserId);
     if (!contact) {
       throw new BadRequestException('Failed to create contact from import record');
     }
@@ -563,7 +579,8 @@ Only return the JSON object, no markdown or explanation.`,
     }
   }
 
-  async scanContactImage(businessId: string, buffer: Buffer, mimetype?: string) {
+  async scanContactImage(businessId: string, buffer: Buffer, mimetype?: string, actorUserId?: string) {
+    await this.assertImportAllowed(businessId, actorUserId);
     const base64 = `data:${mimetype || 'image/jpeg'};base64,${buffer.toString('base64')}`;
     const extracted = await this.extractContactFromImage(businessId, base64);
     if (!extracted.firstName && !extracted.lastName && !extracted.email && !extracted.phone) {
@@ -577,7 +594,7 @@ Only return the JSON object, no markdown or explanation.`,
       companyName: extracted.companyName,
       source: 'scan',
       sourceDetail: 'business_card',
-    });
+    }, actorUserId);
     return { contact, extracted };
   }
 
@@ -586,6 +603,7 @@ Only return the JSON object, no markdown or explanation.`,
     ocrText: string;
     mediaUrl?: string;
     type?: string;
+    actorUserId?: string;
   }) {
     const mapped = this.parseOcrText(params.ocrText);
     const contact = await this.crm.findOrCreateContact(params.businessId, {
@@ -595,7 +613,7 @@ Only return the JSON object, no markdown or explanation.`,
       phone: mapped.phone,
       source: 'ocr',
       sourceDetail: params.type ?? 'business_card',
-    });
+    }, params.actorUserId);
     if (!contact) {
       throw new BadRequestException('Failed to create contact from OCR text');
     }

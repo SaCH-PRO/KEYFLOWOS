@@ -83,6 +83,20 @@ export class CrmController {
     return { actor: { type: 'USER', id: actorUserId } };
   }
 
+  /**
+   * The authenticated member, for a service call that applies that member's
+   * CRM permissions (the import routes). The guards already refuse a request
+   * without a user; this keeps such a call from running unscoped, as a system
+   * caller, if they ever do not.
+   */
+  private requireActorUserId(req: { user?: { id?: string } } | undefined): string {
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return actorUserId;
+  }
+
   // ---------------------------------------------------------------------------
   // Relationship graph (M5)
   // ---------------------------------------------------------------------------
@@ -1003,18 +1017,22 @@ export class CrmController {
   async importContactsFromFile(
     @Param('businessId') businessId: string,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: { user?: { id?: string } },
     @Query('type') type?: string,
   ) {
+    const actorUserId = this.requireActorUserId(req);
     if (!file || !file.buffer) {
       throw new BadRequestException('File is required');
     }
     const allowed: Array<'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf'> = ['csv', 'xlsx', 'pdf', 'image', 'vcf'];
     const sourceType = allowed.includes(type as any) ? (type as 'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf') : 'csv';
+    // The importing member's edit scope and visibility apply to every row.
     return this.crmImport.createFileImport({
       businessId,
       sourceType,
       originalName: file.originalname,
       fileBuffer: file.buffer,
+      actorUserId,
     });
   }
 
@@ -1022,11 +1040,16 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/import/link')
-  async importContactsFromLink(@Param('businessId') businessId: string, @Body('url') url?: string) {
+  async importContactsFromLink(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
+    @Body('url') url?: string,
+  ) {
+    const actorUserId = this.requireActorUserId(req);
     if (!url) {
       throw new BadRequestException('url is required');
     }
-    return this.crmImport.createLinkImport({ businessId, sourceUrl: url });
+    return this.crmImport.createLinkImport({ businessId, sourceUrl: url, actorUserId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1036,7 +1059,9 @@ export class CrmController {
   async createContactFromOcr(
     @Param('businessId') businessId: string,
     @Body() body: { ocrText?: string; url?: string; type?: string },
+    @Req() req: { user?: { id?: string } },
   ) {
+    const actorUserId = this.requireActorUserId(req);
     if (!body?.ocrText) {
       throw new BadRequestException('ocrText is required');
     }
@@ -1045,6 +1070,7 @@ export class CrmController {
       ocrText: body.ocrText,
       mediaUrl: body.url,
       type: body.type,
+      actorUserId,
     });
   }
 
@@ -1061,12 +1087,14 @@ export class CrmController {
   async scanContactImage(
     @Param('businessId') businessId: string,
     @UploadedFile() image: Express.Multer.File,
+    @Req() req: { user?: { id?: string } },
   ) {
+    const actorUserId = this.requireActorUserId(req);
     checkAiRateLimit(businessId);
     if (!image || !image.buffer) {
       throw new BadRequestException('Image file is required');
     }
-    return this.crmImport.scanContactImage(businessId, image.buffer, image.mimetype);
+    return this.crmImport.scanContactImage(businessId, image.buffer, image.mimetype, actorUserId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
