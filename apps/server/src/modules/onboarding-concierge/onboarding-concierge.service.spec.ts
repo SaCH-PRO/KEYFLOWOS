@@ -280,15 +280,35 @@ describe('OnboardingConciergeService', () => {
   });
 
   describe('markOnboardingComplete', () => {
-    it('throws ForbiddenException when the three-pillar minimum is not met', async () => {
-      const { service } = makeService({
+    // Owner ruling D-03: the gate is the minimal profile (name, currency,
+    // timezone); the three-pillar minimum is a recommendation, not a gate.
+    const minimalProfile = { name: 'Biz One', currency: 'TTD', timezone: 'America/Port_of_Spain' };
+
+    it('throws ForbiddenException listing the missing fields when the minimal profile is absent (D-03)', async () => {
+      const { service, prisma, demoSeeder } = makeService({ integrity: { threePillarMinimumMet: true } });
+      const error = await service.markOnboardingComplete('biz_1').catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).getResponse()).toMatchObject({
+        code: 'ONBOARDING_PROFILE_INCOMPLETE',
+        missingFields: ['name', 'currency', 'timezone'],
+      });
+      expect(prisma.client.$transaction).not.toHaveBeenCalled();
+      expect(demoSeeder.seedDemoData).not.toHaveBeenCalled();
+    });
+
+    it('a three-pillar score below the minimum no longer blocks completion (D-03)', async () => {
+      const { service, demoSeeder } = makeService({
+        business: minimalProfile,
         integrity: { threePillarMinimumMet: false, genomeDnaScores: { founder: 30, business: 80, market: 80 } },
       });
-      await expect(service.markOnboardingComplete('biz_1')).rejects.toThrow(ForbiddenException);
+      const result = await service.markOnboardingComplete('biz_1');
+      expect(result.complete).toBe(true);
+      expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
+      expect(result).toMatchObject({ genomeRecommendation: { threePillarMinimumMet: false, missingPillars: ['founder'] } });
     });
 
     it('marks onboarding complete and seeds demo data when the gate passes', async () => {
-      const { service, prisma, demoSeeder } = makeService({ integrity: { threePillarMinimumMet: true } });
+      const { service, prisma, demoSeeder } = makeService({ business: minimalProfile, integrity: { threePillarMinimumMet: true } });
       const result = await service.markOnboardingComplete('biz_1');
 
       expect(result.complete).toBe(true);

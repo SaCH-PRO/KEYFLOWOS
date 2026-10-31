@@ -34,6 +34,36 @@ function isRegistrationStepCompleteForReadiness(status: unknown): boolean {
   return !incomplete.includes(value);
 }
 
+/** Owner ruling D-03: the manual minimal profile that completes onboarding. */
+type MinimalProfileField = 'name' | 'currency' | 'timezone';
+
+function isIanaTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The minimal-profile fields that are absent or unusable: a blank name, a
+ * currency that is not a three-letter ISO 4217 code, or a timezone that is
+ * not an IANA zone (an invalid zone throws wherever a date is formatted).
+ */
+function missingMinimalProfileFields(
+  business: { name?: string | null; currency?: string | null; timezone?: string | null } | null | undefined,
+): MinimalProfileField[] {
+  const name = business?.name?.trim() ?? '';
+  const currency = business?.currency?.trim() ?? '';
+  const timezone = business?.timezone?.trim() ?? '';
+  const missing: MinimalProfileField[] = [];
+  if (!name) missing.push('name');
+  if (!/^[A-Za-z]{3}$/.test(currency)) missing.push('currency');
+  if (!timezone || !isIanaTimezone(timezone)) missing.push('timezone');
+  return missing;
+}
+
 export interface SetupStatus {
   products: boolean;
   businessHours: boolean;
@@ -1112,27 +1142,32 @@ EXTRACTED: archetype=service_provider`;
     return this.demoSeeder.seedDemoData(businessId);
   }
 
+  /**
+   * Owner ruling D-03 (2026-10-31): onboarding completes on a manual minimal
+   * profile — business name, currency and timezone — without AI. The
+   * three-pillar DNA minimum is no longer a gate; it is returned as a
+   * recommendation so the client can still nudge towards the genome.
+   */
   async markOnboardingComplete(businessId: string) {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { onboardingComplete: true, onboardingCompletedAt: true },
+      select: { onboardingComplete: true, onboardingCompletedAt: true, name: true, currency: true, timezone: true },
     });
 
     if (business?.onboardingComplete && business?.onboardingCompletedAt) {
       return { complete: true, alreadyComplete: true };
     }
 
-    const integrity = await this.blueprint.calculateGenomeIntegrity(businessId);
-    if (!integrity.threePillarMinimumMet) {
-      const pillarKeys: DnaSectionKey[] = ['founder', 'business', 'market'];
-      const missingPillars = pillarKeys.filter((key) => integrity.genomeDnaScores[key] < 50);
+    const missingFields = missingMinimalProfileFields(business);
+    if (missingFields.length > 0) {
       throw new ForbiddenException({
-        code: 'GENOME_GATE_BLOCKED',
-        message: 'Three-Pillar Minimum not met. Complete Founder, Business, and Market DNA before finishing onboarding.',
-        genomeIntegrity: integrity.genomeIntegrity,
-        missingPillars,
+        code: 'ONBOARDING_PROFILE_INCOMPLETE',
+        message: 'Add your business name, currency and timezone before finishing onboarding.',
+        missingFields,
       });
     }
+
+    const genomeRecommendation = await this.threePillarRecommendation(businessId);
 
     const demoData = await this.prisma.client.$transaction(async (tx) => {
       await tx.business.update({
@@ -1151,7 +1186,28 @@ EXTRACTED: archetype=service_provider`;
       return seeded;
     });
 
-    return { complete: true, demoData };
+    return { complete: true, demoData, genomeRecommendation };
+  }
+
+  /**
+   * The three-pillar minimum as advice, never as a gate (D-03). A genome that
+   * cannot be scored must not block completion, so a failure reads as null.
+   */
+  private async threePillarRecommendation(businessId: string) {
+    try {
+      const integrity = await this.blueprint.calculateGenomeIntegrity(businessId);
+      const pillarKeys: DnaSectionKey[] = ['founder', 'business', 'market'];
+      return {
+        threePillarMinimumMet: integrity.threePillarMinimumMet,
+        genomeIntegrity: integrity.genomeIntegrity,
+        missingPillars: pillarKeys.filter((key) => (integrity.genomeDnaScores[key] ?? 0) < 50),
+      };
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Genome recommendation unavailable for ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
   }
 
   private async ensureLegalDisclaimerAccepted(businessId: string, tx?: PrismaTx) {
