@@ -6,7 +6,6 @@ import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { DemoDataSeederService, type DemoSeedResult } from './demo-data-seeder.service';
 import { getTenantContext } from '../../core/tenant/tenant-context';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import type {
   BlueprintData,
   BlueprintRegistrationProfile,
@@ -1150,10 +1149,11 @@ EXTRACTED: archetype=service_provider`;
    * three-pillar DNA minimum is no longer a gate; it is returned as a
    * recommendation so the client can still nudge towards the genome.
    *
-   * Review ST-R032-1: only the owner or a member with settings write access
-   * may complete (see resolveCompletionActor), checked before anything else,
-   * and the completion and the disclaimer acceptance it records are written to
-   * team_activity_logs against that actor, in the completion transaction.
+   * Review ST-R032-1, then R0-SEC-03 on owner ruling D-11: only the business
+   * owner (or a SUPER_ADMIN, on the platform bypass) may complete (see
+   * resolveCompletionActor), checked before anything else, and the completion
+   * and the disclaimer acceptance it records are written to team_activity_logs
+   * against that actor, in the completion transaction.
    */
   async markOnboardingComplete(businessId: string) {
     const business = await this.prisma.client.business.findUnique({
@@ -1200,13 +1200,19 @@ EXTRACTED: archetype=service_provider`;
   }
 
   /**
-   * Review ST-R032-1: who may finish onboarding. Completion marks the business
-   * complete, records the legal disclaimer acceptance for it and writes a demo
-   * contact (crm) and a DRAFT demo invoice (revenue), so BusinessGuard's "any
-   * member" is not enough. The rule is ModuleScopeGuard's own reading of the
-   * `settings` module at write level — the explicit scope map, else the role
-   * defaults (OWNER and ADMIN yes, STAFF no) — plus the business owner and
-   * SUPER_ADMIN, whom BusinessGuard admits without a membership row.
+   * Who may finish onboarding: the business owner only — R0-SEC-03, on owner
+   * ruling D-11 (2026-10-31: editing the business profile is OWNER only,
+   * regardless of granted scopes). Completion marks the business complete,
+   * records the legal disclaimer acceptance for it and writes a demo contact
+   * (crm) and a DRAFT demo invoice (revenue), so BusinessGuard's "any member"
+   * is not enough, and neither is a granted scope: settings:write or
+   * settings:admin admits no ADMIN or STAFF member (this replaces review
+   * ST-R032-1's owner-or-settings:write rule).
+   *
+   * The owner is, as for the profile PATCH (IdentityService.assertBusinessOwner),
+   * the distinguished owner (Business.ownerId) or the OWNER membership: the two
+   * arms BusinessGuard admits an owner by. A SUPER_ADMIN keeps the platform
+   * bypass BusinessGuard already grants it; nothing here widens that.
    *
    * The actor is the authenticated user TenantInterceptor bound to this
    * request; with no request context, or one for another business, completion
@@ -1221,27 +1227,20 @@ EXTRACTED: archetype=service_provider`;
     const [membership, user] = await Promise.all([
       this.prisma.client.membership.findUnique({
         where: { userId_businessId: { userId: actorId, businessId } },
-        select: { role: true, permissionScopes: true },
+        select: { role: true },
       }),
       this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } }),
     ]);
 
     if (user?.role === 'SUPER_ADMIN') return actorId;
-    if (membership) {
-      if (membership.role === 'OWNER') return actorId;
-      const scopes =
-        membership.permissionScopes && typeof membership.permissionScopes === 'object'
-          ? (membership.permissionScopes as Record<string, string>)
-          : defaultScopesForRole(membership.role);
-      if (rankOf(scopes.settings) >= LEVEL_RANK.write) return actorId;
-    }
+    if (membership?.role === 'OWNER') return actorId;
     throw this.completionForbidden();
   }
 
   private completionForbidden() {
     return new ForbiddenException({
       code: 'ONBOARDING_COMPLETE_FORBIDDEN',
-      message: 'Only the business owner or a member with settings write access can finish onboarding.',
+      message: 'Only the business owner can finish onboarding.',
     });
   }
 
