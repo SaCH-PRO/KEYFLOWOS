@@ -1611,6 +1611,33 @@ describe('ST-3 (fixed, R0-09-ID-HARDEN, owner ruling D-11) — PATCH /identity/b
   });
 });
 
+// OPEN DEFECTS — D-11 sibling write paths (R0-09-ID-HARDEN review R09-ST-2,
+// R09-ST-3, R09-ST-4, CR-3). The generic PATCH above is closed, but other
+// routes still write the owner-only profile fields with only AuthGuard and
+// BusinessGuard. Each fix is in source outside the R0-09 write set; each
+// it.todo names the required behaviour for its follow-up packet.
+describe('OPEN DEFECTS — D-11 sibling write paths still change owner-only profile fields', () => {
+  it.todo(
+    'REQUIRED (follow-up; site/presence/presence.controller.ts, presence.service.ts publish — outside the R0-09 write set; review R09-ST-2): ' +
+      'PUT /site/presence/businesses/:id/draft and POST .../publish copy draft.slug onto Business.slug for any member, so a settings:none STAFF ' +
+      'changes the public slug the generic PATCH refuses; the slug change answers 403 for a non-owner with Business.slug unchanged',
+  );
+  it.todo(
+    'REQUIRED (follow-up, next to R0-SEC owner-only onboarding completion; onboarding-concierge.controller.ts/.service.ts autoConfigure — ' +
+      'outside the R0-09 write set; review R09-ST-3): POST /onboarding-concierge/businesses/:id/auto-configure writes Business.name ' +
+      '(customBusinessName) and overwrites businessHours for any member with no completion precondition; a non-owner answers 403 with the row unchanged',
+  );
+  it.todo(
+    'REQUIRED (follow-up; key-cortex.controller.ts execute — outside the R0-09 write set; review R09-ST-4): POST /api/v1/cortex/execute ' +
+      "builds the ConnectorCommand with userId: dto.userId ?? 'system', so a member attributes a command to the OWNER; the actor comes from req.user",
+  );
+  it.todo(
+    'REQUIRED (follow-up after the R09-ST-4 actor fix; key-cortex/adapters/settings-adapter.service.ts — outside the R0-09 write set; review CR-3): ' +
+      'settings.update_business_profile and settings.update_branding reach IdentityService.updateBusiness with no owner check; they apply ' +
+      'IdentityService.assertBusinessOwner on the non-spoofable actor, so a STAFF command leaves name, timezone, currency and branding unchanged',
+  );
+});
+
 // ST-4 (R0-ID-F3-REVOCATION-IAT-CUTOFF). The marker used to be a per-user flag
 // with no issue time, and POST /identity/login deleted it, so a token issued
 // before logout — a stolen one included — was admitted again after the next

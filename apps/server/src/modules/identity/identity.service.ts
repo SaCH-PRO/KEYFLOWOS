@@ -316,7 +316,9 @@ export class IdentityService {
 
   /**
    * The generic profile write. It does not write onboardingComplete (R0-09, CF-22):
-   * completion goes through the onboarding concierge's gated path.
+   * completion goes through the onboarding concierge's gated path. It returns the
+   * updated row through sanitizeBusiness, like getBusiness: no OAuth token column
+   * leaves through the PATCH response or the KEY settings adapter.
    */
   async updateBusiness(businessId: string, input: {
     name?: string;
@@ -497,7 +499,10 @@ export class IdentityService {
       }
     }
 
-    return result;
+    // R0-09 review (R09-ST-1): the updated row carries every Business OAuth
+    // token column; GET already redacts them, so the PATCH response and the
+    // KEY settings adapter's connector result must too.
+    return sanitizeBusiness(result);
   }
 
   async getBusinessCommunityProfile(businessId: string) {

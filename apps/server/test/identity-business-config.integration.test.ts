@@ -94,6 +94,8 @@ let prismaService: any;
 let SeedServiceClass: any;
 let ValidationPipeClass: any;
 let UpdateBusinessDtoClass: any;
+let identityService: any;
+let SECRET_FIELDS: readonly string[] = [];
 const blueprintCalls: Array<{ businessId: string; answers: Record<string, unknown> }> = [];
 
 async function cleanup() {
@@ -230,6 +232,8 @@ beforeAll(async () => {
   });
   await app.init();
   prismaService = moduleRef.get(PrismaService);
+  identityService = moduleRef.get(IdentityService);
+  ({ BUSINESS_SECRET_FIELDS: SECRET_FIELDS } = await import('../src/core/security/sanitize-business'));
 
   await cleanup(); // in case a prior run aborted
 
@@ -330,6 +334,64 @@ describe('R0-09 PATCH /identity/businesses/:businessId is OWNER only (D-11)', ()
     const res = await patch(ID.superAdmin, ID.bizC, { timezone: 'Africa/Lagos' });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect((await db.business.findUnique({ where: { id: ID.bizC } })).timezone).toBe('Africa/Lagos');
+  });
+});
+
+/**
+ * R0-09 review R09-ST-1: updateBusiness returned the raw Prisma row, so the
+ * OWNER's (and a SUPER_ADMIN's) PATCH response carried every Business OAuth
+ * access and refresh token in plaintext, and so did the KEY settings adapter's
+ * connector result (it returns IdentityService.updateBusiness as is). GET
+ * already redacts them through sanitizeBusiness.
+ */
+describe('R0-09 the profile write never returns Business OAuth credentials (review R09-ST-1)', () => {
+  const SECRET = `${P}secret-oauth-token`;
+  const isCredentialKey = (k: string) => /(Access|Refresh)Token$/.test(k);
+
+  /** Every redacted column holds a recognisable secret, so a leak cannot hide behind a null. */
+  async function plantSecrets(businessId: string) {
+    expect(SECRET_FIELDS.length, 'the redaction list is not empty').toBeGreaterThan(0);
+    await db.business.update({
+      where: { id: businessId },
+      data: Object.fromEntries(SECRET_FIELDS.map((f) => [f, `${SECRET}-${f}`])),
+    });
+    const row = await db.business.findUnique({ where: { id: businessId } });
+    for (const f of SECRET_FIELDS) expect(row[f], `${f} is planted`).toBe(`${SECRET}-${f}`);
+  }
+
+  function expectNoCredentials(body: Record<string, unknown>, label: string) {
+    for (const f of SECRET_FIELDS) expect(body, `${label}: ${f}`).not.toHaveProperty(f);
+    expect(Object.keys(body).filter(isCredentialKey), `${label}: access/refresh token keys`).toEqual([]);
+    expect(JSON.stringify(body), `${label}: no planted secret anywhere in the body`).not.toContain(SECRET);
+  }
+
+  it('[R0-09-P12] RED-BEFORE: the OWNER\'s PATCH answers 200 with no access or refresh token in the body, and the same keys GET returns', async () => {
+    await plantSecrets(ID.bizA);
+    const res = await patch(ID.owner, ID.bizA, { tagline: `${P}tagline` });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: ID.bizA, tagline: `${P}tagline` });
+    expectNoCredentials(res.body, 'OWNER PATCH');
+
+    const read = await get(ID.owner, ID.bizA);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expectNoCredentials(read.body, 'OWNER GET');
+    expect(Object.keys(res.body).sort(), 'PATCH and GET expose the same Business keys').toEqual(Object.keys(read.body).sort());
+
+    // The write did not touch the stored credentials: redaction is on the way out only.
+    const row = await db.business.findUnique({ where: { id: ID.bizA } });
+    for (const f of SECRET_FIELDS) expect(row[f], `${f} still stored`).toBe(`${SECRET}-${f}`);
+  });
+
+  it('[R0-09-P13] RED-BEFORE: the SUPER_ADMIN bypass PATCH and the service result the KEY settings adapter returns carry no access or refresh token', async () => {
+    await plantSecrets(ID.bizC);
+    const res = await patch(ID.superAdmin, ID.bizC, { timezone: 'Asia/Dubai' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expectNoCredentials(res.body, 'SUPER_ADMIN PATCH');
+
+    // settings-adapter.service.ts update_business_profile / update_branding return this value as the connector result.
+    const result = await identityService.updateBusiness(ID.bizC, { timezone: 'Asia/Kolkata', primaryColor: '#123456' });
+    expect(result).toMatchObject({ id: ID.bizC, timezone: 'Asia/Kolkata', primaryColor: '#123456' });
+    expectNoCredentials(result, 'IdentityService.updateBusiness result');
   });
 });
 

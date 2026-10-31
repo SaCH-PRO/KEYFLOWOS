@@ -20,6 +20,8 @@
  * Pure: an in-memory User table stands in for Prisma. The real-database proof
  * is test/identity-business-config.integration.test.ts (S01-S03).
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SeedService } from './seed.service';
 
@@ -167,5 +169,23 @@ describe('SeedService.onApplicationBootstrap — the boot path reads SUPER_ADMIN
     expect(roleOf('ops@example.test')).toBe('SUPER_ADMIN');
     expect(roleOf(LEGACY_HARD_CODED)).toBe('USER');
     expect(roleOf('other@example.test')).toBe('USER');
+  });
+});
+
+/**
+ * Review R09-ST-5 / CR-2: the variable is read through the `env` parameter, which
+ * the env-documented gate (it matches process.env.X only) cannot see, so that
+ * gate stays green whether or not .env.example declares it. This pins the
+ * declaration here, with the same "declared" rule the gate uses.
+ */
+describe('.env.example declares SUPER_ADMIN_EMAIL (R0-09)', () => {
+  it('[R0-09-U11] RED-BEFORE: .env.example declares SUPER_ADMIN_EMAIL commented out, so a fresh environment promotes nobody', () => {
+    const example = path.join(__dirname, '..', '..', '..', '..', '..', '.env.example');
+    const lines = fs.readFileSync(example, 'utf8').split('\n');
+    const declared = lines.filter((line) => /^\s*#?\s*SUPER_ADMIN_EMAIL=/.test(line));
+    expect(declared, 'declared exactly once').toHaveLength(1);
+    expect(declared[0], 'commented out, with no default address').toMatch(/^\s*#\s*SUPER_ADMIN_EMAIL=\s*$/);
+    expect(lines.some((line) => /^\s*#.*SUPER_ADMIN_EMAIL\b.*SUPER_ADMIN\b/.test(line)), 'a comment says what it does').toBe(true);
+    expect(fs.readFileSync(example, 'utf8')).not.toContain('keyflowos.tt@gmail.com');
   });
 });
