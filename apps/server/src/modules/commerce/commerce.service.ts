@@ -752,41 +752,81 @@ export class CommerceService {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
     }
-    // Delegate the state mutation + invoice.paid event emission to the
-    // workflow service so the (DRAFT|SENT|...) -> PAID transition is
-    // enforced through the canonical state machine. Idempotent: callers
-    // can re-invoke and we just re-load the row.
-    let invoice;
-    if (existingInvoice.status === 'PAID') {
-      invoice = await this.prisma.client.invoice.findUnique({
+    const reload = () =>
+      this.prisma.client.invoice.findUnique({
         where: { id: invoiceId },
         include: { items: true, contact: true, booking: true },
       });
-    } else {
-      invoice = await this.invoiceWorkflow.transition(invoiceId, 'PAID');
+    // Idempotent: an invoice that is already PAID is returned as it is, and
+    // nothing is written (no payment, posting, event or timeline entry).
+    if (existingInvoice.status === 'PAID') {
+      const paid = await reload();
+      if (!paid) throw new NotFoundException('Invoice not found');
+      return paid;
     }
-    if (!invoice) throw new NotFoundException('Invoice not found');
 
-    // Create a Payment record if none exists so reconciliation math works.
-    const existingPayments = await this.prisma.client.payment.count({
+    // R0-PL-04 (G2, PL-F05): the remaining balance is recorded as a payment
+    // through recordPayment, so the payment row, its ledger posting, the
+    // reconcile to PAID (paidAt, COGS) and invoice.paid commit together or not
+    // at all (R0-PL-03), instead of a status flip plus a synthetic, unposted
+    // payment row. A partially paid invoice gets one balancing payment, so a
+    // later reconcile from the rows keeps it PAID. recordPayment owns the state
+    // guard (DRAFT / VOID -> 409) and records the actor (R0-PL-07). The tenant
+    // is the invoice's own, exactly as the synthetic row used; the authority
+    // checks above are unchanged.
+    const rows = await this.prisma.client.payment.findMany({
       where: { invoiceId },
+      select: { amount: true, status: true },
     });
-    if (existingPayments === 0) {
-      await this.prisma.client.payment.create({
-        data: {
-          businessId: existingInvoice.businessId,
+    const balance = computeBalance(Number(existingInvoice.total), rows, existingInvoice.currency);
+    if (balance.remaining > 0) {
+      // R0-PL-04 review (CR-PL04-1): a balance mark-paid can not settle
+      // truthfully (a manual refund on the invoice) is refused here, before
+      // anything is written (see markPaidRemaining).
+      const amount = CommerceService.markPaidRemaining(Number(existingInvoice.total), rows, existingInvoice.currency);
+      try {
+        await this.recordPayment(
           invoiceId,
-          amount: existingInvoice.total,
-          currency: existingInvoice.currency,
-          status: 'SUCCESSFUL',
-          provider: 'manual',
-          providerPaymentId: `manual_${invoiceId}_${Date.now()}`,
-          method: 'MANUAL',
-          // R0-PL-07 review (PL07-ST-2 / PL07-CR-1): the person (or KEY) who
-          // marked the invoice paid recorded this manual row.
-          recordedBy: actorId ?? null,
-        },
-      });
+          existingInvoice.businessId,
+          { amount, method: 'MANUAL' },
+          {
+            actorId: actorId ?? null,
+            provider: 'manual',
+            expectRemaining: amount,
+            // R0-PL-04 review (ST-PL04-1 / ST-PL04-2): a slot of mark-paid's
+            // own, random and built here. No client idempotency key or
+            // reference maps to it (those slots are manual_<inv>_key_ /
+            // manual_<inv>_ref_), and nobody can predict it, so no client row
+            // and no row the public WiPay callback writes can occupy it ahead
+            // of this call. It keys no replay: two concurrent mark-paids are
+            // serialized by the invoice lock, and the second finds the invoice
+            // PAID (the 409 handled below) or its remaining changed.
+            providerPaymentId: `manual_${invoiceId}_markpaid_${randomBytes(16).toString('hex')}`,
+          },
+        );
+      } catch (err) {
+        // A payment that settled the invoice committed while this one waited
+        // for the invoice lock: the invoice is PAID, which is what was asked,
+        // and this call wrote nothing. Any other refusal is the answer.
+        if (err instanceof ConflictException) {
+          const now = await reload();
+          if (now?.status === 'PAID') return now;
+        }
+        throw err;
+      }
+    } else {
+      // Nothing left to collect (a zero-total invoice, or payment rows that
+      // already cover the total): no payment is invented; only the status moves.
+      await this.invoiceWorkflow.transition(invoiceId, 'PAID');
+    }
+    const invoice = await reload();
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    // R0-PL-04 review (ST-PL04-1 / CR-PL04-2): mark-paid answers 200 and logs
+    // invoice.paid only for an invoice that is PAID now. Anything else (the
+    // write left a balance, or a refund reopened the invoice before this read)
+    // is a 409, never a success with a false invoice.paid timeline entry.
+    if (invoice.status !== 'PAID') {
+      throw new ConflictException(`Invoice is ${invoice.status}, not PAID; reload it and try again`);
     }
 
     if (invoice.contactId) {
@@ -1675,6 +1715,30 @@ export class CommerceService {
      * itself. Like actorId it is an option, never part of `input`.
      */
     initiatedBy?: string | null;
+    /**
+     * R0-PL-04: Payment.provider when it is not the method. markInvoicePaid
+     * keeps its historical row shape (provider 'manual', method 'MANUAL').
+     * Internal: an option, never part of `input`. Default: the method.
+     */
+    provider?: string;
+    /**
+     * R0-PL-04 (G2): internal, markInvoicePaid only. `amount` is the remaining
+     * balance the caller read before this transaction. Under the invoice lock
+     * the remaining balance is read again from the payment rows; if a payment
+     * or refund committed in between it no longer matches, and the stale
+     * amount is refused (409) rather than recorded as an over- or
+     * under-payment. Nothing is written.
+     */
+    expectRemaining?: number;
+    /**
+     * R0-PL-04 review (ST-PL04-1 / ST-PL04-2): internal, markInvoicePaid
+     * only. A providerPaymentId the server built (random, never derived from
+     * a client key or reference). It replaces the manualProviderPaymentId
+     * slot and keys no replay: no idempotency lookup runs for it, so no row
+     * another caller wrote can be answered in its place. An option, never part
+     * of `input`.
+     */
+    providerPaymentId?: string;
   } = {}) {
     const actorId = options.actorId ?? null;
     const initiatedBy =
@@ -1683,7 +1747,6 @@ export class CommerceService {
         : null;
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
-      include: { payments: true },
     });
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
@@ -1717,11 +1780,9 @@ export class CommerceService {
     // the create-or-return race-safe. This runs before the state guard: the
     // first submit may have settled the invoice to PAID, and the client that
     // lost that response still deserves the same answer.
-    const providerPaymentId = CommerceService.manualProviderPaymentId(
-      invoiceId,
-      input,
-      options.dedupeByReference === true,
-    );
+    const providerPaymentId: { value: string; keyedOn: 'key' | 'reference' | null } = options.providerPaymentId
+      ? { value: options.providerPaymentId, keyedOn: null }
+      : CommerceService.manualProviderPaymentId(invoiceId, input, options.dedupeByReference === true);
     if (providerPaymentId.keyedOn) {
       const existing = await this.findRecordedPayment(providerPaymentId.value, businessId, invoiceId);
       if (existing) {
@@ -1729,36 +1790,81 @@ export class CommerceService {
       }
     }
 
-    if (invoice.status === 'PAID' || invoice.status === 'VOID') {
-      // R0-D3: a state guard is a 409, not a 500.
-      throw new ConflictException(`Cannot record payment on a ${invoice.status} invoice`);
-    }
+    // R0-PL-03 (G3): a DRAFT invoice has not been issued, and DRAFT ->
+    // PARTIALLY_PAID / PAID is not a legal transition. Refuse it here, before
+    // anything is written, rather than commit the payment and then fail the
+    // reconcile. This is the fast path; the same guard runs again under the
+    // invoice lock inside the transaction below (ST-PL03-1).
+    CommerceService.assertInvoiceAcceptsPayment(invoice.status);
 
-    const existingPaid = invoice.payments
-      .filter((p) => p.status === 'SUCCESSFUL')
-      .reduce((sum, p) => sum + Number(p.amount), 0);
-    const remaining = Math.max(0, Number(invoice.total) - existingPaid);
     // Allow over-payment: store the actual amount the operator received so the
     // ledger stays truthful. The UI presents an explicit confirm + warning
     // toast when amount > remaining and prompts the operator to issue a refund
     // from the Payments tab to settle the over-paid balance.
     const paymentAmount = input.amount;
-    const isOverPayment = paymentAmount > remaining + 0.005;
 
     // FIN2 — record the payment row and post the deposit-side ledger
     // entries in a single transaction so a posting failure rolls back the
     // payment row (preserves invariant: every SUCCESSFUL payment has a
     // matching ledger transaction unless basis is CASH and posting silently
     // skipped — also fine, idempotent on replay).
-    let payment: Payment;
+    //
+    // R0-PL-03 (G3, PL-P10): the invoice reconcile runs inside the same
+    // transaction, so the payment row, its posting, the status change and the
+    // COGS posting commit or roll back together. invoice.paid /
+    // invoice.payment_recorded are buffered and emitted only after commit; a
+    // rolled-back attempt (including the R0-D2 P2002 race below) emits nothing.
+    const pendingEvents: Array<{ name: string; payload: unknown }> = [];
+    const keyedOn = providerPaymentId.keyedOn;
+    type Outcome =
+      | { kind: 'replay'; existing: Payment; keyedOn: 'key' | 'reference' }
+      | {
+          kind: 'recorded';
+          payment: Payment;
+          reconciled: Awaited<ReturnType<InvoiceWorkflowService['reconcileFromPayments']>>;
+        };
+    let outcome: Outcome;
     try {
-      payment = await this.prisma.client.$transaction(async (tx) => {
+      outcome = await this.prisma.client.$transaction(async (tx): Promise<Outcome> => {
+        const txClient = tx as unknown as Prisma.TransactionClient;
+        // R0-PL-03 review (ST-PL03-1): the guards above ran on a read taken
+        // before this transaction. Re-run them on the row as it stands under
+        // the lock, in the same order (not found, replay, state guard), so a
+        // concurrent void / undo / soft-delete, or a concurrent payment that
+        // settled the invoice, refuses this one instead of being bypassed.
+        const locked = await CommerceService.lockInvoiceForPayment(txClient, invoiceId);
+        if (!locked || locked.businessId !== businessId || locked.deletedAt) {
+          throw new NotFoundException('Invoice not found');
+        }
+        if (keyedOn) {
+          // R0-D2: a concurrent duplicate submit that committed while we
+          // waited for the lock (and may have settled the invoice) is a
+          // replay, not a refusal.
+          const winner = await tx.payment.findFirst({
+            where: { providerPaymentId: providerPaymentId.value, businessId, invoiceId },
+          });
+          if (winner) return { kind: 'replay', existing: winner, keyedOn };
+        }
+        CommerceService.assertInvoiceAcceptsPayment(locked.status);
+        if (options.expectRemaining != null) {
+          const current = await tx.invoice.findUnique({
+            where: { id: invoiceId },
+            select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
+          });
+          // R0-PL-04 review (CR-PL04-1): the refund guard runs again on the
+          // rows under the lock, so a manual refund that committed in the gap
+          // refuses this call rather than being counted twice.
+          const remaining = CommerceService.markPaidRemaining(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
+          if (Math.abs(remaining - options.expectRemaining) > 0.005) {
+            throw new ConflictException('The invoice balance changed while it was being marked paid; reload it and try again');
+          }
+        }
         const created = await tx.payment.create({
           data: {
             amount: paymentAmount,
             currency: invoice.currency,
             status: 'SUCCESSFUL',
-            provider: input.method,
+            provider: options.provider ?? input.method,
             method: input.method,
             providerPaymentId: providerPaymentId.value,
             reference: input.reference ?? null,
@@ -1771,10 +1877,16 @@ export class CommerceService {
           },
         });
         await this.revenuePosting.onPaymentRecorded(created.id, {
-          tx: tx as unknown as Prisma.TransactionClient,
+          tx: txClient,
           createdById: actorId,
         });
-        return created;
+        // Single source of truth: workflow recomputes status from payment rows
+        // and queues the appropriate event (invoice.paid / invoice.payment_recorded).
+        const r = await this.invoiceWorkflow.reconcileFromPayments(invoiceId, {
+          tx: txClient,
+          eventBuffer: pendingEvents,
+        });
+        return { kind: 'recorded', payment: created, reconciled: r };
       });
     } catch (err: unknown) {
       // R0-D2 race: a concurrent duplicate submit won the insert between our
@@ -1794,10 +1906,25 @@ export class CommerceService {
       throw err;
     }
 
-    // Single source of truth: workflow recomputes status from payment rows
-    // and emits the appropriate event (invoice.paid / invoice.payment_recorded).
-    const reconciled = await this.invoiceWorkflow.reconcileFromPayments(invoiceId);
-    const newPaidTotal = existingPaid + paymentAmount;
+    if (outcome.kind === 'replay') {
+      return this.replayRecordedPayment(outcome.existing, invoiceId, input.amount, outcome.keyedOn);
+    }
+    const { payment, reconciled } = outcome;
+
+    // Committed: now listeners may see the payment and the new status.
+    for (const evt of pendingEvents) {
+      this.events.emit(evt.name, evt.payload);
+    }
+    // R0-PL-03 review (ST-PL03-2): the totals in the audit event and the
+    // response come from the payment rows the in-transaction reconcile read
+    // under the invoice lock (this payment included), the same read that
+    // derived newStatus. A total computed from the pre-transaction read would
+    // miss a payment committed while this one waited for the lock: the audit
+    // would contradict newStatus and never flag an overpayment. `paid` is the
+    // sum of SUCCESSFUL rows, the formula this route and its replay use.
+    const newPaidTotal = reconciled.balance.paid;
+    const invoiceTotal = reconciled.balance.total;
+    const overPaid = newPaidTotal > invoiceTotal + 0.005 ? Number((newPaidTotal - invoiceTotal).toFixed(2)) : 0;
     const newStatus = reconciled.status;
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
@@ -1817,7 +1944,7 @@ export class CommerceService {
           totalPaid: newPaidTotal,
           invoiceTotal: invoice.total,
           newStatus,
-          overPaid: isOverPayment ? Number((newPaidTotal - Number(invoice.total)).toFixed(2)) : 0,
+          overPaid,
           recordedBy: actorId,
           ...(initiatedBy ? { initiatedBy } : {}),
         },
@@ -1835,8 +1962,51 @@ export class CommerceService {
       payment,
       invoice: updatedInvoice,
       paidAmount: newPaidTotal,
-      remaining: Math.max(0, Number(invoice.total) - newPaidTotal),
+      remaining: Math.max(0, invoiceTotal - newPaidTotal),
     };
+  }
+
+  /**
+   * The recordPayment state guard (R0-D3: a 409, not a 500). A PAID or VOID
+   * invoice takes no further payment; a DRAFT one has not been issued
+   * (R0-PL-03, G3). Run on the pre-transaction read and again under the
+   * invoice lock (ST-PL03-1).
+   */
+  private static assertInvoiceAcceptsPayment(status: string): void {
+    if (status === 'PAID' || status === 'VOID' || status === 'DRAFT') {
+      throw new ConflictException(`Cannot record payment on a ${status} invoice`);
+    }
+  }
+
+  /**
+   * R0-PL-04 review (CR-PL04-1): the amount mark-paid records, or a 409 when
+   * no amount would be true. The amount is computeBalance's remaining, the
+   * figure the reconcile settles against. A manual refund
+   * (markPaymentRefunded) flips the original row to REFUNDED and keeps its
+   * positive amount, and computeBalance then both drops it from `paid` and
+   * subtracts it as `refunded` (V1-29): 60 paid and refunded on a 100 invoice
+   * reads remaining 160. Recording 160 would post an invented 60
+   * over-payment; recording the true 100 would leave the reconcile
+   * PARTIALLY_PAID. Until V1-29 settles that convention, mark-paid refuses
+   * such an invoice and writes nothing. Provider refunds are separate rows
+   * with a negative amount beside a SUCCESSFUL original, counted once, so they
+   * do not block. A remaining above the total (refunds exceeding payments) is
+   * refused the same way. Run on the pre-transaction read and again under the
+   * invoice lock.
+   */
+  private static markPaidRemaining(
+    total: number,
+    rows: Array<{ amount: number; status: string }>,
+    currency?: string | null,
+  ): number {
+    const flippedRefund = rows.some((r) => r.status === 'REFUNDED' && Number(r.amount) > 0);
+    const balance = computeBalance(total, rows, currency ?? undefined);
+    if (flippedRefund || balance.remaining > balance.total + 0.005) {
+      throw new ConflictException(
+        'Cannot mark an invoice paid after one of its payments was refunded; record the payment received instead',
+      );
+    }
+    return balance.remaining;
   }
 
   /**
@@ -1869,6 +2039,31 @@ export class CommerceService {
       return { value: `manual_${invoiceId}_ref_${digest(`${reference}\n${input.amount.toFixed(2)}`)}`, keyedOn: 'reference' };
     }
     return { value: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, keyedOn: null };
+  }
+
+  /**
+   * R0-PL-03: serialize payment writes per invoice. Taken first inside the
+   * payment and refund transactions, so a concurrent payment or refund on the
+   * same invoice waits for this one to commit, and its in-transaction
+   * reconcile then reads every committed row: two partial payments that
+   * together settle the invoice end PAID with one invoice.paid, instead of
+   * each reconciling against a snapshot without the other. FOR NO KEY UPDATE
+   * is the lock a plain UPDATE of the row takes; it does not block the
+   * foreign-key checks of rows that reference the invoice.
+   *
+   * R0-PL-03 review (ST-PL03-1): returns the row as it stands once the lock
+   * is held (under READ COMMITTED a locking read returns the latest committed
+   * version, after waiting for any writer), so recordPayment re-runs its
+   * guards on it. Null when the invoice no longer exists.
+   */
+  private static async lockInvoiceForPayment(
+    tx: Prisma.TransactionClient,
+    invoiceId: string,
+  ): Promise<{ status: string; businessId: string; deletedAt: Date | null } | null> {
+    const rows = await tx.$queryRaw<Array<{ status: string; businessId: string; deletedAt: Date | null }>>`
+      SELECT status::text AS "status", business_id AS "businessId", deleted_at AS "deletedAt"
+      FROM invoices WHERE id = ${invoiceId} FOR NO KEY UPDATE`;
+    return rows[0] ?? null;
   }
 
   /**
@@ -2017,7 +2212,15 @@ export class CommerceService {
     if (payment.status !== 'SUCCESSFUL') throw refusal(payment.status);
     // FIN2 — flip the row + reverse the original posting in one tx so the
     // refunded state and the offsetting ledger entries commit together.
+    //
+    // R0-PL-03 (G12): the invoice reconcile runs in the same transaction. A
+    // reconcile error is no longer swallowed: it rolls the refund back and is
+    // the caller's response, so the payment, the ledger and the invoice
+    // status never disagree. Invoice events are emitted after commit.
+    const pendingEvents: Array<{ name: string; payload: unknown }> = [];
     const updated = await this.prisma.client.$transaction(async (tx) => {
+      const txClient = tx as unknown as Prisma.TransactionClient;
+      if (payment.invoiceId) await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
       const flipped = await tx.payment.updateMany({
         where: { id: paymentId, businessId, status: 'SUCCESSFUL' },
         data: {
@@ -2032,13 +2235,27 @@ export class CommerceService {
       }
       const next = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
       await this.revenuePosting.onPaymentRefunded(paymentId, {
-        tx: tx as unknown as Prisma.TransactionClient,
+        tx: txClient,
         createdById: actorId ?? null,
       });
+      if (payment.invoiceId) {
+        await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId, {
+          tx: txClient,
+          eventBuffer: pendingEvents,
+          // R0-PL-03 review (ST-PL03-3 / CR-1): reversing money must not be
+          // blocked by invoice status bookkeeping. When the status the rows
+          // now imply is not reachable from the current one (a DRAFT invoice
+          // holding payments, e.g. after undoInvoice or from pre-G3 data, or
+          // a credit-note status outside the transition map), the status is
+          // left as it is, as before this packet, and the refund commits.
+          // Any other reconcile failure still rolls the refund back (G12).
+          onIllegalTransition: 'keep',
+        });
+      }
       return next;
     });
-    if (payment.invoiceId) {
-      await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId).catch(() => null);
+    for (const evt of pendingEvents) {
+      this.events.emit(evt.name, evt.payload);
     }
     this.statsCache.invalidateCache(businessId);
     return updated;

@@ -34,6 +34,18 @@ function makeService(invoiceBusinessId = MINE) {
     contactId: null,
     status: 'PAID',
   }));
+  // R0-PL-04 (G2): mark-paid records the remaining balance through
+  // recordPayment (payment row, posting and PAID in one transaction) instead
+  // of transition + a synthetic payment row. recordPayment is the write here;
+  // its own behaviour is proven against the real database elsewhere
+  // (test/payments-mark-paid.integration.test.ts).
+  // R0-PL-04 review (ST-PL04-1 / CR-PL04-2): mark-paid answers only for an
+  // invoice that is PAID after the write, so the stand-in write settles it.
+  let status = 'SENT';
+  const recordPayment = vi.fn(async () => {
+    status = 'PAID';
+    return {};
+  });
 
   const service = Object.assign(Object.create(CommerceService.prototype), {
     prisma: {
@@ -41,7 +53,7 @@ function makeService(invoiceBusinessId = MINE) {
         invoice: {
           findUnique: vi.fn(async () => ({
             businessId: invoiceBusinessId,
-            status: 'SENT',
+            status,
             total: 100,
             currency: 'TTD',
           })),
@@ -49,16 +61,17 @@ function makeService(invoiceBusinessId = MINE) {
         // Nobody is a member of anything here — which is exactly the state KEY
         // is always in.
         membership: { findFirst: vi.fn(async () => null) },
-        payment: { count: vi.fn(async () => 0), create: vi.fn(async () => ({})) },
+        payment: { count: vi.fn(async () => 0), findMany: vi.fn(async () => []), create: vi.fn(async () => ({})) },
       },
     },
     invoiceWorkflow: { transition },
+    recordPayment,
     crm: { logContactEvent: vi.fn(async () => undefined) },
     events: { emit: vi.fn() },
     logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
   });
 
-  return { service, transition };
+  return { service, transition, recordPayment };
 }
 
 describe('the identity is explicit rather than invented', () => {
@@ -79,11 +92,18 @@ describe('the identity is explicit rather than invented', () => {
 describe('KEY can do the thing it was always advertised as doing', () => {
   it('marks an invoice paid in its own business', async () => {
     // The whole tool, working, for the first time.
-    const { service, transition } = makeService(MINE);
+    const { service, recordPayment } = makeService(MINE);
 
     await service.markInvoicePaid('inv_1', KEY_SYSTEM_ACTOR_ID, MINE);
 
-    expect(transition).toHaveBeenCalledTimes(1);
+    // R0-PL-04: the write is the remaining balance, recorded by KEY in KEY's tenant.
+    expect(recordPayment).toHaveBeenCalledTimes(1);
+    expect(recordPayment).toHaveBeenCalledWith(
+      'inv_1',
+      MINE,
+      expect.objectContaining({ amount: 100 }),
+      expect.objectContaining({ actorId: KEY_SYSTEM_ACTOR_ID }),
+    );
   });
 
   it('no longer needs a Membership that never existed', async () => {
@@ -99,12 +119,13 @@ describe('and cannot reach past its own tenant to do it', () => {
   it('refuses an invoice belonging to another business', async () => {
     // The lookup is by primary key. Without this assertion a hallucinated or
     // hostile invoice id would be obeyed.
-    const { service, transition } = makeService(THEIRS);
+    const { service, transition, recordPayment } = makeService(THEIRS);
 
     await expect(
       service.markInvoicePaid('inv_1', KEY_SYSTEM_ACTOR_ID, MINE),
     ).rejects.toThrow(/Invoice not found/);
     expect(transition).not.toHaveBeenCalled();
+    expect(recordPayment).not.toHaveBeenCalled();
   });
 
   it('says "not found" rather than "not yours"', async () => {
@@ -122,12 +143,13 @@ describe('and cannot reach past its own tenant to do it', () => {
     // because the caller proved the tenant; with no businessId there is nothing
     // to prove it with, and accepting the actor on its own word would make
     // every invoice in the database reachable.
-    const { service, transition } = makeService(MINE);
+    const { service, transition, recordPayment } = makeService(MINE);
 
     await expect(service.markInvoicePaid('inv_1', KEY_SYSTEM_ACTOR_ID)).rejects.toThrow(
       /Not authorized/,
     );
     expect(transition).not.toHaveBeenCalled();
+    expect(recordPayment).not.toHaveBeenCalled();
   });
 
   it('still refuses a human with no membership', async () => {
@@ -142,11 +164,18 @@ describe('and cannot reach past its own tenant to do it', () => {
   it('leaves the unauthenticated internal path alone', async () => {
     // Callers that pass no actor at all are trusted internals behind a guard.
     // Changing their behaviour was not the point of this fix.
-    const { service, transition } = makeService(MINE);
+    const { service, recordPayment } = makeService(MINE);
 
     await service.markInvoicePaid('inv_1');
 
-    expect(transition).toHaveBeenCalledTimes(1);
+    // R0-PL-04: the same write as every other caller, with no actor invented.
+    expect(recordPayment).toHaveBeenCalledTimes(1);
+    expect(recordPayment).toHaveBeenCalledWith(
+      'inv_1',
+      MINE,
+      expect.objectContaining({ amount: 100 }),
+      expect.objectContaining({ actorId: null }),
+    );
   });
 });
 

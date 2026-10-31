@@ -208,11 +208,34 @@ export class InvoiceWorkflowService {
    * Recompute status from payments and persist if it changed. Centralises
    * the PARTIALLY_PAID / PAID transition path used by every webhook + the
    * manual recordPayment flow. Returns the updated invoice + balance.
+   *
+   * R0-PL-03: takes the same `tx` / `eventBuffer` options as `transition`.
+   * With `tx`, the read, the status write and the COGS posting all run on
+   * the caller's transaction, so the caller's payment write and this
+   * reconcile commit or roll back together (an illegal transition, e.g. a
+   * payment on a DRAFT invoice, rolls the payment back). With `eventBuffer`,
+   * invoice.paid / invoice.payment_recorded are pushed to the buffer and the
+   * caller emits them after its commit. Without options the behaviour is
+   * unchanged: own $transaction, immediate emit.
+   *
+   * R0-PL-03 review (ST-PL03-3 / CR-1): `onIllegalTransition` says what to do
+   * when the status derived from the payment rows is not reachable from the
+   * current one (DRAFT -> PARTIALLY_PAID, or any move out of a status the
+   * transition map does not know: PARTIALLY_CREDITED, FULLY_CREDITED,
+   * PARTIAL). 'throw' (default, payments and webhooks): 409. 'keep' (the
+   * manual refund): leave the status as it is, write nothing, queue no event,
+   * and return changed: false with the fresh balance.
    */
   async reconcileFromPayments(
     invoiceId: string,
+    extra: {
+      tx?: Prisma.TransactionClient;
+      eventBuffer?: Array<{ name: string; payload: unknown }>;
+      onIllegalTransition?: 'throw' | 'keep';
+    } = {},
   ): Promise<{ status: InvoiceStatus; balance: BalanceSummary; changed: boolean }> {
-    const invoice = await this.prisma.client.invoice.findUnique({
+    const reader = extra.tx ?? (this.prisma.client as unknown as Prisma.TransactionClient);
+    const invoice = await reader.invoice.findUnique({
       where: { id: invoiceId },
       include: { payments: true },
     });
@@ -227,12 +250,18 @@ export class InvoiceWorkflowService {
     if (next === current) {
       return { status: current, balance, changed: false };
     }
+    if (extra.onIllegalTransition === 'keep' && !isLegalTransition(current, next)) {
+      this.logger.warn(
+        `reconcileFromPayments: invoice ${invoiceId} kept at ${current}; ${current} -> ${next} is not a legal transition (net ${balance.net} of ${balance.total})`,
+      );
+      return { status: current, balance, changed: false };
+    }
     this.assertLegalTransition(current, next);
     // FIN3 — wrap status update + COGS posting in a single $transaction
     // so a posting failure rolls back the PAID write. Listeners only see
     // PAID after the ledger entries have been committed alongside it.
-    const updated = await this.prisma.client.$transaction(async (tx) => {
-      const u = await tx.invoice.update({
+    const apply = async (db: Prisma.TransactionClient) => {
+      const u = await db.invoice.update({
         where: { id: invoiceId },
         data: {
           status: next,
@@ -241,24 +270,25 @@ export class InvoiceWorkflowService {
         include: { items: true, contact: true, booking: true },
       });
       if (next === 'PAID') {
-        await this.postCogsForPaidInvoice(
-          invoiceId,
-          u.businessId,
-          u.paidAt,
-          u.currency,
-          tx as unknown as Prisma.TransactionClient,
-        );
+        await this.postCogsForPaidInvoice(invoiceId, u.businessId, u.paidAt, u.currency, db);
       }
       return u;
-    });
+    };
+    const updated = extra.tx
+      ? await apply(extra.tx)
+      : await this.prisma.client.$transaction((tx) => apply(tx as unknown as Prisma.TransactionClient));
+    const queue = (name: string, payload: unknown) => {
+      if (extra.eventBuffer) extra.eventBuffer.push({ name, payload });
+      else this.events.emit(name, payload);
+    };
     if (next === 'PAID') {
-      this.events.emit('invoice.paid', {
+      queue('invoice.paid', {
         invoice: updated,
         businessId: updated.businessId,
         eventName: 'invoice.paid',
       });
     } else if (next === 'PARTIALLY_PAID') {
-      this.events.emit('invoice.payment_recorded', {
+      queue('invoice.payment_recorded', {
         invoice: updated,
         businessId: updated.businessId,
         balance,

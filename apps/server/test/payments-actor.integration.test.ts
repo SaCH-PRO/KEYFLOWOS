@@ -85,6 +85,8 @@ const ID = {
   invRefundRace: `${P}invRefundRace`,
   invEvidenceV: `${P}invEvidenceV`,
   invHumanInit: `${P}invHumanInit`,
+  // R0-PL-04: PA-13, refund of a mark-paid payment
+  invMarkPaidRefund: `${P}invMarkPaidRefund`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -591,12 +593,31 @@ describe('review repairs: mark-paid, refund guard, initiating human', () => {
     expect(reversals[0].createdById).toBe(winnerId);
   });
 
-  it.todo(
-    'PA-13 (PL07-ST-1, remainder): refunding a SUCCESSFUL payment that has no ledger posting (the mark-paid manual row, pre-FIN2 rows) records the refunder. '
-      + 'Blocked inside this write set: there is no reversal to carry createdById, no canonical refund ContactEvent type '
-      + '(CONTACT_EVENT_TYPES lives in packages/shared, outside the write set) and Payment has no refunded-by column (no schema change). '
-      + 'Needs a ruling: add invoice.payment_refunded to packages/shared, or post mark-paid rows to the ledger (finance scope).',
-  );
+  it('PA-13 (PL07-ST-1, remainder; closed by R0-PL-04): U marks paid, V refunds the mark-paid payment -> reversal createdById = V; original posting by U, REVERSED; recordedBy still U', async () => {
+    // R0-PL-04 (G2) posts the mark-paid row to the ledger, so its refund has a
+    // posting to reverse and the reversal carries the refunder.
+    const marked = await agent().patch(`/commerce/invoices/${ID.invMarkPaidRefund}/paid`).set(HEADER, ID.userU).send({ businessId: ID.biz });
+    expect(marked.status, JSON.stringify(marked.body)).toBe(200);
+    const rows = await paymentsOf(ID.invMarkPaidRefund);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: 'manual', method: 'MANUAL', status: 'SUCCESSFUL', amount: INVOICE_TOTAL, recordedBy: ID.userU });
+    const paymentId = rows[0].id;
+    await expectPostingBy(paymentId, ID.userU);
+
+    const refunded = await refundAs(ID.userV, paymentId);
+    expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
+    expect(refunded.body.status).toBe('REFUNDED');
+
+    const reversals = await reversalsFor(paymentId);
+    expect(reversals).toHaveLength(1);
+    expect(reversals[0]).toMatchObject({ type: 'REVERSAL', status: 'POSTED', sourceType: 'Payment', sourceId: paymentId });
+    expect(reversals[0].createdById).toBe(ID.userV);
+    const original = await postingsFor(paymentId);
+    expect(original).toHaveLength(1);
+    expect(original[0]).toMatchObject({ status: 'REVERSED', createdById: ID.userU });
+    expect(reversals[0].reversalOfId).toBe(original[0].id);
+    expect((await paymentRow(paymentId)).recordedBy).toBe(ID.userU);
+  });
 
   it('PA-14 (PL07-ST-3): from-evidence by V -> recorder KEY (SYSTEM); initiatedBy = V from req.user, never the body\'s recordedBy / initiatedBy', async () => {
     nextExtraction = {
