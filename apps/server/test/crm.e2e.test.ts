@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { Test } from '@nestjs/testing';
-import { INestApplication, NotFoundException, ValidationPipe } from '@nestjs/common';
+import { ConflictException, INestApplication, NotFoundException, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { describe, beforeAll, afterAll, beforeEach, it, expect, vi } from 'vitest';
 import { CrmController } from '../src/modules/crm/crm.controller';
@@ -427,6 +427,59 @@ describe('CRM e2e', () => {
       await expect(
         Promise.resolve().then(() => controller.getContactDossier('biz_1', 'contact_1', { user: undefined })),
       ).rejects.toMatchObject({ status: 401 });
+    });
+  });
+
+  // R0-D7-CONTACT-EMAIL-409: a contact whose email or phone is already held in
+  // the tenant is a 409 from the service, and the controller hands it through
+  // untouched: the code names the field, the existing id rides along, and the
+  // audit interceptor (tap on success) writes nothing. The controller also
+  // forwards the caller's identity on create (as update already did), which
+  // is what lets the service bound the disclosed id to the actor's CRM
+  // visibility. Mocked service; the real unique-index and visibility proof
+  // is crm-contact-duplicate.integration.test.ts.
+  // Without the global filter the body is the thrown object itself; with it
+  // (app-bootstrap) `code` stays top-level and the id moves under `details`.
+  describe('duplicate contact identity (guarded controller regressions)', () => {
+    const emailTaken = () => new ConflictException({
+      code: 'contact_email_taken',
+      message: 'A contact with this email already exists in this business',
+      existingContactId: 'contact_existing',
+    });
+
+    it('surfaces the service email conflict on create as 409 with code and existingContactId, and writes no audit entry', async () => {
+      crmServiceMock.createContact.mockImplementationOnce(() => { throw emailTaken(); });
+      const res = await request(app.getHttpServer())
+        .post('/crm/businesses/biz_1/contacts')
+        .send({ firstName: 'Dup', email: 'alice@example.com' })
+        .expect(409);
+      expect(res.body.code).toBe('contact_email_taken');
+      expect(res.body.existingContactId).toBe('contact_existing');
+      expect(res.body).not.toHaveProperty('id');
+      expect(crmServiceMock.createContact).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: 'biz_1', email: 'alice@example.com', actorUserId: 'user_1' }),
+      );
+      await new Promise((r) => setImmediate(r));
+      expect(prisma.teamActivityLogs).toHaveLength(0);
+    });
+
+    it('surfaces the service phone conflict on update as 409 with code and existingContactId, and writes no audit entry', async () => {
+      crmServiceMock.updateContact.mockRejectedValueOnce(new ConflictException({
+        code: 'contact_phone_taken',
+        message: 'A contact with this phone number already exists in this business',
+        existingContactId: 'contact_existing',
+      }));
+      const res = await request(app.getHttpServer())
+        .patch('/crm/businesses/biz_2/contacts/contact_99')
+        .send({ phone: '+18685550100' })
+        .expect(409);
+      expect(res.body.code).toBe('contact_phone_taken');
+      expect(res.body.existingContactId).toBe('contact_existing');
+      expect(crmServiceMock.updateContact).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: 'biz_2', contactId: 'contact_99', phone: '+18685550100' }),
+      );
+      await new Promise((r) => setImmediate(r));
+      expect(prisma.teamActivityLogs).toHaveLength(0);
     });
   });
 

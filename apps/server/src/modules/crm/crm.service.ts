@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Contact, Prisma } from '@prisma/client';
 import {
@@ -398,6 +398,64 @@ export class CrmService {
     }
   }
 
+  /**
+   * Contact carries two tenant-scoped uniques, `(business_id, email_normalized)`
+   * and `(business_id, phone_normalized)`. A write that lands on one of them
+   * raises Prisma P2002, which left alone surfaces as an opaque 500. This turns
+   * it into a 409 that names the field and, when the actor may see it, the
+   * tenant's existing live holder, so a client can link to or merge with that
+   * contact. A violation of anything else, or any other error, is rethrown
+   * untouched.
+   *
+   * The holder is looked up after the failed transaction, through the
+   * soft-delete-aware client and, when `actorUserId` is given, under the same
+   * M7 visibility clause the list and detail routes apply. The id is a working
+   * key (it opens the contact's child routes), so a member who is denied GET
+   * detail on the holder (a 'my book' STAFF, or a view-all STAFF against
+   * another member's PRIVATE row) is not handed it here either. Whenever no
+   * visible live holder exists, because the holder is outside the actor's
+   * visibility or because the only holder is soft-deleted (the index has no
+   * deleted_at term, so it stays occupied), the answer is still 409 with
+   * `existingContactId: null` and the same message as the visible case: the
+   * response never says which of those it is. Callers with no actor (internal
+   * jobs) are tenant-scoped only, as before.
+   */
+  private async rejectContactIdentityTaken(
+    err: unknown,
+    businessId: string,
+    identity: { emailNormalized?: string | null; phoneNormalized?: string | null },
+    actorUserId?: string | null,
+  ): Promise<never> {
+    const known = err as { code?: unknown; meta?: { target?: unknown } } | null;
+    if (!known || typeof known !== 'object' || known.code !== 'P2002') throw err;
+    const target = known.meta?.target;
+    const columns = Array.isArray(target) ? target.map(String) : [String(target ?? '')];
+    const field = columns.includes('email_normalized') ? 'email'
+      : columns.includes('phone_normalized') ? 'phone'
+        : null;
+    if (!field) throw err;
+
+    const value = field === 'email' ? identity.emailNormalized : identity.phoneNormalized;
+    let existing: { id: string } | null = null;
+    if (value) {
+      const where: Prisma.ContactWhereInput = field === 'email'
+        ? { ...contactWhereBase(businessId), emailNormalized: value }
+        : { ...contactWhereBase(businessId), phoneNormalized: value };
+      if (actorUserId) {
+        const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+        const visClause = visibilityClause(access, actorUserId);
+        if (visClause) where.AND = [visClause];
+      }
+      existing = await this.prisma.client.contact.findFirst({ where, select: { id: true } });
+    }
+    const label = field === 'email' ? 'email' : 'phone number';
+    throw new ConflictException({
+      code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
+      message: `A contact with this ${label} already exists in this business`,
+      existingContactId: existing?.id ?? null,
+    });
+  }
+
   async createContact(input: {
     businessId: string;
     firstName?: string | null;
@@ -410,6 +468,12 @@ export class CrmService {
     tags?: string[];
     custom?: any;
     customFieldValues?: Record<string, unknown>;
+    /**
+     * When provided, bounds the holder named in a duplicate-identity 409 to
+     * the actor's M7 CRM visibility. Server callers (cron, internal jobs) can
+     * omit this and receive the tenant's holder unconditionally.
+     */
+    actorUserId?: string;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
     const normalizeString = (value?: string | null) => {
@@ -482,7 +546,7 @@ export class CrmService {
       }, undefined, tx);
 
       return created;
-    });
+    }).catch((err: unknown) => this.rejectContactIdentityTaken(err, input.businessId, { emailNormalized, phoneNormalized }, input.actorUserId));
     if (contact) {
       const payload: ContactCreatedPayload = {
         contact,
@@ -796,7 +860,7 @@ export class CrmService {
       }
 
       return { existing: existingContact, updated: updatedContact };
-    });
+    }).catch((err: unknown) => this.rejectContactIdentityTaken(err, input.businessId, { emailNormalized, phoneNormalized }, input.actorUserId));
 
     const payload: ContactUpdatedPayload = {
       contact: updated,
