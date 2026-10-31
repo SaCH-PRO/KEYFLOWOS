@@ -284,8 +284,10 @@ describe('KeyCortexAuditController tenant binding (R0-34)', () => {
       expect(reflectOffenders(KeyCortexAuditController)).toEqual([]);
     });
 
+    // Parses every source file under apps/server/src (~2s alone); the timeout
+    // leaves room for a loaded full-suite run.
     it('every controller in apps/server/src (source scan)', () => {
       expect(sourceOffenders()).toEqual([]);
-    });
+    }, 30_000);
   });
 });

@@ -355,7 +355,9 @@ describe('a member of A sees only A through the cortex audit routes', () => {
     }).toEqual({
       businessId: ID.bizA,
       reportBusinessId: ID.bizA,
-      autonomyConsistencyScore: 2 / 3,
+      // 1 - blocked/total over A's rows only: 1 - 1/3 (the service's own formula,
+      // so the float is exactly the one it computes).
+      autonomyConsistencyScore: 1 - 1 / 3,
       memoryRetrievalPrecisionScore: 0,
       valueDriftScore: 0.8,
       knowledgeGapCount: 0,
