@@ -90,6 +90,11 @@ describe('KeyCortexController new endpoints', () => {
       await expect(controller.getMessages('')).rejects.toThrow(BadRequestException);
     });
 
+    it("refuses a session id whose (cached) session belongs to another business (review ST-1)", async () => {
+      (conversation.getSession as any) = vi.fn().mockResolvedValue({ ...mockSession, businessId: 'biz_2' });
+      await expect(controller.getMessages('biz_1', 'sess_1')).rejects.toThrow(NotFoundException);
+    });
+
     it('throws when no session exists', async () => {
       (conversation.listSessions as any) = vi.fn().mockResolvedValue([]);
       await expect(controller.getMessages('biz_1')).rejects.toThrow(NotFoundException);
@@ -143,7 +148,8 @@ describe('KeyCortexController new endpoints', () => {
 
     it('updates the autonomy profile', async () => {
       const dto = { businessId: 'biz_1', globalKillSwitch: true };
-      const result = await controller.updateAutonomyProfile(dto as any);
+      // The second argument is the tenant @GuardedBusinessId() resolves (the body's, here).
+      const result = await controller.updateAutonomyProfile(dto as any, 'biz_1');
       expect(safety.updateProfile).toHaveBeenCalledWith('biz_1', dto);
       expect(result.globalKillSwitch).toBe(true);
     });

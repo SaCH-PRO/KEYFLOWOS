@@ -18,12 +18,12 @@
  * Routes that reach them (found by grep over the controllers):
  *
  *   POST /crm/businesses/:b/import/scan                 trackVision, error passed through   -> proven here
- *   POST /voice/businesses/:b/tts                       trackAudio via OpenAiVoiceProvider   -> proven here (503; body code rewrapped)
- *   POST /keyflow/businesses/:b/voice/tts|transcribe    trackAudio via KeyflowVoiceService   (rewrapped 503, outside the write set)
+ *   POST /voice/businesses/:b/tts                       trackAudio via OpenAiVoiceProvider   -> proven here (R0-34b: code kept)
+ *   POST /keyflow/businesses/:b/voice/tts|transcribe    trackAudio via KeyflowVoiceService   -> proven here (R0-34b: code kept)
  *   POST /commerce/businesses/:b/products/import/scan   trackVision via CommerceVisionService (swallowed: 2xx with no products)
  *   GET  /ai/businesses/:b/agent/memory/search, POST .../agent/memory/backfill
  *                                                       trackEmbedding via SemanticMemoryService (swallowed: 200, empty)
- *   POST /api/v1/cortex/voice/speak, /voice/listen      KeyCortexVoiceService                -> proven here (503; body code rewrapped)
+ *   POST /api/v1/cortex/voice/speak, /voice/listen      KeyCortexVoiceService                -> proven here (R0-34b: code kept)
  *   KeyCortexPhoneService (Twilio call flows)           KeyCortexVoiceService                (Twilio itself is off in Release 0)
  *
  * In that environment:
@@ -32,14 +32,25 @@
  *   POST /voice/businesses/:b/tts             -> 503, no OpenAI client built
  *   POST /api/v1/cortex/voice/speak, /listen  -> 503, and no request leaves with the sentinel key
  *
+ * R0-34b-KEY-TENANT-BINDING (COST-LEDGER-001 section 7 items 7 and 9) closed
+ * three of this suite's it.todo cases: OpenAiVoiceProvider, KeyflowVoiceService
+ * and KeyCortexController.speak/listen now rethrow the provider_not_configured
+ * 503 unchanged (every other error keeps its old 503 wrapper), and speak/listen
+ * take the tenant BusinessGuard checked (@GuardedBusinessId) instead of the
+ * query. Review ST-3: a caller the guards refuse (no identity, no membership,
+ * another business) gets 401/403 on every direct-AI route, never the 503 that
+ * says this deployment has no AI key. Review nit CR-N1: a case that checks for
+ * traces makes its own call instead of reading the previous case's.
+ *
  * and nothing is billed: no AiUsageLog row, no contact or import trace. With a
  * key configured (the SDK transport stubbed) import/scan is unchanged: 201,
  * the extracted contact, one AiUsageLog row.
  *
  * Review ST-1: a member of another business that names this business only in
  * the query string is refused 403 by BusinessGuard on the KEY voice routes.
- * The handlers read the query, not the tenant the guard checked, so a JSON body
- * businessId splits the two (it.todo; COST-LEDGER-001 section 7 item 9).
+ * The handlers used to read the query, not the tenant the guard checked, so a
+ * JSON body businessId split the two (COST-LEDGER-001 section 7 item 9; fixed
+ * by R0-34b, proven below and in key-cortex-tenant-binding.integration.test.ts).
  *
  * RED-BEFORE (recorded in the tests-first commit): on the unmodified code
  * import/scan answers 500 INTERNAL_SERVER_ERROR (the SDK constructor's
@@ -52,17 +63,20 @@
  * GlobalHttpExceptionFilter and ValidationPipe, multer (FileInterceptor),
  * CrmController, CrmImportService, CrmService, EntityResolutionService,
  * CrmStatsService, CrmTimelineService, ContactAuditService, AiUsageService,
- * VoiceController, VoiceService, OpenAiVoiceProvider, KeyCortexController and
- * KeyCortexVoiceService, and the OpenAI SDK itself (constructor, request
+ * VoiceController, VoiceService, OpenAiVoiceProvider, KeyflowCommandController,
+ * KeyflowVoiceService, KeyCortexController and KeyCortexVoiceService, and the
+ * OpenAI SDK itself (constructor, request
  * building, error handling). Stand-ins: identity attachment (a test middleware
  * reads `x-k07c-user` and attaches the seeded user row, as the Supabase
  * AuthMiddleware would); the SDK's HTTP transport (its `fetch` option: every
  * request is recorded and refused, or answered by a canned completion in the
  * keyed case; maxRetries 0); globalThis.fetch (recorded and refused); the plan
  * (unlimited); output templates and the model gateway (off the direct path);
- * the CRM side channels as in contacts-import-write-scope; and the
- * collaborators KeyCortexController holds for its other routes (an
- * allow-listed mocker; any other missing token fails the compile). Vitest's
+ * the CRM side channels as in contacts-import-write-scope; the collaborators
+ * KeyflowCommandController and KeyCortexController hold for their other routes
+ * (empty stand-ins, and an allow-listed mocker; any other missing token fails
+ * the compile); and, in the cases that say so, a spy that makes one call fail
+ * with a provider error. Vitest's
  * esbuild transform emits no constructor parameter types, so the suite writes
  * the ones tsc emits for VoiceController and KeyCortexController, as
  * cortex-audit-tenant.integration.test.ts does.
@@ -95,6 +109,8 @@ const ID = {
   /** OWNER of `bizOther` only: no membership of `biz` (review ST-1 negative control). */
   outsider: `${P}outsider`,
   bizOther: `${P}biz_other`,
+  /** No business anywhere (review ST-3). */
+  nomember: `${P}nomember`,
 };
 const SCAN_EMAIL = `${P}scan@test.local`;
 /** Not a real key: the keyed case's requests go to the stub transport only. */
@@ -153,6 +169,8 @@ const CORTEX_CONTROLLER_OFF_BOUNDARY = new Set([
 let db: any;
 let app: any;
 let aiUsage: any;
+/** The KEY voice service instance the app serves (spied on in the cases that say so). */
+let keyVoice: any;
 /** OpenAI clients built while the app was compiled (the KEY voice service builds its own at construction). */
 let attemptsAtBoot: Array<{ apiKey?: string }> = [];
 /** Every globalThis.fetch the process attempted during the suite (refused). */
@@ -192,6 +210,46 @@ function scan() {
     .set(HEADER, ID.owner)
     .set('x-forwarded-for', nextIp())
     .attach('image', Buffer.from(`${P}not-really-a-jpeg`, 'utf8'), { filename: `${P}card.jpg`, contentType: 'image/jpeg' });
+}
+
+/** POST /voice/businesses/:b/tts (OpenAiVoiceProvider). */
+function voiceTts(user?: string) {
+  const req = agent().post(`/voice/businesses/${ID.biz}/tts`);
+  return (user ? req.set(HEADER, user) : req).send({ text: 'Hello from k07c', provider: 'openai' });
+}
+
+/** POST /keyflow/businesses/:b/voice/tts (KeyflowVoiceService.synthesize). */
+function keyflowTts(user?: string) {
+  const req = agent().post(`/keyflow/businesses/${ID.biz}/voice/tts`);
+  return (user ? req.set(HEADER, user) : req).send({ text: 'Hello from k07c' });
+}
+
+/** POST /keyflow/businesses/:b/voice/transcribe (KeyflowVoiceService.transcribe). */
+function keyflowTranscribe(user?: string) {
+  const req = agent().post(`/keyflow/businesses/${ID.biz}/voice/transcribe`);
+  return (user ? req.set(HEADER, user) : req)
+    .attach('audio', Buffer.from(`${P}audio`, 'utf8'), { filename: `${P}utterance.webm`, contentType: 'audio/webm' });
+}
+
+/** POST /api/v1/cortex/voice/speak (KeyCortexController.speak). */
+function speak(user: string | undefined, businessId: string, body: Record<string, unknown> = {}) {
+  const req = agent().post('/api/v1/cortex/voice/speak').query({ businessId });
+  return (user ? req.set(HEADER, user) : req).send({ text: 'Hello from k07c', persona: 'jarvis', ...body });
+}
+
+/** POST /api/v1/cortex/voice/listen (KeyCortexController.listen), optionally with a multipart businessId field. */
+function listen(user: string | undefined, businessId: string, field?: string) {
+  let req = agent().post('/api/v1/cortex/voice/listen').query({ businessId });
+  if (user) req = req.set(HEADER, user);
+  if (field) req = req.field('businessId', field);
+  return req.attach('audio', Buffer.from(`${P}audio`, 'utf8'), { filename: `${P}utterance.webm`, contentType: 'audio/webm' });
+}
+
+/** The 503 a voice wrapper answers for a provider error that is not a missing or unavailable provider. */
+function expectRewrapped(res: { status: number; body: any }, message: string) {
+  expect(res.status, JSON.stringify(res.body)).toBe(503);
+  expect(res.body.message).toBe(message);
+  expect(['provider_not_configured', 'provider_unavailable']).not.toContain(res.body.code);
 }
 
 /** The structured 503 an unconfigured optional service answers, through the production filter (R0-07). */
@@ -294,6 +352,10 @@ beforeAll(async () => {
   const { KeyCortexConsciousnessService } = await import('../src/modules/key-cortex/key-cortex-consciousness.service');
   const { KeyCortexSessionService } = await import('../src/modules/key-cortex/key-cortex-session.service');
   const { KeyCortexAwarenessService } = await import('../src/modules/key-cortex/key-cortex-awareness.service');
+  const { KeyflowCommandController } = await import('../src/modules/keyflow-command/keyflow-command.controller');
+  const { KeyflowCommandService } = await import('../src/modules/keyflow-command/keyflow-command.service');
+  const { KeyflowNotesService } = await import('../src/modules/keyflow-command/keyflow-notes.service');
+  const { KeyflowVoiceService } = await import('../src/modules/keyflow-command/keyflow-voice.service');
 
   // The production build (tsc, emitDecoratorMetadata) records each class's
   // constructor parameter types, and Nest injects by them. Vitest's esbuild
@@ -343,7 +405,7 @@ beforeAll(async () => {
   const gatewayOff = {};
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CrmController, VoiceController, KeyCortexController],
+    controllers: [CrmController, VoiceController, KeyflowCommandController, KeyCortexController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -374,6 +436,14 @@ beforeAll(async () => {
         useFactory: (usage: any) => new KeyCortexVoiceService(usage, {} as any),
         inject: [AiUsageService],
       },
+      {
+        provide: KeyflowVoiceService,
+        useFactory: (usage: any) => new KeyflowVoiceService(usage),
+        inject: [AiUsageService],
+      },
+      // KeyflowCommandController's other routes (events, notes) are off the boundary.
+      { provide: KeyflowCommandService, useValue: {} },
+      { provide: KeyflowNotesService, useValue: {} },
       // CRM side channels, as in contacts-import-write-scope.integration.test.ts.
       { provide: EventEmitter2, useValue: new EventEmitter2() },
       { provide: TimelineService, useValue: { recordEvent: async () => undefined } },
@@ -405,6 +475,7 @@ beforeAll(async () => {
     })
     .compile();
   aiUsage = moduleRef.get(AiUsageService);
+  keyVoice = moduleRef.get(KeyCortexVoiceService);
   attemptsAtBoot = [...sdk.attempts];
 
   app = moduleRef.createNestApplication();
@@ -433,6 +504,7 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.outsider, email: `${P}outsider@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.bizOther, name: 'K07C Other Biz', ownerId: ID.outsider, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_outsider`, userId: ID.outsider, businessId: ID.bizOther, role: 'OWNER' } });
+  await db.user.create({ data: { id: ID.nomember, email: `${P}nomember@test.local`, role: 'USER' } });
 
   // No case below may reach a real provider: every global fetch is recorded and refused.
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
@@ -467,8 +539,13 @@ describe('AiUsageService: a direct OpenAI helper answers 503 provider_not_config
   });
 
   it('the refused scan ran before the SDK: no OpenAI client built, no request sent, no AiUsageLog row, no contact or import trace', async () => {
+    // Review nit CR-N1: this case makes its own scan instead of reading the previous case's trace.
+    const attemptsBefore = sdk.attempts.length;
+    const requestsBefore = sdk.requests.length;
+    expectNotConfigured(await scan());
+    expect(sdk.attempts.slice(attemptsBefore)).toEqual([]);
     expect(sdk.attempts.slice(attemptsAtBoot.length)).toEqual([]);
-    expect(sdk.requests).toEqual([]);
+    expect(sdk.requests.slice(requestsBefore)).toEqual([]);
     expect(await traces()).toEqual(NO_TRACES);
   });
 
@@ -479,18 +556,42 @@ describe('AiUsageService: a direct OpenAI helper answers 503 provider_not_config
       .set(HEADER, ID.owner)
       .send({ text: 'Hello from k07c', provider: 'openai' });
     expect(res.status, JSON.stringify(res.body)).toBe(503);
-    // The provider keeps its own wrapper ('OpenAI TTS failed: ...'), so the cause shows in the message (the code: it.todo below).
+    // R0-34b: the provider rethrows the 503 unchanged, so the cause shows in the message and the code survives (next case).
     expect(res.body.message).toContain('no OpenAI key is configured');
     expect(sdk.attempts.slice(before)).toEqual([]);
     expect(sdk.requests).toEqual([]);
     expect(await traces()).toEqual(NO_TRACES);
   });
 
-  it.todo(
-    'POST /voice/businesses/:b/tts and POST /keyflow/businesses/:b/voice/tts|transcribe carry code provider_not_configured in the 503 body - ' +
-      'OpenAiVoiceProvider (voice/openai-voice.provider.ts) and KeyflowVoiceService (keyflow-command/keyflow-voice.service.ts) rewrap every error ' +
-      'in a new ServiceUnavailableException(message), so the body code is UNKNOWN_ERROR; outside the R0-07a write set',
-  );
+  it('POST /voice/businesses/:b/tts and POST /keyflow/businesses/:b/voice/tts|transcribe carry code provider_not_configured in the 503 body (R0-34b)', async () => {
+    // OpenAiVoiceProvider and KeyflowVoiceService used to rewrap every error in a new
+    // ServiceUnavailableException(message), so the body code was UNKNOWN_ERROR.
+    const attemptsBefore = sdk.attempts.length;
+    const requestsBefore = sdk.requests.length;
+    expectNotConfigured(await voiceTts(ID.owner));
+    expectNotConfigured(await keyflowTts(ID.owner));
+    expectNotConfigured(await keyflowTranscribe(ID.owner));
+    expect(sdk.attempts.slice(attemptsBefore)).toEqual([]);
+    expect(sdk.requests.slice(requestsBefore)).toEqual([]);
+    expect(await traces()).toEqual(NO_TRACES);
+  });
+
+  it('a provider error that is not a missing or unavailable provider keeps its 503 wrapper on voice/tts and keyflow voice (R0-34b)', async () => {
+    const providerError = () => Promise.reject(new Error('k07c: provider exploded'));
+    const spy = vi.spyOn(aiUsage, 'trackAudio');
+    try {
+      spy.mockImplementationOnce(providerError);
+      expectRewrapped(await voiceTts(ID.owner), 'OpenAI TTS failed: k07c: provider exploded');
+      spy.mockImplementationOnce(providerError);
+      expectRewrapped(await keyflowTts(ID.owner), 'Voice synthesis failed.');
+      spy.mockImplementationOnce(providerError);
+      expectRewrapped(await keyflowTranscribe(ID.owner), 'Voice transcription failed.');
+      expect(spy).toHaveBeenCalledTimes(3);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await traces()).toEqual(NO_TRACES);
+  });
   it.todo(
     'POST /commerce/businesses/:b/products/import/scan answers 503 provider_not_configured instead of 2xx with no products - ' +
       'CommerceVisionService.extractProductsFromImage catches every error and returns []; outside the R0-07a write set',
@@ -529,8 +630,16 @@ describe('KeyCortexVoiceService: KEY voice refuses before any provider call when
   });
 
   it('the refused KEY voice calls bill nothing: no AiUsageLog row, and no global fetch either', async () => {
+    // Review nit CR-N1: this case makes its own calls instead of reading the previous cases' trace.
+    const outboundBefore = outbound.length;
+    const requestsBefore = sdk.requests.length;
+    expect((await speak(ID.owner, ID.biz)).status).toBe(503);
+    expect((await listen(ID.owner, ID.biz)).status).toBe(503);
+    // A usage row would be written in the background: give it the time it would take.
+    await new Promise((r) => setTimeout(r, 200));
     expect(await traces()).toEqual(NO_TRACES);
-    expect(outbound).toEqual([]);
+    expect(sdk.requests.slice(requestsBefore)).toEqual([]);
+    expect(outbound.slice(outboundBefore)).toEqual([]);
   });
 
   it('a member of another business only, naming this business in the query, is refused 403 on speak and listen before KEY voice runs', async () => {
@@ -561,20 +670,116 @@ describe('KeyCortexVoiceService: KEY voice refuses before any provider call when
     expect(await traces()).toEqual(NO_TRACES);
   });
 
-  it.todo(
-    'POST /api/v1/cortex/voice/speak and /voice/listen act on the tenant BusinessGuard checked (review ST-1) - ' +
-      'BusinessGuard resolves params -> body -> query (resolveRequestBusinessId), but KeyCortexController.speak and .listen read ' +
-      "@Query('businessId'), so the outsider above sending ?businessId=<this business> with a JSON body {businessId: <own business>} " +
-      'passes the guard for its own business and speak synthesizes for this one (probe: 200, synthesize received this businessId). ' +
-      'Fix: @GuardedBusinessId() in both handlers; key-cortex.controller.ts is outside the R0-07a write set (owned by ' +
-      'V1-03-KEY-CORTEX-PRINCIPAL); COST-LEDGER-001 section 7 item 9',
-  );
+  it('POST /api/v1/cortex/voice/speak and /voice/listen act on the tenant BusinessGuard checked (review ST-1, R0-34b): the outsider never reaches KEY voice for this business', async () => {
+    // BusinessGuard resolves params -> body -> query. The handlers used to read
+    // @Query('businessId'), so the outsider naming this business in the query and
+    // its own in the JSON body passed the guard for its own business, and speak
+    // synthesized for this one (synthesize received this businessId).
+    const seen: Array<{ method: string; businessId: unknown }> = [];
+    const refuse = () => Promise.reject(new Error('k07c: recorded; KEY voice is not called in this case'));
+    const synth = vi.spyOn(keyVoice, 'synthesize').mockImplementation((...args: any[]) => {
+      seen.push({ method: 'synthesize', businessId: args[1] });
+      return refuse();
+    });
+    const trans = vi.spyOn(keyVoice, 'transcribe').mockImplementation((...args: any[]) => {
+      seen.push({ method: 'transcribe', businessId: args[1] });
+      return refuse();
+    });
+    try {
+      // The JSON body names the outsider's own business, the query names this one:
+      // the guard checked its own business, and KEY voice runs for that one only.
+      const split = await speak(ID.outsider, ID.biz, { businessId: ID.bizOther });
+      expect(split.status, JSON.stringify(split.body)).toBe(503);
 
-  it.todo(
-    'POST /api/v1/cortex/voice/speak and /voice/listen carry code provider_not_configured in the 503 body - ' +
-      "KeyCortexController.speak and .listen catch every error and throw new ServiceUnavailableException('Voice synthesis unavailable' / " +
-      "'Speech transcription unavailable'), so the body code is UNKNOWN_ERROR; key-cortex.controller.ts is outside the R0-07a write set",
-  );
+      // Multipart: the guard sees only the query (multer parses the body after it),
+      // so this business in the query is refused whatever the fields say ...
+      const listenForeignQuery = await listen(ID.outsider, ID.biz, ID.bizOther);
+      expect(listenForeignQuery.status, JSON.stringify(listenForeignQuery.body)).toBe(403);
+      // ... and a field naming this business next to the outsider's own query is refused too.
+      const listenForeignField = await listen(ID.outsider, ID.bizOther, ID.biz);
+      expect(listenForeignField.status, JSON.stringify(listenForeignField.body)).toBe(403);
+
+      expect(seen).toEqual([{ method: 'synthesize', businessId: ID.bizOther }]);
+    } finally {
+      synth.mockRestore();
+      trans.mockRestore();
+    }
+    expect(await traces()).toEqual(NO_TRACES);
+  });
+
+  it('POST /api/v1/cortex/voice/speak and /voice/listen carry code provider_not_configured in the 503 body (R0-34b)', async () => {
+    // KeyCortexController.speak and .listen used to catch every error and throw
+    // new ServiceUnavailableException('Voice synthesis unavailable' / 'Speech
+    // transcription unavailable'), so the body code was UNKNOWN_ERROR.
+    const requestsBefore = sdk.requests.length;
+    expectNotConfigured(await speak(ID.owner, ID.biz));
+    expectNotConfigured(await listen(ID.owner, ID.biz));
+    expect(sdk.requests.slice(requestsBefore)).toEqual([]);
+    expect(await traces()).toEqual(NO_TRACES);
+  });
+
+  it('a KEY voice failure that is not a missing or unavailable provider keeps its 503 wrapper on speak and listen (R0-34b)', async () => {
+    const providerError = () => Promise.reject(new Error('k07c: provider exploded'));
+    const synth = vi.spyOn(keyVoice, 'synthesize').mockImplementationOnce(providerError);
+    const trans = vi.spyOn(keyVoice, 'transcribe').mockImplementationOnce(providerError);
+    try {
+      expectRewrapped(await speak(ID.owner, ID.biz), 'Voice synthesis unavailable');
+      expectRewrapped(await listen(ID.owner, ID.biz), 'Speech transcription unavailable');
+      expect(synth).toHaveBeenCalledTimes(1);
+      expect(trans).toHaveBeenCalledTimes(1);
+    } finally {
+      synth.mockRestore();
+      trans.mockRestore();
+    }
+    expect(await traces()).toEqual(NO_TRACES);
+  });
+});
+
+describe('a caller the guards refuse gets 401/403 on every direct-AI route, never the 503 that says no AI key is configured (review ST-3)', () => {
+  /** Every direct-AI route of this suite, for a given caller. */
+  const routes = (user?: string) => [
+    {
+      name: 'POST /crm/businesses/:b/import/scan',
+      send: () => {
+        const req = agent().post(`/crm/businesses/${ID.biz}/import/scan`).set('x-forwarded-for', nextIp());
+        return (user ? req.set(HEADER, user) : req)
+          .attach('image', Buffer.from(`${P}not-really-a-jpeg`, 'utf8'), { filename: `${P}card.jpg`, contentType: 'image/jpeg' });
+      },
+    },
+    { name: 'POST /voice/businesses/:b/tts', send: () => voiceTts(user) },
+    { name: 'POST /keyflow/businesses/:b/voice/tts', send: () => keyflowTts(user) },
+    { name: 'POST /keyflow/businesses/:b/voice/transcribe', send: () => keyflowTranscribe(user) },
+    { name: 'POST /api/v1/cortex/voice/speak', send: () => speak(user, ID.biz) },
+    { name: 'POST /api/v1/cortex/voice/listen', send: () => listen(user, ID.biz) },
+  ];
+
+  const expectRefusedBeforeAi = async (user: string | undefined, status: number) => {
+    const attemptsBefore = sdk.attempts.length;
+    const requestsBefore = sdk.requests.length;
+    for (const route of routes(user)) {
+      const res = await route.send();
+      expect(res.status, `${route.name} ${JSON.stringify(res.body)}`).toBe(status);
+      expect(res.body.code, route.name).not.toBe('provider_not_configured');
+      expect(JSON.stringify(res.body), route.name).not.toMatch(/OpenAI|AI provider/i);
+    }
+    expect(sdk.attempts.slice(attemptsBefore)).toEqual([]);
+    expect(sdk.requests.slice(requestsBefore)).toEqual([]);
+    expect(await traces()).toEqual(NO_TRACES);
+  };
+
+  it('an unauthenticated caller gets 401', async () => {
+    await expectRefusedBeforeAi(undefined, 401);
+  });
+
+  it('a user with no membership gets 403', async () => {
+    expect(await db.membership.count({ where: { userId: ID.nomember } })).toBe(0);
+    await expectRefusedBeforeAi(ID.nomember, 403);
+  });
+
+  it('a member of another business only gets 403', async () => {
+    expect(await db.membership.count({ where: { businessId: ID.biz, userId: ID.outsider } })).toBe(0);
+    await expectRefusedBeforeAi(ID.outsider, 403);
+  });
 });
 
 describe('with an OpenAI key configured (SDK transport stubbed): the direct path is unchanged', () => {

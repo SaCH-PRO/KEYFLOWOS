@@ -64,7 +64,8 @@ describe('KeyCortexGoalsController', () => {
   describe('goals', () => {
     it('creates a goal', async () => {
       const dto = { businessId: 'biz_1', title: 'Increase revenue', description: 'Test' };
-      const result = await controller.createGoal(dto);
+      // The second argument is the tenant @GuardedBusinessId() resolves (the body's, here).
+      const result = await controller.createGoal(dto, 'biz_1');
       expect(planner.createGoal).toHaveBeenCalledWith('biz_1', expect.objectContaining({ title: 'Increase revenue' }));
       expect(result).toEqual(mockGoal);
     });
@@ -109,7 +110,7 @@ describe('KeyCortexGoalsController', () => {
 
   describe('plans', () => {
     it('creates a plan from a goal', async () => {
-      const result = await controller.createPlanFromGoal('goal_1', { businessId: 'biz_1' });
+      const result = await controller.createPlanFromGoal('goal_1', { businessId: 'biz_1' }, 'biz_1');
       expect(planner.createPlanFromGoal).toHaveBeenCalledWith('biz_1', 'goal_1', undefined);
       expect(result).toEqual(mockPlan);
     });
@@ -125,7 +126,7 @@ describe('KeyCortexGoalsController', () => {
 
     it('creates a plan from a command', async () => {
       const dto = { businessId: 'biz_1', objective: 'Invoice all clients', modules: ['commerce'] };
-      const result = await controller.createPlanFromCommand(dto as any);
+      const result = await controller.createPlanFromCommand(dto as any, 'biz_1');
       expect(planner.createPlanFromCommand).toHaveBeenCalledWith('biz_1', expect.objectContaining(dto), undefined);
       expect(result).toEqual(mockPlan);
     });
@@ -153,7 +154,7 @@ describe('KeyCortexGoalsController', () => {
 
     it('updates a trigger rule', async () => {
       const dto = { businessId: 'biz_1', enabled: false };
-      const result = await controller.updateTriggerRule('rule_1', dto as any);
+      const result = await controller.updateTriggerRule('rule_1', dto as any, 'biz_1');
       expect(triggerService.updateRule).toHaveBeenCalledWith('biz_1', 'rule_1', dto);
       expect(result).toEqual(expect.objectContaining({ enabled: false }));
     });
