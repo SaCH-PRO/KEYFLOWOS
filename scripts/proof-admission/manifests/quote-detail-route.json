@@ -2,6 +2,7 @@
   "manifestVersion": 1,
   "packageId": "R0-04-QT-DETAIL-ROUTE",
   "proofScope": "quote-detail-route-real-database-and-public-surface-ledger",
+  "description": "The tenant-bound quote detail route and the retired bare-id route. Run from apps/server: npx vitest run test/commerce-quote-visibility.integration.test.ts src/core/auth/public-surface.spec.ts --reporter=json --outputFile=.proof/r0-04-vitest.json against a migrated local database and REDIS_URL, then node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/quote-detail-route.json --report .proof/r0-04-vitest.json. SCOPE LIMIT (review finding ST-R004-1): this proof binds the QUOTE ROW to the path tenant only. It does not prove that the rows the detail route joins belong to that tenant, and they need not: createQuote and updateQuote (commerce.service.ts:1404, :1471) write body.contactId with no tenant check, and OPERATOR_QUOTE_INCLUDE (:76) joins contact with no tenant condition, so a tenant-B owner can point a B quote at A's contact and B's detail read then serves A's customer name and email. The required case 'OPEN DEFECT ST-R004-1 reproduced' pins that behaviour; it is NOT a certification of it and turns red when the fix lands, and the fix packet replaces it with the required behaviour (a foreign contactId on quote create or patch answers 404, byte-identical to an unknown contact, with no Quote row written or changed). The fix is in commerce.service.ts, outside this write set; it belongs with V1-53-QUOTE-CREATE-ERRORS, the quote half of R0-27's tenant-checked contact. Until then this manifest is not joined-row tenancy evidence for Release 0 journey step 6.",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
   "requiredCases": [
@@ -25,6 +26,7 @@
     "regression control: the signed-token public quote route is unchanged an unknown token is still refused (403), as before",
     "ST-PC01-1: the tenant-bound server-side quote read a KEY caller must use (service level, real DB) getQuoteForBusiness called directly binds the read to the tenant: another tenant's id, an unknown id and a soft-deleted row read as null",
     "ST-PC01-1: the tenant-bound server-side quote read a KEY caller must use (service level, real DB) KEY CommerceAdapterService.getQuoteStatus({ businessId: bizB, quoteId: <bizA DRAFT> }) throws NotFound and leaks nothing; the owning tenant still reads it (ST-PC01-1)",
+    "OPEN DEFECT ST-R004-1 — a quote on B's path can join A's contact (createQuote and updateQuote, outside this write set) OPEN DEFECT ST-R004-1 reproduced — B's owner creates and patches B quotes with A's contactId (A's full contact row echoed), and B's detail route then serves A's customer email",
     "the unauthenticated HTTP surface the parser handles a class-level guard — key-cortex is fully covered",
     "the unauthenticated HTTP surface the parser handles a per-handler guard — phone-voice has exactly one open route",
     "the unauthenticated HTTP surface finds the whole surface — this is not vacuous",
