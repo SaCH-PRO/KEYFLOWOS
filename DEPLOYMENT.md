@@ -70,7 +70,10 @@ REDIS_URL=redis://localhost:6379
 # Supabase (required for auth)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_JWT_SECRET=your-jwt-secret
+# Leave SUPABASE_JWT_SECRET empty with a hosted Supabase project, and never deploy
+# a placeholder in it: production boot refuses the old placeholder since R0-SEC-02
+# (docs/auth-pathway.md). Give GOOGLE_STATE_SECRET its own random value first.
+SUPABASE_JWT_SECRET=
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
@@ -180,7 +183,10 @@ NEXT_PUBLIC_APP_URL=https://your-vercel-domain.vercel.app
 # Auth (same Supabase project)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_JWT_SECRET=your-jwt-secret
+# Leave SUPABASE_JWT_SECRET empty with a hosted Supabase project, and never deploy
+# a placeholder in it: production boot refuses the old placeholder since R0-SEC-02
+# (docs/auth-pathway.md). Give GOOGLE_STATE_SECRET its own random value first.
+SUPABASE_JWT_SECRET=
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 # Database (auto-filled by Railway Postgres)
@@ -401,7 +407,7 @@ fly deploy --app keyflowos-web
 | `DIRECT_URL` | Server | PostgreSQL direct (for migrations) |
 | `SUPABASE_URL` | Both | Supabase project URL |
 | `SUPABASE_ANON_KEY` | Both | Supabase public anon key |
-| `SUPABASE_JWT_SECRET` | Server | JWT signing secret |
+| `SUPABASE_JWT_SECRET` | Server | Leave empty for Release 0 (local HS256 verification; production boot refuses a public placeholder; see `docs/auth-pathway.md`) |
 | `S3_BUCKET` | Server | Object storage bucket |
 | `S3_ACCESS_KEY_ID` | Server | S3 access key |
 | `S3_SECRET_ACCESS_KEY` | Server | S3 secret key |

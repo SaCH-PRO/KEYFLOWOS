@@ -214,18 +214,19 @@ item 3 is open.
    - **Boot.** With `NODE_ENV=production`, a public placeholder (compared
      after trimming) fails the env check: the former `.env.example` value
      `your-supabase-jwt-signing-secret`, and `your-jwt-secret`, which
-     `DEPLOYMENT.md` sets for local use (`:73`) and inside its
-     `NODE_ENV=production` Railway block (`:183`) (review repair SEC02-R1 /
-     CR-2). `SUPABASE_JWT_SECRET: is a public placeholder (from .env.example
+     `DEPLOYMENT.md` used to set for local use and inside its
+     `NODE_ENV=production` Railway block (review repair SEC02-R1 / CR-2;
+     R0-SEC-04 blanked both lines, each now under the comment "Leave
+     SUPABASE_JWT_SECRET empty with a hosted Supabase project … production
+     boot refuses the old placeholder since R0-SEC-02"). `SUPABASE_JWT_SECRET: is a public placeholder (from .env.example
      or DEPLOYMENT.md), …` is printed under `[FATAL] Environment validation
      failed` and the process exits 1. Any other `NODE_ENV` prints the same
      line as a warning and boots (`S/core/config/env.ts:125-140`,
      `:205-207`). The value itself is never printed. `S/core/config/env.spec.ts`
      also reads `DEPLOYMENT.md`, `.env.example`, `MIGRATION.md`, `README.md`
      and `infrastructure/production.env.template`, and fails when any of them
-     sets the variable to a value production boot would accept. Until a docs
-     packet blanks it, do **not** copy the `SUPABASE_JWT_SECRET` line of
-     `DEPLOYMENT.md`.
+     sets the variable to a value production boot would accept. Every one of
+     them now leaves the variable empty.
    - **What the fix does not change.** HS256 is a shared secret. Whoever
      holds the value can still mint the hosted shape for any `sub` and
      `email`, exactly as Supabase can, and a server with no provider client
@@ -335,7 +336,7 @@ sign-up, login or bootstrap leg fails without it.
 | `SUPABASE_URL` (falls back to `NEXT_PUBLIC_SUPABASE_URL`) | `S/core/auth/supabase-admin.service.ts:45-48`; `S/modules/identity/identity-signup.service.ts:307`, `:383`; `S/core/auth/supabase-auth.service.ts:25`, `:65` | Required | Admin client, the password and refresh grants, the `getUser` fallback, the issuer check in `verifyLocal` (`iss` must be this URL + `/auth/v1`) |
 | `SUPABASE_ANON_KEY` (falls back to `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | `S/modules/identity/identity-signup.service.ts:308`, `:384`; `S/core/auth/supabase-auth.service.ts:26` | Required | `apikey` for the password and refresh grants; the anon client behind the `getUser` fallback |
 | `SUPABASE_SERVICE_ROLE_KEY` | `S/core/auth/supabase-admin.service.ts:50-53` | Required | `auth.admin.createUser`, `generateLink`, `listUsers`, `signOut`, recovery mail. Needed for every sign-up, with verification on **or off** |
-| `SUPABASE_JWT_SECRET` | `S/core/auth/supabase-auth.service.ts:43-47`; `S/modules/email-marketing/email-marketing.service.ts:109` | **Leave empty** | Local HS256 verification. Since R0-SEC-02 it accepts only the hosted `iss` shape, but whoever holds it can mint that shape for any user (item 2, and the caveat below). Ignored whenever the server has a provider client (URL + anon key: `getUser` decides, review repair CR-1). Production boot refuses both public placeholders (`.env.example` former, `DEPLOYMENT.md`). It is also the fallback HMAC secret for marketing unsubscribe tokens when `GOOGLE_STATE_SECRET` is unset |
+| `SUPABASE_JWT_SECRET` | `S/core/auth/supabase-auth.service.ts:43-47`; `S/modules/email-marketing/email-marketing.service.ts:109` | **Leave empty** | Local HS256 verification. Since R0-SEC-02 it accepts only the hosted `iss` shape, but whoever holds it can mint that shape for any user (item 2, and the caveat below). Ignored whenever the server has a provider client (URL + anon key: `getUser` decides, review repair CR-1). Production boot refuses both public placeholders (the former `.env.example` and `DEPLOYMENT.md` values). It is also the fallback HMAC secret for marketing unsubscribe tokens when `GOOGLE_STATE_SECRET` is unset |
 | `GOOGLE_STATE_SECRET` | `S/modules/email-marketing/email-marketing.service.ts:109`, and the Google, Gmail, Calendar and Drive OAuth state | Set before emptying `SUPABASE_JWT_SECRET` | The unsubscribe-token HMAC, preferred over `SUPABASE_JWT_SECRET`. Use a long random value, never the `.env.example` placeholder |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | `S/modules/identity/identity-signup.service.ts:20-25`; `S/main.ts:29-52` | Set it explicitly | On by default when `NODE_ENV=production` |
 | `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | `S/modules/notifications/system-email.service.ts:18-24`, `:41-55` | Only with verification on | Sending the verification mail |
@@ -492,7 +493,7 @@ was made. Rows marked "code" are read from source rather than measured.
 | Bearer token on any route | `SUPABASE_JWT_SECRET`, or URL + anon key | With neither, `getUserFromToken` returns `null` after logging "Supabase env vars missing; auth will be treated as optional.", and guarded routes (`/identity/me`, `/identity/bootstrap`, …) answer 401 | `S/core/auth/supabase-auth.service.ts:34-36`, `:188-189` |
 | Boot with verification on (set to true, or unset with `NODE_ENV=production`) (code) | `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS` | `[FATAL] AUTH_REQUIRE_EMAIL_VERIFICATION is on but required env vars are missing: … Refusing to start.`, then exit 1. `SUPABASE_URL` is not checked here | `S/main.ts:29-46` |
 | Boot with verification off (code) | `SUPABASE_SERVICE_ROLE_KEY` | Warning only: `[WARN] SUPABASE_SERVICE_ROLE_KEY is not set. POST /identity/signup will return server_misconfigured until this is configured.` | `S/main.ts:47-52` |
-| Boot, any mode (code) | `SUPABASE_URL`, `SUPABASE_JWT_SECRET` | Warnings from the env check when either is missing; these never block boot. A public placeholder in `SUPABASE_JWT_SECRET` (the former `.env.example` value, or the `DEPLOYMENT.md` one) blocks boot (exit 1) with `NODE_ENV=production` and is a warning otherwise (R0-SEC-02) | `S/core/config/env.ts:188-193`, `:205-207` |
+| Boot, any mode (code) | `SUPABASE_URL`, `SUPABASE_JWT_SECRET` | Warnings from the env check when either is missing; these never block boot. A public placeholder in `SUPABASE_JWT_SECRET` (the former `.env.example` value, or the former `DEPLOYMENT.md` one) blocks boot (exit 1) with `NODE_ENV=production` and is a warning otherwise (R0-SEC-02) | `S/core/config/env.ts:188-193`, `:205-207` |
 | Web built without `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY`, or with the `your-project` placeholder (code) | — | The Google buttons are hidden. Forgot-password shows "Email password reset isn't configured yet — ask your admin for a password reset." Email/password sign-up and login still post to the API and get the answers above. `W/lib/env.ts` logs a warning | `W/app/auth/signup/page.tsx:42`, `:570`; `W/app/auth/login/login-form.tsx:38-39`, `:140`, `:413`; `W/lib/env.ts:73-74` |
 
 The sign-up body, exactly as measured (`timestamp` varies, and `path` is the
@@ -716,7 +717,7 @@ unless noted):
 | `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL`) | Supabase project URL — used by both the admin client (signup/generateLink) and the anon client (signInWithPassword). |
 | `SUPABASE_SERVICE_ROLE_KEY` | Required for admin actions: `auth.admin.createUser`, `generateLink`. Without it `/identity/signup` answers 400 `server_misconfigured`, whether verification is on or off. |
 | `SUPABASE_ANON_KEY` (or `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | Anon key used for the password and refresh grants and the `getUser()` fallback. The frontend reads `NEXT_PUBLIC_SUPABASE_ANON_KEY` for the Google PKCE exchange and user-info call. |
-| `SUPABASE_JWT_SECRET` | **Leave empty for Release 0.** Meant to let the auth middleware verify tokens locally instead of round-tripping `getUser()`. Since R0-SEC-02 it accepts only the hosted shape `iss = ${SUPABASE_URL}/auth/v1`, but whoever holds it can mint that shape for any user, a server with a provider client (URL + anon key) ignores it and lets `getUser()` decide (review repair CR-1), and production boot refuses both public placeholders (the former `.env.example` value and the `DEPLOYMENT.md` one). It is also the fallback secret for marketing unsubscribe tokens, so set `GOOGLE_STATE_SECRET` before removing it. |
+| `SUPABASE_JWT_SECRET` | **Leave empty for Release 0.** Meant to let the auth middleware verify tokens locally instead of round-tripping `getUser()`. Since R0-SEC-02 it accepts only the hosted shape `iss = ${SUPABASE_URL}/auth/v1`, but whoever holds it can mint that shape for any user, a server with a provider client (URL + anon key) ignores it and lets `getUser()` decide (review repair CR-1), and production boot refuses both public placeholders (the former `.env.example` and `DEPLOYMENT.md` values). It is also the fallback secret for marketing unsubscribe tokens, so set `GOOGLE_STATE_SECRET` before removing it. |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | `"true"`/`"1"` to require verification, `"false"`/`"0"` to auto-confirm. Defaults to ON in production. |
 | `RESEND_API_KEY` | Required when verification is on — sends the actual verification email via Resend. |
 | `EMAIL_FROM_ADDRESS` | The `From` address on auth emails (e.g. `no-reply@keyflow.os`). |
