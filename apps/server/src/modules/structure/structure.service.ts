@@ -1,14 +1,113 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CANONICAL_MODULES, MAX_APPROVAL_TIER, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { membershipApprovalTier } from '../../core/authority/approval-tier';
+import { resolveCrmAccess, type CrmAccess } from '../crm/crm-permissions.helper';
 import { CreateOrgUnitDto } from './dto/create-org-unit.dto';
 import { UpdateOrgUnitDto } from './dto/update-org-unit.dto';
-import { CreateJobRoleDto } from './dto/create-job-role.dto';
+import { CreateJobRoleDto, jobRolePermissionsProblem } from './dto/create-job-role.dto';
 import { UpdateJobRoleDto } from './dto/update-job-role.dto';
 import { CreateAssignmentDto } from './dto/create-assignment.dto';
 import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { CreateDelegationRuleDto } from './dto/create-delegation-rule.dto';
 import { UpdateDelegationRuleDto } from './dto/update-delegation-rule.dto';
 import { normalizePhone } from '../crm/crm-duplicate.util';
+
+/**
+ * V1-21-AUTH-JOBROLE-CEILING (CF-27; CR-1 in identity-boundary.integration.test.ts).
+ *
+ * An assignment copies its JobRole's permissions and defaultApprovalTier onto the
+ * holder's Membership, which ModuleScopeGuard and every approval gate read, so a JobRole
+ * and an assignment are grants exactly as an identity role or permissions change is. The
+ * structure routes are gated on team:write only, so without a ceiling a default ADMIN
+ * authored { team: admin } at tier 4 and assigned it to itself. The rule here is the
+ * identity routes' K2 (IdentityService.authorityExcess / assertMayRewriteAuthority): a
+ * requester other than the OWNER or a SUPER_ADMIN may not grant more than it holds, nor
+ * rewrite a member (or a job role) whose authority exceeds its own; above it the write is
+ * refused with 403 and nothing changes.
+ *
+ * The comparison below is the same rule over the same shared readers (module-vocabulary,
+ * approval-tier, resolveCrmAccess). It is not imported from IdentityService because that
+ * method is private and StructureModule cannot import IdentityModule (IdentityModule
+ * imports AiModule, which imports StructureModule).
+ */
+
+/** The three inputs that make up a membership's authority. */
+type AuthorityEnvelope = { role: string; permissionScopes: unknown; maxApprovalTier: number | null };
+
+/** What an assignment writes onto a Membership: a JobRole's map (null: role defaults) and tier. */
+type MembershipCopy = { permissionScopes: Prisma.InputJsonObject | null; maxApprovalTier: number };
+
+/** Membership roles, weakest first; an unrecognised role ranks with STAFF (IdentityService ROLE_RANK). */
+const ROLE_RANK: Readonly<Record<string, number>> = { STAFF: 0, ADMIN: 1, OWNER: 2 };
+/** CRM ownership scopes, weakest first; anything unrecognised ranks lowest. */
+const CRM_SCOPE_RANK: Readonly<Record<string, number>> = { none: 0, owned: 1, any: 2 };
+
+const REFUSED_GRANT = 'You cannot grant more authority than your own';
+const REFUSED_MEMBER = 'You cannot change a member whose authority exceeds your own';
+const REFUSED_JOB_ROLE = 'You cannot change a job role whose authority exceeds your own';
+
+function isPlainMap(value: unknown): value is Prisma.InputJsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** The scope map ModuleScopeGuard reads: an explicit map (missing key = none), else the role defaults. */
+function scopesOf(m: AuthorityEnvelope): Record<string, string> {
+  return m.permissionScopes && typeof m.permissionScopes === 'object'
+    ? (m.permissionScopes as Record<string, string>)
+    : defaultScopesForRole(m.role);
+}
+
+/** resolveCrmAccess itself over an in-memory membership (as IdentityService crmAccessOf). */
+function crmAccessOf(m: AuthorityEnvelope): Promise<CrmAccess> {
+  const inMemory = {
+    client: {
+      user: { findUnique: async () => ({ role: 'USER' }) },
+      membership: { findUnique: async () => ({ role: m.role, permissionScopes: m.permissionScopes }) },
+    },
+  } as unknown as PrismaService;
+  return resolveCrmAccess(inMemory, '', '');
+}
+
+/**
+ * The first dimension in which `subject` holds more authority than `bound`, or null: the
+ * role, every canonical module level, the approval tier, CRM ownership — each read the
+ * way its enforcer reads it.
+ */
+async function authorityExcess(subject: AuthorityEnvelope, bound: AuthorityEnvelope): Promise<string | null> {
+  if ((ROLE_RANK[subject.role] ?? 0) > (ROLE_RANK[bound.role] ?? 0)) return 'role';
+  const s = scopesOf(subject);
+  const b = scopesOf(bound);
+  for (const module of CANONICAL_MODULES) {
+    if (rankOf(s[module]) > rankOf(b[module])) return module;
+  }
+  if (membershipApprovalTier(subject) > membershipApprovalTier(bound)) return 'maxApprovalTier';
+  const [sc, bc] = await Promise.all([crmAccessOf(subject), crmAccessOf(bound)]);
+  if (rankOf(sc.level) > rankOf(bc.level)) return 'crm';
+  if (sc.viewAll && !bc.viewAll) return 'crm_view';
+  if ((CRM_SCOPE_RANK[sc.editScope] ?? 0) > (CRM_SCOPE_RANK[bc.editScope] ?? 0)) return 'crm_edit';
+  if (sc.reassign && !bc.reassign) return 'crm_reassign';
+  if ((CRM_SCOPE_RANK[sc.deleteScope] ?? 0) > (CRM_SCOPE_RANK[bc.deleteScope] ?? 0)) return 'crm_delete';
+  return null;
+}
+
+/**
+ * A JobRole on its own, as an envelope: its map is explicit (a missing key grants none)
+ * and it carries no role, so it is read at the lowest one. What it confers on a holder is
+ * checked again, against the holder's role, when it is assigned.
+ */
+function jobRoleEnvelope(permissions: unknown, tier: number): AuthorityEnvelope {
+  return { role: 'STAFF', permissionScopes: isPlainMap(permissions) ? permissions : {}, maxApprovalTier: tier };
+}
+
+/** What assigning `role` writes onto a membership. A role without a map leaves the role defaults. */
+function copyOf(role: { permissions: unknown; defaultApprovalTier: number }): MembershipCopy {
+  return { permissionScopes: isPlainMap(role.permissions) ? role.permissions : null, maxApprovalTier: role.defaultApprovalTier };
+}
+
+/** No position left to copy from: no explicit map and tier 0, which membershipApprovalTier reads as the role defaults. */
+const ROLE_DEFAULTS_COPY: MembershipCopy = { permissionScopes: null, maxApprovalTier: 0 };
 
 @Injectable()
 export class StructureService {
@@ -217,15 +316,26 @@ export class StructureService {
     });
   }
 
-  async createJobRole(businessId: string, dto: CreateJobRoleDto) {
+  /**
+   * V1-21: the permissions map must be in the canonical vocabulary and the tier 0..4
+   * (400, for every author), and a bounded author may not create a role above its own
+   * authority (403). `requesterId` is the authenticated caller.
+   */
+  async createJobRole(businessId: string, dto: CreateJobRoleDto, requesterId: string) {
+    const permissions = this.validJobRolePermissions(dto.permissions);
+    const tier = this.validApprovalTier(dto.defaultApprovalTier) ?? 0;
+    const bound = await this.grantBound(businessId, requesterId);
+    if (bound && (await authorityExcess(jobRoleEnvelope(permissions, tier), bound))) {
+      throw new ForbiddenException(REFUSED_GRANT);
+    }
     return this.prisma.client.jobRole.create({
       data: {
         businessId,
         name: dto.name,
         description: dto.description,
         level: dto.level ?? 0,
-        permissions: dto.permissions ? (dto.permissions as any) : undefined,
-        defaultApprovalTier: dto.defaultApprovalTier ?? 0,
+        permissions,
+        defaultApprovalTier: tier,
         color: dto.color,
       },
     });
@@ -239,18 +349,133 @@ export class StructureService {
     return role;
   }
 
-  async updateJobRole(businessId: string, id: string, dto: UpdateJobRoleDto) {
-    await this.getJobRole(businessId, id);
+  /**
+   * V1-21: validated as on create. When the edit touches the permissions or the tier, a
+   * bounded editor may not change a role whose current authority exceeds its own, nor
+   * leave it above its own (403, row unchanged). A cosmetic edit grants nothing.
+   * Existing holders keep their copy until their position next syncs (unchanged here).
+   */
+  async updateJobRole(businessId: string, id: string, dto: UpdateJobRoleDto, requesterId: string) {
+    const current = await this.getJobRole(businessId, id);
+    const permissions = this.validJobRolePermissions(dto.permissions);
+    const tier = this.validApprovalTier(dto.defaultApprovalTier);
+    if (permissions !== undefined || tier !== undefined) {
+      const bound = await this.grantBound(businessId, requesterId);
+      if (bound) {
+        if (await authorityExcess(jobRoleEnvelope(current.permissions, current.defaultApprovalTier), bound)) {
+          throw new ForbiddenException(REFUSED_JOB_ROLE);
+        }
+        const next = jobRoleEnvelope(permissions ?? current.permissions, tier ?? current.defaultApprovalTier);
+        if (await authorityExcess(next, bound)) throw new ForbiddenException(REFUSED_GRANT);
+      }
+    }
     return this.prisma.client.jobRole.update({
       where: { id },
       data: {
         name: dto.name,
         description: dto.description,
         level: dto.level,
-        permissions: dto.permissions ? (dto.permissions as any) : undefined,
-        defaultApprovalTier: dto.defaultApprovalTier,
+        permissions,
+        defaultApprovalTier: tier,
         color: dto.color,
       },
+    });
+  }
+
+  /** A JobRole permissions map from a request: undefined when absent, 400 outside the vocabulary. */
+  private validJobRolePermissions(value: unknown): Prisma.InputJsonObject | undefined {
+    if (value === undefined || value === null) return undefined;
+    const problem = jobRolePermissionsProblem(value);
+    if (problem) throw new BadRequestException(problem);
+    return value as Prisma.InputJsonObject;
+  }
+
+  private validApprovalTier(value: unknown): number | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > MAX_APPROVAL_TIER) {
+      throw new BadRequestException(`defaultApprovalTier must be an integer between 0 and ${MAX_APPROVAL_TIER}`);
+    }
+    return value;
+  }
+
+  /**
+   * The authority `requesterId` may grant in this business: its membership, or null when
+   * it is not bounded (the OWNER, a SUPER_ADMIN) — as IdentityService.assertTeamAdmin.
+   * No requester is never read as unbounded.
+   */
+  private async grantBound(businessId: string, requesterId: string): Promise<AuthorityEnvelope | null> {
+    if (!requesterId) throw new ForbiddenException('Authentication required');
+    const requester = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: requesterId, businessId } },
+      select: { role: true, permissionScopes: true, maxApprovalTier: true },
+    });
+    if (requester?.role === 'OWNER') return null;
+    const user = await this.prisma.client.user.findUnique({ where: { id: requesterId }, select: { role: true } });
+    if (user?.role === 'SUPER_ADMIN') return null;
+    if (!requester) throw new ForbiddenException('You are not a member of this business');
+    return requester;
+  }
+
+  /**
+   * K2 for a write that replaces a membership's copied authority with `copy`: a bounded
+   * requester may not rewrite a member whose CURRENT authority exceeds its own (the
+   * identity routes' ST-F5), nor leave it above its own. Returns the copy to write, or
+   * null when the membership is not in this business (a legacy row): it is never written.
+   */
+  private async assertMayCopy(
+    businessId: string,
+    requesterId: string,
+    membershipId: string,
+    copy: MembershipCopy,
+  ): Promise<MembershipCopy | null> {
+    const target = await this.prisma.client.membership.findFirst({
+      where: { id: membershipId, businessId },
+      select: { role: true, permissionScopes: true, maxApprovalTier: true },
+    });
+    if (!target) return null;
+    const bound = await this.grantBound(businessId, requesterId);
+    if (!bound) return copy;
+    if (await authorityExcess(target, bound)) throw new ForbiddenException(REFUSED_MEMBER);
+    if (await authorityExcess({ role: target.role, ...copy }, bound)) throw new ForbiddenException(REFUSED_GRANT);
+    return copy;
+  }
+
+  /** The copy assigning `jobRoleId` writes, 400 when its stored map is outside the vocabulary. */
+  private async jobRoleCopy(businessId: string, jobRoleId: string): Promise<MembershipCopy> {
+    const role = await this.prisma.client.jobRole.findFirst({
+      where: { id: jobRoleId, businessId },
+      select: { permissions: true, defaultApprovalTier: true },
+    });
+    if (!role) throw new NotFoundException('Job role not found');
+    const problem = role.permissions == null ? null : jobRolePermissionsProblem(role.permissions);
+    if (problem) {
+      throw new BadRequestException(`This job role's permissions are outside the module vocabulary (${problem}); edit the job role before assigning it`);
+    }
+    return copyOf(role);
+  }
+
+  /**
+   * What a membership's copy becomes when position `endingId` ends or is deleted: the
+   * job role of its remaining active positions (primary first, then the latest), or the
+   * role defaults when none is left. A remaining role outside the vocabulary is skipped.
+   */
+  private async recomputedCopy(businessId: string, membershipId: string, endingId: string): Promise<MembershipCopy> {
+    const remaining = await this.prisma.client.orgAssignment.findMany({
+      where: { businessId, membershipId, endedAt: null, id: { not: endingId }, jobRoleId: { not: null } },
+      orderBy: [{ isPrimary: 'desc' }, { updatedAt: 'desc' }],
+      select: { jobRole: { select: { permissions: true, defaultApprovalTier: true } } },
+      take: 50,
+    });
+    const next = remaining.find(
+      (a) => a.jobRole && (a.jobRole.permissions == null || jobRolePermissionsProblem(a.jobRole.permissions) === null),
+    );
+    return next?.jobRole ? copyOf(next.jobRole) : ROLE_DEFAULTS_COPY;
+  }
+
+  private async writeCopy(membershipId: string, copy: MembershipCopy): Promise<void> {
+    await this.prisma.client.membership.update({
+      where: { id: membershipId },
+      data: { permissionScopes: copy.permissionScopes ?? Prisma.DbNull, maxApprovalTier: copy.maxApprovalTier },
     });
   }
 
@@ -364,7 +589,20 @@ export class StructureService {
     await Promise.all(checks);
   }
 
-  async createAssignment(businessId: string, dto: CreateAssignmentDto) {
+  /**
+   * V1-21: the job role's copy is checked BEFORE anything is written — its stored map
+   * must be in the vocabulary (400) and the copy may not rewrite a member above the
+   * requester nor leave it above the requester, the requester's own membership included
+   * (403). The copy written is the one checked.
+   *
+   * `requesterId` is optional for one reason: the pure unit spec
+   * assignment-refs-tenant-scope.spec.ts (outside this packet's write set) predates the
+   * ceiling and calls this with (businessId, dto) over a two-method Prisma fake. Without a
+   * requester the copy is the legacy one, read off the created row. Every HTTP call passes
+   * the authenticated caller (StructureController requesterOf), so no request reaches
+   * that path.
+   */
+  async createAssignment(businessId: string, dto: CreateAssignmentDto, requesterId?: string) {
     // UNION, not a choice. Two branches inserted at the same point doing
     // different jobs: the contact-only branch decides whether membershipId is
     // even set, and assertAssignmentRefs scopes every id arriving from the body
@@ -396,6 +634,12 @@ export class StructureService {
 
     await this.assertAssignmentRefs(businessId, dto);
 
+    const syncs = !isContactOnly && !!dto.jobRoleId;
+    const checked =
+      requesterId && syncs
+        ? await this.assertMayCopy(businessId, requesterId, dto.membershipId!, await this.jobRoleCopy(businessId, dto.jobRoleId!))
+        : undefined;
+
     const assignment = await this.prisma.client.orgAssignment.create({
       data: {
         businessId,
@@ -418,14 +662,9 @@ export class StructureService {
     // Sync JobRole permissions to Membership (membership-backed positions only —
     // contact-only staff have no Membership row to sync onto; their tool/approval
     // scope is enforced via the JobRole lookup directly wherever they're delegated to)
-    if (!isContactOnly && dto.jobRoleId && assignment.jobRole) {
-      await this.prisma.client.membership.update({
-        where: { id: dto.membershipId },
-        data: {
-          permissionScopes: assignment.jobRole.permissions as any,
-          maxApprovalTier: assignment.jobRole.defaultApprovalTier,
-        },
-      });
+    if (syncs && assignment.jobRole) {
+      const copy = checked === undefined ? copyOf(assignment.jobRole) : checked;
+      if (copy) await this.writeCopy(dto.membershipId!, copy);
     }
 
     return assignment;
@@ -468,7 +707,15 @@ export class StructureService {
     return a;
   }
 
-  async updateAssignment(businessId: string, id: string, dto: UpdateAssignmentDto) {
+  /**
+   * V1-21: on an active membership-backed position, ending it (endedAt) recomputes the
+   * member's copy from its remaining positions (recomputedCopy) instead of leaving the
+   * ended role's map in place; otherwise a new jobRoleId copies that role, as before. An
+   * ended position syncs nothing. Either copy is bounded by the requester as on create
+   * (assertMayCopy) before the assignment is written: a restricted member cannot lift its
+   * own restriction by ending its position.
+   */
+  async updateAssignment(businessId: string, id: string, dto: UpdateAssignmentDto, requesterId: string) {
     const existing = await this.getAssignment(businessId, id);
     // UNION — same reasoning as createAssignment above.
     let normalizedPhone: string | null | undefined;
@@ -487,6 +734,18 @@ export class StructureService {
     // reach the same permission-syncing write.
     await this.assertAssignmentRefs(businessId, dto);
 
+    const membershipId = !existing.isContactOnly ? existing.membershipId : null;
+    const active = existing.endedAt === null;
+    const recomputes = !!membershipId && active && !!dto.endedAt && !!existing.jobRoleId;
+    const syncs = !!membershipId && active && !dto.endedAt && !!dto.jobRoleId;
+    let checked: MembershipCopy | null = null;
+    if (membershipId && (recomputes || syncs)) {
+      const copy = recomputes
+        ? await this.recomputedCopy(businessId, membershipId, id)
+        : await this.jobRoleCopy(businessId, dto.jobRoleId!);
+      checked = await this.assertMayCopy(businessId, requesterId, membershipId, copy);
+    }
+
     const updated = await this.prisma.client.orgAssignment.update({
       where: { id },
       data: {
@@ -504,23 +763,24 @@ export class StructureService {
       include: { jobRole: true },
     });
 
-    // Sync JobRole permissions to Membership when role changes (membership-backed only)
-    if (!existing.isContactOnly && dto.jobRoleId && updated.jobRole) {
-      await this.prisma.client.membership.update({
-        where: { id: existing.membershipId! },
-        data: {
-          permissionScopes: updated.jobRole.permissions as any,
-          maxApprovalTier: updated.jobRole.defaultApprovalTier,
-        },
-      });
-    }
+    // Sync the member's copy (membership-backed only): recomputed when the position ends,
+    // the new JobRole's when the role changes on an active position — the copy checked above.
+    if (membershipId && checked) await this.writeCopy(membershipId, checked);
 
     return updated;
   }
 
-  async deleteAssignment(businessId: string, id: string) {
-    await this.getAssignment(businessId, id);
-    return this.prisma.client.orgAssignment.delete({ where: { id } });
+  /** V1-21: deleting an active position recomputes the member's copy, bounded as ending it is. */
+  async deleteAssignment(businessId: string, id: string, requesterId: string) {
+    const existing = await this.getAssignment(businessId, id);
+    const membershipId =
+      !existing.isContactOnly && existing.endedAt === null && existing.jobRoleId ? existing.membershipId : null;
+    const checked = membershipId
+      ? await this.assertMayCopy(businessId, requesterId, membershipId, await this.recomputedCopy(businessId, membershipId, id))
+      : null;
+    const deleted = await this.prisma.client.orgAssignment.delete({ where: { id } });
+    if (membershipId && checked) await this.writeCopy(membershipId, checked);
+    return deleted;
   }
 
   /**
