@@ -36,6 +36,11 @@
  * key configured (the SDK transport stubbed) import/scan is unchanged: 201,
  * the extracted contact, one AiUsageLog row.
  *
+ * Review ST-1: a member of another business that names this business only in
+ * the query string is refused 403 by BusinessGuard on the KEY voice routes.
+ * The handlers read the query, not the tenant the guard checked, so a JSON body
+ * businessId splits the two (it.todo; COST-LEDGER-001 section 7 item 9).
+ *
  * RED-BEFORE (recorded in the tests-first commit): on the unmodified code
  * import/scan answers 500 INTERNAL_SERVER_ERROR (the SDK constructor's
  * OpenAIError), voice/tts attempted to build a client with no key, and the KEY
@@ -87,6 +92,9 @@ const HEADER = 'x-k07c-user';
 const ID = {
   owner: `${P}owner`,
   biz: `${P}biz`,
+  /** OWNER of `bizOther` only: no membership of `biz` (review ST-1 negative control). */
+  outsider: `${P}outsider`,
+  bizOther: `${P}biz_other`,
 };
 const SCAN_EMAIL = `${P}scan@test.local`;
 /** Not a real key: the keyed case's requests go to the stub transport only. */
@@ -422,6 +430,9 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.biz, name: 'K07C Biz', ownerId: ID.owner, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
+  await db.user.create({ data: { id: ID.outsider, email: `${P}outsider@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.bizOther, name: 'K07C Other Biz', ownerId: ID.outsider, currency: 'TTD' } });
+  await db.membership.create({ data: { id: `${P}m_outsider`, userId: ID.outsider, businessId: ID.bizOther, role: 'OWNER' } });
 
   // No case below may reach a real provider: every global fetch is recorded and refused.
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
@@ -521,6 +532,43 @@ describe('KeyCortexVoiceService: KEY voice refuses before any provider call when
     expect(await traces()).toEqual(NO_TRACES);
     expect(outbound).toEqual([]);
   });
+
+  it('a member of another business only, naming this business in the query, is refused 403 on speak and listen before KEY voice runs', async () => {
+    expect(await db.membership.count({ where: { businessId: ID.biz, userId: ID.outsider } })).toBe(0);
+    expect(await db.membership.count({ where: { businessId: ID.bizOther, userId: ID.outsider, role: 'OWNER' } })).toBe(1);
+    const attemptsBefore = sdk.attempts.length;
+    const requestsBefore = sdk.requests.length;
+
+    const speak = await agent()
+      .post('/api/v1/cortex/voice/speak')
+      .query({ businessId: ID.biz })
+      .set(HEADER, ID.outsider)
+      .send({ text: 'Hello from k07c', persona: 'jarvis' });
+    // 403, not the 503 KEY voice answers: BusinessGuard refused before the handler ran.
+    expect(speak.status, JSON.stringify(speak.body)).toBe(403);
+    expect(speak.body.message).toBe('No access to this business');
+
+    const listen = await agent()
+      .post('/api/v1/cortex/voice/listen')
+      .query({ businessId: ID.biz })
+      .set(HEADER, ID.outsider)
+      .attach('audio', Buffer.from(`${P}audio`, 'utf8'), { filename: `${P}utterance.webm`, contentType: 'audio/webm' });
+    expect(listen.status, JSON.stringify(listen.body)).toBe(403);
+    expect(listen.body.message).toBe('No access to this business');
+
+    expect(sdk.attempts.slice(attemptsBefore)).toEqual([]);
+    expect(sdk.requests.slice(requestsBefore)).toEqual([]);
+    expect(await traces()).toEqual(NO_TRACES);
+  });
+
+  it.todo(
+    'POST /api/v1/cortex/voice/speak and /voice/listen act on the tenant BusinessGuard checked (review ST-1) - ' +
+      'BusinessGuard resolves params -> body -> query (resolveRequestBusinessId), but KeyCortexController.speak and .listen read ' +
+      "@Query('businessId'), so the outsider above sending ?businessId=<this business> with a JSON body {businessId: <own business>} " +
+      'passes the guard for its own business and speak synthesizes for this one (probe: 200, synthesize received this businessId). ' +
+      'Fix: @GuardedBusinessId() in both handlers; key-cortex.controller.ts is outside the R0-07a write set (owned by ' +
+      'V1-03-KEY-CORTEX-PRINCIPAL); COST-LEDGER-001 section 7 item 9',
+  );
 
   it.todo(
     'POST /api/v1/cortex/voice/speak and /voice/listen carry code provider_not_configured in the 503 body - ' +
