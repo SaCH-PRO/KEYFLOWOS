@@ -36,6 +36,25 @@
  *     the public booking flow uses (bookings.service.ts), is tenant-scoped
  *     only, as before; the actor is an explicit third argument.
  *
+ * Review repairs (R0-13b-CT-IMPORT-ACTOR review):
+ *   - CR-1 / ST-3 OWNED REACH: a member whose reach is limited to owned
+ *     contacts (crm_edit 'owned', or crm_view 'owned') owns the contacts an
+ *     import creates, so re-importing a card, a duplicate CSV or link row, or a
+ *     name-only card merges into it instead of a 409 or a duplicate, and a
+ *     'my book' member can open what it imported. Members who may edit every
+ *     contact they see leave the owner unset, as before.
+ *   - ST-2 AUDIT ACTOR: an import records the importing member as the actor, as
+ *     POST /contacts does: contact.created, contact.imported and
+ *     contact.imported_from_media events, the created audit entry, and an
+ *     'updated' audit entry for a merge. System-context calls are unchanged.
+ *   - CR-2 LINK ROWS: import/link settles each row on its own, as import/file
+ *     does: a refused row is FAILED with its error, the rest of the file is
+ *     imported, and the rows are linked to their contacts.
+ *   - ST-4 RECORDS: GET imports/:importId/records lists a row linked to a
+ *     contact only to a member who may open that contact.
+ *   - ST-1 (POST google/import) is outside this packet's write set; it is kept
+ *     as an it.todo hand-off at the end of the file.
+ *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the rows,
  * CrmRateLimitGuard, AuthGuard, BusinessGuard, ModuleScopeGuard, the global
  * ValidationPipe and GlobalHttpExceptionFilter, multer (FileInterceptor),
@@ -48,8 +67,10 @@
  * and global fetch for two fixed import/link URLs (any other URL throws, so no
  * request leaves the process).
  *
- * The import routes are rate limited to 5 calls a minute per handler and
- * business; the cases below stay inside that budget (at most 4 per handler).
+ * The import routes are rate limited to 5 calls a minute per client IP,
+ * handler and business. The app trusts the proxy header as app-bootstrap.ts
+ * does, and every request carries its own x-forwarded-for address, so the real
+ * guard runs on every request without capping how many cases a handler has.
  *
  * Requires DATABASE_URL. Every seeded row carries the `k13b_` prefix (rows
  * created through the API are deleted by their business id) and is
@@ -72,6 +93,7 @@ const ID = {
   staffNoEdit: `${P}staffNoEdit`, // STAFF, crm: write, crm_edit: none (passes the module guard)
   staffWrite: `${P}staffWrite`,   // STAFF, crm: write (view all, edit any)
   staffOwned: `${P}staffOwned`,   // STAFF, crm: write, crm_edit: owned (view all)
+  staffBook: `${P}staffBook`,     // STAFF, crm: write, crm_view: owned, crm_edit: owned ('my book')
   // tenant
   bizA: `${P}bizA`,
   // contacts
@@ -81,6 +103,8 @@ const ID = {
   cMine: `${P}cMine`,                     // TEAM, owned by staffOwned
   cPrivOwnerMerge: `${P}cPrivOwnerMerge`, // PRIVATE, owned by owner: the owner's own import merges into it
   cPrivSystem: `${P}cPrivSystem`,         // PRIVATE, owned by owner: a system-context call merges into it
+  cTeamAudit: `${P}cTeamAudit`,           // TEAM, owned by owner: staffWrite's import merges into it (audit actor)
+  cPrivRecords: `${P}cPrivRecords`,       // PRIVATE, owned by owner: the owner's import merges into it (records listing)
 };
 
 const MAIL = {
@@ -91,6 +115,8 @@ const MAIL = {
   privOwnerMerge: `${P}priv-owner-merge@test.local`,
   privSystem: `${P}priv-system@test.local`,
   scan: `${P}scan@test.local`,
+  teamAudit: `${P}team-audit@test.local`,
+  privRecords: `${P}priv-records@test.local`,
 };
 
 const LINK_URL_DENIED = 'https://k13b-import.example.test/denied.csv';
@@ -99,6 +125,10 @@ const LINK_URL_OWNER = 'https://k13b-import.example.test/owner.csv';
 let db: any;
 let app: any;
 let crmService: any;
+
+/** A fresh client address per request: each gets its own rate-limit bucket. */
+let ipN = 0;
+const nextIp = () => `10.13.${Math.floor(ipN / 250)}.${(ipN++ % 250) + 1}`;
 
 /** The vision model behind import/scan: a stand-in, so no provider is called. */
 const trackVision = vi.fn(async () => ({
@@ -133,6 +163,7 @@ function ocr(actor: string, ocrText: string) {
   return request(app.getHttpServer())
     .post(`/crm/businesses/${ID.bizA}/import/image/ocr`)
     .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
     .send({ ocrText });
 }
 
@@ -141,6 +172,7 @@ function csvFile(actor: string, content: string) {
     .post(`/crm/businesses/${ID.bizA}/import/file`)
     .query({ type: 'csv' })
     .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
     .attach('file', Buffer.from(content, 'utf8'), { filename: `${P}contacts.csv`, contentType: 'text/csv' });
 }
 
@@ -148,6 +180,7 @@ function link(actor: string, url: string) {
   return request(app.getHttpServer())
     .post(`/crm/businesses/${ID.bizA}/import/link`)
     .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
     .send({ url });
 }
 
@@ -155,6 +188,7 @@ function scan(actor: string) {
   return request(app.getHttpServer())
     .post(`/crm/businesses/${ID.bizA}/import/scan`)
     .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
     .attach('image', Buffer.from(`${P}not-really-a-jpeg`, 'utf8'), { filename: `${P}card.jpg`, contentType: 'image/jpeg' });
 }
 
@@ -162,13 +196,22 @@ function postContact(actor: string, body: Record<string, unknown>) {
   return request(app.getHttpServer())
     .post(`/crm/businesses/${ID.bizA}/contacts`)
     .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
     .send(body);
 }
 
 function detail(actor: string, contactId: string) {
   return request(app.getHttpServer())
     .get(`/crm/businesses/${ID.bizA}/contacts/${contactId}`)
-    .set('x-test-user', actor);
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp());
+}
+
+function records(actor: string, importId: string) {
+  return request(app.getHttpServer())
+    .get(`/crm/businesses/${ID.bizA}/imports/${importId}/records`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp());
 }
 
 /** A CSV with the headers the importer maps to firstName, lastName, email and companyName. */
@@ -355,6 +398,8 @@ beforeAll(async () => {
 
   crmService = moduleRef.get(CrmService);
   app = moduleRef.createNestApplication();
+  // As app-bootstrap.ts: the client address comes from the proxy header.
+  app.getHttpAdapter().getInstance().set('trust proxy', true);
   // Identity attachment only, for seeded k13b_ users. No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
     const header = req.headers['x-test-user'];
@@ -373,7 +418,7 @@ beforeAll(async () => {
   await cleanup(); // in case a prior run aborted
 
   // ---- identities, tenant, memberships -----------------------------------
-  for (const id of [ID.owner, ID.staffNoEdit, ID.staffWrite, ID.staffOwned]) {
+  for (const id of [ID.owner, ID.staffNoEdit, ID.staffWrite, ID.staffOwned, ID.staffBook]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'K13B Biz A', ownerId: ID.owner } });
@@ -385,6 +430,7 @@ beforeAll(async () => {
   await m(ID.staffNoEdit, 'STAFF', { crm: 'write', crm_edit: 'none' });
   await m(ID.staffWrite, 'STAFF', { crm: 'write' });
   await m(ID.staffOwned, 'STAFF', { crm: 'write', crm_edit: 'owned' });
+  await m(ID.staffBook, 'STAFF', { crm: 'write', crm_view: 'owned', crm_edit: 'owned' });
 
   // ---- contacts: lastName and companyName left empty, so a merge shows -----
   const c = async (id: string, email: string, visibility: string, ownerId: string) =>
@@ -397,6 +443,8 @@ beforeAll(async () => {
   await c(ID.cMine, MAIL.mine, 'TEAM', ID.staffOwned);
   await c(ID.cPrivOwnerMerge, MAIL.privOwnerMerge, 'PRIVATE', ID.owner);
   await c(ID.cPrivSystem, MAIL.privSystem, 'PRIVATE', ID.owner);
+  await c(ID.cTeamAudit, MAIL.teamAudit, 'TEAM', ID.owner);
+  await c(ID.cPrivRecords, MAIL.privRecords, 'PRIVATE', ID.owner);
 }, 120_000);
 
 afterAll(async () => {
@@ -405,10 +453,10 @@ afterAll(async () => {
 });
 
 describe('fixture sanity (real rows)', () => {
-  it('seeded one tenant with an owner, three STAFF members and six live contacts, and no import traces', async () => {
-    expect(await db.membership.count({ where: { businessId: ID.bizA } })).toBe(4);
+  it('seeded one tenant with an owner, four STAFF members and eight live contacts, and no import traces', async () => {
+    expect(await db.membership.count({ where: { businessId: ID.bizA } })).toBe(5);
     expect(await traceCounts()).toEqual({
-      contacts: 6, live: 6, contactEvents: 0, audits: 0, imports: 0, importRows: 0, media: 0,
+      contacts: 8, live: 8, contactEvents: 0, audits: 0, imports: 0, importRows: 0, media: 0,
     });
     expect(await rawContact(ID.cPriv)).toMatchObject({ visibility: 'PRIVATE', owner_id: ID.owner, last_name: null, company_name: null });
   });
@@ -669,4 +717,247 @@ describe('SYSTEM CONTEXT: findOrCreateContact takes the actor as an explicit arg
     expect(await contactTraces(ID.cPrivSystem)).toEqual(privBefore);
     expect(await traceCounts()).toEqual(tenantBefore);
   });
+});
+
+// ---- review repairs -----------------------------------------------------------
+
+describe('a member whose CRM reach is limited to owned contacts owns what an import creates, so re-importing merges instead of colliding (review repair CR-1, ST-3)', () => {
+  it('STAFF with crm_edit owned: import/image/ocr of the same new card twice answers 201 both times with the same contact, owned by that member', async () => {
+    const email = `${P}reimport-owned@test.local`;
+    const text = `${P}Re Owned\n${email}`;
+    const first = await ocr(ID.staffOwned, text);
+    expect(first.status).toBe(201);
+    expect(first.body.contact).toMatchObject({ email, ownerId: ID.staffOwned });
+    const second = await ocr(ID.staffOwned, text);
+    expect(second.status).toBe(201);
+    expect(second.body.contact.id).toBe(first.body.contact.id);
+    expect(await contactIdsWithEmail(email)).toEqual([first.body.contact.id]);
+    expect(await rawContact(first.body.contact.id)).toMatchObject({ owner_id: ID.staffOwned, visibility: 'TEAM', deleted_at: null });
+  });
+
+  it('STAFF with crm_edit owned: a CSV with two rows of the same new email answers 201 COMPLETED 2/2; one contact, owned by that member, with both rows linked to it', async () => {
+    const email = `${P}twice-owned@test.local`;
+    const res = await csvFile(ID.staffOwned, csv([
+      { first: `${P}Twice`, email },
+      { first: `${P}Twice`, last: 'Again', email, company: `${P}TwiceCo` },
+    ]));
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: 2, processedRows: 2 });
+    const ids = await contactIdsWithEmail(email);
+    expect(ids).toHaveLength(1);
+    expect(await rawContact(ids[0])).toMatchObject({ owner_id: ID.staffOwned, last_name: 'Again', company_name: `${P}TwiceCo` });
+    const rows = await importRows(res.body.id);
+    expect(rows.map((r) => [r.status, r.contact_id])).toEqual([['CREATED', ids[0]], ['CREATED', ids[0]]]);
+  });
+
+  it("STAFF 'my book' (crm_view owned, crm_edit owned): a card it imports is owned by it, its GET of that contact answers 200, and importing the card again merges into it", async () => {
+    const email = `${P}book@test.local`;
+    const text = `${P}Book Import\n${email}`;
+    const first = await ocr(ID.staffBook, text);
+    expect(first.status).toBe(201);
+    expect(first.body.contact).toMatchObject({ email, ownerId: ID.staffBook });
+    expect((await detail(ID.staffBook, first.body.contact.id)).status).toBe(200);
+    const second = await ocr(ID.staffBook, text);
+    expect(second.status).toBe(201);
+    expect(second.body.contact.id).toBe(first.body.contact.id);
+    expect(await contactIdsWithEmail(email)).toEqual([first.body.contact.id]);
+  });
+
+  it('STAFF with crm_edit owned: a name-only card imported twice within five minutes resolves to one contact', async () => {
+    const first = await ocr(ID.staffOwned, `${P}NameOnly Card`);
+    expect(first.status).toBe(201);
+    const second = await ocr(ID.staffOwned, `${P}NameOnly Card`);
+    expect(second.status).toBe(201);
+    expect(second.body.contact.id).toBe(first.body.contact.id);
+    const rows: Array<{ id: string }> = await db.$queryRawUnsafe(
+      'SELECT id FROM contacts WHERE business_id = $1 AND first_name = $2', ID.bizA, `${P}NameOnly`,
+    );
+    expect(rows.map((r) => r.id)).toEqual([first.body.contact.id]);
+  });
+
+  it('positive control: STAFF who may edit every contact it sees (view all, edit any) leaves an imported contact without an owner, as before, and re-importing it merges into it', async () => {
+    const email = `${P}reimport-any@test.local`;
+    const text = `${P}Re Any\n${email}`;
+    const first = await ocr(ID.staffWrite, text);
+    expect(first.status).toBe(201);
+    expect(first.body.contact).toMatchObject({ email, ownerId: null });
+    const second = await ocr(ID.staffWrite, text);
+    expect(second.status).toBe(201);
+    expect(second.body.contact.id).toBe(first.body.contact.id);
+  });
+});
+
+describe('an import records the importing member as the actor, as POST /contacts does (review repair ST-2)', () => {
+  const events = (contactId: string): Promise<Array<{ type: string; actor_type: string | null; actor_id: string | null }>> =>
+    db.$queryRawUnsafe('SELECT type, actor_type, actor_id FROM contact_events WHERE contact_id = $1 ORDER BY created_at', contactId);
+  const audits = (contactId: string): Promise<Array<{ action: string; actor: any; changed_fields: string[] }>> =>
+    db.$queryRawUnsafe('SELECT action, actor, changed_fields FROM contact_audit_entries WHERE contact_id = $1 ORDER BY created_at', contactId);
+
+  it('a contact a STAFF member creates through import/image/ocr: its contact.created and contact.imported_from_media events and its created audit entry name that member', async () => {
+    const email = `${P}audit-ocr@test.local`;
+    const res = await ocr(ID.staffWrite, `${P}Audit Ocr\n${email}`);
+    expect(res.status).toBe(201);
+    await settle();
+    const id = res.body.contact.id;
+    const rows = await events(id);
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(expect.arrayContaining([
+      { type: 'contact.created', actor_type: 'USER', actor_id: ID.staffWrite },
+      { type: 'contact.imported_from_media', actor_type: 'USER', actor_id: ID.staffWrite },
+    ]));
+    const entries = await audits(id);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ action: 'created', actor: { type: 'USER', id: ID.staffWrite } });
+  });
+
+  it("a STAFF CSV row merged into the owner's TEAM contact writes an 'updated' audit entry naming the member with the fields it filled, and its contact.imported event names the member", async () => {
+    await settle();
+    expect(await audits(ID.cTeamAudit)).toEqual([]);
+    const res = await csvFile(ID.staffWrite, csv([
+      { first: `${P}Ignored`, last: 'AuditMerged', email: MAIL.teamAudit, company: `${P}AuditCo` },
+    ]));
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: 1, processedRows: 1 });
+    await settle();
+    expect(await rawContact(ID.cTeamAudit)).toMatchObject({ last_name: 'AuditMerged', company_name: `${P}AuditCo`, owner_id: ID.owner });
+    const entries = await audits(ID.cTeamAudit);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ action: 'updated', actor: { type: 'USER', id: ID.staffWrite } });
+    expect(entries[0].changed_fields).toEqual(expect.arrayContaining(['lastName', 'companyName']));
+    expect(await events(ID.cTeamAudit)).toEqual([{ type: 'contact.imported', actor_type: 'USER', actor_id: ID.staffWrite }]);
+  });
+
+  it('regression control: findOrCreateContact with no actor (system context) attributes no member: the contact.created event has no actor, the created audit entry names SYSTEM, and a merge writes no audit entry', async () => {
+    const email = `${P}system-audit@test.local`;
+    const input = { firstName: `${P}SysAudit`, lastName: 'Guest', email, phone: null, source: 'storefront', sourceDetail: 'public-booking' };
+    const created = await crmService.findOrCreateContact(ID.bizA, input);
+    expect(created.ownerId).toBeNull();
+    await settle();
+    expect(await events(created.id)).toEqual([{ type: 'contact.created', actor_type: null, actor_id: null }]);
+    expect(await audits(created.id)).toMatchObject([{ action: 'created', actor: { type: 'SYSTEM' } }]);
+
+    const merged = await crmService.findOrCreateContact(ID.bizA, { ...input, companyName: `${P}SysCo` });
+    expect(merged.id).toBe(created.id);
+    await settle();
+    expect(await rawContact(created.id)).toMatchObject({ company_name: `${P}SysCo` });
+    expect(await audits(created.id)).toHaveLength(1);
+  });
+});
+
+describe('import/link settles each row on its own: a refused row is FAILED and the rest of the file is imported (review repair CR-2)', () => {
+  const LINK_URL_MIXED = 'https://k13b-import.example.test/mixed.csv';
+  const LINK_URL_TWICE = 'https://k13b-import.example.test/twice.csv';
+  const MIX_A = `${P}link-mix-a@test.local`;
+  const MIX_C = `${P}link-mix-c@test.local`;
+  const TWICE = `${P}link-twice@test.local`;
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  const served: Record<string, string> = {
+    [LINK_URL_MIXED]: csv([
+      { first: `${P}LinkMixA`, email: MIX_A },
+      { first: `${P}LinkMixPriv`, last: 'Leaked', email: MAIL.priv, company: `${P}LeakCo` },
+      { first: `${P}LinkMixC`, email: MIX_C },
+    ]),
+    [LINK_URL_TWICE]: csv([
+      { first: `${P}LinkTwice`, email: TWICE },
+      { first: `${P}LinkTwice`, last: 'Again', email: TWICE },
+    ]),
+  };
+
+  beforeAll(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any) => {
+      const url = typeof input === 'string' ? input : String(input?.href ?? input?.url);
+      if (url in served) return new Response(served[url], { status: 200, headers: { 'content-type': 'text/csv' } });
+      throw new Error(`unexpected outbound fetch in a test: ${url}`);
+    }) as any);
+  });
+
+  afterAll(() => fetchSpy.mockRestore());
+
+  it("NEGATIVE CONTROL: STAFF (view all, edit any) importing a link whose middle row matches the owner's PRIVATE contact: 201, the import FAILED with 2 of 3 rows processed, the other two rows created and linked, the refused row FAILED without naming the holder, and the holder untouched", async () => {
+    await settle();
+    const privBefore = await contactTraces(ID.cPriv);
+    const res = await link(ID.staffWrite, LINK_URL_MIXED);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ businessId: ID.bizA, status: 'FAILED', totalRows: 3, processedRows: 2 });
+    expect(JSON.stringify(res.body)).not.toContain(ID.cPriv);
+    await settle();
+
+    const a = await contactIdsWithEmail(MIX_A);
+    const c = await contactIdsWithEmail(MIX_C);
+    expect(a).toHaveLength(1);
+    expect(c).toHaveLength(1);
+    expect(await contactTraces(ID.cPriv)).toEqual(privBefore);
+    expect(await contactIdsWithEmail(MAIL.priv)).toEqual([ID.cPriv]);
+
+    const rows = await importRows(res.body.id);
+    expect(rows).toHaveLength(3);
+    expect(rows.find((r) => r.raw_data.email === MIX_A)).toMatchObject({ status: 'CREATED', contact_id: a[0] });
+    expect(rows.find((r) => r.raw_data.email === MIX_C)).toMatchObject({ status: 'CREATED', contact_id: c[0] });
+    const refused = rows.find((r) => r.raw_data.email === MAIL.priv)!;
+    expect(refused).toMatchObject({ status: 'FAILED', contact_id: null });
+    expect(refused.error).toMatch(/already exists/i);
+    expect(refused.error).not.toContain(ID.cPriv);
+  });
+
+  it('STAFF with crm_edit owned importing a link with two rows of the same new email: 201 COMPLETED 2/2, one contact owned by that member, both rows linked to it', async () => {
+    const res = await link(ID.staffOwned, LINK_URL_TWICE);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: 2, processedRows: 2 });
+    const ids = await contactIdsWithEmail(TWICE);
+    expect(ids).toHaveLength(1);
+    expect(await rawContact(ids[0])).toMatchObject({ owner_id: ID.staffOwned, last_name: 'Again' });
+    const rows = await importRows(res.body.id);
+    expect(rows.map((r) => [r.status, r.contact_id])).toEqual([['CREATED', ids[0]], ['CREATED', ids[0]]]);
+  });
+});
+
+describe('GET imports/:importId/records lists a row linked to a contact only to a member who may open that contact (review repair ST-4)', () => {
+  it("NEGATIVE CONTROL: the owner's CSV row merged into the owner's PRIVATE contact is listed to the owner and to no STAFF member; its row linked to a new TEAM contact is listed to a view-all member and not to a 'my book' member", async () => {
+    const teamEmail = `${P}records-team@test.local`;
+    const imp = await csvFile(ID.owner, csv([
+      { first: `${P}Ignored`, last: 'Secret', email: MAIL.privRecords, company: `${P}SecretCo` },
+      { first: `${P}RecordsTeam`, email: teamEmail },
+    ]));
+    expect(imp.status).toBe(201);
+    expect(imp.body).toMatchObject({ status: 'COMPLETED', totalRows: 2, processedRows: 2 });
+    expect(await rawContact(ID.cPrivRecords)).toMatchObject({ visibility: 'PRIVATE', last_name: 'Secret' });
+    const [teamId] = await contactIdsWithEmail(teamEmail);
+
+    const byOwner = await records(ID.owner, imp.body.id);
+    expect(byOwner.status).toBe(200);
+    expect(byOwner.body.map((r: any) => r.contactId).sort()).toEqual([ID.cPrivRecords, teamId].sort());
+
+    const byViewAll = await records(ID.staffWrite, imp.body.id);
+    expect(byViewAll.status).toBe(200);
+    expect(byViewAll.body.map((r: any) => r.contactId)).toEqual([teamId]);
+    for (const leak of [ID.cPrivRecords, MAIL.privRecords, `${P}SecretCo`]) {
+      expect(JSON.stringify(byViewAll.body)).not.toContain(leak);
+    }
+
+    const byBook = await records(ID.staffBook, imp.body.id);
+    expect(byBook.status).toBe(200);
+    expect(byBook.body).toEqual([]);
+  });
+
+  it('positive control: a member sees every row of its own import, the created row linked to its contact and the refused row (FAILED, linked to no contact)', async () => {
+    const ownEmail = `${P}records-own@test.local`;
+    const imp = await csvFile(ID.staffWrite, csv([
+      { first: `${P}RecordsOwn`, email: ownEmail },
+      { first: `${P}Ignored`, last: 'Refused', email: MAIL.priv },
+    ]));
+    expect(imp.status).toBe(201);
+    expect(imp.body).toMatchObject({ status: 'FAILED', totalRows: 2, processedRows: 1 });
+    const [ownId] = await contactIdsWithEmail(ownEmail);
+
+    const res = await records(ID.staffWrite, imp.body.id);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+    expect(res.body.find((r: any) => r.status === 'CREATED')).toMatchObject({ contactId: ownId });
+    expect(res.body.find((r: any) => r.status === 'FAILED')).toMatchObject({ contactId: null });
+    expect(JSON.stringify(res.body)).not.toContain(ID.cPriv);
+  });
+});
+
+describe('hand-off outside this packet (review finding ST-1)', () => {
+  it.todo("FOLLOW-UP PACKET: POST crm/businesses/:businessId/google/import (crm-google.controller.ts) runs under AuthGuard and BusinessGuard only (no ModuleScopeGuard, no crm write), and CrmGoogleService.importGoogleContacts (crm-google.service.ts) calls findOrCreateContact without the actor, so a crm read-only STAFF member can merge Google data into the owner's PRIVATE contact. Both files are outside this packet's write set; the follow-up adds the crm write scope and passes req.user.id as the actor.");
 });

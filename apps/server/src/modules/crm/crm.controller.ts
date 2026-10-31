@@ -1109,8 +1109,14 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/imports/:importId/records')
-  listImportRecords(@Param('businessId') businessId: string, @Param('importId') importId: string) {
-    return this.crmImport.listImportRecords(businessId, importId);
+  listImportRecords(
+    @Param('businessId') businessId: string,
+    @Param('importId') importId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    // A row linked to a contact is listed only when this member may open it.
+    const actorUserId = this.requireActorUserId(req);
+    return this.crmImport.listImportRecords(businessId, importId, actorUserId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

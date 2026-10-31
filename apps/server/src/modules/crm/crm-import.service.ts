@@ -1,10 +1,13 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
 import { AiUsageService } from '../ai/ai-usage.service';
 import pdfParse from 'pdf-parse';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from './crm.service';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import { contactWhereBase } from './crm.helpers';
 import {
   CONTACT_AGE_GROUPS,
   CONTACT_AGE_GROUP_LABELS,
@@ -417,7 +420,12 @@ export class CrmImportService {
         },
       });
 
+      // Each row is settled on its own, as import/file does: a row that is
+      // refused (a 409 from a contact the member may not edit, a 403) or fails
+      // is marked FAILED with its error and the import goes on with the next
+      // row; a row that resolves to a contact is marked CREATED with its id.
       let created = 0;
+      let failed = 0;
       for (const row of rows) {
         const builtInput = this.buildContactInput(row, mapping);
         const contactInput = {
@@ -430,7 +438,7 @@ export class CrmImportService {
           continue;
         }
 
-        await this.prisma.client.contactImportContact.create({
+        const record = await this.prisma.client.contactImportContact.create({
           data: {
             importId: importRecord.id,
             rawData: row as Record<string, unknown>,
@@ -438,16 +446,28 @@ export class CrmImportService {
           },
         });
 
-        const contact = await this.crm.findOrCreateContact(params.businessId, contactInput, params.actorUserId);
-        if (contact) {
-          created++;
+        try {
+          const contact = await this.crm.findOrCreateContact(params.businessId, contactInput, params.actorUserId);
+          if (contact) {
+            created++;
+            await this.prisma.client.contactImportContact.update({
+              where: { id: record.id },
+              data: { status: 'CREATED', contactId: contact.id },
+            });
+          }
+        } catch (error: unknown) {
+          failed++;
+          await this.prisma.client.contactImportContact.update({
+            where: { id: record.id },
+            data: { status: 'FAILED', error: (error as Error)?.message },
+          });
         }
       }
 
       await this.prisma.client.contactImport.update({
         where: { id: importRecord.id },
         data: {
-          status: 'COMPLETED',
+          status: failed === 0 ? 'COMPLETED' : 'FAILED',
           processedRows: created,
           completedAt: new Date(),
         },
@@ -513,7 +533,8 @@ export class CrmImportService {
       type: 'contact.imported',
       data: { importId: record.importId, recordId: record.id },
       source: 'import',
-      actorType: 'SYSTEM',
+      // The importing member, when there is one (the import routes).
+      ...(params.actorUserId ? { actorType: 'USER', actorId: params.actorUserId } : { actorType: 'SYSTEM' }),
     });
 
     return record;
@@ -634,7 +655,8 @@ Only return the JSON object, no markdown or explanation.`,
       type: 'contact.imported_from_media',
       data: { mediaId: media.id },
       source: 'ocr',
-      actorType: 'SYSTEM',
+      // The importing member, when there is one (the import route).
+      ...(params.actorUserId ? { actorType: 'USER', actorId: params.actorUserId } : { actorType: 'SYSTEM' }),
     });
 
     return { contact, media };
@@ -648,15 +670,32 @@ Only return the JSON object, no markdown or explanation.`,
     });
   }
 
-  async listImportRecords(businessId: string, importId: string) {
+  /**
+   * The rows of one import. With `actorUserId` (the route passes the requesting
+   * member), a row linked to a contact is listed only when that member may open
+   * the contact, under the same M7 visibility clause the contact list and
+   * detail apply (a live contact of this tenant): its raw data and contact id
+   * would otherwise disclose a PRIVATE or unshared contact. A row linked to no
+   * contact (FAILED, PENDING) is listed as before. OWNER and SUPER_ADMIN see
+   * every row.
+   */
+  async listImportRecords(businessId: string, importId: string, actorUserId?: string) {
     const importJob = await this.prisma.client.contactImport.findUnique({
       where: { id: importId },
     });
     if (!importJob || importJob.businessId !== businessId) {
       throw new BadRequestException('Import not found');
     }
+    const where: Prisma.ContactImportContactWhereInput = { importId };
+    if (actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+      const visClause = visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null;
+      if (visClause) {
+        where.OR = [{ contactId: null }, { contact: { is: { ...contactWhereBase(businessId), ...visClause } } }];
+      }
+    }
     return this.prisma.client.contactImportContact.findMany({
-      where: { importId },
+      where,
       orderBy: { createdAt: 'desc' },
     });
   }

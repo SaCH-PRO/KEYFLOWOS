@@ -501,6 +501,18 @@ export class CrmService {
     return clauses.length > 0 ? { AND: clauses } : null;
   }
 
+  /**
+   * True when `access` reaches only contacts the member owns or that are shared
+   * with them (crm_edit 'owned', or crm_view 'owned'). An ownerless contact is
+   * outside editableContactClause for such a member, so a contact they create
+   * through an import is made theirs; otherwise they could not open, merge into
+   * or re-import a contact they had just created.
+   */
+  private reachLimitedToOwned(access: CrmAccess): boolean {
+    if (access.isOwner || access.isSuperAdmin) return false;
+    return access.editScope !== 'any' || !access.viewAll;
+  }
+
   async createContact(input: {
     businessId: string;
     firstName?: string | null;
@@ -656,9 +668,15 @@ export class CrmService {
    * may edit that contact (editableContactClause); otherwise the input goes to
    * createContact with the same actor, so a colliding email or phone answers
    * the bounded 409 POST /contacts gives (the holder named only when the member
-   * can open it) and the existing contact is left untouched. Without it
-   * (bookings, intake, store, KEY and other system-context callers) the lookup
-   * is tenant-scoped only, as before.
+   * can open it) and the existing contact is left untouched. The member is
+   * also the audit actor, as on POST /contacts: a created contact's
+   * contact.created event and audit entry name them, and a merge that changes
+   * a contact writes an 'updated' audit entry naming them. A member whose reach
+   * is limited to owned contacts (reachLimitedToOwned) owns the contact an
+   * import creates, so re-importing the same row merges into it. Without an
+   * actor (bookings, intake, store, KEY and other system-context callers) the
+   * lookup is tenant-scoped only, the owner is left unset and no merge audit is
+   * written, as before.
    */
   async findOrCreateContact(
     businessId: string,
@@ -676,11 +694,15 @@ export class CrmService {
     } & Partial<ContactExtraAttributes>,
     actorUserId?: string,
   ) {
+    let access: CrmAccess | null = null;
     let editable: Prisma.ContactWhereInput | null = null;
     if (actorUserId) {
-      const access = await this.assertCanCreateContacts(businessId, actorUserId);
+      access = await this.assertCanCreateContacts(businessId, actorUserId);
       editable = this.editableContactClause(access, actorUserId);
     }
+    // The same actor the controller's userAuditContext records for POST /contacts.
+    const audit: AuditContext | undefined = actorUserId ? { actor: { type: 'USER', id: actorUserId } } : undefined;
+    const ownerId = input.ownerId ?? (actorUserId && access && this.reachLimitedToOwned(access) ? actorUserId : null);
     const scoped = (where: Prisma.ContactWhereInput): Prisma.ContactWhereInput =>
       (editable ? { ...where, AND: [editable] } : where);
     const normalizeString = (value?: string | null) => {
@@ -714,7 +736,7 @@ export class CrmService {
             source: input.source,
             sourceDetail: input.sourceDetail,
             tags,
-          });
+          }, audit);
         }
       }
 
@@ -747,14 +769,21 @@ export class CrmService {
         sourceDetail: input.sourceDetail ?? undefined,
         tags,
         ...extraFields,
+        ...(ownerId ? { ownerId } : {}),
         ...(actorUserId ? { actorUserId } : {}),
-      });
+      }, audit);
     }, { isolationLevel: 'Serializable' });
   }
 
+  /**
+   * Fill `existing`'s empty fields from `input` (and union the tags). With an
+   * audit context (findOrCreateContact on behalf of a member), a merge that
+   * changes the contact writes an 'updated' audit entry naming that actor, as
+   * updateContact does; system-context merges write none, as before.
+   */
   private async mergeContactDetails(
     existing: Contact,
-    _businessId: string,
+    businessId: string,
     input: {
       firstName?: string | null;
       lastName?: string | null;
@@ -765,6 +794,7 @@ export class CrmService {
       sourceDetail?: string | null;
       tags?: string[];
     },
+    audit?: AuditContext,
   ) {
     const data: Record<string, any> = {};
     if (input.firstName && !existing.firstName) data.firstName = sanitize(input.firstName);
@@ -787,10 +817,22 @@ export class CrmService {
     if (Object.keys(data).length === 0) {
       return existing;
     }
-    return this.prisma.client.contact.update({
+    const updated = await this.prisma.client.contact.update({
       where: { id: existing.id },
       data,
     });
+    if (audit) {
+      this.auditContact({
+        businessId,
+        contactId: existing.id,
+        action: 'updated',
+        before: existing as unknown as Record<string, unknown>,
+        after: updated as unknown as Record<string, unknown>,
+        ctx: audit,
+        extraReason: `merged ${input.source ?? 'unknown'} input into existing contact`,
+      });
+    }
+    return updated;
   }
 
   async updateContact(input: {
