@@ -962,20 +962,34 @@ export class CommerceService {
     actorId?: string | null;
     source?: 'public' | 'internal';
     reason?: string | null;
+    /**
+     * R0-28: the tenant the caller was admitted to. Optional for the callers
+     * that resolve the quote themselves (the public token response, the
+     * tenant-checked send-email route), but ENFORCED whenever supplied: the
+     * lookup below is by primary key alone, and a guard proves which tenant is
+     * asking, not which quote it may touch.
+     */
+    businessId?: string;
   }) {
     const existingQuote = await this.prisma.client.quote.findUnique({
       where: { id: params.quoteId },
       select: { businessId: true, status: true, viewToken: true },
     });
+    // R0-28: unknown, soft-deleted and foreign ids answer the same 404 (they
+    // were plain Errors, so 500s): a different answer for "exists but is not
+    // yours" would confirm the id belongs to someone.
     if (!existingQuote) {
-      throw new Error('Quote not found');
+      throw new NotFoundException('Quote not found');
+    }
+    if (params.businessId && existingQuote.businessId !== params.businessId) {
+      throw new NotFoundException('Quote not found');
     }
     if (params.actorId) {
       const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingQuote.businessId, userId: params.actorId },
       });
       if (!membership) {
-        throw new Error('Not authorized to update this quote');
+        throw new ForbiddenException('Not authorized to update this quote');
       }
     }
     const now = new Date();

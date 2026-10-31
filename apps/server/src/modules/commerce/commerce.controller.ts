@@ -553,20 +553,32 @@ export class CommerceController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // R0-28 (M21, CF-15 authorization half): this bare-id write ran AuthGuard and
+  // BusinessGuard only, so a revenue:read member (or the STAFF default, or
+  // revenue:none) sent, accepted or rejected quotes; and the handler dropped
+  // the tenant the guards checked, so the service looked the quote up by id
+  // alone. It now requires revenue:write like every other revenue write, and
+  // forwards the guard-resolved tenant (same resolver as the guards, as on the
+  // invoice status route) for the service to bind: a foreign id answers like
+  // an unknown one. Path and `{ businessId }` body are unchanged for the web
+  // client. No state machine here: transitions are V1-50 (D-04).
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('quotes/:quoteId/status/:status')
   async updateQuoteStatus(
-    @Body('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string | undefined,
     @Param('quoteId') quoteId: string,
     @Param('status') status: string,
     @Req() req: any,
   ) {
+    const tenant = this.requireGuardedTenant(businessId);
     try {
       this.logger.log(`Updating quote ${quoteId} to status ${status} by user ${req?.user?.id}`);
       const result = await this.commerce.updateQuoteStatus({
         quoteId,
         status: status.toUpperCase() as UpdateQuoteStatusDto['status'],
         actorId: req?.user?.id,
+        businessId: tenant,
       });
       this.logger.log(`Quote ${quoteId} status updated successfully`);
       return result;
