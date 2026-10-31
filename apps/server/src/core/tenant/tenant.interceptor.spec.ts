@@ -17,8 +17,11 @@
  * These cases pin the contract with no database: the tenant a handler runs
  * under is exactly the string BusinessGuard validated (the value it attaches
  * to the request, else the same string-only resolver it ran); a non-string
- * candidate is skipped, never coerced; and every well-formed request resolves
- * exactly as the legacy expression did.
+ * candidate is skipped, never coerced; and every well-formed request from a
+ * caller who belongs to the named tenant resolves exactly as the legacy
+ * expression did. On a route no guard admitted (review finding F1) the named
+ * tenant becomes ambient only for a caller who passes BusinessGuard's own
+ * membership predicate for it, or is SUPER_ADMIN.
  */
 import { describe, it, expect } from 'vitest';
 import { Observable, lastValueFrom } from 'rxjs';
@@ -45,8 +48,45 @@ function ctxFor(req: Req): ExecutionContext {
   return { switchToHttp: () => ({ getRequest: () => req }) } as unknown as ExecutionContext;
 }
 
-/** Run the interceptor around a handler that reports the ambient tenant it ran under. */
-async function runUnderInterceptor(req: Req): Promise<{ tenant: unknown; userId: unknown }> {
+/** Every business id the tests in this file name; the default caller belongs to all of them. */
+const EVERY_NAMED = [A, B, 'p_biz', 'b_biz', 'q_biz'];
+
+/**
+ * A fake PrismaService whose `business.findFirst` answers BusinessGuard's
+ * membership predicate (`{ id, OR: [{ ownerId }, { members: { some: { userId } } }] }`)
+ * for USER as a member of `memberOf`, recording every id it was asked about.
+ */
+function membershipPrisma(memberOf: string[], opts: { fail?: boolean } = {}) {
+  const lookups: unknown[] = [];
+  const prisma = {
+    client: {
+      business: {
+        findFirst: async ({ where }: { where: { id: unknown; OR?: Array<Record<string, unknown>> } }) => {
+          lookups.push(where.id);
+          if (opts.fail) throw new Error('connection terminated');
+          const asks = JSON.stringify(where.OR ?? []);
+          const forUser = asks.includes(JSON.stringify(USER));
+          return forUser && typeof where.id === 'string' && memberOf.includes(where.id) ? { id: where.id } : null;
+        },
+      },
+    },
+  };
+  return { prisma: prisma as unknown as PrismaService, lookups };
+}
+
+/**
+ * Run the interceptor around a handler that reports the ambient tenant it ran
+ * under. The caller (USER) is a member of `memberOf` (default: every business
+ * these tests name, so only the request shape decides the tenant).
+ */
+async function runUnderInterceptor(
+  req: Req,
+  memberOf: string[] = EVERY_NAMED,
+): Promise<{ tenant: unknown; userId: unknown }> {
+  return (await interceptWithLookups(req, memberOf)).seen;
+}
+
+async function interceptWithLookups(req: Req, memberOf: string[], opts: { fail?: boolean } = {}) {
   let seen: { tenant: unknown; userId: unknown } | undefined;
   const next: CallHandler = {
     handle: () =>
@@ -57,10 +97,11 @@ async function runUnderInterceptor(req: Req): Promise<{ tenant: unknown; userId:
         subscriber.complete();
       }),
   };
-  const out = await lastValueFrom(new TenantInterceptor().intercept(ctxFor(req), next));
+  const { prisma, lookups } = membershipPrisma(memberOf, opts);
+  const out = await lastValueFrom(new TenantInterceptor(prisma).intercept(ctxFor(req), next));
   expect(out).toBe('handled');
   if (!seen) throw new Error('handler did not run');
-  return seen;
+  return { seen, lookups };
 }
 
 /** The interceptor's pre-fix expression, kept here as the oracle for well-formed requests. */
@@ -98,7 +139,7 @@ async function guardedPipeline(req: Req, memberOf: string[] = [A]) {
   } catch (err) {
     return { admitted: false, error: (err as Error).name, checked, handler: undefined };
   }
-  const handler = admitted ? await runUnderInterceptor(req) : undefined;
+  const handler = admitted ? await runUnderInterceptor(req, memberOf) : undefined;
   return { admitted, error: undefined, checked, handler };
 }
 
@@ -124,7 +165,7 @@ for (const params of PARAMS) for (const body of BODIES) for (const query of QUER
   WELL_FORMED.push({ user: { id: USER }, params, body, query });
 }
 
-describe('TenantInterceptor: well-formed requests resolve exactly as before (control)', () => {
+describe('TenantInterceptor: well-formed requests from a caller who belongs to the named tenant resolve exactly as before (control)', () => {
   it(`installs the legacy expression's tenant on all ${WELL_FORMED.length} well-formed shapes`, async () => {
     const mismatches: unknown[] = [];
     for (const req of WELL_FORMED) {
@@ -204,6 +245,12 @@ describe('TenantInterceptor: the value BusinessGuard attached wins', () => {
     expect(await runUnderInterceptor(req)).toEqual({ tenant: A, userId: USER });
   });
 
+  it('installs the guard-attached tenant without a second membership lookup', async () => {
+    const req: Req = { user: { id: USER }, guardedBusinessId: A, query: { businessId: A } };
+    const { seen, lookups } = await interceptWithLookups(req, [A]);
+    expect({ seen, lookups }).toEqual({ seen: { tenant: A, userId: USER }, lookups: [] });
+  });
+
   it('ignores a non-string or empty guardedBusinessId and falls back to the shared resolver', async () => {
     for (const guarded of [{ not: 'x' }, [B], 9, '', null]) {
       const req: Req = { user: { id: USER }, guardedBusinessId: guarded, body: { businessId: { equals: B } }, query: { businessId: A } };
@@ -273,5 +320,84 @@ describe('BusinessGuard + TenantInterceptor: the handler runs under exactly the 
     });
     const onlyNonString = await guardedPipeline(admin({ query: { businessId: [A, B] } }));
     expect({ admitted: onlyNonString.admitted, tenant: onlyNonString.handler?.tenant }).toEqual({ admitted: true, tenant: undefined });
+  });
+});
+
+// ── Review finding F1: a route BusinessGuard did not admit ───────────────────
+//
+// TenantInterceptor is a global APP_INTERCEPTOR, so it also runs on the ~60
+// AuthGuard-only routes (identity bootstrap, community, diagnostics...) and on
+// public routes reached with a valid bearer token. No guard attaches a tenant
+// there. Installing the request's businessId unverified made it a cross-tenant
+// WRITE primitive: the Prisma extension forces businessId on create/upsert, so
+// POST /identity/bootstrap?businessId=<B> by a user with no access to B wrote
+// the bootstrap membership upsert (keyed to the caller's own business) into B
+// as an OWNER row. On such a route the named tenant becomes ambient only when
+// the caller passes BusinessGuard's own membership predicate for it (or is
+// SUPER_ADMIN, whom BusinessGuard admits to every tenant); otherwise the
+// handler runs exactly as if no tenant had been named.
+
+describe('TenantInterceptor on a route no guard admitted: only a tenant the caller can access becomes ambient (F1)', () => {
+  it('a caller with no access to B naming B (query, body or path) runs under no tenant', async () => {
+    const shapes: Req[] = [
+      { user: { id: USER, role: 'USER' }, query: { businessId: B } },
+      { user: { id: USER, role: 'USER' }, body: { businessId: B } },
+      { user: { id: USER, role: 'USER' }, params: { businessId: B } },
+    ];
+    const observed = [];
+    for (const req of shapes) observed.push(await interceptWithLookups(req, [A]));
+    expect(observed).toEqual(shapes.map(() => ({ seen: { tenant: undefined, userId: undefined }, lookups: [B] })));
+  });
+
+  it('a member of B naming B still runs under B (unchanged for legitimate callers)', async () => {
+    const { seen, lookups } = await interceptWithLookups({ user: { id: USER, role: 'USER' }, query: { businessId: B } }, [A, B]);
+    expect({ seen, lookups }).toEqual({ seen: { tenant: B, userId: USER }, lookups: [B] });
+  });
+
+  it('a foreign body tenant ahead of the caller’s own query tenant installs nothing (no fall-through to A)', async () => {
+    const req: Req = { user: { id: USER, role: 'USER' }, body: { businessId: B }, query: { businessId: A } };
+    const { seen, lookups } = await interceptWithLookups(req, [A]);
+    expect({ seen, lookups }).toEqual({ seen: { tenant: undefined, userId: undefined }, lookups: [B] });
+  });
+
+  it('only SUPER_ADMIN bypasses the check; ADMIN, OWNER and USER roles do not', async () => {
+    const admin = await interceptWithLookups({ user: { id: USER, role: 'SUPER_ADMIN' }, query: { businessId: B } }, []);
+    expect(admin).toEqual({ seen: { tenant: B, userId: USER }, lookups: [] });
+    for (const role of ['ADMIN', 'OWNER', 'USER', undefined]) {
+      const r = await interceptWithLookups({ user: { id: USER, role }, query: { businessId: B } }, []);
+      expect({ role, ...r }).toEqual({ role, seen: { tenant: undefined, userId: undefined }, lookups: [B] });
+    }
+  });
+
+  it(`a caller who belongs to no named tenant runs under no tenant on all ${WELL_FORMED.length} well-formed shapes`, async () => {
+    const installed = [];
+    for (const req of WELL_FORMED) {
+      const { seen } = await interceptWithLookups(req, []);
+      if (seen.tenant !== undefined) installed.push({ req, seen });
+    }
+    expect(installed).toEqual([]);
+  });
+
+  it('a request that names no tenant performs no lookup', async () => {
+    const r = await interceptWithLookups({ user: { id: USER, role: 'USER' }, body: { name: 'x' }, query: {} }, []);
+    expect(r).toEqual({ seen: { tenant: undefined, userId: undefined }, lookups: [] });
+  });
+
+  it('when the membership lookup fails the request is refused and the handler never runs (fail closed)', async () => {
+    let ran = false;
+    const next: CallHandler = {
+      handle: () =>
+        new Observable((subscriber) => {
+          ran = true;
+          subscriber.next('handled');
+          subscriber.complete();
+        }),
+    };
+    const { prisma } = membershipPrisma([B], { fail: true });
+    const req: Req = { user: { id: USER, role: 'USER' }, query: { businessId: B } };
+    await expect(lastValueFrom(new TenantInterceptor(prisma).intercept(ctxFor(req), next))).rejects.toMatchObject({
+      name: 'ForbiddenException',
+    });
+    expect(ran).toBe(false);
   });
 });

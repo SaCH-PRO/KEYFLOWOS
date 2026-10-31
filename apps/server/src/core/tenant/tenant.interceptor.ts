@@ -1,7 +1,9 @@
-import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
-import { Observable } from 'rxjs';
+import { Inject, Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
+import { Observable, from, switchMap } from 'rxjs';
 import { runWithTenant } from './tenant-context';
-import { requestTenantBusinessId, type BusinessGuardedRequest } from '../auth/business.guard';
+import { verifiedTenantBusinessId, type BusinessGuardedRequest } from '../auth/business.guard';
+import { resolveRequestBusinessId } from '../auth/request-business-id';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * Interceptor that sets the AsyncLocalStorage tenant context for every request
@@ -9,36 +11,52 @@ import { requestTenantBusinessId, type BusinessGuardedRequest } from '../auth/bu
  * and downstream services to access the current tenant without passing it
  * through every function call.
  *
- * The tenant is `requestTenantBusinessId(req)`: the string BusinessGuard
- * validated and attached, else the same string-only resolver the guard runs
- * (R0-F24-TENANT-INTERCEPTOR-ALIGN, build map CF-24). It used to be
- * `params.businessId || body.businessId || query.businessId` — the first
- * TRUTHY field — so `?businessId=A` with the JSON body `{"businessId":
- * {"not":"x"}}` passed the guard against A and then ran the handler with the
- * object as the ambient tenant, which the Prisma tenant extension wrote over
- * every scoped `where.businessId`: every tenant's rows (or B's, for
- * `{"equals":"B"}`) under a response that said A, and a 500 for an array or a
- * number. A non-string candidate is now skipped, never installed.
+ * The tenant is `verifiedTenantBusinessId(req)` (R0-F24-TENANT-INTERCEPTOR-ALIGN,
+ * build map CF-24): the string BusinessGuard validated and attached; else the
+ * string the guard's own resolver finds, only for SUPER_ADMIN or a caller who
+ * passes BusinessGuard's membership predicate for it; else no tenant at all.
+ *
+ * It used to be `params.businessId || body.businessId || query.businessId` —
+ * the first TRUTHY field, unchecked. On a BusinessGuard route `?businessId=A`
+ * with the JSON body `{"businessId": {"not":"x"}}` passed the guard against A
+ * and ran the handler with the object as the ambient tenant, which the Prisma
+ * tenant extension wrote over every scoped `where.businessId`. And because this
+ * interceptor is global, on the AuthGuard-only and public routes — where no
+ * guard checks the tenant at all — any caller could name any business as the
+ * ambient tenant, which the extension also forces onto every create and upsert
+ * (review finding F1: POST /identity/bootstrap?businessId=<B> wrote an OWNER
+ * membership into B for a user with no access to B). Neither is possible now:
+ * a non-string candidate is skipped, and an unverified one is never installed.
  */
 @Injectable()
 export class TenantInterceptor implements NestInterceptor {
-  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    const req = context.switchToHttp().getRequest<BusinessGuardedRequest & { user?: { id?: string } }>();
-    const userId = req?.user?.id;
-    const businessId = requestTenantBusinessId(req);
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-    if (!userId || !businessId) {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const req = context.switchToHttp().getRequest<BusinessGuardedRequest>();
+    const userId = req?.user?.id;
+    const guarded = req?.guardedBusinessId;
+    const namesTenant = (typeof guarded === 'string' && guarded.length > 0) || !!resolveRequestBusinessId(req);
+
+    if (!userId || !namesTenant) {
       return next.handle();
     }
 
-    return new Observable((subscriber) => {
-      runWithTenant(businessId, userId as string, () => {
-        next.handle().subscribe({
-          next: (value) => subscriber.next(value),
-          error: (err) => subscriber.error(err),
-          complete: () => subscriber.complete(),
-        });
-      });
-    });
+    return from(verifiedTenantBusinessId(req, this.prisma)).pipe(
+      switchMap((businessId) => {
+        if (!businessId) return next.handle();
+        // The handler subscribes inside the tenant's AsyncLocalStorage scope;
+        // its subscription is returned as the teardown.
+        return new Observable((subscriber) =>
+          runWithTenant(businessId, userId, () =>
+            next.handle().subscribe({
+              next: (value) => subscriber.next(value),
+              error: (err) => subscriber.error(err),
+              complete: () => subscriber.complete(),
+            }),
+          ),
+        );
+      }),
+    );
   }
 }

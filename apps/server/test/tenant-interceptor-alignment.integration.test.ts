@@ -28,8 +28,22 @@
  * Contact is one of the extension's BUSINESS_ID_MODELS, so the rows it returns
  * are the rows the ambient tenant selects.
  *
+ * Review finding F1 (security-tenancy): the interceptor is global, so it also
+ * runs on routes NO guard admits a tenant for — the AuthGuard-only routes and
+ * public routes reached with a bearer token. There it installed the request's
+ * businessId with no membership check, and because the extension forces
+ * businessId on create/upsert that was a cross-tenant WRITE primitive:
+ * POST /identity/bootstrap?businessId=<B> by A's owner wrote the bootstrap
+ * membership upsert (keyed to A) into B as an OWNER row. The F1 cases run the
+ * REAL IdentityController bootstrap route (real IdentityService; the
+ * controller's other collaborators are inert stand-ins, unused on that route)
+ * and a second probe declared here with AuthGuard only, and pin that on such a
+ * route the named tenant becomes ambient only for a caller who passes
+ * BusinessGuard's membership predicate for it (or is SUPER_ADMIN).
+ *
  * Every seeded row carries the `k24a_` prefix and is hard-deleted by raw SQL in
- * beforeAll and afterAll. No $transaction wrapping.
+ * beforeAll and afterAll (memberships also by user/business prefix, which
+ * covers the cuid-keyed rows bootstrap writes). No $transaction wrapping.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -69,10 +83,15 @@ let runs: Run[] = [];
 /** Every handler run in the suite, for the closing invariant. */
 const allRuns: Run[] = [];
 
+/** Every run of the AuthGuard-only probe (no BusinessGuard), for the F1 invariant. */
+type OpenRun = { route: string; actor: string; ambient: unknown; ambientType: string };
+const openRuns: OpenRun[] = [];
+let writeSeq = 0;
+
 async function cleanup() {
   for (const sql of [
     `DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
@@ -132,7 +151,19 @@ beforeAll(async () => {
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
   const { GuardedBusinessId } = await import('../src/core/auth/request-business-id');
-  const { Controller, Get, Post, HttpCode, Inject, UseGuards, ForbiddenException } = common;
+  const { Controller, Get, Post, HttpCode, Inject, UseGuards, ForbiddenException, Req } = common;
+  // F1: the real bootstrap route and the service behind it.
+  const { IdentityController } = await import('../src/modules/identity/identity.controller');
+  const { IdentityService } = await import('../src/modules/identity/identity.service');
+  const { IdentitySignupService } = await import('../src/modules/identity/identity-signup.service');
+  const { AuthSecurityService } = await import('../src/modules/identity/auth-security.service');
+  const { IdentityPasswordService } = await import('../src/modules/identity/identity-password.service');
+  const { BusinessContextService } = await import('../src/modules/identity/business-context.service');
+  const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
+  const { SupabaseAdminService } = await import('../src/core/auth/supabase-admin.service');
+  const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+  const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
+  const { DefaultTriggersService } = await import('../src/modules/ai/default-triggers.service');
 
   /**
    * A bare-id route shaped like the production ones that read the tenant from
@@ -175,12 +206,78 @@ beforeAll(async () => {
     }
   }
 
+  /**
+   * F1: an AuthGuard-only route (no BusinessGuard), shaped like the ~60 in
+   * production. `read` names no businessId of its own, so the rows it returns
+   * are exactly the rows the ambient tenant selects. `write` creates a contact
+   * in the caller's OWN business (the oldest it owns, as bootstrap resolves
+   * it), with businessId named explicitly — under a foreign ambient tenant the
+   * extension's forced create would move it.
+   */
+  @Controller('k24a/open')
+  @UseGuards(AuthGuard)
+  class OpenProbeController {
+    constructor(@Inject(PrismaService) private readonly prisma: InstanceType<typeof PrismaService>) {}
+
+    private record(route: string, req: { user: { id: string } }) {
+      const ambient = tenant.getCurrentBusinessId() as unknown;
+      openRuns.push({ route, actor: req.user.id, ambient, ambientType: typeof ambient });
+      return ambient;
+    }
+
+    @Get('read')
+    async readOpen(@Req() req: { user: { id: string } }) {
+      const ambient = this.record('GET open/read', req);
+      const rows = await this.prisma.client.contact.findMany({
+        where: { id: { startsWith: `${P}c` } },
+        select: { id: true, businessId: true },
+        orderBy: { id: 'asc' },
+      });
+      return { ambient: ambient ?? null, rows };
+    }
+
+    @Post('write')
+    @HttpCode(200)
+    async writeOpen(@Req() req: { user: { id: string } }) {
+      const ambient = this.record('POST open/write', req);
+      const own = await this.prisma.client.business.findFirst({
+        where: { ownerId: req.user.id },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (!own) throw new ForbiddenException('no own business');
+      const id = `${P}w_${++writeSeq}`;
+      const row = await this.prisma.client.contact.create({
+        data: { id, businessId: own.id, firstName: id },
+        select: { id: true, businessId: true },
+      });
+      return { ambient: ambient ?? null, intended: own.id, row };
+    }
+  }
+
+  // The real IdentityController and IdentityService. The bootstrap route uses
+  // only IdentityService (PrismaService underneath); the controller's other
+  // collaborators, and IdentityService's BlueprintService/DefaultTriggersService,
+  // are not reached on that route and are inert stand-ins. Every one is
+  // declared with an explicit @Inject token, so no emitted metadata is needed.
+  const inert = (token: unknown) => ({ provide: token as never, useValue: {} });
+
   const moduleRef = await Test.createTestingModule({
-    controllers: [TenantProbeController],
+    controllers: [TenantProbeController, OpenProbeController, IdentityController],
     providers: [
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      IdentityService,
+      inert(BlueprintService),
+      inert(DefaultTriggersService),
+      inert(AiUsageService),
+      inert(BusinessContextService),
+      inert(IdentitySignupService),
+      inert(AuthSecurityService),
+      inert(IdentityPasswordService),
+      inert(SupabaseAdminService),
+      inert(REDIS_CLIENT),
       // Installed globally in production (app.module.ts).
       { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
     ],
@@ -362,10 +459,127 @@ describe('divergent shapes: a non-string businessId never becomes the ambient te
   });
 });
 
+// ── Review finding F1: routes no guard admits a tenant for ───────────────────
+
+/** Membership rows of a business, as the database holds them (no tenant context). */
+async function membershipsOf(businessId: string) {
+  return db.membership.findMany({
+    where: { businessId },
+    select: { userId: true, businessId: true, role: true },
+    orderBy: { userId: 'asc' },
+  });
+}
+
+/** Contacts the probe wrote (`k24a_w_*`), by business. */
+async function writtenContacts() {
+  return db.contact.findMany({
+    where: { id: { startsWith: `${P}w_` } },
+    select: { id: true, businessId: true },
+    orderBy: { id: 'asc' },
+  });
+}
+
+describe('F1: the real AuthGuard-only bootstrap route writes nothing into a tenant the caller cannot access', () => {
+  it('POST /identity/bootstrap?businessId=<B> by A’s owner (no access to B) returns A and leaves B’s memberships untouched', async () => {
+    const bBefore = await membershipsOf(ID.bizB);
+    const res = await request(server()).post(`/identity/bootstrap?businessId=${ID.bizB}`).set('x-test-user', ID.ownerA).send({});
+    expect({ status: res.status, business: res.body?.business?.id }).toEqual({ status: 201, business: ID.bizA });
+    // Before the repair: Membership { ownerA, bizB, OWNER } — the upsert keyed
+    // to A ran under the ambient tenant B and its create was forced into B.
+    expect(await membershipsOf(ID.bizB)).toEqual(bBefore);
+    expect(
+      await db.membership.findMany({ where: { userId: ID.ownerA }, select: { businessId: true, role: true } }),
+    ).toEqual([{ businessId: ID.bizA, role: 'OWNER' }]);
+    // And the negative control the escalation bypassed still refuses.
+    expectNothingRan(await getProbe(ID.ownerA, `?businessId=${ID.bizB}`), 403, 'BusinessGuard still refuses A’s owner for B');
+  });
+
+  it('bootstrap repeated by A’s owner naming B is idempotent and still writes only into A', async () => {
+    const res = await request(server()).post(`/identity/bootstrap?businessId=${ID.bizB}`).set('x-test-user', ID.ownerA).send({});
+    expect({ status: res.status, business: res.body?.business?.id }).toEqual({ status: 201, business: ID.bizA });
+    expect((await membershipsOf(ID.bizB)).map((m: { userId: string }) => m.userId)).toEqual([]);
+  });
+});
+
+describe('F1: on an AuthGuard-only route a named tenant is ambient only for a caller who can access it', () => {
+  const readOpen = (actor: string, qs: string) => request(server()).get(`/k24a/open/read${qs}`).set('x-test-user', actor);
+  const ALL_ROWS = [...ROWS_A, ...ROWS_B].sort((x, y) => x.id.localeCompare(y.id));
+
+  it('naming a tenant the caller cannot access is the same as naming none (no ambient tenant, B’s rows not selected)', async () => {
+    const baseline = await readOpen(ID.ownerA, '');
+    expect({ status: baseline.status, body: baseline.body }).toEqual({ status: 200, body: { ambient: null, rows: ALL_ROWS } });
+    for (const [actor, qs] of [
+      [ID.ownerA, `?businessId=${ID.bizB}`],
+      [ID.staffA, `?businessId=${ID.bizB}`],
+      [ID.nomember, `?businessId=${ID.bizA}`],
+      [ID.ownerB, `?businessId=${ID.bizA}`],
+    ] as const) {
+      const res = await readOpen(actor, qs);
+      expect({ actor, qs, status: res.status, body: res.body }).toEqual({ actor, qs, status: 200, body: baseline.body });
+    }
+  });
+
+  it('a foreign tenant named in a JSON body (ahead of the caller’s own ?businessId) installs nothing', async () => {
+    const res = await readOpen(ID.ownerA, `?businessId=${ID.bizA}`).set('Content-Type', 'application/json').send({ businessId: ID.bizB });
+    expect({ status: res.status, ambient: res.body.ambient }).toEqual({ status: 200, ambient: null });
+  });
+
+  it('a create the handler binds to the caller’s own business lands there, not in the named foreign tenant', async () => {
+    const res = await request(server()).post(`/k24a/open/write?businessId=${ID.bizB}`).set('x-test-user', ID.ownerA).send({});
+    expect({ status: res.status, ambient: res.body.ambient, intended: res.body.intended, landed: res.body.row?.businessId }).toEqual({
+      status: 200,
+      ambient: null,
+      intended: ID.bizA,
+      landed: ID.bizA,
+    });
+    expect((await writtenContacts()).filter((c: { businessId: string }) => c.businessId === ID.bizB)).toEqual([]);
+  });
+
+  it('controls: a member, the owner and SUPER_ADMIN still run under the tenant they named (unchanged)', async () => {
+    const cases: Array<[string, string, unknown]> = [
+      [ID.staffA, ID.bizA, ROWS_A], // member through Membership
+      [ID.ownerA, ID.bizA, ROWS_A], // owner through Business.ownerId
+      [ID.ownerB, ID.bizB, ROWS_B],
+      [ID.superAdmin, ID.bizB, ROWS_B], // BusinessGuard admits SUPER_ADMIN to every tenant
+    ];
+    for (const [actor, biz, rows] of cases) {
+      const res = await readOpen(actor, `?businessId=${biz}`);
+      expect({ actor, status: res.status, body: res.body }).toEqual({ actor, status: 200, body: { ambient: biz, rows } });
+    }
+    const write = await request(server()).post(`/k24a/open/write?businessId=${ID.bizA}`).set('x-test-user', ID.ownerA).send({});
+    expect({ ambient: write.body.ambient, landed: write.body.row?.businessId }).toEqual({ ambient: ID.bizA, landed: ID.bizA });
+  });
+
+  it('a repeated (array) query names no tenant on this route either', async () => {
+    const res = await readOpen(ID.ownerA, `?businessId=${ID.bizA}&businessId=${ID.bizB}`);
+    expect({ status: res.status, ambient: res.body.ambient }).toEqual({ status: 200, ambient: null });
+  });
+});
+
 describe('invariant over every handler run in this suite', () => {
   it('the ambient tenant was exactly the guard-resolved string, or absent when none was named', () => {
     expect(allRuns.length).toBeGreaterThan(20);
     const violations = allRuns.filter((r) => r.ambient !== r.guarded || (r.ambient !== undefined && r.ambientType !== 'string'));
+    expect(violations).toEqual([]);
+  });
+
+  it('on the AuthGuard-only route every ambient tenant was one the actor owns or belongs to, or the actor was SUPER_ADMIN', async () => {
+    expect(openRuns.length).toBeGreaterThan(10);
+    const violations = [];
+    for (const r of openRuns) {
+      if (r.ambient === undefined) continue;
+      if (r.ambientType !== 'string') {
+        violations.push(r);
+        continue;
+      }
+      const actor = await db.user.findUnique({ where: { id: r.actor }, select: { role: true } });
+      if (actor?.role === 'SUPER_ADMIN') continue;
+      const access = await db.business.findFirst({
+        where: { id: r.ambient, OR: [{ ownerId: r.actor }, { members: { some: { userId: r.actor } } }] },
+        select: { id: true },
+      });
+      if (!access) violations.push(r);
+    }
     expect(violations).toEqual([]);
   });
 });
