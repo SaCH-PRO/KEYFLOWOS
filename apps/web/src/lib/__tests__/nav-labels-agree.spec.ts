@@ -76,6 +76,113 @@ describe('/app/command-center: nav, breadcrumb and page title agree', () => {
   });
 });
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * The other surfaces that name /app/command-center.
+ *
+ * The rail rename put the desktop rail in line with the breadcrumb and the
+ * header. It also put it out of line with the mobile drawer's cockpit link and
+ * the ⌘H shortcut labels, which still say "Cockpit". Before R0-08 the desktop
+ * rail and the mobile drawer agreed with each other, so this disagreement is
+ * new. Those three files are outside the R0-08 write set, so it is ledgered
+ * here instead of going unnoticed. The ledger is shrink-only and cleans itself:
+ * once a surface reads the constant, its entry has to go.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Everything inside one <Link …>…</Link> that opens the cockpit (or its stub). */
+const NOT_LINK_END = '(?:(?!</Link>)[\\s\\S])*?';
+const cockpitLink = (tail: string) =>
+  new RegExp(`<Link\\s+href="/app/(?:command-center|keyflow-command)"${NOT_LINK_END}${tail}`);
+
+interface CockpitSurface {
+  file: string;
+  what: string;
+  inWriteSet: boolean;
+  /** The source text the surface shows, or undefined if the extractor broke. */
+  extract: (src: string) => string | undefined;
+}
+
+const COCKPIT_SURFACES: CockpitSurface[] = [
+  {
+    file: 'components/layout/desktop-sidebar.tsx',
+    what: 'logo tooltip',
+    inWriteSet: true,
+    extract: (s) => s.match(cockpitLink('title=(\\{[^\\n]*\\}|"[^"]*")'))?.[1],
+  },
+  {
+    file: 'components/addon-pack-gate.tsx',
+    what: 'add-on gate back link',
+    inWriteSet: true,
+    extract: (s) => s.match(cockpitLink('<ArrowLeft[^>]*/>\\s*([^<]+?)\\s*</Link>'))?.[1],
+  },
+  {
+    file: 'components/layout/mobile-drawer.tsx',
+    what: 'mobile drawer cockpit link',
+    inWriteSet: false,
+    extract: (s) => s.match(cockpitLink('<span>([^<]+)</span>\\s*</Link>'))?.[1],
+  },
+  {
+    file: 'components/functional/keyboard-shortcuts-help.tsx',
+    what: '⌘H in the shortcut help',
+    inWriteSet: false,
+    extract: (s) => s.match(/keys: \["⌘", "H"\], description: ("[^"]*"|[^}\n]+)/)?.[1],
+  },
+  {
+    file: 'hooks/use-keyboard-shortcuts.ts',
+    what: 'kf:go-home shortcut description',
+    inWriteSet: false,
+    extract: (s) => s.match(/"kf:go-home"\)\),\s*description: ("[^"]*"|[^,\n]+)/)?.[1],
+  },
+];
+
+/**
+ * Surfaces outside the R0-08 write set that still name the cockpit with a
+ * label other than NAV_ROUTE_LABELS["/app/command-center"].
+ */
+const COCKPIT_LABEL_OUTSIDE_WRITE_SET: Record<string, string> = {
+  'components/layout/mobile-drawer.tsx':
+    '<span>Cockpit</span>, while the desktop rail says the D-09 label (the link also targets the keyflow-command stub)',
+  'components/functional/keyboard-shortcuts-help.tsx': '"Go to Cockpit"',
+  'hooks/use-keyboard-shortcuts.ts': '"Go to Cockpit"',
+};
+
+const agreesWithConstant = (shown: string) =>
+  shown.includes('NAV_ROUTE_LABELS["/app/command-center"]') || shown.includes(NAV_ROUTE_LABELS[COCKPIT]);
+
+describe('/app/command-center: the other nav surfaces agree, or are ledgered', () => {
+  const shown = () => COCKPIT_SURFACES.map((s) => ({ ...s, text: s.extract(read(s.file)) }));
+
+  it('every surface extractor finds its label — the checks below are not vacuous', () => {
+    for (const s of shown()) {
+      expect(s.text?.trim(), `${s.what} (${s.file}) not found — extractor is broken`).toBeTruthy();
+    }
+  });
+
+  it('the surfaces in the R0-08 write set name the cockpit with the constant', () => {
+    const off = shown()
+      .filter((s) => s.inWriteSet && !agreesWithConstant(s.text ?? ''))
+      .map((s) => `${s.what} (${s.file}): ${s.text}`);
+    expect(off).toEqual([]);
+  });
+
+  it('every surface outside the write set agrees, or is a ledgered disagreement', () => {
+    const off = shown()
+      .filter((s) => !s.inWriteSet && !agreesWithConstant(s.text ?? ''))
+      .filter((s) => !(s.file in COCKPIT_LABEL_OUTSIDE_WRITE_SET))
+      .map((s) => `${s.what} (${s.file}): ${s.text}`);
+    expect(off, `these name the cockpit as something other than "${NAV_ROUTE_LABELS[COCKPIT]}"`).toEqual([]);
+  });
+
+  it('the label ledger only names surfaces that still disagree', () => {
+    const surfaces = shown();
+    for (const [file, reason] of Object.entries(COCKPIT_LABEL_OUTSIDE_WRITE_SET)) {
+      const s = surfaces.find((x) => x.file === file);
+      expect(s, `${file} is ledgered but is not a known cockpit surface`).toBeDefined();
+      expect(s!.inWriteSet, `${file} is in the write set — fix it, do not ledger it`).toBe(false);
+      expect(agreesWithConstant(s!.text ?? ''), `${file} ("${reason}") now agrees — remove its entry`).toBe(false);
+    }
+  });
+});
+
 describe('/app/commerce: nav, breadcrumb and page title agree', () => {
   const navEntry = () => operateSections.flatMap((s) => s.items).find((i) => i.href === COMMERCE);
 

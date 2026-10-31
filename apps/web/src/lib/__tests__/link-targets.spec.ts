@@ -193,13 +193,18 @@ const read = (rel: string) => fs.readFileSync(path.join(WEB_SRC, rel), 'utf8');
 const relOf = (file: string) => path.relative(WEB_SRC, file).split(path.sep).join('/');
 
 /**
- * A link into the commerce workspace that carries an invoice id: the template
- * either interpolates something named invoiceId, or sets an invoice/invoiceId
- * query key. Only /app/commerce is in scope — quotes-panel deliberately opens
+ * A link into the commerce workspace that carries an invoice id. Three shapes,
+ * whatever the interpolated variable is called:
+ *   - the template interpolates something named invoiceId;
+ *   - it sets an invoice= or invoiceId= query key;
+ *   - it pairs tab=invoices with an id= key, in either order. The contact
+ *     timeline's "View Invoice" passes data.invoiceId as `entityId`, so a
+ *     name-based check alone never sees it.
+ * Only /app/commerce is in scope — quotes-panel deliberately opens
  * /app/payments filtered by an invoice id, which is a search, not a deep link.
  */
 const INVOICE_LINK =
-  /`(\/app\/commerce[^`]*(?:\$\{[^}]*invoiceId[^}]*\}|[?&](?:invoice|invoiceId)=)[^`]*)`/g;
+  /`(\/app\/commerce[^`]*(?:\$\{[^}]*invoiceId[^}]*\}|[?&](?:invoice|invoiceId)=|[?&]tab=invoices&(?:[^`]*&)?id=|[?&]id=[^`]*[?&]tab=invoices\b)[^`]*)`/g;
 /** The one shape that opens the invoice: the detail route, any query after it. */
 const INVOICE_DETAIL = /^\/app\/commerce\/invoices\/\$\{[^}]+\}(?:\?[^`]*)?$/;
 
@@ -225,6 +230,8 @@ const INVOICE_LINK_OUTSIDE_WRITE_SET: Record<string, string> = {
   'app/app/commerce/recurring/recurring-panel.tsx': 'tab=invoices&invoice=',
   'app/app/bookings/components/booking-detail-drawer.tsx': 'tab=invoices&invoiceId=',
   'app/app/bookings/page.tsx': 'tab=invoices&invoiceId=',
+  'components/contacts/timeline-tab-panel.tsx':
+    'tab=invoices&id= (x3: the CTA map, and both "View Invoice" timeline buttons)',
 };
 
 describe('a link that names an invoice opens that invoice (CF-21)', () => {
@@ -240,6 +247,39 @@ describe('a link that names an invoice opens that invoice (CF-21)', () => {
     expect(commerce, 'commerce now reads ?invoice= — revisit this gate').not.toMatch(
       /get\("invoice(Id)?"\)/,
     );
+    expect(commerce, 'commerce now reads ?id= — revisit this gate').not.toMatch(/get\("id"\)/);
+  });
+
+  it('the extractor sees every shape that carries an invoice id, whatever the variable is called', () => {
+    // The completeness claim below is only as good as this regex. The samples
+    // are shapes found in the product, plus the id= key before tab=invoices;
+    // the last two must NOT be read as an invoice deep link (a contact filter,
+    // and commerce's own record drawer, which honours recordType/recordId).
+    const tpl = (s: string) => '`' + s + '`';
+    const seen = (s: string) => [...tpl(s).matchAll(INVOICE_LINK)].map((m) => m[1]);
+    const carries = [
+      '/app/commerce?tab=invoices&id=${encodeURIComponent(entityId)}',
+      '/app/commerce?tab=invoices&id=${encodeURIComponent(inv.id)}',
+      '/app/commerce?id=${x}&tab=invoices',
+      '/app/commerce?tab=invoices&invoice=${entry.id}',
+      '/app/commerce?tab=pipeline&invoice=${inv.id}',
+      '/app/commerce?tab=invoices&invoiceId=${inv.id}',
+      '/app/commerce?tab=invoices&id=${project.invoiceId}',
+      '/app/commerce/invoices/${encodeURIComponent(t.invoiceId)}',
+    ];
+    for (const s of carries) expect(seen(s), s).toEqual([s]);
+    for (const s of [
+      '/app/commerce?tab=invoices&contactId=${contactId}',
+      '/app/commerce?recordType=invoice&recordId=${id}',
+    ]) {
+      expect(seen(s), s).toEqual([]);
+    }
+  });
+
+  it('finds the contact timeline\'s "View Invoice" links, which name the id entityId', () => {
+    // Regression for the review finding: these escaped the name-based regex.
+    const timeline = invoiceLinks().filter((l) => l.file === 'components/contacts/timeline-tab-panel.tsx');
+    expect(timeline.length, 'timeline invoice links not found — extractor is broken').toBeGreaterThanOrEqual(3);
   });
 
   it('the payments console links each transaction to its invoice detail page', () => {
