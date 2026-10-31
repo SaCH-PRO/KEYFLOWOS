@@ -8,13 +8,15 @@
  * unproven claims:
  *
  *   ST-R014-2  `SUPABASE_JWT_SECRET` was described as inert with a hosted
- *              project. It is not: `verifyLocal` accepts any HS256 token signed
- *              with it whose `iss` is absent or equals SUPABASE_URL, and
- *              .env.example shipped a public placeholder as its value. The
- *              Release 0 rule is now "leave it empty". The first block proves
- *              that rule closes the forged-token path; the second pins the
- *              hazard the doc describes, so the doc goes stale loudly when a
- *              code packet fixes the issuer check.
+ *              project. It was not: `verifyLocal` accepted any HS256 token
+ *              signed with it whose `iss` was absent or equal to SUPABASE_URL,
+ *              and .env.example shipped a public placeholder as its value. The
+ *              Release 0 rule is "leave it empty". The first block proves that
+ *              rule closes the forged-token path. The second block was a
+ *              characterization of that acceptance path; R0-SEC-02-VERIFYLOCAL-
+ *              ISSUER flipped it: only the hosted shape
+ *              `iss = ${SUPABASE_URL}/auth/v1` is accepted, and the no-`iss`
+ *              shape is a test-only path (NODE_ENV=test, no Supabase URL).
  *   ST-R014-1  POST /identity/bootstrap moved another user's row, role,
  *              memberships and businesses to the caller on an email match. R0-14
  *              held it as it.todo; R0-SEC-01-BOOTSTRAP-TAKEOVER turned those
@@ -29,7 +31,7 @@
  * what the middleware attached, so the assertion is about the boundary and not
  * about any controller behind it.
  *
- * No network: SUPABASE_URL is a fake host and no anon key is set, so the
+ * No network: SUPABASE_URL is a fake host (or unset) and no anon key is set, so the
  * getUser() fallback has no client and never runs; global fetch is replaced by
  * a recorder that refuses every call, and the suite asserts it was never used.
  *
@@ -60,6 +62,8 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'k14a_';
 const FAKE_SUPABASE_URL = 'https://k14a-example-ref.supabase.co';
+/** The issuer hosted GoTrue puts on access tokens: the project URL + /auth/v1. */
+const HOSTED_ISS = `${FAKE_SUPABASE_URL}/auth/v1`;
 /** The value .env.example carried for SUPABASE_JWT_SECRET before this repair. */
 const FORMER_PLACEHOLDER = 'your-supabase-jwt-signing-secret';
 const OTHER_SECRET = `${P}a-secret-nobody-configured`;
@@ -83,13 +87,17 @@ const SUBS = {
   urlIssPlaceholder: `${P}forger_urliss_placeholder`,
   hostedIss: `${P}forger_hostediss`,
   wrongSecret: `${P}forger_wrongsecret`,
+  hostedIssEmpty: `${P}forger_hostediss_empty`,
+  noIssProduction: `${P}forger_noiss_production`,
+  noIssTestOnly: `${P}forger_noiss_testonly`,
 };
 const VICTIM_EMAIL = `${P}victim@test.local`;
 
 /**
  * R0-SEC-01: the bootstrap block signs its tokens with this test-only secret
- * and no `iss`, the shape the spawned-server suites mint, so the real
- * AuthMiddleware accepts them through verifyLocal.
+ * and no `iss`, the shape the spawned-server suites mint. R0-SEC-02: that shape
+ * is accepted only on the test-only path (NODE_ENV=test and no Supabase URL),
+ * so the bootstrap blocks unset SUPABASE_URL before each case.
  */
 const BOOT_SECRET = `${P}bootstrap-signing-secret`;
 const BOOT = {
@@ -141,6 +149,24 @@ function forge(secret: string, claims: { sub: string; email: string; iss?: strin
 function setSecret(value: string | undefined) {
   if (value === undefined) delete process.env.SUPABASE_JWT_SECRET;
   else process.env.SUPABASE_JWT_SECRET = value;
+}
+
+/** NEXT_PUBLIC_SUPABASE_URL stays deleted (pinned in beforeAll), so this is the only URL. */
+function setSupabaseUrl(value: string | undefined) {
+  if (value === undefined) delete process.env.SUPABASE_URL;
+  else process.env.SUPABASE_URL = value;
+}
+
+/** Run one request under another NODE_ENV and always put the runner's back. */
+async function withNodeEnv<T>(value: string, fn: () => Promise<T>): Promise<T> {
+  const before = process.env.NODE_ENV;
+  process.env.NODE_ENV = value;
+  try {
+    return await fn();
+  } finally {
+    if (before === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = before;
+  }
 }
 
 /**
@@ -311,6 +337,8 @@ function whoami(token?: string) {
 }
 
 describe('Release 0 rule: SUPABASE_JWT_SECRET left empty closes the forged-token path (ST-R014-2)', () => {
+  beforeEach(() => setSupabaseUrl(FAKE_SUPABASE_URL));
+
   it('control: no bearer token answers 401', async () => {
     setSecret(undefined);
     const res = await whoami();
@@ -331,43 +359,71 @@ describe('Release 0 rule: SUPABASE_JWT_SECRET left empty closes the forged-token
     expect(res.status).toBe(401);
   });
 
+  it('R0-SEC-02: even the hosted shape iss = SUPABASE_URL/auth/v1, signed with the former placeholder, answers 401', async () => {
+    setSecret(undefined);
+    const res = await whoami(
+      forge(FORMER_PLACEHOLDER, { sub: SUBS.hostedIssEmpty, email: VICTIM_EMAIL, iss: HOSTED_ISS }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('nothing left the server: the getUser() fallback had no client, and no fetch was attempted', () => {
     expect(outbound).toEqual([]);
   });
 });
 
-describe('CHARACTERIZATION — the acceptance path the doc warns about (flips when a code packet fixes verifyLocal)', () => {
-  // These pass today and SHOULD start failing once the issuer check requires
-  // the hosted `iss` shape. When they do, update docs/auth-pathway.md (the
-  // verifyLocal caveat and open defect 2) in the same change.
-  it('with the secret set to the former placeholder, a forged token with no iss passes AuthGuard and its email claim is attached', async () => {
+describe('R0-SEC-02 — verifyLocal accepts only the hosted issuer (flipped from the R0-14 characterization of open defect 2)', () => {
+  // Until R0-SEC-02 the first two cases answered 200 carrying the forged email
+  // and the third answered 401: the secret verified no real hosted token but
+  // let anyone holding it mint one. Same inputs, now refused, and the hosted
+  // shape is the one that passes.
+  beforeEach(() => {
+    setSupabaseUrl(FAKE_SUPABASE_URL);
     setSecret(FORMER_PLACEHOLDER);
-    const res = await whoami(forge(FORMER_PLACEHOLDER, { sub: SUBS.noIssPlaceholder, email: VICTIM_EMAIL }));
-    expect(res.status).toBe(200);
-    // Role comes from the local row; with none, the bootstrap default.
-    expect(res.body).toEqual({ id: SUBS.noIssPlaceholder, email: VICTIM_EMAIL, role: 'USER' });
   });
 
-  it('with the secret set, a forged token with iss = SUPABASE_URL also passes AuthGuard', async () => {
-    setSecret(FORMER_PLACEHOLDER);
+  it('with the secret set, a forged token with no iss answers 401 (was 200 with the forged email attached)', async () => {
+    const res = await whoami(forge(FORMER_PLACEHOLDER, { sub: SUBS.noIssPlaceholder, email: VICTIM_EMAIL }));
+    expect(res.status).toBe(401);
+  });
+
+  it('with the secret set, a forged token with iss = SUPABASE_URL answers 401 (was 200)', async () => {
     const res = await whoami(
       forge(FORMER_PLACEHOLDER, { sub: SUBS.urlIssPlaceholder, email: VICTIM_EMAIL, iss: FAKE_SUPABASE_URL }),
-    );
-    expect(res.status).toBe(200);
-    expect(res.body.id).toBe(SUBS.urlIssPlaceholder);
-  });
-
-  it('with the secret set, the hosted shape iss = SUPABASE_URL/auth/v1 is refused (so the secret verifies no real hosted token)', async () => {
-    setSecret(FORMER_PLACEHOLDER);
-    const res = await whoami(
-      forge(FORMER_PLACEHOLDER, { sub: SUBS.hostedIss, email: VICTIM_EMAIL, iss: `${FAKE_SUPABASE_URL}/auth/v1` }),
     );
     expect(res.status).toBe(401);
   });
 
-  it('negative control: with the secret set, a token signed with another secret is refused', async () => {
-    setSecret(FORMER_PLACEHOLDER);
-    const res = await whoami(forge(OTHER_SECRET, { sub: SUBS.wrongSecret, email: VICTIM_EMAIL }));
+  it('with the secret set, the hosted shape iss = SUPABASE_URL/auth/v1 passes AuthGuard (was 401): local verification now accepts what a hosted project issues', async () => {
+    // The issuer check cannot stop a holder of the secret from minting this
+    // shape; HS256 is a shared secret. That is why boot refuses the public
+    // placeholder in production (src/core/config/env.spec.ts) and the Release 0
+    // rule still leaves the secret empty.
+    const res = await whoami(forge(FORMER_PLACEHOLDER, { sub: SUBS.hostedIss, email: VICTIM_EMAIL, iss: HOSTED_ISS }));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    // Role comes from the local row; with none, the bootstrap default.
+    expect(res.body).toEqual({ id: SUBS.hostedIss, email: VICTIM_EMAIL, role: 'USER' });
+  });
+
+  it('negative control: the hosted shape signed with another secret answers 401', async () => {
+    const res = await whoami(forge(OTHER_SECRET, { sub: SUBS.wrongSecret, email: VICTIM_EMAIL, iss: HOSTED_ISS }));
+    expect(res.status).toBe(401);
+  });
+
+  it('the no-iss shape is a test-only path: with no Supabase URL it passes under NODE_ENV=test (the shape the real-database harnesses mint)', async () => {
+    setSupabaseUrl(undefined);
+    const res = await withNodeEnv('test', () =>
+      whoami(forge(FORMER_PLACEHOLDER, { sub: SUBS.noIssTestOnly, email: VICTIM_EMAIL })),
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.id).toBe(SUBS.noIssTestOnly);
+  });
+
+  it('the same no-iss token with no Supabase URL answers 401 under NODE_ENV=production', async () => {
+    setSupabaseUrl(undefined);
+    const res = await withNodeEnv('production', () =>
+      whoami(forge(FORMER_PLACEHOLDER, { sub: SUBS.noIssProduction, email: VICTIM_EMAIL })),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -459,6 +515,7 @@ const VICTIMS = [
 describe('R0-SEC-01 — POST /identity/bootstrap binds by verified subject and never moves an existing user to another caller', () => {
   beforeEach(async () => {
     setSecret(BOOT_SECRET);
+    setSupabaseUrl(undefined); // R0-SEC-02: the test-only path for no-iss tokens
     await cleanupBootstrapRows();
     for (const v of VICTIMS) await seedVictim(v.id, v.biz, v.role);
   });
@@ -636,6 +693,7 @@ function setVerification(on: boolean) {
 describe("R0-SEC-01 review repair — a team invitation is accepted on the invitee's first bootstrap, and cannot lock an address out (SEC01-T1, CR-1)", () => {
   beforeEach(async () => {
     setSecret(BOOT_SECRET);
+    setSupabaseUrl(undefined); // R0-SEC-02: the test-only path for no-iss tokens
     await cleanupBootstrapRows();
     await seedVictim(BOOT.owner, BOOT.ownerBiz, 'USER');
     supabaseAdmin.records.clear();
