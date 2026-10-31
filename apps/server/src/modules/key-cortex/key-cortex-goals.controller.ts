@@ -39,7 +39,10 @@ import {
  * stripped value and rejected the request itself.
  */
 
-class CreateGoalDto implements CreateGoalInput {
+// The four body DTOs below are exported only so
+// test/key-cortex-tenant-binding.integration.test.ts can write the parameter
+// types tsc emits (vitest's transform emits none).
+export class CreateGoalDto implements CreateGoalInput {
   @IsString()
   title: string;
 
@@ -66,7 +69,7 @@ class CreateGoalDto implements CreateGoalInput {
   businessId: string;
 }
 
-class CreatePlanFromGoalDto {
+export class CreatePlanFromGoalDto {
   @IsOptional()
   @IsString()
   userId?: string;
@@ -76,7 +79,7 @@ class CreatePlanFromGoalDto {
   businessId?: string;
 }
 
-class CreatePlanFromCommandDto {
+export class CreatePlanFromCommandDto {
   @IsString()
   objective: string;
 
@@ -135,7 +138,7 @@ class CreateTriggerRuleDto {
   enabled?: boolean;
 }
 
-class UpdateTriggerRuleDto {
+export class UpdateTriggerRuleDto {
   @IsOptional()
   @IsString()
   eventType?: string;
@@ -170,8 +173,16 @@ class UpdateTriggerRuleDto {
  * segment, so BusinessGuard checks the tenant the request names (params, then
  * body, then query). The four handlers that read `@Query('businessId')` acted on
  * the query's tenant while the guard had checked the body's; they take
- * `@GuardedBusinessId()` now. The body handlers read `dto.businessId`, the field
- * the guard resolves first on these paths.
+ * `@GuardedBusinessId()` now.
+ *
+ * Review ST-2: four body handlers typed their `@Body()` as `Dto & { businessId }`.
+ * tsc emits an intersection as `Object` and the global ValidationPipe skips
+ * `Object`, so those bodies were never validated or whitelisted, and a
+ * `businessId` that is not a string (which the guard skips, checking the query
+ * instead) reached the service raw: on its own the handler updated another
+ * tenant's trigger rule. They take the class DTO (validated again) and
+ * `@GuardedBusinessId()`. createTriggerRule keeps `dto.businessId`: its class
+ * DTO validates it as a string, which the guard resolved first.
  */
 @Controller('/api/v1/cortex')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -185,12 +196,12 @@ export class KeyCortexGoalsController {
   ) {}
 
   @Post('goals')
-  async createGoal(@Body() dto: CreateGoalDto & { businessId: string }) {
-    if (!dto.businessId || !dto.title) {
+  async createGoal(@Body() dto: CreateGoalDto, @GuardedBusinessId() businessId: string) {
+    if (!businessId || !dto.title) {
       throw new BadRequestException('businessId and title are required');
     }
-    this.logger.log(`[goals] create goal for ${dto.businessId}: ${dto.title}`);
-    return this.planner.createGoal(dto.businessId, dto);
+    this.logger.log(`[goals] create goal for ${businessId}: ${dto.title}`);
+    return this.planner.createGoal(businessId, dto);
   }
 
   @Get('goals')
@@ -214,24 +225,26 @@ export class KeyCortexGoalsController {
   @Post('goals/:goalId/plans')
   async createPlanFromGoal(
     @Param('goalId') goalId: string,
-    @Body() dto: CreatePlanFromGoalDto & { businessId?: string },
+    @Body() dto: CreatePlanFromGoalDto,
+    @GuardedBusinessId() businessId: string,
   ) {
     // businessId was absent here entirely, so the goal id from the URL was
     // resolved against every business. Every sibling route on this controller
     // already demanded it; this one did not, and it is the only one that wrote.
-    if (!dto.businessId) throw new BadRequestException('businessId is required');
+    if (!businessId) throw new BadRequestException('businessId is required');
     this.logger.log(`[goals] create plan from goal ${goalId}`);
-    return this.planner.createPlanFromGoal(dto.businessId, goalId, dto.userId);
+    return this.planner.createPlanFromGoal(businessId, goalId, dto.userId);
   }
 
   @Post('plans')
   async createPlanFromCommand(
-    @Body() dto: CreatePlanFromCommandDto & { businessId: string },
+    @Body() dto: CreatePlanFromCommandDto,
+    @GuardedBusinessId() businessId: string,
   ) {
-    if (!dto.businessId || !dto.objective) {
+    if (!businessId || !dto.objective) {
       throw new BadRequestException('businessId and objective are required');
     }
-    return this.planner.createPlanFromCommand(dto.businessId, dto, dto.userId);
+    return this.planner.createPlanFromCommand(businessId, dto, dto.userId);
   }
 
   @Get('plans/:planId')
@@ -279,9 +292,10 @@ export class KeyCortexGoalsController {
   @Patch('triggers/:id')
   async updateTriggerRule(
     @Param('id') id: string,
-    @Body() dto: UpdateTriggerRuleDto & { businessId: string },
+    @Body() dto: UpdateTriggerRuleDto,
+    @GuardedBusinessId() businessId: string,
   ) {
-    if (!dto.businessId) throw new BadRequestException('businessId is required');
-    return this.triggerService.updateRule(dto.businessId, id, dto);
+    if (!businessId) throw new BadRequestException('businessId is required');
+    return this.triggerService.updateRule(businessId, id, dto);
   }
 }

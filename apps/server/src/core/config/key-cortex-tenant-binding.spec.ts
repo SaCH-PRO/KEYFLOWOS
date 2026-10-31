@@ -32,9 +32,14 @@
  *     provider_not_configured / provider_unavailable 503 unchanged and keep
  *     rewrapping every other error.
  *
- * Handlers that read `dto.businessId` from a whole JSON `@Body()` are not
- * offenders: on these paths the body is the first field the guard resolves, so
- * a non-empty string there is exactly the tenant the guard checked.
+ * A handler that reads `dto.businessId` from a whole JSON `@Body()` is not an
+ * offender only when the body is a class DTO that validates businessId as a
+ * string: the body is the first field the guard resolves on these paths, so a
+ * non-empty string there is the tenant the guard checked. Review ST-2 found
+ * five handlers typed `Dto & { businessId }`: tsc emits an intersection as
+ * `Object`, the global ValidationPipe skips `Object`, and a body businessId
+ * that is not a string (which the guard skips) reached the service raw. They
+ * take the class DTO and @GuardedBusinessId() now, and this file checks both.
  *
  * No real key is ever set: the document-service cases use a recording stand-in
  * for the OpenAI SDK and a value that is not a key.
@@ -67,10 +72,27 @@ const QUERY_TENANT_HANDLERS_AT_BASE: Record<string, string[]> = {
   'modules/key-cortex/key-cortex-goals.controller.ts': ['listGoals', 'getGoal', 'deleteGoal', 'listTriggerRules'],
 };
 
+/**
+ * Review ST-2: the body handlers whose @Body() was typed `Dto & { businessId }`
+ * at the base (emitted as `Object`, so never validated). Each must now take
+ * @GuardedBusinessId().
+ */
+const INTERSECTION_BODY_HANDLERS_AT_BASE: Record<string, string[]> = {
+  'modules/key-cortex/key-cortex.controller.ts': ['updateAutonomyProfile'],
+  'modules/key-cortex/key-cortex-goals.controller.ts': ['createGoal', 'createPlanFromGoal', 'createPlanFromCommand', 'updateTriggerRule'],
+};
+
 interface Decorator { name: string; args: readonly ts.Expression[] }
-interface HandlerParam { name: string; decorators: Decorator[] }
+/**
+ * `type` is the parameter's type annotation; `businessIdValidators` is, when
+ * that type names a class declared in the same file, the decorator names on the
+ * class's `businessId` property (undefined when the type is not such a class,
+ * [] when the class declares no `businessId`).
+ */
+interface HandlerParam { name: string; decorators: Decorator[]; type: ts.TypeNode | undefined; businessIdValidators: string[] | undefined }
 interface Handler {
   file: string;
+  cls: string;
   line: number;
   name: string;
   route: string;
@@ -102,6 +124,15 @@ function guardedKeyCortexHandlers(): { controllers: string[]; handlers: Handler[
   for (const file of files) {
     const text = readFileSync(file, 'utf8');
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const classes = new Map<string, ts.ClassDeclaration>();
+    sf.forEachChild((n) => { if (ts.isClassDeclaration(n) && n.name) classes.set(n.name.text, n); });
+    const businessIdValidators = (type: ts.TypeNode | undefined): string[] | undefined => {
+      if (!type || !ts.isTypeReferenceNode(type)) return undefined;
+      const cls = classes.get(type.typeName.getText(sf));
+      if (!cls) return undefined;
+      const prop = cls.members.find((m) => ts.isPropertyDeclaration(m) && m.name.getText(sf) === 'businessId');
+      return prop ? decoratorsOf(prop).map((d) => d.name) : [];
+    };
     const visit = (node: ts.Node) => {
       if (ts.isClassDeclaration(node)) {
         const classDecs = decoratorsOf(node);
@@ -118,10 +149,16 @@ function guardedKeyCortexHandlers(): { controllers: string[]; handlers: Handler[
             if (!classGuarded && !methodGuarded) continue;
             handlers.push({
               file: relative(SERVER_SRC, file),
+              cls: node.name?.text ?? '',
               line: sf.getLineAndCharacterOfPosition(member.getStart(sf)).line + 1,
               name: member.name.getText(sf),
               route: `${route.name.toUpperCase()} ${stringArg(ctl) ?? ''}/${stringArg(route) ?? ''}`.replace(/\/+/g, '/'),
-              params: member.parameters.map((p) => ({ name: p.name.getText(sf), decorators: decoratorsOf(p) })),
+              params: member.parameters.map((p) => ({
+                name: p.name.getText(sf),
+                decorators: decoratorsOf(p),
+                type: p.type,
+                businessIdValidators: businessIdValidators(p.type),
+              })),
               interceptors: decs.filter((d) => d.name === 'UseInterceptors').map((d) => d.args.map((a) => a.getText()).join(',')).join(','),
               body: member.body,
             });
@@ -150,6 +187,37 @@ function readsBusinessIdOf(body: ts.Node | undefined, ident: string): boolean {
 }
 
 const label = (h: Handler) => `${h.file}:${h.line} ${h.route} (${h.name})`;
+
+/**
+ * The `design:paramtypes` tsc emits (emitDecoratorMetadata, as the production
+ * build) for each method of `file`, as `Class.method -> [type, ...]` source
+ * text. The ValidationPipe validates a @Body() only when its entry is a class;
+ * an intersection or a type literal is emitted as `Object`, which it skips.
+ */
+function emittedParamTypes(file: string): Map<string, string[]> {
+  const source = readFileSync(join(SERVER_SRC, file), 'utf8');
+  const out = ts.transpileModule(source, {
+    compilerOptions: { experimentalDecorators: true, emitDecoratorMetadata: true, target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  const sf = ts.createSourceFile('emitted.js', out, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const types = new Map<string, string[]>();
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(sf) === '__decorate' && node.arguments.length >= 3) {
+      const [decorators, target, name] = node.arguments;
+      if (ts.isArrayLiteralExpression(decorators) && ts.isStringLiteral(name)) {
+        for (const d of decorators.elements) {
+          if (ts.isCallExpression(d) && d.expression.getText(sf) === '__metadata'
+            && ts.isStringLiteral(d.arguments[0]) && d.arguments[0].text === 'design:paramtypes' && ts.isArrayLiteralExpression(d.arguments[1])) {
+            types.set(`${target.getText(sf).replace(/\.prototype$/, '')}.${name.text}`, d.arguments[1].elements.map((e) => e.getText(sf)));
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return types;
+}
 
 describe('KEY cortex controllers bind the tenant BusinessGuard checked (R0-34b, R0-07a review ST-1)', () => {
   const { controllers, handlers } = guardedKeyCortexHandlers();
@@ -197,6 +265,57 @@ describe('KEY cortex controllers bind the tenant BusinessGuard checked (R0-34b, 
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it('a handler that reads businessId from a whole @Body() takes a class DTO that validates it as a string (review ST-2: an intersection or literal type is emitted as Object, which the ValidationPipe skips)', () => {
+    const offenders = handlers
+      .flatMap((h) => h.params
+        .filter((p) => p.decorators.some((d) => d.name === 'Body' && d.args.length === 0) && readsBusinessIdOf(h.body, p.name))
+        .filter((p) => !p.businessIdValidators?.includes('IsString'))
+        .map((p) => `${label(h)} @Body() ${p.name}: ${p.type?.getText() ?? '(untyped)'}`));
+    expect(offenders).toEqual([]);
+  });
+
+  it('every body handler whose @Body() was an intersection at the base takes @GuardedBusinessId() and a class-typed body (review ST-2)', () => {
+    const missing: string[] = [];
+    for (const [file, names] of Object.entries(INTERSECTION_BODY_HANDLERS_AT_BASE)) {
+      for (const name of names) {
+        const h = handlers.find((x) => x.file === file && x.name === name);
+        const body = h?.params.find((p) => p.decorators.some((d) => d.name === 'Body'));
+        if (!h || !h.params.some((p) => p.decorators.some((d) => d.name === 'GuardedBusinessId'))) missing.push(`${file} ${name}: no @GuardedBusinessId()`);
+        if (!body?.type || !ts.isTypeReferenceNode(body.type) || body.businessIdValidators === undefined) {
+          missing.push(`${file} ${name}: @Body() is not a class DTO (${body?.type?.getText() ?? 'none'})`);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it('tsc emits a class, never Object, as the @Body() type of every guarded handler that reads businessId from its body, and the five emit exactly the types the real-database suite writes (review ST-2)', () => {
+    const emitted = new Map<string, string[]>();
+    for (const file of new Set(handlers.map((h) => h.file))) for (const [k, v] of emittedParamTypes(file)) emitted.set(`${file} ${k}`, v);
+
+    const objectBodies = handlers.flatMap((h) => h.params
+      .map((p, i) => ({ p, i }))
+      .filter(({ p }) => p.decorators.some((d) => d.name === 'Body' && d.args.length === 0) && readsBusinessIdOf(h.body, p.name))
+      .filter(({ i }) => (emitted.get(`${h.file} ${h.cls}.${h.name}`)?.[i] ?? 'Object') === 'Object')
+      .map(() => label(h)));
+    expect(objectBodies).toEqual([]);
+
+    // test/key-cortex-tenant-binding.integration.test.ts writes these (vitest emits no metadata).
+    expect({
+      updateAutonomyProfile: emitted.get('modules/key-cortex/key-cortex.controller.ts KeyCortexController.updateAutonomyProfile'),
+      createGoal: emitted.get('modules/key-cortex/key-cortex-goals.controller.ts KeyCortexGoalsController.createGoal'),
+      createPlanFromGoal: emitted.get('modules/key-cortex/key-cortex-goals.controller.ts KeyCortexGoalsController.createPlanFromGoal'),
+      createPlanFromCommand: emitted.get('modules/key-cortex/key-cortex-goals.controller.ts KeyCortexGoalsController.createPlanFromCommand'),
+      updateTriggerRule: emitted.get('modules/key-cortex/key-cortex-goals.controller.ts KeyCortexGoalsController.updateTriggerRule'),
+    }).toEqual({
+      updateAutonomyProfile: ['UpdateAutonomyProfileDto', 'String'],
+      createGoal: ['CreateGoalDto', 'String'],
+      createPlanFromGoal: ['String', 'CreatePlanFromGoalDto', 'String'],
+      createPlanFromCommand: ['CreatePlanFromCommandDto', 'String'],
+      updateTriggerRule: ['String', 'UpdateTriggerRuleDto', 'String'],
+    });
   });
 
   it.todo(

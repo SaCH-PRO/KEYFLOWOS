@@ -67,7 +67,7 @@ import {
 } from 'class-validator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
-import { Observable, Subject, interval, map, from, of, catchError, concatWith } from 'rxjs';
+import { Observable, Subject, interval, map, from, of, catchError, concatWith, defer, switchMap } from 'rxjs';
 
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
 import { KeyCortexConversationService } from './key-cortex-conversation.service';
@@ -342,7 +342,8 @@ class ProfitOpportunitiesQueryDto {
   category?: 'automation' | 'upsell' | 'cost_reduction' | 'new_revenue' | 'retention';
 }
 
-class UpdateAutonomyProfileDto {
+// Exported only so test/key-cortex-tenant-binding.integration.test.ts can write the parameter types tsc emits.
+export class UpdateAutonomyProfileDto {
   @IsOptional()
   @IsBoolean()
   globalKillSwitch?: boolean;
@@ -796,10 +797,20 @@ class EvolutionExplainDto {
  * passed the guard for A and the handler acted on B. Every handler that reads
  * the tenant from the request now takes `@GuardedBusinessId()`, the resolver
  * the guard ran (the R0-34 pattern in key-cortex-audit.controller.ts); the two
- * multipart handlers also go through `multipartTenant`. Handlers that read
- * `dto.businessId` from a whole JSON `@Body()` read the field the guard
+ * multipart handlers also go through `multipartTenant`. A handler that reads
+ * `dto.businessId` from a whole JSON `@Body()` reads the field the guard
  * resolves first on these paths, so a non-empty string there is the tenant the
- * guard checked.
+ * guard checked, but only because its DTO is a class that validates businessId
+ * as a string. A `@Body()` typed `Dto & { businessId }` is emitted as `Object`,
+ * which the global ValidationPipe skips, so a non-string businessId (which the
+ * guard skips) reached the service raw (review ST-2): PATCH autonomy-profile
+ * takes its class DTO and @GuardedBusinessId() now.
+ *
+ * Review ST-1: the session services read the Redis entry
+ * `cortex:session:<id>` before the database and check no tenant there (the
+ * Prisma tenant extension scopes only the database fallback). Every handler
+ * that takes a client session id (messages, chat, chat/stream, stream,
+ * conscious/chat, conscious/stream) goes through `tenantSessionId` first.
  */
 @Controller('api/v1/cortex')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -969,9 +980,10 @@ export class KeyCortexController {
     if (!query.businessId) {
       throw new BadRequestException('businessId is required');
     }
+    const sessionId = await this.tenantSessionId(query.businessId, query.sessionId);
 
     try {
-      const response = await this.reasoning.processQuery(query as any);
+      const response = await this.reasoning.processQuery({ ...query, sessionId } as any);
       return response;
     } catch (err: any) {
       this.logger.error(`Chat error: ${err.message}`, err.stack);
@@ -994,20 +1006,24 @@ export class KeyCortexController {
    * the object-valued fields on ChatQueryDto (persona, attachments) have no
    * sensible query-string encoding, and callers needing those should use the
    * non-streaming POST /chat.
+   *
+   * A session id naming another tenant's session is refused before the stream
+   * starts (review ST-1, `tenantSessionId`).
    */
   @Sse('chat/stream')
-  streamChat(
+  async streamChat(
     @GuardedBusinessId() businessId: string,
     @Query('text') text: string,
     @Query('userId') userId?: string,
-    @Query('sessionId') sessionId?: string,
-  ): Observable<CortexStreamChunk> {
+    @Query('sessionId') requestedSessionId?: string,
+  ): Promise<Observable<CortexStreamChunk>> {
     if (!text?.trim()) {
       throw new BadRequestException('text query parameter is required');
     }
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
     }
+    const sessionId = await this.tenantSessionId(businessId, requestedSessionId);
 
     const subject = new Subject<CortexStreamChunk>();
 
@@ -1059,6 +1075,10 @@ export class KeyCortexController {
     let session: CortexSession | null;
     if (sessionId) {
       session = await this.conversation.getSession(sessionId);
+      // Review ST-1: getSession reads the session cache before the tenant-scoped
+      // database, so another tenant's cached session comes back here. Not
+      // found, as for an id that does not exist.
+      if (session && session.businessId !== businessId) session = null;
     } else {
       const sessions = await this.conversation.listSessions(businessId);
       session = sessions[0] ?? null;
@@ -1123,7 +1143,13 @@ export class KeyCortexController {
       enableActions: true,
     };
 
-    return from(this.reasoning.streamQuery(query)).pipe(
+    // Review ST-1: a session id naming another tenant's session ends the stream
+    // with an error event before the reasoning engine runs (`tenantSessionId`).
+    const chunks = defer(() => this.tenantSessionId(businessId, sessionId)).pipe(
+      switchMap((ownSessionId) => from(this.reasoning.streamQuery({ ...query, sessionId: ownSessionId }))),
+    );
+
+    return chunks.pipe(
       map((chunk) => ({ data: this.mapStreamChunk(chunk, messageId) })),
       catchError((err: Error) =>
         of({
@@ -1176,15 +1202,22 @@ export class KeyCortexController {
 
   /**
    * PATCH /api/v1/cortex/autonomy-profile
+   *
+   * Review ST-2: the body was typed `UpdateAutonomyProfileDto & { businessId }`,
+   * which tsc emits as `Object`, so the ValidationPipe never validated it and a
+   * non-string `businessId` reached the service raw. The body is the class DTO
+   * now (the pipe validates the fields and strips `businessId`, which the guard
+   * read from the raw body first), and the tenant is the one the guard checked.
    */
   @Patch('autonomy-profile')
   async updateAutonomyProfile(
-    @Body() dto: UpdateAutonomyProfileDto & { businessId: string },
+    @Body() dto: UpdateAutonomyProfileDto,
+    @GuardedBusinessId() businessId: string,
   ) {
-    if (!dto.businessId) {
+    if (!businessId) {
       throw new BadRequestException('businessId is required');
     }
-    return this.safety.updateProfile(dto.businessId, dto);
+    return this.safety.updateProfile(businessId, dto);
   }
 
   /* ================================================================== */
@@ -3229,7 +3262,7 @@ export class KeyCortexController {
       text: dto.text,
       businessId: dto.businessId,
       userId: dto.userId,
-      sessionId: dto.sessionId,
+      sessionId: await this.tenantSessionId(dto.businessId, dto.sessionId),
     } as CortexQuery);
 
     // Collect the phases the pipeline actually emits. Deriving them from
@@ -3276,18 +3309,21 @@ export class KeyCortexController {
    *
    * The tenant is the one BusinessGuard checked (R0-34b), not the query's
    * `businessId` field of the DTO: a GET can still carry a JSON body, which the
-   * guard resolves before the query.
+   * guard resolves before the query. A session id naming another tenant's
+   * session is refused before the stream starts (review ST-1,
+   * `tenantSessionId`).
    */
   @Sse('conscious/stream')
-  consciousStream(
+  async consciousStream(
     @Query() dto: ConsciousChatDto,
     @GuardedBusinessId() businessId?: string,
-  ): Observable<{
+  ): Promise<Observable<{
     type: string;
     data: Record<string, unknown>;
-  }> {
+  }>> {
     if (!dto.text?.trim()) throw new BadRequestException('text is required');
     if (!businessId) throw new BadRequestException('businessId is required');
+    const sessionId = await this.tenantSessionId(businessId, dto.sessionId);
 
     const subject = new Subject<{ type: string; data: Record<string, unknown> }>();
 
@@ -3300,7 +3336,7 @@ export class KeyCortexController {
           text: dto.text,
           businessId,
           userId: dto.userId,
-          sessionId: dto.sessionId,
+          sessionId,
         } as CortexQuery);
 
         const response = await this.consciousness.processConsciously(
@@ -3386,5 +3422,32 @@ export class KeyCortexController {
 
   private generateCorrelationId(): string {
     return `kc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  /**
+   * Review ST-1: the session id a handler may hand the session services for
+   * `businessId`, the tenant the guard checked.
+   *
+   * KeyCortexConversationService.getSession and
+   * KeyCortexSessionService.getOrCreateSession read the Redis entry
+   * `cortex:session:<id>` before the database and check no tenant there; the
+   * Prisma tenant extension scopes only the database fallback. So a member of
+   * A naming B's session id, once B's own traffic had cached it, read B's
+   * messages and ran chat, the streams and the conscious pipeline on B's
+   * session (appending A's turns to B's cached session).
+   *
+   * A session of another tenant is refused as not found (an `error` event once
+   * an SSE stream is committed). A session found nowhere in this tenant gives
+   * `undefined`, so the services start a new session under `businessId`
+   * exactly as they did for an unknown id; the caller's id never reaches their
+   * cache read, so a session cached after this check cannot be picked up.
+   * Sessions never change tenant, so an id returned here stays this tenant's.
+   */
+  private async tenantSessionId(businessId: string, sessionId: string | undefined): Promise<string | undefined> {
+    if (!sessionId) return undefined;
+    const session = await this.conversation.getSession(sessionId);
+    if (!session) return undefined;
+    if (session.businessId !== businessId) throw new NotFoundException('Session not found');
+    return sessionId;
   }
 }
