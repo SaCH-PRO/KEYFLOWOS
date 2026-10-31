@@ -17,6 +17,11 @@
  * with the existing messages preserved verbatim, and proves nothing is written
  * on any denied path.
  *
+ * Review repairs (R0-D3 integration review) pinned here as well:
+ *   ST-D3-1  PATCH contactId must resolve inside the caller's tenant   -> 404
+ *   ST-D3-2  PATCH items[].productId must resolve inside the tenant    -> 404
+ *   ST-D3-3  POST payments with a malformed amount or missing method   -> 400
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService and the production
  * GlobalHttpExceptionFilter + ValidationPipe are real against DATABASE_URL.
@@ -58,6 +63,13 @@ const ID = {
   invPaidB: `${P}invPaidB`,
   invPartialB: `${P}invPartialB`,
   invVoidB: `${P}invVoidB`,
+  // bizA: the product whose id is offered under bizB's path (ST-D3-2)
+  productA: `${P}productA`,
+  // bizB: same-tenant controls for the reference-binding cases (ST-D3-1/2)
+  productB: `${P}productB`,
+  invBindB: `${P}invBindB`,
+  // bizB: the one invoice that receives a legal payment (ST-D3-3 positive control)
+  invPayB: `${P}invPayB`,
 };
 
 const ORIGINAL_NOTES = 'cie original notes';
@@ -110,6 +122,7 @@ async function cleanup() {
     `DELETE FROM payment_links WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE '${P}%'`,
     `DELETE FROM invoices WHERE business_id LIKE '${P}%'`,
+    `DELETE FROM products WHERE business_id LIKE '${P}%'`,
     `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
     `DELETE FROM memberships WHERE business_id LIKE '${P}%' OR user_id LIKE '${P}%'`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE '${P}%'`,
@@ -148,6 +161,19 @@ function fourRoutes(actor: string, biz: string, inv: string) {
 
 async function invoiceRow(id: string) {
   return db.invoice.findUnique({ where: { id }, select: { status: true, deletedAt: true, notes: true, taxRate: true, businessId: true } });
+}
+
+/** Raw columns of an invoice row, as the database holds them. */
+async function rawInvoice(id: string): Promise<{ contact_id: string; subtotal: number; total: number }> {
+  const rows: Array<{ contact_id: string; subtotal: number; total: number }> =
+    await db.$queryRawUnsafe(`SELECT contact_id, subtotal, total FROM invoices WHERE id = '${id}'`);
+  expect(rows).toHaveLength(1);
+  return rows[0];
+}
+
+/** Raw invoice_items rows (id, product_id) for an invoice, in id order. */
+async function rawItems(invoiceId: string): Promise<Array<{ id: string; product_id: string | null }>> {
+  return db.$queryRawUnsafe(`SELECT id, product_id FROM invoice_items WHERE invoice_id = '${invoiceId}' ORDER BY id`);
 }
 
 async function paymentCount(invoiceId: string): Promise<number> {
@@ -260,6 +286,8 @@ beforeAll(async () => {
   await db.membership.create({ data: { id: `${P}m_ownerB_bizB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
   await db.contact.create({ data: { id: ID.contactA, businessId: ID.bizA, firstName: 'Cie', lastName: 'CustomerA', email: `${P}a@test.local` } });
   await db.contact.create({ data: { id: ID.contactB, businessId: ID.bizB, firstName: 'Cie', lastName: 'CustomerB', email: `${P}b@test.local` } });
+  await db.product.create({ data: { id: ID.productA, businessId: ID.bizA, name: 'CIE Product A', price: 5 } });
+  await db.product.create({ data: { id: ID.productB, businessId: ID.bizB, name: 'CIE Product B', price: 7 } });
 
   const inv = async (id: string, biz: string, contactId: string, status: string, total: number, number: string) =>
     db.invoice.create({
@@ -282,6 +310,8 @@ beforeAll(async () => {
   await inv(ID.invPaidB, ID.bizB, ID.contactB, 'PAID', 20, 'CIE-B-PAID');
   await inv(ID.invPartialB, ID.bizB, ID.contactB, 'PARTIALLY_PAID', 60, 'CIE-B-PARTIAL');
   await inv(ID.invVoidB, ID.bizB, ID.contactB, 'VOID', 30, 'CIE-B-VOID');
+  await inv(ID.invBindB, ID.bizB, ID.contactB, 'DRAFT', 40, 'CIE-B-BIND');
+  await inv(ID.invPayB, ID.bizB, ID.contactB, 'SENT', 80, 'CIE-B-PAY');
 
   // Payments, not labels, determine paid state: back the PAID and
   // PARTIALLY_PAID rows with real SUCCESSFUL payments.
@@ -314,9 +344,11 @@ beforeEach(() => {
 describe('fixture sanity (real rows)', () => {
   it('seeded two tenants, one owner each, and the invoices under test', async () => {
     expect((await invoiceRow(ID.invSentA)).businessId).toBe(ID.bizA);
-    for (const id of [ID.invDraftB, ID.invSentB, ID.invPaidB, ID.invPartialB, ID.invVoidB]) {
+    for (const id of [ID.invDraftB, ID.invSentB, ID.invPaidB, ID.invPartialB, ID.invVoidB, ID.invBindB, ID.invPayB]) {
       expect((await invoiceRow(id)).businessId).toBe(ID.bizB);
     }
+    expect((await db.product.findUnique({ where: { id: ID.productA } })).businessId).toBe(ID.bizA);
+    expect((await db.product.findUnique({ where: { id: ID.productB } })).businessId).toBe(ID.bizB);
     expect(await paymentCount(ID.invPaidB)).toBe(1);
     expect(await paymentCount(ID.invPartialB)).toBe(1);
   });
@@ -474,6 +506,158 @@ describe('invalid input answers 400 BAD_REQUEST with the exact message', () => {
     const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, ID.invDraftB))).send({ discountType: 'PERCENT', discountValue: 150 });
     expect(res.status).toBe(400);
     expectErrorEnvelope(res.body, 400, 'BAD_REQUEST', 'Percentage discount cannot exceed 100%');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review repairs ST-D3-1 / ST-D3-2: PATCH .../invoices/:id binds contactId and
+// items[].productId and answers with `include: { contact: true }`. Both ids
+// must resolve inside the caller's tenant. A foreign id and an unknown id are
+// the same 404 (no existence disclosure) and nothing is written: no bind, no
+// item rewrite, no event.
+// ---------------------------------------------------------------------------
+describe("cross-tenant reference binding on PATCH .../invoices/:id (owner of B, own DRAFT invoice)", () => {
+  it("contactId of bizA's contact -> 404 'Contact not found'; contact_id unchanged; no contact row in the body", async () => {
+    const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, ID.invDraftB))).send({ contactId: ID.contactA });
+    expect(res.status).toBe(404);
+    expectErrorEnvelope(res.body, 404, 'NOT_FOUND', 'Contact not found');
+    expect(res.body).not.toHaveProperty('contact');
+    const text = JSON.stringify(res.body);
+    expect(text).not.toContain('CustomerA');
+    expect(text).not.toContain(`${P}a@test.local`);
+    expect(text).not.toContain(ID.bizA);
+    expect((await rawInvoice(ID.invDraftB)).contact_id).toBe(ID.contactB);
+    expect(recordedEvents.filter((e) => e.name === 'invoice.updated')).toEqual([]);
+  });
+
+  it("an unknown contactId -> the same 404 'Contact not found'; contact_id unchanged", async () => {
+    const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, ID.invDraftB))).send({ contactId: `${P}no_such_contact` });
+    expect(res.status).toBe(404);
+    expectErrorEnvelope(res.body, 404, 'NOT_FOUND', 'Contact not found');
+    expect((await rawInvoice(ID.invDraftB)).contact_id).toBe(ID.contactB);
+  });
+
+  it('a null contactId -> 400 (Invoice.contactId is required), never 500; contact_id unchanged', async () => {
+    const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, ID.invDraftB))).send({ contactId: null });
+    expect(res.status).toBe(400);
+    expectErrorEnvelope(res.body, 400, 'BAD_REQUEST', 'contactId must be a non-empty string');
+    expect((await rawInvoice(ID.invDraftB)).contact_id).toBe(ID.contactB);
+  });
+
+  it("items[].productId of bizA's product -> 404 'Product not found'; the existing item row and totals are untouched", async () => {
+    const itemsBefore = await rawItems(ID.invDraftB);
+    const rowBefore = await rawInvoice(ID.invDraftB);
+    expect(itemsBefore).toEqual([{ id: `${ID.invDraftB}_item1`, product_id: null }]);
+    const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, ID.invDraftB))).send({
+      items: [{ description: 'x', quantity: 1, unitPrice: 5, productId: ID.productA }],
+    });
+    expect(res.status).toBe(404);
+    expectErrorEnvelope(res.body, 404, 'NOT_FOUND', 'Product not found');
+    expect(await rawItems(ID.invDraftB)).toEqual(itemsBefore);
+    expect(await rawInvoice(ID.invDraftB)).toEqual(rowBefore);
+    expect(recordedEvents.filter((e) => e.name === 'invoice.updated')).toEqual([]);
+  });
+
+  it("one foreign productId among own ones -> 404 'Product not found'; nothing written", async () => {
+    const itemsBefore = await rawItems(ID.invDraftB);
+    const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, ID.invDraftB))).send({
+      items: [
+        { description: 'own', quantity: 1, unitPrice: 5, productId: ID.productB },
+        { description: 'foreign', quantity: 1, unitPrice: 5, productId: ID.productA },
+      ],
+    });
+    expect(res.status).toBe(404);
+    expectErrorEnvelope(res.body, 404, 'NOT_FOUND', 'Product not found');
+    expect(await rawItems(ID.invDraftB)).toEqual(itemsBefore);
+  });
+
+  it("an unknown productId -> the same 404 'Product not found'; nothing written", async () => {
+    const itemsBefore = await rawItems(ID.invDraftB);
+    const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, ID.invDraftB))).send({
+      items: [{ description: 'x', quantity: 1, unitPrice: 5, productId: `${P}no_such_product` }],
+    });
+    expect(res.status).toBe(404);
+    expectErrorEnvelope(res.body, 404, 'NOT_FOUND', 'Product not found');
+    expect(await rawItems(ID.invDraftB)).toEqual(itemsBefore);
+  });
+
+  it('positive control: own contactId and own productId -> 200, both bound, the response contact is the own-tenant row', async () => {
+    const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, ID.invBindB))).send({
+      contactId: ID.contactB,
+      items: [
+        { description: 'own product line', quantity: 2, unitPrice: 7, productId: ID.productB },
+        { description: 'free-text line', quantity: 1, unitPrice: 1 },
+        { description: 'empty productId is no product', quantity: 1, unitPrice: 1, productId: '' },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.contact).toMatchObject({ id: ID.contactB, businessId: ID.bizB });
+    expect(res.body.total).toBe(16);
+    expect((await rawInvoice(ID.invBindB)).contact_id).toBe(ID.contactB);
+    const productIds = (await rawItems(ID.invBindB)).map((r) => r.product_id).sort();
+    expect(productIds).toEqual([null, null, ID.productB].sort());
+    expect(recordedEvents.filter((e) => e.name === 'invoice.updated')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review repair ST-D3-3: the record-payment body is an inline type, so the
+// ValidationPipe cannot reject a malformed amount or a missing method. Those
+// reached tx.payment.create and answered 500 INTERNAL_SERVER_ERROR. They are
+// 400 now, with no payment row and no posting on any of them.
+// ---------------------------------------------------------------------------
+describe('malformed payment input answers 400 BAD_REQUEST, never 500 (owner of B, own SENT invoice)', () => {
+  const amountCases: Array<[string, Record<string, unknown>]> = [
+    ['missing amount', { method: 'cash' }],
+    ['null amount', { amount: null, method: 'cash' }],
+    ['numeric-string amount', { amount: '5', method: 'cash' }],
+    ['non-numeric string amount', { amount: 'abc', method: 'cash' }],
+    ['object amount', { amount: { gt: 0 }, method: 'cash' }],
+    ['boolean amount', { amount: true, method: 'cash' }],
+  ];
+  for (const [label, body] of amountCases) {
+    it(`${label} -> 400 "Payment amount must be a number"; no payment row, no posting`, async () => {
+      const res = await as(ID.ownerB, agent().post(routes.recordPayment(ID.bizB, ID.invSentB))).send(body);
+      expect(res.status, label).toBe(400);
+      expectErrorEnvelope(res.body, 400, 'BAD_REQUEST', 'Payment amount must be a number');
+      expect(await paymentCount(ID.invSentB)).toBe(0);
+      expect(postingCalls).toEqual([]);
+      expect(crmCalls).toEqual([]);
+    });
+  }
+
+  const methodCases: Array<[string, Record<string, unknown>]> = [
+    ['missing method', { amount: 1 }],
+    ['empty method', { amount: 1, method: '' }],
+    ['blank method', { amount: 1, method: '   ' }],
+    ['non-string method', { amount: 1, method: 7 }],
+  ];
+  for (const [label, body] of methodCases) {
+    it(`${label} -> 400 "Payment method is required"; no payment row, no posting`, async () => {
+      const res = await as(ID.ownerB, agent().post(routes.recordPayment(ID.bizB, ID.invSentB))).send(body);
+      expect(res.status, label).toBe(400);
+      expectErrorEnvelope(res.body, 400, 'BAD_REQUEST', 'Payment method is required');
+      expect(await paymentCount(ID.invSentB)).toBe(0);
+      expect(postingCalls).toEqual([]);
+    });
+  }
+
+  it('the tenant check still runs first: a malformed body for a foreign invoice id answers 404, not 400', async () => {
+    const res = await as(ID.ownerB, agent().post(routes.recordPayment(ID.bizB, ID.invSentA))).send({ method: 'cash' });
+    expect(res.status).toBe(404);
+    expectErrorEnvelope(res.body, 404, 'NOT_FOUND', 'Invoice not found');
+    expect(await paymentCount(ID.invSentA)).toBe(0);
+  });
+
+  it('positive control: a well-formed payment on an own SENT invoice -> 201, one SUCCESSFUL row, posting reached, PARTIALLY_PAID', async () => {
+    const res = await as(ID.ownerB, agent().post(routes.recordPayment(ID.bizB, ID.invPayB))).send({ amount: 5, method: 'cash', reference: 'cie-ref-1' });
+    expect(res.status).toBe(201);
+    expect(res.body.payment).toMatchObject({ invoiceId: ID.invPayB, businessId: ID.bizB, amount: 5, status: 'SUCCESSFUL', method: 'cash' });
+    expect(res.body.paidAmount).toBe(5);
+    expect(res.body.remaining).toBe(75);
+    expect(await paymentCount(ID.invPayB)).toBe(1);
+    expect(postingCalls).toEqual([`recorded:${res.body.payment.id}`]);
+    expect((await invoiceRow(ID.invPayB)).status).toBe('PARTIALLY_PAID');
   });
 });
 
