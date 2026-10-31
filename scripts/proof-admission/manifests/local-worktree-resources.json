@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "environment": "local-worktree",
   "packetScoped": true,
-  "about": "R0-00-WT-ISOLATION. Admits only the packet's own database kf_wt_<packet> and a non-zero Redis index, as provisioned by scripts/worktree-resources.sh. Run as: node scripts/proof-admission/admit-resources.mjs --packet <packet-id> [--env-file <worktree>/.env]. Values are judged as a suite sees them: the worktree .env, overridden by anything the shell exports.",
+  "about": "R0-00-WT-ISOLATION. Admits only the packet's own database kf_wt_<packet> and the non-zero Redis index scripts/worktree-resources.sh allocated to it. Run as: node scripts/proof-admission/admit-resources.mjs --packet <packet-id> [--env-file <worktree>/.env] [--state-file <allocation table>]. Values are judged as a suite sees them: the worktree .env, overridden by anything the shell exports. A packet-scoped manifest is also bound to the provisioner's allocation table (KF_WT_STATE_FILE or <git common dir>/kf-worktree-resources.tsv): KF_WT_PACKET must name the packet, the packet must have a row, REDIS_URL must name that row's index and no other row may hold it, and the .env must belong to that row's worktree.",
   "requiredEnv": {},
   "sharedDatabaseNames": [
     "keyflowos",

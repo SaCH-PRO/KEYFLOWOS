@@ -19,9 +19,9 @@
  * rather than imagined. A fixture describing a shape the client cannot produce
  * would assert that the broken thing is correct.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { ServiceUnavailableException, HttpException } from '@nestjs/common';
-import { PublicRateLimitGuard } from './public-rate-limit.guard';
+import { PublicRateLimitGuard, publicRateLimitNamespace } from './public-rate-limit.guard';
 
 /** An ioredis double. `failing` reproduces the measured outage behaviour. */
 function makeRedis(opts: { failing: boolean; count?: number }) {
@@ -215,11 +215,22 @@ describe('the public rate-limit key carries an optional namespace (R0-00)', () =
   }
 
   const saved = process.env.RATE_LIMIT_KEY_NAMESPACE;
+  const savedNodeEnv = process.env.NODE_ENV;
   function setNamespace(value: string | undefined) {
     if (value === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
     else process.env.RATE_LIMIT_KEY_NAMESPACE = value;
   }
-  afterEach(() => setNamespace(saved));
+  function setNodeEnv(value: string | undefined) {
+    if (value === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = value;
+  }
+  // The namespace is a test-only knob (review SEC-R000-3): every case below
+  // runs as NODE_ENV=test unless it says otherwise.
+  beforeEach(() => setNodeEnv('test'));
+  afterEach(() => {
+    setNamespace(saved);
+    setNodeEnv(savedNodeEnv);
+  });
 
   it('with the namespace unset, the key is byte-identical to the pre-namespace key', async () => {
     setNamespace(undefined);
@@ -275,5 +286,44 @@ describe('the public rate-limit key carries an optional namespace (R0-00)', () =
       guard.canActivate(makeContext()),
       "a second suite on the same Redis index was throttled by the first suite's window",
     ).resolves.toBe(true);
+  });
+
+  it('outside NODE_ENV=test the namespace is ignored: the key is byte-identical to the pre-namespace key (SEC-R000-3)', async () => {
+    // This guard covers the unauthenticated surface. A namespace honoured on a
+    // deployed instance would reset every public window when set, and multiply
+    // the effective limit by the number of distinct namespaces.
+    for (const nodeEnv of ['production', 'development', undefined]) {
+      setNodeEnv(nodeEnv);
+      setNamespace('k00a_');
+      const redis = makeRecordingRedis();
+
+      await expect(guardWith(redis).canActivate(makeContext())).resolves.toBe(true);
+      expect([...new Set(redis.keys)], `NODE_ENV=${nodeEnv}`).toEqual(['pub_rate_limit:1.2.3.4:handler:/public/t']);
+    }
+  });
+
+  it('NEGATIVE CONTROL: in production, switching the namespace does not open a fresh window', async () => {
+    setNodeEnv('production');
+    const redis = makeRecordingRedis();
+    const guard = guardWith(redis, 2);
+
+    setNamespace('instance-a');
+    await expect(guard.canActivate(makeContext())).resolves.toBe(true);
+    await expect(guard.canActivate(makeContext())).resolves.toBe(true);
+
+    setNamespace('instance-b');
+    const third = await guard.canActivate(makeContext()).catch((e) => e);
+    expect(third, 'a per-instance namespace multiplied the public limit').toBeInstanceOf(HttpException);
+    expect((third as HttpException).getStatus()).toBe(429);
+  });
+
+  it('publicRateLimitNamespace() reads the variable only under NODE_ENV=test', () => {
+    setNamespace('  k00c_  ');
+    expect(publicRateLimitNamespace()).toBe('k00c_');
+    setNamespace('   ');
+    expect(publicRateLimitNamespace()).toBeUndefined();
+    setNamespace('k00c_');
+    setNodeEnv('production');
+    expect(publicRateLimitNamespace()).toBeUndefined();
   });
 });

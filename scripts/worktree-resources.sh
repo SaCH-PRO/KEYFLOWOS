@@ -35,19 +35,30 @@
 #   KF_WT_PG_URL         [postgresql://keyflow:keyflow@localhost:5432] admin connection base
 #   KF_WT_REDIS_URL      [redis://localhost:6379]
 #   KF_WT_REDIS_INDEXES  ["1 2 ... 15"] candidate indexes; an index is free when no
-#                        packet holds it and it is empty
+#                        packet holds it, no allocator's owner key claims it, and
+#                        it is empty. An allocator that neither writes this
+#                        script's state file nor sets the owner key (for
+#                        example a harness that hands out indexes 1-15 by
+#                        worker number) is invisible while its index is empty:
+#                        give the two disjoint ranges with this variable.
 #   KF_WT_STATE_FILE     [<git common dir>/kf-worktree-resources.tsv] allocation table,
 #                        shared by every worktree of this clone, never committed
 #   KF_WT_PRISMA         [<main tree>/packages/db/node_modules/.bin/prisma]
 #
 # Safety: only databases whose names match ^kf_wt_[a-z0-9_]+$ are ever created
 # or dropped (require_wt_db), only on localhost. The template is kf_wt_template.
+# A Redis index is claimed with SET kf_wt:owner <packet> NX before it is
+# allocated, and release flushes an index only while that key still names the
+# packet being released (flush_owned_index): never another packet's index.
+# node scripts/proof-admission/admit-resources.mjs --packet <id> admits only
+# the index this table allocated to <id>.
 set -euo pipefail
 
 TEMPLATE_DB=kf_wt_template
 PG_URL=${KF_WT_PG_URL:-postgresql://keyflow:keyflow@localhost:5432}
 REDIS_BASE=${KF_WT_REDIS_URL:-redis://localhost:6379}
 REDIS_INDEXES=${KF_WT_REDIS_INDEXES:-1 2 3 4 5 6 7 8 9 10 11 12 13 14 15}
+REDIS_OWNER_KEY=kf_wt:owner
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 PACKET_ID_RE='^([A-Za-z])([0-9]+)[-_]([0-9]{2,3})([-_][A-Za-z0-9-]*)?$'
 
@@ -169,16 +180,45 @@ state_del() {
   mv "$tmp" "$STATE_FILE"
 }
 
+# pick_redis_index <slug>: the first candidate index that no packet in the
+# state file holds, that is empty, and that this call wins the owner key on.
+# SET NX makes the claim atomic against another allocator honouring the key
+# (another clone's copy of this script, with its own state file).
 pick_redis_index() {
-  local i held
+  local slug=$1 i held
   held=$(awk -F'\t' '{ print $2 }' "$STATE_FILE")
   for i in $REDIS_INDEXES; do
     [[ $i =~ ^[0-9]+$ ]] && ((i >= 1 && i <= 15)) || continue
     grep -qx "$i" <<<"$held" && continue
     [[ $(redis_cli "$i" DBSIZE) == 0 ]] || continue
+    [[ $(redis_cli "$i" SET "$REDIS_OWNER_KEY" "$slug" NX) == OK ]] || continue
     echo "$i"
     return 0
   done
+  return 1
+}
+
+# claim_owned_index <slug> <index>: (re)assert the owner key on an index the
+# state file already gives this packet. Fails if another packet's key is there.
+claim_owned_index() {
+  local slug=$1 idx=$2 owner
+  redis_cli "$idx" SET "$REDIS_OWNER_KEY" "$slug" NX >/dev/null
+  owner=$(redis_cli "$idx" GET "$REDIS_OWNER_KEY")
+  [[ $owner == "$slug" ]] || die "redis index $idx is claimed by '$owner', not $slug; release that packet or pick another index"
+}
+
+# flush_owned_index <slug> <index>: FLUSHDB only while the owner key names
+# <slug>, or is absent and no other packet in the state file holds the index.
+# Anything else means the index is in use by someone else: leave it alone.
+flush_owned_index() {
+  local slug=$1 idx=$2 owner others
+  owner=$(redis_cli "$idx" GET "$REDIS_OWNER_KEY")
+  others=$(awk -F'\t' -v s="$slug" -v i="$idx" '$1 != s && $2 == i { print $1 }' "$STATE_FILE")
+  if [[ $owner == "$slug" ]] || [[ -z $owner && -z $others ]]; then
+    redis_cli "$idx" FLUSHDB >/dev/null
+    return 0
+  fi
+  echo "worktree-resources: warning: not flushing redis index $idx: it is claimed by '${owner:-$others}', not $slug" >&2
   return 1
 }
 
@@ -234,7 +274,11 @@ cmd_provision() {
 
   ensure_template
   db_exists "$db" || pg_create_db "$db" "$TEMPLATE_DB"
-  idx=$(state_get "$slug" 2) || idx=$(pick_redis_index) || die "no free Redis index among: $REDIS_INDEXES"
+  if idx=$(state_get "$slug" 2); then
+    claim_owned_index "$slug" "$idx"
+  else
+    idx=$(pick_redis_index "$slug") || die "no free Redis index among: $REDIS_INDEXES"
+  fi
   state_put "$slug" "$idx" "$wt"
   write_env "$wt" "$slug" "$db" "$idx"
 
@@ -273,7 +317,7 @@ cmd_release() {
   init_paths
   pg_drop_db "$db" "$force"
   if idx=$(state_get "$slug" 2); then
-    redis_cli "$idx" FLUSHDB >/dev/null
+    flush_owned_index "$slug" "$idx" || true
   fi
   if wt=$(state_get "$slug" 3) && [[ -f $wt/.env ]] && grep -qx "KF_WT_PACKET=$slug" "$wt/.env"; then
     rm -f "$wt/.env"

@@ -20,9 +20,17 @@
  * New suites clean up with sqlLikePrefix() (test/helpers/sql-like.js), which
  * escapes '_' and '%' and adds ESCAPE, and embed their prefix in every literal
  * that lands in a globally unique column.
+ *
+ * Review repair (SEC-R000-2): prefixes were found only as `const P = '...'`, so
+ * 'kab_' and 'kas_' (passed straight to buildBoundaryFixture()) were invisible,
+ * and a suite could bypass every check by naming its constant PREFIX. The
+ * scanner now also reads `const <UPPER_NAME> = '<x>_'` and a prefix-shaped
+ * string passed as a call's first argument, and every real-DB suite
+ * (*.integration.test.ts) must either own a registered prefix or be listed in
+ * noPrefixSuites with a reason, so a form the scanner misses still fails here.
  */
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SERVER = join(__dirname, '..', '..', '..');
@@ -32,15 +40,18 @@ const REGISTRY = join(TEST_DIR, 'helpers', 'fixture-prefixes.json');
 const SQL_LIKE = join(TEST_DIR, 'helpers', 'sql-like.js');
 
 /**
- * The prefixes in use at c2f6f46d. They predate the k/v format and keep their
- * names. This list may shrink (a suite renamed to a new prefix) but never grow:
- * a new suite registers a k<NN><a-z>_ or v<NN><a-z>_ prefix.
+ * The prefixes in use before R0-00 landed: those at c2f6f46d ('kab_' and
+ * 'kas_' among them, which the first scanner missed) plus 'ab_', which R0-05's
+ * identity-boundary suite landed on the integration branch (5787c722) while
+ * R0-00 was in review. They predate the k/v format and keep their names. This
+ * list may shrink (a suite renamed to a new prefix) but never grow: a new suite
+ * registers a k<NN><a-z>_ or v<NN><a-z>_ prefix.
  */
 const LEGACY = new Set([
-  'ainv_', 'cid_', 'cie_', 'cpi_', 'cqv_', 'fcs_', 'pya_', 'r0_', 'rva_',
-  't2b_', 't2d_', 't2i1_', 't3_', 't4_', 't6_', 'tca_', 'tcc_', 'tcd_', 'tcr_',
-  'tcv_', 'tfw_', 'tgen_', 'tss_', 'zz_credit_', 'zz_ctxv2_', 'zz_gdpr_',
-  'zz_ingest_', 'zz_obl_', 'zz_tse_', 'zz_wl_',
+  'ab_', 'ainv_', 'cid_', 'cie_', 'cpi_', 'cqv_', 'fcs_', 'kab_', 'kas_', 'pya_',
+  'r0_', 'rva_', 't2b_', 't2d_', 't2i1_', 't3_', 't4_', 't6_', 'tca_', 'tcc_',
+  'tcd_', 'tcr_', 'tcv_', 'tfw_', 'tgen_', 'tss_', 'zz_credit_', 'zz_ctxv2_',
+  'zz_gdpr_', 'zz_ingest_', 'zz_obl_', 'zz_tse_', 'zz_wl_',
 ]);
 
 const NEW_PREFIX = /^[kv]\d{2}[a-z]_$/;
@@ -50,7 +61,8 @@ const UNIQUE_LITERAL_KEYS = ['email', 'slug', 'providerPaymentId', 'token', 'sub
 
 interface Entry { prefix: string; owner: string; legacy?: boolean; packet?: string }
 interface PendingRename { prefix: string; file: string; owner: string; reason: string }
-interface Registry { prefixes: Entry[]; pendingRenames: PendingRename[] }
+interface NoPrefixSuite { file: string; reason: string }
+interface Registry { prefixes: Entry[]; pendingRenames: PendingRename[]; noPrefixSuites: NoPrefixSuite[] }
 
 function rel(file: string): string {
   return file.slice(REPO.length + 1).split(sep).join('/');
@@ -58,9 +70,9 @@ function rel(file: string): string {
 
 /** The registry, or an empty one if it does not exist yet (so cases fail on content, not ENOENT). */
 function registry(): Registry {
-  if (!existsSync(REGISTRY)) return { prefixes: [], pendingRenames: [] };
+  if (!existsSync(REGISTRY)) return { prefixes: [], pendingRenames: [], noPrefixSuites: [] };
   const raw = JSON.parse(readFileSync(REGISTRY, 'utf8'));
-  return { prefixes: raw.prefixes ?? [], pendingRenames: raw.pendingRenames ?? [] };
+  return { prefixes: raw.prefixes ?? [], pendingRenames: raw.pendingRenames ?? [], noPrefixSuites: raw.noPrefixSuites ?? [] };
 }
 
 function testFiles(dir: string): string[] {
@@ -72,14 +84,67 @@ function testFiles(dir: string): string[] {
   });
 }
 
-/** Every `const P = '...'` under apps/server/test, as { prefix, file }. */
+/** A fixture prefix: lower-case head, ending in '_' ('r0_', 'zz_credit_', 'k12a_'). */
+const PREFIX_SHAPE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*_$/;
+
+/**
+ * String and matcher methods whose first argument is a value being inspected,
+ * not a prefix being declared (`id.startsWith('r0_')`, `toContain('cid_')`).
+ */
+const NON_DECLARING_CALLS = new Set([
+  'startsWith', 'endsWith', 'includes', 'indexOf', 'lastIndexOf', 'split', 'replace', 'replaceAll',
+  'match', 'matchAll', 'search', 'concat', 'padStart', 'padEnd', 'join', 'test',
+  'toBe', 'toEqual', 'toStrictEqual', 'toContain', 'toMatch', 'toHaveProperty', 'stringContaining', 'stringMatching',
+]);
+
+/**
+ * The fixture prefixes a source declares, in any of the forms suites use:
+ *   const P = '<anything>'               (the convention; any value)
+ *   const <UPPER_NAME> = '<x>_'          (PREFIX, FIXTURE_PREFIX, ...)
+ *   <builder>('<x>_', ...)               (buildBoundaryFixture('kab_'))
+ */
+function prefixesIn(src: string): string[] {
+  const out: string[] = [];
+  const assigned = /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Z][A-Z0-9_]*)\s*(?::\s*string\s*)?=\s*(['"`])([^'"`$]+)\2/gm;
+  for (const m of src.matchAll(assigned)) {
+    if (m[1] === 'P' || PREFIX_SHAPE.test(m[3])) out.push(m[3]);
+  }
+  const passed = /([A-Za-z_$][\w$]*)\s*\(\s*(['"`])([^'"`$]+)\2\s*[,)]/g;
+  for (const m of src.matchAll(passed)) {
+    if (PREFIX_SHAPE.test(m[3]) && !NON_DECLARING_CALLS.has(m[1])) out.push(m[3]);
+  }
+  return [...new Set(out)];
+}
+
+/** Every fixture prefix declared under apps/server/test, as { prefix, file }. */
 function declarations(): Array<{ prefix: string; file: string }> {
   const out: Array<{ prefix: string; file: string }> = [];
   for (const file of testFiles(TEST_DIR)) {
-    const src = readFileSync(file, 'utf8');
-    for (const m of src.matchAll(/^\s*(?:export\s+)?const\s+P\s*=\s*(['"`])([^'"`$]+)\1/gm)) {
-      out.push({ prefix: m[2], file: rel(file) });
-    }
+    for (const prefix of prefixesIn(readFileSync(file, 'utf8'))) out.push({ prefix, file: rel(file) });
+  }
+  return out;
+}
+
+/** The real-DB suites: every *.integration.test.ts under apps/server/test. */
+function realDbSuites(): string[] {
+  return testFiles(TEST_DIR).filter((f) => f.endsWith('.integration.test.ts')).map(rel);
+}
+
+/**
+ * The helper modules a suite imports from apps/server/test, transitively, so a
+ * cleanup written inside a fixture builder is judged with the suite that calls
+ * it. sql-like.js is the escaping helper itself and is not a cleanup.
+ */
+function helperSources(file: string, seen = new Set<string>()): Array<{ file: string; src: string }> {
+  const out: Array<{ file: string; src: string }> = [];
+  const src = readFileSync(file, 'utf8');
+  for (const m of src.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\brequire\s*\(\s*)(['"])(\.{1,2}\/[^'"]+)\1/g)) {
+    const base = resolve(dirname(file), m[2]);
+    const target = ['', '.js', '.ts', '.mjs', '/index.js', '/index.ts'].map((ext) => base + ext).find((p) => existsSync(p) && statSync(p).isFile());
+    if (!target || seen.has(target) || !target.startsWith(TEST_DIR + sep) || target === SQL_LIKE) continue;
+    if (/\.(test|spec)\.ts$/.test(target)) continue;
+    seen.add(target);
+    out.push({ file: target, src: readFileSync(target, 'utf8') }, ...helperSources(target, seen));
   }
   return out;
 }
@@ -208,6 +273,48 @@ describe('fixture prefixes are registered and unique (R0-00)', () => {
     expect(problems, 'add the suite to apps/server/test/helpers/fixture-prefixes.json').toEqual([]);
   });
 
+  it('every real-DB suite owns a registered prefix or is listed in noPrefixSuites with a reason (SEC-R000-2)', () => {
+    // The backstop for any declaration form the scanner does not read: a new
+    // *.integration.test.ts fails here until it is registered, whatever it
+    // calls its prefix.
+    const { prefixes, noPrefixSuites } = registry();
+    const owners = new Set(prefixes.map((e) => e.owner));
+    const exempt = new Map(noPrefixSuites.map((s) => [s.file, s.reason]));
+    const problems: string[] = [];
+    for (const suite of realDbSuites()) {
+      if (owners.has(suite)) continue;
+      if (!exempt.has(suite)) problems.push(`${suite} owns no registered prefix and is not in noPrefixSuites`);
+      else if (!String(exempt.get(suite) ?? '').trim()) problems.push(`${suite}: noPrefixSuites entry has no reason`);
+    }
+    expect(problems, 'register the suite\'s prefix in apps/server/test/helpers/fixture-prefixes.json').toEqual([]);
+  });
+
+  it('a noPrefixSuites entry exists, is a real-DB suite, and declares no prefix', () => {
+    const suites = new Set(realDbSuites());
+    const declared = declarations();
+    const owners = new Set(registry().prefixes.map((e) => e.owner));
+    const problems: string[] = [];
+    for (const { file } of registry().noPrefixSuites) {
+      if (!suites.has(file)) problems.push(`${file} is not an existing *.integration.test.ts`);
+      if (owners.has(file)) problems.push(`${file} owns a registered prefix; remove it from noPrefixSuites`);
+      for (const d of declared.filter((x) => x.file === file)) problems.push(`${file} declares ${d.prefix}; register it`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('the scanner reads every declaration form suites use (self-test)', () => {
+    // The review probe: none of these were seen by the `const P` scan.
+    expect(prefixesIn("const P = 'cid_';")).toEqual(['cid_']);
+    expect(prefixesIn("const PREFIX = 'r0q_';")).toEqual(['r0q_']);
+    expect(prefixesIn("export const FIXTURE_PREFIX: string = 'k12a_';")).toEqual(['k12a_']);
+    expect(prefixesIn("fx = await buildBoundaryFixture('kab_');")).toEqual(['kab_']);
+    expect(prefixesIn('const w = makeWorld("zz_probe_", { seed: 1 });')).toEqual(['zz_probe_']);
+    // Values inspected, not declared, and identifiers that are not prefixes.
+    expect(prefixesIn("expect(id.startsWith('r0_')).toBe(true); expect(ids).toContain('cid_');")).toEqual([]);
+    expect(prefixesIn("const CANARY = 'CID_SECRET_'; const HEADER = 'x-cid-user'; createId('thread');")).toEqual([]);
+    expect(prefixesIn('const label = `${P}owner`;')).toEqual([]);
+  });
+
   it('every registry entry is unique, has an existing owner, and that owner declares it', () => {
     const entries = registry().prefixes;
     const seen = new Set<string>();
@@ -268,13 +375,25 @@ describe('cleanup LIKE patterns cannot reach another suite (R0-00)', () => {
     expect(() => sqlLikePrefix('')).toThrow();
   });
 
-  it('a new suite cleans up with sqlLikePrefix(), never a hand-written LIKE', () => {
+  it('a new suite cleans up with sqlLikePrefix(), never a hand-written LIKE, in its own file or a helper it imports', () => {
+    // A legacy builder such as key-action-boundary.fixture.js cleans up with
+    // `LIKE '${P}%'`; a new suite that hands it a prefix inherits that hazard.
     const problems: string[] = [];
     for (const e of registry().prefixes.filter((x) => !x.legacy)) {
-      const src = readFileSync(join(REPO, e.owner), 'utf8');
-      for (const line of likeWithoutHelper(src)) problems.push(`${e.owner}:${line}`);
+      const owner = join(REPO, e.owner);
+      for (const { file, src } of [{ file: owner, src: readFileSync(owner, 'utf8') }, ...helperSources(owner)]) {
+        for (const line of likeWithoutHelper(src)) problems.push(`${e.owner} -> ${rel(file)}:${line}`);
+      }
     }
     expect(problems, "use `LIKE ${sqlLikePrefix(P)}` from test/helpers/sql-like.js").toEqual([]);
+  });
+
+  it('the helper walk reaches a legacy fixture builder with a hand-written LIKE (self-test)', () => {
+    const suite = join(TEST_DIR, 'key-action-boundary.integration.test.ts');
+    const helpers = helperSources(suite).map((h) => rel(h.file));
+    expect(helpers).toContain('apps/server/test/helpers/key-action-boundary.fixture.js');
+    const builder = helperSources(suite).find((h) => h.file.endsWith('key-action-boundary.fixture.js'));
+    expect(likeWithoutHelper(builder?.src ?? '').length).toBeGreaterThan(0);
   });
 
   it('a new suite embeds its prefix in every literal it writes to a globally unique column', () => {

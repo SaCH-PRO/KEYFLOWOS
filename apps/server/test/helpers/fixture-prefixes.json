@@ -3,10 +3,16 @@
   "about": [
     "Fixture prefixes of apps/server/test suites (R0-00-WT-ISOLATION). Enforced by apps/server/src/core/config/fixture-prefix-registry.spec.ts.",
     "A new prefix is a 4-character head plus '_': k<NN><a-z>_ for an R0 packet, v<NN><a-z>_ for a V1 packet, NN = the packet number (R0-12 -> k12a_). The packet that adds the suite adds {prefix, owner, packet} here.",
-    "A new suite cleans up with LIKE ${sqlLikePrefix(P)} from test/helpers/sql-like.js and embeds its prefix in every literal written to User.email, Business.slug, Payment.providerPaymentId, PaymentLink.token or Site.subdomain.",
-    "legacy: true marks the prefixes in use at c2f6f46d. They keep their names; the set may shrink but never grow."
+    "A new suite cleans up with LIKE ${sqlLikePrefix(P)} from test/helpers/sql-like.js, in its own file and in every helper it imports from apps/server/test, and embeds its prefix in every literal written to User.email, Business.slug, Payment.providerPaymentId, PaymentLink.token or Site.subdomain.",
+    "A prefix is found as `const P = '...'`, as `const <UPPER_NAME> = '<x>_'`, or as a '<x>_' string passed as a call's first argument (buildBoundaryFixture('kab_')). Every *.integration.test.ts must own a registered prefix or be listed in noPrefixSuites with a reason.",
+    "legacy: true marks the prefixes in use before R0-00 landed (c2f6f46d, plus 'ab_' from R0-05). They keep their names; the set may shrink but never grow. A packet branched before R0-00 that adds a suite renames its prefix to k<NN><a-z>_ and switches its cleanup to sqlLikePrefix() when it is integrated."
   ],
   "prefixes": [
+    {
+      "prefix": "ab_",
+      "owner": "apps/server/test/identity-boundary.integration.test.ts",
+      "legacy": true
+    },
     {
       "prefix": "ainv_",
       "owner": "apps/server/test/authority-inventory.integration.test.ts",
@@ -35,6 +41,16 @@
     {
       "prefix": "fcs_",
       "owner": "apps/server/test/finance-coa-seed-concurrency.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "kab_",
+      "owner": "apps/server/test/key-action-boundary.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "kas_",
+      "owner": "apps/server/test/key-action-boundary-surfaces.integration.test.ts",
       "legacy": true
     },
     {
@@ -164,6 +180,24 @@
       "file": "apps/server/test/commerce-authorization.e2e.test.ts",
       "owner": "apps/server/test/revenue-authorization.integration.test.ts",
       "reason": "The registered owner is revenue-authorization (real DB and Redis). The e2e suite runs on in-memory Prisma and Redis stand-ins, so the shared prefix reaches no shared resource, but it is renamed for registry hygiene. That file is outside the R0-00 write set: the next packet that writes it (R0-27 or R0-28) renames its prefix to a new k<NN><a-z>_ entry and deletes this record."
+    }
+  ],
+  "noPrefixSuites": [
+    {
+      "file": "apps/server/test/app-module-boots.integration.test.ts",
+      "reason": "Boots the built server in a child process and asserts it listens; seeds and deletes no rows."
+    },
+    {
+      "file": "apps/server/test/key-inbox-intelligence.integration.test.ts",
+      "reason": "Seeds rows with random ids (createId) under an existing business and deletes them by those id lists; no LIKE cleanup."
+    },
+    {
+      "file": "apps/server/test/keyflow-dev-auth.integration.test.ts",
+      "reason": "Spawns main.ts with KEYFLOW_DEV_AUTH_BYPASS set and asserts the boot guard exits; touches no rows."
+    },
+    {
+      "file": "apps/server/test/token-encryption-coverage.integration.test.ts",
+      "reason": "Reads schema.prisma and the encryption extension's coverage; touches no rows."
     }
   ]
 }

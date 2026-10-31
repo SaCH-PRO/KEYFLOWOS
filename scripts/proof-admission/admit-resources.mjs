@@ -2,21 +2,34 @@
 /**
  * K12 resource admission.
  *
- *   --manifest <file>               CI mode (ci-resources.json): judge process.env.
+ *   --manifest <file>               CI mode (ci-resources.json): judge process.env
+ *                                   only. --env-file is refused here: a file cannot
+ *                                   vouch for CI=true.
  *   --packet <id> [--env-file <f>]  Per-packet mode (R0-00-WT-ISOLATION): judge the
- *                                   values a suite in this worktree will see, against
+ *         [--state-file <f>]        values a suite in this worktree will see, against
  *                                   manifests/local-worktree-resources.json (or
- *                                   --manifest). Admits only kf_wt_<packet> and a
- *                                   non-zero Redis index.
+ *                                   --manifest). Admits only kf_wt_<packet> and the
+ *                                   Redis index scripts/worktree-resources.sh
+ *                                   allocated to that packet.
  *
  * In per-packet mode the env file defaults to the repo-root .env beside this
  * script, the file every integration suite loads (../../../.env from
  * apps/server/test). A value the shell exports wins over the file, exactly as
  * dotenv does, so a shell that still exports the main-tree DATABASE_URL is
  * judged as what it is.
+ *
+ * Per-packet mode is also bound to the provisioner's allocation table (the
+ * state file: --state-file, else KF_WT_STATE_FILE, else
+ * <git common dir>/kf-worktree-resources.tsv, as in worktree-resources.sh). The
+ * packet must have exactly one row; REDIS_URL must name the index in that row
+ * and no other row may hold it; the worktree that owns the judged .env must be
+ * the one in that row; and KF_WT_PACKET (the provisioner writes it into .env)
+ * must name the packet. So a worktree cannot be admitted under another packet's
+ * id, and two packets cannot both be admitted on one Redis index.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const EXIT = Object.freeze({ ADMITTED: 0, REJECTED: 2 });
@@ -51,6 +64,20 @@ export function parseEnvFile(text) {
     vars[m[1]] = value;
   }
   return vars;
+}
+
+/**
+ * The provisioner's allocation table: one `<slug>\t<redis index>\t<worktree>`
+ * line per live packet (scripts/worktree-resources.sh state_put).
+ */
+export function parseStateFile(text) {
+  const rows = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    if (line.trim() === '') continue;
+    const [slug = '', index = '', worktree = ''] = line.split('\t');
+    rows.push({ slug, index: /^\d+$/.test(index) ? Number(index) : NaN, worktree });
+  }
+  return rows;
 }
 
 function redisDbIndex(url) {
@@ -110,8 +137,12 @@ function resourceIdentity(rule, url) {
 /**
  * @param manifest  a resource manifest
  * @param env       the exported environment (process.env)
- * @param options   per-packet mode: { packet, fileEnv } where fileEnv holds the
- *                  worktree .env values; an exported value wins, as with dotenv
+ * @param options   per-packet mode: { packet, fileEnv, state, worktree }. fileEnv
+ *                  holds the worktree .env values (an exported value wins, as
+ *                  with dotenv); state the provisioner's rows (parseStateFile);
+ *                  worktree the real path of the worktree whose .env is judged.
+ *                  Outside per-packet mode only `env` is judged and fileEnv is
+ *                  ignored.
  */
 export function admitResources(manifest, env = process.env, options = {}) {
   const policyErrors = validateManifest(manifest);
@@ -126,16 +157,55 @@ export function admitResources(manifest, env = process.env, options = {}) {
     return verdict('REJECTED', ['KF_PROOF_RESOURCE_POLICY_INVALID'], { message: 'manifest is not packet-scoped' });
   }
 
-  const fileEnv = options.fileEnv ?? {};
+  // A file is consulted only in per-packet mode. In CI mode the trust anchor
+  // is what the runner exported, and a file must not be able to supply it.
+  const fileEnv = packet ? (options.fileEnv ?? {}) : {};
   const shellHas = (key) => Object.prototype.hasOwnProperty.call(env, key);
+  const fileHas = (key) => Object.prototype.hasOwnProperty.call(fileEnv, key);
   const lookup = (key) => (shellHas(key) ? env[key] : fileEnv[key]);
   const sourceOf = (key) => (shellHas(key) ? 'shell' : 'env-file');
 
+  // requiredEnv is never resolved from a file, in either mode.
   const envMismatches = Object.entries(manifest.requiredEnv)
-    .filter(([key, expected]) => lookup(key) !== expected)
+    .filter(([key, expected]) => (shellHas(key) ? env[key] : undefined) !== expected)
     .map(([key]) => key);
   if (envMismatches.length > 0) {
     return verdict('REJECTED', ['KF_PROOF_RESOURCE_ENVIRONMENT_UNTRUSTED'], { envMismatches });
+  }
+
+  let allocation = null;
+  if (packet) {
+    // The .env must have been written for this packet: every source that sets
+    // KF_WT_PACKET names it, and at least one sets it.
+    const markers = [
+      ...(shellHas('KF_WT_PACKET') ? [{ source: 'shell', value: env.KF_WT_PACKET }] : []),
+      ...(fileHas('KF_WT_PACKET') ? [{ source: 'env-file', value: fileEnv.KF_WT_PACKET }] : []),
+    ];
+    if (markers.length === 0 || markers.some((m) => m.value !== packet)) {
+      return verdict('REJECTED', ['KF_PROOF_RESOURCE_PACKET_MISMATCH'], {
+        packet,
+        markers,
+        hint: 'KF_WT_PACKET must name this packet; the .env was written for another packet, or not by worktree-resources.sh provision',
+      });
+    }
+
+    // The allocation table is the only record of which Redis index belongs to
+    // which packet. Without it, two packets on one index look equally valid.
+    if (!Array.isArray(options.state)) {
+      return verdict('REJECTED', ['KF_PROOF_RESOURCE_STATE_UNAVAILABLE'], { packet });
+    }
+    const rows = options.state.filter((r) => r.slug === packet);
+    if (rows.length !== 1) {
+      return verdict('REJECTED', ['KF_PROOF_RESOURCE_NOT_PROVISIONED'], { packet, rows: rows.length });
+    }
+    allocation = rows[0];
+    if (options.worktree !== undefined && options.worktree !== allocation.worktree) {
+      return verdict('REJECTED', ['KF_PROOF_RESOURCE_WORKTREE_MISMATCH'], {
+        packet,
+        worktree: options.worktree,
+        allocatedWorktree: allocation.worktree,
+      });
+    }
   }
 
   const sharedDatabaseNames = Array.isArray(manifest.sharedDatabaseNames) ? manifest.sharedDatabaseNames : [];
@@ -192,11 +262,29 @@ export function admitResources(manifest, env = process.env, options = {}) {
         return verdict('REJECTED', ['KF_PROOF_RESOURCE_REDIS_INDEX_UNSAFE'], identity);
       }
     }
+    if (rule.kind === 'redis' && allocation) {
+      if (!('dbIndex' in identity)) identity.dbIndex = redisDbIndex(url);
+      if (identity.dbIndex !== allocation.index) {
+        return verdict('REJECTED', ['KF_PROOF_RESOURCE_REDIS_INDEX_FOREIGN'], { ...identity, allocatedDbIndex: allocation.index });
+      }
+      const sharedWith = options.state.filter((r) => r.slug !== packet && r.index === identity.dbIndex).map((r) => r.slug);
+      if (sharedWith.length > 0) {
+        return verdict('REJECTED', ['KF_PROOF_RESOURCE_REDIS_INDEX_SHARED'], { ...identity, sharedWith });
+      }
+    }
 
     admitted.push(identity);
   }
 
   return verdict('ADMITTED_NONPRODUCTION', [], packet ? { packet, resources: admitted } : { resources: admitted });
+}
+
+/** <git common dir>/kf-worktree-resources.tsv, derived as worktree-resources.sh init_paths does. */
+function defaultStateFile() {
+  const git = spawnSync('git', ['-C', REPO_ROOT, 'rev-parse', '--git-common-dir'], { encoding: 'utf8' });
+  if (git.status !== 0) return null;
+  const common = git.stdout.trim();
+  return join(isAbsolute(common) ? common : resolve(REPO_ROOT, common), 'kf-worktree-resources.tsv');
 }
 
 function main() {
@@ -223,14 +311,26 @@ function main() {
     process.exit(EXIT.REJECTED);
   }
 
+  const packetScoped = manifest?.packetScoped === true;
+  if (!packetScoped && (args['env-file'] || args['state-file'])) {
+    // CI mode judges what the runner exported. Before R0-00 a file could not
+    // supply CI=true or GITHUB_ACTIONS=true; it still cannot.
+    console.log(JSON.stringify(verdict('REJECTED', ['KF_PROOF_ARGUMENT_INVALID'], {
+      message: '--env-file and --state-file apply only to a packet-scoped manifest (--packet)',
+    })));
+    process.exit(EXIT.REJECTED);
+  }
+
   // The worktree .env: explicit --env-file must exist; the default (the repo
   // root .env the suites load) may be absent, leaving only the shell.
   let fileEnv;
-  const envFile = args['env-file'] ?? (manifest.packetScoped === true ? join(REPO_ROOT, '.env') : null);
+  let worktree;
+  const envFile = args['env-file'] ?? (packetScoped ? join(REPO_ROOT, '.env') : null);
   if (envFile) {
     if (existsSync(envFile)) {
       try {
         fileEnv = parseEnvFile(readFileSync(envFile, 'utf8'));
+        worktree = realpathSync(dirname(resolve(envFile)));
       } catch (error) {
         console.log(JSON.stringify(verdict('REJECTED', ['KF_PROOF_RESOURCE_ENV_FILE_INVALID'], { message: error.message })));
         process.exit(EXIT.REJECTED);
@@ -238,10 +338,27 @@ function main() {
     } else if (args['env-file']) {
       console.log(JSON.stringify(verdict('REJECTED', ['KF_PROOF_RESOURCE_ENV_FILE_MISSING'])));
       process.exit(EXIT.REJECTED);
+    } else {
+      // No .env: the shell supplies everything, for the worktree this script is in.
+      worktree = realpathSync(REPO_ROOT);
     }
   }
 
-  const result = admitResources(manifest, process.env, { packet: args.packet, fileEnv });
+  // The provisioner's allocation table. Absent or unreadable, per-packet mode
+  // rejects with KF_PROOF_RESOURCE_STATE_UNAVAILABLE.
+  let state;
+  if (packetScoped) {
+    const stateFile = args['state-file'] ?? process.env.KF_WT_STATE_FILE ?? defaultStateFile();
+    if (stateFile && existsSync(stateFile)) {
+      try {
+        state = parseStateFile(readFileSync(stateFile, 'utf8'));
+      } catch {
+        state = undefined;
+      }
+    }
+  }
+
+  const result = admitResources(manifest, process.env, { packet: args.packet, fileEnv, state, worktree });
   console.log(JSON.stringify(result));
   process.exit(result.status === 'ADMITTED_NONPRODUCTION' ? EXIT.ADMITTED : EXIT.REJECTED);
 }
