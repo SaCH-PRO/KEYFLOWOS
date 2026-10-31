@@ -54,6 +54,15 @@ export class GmailService {
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   private readonly redirectUri = process.env.GMAIL_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI?.replace('/api/crm/google/callback', '/api/commerce/gmail/callback');
   private readonly stateSecret = process.env.GOOGLE_STATE_SECRET;
+  /**
+   * Nonces of OAuth states this process has accepted, with their expiry (R0-07
+   * review ST-2): a signed state is good for one callback, so a captured or
+   * forwarded auth URL cannot be completed again within its 10 minutes. Entries
+   * leave when their state would have expired anyway. This is per process; it
+   * does not by itself bind the state to the user who asked for it (that check
+   * belongs to the callback in commerce.controller.ts).
+   */
+  private readonly acceptedStateNonces = new Map<string, number>();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -99,11 +108,25 @@ export class GmailService {
       }
       
       const state: OAuthState = JSON.parse(payload);
-      if (state.exp < Date.now()) {
+      const now = Date.now();
+      if (state.exp < now) {
         this.logger.warn('OAuth state expired');
         return null;
       }
-      
+
+      for (const [nonce, exp] of this.acceptedStateNonces) {
+        if (exp < now) this.acceptedStateNonces.delete(nonce);
+      }
+      if (typeof state.nonce !== 'string' || state.nonce.length === 0) {
+        this.logger.warn('OAuth state has no nonce');
+        return null;
+      }
+      if (this.acceptedStateNonces.has(state.nonce)) {
+        this.logger.warn('OAuth state already used');
+        return null;
+      }
+      this.acceptedStateNonces.set(state.nonce, state.exp);
+
       return state;
     } catch {
       this.logger.warn('Failed to verify OAuth state');

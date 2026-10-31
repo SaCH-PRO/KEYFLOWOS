@@ -590,3 +590,58 @@ describe('Release 0 money routes still answer 2xx in the same environment', () =
     expect(outbound).toEqual([]);
   });
 });
+
+// R0-07 review ST-2: a signed Gmail OAuth state is good for one callback. The
+// real GmailService is built here with a Google OAuth client and state secret
+// (the app above deliberately has none); nothing in this block calls out.
+describe('Gmail OAuth state (R0-07 review)', () => {
+  const OAUTH_ENV: Record<string, string> = {
+    GOOGLE_CLIENT_ID: `${P}client-id`,
+    GOOGLE_CLIENT_SECRET: `${P}client-secret`,
+    GMAIL_REDIRECT_URI: 'http://localhost:3001/api/commerce/gmail/callback',
+    GOOGLE_STATE_SECRET: `${P}state-secret`,
+  };
+
+  async function configuredGmail() {
+    const { GmailService } = await import('../src/modules/commerce/gmail.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    Object.assign(process.env, OAUTH_ENV);
+    try {
+      return new GmailService(app.get(PrismaService));
+    } finally {
+      for (const key of Object.keys(OAUTH_ENV)) delete process.env[key];
+    }
+  }
+
+  function stateOf(url: string): string {
+    const state = new URL(url).searchParams.get('state');
+    expect(state).toBeTruthy();
+    return state as string;
+  }
+
+  it('ST-2: a signed state is accepted once; the same state replayed is refused, and a fresh state still works', async () => {
+    const gmail = await configuredGmail();
+
+    const first = stateOf(gmail.getAuthUrl(ID.biz));
+    expect(gmail.verifyState(first)).toMatchObject({ businessId: ID.biz, purpose: 'gmail' });
+    expect(gmail.verifyState(first)).toBeNull();
+    expect(gmail.verifyState(first)).toBeNull();
+
+    const second = stateOf(gmail.getAuthUrl(ID.biz));
+    expect(gmail.verifyState(second)).toMatchObject({ businessId: ID.biz, purpose: 'gmail' });
+    expect(outbound).toEqual([]);
+  });
+
+  it.todo(
+    'ST-2: the state names the initiating user, and gmail/callback links the mailbox only for that signed-in user (or after they confirm) - ' +
+      'needs commerce.controller.ts (getGmailAuthUrl passes the user; the unauthenticated callback checks or defers to a session), outside the R0-07 write set',
+  );
+  it.todo(
+    'ST-3: GET /commerce/businesses/:b/gmail/auth-url requires the authority to connect or replace the mailbox, so STAFF (revenue:read) answers 403 - ' +
+      'the guard is RequireModuleScope(revenue, read) in commerce.controller.ts, outside the R0-07 write set',
+  );
+  it.todo(
+    'ST-4 / R07-CR-1: the web client hands a GET 503 {code: provider_not_configured} to its caller on the first response (body intact, no retry, no backend-unreachable warning) - ' +
+      'apps/web/src/lib/fetch-with-retry.ts and api.ts retry every GET 503 three times and drop the body; outside the R0-07 write set',
+  );
+});
