@@ -4,10 +4,14 @@ import { Loader2 } from "lucide-react";
 import { useOnboarding } from "./hooks/use-onboarding";
 import { OnboardingShell } from "./components/onboarding-shell";
 import { KeyOnboardingChatView } from "./components/key-onboarding-chat-view";
-import { ManualSetupStep } from "./components/manual-setup-step";
+import { ManualSetupStep, useManualSetup } from "./components/manual-setup-step";
 
 export default function OnboardingPage() {
   const { step, loading, error, goToStep } = useOnboarding();
+  // Held here, above OnboardingShell's per-step container (keyed on the step,
+  // so every step change remounts what it wraps): what the owner typed, and
+  // any refusal shown, survive a step change (review CR-R006-2).
+  const manualSetup = useManualSetup();
 
   if (loading) {
     return (
@@ -37,7 +41,7 @@ export default function OnboardingPage() {
             </button>
           </div>
         )}
-        <ManualSetupStep />
+        <ManualSetupStep setup={manualSetup} />
         <KeyOnboardingChatView step={step} goToStep={goToStep} />
       </div>
     </OnboardingShell>

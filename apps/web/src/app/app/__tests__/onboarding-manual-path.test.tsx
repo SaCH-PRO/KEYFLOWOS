@@ -15,8 +15,23 @@
  * the owner finishes through the manual step: the profile goes to PATCH
  * /identity/businesses/:id (the route R0-32 proves sets those fields), the
  * completion to POST .../complete, and a 2xx lands on the command center.
+ *
+ * Review repairs:
+ * - SEC-R006-1: POST .../complete admits only the owner, a SUPER_ADMIN or a
+ *   member with settings write, but the PATCH route admits any member. The
+ *   stubs answer the way the real server answers a STAFF member (PATCH 200,
+ *   POST .../complete 403 ONBOARDING_COMPLETE_FORBIDDEN), and nothing may be
+ *   written before that refusal.
+ * - SEC-R006-2: the form writes only to the business it was loaded for.
+ * - CR-R006-1: "no model call" is asserted by method, not by timing. The KEY
+ *   chat beside the step reads its session with a GET that fetchWithRetry
+ *   retries on 503 on its own schedule; and each test signs in with its own
+ *   token, so a retry left over from an earlier test is answered but never
+ *   recorded against a later one.
+ * - CR-R006-2: a step change remounts the shell's per-step container; the
+ *   owner's input and any refusal survive it.
  */
-import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach, type MockInstance } from "vitest";
 import { render, screen, waitFor, fireEvent, cleanup, within } from "@testing-library/react";
 import { GenomeProvider } from "@/contexts/genome-context";
 import { TtsProvider } from "@/components/tts";
@@ -52,6 +67,8 @@ vi.mock("sonner", () => ({
 import OnboardingPage from "../onboarding/page";
 
 const BIZ = "biz_k06a_manual";
+const OWNER = "usr_k06a_owner";
+const STAFF = "usr_k06a_staff";
 
 type Call = { method: string; path: string; body: unknown };
 
@@ -80,10 +97,13 @@ const FRESH_STATE = json(200, {
 
 const BUSINESS = json(200, {
   id: BIZ,
+  ownerId: OWNER,
   name: "k06a Bakery",
   currency: "TTD",
   timezone: "America/Port_of_Spain",
 });
+
+const SIGNED_IN_AS = (id: string, role = "USER") => json(200, { id, email: `${id}@k06a.test`, role });
 
 const COMPLETE_OK = json(201, {
   complete: true,
@@ -91,11 +111,28 @@ const COMPLETE_OK = json(201, {
   genomeRecommendation: { threePillarMinimumMet: false, genomeIntegrity: 13, missingPillars: ["founder", "business", "market"] },
 });
 
+/** What the real server answers a member without settings write (R0-32 ST-R032-1). */
+const COMPLETE_FORBIDDEN = json(403, {
+  statusCode: 403,
+  code: "ONBOARDING_COMPLETE_FORBIDDEN",
+  message: "Only the business owner or a member with settings write access can finish onboarding.",
+});
+
+const PROFILE_INCOMPLETE = json(403, {
+  statusCode: 403,
+  code: "ONBOARDING_PROFILE_INCOMPLETE",
+  message: "Add your business name, currency and timezone before finishing onboarding.",
+  details: { missingFields: ["currency", "timezone"] },
+});
+
 let calls: Call[] = [];
 let routes: Record<string, Stub | (() => Stub)> = {};
 /** A route listed here answers only once its promise settles. */
 let holds: Partial<Record<string, Promise<void>>> = {};
 let fetchSpy: MockInstance<typeof fetch>;
+/** This test's session token; requests carrying any other are not recorded. */
+let token = "";
+let testSeq = 0;
 
 function key(method: string, path: string) {
   return `${method} ${path}`;
@@ -114,7 +151,11 @@ function installFetch() {
         body = init.body;
       }
     }
-    calls.push({ method, path, body });
+    // A request built under an earlier test's session (a chat read still in
+    // fetchWithRetry's backoff when that test ended) is answered, not recorded.
+    if (new Headers(init?.headers).get("Authorization") === `Bearer ${token}`) {
+      calls.push({ method, path, body });
+    }
     const hold = holds[key(method, path)];
     if (hold) await hold;
     let stub: Stub | (() => Stub) | undefined = routes[key(method, path)];
@@ -129,8 +170,11 @@ function installFetch() {
 }
 
 const statePath = `/onboarding-concierge/businesses/${BIZ}/onboarding-state`;
+const stepPath = `/onboarding-concierge/businesses/${BIZ}/onboarding-step`;
 const businessPath = `/identity/businesses/${BIZ}`;
 const completePath = `/onboarding-concierge/businesses/${BIZ}/complete`;
+const sessionsPath = `/ai/businesses/${BIZ}/flow/sessions`;
+const mePath = "/identity/me";
 
 function renderPage() {
   // The providers the app layout wraps every /app route in.
@@ -156,28 +200,45 @@ async function fillProfile(step: ReturnType<typeof within>, profile: { name: str
   fireEvent.change(step.getByLabelText(/timezone/i), { target: { value: profile.timezone } });
 }
 
+const valueOf = (step: ReturnType<typeof within>, label: RegExp) => (step.getByLabelText(label) as HTMLInputElement).value;
+
+async function prefilled(step: ReturnType<typeof within>) {
+  await waitFor(() => expect(valueOf(step, /business name/i)).toBe("k06a Bakery"));
+}
+
 const callsTo = (method: string, path: string) => calls.filter((c) => c.method === method && c.path === path);
 
+/** Every write the page made outside the KEY chat, in order. */
+const writes = () => calls.filter((c) => c.method !== "GET" && !c.path.startsWith("/ai/")).map((c) => key(c.method, c.path));
+
 describe("onboarding: the manual path completes without AI (D-03)", () => {
+  beforeAll(() => {
+    installFetch();
+  });
+
+  afterAll(() => {
+    fetchSpy.mockRestore();
+  });
+
   beforeEach(() => {
     calls = [];
     holds = {};
     routes = {
       [key("GET", statePath)]: FRESH_STATE,
       [key("GET", businessPath)]: BUSINESS,
+      [key("GET", mePath)]: SIGNED_IN_AS(OWNER),
       [key("PATCH", businessPath)]: json(200, { id: BIZ }),
       [key("POST", completePath)]: COMPLETE_OK,
     };
     nav.router.replace.mockReset();
     nav.router.push.mockReset();
-    window.localStorage.setItem("kf_token", "k06a-token");
+    token = `k06a-token-${++testSeq}`;
+    window.localStorage.setItem("kf_token", token);
     window.localStorage.setItem("kf_business_id", BIZ);
-    installFetch();
   });
 
   afterEach(() => {
     cleanup();
-    fetchSpy.mockRestore();
     window.localStorage.clear();
   });
 
@@ -203,7 +264,6 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
     renderPage();
     const step = await manualStep();
     await fillProfile(step, { name: "  k06a Bread House ", currency: "usd", timezone: "America/New_York" });
-    const aiBefore = calls.filter((c) => c.path.startsWith("/ai/")).length;
 
     fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
 
@@ -212,13 +272,19 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
       { method: "PATCH", path: businessPath, body: { name: "k06a Bread House", currency: "USD", timezone: "America/New_York" } },
     ]);
     expect(callsTo("POST", completePath)).toHaveLength(1);
-    // The profile is saved before completion is asked for.
+    // The owner's profile is saved before completion is asked for.
     const patchAt = calls.findIndex((c) => c.method === "PATCH" && c.path === businessPath);
     const completeAt = calls.findIndex((c) => c.method === "POST" && c.path === completePath);
     expect(patchAt).toBeGreaterThanOrEqual(0);
     expect(completeAt).toBeGreaterThan(patchAt);
-    // Finishing needs no model call.
-    expect(calls.filter((c) => c.path.startsWith("/ai/")).length).toBe(aiBefore);
+    // Finishing needs no model call: nothing was sent to /ai/* but the KEY
+    // chat's background reads (GETs fetchWithRetry repeats on 503 on its own
+    // schedule), and the only writes are the profile save and the completion.
+    expect(calls.filter((c) => c.path.startsWith("/ai/") && c.method !== "GET")).toEqual([]);
+    expect(calls.filter((c) => c.method !== "GET").map((c) => key(c.method, c.path))).toEqual([
+      key("PATCH", businessPath),
+      key("POST", completePath),
+    ]);
   });
 
   it("the profile fields are prefilled from the business record", async () => {
@@ -261,12 +327,7 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
   });
 
   it("403 ONBOARDING_PROFILE_INCOMPLETE renders the missing fields and stays on onboarding", async () => {
-    routes[key("POST", completePath)] = json(403, {
-      statusCode: 403,
-      code: "ONBOARDING_PROFILE_INCOMPLETE",
-      message: "Add your business name, currency and timezone before finishing onboarding.",
-      details: { missingFields: ["currency", "timezone"] },
-    });
+    routes[key("POST", completePath)] = PROFILE_INCOMPLETE;
     renderPage();
     const step = await manualStep();
     await fillProfile(step, { name: "k06a Bakery", currency: "TTD", timezone: "America/Port_of_Spain" });
@@ -298,13 +359,20 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
   });
 
   it("a failed profile save shows the error and does not ask for completion", async () => {
-    routes[key("PATCH", businessPath)] = json(403, { statusCode: 403, code: "FORBIDDEN", message: "You cannot edit this business." });
+    // A refusal the real PATCH route sends: UpdateBusinessDto's MaxLength(200)
+    // on name, through the global ValidationPipe. (It does not refuse a member
+    // on authority: see the SEC-R006-1 cases below.)
+    routes[key("PATCH", businessPath)] = json(400, {
+      statusCode: 400,
+      message: ["name must be shorter than or equal to 200 characters"],
+      error: "Bad Request",
+    });
     renderPage();
     const step = await manualStep();
     await fillProfile(step, { name: "k06a Bakery", currency: "TTD", timezone: "America/Port_of_Spain" });
     fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
     const alert = await step.findByRole("alert");
-    expect(alert).toHaveTextContent(/cannot edit this business/i);
+    expect(alert).toHaveTextContent(/name must be shorter than or equal to 200 characters/i);
     expect(callsTo("POST", completePath)).toHaveLength(0);
     expect(nav.router.replace).not.toHaveBeenCalledWith("/app/command-center");
   });
@@ -324,5 +392,130 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
     const step = await manualStep();
     expect(step.getByRole("button", { name: /finish setup/i })).toBeInTheDocument();
     expect(screen.getByText(/internal server error/i)).toBeInTheDocument();
+  });
+
+  describe("SEC-R006-1: nothing is written before the server accepts who is acting", () => {
+    it("a STAFF member is refused before any write: no PATCH, and the form gives way to 'ask the owner'", async () => {
+      // How the real server answers a STAFF member with role-default scopes:
+      // the PATCH route would accept the write; POST .../complete refuses.
+      routes[key("GET", mePath)] = SIGNED_IN_AS(STAFF);
+      routes[key("POST", completePath)] = COMPLETE_FORBIDDEN;
+      renderPage();
+      const step = await manualStep();
+      await prefilled(step);
+      await fillProfile(step, { name: "Renamed by staff", currency: "USD", timezone: "Asia/Tokyo" });
+      fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+
+      const alert = await step.findByRole("alert");
+      expect(alert).toHaveTextContent(/only the business owner/i);
+      expect(alert).toHaveTextContent(/ask the business owner/i);
+      expect(callsTo("PATCH", businessPath)).toHaveLength(0);
+      expect(writes()).toEqual([key("POST", completePath)]);
+      expect(step.queryByRole("button", { name: /finish setup/i })).not.toBeInTheDocument();
+      expect(step.queryByLabelText(/business name/i)).not.toBeInTheDocument();
+      expect(nav.router.replace).not.toHaveBeenCalledWith("/app/command-center");
+    });
+
+    it("when who is signed in cannot be read, completion is still asked for before any write", async () => {
+      routes[key("GET", mePath)] = json(500, { statusCode: 500, message: "Internal server error" });
+      routes[key("POST", completePath)] = COMPLETE_FORBIDDEN;
+      renderPage();
+      const step = await manualStep();
+      await prefilled(step);
+      await fillProfile(step, { name: "Renamed", currency: "USD", timezone: "Asia/Tokyo" });
+      fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+      expect(await step.findByRole("alert")).toHaveTextContent(/ask the business owner/i);
+      expect(writes()).toEqual([key("POST", completePath)]);
+    });
+
+    it("a member the server lets finish (settings write): completion first, then the changed profile is saved", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS("usr_k06a_admin");
+      renderPage();
+      const step = await manualStep();
+      await prefilled(step);
+      await fillProfile(step, { name: "k06a Bread House", currency: "usd", timezone: "America/New_York" });
+      fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+      await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith("/app/command-center"));
+      expect(writes()).toEqual([key("POST", completePath), key("PATCH", businessPath)]);
+      expect(callsTo("PATCH", businessPath)[0].body).toEqual({ name: "k06a Bread House", currency: "USD", timezone: "America/New_York" });
+    });
+
+    it("a member the server lets finish, with the stored profile unchanged: completion only, no PATCH", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS("usr_k06a_admin");
+      renderPage();
+      const step = await manualStep();
+      await prefilled(step);
+      fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+      await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith("/app/command-center"));
+      expect(writes()).toEqual([key("POST", completePath)]);
+    });
+
+    it("ONBOARDING_PROFILE_INCOMPLETE proves the member may finish: the profile is saved, then completion asked again", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS("usr_k06a_admin");
+      let asked = 0;
+      routes[key("POST", completePath)] = () => (++asked === 1 ? PROFILE_INCOMPLETE : COMPLETE_OK);
+      renderPage();
+      const step = await manualStep();
+      await prefilled(step);
+      await fillProfile(step, { name: "k06a Bakery", currency: "TTD", timezone: "America/Port_of_Spain" });
+      fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+      await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith("/app/command-center"));
+      expect(writes()).toEqual([key("POST", completePath), key("PATCH", businessPath), key("POST", completePath)]);
+    });
+
+    it("a SUPER_ADMIN, whom the server admits, saves first like the owner", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS("usr_k06a_root", "SUPER_ADMIN");
+      renderPage();
+      const step = await manualStep();
+      await prefilled(step);
+      await fillProfile(step, { name: "k06a Bread House", currency: "TTD", timezone: "America/Port_of_Spain" });
+      fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+      await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith("/app/command-center"));
+      expect(writes()).toEqual([key("PATCH", businessPath), key("POST", completePath)]);
+    });
+  });
+
+  it("SEC-R006-2: a business switched in another tab is refused, and nothing is written to either business", async () => {
+    const other = "biz_k06a_other";
+    routes[key("GET", `/identity/businesses/${other}`)] = json(200, {
+      id: other, ownerId: OWNER, name: "Other Co", currency: "JMD", timezone: "America/Jamaica",
+    });
+    renderPage();
+    const step = await manualStep();
+    await prefilled(step);
+    // Another tab signs in to, or creates, a different business.
+    window.localStorage.setItem("kf_business_id", other);
+    fireEvent.change(step.getByLabelText(/timezone/i), { target: { value: "America/Port_of_Spain " } });
+    fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+
+    expect(await step.findByRole("alert")).toHaveTextContent(/another tab switched/i);
+    expect(writes()).toEqual([]);
+    expect(nav.router.replace).not.toHaveBeenCalledWith("/app/command-center");
+  });
+
+  it("CR-R006-2: a step change keeps what the owner typed and the refusal shown", async () => {
+    // The chat restores at once (no session yet), so its welcome card shows.
+    routes[key("GET", sessionsPath)] = json(200, []);
+    routes[key("POST", stepPath)] = json(201, { ...(FRESH_STATE.body as object), step: "intake" });
+    renderPage();
+    const step = await manualStep();
+    await prefilled(step);
+    const before = step.getByLabelText(/business name/i);
+    await fillProfile(step, { name: "Owner Typed Name", currency: "USD", timezone: "Mars/Olympus_Mons" });
+    fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+    expect(await step.findByRole("alert")).toHaveTextContent(/timezone/i);
+
+    fireEvent.click(await screen.findByRole("button", { name: /start talking to key/i }, { timeout: 3000 }));
+    await waitFor(() => expect(callsTo("POST", stepPath)).toHaveLength(1));
+
+    const after = await manualStep();
+    // The shell's per-step container was remounted...
+    await waitFor(() => expect(after.getByLabelText(/business name/i)).not.toBe(before));
+    // ...and the owner's input and the refusal are still there.
+    expect(valueOf(after, /business name/i)).toBe("Owner Typed Name");
+    expect(valueOf(after, /currency/i)).toBe("USD");
+    expect(valueOf(after, /timezone/i)).toBe("Mars/Olympus_Mons");
+    expect(after.getByRole("alert")).toHaveTextContent(/timezone/i);
+    expect(writes()).toEqual([key("POST", stepPath)]);
   });
 });

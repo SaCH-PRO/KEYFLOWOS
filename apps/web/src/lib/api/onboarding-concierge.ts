@@ -201,9 +201,13 @@ export interface MinimalBusinessProfile {
   timezone: string;
 }
 
-/** The business record's current name, currency and timezone (for prefill). */
+/**
+ * The business record's current name, currency and timezone (for prefill),
+ * and its owner: the one member the browser can tell may finish onboarding
+ * (the server's rule also admits SUPER_ADMIN and members with settings write).
+ */
 export function fetchBusinessMinimalProfile(businessId: string) {
-  return apiGet<{ id: string } & Partial<Record<MinimalProfileField, string | null>>>(
+  return apiGet<{ id: string; ownerId?: string | null } & Partial<Record<MinimalProfileField, string | null>>>(
     `/identity/businesses/${encodeURIComponent(businessId)}`,
   );
 }
