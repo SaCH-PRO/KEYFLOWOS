@@ -1,10 +1,17 @@
 import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
-import { PresenceService } from './presence.service';
+import { PresenceService, type PresenceActor } from './presence.service';
 import { PresenceOverviewService } from './presence-overview.service';
 import { StorefrontIntelligenceService } from './storefront-intelligence.service';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../../core/guards/public-rate-limit.guard';
+
+/** The authenticated caller AuthMiddleware attached (id and platform role), or undefined. */
+function presenceActor(req: { user?: { id?: unknown; role?: unknown } } | undefined): PresenceActor | undefined {
+  const user = req?.user;
+  if (typeof user?.id !== 'string' || !user.id) return undefined;
+  return { id: user.id, role: typeof user.role === 'string' ? user.role : undefined };
+}
 
 @Controller('site/presence')
 export class PresenceController {
@@ -20,6 +27,10 @@ export class PresenceController {
     return this.presence.getDraft(businessId);
   }
 
+  /**
+   * Any member saves the draft; a new public slug is OWNER only (R0-09b, owner
+   * ruling D-11), decided in PresenceService from the authenticated caller.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Put('businesses/:businessId/draft')
   saveDraft(
@@ -27,7 +38,7 @@ export class PresenceController {
     @Body() body: { payload: unknown },
     @Req() req: any,
   ) {
-    return this.presence.saveDraft(businessId, body?.payload, req?.user?.id);
+    return this.presence.saveDraft(businessId, body?.payload, presenceActor(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -42,10 +53,11 @@ export class PresenceController {
     return this.presence.createPreviewToken(businessId);
   }
 
+  /** A publish that changes Business.slug is OWNER only (R0-09b, owner ruling D-11). */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/publish')
   publish(@Param('businessId') businessId: string, @Req() req: any) {
-    return this.presence.publish(businessId, req?.user?.id);
+    return this.presence.publish(businessId, presenceActor(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

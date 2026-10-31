@@ -10,6 +10,7 @@ import {
 } from './dto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 
 @Controller('onboarding-concierge/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -76,11 +77,18 @@ export class OnboardingConciergeController {
     );
   }
 
+  /**
+   * R0-09b (owner ruling D-11, review R09-ST-3): auto-configure rewrites the
+   * business profile (name, businessHours, store settings, slug, metaData), so
+   * it is OWNER only; the check runs before the template or the body is used.
+   */
   @Post('auto-configure')
   async autoConfigure(
     @Param('businessId') businessId: string,
     @Body() body: AutoConfigureDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ): Promise<AutoConfigureResult> {
+    await this.concierge.assertProfileOwner(businessId, user);
     return this.concierge.autoConfigureFromTemplate(businessId, body.templateId, body);
   }
 

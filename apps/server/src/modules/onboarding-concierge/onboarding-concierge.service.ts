@@ -35,6 +35,9 @@ function isRegistrationStepCompleteForReadiness(status: unknown): boolean {
   return !incomplete.includes(value);
 }
 
+/** R0-09b (owner ruling D-11): the refusal a non-owner gets on POST .../auto-configure. */
+export const BUSINESS_PROFILE_OWNER_ONLY = 'BUSINESS_PROFILE_OWNER_ONLY';
+
 /** Owner ruling D-03: the manual minimal profile that completes onboarding. */
 type MinimalProfileField = 'name' | 'currency' | 'timezone';
 
@@ -418,6 +421,46 @@ export class OnboardingConciergeService {
       paymentRecommendations: template.paymentRecommendations,
       emailTemplate: template.emailTemplate,
     };
+  }
+
+  /**
+   * Who may auto-configure: the business owner only — R0-09b-D11-SIBLING-WRITES,
+   * owner ruling D-11 (2026-10-31: editing the business profile is OWNER only,
+   * regardless of granted scopes; review R09-ST-3). autoConfigureFromTemplate
+   * writes Business.name (customBusinessName), overwrites businessHours, turns
+   * the store on and mints a slug when there is none, and every call rewrites
+   * Business.metaData (conciergeTemplateId, conciergeSetupAt, the setup
+   * milestone). Those are fields of the owner-only profile PATCH
+   * (PATCH /identity/businesses/:businessId, R0-09), so no auto-configure call
+   * writes no owner-only field and the route is refused as a whole: 403
+   * BUSINESS_PROFILE_OWNER_ONLY, before anything is read or written.
+   *
+   * The owner is the OWNER membership or the distinguished owner
+   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
+   * BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants. The actor is the authenticated user
+   * AuthMiddleware attached (req.user); none fails closed. The rule is
+   * restated rather than imported, as R0-08c did: injecting IdentityService
+   * would need OnboardingConciergeModule to import IdentityModule.
+   */
+  async assertProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<void> {
+    if (actor?.id) {
+      if (actor.role === 'SUPER_ADMIN') return;
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: actor.id, businessId } },
+        select: { role: true },
+      });
+      if (membership?.role === 'OWNER') return;
+      const owned = await this.prisma.client.business.findFirst({
+        where: { id: businessId, ownerId: actor.id },
+        select: { id: true },
+      });
+      if (owned) return;
+    }
+    throw new ForbiddenException({
+      code: BUSINESS_PROFILE_OWNER_ONLY,
+      message: 'Only the business owner can auto-configure the business profile.',
+    });
   }
 
   async autoConfigureFromTemplate(

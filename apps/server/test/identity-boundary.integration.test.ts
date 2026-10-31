@@ -1640,16 +1640,9 @@ describe('ST-3 (fixed, R0-09-ID-HARDEN, owner ruling D-11) — PATCH /identity/b
 // BusinessGuard. Each fix is in source outside the R0-09 write set; each
 // it.todo names the required behaviour for its follow-up packet.
 describe('OPEN DEFECTS — D-11 sibling write paths still change owner-only profile fields', () => {
-  it.todo(
-    'REQUIRED (follow-up; site/presence/presence.controller.ts, presence.service.ts publish — outside the R0-09 write set; review R09-ST-2): ' +
-      'PUT /site/presence/businesses/:id/draft and POST .../publish copy draft.slug onto Business.slug for any member, so a settings:none STAFF ' +
-      'changes the public slug the generic PATCH refuses; the slug change answers 403 for a non-owner with Business.slug unchanged',
-  );
-  it.todo(
-    'REQUIRED (follow-up, next to R0-SEC owner-only onboarding completion; onboarding-concierge.controller.ts/.service.ts autoConfigure — ' +
-      'outside the R0-09 write set; review R09-ST-3): POST /onboarding-concierge/businesses/:id/auto-configure writes Business.name ' +
-      '(customBusinessName) and overwrites businessHours for any member with no completion precondition; a non-owner answers 403 with the row unchanged',
-  );
+  // R09-ST-2 (presence draft/publish slug) and R09-ST-3 (concierge auto-configure)
+  // are FIXED by R0-09b-D11-SIBLING-WRITES; their cases assert the required
+  // behaviour on a real database in d11-sibling-writes.integration.test.ts.
   it.todo(
     'REQUIRED (follow-up; key-cortex.controller.ts execute — outside the R0-09 write set; review R09-ST-4): POST /api/v1/cortex/execute ' +
       "builds the ConnectorCommand with userId: dto.userId ?? 'system', so a member attributes a command to the OWNER; the actor comes from req.user",

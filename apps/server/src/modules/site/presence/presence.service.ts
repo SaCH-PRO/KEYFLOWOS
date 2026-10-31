@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { skipTenantIsolation } from '@keyflow/db';
@@ -210,6 +210,12 @@ function sanitizePayload(input: unknown): PresencePayload {
   return cleaned;
 }
 
+/** The authenticated caller of a presence write, as AuthMiddleware attaches it (req.user). */
+export type PresenceActor = { id: string; role?: string };
+
+/** R0-09b (owner ruling D-11): the refusal a non-owner gets for a public-slug change. */
+export const PRESENCE_SLUG_OWNER_ONLY = 'PRESENCE_SLUG_OWNER_ONLY';
+
 type Diff = { path: string; before: unknown; after: unknown };
 function diffPayload(a: unknown, b: unknown, path = ''): Diff[] {
   const diffs: Diff[] = [];
@@ -287,13 +293,26 @@ export class PresenceService {
     };
   }
 
-  async saveDraft(businessId: string, payload: unknown, userId?: string) {
+  /**
+   * Any member may save the draft (BusinessGuard), except that a non-owner may
+   * not put a new public slug in it (R0-09b, owner ruling D-11): a slug that is
+   * neither the Business's current slug nor the one the draft already carries
+   * answers 403 PRESENCE_SLUG_OWNER_ONLY and nothing is saved. Keeping the
+   * draft's slug, or sending none, is today's rule (see assertSlugOwner).
+   */
+  async saveDraft(businessId: string, payload: unknown, actor?: PresenceActor) {
     const cleaned = sanitizePayload(payload);
     const existing = await this.prisma.client.sitePageDraft.findUnique({ where: { businessId } });
+    if (cleaned.slug !== undefined) {
+      const draftSlug = existing ? fromJson(existing.payload).slug : undefined;
+      if (cleaned.slug !== draftSlug && cleaned.slug !== (await this.businessSlug(businessId))) {
+        await this.assertSlugOwner(businessId, actor);
+      }
+    }
     const data = {
       payload: asJson(cleaned),
       status: 'DRAFT',
-      lastSavedById: userId ?? null,
+      lastSavedById: actor?.id ?? null,
       version: existing ? existing.version + 1 : 1,
     };
     const upserted = await this.prisma.client.sitePageDraft.upsert({
@@ -358,10 +377,21 @@ export class PresenceService {
     };
   }
 
-  async publish(businessId: string, userId?: string) {
+  /**
+   * Publishing copies the draft's slug onto Business.slug, the public address.
+   * R0-09b (owner ruling D-11, review R09-ST-2): when that would change
+   * Business.slug, only the owner may publish; a non-owner gets 403
+   * PRESENCE_SLUG_OWNER_ONLY before anything is written (no page, no draft
+   * status, no slug). A publish that leaves the slug as it is stays open to any
+   * member and no longer rewrites the Business row.
+   */
+  async publish(businessId: string, actor?: PresenceActor) {
+    const userId = actor?.id;
     const draft = await this.prisma.client.sitePageDraft.findUnique({ where: { businessId } });
     if (!draft) throw new BadRequestException('No draft to publish');
     const cleaned = sanitizePayload(draft.payload);
+    const slugChange = !!cleaned.slug && cleaned.slug !== (await this.businessSlug(businessId));
+    if (slugChange) await this.assertSlugOwner(businessId, actor);
     const existing = await this.prisma.client.sitePagePublished.findUnique({ where: { businessId } });
     const nextVersion = (existing?.version ?? 0) + 1;
     const published = await this.prisma.client.sitePagePublished.upsert({
@@ -385,7 +415,7 @@ export class PresenceService {
       where: { businessId },
       data: { status: 'PUBLISHED' },
     });
-    if (cleaned.slug) {
+    if (slugChange) {
       try {
         await this.prisma.client.business.update({ where: { id: businessId }, data: { slug: cleaned.slug } });
       } catch (err: any) {
@@ -446,6 +476,48 @@ export class PresenceService {
     }
     this.events.emit('SITE_UNPUBLISHED', { businessId, version: updated.version });
     return { id: updated.id, unpublishedAt: updated.unpublishedAt };
+  }
+
+  private async businessSlug(businessId: string): Promise<string | null> {
+    const business = await this.prisma.client.business.findFirst({ where: { id: businessId }, select: { slug: true } });
+    return business?.slug ?? null;
+  }
+
+  /**
+   * R0-09b-D11-SIBLING-WRITES, owner ruling D-11 (2026-10-31): editing the
+   * business profile is OWNER only, regardless of granted scopes. Of the
+   * owner-only profile fields (the ones PATCH /identity/businesses/:businessId
+   * writes: name, slug, currency, timezone, tax, store settings and the rest),
+   * the presence routes write exactly one onto the Business row: slug, at
+   * publish. Branding, sections, seo and customDomain live in site_page_drafts
+   * and site_pages_published only, so those edits keep the BusinessGuard rule
+   * (any member) and are not gated here.
+   *
+   * The owner is the OWNER membership or the distinguished owner
+   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
+   * BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants. The rule is restated rather than imported, as
+   * R0-08c did: IdentityModule imports AiModule, which reaches SiteModule
+   * through KeyCortexModule. No actor fails closed.
+   */
+  private async assertSlugOwner(businessId: string, actor: PresenceActor | undefined): Promise<void> {
+    if (actor?.id) {
+      if (actor.role === 'SUPER_ADMIN') return;
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: actor.id, businessId } },
+        select: { role: true },
+      });
+      if (membership?.role === 'OWNER') return;
+      const owned = await this.prisma.client.business.findFirst({
+        where: { id: businessId, ownerId: actor.id },
+        select: { id: true },
+      });
+      if (owned) return;
+    }
+    throw new ForbiddenException({
+      code: PRESENCE_SLUG_OWNER_ONLY,
+      message: 'Only the business owner can change the public site address (slug).',
+    });
   }
 
   async getPublishedBySlug(slug: string) {
