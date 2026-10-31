@@ -37,17 +37,42 @@
  * apply the same visibility clause, so a contact the caller cannot see answers
  * a single DELETE like an unknown id and is skipped by a bulk one (ST-R2).
  *
+ * R0-13d-CT-BULK-ENRICH-VISIBILITY (the cases after the review repairs): the
+ * two remaining member-facing contact write paths apply the same clause.
+ * Bulk update (CrmService.bulkUpdateContacts, behind PATCH contacts/bulk)
+ * checked only the edit scope, so a crm 'write' member (edit 'any') changed
+ * another member's PRIVATE contact and a 'my book' member any TEAM one, and
+ * the count revealed them; now a hidden id is skipped exactly like a missing
+ * one. Enrichment (POST contacts/:id/enrich, ContactEnrichmentService)
+ * mirrored only the edit scope, so a hidden contact answered 201 no_match (an
+ * unknown id 404) and its email and name went to the paid provider; now it
+ * takes the edit decision from CrmService.assertCanEditContact, the check
+ * PATCH applies (R0-13c review ST-R3 / CR-1), and a hidden contact answers 404
+ * byte-identical to an unknown id with no provider call and nothing stamped.
+ * CR-3: a PATCH naming a non-member owner says 'ownerId must belong to a
+ * member of this business' (the field the PATCH body has), and POST /contacts
+ * uses the same membership helper.
+ * PATCH contacts/bulk is declared after PATCH contacts/:contactId in
+ * crm.controller.ts and is answered by it today (M15, fixed by V1-54, whose
+ * write set holds the controller), so the bulk cases drive the real
+ * CrmService exactly as CrmController.bulkUpdateContacts forwards a member's
+ * request, and one HTTP case proves the route answers a hidden id like an
+ * unknown one whichever handler it reaches.
+ *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the user,
  * business, membership, contact and share rows, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CrmRateLimitGuard, PlanLimitGuard, TeamAuditInterceptor,
  * the global ValidationPipe and GlobalHttpExceptionFilter, CrmController,
- * CrmService, CrmStatsService, CrmTimelineService and ContactAuditService are
- * all real against DATABASE_URL. The stand-ins: identity attachment (a test
- * middleware reads `x-test-user` and attaches the seeded user row as
- * AuthMiddleware would), the timeline service's side channels, the caches and
- * the plan limit (a stub that allows). The app trusts the proxy header as
- * app-bootstrap.ts does and every request carries its own x-forwarded-for
- * address, so the real rate-limit guard runs without capping the case count.
+ * ContactEnrichmentController, CrmService, ContactEnrichmentService,
+ * CrmStatsService, CrmTimelineService and ContactAuditService are all real
+ * against DATABASE_URL. The stand-ins: identity attachment (a test middleware
+ * reads `x-test-user` and attaches the seeded user row as AuthMiddleware
+ * would), the timeline service's side channels, the caches, the plan limit (a
+ * stub that allows) and the enrichment provider (a recording stub in place of
+ * ApolloEnrichmentProvider: no real provider is ever called). The app trusts
+ * the proxy header as app-bootstrap.ts does and every request carries its own
+ * x-forwarded-for address, so the real rate-limit guard runs without capping
+ * the case count.
  *
  * Requires DATABASE_URL. Every seeded row carries the `k13c_` prefix and is
  * hard-deleted by raw SQL in beforeAll and afterAll. No $transaction wrapping.
@@ -59,7 +84,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
@@ -82,7 +107,26 @@ const NOT_A_USER = `${P}not-a-user-at-all`;
 const DEPARTED = `${P}departed`; // a legacy owner_id naming nobody in bizA
 const SENSITIVE_NOTES = 'k13c-sensitive-internal-notes-5d1e';
 const SENSITIVE_PHONE = '+15550131313';
+/** POST /contacts/bulk/reassign's refusal of a non-member owner. */
 const MEMBER_MESSAGE = 'newOwnerId must belong to a member of this business';
+/** The same refusal from PATCH and POST /contacts, naming the field their body has (CR-3). */
+const OWNER_MEMBER_MESSAGE = 'ownerId must belong to a member of this business';
+const BULK_REFUSAL = 'You cannot edit any of the selected contacts';
+
+/**
+ * The enrichment provider stand-in, injected in place of ApolloEnrichmentProvider:
+ * it records every lookup it is asked for and answers the outcome a case sets.
+ */
+const enrichmentProvider = {
+  key: 'k13d-stub',
+  enabled: true,
+  outcome: { status: 'no_match' } as { status: 'no_match' } | { status: 'match'; result: Record<string, unknown> },
+  lookups: [] as Array<Record<string, unknown>>,
+  async enrich(query: Record<string, unknown>) {
+    enrichmentProvider.lookups.push(query);
+    return enrichmentProvider.outcome;
+  },
+};
 
 let db: any;
 let app: any;
@@ -147,6 +191,43 @@ function bulkReassign(actor: string, contactIds: string[], newOwnerId: string) {
     .set('x-test-user', actor)
     .set('x-forwarded-for', nextIp())
     .send({ contactIds, newOwnerId });
+}
+
+function create(actor: string, body: Record<string, unknown>) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${ID.bizA}/contacts`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
+    .send(body);
+}
+
+function bulkUpdateHttp(actor: string, contactIds: string[], body: Record<string, unknown>) {
+  return request(app.getHttpServer())
+    .patch(`/crm/businesses/${ID.bizA}/contacts/bulk`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
+    .send({ contactIds, ...body });
+}
+
+/**
+ * CrmService.bulkUpdateContacts called exactly as CrmController.bulkUpdateContacts
+ * forwards a member's PATCH contacts/bulk (the body fields plus actorUserId =
+ * req.user.id), settled: the result, or the refusal's status and body.
+ */
+async function bulkUpdate(actor: string, contactIds: string[], body: Record<string, unknown>) {
+  try {
+    return { result: await crm.bulkUpdateContacts({ businessId: ID.bizA, contactIds, ...body, actorUserId: actor }) };
+  } catch (err: any) {
+    return { refused: { status: err?.status, response: err?.getResponse?.() ?? String(err) } };
+  }
+}
+
+function enrich(actor: string, contactId: string, body: Record<string, unknown> = {}) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${ID.bizA}/contacts/${contactId}/enrich`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
+    .send(body);
 }
 
 let seq = 0;
@@ -310,10 +391,20 @@ beforeAll(async () => {
   const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
   const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+  const { ContactEnrichmentController } = await import('../src/modules/crm/enrichment/contact-enrichment.controller');
+  const { ContactEnrichmentService } = await import('../src/modules/crm/enrichment/contact-enrichment.service');
+  const { ApolloEnrichmentProvider } = await import('../src/modules/crm/enrichment/apollo-enrichment.provider');
+
+  // The constructor parameter types tsc emits for the enrichment controller and
+  // service (emitDecoratorMetadata, the production build), which vitest's
+  // esbuild transform does not: without them Nest injects nothing into the
+  // parameters that carry no @Inject. Copied from the two constructors.
+  Reflect.defineMetadata('design:paramtypes', [ContactEnrichmentService], ContactEnrichmentController);
+  Reflect.defineMetadata('design:paramtypes', [PrismaService, CrmService, ApolloEnrichmentProvider], ContactEnrichmentService);
 
   // ---- the real HTTP path (wired before any row is seeded) ----------------
   const moduleRef = await Test.createTestingModule({
-    controllers: [CrmController],
+    controllers: [CrmController, ContactEnrichmentController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -327,6 +418,9 @@ beforeAll(async () => {
       CrmService,
       CrmTimelineService,
       ContactAuditService,
+      ContactEnrichmentService,
+      // The paid provider is never called: a recording stub answers instead.
+      { provide: ApolloEnrichmentProvider, useValue: enrichmentProvider },
       { provide: EventEmitter2, useValue: new EventEmitter2() },
       // CrmTimelineService's side channels; the ContactEvent row itself is the
       // real write inside the contact transaction.
@@ -522,12 +616,12 @@ describe('ST-B: a PATCH that changes ownerId must name a member of this business
     });
   });
 
-  it("NEGATIVE CONTROL: the owner PATCHing ownerId to another tenant's user answers 400 with the bulk reassign message and writes nothing", async () => {
+  it("NEGATIVE CONTROL: the owner PATCHing ownerId to another tenant's user answers 400 'ownerId must belong to a member of this business' (the bulk reassign refusal, naming the field PATCH has) and writes nothing", async () => {
     const contact = await seedContact({ visibility: 'TEAM', ownerId: ID.owner });
     await expectNothingWritten(contact.id, async () => {
       const res = await patch(ID.owner, contact.id, { ownerId: ID.outsider });
       expect(res.status).toBe(400);
-      expect(res.body.message).toBe(MEMBER_MESSAGE);
+      expect(res.body.message).toBe(OWNER_MEMBER_MESSAGE);
       expect(res.text).not.toContain(String(contact.email));
     });
     expect((await rawRow(contact.id)).owner_id).toBe(ID.owner);
@@ -538,7 +632,7 @@ describe('ST-B: a PATCH that changes ownerId must name a member of this business
     await expectNothingWritten(contact.id, async () => {
       const res = await patch(ID.reassigner, contact.id, { ownerId: NOT_A_USER });
       expect(res.status).toBe(400);
-      expect(res.body.message).toBe(MEMBER_MESSAGE);
+      expect(res.body.message).toBe(OWNER_MEMBER_MESSAGE);
     });
     expect((await rawRow(contact.id)).owner_id).toBe(ID.staffB);
   });
@@ -549,7 +643,7 @@ describe('ST-B: a PATCH that changes ownerId must name a member of this business
       await expectNothingWritten(contact.id, async () => {
         const res = await patch(ID.owner, contact.id, { ownerId: '' });
         expect(res.status, `owner ${ownerId}`).toBe(400);
-        expect(res.body.message, `owner ${ownerId}`).toBe(MEMBER_MESSAGE);
+        expect(res.body.message, `owner ${ownerId}`).toBe(OWNER_MEMBER_MESSAGE);
       });
       expect((await rawRow(contact.id)).owner_id, `owner ${ownerId}`).toBe(ownerId);
     }
@@ -569,7 +663,7 @@ describe('ST-B: a PATCH that changes ownerId must name a member of this business
     const contact = await seedContact({ visibility: 'TEAM', ownerId: ID.owner });
     await expectNothingWritten(contact.id, async () => {
       await expect(crm.updateContact({ businessId: ID.bizA, contactId: contact.id, ownerId: ID.outsider }))
-        .rejects.toMatchObject({ status: 400, message: MEMBER_MESSAGE });
+        .rejects.toMatchObject({ status: 400, message: OWNER_MEMBER_MESSAGE });
     });
   });
 
@@ -607,6 +701,20 @@ describe('ST-B: a PATCH that changes ownerId must name a member of this business
     expect(updated).toHaveLength(1);
     await settle();
     expect(await db.contactAuditEntry.count({ where: { contactId: contact.id, action: 'reassigned' } })).toBe(0);
+  });
+
+  it("POST /contacts naming another tenant's user, or an id that is no user, as the owner is refused by the same membership check: 400 'ownerId must belong to a member of this business' and no contact is created (CR-3)", async () => {
+    await settle();
+    const tracesBefore = await traceCounts();
+    const contactsBefore = await db.contact.count({ where: { businessId: ID.bizA } });
+    for (const ownerId of [ID.outsider, NOT_A_USER]) {
+      const res = await create(ID.owner, { firstName: `${P}CreateOwner`, ownerId });
+      expect(res.status, ownerId).toBe(400);
+      expect(res.body.message, ownerId).toBe(OWNER_MEMBER_MESSAGE);
+    }
+    await settle();
+    expect(await db.contact.count({ where: { businessId: ID.bizA } })).toBe(contactsBefore);
+    expect(await traceCounts()).toEqual(tracesBefore);
   });
 });
 
@@ -740,5 +848,321 @@ describe('ST-A: DELETE applies the GET visibility clause: a contact the caller c
     const bulkAudits = await auditEntries(team.id, 'bulk_deleted');
     expect(bulkAudits).toHaveLength(1);
     expect(bulkAudits[0].actor).toEqual({ type: 'USER', id: ADMIN });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R0-13d-CT-BULK-ENRICH-VISIBILITY: bulk update and enrichment, the remaining
+// member-facing contact write paths, apply the GET visibility clause. Cases
+// tagged NEGATIVE CONTROL fail on the unmodified source (the R0-13c base).
+// ---------------------------------------------------------------------------
+
+const BULK_TAG = `${P}bulk-tag`;
+/** One body per write path of bulkUpdateContacts: the updateMany path and the per-row tags path. */
+const BULK_BODIES: Array<Record<string, unknown>> = [
+  { status: 'CLIENT', priority: 'high', favorite: true },
+  { addTags: [BULK_TAG] },
+];
+
+/** True when `row` (a rawRow) carries what `body` (one of BULK_BODIES) writes. */
+function bulkApplied(row: Record<string, any>, body: Record<string, unknown>) {
+  return body.addTags
+    ? Array.isArray(row.tags) && row.tags.includes(BULK_TAG)
+    : row.status === 'CLIENT' && row.priority === 'high' && row.favorite === true;
+}
+
+describe('ST-A: bulk update applies the GET visibility clause: a contact the caller cannot see is skipped like a missing id', () => {
+  it("NEGATIVE CONTROL: a crm 'write' STAFF member's bulk update naming only another member's PRIVATE contact is refused exactly as for an unknown id and writes nothing, for a field update and for added tags", async () => {
+    for (const body of BULK_BODIES) {
+      const label = JSON.stringify(body);
+      const contact = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+      expect((await detail(ID.staff, contact.id)).status).toBe(404);
+      await expectNothingWritten(contact.id, async () => {
+        const hidden = await bulkUpdate(ID.staff, [contact.id], body);
+        const absent = await bulkUpdate(ID.staff, [UNKNOWN_CONTACT], body);
+        expect(hidden, label).toEqual(absent);
+        expect(absent.refused, label).toMatchObject({ status: 403, response: { message: BULK_REFUSAL } });
+        expect(JSON.stringify(hidden), label).not.toContain(contact.id);
+      });
+    }
+  });
+
+  it("NEGATIVE CONTROL: next to a visible TEAM contact in one call only the TEAM contact is updated, the count is the one an unknown id in the hidden id's place gives, and the hidden contact gets no event or audit entry, for a field update and for added tags", async () => {
+    for (const body of BULK_BODIES) {
+      const label = JSON.stringify(body);
+      const hidden = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+      const teamA = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+      const teamB = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+      await settle();
+      const hiddenBefore = await rawRow(hidden.id);
+
+      const withHidden = await bulkUpdate(ID.staff, [teamA.id, hidden.id], body);
+      const withUnknown = await bulkUpdate(ID.staff, [teamB.id, UNKNOWN_CONTACT], body);
+      expect(withHidden, label).toEqual({ result: { updated: 1 } });
+      expect(withUnknown, label).toEqual(withHidden);
+
+      await settle();
+      expect(await rawRow(hidden.id), label).toEqual(hiddenBefore);
+      expect(await db.contactEvent.count({ where: { contactId: hidden.id } }), label).toBe(0);
+      expect(await db.contactAuditEntry.count({ where: { contactId: hidden.id } }), label).toBe(0);
+      for (const team of [teamA, teamB]) {
+        expect(bulkApplied(await rawRow(team.id), body), `${label} ${team.id}`).toBe(true);
+        expect(await db.contactEvent.count({ where: { contactId: team.id, type: 'bulk.updated' } }), `${label} ${team.id}`).toBe(1);
+        expect(await auditEntries(team.id, 'bulk_updated'), `${label} ${team.id}`).toHaveLength(1);
+      }
+    }
+  });
+
+  it("NEGATIVE CONTROL: a 'my book' member (crm_view owned) bulk-updating another member's TEAM contact, which GET answers 404, is refused exactly as for an unknown id and writes nothing", async () => {
+    const contact = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    expect((await detail(ID.myBook, contact.id)).status).toBe(404);
+    await expectNothingWritten(contact.id, async () => {
+      for (const body of BULK_BODIES) {
+        const hidden = await bulkUpdate(ID.myBook, [contact.id], body);
+        expect(hidden, JSON.stringify(body)).toEqual(await bulkUpdate(ID.myBook, [UNKNOWN_CONTACT], body));
+        expect(hidden.refused, JSON.stringify(body)).toMatchObject({ status: 403, response: { message: BULK_REFUSAL } });
+      }
+    });
+  });
+
+  it("a visible contact the member may not edit stays refused as before: a crm_edit 'owned' member bulk-updating another member's TEAM contact gets 403, nothing written", async () => {
+    const contact = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    expect((await detail(ID.editOwned, contact.id)).status).toBe(200);
+    await expectNothingWritten(contact.id, async () => {
+      for (const body of BULK_BODIES) {
+        const res = await bulkUpdate(ID.editOwned, [contact.id], body);
+        expect(res.refused, JSON.stringify(body)).toMatchObject({ status: 403, response: { message: BULK_REFUSAL } });
+      }
+    });
+  });
+
+  it("positive control: the owner bulk-updates another member's PRIVATE contact, a crm 'write' STAFF member their own PRIVATE contact, a PRIVATE contact shared with them and another member's TEAM contact in one call, and a crm_edit 'owned' member a contact they own (each persisted, with one bulk.updated event per call)", async () => {
+    const [fields, tags] = BULK_BODIES;
+    const priv = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    expect(await bulkUpdate(ID.owner, [priv.id], fields)).toEqual({ result: { updated: 1 } });
+    expect(bulkApplied(await rawRow(priv.id), fields)).toBe(true);
+
+    const own = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staff });
+    const shared = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB, shareWith: [ID.staff] });
+    const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    expect(await bulkUpdate(ID.staff, [own.id, shared.id, team.id], tags)).toEqual({ result: { updated: 3 } });
+    expect(await bulkUpdate(ID.staff, [own.id, shared.id, team.id], fields)).toEqual({ result: { updated: 3 } });
+    for (const contact of [own, shared, team]) {
+      const row = await rawRow(contact.id);
+      expect(bulkApplied(row, tags) && bulkApplied(row, fields), contact.id).toBe(true);
+      expect(await db.contactEvent.count({ where: { contactId: contact.id, type: 'bulk.updated' } }), contact.id).toBe(2);
+    }
+
+    const owned = await seedContact({ visibility: 'TEAM', ownerId: ID.editOwned });
+    expect(await bulkUpdate(ID.editOwned, [owned.id], fields)).toEqual({ result: { updated: 1 } });
+    expect(bulkApplied(await rawRow(owned.id), fields)).toBe(true);
+    expect(await db.contactEvent.count({ where: { contactId: owned.id, type: 'bulk.updated' } })).toBe(1);
+  });
+
+  it("over HTTP, PATCH contacts/bulk naming another member's PRIVATE contact answers byte-identical to the same request naming an unknown id, alone and next to a visible TEAM contact, and the hidden contact is not written, whichever handler the route reaches (M15: PATCH contacts/:contactId today, bulkUpdateContacts once V1-54 reorders the routes)", async () => {
+    const hidden = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    await settle();
+    const hiddenBefore = await rawRow(hidden.id);
+    for (const body of BULK_BODIES) {
+      for (const others of [[], [team.id]]) {
+        const label = `${JSON.stringify(body)} next to [${others}]`;
+        const withHidden = await bulkUpdateHttp(ID.staff, [...others, hidden.id], body);
+        const withUnknown = await bulkUpdateHttp(ID.staff, [...others, UNKNOWN_CONTACT], body);
+        expect(withHidden.status, label).toBe(withUnknown.status);
+        expect(normalisedError(withHidden, hidden.id), label).toBe(normalisedError(withUnknown, UNKNOWN_CONTACT));
+        expect(withHidden.headers['content-type'], label).toBe(withUnknown.headers['content-type']);
+        for (const secret of [hidden.id, hidden.email, hidden.phone, hidden.notesInternal]) {
+          expect(withHidden.text, label).not.toContain(String(secret));
+        }
+      }
+    }
+    await settle();
+    expect(await rawRow(hidden.id)).toEqual(hiddenBefore);
+    expect(await db.contactEvent.count({ where: { contactId: hidden.id } })).toBe(0);
+    expect(await db.contactAuditEntry.count({ where: { contactId: hidden.id } })).toBe(0);
+  });
+});
+
+describe('ST-A: enrichment applies the GET visibility clause before the provider call: a contact the caller cannot see answers like an unknown id', () => {
+  const MATCH = { status: 'match' as const, result: { jobTitle: `${P}Enriched title`, city: `${P}Lookup City` } };
+
+  beforeEach(() => {
+    enrichmentProvider.outcome = { status: 'no_match' };
+    enrichmentProvider.lookups = [];
+  });
+
+  /** expectRefusedLikeUnknown for POST enrich, plus: the provider was asked nothing at all. */
+  async function expectEnrichRefusedLikeUnknown(
+    actor: string,
+    contact: { id: string; email: string | null; phone: string | null; notesInternal: string | null },
+    body: Record<string, unknown> = {},
+  ) {
+    await expectRefusedLikeUnknown((contactId) => enrich(actor, contactId, body), contact);
+    expect(enrichmentProvider.lookups).toEqual([]);
+  }
+
+  it("NEGATIVE CONTROL: POST enrich by a crm 'write' STAFF member on another member's PRIVATE contact answers 404 byte-identical to an unknown id, asks the provider nothing and stamps nothing, where the provider would answer no match", async () => {
+    const contact = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    expect((await detail(ID.staff, contact.id)).status).toBe(404);
+    await expectNothingWritten(contact.id, () => expectEnrichRefusedLikeUnknown(ID.staff, contact));
+    expect((await rawRow(contact.id)).custom ?? {}).not.toHaveProperty('enrichment');
+  });
+
+  it("NEGATIVE CONTROL: the same request with force, where the provider would match, answers 404 like an unknown id: the contact's email and name never reach the provider and nothing is written", async () => {
+    enrichmentProvider.outcome = MATCH;
+    const contact = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    await expectNothingWritten(contact.id, () => expectEnrichRefusedLikeUnknown(ID.staff, contact, { force: true }));
+    expect(JSON.stringify(enrichmentProvider.lookups)).not.toContain(String(contact.email));
+    expect((await rawRow(contact.id)).job_title).toBeNull();
+  });
+
+  it("NEGATIVE CONTROL: a 'my book' member (crm_view owned) gets 404 like an unknown id on enrich for another member's TEAM contact, as on GET, with no provider call", async () => {
+    const contact = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    expect((await detail(ID.myBook, contact.id)).status).toBe(404);
+    await expectNothingWritten(contact.id, () => expectEnrichRefusedLikeUnknown(ID.myBook, contact));
+  });
+
+  it("NEGATIVE CONTROL: a member whose crm_edit is 'owned' gets 404 like an unknown id, not the edit-scope 403, on enrich for another member's PRIVATE contact, with no provider call", async () => {
+    const contact = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    await expectNothingWritten(contact.id, () => expectEnrichRefusedLikeUnknown(ID.editOwned, contact));
+  });
+
+  it("a visible contact the member may not edit keeps today's 403: crm_edit 'owned' enriching another member's TEAM contact, no provider call, nothing written", async () => {
+    const contact = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    expect((await detail(ID.editOwned, contact.id)).status).toBe(200);
+    await expectNothingWritten(contact.id, async () => {
+      const res = await enrich(ID.editOwned, contact.id, { force: true });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe('You can only edit contacts you own');
+      expect(res.text).not.toContain(String(contact.email));
+    });
+    expect(enrichmentProvider.lookups).toEqual([]);
+  });
+
+  it("positive control: the owner enriches another member's PRIVATE contact (a match fills the blank fields, recorded as updated by the owner) and a crm 'write' STAFF member enriches their own PRIVATE contact and another member's TEAM contact (a miss is stamped); each lookup carries that contact's own email and name", async () => {
+    enrichmentProvider.outcome = MATCH;
+    const priv = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    const byOwner = await enrich(ID.owner, priv.id, { force: true });
+    expect(byOwner.status).toBe(201);
+    expect(byOwner.body).toEqual({ status: 'enriched', provider: enrichmentProvider.key, filled: ['jobTitle', 'city'] });
+    expect(enrichmentProvider.lookups).toEqual([expect.objectContaining({ email: priv.email, firstName: priv.firstName })]);
+    expect(await rawRow(priv.id)).toMatchObject({ job_title: MATCH.result.jobTitle, city: MATCH.result.city });
+    const audits = await auditEntries(priv.id, 'updated');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].actor).toEqual({ type: 'USER', id: ID.owner });
+
+    enrichmentProvider.outcome = { status: 'no_match' };
+    const own = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staff });
+    const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    for (const contact of [own, team]) {
+      enrichmentProvider.lookups = [];
+      const res = await enrich(ID.staff, contact.id);
+      expect(res.status, contact.id).toBe(201);
+      expect(res.body, contact.id).toEqual({ status: 'no_match', provider: enrichmentProvider.key, filled: [] });
+      expect(enrichmentProvider.lookups, contact.id).toEqual([expect.objectContaining({ email: contact.email, firstName: contact.firstName })]);
+      expect((await rawRow(contact.id)).custom, contact.id).toMatchObject({ enrichment: { provider: enrichmentProvider.key, filled: [] } });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R0-13d review repairs. ST-1: every caller of bulkUpdateContacts, the owner
+// and a system call with no actor (the KEY flow-orchestrator
+// 'update_status_with_confirmation' tool) included, writes only live rows of
+// the path tenant, so another tenant's id is skipped like an unknown one: the
+// same count, no event or audit entry under either tenant, and an unknown id no
+// longer fails the contact_events foreign key after an audit entry was written.
+// ST-2: a member's bulk update is recorded as theirs (USER), not SYSTEM.
+// ---------------------------------------------------------------------------
+
+/**
+ * CrmService.bulkUpdateContacts called as the KEY flow-orchestrator
+ * 'update_status_with_confirmation' tool calls it: no actorUserId, no audit
+ * context. Settled like bulkUpdate.
+ */
+async function systemBulkUpdate(contactIds: string[], body: Record<string, unknown>) {
+  try {
+    return { result: await crm.bulkUpdateContacts({ businessId: ID.bizA, contactIds, ...body }) };
+  } catch (err: any) {
+    return { refused: { status: err?.status, response: err?.getResponse?.() ?? String(err) } };
+  }
+}
+
+let foreignSeq = 0;
+/** A live contact of the other tenant (bizB), seeded directly. */
+async function seedForeignContact() {
+  foreignSeq += 1;
+  const id = `${P}c_bizB_${foreignSeq}`;
+  const email = `${P}bizB-${foreignSeq}@test.local`;
+  return db.contact.create({
+    data: { id, businessId: ID.bizB, firstName: `${P}Foreign${foreignSeq}`, email, emailNormalized: email, visibility: 'TEAM', ownerId: ID.outsider },
+  });
+}
+
+describe("R0-13d review repairs: bulk update writes only the path tenant's rows for every caller and records the member who made it", () => {
+  const CALLERS: Array<[string, (ids: string[], body: Record<string, unknown>) => Promise<any>]> = [
+    ['owner', (ids, body) => bulkUpdate(ID.owner, ids, body)],
+    ['system (no actor)', (ids, body) => systemBulkUpdate(ids, body)],
+  ];
+
+  it("NEGATIVE CONTROL: the owner's and a system (no actor) bulk update naming another tenant's contact skip it exactly like an unknown id: the same count alone and next to a TEAM contact, the foreign row unchanged, and no event or audit entry for the foreign or the unknown id under either tenant, for a field update and for added tags (ST-1)", async () => {
+    for (const [who, send] of CALLERS) {
+      for (const body of BULK_BODIES) {
+        const label = `${who} ${JSON.stringify(body)}`;
+        const foreign = await seedForeignContact();
+        const teamA = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+        const teamB = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+        await settle();
+        const foreignBefore = await rawRow(foreign.id);
+
+        const alone = await send([foreign.id], body);
+        expect(alone, label).toEqual(await send([UNKNOWN_CONTACT], body));
+        expect(alone, label).toEqual({ result: { updated: 0 } });
+
+        const withForeign = await send([teamA.id, foreign.id], body);
+        const withUnknown = await send([teamB.id, UNKNOWN_CONTACT], body);
+        expect(withForeign, label).toEqual({ result: { updated: 1 } });
+        expect(withUnknown, label).toEqual(withForeign);
+
+        await settle();
+        expect(await rawRow(foreign.id), label).toEqual(foreignBefore);
+        for (const id of [foreign.id, UNKNOWN_CONTACT]) {
+          expect(await db.contactEvent.count({ where: { contactId: id } }), `${label} ${id}`).toBe(0);
+          expect(await db.contactAuditEntry.count({ where: { contactId: id } }), `${label} ${id}`).toBe(0);
+        }
+        for (const team of [teamA, teamB]) {
+          expect(bulkApplied(await rawRow(team.id), body), `${label} ${team.id}`).toBe(true);
+          expect(await db.contactEvent.count({ where: { contactId: team.id, type: 'bulk.updated' } }), `${label} ${team.id}`).toBe(1);
+          expect(await auditEntries(team.id, 'bulk_updated'), `${label} ${team.id}`).toHaveLength(1);
+        }
+      }
+    }
+  });
+
+  it("NEGATIVE CONTROL: a member's bulk update is recorded as theirs: each bulk_updated audit entry names them as USER and each bulk.updated event carries actorType USER and their id, for a crm 'write' STAFF member and the owner, for a field update and for added tags; a system call (no actor) stays SYSTEM with no user on the event (ST-2)", async () => {
+    for (const body of BULK_BODIES) {
+      const label = JSON.stringify(body);
+      for (const actor of [ID.staff, ID.owner]) {
+        const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+        expect(await bulkUpdate(actor, [team.id], body), `${label} ${actor}`).toEqual({ result: { updated: 1 } });
+        const audits = await auditEntries(team.id, 'bulk_updated');
+        expect(audits, `${label} ${actor}`).toHaveLength(1);
+        expect(audits[0].actor, `${label} ${actor}`).toEqual({ type: 'USER', id: actor });
+        const events = await db.contactEvent.findMany({ where: { contactId: team.id, type: 'bulk.updated' } });
+        expect(events, `${label} ${actor}`).toHaveLength(1);
+        expect(events[0], `${label} ${actor}`).toMatchObject({ businessId: ID.bizA, actorType: 'USER', actorId: actor });
+      }
+
+      const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+      expect(await systemBulkUpdate([team.id], body), label).toEqual({ result: { updated: 1 } });
+      const audits = await auditEntries(team.id, 'bulk_updated');
+      expect(audits, label).toHaveLength(1);
+      expect(audits[0].actor, label).toEqual({ type: 'SYSTEM' });
+      const events = await db.contactEvent.findMany({ where: { contactId: team.id, type: 'bulk.updated' } });
+      expect(events, label).toHaveLength(1);
+      expect(events[0].actorId, label).toBeNull();
+      expect(events[0].actorType, label).not.toBe('USER');
+    }
   });
 });
