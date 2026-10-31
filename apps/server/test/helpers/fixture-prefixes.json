@@ -108,6 +108,11 @@
       "packet": "R0-34-KEY-AUDIT-TENANT"
     },
     {
+      "prefix": "k34b_",
+      "owner": "apps/server/test/key-cortex-tenant-binding.integration.test.ts",
+      "packet": "R0-34 / R0-34b-KEY-TENANT-BINDING"
+    },
+    {
       "prefix": "kab_",
       "owner": "apps/server/test/key-action-boundary.integration.test.ts",
       "legacy": true
