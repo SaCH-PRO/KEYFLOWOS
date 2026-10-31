@@ -1,5 +1,6 @@
 /**
- * R0-D6-LISTEN-IPV4-FALLBACK — pure spec for the listen-host selection in main.ts.
+ * R0-D6-LISTEN-IPV4-FALLBACK — pure spec for the listen-host selection in
+ * listen-host.ts, the helper main.ts binds through.
  *
  * Journey harness defect D6: `app.listen(port, '::')` dies with
  * `listen EAFNOSUPPORT: address family not supported :::<port>` on hosts whose
@@ -19,12 +20,22 @@
  *     EAFNOSUPPORT) -> one retry on '0.0.0.0';
  *   - any other error, on any host -> rethrown untouched, no retry.
  *
- * Importing './main' must not boot the server: bootstrap() only runs when
- * main.js is the process entry point.
+ * This spec imports listen-host.ts, never main.ts. main.ts's module scope loads
+ * the repo-root .env through dotenv and pulls in @nestjs/core and @keyflow/db;
+ * under the unit suite's shared module registry (vitest.unit.config.ts,
+ * isolate: false, shuffled) importing it here would leak a developer's .env
+ * into every spec that runs later in the same worker (review finding
+ * D6-SEC-2 / D6-R2). And main.ts must keep booting unconditionally: a
+ * `require.main === module` guard turns any require()-based load of the entry
+ * (pm2 fork mode, a `node -r` wrapper) into a silent exit-0 no-op (D6-SEC-3).
+ * The last describe block pins both.
  */
+import fs from 'node:fs';
+import { builtinModules } from 'node:module';
 import net from 'node:net';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { listenWithIpv4Fallback, probeAddressFamily, resolveListenHosts } from './main';
+import { listenWithIpv4Fallback, probeAddressFamily, resolveListenHosts } from './listen-host';
 
 function errnoError(code: string, message = `listen ${code}`): NodeJS.ErrnoException {
   const err = new Error(message) as NodeJS.ErrnoException;
@@ -249,4 +260,53 @@ describe('probeAddressFamily', () => {
 
     await expect(probeAddressFamily('::')).resolves.toBe(kernelSaysSupported);
   });
+});
+
+describe('module boundaries (review repairs D6-SEC-2, D6-SEC-3, D6-R2)', () => {
+  const LISTEN_HOST_SRC = fs.readFileSync(path.join(__dirname, 'listen-host.ts'), 'utf8');
+  const MAIN_SRC = fs.readFileSync(path.join(__dirname, 'main.ts'), 'utf8');
+
+  /** Every module specifier a source file loads: `import … from 'x'`, `import 'x'`, `require('x')`. */
+  function loadedSpecifiers(src: string): string[] {
+    const out: string[] = [];
+    for (const m of src.matchAll(/^\s*import\s+(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]/gm)) out.push(m[1]);
+    for (const m of src.matchAll(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/g)) out.push(m[1]);
+    for (const m of src.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)) out.push(m[1]);
+    return out;
+  }
+
+  function isNodeBuiltin(specifier: string): boolean {
+    return specifier.startsWith('node:') || builtinModules.includes(specifier);
+  }
+
+  it('listen-host.ts loads nothing but Node builtins — no dotenv, no Nest, no @keyflow/db', () => {
+    // The scan must see the one import the module does have, or it is vacuous.
+    const specifiers = loadedSpecifiers(LISTEN_HOST_SRC);
+    expect(specifiers.length).toBeGreaterThan(0);
+    expect(specifiers.filter((s) => !isNodeBuiltin(s))).toEqual([]);
+  });
+
+  it('this spec never imports main.ts', () => {
+    const ownSrc = fs.readFileSync(__filename, 'utf8');
+    expect(loadedSpecifiers(ownSrc)).not.toContain('./main');
+    expect(loadedSpecifiers(ownSrc)).toContain('./listen-host');
+  });
+
+  it('main.ts takes the listen helper from listen-host.ts instead of defining it', () => {
+    expect(loadedSpecifiers(MAIN_SRC)).toContain('./listen-host');
+    expect(MAIN_SRC).not.toMatch(/function (resolveListenHosts|probeAddressFamily|listenWithIpv4Fallback)\b/);
+    expect(MAIN_SRC).toMatch(/await listenWithIpv4Fallback\(app, port\)/);
+  });
+
+  it('main.ts boots unconditionally — no require.main guard turning a require() of the entry into a silent no-op', () => {
+    expect(MAIN_SRC).not.toMatch(/require\.main/);
+    expect(MAIN_SRC).toMatch(/^bootstrap\(\);\s*$/m);
+  });
+
+  // D6-SEC-1 / D6-R1: LISTEN_HOST is read through the `env` parameter, which the
+  // env-documented gate (core/config/env-documented.spec.ts) cannot see, so a
+  // missing `# LISTEN_HOST=` line in .env.example is not caught by it. The line
+  // belongs in .env.example, which is outside the R0-D6 write set — integrator
+  // action; this stays a todo until it lands rather than being asserted red.
+  it.todo('LISTEN_HOST is declared in .env.example (integrator: add `# LISTEN_HOST=` — IP literal, pinned host is never second-guessed; file is outside the R0-D6 write set)');
 });
