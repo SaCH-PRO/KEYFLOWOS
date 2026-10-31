@@ -14,6 +14,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { primaryNav } from "@/lib/nav-config";
+import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 import type { NavItem, NavSection, PrimaryNavItem, DrawerSurface } from "@/lib/nav-config";
 
 interface DesktopSidebarProps {
@@ -265,15 +266,16 @@ export function DesktopSidebar({
         className="w-14 flex flex-col items-center border-r border-border h-full py-3 gap-1 flex-shrink-0 relative"
         style={{ background: "hsl(var(--kf-sidebar-bg))" }}
       >
-        {/* KEY Home Button */}
+        {/* KEY Home Button. Straight to the cockpit: the keyflow-command
+            route is only a redirect stub to it (kept for bookmarks). */}
         <Link
-          href="/app/keyflow-command"
+          href="/app/command-center"
           className="h-11 w-11 min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center flex-shrink-0 mb-3 relative group"
           style={{
             background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
             boxShadow: "0 4px 16px hsl(var(--kf-accent1) / 0.3)",
           }}
-          title="KEYFLOW — Command Center"
+          title={`KEYFLOW — ${NAV_ROUTE_LABELS["/app/command-center"]}`}
         >
           <Sparkles className="w-5 h-5 text-white drop-shadow-md" />
           <div className="absolute inset-0 rounded-xl bg-white/0 group-hover:bg-white/10 transition-colors" />

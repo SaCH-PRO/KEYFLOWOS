@@ -120,13 +120,48 @@ export interface SemanticRoute {
 }
 
 /* ────────────────────────────────────────────────────────────────
+ * Navigation labels under decision D-09
+ * ──────────────────────────────────────────────────────────────── */
+
+/**
+ * The one name each of these screens goes by: the rail/nav entry, the
+ * breadcrumb below and the page header all read or are checked against it
+ * (lib/__tests__/nav-labels-agree.spec.ts).
+ *
+ * D-09 is OPEN: "Cockpit" or "Command Center" for /app/command-center, "Sales"
+ * or "Revenue" for /app/commerce. Until the owner rules, each value is the
+ * label the codebase already showed most (R0-08). For the cockpit, counted at
+ * ab8efa35 as user-visible strings that name or link the screen, one per
+ * surface (a header rendered in three states counts once):
+ *   "Command Center" 12 — breadcrumb, page header ("Business Command Center"),
+ *     logo tooltip, flow-shell home pill, mobile drawer header, and seven
+ *     back/go-to/open links (command-center/[id], genome hub, onboarding
+ *     completion, genesis readiness, key-modes, key-autonomy, proposal card);
+ *   "Cockpit" 5 — desktop rail, mobile drawer link, add-on gate back link,
+ *     the ⌘H entry in shortcut help and the kf:go-home shortcut description.
+ * The rail and the add-on gate (R0-08 write set) now read this value; the
+ * other three "Cockpit" surfaces are outside it and are ledgered as known
+ * disagreements in nav-labels-agree.spec.ts, so the mobile drawer saying
+ * "Cockpit" while the desktop rail says "Command Center" is visible, not silent.
+ * The ruling is a change to the value here; the spec then names anything that
+ * still disagrees.
+ *
+ * Lives here rather than in nav-config.ts because nav-config is a "use client"
+ * module and this one is not, so any importer gets a plain string.
+ */
+export const NAV_ROUTE_LABELS = {
+  "/app/command-center": "Command Center",
+  "/app/commerce": "Sales",
+} as const satisfies Record<string, string>;
+
+/* ────────────────────────────────────────────────────────────────
  * Route Registry
  * ──────────────────────────────────────────────────────────────── */
 
 export const SEMANTIC_ROUTES: SemanticRoute[] = [
   /* ─── Core ─── */
   { segment: "app", label: "Home", workspace: "cockpit", icon: Zap },
-  { segment: "command-center", label: "Command Center", workspace: "cockpit", icon: Zap },
+  { segment: "command-center", label: NAV_ROUTE_LABELS["/app/command-center"], workspace: "cockpit", icon: Zap },
   { segment: "keyflow-command", label: "Command", workspace: "cockpit", icon: Zap },
   { segment: "control-tower", label: "KEYFLOW", workspace: "cockpit", icon: Zap },
   { segment: "key", label: "KEY", workspace: "key", icon: Bot },
@@ -140,7 +175,7 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
   { segment: "sequences", label: "Sequences", workspace: "contacts", icon: Mail, isDetailSurface: true, entityType: "sequence" },
 
   /* ─── Commerce ─── */
-  { segment: "commerce", label: "Sales", workspace: "commerce", icon: Banknote, parentOverride: [{ label: "Money", href: "/app/money" }] },
+  { segment: "commerce", label: NAV_ROUTE_LABELS["/app/commerce"], workspace: "commerce", icon: Banknote, parentOverride: [{ label: "Money", href: "/app/money" }] },
   { segment: "invoices", label: "Invoices", workspace: "commerce", icon: Receipt, isDetailSurface: true, entityType: "invoice" },
   { segment: "quotes", label: "Quotes", workspace: "commerce", icon: FileText, isDetailSurface: true, entityType: "quote" },
   { segment: "products", label: "Products", workspace: "commerce", icon: Package, isDetailSurface: true, entityType: "product" },

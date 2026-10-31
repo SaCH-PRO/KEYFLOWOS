@@ -321,7 +321,7 @@ function TransactionsTab({
                   <td className="px-4 py-3 text-gray-600">
                     {t.description ?? "—"}
                     {t.invoiceId && (
-                      <Link href={`/app/commerce?tab=invoices&invoice=${t.invoiceId}`} className="ml-2 text-xs text-violet-600 hover:underline">
+                      <Link href={`/app/commerce/invoices/${encodeURIComponent(t.invoiceId)}`} className="ml-2 text-xs text-violet-600 hover:underline">
                         Invoice
                       </Link>
                     )}
@@ -730,7 +730,7 @@ function TransactionDrawer({ tx, onClose }: { tx: PaymentsTransaction; onClose: 
         <Row label="Created">{new Date(tx.createdAt).toLocaleString()}</Row>
         {tx.invoiceId && (
           <Row label="Invoice">
-            <Link href={`/app/commerce?tab=invoices&invoice=${tx.invoiceId}`} className="text-violet-600 hover:underline">
+            <Link href={`/app/commerce/invoices/${encodeURIComponent(tx.invoiceId)}`} className="text-violet-600 hover:underline">
               {tx.invoiceId}
             </Link>
           </Row>

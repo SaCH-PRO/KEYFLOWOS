@@ -17,7 +17,7 @@ const SECTION_META: Record<SetupSection, { title: string; subtitle: string; icon
     title: "Billing & Tax",
     subtitle: "Tax rates, invoice terms, and billing preferences",
     icon: Receipt,
-    href: "/app/settings/business?tab=billing",
+    href: "/app/settings/billing",
     hrefLabel: "Open full Billing Settings",
   },
   payments: {

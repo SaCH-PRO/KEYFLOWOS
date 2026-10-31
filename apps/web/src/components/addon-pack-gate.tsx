@@ -13,6 +13,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { isFeatureEnabled, type DormantFeatureFlagKey } from "@/lib/feature-flags";
+import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 
 interface AddonPackGateProps {
   pack: DormantFeatureFlagKey;
@@ -117,18 +118,18 @@ export function AddonPackGate({
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link
-            href="/app/settings/business?tab=billing"
+            href="/app/settings/billing"
             className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all hover:scale-[1.02] min-h-[44px] min-w-[140px]"
             style={{ background: meta.color, color: "hsl(var(--kf-foreground))" }}
           >
             {meta.cta}
           </Link>
           <Link
-            href="/app/keyflow-command"
+            href="/app/command-center"
             className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-muted/40 px-4 py-2.5 text-sm font-medium text-foreground/80 hover:bg-muted/70 transition-colors min-h-[44px]"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Back to Cockpit
+            Back to {NAV_ROUTE_LABELS["/app/command-center"]}
           </Link>
         </div>
 
