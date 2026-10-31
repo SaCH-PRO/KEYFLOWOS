@@ -122,9 +122,13 @@ export default function PublicInvoicePage() {
   const accent = business?.primaryColor || "#F97316";
   const isPaid = invoice.status === "PAID";
   const isVoid = invoice.status === "VOID";
-  // V1-49: a receipt exists once something has been received (PAID, or
-  // PARTIALLY_PAID with the remaining stated); the server decides the rest.
-  const hasReceipt = isPaid || invoice.status === "PARTIALLY_PAID";
+  // V1-49: a receipt exists once something has been received, with the
+  // remaining stated. That is read from the server's paid figure, not the
+  // status (review CR-V49-1): a part-paid invoice moved to OVERDUE still has
+  // one. Without a balance block (an older server) the status decides. The
+  // receipt route has the last word.
+  const hasReceipt =
+    !isVoid && (balance ? Number(balance.amountPaid) > 0 : isPaid || invoice.status === "PARTIALLY_PAID");
   const contactName = invoice.contact
     ? [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(" ") || "Customer"
     : "Customer";

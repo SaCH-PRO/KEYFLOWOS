@@ -3,8 +3,8 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { CommerceService } from './commerce.service';
 import { GmailService } from './gmail.service';
 import { buildInvoiceEmailHtml } from './invoice-email.template';
-import type { InvoiceEmailPaymentSlim, InvoiceForEmail } from './invoice-email.types';
-import { computeBalance } from './invoice-workflow.service';
+import type { InvoiceForEmail } from './invoice-email.types';
+import { isSettledForReceiptEmail, ownTenantReceiptBalance } from './invoice-receipt-builder.service';
 import { appUrl } from '../../core/config/runtime-urls';
 
 /**
@@ -44,11 +44,9 @@ export class InvoiceReceiptListener {
       // as anything but PAID with nothing remaining (a refund reopened it
       // before this ran, rows short of the total, no row at all) gets no
       // receipt, rather than one claiming full settlement; nothing is written.
-      const ownRows = ((invoice.payments ?? []) as Array<InvoiceEmailPaymentSlim & { businessId?: string | null }>).filter(
-        (p) => p.businessId === invoice.businessId,
-      );
-      const balance = computeBalance(Number(invoice.total), ownRows, invoice.currency);
-      if (invoice.status !== 'PAID' || balance.remaining > 0) {
+      // The operator's "Resend receipt" applies the same rule (review SEC-V49-1).
+      const balance = ownTenantReceiptBalance(invoice);
+      if (!isSettledForReceiptEmail(invoice, balance)) {
         this.logger.log(
           `Auto-receipt not sent for invoice ${invoice.id}: ${invoice.status} with ${balance.remaining} ${invoice.currency} still owed`,
         );

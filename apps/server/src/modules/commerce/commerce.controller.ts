@@ -20,14 +20,14 @@ import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-
 import { sanitizeString } from '../../core/utils/sanitize';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
 import { BulkProductsDto } from './dto/bulk-products.dto';
-import { InvoiceReceiptBuilderService } from './invoice-receipt-builder.service';
+import { InvoiceReceiptBuilderService, isSettledForReceiptEmail, ownTenantReceiptBalance } from './invoice-receipt-builder.service';
 import { GmailService } from './gmail.service';
 import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
 import { buildInvoiceEmailHtml } from './invoice-email.template';
-import { sumSuccessfulPayments, type InvoiceForEmail } from './invoice-email.types';
+import type { InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
@@ -1146,7 +1146,14 @@ export class CommerceController {
   ) {
     const business = invoice.business;
     const contact = invoice.contact;
-    const paid = sumSuccessfulPayments(invoice.payments);
+    // V1-49 review (SEC-V49-1, CR-V49-2): the amount received is computeBalance's
+    // paid over the invoice's own-tenant rows, the rule the invoice.paid receipt
+    // and the public receipt use. It was sumSuccessfulPayments over every row,
+    // so a SUCCESSFUL row tagged with another businessId (M31) raised the
+    // "received" figure in a customer email. Tenancy does not depend on the
+    // variant, so the invoice and reminder emails use the same rows; their
+    // arithmetic (remaining = total - paid) is unchanged.
+    const paid = ownTenantReceiptBalance(invoice).paid;
     return buildInvoiceEmailHtml({
       businessName: business?.name ?? 'Your business',
       businessLogo: business?.logoUrl,
@@ -1270,6 +1277,14 @@ export class CommerceController {
       | null;
     if (!invoice || invoice.businessId !== businessId) throw new ForbiddenException('Invoice not found');
     if (invoice.status !== 'PAID') throw new ForbiddenException('Invoice is not yet paid');
+    // V1-49 review (CR-V49-2): the same settlement rule as the invoice.paid
+    // receipt. A PAID row whose own-tenant rows do not cover the total (a
+    // foreign-tenant row, no row, a refund that left it PAID) gets the same
+    // refusal, before any link is looked up or minted, rather than a receipt
+    // the automatic path would not send.
+    if (!isSettledForReceiptEmail(invoice, ownTenantReceiptBalance(invoice))) {
+      throw new ForbiddenException('Invoice is not yet paid');
+    }
     const recipient = body.recipientEmail || invoice.contact?.email;
     if (!recipient) throw new ForbiddenException('Recipient email is required');
     const paymentUrl = await this.buildPublicInvoiceUrl(invoiceId, businessId);
@@ -1355,7 +1370,8 @@ export class CommerceController {
   // ledger counts it): the token is the credential, as on the sibling view,
   // and it is rate limited. An unknown, expired, inactive or foreign-tenant
   // link, and an invoice no receipt can be shown for, answer one 404; a
-  // payable invoice with nothing received is a 409. Read-only: no view event,
+  // shareable invoice whose own-tenant rows net to zero or less (nothing
+  // received, or refunded away) is a 409. Read-only: no view event,
   // no token rotation, no write.
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(30, 60_000)

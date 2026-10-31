@@ -152,4 +152,11 @@ describe('no "remaining 0" receipt for a partial state (V1-49, M24)', () => {
     expect(commerce.findAnyPaymentLink).not.toHaveBeenCalled();
     expect(commerce.createPaymentLink).not.toHaveBeenCalled();
   });
+
+  it('RL-09 (review SEC-V49-2): a PAID invoice whose only payment was refunded (deriveStatusAfterPayment leaves it PAID) gets no receipt', async () => {
+    const { commerce, gmail, fire } = setup(invoice('PAID', 100, [{ amount: 100, status: 'REFUNDED' }]));
+    await fire();
+    expect(gmail.sendEmail).not.toHaveBeenCalled();
+    expect(commerce.recordReceiptSent).not.toHaveBeenCalled();
+  });
 });

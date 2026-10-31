@@ -22,7 +22,7 @@
  * shows none.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import PublicInvoicePage from "../[token]/page";
 
 const TOKEN = "Zk3v8yX2Qp0wLr7mNc4tHb6sJd1aUe9f";
@@ -186,5 +186,64 @@ describe("controls (V1-48)", () => {
     expect(await screen.findByTestId("public-invoice-amount-due")).toHaveTextContent(money(250));
     expect(screen.queryByTestId("public-invoice-paid")).toBeNull();
     expect(screen.queryByTestId("public-invoice-remaining")).toBeNull();
+  });
+});
+
+/** Answer the token read with `view` and the receipt read with `receiptBody`; record every requested path. */
+function stubTokenAndReceipt(view: unknown, receiptBody: unknown, receiptStatus = 200) {
+  const requested: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const { pathname } = new URL(url, "http://localhost");
+      requested.push(pathname);
+      if (pathname.endsWith(`/commerce/public/invoice-link/${TOKEN}/receipt`)) return jsonResponse(receiptStatus, receiptBody);
+      if (pathname.endsWith(`/commerce/public/invoice-link/${TOKEN}`)) return jsonResponse(200, view);
+      return jsonResponse(404, { message: "Not Found" }, "Not Found");
+    }),
+  );
+  return requested;
+}
+
+describe("the receipt button follows the received amount, not the status (V1-49 review CR-V49-1)", () => {
+  it("W-07: a part-paid invoice moved to OVERDUE (100 of 250 received) offers the receipt, and shows Received / Remaining as served", async () => {
+    const requested = stubTokenAndReceipt(
+      { ok: true, token: TOKEN, invoice: invoice({ status: "OVERDUE" }), balance: { amountPaid: 100, amountDue: 150, paidAt: null } },
+      { invoiceNumber: "INV-0042", status: "OVERDUE", currency: "TTD", total: 250, amountPaid: 100, amountDue: 150, paidAt: null, issuedAt: null },
+    );
+    render(<PublicInvoicePage />);
+
+    fireEvent.click(await screen.findByTestId("public-invoice-receipt-button"));
+    expect(await screen.findByTestId("public-receipt-paid")).toHaveTextContent(money(100));
+    expect(screen.getByTestId("public-receipt-remaining")).toHaveTextContent(money(150));
+    expect(requested.some((p) => p.endsWith(`/commerce/public/invoice-link/${TOKEN}/receipt`))).toBe(true);
+  });
+
+  it("W-08: nothing received offers no receipt: a SENT invoice with 0 paid, and a PAID invoice whose payment was refunded (paid 0)", async () => {
+    for (const status of ["SENT", "PAID"]) {
+      const requested = stubTokenAndReceipt(
+        { ok: true, token: TOKEN, invoice: invoice({ status }), balance: { amountPaid: 0, amountDue: status === "PAID" ? 500 : 250, paidAt: null } },
+        { message: "No receipt is available for this invoice" },
+        409,
+      );
+      render(<PublicInvoicePage />);
+
+      await screen.findByTestId("public-invoice-remaining");
+      expect(screen.queryByTestId("public-invoice-receipt-button"), status).toBeNull();
+      expect(requested.some((p) => p.endsWith("/receipt")), status).toBe(false);
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("W-09 control: an older payload without a balance block keeps the status rule (PAID offers the receipt)", async () => {
+    stubTokenAndReceipt(
+      { ok: true, token: TOKEN, invoice: invoice({ status: "PAID" }) },
+      { invoiceNumber: "INV-0042", status: "PAID", currency: "TTD", total: 250, amountPaid: 250, amountDue: 0, paidAt: null },
+    );
+    render(<PublicInvoicePage />);
+
+    expect(await screen.findByTestId("public-invoice-receipt-button")).toBeInTheDocument();
   });
 });

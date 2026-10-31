@@ -23,6 +23,12 @@
  *   PARTIALLY_PAID 40 of 100  -> 200, amountPaid 40, amountDue 60, paidAt null (D-07: "the
  *                                receipt", paid and remaining shown as on the link)
  *   SENT / OVERDUE, unpaid    -> 409, no figures
+ *   (review repairs)          -> the own-tenant rows decide, not the status: OVERDUE after a part
+ *                                payment answers the receipt (CR-V49-1); a net of zero or less
+ *                                (paid in full, then refunded, still PAID) is a 409 (SEC-V49-2);
+ *                                the operator's Resend receipt states the same own-tenant amount
+ *                                and refuses what the invoice.paid listener would not send
+ *                                (SEC-V49-1, CR-V49-2)
  *   unknown / expired / inactive / foreign-tenant link, or a DRAFT, VOID or deleted invoice
  *                             -> 404, the same body as an unknown token
  *   LEDGER (no refund row)    -> amountPaid = sum(SUCCESSFUL) = computeBalance.paid = the ledger
@@ -91,8 +97,13 @@ const ID = {
   invLedger: `${P}invLedger`,
   invRefund: `${P}invRefund`,
   invTenantA: `${P}invTenantA`,
+  // review repairs (CR-V49-1, SEC-V49-2, CR-V49-2)
+  invOverduePartial: `${P}invOverduePartial`,
+  invRefundFull: `${P}invRefundFull`,
+  invShortPaid: `${P}invShortPaid`,
   // tenant B
   invB: `${P}invB`,
+  invBResend: `${P}invBResend`,
 };
 
 /** Seeded PaymentLink rows (every other link is minted by the real route). */
@@ -124,6 +135,11 @@ let PUBLIC_RATE_LIMIT_KEY_REF: string;
 
 /** Route-minted links: invoice -> token. */
 const TOKEN: Record<string, string> = {};
+
+/** GmailService stub (nothing leaves the process); the resend-receipt cases spy on sendEmail. */
+const gmailStub = {
+  sendEmail: async (_m: { businessId: string; to: string; subject: string; htmlBody: string }) => ({ messageId: `${P}msg` }),
+};
 let unknownRes: { status: number; body: any };
 
 async function cleanup() {
@@ -164,7 +180,16 @@ function ownerOf(biz: string) {
 }
 
 function bizOf(invoiceId: string) {
-  return invoiceId === ID.invB ? ID.bizB : ID.bizA;
+  return invoiceId === ID.invB || invoiceId === ID.invBResend ? ID.bizB : ID.bizA;
+}
+
+/** The operator's "Resend receipt" through the real route (AuthGuard, BusinessGuard, revenue:write). */
+function resendReceipt(invoiceId: string) {
+  const biz = bizOf(invoiceId);
+  return agent()
+    .post(`/commerce/businesses/${biz}/invoices/${invoiceId}/resend-receipt`)
+    .set(HEADER, ownerOf(biz))
+    .send({});
 }
 
 /** An operator payment through the real route (a real posting). Returns the Payment id. */
@@ -358,7 +383,7 @@ beforeAll(async () => {
       { provide: PublicEventsService, useValue: {} },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
       { provide: TimeEntryService, useValue: {} },
-      { provide: GmailService, useValue: { sendEmail: async () => ({ messageId: `${P}msg` }) } },
+      { provide: GmailService, useValue: gmailStub },
       { provide: CommerceVisionService, useValue: {} },
       { provide: StoreReadinessService, useValue: {} },
       PaymentEvidenceService,
@@ -429,7 +454,10 @@ beforeAll(async () => {
   }
 
   // ---- links minted by the real route while the invoices are payable ------
-  for (const inv of [ID.invPaid, ID.invPartial, ID.invSent, ID.invOverdue, ID.invDeleted, ID.invLedger, ID.invRefund, ID.invTenantA, ID.invB]) {
+  for (const inv of [
+    ID.invPaid, ID.invPartial, ID.invSent, ID.invOverdue, ID.invDeleted, ID.invLedger, ID.invRefund, ID.invTenantA, ID.invB,
+    ID.invOverduePartial, ID.invRefundFull, ID.invShortPaid, ID.invBResend,
+  ]) {
     await mintLink(inv);
   }
 
@@ -450,6 +478,26 @@ beforeAll(async () => {
   await pay(ID.invTenantA, 50, 'cash', 'slip_tenant_a');
   await pay(ID.invB, 100, 'cash', 'slip_b');
 
+  // ---- review repairs ---------------------------------------------------------
+  // CR-V49-1: 40 of 100 paid, then the operator moves it to OVERDUE (PARTIALLY_PAID -> OVERDUE is legal).
+  await pay(ID.invOverduePartial, 40, 'cash', 'slip_overdue_partial');
+  const overdue = await agent()
+    .patch(`/commerce/invoices/${ID.invOverduePartial}/status/overdue?businessId=${ID.bizA}`)
+    .set(HEADER, ID.ownerA)
+    .send({ status: 'OVERDUE' });
+  if (overdue.status !== 200) throw new Error(`overdue transition failed: ${overdue.status} ${JSON.stringify(overdue.body)}`);
+  // SEC-V49-2: paid in full, then that payment refunded through the operator route.
+  const fullPayment = await pay(ID.invRefundFull, 100, 'cash', 'slip_refund_full');
+  const fullRefund = await agent()
+    .post(`/commerce/businesses/${ID.bizA}/payments/${fullPayment}/refund`)
+    .set(HEADER, ID.ownerA)
+    .send({ reason: 'order cancelled' });
+  if (fullRefund.status !== 201) throw new Error(`full refund failed: ${fullRefund.status} ${JSON.stringify(fullRefund.body)}`);
+  // CR-V49-2: 60 own paid through the route; 40 more and the PAID status are seeded below.
+  await pay(ID.invShortPaid, 60, 'cash', 'slip_short_paid');
+  // SEC-V49-1: tenant B's invoice paid 100 of 100; a row tagged with tenant A is seeded below.
+  await pay(ID.invBResend, 100, 'cash', 'slip_b_resend');
+
   // ---- seeded rows the routes cannot make -----------------------------------
   await db.paymentLink.create({ data: { id: LINK.expired.id, token: LINK.expired.token, invoiceId: ID.invPaid, businessId: ID.bizA, active: true, expiresAt: new Date(Date.now() - DAY_MS) } });
   await db.paymentLink.create({ data: { id: LINK.inactive.id, token: LINK.inactive.token, invoiceId: ID.invPaid, businessId: ID.bizA, active: false } });
@@ -466,6 +514,21 @@ beforeAll(async () => {
       provider: 'cash', method: 'cash', providerPaymentId: `${P}pp_foreign`, reference: `${CANARY}foreign`, notes: `${CANARY}foreign_note`,
     },
   });
+  // SEC-V49-1: a SUCCESSFUL row tagged with tenant A on tenant B's PAID 100/100 invoice.
+  await db.payment.create({
+    data: {
+      id: `${P}pay_foreign_b`, businessId: ID.bizA, invoiceId: ID.invBResend, amount: 30, currency: 'TTD', status: 'SUCCESSFUL',
+      provider: 'cash', method: 'cash', providerPaymentId: `${P}pp_foreign_b`, reference: `${CANARY}foreign_b`, notes: `${CANARY}foreign_b_note`,
+    },
+  });
+  // CR-V49-2: the RL-07 shape on a real row: 60 own + 40 tagged with tenant B, and the row reads PAID.
+  await db.payment.create({
+    data: {
+      id: `${P}pay_foreign_short`, businessId: ID.bizB, invoiceId: ID.invShortPaid, amount: 40, currency: 'TTD', status: 'SUCCESSFUL',
+      provider: 'cash', method: 'cash', providerPaymentId: `${P}pp_foreign_short`, reference: `${CANARY}foreign_short`, notes: `${CANARY}foreign_short_note`,
+    },
+  });
+  await db.$executeRawUnsafe(`UPDATE invoices SET status = 'PAID', paid_at = NOW() WHERE id = $1`, ID.invShortPaid);
 
   await clearRateLimits();
   const u = await receipt(UNKNOWN_TOKEN);
@@ -506,7 +569,11 @@ describe('fixture sanity (real rows)', () => {
     const refundRows = await db.payment.findMany({ where: { invoiceId: ID.invRefund }, orderBy: { createdAt: 'asc' } });
     expect(refundRows.map((r: any) => [Number(r.amount), r.status])).toEqual([[50, 'SUCCESSFUL'], [30, 'REFUNDED']]);
     expect((await ledgerCounts(ID.bizA)).transactions).toBeGreaterThanOrEqual(8);
-    expect(Object.keys(TOKEN)).toHaveLength(9);
+    expect(Object.keys(TOKEN)).toHaveLength(13);
+    // review-repair fixtures
+    expect((await invoiceRow(ID.invOverduePartial)).status).toBe('OVERDUE');
+    expect((await invoiceRow(ID.invShortPaid)).status).toBe('PAID');
+    expect((await invoiceRow(ID.invBResend)).status).toBe('PAID');
   });
 });
 
@@ -675,5 +742,92 @@ describe('the route and the authenticated receipt (V1-49)', () => {
     // The other tenant's owner still cannot read A's receipt through it.
     const foreign = await agent().get(`/commerce/invoices/${ID.invPaid}/receipt?businessId=${ID.bizB}`).set(HEADER, ID.ownerB);
     expect(foreign.status).toBe(404);
+  });
+});
+
+describe('review repairs: the rows decide, and both receipt emails agree (V1-49)', () => {
+  it('R-16 (CR-V49-1): a part-paid invoice the operator moved to OVERDUE still has its receipt: 40 received, 60 remaining, no paidAt, the figures the token view shows', async () => {
+    expect((await invoiceRow(ID.invOverduePartial)).status).toBe('OVERDUE');
+    const res = await receipt(TOKEN[ID.invOverduePartial]);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual([...RECEIPT_KEYS].sort());
+    expect(res.body).toMatchObject({ status: 'OVERDUE', total: TOTAL, amountPaid: 40, amountDue: 60, paidAt: null });
+    expectNoPaymentRowsOrEmail(res.body);
+    const view = await agent().get(`/commerce/public/invoice-link/${encodeURIComponent(TOKEN[ID.invOverduePartial])}`);
+    expect(view.status).toBe(200);
+    expect(view.body.balance).toMatchObject({ amountPaid: res.body.amountPaid, amountDue: res.body.amountDue });
+  });
+
+  it('R-17 (SEC-V49-2; the PAID status is a characterization naming V1-29): paid in full, then that payment refunded, the row stays PAID; the receipt is a 409 with no figures, never "PAID, received 0, remaining 200", and Resend receipt sends nothing', async () => {
+    // deriveStatusAfterPayment reopens only on a positive net, so the row stays PAID (V1-29).
+    expect((await invoiceRow(ID.invRefundFull)).status).toBe('PAID');
+    // M28: the flipped row leaves paid and is subtracted again, so remaining is twice the total.
+    expect(await balanceOf(ID.invRefundFull)).toMatchObject({ paid: 0, refunded: 100, net: -100, remaining: 200 });
+    expect(await ledgerCashNet(ID.invRefundFull, ID.bizA)).toBe(0);
+
+    const res = await receipt(TOKEN[ID.invRefundFull]);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    for (const key of ['amountPaid', 'amountDue', 'paidAt', 'invoiceNumber', 'status']) expect(res.body).not.toHaveProperty(key);
+    // A payment was received and refunded: the refusal does not claim nothing was ever received.
+    expect(String(res.body.message)).not.toMatch(/no payment has been received/i);
+    expectNoCanary(res.body);
+
+    const send = vi.spyOn(gmailStub, 'sendEmail');
+    const resend = await resendReceipt(ID.invRefundFull);
+    expect(resend.status, JSON.stringify(resend.body)).toBe(403);
+    expect(resend.body.message).toBe('Invoice is not yet paid');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("R-18 TENANT (M31, SEC-V49-1): Resend receipt on tenant B's PAID 100/100 states TT$100.00 received, never TT$130.00 with a SUCCESSFUL row tagged with tenant A counted; the public receipt agrees", async () => {
+    const send = vi.spyOn(gmailStub, 'sendEmail');
+    const res = await resendReceipt(ID.invBResend);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(send).toHaveBeenCalledTimes(1);
+    const mail = send.mock.calls[0]![0];
+    expect(mail.businessId).toBe(ID.bizB);
+    expect(mail.htmlBody).toContain('received your payment of TT$100.00');
+    expect(mail.htmlBody).not.toContain('TT$130.00');
+    expect(mail.htmlBody).not.toContain(CANARY);
+
+    const pub = await receipt(TOKEN[ID.invBResend]);
+    expect(pub.status).toBe(200);
+    expect(pub.body).toMatchObject({ status: 'PAID', amountPaid: 100, amountDue: 0 });
+  });
+
+  it("R-19 TENANT (M31, CR-V49-2): Resend receipt follows the invoice.paid rule: a PAID row whose own rows cover 60 of 100 (40 more tagged with tenant B) is refused like an unpaid one, with no email and no link written; the public receipt states 60 received, 40 remaining", async () => {
+    const linksBefore = await db.paymentLink.findMany({ where: { invoiceId: ID.invShortPaid }, orderBy: { id: 'asc' } });
+    const send = vi.spyOn(gmailStub, 'sendEmail');
+    const res = await resendReceipt(ID.invShortPaid);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.message).toBe('Invoice is not yet paid');
+    expect(send).not.toHaveBeenCalled();
+    expect(await db.paymentLink.findMany({ where: { invoiceId: ID.invShortPaid }, orderBy: { id: 'asc' } })).toEqual(linksBefore);
+
+    const pub = await receipt(TOKEN[ID.invShortPaid]);
+    expect(pub.status).toBe(200);
+    expect(pub.body).toMatchObject({ amountPaid: 60, amountDue: 40 });
+  });
+
+  it('R-20 control: Resend receipt on an own-tenant PAID 100/100 (70 + 30) is unchanged: one email stating TT$100.00 received', async () => {
+    const send = vi.spyOn(gmailStub, 'sendEmail');
+    const res = await resendReceipt(ID.invLedger);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![0].htmlBody).toContain('received your payment of TT$100.00');
+  });
+
+  it("R-21 TENANT (M31): the reminder built by the same email context counts only own-tenant rows: tenant A's 50 of 100 with 30 tagged with tenant B is reminded for TT$50.00 due, not TT$20.00", async () => {
+    const send = vi.spyOn(gmailStub, 'sendEmail');
+    const res = await agent()
+      .post(`/commerce/businesses/${ID.bizA}/invoices/${ID.invTenantA}/send-reminder`)
+      .set(HEADER, ID.ownerA)
+      .send({ channel: 'email' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(send).toHaveBeenCalledTimes(1);
+    const html = send.mock.calls[0]![0].htmlBody;
+    expect(html).toContain('for TT$50.00 is awaiting payment');
+    expect(html).not.toContain('TT$20.00');
+    expect(html).not.toContain('TT$80.00');
   });
 });
