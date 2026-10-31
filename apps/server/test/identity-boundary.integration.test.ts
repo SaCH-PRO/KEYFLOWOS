@@ -64,26 +64,43 @@
  *         non-OWNER self-target and bound a non-OWNER requester by its own
  *         authority, on what it grants and on whom it rewrites.
  *         NOT CLOSED END TO END: the original outcome (a member undoing the
- *         OWNER's restriction on itself) is still reachable through two
- *         sibling team:write routes with no grantor ceiling, each pinned below:
- *   ST-F4 the invite route mints any scopes and tier, so a restricted
- *         team:write member invites an account it controls with team:admin,
- *         which then resets the member through the role route (V1-07).
- *   CR-1  the structure routes copy a JobRole's permissions and tier onto any
- *         membership in the business, the caller's own included
- *         (structure.service.ts createAssignment; V1-21).
+ *         OWNER's restriction on itself) was reachable through two sibling
+ *         team:write routes with no grantor ceiling:
+ *   ST-F4 FIXED by V1-07-AUTH-INVITE-CEILING (its cases assert the required
+ *         behaviour; see "ST-F4 (fixed …)" below). The invite route minted any
+ *         scopes and tier, so a restricted team:write member invited an account
+ *         it controls with team:admin, which then reset the member through the
+ *         role route. The invite is now bounded by the inviter's own authority
+ *         (identity.service.ts inviteTeamMember): above it, 403 and nothing is
+ *         created; the OWNER and a SUPER_ADMIN are not bounded.
+ *   CR-1  FIXED by V1-21-AUTH-JOBROLE-CEILING (its cases assert the required
+ *         behaviour; see "CR-1 (fixed …)" below). The structure routes copied
+ *         a JobRole's permissions and tier onto any membership in the
+ *         business, the caller's own included (structure.service.ts
+ *         createAssignment). A JobRole is now vocabulary-validated and bounded
+ *         by its author, and an assignment's sync by the assigner's own
+ *         authority: above it, 403 and nothing changes.
  *   ST-2  FIXED by R0-ID-F2-ADMIN-TOKEN-LOCAL-USER (its cases assert the
  *         required behaviour; see "ST-2 (fixed …)" below). The admin-token
  *         branch attached verifyAdminToken's result directly: no revocation
  *         marker, no deletedAt/bannedAt, role from the token
- *         (auth.middleware.ts). NOT CLOSED on one sibling path, pinned below:
- *         the KEY Cortex WebSocket admin-token path still skips every
- *         local-user check (ST-2-WS). (POST /identity/logout not revoking an
- *         admin token was the admin half of ST-4, fixed with it.)
- *   ST-2-WS key-cortex-ws-auth.service.ts authenticateSocket takes the role
- *         from an admin token and checks neither deletedAt, bannedAt nor the
- *         marker, and verifyBusinessMembership lets SUPER_ADMIN into any
- *         tenant's socket; its Supabase path falls back to USER on a DB error.
+ *         (auth.middleware.ts). Its sibling path on the KEY Cortex WebSocket is
+ *         closed too (ST-2-WS). (POST /identity/logout not revoking an admin
+ *         token was the admin half of ST-4, fixed with it.)
+ *   ST-2-WS FIXED by R0-ID-F6-WS-ADMIN-TOKEN (its cases open a real socket;
+ *         see "ST-2-WS (fixed …)" below). key-cortex-ws-auth.service.ts
+ *         authenticateSocket took the role from an admin token and checked
+ *         neither deletedAt, bannedAt nor the logout marker, so with
+ *         verifyBusinessMembership's SUPER_ADMIN bypass a demoted, deleted or
+ *         banned SUPER_ADMIN opened any tenant's socket; its Supabase path fell
+ *         back to USER on a DB error. It now takes AuthMiddleware's decision
+ *         for the same bearer token, and reads the handshake businessId as
+ *         BusinessGuard does (review finding ST-WS-R2: a Prisma filter object
+ *         such as { in: [own, foreign] } was authorized as the tenant).
+ *   ST-WS-R1 the KEY Cortex gateway decides at connect only: a socket opened
+ *         before a ban, demotion or logout keeps approving in its tenant and
+ *         keeps its room pushes (key-cortex.gateway.ts; pre-existing, outside
+ *         R0-ID-F6's write set; reproduced, with its it.todo, below).
  *   ST-3  FIXED by R0-09-ID-HARDEN (owner ruling D-11; its cases assert the
  *         required behaviour; see "ST-3 (fixed …)" below). PATCH
  *         /identity/businesses/:id had only AuthGuard and BusinessGuard, so a
@@ -136,6 +153,7 @@ import { createHmac, scryptSync } from 'node:crypto';
 import { config as loadEnv, parse as parseEnv, populate as populateEnv } from 'dotenv';
 import request from 'supertest';
 import { Redis } from 'ioredis';
+import WebSocket from 'ws';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 // Pure modules (no Nest, no I/O): the production admin-token issuer and the
 // canonical role-default tables the team routes write.
@@ -214,14 +232,15 @@ const ID = {
   staffA: `${P}staffA`,           // STAFF of bizD: STAFF defaults + team: admin, tier 0 — bounded by whom it rewrites (ST-F5)
   adminC: `${P}adminC`,           // ADMIN of bizD: ADMIN defaults + team: admin + CRM "my book" sub-permissions, tier 3 (ST-F3)
   staffC: `${P}staffC`,           // STAFF of bizD: { crm: read, crm_view: owned, crm_edit/crm_delete: none, crm_reassign: false } (ST-F3)
-  adminW: `${P}adminW`,           // ADMIN of bizD restricted by the OWNER: { crm: read, team: write }, tier 0 (OPEN DEFECT ST-F4)
-  accomplice: `${P}accomplice`,   // User row only; invited into bizD by adminW mid-suite (OPEN DEFECT ST-F4)
-  adminJ: `${P}adminJ`,           // ADMIN of bizD, role-default scopes (team: write) (OPEN DEFECT CR-1)
+  adminW: `${P}adminW`,           // ADMIN of bizD restricted by the OWNER: { crm: read, team: write }, tier 0 (ST-F4 fix)
+  accomplice: `${P}accomplice`,   // User row only; adminW's invite of it is refused, the OWNER's succeeds (ST-F4 fix)
+  adminJ: `${P}adminJ`,           // ADMIN of bizD, role-default scopes (team: write) (CR-1 fix)
   staffD: `${P}staffD`,           // STAFF of bizD, role-default scopes (settings: none) (ST-3)
   adminS: `${P}adminS`,           // ADMIN of bizD, ADMIN defaults with settings: write (ST-3 fix, D-11 owner-only)
   relogin: `${P}relogin`,         // STAFF of bizD; logs out, then the login marker clear (ST-4)
   adminTok: `${P}adminTok`,       // User row role SUPER_ADMIN at token issue, no membership (ST-2)
   adminNoRow: `${P}adminNoRow`,   // subject of a valid admin token, no User row at all (ST-2 fix); not seeded
+  wsAdmin: `${P}wsAdmin`,         // User row SUPER_ADMIN, no membership; opens bizB's KEY Cortex socket (ST-2-WS fix)
   // tenants
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
@@ -267,7 +286,7 @@ const adminCutoffKey = (userId: string) => `admin:user:${userId}:revokedAt`;
 const ALL_USERS = [
   ID.owner, ID.admin, ID.staff, ID.staffNoTeam, ID.ownerB, ID.deleted, ID.banned, ID.revoked, ID.noRow,
   ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin, ID.adminTok,
-  ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ, ID.adminNoRow, ID.adminS,
+  ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ, ID.adminNoRow, ID.adminS, ID.wsAdmin,
 ];
 
 const IDLE_MS = 90_000;      // silence from the child counts; slow-but-talking does not
@@ -364,7 +383,7 @@ const routes = {
   crmContacts: (id: string) => `/crm/businesses/${id}/contacts?take=5`,
   /** A read gated on settings:read (IntelligenceController.listRules). */
   settingsRead: (id: string) => `/intelligence/businesses/${id}/rules`,
-  /** Structure routes, gated on team:write (OPEN DEFECT CR-1). */
+  /** Structure routes, gated on team:write (CR-1, fixed by V1-21-AUTH-JOBROLE-CEILING). */
   orgUnits: (id: string) => `/structure/businesses/${id}/org-units`,
   jobRoles: (id: string) => `/structure/businesses/${id}/job-roles`,
   assignments: (id: string) => `/structure/businesses/${id}/assignments`,
@@ -452,14 +471,15 @@ async function cleanup() {
     `DELETE FROM autopilot_settings WHERE business_id LIKE ${LIKE_P}`,
     // PATCH /identity/businesses/:id mirrors some fields into the blueprint (ST-3 case avoids them; defensive).
     `DELETE FROM business_blueprints WHERE business_id LIKE ${LIKE_P}`,
-    // OPEN DEFECT CR-1 creates an org unit, a job role and an assignment in bizD.
+    // The CR-1 cases create an org unit and job roles in bizD (and, were the fix to regress, an assignment).
     `DELETE FROM org_assignments WHERE business_id LIKE ${LIKE_P}`,
     `DELETE FROM job_roles WHERE business_id LIKE ${LIKE_P}`,
     `DELETE FROM org_units WHERE business_id LIKE ${LIKE_P}`,
     `DELETE FROM memberships WHERE id LIKE ${LIKE_P} OR business_id LIKE ${LIKE_P} OR user_id LIKE ${LIKE_P}`,
     `DELETE FROM businesses WHERE id LIKE ${LIKE_P} OR owner_id LIKE ${LIKE_P}`,
     `DELETE FROM user_identities WHERE user_id LIKE ${LIKE_P}`,
-    `DELETE FROM users WHERE id LIKE ${LIKE_P}`,
+    // An invite creates a User with a generated id (ST-F4 cases); its email carries the prefix.
+    `DELETE FROM users WHERE id LIKE ${LIKE_P} OR email LIKE ${LIKE_P}`,
   ];
   for (const sql of statements) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort: cascades cover most of these */ }
@@ -510,6 +530,8 @@ async function seed() {
   }
   // SUPER_ADMIN when its admin token is issued; demoted mid-suite (ST-2).
   await db.user.create({ data: { id: ID.adminTok, email: email(ID.adminTok), name: ID.adminTok, role: 'SUPER_ADMIN' } });
+  // The same shape for the KEY Cortex socket cases (ST-2-WS), so they depend on no other case's state.
+  await db.user.create({ data: { id: ID.wsAdmin, email: email(ID.wsAdmin), name: ID.wsAdmin, role: 'SUPER_ADMIN' } });
   await db.business.create({ data: { id: ID.bizD, name: BIZ_D_NAME, ownerId: ID.ownerD, defaultTaxRate: 0 } });
   const defectMemberships: Array<{ id: string; userId: string; businessId: string; role: string; permissionScopes?: Record<string, string>; maxApprovalTier?: number }> = [
     { id: ID.mOwnerD, userId: ID.ownerD, businessId: ID.bizD, role: 'OWNER' },
@@ -677,7 +699,7 @@ describe('harness — the real built server is serving, with the ab_ fixtures in
     expect(await db.user.findUnique({ where: { id: ID.noRow } })).toBeNull();
     // OPEN DEFECT fixtures live in their own tenant.
     expect(await db.membership.count({ where: { businessId: ID.bizD } })).toBe(15);
-    // The ST-F4 accomplice has a User row and no membership until adminW invites it.
+    // The ST-F4 accomplice has a User row and no membership until the OWNER invites it (adminW cannot).
     expect(await db.membership.count({ where: { userId: ID.accomplice } })).toBe(0);
     expect(await db.membership.count({ where: { userId: ID.adminTok } })).toBe(0);
     // The ST-2 no-row admin-token subject is never seeded.
@@ -1043,9 +1065,10 @@ describe('team routes — ModuleScopeGuard over the real membership rows', () =>
 // bounded by the grantor's current authority), the team:admin and OWNER
 // positive controls, the actor on the team_activity_logs row, the OWNER role,
 // and self-target. The review repairs after this block extend the same rules
-// to PATCH .../permissions; the two sibling team:write paths that still reach
-// the ST-1 outcome (invite, structure assignments) are pinned as OPEN DEFECTs
-// ST-F4 and CR-1 at the end of this file.
+// to PATCH .../permissions; of the two sibling team:write paths that reached
+// the ST-1 outcome, the invite is closed (ST-F4, fixed by
+// V1-07-AUTH-INVITE-CEILING) and so are structure job roles and assignments
+// (CR-1, fixed by V1-21-AUTH-JOBROLE-CEILING), both at the end of this file.
 // ---------------------------------------------------------------------------
 
 /** The membership row exactly as Postgres stores it, so "unchanged" means byte-identical. */
@@ -1726,12 +1749,301 @@ describe('ST-4 — logout revocation is an issue-time cutoff that the next login
   });
 });
 
-describe('OPEN DEFECT ST-2-WS — the KEY Cortex WebSocket admin-token path skips the local-user checks', () => {
+// ---------------------------------------------------------------------------
+// ST-2-WS (fixed by R0-ID-F6-WS-ADMIN-TOKEN) — the KEY Cortex WebSocket.
+//
+// KeyCortexWsAuthService.authenticateSocket had its own admin-token path: the
+// role came from the token and neither User.deletedAt, User.bannedAt nor a
+// missing row refused it; its Supabase path ignored the logout marker. A
+// demoted, deleted or banned SUPER_ADMIN therefore still opened another tenant's
+// socket, since verifyBusinessMembership lets SUPER_ADMIN through (as
+// BusinessGuard does over HTTP). It now takes the HTTP AuthMiddleware decision
+// for the same bearer token, so the cases below are the ST-2 / ST-4 cases above
+// asked over the socket instead of over HTTP.
+//
+// The socket is opened the way socket.io-client opens it — Engine.IO v4 over a
+// WebSocket, then a Socket.IO CONNECT to /key-cortex carrying { token,
+// businessId } as its auth payload — with the `ws` package the server already
+// depends on, so no client library is added. The gateway's decision is what the
+// client sees: `key:connected` once the socket is authenticated, authorized and
+// joined to its rooms, or a DISCONNECT and a closed connection.
+//
+// `businessId` is sent as given: the handshake auth payload is client JSON, so
+// a case can name the tenant with something other than a string (ST-WS-R2).
+// ---------------------------------------------------------------------------
+type CortexOutcome = { outcome: 'connected' | 'refused'; userId?: string; businessId?: unknown; frames: string[] };
+type CortexEvent = { event: string; payload: unknown };
+/** A socket kept open after the gateway's decision (ST-WS-R1): emit events on it and read what the gateway answers. */
+type CortexSession = CortexOutcome & {
+  emit(event: string, payload: unknown): void;
+  /** The next server event named `event`, or 'closed' once the server disconnects the socket. */
+  next(event: string, ms?: number): Promise<CortexEvent | 'closed'>;
+  close(): void;
+};
+
+const CORTEX_NSP = '/key-cortex';
+
+async function cortexOpen(token: string, businessId: unknown): Promise<CortexSession> {
+  requireServer();
+  const url = `${baseUrl.replace(/^http/, 'ws')}/socket.io/?EIO=4&transport=websocket`;
+  const NSP = CORTEX_NSP;
+  return new Promise((resolve, reject) => {
+    const frames: string[] = [];
+    const ws = new WebSocket(url);
+    let decided = false;
+    let closed = false;
+    const waiters: Array<{ event: string; done: (v: CortexEvent | 'closed') => void }> = [];
+    const markClosed = () => {
+      closed = true;
+      for (const w of waiters.splice(0)) w.done('closed');
+    };
+    const session = (outcome: CortexOutcome['outcome'], payload?: { userId?: string; businessId?: unknown }): CortexSession => ({
+      outcome,
+      userId: payload?.userId,
+      businessId: payload?.businessId,
+      frames,
+      emit: (event, data) => ws.send(`42${NSP},${JSON.stringify([event, data])}`),
+      next: (event, ms = 15_000) =>
+        closed
+          ? Promise.resolve('closed')
+          : new Promise((done, fail) => {
+              const timer = setTimeout(() => fail(new Error(`no ${event} within ${ms}ms; frames: ${frames.join(' | ')}`)), ms);
+              waiters.push({ event, done: (v) => { clearTimeout(timer); done(v); } });
+            }),
+      close: () => ws.terminate(),
+    });
+    const decide = (s: CortexSession) => {
+      if (decided) return;
+      decided = true;
+      clearTimeout(timer);
+      resolve(s);
+    };
+    const timer = setTimeout(() => {
+      if (decided) return;
+      decided = true;
+      ws.terminate();
+      reject(new Error(`no gateway decision within 15s; frames: ${frames.join(' | ')}`));
+    }, 15_000);
+    ws.on('message', (data) => {
+      const frame = data.toString();
+      frames.push(frame);
+      if (frame.startsWith('0{')) {
+        // Engine.IO OPEN -> Socket.IO CONNECT to the namespace, with the handshake auth payload.
+        ws.send(`40${NSP},${JSON.stringify({ token, businessId })}`);
+      } else if (frame === '2') {
+        ws.send('3'); // Engine.IO ping -> pong
+      } else if (frame.startsWith(`42${NSP},`)) {
+        const [event, payload] = JSON.parse(frame.slice(`42${NSP},`.length)) as [string, { userId?: string; businessId?: unknown }];
+        if (event === 'key:connected') decide(session('connected', payload));
+        const i = waiters.findIndex((w) => w.event === event);
+        if (i >= 0) waiters.splice(i, 1)[0].done({ event, payload });
+      } else if (frame.startsWith(`41${NSP}`) || frame.startsWith(`44${NSP}`)) {
+        markClosed();
+        decide(session('refused'));
+      }
+    });
+    ws.on('close', () => {
+      markClosed();
+      decide(session('refused'));
+    });
+    ws.on('error', (e) => {
+      markClosed();
+      if (!decided) {
+        decided = true;
+        clearTimeout(timer);
+        reject(e);
+      }
+    });
+  });
+}
+
+/** The gateway's connect decision only; the socket is closed once it is known. */
+async function cortexConnect(token: string, businessId: unknown): Promise<CortexOutcome> {
+  const s = await cortexOpen(token, businessId);
+  s.close();
+  return { outcome: s.outcome, userId: s.userId, businessId: s.businessId, frames: s.frames };
+}
+
+describe('ST-2-WS (fixed) — the KEY Cortex WebSocket applies the same local-user checks as AuthMiddleware, to both token kinds', () => {
+  /** Each case starts from an active SUPER_ADMIN row. */
+  async function resetWsAdmin() {
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { role: 'SUPER_ADMIN', bannedAt: null, deletedAt: null } });
+  }
+
+  async function expectSocketServed(token: string, label: string) {
+    const res = await cortexConnect(token, ID.bizB);
+    expect(res.outcome, `${label}: ${res.frames.join(' | ')}`).toBe('connected');
+    expect(res.userId).toBe(ID.wsAdmin);
+    expect(res.businessId).toBe(ID.bizB);
+  }
+
+  async function expectSocketRefused(token: string, label: string) {
+    const res = await cortexConnect(token, ID.bizB);
+    expect(res.outcome, `${label}: ${res.frames.join(' | ')}`).toBe('refused');
+    expect(res.frames.join(' '), `${label}: nothing of the foreign tenant is sent`).not.toContain(BIZ_B_NAME);
+  }
+
+  it('fixture: wsAdmin is a SUPER_ADMIN row with no membership, so only the SUPER_ADMIN bypass can open bizB’s socket', async () => {
+    expect(await db.user.findUnique({ where: { id: ID.wsAdmin } })).toMatchObject({ role: 'SUPER_ADMIN', deletedAt: null, bannedAt: null });
+    expect(await db.membership.count({ where: { userId: ID.wsAdmin } })).toBe(0);
+  });
+
+  it('positive control: an admin token and a Supabase token of an active SUPER_ADMIN open the foreign tenant’s socket; the owner of another tenant does not', async () => {
+    await resetWsAdmin();
+    await expectSocketServed(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), 'admin token, active SUPER_ADMIN');
+    await expectSocketServed(mintToken(ID.wsAdmin), 'Supabase token, active SUPER_ADMIN');
+    // The tenant check itself is live: the owner of bizA only is refused bizB's socket.
+    await expectSocketRefused(T[ID.owner], 'Supabase token, owner of bizA only');
+  });
+
+  it('the role comes from the User row: after the row is demoted, an admin token that still says SUPER_ADMIN cannot open the foreign tenant’s socket; restoring the row restores it', async () => {
+    await resetWsAdmin();
+    const adminToken = mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN');
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { role: 'USER' } });
+    await expectSocketRefused(adminToken, 'admin token, row demoted to USER');
+    await expectSocketRefused(mintToken(ID.wsAdmin), 'Supabase token, row demoted to USER');
+    await resetWsAdmin();
+    await expectSocketServed(adminToken, 'admin token, row restored');
+  });
+
+  it('User.bannedAt and User.deletedAt each refuse both token kinds; clearing them restores access', async () => {
+    await resetWsAdmin();
+    const adminToken = mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN');
+    const supabaseToken = mintToken(ID.wsAdmin);
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { bannedAt: new Date() } });
+    await expectSocketRefused(adminToken, 'admin token, bannedAt');
+    await expectSocketRefused(supabaseToken, 'Supabase token, bannedAt');
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { bannedAt: null, deletedAt: new Date() } });
+    await expectSocketRefused(adminToken, 'admin token, deletedAt');
+    await expectSocketRefused(supabaseToken, 'Supabase token, deletedAt');
+    await resetWsAdmin();
+    await expectSocketServed(adminToken, 'admin token, ban and delete cleared');
+    await expectSocketServed(supabaseToken, 'Supabase token, ban and delete cleared');
+  });
+
+  it('an admin token whose subject has no User row cannot open any socket, and no row is created', async () => {
+    await expectSocketRefused(mintAdminToken(ID.adminNoRow, 'SUPER_ADMIN'), 'admin token, no User row');
+    expect(await db.user.findUnique({ where: { id: ID.adminNoRow } })).toBeNull();
+  });
+
+  // ST-WS-R2 (R0-ID-F6 review). The handshake businessId is client JSON. It
+  // reached business.findFirst as `id`, where an object is a Prisma filter, so
+  // the owner of bizA opened a socket with { in: [bizA, bizB] } as its tenant
+  // (joined business:[object Object], and that object went on to the chat and
+  // approval handlers). BusinessGuard refuses the same value over HTTP
+  // ('businessId is required'); the socket now reads it the same way.
+  it('ST-WS-R2: a tenant named by anything but a non-empty string is refused — the owner of bizA with { in: [bizA, bizB] } or { not: "" }, and a SUPER_ADMIN with an object; bizA as a string is served', async () => {
+    await resetWsAdmin();
+    const own = await cortexConnect(T[ID.owner], ID.bizA);
+    expect(own.outcome, `control, owner of bizA asks for bizA: ${own.frames.join(' | ')}`).toBe('connected');
+    expect(own.businessId).toBe(ID.bizA);
+
+    for (const businessId of [{ in: [ID.bizA, ID.bizB] }, { not: '' }, [ID.bizA, ID.bizB]]) {
+      const res = await cortexConnect(T[ID.owner], businessId);
+      expect(res.outcome, `owner of bizA, businessId ${JSON.stringify(businessId)}: ${res.frames.join(' | ')}`).toBe('refused');
+    }
+    const admin = await cortexConnect(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), { in: [ID.bizB] });
+    expect(admin.outcome, `SUPER_ADMIN, businessId { in: [bizB] }: ${admin.frames.join(' | ')}`).toBe('refused');
+  });
+
+  // A NEW socket only: cortexConnect closes each socket once the gateway decides.
+  // A socket already open when the logout lands keeps working (OPEN DEFECT
+  // ST-WS-R1, reproduced below).
+  it('POST /identity/logout refuses a new socket to both token kinds issued before it, by issue time (the admin cutoff and the logout marker); tokens of a later session are served', async () => {
+    await resetWsAdmin();
+    const adminBefore = mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN');
+    const supabaseBefore = mintToken(ID.wsAdmin);
+    await expectSocketServed(supabaseBefore, 'Supabase token before the logout');
+
+    const loggedOutFrom = Math.floor(Date.now() / 1000);
+    const out = await call('post', '/identity/logout', supabaseBefore);
+    const loggedOutTo = Math.floor(Date.now() / 1000);
+    expect(out.status, JSON.stringify(out.body)).toBe(201);
+    const revokedAt = await expectRevocationTime(ID.wsAdmin, loggedOutFrom, loggedOutTo);
+    expect(await redis!.get(adminCutoffKey(ID.wsAdmin)), 'POST /identity/logout also writes the admin-token cutoff').toMatch(/^\d{13,}$/);
+
+    await expectSocketRefused(adminBefore, 'admin token issued before the logout');
+    await expectSocketRefused(supabaseBefore, 'Supabase token issued before the logout');
+
+    await untilAfterSecond(revokedAt);
+    await expectSocketServed(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), 'admin token issued after the logout');
+    await expectSocketServed(mintToken(ID.wsAdmin), 'Supabase token of a session opened after the logout');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OPEN DEFECT ST-WS-R1 (R0-ID-F6 review; pre-existing, NOT fixed here). The
+// gateway decides at connect only: handleConnection stores the connect-time
+// { userId, businessId } (key-cortex.gateway.ts ClientInfo) and handleApprove,
+// handleReject, handleChat, handleTyping and the business:/user: room pushes
+// trust it for the socket's lifetime; nothing in src disconnects a socket on a
+// ban, a demotion, a delete or a logout. The fix is in key-cortex.gateway.ts
+// and the revocation writers, outside R0-ID-F6's write set.
+//
+// The probe is key:approve for an approval id that exists nowhere: the handler
+// answers 'Not authenticated' for a socket it holds no identity for, and
+// 'Approval failed: Approval request not found' once it has looked the id up
+// in the socket's tenant — i.e. it decided as wsAdmin in bizB. Nothing is
+// approved or executed.
+// ---------------------------------------------------------------------------
+describe('OPEN DEFECT ST-WS-R1 — a KEY Cortex socket opened before a ban, demotion or logout keeps acting in the foreign tenant', () => {
+  const NO_SUCH_APPROVAL = `${P}ws_no_such_approval`;
+  const DECIDED_IN_TENANT = 'Approval failed: Approval request not found';
+
+  async function resetWsAdmin() {
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { role: 'SUPER_ADMIN', bannedAt: null, deletedAt: null } });
+  }
+
+  /** key:approve on the open socket: what the gateway answered, or 'closed' if it cut the socket. */
+  async function approveProbe(s: CortexSession): Promise<string> {
+    const answer = s.next('key:error');
+    s.emit('key:approve', { approvalId: NO_SUCH_APPROVAL });
+    const res = await answer;
+    return res === 'closed' ? 'closed' : String((res.payload as { message?: string }).message);
+  }
+
+  it('OPEN DEFECT ST-WS-R1 reproduced — after the row is banned and demoted, a new socket is refused but the open one still decides approvals in bizB as wsAdmin', async () => {
+    await resetWsAdmin();
+    const s = await cortexOpen(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), ID.bizB);
+    try {
+      expect(s.outcome, s.frames.join(' | ')).toBe('connected');
+      expect(await approveProbe(s), 'control, before the ban').toBe(DECIDED_IN_TENANT);
+
+      await db.user.update({ where: { id: ID.wsAdmin }, data: { role: 'USER', bannedAt: new Date() } });
+      const fresh = await cortexConnect(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), ID.bizB);
+      expect(fresh.outcome, 'a new socket after the ban').toBe('refused');
+
+      expect(await approveProbe(s), 'the socket opened before the ban').toBe(DECIDED_IN_TENANT);
+    } finally {
+      s.close();
+      await resetWsAdmin();
+    }
+  });
+
+  it('OPEN DEFECT ST-WS-R1 reproduced — after POST /identity/logout, a new socket with the same token is refused but the open one still decides approvals in bizB', async () => {
+    await resetWsAdmin();
+    const token = mintToken(ID.wsAdmin);
+    const s = await cortexOpen(token, ID.bizB);
+    try {
+      expect(s.outcome, s.frames.join(' | ')).toBe('connected');
+      const out = await call('post', '/identity/logout', token);
+      expect(out.status, JSON.stringify(out.body)).toBe(201);
+      const fresh = await cortexConnect(token, ID.bizB);
+      expect(fresh.outcome, 'a new socket with the logged-out token').toBe('refused');
+
+      expect(await approveProbe(s), 'the socket opened before the logout').toBe(DECIDED_IN_TENANT);
+    } finally {
+      s.close();
+    }
+  });
+
   it.todo(
-    'REQUIRED (follow-up packet; key-cortex-ws-auth.service.ts, outside this write set): authenticateSocket applies the AuthMiddleware local-user ' +
-      'checks to both token kinds — an admin token takes its role from the User row and is refused when the row is missing, deletedAt or bannedAt is set ' +
-      '(and the Supabase path also on the logout marker); a Postgres failure refuses instead of falling back to USER — so verifyBusinessMembership ' +
-      'never admits a demoted, deleted or banned SUPER_ADMIN into another tenant’s socket',
+    'REQUIRED (follow-up packet; key-cortex.gateway.ts and the ban/demote/delete/logout writers — identity.controller.ts logout, ' +
+      'admin-auth logout, the admin user routes — outside this write set): a socket loses the tenant once its user is banned, deleted, ' +
+      'demoted below the authority it connected with, or logged out — each case above answers "closed" (the socket is disconnected and ' +
+      'leaves its business:/user: rooms) or "Not authenticated", never "Approval failed: Approval request not found". Re-checking the ' +
+      'handshake token on every message would also cut every socket at the token’s expiry, which has no in-band refresh today; the fix ' +
+      'packet decides between disconnecting user:<id> on revocation and a per-message re-check with a token-refresh event',
   );
 });
 
@@ -1745,20 +2057,36 @@ describe('OPEN DEFECT CR-2 — logout never revokes the Supabase sessions', () =
 });
 
 // ---------------------------------------------------------------------------
-// OPEN DEFECTS ST-F4 and CR-1 — the ST-1 outcome through sibling team:write
-// routes (R0-ID-F1-ROLE-ROUTE-AUTHORITY review). The role and permissions routes
-// are closed; these two are not, and their fixes belong to queued packets
-// (V1-07-AUTH-INVITE-CEILING, V1-21-AUTH-JOBROLE-CEILING). Each reproduction pins
-// today's behaviour and turns red when its fix lands. They run last and use
-// their own fixtures (adminW, accomplice, adminJ), because they leave those
-// memberships escalated.
+// ST-F4 — FIXED by V1-07-AUTH-INVITE-CEILING. The "OPEN DEFECT ST-F4
+// reproduced" case pinned a restricted team:write member (adminW) inviting an
+// account it controls with team:admin at tier 4, which then reset adminW to
+// the ADMIN defaults through the role route. It now asserts the behaviour its
+// it.todo required (refused with 403, not clamped: nothing is created) and the
+// it.todo is gone; the OWNER positive control shows the invite is bounded, not
+// closed.
+//
+// CR-1 — FIXED by V1-21-AUTH-JOBROLE-CEILING. The "OPEN DEFECT CR-1
+// reproduced" case pinned the ST-1 outcome through the sibling team:write
+// structure routes (R0-ID-F1-ROLE-ROUTE-AUTHORITY review): a default ADMIN
+// (adminJ) authored a JobRole with team:admin at tier 4 and assigned it to
+// itself, then passed the role route's team:admin gate. It now asserts the
+// behaviour its it.todo required (each step refused with 403, the membership
+// byte-identical) and the it.todo is gone. The OWNER positive control shows
+// the job-role route is bounded, not closed; the DTO case proves the
+// vocabulary at the built server's ValidationPipe. The full case matrix is in
+// structure-authority-ceiling.integration.test.ts. Both blocks run last and
+// use their own fixtures (adminW, accomplice, adminJ).
 // ---------------------------------------------------------------------------
-describe('OPEN DEFECT ST-F4 — the invite route has no grantor ceiling, so a restricted team:write member resets itself in two requests', () => {
-  it('OPEN DEFECT ST-F4 reproduced — adminW ({ crm: read, team: write }, tier 0) invites an account it controls with team:admin at tier 4; that account resets adminW to the ADMIN defaults', async () => {
+/** A User created by an invite has a generated id, so it is found by its (prefixed) email. */
+const freshInviteEmail = (tag: string) => email(`${P}invite_${tag}`);
+
+describe('ST-F4 (fixed, V1-07-AUTH-INVITE-CEILING) — the invite route applies the grantor ceiling, so a restricted team:write member cannot mint an account above itself', () => {
+  it('ST-F4 — adminW ({ crm: read, team: write }, tier 0) invites an account it controls with team:admin at tier 4: 403, no membership is created, and that account cannot reset adminW', async () => {
     const t = T[ID.adminW];
     expect((await call('get', routes.settingsRead(ID.bizD), t)).status).toBe(403);
     // The direct routes are closed to adminW (team:write only).
     expect((await call('patch', routes.member(ID.bizD, ID.mAdminW), t, { role: 'ADMIN' })).status).toBe(403);
+    const adminWBefore = await membershipRowText(ID.mAdminW);
 
     const invite = await call('post', routes.team(ID.bizD), t, {
       email: email(ID.accomplice),
@@ -1766,59 +2094,118 @@ describe('OPEN DEFECT ST-F4 — the invite route has no grantor ceiling, so a re
       scopes: { ...ROLE_DEFAULT_SCOPES.OWNER },
       maxApprovalTier: 4,
     });
-    expect(invite.status, JSON.stringify(invite.body)).toBe(201);
-    const reset = await call('patch', routes.member(ID.bizD, ID.mAdminW), T[ID.accomplice], { role: 'ADMIN' });
-    expect(reset.status, JSON.stringify(reset.body)).toBe(200);
+    expect(invite.status, JSON.stringify(invite.body)).toBe(403);
+    expect(JSON.stringify(invite.body)).toContain('You cannot grant more authority than your own');
+    // No Membership, and the accomplice's User row is still the only one with its email.
+    expect(await db.membership.count({ where: { userId: ID.accomplice } })).toBe(0);
+    expect(await db.user.count({ where: { email: email(ID.accomplice) } })).toBe(1);
+    expect(await db.teamActivityLog.count({ where: { businessId: ID.bizD, action: 'member_invited', userId: ID.adminW } })).toBe(0);
 
-    const row = await db.membership.findUnique({ where: { id: ID.mAdminW } });
-    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.ADMIN);
-    expect(row.maxApprovalTier).toBe(DEFAULT_APPROVAL_TIERS.ADMIN);
-    expect((await call('get', routes.settingsRead(ID.bizD), t)).status).toBe(200);
+    // The second request of the escalation has nothing to stand on.
+    const reset = await call('patch', routes.member(ID.bizD, ID.mAdminW), T[ID.accomplice], { role: 'ADMIN' });
+    expect(reset.status, JSON.stringify(reset.body)).toBe(403);
+    expect(await membershipRowText(ID.mAdminW)).toBe(adminWBefore);
+    expect((await call('get', routes.settingsRead(ID.bizD), t)).status).toBe(403);
   });
 
-  it.todo(
-    'REQUIRED (V1-07-AUTH-INVITE-CEILING; identity.service.ts inviteTeamMember): the invite applies the grantor ceiling the role and ' +
-      'permissions routes apply — adminW’s invite with team:admin at tier 4 answers 403 with no User or Membership created, so no account ' +
-      'adminW controls holds more than adminW and the reset above cannot happen',
-  );
+  it('ST-F4 — each dimension alone is refused for adminW: a module level above its own, a tier above its own, and a role whose defaults exceed its own; no User row is created for a new email', async () => {
+    const t = T[ID.adminW];
+    const e = freshInviteEmail('refused');
+    const payloads = [
+      { email: e, role: 'STAFF', scopes: { crm: 'read', team: 'admin' }, maxApprovalTier: 0 }, // team above write
+      { email: e, role: 'STAFF', scopes: { crm: 'write' }, maxApprovalTier: 0 },               // crm above read
+      { email: e, role: 'STAFF', scopes: { crm: 'read' }, maxApprovalTier: 1 },                // tier above 0
+      { email: e, role: 'ADMIN' },                                                             // ADMIN role defaults
+      { email: e, role: 'STAFF' },                                                             // STAFF role defaults (revenue: read, ...)
+    ];
+    for (const body of payloads) {
+      const res = await call('post', routes.team(ID.bizD), t, body);
+      expect(res.status, `${JSON.stringify(body)} -> ${JSON.stringify(res.body)}`).toBe(403);
+      expect(await db.user.count({ where: { email: e } }), JSON.stringify(body)).toBe(0);
+    }
+  });
+
+  it('ST-F4 positive control: adminW still invites within its own authority ({ crm: read }, tier 0) -> 201, the row holds exactly that', async () => {
+    const e = freshInviteEmail('within');
+    const res = await call('post', routes.team(ID.bizD), T[ID.adminW], {
+      email: e, role: 'STAFF', scopes: { crm: 'read' }, maxApprovalTier: 0,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const row = await db.membership.findFirst({ where: { businessId: ID.bizD, user: { email: e } } });
+    expect(row.permissionScopes).toEqual({ crm: 'read' });
+    expect(row.maxApprovalTier).toBe(0);
+  });
+
+  it('ST-F4 positive control: the OWNER invites at any tier — the same team:admin, tier-4 invite of the accomplice -> 201, created as asked', async () => {
+    const res = await call('post', routes.team(ID.bizD), T[ID.ownerD], {
+      email: email(ID.accomplice),
+      role: 'ADMIN',
+      scopes: { ...ROLE_DEFAULT_SCOPES.OWNER },
+      maxApprovalTier: 4,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const row = await db.membership.findFirst({ where: { businessId: ID.bizD, userId: ID.accomplice } });
+    expect(row.role).toBe('ADMIN');
+    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.OWNER);
+    expect(row.maxApprovalTier).toBe(4);
+  });
 });
 
-describe('OPEN DEFECT CR-1 — the structure routes (team:write) copy a JobRole’s permissions and tier onto any membership, the caller’s own included', () => {
-  it('OPEN DEFECT CR-1 reproduced — a default ADMIN (team:write) raises itself to team:admin at tier 4 through job-roles + assignments, then passes the gate this packet added', async () => {
+describe('CR-1 (fixed, V1-21-AUTH-JOBROLE-CEILING) — the structure routes (team:write) cannot copy a JobRole above the caller onto any membership, the caller’s own included', () => {
+  it('CR-1 — a default ADMIN (team:write) tries to raise itself to team:admin at tier 4 through job-roles + assignments: each step 403, its membership byte-identical, and the role route still refuses it', async () => {
     const t = T[ID.adminJ];
     // Before: the role route is closed to a team:write member.
     const before = await call('patch', routes.member(ID.bizD, ID.mStaffP), t, { role: 'STAFF' });
     expect(before.status, JSON.stringify(before.body)).toBe(403);
+    const adminJBefore = await membershipRowText(ID.mAdminJ);
 
     const unit = await call('post', routes.orgUnits(ID.bizD), t, { name: `${P}unit_cr1` });
     expect(unit.status, JSON.stringify(unit.body)).toBe(201);
+    // 1. Authoring the escalation is refused: a JobRole is bounded by its author.
     const jobRole = await call('post', routes.jobRoles(ID.bizD), t, {
       name: `${P}jobrole_cr1`,
       permissions: { ...ROLE_DEFAULT_SCOPES.OWNER },
       defaultApprovalTier: 4,
     });
-    expect(jobRole.status, JSON.stringify(jobRole.body)).toBe(201);
+    expect(jobRole.status, JSON.stringify(jobRole.body)).toBe(403);
+    expect(JSON.stringify(jobRole.body)).toContain('You cannot grant more authority than your own');
+    expect(await db.jobRole.count({ where: { businessId: ID.bizD, name: `${P}jobrole_cr1` } })).toBe(0);
+
+    // 2. The same role authored by the OWNER is created (positive control: bounded, not closed) ...
+    const ownerRole = await call('post', routes.jobRoles(ID.bizD), T[ID.ownerD], {
+      name: `${P}jobrole_cr1_owner`,
+      permissions: { ...ROLE_DEFAULT_SCOPES.OWNER },
+      defaultApprovalTier: 4,
+    });
+    expect(ownerRole.status, JSON.stringify(ownerRole.body)).toBe(201);
+    // ... and the ADMIN still cannot sync it onto its own membership.
     const assign = await call('post', routes.assignments(ID.bizD), t, {
       membershipId: ID.mAdminJ,
       userId: ID.adminJ,
       orgUnitId: unit.body.id,
-      jobRoleId: jobRole.body.id,
+      jobRoleId: ownerRole.body.id,
     });
-    expect(assign.status, JSON.stringify(assign.body)).toBe(201);
+    expect(assign.status, JSON.stringify(assign.body)).toBe(403);
+    expect(JSON.stringify(assign.body)).toContain('You cannot grant more authority than your own');
+    expect(await membershipRowText(ID.mAdminJ)).toBe(adminJBefore);
+    expect(await db.orgAssignment.count({ where: { membershipId: ID.mAdminJ } })).toBe(0);
 
-    const row = await db.membership.findUnique({ where: { id: ID.mAdminJ } });
-    expect(row.permissionScopes).toMatchObject({ team: 'admin' });
-    expect(row.maxApprovalTier).toBe(4);
-    // After: team:admin at tier 4 — the role route now admits it.
+    // After: still team:write at tier 3, so the role route still refuses it, and so does its self-target (ST-F1).
     const after = await call('patch', routes.member(ID.bizD, ID.mStaffP), t, { role: 'STAFF' });
-    expect(after.status, JSON.stringify(after.body)).toBe(200);
-    // The identity routes still refuse its self-target (ST-F1 holds); the escalation came from elsewhere.
+    expect(after.status, JSON.stringify(after.body)).toBe(403);
     expect((await call('patch', routes.perms(ID.bizD, ID.mAdminJ), t, { scopes: { crm: 'read' }, maxApprovalTier: 0 })).status).toBe(403);
   });
 
-  it.todo(
-    'REQUIRED (V1-21-AUTH-JOBROLE-CEILING; structure.service.ts, structure.controller.ts, job-role DTOs — outside this write set): JobRole ' +
-      'permissions are vocabulary-validated and capped by the grantor, and an assignment cannot sync a JobRole above the assigner’s own ' +
-      'authority onto a membership, nor onto the assigner’s own — the escalation above answers 403 with the membership unchanged',
-  );
+  it('CR-1 — the built server refuses a JobRole outside the canonical vocabulary at its ValidationPipe, for the OWNER too: a KEY tool-family key, a level that is not one, a tier above 4 (400, nothing created)', async () => {
+    const name = `${P}jobrole_cr1_invalid`;
+    for (const body of [
+      { name, permissions: { finance: 'write' } },
+      { name, permissions: { crm: 'owner' } },
+      { name, permissions: { crm: 'read' }, defaultApprovalTier: 5 },
+    ]) {
+      const res = await call('post', routes.jobRoles(ID.bizD), T[ID.ownerD], body);
+      expect(res.status, `${JSON.stringify(body)} -> ${JSON.stringify(res.body)}`).toBe(400);
+    }
+    expect(await db.jobRole.count({ where: { businessId: ID.bizD, name } })).toBe(0);
+  });
 });

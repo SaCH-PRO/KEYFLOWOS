@@ -2,8 +2,15 @@ import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/comm
 import { createPublicKey, KeyObject } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { jwtVerify } from 'jose';
+import { Redis } from 'ioredis';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
+import {
+  LOGOUT_REVOCATION_TTL_SECONDS,
+  logoutRevocationKey,
+  logoutRevocationValue,
+} from '../../core/auth/auth.middleware';
+import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { AuthSecurityService } from '../identity/auth-security.service';
 import {
   RiscDiscoveryDocument,
@@ -14,6 +21,51 @@ import {
 } from './risc.types';
 
 const RISC_CONFIG_URL = 'https://accounts.google.com/.well-known/risc-configuration';
+
+/**
+ * How long an account-disabled/hijacking RISC event bans the user at Supabase,
+ * in seconds. No other event bans (R0-ID-F7 review F7-CR-1): Google also sends
+ * sessions-revoked, tokens-revoked and token-revoked for ordinary account
+ * actions, and a ban refuses the user's own sign-in by every method (password,
+ * OAuth, refresh) while it lasts.
+ *
+ * A RISC event carries no user JWT, and the installed auth-js (2.94.0) admin
+ * API has no call that ends sessions by user id: admin.signOut(jwt, scope)
+ * takes the user's ACCESS JWT as the bearer of POST /logout (handing it the
+ * user id is the CR-2 defect), and there is no admin sessions API. The call it
+ * has that takes a user id is admin.updateUserById, whose
+ * AdminUserAttributes.ban_duration bans the user for a Go duration.
+ *
+ * The ban PAUSES the provider sessions; it does not revoke them (F7-SEC-2).
+ * GoTrue refuses a refresh while the user is banned but keeps the refresh
+ * token, and a ban does not log the user out. So once the ban lapses a
+ * pre-event refresh token (the hijacker's) works at Supabase again, and its
+ * tokens are refused at this API only while the local logout cutoff lasts
+ * (LOGOUT_REVOCATION_TTL_SECONDS). That residual needs a follow-up: a durable
+ * RISC cutoff AuthMiddleware reads, or a provider global logout.
+ *
+ * Long enough that every live client meets it: a default Supabase access token
+ * lives 1h, so a client holding one issued just before the event must refresh
+ * within the ban, is refused, and auth-js drops that session. Not longer than
+ * that plus a margin: the legitimate user is locked out of sign-in too, and the
+ * local cutoff already lets a session authenticated after the event through. A
+ * longer lock is the operator's (the Supabase dashboard ban), and this handler
+ * never shortens one (F7-SEC-1, see banAtProvider).
+ */
+const RISC_PROVIDER_BAN_SECONDS = 60 * 60 + 5 * 60;
+
+/**
+ * A revocation leg of a session-ending event that can fail, named as
+ * POST /identity/logout names its legs in the audit reason.
+ */
+type RevocationLeg = 'revocation_marker' | 'admin_cutoff' | 'local_sessions' | 'provider_ban';
+
+interface HandledEvent {
+  /** What the event did; persisted on RiscEvent.actionTaken. */
+  action: string;
+  /** Every revocation leg that did not hold, in the order they ran. */
+  failed: RevocationLeg[];
+}
 
 type VerificationKey = KeyObject | CryptoKey;
 
@@ -39,6 +91,7 @@ export class RiscService {
     @Inject(SupabaseAdminService) private readonly supabaseAdmin: SupabaseAdminService,
     @Inject(AuthSecurityService) private readonly authSecurity: AuthSecurityService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   onApplicationBootstrap() {
@@ -90,7 +143,11 @@ export class RiscService {
     }
 
     const userId = await this.resolveUser(subject);
-    const actionTaken = await this.handleEvent(eventType, eventDetails, userId);
+    const { action, failed } = await this.handleEvent(eventType, eventDetails, userId);
+    // A revocation that did not fully happen is not recorded as one that did
+    // (R0-ID-F7 review F7-SEC-3): every failed leg is named on the row and in
+    // the audit, as POST /identity/logout names its failed legs.
+    const actionTaken = failed.length > 0 ? `${action}:revocation_incomplete:${failed.join(',')}` : action;
 
     await this.prisma.client.riscEvent
       .create({
@@ -115,14 +172,18 @@ export class RiscService {
     await this.authSecurity
       .audit({
         event: 'login_failure',
-        outcome: 'success',
+        // As for POST /identity/logout: 'success' means the server-side
+        // revocation (the logout cutoff) holds, when the event writes one; the
+        // reason names every leg that did not.
+        outcome: failed.includes('revocation_marker') ? 'error' : 'success',
         userId: userId ?? undefined,
-        reason: `risc:${eventType}`,
+        reason: failed.length > 0 ? `risc:${eventType}; revocation_incomplete: ${failed.join(', ')}` : `risc:${eventType}`,
         metadata: {
           jti: payload.jti,
           providerSubject: subject.sub,
           actionTaken,
           eventReason: eventDetails?.reason ?? null,
+          ...(failed.length > 0 ? { revocationIncomplete: failed } : {}),
         },
       })
       .catch(() => undefined);
@@ -259,77 +320,175 @@ export class RiscService {
 
   /**
    * Execute the security action requested by the event type.
-   * Returns a short `actionTaken` string persisted for observability.
+   * Returns a short action string persisted for observability, and every
+   * revocation leg that did not hold.
    */
   private async handleEvent(
     eventType: string,
     eventDetails: { subject: RiscSubject; reason?: string; state?: string },
     userId: string | null,
-  ): Promise<string> {
+  ): Promise<HandledEvent> {
+    const done = (action: string, failed: RevocationLeg[] = []): HandledEvent => ({ action, failed });
     if (!userId) {
-      return 'no_matching_user';
+      return done('no_matching_user');
     }
 
     switch (eventType) {
+      // Google also sends these for ordinary account actions (a password
+      // change, revoking the app's access), so they end the sessions here but
+      // do not ban at the provider (R0-ID-F7 review F7-CR-1).
       case RISC_EVENT_TYPES.SESSIONS_REVOKED:
       case RISC_EVENT_TYPES.TOKENS_REVOKED:
-        await this.terminateUserSessions(userId);
-        return 'sessions_terminated';
+        return done('sessions_terminated', await this.terminateUserSessions(userId, { providerBan: false }));
 
       case RISC_EVENT_TYPES.TOKEN_REVOKED:
         // We don't store OAuth refresh tokens for Google Sign-in itself;
         // Supabase manages those. Treat as a session revocation.
-        await this.terminateUserSessions(userId);
-        return 'token_revoked_sessions_terminated';
+        return done('token_revoked_sessions_terminated', await this.terminateUserSessions(userId, { providerBan: false }));
 
       case RISC_EVENT_TYPES.ACCOUNT_DISABLED:
         if (eventDetails.reason === RISC_DISABLED_REASON.HIJACKING) {
-          await this.terminateUserSessions(userId);
+          const failed = await this.terminateUserSessions(userId, { providerBan: true });
           await this.flagGoogleSignInDisabled(userId, true);
           await this.notifyAdmins(userId, eventType, eventDetails.reason);
-          return 'account_disabled_hijacking';
+          return done('account_disabled_hijacking', failed);
         }
         // bulk-account or unknown reason: flag for review but don't lock the user out.
         await this.flagGoogleSignInDisabled(userId, true);
         await this.notifyAdmins(userId, eventType, eventDetails.reason ?? 'unspecified');
-        return 'account_disabled_flagged';
+        return done('account_disabled_flagged');
 
       case RISC_EVENT_TYPES.ACCOUNT_ENABLED:
         await this.flagGoogleSignInDisabled(userId, false);
-        return 'account_enabled';
+        return done('account_enabled');
 
       case RISC_EVENT_TYPES.ACCOUNT_CREDENTIAL_CHANGE_REQUIRED:
         await this.notifyAdmins(userId, eventType, 'credential_change');
-        return 'credential_change_logged';
+        return done('credential_change_logged');
 
       case RISC_EVENT_TYPES.VERIFICATION:
-        return 'verification_logged';
+        return done('verification_logged');
 
       default:
-        return 'unhandled_event';
+        return done('unhandled_event');
     }
   }
 
   /**
-   * End all local sessions and revoke Supabase sessions for the user.
+   * Revoke the user's sessions at this API and in the local Session rows, and,
+   * for account-disabled/hijacking (`providerBan`), pause them at Supabase.
+   * Returns every leg that did not hold.
+   *
+   * A RISC event carries no user JWT, so the provider cannot be asked to sign
+   * the user out (admin.signOut takes the user's ACCESS JWT as the bearer of
+   * POST /logout; until R0-ID-F7 this passed the user id and GoTrue refused it:
+   * R0-ID-F4 review F4-C, the CR-2 shape). Instead, in this order:
+   *
+   *   1. The logout cutoff POST /identity/logout writes
+   *      (auth:revoked:user:<id>, the revocation time in epoch seconds, for
+   *      LOGOUT_REVOCATION_TTL_SECONDS): AuthMiddleware refuses every token of
+   *      a session authenticated up to now, including one a refresh mints
+   *      later, and attaches a session authenticated after it. Written FIRST,
+   *      so nothing the provider does (fail, throw, hang) stands in its way.
+   *   2. The admin-token cutoff the same logout writes
+   *      (admin:user:<id>:revokedAt, ms, same TTL), so the user's admin
+   *      local-auth tokens issued up to now are refused too: a hijacking event
+   *      revokes no less than a voluntary logout (review F7-SEC-4).
+   *   3. The local Session rows.
+   *   4. With `providerBan` only: the ban at Supabase (banAtProvider), which
+   *      refuses to renew the user's sessions while it lasts. It does not
+   *      revoke them: once it lapses a pre-event refresh token works at
+   *      Supabase again (review F7-SEC-2, residual; see
+   *      RISC_PROVIDER_BAN_SECONDS).
+   *
+   * Each leg's failure is logged, named in the result, and does not skip the
+   * next.
    */
-  private async terminateUserSessions(userId: string): Promise<void> {
+  private async terminateUserSessions(userId: string, opts: { providerBan: boolean }): Promise<RevocationLeg[]> {
+    const failed: RevocationLeg[] = [];
+    const now = Date.now();
+    const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+    try {
+      await this.redis.setex(logoutRevocationKey(userId), LOGOUT_REVOCATION_TTL_SECONDS, logoutRevocationValue(now));
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to write the logout cutoff for ${userId}: ${reason(err)}`);
+      failed.push('revocation_marker');
+    }
+
+    try {
+      await this.redis.set(`admin:user:${userId}:revokedAt`, String(now), 'EX', LOGOUT_REVOCATION_TTL_SECONDS);
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to write the admin-token cutoff for ${userId}: ${reason(err)}`);
+      failed.push('admin_cutoff');
+    }
+
     try {
       await this.prisma.client.session.deleteMany({ where: { userId } });
     } catch (err: unknown) {
-      this.logger.warn(`Failed to delete local sessions for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`Failed to delete local sessions for ${userId}: ${reason(err)}`);
+      failed.push('local_sessions');
     }
 
-    if (this.supabaseAdmin.isConfigured()) {
-      try {
-        const client = this.supabaseAdmin.getClient();
-        const { error } = await client.auth.admin.signOut(userId, 'global');
-        if (error) {
-          this.logger.warn(`Supabase global sign-out failed for ${userId}: ${error.message}`);
-        }
-      } catch (err: unknown) {
-        this.logger.warn(`Supabase sign-out threw for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+    if (opts.providerBan && !(await this.banAtProvider(userId))) {
+      failed.push('provider_ban');
+    }
+    return failed;
+  }
+
+  /**
+   * Ban the user at Supabase for RISC_PROVIDER_BAN_SECONDS, unless a ban that
+   * lasts at least that long is already on the account. Returns whether such a
+   * ban holds when it returns; every failure is logged.
+   *
+   * GoTrue's ban overwrites: ban_duration sets banned_until = now + duration,
+   * whatever was there. Written blind, it would cut a longer ban, such as an
+   * operator's indefinite one from the Supabase dashboard (the only
+   * provider-level lock this repository has), down to
+   * RISC_PROVIDER_BAN_SECONDS, after which the attacker could sign in again
+   * (review F7-SEC-1, F7-CR-2). So the current ban is read first, and when it
+   * cannot be read, or its end cannot be parsed, nothing is written: a ban
+   * written over one we could not read may shorten it. auth-js has no
+   * conditional update, so a ban set between the read and the write is still
+   * overwritten.
+   */
+  private async banAtProvider(userId: string): Promise<boolean> {
+    if (!this.supabaseAdmin.isConfigured()) {
+      this.logger.warn(`Supabase session ban not attempted for ${userId}: Supabase admin client not configured`);
+      return false;
+    }
+    try {
+      const admin = this.supabaseAdmin.getClient().auth.admin;
+      const { data, error: readError } = await admin.getUserById(userId);
+      if (readError || !data?.user) {
+        this.logger.warn(
+          `Supabase session ban not written for ${userId}: its current ban could not be read (${readError?.message ?? 'no user returned'})`,
+        );
+        return false;
       }
+
+      const bannedUntil = data.user.banned_until;
+      if (bannedUntil) {
+        const endsAt = Date.parse(bannedUntil);
+        if (Number.isNaN(endsAt)) {
+          this.logger.warn(`Supabase session ban not written for ${userId}: its current ban end is unreadable (${bannedUntil})`);
+          return false;
+        }
+        if (endsAt >= Date.now() + RISC_PROVIDER_BAN_SECONDS * 1000) {
+          this.logger.log(`Supabase ban for ${userId} already lasts until ${bannedUntil}; left as it is`);
+          return true;
+        }
+      }
+
+      const { error } = await admin.updateUserById(userId, { ban_duration: `${RISC_PROVIDER_BAN_SECONDS}s` });
+      if (error) {
+        this.logger.warn(`Supabase session ban failed for ${userId}: ${error.message}`);
+        return false;
+      }
+      return true;
+    } catch (err: unknown) {
+      this.logger.warn(`Supabase session ban threw for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
     }
   }
 

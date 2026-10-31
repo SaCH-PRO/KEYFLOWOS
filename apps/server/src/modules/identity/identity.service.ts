@@ -26,6 +26,17 @@ const CRM_SCOPE_RANK: Readonly<Record<string, number>> = { none: 0, owned: 1, an
 const crmScopeRank = (scope: string) => CRM_SCOPE_RANK[scope] ?? 0;
 
 /**
+ * Membership roles, weakest first. The role is a dimension of authority in its own
+ * right, not only the source of default scopes: two gates grant by role name alone,
+ * whatever the scope map says — PUT .../ai/governance (AiOversightService
+ * .updateAutonomySettings) and approving a tier-4 AI plan (PlannerService.approvePlan)
+ * both admit OWNER and ADMIN. An unrecognised role ranks with STAFF, the role every
+ * reader falls back to and the one neither gate admits.
+ */
+const ROLE_RANK: Readonly<Record<string, number>> = { STAFF: 0, ADMIN: 1, OWNER: 2 };
+const roleRank = (role: string) => ROLE_RANK[role] ?? 0;
+
+/**
  * The CRM ownership authority a membership's scope map confers (level, crm_view,
  * crm_edit, crm_reassign, crm_delete), by `resolveCrmAccess` itself — the rule every
  * CRM read and write enforces — evaluated on an in-memory membership rather than a
@@ -629,6 +640,10 @@ export class IdentityService {
   /**
    * The first dimension in which `subject` holds more authority than `bound`, or null
    * when it holds no more in any. Each dimension is read the way its enforcer reads it:
+   *   - the role, ranked STAFF < ADMIN < OWNER, as the role-name gates read it
+   *     (ROLE_RANK; V1-07 review F1): without it a bounded STAFF member minted an
+   *     ADMIN-role account with every scope 'none', and that account could set AI
+   *     autonomy and approve tier-4 plans, both of which refuse its inviter;
    *   - every canonical module level, as ModuleScopeGuard does (explicit map, missing
    *     key = none; no map = role defaults);
    *   - the approval tier, as membershipApprovalTier does;
@@ -637,6 +652,7 @@ export class IdentityService {
    *     defaults there, so omitting them is not a restriction (ST-F3).
    */
   private async authorityExcess(subject: AuthorityEnvelope, bound: AuthorityEnvelope): Promise<string | null> {
+    if (roleRank(subject.role) > roleRank(bound.role)) return 'role';
     const s = this.resolveScopes(subject);
     const b = this.resolveScopes(bound);
     for (const module of CANONICAL_MODULES) {
@@ -705,14 +721,37 @@ export class IdentityService {
     }));
   }
 
+  /**
+   * POST .../team (team:write). V1-07-AUTH-INVITE-CEILING (CF-26; ST-F4 in
+   * identity-boundary.integration.test.ts): the new membership is a grant, so it is
+   * bounded by the inviter's own authority exactly as a role or permissions change is
+   * (K2) — the role, every canonical module level, the approval tier and CRM ownership,
+   * the role defaults included when no scopes are given. Above it the invite is REFUSED
+   * with 403 before any User or Membership is written; it is not clamped, which would
+   * create a member with less than was asked for and no signal. The OWNER and a
+   * SUPER_ADMIN are not bounded. Without this a team:write member invited an account it
+   * controls with team:admin, which then rewrote the inviter through the role route.
+   *
+   * Consequence for callers that send no scopes (KEY's add_team_member, and POST
+   * .../team without scopes): the 14-module role defaults are the grant, so an inviter
+   * whose explicit map lacks a module those defaults hold is refused. An ADMIN invited
+   * through the web team form holds that form's 11-key map, which has no `analytics`
+   * and no `operations`, so its no-scope STAFF invite is refused (STAFF defaults hold
+   * both at read); it was created before V1-07. Under K2 that is correct — the ADMIN
+   * really lacks both — and an invite with explicit scopes within its own (the web
+   * form's STAFF map) still succeeds. Converging the web form's DEFAULT_SCOPES on
+   * core/authority/module-vocabulary is a follow-up outside this packet's write set.
+   */
   async inviteTeamMember(businessId: string, email: string, role: string, inviterId: string, scopes?: Record<string, string>, maxApprovalTier?: number) {
-    await this.assertTeamAdmin(businessId, inviterId);
+    const { requester, bounded } = await this.assertTeamAdmin(businessId, inviterId);
     this.validateRole(role);
+    const permissionScopes = scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF);
+    const tier = maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0);
     if (scopes || maxApprovalTier !== undefined) {
-      this.validateScopesPayload(
-        scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF),
-        maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0),
-      );
+      this.validateScopesPayload(permissionScopes, tier);
+    }
+    if (bounded && (await this.authorityExcess({ role, permissionScopes, maxApprovalTier: tier }, requester))) {
+      throw new ForbiddenException('You cannot grant more authority than your own');
     }
     let user = await this.prisma.client.user.findUnique({ where: { email } });
     if (!user) {
@@ -738,8 +777,8 @@ export class IdentityService {
         userId: user.id,
         businessId,
         role,
-        permissionScopes: scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF),
-        maxApprovalTier: maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0),
+        permissionScopes,
+        maxApprovalTier: tier,
       },
       include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
     });
@@ -774,17 +813,19 @@ export class IdentityService {
    *     authority PATCH .../permissions needs; with no requester it fails closed;
    *   - a non-OWNER cannot change its own membership through either route;
    *   - a bounded requester cannot change a member whose current authority exceeds its
-   *     own, nor grant a role whose defaults exceed its own authority: no module above
-   *     its own level, no approval tier above its own, no CRM ownership authority above
-   *     its own (K2).
+   *     own, nor grant a role whose defaults exceed its own authority: no role above its
+   *     own (a STAFF with team:admin cannot make an ADMIN, nor change one, even when its
+   *     scope map equals the ADMIN defaults; V1-07 review F1), no module above its own
+   *     level, no approval tier above its own, no CRM ownership authority above its own
+   *     (K2).
    * The OWNER role is not assignable here (validateRole) and the OWNER membership
    * cannot be changed here; there is no ownership-transfer route.
    *
-   * NOT closed here (routes outside this service's role and permissions writes, pinned
-   * as OPEN DEFECTs in identity-boundary.integration.test.ts): the team:write invite
-   * route mints any scopes and tier for a new account (V1-07), and the team:write
-   * structure routes copy a JobRole's permissions and tier onto any membership in the
-   * business, the caller's own included (V1-21).
+   * The team:write invite route applies the same grant ceiling (V1-07, inviteTeamMember).
+   * NOT closed here (a route outside this service, pinned as OPEN DEFECT CR-1 in
+   * identity-boundary.integration.test.ts): the team:write structure routes copy a
+   * JobRole's permissions and tier onto any membership in the business, the caller's
+   * own included (V1-21).
    */
   async updateMemberRole(businessId: string, membershipId: string, role: string, requesterId: string) {
     this.validateRole(role);
