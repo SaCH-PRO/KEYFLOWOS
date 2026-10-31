@@ -929,6 +929,8 @@ Counts: ADOPTED 1, CONTROL 15, DEFER 8, DOCS 10, EVIDENCE 3, NONE 9, PORT 9, STA
 | D-30 | **Operator action.** Rotate the test-account credential committed in `audit-keyflowos.py` and `audit-mobile-quick.py`; it remains in git history after R0-31. | R0-31 completion |
 | D-31 | **Concurrency.** May V1 packets with zero file overlap start before the R0 exit gate (never before R0-00)? | V1 start |
 | D-32 | **Control-plane PRs (ChatGPT, #80).** Which PR-discovery implementation becomes canonical (#185, #170 or #168)? Base-aware divergence (#107)? #184 quota wording, which unblocks #155's admission? | not product |
+| D-33 | **Self-declared subscription payments.** `POST /subscriptions/businesses/:id/record-payment` with `method: 'manual'` activates a paid plan and writes a COMPLETED SubscriptionPayment from the caller's own claim, with no money moving. R0-08c limits it to the owner (and SUPER_ADMIN) and audits it; should a manual record instead stay PENDING until platform staff confirm the transfer? | R0-08c (found by the R0-08 security review, ST-R008-1) |
+| D-34 | **Navigation labels default.** Until D-09 is ruled, R0-08/R0-08b keep the majority labels already in the code (`Command Center`, `Sales`) in one constant, `NAV_ROUTE_LABELS` in `apps/web/src/lib/semantic-routes.ts`; ruling D-09 is a one-line change there. | R0-08, R0-08b |
 
 ---
 
