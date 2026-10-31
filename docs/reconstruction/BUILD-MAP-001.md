@@ -932,6 +932,19 @@ Counts: ADOPTED 1, CONTROL 15, DEFER 8, DOCS 10, EVIDENCE 3, NONE 9, PORT 9, STA
 
 ---
 
+### Owner rulings, 2026-10-31
+
+| Id | Ruling | Effect on the queue |
+|---|---|---|
+| D-02 | Hosted Supabase free tier (option C). | R0-14 is documentation only. The live sign-up leg runs where a Supabase project is configured. |
+| D-03 | Manual minimal profile: business name, currency and timezone complete onboarding without AI. The AI genome stays as optional enrichment. | R0-32 relaxes the server gate. R0-06 adds the manual web path and makes the genome gate fail open. |
+| D-07 | The customer link (paid and remaining) and the receipt are in Release 0, token links only. The bare-id pay page is retired. | V1-48, V1-49 and V1-46 move to wave R0, after R0-20. |
+| D-11 | Editing the business profile is OWNER only, regardless of granted scopes. | R0-09 implements owner-only on PATCH /identity/businesses/:id. |
+
+D-04 (quotes in Release 0) was not ruled; Release 0 proceeds with invoices, and the quote branch stays in V1 as written.
+
+---
+
 ## (h) Judge dispositions
 
 Three judges scored the draft: release0-first (6/10), correctness and evidence (7/10), and parallel safety (5/10). Each blocking issue is listed with what changed. Disputed claims were re-checked read-only at c2f6f46d before any change.

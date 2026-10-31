@@ -112,9 +112,7 @@
     "domain": "cockpit-web-shell",
     "wave": "R0",
     "order": 4,
-    "depends_on": [
-      "DECISION:D-03"
-    ],
+    "depends_on": [],
     "parallel_group": "R0-G0",
     "write_set": [
       "apps/web/src/app/app/onboarding/page.tsx",
@@ -138,7 +136,8 @@
     ],
     "estimate_hours": 8,
     "v1_relevance": "release0",
-    "rationale": "M07 and CF-22 (P0): the unconditional first failing step of the customer journey in the browser. useGenomeGate (apps/web/src/app/app/layout.tsx:41) sends every new owner to an LLM-only page. The server completion endpoint exists; the deterministic web path is missing, and R0-32 proves the server accepts it without AI."
+    "rationale": "M07 and CF-22 (P0): the unconditional first failing step of the customer journey in the browser. useGenomeGate (apps/web/src/app/app/layout.tsx:41) sends every new owner to an LLM-only page. The server completion endpoint exists; the deterministic web path is missing, and R0-32 proves the server accepts it without AI.",
+    "ruling": "D-03 ruled 2026-10-31 by the owner: manual minimal profile (name, currency, timezone) completes onboarding without AI; the genome gate fails open; AI onboarding is optional enrichment."
   },
   {
     "id": "R0-17-PAYMENT-TX-INTEGRITY",
@@ -409,8 +408,7 @@
     "wave": "R0",
     "order": 13,
     "depends_on": [
-      "R0-00-WT-ISOLATION",
-      "DECISION:D-02"
+      "R0-00-WT-ISOLATION"
     ],
     "parallel_group": "R0-G1",
     "write_set": [
@@ -437,7 +435,8 @@
     ],
     "estimate_hours": 8,
     "v1_relevance": "release0",
-    "rationale": "M02 and CF-35 (P0): no product path mints an identity without a reachable Supabase project. Sign-up needing Supabase is a Release 0 failure only if D-02 rejects hosted free-tier Supabase; the unconditional first failure is the LLM-only onboarding (R0-06, R0-32). The draft's dependency on R0-09 existed only because both edit .env.example; it is reversed, so this packet waits on D-02 alone."
+    "rationale": "M02 and CF-35 (P0): no product path mints an identity without a reachable Supabase project. Sign-up needing Supabase is a Release 0 failure only if D-02 rejects hosted free-tier Supabase; the unconditional first failure is the LLM-only onboarding (R0-06, R0-32). The draft's dependency on R0-09 existed only because both edit .env.example; it is reversed, so this packet waits on D-02 alone.",
+    "ruling": "D-02 ruled 2026-10-31 by the owner: hosted Supabase free tier (option C). This packet is documentation only: docs/auth-pathway.md and .env.example describe the free-tier project configuration; no identity code change; the live sign-up leg runs only where a Supabase project is configured."
   },
   {
     "id": "R0-27-REVENUE-CREATE-CONTRACT",
@@ -482,8 +481,7 @@
     "wave": "R0",
     "order": 15,
     "depends_on": [
-      "R0-00-WT-ISOLATION",
-      "DECISION:D-03"
+      "R0-00-WT-ISOLATION"
     ],
     "parallel_group": "R0-G1",
     "write_set": [
@@ -504,7 +502,8 @@
     ],
     "estimate_hours": 6,
     "v1_relevance": "release0",
-    "rationale": "Release0-first judge, blocking issue 3: R0-06 renders the 403 but no packet proved that a fresh owner can actually finish onboarding without AI under either D-03 outcome. This is the server half of the first failing step (M07, CF-22)."
+    "rationale": "Release0-first judge, blocking issue 3: R0-06 renders the 403 but no packet proved that a fresh owner can actually finish onboarding without AI under either D-03 outcome. This is the server half of the first failing step (M07, CF-22).",
+    "ruling": "D-03 ruled 2026-10-31 by the owner: manual minimal profile. The server accepts completion with business name, currency and timezone; the three-pillar DNA minimum no longer gates completion (the AI genome stays as optional enrichment)."
   },
   {
     "id": "R0-12-CT-TENANT-ROUTES",
@@ -862,8 +861,7 @@
     "order": 27,
     "depends_on": [
       "R0-00-WT-ISOLATION",
-      "R0-14-AUTH-LOCAL-SIGNIN",
-      "DECISION:D-11"
+      "R0-14-AUTH-LOCAL-SIGNIN"
     ],
     "parallel_group": "R0-G3",
     "write_set": [
@@ -891,7 +889,8 @@
     ],
     "estimate_hours": 6,
     "v1_relevance": "release0",
-    "rationale": "M04, CF-28 and CF-22 (completion bypass), covering P0-7 minimal setup. STAFF can change tenant currency, timezone and slug today, and a hard-coded email is promoted to a guard-bypassing role on every boot. It reuses the existing 'settings' vocabulary. It follows R0-14 only because both edit .env.example (file order), so the first failing step never waits on D-11."
+    "rationale": "M04, CF-28 and CF-22 (completion bypass), covering P0-7 minimal setup. STAFF can change tenant currency, timezone and slug today, and a hard-coded email is promoted to a guard-bypassing role on every boot. It reuses the existing 'settings' vocabulary. It follows R0-14 only because both edit .env.example (file order), so the first failing step never waits on D-11.",
+    "ruling": "D-11 ruled 2026-10-31 by the owner: editing the business profile (PATCH /identity/businesses/:id) is OWNER only, regardless of granted scopes. Other D-11 items (SUPER_ADMIN promotion gating) follow the packet text."
   },
   {
     "id": "R0-25-PLAYWRIGHT-R0",
@@ -2525,11 +2524,10 @@
     "id": "V1-48-PUBLIC-TOKEN-VIEW",
     "title": "Public invoice link shows paid and remaining; pay-link tokens are crypto-random and honour expiresInDays",
     "domain": "public-commercial",
-    "wave": "V1",
+    "wave": "R0",
     "order": 80,
     "depends_on": [
-      "V1-45-DM-CREATE-IDEMPOTENCY",
-      "DECISION:D-07"
+      "V1-45-DM-CREATE-IDEMPOTENCY"
     ],
     "parallel_group": "V1-G11",
     "write_set": [
@@ -2552,17 +2550,17 @@
     ],
     "estimate_hours": 7,
     "v1_relevance": "v1",
-    "rationale": "Formerly R0-24. Conditional on D-07: V1-MODULE-SCOPE P0-5 makes the customer link 'conditional on journey' for Release 0, and issue #186 names no public link. If D-07 rules it into Release 0, it moves back unchanged to the end of the R0 commerce chain (after R0-20); otherwise it is V1, and the cuid-to-randomBytes token hardening is V1 security either way. CF-18 and M34 for P0-5 'customer-facing link, visible result': without an email provider the link cannot show a partial payment, and the token is the whole credential."
+    "rationale": "Formerly R0-24. Conditional on D-07: V1-MODULE-SCOPE P0-5 makes the customer link 'conditional on journey' for Release 0, and issue #186 names no public link. If D-07 rules it into Release 0, it moves back unchanged to the end of the R0 commerce chain (after R0-20); otherwise it is V1, and the cuid-to-randomBytes token hardening is V1 security either way. CF-18 and M34 for P0-5 'customer-facing link, visible result': without an email provider the link cannot show a partial payment, and the token is the whole credential.",
+    "ruling": "D-07 ruled 2026-10-31 by the owner: the customer link (paid and remaining) and the receipt are in Release 0, token links only. Promoted to wave R0."
   },
   {
     "id": "V1-49-PUBLIC-RECEIPT",
     "title": "Customer receipt by pay-link token and truthful receipt-email amounts",
     "domain": "public-commercial",
-    "wave": "V1",
+    "wave": "R0",
     "order": 81,
     "depends_on": [
-      "V1-48-PUBLIC-TOKEN-VIEW",
-      "DECISION:D-07"
+      "V1-48-PUBLIC-TOKEN-VIEW"
     ],
     "parallel_group": "V1-G12",
     "write_set": [
@@ -2586,18 +2584,18 @@
     ],
     "estimate_hours": 6,
     "v1_relevance": "v1",
-    "rationale": "Formerly R0-26. Conditional on D-07, as V1-48: if D-07 rules a customer receipt into Release 0, it moves back with V1-48 to the end of the R0 commerce chain. M24 (P0) for P0-5, which names a receipt: customers get 401 today, and the receipt email claims full settlement. The booking confirmation pages that open the authenticated receipt are handed to V1-28."
+    "rationale": "Formerly R0-26. Conditional on D-07, as V1-48: if D-07 rules a customer receipt into Release 0, it moves back with V1-48 to the end of the R0 commerce chain. M24 (P0) for P0-5, which names a receipt: customers get 401 today, and the receipt email claims full settlement. The booking confirmation pages that open the authenticated receipt are handed to V1-28.",
+    "ruling": "D-07 ruled 2026-10-31 by the owner: promoted to wave R0 (receipt by pay-link token)."
   },
   {
     "id": "V1-46-PUB-PAY-LINK-TOKEN-GATE",
     "title": "Token-gated customer pay surface: /pay/link/[token] stops downgrading to the bare-id page (decision-gated)",
     "domain": "public-commercial",
-    "wave": "V1",
+    "wave": "R0",
     "order": 82,
     "depends_on": [
       "V1-45-DM-CREATE-IDEMPOTENCY",
-      "V1-49-PUBLIC-RECEIPT",
-      "DECISION:D-07"
+      "V1-49-PUBLIC-RECEIPT"
     ],
     "parallel_group": "V1-G13",
     "write_set": [
@@ -2619,7 +2617,8 @@
     ],
     "estimate_hours": 7,
     "v1_relevance": "v1",
-    "rationale": "M34: pay-link revocation and expiry are unenforceable while every token path downgrades to the bare id."
+    "rationale": "M34: pay-link revocation and expiry are unenforceable while every token path downgrades to the bare id.",
+    "ruling": "D-07 ruled 2026-10-31 by the owner: token links only, the bare-id pay page is retired. Promoted to wave R0."
   },
   {
     "id": "V1-50-QUOTE-STATE-MACHINE",
