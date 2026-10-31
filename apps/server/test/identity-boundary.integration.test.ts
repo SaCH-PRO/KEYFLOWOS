@@ -64,11 +64,15 @@
  *         non-OWNER self-target and bound a non-OWNER requester by its own
  *         authority, on what it grants and on whom it rewrites.
  *         NOT CLOSED END TO END: the original outcome (a member undoing the
- *         OWNER's restriction on itself) is still reachable through two
- *         sibling team:write routes with no grantor ceiling, each pinned below:
- *   ST-F4 the invite route mints any scopes and tier, so a restricted
- *         team:write member invites an account it controls with team:admin,
- *         which then resets the member through the role route (V1-07).
+ *         OWNER's restriction on itself) was reachable through two sibling
+ *         team:write routes with no grantor ceiling:
+ *   ST-F4 FIXED by V1-07-AUTH-INVITE-CEILING (its cases assert the required
+ *         behaviour; see "ST-F4 (fixed …)" below). The invite route minted any
+ *         scopes and tier, so a restricted team:write member invited an account
+ *         it controls with team:admin, which then reset the member through the
+ *         role route. The invite is now bounded by the inviter's own authority
+ *         (identity.service.ts inviteTeamMember): above it, 403 and nothing is
+ *         created; the OWNER and a SUPER_ADMIN are not bounded.
  *   CR-1  the structure routes copy a JobRole's permissions and tier onto any
  *         membership in the business, the caller's own included
  *         (structure.service.ts createAssignment; V1-21).
@@ -224,8 +228,8 @@ const ID = {
   staffA: `${P}staffA`,           // STAFF of bizD: STAFF defaults + team: admin, tier 0 — bounded by whom it rewrites (ST-F5)
   adminC: `${P}adminC`,           // ADMIN of bizD: ADMIN defaults + team: admin + CRM "my book" sub-permissions, tier 3 (ST-F3)
   staffC: `${P}staffC`,           // STAFF of bizD: { crm: read, crm_view: owned, crm_edit/crm_delete: none, crm_reassign: false } (ST-F3)
-  adminW: `${P}adminW`,           // ADMIN of bizD restricted by the OWNER: { crm: read, team: write }, tier 0 (OPEN DEFECT ST-F4)
-  accomplice: `${P}accomplice`,   // User row only; invited into bizD by adminW mid-suite (OPEN DEFECT ST-F4)
+  adminW: `${P}adminW`,           // ADMIN of bizD restricted by the OWNER: { crm: read, team: write }, tier 0 (ST-F4 fix)
+  accomplice: `${P}accomplice`,   // User row only; adminW's invite of it is refused, the OWNER's succeeds (ST-F4 fix)
   adminJ: `${P}adminJ`,           // ADMIN of bizD, role-default scopes (team: write) (OPEN DEFECT CR-1)
   staffD: `${P}staffD`,           // STAFF of bizD, role-default scopes (settings: none) (ST-3)
   adminS: `${P}adminS`,           // ADMIN of bizD, ADMIN defaults with settings: write (ST-3 fix, D-11 owner-only)
@@ -470,7 +474,8 @@ async function cleanup() {
     `DELETE FROM memberships WHERE id LIKE ${LIKE_P} OR business_id LIKE ${LIKE_P} OR user_id LIKE ${LIKE_P}`,
     `DELETE FROM businesses WHERE id LIKE ${LIKE_P} OR owner_id LIKE ${LIKE_P}`,
     `DELETE FROM user_identities WHERE user_id LIKE ${LIKE_P}`,
-    `DELETE FROM users WHERE id LIKE ${LIKE_P}`,
+    // An invite creates a User with a generated id (ST-F4 cases); its email carries the prefix.
+    `DELETE FROM users WHERE id LIKE ${LIKE_P} OR email LIKE ${LIKE_P}`,
   ];
   for (const sql of statements) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort: cascades cover most of these */ }
@@ -690,7 +695,7 @@ describe('harness — the real built server is serving, with the ab_ fixtures in
     expect(await db.user.findUnique({ where: { id: ID.noRow } })).toBeNull();
     // OPEN DEFECT fixtures live in their own tenant.
     expect(await db.membership.count({ where: { businessId: ID.bizD } })).toBe(15);
-    // The ST-F4 accomplice has a User row and no membership until adminW invites it.
+    // The ST-F4 accomplice has a User row and no membership until the OWNER invites it (adminW cannot).
     expect(await db.membership.count({ where: { userId: ID.accomplice } })).toBe(0);
     expect(await db.membership.count({ where: { userId: ID.adminTok } })).toBe(0);
     // The ST-2 no-row admin-token subject is never seeded.
@@ -1056,9 +1061,10 @@ describe('team routes — ModuleScopeGuard over the real membership rows', () =>
 // bounded by the grantor's current authority), the team:admin and OWNER
 // positive controls, the actor on the team_activity_logs row, the OWNER role,
 // and self-target. The review repairs after this block extend the same rules
-// to PATCH .../permissions; the two sibling team:write paths that still reach
-// the ST-1 outcome (invite, structure assignments) are pinned as OPEN DEFECTs
-// ST-F4 and CR-1 at the end of this file.
+// to PATCH .../permissions; of the two sibling team:write paths that reached
+// the ST-1 outcome, the invite is closed (ST-F4, fixed by
+// V1-07-AUTH-INVITE-CEILING) and structure assignments are pinned as OPEN
+// DEFECT CR-1, both at the end of this file.
 // ---------------------------------------------------------------------------
 
 /** The membership row exactly as Postgres stores it, so "unchanged" means byte-identical. */
@@ -2047,20 +2053,30 @@ describe('OPEN DEFECT CR-2 — logout never revokes the Supabase sessions', () =
 });
 
 // ---------------------------------------------------------------------------
-// OPEN DEFECTS ST-F4 and CR-1 — the ST-1 outcome through sibling team:write
-// routes (R0-ID-F1-ROLE-ROUTE-AUTHORITY review). The role and permissions routes
-// are closed; these two are not, and their fixes belong to queued packets
-// (V1-07-AUTH-INVITE-CEILING, V1-21-AUTH-JOBROLE-CEILING). Each reproduction pins
-// today's behaviour and turns red when its fix lands. They run last and use
-// their own fixtures (adminW, accomplice, adminJ), because they leave those
-// memberships escalated.
+// ST-F4 — FIXED by V1-07-AUTH-INVITE-CEILING. The "OPEN DEFECT ST-F4
+// reproduced" case pinned a restricted team:write member (adminW) inviting an
+// account it controls with team:admin at tier 4, which then reset adminW to
+// the ADMIN defaults through the role route. It now asserts the behaviour its
+// it.todo required (refused with 403, not clamped: nothing is created) and the
+// it.todo is gone; the OWNER positive control shows the invite is bounded, not
+// closed.
+//
+// OPEN DEFECT CR-1 — the ST-1 outcome through the sibling team:write structure
+// routes (R0-ID-F1-ROLE-ROUTE-AUTHORITY review); its fix belongs to the queued
+// V1-21-AUTH-JOBROLE-CEILING. The reproduction pins today's behaviour and turns
+// red when its fix lands. Both blocks run last and use their own fixtures
+// (adminW, accomplice, adminJ), because CR-1 leaves adminJ escalated.
 // ---------------------------------------------------------------------------
-describe('OPEN DEFECT ST-F4 — the invite route has no grantor ceiling, so a restricted team:write member resets itself in two requests', () => {
-  it('OPEN DEFECT ST-F4 reproduced — adminW ({ crm: read, team: write }, tier 0) invites an account it controls with team:admin at tier 4; that account resets adminW to the ADMIN defaults', async () => {
+/** A User created by an invite has a generated id, so it is found by its (prefixed) email. */
+const freshInviteEmail = (tag: string) => email(`${P}invite_${tag}`);
+
+describe('ST-F4 (fixed, V1-07-AUTH-INVITE-CEILING) — the invite route applies the grantor ceiling, so a restricted team:write member cannot mint an account above itself', () => {
+  it('ST-F4 — adminW ({ crm: read, team: write }, tier 0) invites an account it controls with team:admin at tier 4: 403, no membership is created, and that account cannot reset adminW', async () => {
     const t = T[ID.adminW];
     expect((await call('get', routes.settingsRead(ID.bizD), t)).status).toBe(403);
     // The direct routes are closed to adminW (team:write only).
     expect((await call('patch', routes.member(ID.bizD, ID.mAdminW), t, { role: 'ADMIN' })).status).toBe(403);
+    const adminWBefore = await membershipRowText(ID.mAdminW);
 
     const invite = await call('post', routes.team(ID.bizD), t, {
       email: email(ID.accomplice),
@@ -2068,21 +2084,61 @@ describe('OPEN DEFECT ST-F4 — the invite route has no grantor ceiling, so a re
       scopes: { ...ROLE_DEFAULT_SCOPES.OWNER },
       maxApprovalTier: 4,
     });
-    expect(invite.status, JSON.stringify(invite.body)).toBe(201);
-    const reset = await call('patch', routes.member(ID.bizD, ID.mAdminW), T[ID.accomplice], { role: 'ADMIN' });
-    expect(reset.status, JSON.stringify(reset.body)).toBe(200);
+    expect(invite.status, JSON.stringify(invite.body)).toBe(403);
+    expect(JSON.stringify(invite.body)).toContain('You cannot grant more authority than your own');
+    // No Membership, and the accomplice's User row is still the only one with its email.
+    expect(await db.membership.count({ where: { userId: ID.accomplice } })).toBe(0);
+    expect(await db.user.count({ where: { email: email(ID.accomplice) } })).toBe(1);
+    expect(await db.teamActivityLog.count({ where: { businessId: ID.bizD, action: 'member_invited', userId: ID.adminW } })).toBe(0);
 
-    const row = await db.membership.findUnique({ where: { id: ID.mAdminW } });
-    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.ADMIN);
-    expect(row.maxApprovalTier).toBe(DEFAULT_APPROVAL_TIERS.ADMIN);
-    expect((await call('get', routes.settingsRead(ID.bizD), t)).status).toBe(200);
+    // The second request of the escalation has nothing to stand on.
+    const reset = await call('patch', routes.member(ID.bizD, ID.mAdminW), T[ID.accomplice], { role: 'ADMIN' });
+    expect(reset.status, JSON.stringify(reset.body)).toBe(403);
+    expect(await membershipRowText(ID.mAdminW)).toBe(adminWBefore);
+    expect((await call('get', routes.settingsRead(ID.bizD), t)).status).toBe(403);
   });
 
-  it.todo(
-    'REQUIRED (V1-07-AUTH-INVITE-CEILING; identity.service.ts inviteTeamMember): the invite applies the grantor ceiling the role and ' +
-      'permissions routes apply — adminW’s invite with team:admin at tier 4 answers 403 with no User or Membership created, so no account ' +
-      'adminW controls holds more than adminW and the reset above cannot happen',
-  );
+  it('ST-F4 — each dimension alone is refused for adminW: a module level above its own, a tier above its own, and a role whose defaults exceed its own; no User row is created for a new email', async () => {
+    const t = T[ID.adminW];
+    const e = freshInviteEmail('refused');
+    const payloads = [
+      { email: e, role: 'STAFF', scopes: { crm: 'read', team: 'admin' }, maxApprovalTier: 0 }, // team above write
+      { email: e, role: 'STAFF', scopes: { crm: 'write' }, maxApprovalTier: 0 },               // crm above read
+      { email: e, role: 'STAFF', scopes: { crm: 'read' }, maxApprovalTier: 1 },                // tier above 0
+      { email: e, role: 'ADMIN' },                                                             // ADMIN role defaults
+      { email: e, role: 'STAFF' },                                                             // STAFF role defaults (revenue: read, ...)
+    ];
+    for (const body of payloads) {
+      const res = await call('post', routes.team(ID.bizD), t, body);
+      expect(res.status, `${JSON.stringify(body)} -> ${JSON.stringify(res.body)}`).toBe(403);
+      expect(await db.user.count({ where: { email: e } }), JSON.stringify(body)).toBe(0);
+    }
+  });
+
+  it('ST-F4 positive control: adminW still invites within its own authority ({ crm: read }, tier 0) -> 201, the row holds exactly that', async () => {
+    const e = freshInviteEmail('within');
+    const res = await call('post', routes.team(ID.bizD), T[ID.adminW], {
+      email: e, role: 'STAFF', scopes: { crm: 'read' }, maxApprovalTier: 0,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const row = await db.membership.findFirst({ where: { businessId: ID.bizD, user: { email: e } } });
+    expect(row.permissionScopes).toEqual({ crm: 'read' });
+    expect(row.maxApprovalTier).toBe(0);
+  });
+
+  it('ST-F4 positive control: the OWNER invites at any tier — the same team:admin, tier-4 invite of the accomplice -> 201, created as asked', async () => {
+    const res = await call('post', routes.team(ID.bizD), T[ID.ownerD], {
+      email: email(ID.accomplice),
+      role: 'ADMIN',
+      scopes: { ...ROLE_DEFAULT_SCOPES.OWNER },
+      maxApprovalTier: 4,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const row = await db.membership.findFirst({ where: { businessId: ID.bizD, userId: ID.accomplice } });
+    expect(row.role).toBe('ADMIN');
+    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.OWNER);
+    expect(row.maxApprovalTier).toBe(4);
+  });
 });
 
 describe('OPEN DEFECT CR-1 — the structure routes (team:write) copy a JobRole’s permissions and tier onto any membership, the caller’s own included', () => {
