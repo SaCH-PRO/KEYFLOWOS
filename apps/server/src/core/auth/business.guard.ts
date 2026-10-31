@@ -1,5 +1,6 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveRequestBusinessId } from './request-business-id';
 
 @Injectable()
 export class BusinessGuard implements CanActivate {
@@ -18,7 +19,9 @@ export class BusinessGuard implements CanActivate {
       return true;
     }
 
-    const businessId = req.params?.businessId || req.body?.businessId || req.query?.businessId;
+    // The same resolver the handlers read through (core/auth/request-business-id.ts):
+    // a handler behind this guard cannot act on a tenant the guard did not check.
+    const businessId = resolveRequestBusinessId(req);
     this.logger.debug(`BusinessGuard checking businessId: ${businessId} for userId: ${user.id}`);
     if (!businessId) {
       throw new ForbiddenException('businessId is required');

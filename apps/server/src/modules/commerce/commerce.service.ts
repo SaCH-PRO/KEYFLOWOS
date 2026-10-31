@@ -16,11 +16,12 @@ import { Service, Prisma } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, computeBalance } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus } from './invoice-workflow.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 
 @Injectable()
 export class CommerceService {
@@ -449,21 +450,83 @@ export class CommerceService {
   }
 
   /**
+   * KF-REVENUE-AUTH-PROJECTION-001 review (RCR-01) — `GET /commerce/invoices/:id`
+   * has two readers, not one. The customer pay page is anonymous and gets the
+   * public projection below. The operator app's invoice detail and edit pages
+   * load the same route with the operator's bearer token (client.ts
+   * `getInvoice`), and they read what the projection withholds: the payment
+   * rows behind the Payment Summary, the customer's email for the reminder
+   * composer, and `contactId` for the edit form. Serving them the projection
+   * showed "Paid 0.00" on every part-paid invoice.
+   *
+   * The viewer gets the full operator shape only when they could pass the
+   * tenant routes for this invoice's business: SUPER_ADMIN, or a member whose
+   * revenue scope is at least `read` — the answer ModuleScopeGuard gives,
+   * evaluated here because this route is public by design and carries neither
+   * guard. Everyone else gets the projection, which is what an anonymous
+   * caller gets; a membership carrying `revenue: none` is anonymous for
+   * revenue purposes (RA-G7-04), and so is a member of another tenant.
+   *
+   * The shareable gate is the same for both readers: on main the route
+   * answered null for DRAFT/VOID to everyone, and this packet does not widen
+   * what the route serves.
+   */
+  async getInvoiceForViewer(invoiceId: string, viewer?: { id?: string; role?: string } | null) {
+    if (viewer?.id && (await this.viewerMayReadInvoiceAsOperator(invoiceId, viewer.id, viewer.role))) {
+      return this.getInvoiceWithBusiness(invoiceId, true);
+    }
+    return this.getInvoicePublicView(invoiceId);
+  }
+
+  /**
+   * Mirrors ModuleScopeGuard's legacy answer for `revenue >= read` — an
+   * explicit scope map, else the role defaults, SUPER_ADMIN unconditionally —
+   * for the one route that cannot carry the guard. It is not a new authority
+   * model: it is the guard's rule, restated once, for the operator reader.
+   */
+  private async viewerMayReadInvoiceAsOperator(invoiceId: string, userId: string, role?: string): Promise<boolean> {
+    if (role === 'SUPER_ADMIN') return true;
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { businessId: true },
+    });
+    if (!invoice) return false;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId, businessId: invoice.businessId } },
+    });
+    if (!membership) return false;
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    return rankOf(scopes.revenue || 'none') >= LEVEL_RANK.read;
+  }
+
+  /**
    * KF-REVENUE-AUTH-PROJECTION-001 (G5) — the public, unauthenticated view of
    * an invoice for the id-based pay page (`GET /commerce/invoices/:id`).
    *
    * `getInvoiceWithBusiness` above is the full operator shape: every payment
    * row (reference, notes, evidence URL, who recorded it), the customer's
-   * email and the business profile. Five server-side callers depend on that
-   * shape (the email paths, the receipt listener, the token route, the KEY
-   * adapter) and it is unchanged. The public route used to return it to anyone
-   * holding an invoice id; it now returns this projection, which is the shape
-   * the token route already hand-builds as its public-safe contract, plus the
-   * fields the pay page (pay/[invoiceId]/page.tsx) reads beyond that shape:
-   * the invoice's own arithmetic (subtotal, tax, discount — printed on the
-   * invoice), the tenant key for its presence tracker, and `paid`/`remaining`
-   * from the canonical balance so the page can show progress without seeing a
-   * single row.
+   * email and the business's document templates. Five server-side callers
+   * depend on that shape (the email paths, the receipt listener, the token
+   * route, the KEY adapter) and it is unchanged. The public route used to
+   * return it to anyone holding an invoice id; it now returns this projection,
+   * which is the shape the token route already hand-builds as its public-safe
+   * contract, plus the fields the pay page (pay/[invoiceId]/page.tsx) reads
+   * beyond that shape: the invoice's own arithmetic (subtotal, tax, discount —
+   * printed on the invoice), the tenant key for its presence tracker,
+   * `paid`/`remaining` from the canonical balance so the page can show
+   * progress without seeing a single row, and the business's public profile.
+   *
+   * The business block is the profile the storefront and presence routes
+   * already serve to anyone (site.service.ts, presence.service.ts): name,
+   * logo, colours, contact details, address and social handles — the pay page
+   * renders all of them (header gradient, address under the name, the cash
+   * block, the footer links). Withholding them bought no confidentiality and
+   * blanked those sections for every customer (review RCR-02). What stays
+   * private is what no public route serves: the document template choices,
+   * `metaData` (bank details), the customer's email and the payment rows.
    *
    * Same shareable-status gate as the token route; null otherwise, which the
    * controller turns into the same 404 as an unknown id.
@@ -490,13 +553,29 @@ export class CommerceService {
         items: { select: { id: true, description: true, quantity: true, unitPrice: true, total: true } },
         payments: { select: { amount: true, status: true } },
         contact: { select: { firstName: true, lastName: true } },
-        business: { select: { name: true, logoUrl: true, primaryColor: true, email: true, phone: true } },
+        business: {
+          select: {
+            name: true,
+            logoUrl: true,
+            primaryColor: true,
+            secondaryColor: true,
+            email: true,
+            phone: true,
+            address: true,
+            city: true,
+            country: true,
+            website: true,
+            facebook: true,
+            instagram: true,
+            twitter: true,
+            whatsapp: true,
+          },
+        },
       },
     });
     if (!invoice) return null;
 
-    const shareableStatuses = ['SENT', 'PAID', 'OVERDUE', 'PARTIALLY_PAID'];
-    if (!shareableStatuses.includes(invoice.status)) return null;
+    if (!isShareableInvoiceStatus(invoice.status)) return null;
 
     const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
     // Same legacy-row fallback as getInvoiceWithBusiness: older invoices stored
@@ -535,8 +614,17 @@ export class CommerceService {
             name: invoice.business.name,
             logoUrl: invoice.business.logoUrl,
             primaryColor: invoice.business.primaryColor,
+            secondaryColor: invoice.business.secondaryColor,
             email: invoice.business.email,
             phone: invoice.business.phone,
+            address: invoice.business.address,
+            city: invoice.business.city,
+            country: invoice.business.country,
+            website: invoice.business.website,
+            facebook: invoice.business.facebook,
+            instagram: invoice.business.instagram,
+            twitter: invoice.business.twitter,
+            whatsapp: invoice.business.whatsapp,
           }
         : null,
       paid: balance.paid,

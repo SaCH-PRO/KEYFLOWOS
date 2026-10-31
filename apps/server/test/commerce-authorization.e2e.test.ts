@@ -41,6 +41,7 @@ import { PublicRateLimitGuard, PUBLIC_RATE_LIMIT_KEY } from '../src/core/guards/
 import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
 import { TeamAuditInterceptor } from '../src/core/interceptors/team-audit.interceptor';
 import { GlobalHttpExceptionFilter } from '../src/core/filters/http-exception.filter';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 
 const P = 'rva_';
 const ID = {
@@ -165,6 +166,7 @@ const commerceMock = {
   updateInvoiceStatus: vi.fn(),
   getInvoiceWithBusiness: vi.fn(),
   getInvoicePublicView: vi.fn(),
+  getInvoiceForViewer: vi.fn(),
 };
 
 const receiptsMock = {
@@ -247,6 +249,7 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
     commerceMock.updateInvoiceStatus.mockResolvedValue({ id: ID.inv, status: 'SENT' });
     receiptsMock.buildReceipt.mockResolvedValue({ invoiceNumber: 'RVA-SENT', status: 'SENT' });
     paymentsMock.getInvoicePaymentStatus.mockResolvedValue({ status: 'SENT', paid: 40, remaining: 60, currency: 'TTD', lastPaymentAt: null });
+    commerceMock.getInvoiceForViewer.mockResolvedValue({ id: ID.inv, status: 'SENT', paid: 0, remaining: 100 });
   });
 
   // -------------------------------------------------------------------------
@@ -412,6 +415,91 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       }
       const blocked = await agent().get(`/payments/invoice/${ID.inv}/status`);
       expect(blocked.status).toBe(429);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Review repairs — the L1 half of each repair. These fail at the packet's fix
+  // head bd66cde0 and pass at the repair head; the L2 half is in
+  // test/revenue-authorization.integration.test.ts (RR-*).
+  describe('Review repairs (L1 half)', () => {
+    it('RR-ST1 (L1 half): the receipt handler forwards the tenant the guards validated (body), not the query string', async () => {
+      // ownerB is a member of B only. Body B satisfies both guards; the query A
+      // used to drive the lookup.
+      const res = await withActor(agent().get(`/commerce/invoices/${ID.inv}/receipt?businessId=${ID.bizA}`), ID.ownerB)
+        .set('Content-Type', 'application/json')
+        .send({ businessId: ID.bizB });
+      expect(res.status).toBe(200);
+      expect(receiptsMock.buildReceipt).toHaveBeenCalledWith(ID.inv, ID.bizB);
+    });
+
+    it('RR-ST2 (L1 half): with the tenant only in the query string, all three mutation handlers forward the guard tenant instead of undefined', async () => {
+      await withActor(agent().patch(`/commerce/invoices/${ID.inv}/paid?businessId=${ID.bizA}`), ID.ownerA).send({}).expect(200);
+      expect(commerceMock.markInvoicePaid).toHaveBeenCalledWith(ID.inv, ID.ownerA, ID.bizA);
+
+      await withActor(agent().patch(`/commerce/invoices/${ID.inv}/payment-failed?businessId=${ID.bizA}`), ID.ownerA)
+        .send({ reason: 'x' })
+        .expect(200);
+      expect(commerceMock.markInvoicePaymentFailed).toHaveBeenCalledWith(ID.inv, ID.ownerA, 'x', ID.bizA);
+
+      await withActor(agent().patch(`/commerce/invoices/${ID.inv}/status/sent?businessId=${ID.bizA}`), ID.ownerA)
+        .send({ status: 'SENT' })
+        .expect(200);
+      expect(commerceMock.updateInvoiceStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ invoiceId: ID.inv, status: 'SENT', actorId: ID.ownerA, businessId: ID.bizA }),
+      );
+    });
+
+    it('RR-ST2 (L1 half): the guards\' precedence is the handler\'s — body wins over query on both sides', async () => {
+      // ownerA is a member of A only: body A admits; query B is ignored by the
+      // guards and by the handler alike.
+      await withActor(agent().patch(`/commerce/invoices/${ID.inv}/paid?businessId=${ID.bizB}`), ID.ownerA)
+        .send({ businessId: ID.bizA })
+        .expect(200);
+      expect(commerceMock.markInvoicePaid).toHaveBeenCalledWith(ID.inv, ID.ownerA, ID.bizA);
+    });
+
+    it('RR-ST2 (L1 half): SUPER_ADMIN with no tenant anywhere is refused at the handler (403 businessId is required) before any service call', async () => {
+      const responses = [
+        await markPaid(ID.superAdmin, {}),
+        await markFailed(ID.superAdmin, { reason: 'x' }),
+        await setStatus(ID.superAdmin, 'void', { status: 'VOID' }),
+        await receipt(ID.superAdmin),
+      ];
+      for (const res of responses) {
+        expect(res.status).toBe(403);
+        expect(res.body.message).toMatch(/businessId is required/);
+      }
+      expect(commerceMock.markInvoicePaid).not.toHaveBeenCalled();
+      expect(commerceMock.markInvoicePaymentFailed).not.toHaveBeenCalled();
+      expect(commerceMock.updateInvoiceStatus).not.toHaveBeenCalled();
+      expect(receiptsMock.buildReceipt).not.toHaveBeenCalled();
+    });
+
+    it('RR-ST4 (L1 half): getInvoice carries @PublicRateLimit(20, 60000) behind PublicRateLimitGuard, and the guard enforces it', async () => {
+      const meta = Reflect.getMetadata(PUBLIC_RATE_LIMIT_KEY, CommerceController.prototype.getInvoice);
+      expect(meta).toEqual({ limit: 20, windowMs: 60_000 });
+      const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, CommerceController.prototype.getInvoice) ?? [];
+      expect(guards).toContain(PublicRateLimitGuard);
+
+      for (let i = 1; i <= 20; i += 1) {
+        const res = await agent().get(`/commerce/invoices/${ID.inv}`);
+        expect(res.status, `request ${i}`).toBe(200);
+      }
+      const blocked = await agent().get(`/commerce/invoices/${ID.inv}`);
+      expect(blocked.status).toBe(429);
+    });
+
+    it('RR-RCR1 (L1 half): getInvoice forwards the attached identity (or none) to the service, which picks the shape', async () => {
+      await agent().get(`/commerce/invoices/${ID.inv}`).expect(200);
+      expect(commerceMock.getInvoiceForViewer).toHaveBeenLastCalledWith(ID.inv, undefined);
+
+      await withActor(agent().get(`/commerce/invoices/${ID.inv}`), ID.ownerA).expect(200);
+      expect(commerceMock.getInvoiceForViewer).toHaveBeenLastCalledWith(ID.inv, { id: ID.ownerA, role: 'USER' });
+
+      commerceMock.getInvoiceForViewer.mockResolvedValueOnce(null);
+      const missing = await agent().get(`/commerce/invoices/${ID.inv}`);
+      expect(missing.status).toBe(404);
     });
   });
 });

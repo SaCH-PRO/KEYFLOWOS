@@ -3,7 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
-import { InvoiceWorkflowService, computeBalance } from '../commerce/invoice-workflow.service';
+import { InvoiceWorkflowService, computeBalance, isShareableInvoiceStatus } from '../commerce/invoice-workflow.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
@@ -957,6 +957,12 @@ export class PaymentsService {
    * `{ status, paid, remaining, currency, lastPaymentAt }`, computed from the
    * canonical balance — PENDING and FAILED rows contribute nothing and no
    * row-shaped data leaves the server.
+   *
+   * Review (ST-3): the same shareable gate as the public invoice view. A
+   * DRAFT or VOID id answered 200 with its status and full total while an
+   * unknown id answered 404 — the distinction and the amount were both new
+   * disclosures (main answered `[]` for either). Non-shareable now answers
+   * exactly like unknown.
    */
   async getInvoicePaymentStatus(invoiceId: string): Promise<{
     status: string;
@@ -974,7 +980,7 @@ export class PaymentsService {
         payments: { select: { amount: true, status: true, createdAt: true } },
       },
     });
-    if (!invoice) throw new NotFoundException('Invoice not found');
+    if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
     const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
     let lastPaymentAt: Date | null = null;
     for (const p of invoice.payments) {

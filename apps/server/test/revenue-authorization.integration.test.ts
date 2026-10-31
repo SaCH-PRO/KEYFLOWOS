@@ -157,6 +157,17 @@ async function clearStatusRouteRateLimit() {
   if (keys.length) await redis.del(...keys);
 }
 
+// Review repair ST-4: GET /commerce/invoices/:id is now limited at 20/min per
+// IP like the status route. Every case in this file that reads the public view
+// shares one IP, so the key is reset before each test; the RR-ST4 case below
+// is the only one that counts hits within a single test.
+const PUBLIC_INVOICE_ROUTE_KEY_PATTERN = 'pub_rate_limit:*:getInvoice:*';
+
+async function clearPublicInvoiceRouteRateLimit() {
+  const keys: string[] = await redis.keys(PUBLIC_INVOICE_ROUTE_KEY_PATTERN);
+  if (keys.length) await redis.del(...keys);
+}
+
 async function clearAllPublicRateLimits() {
   const keys: string[] = await redis.keys('pub_rate_limit:*');
   if (keys.length) await redis.del(...keys);
@@ -394,7 +405,17 @@ beforeAll(async () => {
   }
 
   // ---- tenants (A on ACCRUAL so the AR posting at SENT is observable) ------
-  await db.business.create({ data: { id: ID.bizA, name: 'RVA Biz A', ownerId: ID.ownerA, accountingBasis: 'ACCRUAL', currency: 'TTD' } });
+  // Business A carries the public profile the storefront already serves
+  // (RCR-02) plus the fields no public route serves: a template choice and
+  // bank details under metaData, the latter with a canary.
+  await db.business.create({
+    data: {
+      id: ID.bizA, name: 'RVA Biz A', ownerId: ID.ownerA, accountingBasis: 'ACCRUAL', currency: 'TTD',
+      address: '1 Harbour Street', city: 'Port of Spain', country: 'TT', website: 'https://rva.example',
+      secondaryColor: '#123456', facebook: 'rva.fb', instagram: 'rva.ig', twitter: 'rva.tw', whatsapp: '+18680000000',
+      invoiceTemplate: 'modern', metaData: { bankAccountNumber: `${CANARY}acct` },
+    },
+  });
   await db.business.create({ data: { id: ID.bizB, name: 'RVA Biz B', ownerId: ID.ownerB, currency: 'TTD' } });
 
   // ---- real memberships (§2.1) --------------------------------------------
@@ -482,6 +503,8 @@ afterAll(async () => {
     await redis.quit();
   }
 });
+
+beforeEach(clearPublicInvoiceRouteRateLimit);
 
 describe('fixture sanity (real rows)', () => {
   it('seeded the tenants, memberships, invoices, payments and the AR baseline for rva_invSent', async () => {
@@ -623,14 +646,19 @@ describe('List A: pre-fix failures', () => {
   });
 
   describe('G5 — public disclosure', () => {
-    it('RA-G5-01: the public invoice view carries no payment rows, no contact email, no business profile fields, and no canary', async () => {
+    it('RA-G5-01: the public invoice view carries no payment rows, no contact email, no private business fields, and no canary', async () => {
       const res = await publicInvoice(ID.invSent);
       expect(res.status).toBe(200);
       expect(res.body.paid).toBe(40);
       expect(res.body.remaining).toBe(60);
       expect(res.body).not.toHaveProperty('payments');
+      expect(res.body).not.toHaveProperty('contactId');
       expect(res.body.contact).not.toHaveProperty('email');
-      for (const key of ['address', 'whatsapp', 'facebook', 'instagram', 'twitter', 'website', 'invoiceTemplate', 'quoteTemplate']) {
+      // Review RCR-02: the exclusion list is the genuinely private fields — the
+      // ones no public route serves. The public profile (address, website, the
+      // social handles, secondaryColor) is the storefront's and is asserted
+      // present in RR-RCR2-01.
+      for (const key of ['id', 'ownerId', 'invoiceTemplate', 'quoteTemplate', 'metaData', 'slug']) {
         expect(res.body.business ?? {}, `business.${key}`).not.toHaveProperty(key);
       }
       expectNoCanary(res.body);
@@ -992,7 +1020,12 @@ describe('List C: post-fix acceptance', () => {
     );
     expect(res.body.items[0]).toHaveProperty('id');
     expect(res.body.contact).toEqual({ firstName: 'Rva', lastName: 'Customer' });
-    expect(Object.keys(res.body.business).sort()).toEqual(['email', 'logoUrl', 'name', 'phone', 'primaryColor']);
+    // The business block is the public profile the pay page renders (RCR-02):
+    // header gradient, address under the name, cash block, footer links.
+    expect(Object.keys(res.body.business).sort()).toEqual([
+      'address', 'city', 'country', 'email', 'facebook', 'instagram', 'logoUrl', 'name', 'phone',
+      'primaryColor', 'secondaryColor', 'twitter', 'website', 'whatsapp',
+    ]);
     expect(res.body.business.name).toBe('RVA Biz A');
 
     const gateways = await agent().get(`/payments/invoice/${ID.invSent}/gateways`);
@@ -1043,5 +1076,219 @@ describe('List C: post-fix acceptance', () => {
     const res = await publicStatus(ID.invSent);
     expect(res.status).toBe(200);
     expect(Object.keys(res.body).sort()).toEqual(['currency', 'lastPaymentAt', 'paid', 'remaining', 'status']);
+  });
+});
+
+// =============================================================================
+// Review repairs — KF-REVENUE-AUTH-PROJECTION-001 integration review of the fix
+// head bd66cde0. Every RR-* case below failed at that head (the review probe
+// that found it is named) and passes at the repair head; the controls that
+// must keep working sit beside them.
+// =============================================================================
+describe('Review repairs: the guards and the handler read one tenant source (ST-1, ST-2)', () => {
+  // staffReadA holds revenue:read in A and — for this block only — revenue:write
+  // in B: the multi-tenant member the ST-2 probe used.
+  beforeAll(async () => {
+    await db.membership.create({
+      data: { id: `${P}m_staffReadA_bizB`, userId: ID.staffReadA, businessId: ID.bizB, role: 'STAFF', permissionScopes: { revenue: 'write' } },
+    });
+  });
+  afterAll(async () => {
+    await db.$executeRawUnsafe(`DELETE FROM memberships WHERE id = '${P}m_staffReadA_bizB'`);
+  });
+
+  it('RR-ST1-01: a GET carrying a JSON body naming the caller\'s own tenant with another tenant in the query cannot read that tenant\'s receipt (PROBE-1)', async () => {
+    const res = await withActor(agent().get(`/commerce/invoices/${ID.invSent}/receipt?businessId=${ID.bizA}`), ID.ownerB)
+      .set('Content-Type', 'application/json')
+      .send({ businessId: ID.bizB });
+    expect(res.status).toBe(404);
+    for (const key of ['contact', 'items', 'business']) expect(res.body).not.toHaveProperty(key);
+    expectNoCanary(res.body);
+    const unknown = await receipt(ID.ownerA, `${P}nope`, ID.bizA);
+    expect(stripVolatile(res.body)).toEqual(stripVolatile(unknown.body));
+  });
+
+  it('RR-ST1-02: the handler applies the guards\' precedence in the admitting direction too (body wins over query; the owner reads their own receipt)', async () => {
+    const res = await withActor(agent().get(`/commerce/invoices/${ID.invSent}/receipt?businessId=${ID.bizB}`), ID.ownerA)
+      .set('Content-Type', 'application/json')
+      .send({ businessId: ID.bizA });
+    expect(res.status).toBe(200);
+    expect(res.body.invoiceNumber).toBe('RVA-SENT');
+  });
+
+  it('RR-ST2-01: revenue:read in A plus revenue:write in B cannot mark an invoice of A paid with the tenant only in the query string (PROBE-2)', async () => {
+    const copy = await createCopy('rr_st2_01', { status: 'SENT' });
+    const res = await withActor(agent().patch(`/commerce/invoices/${copy}/paid?businessId=${ID.bizB}`), ID.staffReadA).send({});
+    expect(res.status).toBe(404);
+    expect(await invoiceStatus(copy)).toBe('SENT');
+    expect(await paymentCount(copy)).toBe(0);
+    expect(eventsFor('invoice.paid', copy)).toHaveLength(0);
+    const unknown = await markPaid(ID.ownerA, `${P}nope`, { businessId: ID.bizA });
+    expect(stripVolatile(res.body)).toEqual(stripVolatile(unknown.body));
+  });
+
+  it('RR-ST2-02: the same on the status route (no void, no reversal) and on payment-failed (PROBE-2b)', async () => {
+    const v = await createCopy('rr_st2_02v', { status: 'SENT', viaWorkflow: true });
+    const rv = await withActor(agent().patch(`/commerce/invoices/${v}/status/void?businessId=${ID.bizB}`), ID.staffReadA).send({ status: 'VOID' });
+    expect(rv.status).toBe(404);
+    expect(await invoiceStatus(v)).toBe('SENT');
+    expect(eventsFor('invoice.void', v)).toHaveLength(0);
+    expect((await postingsFor(v)).some((t) => t.type === 'REVERSAL')).toBe(false);
+
+    const f = await createCopy('rr_st2_02f', { status: 'SENT' });
+    const rf = await withActor(agent().patch(`/commerce/invoices/${f}/payment-failed?businessId=${ID.bizB}`), ID.staffReadA).send({ reason: 'x' });
+    expect(rf.status).toBe(404);
+    expect(await invoiceStatus(f)).toBe('SENT');
+    expect(eventsFor('invoice.payment_failed', f)).toHaveLength(0);
+  });
+
+  it('RR-ST2-03: a pure non-member via the query string is stopped by the tenant binding (404), not only by the service membership check (PROBE-2c)', async () => {
+    const copy = await createCopy('rr_st2_03', { status: 'SENT' });
+    const res = await withActor(agent().patch(`/commerce/invoices/${copy}/paid?businessId=${ID.bizB}`), ID.ownerB).send({});
+    expect(res.status).toBe(404);
+    expect(await invoiceStatus(copy)).toBe('SENT');
+    expect(await paymentCount(copy)).toBe(0);
+  });
+
+  it('RR-ST2-04: an admitted actor naming the tenant only in the query string is forwarded that tenant (real service spied) and the write succeeds', async () => {
+    const paidSpy = vi.spyOn(commerce, 'markInvoicePaid');
+    try {
+      const copy = await createCopy('rr_st2_04', { status: 'SENT' });
+      const res = await withActor(agent().patch(`/commerce/invoices/${copy}/paid?businessId=${ID.bizA}`), ID.ownerA).send({});
+      expect(res.status).toBe(200);
+      expect(paidSpy).toHaveBeenCalledWith(copy, ID.ownerA, ID.bizA);
+      expect(await invoiceStatus(copy)).toBe('PAID');
+    } finally {
+      paidSpy.mockRestore();
+    }
+  });
+
+  it('RR-ST2-05: SUPER_ADMIN, who bypasses both guards, is refused at the handler when no request field names a tenant (403 businessId is required; no service call)', async () => {
+    const paidSpy = vi.spyOn(commerce, 'markInvoicePaid');
+    const failedSpy = vi.spyOn(commerce, 'markInvoicePaymentFailed');
+    const statusSpy = vi.spyOn(commerce, 'updateInvoiceStatus');
+    try {
+      const copy = await createCopy('rr_st2_05', { status: 'SENT' });
+      const responses = [
+        await markPaid(ID.superAdmin, copy, {}),
+        await markFailed(ID.superAdmin, copy, { reason: 'x' }),
+        await setStatus(ID.superAdmin, copy, 'void', { status: 'VOID' }),
+        await receipt(ID.superAdmin, copy),
+      ];
+      for (const res of responses) {
+        expect(res.status).toBe(403);
+        expect(res.body.message).toMatch(/businessId is required/);
+        expectNoCanary(res.body);
+      }
+      expect(paidSpy).not.toHaveBeenCalled();
+      expect(failedSpy).not.toHaveBeenCalled();
+      expect(statusSpy).not.toHaveBeenCalled();
+      expect(await invoiceStatus(copy)).toBe('SENT');
+    } finally {
+      paidSpy.mockRestore();
+      failedSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+});
+
+describe('Review repairs: the public status route hides non-shareable invoices (ST-3)', () => {
+  beforeEach(clearStatusRouteRateLimit);
+  afterEach(clearStatusRouteRateLimit);
+
+  it('RR-ST3-01: DRAFT and VOID ids answer 404 with the unknown-id body; no status, number or balance leaves (PROBE-3)', async () => {
+    const unknown = await publicStatus(`${P}nope`);
+    expect(unknown.status).toBe(404);
+    for (const id of [ID.invDraft, ID.invVoid]) {
+      const res = await publicStatus(id);
+      expect(res.status, id).toBe(404);
+      expect(stripVolatile(res.body)).toEqual(stripVolatile(unknown.body));
+      const text = JSON.stringify(stripVolatile(res.body));
+      for (const needle of ['DRAFT', 'VOID', 'remaining', 'paid', 'RVA-']) expect(text, `${id} ${needle}`).not.toContain(needle);
+      expectNoCanary(res.body);
+    }
+  });
+
+  it('RR-ST3-02: shareable statuses still answer the poll (SENT and PAID)', async () => {
+    const sent = await publicStatus(ID.invSent);
+    expect(sent.status).toBe(200);
+    expect(sent.body.status).toBe('SENT');
+    const paid = await publicStatus(ID.invPaid);
+    expect(paid.status).toBe(200);
+    expect(paid.body).toEqual({ status: 'PAID', paid: 20, remaining: 0, currency: 'TTD', lastPaymentAt: PAY_P1_CREATED_AT.toISOString() });
+  });
+});
+
+describe('Review repairs: the public invoice route is rate limited (ST-4)', () => {
+  it('RR-ST4-01: answers 200 twenty times and 429 on the twenty-first (real guard, real Redis; PROBE-5)', async () => {
+    for (let i = 1; i <= 20; i += 1) {
+      const res = await publicInvoice(ID.invSent);
+      expect(res.status, `request ${i}`).toBe(200);
+    }
+    const blocked = await publicInvoice(ID.invSent);
+    expect(blocked.status).toBe(429);
+    expectNoCanary(blocked.body);
+    const keys: string[] = await redis.keys(PUBLIC_INVOICE_ROUTE_KEY_PATTERN);
+    expect(keys.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Review repairs: operators keep the full invoice shape on GET /commerce/invoices/:id (RCR-01)', () => {
+  it('RR-RCR1-01: the owner, an admin, a revenue:read member, a STAFF default and SUPER_ADMIN get payments, contact.email and contactId (what the detail and edit pages read)', async () => {
+    for (const actor of [ID.ownerA, ID.adminA, ID.staffReadA, ID.staffDefaultA, ID.superAdmin]) {
+      const res = await withActor(publicInvoice(ID.invSent), actor);
+      expect(res.status, actor).toBe(200);
+      expect(res.body.contactId, actor).toBe(ID.contactA);
+      expect(res.body.contact?.email, actor).toBe(`${CANARY}customer@test.local`);
+      expect(res.body.payments?.map((p: { id: string }) => p.id).sort(), actor).toEqual([ID.payS1, ID.payS2].sort());
+      expect(res.body.business?.invoiceTemplate, actor).toBe('modern');
+      // paidAmount exactly as the detail page computes it (SUCCESSFUL rows only).
+      const paid = res.body.payments
+        .filter((p: { status: string }) => p.status === 'SUCCESSFUL')
+        .reduce((s: number, p: { amount: number }) => s + p.amount, 0);
+      expect(paid, actor).toBe(40);
+    }
+  });
+
+  it('RR-RCR1-02: a revenue:none member, a member of another tenant, a non-member and an anonymous caller get the projection', async () => {
+    for (const actor of [ID.staffNoneA, ID.ownerB, ID.noMember, null]) {
+      const res = await withActor(publicInvoice(ID.invSent), actor);
+      expect(res.status, String(actor)).toBe(200);
+      for (const key of ['payments', 'contactId']) expect(res.body, `${actor} ${key}`).not.toHaveProperty(key);
+      expect(res.body.contact, String(actor)).toEqual({ firstName: 'Rva', lastName: 'Customer' });
+      expect(res.body.business, String(actor)).not.toHaveProperty('invoiceTemplate');
+      expect(res.body.paid, String(actor)).toBe(40);
+      expectNoCanary(res.body);
+    }
+  });
+
+  it('RR-RCR1-03: the shareable gate is unchanged for the operator — DRAFT and VOID answer 404 as on main b1948d27 (not widened by this packet)', async () => {
+    for (const id of [ID.invDraft, ID.invVoid]) {
+      const res = await withActor(publicInvoice(id), ID.ownerA);
+      expect(res.status, id).toBe(404);
+    }
+  });
+});
+
+describe('Review repairs: the projection carries the public business profile (RCR-02)', () => {
+  it('RR-RCR2-01: address, city, country, website, secondaryColor and the social handles are served; the template choice and bank details are not', async () => {
+    const res = await publicInvoice(ID.invSent);
+    expect(res.status).toBe(200);
+    expect(res.body.business).toEqual(
+      expect.objectContaining({
+        name: 'RVA Biz A',
+        address: '1 Harbour Street',
+        city: 'Port of Spain',
+        country: 'TT',
+        website: 'https://rva.example',
+        secondaryColor: '#123456',
+        facebook: 'rva.fb',
+        instagram: 'rva.ig',
+        twitter: 'rva.tw',
+        whatsapp: '+18680000000',
+      }),
+    );
+    for (const key of ['invoiceTemplate', 'quoteTemplate', 'metaData', 'id', 'ownerId']) expect(res.body.business).not.toHaveProperty(key);
+    expectNoCanary(res.body);
   });
 });

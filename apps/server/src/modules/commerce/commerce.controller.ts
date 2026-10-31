@@ -10,6 +10,7 @@ import { PaymentEvidenceService } from './payment-evidence.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { appUrl } from '../../core/config/runtime-urls';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -329,40 +330,58 @@ export class CommerceController {
     return { created, count: created.length, errors, totalAttempted: validProducts.length };
   }
 
+  /**
+   * The tenant a bare-id route (no `:businessId` in the path) acts on.
+   *
+   * KF-REVENUE-AUTH-PROJECTION-001 review (ST-1, ST-2): `@GuardedBusinessId()`
+   * is the same resolver BusinessGuard and ModuleScopeGuard ran, so the
+   * handler cannot act on a tenant the guards did not check. It is `undefined`
+   * only when no request field named a tenant; BusinessGuard already refuses
+   * that for every ordinary user, and SUPER_ADMIN — who bypasses both guards —
+   * is refused here for the same reason: a tenant that reaches the service as
+   * `undefined` switches the invoice binding off. (The no-actor, no-tenant
+   * service path is the deprecated webhook contract; see RA-G16-01.)
+   */
+  private requireGuardedTenant(businessId: string | undefined): string {
+    if (!businessId) throw new ForbiddenException('businessId is required');
+    return businessId;
+  }
+
   // KF-REVENUE-AUTH-PROJECTION-001 (G4): these three bare-id routes carry no
-  // :businessId param, so BusinessGuard resolves the tenant from the body. The
-  // guard proves the caller belongs to THAT tenant; it does not constrain which
-  // invoice the service touches, so the same tenant is forwarded and bound in
-  // the service. Every other write on this controller already requires
-  // revenue:write — these did not, so a read-only member could mark paid.
+  // :businessId param, so BusinessGuard resolves the tenant from the request
+  // (params, then body, then query). The guard proves the caller belongs to
+  // THAT tenant; it does not constrain which invoice the service touches, so
+  // the same tenant is forwarded and bound in the service. Every other write
+  // on this controller already requires revenue:write — these did not, so a
+  // read-only member could mark paid.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('invoices/:invoiceId/paid')
   async markInvoicePaid(
-    @Body('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string | undefined,
     @Param('invoiceId') invoiceId: string,
     @Req() req: any,
   ) {
-    return this.commerce.markInvoicePaid(invoiceId, req?.user?.id, businessId);
+    return this.commerce.markInvoicePaid(invoiceId, req?.user?.id, this.requireGuardedTenant(businessId));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('invoices/:invoiceId/payment-failed')
   async markInvoicePaymentFailed(
-    @Body('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string | undefined,
     @Param('invoiceId') invoiceId: string,
     @Req() req: any,
     @Body() body: { reason?: string },
   ) {
-    return this.commerce.markInvoicePaymentFailed(invoiceId, req?.user?.id, body?.reason, businessId);
+    return this.commerce.markInvoicePaymentFailed(invoiceId, req?.user?.id, body?.reason, this.requireGuardedTenant(businessId));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('invoices/:invoiceId/status/:status')
   async updateInvoiceStatus(
-    @Body('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string | undefined,
     @Param('invoiceId') invoiceId: string,
     @Param('status') status: string,
     @Req() req: any,
@@ -381,7 +400,7 @@ export class CommerceController {
       actorId: req?.user?.id,
       sentAt: body?.sentAt,
       dueDate: body?.dueDate,
-      businessId,
+      businessId: this.requireGuardedTenant(businessId),
     });
   }
 
@@ -524,23 +543,34 @@ export class CommerceController {
   }
 
   // G7: the receipt is bound to the guard's tenant and revenue:read is the
-  // mandatory floor; an explicit revenue:none is refused.
+  // mandatory floor; an explicit revenue:none is refused. The tenant is the
+  // one the guards resolved (ST-1): reading `@Query` here while the guards
+  // read the body first let a GET with a JSON body pass the guards on one
+  // tenant and fetch another's receipt.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
   @Get('invoices/:invoiceId/receipt')
   async getReceipt(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string | undefined,
     @Param('invoiceId') invoiceId: string,
   ) {
-    return this.receipts.buildReceipt(invoiceId, businessId);
+    return this.receipts.buildReceipt(invoiceId, this.requireGuardedTenant(businessId));
   }
 
-  // G5: the unauthenticated detail route answers with the public projection
-  // (no payment rows, no customer email, no business profile fields) and 404
-  // for anything not shareable — the same answer as an unknown id.
+  // G5: the id-based detail route answers 404 for anything not shareable —
+  // the same answer as an unknown id — and otherwise serves the shape the
+  // caller is entitled to: the full operator shape to an operator of the
+  // invoice's business (RCR-01: the operator app's detail and edit pages load
+  // this route with the operator's token), the public projection (no payment
+  // rows, no customer email, no private business fields) to everyone else.
+  // Rate limited like the sibling status route (ST-4): this is the richer
+  // disclosure surface and the natural id-enumeration target, and the
+  // integration harness does not install the global express limiter.
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(20, 60_000)
   @Get('invoices/:invoiceId')
-  async getInvoice(@Param('invoiceId') invoiceId: string) {
-    const view = await this.commerce.getInvoicePublicView(invoiceId);
+  async getInvoice(@Param('invoiceId') invoiceId: string, @Req() req: { user?: { id?: string; role?: string } }) {
+    const view = await this.commerce.getInvoiceForViewer(invoiceId, req?.user);
     if (!view) throw new NotFoundException('Invoice not found');
     return view;
   }
