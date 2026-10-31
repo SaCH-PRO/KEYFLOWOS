@@ -833,8 +833,53 @@ describe('ST-C: only a call that names no actor is recorded as SYSTEM', () => {
     expect(deletedAudits[0].actor).toEqual({ type: 'USER', id: ID.owner });
   });
 
-  // Hand-off, not fixed here: the fix is in contact-enrichment.service.ts,
-  // outside the R0-13c write set. Kept in this suite because its manifest
-  // admits non-required cases; contacts-patch-visibility.json is strict.
-  it.todo("review hand-off (R0-13c review ST-R3 / CR-1): POST /contacts/:id/enrich applies the GET visibility clause before the provider call. Reproduced: a crm 'write' STAFF member enriching another member's PRIVATE contact gets 200 no_match (custom.enrichment stamped on the hidden row) or, on a match, a paid lookup that received the contact's email and name followed by 404, where an unknown id gets 404 with no lookup. Fix: visibilityClause in ContactEnrichmentService's contact lookup and assertCanEdit, so a contact the caller cannot see answers 404 like an unknown id with no provider call and nothing stamped");
+});
+
+// ---------------------------------------------------------------------------
+// R0-13c review hand-off ST-R3 / CR-1, left here as an it.todo by the R0-13c
+// repair and made a real case by R0-13d-CT-BULK-ENRICH-VISIBILITY (its own
+// suite, contacts-patch-visibility.integration.test.ts, covers the HTTP route
+// in depth). The NEGATIVE CONTROL fails on the R0-13d base, where
+// ContactEnrichmentService mirrored only the edit scope: the hidden contact
+// answered no_match with custom.enrichment stamped, or, on a match, a lookup
+// that received its email and name followed by 404.
+// ---------------------------------------------------------------------------
+
+describe('ST-R3 / CR-1: enrichment applies the GET visibility clause before the provider call', () => {
+  it("NEGATIVE CONTROL: a crm 'write' STAFF member enriching the owner's PRIVATE contact (ContactEnrichmentService called as the controller calls it) is refused 404 exactly like an unknown id, for a provider miss and for a forced match, with no provider call, no custom.enrichment stamp and no ContactEvent or ContactAuditEntry", async () => {
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { ContactEnrichmentService } = await import('../src/modules/crm/enrichment/contact-enrichment.service');
+    // The enabled stand-in for the paid provider: no network, records each lookup.
+    const lookups: unknown[] = [];
+    let outcome: Record<string, unknown> = { status: 'no_match' };
+    const provider = { key: 'stub', enabled: true, enrich: async (query: unknown) => { lookups.push(query); return outcome; } };
+    const enrichment = new ContactEnrichmentService(app.get(PrismaService), crm, provider as any);
+    const refusal = (contactId: string, force?: boolean) =>
+      enrichment.enrichContact({ businessId: ID.bizA, contactId, actorUserId: ID.staff, force }).then(
+        (value: unknown) => ({ value }),
+        (err: any) => ({ status: err?.status, response: err?.getResponse?.() }),
+      );
+
+    const contact = await seedSensitiveContact('PRIVATE', ID.owner);
+    expect((await detail(ID.staff, contact.id)).status).toBe(404);
+    await settle();
+    const before = await traceCounts();
+    const rowBefore = await rowSnapshot(contact.id);
+
+    for (const [label, providerOutcome, force] of [
+      ['miss', { status: 'no_match' }, undefined],
+      ['forced match', { status: 'match', result: { jobTitle: `${P}Enriched` } }, true],
+    ] as const) {
+      outcome = providerOutcome;
+      const hidden = await refusal(contact.id, force);
+      const absent = await refusal(`${P}c_unknown`, force);
+      expect(hidden, label).toEqual(absent);
+      expect(hidden, label).toMatchObject({ status: 404, response: { message: 'Contact not found' } });
+      expect(lookups, label).toEqual([]);
+    }
+    await settle();
+    expect(await traceCounts()).toEqual(before);
+    expect(await rowSnapshot(contact.id)).toEqual(rowBefore);
+    expect(await contactTraces(contact.id)).toEqual({ contactEvents: 0, audits: 0 });
+  });
 });

@@ -1,9 +1,15 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ContactEnrichmentService } from './contact-enrichment.service';
 import type { EnrichmentProvider, ProviderOutcome } from './enrichment-provider';
+import { CrmService } from '../crm.service';
 import { resolveCrmAccess } from '../crm-permissions.helper';
 
-vi.mock('../crm-permissions.helper', () => ({ resolveCrmAccess: vi.fn() }));
+// The member's access is stubbed; the visibility clause built from it is the real one.
+vi.mock('../crm-permissions.helper', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../crm-permissions.helper')>()),
+  resolveCrmAccess: vi.fn(),
+}));
 
 /**
  * The enrichment service has one invariant above all: it can only ADD data to a
@@ -29,9 +35,11 @@ function makeService(opts: {
     findFirst.mockResolvedValue(opts.contact);
   }
   const prisma = { client: { contact: { findFirst, updateMany } } };
-  const crm = { updateContact };
+  // A CrmService carrying only what its contact edit check reads (prisma), so
+  // the enrichment service runs the real CrmService rule; updateContact is a spy.
+  const crm = Object.assign(Object.create(CrmService.prototype), { prisma, updateContact });
   const svc = new ContactEnrichmentService(prisma as never, crm as never, opts.provider as never);
-  return { svc, updateContact, updateMany, findFirst };
+  return { svc, updateContact, updateMany, findFirst, crm };
 }
 
 function fakeProvider(outcome: ProviderOutcome | null, enabled = true): EnrichmentProvider {
@@ -162,5 +170,51 @@ describe('ContactEnrichmentService', () => {
 
     expect(provider.enrich).not.toHaveBeenCalled(); // no paid lookup
     expect(updateContact).not.toHaveBeenCalled();
+  });
+
+  // R0-13d-CT-BULK-ENRICH-VISIBILITY (R0-13c review ST-R3 / CR-1).
+  it('refuses a contact the member cannot see (outside the GET visibility clause) with the 404 an unknown id gets, before any lookup or stamp', async () => {
+    (resolveCrmAccess as Mock).mockResolvedValue({
+      isOwner: false, isSuperAdmin: false, viewAll: true, editScope: 'any', reassign: false, deleteScope: 'owned', level: 'write',
+    });
+    const provider = fakeProvider({ status: 'no_match' });
+    const { svc, findFirst, updateContact, updateMany } = makeService({ provider, contact: baseContact });
+    // c1 is a live row of the tenant, but not one the member's visibility clause reaches.
+    findFirst.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const where = args?.where ?? {};
+      return where.id === 'c1' && !JSON.stringify(where).includes('visibility') ? baseContact : null;
+    });
+
+    const hidden = await svc.enrichContact({ businessId: 'b1', contactId: 'c1', actorUserId: 'member-1' }).catch((err: unknown) => err);
+    const unknown = await svc.enrichContact({ businessId: 'b1', contactId: 'c-unknown', actorUserId: 'member-1' }).catch((err: unknown) => err);
+
+    expect(hidden).toBeInstanceOf(NotFoundException);
+    expect(unknown).toBeInstanceOf(NotFoundException);
+    expect((hidden as NotFoundException).getResponse()).toEqual((unknown as NotFoundException).getResponse());
+    expect(provider.enrich).not.toHaveBeenCalled(); // the hidden contact's email and name never leave
+    expect(updateMany).not.toHaveBeenCalled(); // no custom.enrichment stamp
+    expect(updateContact).not.toHaveBeenCalled();
+  });
+
+  it("takes the edit decision from CrmService.assertCanEditContact, the check updateContact applies (CR-1): its refusal ends the call before any read, lookup or stamp, and the row it reaches is the row read", async () => {
+    const provider = fakeProvider({ status: 'match', result: { jobTitle: 'CTO' } });
+    const { svc, crm, findFirst, updateContact, updateMany } = makeService({ provider, contact: baseContact });
+
+    crm.assertCanEditContact = vi.fn().mockRejectedValue(new ForbiddenException('You can only edit contacts you own'));
+    await expect(svc.enrichContact({ businessId: 'b1', contactId: 'c1', actorUserId: 'member-1' }))
+      .rejects.toThrow('You can only edit contacts you own');
+    expect(crm.assertCanEditContact).toHaveBeenCalledWith('b1', 'c1', 'member-1');
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(provider.enrich).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(updateContact).not.toHaveBeenCalled();
+
+    const reachableWhere = { id: 'c1', businessId: 'b1', deletedAt: null, AND: [{ OR: [{ ownerId: 'member-1' }] }] };
+    crm.assertCanEditContact = vi.fn().mockResolvedValue({ access: null, reachableWhere });
+    const out = await svc.enrichContact({ businessId: 'b1', contactId: 'c1', actorUserId: 'member-1' });
+    expect(out.status).toBe('enriched');
+    expect(findFirst).toHaveBeenCalledTimes(2); // initial read + re-read, both bounded by the check
+    for (const call of findFirst.mock.calls) expect(call[0]).toEqual({ where: reachableWhere });
+    expect(updateContact.mock.calls[0][0]).toMatchObject({ contactId: 'c1', actorUserId: 'member-1', jobTitle: 'CTO' });
   });
 });
