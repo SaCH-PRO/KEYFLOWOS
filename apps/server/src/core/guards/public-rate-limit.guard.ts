@@ -31,7 +31,15 @@ export class PublicRateLimitGuard implements CanActivate {
     const handler = context.getHandler().name;
     const route = req.route?.path ?? req.url ?? '';
 
-    const key = `pub_rate_limit:${ip}:${handler}:${route}`;
+    // RATE_LIMIT_KEY_NAMESPACE separates test runs that share one Redis index
+    // (a suite's fixture prefix, R0-00-WT-ISOLATION), so one suite resetting
+    // or exhausting its windows cannot touch another's. It is read per request
+    // so a suite can set it after the app is built. Unset or empty, the key is
+    // byte-identical to the pre-namespace one: production does not set it.
+    const namespace = process.env.RATE_LIMIT_KEY_NAMESPACE?.trim();
+    const key = namespace
+      ? `pub_rate_limit:${namespace}:${ip}:${handler}:${route}`
+      : `pub_rate_limit:${ip}:${handler}:${route}`;
     const now = Date.now();
     const windowStart = now - opts.windowMs;
 

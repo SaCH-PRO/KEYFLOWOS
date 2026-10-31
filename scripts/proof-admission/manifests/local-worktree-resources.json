@@ -1,0 +1,73 @@
+{
+  "manifestVersion": 1,
+  "environment": "local-worktree",
+  "packetScoped": true,
+  "about": "R0-00-WT-ISOLATION. Admits only the packet's own database kf_wt_<packet> and a non-zero Redis index, as provisioned by scripts/worktree-resources.sh. Run as: node scripts/proof-admission/admit-resources.mjs --packet <packet-id> [--env-file <worktree>/.env]. Values are judged as a suite sees them: the worktree .env, overridden by anything the shell exports.",
+  "requiredEnv": {},
+  "sharedDatabaseNames": [
+    "keyflowos",
+    "postgres",
+    "template0",
+    "template1",
+    "kf_wt_template"
+  ],
+  "resources": [
+    {
+      "env": "DATABASE_URL",
+      "kind": "postgres",
+      "allowedProtocols": [
+        "postgresql:",
+        "postgres:"
+      ],
+      "allowedHosts": [
+        "localhost",
+        "127.0.0.1"
+      ],
+      "allowedPorts": [
+        5432
+      ],
+      "allowedUsernames": [
+        "keyflow"
+      ],
+      "allowedDatabaseNames": [
+        "kf_wt_{packet}"
+      ]
+    },
+    {
+      "env": "DIRECT_URL",
+      "kind": "postgres",
+      "allowedProtocols": [
+        "postgresql:",
+        "postgres:"
+      ],
+      "allowedHosts": [
+        "localhost",
+        "127.0.0.1"
+      ],
+      "allowedPorts": [
+        5432
+      ],
+      "allowedUsernames": [
+        "keyflow"
+      ],
+      "allowedDatabaseNames": [
+        "kf_wt_{packet}"
+      ]
+    },
+    {
+      "env": "REDIS_URL",
+      "kind": "redis",
+      "allowedProtocols": [
+        "redis:"
+      ],
+      "allowedHosts": [
+        "localhost",
+        "127.0.0.1"
+      ],
+      "allowedPorts": [
+        6379
+      ],
+      "allowedDbIndexes": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    }
+  ]
+}

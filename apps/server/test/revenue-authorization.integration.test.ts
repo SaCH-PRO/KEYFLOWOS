@@ -45,6 +45,15 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 const P = 'rva_';
 const CANARY = 'RVA_SECRET_';
 
+// R0-00-WT-ISOLATION: this suite's public rate-limit keys live under its own
+// namespace (pub_rate_limit:rva_:<ip>:<handler>:<route>), and every reset below
+// deletes only that namespace, so it can neither reset nor exhaust another
+// suite's windows on the same Redis index. The guard reads the variable per
+// request; the previous value is restored in afterAll.
+const RATE_LIMIT_NS = P;
+const PREVIOUS_RATE_LIMIT_NS = process.env.RATE_LIMIT_KEY_NAMESPACE;
+process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
+
 const ID = {
   // identities (§2.1)
   ownerA: `${P}ownerA`,
@@ -83,7 +92,7 @@ const PAY_S1_CREATED_AT = new Date('2026-01-10T10:00:00.000Z');
 const PAY_S2_CREATED_AT = new Date('2026-01-11T10:00:00.000Z');
 const PAY_P1_CREATED_AT = new Date('2026-01-12T10:00:00.000Z');
 
-const STATUS_ROUTE_KEY_PATTERN = 'pub_rate_limit:*getInvoicePaymentStatus*';
+const STATUS_ROUTE_KEY_PATTERN = `pub_rate_limit:${RATE_LIMIT_NS}:*getInvoicePaymentStatus*`;
 
 let db: any;
 let app: any;
@@ -161,7 +170,7 @@ async function clearStatusRouteRateLimit() {
 // IP like the status route. Every case in this file that reads the public view
 // shares one IP, so the key is reset before each test; the RR-ST4 case below
 // is the only one that counts hits within a single test.
-const PUBLIC_INVOICE_ROUTE_KEY_PATTERN = 'pub_rate_limit:*:getInvoice:*';
+const PUBLIC_INVOICE_ROUTE_KEY_PATTERN = `pub_rate_limit:${RATE_LIMIT_NS}:*:getInvoice:*`;
 
 async function clearPublicInvoiceRouteRateLimit() {
   const keys: string[] = await redis.keys(PUBLIC_INVOICE_ROUTE_KEY_PATTERN);
@@ -169,7 +178,9 @@ async function clearPublicInvoiceRouteRateLimit() {
 }
 
 async function clearAllPublicRateLimits() {
-  const keys: string[] = await redis.keys('pub_rate_limit:*');
+  // Only this suite's namespace. At c2f6f46d this deleted every pub_rate_limit:*
+  // key on the Redis index, including other suites' live windows.
+  const keys: string[] = await redis.keys(`pub_rate_limit:${RATE_LIMIT_NS}:*`);
   if (keys.length) await redis.del(...keys);
 }
 
@@ -502,6 +513,8 @@ afterAll(async () => {
     try { await clearAllPublicRateLimits(); } catch { /* best-effort */ }
     await redis.quit();
   }
+  if (PREVIOUS_RATE_LIMIT_NS === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
+  else process.env.RATE_LIMIT_KEY_NAMESPACE = PREVIOUS_RATE_LIMIT_NS;
 });
 
 beforeEach(clearPublicInvoiceRouteRateLimit);

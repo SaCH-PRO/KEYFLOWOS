@@ -52,6 +52,14 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 const P = 'cid_';
 const HEADER = 'x-cid-user';
 const CANARY = 'CID_SECRET_';
+
+// R0-00-WT-ISOLATION: this suite's public rate-limit keys live under its own
+// namespace (pub_rate_limit:cid_:<ip>:<handler>:<route>) and the reset below
+// deletes only that namespace. The guard reads the variable per request; the
+// previous value is restored in afterAll.
+const RATE_LIMIT_NS = P;
+const PREVIOUS_RATE_LIMIT_NS = process.env.RATE_LIMIT_KEY_NAMESPACE;
+process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
 const UNKNOWN_INVOICE = `${P}does_not_exist`;
 
 const ID = {
@@ -160,9 +168,10 @@ async function cleanup() {
 
 // The public bare-id route is limited at 20/min per IP (RR-ST4). The few
 // public reads here share one IP with the other suites on this Redis db, so
-// the key is reset around them.
+// the key is reset around them: only this suite's namespace, never another
+// suite's live window.
 async function clearPublicInvoiceRouteRateLimit() {
-  const keys: string[] = await redis.keys('pub_rate_limit:*:getInvoice:*');
+  const keys: string[] = await redis.keys(`pub_rate_limit:${RATE_LIMIT_NS}:*:getInvoice:*`);
   if (keys.length) await redis.del(...keys);
 }
 
@@ -416,6 +425,8 @@ afterAll(async () => {
     try { await clearPublicInvoiceRouteRateLimit(); } catch { /* best-effort */ }
     await redis.quit();
   }
+  if (PREVIOUS_RATE_LIMIT_NS === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
+  else process.env.RATE_LIMIT_KEY_NAMESPACE = PREVIOUS_RATE_LIMIT_NS;
 });
 
 beforeEach(clearPublicInvoiceRouteRateLimit);

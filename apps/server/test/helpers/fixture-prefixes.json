@@ -1,0 +1,169 @@
+{
+  "registryVersion": 1,
+  "about": [
+    "Fixture prefixes of apps/server/test suites (R0-00-WT-ISOLATION). Enforced by apps/server/src/core/config/fixture-prefix-registry.spec.ts.",
+    "A new prefix is a 4-character head plus '_': k<NN><a-z>_ for an R0 packet, v<NN><a-z>_ for a V1 packet, NN = the packet number (R0-12 -> k12a_). The packet that adds the suite adds {prefix, owner, packet} here.",
+    "A new suite cleans up with LIKE ${sqlLikePrefix(P)} from test/helpers/sql-like.js and embeds its prefix in every literal written to User.email, Business.slug, Payment.providerPaymentId, PaymentLink.token or Site.subdomain.",
+    "legacy: true marks the prefixes in use at c2f6f46d. They keep their names; the set may shrink but never grow."
+  ],
+  "prefixes": [
+    {
+      "prefix": "ainv_",
+      "owner": "apps/server/test/authority-inventory.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "cid_",
+      "owner": "apps/server/test/commerce-invoice-detail.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "cie_",
+      "owner": "apps/server/test/commerce-invoice-errors.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "cpi_",
+      "owner": "apps/server/test/commerce-payment-idempotency.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "cqv_",
+      "owner": "apps/server/test/commerce-quote-visibility.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "fcs_",
+      "owner": "apps/server/test/finance-coa-seed-concurrency.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "pya_",
+      "owner": "apps/server/test/payments-actor.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "r0_",
+      "owner": "apps/server/test/release0-journey.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "rva_",
+      "owner": "apps/server/test/revenue-authorization.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t2b_",
+      "owner": "apps/server/test/bank-connection-secret.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t2d_",
+      "owner": "apps/server/test/tenant-membership-boundary.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t2i1_",
+      "owner": "apps/server/test/task-assignment-tenant.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t3_",
+      "owner": "apps/server/test/business-token-disclosure.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t4_",
+      "owner": "apps/server/test/social-disconnect-tenant.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t6_",
+      "owner": "apps/server/test/webhook-ingress-secret-redaction.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tca_",
+      "owner": "apps/server/test/contacts-audit-actor.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tcc_",
+      "owner": "apps/server/test/connector-credentials-attack.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tcd_",
+      "owner": "apps/server/test/crm-contact-duplicate.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tcr_",
+      "owner": "apps/server/test/connector-routes-attack.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tcv_",
+      "owner": "apps/server/test/contacts-visibility.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tfw_",
+      "owner": "apps/server/test/form-webhook-tenancy-attack.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tgen_",
+      "owner": "apps/server/test/tenant-founding-membership.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tss_",
+      "owner": "apps/server/test/social-sync-unsupported.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_credit_",
+      "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_ctxv2_",
+      "owner": "apps/server/test/cortex-context-v2.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_gdpr_",
+      "owner": "apps/server/test/gdpr-purge.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_ingest_",
+      "owner": "apps/server/test/bank-statement-ingest.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_obl_",
+      "owner": "apps/server/test/obligation-clock.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_tse_",
+      "owner": "apps/server/test/tenant-scope-extension.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_wl_",
+      "owner": "apps/server/test/booking-waitlist.integration.test.ts",
+      "legacy": true
+    }
+  ],
+  "pendingRenames": [
+    {
+      "prefix": "rva_",
+      "file": "apps/server/test/commerce-authorization.e2e.test.ts",
+      "owner": "apps/server/test/revenue-authorization.integration.test.ts",
+      "reason": "The registered owner is revenue-authorization (real DB and Redis). The e2e suite runs on in-memory Prisma and Redis stand-ins, so the shared prefix reaches no shared resource, but it is renamed for registry hygiene. That file is outside the R0-00 write set: the next packet that writes it (R0-27 or R0-28) renames its prefix to a new k<NN><a-z>_ entry and deletes this record."
+    }
+  ]
+}
