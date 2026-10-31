@@ -31,10 +31,20 @@
  *                                               -> PAID through the same path; recordedBy null
  *   KEY (KEY_SYSTEM_ACTOR_ID + businessId)      -> PAID through the same path; recordedBy KEY
  *   KEY without a tenant                        -> 403; nothing written (system-actor contract unchanged)
- *   two concurrent mark-paids                   -> one payment, one posting, one invoice.paid (deterministic key)
+ *   two concurrent mark-paids                   -> one payment, one posting, one invoice.paid (the invoice lock)
  *   a payment commits while mark-paid waits for the invoice lock:
  *     it settles the invoice                    -> 200 (already PAID: idempotent); mark-paid writes nothing
  *     it leaves a balance                       -> 409; mark-paid writes nothing (its remaining is stale)
+ *
+ * Review repairs (R0-PL-04 review):
+ *   ST-PL04-1  a client record-payment whose idempotencyKey is the old mark-paid key shape
+ *              -> mark-paid still records its own balancing payment and ends PAID (no replay of the client row)
+ *   ST-PL04-2  a FAILED row the public WiPay callback wrote on the old predictable mark-paid slot
+ *              -> mark-paid still ends PAID (its slot is random, server-built, never a client-key slot)
+ *   CR-PL04-1  a manual refund (flipped REFUNDED row) on the invoice -> 409; nothing written, nothing posted
+ *              (computeBalance counts the flipped row twice, V1-29; a provider refund row does not block)
+ *   CR-PL04-2  paid, undone to DRAFT, total edited, re-issued, marked paid again -> 200 PAID with a second payment
+ *   either     the write leaves the invoice short of PAID -> 409; no invoice.paid timeline entry
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
@@ -56,6 +66,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
+import { createHash } from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import type { CommerceService } from '../src/modules/commerce/commerce.service';
 import type { InvoiceWorkflowService } from '../src/modules/commerce/invoice-workflow.service';
@@ -86,6 +97,14 @@ const ID = {
   invConcurrent: `${P}invConcurrent`,
   invRaceSettled: `${P}invRaceSettled`,
   invRaceMoved: `${P}invRaceMoved`,
+  // R0-PL-04 review repairs
+  invClientKey: `${P}invClientKey`,
+  invSquat: `${P}invSquat`,
+  invManualRefund: `${P}invManualRefund`,
+  invManualRefundPart: `${P}invManualRefundPart`,
+  invProviderRefund: `${P}invProviderRefund`,
+  invReissue: `${P}invReissue`,
+  invShort: `${P}invShort`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -99,6 +118,8 @@ let commerce: CommerceService;
 /** The CommerceService class itself: lockInvoiceForPayment is a static on it. */
 let CommerceServiceClass: any;
 let workflow: InvoiceWorkflowService;
+/** Real PaymentsService: the public WiPay callback is the squatter in ST-PL04-2. */
+let payments: any;
 let systemActorId: string;
 
 /**
@@ -133,6 +154,7 @@ const contactEvents: any[] = [];
 async function cleanup() {
   for (const sql of [
     `DELETE FROM contact_events WHERE business_id LIKE '${P}%'`,
+    `DELETE FROM webhook_events WHERE business_id LIKE '${P}%'`,
     `DELETE FROM ledger_entries WHERE business_id LIKE '${P}%'`,
     `DELETE FROM financial_transactions WHERE business_id LIKE '${P}%'`,
     `DELETE FROM payments WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
@@ -370,6 +392,10 @@ beforeAll(async () => {
   commerce = moduleRef.get(CommerceService);
   CommerceServiceClass = CommerceService;
   workflow = moduleRef.get(InvoiceWorkflowService);
+  // Constructed directly with the real collaborators (no connectors: the WiPay
+  // failure path only writes the FAILED row).
+  const { PaymentsService } = await import('../src/modules/payments/payments.service');
+  payments = new PaymentsService(moduleRef.get(PrismaService), commerce, workflow, moduleRef.get(RevenuePostingService));
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -524,11 +550,13 @@ describe('mark-paid records the remaining balance as a posted payment (G2)', () 
     expect(timelineFor(ID.invDraft)).toHaveLength(0);
   });
 
+  // MP-12 (CR-PL04-1): mark-paid after a MANUAL refund is refused (409) and
+  // writes nothing; proven in 'review repairs' below (MP-12a / MP-12b).
   it.todo(
-    'MP-12 (V1-29, out of scope): mark-paid after a MANUAL refund records the canonical computeBalance remaining, which counts the '
-      + 'flipped REFUNDED row twice (paid excludes it, refunded subtracts it): a 100 invoice whose 60 payment was refunded gets a 160 '
-      + 'mark-paid payment (net 100 -> PAID). Recording the true 100 would leave net 40 and the invoice PARTIALLY_PAID, so the fix '
-      + 'belongs to the refund/balance convention (V1-29: invoice-workflow.service.ts computeBalance / markPaymentRefunded), outside this write set.',
+    'MP-12 (V1-29, out of scope): settling an invoice by mark-paid after a MANUAL refund. computeBalance counts the flipped '
+      + 'REFUNDED row twice (paid excludes it, refunded subtracts it), so no amount both matches the money and reconciles to PAID '
+      + '(160 over-posts; the true 100 leaves PARTIALLY_PAID). Mark-paid refuses until the refund/balance convention is fixed '
+      + '(V1-29: invoice-workflow.service.ts computeBalance / markPaymentRefunded), outside this write set.',
   );
 
   it('MP-05: a refund of the mark-paid payment reverses its posting and records the refunder on the reversal', async () => {
@@ -625,5 +653,185 @@ describe('concurrency: the remaining balance is the one under the invoice lock',
     expectMarkPaidRow(balancing, ID.invRaceMoved, 70, ID.owner);
     await expectPostedOnce(balancing.id, 70, ID.owner);
     expect((await invoiceRow(ID.invRaceMoved)).status).toBe('PAID');
+  });
+});
+
+describe('review repairs (R0-PL-04 review)', () => {
+  /** The pre-repair mark-paid slot: the client-key path's hash of 'markpaid:<inv>:<remaining>:<refunded>'. */
+  const oldMarkPaidSlot = (inv: string, remaining: string, refunded = '0.00') =>
+    `manual_${inv}_key_${createHash('sha256').update(`markpaid:${inv}:${remaining}:${refunded}`, 'utf8').digest('hex').slice(0, 32)}`;
+  /** Mark-paid's own slot: random, server-built, never a client-key or reference slot. */
+  const markPaidSlot = (inv: string) => new RegExp(`^manual_${inv}_markpaid_[0-9a-f]{32}$`);
+
+  it('MP-13 (ST-PL04-1): a client payment keyed with the old mark-paid key shape does not capture mark-paid: it records its own 50 balancing payment and ends PAID', async () => {
+    const inv = ID.invClientKey;
+    const client = await pay(ID.staff, inv, { amount: 50, method: 'cash', idempotencyKey: `markpaid:${inv}:50.00:0.00` });
+    expect(client.status, JSON.stringify(client.body)).toBe(201);
+    expect(client.body.payment.providerPaymentId).toBe(oldMarkPaidSlot(inv, '50.00'));
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_PAID');
+    emitted.length = 0;
+    contactEvents.length = 0;
+
+    const res = await markPaid(ID.owner, inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: inv, status: 'PAID' });
+
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(2);
+    const balancing = rows.find((r) => r.id !== client.body.payment.id);
+    expectMarkPaidRow(balancing, inv, 50, ID.owner);
+    expect(balancing.providerPaymentId).toMatch(markPaidSlot(inv));
+    await expectPostedOnce(balancing.id, 50, ID.owner);
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+    const timeline = timelineFor(inv, 'invoice.paid');
+    expect(timeline).toHaveLength(1);
+    expect(timeline[0]).toMatchObject({ actorId: ID.owner, actorType: 'USER' });
+  });
+
+  it('MP-14 (ST-PL04-2): a FAILED row the unauthenticated WiPay failure callback wrote on the old predictable slot does not block mark-paid', async () => {
+    const inv = ID.invSquat;
+    const squat = oldMarkPaidSlot(inv, '100.00');
+    const cb = await payments.handleWipayCallback({ order_id: inv, status: 'failed', transaction_id: squat, total: '100' });
+    expect(cb, JSON.stringify(cb)).toMatchObject({ invoiceId: inv });
+    const before = await paymentsOf(inv);
+    expect(before).toHaveLength(1);
+    expect(before[0]).toMatchObject({ providerPaymentId: squat, status: 'FAILED', businessId: ID.biz, invoiceId: inv });
+
+    const res = await markPaid(ID.owner, inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: inv, status: 'PAID' });
+
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(2);
+    const marked = rows.find((r) => r.providerPaymentId !== squat);
+    expectMarkPaidRow(marked, inv, INVOICE_TOTAL, ID.owner);
+    expect(marked.providerPaymentId).toMatch(markPaidSlot(inv));
+    await expectPostedOnce(marked.id, INVOICE_TOTAL, ID.owner);
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+  });
+
+  it('MP-12a (CR-PL04-1): 60 paid then refunded (manual flip) on a 100 invoice -> mark-paid 409; no payment, no posting, status unchanged, no event or timeline entry', async () => {
+    const inv = ID.invManualRefund;
+    const paid = await pay(ID.owner, inv, { amount: 60, method: 'cash', reference: 'PMP-MR-1' });
+    expect(paid.status, JSON.stringify(paid.body)).toBe(201);
+    const refunded = await refund(ID.owner, paid.body.payment.id);
+    expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
+    // The operator's own projection reads remaining 100; computeBalance reads 160 (V1-29).
+    expect(await commerce.getInvoiceForBusiness(inv, ID.biz)).toMatchObject({ paidAmount: 0, remaining: INVOICE_TOTAL });
+    const statusBefore = (await invoiceRow(inv)).status;
+    const postingsBefore = (await paymentPostingsOf(inv)).map((t) => t.id).sort();
+    emitted.length = 0;
+    contactEvents.length = 0;
+
+    const res = await markPaid(ID.owner, inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+
+    const rows = await paymentsOf(inv);
+    expect(rows.map((r) => [r.id, Number(r.amount), r.status])).toEqual([[paid.body.payment.id, 60, 'REFUNDED']]);
+    expect((await paymentPostingsOf(inv)).map((t) => t.id).sort()).toEqual(postingsBefore);
+    expect((await invoiceRow(inv)).status).toBe(statusBefore);
+    expect(invoiceEventsFor(inv)).toHaveLength(0);
+    expect(timelineFor(inv)).toHaveLength(0);
+  });
+
+  it('MP-12b (CR-PL04-1): a manual refund that leaves remaining below the total still blocks (30 refunded, 50 paid: computeBalance 80, true 50) -> 409; nothing written', async () => {
+    const inv = ID.invManualRefundPart;
+    const a = await pay(ID.owner, inv, { amount: 30, method: 'cash', reference: 'PMP-MRP-A' });
+    expect(a.status, JSON.stringify(a.body)).toBe(201);
+    const b = await pay(ID.owner, inv, { amount: 50, method: 'cash', reference: 'PMP-MRP-B' });
+    expect(b.status, JSON.stringify(b.body)).toBe(201);
+    const refunded = await refund(ID.owner, a.body.payment.id);
+    expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
+    const statusBefore = (await invoiceRow(inv)).status;
+    const postingsBefore = (await paymentPostingsOf(inv)).map((t) => t.id).sort();
+    emitted.length = 0;
+    contactEvents.length = 0;
+
+    const res = await markPaid(ID.owner, inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+
+    expect((await paymentsOf(inv)).map((r) => r.id).sort()).toEqual([a.body.payment.id, b.body.payment.id].sort());
+    expect((await paymentPostingsOf(inv)).map((t) => t.id).sort()).toEqual(postingsBefore);
+    expect((await invoiceRow(inv)).status).toBe(statusBefore);
+    expect(invoiceEventsFor(inv)).toHaveLength(0);
+    expect(timelineFor(inv)).toHaveLength(0);
+  });
+
+  it('MP-15 (CR-PL04-1, narrow): a provider refund (a separate negative REFUNDED row beside a SUCCESSFUL original) does not block: mark-paid records the 40 net balance and ends PAID', async () => {
+    const inv = ID.invProviderRefund;
+    await db.payment.create({
+      data: {
+        id: `${inv}_charge`, businessId: ID.biz, invoiceId: inv, amount: INVOICE_TOTAL, currency: 'TTD',
+        status: 'SUCCESSFUL', provider: 'stripe', method: 'card', providerPaymentId: `${inv}_charge`,
+      },
+    });
+    await db.payment.create({
+      data: {
+        id: `${inv}_refund`, businessId: ID.biz, invoiceId: inv, amount: -40, currency: 'TTD',
+        status: 'REFUNDED', provider: 'stripe', providerPaymentId: `${inv}_refund`, reference: `${inv}_charge`,
+      },
+    });
+    await db.invoice.update({ where: { id: inv }, data: { status: 'PARTIALLY_PAID' } });
+
+    const res = await markPaid(ID.owner, inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: inv, status: 'PAID' });
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(3);
+    const marked = rows.find((r) => r.id !== `${inv}_charge` && r.id !== `${inv}_refund`);
+    expectMarkPaidRow(marked, inv, 40, ID.owner);
+    await expectPostedOnce(marked.id, 40, ID.owner);
+  });
+
+  it('MP-16 (CR-PL04-2): paid, undone to DRAFT, total edited to 200, re-issued, marked paid again -> 200 PAID with a second 100 payment and invoice.paid', async () => {
+    const inv = ID.invReissue;
+    const first = await markPaid(ID.owner, inv);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const [firstRow] = await paymentsOf(inv);
+    expectMarkPaidRow(firstRow, inv, INVOICE_TOTAL, ID.owner);
+
+    expect(await commerce.undoInvoice(inv, ID.biz)).toMatchObject({ status: 'reverted_to_draft' });
+    await commerce.updateInvoice({
+      invoiceId: inv,
+      businessId: ID.biz,
+      items: [
+        { description: 'PMP reissue 1', quantity: 1, unitPrice: 100 },
+        { description: 'PMP reissue 2', quantity: 1, unitPrice: 100 },
+      ],
+    });
+    expect(Number((await invoiceRow(inv)).total)).toBe(200);
+    await workflow.transition(inv, 'SENT');
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    emitted.length = 0;
+    contactEvents.length = 0;
+
+    const second = await markPaid(ID.owner, inv);
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    expect(second.body).toMatchObject({ id: inv, status: 'PAID' });
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(2);
+    const secondRow = rows.find((r) => r.id !== firstRow.id);
+    expectMarkPaidRow(secondRow, inv, 100, ID.owner);
+    expect(secondRow.providerPaymentId).not.toBe(firstRow.providerPaymentId);
+    await expectPostedOnce(secondRow.id, 100, ID.owner);
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+    expect(timelineFor(inv, 'invoice.paid')).toHaveLength(1);
+  });
+
+  it('MP-17 (ST-PL04-1 / CR-PL04-2): when the write leaves the invoice short of PAID, mark-paid answers 409 and logs no invoice.paid', async () => {
+    const inv = ID.invShort;
+    // Stand-in for a write that did not settle the invoice (the pre-repair
+    // replay of another row): it resolves and changes nothing.
+    const spy = vi.spyOn(commerce, 'recordPayment').mockResolvedValue({} as any);
+
+    const res = await markPaid(ID.owner, inv);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    expect(timelineFor(inv)).toHaveLength(0);
+    expect(invoiceEventsFor(inv)).toHaveLength(0);
   });
 });

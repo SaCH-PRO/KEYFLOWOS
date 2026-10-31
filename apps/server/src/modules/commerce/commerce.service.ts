@@ -780,20 +780,29 @@ export class CommerceService {
     });
     const balance = computeBalance(Number(existingInvoice.total), rows, existingInvoice.currency);
     if (balance.remaining > 0) {
+      // R0-PL-04 review (CR-PL04-1): a balance mark-paid can not settle
+      // truthfully (a manual refund on the invoice) is refused here, before
+      // anything is written (see markPaidRemaining).
+      const amount = CommerceService.markPaidRemaining(Number(existingInvoice.total), rows, existingInvoice.currency);
       try {
         await this.recordPayment(
           invoiceId,
           existingInvoice.businessId,
+          { amount, method: 'MANUAL' },
           {
-            amount: balance.remaining,
-            method: 'MANUAL',
-            // Deterministic: two concurrent mark-paids of the same balance land
-            // on one row (R0-D2 replay). The refunded total is part of it so a
-            // balance reopened by a refund is a new payment, not a replay of the
-            // refunded one.
-            idempotencyKey: `markpaid:${invoiceId}:${balance.remaining.toFixed(2)}:${balance.refunded.toFixed(2)}`,
+            actorId: actorId ?? null,
+            provider: 'manual',
+            expectRemaining: amount,
+            // R0-PL-04 review (ST-PL04-1 / ST-PL04-2): a slot of mark-paid's
+            // own, random and built here. No client idempotency key or
+            // reference maps to it (those slots are manual_<inv>_key_ /
+            // manual_<inv>_ref_), and nobody can predict it, so no client row
+            // and no row the public WiPay callback writes can occupy it ahead
+            // of this call. It keys no replay: two concurrent mark-paids are
+            // serialized by the invoice lock, and the second finds the invoice
+            // PAID (the 409 handled below) or its remaining changed.
+            providerPaymentId: `manual_${invoiceId}_markpaid_${randomBytes(16).toString('hex')}`,
           },
-          { actorId: actorId ?? null, provider: 'manual', expectRemaining: balance.remaining },
         );
       } catch (err) {
         // A payment that settled the invoice committed while this one waited
@@ -812,6 +821,13 @@ export class CommerceService {
     }
     const invoice = await reload();
     if (!invoice) throw new NotFoundException('Invoice not found');
+    // R0-PL-04 review (ST-PL04-1 / CR-PL04-2): mark-paid answers 200 and logs
+    // invoice.paid only for an invoice that is PAID now. Anything else (the
+    // write left a balance, or a refund reopened the invoice before this read)
+    // is a 409, never a success with a false invoice.paid timeline entry.
+    if (invoice.status !== 'PAID') {
+      throw new ConflictException(`Invoice is ${invoice.status}, not PAID; reload it and try again`);
+    }
 
     if (invoice.contactId) {
       await this.crm.logContactEvent({
@@ -1714,6 +1730,15 @@ export class CommerceService {
      * under-payment. Nothing is written.
      */
     expectRemaining?: number;
+    /**
+     * R0-PL-04 review (ST-PL04-1 / ST-PL04-2): internal, markInvoicePaid
+     * only. A providerPaymentId the server built (random, never derived from
+     * a client key or reference). It replaces the manualProviderPaymentId
+     * slot and keys no replay: no idempotency lookup runs for it, so no row
+     * another caller wrote can be answered in its place. An option, never part
+     * of `input`.
+     */
+    providerPaymentId?: string;
   } = {}) {
     const actorId = options.actorId ?? null;
     const initiatedBy =
@@ -1755,11 +1780,9 @@ export class CommerceService {
     // the create-or-return race-safe. This runs before the state guard: the
     // first submit may have settled the invoice to PAID, and the client that
     // lost that response still deserves the same answer.
-    const providerPaymentId = CommerceService.manualProviderPaymentId(
-      invoiceId,
-      input,
-      options.dedupeByReference === true,
-    );
+    const providerPaymentId: { value: string; keyedOn: 'key' | 'reference' | null } = options.providerPaymentId
+      ? { value: options.providerPaymentId, keyedOn: null }
+      : CommerceService.manualProviderPaymentId(invoiceId, input, options.dedupeByReference === true);
     if (providerPaymentId.keyedOn) {
       const existing = await this.findRecordedPayment(providerPaymentId.value, businessId, invoiceId);
       if (existing) {
@@ -1828,7 +1851,10 @@ export class CommerceService {
             where: { id: invoiceId },
             select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
           });
-          const { remaining } = computeBalance(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
+          // R0-PL-04 review (CR-PL04-1): the refund guard runs again on the
+          // rows under the lock, so a manual refund that committed in the gap
+          // refuses this call rather than being counted twice.
+          const remaining = CommerceService.markPaidRemaining(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
           if (Math.abs(remaining - options.expectRemaining) > 0.005) {
             throw new ConflictException('The invoice balance changed while it was being marked paid; reload it and try again');
           }
@@ -1950,6 +1976,37 @@ export class CommerceService {
     if (status === 'PAID' || status === 'VOID' || status === 'DRAFT') {
       throw new ConflictException(`Cannot record payment on a ${status} invoice`);
     }
+  }
+
+  /**
+   * R0-PL-04 review (CR-PL04-1): the amount mark-paid records, or a 409 when
+   * no amount would be true. The amount is computeBalance's remaining, the
+   * figure the reconcile settles against. A manual refund
+   * (markPaymentRefunded) flips the original row to REFUNDED and keeps its
+   * positive amount, and computeBalance then both drops it from `paid` and
+   * subtracts it as `refunded` (V1-29): 60 paid and refunded on a 100 invoice
+   * reads remaining 160. Recording 160 would post an invented 60
+   * over-payment; recording the true 100 would leave the reconcile
+   * PARTIALLY_PAID. Until V1-29 settles that convention, mark-paid refuses
+   * such an invoice and writes nothing. Provider refunds are separate rows
+   * with a negative amount beside a SUCCESSFUL original, counted once, so they
+   * do not block. A remaining above the total (refunds exceeding payments) is
+   * refused the same way. Run on the pre-transaction read and again under the
+   * invoice lock.
+   */
+  private static markPaidRemaining(
+    total: number,
+    rows: Array<{ amount: number; status: string }>,
+    currency?: string | null,
+  ): number {
+    const flippedRefund = rows.some((r) => r.status === 'REFUNDED' && Number(r.amount) > 0);
+    const balance = computeBalance(total, rows, currency ?? undefined);
+    if (flippedRefund || balance.remaining > balance.total + 0.005) {
+      throw new ConflictException(
+        'Cannot mark an invoice paid after one of its payments was refunded; record the payment received instead',
+      );
+    }
+    return balance.remaining;
   }
 
   /**

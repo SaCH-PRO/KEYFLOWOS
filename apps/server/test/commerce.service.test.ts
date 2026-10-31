@@ -206,8 +206,10 @@ describe('CommerceService', () => {
       expect(recordSpy).toHaveBeenCalledWith(
         'inv_1',
         'biz_1',
-        { amount: 100, method: 'MANUAL', idempotencyKey: 'markpaid:inv_1:100.00:0.00' },
-        expect.objectContaining({ actorId: 'user_1' }),
+        // R0-PL-04 review (ST-PL04-1): no client-shaped idempotency key; the
+        // slot is server-built and passed as an option, never in `input`.
+        { amount: 100, method: 'MANUAL' },
+        expect.objectContaining({ actorId: 'user_1', providerPaymentId: expect.stringMatching(/^manual_inv_1_markpaid_[0-9a-f]{32}$/) }),
       );
       expect(prisma.client.payment.create).toHaveBeenCalledTimes(1);
       const data = prisma.client.payment.create.mock.calls[0][0].data;
@@ -220,8 +222,13 @@ describe('CommerceService', () => {
         method: 'MANUAL',
         recordedBy: 'user_1',
       });
-      // A deterministic key, never a timestamp: a concurrent duplicate lands on the same row.
-      expect(data.providerPaymentId).toMatch(/^manual_inv_1_key_[0-9a-f]{32}$/);
+      // R0-PL-04 review (ST-PL04-1 / ST-PL04-2): mark-paid's own random slot.
+      // Not a client-key slot (manual_<inv>_key_), so no client row can be
+      // replayed in its place, and not predictable, so no row can squat it.
+      // Concurrent mark-paids are serialized by the invoice lock instead
+      // (payments-mark-paid MP-09).
+      expect(data.providerPaymentId).toMatch(/^manual_inv_1_markpaid_[0-9a-f]{32}$/);
+      expect(data.providerPaymentId).not.toMatch(/_key_|_ref_/);
       // G2: the row is posted, in the payment transaction, attributed to the actor.
       expect(revenuePosting.onPaymentRecorded).toHaveBeenCalledTimes(1);
       expect(revenuePosting.onPaymentRecorded).toHaveBeenCalledWith(
@@ -247,8 +254,8 @@ describe('CommerceService', () => {
       expect(recordSpy).toHaveBeenCalledWith(
         'inv_1',
         'biz_1',
-        { amount: 40, method: 'MANUAL', idempotencyKey: 'markpaid:inv_1:40.00:0.00' },
-        expect.objectContaining({ actorId: 'user_1' }),
+        { amount: 40, method: 'MANUAL' },
+        expect.objectContaining({ actorId: 'user_1', providerPaymentId: expect.stringMatching(/^manual_inv_1_markpaid_[0-9a-f]{32}$/) }),
       );
       expect(prisma.client.payment.create).toHaveBeenCalledTimes(1);
       expect(prisma.client.payment.create.mock.calls[0][0].data).toMatchObject({ amount: 40, status: 'SUCCESSFUL', recordedBy: 'user_1' });
@@ -286,6 +293,49 @@ describe('CommerceService', () => {
       expect(prisma.client.invoice.findUnique({ where: { id: 'inv_1' } }).status).toBe('DRAFT');
       expect(emit).not.toHaveBeenCalled();
       expect(crm.logContactEvent).not.toHaveBeenCalled();
+    });
+
+    it('R0-PL-04 review (CR-PL04-1): a manually refunded (flipped) row on the invoice -> 409 before any write; computeBalance would have asked for 160', async () => {
+      const { service, prisma, revenuePosting, recordSpy, emit, crm } = setup(
+        { status: 'PARTIALLY_PAID' },
+        [{ amount: 60, status: 'REFUNDED', provider: 'cash', method: 'cash', providerPaymentId: 'seed_60_refunded' }],
+      );
+      expect(computeBalance(100, prisma.client.payment.findMany({ where: { invoiceId: 'inv_1' } })).remaining).toBe(160);
+
+      await expect(service.markInvoicePaid('inv_1', 'user_1', 'biz_1')).rejects.toBeInstanceOf(ConflictException);
+
+      expect(recordSpy).not.toHaveBeenCalled();
+      expect(prisma.client.payment.create).not.toHaveBeenCalled();
+      expect(revenuePosting.onPaymentRecorded).not.toHaveBeenCalled();
+      expect(prisma.client.invoice.findUnique({ where: { id: 'inv_1' } }).status).toBe('PARTIALLY_PAID');
+      expect(emit).not.toHaveBeenCalled();
+      expect(crm.logContactEvent).not.toHaveBeenCalled();
+    });
+
+    it('R0-PL-04 review (ST-PL04-1 / CR-PL04-2): a write that leaves the invoice short of PAID -> 409; no invoice.paid timeline entry', async () => {
+      const { service, prisma, recordSpy, crm } = setup({ status: 'SENT' });
+      // Stand-in for a write that did not settle the invoice (the pre-repair replay).
+      recordSpy.mockResolvedValue({} as any);
+
+      await expect(service.markInvoicePaid('inv_1', 'user_1', 'biz_1')).rejects.toBeInstanceOf(ConflictException);
+
+      expect(recordSpy).toHaveBeenCalledTimes(1);
+      expect(prisma.client.invoice.findUnique({ where: { id: 'inv_1' } }).status).toBe('SENT');
+      expect(crm.logContactEvent).not.toHaveBeenCalled();
+    });
+
+    it('R0-PL-04 review (ST-PL04-1 / ST-PL04-2): each mark-paid write gets a fresh random slot, never a client-key slot', async () => {
+      const first = setup({ status: 'SENT' });
+      const second = setup({ status: 'SENT' });
+
+      await first.service.markInvoicePaid('inv_1', 'user_1', 'biz_1');
+      await second.service.markInvoicePaid('inv_1', 'user_1', 'biz_1');
+
+      const a = first.prisma.client.payment.create.mock.calls[0][0].data.providerPaymentId;
+      const b = second.prisma.client.payment.create.mock.calls[0][0].data.providerPaymentId;
+      expect(a).toMatch(/^manual_inv_1_markpaid_[0-9a-f]{32}$/);
+      expect(b).toMatch(/^manual_inv_1_markpaid_[0-9a-f]{32}$/);
+      expect(a).not.toBe(b);
     });
   });
 

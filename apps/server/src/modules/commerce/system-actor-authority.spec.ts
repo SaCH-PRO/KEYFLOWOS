@@ -39,7 +39,13 @@ function makeService(invoiceBusinessId = MINE) {
   // of transition + a synthetic payment row. recordPayment is the write here;
   // its own behaviour is proven against the real database elsewhere
   // (test/payments-mark-paid.integration.test.ts).
-  const recordPayment = vi.fn(async () => ({}));
+  // R0-PL-04 review (ST-PL04-1 / CR-PL04-2): mark-paid answers only for an
+  // invoice that is PAID after the write, so the stand-in write settles it.
+  let status = 'SENT';
+  const recordPayment = vi.fn(async () => {
+    status = 'PAID';
+    return {};
+  });
 
   const service = Object.assign(Object.create(CommerceService.prototype), {
     prisma: {
@@ -47,7 +53,7 @@ function makeService(invoiceBusinessId = MINE) {
         invoice: {
           findUnique: vi.fn(async () => ({
             businessId: invoiceBusinessId,
-            status: 'SENT',
+            status,
             total: 100,
             currency: 'TTD',
           })),
