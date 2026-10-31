@@ -18,6 +18,41 @@ const DEFAULT_RETRY_METHODS = ["GET", "HEAD", "OPTIONS"];
 const DEFAULT_RETRIES = 3;
 const DEFAULT_BASE_DELAY_MS = 300;
 
+/**
+ * R0-07: the body codes of the structured 503 an optional service (Gmail, AI)
+ * answers when it cannot be used for this request:
+ *
+ *   { statusCode: 503, code: 'provider_not_configured' | 'provider_unavailable', message, details: { service } }
+ *
+ * `provider_not_configured`: nothing is set up to call (no Gmail connection, no
+ * AI key). `provider_unavailable`: AI providers are configured but every
+ * circuit is open. Neither is a transient gateway failure, so retrying cannot
+ * change the answer and only spends the caller's rate limit.
+ */
+export const PROVIDER_UNAVAILABLE_CODES = ["provider_not_configured", "provider_unavailable"] as const;
+export type ProviderUnavailableCode = (typeof PROVIDER_UNAVAILABLE_CODES)[number];
+
+/** The R0-07 code a parsed error body carries, or null when it carries none. */
+export function providerUnavailableCode(body: unknown): ProviderUnavailableCode | null {
+  if (typeof body !== "object" || body === null) return null;
+  const code = (body as { code?: unknown }).code;
+  return (PROVIDER_UNAVAILABLE_CODES as readonly unknown[]).includes(code) ? (code as ProviderUnavailableCode) : null;
+}
+
+/**
+ * Whether a 503 is the R0-07 optional-service answer. Reads a clone, so the
+ * caller still gets the body. An empty, HTML or other non-JSON body is a plain
+ * 503 and keeps the retry.
+ */
+async function isProviderUnavailable503(res: Response): Promise<boolean> {
+  if (res.status !== 503 || typeof res.clone !== "function") return false;
+  try {
+    return providerUnavailableCode(JSON.parse(await res.clone().text())) !== null;
+  } catch {
+    return false;
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -45,6 +80,9 @@ function isRetryableError(error: unknown): boolean {
  * Does NOT retry on:
  *   - 4xx client errors (except 408/429)
  *   - Non-idempotent methods (POST, PUT, PATCH, DELETE) unless explicitly configured
+ *   - A 503 whose JSON body code is provider_not_configured or provider_unavailable
+ *     (R0-07): that response is returned with its body, so the caller can show
+ *     "not configured" rather than "backend unreachable"
  */
 export async function fetchWithRetry(
   input: RequestInfo | URL,
@@ -74,6 +112,9 @@ export async function fetchWithRetry(
 
       // If successful or non-retryable, return immediately
       if (res.ok || !retryStatusCodes.includes(res.status) || !shouldRetryMethod) {
+        return res;
+      }
+      if (await isProviderUnavailable503(res)) {
         return res;
       }
 

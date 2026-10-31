@@ -10,7 +10,7 @@ const API_BASE = (() => {
 })();
 const AI_SUGGEST_URL = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
-import { fetchWithRetry } from "./fetch-with-retry";
+import { fetchWithRetry, providerUnavailableCode, type ProviderUnavailableCode } from "./fetch-with-retry";
 import { refreshAccessToken } from "./workspace";
 
 // One-shot reachability check: the first time a network error is observed
@@ -38,7 +38,12 @@ type FetchOptions = {
   init?: RequestInit;
 };
 
-type ApiResponse<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null; rawError?: Record<string, unknown> | null };
+/**
+ * `status` is the HTTP status of an error response; it is absent on success
+ * and on a network failure, which never got one. `rawError` is the parsed
+ * error body.
+ */
+type ApiResponse<T> = { data: T | null; error: string | null; status?: number; planLimitReached?: PlanLimitError | null; rawError?: Record<string, unknown> | null };
 
 export interface PlanLimitError {
   resource: string;
@@ -168,7 +173,7 @@ function handleErrorResponse<T>(data: unknown, statusText: string, status?: numb
   } else {
     message = statusText || "Request failed";
   }
-  return { data: null, error: message, planLimitReached: planLimit, rawError: parsed };
+  return { data: null, error: message, status, planLimitReached: planLimit, rawError: parsed };
 }
 
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {
@@ -340,6 +345,28 @@ export async function apiPut<T>(path: string, body: unknown): Promise<ApiRespons
 
 export function isPlanLimitError<T>(res: ApiResponse<T>): res is ApiResponse<T> & { planLimitReached: PlanLimitError } {
   return res.planLimitReached != null;
+}
+
+export interface ProviderUnavailable {
+  code: ProviderUnavailableCode;
+  /** `details.service` of the 503 body, e.g. "gmail" or "ai". */
+  service: string | null;
+}
+
+/**
+ * R0-07: which optional service an error response says is not set up (or has
+ * no provider available), read from the structured 503 body
+ * `{ code: 'provider_not_configured' | 'provider_unavailable', details: { service } }`.
+ * fetchWithRetry hands that 503 back on the first response, so the screen can
+ * say "connect Gmail" instead of "backend unreachable". Null for anything
+ * else, including a plain 503 (gateway down), which is still retried.
+ */
+export function providerUnavailableOf<T>(res: ApiResponse<T>): ProviderUnavailable | null {
+  if (res.status !== 503) return null;
+  const code = providerUnavailableCode(res.rawError);
+  if (!code) return null;
+  const service = (res.rawError?.details as { service?: unknown } | null | undefined)?.service;
+  return { code, service: typeof service === "string" ? service : null };
 }
 
 /**
