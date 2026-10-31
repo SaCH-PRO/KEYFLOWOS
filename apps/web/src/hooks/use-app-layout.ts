@@ -264,22 +264,32 @@ export function useAppLayout(): AppLayoutState {
     }
   }, [pathname]);
 
+  // Header identity from the cached user. Network-free, so it still follows
+  // every navigation as it did when the whole init ran per pathname: a profile
+  // edit (setCachedUser) reaches the header on the next click, not only after
+  // a reload.
+  const applyCachedUser = useCallback(() => {
+    const user = getCachedUser();
+    if (!user) return;
+    setDisplayName(getUserDisplayName());
+    setInitials(getUserInitials());
+    setAvatarUrl(user.avatarUrl ?? null);
+    setIsAdminUser(isSuperAdmin());
+    setUserEmail(user.email ?? null);
+  }, []);
+
+  useEffect(() => {
+    applyCachedUser();
+  }, [pathname, applyCachedUser]);
+
   useEffect(() => {
     let canceled = false;
     const init = async () => {
       try {
         await refreshWorkspace();
         if (canceled) return;
-        const user = getCachedUser();
         void getCachedBusiness();
-
-        if (user) {
-          setDisplayName(getUserDisplayName());
-          setInitials(getUserInitials());
-          if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
-          setIsAdminUser(isSuperAdmin());
-          setUserEmail(user.email ?? null);
-        }
+        applyCachedUser();
 
         const businessId = getStoredBusinessId();
         if (businessId) {
@@ -318,6 +328,10 @@ export function useAppLayout(): AppLayoutState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The business the notifications on screen belong to. markAllRead acts on
+  // this one, never on whatever is stored by the time the click lands.
+  const notificationsBusinessRef = useRef<string | null>(null);
+
   const fetchNotifications = useCallback(async () => {
     const businessId = getStoredBusinessId();
     if (!businessId) return;
@@ -325,20 +339,25 @@ export function useAppLayout(): AppLayoutState {
       apiGet(`/notifications/businesses/${businessId}?unreadOnly=false`),
       apiGet(`/notifications/businesses/${businessId}/unread-count`),
     ]);
+    // Switched while this was in flight: these rows belong to the previous business.
+    if (getStoredBusinessId() !== businessId) return;
     if (listRes.data) setNotifications(listRes.data as AppNotification[]);
     if (countRes.data) setUnreadCount((countRes.data as { count?: number }).count ?? 0);
+    notificationsBusinessRef.current = businessId;
   }, []);
 
   const fetchConnectorAlerts = useCallback(async () => {
     const businessId = getStoredBusinessId();
     if (!businessId) return;
     const res = await apiGet(`/connectors/businesses/${businessId}/needs-attention`);
+    if (getStoredBusinessId() !== businessId) return;
     if (res.data) {
       setConnectorAlertCount((res.data as { count?: number }).count ?? 0);
     }
   }, []);
 
   useEffect(() => {
+    let canceled = false;
     fetchNotifications();
     fetchConnectorAlerts();
     const interval = setInterval(() => {
@@ -346,7 +365,27 @@ export function useAppLayout(): AppLayoutState {
       fetchNotifications();
       fetchConnectorAlerts();
     }, 30000);
-    return () => clearInterval(interval);
+    // A switch: what is on screen describes the previous business, so drop it
+    // at once, then load the new business's once its resolution has landed.
+    const onBusinessChanged = () => {
+      notificationsBusinessRef.current = null;
+      setNotifications([]);
+      setUnreadCount(0);
+      setConnectorAlertCount(0);
+      void refreshWorkspace()
+        .catch(() => null)
+        .then(() => {
+          if (canceled) return;
+          fetchNotifications();
+          fetchConnectorAlerts();
+        });
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
+    return () => {
+      canceled = true;
+      clearInterval(interval);
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
+    };
   }, [fetchNotifications, fetchConnectorAlerts]);
 
   useEffect(() => {
@@ -372,9 +411,12 @@ export function useAppLayout(): AppLayoutState {
   }, [mobileDrawerOpen]);
 
   const markAllRead = useCallback(async () => {
-    const businessId = getStoredBusinessId();
-    if (!businessId) return;
+    // The business whose notifications are displayed, and only while it is
+    // still the selected one: one tenant's list is never marked read on another.
+    const businessId = notificationsBusinessRef.current;
+    if (!businessId || businessId !== getStoredBusinessId()) return;
     await apiPatch(`/notifications/businesses/${businessId}/read-all`, {});
+    if (notificationsBusinessRef.current !== businessId) return;
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     setUnreadCount(0);
   }, []);

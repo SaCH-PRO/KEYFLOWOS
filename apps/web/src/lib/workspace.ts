@@ -280,6 +280,16 @@ export function clearStoredBusinessId() {
 export const BUSINESS_CHANGED_EVENT = "kf:business-changed";
 
 /**
+ * Bumped by every selectBusiness(). A resolution that started under an older
+ * generation was answering for the previous choice: it writes nothing and
+ * hands over to a fresh one, so no caller is told the old business after a
+ * switch and the caches are never written back with it.
+ */
+let selectionGeneration = 0;
+let lastSelectedBusinessId: string | null = null;
+let resolvePromise: Promise<string | null> | null = null;
+
+/**
  * The one place a user's business choice is written: localStorage and the
  * `kf_business_id` cookie, with the business and user caches dropped (both
  * describe the previous business) and `kf:business-changed` announced so the
@@ -287,6 +297,11 @@ export const BUSINESS_CHANGED_EVENT = "kf:business-changed";
  */
 export function selectBusiness(id: string) {
   if (typeof window === "undefined") return;
+  selectionGeneration += 1;
+  lastSelectedBusinessId = id;
+  // A resolution already in flight answers for the previous choice; callers
+  // from here on get a new one (it hands over on its own when it lands).
+  resolvePromise = null;
   setStoredBusinessId(id);
   window.localStorage.removeItem(BUSINESS_CACHE_KEY);
   window.localStorage.removeItem(USER_CACHE_KEY);
@@ -327,8 +342,17 @@ export async function listMyBusinesses(): Promise<CachedBusiness[] | null> {
   );
 }
 
-async function bootstrapFirstBusiness(): Promise<string | null> {
+async function bootstrapFirstBusiness(
+  generation: number,
+  onSuperseded: () => Promise<string | null>,
+): Promise<string | null> {
   const result = await bootstrapIdentity({});
+  if (generation !== selectionGeneration) {
+    // bootstrapIdentity (client.ts) has just written its own pick over a
+    // choice made while it ran: put that choice back and resolve it instead.
+    if (lastSelectedBusinessId) setStoredBusinessId(lastSelectedBusinessId);
+    return onSuperseded();
+  }
   const business = result.data?.business;
   if (!business?.id) return null;
   setStoredBusinessId(business.id);
@@ -343,18 +367,27 @@ async function bootstrapFirstBusiness(): Promise<string | null> {
  * (which answers with the oldest OWNED business and would overwrite a choice)
  * runs only when the caller has no membership at all. An unavailable list
  * keeps whatever is stored rather than bootstrapping blind.
+ *
+ * Nothing is written when the choice moved while the lists were in flight (a
+ * selectBusiness(), or any other write of the stored id): `onSuperseded`
+ * answers instead, from the choice as it now stands.
  */
-async function resolveBusinessSelection(preferred: (string | null)[]): Promise<string | null> {
+async function resolveBusinessSelection(
+  preferred: (string | null)[],
+  onSuperseded: () => Promise<string | null>,
+): Promise<string | null> {
   if (!window.localStorage.getItem(TOKEN_KEY)) return null;
+  const generation = selectionGeneration;
   const stored = getStoredBusinessId();
   const [businesses, me] = await Promise.all([listMyBusinesses(), getWithSession("/identity/me")]);
+  if (generation !== selectionGeneration || getStoredBusinessId() !== stored) return onSuperseded();
   const user = me && typeof me === "object" && typeof (me as CachedUser).id === "string" ? (me as CachedUser) : null;
 
   if (businesses === null) {
     if (user) setCachedUser(user);
     return stored;
   }
-  if (businesses.length === 0) return bootstrapFirstBusiness();
+  if (businesses.length === 0) return bootstrapFirstBusiness(generation, onSuperseded);
 
   const chosen =
     preferred.map((id) => businesses.find((b) => b.id === id)).find((b) => b !== undefined) ??
@@ -365,21 +398,24 @@ async function resolveBusinessSelection(preferred: (string | null)[]): Promise<s
   return chosen.id;
 }
 
-let resolvePromise: Promise<string | null> | null = null;
-
 /**
  * Re-validate the stored business against the caller's memberships (see
  * resolveBusinessSelection). Concurrent callers share one round trip, so an
- * empty list bootstraps once however many screens ask at the same moment.
+ * empty list bootstraps once however many screens ask at the same moment. A
+ * round trip overtaken by a switch is not shared any more, and its own callers
+ * are answered by the resolution of the new choice.
  */
 export function refreshWorkspace(): Promise<string | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
-  if (!resolvePromise) {
-    resolvePromise = resolveBusinessSelection([getStoredBusinessId()]).finally(() => {
-      resolvePromise = null;
-    });
-  }
-  return resolvePromise;
+  if (resolvePromise) return resolvePromise;
+  const promise: Promise<string | null> = resolveBusinessSelection([getStoredBusinessId()], () => {
+    if (resolvePromise === promise) resolvePromise = null;
+    return refreshWorkspace();
+  }).finally(() => {
+    if (resolvePromise === promise) resolvePromise = null;
+  });
+  resolvePromise = promise;
+  return promise;
 }
 
 /** The stored business, or a membership-first resolution when nothing is stored. */
@@ -400,7 +436,12 @@ export async function restoreBusinessChoice(previous: string | null): Promise<st
   if (typeof window === "undefined") return null;
   const current = getStoredBusinessId();
   if (!previous || previous === current) return current;
-  return resolveBusinessSelection([previous, current]);
+  const generation = selectionGeneration;
+  // An explicit switch made meanwhile wins over the restore; any other write
+  // of the stored id just means trying the restore again against it.
+  return resolveBusinessSelection([previous, current], () =>
+    generation !== selectionGeneration ? refreshWorkspace() : restoreBusinessChoice(previous),
+  );
 }
 
 export function getCachedAdminUser(): CachedUser | null {

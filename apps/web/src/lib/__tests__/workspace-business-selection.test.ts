@@ -20,9 +20,10 @@ import { renderHook, act, waitFor } from "@testing-library/react";
  *   - the app shell resolves once per mount, and again on kf:business-changed.
  */
 
-const { bootstrapIdentity, apiGet, nav } = vi.hoisted(() => ({
+const { bootstrapIdentity, apiGet, apiPatch, nav } = vi.hoisted(() => ({
   bootstrapIdentity: vi.fn(),
   apiGet: vi.fn(),
+  apiPatch: vi.fn(),
   nav: { pathname: "/app", router: { push: () => {}, replace: () => {} } },
 }));
 
@@ -42,7 +43,7 @@ vi.mock("@/hooks/use-plan", () => ({
 }));
 vi.mock("@/lib/api", () => ({
   apiGet: (...args: unknown[]) => apiGet(...args),
-  apiPatch: async () => ({ data: null, error: null }),
+  apiPatch: (...args: unknown[]) => apiPatch(...args),
   apiPost: async () => ({ data: null, error: null }),
 }));
 
@@ -63,12 +64,30 @@ function jsonResponse(status: number, body: unknown): Response {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
-function serve(opts: { businesses?: unknown; businessesStatus?: number }) {
+/** A promise the test releases by hand, to hold a request in flight. */
+function gate() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+function serve(opts: {
+  businesses?: unknown | (() => unknown);
+  businessesStatus?: number;
+  held?: Promise<void>;
+}) {
   fetchMock.mockImplementation(async (url: string) => {
     if (url.endsWith("/identity/businesses")) {
-      return jsonResponse(opts.businessesStatus ?? 200, opts.businesses ?? []);
+      await opts.held;
+      const listed = typeof opts.businesses === "function" ? opts.businesses() : opts.businesses;
+      return jsonResponse(opts.businessesStatus ?? 200, listed ?? []);
     }
-    if (url.endsWith("/identity/me")) return jsonResponse(200, USER);
+    if (url.endsWith("/identity/me")) {
+      await opts.held;
+      return jsonResponse(200, USER);
+    }
     if (url.endsWith("/identity/refresh")) return jsonResponse(401, {});
     return jsonResponse(404, {});
   });
@@ -96,6 +115,8 @@ beforeEach(() => {
   nav.pathname = "/app";
   apiGet.mockReset();
   apiGet.mockResolvedValue({ data: null, error: null });
+  apiPatch.mockReset();
+  apiPatch.mockResolvedValue({ data: null, error: null });
   bootstrapIdentity.mockReset();
   // Like the real client.ts bootstrapIdentity: it answers with the oldest
   // owned business AND writes kf_business_id itself.
@@ -228,6 +249,69 @@ describe("workspace business selection (membership-first)", () => {
   });
 });
 
+describe("selectBusiness against a resolution already in flight", () => {
+  it("nobody is told the old business after a switch, and the old business is not written back to the cache", async () => {
+    window.localStorage.setItem("kf_business_id", SECOND.id);
+    const held = gate();
+    serve({ businesses: [OLDEST_OWNED, SECOND], held: held.promise });
+    const ws = await import("../workspace");
+
+    const before = ws.refreshWorkspace(); // e.g. a page's mount, still waiting on the lists
+    ws.selectBusiness(OLDEST_OWNED.id);
+    const after = ws.refreshWorkspace(); // e.g. the shell's kf:business-changed handler
+    held.release();
+
+    await expect(after).resolves.toBe(OLDEST_OWNED.id);
+    await expect(before).resolves.toBe(OLDEST_OWNED.id);
+    expect(window.localStorage.getItem("kf_business_id")).toBe(OLDEST_OWNED.id);
+    expect(cookie("kf_business_id")).toBe(OLDEST_OWNED.id);
+    expect(ws.getCachedBusiness()?.id).toBe(OLDEST_OWNED.id);
+    expect(JSON.parse(window.localStorage.getItem("kf_business_cache") ?? "null")?.id).toBe(
+      OLDEST_OWNED.id,
+    );
+    expect(bootstrapIdentity).not.toHaveBeenCalled();
+  });
+
+  it("a switch made while a stale stored id resolves is kept, not replaced by the first listed membership", async () => {
+    window.localStorage.setItem("kf_business_id", "biz-no-longer-a-member");
+    const held = gate();
+    serve({ businesses: [OLDEST_OWNED, SECOND], held: held.promise });
+    const ws = await import("../workspace");
+
+    const inFlight = ws.refreshWorkspace();
+    ws.selectBusiness(SECOND.id);
+    held.release();
+
+    await expect(inFlight).resolves.toBe(SECOND.id);
+    expect(window.localStorage.getItem("kf_business_id")).toBe(SECOND.id);
+    expect(cookie("kf_business_id")).toBe(SECOND.id);
+    expect(ws.getCachedBusiness()?.id).toBe(SECOND.id);
+  });
+
+  it("a switch made while bootstrap runs is put back after bootstrap writes its own pick", async () => {
+    let listed: unknown[] = [];
+    serve({ businesses: () => listed });
+    const bootstrapHeld = gate();
+    bootstrapIdentity.mockImplementation(async () => {
+      await bootstrapHeld.promise;
+      window.localStorage.setItem("kf_business_id", OLDEST_OWNED.id);
+      return { data: { user: USER, business: OLDEST_OWNED, isNewBusiness: true }, error: null };
+    });
+    const ws = await import("../workspace");
+
+    const inFlight = ws.refreshWorkspace();
+    await vi.waitFor(() => expect(bootstrapIdentity).toHaveBeenCalledTimes(1));
+    listed = [OLDEST_OWNED, SECOND];
+    ws.selectBusiness(SECOND.id);
+    bootstrapHeld.release();
+
+    await expect(inFlight).resolves.toBe(SECOND.id);
+    expect(window.localStorage.getItem("kf_business_id")).toBe(SECOND.id);
+    expect(ws.getCachedBusiness()?.id).toBe(SECOND.id);
+    expect(bootstrapIdentity).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("app shell (useAppLayout) business resolution", () => {
   const resolutions = () => listCalls().length + bootstrapIdentity.mock.calls.length;
 
@@ -267,6 +351,102 @@ describe("app shell (useAppLayout) business resolution", () => {
     });
 
     await waitFor(() => expect(resolutions()).toBe(2));
+    unmount();
+  });
+
+  it("a profile edit reaches the header on the next navigation, without another resolution", async () => {
+    window.localStorage.setItem("kf_business_id", SECOND.id);
+    serve({ businesses: [OLDEST_OWNED, SECOND] });
+    const ws = await import("../workspace");
+    const { useAppLayout } = await import("@/hooks/use-app-layout");
+
+    const { result, rerender, unmount } = renderHook(() => useAppLayout());
+    await waitFor(() => expect(result.current.displayName).toBe(USER.name));
+
+    // what personal-info-section does after PATCH /identity/me
+    ws.setCachedUser({ ...USER, name: "Renamed Owner", avatarUrl: "/objects/avatar-2.png" });
+    await act(async () => {
+      nav.pathname = "/app/crm";
+      rerender();
+    });
+
+    expect(result.current.displayName).toBe("Renamed Owner");
+    expect(result.current.initials).toBe("RO");
+    expect(result.current.avatarUrl).toBe("/objects/avatar-2.png");
+    expect(resolutions()).toBe(1);
+    unmount();
+  });
+});
+
+describe("app shell notifications across a business switch", () => {
+  const N_SECOND = { id: "n-second", title: "Bravo order", read: false };
+  const N_OLDEST = { id: "n-oldest", title: "Alpha order", read: false };
+
+  function serveNotifications(held?: { businessId: string; promise: Promise<void> }) {
+    const rows: Record<string, unknown[]> = { [SECOND.id]: [N_SECOND], [OLDEST_OWNED.id]: [N_OLDEST] };
+    apiGet.mockImplementation(async (path: string) => {
+      const m = path.match(/^\/notifications\/businesses\/([^/?]+)(\/unread-count)?/);
+      if (!m) return { data: null, error: null };
+      if (held && m[1] === held.businessId) await held.promise;
+      const list = rows[m[1]] ?? [];
+      return { data: m[2] ? { count: list.length } : list, error: null };
+    });
+  }
+
+  const ids = (list: { id: string }[]) => list.map((n) => n.id);
+
+  it("drops the previous business's notifications at once, loads the new one's, and marks read only the one on screen", async () => {
+    window.localStorage.setItem("kf_business_id", SECOND.id);
+    serve({ businesses: [OLDEST_OWNED, SECOND] });
+    serveNotifications();
+    const ws = await import("../workspace");
+    const { useAppLayout } = await import("@/hooks/use-app-layout");
+
+    const { result, unmount } = renderHook(() => useAppLayout());
+    await waitFor(() => expect(ids(result.current.notifications)).toEqual([N_SECOND.id]));
+
+    act(() => ws.selectBusiness(OLDEST_OWNED.id));
+
+    // Nothing of the previous business is left to act on.
+    expect(result.current.notifications).toEqual([]);
+    expect(result.current.unreadCount).toBe(0);
+    await act(async () => {
+      await result.current.markAllRead();
+    });
+    expect(apiPatch).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(ids(result.current.notifications)).toEqual([N_OLDEST.id]));
+    await act(async () => {
+      await result.current.markAllRead();
+    });
+
+    expect(apiPatch).toHaveBeenCalledTimes(1);
+    expect(apiPatch).toHaveBeenCalledWith(`/notifications/businesses/${OLDEST_OWNED.id}/read-all`, {});
+    expect(result.current.notifications).toEqual([{ ...N_OLDEST, read: true }]);
+    unmount();
+  });
+
+  it("a notifications answer for the previous business that lands after the switch is discarded", async () => {
+    window.localStorage.setItem("kf_business_id", SECOND.id);
+    serve({ businesses: [OLDEST_OWNED, SECOND] });
+    const held = gate();
+    serveNotifications({ businessId: SECOND.id, promise: held.promise });
+    const ws = await import("../workspace");
+    const { useAppLayout } = await import("@/hooks/use-app-layout");
+
+    const { result, unmount } = renderHook(() => useAppLayout());
+    await waitFor(() =>
+      expect(apiGet).toHaveBeenCalledWith(`/notifications/businesses/${SECOND.id}?unreadOnly=false`),
+    );
+
+    act(() => ws.selectBusiness(OLDEST_OWNED.id));
+    await waitFor(() => expect(ids(result.current.notifications)).toEqual([N_OLDEST.id]));
+    await act(async () => {
+      held.release();
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(ids(result.current.notifications)).toEqual([N_OLDEST.id]);
     unmount();
   });
 });
