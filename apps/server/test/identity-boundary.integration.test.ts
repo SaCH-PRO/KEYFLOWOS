@@ -47,9 +47,11 @@
  * "OPEN DEFECT … reproduced" case that pins today's observed behaviour and
  * turns red when the fix lands, next to an it.todo naming the required
  * behaviour for the fix packet):
- *   ST-1  PATCH /identity/businesses/:id/team/:membershipId {role} needs only
- *         team:write, resets permissionScopes/maxApprovalTier to the role
- *         defaults and has no self-target check — a team:write member gets
+ *   ST-1  FIXED by R0-ID-F1-ROLE-ROUTE-AUTHORITY (its cases now assert the
+ *         required behaviour; see "ST-1 (fixed …)" at the end of this file).
+ *         PATCH /identity/businesses/:id/team/:membershipId {role} needed only
+ *         team:write, reset permissionScopes/maxApprovalTier to the role
+ *         defaults and had no self-target check — a team:write member got
  *         around the team:admin gate on .../permissions, for itself or others
  *         (identity.controller.ts updateMemberRole, identity.service.ts
  *         updateMemberRole).
@@ -157,6 +159,9 @@ const ID = {
   adminR: `${P}adminR`,           // ADMIN of bizD restricted by the OWNER: { crm: read, team: write }, tier 0 (ST-1)
   adminD: `${P}adminD`,           // ADMIN of bizD, role-default scopes (team: write) (ST-1)
   staffR: `${P}staffR`,           // STAFF of bizD restricted by the OWNER: { crm: read, team: none } (ST-1)
+  adminT: `${P}adminT`,           // ADMIN of bizD granted team:admin by the OWNER (ADMIN defaults + team: admin), tier 3 (ST-1 fix)
+  staffT: `${P}staffT`,           // STAFF of bizD granted team:admin by the OWNER but nothing else: { crm: read, team: admin }, tier 0 (ST-1 fix)
+  staffP: `${P}staffP`,           // STAFF of bizD, role-default scopes — the target of the ST-1 fix's allowed role changes
   staffD: `${P}staffD`,           // STAFF of bizD, role-default scopes (settings: none) (ST-3)
   relogin: `${P}relogin`,         // STAFF of bizD; logs out, then the login marker clear (ST-4)
   adminTok: `${P}adminTok`,       // User row role SUPER_ADMIN at token issue, no membership (ST-2)
@@ -178,6 +183,9 @@ const ID = {
   mAdminR: `${P}m_adminR`,
   mAdminD: `${P}m_adminD`,
   mStaffR: `${P}m_staffR`,
+  mAdminT: `${P}m_adminT`,
+  mStaffT: `${P}m_staffT`,
+  mStaffP: `${P}m_staffP`,
   mStaffD: `${P}m_staffD`,
   mRelogin: `${P}m_relogin`,
 };
@@ -191,7 +199,7 @@ const email = (id: string) => `${id}@ab04.test.local`;
 const revocationKey = (userId: string) => `auth:revoked:user:${userId}`;
 const ALL_USERS = [
   ID.owner, ID.admin, ID.staff, ID.staffNoTeam, ID.ownerB, ID.deleted, ID.banned, ID.revoked, ID.noRow,
-  ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.staffD, ID.relogin, ID.adminTok,
+  ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin, ID.adminTok,
 ];
 
 const IDLE_MS = 90_000;      // silence from the child counts; slow-but-talking does not
@@ -370,7 +378,7 @@ async function seed() {
   for (const m of memberships) await db.membership.create({ data: m });
 
   // OPEN DEFECT fixtures (bizD).
-  for (const id of [ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.staffD, ID.relogin]) {
+  for (const id of [ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin]) {
     await db.user.create({ data: { id, email: email(id), name: id, role: 'USER' } });
   }
   // SUPER_ADMIN when its admin token is issued; demoted mid-suite (ST-2).
@@ -381,6 +389,9 @@ async function seed() {
     { id: ID.mAdminR, userId: ID.adminR, businessId: ID.bizD, role: 'ADMIN', permissionScopes: { crm: 'read', team: 'write' }, maxApprovalTier: 0 },
     { id: ID.mAdminD, userId: ID.adminD, businessId: ID.bizD, role: 'ADMIN' },
     { id: ID.mStaffR, userId: ID.staffR, businessId: ID.bizD, role: 'STAFF', permissionScopes: { crm: 'read', team: 'none' } },
+    { id: ID.mAdminT, userId: ID.adminT, businessId: ID.bizD, role: 'ADMIN', permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, team: 'admin' }, maxApprovalTier: 3 },
+    { id: ID.mStaffT, userId: ID.staffT, businessId: ID.bizD, role: 'STAFF', permissionScopes: { crm: 'read', team: 'admin' }, maxApprovalTier: 0 },
+    { id: ID.mStaffP, userId: ID.staffP, businessId: ID.bizD, role: 'STAFF' },
     { id: ID.mStaffD, userId: ID.staffD, businessId: ID.bizD, role: 'STAFF' },
     { id: ID.mRelogin, userId: ID.relogin, businessId: ID.bizD, role: 'STAFF' },
   ];
@@ -528,7 +539,7 @@ describe('harness — the real built server is serving, with the ab_ fixtures in
     expect(await db.membership.count({ where: { businessId: ID.bizB } })).toBe(1);
     expect(await db.user.findUnique({ where: { id: ID.noRow } })).toBeNull();
     // OPEN DEFECT fixtures live in their own tenant.
-    expect(await db.membership.count({ where: { businessId: ID.bizD } })).toBe(6);
+    expect(await db.membership.count({ where: { businessId: ID.bizD } })).toBe(9);
     expect(await db.membership.count({ where: { userId: ID.adminTok } })).toBe(0);
   });
 
@@ -819,9 +830,9 @@ describe('team routes — ModuleScopeGuard over the real membership rows', () =>
     expect(row.maxApprovalTier).toBe(0);
 
     // THIS route's change did not land: the target is still refused the team
-    // route. The team:admin gate is NOT the only way to rewrite scopes — the
-    // role route (team:write) resets them to role defaults, which a team:write
-    // member can use on itself or others: OPEN DEFECT ST-1 at the end of this file.
+    // route. The role route, which resets scopes to role defaults, now needs the
+    // same team:admin authority and is bounded by the caller (ST-1, fixed by
+    // R0-ID-F1-ROLE-ROUTE-AUTHORITY — see the end of this file).
     const still = await call('get', routes.team(ID.bizA), T[ID.staffNoTeam]);
     expect(still.status).toBe(403);
   });
@@ -865,17 +876,34 @@ describe('team routes — ModuleScopeGuard over the real membership rows', () =>
 });
 
 // ---------------------------------------------------------------------------
-// OPEN DEFECTS — found in review, reproduced against the real server.
+// ST-1 — FIXED by R0-ID-F1-ROLE-ROUTE-AUTHORITY.
 //
-// Each "OPEN DEFECT … reproduced" case pins TODAY's observed behaviour so the
-// defect is recorded by an executing test, not by prose; it is NOT a
-// certification of that behaviour. It turns red when the fix lands, and the fix
-// packet replaces it with the it.todo next to it. Every fix is in source outside
-// this proof packet's write set (identity.controller.ts, identity.service.ts,
-// auth.middleware.ts, supabase-admin.service.ts).
+// The two "OPEN DEFECT ST-1 reproduced" cases pinned a team:write member
+// rewriting scopes through the role route. They now assert the behaviour the
+// it.todo next to them required, and the it.todo is gone. The cases after them
+// pin the rest of the fix: the caller's ceiling (K2: an authority change is
+// bounded by the grantor's current authority), the team:admin and OWNER
+// positive controls, the actor on the team_activity_logs row, the OWNER role,
+// and self-target.
 // ---------------------------------------------------------------------------
-describe('OPEN DEFECT ST-1 — the role route (team:write) rewrites permission scopes and gets around the team:admin gate', () => {
-  it('OPEN DEFECT ST-1 reproduced — an OWNER-restricted ADMIN resets its OWN scopes to ADMIN defaults through PATCH .../team/:ownMembership {role}', async () => {
+
+/** The membership row exactly as Postgres stores it, so "unchanged" means byte-identical. */
+async function membershipRowText(id: string): Promise<string> {
+  const rows = await db.$queryRawUnsafe('SELECT row_to_json(m)::text AS j FROM memberships m WHERE m.id = $1', id);
+  expect(rows.length, `membership ${id} exists`).toBe(1);
+  return rows[0].j as string;
+}
+
+/** role_changed rows the server wrote for one membership, oldest first. */
+async function roleChangeRows(membershipId: string) {
+  return db.teamActivityLog.findMany({
+    where: { businessId: ID.bizD, action: 'role_changed', entityId: membershipId },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
+describe('ST-1 (fixed, R0-ID-F1-ROLE-ROUTE-AUTHORITY) — the role route needs the authority of the permissions route and is bounded by the caller', () => {
+  it('an OWNER-restricted ADMIN (team:write) cannot reset its OWN scopes through PATCH .../team/:ownMembership {role}: 403, row byte-identical', async () => {
     const t = T[ID.adminR];
     // Restricted by the OWNER: { crm: read, team: write }, tier 0 — no settings.
     const settingsBefore = await call('get', routes.settingsRead(ID.bizD), t);
@@ -887,25 +915,25 @@ describe('OPEN DEFECT ST-1 — the role route (team:write) rewrites permission s
       maxApprovalTier: 3,
     });
     expect(perms.status, JSON.stringify(perms.body)).toBe(403);
-    const unchanged = await db.membership.findUnique({ where: { id: ID.mAdminR } });
-    expect(unchanged.permissionScopes).toEqual({ crm: 'read', team: 'write' });
-    expect(unchanged.maxApprovalTier).toBe(0);
 
-    // The role route (team:write, no self-target check) is answered 200 ...
-    const self = await call('patch', routes.member(ID.bizD, ID.mAdminR), t, { role: 'ADMIN' });
-    expect(self.status, JSON.stringify(self.body)).toBe(200);
-    // ... and overwrites the OWNER's restriction with the ADMIN role defaults.
+    const before = await membershipRowText(ID.mAdminR);
+    // The role route is refused the same widening, for either role.
+    for (const role of ['ADMIN', 'STAFF']) {
+      const self = await call('patch', routes.member(ID.bizD, ID.mAdminR), t, { role });
+      expect(self.status, `{ role: ${role} } ${JSON.stringify(self.body)}`).toBe(403);
+      expectNoBusinessData(self);
+      expect(await membershipRowText(ID.mAdminR), `row after { role: ${role} }`).toBe(before);
+    }
     const row = await db.membership.findUnique({ where: { id: ID.mAdminR } });
-    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.ADMIN);
-    expect(row.permissionScopes.settings).toBe('admin');
-    expect(row.maxApprovalTier).toBe(DEFAULT_APPROVAL_TIERS.ADMIN);
+    expect(row.permissionScopes).toEqual({ crm: 'read', team: 'write' });
+    expect(row.maxApprovalTier).toBe(0);
 
-    // Effective on the very next request.
+    // Still restricted on the very next request.
     const settingsAfter = await call('get', routes.settingsRead(ID.bizD), t);
-    expect(settingsAfter.status, JSON.stringify(settingsAfter.body)).toBe(200);
+    expect(settingsAfter.status, JSON.stringify(settingsAfter.body)).toBe(403);
   });
 
-  it('OPEN DEFECT ST-1 reproduced — an ADMIN (team:write) widens an OWNER-restricted STAFF to STAFF defaults through PATCH .../team/:m {role}', async () => {
+  it('an ADMIN with team:write cannot widen an OWNER-restricted STAFF through PATCH .../team/:m {role}: 403, row byte-identical', async () => {
     const t = T[ID.adminD];
     // The same widening through the permissions route is refused (team:admin) ...
     const perms = await call('patch', routes.perms(ID.bizD, ID.mStaffR), t, {
@@ -913,24 +941,136 @@ describe('OPEN DEFECT ST-1 — the role route (team:write) rewrites permission s
       maxApprovalTier: 0,
     });
     expect(perms.status, JSON.stringify(perms.body)).toBe(403);
-    expect((await db.membership.findUnique({ where: { id: ID.mStaffR } })).permissionScopes).toEqual({ crm: 'read', team: 'none' });
 
-    // ... the role route does it.
-    const res = await call('patch', routes.member(ID.bizD, ID.mStaffR), t, { role: 'STAFF' });
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const row = await db.membership.findUnique({ where: { id: ID.mStaffR } });
-    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.STAFF);
-    // Modules the explicit map denied by absence are now readable.
-    for (const m of ['revenue', 'operations', 'bookings', 'expenses']) expect(row.permissionScopes[m], m).toBe('read');
+    // ... and so is the role route, for the same role and for a higher tier.
+    const before = await membershipRowText(ID.mStaffR);
+    for (const role of ['STAFF', 'ADMIN']) {
+      const res = await call('patch', routes.member(ID.bizD, ID.mStaffR), t, { role });
+      expect(res.status, `{ role: ${role} } ${JSON.stringify(res.body)}`).toBe(403);
+      expectNoBusinessData(res);
+      expect(await membershipRowText(ID.mStaffR), `row after { role: ${role} }`).toBe(before);
+    }
+    expect((await db.membership.findUnique({ where: { id: ID.mStaffR } })).permissionScopes).toEqual({ crm: 'read', team: 'none' });
   });
 
-  it.todo(
-    'REQUIRED (fix packet; identity.controller.ts / identity.service.ts updateMemberRole, outside this write set): ' +
-      'PATCH .../team/:membershipId {role} cannot set scopes or a tier the caller could not set through .../permissions (team:admin), ' +
-      'and a non-OWNER cannot change its own membership — both cases above answer 403 with the row unchanged',
-  );
+  it('a team:admin member cannot grant a role above its own authority (K2): 403, row byte-identical', async () => {
+    // staffT holds team:admin, so it passes the permissions-route gate, but its
+    // own map is { crm: read, team: admin } at tier 0. ADMIN defaults (admin on
+    // every module, tier 3) and STAFF defaults (read on revenue, bookings, ...)
+    // both exceed it.
+    const before = await membershipRowText(ID.mStaffP);
+    for (const role of ['ADMIN', 'STAFF']) {
+      const res = await call('patch', routes.member(ID.bizD, ID.mStaffP), T[ID.staffT], { role });
+      expect(res.status, `{ role: ${role} } ${JSON.stringify(res.body)}`).toBe(403);
+      expectNoBusinessData(res);
+      expect(await membershipRowText(ID.mStaffP), `row after { role: ${role} }`).toBe(before);
+    }
+  });
+
+  it('positive control: a non-OWNER with team:admin changes ANOTHER member to a role within its own authority -> 200, effective on the next request', async () => {
+    // The gate is the permissions route's (team:admin), not OWNER-only. (The
+    // target was STAFF with settings:none until here; the OWNER case below
+    // demotes it again and shows settings refused.)
+    const res = await call('patch', routes.member(ID.bizD, ID.mStaffP), T[ID.adminT], { role: 'ADMIN' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: ID.mStaffP, role: 'ADMIN' });
+    const row = await db.membership.findUnique({ where: { id: ID.mStaffP } });
+    expect(row.role).toBe('ADMIN');
+    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.ADMIN);
+    expect(row.maxApprovalTier).toBe(DEFAULT_APPROVAL_TIERS.ADMIN);
+    // Recorded against the team:admin actor.
+    const rows = await roleChangeRows(ID.mStaffP);
+    expect(rows[rows.length - 1]).toMatchObject({ userId: ID.adminT, meta: { newRole: 'ADMIN' } });
+
+    const after = await call('get', routes.settingsRead(ID.bizD), T[ID.staffP]);
+    expect(after.status, JSON.stringify(after.body)).toBe(200);
+  });
+
+  it('positive control: the OWNER changes a role -> 200; scopes and tier are the role defaults, effective on the next request', async () => {
+    const res = await call('patch', routes.member(ID.bizD, ID.mStaffP), T[ID.ownerD], { role: 'STAFF' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: ID.mStaffP, role: 'STAFF' });
+    const row = await db.membership.findUnique({ where: { id: ID.mStaffP } });
+    expect(row.role).toBe('STAFF');
+    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.STAFF);
+    expect(row.maxApprovalTier).toBe(DEFAULT_APPROVAL_TIERS.STAFF);
+
+    const settings = await call('get', routes.settingsRead(ID.bizD), T[ID.staffP]);
+    expect(settings.status, JSON.stringify(settings.body)).toBe(403);
+  });
+
+  it('a role change recorded in team_activity_logs keeps its actor (existing behaviour, pinned)', async () => {
+    // The most recent change is the OWNER's, recorded against the OWNER.
+    const rows = await roleChangeRows(ID.mStaffP);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[rows.length - 1]).toMatchObject({
+      businessId: ID.bizD,
+      userId: ID.ownerD,
+      module: 'team',
+      action: 'role_changed',
+      entityType: 'membership',
+      entityId: ID.mStaffP,
+      title: `Changed ${email(ID.staffP)} role to STAFF`,
+      meta: { newRole: 'STAFF' },
+    });
+  });
+
+  it('a refused role change writes no role_changed row', async () => {
+    expect(await roleChangeRows(ID.mAdminR)).toEqual([]);
+    expect(await roleChangeRows(ID.mStaffR)).toEqual([]);
+    const byRefusedActors = await db.teamActivityLog.count({
+      where: { businessId: ID.bizD, action: 'role_changed', userId: { in: [ID.adminR, ID.adminD, ID.staffT] } },
+    });
+    expect(byRefusedActors).toBe(0);
+  });
+
+  it('the OWNER role cannot be granted or removed through this route, by anyone (pinned: no ownership-transfer route exists)', async () => {
+    const ownerRow = await membershipRowText(ID.mOwnerD);
+    const targetRow = await membershipRowText(ID.mStaffP);
+
+    // Granting OWNER: not an assignable role, even for the OWNER.
+    for (const actor of [ID.ownerD, ID.adminT]) {
+      const grant = await call('patch', routes.member(ID.bizD, ID.mStaffP), T[actor], { role: 'OWNER' });
+      expect(grant.status, `${actor} grants OWNER: ${JSON.stringify(grant.body)}`).toBe(400);
+    }
+    // Removing OWNER: the OWNER membership's role cannot be changed, even by the OWNER itself.
+    for (const actor of [ID.ownerD, ID.adminT]) {
+      const demote = await call('patch', routes.member(ID.bizD, ID.mOwnerD), T[actor], { role: 'ADMIN' });
+      expect(demote.status, `${actor} demotes the OWNER: ${JSON.stringify(demote.body)}`).toBe(400);
+    }
+    // Without team:admin the caller is refused before the target is examined.
+    const byTeamWrite = await call('patch', routes.member(ID.bizD, ID.mOwnerD), T[ID.adminD], { role: 'STAFF' });
+    expect(byTeamWrite.status, JSON.stringify(byTeamWrite.body)).toBe(403);
+
+    expect(await membershipRowText(ID.mOwnerD)).toBe(ownerRow);
+    expect(await membershipRowText(ID.mStaffP)).toBe(targetRow);
+    expect(await db.membership.count({ where: { businessId: ID.bizD, role: 'OWNER' } })).toBe(1);
+  });
+
+  it('a non-OWNER cannot change its OWN membership role, even with team:admin: 403, row byte-identical', async () => {
+    for (const [actor, membershipId] of [[ID.adminT, ID.mAdminT], [ID.staffT, ID.mStaffT]] as const) {
+      const before = await membershipRowText(membershipId);
+      for (const role of ['ADMIN', 'STAFF']) {
+        const res = await call('patch', routes.member(ID.bizD, membershipId), T[actor], { role });
+        expect(res.status, `${actor} -> own { role: ${role} }: ${JSON.stringify(res.body)}`).toBe(403);
+        expectNoBusinessData(res);
+        expect(await membershipRowText(membershipId), `${actor} row after { role: ${role} }`).toBe(before);
+      }
+      expect(await roleChangeRows(membershipId)).toEqual([]);
+    }
+  });
 });
 
+// ---------------------------------------------------------------------------
+// OPEN DEFECTS — found in review, reproduced against the real server.
+//
+// Each "OPEN DEFECT … reproduced" case pins TODAY's observed behaviour so the
+// defect is recorded by an executing test, not by prose; it is NOT a
+// certification of that behaviour. It turns red when the fix lands, and the fix
+// packet replaces it with the it.todo next to it. Every fix is in source outside
+// this proof packet's write set (identity.controller.ts, identity.service.ts,
+// auth.middleware.ts, supabase-admin.service.ts).
+// ---------------------------------------------------------------------------
 describe('OPEN DEFECT ST-2 — the admin-token branch of AuthMiddleware skips every AB-P02 check', () => {
   // Issued by the production issuer while the User row is SUPER_ADMIN.
   let adminToken = '';

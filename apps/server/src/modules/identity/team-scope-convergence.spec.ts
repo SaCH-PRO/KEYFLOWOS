@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { IdentityService } from './identity.service';
 import type { PrismaService } from '../../core/prisma/prisma.service';
 import type { BlueprintService } from '../blueprint/blueprint.service';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { Reflector } from '@nestjs/core';
+import { ROLE_DEFAULT_SCOPES, DEFAULT_APPROVAL_TIERS } from '../../core/authority/module-vocabulary';
 
 /**
  * The C1 outage, proved closed at the writer AND at the enforcer.
@@ -180,5 +181,110 @@ describe('C1 — connect is reachable only by explicit grant', () => {
 
     expect(await guardAdmits(fake, invited.userId, 'connect', 'write')).toBe(true);
     expect(await guardAdmits(fake, invited.userId, 'connect', 'admin')).toBe(false);
+  });
+});
+
+/**
+ * R0-ID-F1-ROLE-ROUTE-AUTHORITY (ST-1). `updateMemberRole` rewrites the target's
+ * scope map and approval tier to the role defaults, so it is a permissions write:
+ * it needs what `updateMemberPermissions` needs (OWNER, SUPER_ADMIN or team:admin),
+ * a non-OWNER cannot aim it at its own membership, and a non-OWNER cannot grant a
+ * role whose defaults exceed its own authority (K2). The OWNER requester above is
+ * the positive control ("a role change does not strip operations or analytics").
+ */
+describe('ST-1 — the role route is a permissions write, bounded by the caller', () => {
+  function addMember(
+    fake: TeamPrismaFake,
+    m: { id: string; userId: string; role: string; permissionScopes?: Record<string, string> | null; maxApprovalTier?: number },
+    userRole = 'USER',
+  ) {
+    fake.users.push({ id: m.userId, email: `${m.userId}@x.test`, role: userRole });
+    fake.memberships.push({ businessId: BUSINESS, permissionScopes: null, maxApprovalTier: 0, ...m });
+  }
+  const snapshot = (fake: TeamPrismaFake, id: string) => JSON.stringify(fake.memberships.find((m) => m.id === id));
+
+  /** A STAFF target restricted by the OWNER, plus the caller under test. */
+  function setup(caller: { role: string; permissionScopes?: Record<string, string> | null; maxApprovalTier?: number }, userRole = 'USER') {
+    const fake = new TeamPrismaFake();
+    addMember(fake, { id: 'mem_target', userId: 'u_target', role: 'STAFF', permissionScopes: { crm: 'read', team: 'none' }, maxApprovalTier: 0 });
+    addMember(fake, { id: 'mem_caller', userId: 'u_caller', ...caller }, userRole);
+    return { fake, service: serviceWith(fake) };
+  }
+
+  it.each([
+    ['STAFF', 'the same role (scope reset)'],
+    ['ADMIN', 'a higher role'],
+  ])('a team:write ADMIN cannot set %s (%s) on another member: Forbidden, nothing written', async (role) => {
+    const { fake, service } = setup({ role: 'ADMIN' }); // role defaults: team:write
+    const before = snapshot(fake, 'mem_target');
+    await expect(service.updateMemberRole(BUSINESS, 'mem_target', role, 'u_caller')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(snapshot(fake, 'mem_target')).toBe(before);
+    expect(fake.client.membership.update).not.toHaveBeenCalled();
+    expect(fake.client.teamActivityLog.create).not.toHaveBeenCalled();
+  });
+
+  it('a non-OWNER with team:admin cannot change its own membership', async () => {
+    const { fake, service } = setup({ role: 'ADMIN', permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, team: 'admin' }, maxApprovalTier: 3 });
+    const before = snapshot(fake, 'mem_caller');
+    for (const role of ['ADMIN', 'STAFF']) {
+      await expect(service.updateMemberRole(BUSINESS, 'mem_caller', role, 'u_caller')).rejects.toBeInstanceOf(ForbiddenException);
+    }
+    expect(snapshot(fake, 'mem_caller')).toBe(before);
+    expect(fake.client.membership.update).not.toHaveBeenCalled();
+  });
+
+  it('a non-OWNER with team:admin and authority at or above the role changes another member', async () => {
+    const { fake, service } = setup({ role: 'ADMIN', permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, team: 'admin' }, maxApprovalTier: 3 });
+    const updated = await service.updateMemberRole(BUSINESS, 'mem_target', 'ADMIN', 'u_caller');
+    expect(updated.role).toBe('ADMIN');
+    const row = fake.memberships.find((m) => m.id === 'mem_target');
+    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.ADMIN);
+    expect(row.maxApprovalTier).toBe(DEFAULT_APPROVAL_TIERS.ADMIN);
+    expect(await guardAdmits(fake, 'u_target', 'operations', 'admin')).toBe(true);
+    // The actor is recorded.
+    expect(fake.client.teamActivityLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ userId: 'u_caller', action: 'role_changed', entityId: 'mem_target' }) }),
+    );
+  });
+
+  it('a team:admin caller cannot grant a role whose default scopes exceed its own', async () => {
+    // Tier 3 is enough for ADMIN, but `settings` is only read here.
+    const { fake, service } = setup({
+      role: 'ADMIN',
+      permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, team: 'admin', settings: 'read' },
+      maxApprovalTier: 3,
+    });
+    const before = snapshot(fake, 'mem_target');
+    await expect(service.updateMemberRole(BUSINESS, 'mem_target', 'ADMIN', 'u_caller')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(snapshot(fake, 'mem_target')).toBe(before);
+  });
+
+  it('a team:admin caller cannot grant a role whose default approval tier exceeds its own', async () => {
+    // Every scope is at ADMIN level, but the caller's tier is 1 and ADMIN's is 3.
+    const { fake, service } = setup({ role: 'ADMIN', permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, team: 'admin' }, maxApprovalTier: 1 });
+    const before = snapshot(fake, 'mem_target');
+    await expect(service.updateMemberRole(BUSINESS, 'mem_target', 'ADMIN', 'u_caller')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(snapshot(fake, 'mem_target')).toBe(before);
+    // STAFF (tier 0, read-only defaults) is within that caller's authority.
+    await expect(service.updateMemberRole(BUSINESS, 'mem_target', 'STAFF', 'u_caller')).resolves.toMatchObject({ role: 'STAFF' });
+  });
+
+  it('a SUPER_ADMIN user is admitted as on the permissions route', async () => {
+    const { service } = setup({ role: 'STAFF', permissionScopes: { team: 'none' } }, 'SUPER_ADMIN');
+    await expect(service.updateMemberRole(BUSINESS, 'mem_target', 'ADMIN', 'u_caller')).resolves.toMatchObject({ role: 'ADMIN' });
+  });
+
+  it('fails closed without a requester: nothing written', async () => {
+    const { fake, service } = setup({ role: 'ADMIN' });
+    const before = snapshot(fake, 'mem_target');
+    await expect(service.updateMemberRole(BUSINESS, 'mem_target', 'ADMIN', undefined as unknown as string)).rejects.toThrow();
+    expect(snapshot(fake, 'mem_target')).toBe(before);
+    expect(fake.client.membership.update).not.toHaveBeenCalled();
+  });
+
+  it('the OWNER membership cannot be changed, even by the OWNER', async () => {
+    const fake = new TeamPrismaFake();
+    await expect(serviceWith(fake).updateMemberRole(BUSINESS, 'mem_owner', 'ADMIN', ADMIN_REQUESTER)).rejects.toBeInstanceOf(BadRequestException);
+    expect(fake.memberships.find((m) => m.id === 'mem_owner').role).toBe('OWNER');
   });
 });
