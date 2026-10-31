@@ -88,6 +88,7 @@ function matches(file: string, glob: string): boolean {
 const NAMED_CONFIGS = [
   'vitest.unit.config.ts',
   'vitest.integration.config.ts',
+  'vitest.e2e.config.ts',
   'vitest.smoke.config.ts',
 ];
 
@@ -105,7 +106,7 @@ describe('the named vitest configs cover every test file', () => {
     const globs = NAMED_CONFIGS.flatMap((c) => includesOf(c) ?? []);
     const uncovered = files.filter((f) => !globs.some((g) => matches(f, g)));
 
-    // NOT asserted empty. Today 30 files are reachable only through the default
+    // NOT asserted empty. Today 24 files are reachable only through the default
     // config, and that is the STATUS QUO, not a regression — `vitest run` runs
     // them all. Recording the number here is what makes the CI split a decision
     // rather than an accident: whoever changes test:ci to the named configs has
@@ -119,7 +120,7 @@ describe('the named vitest configs cover every test file', () => {
         `test:integration would silently stop running them:\n    ${summary}\n\n  ` +
         'If this number has GROWN, a new test file has been added that the named ' +
         'configs cannot see. If you are here to shrink it, widen a config include.',
-    ).toBeLessThanOrEqual(30);
+    ).toBeLessThanOrEqual(24);
   });
 
   it('the boot-protection gate is never orphaned', () => {
