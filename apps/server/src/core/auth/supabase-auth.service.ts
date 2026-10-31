@@ -20,18 +20,23 @@ export class SupabaseAuthService {
   private readonly logger = new Logger(SupabaseAuthService.name);
   private client: SupabaseClient | null = null;
 
+  /** The pair the getUser() client is built from; null when either is missing. */
+  private providerConfig(): { url: string; anonKey: string } | null {
+    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    return url && anonKey ? { url, anonKey } : null;
+  }
+
   private get supabase(): SupabaseClient | null {
     if (this.client) return this.client;
 
-    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!url || !anonKey) {
+    const config = this.providerConfig();
+    if (!config) {
       this.logger.warn('Supabase env vars missing; auth will be treated as optional.');
       return null;
     }
 
-    this.client = createClient(url, anonKey, { auth: { persistSession: false } });
+    this.client = createClient(config.url, config.anonKey, { auth: { persistSession: false } });
     return this.client;
   }
 
@@ -148,25 +153,38 @@ export class SupabaseAuthService {
   /**
    * Resolve a Supabase access token to a verified user.
    *
-   * When SUPABASE_JWT_SECRET is configured, tokens are verified locally
-   * using HMAC-SHA256 signature validation (faster, works offline).
-   * Otherwise we round-trip to Supabase auth.getUser() (requires network).
+   * With a provider client (a Supabase URL and an anon key), Supabase
+   * auth.getUser() decides, whether or not SUPABASE_JWT_SECRET is set. Only
+   * without one are tokens verified locally, using HMAC-SHA256 with
+   * SUPABASE_JWT_SECRET (works offline).
    *
-   * SECURITY: local verification uses the exact same secret Supabase uses
-   * to sign tokens, so a forged signature is cryptographically infeasible.
-   * It accepts only the hosted token shape (`iss` = `${SUPABASE_URL}/auth/v1`,
-   * `aud` = `authenticated`, a live `exp`); see issuerAccepted (R0-SEC-02).
+   * SECURITY: local verification accepts only the hosted token shape (`iss` =
+   * `${SUPABASE_URL}/auth/v1`, `aud` = `authenticated`, a live `exp`); see
+   * issuerAccepted (R0-SEC-02). It proves only that whoever holds the secret
+   * signed the token: it cannot see provider-side revocation (a session ended
+   * by logout, by admin signOut or by a password reset, answered 403
+   * session_not_found by getUser) nor a Supabase `banned_at`. Before R0-SEC-02
+   * no hosted token passed it, so every hosted token got those checks from
+   * getUser(), and two callers still rely on them, checking nothing after this
+   * method: IdentityPasswordService.completeReset (a used recovery link must
+   * not set the password again) and KeyCortexWsAuthService.authenticateSocket
+   * (no logout-marker check). So local acceptance never overrides a provider
+   * client (review repair CR-1). It also means a token signed with anything
+   * but the project's own key (a placeholder secret, say) is refused whenever
+   * the provider is configured, because Supabase checks the signature itself.
    */
   async getUserFromToken(token?: string): Promise<User | null> {
     if (!token) return null;
 
-    // Primary path: local verification with SUPABASE_JWT_SECRET
-    const localPayload = this.verifyLocal(token);
-    if (localPayload?.sub) {
-      return this.buildUserFromPayload(localPayload);
+    // No provider client: local verification is the only check available.
+    if (!this.providerConfig()) {
+      const localPayload = this.verifyLocal(token);
+      if (localPayload?.sub) {
+        return this.buildUserFromPayload(localPayload);
+      }
     }
 
-    // Fallback: round-trip to Supabase (when JWT secret is not configured)
+    // Provider client: the round trip decides (session revocation, bans).
     const supabase = this.supabase;
     if (!supabase) return null;
 

@@ -49,7 +49,7 @@ import path from 'path';
 import { createHmac, randomUUID } from 'node:crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { Controller, Get, Req, UseGuards } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { AuthGuard } from '../src/core/auth/auth.guard';
@@ -90,6 +90,7 @@ const SUBS = {
   hostedIssEmpty: `${P}forger_hostediss_empty`,
   noIssProduction: `${P}forger_noiss_production`,
   noIssTestOnly: `${P}forger_noiss_testonly`,
+  hostedIssProvider: `${P}forger_hostediss_provider`,
 };
 const VICTIM_EMAIL = `${P}victim@test.local`;
 
@@ -201,6 +202,8 @@ let app: INestApplication;
 let db: any;
 let skipTenantIsolation: <T extends object>(args: T) => T;
 let redis: { quit: () => Promise<unknown> } | undefined;
+/** The DI singleton the middleware calls; the CR-1 block drops the getUser() client it caches. */
+let supabaseAuth: { client: unknown } | undefined;
 const outbound: string[] = [];
 const realFetch = globalThis.fetch;
 
@@ -309,6 +312,7 @@ beforeAll(async () => {
   configureNestApp(app);
   // AppModule applies this middleware with consumer.apply(AuthMiddleware)
   // .forRoutes('*'); the DI-built instance is applied here the same way.
+  supabaseAuth = moduleRef.get(SupabaseAuthService) as unknown as { client: unknown };
   const middleware = moduleRef.get(AuthMiddleware);
   app.use((req: never, res: never, next: () => void) => middleware.use(req, res, next));
   await app.init();
@@ -429,6 +433,40 @@ describe('R0-SEC-02 — verifyLocal accepts only the hosted issuer (flipped from
 
   it('still nothing left the server', () => {
     expect(outbound).toEqual([]);
+  });
+});
+
+describe('R0-SEC-02 review repair CR-1 — with a provider client, local acceptance never decides', () => {
+  // Before R0-SEC-02 no hosted token passed verifyLocal, so every one went
+  // through getUser(), which refuses a session GoTrue has ended (logout, admin
+  // signOut, a used recovery link) and a banned user. Two callers check nothing
+  // after getUserFromToken and rely on that (completeReset, the KEY Cortex
+  // socket). So with an anon key set, the provider decides even for a token
+  // the configured secret verifies. Here the provider cannot be reached (fetch
+  // is refused), so the request is refused, and the attempt is the proof that
+  // the provider was asked.
+  let before = 0;
+  beforeEach(() => {
+    setSupabaseUrl(FAKE_SUPABASE_URL);
+    setSecret(FORMER_PLACEHOLDER);
+    process.env.SUPABASE_ANON_KEY = `${P}anon-key`;
+    before = outbound.length;
+  });
+  afterEach(() => {
+    delete process.env.SUPABASE_ANON_KEY;
+    // The service caches its getUser() client; later blocks run with no anon key.
+    if (supabaseAuth) supabaseAuth.client = null;
+    outbound.splice(before);
+  });
+
+  it('the hosted shape signed with the configured secret answers 401 when the provider cannot confirm it (it passed AuthGuard locally above)', async () => {
+    const res = await whoami(
+      forge(FORMER_PLACEHOLDER, { sub: SUBS.hostedIssProvider, email: VICTIM_EMAIL, iss: HOSTED_ISS }),
+    );
+    expect(res.status).toBe(401);
+    const asked = outbound.slice(before);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((u) => u.startsWith(`${HOSTED_ISS}/user`))).toBe(true);
   });
 });
 

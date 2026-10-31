@@ -7,6 +7,8 @@
  * it, f6554848 removed it). Anyone who copied the example kept a value that
  * is public, and the server verifies HS256 tokens with it.
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ensureValidServerEnv, validateServerEnv } from './env';
 
@@ -64,6 +66,73 @@ describe('validateServerEnv — SUPABASE_JWT_SECRET placeholder', () => {
     expect(report.ok).toBe(true);
     expect(mentionsPlaceholder(report.missingRequired)).toEqual([]);
     expect(mentionsPlaceholder(report.warnings)).toEqual([]);
+  });
+});
+
+/**
+ * Review repair SEC02-R1 / CR-2: the repo ships a second public value for the
+ * same variable. DEPLOYMENT.md sets `SUPABASE_JWT_SECRET=your-jwt-secret` for
+ * local use (:73) and inside the NODE_ENV=production Railway block (:183).
+ */
+const DEPLOYMENT_PLACEHOLDER = 'your-jwt-secret';
+
+describe('validateServerEnv — the DEPLOYMENT.md placeholder (review repair SEC02-R1 / CR-2)', () => {
+  it('production: your-jwt-secret fails validation, and the value is not echoed', () => {
+    const report = validateServerEnv(env({ NODE_ENV: 'production', SUPABASE_JWT_SECRET: DEPLOYMENT_PLACEHOLDER }));
+    expect(report.ok).toBe(false);
+    const errors = mentionsPlaceholder(report.missingRequired);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/leave it empty/i);
+    expect(errors[0]).not.toContain(DEPLOYMENT_PLACEHOLDER);
+  });
+
+  it('production: surrounding whitespace does not hide it', () => {
+    const report = validateServerEnv(env({ NODE_ENV: 'production', SUPABASE_JWT_SECRET: ` ${DEPLOYMENT_PLACEHOLDER}\t` }));
+    expect(report.ok).toBe(false);
+    expect(mentionsPlaceholder(report.missingRequired)).toHaveLength(1);
+  });
+
+  it.each(['development', 'test', undefined])('NODE_ENV=%s: it is a warning, and boot is not blocked', (nodeEnv) => {
+    const report = validateServerEnv(env({ NODE_ENV: nodeEnv, SUPABASE_JWT_SECRET: DEPLOYMENT_PLACEHOLDER }));
+    expect(report.ok).toBe(true);
+    expect(mentionsPlaceholder(report.warnings)).toHaveLength(1);
+  });
+
+  it('production boot with it exits 1 with a FATAL line naming SUPABASE_JWT_SECRET', () => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    ensureValidServerEnv(env({ NODE_ENV: 'production', SUPABASE_JWT_SECRET: DEPLOYMENT_PLACEHOLDER }));
+
+    expect(exit).toHaveBeenCalledWith(1);
+    const printed = error.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(printed).toMatch(/\[FATAL\]/);
+    expect(printed).toMatch(/SUPABASE_JWT_SECRET/);
+    expect(printed).not.toContain(DEPLOYMENT_PLACEHOLDER);
+  });
+
+  it('every non-empty SUPABASE_JWT_SECRET value the repo documents is refused in production', () => {
+    // A ratchet: a doc or template that ships a new example value for this
+    // variable fails here until the value joins the deny-list (or is blanked).
+    const root = resolve(__dirname, '../../../../..');
+    expect(existsSync(resolve(root, 'pnpm-workspace.yaml'))).toBe(true);
+    const sources = ['DEPLOYMENT.md', '.env.example', 'infrastructure/production.env.template', 'MIGRATION.md', 'README.md'];
+    const values = new Set<string>();
+    for (const rel of sources) {
+      const file = resolve(root, rel);
+      if (!existsSync(file)) continue;
+      for (const m of readFileSync(file, 'utf8').matchAll(/^[ \t]*(?:export[ \t]+)?SUPABASE_JWT_SECRET[ \t]*=[ \t]*(.*)$/gm)) {
+        const value = m[1].replace(/[ \t]+#.*$/, '').trim().replace(/^(['"])(.*)\1$/, '$2');
+        if (value) values.add(value);
+      }
+    }
+    // DEPLOYMENT.md carries one today; when a docs packet blanks it, this
+    // still holds with nothing to check.
+    for (const value of values) {
+      const report = validateServerEnv(env({ NODE_ENV: 'production', SUPABASE_JWT_SECRET: value }));
+      expect({ value, ok: report.ok }).toEqual({ value, ok: false });
+    }
   });
 });
 
