@@ -29,7 +29,12 @@
  * fix is in product code outside R0-11-PL07-PAYMENT-ACTOR's manifest-only
  * write set):
  *   PA-16 (ST-R011-1) PATCH /commerce/businesses/:b/invoices/:id {status:'PAID'} by a human
- *         writes a payment attributed to KEY_SYSTEM_ACTOR_ID, with no human recorded
+ *         writes a payment attributed to KEY_SYSTEM_ACTOR_ID, with no human recorded.
+ *         CLOSED by R0-CMF1-INVOICE-PATCH-ACTOR: the it.todo is replaced by the
+ *         PA-16a..j cases below (PAID, SENT, OVERDUE, VOID through PATCH name the
+ *         human; the body is a whitelisted DTO; an invalid status is a 400; a
+ *         revenue:read member is refused like the mark-paid route; the owner's
+ *         PATCH and mark-paid ledger effects are identical; KEY stays KEY).
  *   PA-17 (ST-R011-2) refunding a SUCCESSFUL payment with no payment_recorded posting
  *         records the refunder nowhere
  *   PA-18 (ST-R011-3) drive-intake approval drops the approver: record_payment records null
@@ -52,14 +57,16 @@
  * boundary), Gmail, vision, stats cache and the unified activity timeline are
  * stubs off the boundary (the activity stub records what it is handed).
  *
- * Fixtures: prefix `pya_`; hard-deleted by raw SQL in dependency order in
- * beforeAll and afterAll; no $transaction wrapping.
+ * Fixtures: prefix `pya_` (legacy registry entry); hard-deleted by raw SQL
+ * (LIKE through sqlLikePrefix) in dependency order in beforeAll and afterAll;
+ * no $transaction wrapping.
  */
 import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 // Type-only: erased at runtime, so the dynamic-import order below (dotenv
 // before anything that reads DATABASE_URL) is unchanged.
 import type { CommerceService } from '../src/modules/commerce/commerce.service';
@@ -96,6 +103,21 @@ const ID = {
   invHumanInit: `${P}invHumanInit`,
   // R0-PL-04: PA-13, refund of a mark-paid payment
   invMarkPaidRefund: `${P}invMarkPaidRefund`,
+  // R0-CMF1-INVOICE-PATCH-ACTOR: PA-16a..j, status changes through
+  // PATCH /commerce/businesses/:b/invoices/:id. W (STAFF, revenue:read) is
+  // seeded by that describe block, after the fixture sanity case.
+  userW: `${P}userW`,
+  invPatchPaidV: `${P}invPatchPaidV`,
+  invPatchSpoofV: `${P}invPatchSpoofV`,
+  invPatchSentV: `${P}invPatchSentV`, // moved back to DRAFT by its describe block
+  invPatchOverdueV: `${P}invPatchOverdueV`,
+  invPatchVoidV: `${P}invPatchVoidV`,
+  invPatchDeniedW: `${P}invPatchDeniedW`,
+  invPatchInvalid: `${P}invPatchInvalid`,
+  invPatchPaidU: `${P}invPatchPaidU`,
+  invRoutePaidU: `${P}invRoutePaidU`,
+  invKeyPatchPaid: `${P}invKeyPatchPaid`,
+  invKeyPatchVoid: `${P}invKeyPatchVoid`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -133,19 +155,21 @@ const timelineStub = {
 };
 
 async function cleanup() {
+  // `pya_` matched literally: a bare LIKE 'pya_%' would also match any 'pya?…' prefix.
+  const like = sqlLikePrefix(P);
   for (const sql of [
-    `DELETE FROM contact_events WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM ledger_entries WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM financial_transactions WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM payments WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
-    `DELETE FROM payment_links WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
-    `DELETE FROM invoice_items WHERE invoice_id LIKE '${P}%'`,
-    `DELETE FROM invoices WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM memberships WHERE business_id LIKE '${P}%' OR user_id LIKE '${P}%'`,
-    `DELETE FROM chart_of_accounts WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM businesses WHERE id LIKE '${P}%'`,
-    `DELETE FROM users WHERE id LIKE '${P}%'`,
+    `DELETE FROM contact_events WHERE business_id LIKE ${like}`,
+    `DELETE FROM ledger_entries WHERE business_id LIKE ${like}`,
+    `DELETE FROM financial_transactions WHERE business_id LIKE ${like}`,
+    `DELETE FROM payments WHERE business_id LIKE ${like} OR invoice_id LIKE ${like}`,
+    `DELETE FROM payment_links WHERE business_id LIKE ${like} OR invoice_id LIKE ${like}`,
+    `DELETE FROM invoice_items WHERE invoice_id LIKE ${like}`,
+    `DELETE FROM invoices WHERE business_id LIKE ${like}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${like}`,
+    `DELETE FROM memberships WHERE business_id LIKE ${like} OR user_id LIKE ${like}`,
+    `DELETE FROM chart_of_accounts WHERE business_id LIKE ${like}`,
+    `DELETE FROM businesses WHERE id LIKE ${like}`,
+    `DELETE FROM users WHERE id LIKE ${like}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
@@ -666,16 +690,272 @@ describe('review repairs: mark-paid, refund guard, initiating human', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// R0-CMF1-INVOICE-PATCH-ACTOR (R0-11 review ST-R011-1, BLOCKING): PA-16.
+//
+// PATCH /commerce/businesses/:b/invoices/:id took an inline body type, so the
+// global ValidationPipe saw `Object` and stripped nothing: `status` reached
+// CommerceService.updateInvoice, which hard-coded KEY_SYSTEM_ACTOR_ID for
+// markInvoicePaid and updateInvoiceStatus. A human's PATCH {status:'PAID'}
+// wrote Payment.recordedBy 'key_ai', a posting by 'key_ai' and timeline
+// entries by KEY: the human was recorded nowhere. The authority PATCH status
+// PAID needs is the dedicated mark-paid route's: AuthGuard + BusinessGuard +
+// ModuleScopeGuard revenue:write, then markInvoicePaid's Membership check.
+// ---------------------------------------------------------------------------
+
+const invoiceRoute = (inv: string) => `/commerce/businesses/${ID.biz}/invoices/${inv}`;
+
+function patchInvoiceAs(user: string, inv: string, body: Record<string, unknown>) {
+  return agent().patch(invoiceRoute(inv)).set(HEADER, user).send(body);
+}
+
+function markPaidAs(user: string, inv: string) {
+  return agent().patch(`/commerce/invoices/${inv}/paid`).set(HEADER, user).send({ businessId: ID.biz });
+}
+
+async function invoiceRow(id: string): Promise<any> {
+  return db.invoice.findUnique({ where: { id } });
+}
+
+/** Every ContactEvent of any type on the fixture contact for one invoice. */
+async function allContactEventsFor(invoiceId: string): Promise<any[]> {
+  const rows = await db.contactEvent.findMany({ where: { businessId: ID.biz }, orderBy: { createdAt: 'asc' } });
+  return rows.filter((r: any) => (r.data as any)?.invoiceId === invoiceId);
+}
+
+/** The unified activity entries the contact timeline wrote for one invoice and event type. */
+function activityFor(invoiceId: string, action: string): Array<Record<string, any>> {
+  return activity.filter((a) => a.module === 'crm' && a.action === action && a.data?.invoiceId === invoiceId);
+}
+
+/** Every ledger transaction about this invoice or one of its payments. */
+async function postingsAbout(invoiceId: string): Promise<any[]> {
+  const paymentIds = (await paymentsOf(invoiceId)).map((p) => p.id);
+  return db.financialTransaction.findMany({
+    where: { businessId: ID.biz, OR: [{ sourceId: invoiceId }, { sourceId: { in: paymentIds } }] },
+  });
+}
+
+/** One payment's posting as a fingerprint without ids, so two postings compare. */
+async function ledgerEffect(paymentId: string) {
+  const txns = await postingsFor(paymentId);
+  expect(txns, `postings for ${paymentId}`).toHaveLength(1);
+  const txn = txns[0];
+  const entries = await db.ledgerEntry.findMany({ where: { transactionId: txn.id } });
+  return {
+    type: txn.type,
+    status: txn.status,
+    amount: Number(txn.amount),
+    currency: txn.currency,
+    sourceType: txn.sourceType,
+    createdById: txn.createdById,
+    entries: entries
+      .map((e: any) => ({ accountId: e.accountId, debit: Number(e.debit), credit: Number(e.credit), currency: e.currency }))
+      .sort((a: any, b: any) => `${a.accountId}:${a.debit}`.localeCompare(`${b.accountId}:${b.debit}`)),
+  };
+}
+
+/** No row and no activity entry written about this invoice names KEY. */
+async function expectNoKeyActor(invoiceId: string) {
+  for (const p of await paymentsOf(invoiceId)) expect(p.recordedBy, `payment ${p.id}`).not.toBe(KEY_ACTOR);
+  for (const t of await postingsAbout(invoiceId)) expect(t.createdById, `posting ${t.externalRef}`).not.toBe(KEY_ACTOR);
+  for (const e of await allContactEventsFor(invoiceId)) {
+    expect(e.actorId, `contact event ${e.type}`).not.toBe(KEY_ACTOR);
+    expect((e.data as any)?.recordedBy, `contact event ${e.type} data.recordedBy`).not.toBe(KEY_ACTOR);
+  }
+  for (const a of activity.filter((x) => x.data?.invoiceId === invoiceId)) expect(a.actorId, `activity ${a.action}`).not.toBe(KEY_ACTOR);
+}
+
+const messagesOf = (body: Record<string, unknown>) => [body.message].flat().map(String);
+
+describe('R0-CMF1: status changes through PATCH .../invoices/:id record the human who made them (PA-16, ST-R011-1)', () => {
+  beforeAll(async () => {
+    // W is a member WITHOUT revenue:write: the dedicated mark-paid route refuses W.
+    await db.user.create({ data: { id: ID.userW, email: `${ID.userW}@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${P}m_userW`, userId: ID.userW, businessId: ID.biz, role: 'STAFF', permissionScopes: { revenue: 'read' } },
+    });
+    // SENT is reachable only from DRAFT.
+    await db.invoice.update({ where: { id: ID.invPatchSentV }, data: { status: 'DRAFT' } });
+  });
+
+  it('PA-16a: V (STAFF, revenue:write) PATCH {status:"PAID"} -> 200 PAID; Payment.recordedBy, the posting createdById and the invoice.payment_recorded / invoice.paid entries name V; KEY is recorded nowhere', async () => {
+    const inv = ID.invPatchPaidV;
+    const res = await patchInvoiceAs(ID.userV, inv, { status: 'PAID' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: inv, status: 'PAID' });
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: 'manual', method: 'MANUAL', status: 'SUCCESSFUL', amount: INVOICE_TOTAL });
+    expect(rows[0].recordedBy).toBe(ID.userV);
+    await expectPostingBy(rows[0].id, ID.userV);
+    await expectContactEventBy(inv, ID.userV, 'USER');
+    const paid = await contactEventsFor(inv, 'invoice.paid');
+    expect(paid).toHaveLength(1);
+    expect(paid[0]).toMatchObject({ actorId: ID.userV, actorType: 'USER', source: 'commerce' });
+    expect(activityFor(inv, 'invoice.paid')).toEqual([expect.objectContaining({ actorId: ID.userV, actorType: 'USER' })]);
+    await expectNoKeyActor(inv);
+  });
+
+  it('PA-16b: actor and computed fields in the PATCH body (actorId KEY, recordedBy, initiatedBy, total, invoiceNumber, businessId) are stripped; the service is handed V as the actor and every audit column names V', async () => {
+    const inv = ID.invPatchSpoofV;
+    const spy = vi.spyOn(commerce, 'updateInvoice');
+    try {
+      const res = await patchInvoiceAs(ID.userV, inv, {
+        status: 'PAID',
+        actorId: KEY_ACTOR,
+        recordedBy: ID.userU,
+        initiatedBy: ID.userU,
+        total: 1,
+        invoiceNumber: `${P}HIJACK`,
+        businessId: `${P}otherBiz`,
+      });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.status).toBe('PAID');
+      expect(spy).toHaveBeenCalledTimes(1);
+      const [input, actor] = spy.mock.calls[0] as unknown as [Record<string, unknown>, unknown];
+      expect(actor, 'the actor argument').toBe(ID.userV);
+      expect(input).toMatchObject({ invoiceId: inv, businessId: ID.biz, status: 'PAID' });
+      for (const key of ['actorId', 'recordedBy', 'initiatedBy', 'total', 'invoiceNumber']) {
+        expect(input, key).not.toHaveProperty(key);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ amount: INVOICE_TOTAL, recordedBy: ID.userV });
+    await expectPostingBy(rows[0].id, ID.userV);
+    await expectContactEventBy(inv, ID.userV, 'USER');
+    expect(((await contactEventsFor(inv))[0].data as any).initiatedBy).toBeUndefined();
+    expect((await invoiceRow(inv)).invoiceNumber).not.toBe(`${P}HIJACK`);
+    await expectNoKeyActor(inv);
+  });
+
+  const statusCases: Array<[string, string, 'SENT' | 'OVERDUE' | 'VOID', string]> = [
+    ['PA-16c', ID.invPatchSentV, 'SENT', 'invoice.sent'],
+    ['PA-16d', ID.invPatchOverdueV, 'OVERDUE', 'invoice.overdue'],
+    ['PA-16e', ID.invPatchVoidV, 'VOID', 'invoice.void'],
+  ];
+  for (const [label, inv, status, eventType] of statusCases) {
+    it(`${label}: V PATCH {status:"${status}"} -> 200 ${status}; the ${eventType} entry and its activity record name V (USER), never KEY; no payment is written`, async () => {
+      const res = await patchInvoiceAs(ID.userV, inv, { status });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ id: inv, status });
+      expect((await invoiceRow(inv)).status).toBe(status);
+      const events = await contactEventsFor(inv, eventType);
+      expect(events, eventType).toHaveLength(1);
+      expect(events[0]).toMatchObject({ actorId: ID.userV, actorType: 'USER', source: 'commerce' });
+      expect(activityFor(inv, eventType)).toEqual([expect.objectContaining({ actorId: ID.userV, actorType: 'USER' })]);
+      expect(await paymentsOf(inv)).toHaveLength(0);
+      await expectNoKeyActor(inv);
+    });
+  }
+
+  it('PA-16f: W (STAFF, revenue:read) PATCH {status:"PAID"} or {status:"VOID"} -> 403, the same refusal the dedicated mark-paid route gives W; nothing is written', async () => {
+    const inv = ID.invPatchDeniedW;
+    for (const body of [{ status: 'PAID' }, { status: 'VOID' }]) {
+      const res = await patchInvoiceAs(ID.userW, inv, body);
+      expect(res.status, `${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body.message).toMatch(/^Insufficient permissions: revenue requires write access/);
+    }
+    // The control: mark-paid itself refuses W the same way.
+    const dedicated = await markPaidAs(ID.userW, inv);
+    expect(dedicated.status, JSON.stringify(dedicated.body)).toBe(403);
+    expect(dedicated.body.message).toMatch(/^Insufficient permissions: revenue requires write access/);
+
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null });
+    expect(await paymentsOf(inv)).toHaveLength(0);
+    expect(await postingsAbout(inv)).toHaveLength(0);
+    expect(await allContactEventsFor(inv)).toHaveLength(0);
+    expect(activity.filter((a) => a.data?.invoiceId === inv)).toHaveLength(0);
+  });
+
+  it('PA-16g: a status outside SENT / OVERDUE / VOID / PAID (BOGUS, DRAFT, PARTIALLY_PAID, lower-case paid, a number) -> 400 BAD_REQUEST, never 409 or 500; nothing is written', async () => {
+    const inv = ID.invPatchInvalid;
+    for (const status of ['BOGUS', 'DRAFT', 'PARTIALLY_PAID', 'paid', 42]) {
+      const res = await patchInvoiceAs(ID.userV, inv, { status });
+      expect(res.status, `${String(status)}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body.code).toBe('BAD_REQUEST');
+      expect(
+        messagesOf(res.body).some((m) => /^status must be one of the following values: SENT, OVERDUE, VOID, PAID$/.test(m)),
+        `${String(status)}: ${JSON.stringify(res.body.message)}`,
+      ).toBe(true);
+    }
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null });
+    expect(await paymentsOf(inv)).toHaveLength(0);
+    expect(await postingsAbout(inv)).toHaveLength(0);
+    expect(await allContactEventsFor(inv)).toHaveLength(0);
+  });
+
+  it('PA-16h: the owner U marks paid via PATCH {status:"PAID"} and via PATCH /commerce/invoices/:id/paid -> the same Payment row, ledger posting and entries, and timeline entries, all naming U', async () => {
+    const viaPatch = await patchInvoiceAs(ID.userU, ID.invPatchPaidU, { status: 'PAID' });
+    expect(viaPatch.status, JSON.stringify(viaPatch.body)).toBe(200);
+    const viaRoute = await markPaidAs(ID.userU, ID.invRoutePaidU);
+    expect(viaRoute.status, JSON.stringify(viaRoute.body)).toBe(200);
+    expect(viaPatch.body.status).toBe('PAID');
+    expect(viaRoute.body.status).toBe('PAID');
+
+    const [a, b] = [await paymentsOf(ID.invPatchPaidU), await paymentsOf(ID.invRoutePaidU)];
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(1);
+    const shape = (p: any) => ({
+      provider: p.provider, method: p.method, status: p.status, amount: p.amount, currency: p.currency, recordedBy: p.recordedBy,
+    });
+    expect(shape(a[0])).toEqual(shape(b[0]));
+    expect(shape(a[0])).toEqual({ provider: 'manual', method: 'MANUAL', status: 'SUCCESSFUL', amount: INVOICE_TOTAL, currency: 'TTD', recordedBy: ID.userU });
+
+    const [effectA, effectB] = [await ledgerEffect(a[0].id), await ledgerEffect(b[0].id)];
+    expect(effectA).toEqual(effectB);
+    expect(effectA).toMatchObject({ type: 'INCOME', status: 'POSTED', amount: INVOICE_TOTAL, sourceType: 'Payment', createdById: ID.userU });
+    expect(effectA.entries.length).toBeGreaterThan(1);
+
+    for (const inv of [ID.invPatchPaidU, ID.invRoutePaidU]) {
+      const row = await invoiceRow(inv);
+      expect(row.status, inv).toBe('PAID');
+      expect(row.paidAt, inv).not.toBeNull();
+      await expectContactEventBy(inv, ID.userU, 'USER');
+      const paid = await contactEventsFor(inv, 'invoice.paid');
+      expect(paid, inv).toHaveLength(1);
+      expect(paid[0]).toMatchObject({ actorId: ID.userU, actorType: 'USER' });
+      await expectNoKeyActor(inv);
+    }
+  });
+
+  it('PA-16i: the KEY flow executor call (commerce_update_invoice: updateInvoice with the tenant and no human actor) still marks PAID, attributed to KEY_SYSTEM_ACTOR_ID', async () => {
+    const inv = ID.invKeyPatchPaid;
+    // The call shape of flow-orchestrator.service.ts `commerce_update_invoice`.
+    const result: any = await commerce.updateInvoice({ invoiceId: inv, businessId: ID.biz, status: 'PAID' });
+    expect(result.status).toBe('PAID');
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: 'manual', amount: INVOICE_TOTAL, recordedBy: KEY_ACTOR });
+    await expectPostingBy(rows[0].id, KEY_ACTOR);
+    await expectContactEventBy(inv, KEY_ACTOR, 'SYSTEM');
+    const paid = await contactEventsFor(inv, 'invoice.paid');
+    expect(paid).toHaveLength(1);
+    expect(paid[0].actorId).toBe(KEY_ACTOR);
+  });
+
+  it('PA-16j: updateInvoice with KEY_SYSTEM_ACTOR_ID passed explicitly voids the invoice; the invoice.void entry names KEY', async () => {
+    const inv = ID.invKeyPatchVoid;
+    const update = commerce.updateInvoice as unknown as (input: Record<string, unknown>, actorId?: string) => Promise<any>;
+    const result = await update.call(commerce, { invoiceId: inv, businessId: ID.biz, status: 'VOID' }, systemActorId);
+    expect(result.status).toBe('VOID');
+    const events = await contactEventsFor(inv, 'invoice.void');
+    expect(events).toHaveLength(1);
+    expect(events[0].actorId).toBe(KEY_ACTOR);
+    expect(await paymentsOf(inv)).toHaveLength(0);
+  });
+});
+
 // R0-11 review: real gaps whose fixes are all in product code outside this
 // packet's write set (the manifest only). Each it.todo names the behaviour a
-// follow-up packet must make pass and the file it has to change.
+// follow-up packet must make pass and the file it has to change. PA-16 is
+// closed above (R0-CMF1-INVOICE-PATCH-ACTOR).
 describe('open gaps found by the R0-11 review (outside the R0-11 write set)', () => {
-  it.todo(
-    'PA-16 (ST-R011-1): PATCH /commerce/businesses/:b/invoices/:id {status:"PAID"} by a human (V, revenue:write) never attributes the payment to KEY_SYSTEM_ACTOR_ID: ' +
-      'either status is refused or stripped and no payment is written, or Payment.recordedBy, the posting createdById and the invoice.payment_recorded / invoice.paid ' +
-      'contact events name V (SENT / OVERDUE / VOID likewise never carry the KEY actor for a human) - needs commerce.controller.ts (the inline body type is not ' +
-      'whitelisted by the ValidationPipe, so status reaches updateInvoice) and commerce.service.ts updateInvoice (hard-codes KEY_SYSTEM_ACTOR_ID), outside the R0-11 write set',
-  );
   it.todo(
     'PA-17 (ST-R011-2): refunding a SUCCESSFUL payment that has no Payment:<id>:payment_recorded posting (a mark-paid row written before R0-PL-04) records the ' +
       'refunding user on a durable row (a contact event or audit entry naming V); today onPaymentRefunded returns null and nothing names the refunder - ' +
