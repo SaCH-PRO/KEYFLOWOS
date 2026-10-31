@@ -38,6 +38,22 @@ const ID = {
   mA_admin: `${P}mA_admin`,
   mA_teamAdmin: `${P}mA_teamAdmin`,
   mA_target: `${P}mA_target`,
+  // V1-07 review repairs (F1, CR-REG-1), all in bizA.
+  userStaffAdminLikeA: `${P}userStaffAdminLikeA`, // STAFF of bizA holding the ADMIN default scopes plus team: admin, tier 3
+  userWebAdminA: `${P}userWebAdminA`,             // ADMIN of bizA as the web team form invites one: its 11-key map, tier 3
+  mA_staffAdminLike: `${P}mA_staffAdminLike`,
+  mA_webAdmin: `${P}mA_webAdmin`,
+};
+
+/**
+ * The web settings/team form's role maps (apps/web/src/app/app/settings/team/page.tsx
+ * PERMISSION_MODULES / DEFAULT_SCOPES), transcribed: 11 keys, no `analytics`, no
+ * `operations`. An ADMIN invited through that form holds exactly WEB_FORM_SCOPES.ADMIN.
+ */
+const WEB_FORM_MODULES = ['crm', 'revenue', 'bookings', 'projects', 'content', 'expenses', 'automations', 'storefront', 'settings', 'ai', 'team'];
+const WEB_FORM_SCOPES: Record<'ADMIN' | 'STAFF', Record<string, string>> = {
+  ADMIN: Object.fromEntries(WEB_FORM_MODULES.map((m) => [m, m === 'team' ? 'write' : 'admin'])),
+  STAFF: Object.fromEntries(WEB_FORM_MODULES.map((m) => [m, ['settings', 'team', 'ai'].includes(m) ? 'none' : 'read'])),
 };
 
 /** Emails embed the prefix (users.email is globally unique), so cleanup can find invite-created rows. */
@@ -46,6 +62,8 @@ const inviteEmail = (tag: string) => `${P}inv_${tag}@test.local`;
 let db: any;
 let identity: any;
 let guard: any;
+let oversight: any;
+let settingsAdapter: any;
 
 function ctx(user: { id: string; role?: string } | undefined, businessId?: string) {
   return {
@@ -76,6 +94,12 @@ beforeAll(async () => {
   const prisma = new PrismaService();
   identity = new IdentityService(prisma as any, {} as any); // BlueprintService unused by team paths
   guard = new BusinessGuard(prisma as any);
+  // The two role-name gates' owner and KEY's team adapter, real over the same Prisma;
+  // only collaborators the exercised paths never reach are stubbed.
+  const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
+  const { SettingsAdapterService } = await import('../src/modules/key-cortex/adapters/settings-adapter.service');
+  oversight = new AiOversightService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+  settingsAdapter = new SettingsAdapterService(identity, {} as any, prisma as any);
 
   await cleanup(); // in case a prior run aborted
 
@@ -105,6 +129,19 @@ beforeAll(async () => {
   });
   await db.membership.create({
     data: { id: ID.mA_target, userId: ID.userTargetA, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'read' }, maxApprovalTier: 0 },
+  });
+  // V1-07 review repair fixtures.
+  for (const id of [ID.userStaffAdminLikeA, ID.userWebAdminA]) {
+    await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
+  }
+  await db.membership.create({
+    data: {
+      id: ID.mA_staffAdminLike, userId: ID.userStaffAdminLikeA, businessId: ID.bizA, role: 'STAFF',
+      permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, team: 'admin' }, maxApprovalTier: 3,
+    },
+  });
+  await db.membership.create({
+    data: { id: ID.mA_webAdmin, userId: ID.userWebAdminA, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { ...WEB_FORM_SCOPES.ADMIN }, maxApprovalTier: 3 },
   });
 }, 60_000);
 
@@ -296,5 +333,84 @@ describe('V1-07-AUTH-INVITE-CEILING — inviteTeamMember is bounded by the invit
       identity.inviteTeamMember(ID.bizA, inviteEmail('badtier'), 'STAFF', ID.userAdminA, { crm: 'read' }, 9),
     ).rejects.toMatchObject({ message: 'maxApprovalTier must be an integer between 0 and 4' });
     expect(await db.user.count({ where: { email: inviteEmail('badtier') } })).toBe(0);
+  });
+});
+
+/**
+ * V1-07 review repairs.
+ *
+ * F1: the role is a dimension of authority. PUT .../ai/governance and tier-4 AI plan
+ * approval admit OWNER and ADMIN by role name alone, whatever the scope map says, so a
+ * bounded STAFF that could mint an ADMIN-role account (even with every scope 'none')
+ * handed that account authority it does not hold itself. The ceiling now ranks the role
+ * STAFF < ADMIN < OWNER, on the invite and on the role and permissions writes.
+ *
+ * CR-REG-1: callers that send no scopes grant the 14-module role defaults, so an ADMIN
+ * holding the web team form's 11-key map (no analytics, no operations) is refused a
+ * no-scope STAFF invite, KEY's add_team_member included. Pinned as the K2 behaviour.
+ */
+describe('V1-07 review repairs — the role is bounded too (F1); no-scope invites grant the role defaults (CR-REG-1) (real DB)', () => {
+  it('F1: a bounded STAFF ({ crm: read, team: admin }, tier 0) cannot invite role ADMIN even with { crm: none } at tier 0 — 403, nothing created', async () => {
+    // The inviter itself is refused the ADMIN-role-gated governance write: role ADMIN is authority it lacks.
+    const gate: any = await oversight
+      .updateAutonomySettings(ID.bizA, { mode: 'pro_auto' }, ID.userTeamAdminA)
+      .then(() => null, (e: any) => e);
+    expect(gate?.getStatus?.()).toBe(403);
+
+    const e = inviteEmail('f1_admin_none');
+    await expectForbidden(identity.inviteTeamMember(ID.bizA, e, 'ADMIN', ID.userTeamAdminA, { crm: 'none' }, 0), CEILING);
+    expect(await db.user.count({ where: { email: e } })).toBe(0);
+    expect(await bizAMembershipsFor(e)).toEqual([]);
+  });
+
+  it('F1: a STAFF holding the ADMIN default scopes (team: admin, tier 3) cannot invite an ADMIN, but can invite a STAFF with those same scopes', async () => {
+    const refused = inviteEmail('f1_adminlike_admin');
+    await expectForbidden(identity.inviteTeamMember(ID.bizA, refused, 'ADMIN', ID.userStaffAdminLikeA), CEILING);
+    expect(await db.user.count({ where: { email: refused } })).toBe(0);
+
+    // Positive control: the role is the only dimension refused — the same scopes and tier as a STAFF are created as asked.
+    const allowed = inviteEmail('f1_adminlike_staff');
+    const m = await identity.inviteTeamMember(ID.bizA, allowed, 'STAFF', ID.userStaffAdminLikeA, { ...ROLE_DEFAULT_SCOPES.ADMIN }, 3);
+    const row = await db.membership.findUnique({ where: { id: m.id } });
+    expect(row.role).toBe('STAFF');
+    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.ADMIN);
+    expect(row.maxApprovalTier).toBe(3);
+  });
+
+  it('F1: updateMemberRole — that STAFF cannot give a member within its authority the ADMIN role — 403, row unchanged', async () => {
+    const before = await db.membership.findUnique({ where: { id: ID.mA_target } });
+    await expectForbidden(identity.updateMemberRole(ID.bizA, ID.mA_target, 'ADMIN', ID.userStaffAdminLikeA), CEILING);
+    expect(await db.membership.findUnique({ where: { id: ID.mA_target } })).toEqual(before);
+  });
+
+  it('F1: that STAFF cannot rewrite an ADMIN-role member, whose role exceeds its own — 403 on both routes, row unchanged', async () => {
+    const before = await db.membership.findUnique({ where: { id: ID.mA_admin } });
+    const ABOVE = 'You cannot change a member whose authority exceeds your own';
+    await expectForbidden(identity.updateMemberRole(ID.bizA, ID.mA_admin, 'STAFF', ID.userStaffAdminLikeA), ABOVE);
+    await expectForbidden(identity.updateMemberPermissions(ID.bizA, ID.mA_admin, { crm: 'read' }, 0, ID.userStaffAdminLikeA), ABOVE);
+    expect(await db.membership.findUnique({ where: { id: ID.mA_admin } })).toEqual(before);
+  });
+
+  it('CR-REG-1: an ADMIN holding the web form map is refused a no-scope STAFF invite (service 403, KEY add_team_member success:false), nothing created', async () => {
+    const direct = inviteEmail('cr1_direct');
+    await expectForbidden(identity.inviteTeamMember(ID.bizA, direct, 'STAFF', ID.userWebAdminA), CEILING);
+    expect(await db.user.count({ where: { email: direct } })).toBe(0);
+
+    const viaKey = inviteEmail('cr1_key');
+    const result = await settingsAdapter.execute({
+      module: 'settings', action: 'add_team_member', parameters: { email: viaKey, role: 'STAFF' }, businessId: ID.bizA, userId: ID.userWebAdminA,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(CEILING);
+    expect(await db.user.count({ where: { email: viaKey } })).toBe(0);
+  });
+
+  it('CR-REG-1 positive control: the same ADMIN invites a STAFF with the web form STAFF map, created as asked', async () => {
+    const e = inviteEmail('cr1_webstaff');
+    const m = await identity.inviteTeamMember(ID.bizA, e, 'STAFF', ID.userWebAdminA, { ...WEB_FORM_SCOPES.STAFF }, 0);
+    const row = await db.membership.findUnique({ where: { id: m.id } });
+    expect(row.role).toBe('STAFF');
+    expect(row.permissionScopes).toEqual(WEB_FORM_SCOPES.STAFF);
+    expect(row.maxApprovalTier).toBe(0);
   });
 });
