@@ -49,6 +49,11 @@
       "packet": "R0-07-OPTIONAL-SVC-VISIBLE"
     },
     {
+      "prefix": "k07c_",
+      "owner": "apps/server/test/ai-direct-provider-503.integration.test.ts",
+      "packet": "R0-07 / R0-07a-AI-DIRECT-503"
+    },
+    {
       "prefix": "k12a_",
       "owner": "apps/server/test/contact-scoped-tenancy.integration.test.ts",
       "packet": "R0-12-CT-TENANT-ROUTES"

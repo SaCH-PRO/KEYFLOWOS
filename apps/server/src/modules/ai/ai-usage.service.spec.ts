@@ -3,6 +3,43 @@ import { ForbiddenException, HttpException } from '@nestjs/common';
 import { AiUsageService } from './ai-usage.service';
 import { AI_CREDIT_COSTS } from '../subscriptions/plans';
 
+/**
+ * R0-07a: the OpenAI SDK the direct helpers (trackEmbedding, trackVision,
+ * trackAudio) construct. The REAL constructor runs, so a missing key is refused
+ * exactly as in production; only the resource methods a helper calls are
+ * stubs, so no request can leave the process. `attempts` records every
+ * `new OpenAI(options)` before the real constructor runs; `clients` records the
+ * key and base URL of every client it accepted.
+ */
+const sdk = vi.hoisted(() => ({
+  attempts: [] as Array<{ apiKey?: string; baseURL?: string }>,
+  clients: [] as Array<{ apiKey: string; baseURL: string }>,
+  embeddingsCreate: vi.fn(),
+  chatCreate: vi.fn(),
+  speechCreate: vi.fn(),
+  transcriptionsCreate: vi.fn(),
+}));
+
+vi.mock('openai', async (importOriginal) => {
+  const actual: any = await importOriginal();
+  const RealOpenAI = actual.default;
+  class RecordingOpenAI extends RealOpenAI {
+    constructor(options: any = {}) {
+      sdk.attempts.push({ apiKey: options.apiKey, baseURL: options.baseURL });
+      super(options);
+      const self = this as any;
+      sdk.clients.push({ apiKey: self.apiKey, baseURL: self.baseURL });
+      self.embeddings = { create: (...args: any[]) => sdk.embeddingsCreate(...args) };
+      self.chat = { completions: { create: (...args: any[]) => sdk.chatCreate(...args) } };
+      self.audio = {
+        speech: { create: (...args: any[]) => sdk.speechCreate(...args) },
+        transcriptions: { create: (...args: any[]) => sdk.transcriptionsCreate(...args) },
+      };
+    }
+  }
+  return { ...actual, default: RecordingOpenAI, OpenAI: RecordingOpenAI };
+});
+
 const mockPrismaClient = {
   aiUsageLog: {
     create: vi.fn().mockResolvedValue({}),
@@ -821,6 +858,198 @@ describe('AiUsageService', () => {
       expect(summary.overageCredits).toBe(0);
       expect(summary.overageCost).toBe(0);
       expect(summary.creditsRemaining).toBe(-1);
+    });
+  });
+});
+
+/**
+ * R0-07a-AI-DIRECT-503 (COST-LEDGER-001 section 4 and section 7 item 1). The
+ * embedding, vision and audio helpers call OpenAI directly, not through the
+ * model gateway, so R0-07's structured 503 did not cover them: with no OpenAI
+ * key the SDK constructor threw a plain OpenAIError, which a route surfaces as
+ * a 500. With neither AI_INTEGRATIONS_OPENAI_API_KEY nor OPENAI_API_KEY set,
+ * each helper must refuse with the gateway's 503 shape
+ * { code: 'provider_not_configured', service: 'ai' } before it constructs a
+ * client, calls the provider, spends a rate-limit slot, checks credits or
+ * writes an AiUsageLog row. With a key (SDK stubbed) nothing changes.
+ */
+describe('AiUsageService direct OpenAI helpers fail visibly when no OpenAI key is configured (R0-07a)', () => {
+  const ENV_KEYS = ['AI_INTEGRATIONS_OPENAI_API_KEY', 'OPENAI_API_KEY', 'AI_INTEGRATIONS_OPENAI_BASE_URL', 'OPENAI_BASE_URL'];
+  const saved: Record<string, string | undefined> = {};
+  let service: AiUsageService;
+
+  /** The structured 503 the model gateway answers when no AI provider is configured (R0-07). */
+  async function expectNotConfigured(call: Promise<unknown>) {
+    const err: any = await call.then(
+      () => { throw new Error('expected the call to be refused'); },
+      (e: unknown) => e,
+    );
+    expect(err, String(err?.stack ?? err)).toBeInstanceOf(HttpException);
+    expect(err.getStatus()).toBe(503);
+    expect(err.getResponse()).toMatchObject({ code: 'provider_not_configured', service: 'ai', error: 'Service Unavailable' });
+    expect(typeof err.getResponse().message).toBe('string');
+    expect(err.getResponse().message.length).toBeGreaterThan(0);
+  }
+
+  /** Nothing ran: no client, no provider call, no credit check, no usage row. */
+  function expectNothingRan() {
+    expect(sdk.attempts).toEqual([]);
+    expect(sdk.embeddingsCreate).not.toHaveBeenCalled();
+    expect(sdk.chatCreate).not.toHaveBeenCalled();
+    expect(sdk.speechCreate).not.toHaveBeenCalled();
+    expect(sdk.transcriptionsCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsService.getActiveSubscription).not.toHaveBeenCalled();
+    expect(mockPrismaClient.aiUsageLog.aggregate).not.toHaveBeenCalled();
+    expect(mockPrismaClient.aiUsageLog.create).not.toHaveBeenCalled();
+  }
+
+  /** The refused call spent no rate-limit slot: all 120 of this minute's calls are still free. */
+  function expectNoRateLimitSlotSpent(businessId: string) {
+    for (let i = 0; i < 120; i++) service.checkRateLimit(businessId);
+    expect(() => service.checkRateLimit(businessId)).toThrow();
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    for (const k of ENV_KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+    sdk.attempts.length = 0;
+    sdk.clients.length = 0;
+    mockPrismaClient.aiUsageLog.create.mockResolvedValue({});
+    mockPrismaClient.aiUsageLog.aggregate.mockResolvedValue({ _sum: { creditsUsed: 0, estimatedCost: 0 } });
+    mockUnlimitedPlan();
+    mockSubscriptionsService.getActiveSubscription.mockClear();
+    service = createService();
+  });
+
+  afterEach(() => {
+    service.onModuleDestroy();
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  describe('with neither AI_INTEGRATIONS_OPENAI_API_KEY nor OPENAI_API_KEY set', () => {
+    it('trackEmbedding answers 503 {code: provider_not_configured, service: ai} before any client, provider call, credit check or usage row', async () => {
+      await expectNotConfigured(service.trackEmbedding('biz-r07a', 'user-1', 'semantic_embedding', ['hello']));
+      expectNothingRan();
+      expectNoRateLimitSlotSpent('biz-r07a');
+    });
+
+    it('trackVision answers 503 {code: provider_not_configured, service: ai} before any client, provider call, credit check or usage row', async () => {
+      await expectNotConfigured(
+        service.trackVision('biz-r07a', undefined, 'vision_contact', [{ role: 'user', content: [{ type: 'text', text: 'card' }] }]),
+      );
+      expectNothingRan();
+      expectNoRateLimitSlotSpent('biz-r07a');
+    });
+
+    it('trackAudio (tts) answers 503 {code: provider_not_configured, service: ai} before any client, provider call, credit check or usage row', async () => {
+      await expectNotConfigured(service.trackAudio('biz-r07a', undefined, 'audio_tts', 'tts', { text: 'Hello there', voice: 'alloy' }));
+      expectNothingRan();
+      expectNoRateLimitSlotSpent('biz-r07a');
+    });
+
+    it('trackAudio (stt) answers 503 {code: provider_not_configured, service: ai} before any client, provider call, credit check or usage row', async () => {
+      await expectNotConfigured(
+        service.trackAudio('biz-r07a', undefined, 'audio_stt', 'stt', { audioFile: Buffer.from('r07a-audio'), fileName: 'a.webm' }),
+      );
+      expectNothingRan();
+      expectNoRateLimitSlotSpent('biz-r07a');
+    });
+
+    it('an empty AI_INTEGRATIONS_OPENAI_API_KEY counts as not configured: no client is built with an empty key', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = '';
+      await expectNotConfigured(service.trackEmbedding('biz-r07a', undefined, 'semantic_embedding', ['hello']));
+      expectNothingRan();
+    });
+  });
+
+  describe('with a key configured (SDK stubbed): behaviour is unchanged', () => {
+    it('trackEmbedding builds its client from AI_INTEGRATIONS_OPENAI_API_KEY and the base URL, returns the vectors and logs the usage', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = 'r07a-test-not-a-real-key';
+      process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = 'http://r07a-openai.test/v1';
+      sdk.embeddingsCreate.mockResolvedValue({ data: [{ embedding: [0.1, 0.2] }, { embedding: [0.3, 0.4] }] });
+
+      const out = await service.trackEmbedding('biz-r07a', 'user-1', 'semantic_embedding', ['abcd', 'efgh'], 'text-embedding-3-small');
+
+      expect(out).toEqual([[0.1, 0.2], [0.3, 0.4]]);
+      expect(sdk.clients).toEqual([{ apiKey: 'r07a-test-not-a-real-key', baseURL: 'http://r07a-openai.test/v1' }]);
+      expect(sdk.embeddingsCreate).toHaveBeenCalledWith({ model: 'text-embedding-3-small', input: ['abcd', 'efgh'] });
+      expect(mockPrismaClient.aiUsageLog.create).toHaveBeenCalledTimes(1);
+      expect(mockPrismaClient.aiUsageLog.create.mock.calls[0][0].data).toMatchObject({
+        businessId: 'biz-r07a',
+        userId: 'user-1',
+        feature: 'semantic_embedding',
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+        creditsUsed: AI_CREDIT_COSTS.semantic_embedding,
+      });
+    });
+
+    it('trackVision returns the completion and logs the usage', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = 'r07a-test-not-a-real-key';
+      sdk.chatCreate.mockResolvedValue({
+        choices: [{ message: { content: '{"firstName":"Ada"}' } }],
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+      });
+
+      const out = await service.trackVision('biz-r07a', undefined, 'vision_contact', [{ role: 'user', content: 'card' }], 500, 0.2, 'gpt-4o');
+
+      expect(out.content).toBe('{"firstName":"Ada"}');
+      expect(out.usage).toMatchObject({ promptTokens: 100, completionTokens: 20, totalTokens: 120 });
+      expect(sdk.clients.map((c) => c.apiKey)).toEqual(['r07a-test-not-a-real-key']);
+      expect(sdk.chatCreate).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-4o', max_tokens: 500, temperature: 0.2 }));
+      expect(mockPrismaClient.aiUsageLog.create).toHaveBeenCalledTimes(1);
+      expect(mockPrismaClient.aiUsageLog.create.mock.calls[0][0].data).toMatchObject({ feature: 'vision_contact', provider: 'openai', totalTokens: 120 });
+    });
+
+    it('trackAudio synthesizes (tts) and transcribes (stt) and logs each', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = 'r07a-test-not-a-real-key';
+      sdk.speechCreate.mockResolvedValue({ arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer });
+      sdk.transcriptionsCreate.mockResolvedValue({ text: 'hello from whisper' });
+
+      const audio = await service.trackAudio('biz-r07a', undefined, 'audio_tts', 'tts', { text: 'Hello', voice: 'nova', model: 'gpt-4o-mini-tts' });
+      const text = await service.trackAudio('biz-r07a', undefined, 'audio_stt', 'stt', { audioFile: Buffer.from('r07a'), fileName: 'u.webm', model: 'whisper-1' });
+
+      expect(Buffer.isBuffer(audio)).toBe(true);
+      expect([...(audio as Buffer)]).toEqual([1, 2, 3]);
+      expect(text).toBe('hello from whisper');
+      expect(sdk.speechCreate).toHaveBeenCalledWith({ model: 'gpt-4o-mini-tts', voice: 'nova', input: 'Hello' });
+      expect(sdk.transcriptionsCreate).toHaveBeenCalledWith(expect.objectContaining({ model: 'whisper-1' }));
+      expect(mockPrismaClient.aiUsageLog.create.mock.calls.map((c: any[]) => c[0].data.feature)).toEqual(['audio_tts', 'audio_stt']);
+    });
+
+    it('OPENAI_API_KEY alone (the production container name) still serves the call with that key', async () => {
+      process.env.OPENAI_API_KEY = 'r07a-test-container-key';
+      sdk.embeddingsCreate.mockResolvedValue({ data: [{ embedding: [1] }] });
+
+      await expect(service.trackEmbedding('biz-r07a', undefined, 'semantic_embedding', ['x'])).resolves.toEqual([[1]]);
+      expect(sdk.clients.map((c) => c.apiKey)).toEqual(['r07a-test-container-key']);
+    });
+
+    it('a configured provider that fails keeps its own error: a provider failure is not reported as not configured', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = 'r07a-test-not-a-real-key';
+      sdk.chatCreate.mockRejectedValue(new Error('r07a: provider answered 500'));
+
+      await expect(
+        service.trackVision('biz-r07a', undefined, 'vision_contact', [{ role: 'user', content: 'card' }]),
+      ).rejects.toThrow('r07a: provider answered 500');
+      expect(mockPrismaClient.aiUsageLog.create).not.toHaveBeenCalled();
+    });
+
+    it('credits are still enforced before the provider is called', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = 'r07a-test-not-a-real-key';
+      mockFreePlan(10);
+      mockPrismaClient.aiUsageLog.aggregate.mockResolvedValue({ _sum: { creditsUsed: 10 } });
+
+      await expect(
+        service.trackVision('biz-r07a', undefined, 'vision_contact', [{ role: 'user', content: 'card' }]),
+      ).rejects.toThrow(ForbiddenException);
+      expect(sdk.chatCreate).not.toHaveBeenCalled();
     });
   });
 });
