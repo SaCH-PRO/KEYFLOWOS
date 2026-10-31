@@ -69,6 +69,10 @@
       "packet": "R0-20-MARKPAID-CONVERGENCE"
     },
     {
+      "prefix": "k24a_",
+      "owner": "apps/server/test/tenant-interceptor-alignment.integration.test.ts"
+    },
+    {
       "prefix": "k32a_",
       "owner": "apps/server/test/onboarding-manual-complete.integration.test.ts",
       "packet": "R0-32-ONBOARD-COMPLETE-SERVER"
