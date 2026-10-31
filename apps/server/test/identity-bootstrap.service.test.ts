@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ConflictException } from '@nestjs/common';
 import { IdentityService } from '../src/modules/identity/identity.service';
 import type { BlueprintService } from '../src/modules/blueprint/blueprint.service';
 
@@ -167,51 +168,93 @@ function makePrismaMock() {
   };
 }
 
+/** The pre-existing local account another caller must never be moved onto. */
+function seedHolder(state: ReturnType<typeof makePrismaMock>['state'], role: 'USER' | 'SUPER_ADMIN' = 'USER') {
+  state.users.push({
+    id: 'old-local-id',
+    email: 'collision@test.local',
+    name: 'Existing Name',
+    firstName: 'Existing',
+    lastName: null,
+    phone: null,
+    avatarUrl: null,
+    role,
+  });
+  state.businesses.push({
+    id: 'biz_pre',
+    name: "Existing's Workspace",
+    ownerId: 'old-local-id',
+    deletedAt: null,
+    createdAt: 1,
+  });
+  state.memberships.push({ userId: 'old-local-id', businessId: 'biz_pre', role: 'OWNER' });
+  state.sessions.push({ id: 'sess_1', userId: 'old-local-id' });
+}
+
+function expectHolderUntouched(state: ReturnType<typeof makePrismaMock>['state'], role: 'USER' | 'SUPER_ADMIN') {
+  expect(state.users).toEqual([
+    expect.objectContaining({ id: 'old-local-id', email: 'collision@test.local', role, firstName: 'Existing' }),
+  ]);
+  expect(state.businesses).toEqual([expect.objectContaining({ id: 'biz_pre', ownerId: 'old-local-id' })]);
+  expect(state.memberships).toEqual([{ userId: 'old-local-id', businessId: 'biz_pre', role: 'OWNER' }]);
+  expect(state.sessions).toEqual([{ id: 'sess_1', userId: 'old-local-id' }]);
+}
+
 describe('IdentityService.bootstrapUser', () => {
-  it('reconciles an existing User row whose id differs from the Supabase auth id (task #308)', async () => {
+  // R0-SEC-01-BOOTSTRAP-TAKEOVER. Until this packet the case below was the
+  // task #308 reconcile: bootstrap moved the row, its role, memberships,
+  // sessions and Business.ownerId to whichever caller presented the email.
+  // That is the account takeover; a different-id holder is now a 409.
+  it.each(['USER', 'SUPER_ADMIN'] as const)(
+    'refuses with 409 account_email_in_use and writes nothing when a %s with a different id already holds the email',
+    async (role) => {
+      const { prisma, state } = makePrismaMock();
+      seedHolder(state, role);
+      const service = new IdentityService(prisma, blueprintMock);
+
+      const attempt = service.bootstrapUser({
+        userId: 'new-supabase-id',
+        email: 'collision@test.local',
+        firstName: 'Updated',
+        lastName: 'Name',
+        company: 'Takeover Co',
+      });
+
+      await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+      await attempt.catch((err: ConflictException) => {
+        expect(err.getStatus()).toBe(409);
+        expect(err.getResponse()).toMatchObject({ code: 'account_email_in_use' });
+      });
+
+      expectHolderUntouched(state, role);
+      const client = (prisma as any).client;
+      expect(client.user.create).not.toHaveBeenCalled();
+      expect(client.user.update).not.toHaveBeenCalled();
+      expect(client.user.delete).not.toHaveBeenCalled();
+      expect(client.business.create).not.toHaveBeenCalled();
+      expect(client.business.updateMany).not.toHaveBeenCalled();
+      expect(client.membership.upsert).not.toHaveBeenCalled();
+      expect(client.membership.updateMany).not.toHaveBeenCalled();
+      expect(client.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('a returning user with the same id is idempotent: same row, same role, same business, one membership', async () => {
     const { prisma, state } = makePrismaMock();
-
-    state.users.push({
-      id: 'old-local-id',
-      email: 'collision@test.local',
-      name: 'Existing Name',
-      firstName: 'Existing',
-      lastName: null,
-      phone: null,
-      avatarUrl: null,
-      role: 'USER',
-    });
-    state.businesses.push({
-      id: 'biz_pre',
-      name: "Existing's Workspace",
-      ownerId: 'old-local-id',
-      deletedAt: null,
-      createdAt: 1,
-    });
-    state.memberships.push({ userId: 'old-local-id', businessId: 'biz_pre', role: 'OWNER' });
-    state.sessions.push({ id: 'sess_1', userId: 'old-local-id' });
-
+    seedHolder(state, 'SUPER_ADMIN');
     const service = new IdentityService(prisma, blueprintMock);
 
-    const result = await service.bootstrapUser({
-      userId: 'new-supabase-id',
-      email: 'collision@test.local',
-      firstName: 'Updated',
-      lastName: 'Name',
-    });
+    const first = await service.bootstrapUser({ userId: 'old-local-id', email: 'collision@test.local' });
+    const second = await service.bootstrapUser({ userId: 'old-local-id', email: 'collision@test.local' });
 
-    expect(result.user.id).toBe('new-supabase-id');
-    expect(result.user.email).toBe('collision@test.local');
-    expect(result.business.id).toBe('biz_pre');
-    expect(result.business.ownerId).toBe('new-supabase-id');
-
+    for (const result of [first, second]) {
+      expect(result.user).toMatchObject({ id: 'old-local-id', email: 'collision@test.local', role: 'SUPER_ADMIN' });
+      expect(result.business.id).toBe('biz_pre');
+      expect(result.isNewBusiness).toBe(false);
+    }
     expect(state.users).toHaveLength(1);
-    expect(state.users[0].id).toBe('new-supabase-id');
-    expect(state.users[0].email).toBe('collision@test.local');
-    expect(state.users[0].firstName).toBe('Existing');
-
-    expect(state.memberships[0].userId).toBe('new-supabase-id');
-    expect(state.sessions[0].userId).toBe('new-supabase-id');
+    expect(state.businesses).toHaveLength(1);
+    expect(state.memberships).toEqual([{ userId: 'old-local-id', businessId: 'biz_pre', role: 'OWNER' }]);
   });
 
   it('creates a fresh User and Business for a brand-new Supabase user (no regression)', async () => {
@@ -235,5 +278,32 @@ describe('IdentityService.bootstrapUser', () => {
       businessId: result.business.id,
       role: 'OWNER',
     });
+  });
+});
+
+describe('IdentityService.reconcileUserId (kept for an explicit operator migration; bootstrap no longer calls it)', () => {
+  // The row-migration mechanics task #308 relied on, kept so an operator path
+  // can reuse them (docs/auth-pathway.md, "Fixed by R0-SEC-01"). Asserted here
+  // directly because no request handler reaches it any more.
+  it('moves the row, memberships, sessions and Business.ownerId from the old id to the new one', async () => {
+    const { prisma, state } = makePrismaMock();
+    seedHolder(state, 'USER');
+    const service = new IdentityService(prisma, blueprintMock);
+
+    const user = await (service as any).reconcileUserId('old-local-id', {
+      userId: 'new-supabase-id',
+      email: 'collision@test.local',
+      firstName: 'Updated',
+      lastName: 'Name',
+    });
+
+    expect(user.id).toBe('new-supabase-id');
+    expect(user.email).toBe('collision@test.local');
+    expect(state.users).toHaveLength(1);
+    expect(state.users[0].id).toBe('new-supabase-id');
+    expect(state.users[0].firstName).toBe('Existing');
+    expect(state.businesses[0].ownerId).toBe('new-supabase-id');
+    expect(state.memberships[0].userId).toBe('new-supabase-id');
+    expect(state.sessions[0].userId).toBe('new-supabase-id');
   });
 });

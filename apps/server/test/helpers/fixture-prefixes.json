@@ -54,6 +54,11 @@
       "packet": "R0-13-CT-PERSISTENCE-PROOF"
     },
     {
+      "prefix": "k14a_",
+      "owner": "apps/server/test/identity-local-auth.integration.test.ts",
+      "packet": "R0-14-AUTH-LOCAL-SIGNIN"
+    },
+    {
       "prefix": "k17a_",
       "owner": "apps/server/test/payments-manual.integration.test.ts",
       "packet": "R0-17-PAYMENT-TX-INTEGRITY"

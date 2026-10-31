@@ -15,11 +15,12 @@
  *              that rule closes the forged-token path; the second pins the
  *              hazard the doc describes, so the doc goes stale loudly when a
  *              code packet fixes the issuer check.
- *   ST-R014-1  POST /identity/bootstrap moves another user's row, role,
- *              memberships and businesses to the caller on an email match. The
- *              fix is a code change outside this packet's ruling and write set
- *              (identity.controller.ts, identity.service.ts), so it is held
- *              here as it.todo, with the reason, until that packet lands.
+ *   ST-R014-1  POST /identity/bootstrap moved another user's row, role,
+ *              memberships and businesses to the caller on an email match. R0-14
+ *              held it as it.todo; R0-SEC-01-BOOTSTRAP-TAKEOVER turned those
+ *              into the real-database cases of the last block, which run the
+ *              real IdentityController and IdentityService behind the same
+ *              real AuthMiddleware and AuthGuard.
  *
  * Nothing on the boundary is mocked: the real AuthMiddleware (real
  * SupabaseAuthService, real PrismaService against DATABASE_URL, real Redis for
@@ -33,18 +34,24 @@
  * a recorder that refuses every call, and the suite asserts it was never used.
  *
  * RESOURCES: fixture prefix k14a_ (docs/reconstruction/BUILD-MAP-001.md, R0-14
- * row). The suite writes no rows. The forged `sub` values carry the prefix and
- * are checked absent from `users` by exact id, before and after.
+ * row; registered in test/helpers/fixture-prefixes.json). The first two blocks
+ * write no rows: their forged `sub` values carry the prefix and are checked
+ * absent from `users` by exact id, before and after. The bootstrap block
+ * (R0-SEC-01) seeds and creates users, businesses and memberships whose ids,
+ * owner ids and emails carry the prefix; they are hard-deleted by raw SQL
+ * through sqlLikePrefix(P) before every case and after the suite, with no
+ * $transaction wrapping.
  */
 import 'reflect-metadata';
 import path from 'path';
 import { createHmac, randomUUID } from 'node:crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { Controller, Get, Req, UseGuards } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { AuthGuard } from '../src/core/auth/auth.guard';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
@@ -76,6 +83,29 @@ const SUBS = {
   wrongSecret: `${P}forger_wrongsecret`,
 };
 const VICTIM_EMAIL = `${P}victim@test.local`;
+
+/**
+ * R0-SEC-01: the bootstrap block signs its tokens with this test-only secret
+ * and no `iss`, the shape the spawned-server suites mint, so the real
+ * AuthMiddleware accepts them through verifyLocal.
+ */
+const BOOT_SECRET = `${P}bootstrap-signing-secret`;
+const BOOT = {
+  /** A plain owner (role USER) holding the OWNER membership of its business. */
+  owner: `${P}boot_owner`,
+  ownerBiz: `${P}boot_owner_biz`,
+  /** A SUPER_ADMIN that also owns a business. */
+  admin: `${P}boot_admin`,
+  adminBiz: `${P}boot_admin_biz`,
+  /** Signs in with its own address, then names a victim's in the body. */
+  attacker: `${P}boot_attacker`,
+  /** A different sub whose token email claim IS a victim's address. */
+  claimer: `${P}boot_claimer`,
+  /** A first-time caller with nothing in the database. */
+  fresh: `${P}boot_fresh`,
+};
+/** Every bootstrap-block address embeds the prefix: users.email is globally unique. */
+const bootEmail = (id: string) => `${id}@test.local`;
 
 @Controller('k14a-probe')
 class K14aProbeController {
@@ -114,12 +144,33 @@ function setSecret(value: string | undefined) {
 let app: INestApplication;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the @keyflow/db client is loaded dynamically after env
 let db: any;
+let skipTenantIsolation: <T extends object>(args: T) => T;
 let redis: { quit: () => Promise<unknown> } | undefined;
 const outbound: string[] = [];
 const realFetch = globalThis.fetch;
 
 async function rowsForForgedSubs(): Promise<number> {
   return db.user.count({ where: { id: { in: Object.values(SUBS) } } });
+}
+
+/**
+ * Hard-delete every row the bootstrap block seeds or the bootstrap route
+ * creates. The businesses bootstrap creates get generated ids, so they are
+ * found by their prefixed owner. Raw SQL: User and Business are soft-deleted
+ * models, so the client's deleteMany would only set deletedAt.
+ */
+async function cleanupBootstrapRows() {
+  const owned = `(SELECT id FROM businesses WHERE id LIKE ${sqlLikePrefix(P)} OR owner_id LIKE ${sqlLikePrefix(P)})`;
+  for (const sql of [
+    `DELETE FROM team_activity_logs WHERE business_id IN ${owned} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE business_id IN ${owned} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)} OR owner_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM sessions WHERE user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM user_identities WHERE user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)} OR email LIKE ${sqlLikePrefix(P)}`,
+  ]) {
+    await db.$executeRawUnsafe(sql);
+  }
 }
 
 beforeAll(async () => {
@@ -134,6 +185,7 @@ beforeAll(async () => {
 
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
+  skipTenantIsolation = dbMod.skipTenantIsolation;
 
   const { Test } = await import('@nestjs/testing');
   const IORedis = (await import('ioredis')).default;
@@ -142,6 +194,21 @@ beforeAll(async () => {
   const { AuthMiddleware } = await import('../src/core/auth/auth.middleware');
   const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
   const { configureNestApp } = await import('../src/app-bootstrap');
+  // R0-SEC-01: the real bootstrap route. IdentityController and IdentityService
+  // are the shipped classes on the real PrismaService; only collaborators the
+  // bootstrap path never calls are stood in (the service's blueprint and
+  // default-trigger services; the controller's signup, password, AI-usage,
+  // business-context, auth-security and Supabase-admin services).
+  const { IdentityController } = await import('../src/modules/identity/identity.controller');
+  const { IdentityService } = await import('../src/modules/identity/identity.service');
+  const { IdentitySignupService } = await import('../src/modules/identity/identity-signup.service');
+  const { IdentityPasswordService } = await import('../src/modules/identity/identity-password.service');
+  const { AuthSecurityService } = await import('../src/modules/identity/auth-security.service');
+  const { BusinessContextService } = await import('../src/modules/identity/business-context.service');
+  const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
+  const { SupabaseAdminService } = await import('../src/core/auth/supabase-admin.service');
+  const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
+  const { DefaultTriggersService } = await import('../src/modules/ai/default-triggers.service');
 
   const client = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
     maxRetriesPerRequest: 2,
@@ -149,14 +216,27 @@ beforeAll(async () => {
   });
   redis = client;
 
+  // Empty objects: a call into one would throw, so the bootstrap cases also
+  // show none of them is on the path.
+  const notUsedByBootstrap = {};
+
   const moduleRef = await Test.createTestingModule({
-    controllers: [K14aProbeController],
+    controllers: [K14aProbeController, IdentityController],
     providers: [
       PrismaService,
       SupabaseAuthService,
       AuthMiddleware,
       AuthGuard,
       { provide: REDIS_CLIENT, useValue: client },
+      IdentityService,
+      { provide: BlueprintService, useValue: notUsedByBootstrap },
+      { provide: DefaultTriggersService, useValue: notUsedByBootstrap },
+      { provide: IdentitySignupService, useValue: notUsedByBootstrap },
+      { provide: IdentityPasswordService, useValue: notUsedByBootstrap },
+      { provide: AuthSecurityService, useValue: notUsedByBootstrap },
+      { provide: BusinessContextService, useValue: notUsedByBootstrap },
+      { provide: AiUsageService, useValue: notUsedByBootstrap },
+      { provide: SupabaseAdminService, useValue: notUsedByBootstrap },
     ],
   }).compile();
 
@@ -168,12 +248,16 @@ beforeAll(async () => {
   app.use((req: never, res: never, next: () => void) => middleware.use(req, res, next));
   await app.init();
 
+  await cleanupBootstrapRows();
   expect(await rowsForForgedSubs()).toBe(0);
 }, 60_000);
 
 afterAll(async () => {
   globalThis.fetch = realFetch;
-  if (db) expect(await rowsForForgedSubs()).toBe(0);
+  if (db) {
+    await cleanupBootstrapRows();
+    expect(await rowsForForgedSubs()).toBe(0);
+  }
   if (app) await app.close();
   if (redis) await redis.quit();
   for (const k of PINNED_KEYS) {
@@ -253,16 +337,188 @@ describe('CHARACTERIZATION — the acceptance path the doc warns about (flips wh
   });
 });
 
-describe('open defect: POST /identity/bootstrap takes over an account by email (ST-R014-1)', () => {
-  // Not implementable in R0-14: D-02 option C rules no identity code change,
-  // and identity.controller.ts / identity.service.ts are outside the packet's
-  // write set. docs/auth-pathway.md records this as open defect 1 and a stop
-  // condition for opening Release 0 sign-in. The code packet that fixes it
-  // turns these into real-database cases.
-  it.todo(
-    "bootstrap with a body `email` naming another user's address never moves that user's row, role, memberships or Business.ownerId to the caller (today: identity.controller.ts:906 prefers body.email; identity.service.ts:979-985 reconciles by email)",
+// ── R0-SEC-01-BOOTSTRAP-TAKEOVER (was ST-R014-1, open defect 1) ──────────────
+//
+// Kernel K1 (Tenant Genesis & Identity): a local User is bound to the verified
+// token subject, never to a client-supplied attribute. Pinned design:
+//   (a) the bootstrap email is the verified token's `email` claim; a body
+//       `email` is IGNORED (no 400: the web sends the address the user typed,
+//       which may differ from the token's only in case or whitespace);
+//   (b) when a User with a different id already holds the token's email,
+//       bootstrap answers 409 {code:'account_email_in_use'} and writes nothing:
+//       no User row, no membership, no business, and the holder's row, role,
+//       memberships and Business.ownerId are untouched;
+//   (c) moving a row to a new sub (same person, new Supabase project) is an
+//       operator step, not something bootstrap does (docs/auth-pathway.md).
+// The reviewer measured, before the fix: 201 {id: <attacker>, email: <victim>,
+// role: SUPER_ADMIN}, with the victim's OWNER membership and businesses.owner_id
+// re-pointed to the attacker.
+
+type VictimState = {
+  user: { id: string; email: string; role: string; deleted_at: Date | null } | null;
+  emailHolders: string[];
+  businessOwner: string | null;
+  members: Array<{ user_id: string; role: string }>;
+};
+
+async function victimState(id: string, businessId: string): Promise<VictimState> {
+  const users = await db.$queryRawUnsafe(
+    'SELECT id, email, role, deleted_at FROM users WHERE id = $1',
+    id,
   );
-  it.todo(
-    "bootstrap with a token whose `email` claim matches a local user under a different `sub` never moves that user's row to the caller without proof of the same identity (today: reconcileUserId, identity.service.ts:814-876, copies the role and deletes the old row)",
+  const holders = await db.$queryRawUnsafe('SELECT id FROM users WHERE email = $1 ORDER BY id', bootEmail(id));
+  const biz = await db.$queryRawUnsafe('SELECT owner_id FROM businesses WHERE id = $1', businessId);
+  const members = await db.$queryRawUnsafe(
+    'SELECT user_id, role FROM memberships WHERE business_id = $1 ORDER BY user_id',
+    businessId,
   );
+  return {
+    user: users[0] ?? null,
+    emailHolders: holders.map((r: { id: string }) => r.id),
+    businessOwner: biz[0]?.owner_id ?? null,
+    members,
+  };
+}
+
+function intact(id: string, role: 'USER' | 'SUPER_ADMIN'): VictimState {
+  return {
+    user: { id, email: bootEmail(id), role, deleted_at: null },
+    emailHolders: [id],
+    businessOwner: id,
+    members: [{ user_id: id, role: 'OWNER' }],
+  };
+}
+
+/** What a caller id holds: its User row, its memberships, the businesses it owns. */
+async function footprint(id: string): Promise<{ users: number; memberships: number; businesses: number }> {
+  const rows = await db.$queryRawUnsafe(
+    'SELECT (SELECT count(*)::int FROM users WHERE id = $1) AS users, ' +
+      '(SELECT count(*)::int FROM memberships WHERE user_id = $1) AS memberships, ' +
+      '(SELECT count(*)::int FROM businesses WHERE owner_id = $1) AS businesses',
+    id,
+  );
+  return rows[0];
+}
+
+async function seedVictim(id: string, businessId: string, role: 'USER' | 'SUPER_ADMIN') {
+  await db.user.create({ data: { id, email: bootEmail(id), name: id, role } });
+  await db.business.create({ data: { id: businessId, name: `${P}${role} business`, ownerId: id } });
+  await db.membership.create(skipTenantIsolation({ data: { userId: id, businessId, role: 'OWNER' } }));
+}
+
+function bootstrap(token: string, body: Record<string, unknown> = {}) {
+  return request(app.getHttpServer()).post('/identity/bootstrap').set('Authorization', `Bearer ${token}`).send(body);
+}
+
+const token = (sub: string, email: string) => forge(BOOT_SECRET, { sub, email });
+
+const VICTIMS = [
+  { label: 'a plain owner (USER)', id: BOOT.owner, biz: BOOT.ownerBiz, role: 'USER' as const },
+  { label: 'a SUPER_ADMIN', id: BOOT.admin, biz: BOOT.adminBiz, role: 'SUPER_ADMIN' as const },
+];
+
+describe('R0-SEC-01 — POST /identity/bootstrap binds by verified subject and never moves an existing user to another caller', () => {
+  beforeEach(async () => {
+    setSecret(BOOT_SECRET);
+    await cleanupBootstrapRows();
+    for (const v of VICTIMS) await seedVictim(v.id, v.biz, v.role);
+  });
+
+  it('fixture: each victim holds its own row, role and the OWNER membership of the business it owns', async () => {
+    for (const v of VICTIMS) expect(await victimState(v.id, v.biz)).toEqual(intact(v.id, v.role));
+  });
+
+  it.each(VICTIMS)(
+    "negative control: a body `email` naming $label's address is ignored — the caller (own sub, own email) gets only its own account, and the victim is untouched",
+    async (v) => {
+      const res = await bootstrap(token(BOOT.attacker, bootEmail(BOOT.attacker)), {
+        email: bootEmail(v.id),
+        company: `${P}attacker co`,
+        firstName: 'Mallory',
+      });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.user).toMatchObject({ id: BOOT.attacker, email: bootEmail(BOOT.attacker), role: 'USER' });
+      expect(res.body.business.id).not.toBe(v.biz);
+      expect(await victimState(v.id, v.biz)).toEqual(intact(v.id, v.role));
+      expect(await footprint(BOOT.attacker)).toEqual({ users: 1, memberships: 1, businesses: 1 });
+    },
+  );
+
+  it.each(VICTIMS)(
+    "negative control: a token whose own `email` claim is $label's address, under a different sub, answers 409 account_email_in_use and writes nothing",
+    async (v) => {
+      const res = await bootstrap(token(BOOT.claimer, bootEmail(v.id)), { company: `${P}claimer co`, firstName: 'Mallory' });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body.code).toBe('account_email_in_use');
+      expect(JSON.stringify(res.body)).not.toContain(v.id);
+      expect(await victimState(v.id, v.biz)).toEqual(intact(v.id, v.role));
+      expect(await footprint(BOOT.claimer)).toEqual({ users: 0, memberships: 0, businesses: 0 });
+    },
+  );
+
+  it('negative control: that token cannot dodge the 409 by sending a free address in the body (the body email is ignored both ways)', async () => {
+    const res = await bootstrap(token(BOOT.claimer, bootEmail(BOOT.admin)), { email: bootEmail(BOOT.claimer) });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.code).toBe('account_email_in_use');
+    expect(await victimState(BOOT.admin, BOOT.adminBiz)).toEqual(intact(BOOT.admin, 'SUPER_ADMIN'));
+    expect(await footprint(BOOT.claimer)).toEqual({ users: 0, memberships: 0, businesses: 0 });
+    const freeAddress = await db.$queryRawUnsafe('SELECT id FROM users WHERE email = $1', bootEmail(BOOT.claimer));
+    expect(freeAddress).toEqual([]);
+  });
+
+  it('negative control: repeating the claim changes nothing, and the victim still signs in with its own token afterwards', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      const res = await bootstrap(token(BOOT.claimer, bootEmail(BOOT.admin)));
+      expect(res.status).toBe(409);
+    }
+    const own = await bootstrap(token(BOOT.admin, bootEmail(BOOT.admin)));
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
+    expect(own.body.user).toMatchObject({ id: BOOT.admin, role: 'SUPER_ADMIN' });
+    expect(own.body.business.id).toBe(BOOT.adminBiz);
+    expect(await victimState(BOOT.admin, BOOT.adminBiz)).toEqual(intact(BOOT.admin, 'SUPER_ADMIN'));
+    expect(await footprint(BOOT.claimer)).toEqual({ users: 0, memberships: 0, businesses: 0 });
+  });
+
+  it.each(VICTIMS)(
+    'positive control: $label, returning with its own sub, is idempotent — same row, same role, its own business, no new membership',
+    async (v) => {
+      for (let i = 0; i < 2; i += 1) {
+        const res = await bootstrap(token(v.id, bootEmail(v.id)), { company: `${P}ignored co` });
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(res.body.user).toMatchObject({ id: v.id, email: bootEmail(v.id), role: v.role });
+        expect(res.body.business.id).toBe(v.biz);
+        expect(res.body.isNewBusiness).toBe(false);
+      }
+      expect(await victimState(v.id, v.biz)).toEqual(intact(v.id, v.role));
+      expect(await footprint(v.id)).toEqual({ users: 1, memberships: 1, businesses: 1 });
+    },
+  );
+
+  it('positive control (journey step 1): a first-time caller gets its own User, its own business and one OWNER membership; a second call is idempotent', async () => {
+    const t = token(BOOT.fresh, bootEmail(BOOT.fresh));
+    const first = await bootstrap(t, { company: `${P}fresh co`, firstName: 'Riley' });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(first.body.user).toMatchObject({ id: BOOT.fresh, email: bootEmail(BOOT.fresh), role: 'USER' });
+    expect(first.body.isNewBusiness).toBe(true);
+
+    const again = await bootstrap(t, { company: `${P}fresh co`, firstName: 'Riley' });
+    expect(again.status).toBe(201);
+    expect(again.body.business.id).toBe(first.body.business.id);
+    expect(again.body.isNewBusiness).toBe(false);
+
+    const members = await db.$queryRawUnsafe(
+      'SELECT user_id, role FROM memberships WHERE business_id = $1',
+      first.body.business.id,
+    );
+    expect(members).toEqual([{ user_id: BOOT.fresh, role: 'OWNER' }]);
+    expect(await footprint(BOOT.fresh)).toEqual({ users: 1, memberships: 1, businesses: 1 });
+    for (const v of VICTIMS) expect(await victimState(v.id, v.biz)).toEqual(intact(v.id, v.role));
+  });
+
+  it('bootstrap never contacted Supabase: no fetch was attempted', () => {
+    expect(outbound).toEqual([]);
+  });
 });
