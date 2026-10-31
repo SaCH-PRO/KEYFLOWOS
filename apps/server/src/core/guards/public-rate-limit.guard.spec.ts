@@ -19,9 +19,9 @@
  * rather than imagined. A fixture describing a shape the client cannot produce
  * would assert that the broken thing is correct.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { ServiceUnavailableException, HttpException } from '@nestjs/common';
-import { PublicRateLimitGuard } from './public-rate-limit.guard';
+import { PublicRateLimitGuard, publicRateLimitNamespace } from './public-rate-limit.guard';
 
 /** An ioredis double. `failing` reproduces the measured outage behaviour. */
 function makeRedis(opts: { failing: boolean; count?: number }) {
@@ -155,5 +155,175 @@ describe('the public rate limiter still limits when the store is healthy', () =>
 
     await expect(guard.canActivate(makeContext())).resolves.toBe(true);
     expect(redis.zadd).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * R0-00-WT-ISOLATION: the key carries an optional namespace.
+ *
+ * At c2f6f46d the guard keyed `pub_rate_limit:${ip}:${handler}:${route}` with
+ * nothing that identifies the caller's test run. Every suite that counts or
+ * resets limits therefore shared one key space: revenue-authorization deleted
+ * every `pub_rate_limit:*` key in its teardown, and two suites in one
+ * `vitest run` (file parallelism is on) or two worktrees on one Redis index
+ * reset or exhausted each other's windows.
+ *
+ * With RATE_LIMIT_KEY_NAMESPACE set, the key is
+ * `pub_rate_limit:<ns>:<ip>:<handler>:<route>`. With it unset (or empty) the key
+ * must stay byte-identical to the old one, so production behaviour does not move.
+ */
+describe('the public rate-limit key carries an optional namespace (R0-00)', () => {
+  /** A Redis double that records the key of every command and counts per key. */
+  function makeRecordingRedis() {
+    const counts = new Map<string, number>();
+    const keys: string[] = [];
+    return {
+      keys,
+      counts,
+      pipeline: () => {
+        const queued: Array<() => [null, number]> = [];
+        const p = {
+          zremrangebyscore: (key: string) => {
+            keys.push(key);
+            queued.push(() => [null, 0]);
+            return p;
+          },
+          zcard: (key: string) => {
+            keys.push(key);
+            queued.push(() => [null, counts.get(key) ?? 0]);
+            return p;
+          },
+          exec: async () => queued.map((q) => q()),
+        };
+        return p;
+      },
+      zadd: async (key: string) => {
+        keys.push(key);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+        return 1;
+      },
+      pexpire: async (key: string) => {
+        keys.push(key);
+        return 1;
+      },
+    };
+  }
+
+  function guardWith(redis: ReturnType<typeof makeRecordingRedis>, limit = 5) {
+    const reflector = { get: () => ({ limit, windowMs: 60_000 }) } as never;
+    return new PublicRateLimitGuard(reflector, redis as never);
+  }
+
+  const saved = process.env.RATE_LIMIT_KEY_NAMESPACE;
+  const savedNodeEnv = process.env.NODE_ENV;
+  function setNamespace(value: string | undefined) {
+    if (value === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
+    else process.env.RATE_LIMIT_KEY_NAMESPACE = value;
+  }
+  function setNodeEnv(value: string | undefined) {
+    if (value === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = value;
+  }
+  // The namespace is a test-only knob (review SEC-R000-3): every case below
+  // runs as NODE_ENV=test unless it says otherwise.
+  beforeEach(() => setNodeEnv('test'));
+  afterEach(() => {
+    setNamespace(saved);
+    setNodeEnv(savedNodeEnv);
+  });
+
+  it('with the namespace unset, the key is byte-identical to the pre-namespace key', async () => {
+    setNamespace(undefined);
+    const redis = makeRecordingRedis();
+
+    await expect(guardWith(redis).canActivate(makeContext())).resolves.toBe(true);
+    expect([...new Set(redis.keys)]).toEqual(['pub_rate_limit:1.2.3.4:handler:/public/t']);
+  });
+
+  it('an empty namespace is treated as unset', async () => {
+    setNamespace('');
+    const redis = makeRecordingRedis();
+
+    await expect(guardWith(redis).canActivate(makeContext())).resolves.toBe(true);
+    expect([...new Set(redis.keys)]).toEqual(['pub_rate_limit:1.2.3.4:handler:/public/t']);
+  });
+
+  it('with RATE_LIMIT_KEY_NAMESPACE set, every command of the request uses pub_rate_limit:<ns>:<ip>:<handler>:<route>', async () => {
+    setNamespace('k00a_');
+    const redis = makeRecordingRedis();
+
+    await expect(guardWith(redis).canActivate(makeContext())).resolves.toBe(true);
+    // zremrangebyscore, zcard, zadd and pexpire: four commands, one key.
+    expect(redis.keys).toHaveLength(4);
+    expect([...new Set(redis.keys)]).toEqual(['pub_rate_limit:k00a_:1.2.3.4:handler:/public/t']);
+  });
+
+  it('the namespace is read per request, so a suite may set it after the app is built', async () => {
+    setNamespace(undefined);
+    const redis = makeRecordingRedis();
+    const guard = guardWith(redis);
+    setNamespace('k00b_');
+
+    await guard.canActivate(makeContext());
+    expect([...new Set(redis.keys)]).toEqual(['pub_rate_limit:k00b_:1.2.3.4:handler:/public/t']);
+  });
+
+  it('two namespaces on one Redis count independently: one at its limit does not throttle the other', async () => {
+    // The interference this packet removes. One store, one IP, one route; only
+    // the namespace differs.
+    const redis = makeRecordingRedis();
+    const guard = guardWith(redis, 2);
+
+    setNamespace('k00a_');
+    await expect(guard.canActivate(makeContext())).resolves.toBe(true);
+    await expect(guard.canActivate(makeContext())).resolves.toBe(true);
+    const third = await guard.canActivate(makeContext()).catch((e) => e);
+    expect(third).toBeInstanceOf(HttpException);
+    expect((third as HttpException).getStatus()).toBe(429);
+
+    setNamespace('k00b_');
+    await expect(
+      guard.canActivate(makeContext()),
+      "a second suite on the same Redis index was throttled by the first suite's window",
+    ).resolves.toBe(true);
+  });
+
+  it('outside NODE_ENV=test the namespace is ignored: the key is byte-identical to the pre-namespace key (SEC-R000-3)', async () => {
+    // This guard covers the unauthenticated surface. A namespace honoured on a
+    // deployed instance would reset every public window when set, and multiply
+    // the effective limit by the number of distinct namespaces.
+    for (const nodeEnv of ['production', 'development', undefined]) {
+      setNodeEnv(nodeEnv);
+      setNamespace('k00a_');
+      const redis = makeRecordingRedis();
+
+      await expect(guardWith(redis).canActivate(makeContext())).resolves.toBe(true);
+      expect([...new Set(redis.keys)], `NODE_ENV=${nodeEnv}`).toEqual(['pub_rate_limit:1.2.3.4:handler:/public/t']);
+    }
+  });
+
+  it('NEGATIVE CONTROL: in production, switching the namespace does not open a fresh window', async () => {
+    setNodeEnv('production');
+    const redis = makeRecordingRedis();
+    const guard = guardWith(redis, 2);
+
+    setNamespace('instance-a');
+    await expect(guard.canActivate(makeContext())).resolves.toBe(true);
+    await expect(guard.canActivate(makeContext())).resolves.toBe(true);
+
+    setNamespace('instance-b');
+    const third = await guard.canActivate(makeContext()).catch((e) => e);
+    expect(third, 'a per-instance namespace multiplied the public limit').toBeInstanceOf(HttpException);
+    expect((third as HttpException).getStatus()).toBe(429);
+  });
+
+  it('publicRateLimitNamespace() reads the variable only under NODE_ENV=test', () => {
+    setNamespace('  k00c_  ');
+    expect(publicRateLimitNamespace()).toBe('k00c_');
+    setNamespace('   ');
+    expect(publicRateLimitNamespace()).toBeUndefined();
+    setNamespace('k00c_');
+    setNodeEnv('production');
+    expect(publicRateLimitNamespace()).toBeUndefined();
   });
 });
