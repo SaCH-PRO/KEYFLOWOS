@@ -608,7 +608,7 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
         loginToken?: () => string;
         /** The access token Supabase hands refreshSession's caller. */
         refreshToken?: () => string;
-        /** What SupabaseAdminService.signOut resolves to: false is its failure report (CR-2: today, always). */
+        /** What SupabaseAdminService.signOut resolves to: false is its failure report. */
         signOut?: () => Promise<unknown>;
       } = {},
     ) {
@@ -640,8 +640,13 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub
         redis as any,
       );
-      const req = { ip: '127.0.0.1', headers: {}, socket: {} } as unknown as Request;
+      // The bearer AuthMiddleware authenticated the request with: logout hands
+      // it to SupabaseAdminService.signOut (CR-2, R0-ID-F4: auth-js
+      // admin.signOut takes the access JWT, not the user id).
+      const callerToken = jwt({ iat: NOW_S - 600, exp: NOW_S + 3000, session_id: 's-caller' });
+      const req = { ip: '127.0.0.1', headers: { authorization: `Bearer ${callerToken}` }, socket: {} } as unknown as Request;
       return {
+        callerToken,
         logout: () => ctrl.logout({ id: USER, email: 'st4@example.com' } as never, req),
         login: () => ctrl.login({ email: 'st4@example.com', password: 'pw' }, req),
         refresh: () => ctrl.refresh({ refreshToken: 'pre-logout-refresh-token' } as never, req),
@@ -657,7 +662,7 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
       return jwt({ iat, exp: iat + 3600, session_id: sessionId, amr: [{ method: 'password', timestamp: authenticatedAt }] });
     };
 
-    it('ST4-R1 / F1: with the provider sign-out failing as it does today (CR-2: signOut resolves false), a pre-logout session refreshed through the real POST /identity/refresh after the logout is refused, with no login in between; the next login is attached; the audit names the failed leg', async () => {
+    it('ST4-R1 / F1: with the provider sign-out failing (signOut resolves false: provider down, or the refresh tokens otherwise left alive), a pre-logout session refreshed through the real POST /identity/refresh after the logout is refused, with no login in between; the next login is attached; the audit names the failed leg', async () => {
       const redis = memoryRedis();
       const { mw } = middleware(redis);
       let loginSessionStart = 0;
@@ -672,7 +677,8 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
       expect(await attached(mw, t1), 'T1 before logout').toBeTruthy();
 
       await c.logout();
-      expect(c.supabaseAdmin.signOut).toHaveBeenCalledWith(USER, 'global');
+      expect(c.supabaseAdmin.signOut).toHaveBeenCalledWith(c.callerToken, 'global');
+      expect(c.supabaseAdmin.signOut).not.toHaveBeenCalledWith(USER, expect.anything());
       expect(await attached(mw, t1), 'T1 after logout').toBeUndefined();
       expect(c.authSec.audit).toHaveBeenCalledWith(
         expect.objectContaining({ event: 'logout', outcome: 'success', reason: 'revocation_incomplete: provider_signout' }),

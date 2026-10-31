@@ -97,23 +97,41 @@ export class SupabaseAdminService {
   }
 
   /**
-   * Revoke all sessions for a user. This invalidates every access and
-   * refresh token issued by Supabase for the user. Call this during logout
-   * and after security events (password change, RISC account-hijacking,
-   * admin ban). Swallows errors but returns whether the call succeeded.
+   * Revoke Supabase sessions of the user an access token belongs to.
+   *
+   * `jwt` is that user's Supabase ACCESS TOKEN, not their id. auth-js
+   * (installed 2.94.0) declares `GoTrueAdminApi.signOut(jwt, scope)` and sends
+   * the first argument as the bearer of `POST /logout?scope=<scope>`; GoTrue
+   * then revokes the refresh tokens of the sessions the scope names — 'global':
+   * every session of that user, 'others': all but the token's own session,
+   * 'local': only the token's own. The installed admin API has no call that
+   * revokes by user id. Until R0-ID-F4 (CR-2) this method was handed the user
+   * id, which GoTrue refused as a bearer, so nothing was ever revoked.
+   *
+   * Access tokens already issued stay valid until their exp (Supabase cannot
+   * recall a JWT): POST /identity/logout's local marker covers those.
+   *
+   * Swallows errors and returns whether the call succeeded. The token is never
+   * logged. A value that is not JWT-shaped (a user id) is refused without a
+   * request.
    */
-  async signOut(userId: string, scope: 'global' | 'local' | 'others' = 'global'): Promise<boolean> {
+  async signOut(jwt: string, scope: 'global' | 'local' | 'others' = 'global'): Promise<boolean> {
+    const parts = typeof jwt === 'string' ? jwt.split('.') : [];
+    if (parts.length !== 3 || parts.some((p) => p.length === 0)) {
+      this.logger.warn(`signOut(${scope}) refused: not a Supabase access token (a user id cannot revoke sessions)`);
+      return false;
+    }
     try {
       const client = this.getClient();
-      const { error } = await client.auth.admin.signOut(userId, scope);
+      const { error } = await client.auth.admin.signOut(jwt, scope);
       if (error) {
-        this.logger.warn(`signOut(${userId}, ${scope}) failed: ${error.message}`);
+        this.logger.warn(`signOut(${scope}) failed: ${error.message}`);
         return false;
       }
       return true;
     } catch (err: any) {
       this.logger.warn(
-        `signOut(${userId}) threw: ${err instanceof Error ? err.message : err}`,
+        `signOut(${scope}) threw: ${err instanceof Error ? err.message : err}`,
       );
       return false;
     }

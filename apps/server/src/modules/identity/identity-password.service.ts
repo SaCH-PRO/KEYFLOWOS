@@ -71,7 +71,10 @@ export class IdentityPasswordService {
    * which passwords the policy accepts, and the HIBP lookup it performs is a
    * network call an anonymous caller should not be able to trigger.
    */
-  async completeReset(accessToken: string, newPassword: string): Promise<{ userId: string; email: string }> {
+  async completeReset(
+    accessToken: string,
+    newPassword: string,
+  ): Promise<{ userId: string; email: string; providerSignedOut: boolean }> {
     const user = await this.auth.getUserFromToken(accessToken);
     if (!user?.id) {
       throw new UnauthorizedException('This password reset link is invalid or has expired');
@@ -86,15 +89,42 @@ export class IdentityPasswordService {
     // Every other session is dropped. Recovery is the flow someone uses when
     // they believe their account is compromised, so leaving the attacker's
     // existing sessions alive would defeat the point of the reset.
+    //
+    // auth-js admin.signOut takes the user's access JWT, not their id (CR-2,
+    // R0-ID-F4): the recovery link's access token, verified above, is that JWT,
+    // and 'global' revokes every session of its user, its own included.
+    // Not thrown: the new password is live by now. Reported instead, so the
+    // caller's audit row can name a sweep that did not happen.
+    const providerSignedOut = await this.revokeProviderSessions(accessToken, 'global', user.id, 'Password reset');
+
+    return { userId: user.id, email: user.email ?? '', providerSignedOut };
+  }
+
+  /**
+   * Ask Supabase to revoke sessions with the user's access JWT. Never throws;
+   * returns whether the provider confirmed it (SupabaseAdminService.signOut
+   * reports failure by resolving false, and a throw is a failure too).
+   */
+  private async revokeProviderSessions(
+    accessToken: string | null | undefined,
+    scope: 'global' | 'others',
+    userId: string,
+    what: string,
+  ): Promise<boolean> {
+    if (!accessToken) {
+      this.logger.warn(`${what} succeeded but no Supabase access token was presented; ${scope} sign-out not attempted for ${userId}`);
+      return false;
+    }
     try {
-      await this.admin.signOut(user.id, 'global');
+      const ok = (await this.admin.signOut(accessToken, scope)) === true;
+      if (!ok) this.logger.warn(`${what} succeeded but the ${scope} sign-out failed for ${userId}`);
+      return ok;
     } catch (err) {
       this.logger.warn(
-        `Password reset succeeded but global sign-out failed for ${user.id}: ${err instanceof Error ? err.message : String(err)}`,
+        `${what} succeeded but the ${scope} sign-out failed for ${userId}: ${err instanceof Error ? err.message : String(err)}`,
       );
+      return false;
     }
-
-    return { userId: user.id, email: user.email ?? '' };
   }
 
   /**
@@ -116,10 +146,14 @@ export class IdentityPasswordService {
     email: string;
     currentPassword: string;
     newPassword: string;
+    /** The caller's own Supabase access token (the request's bearer): the
+     *  session named by it is the one 'others' keeps. Null when the caller
+     *  authenticated with something else (an admin local-auth token). */
+    accessToken: string | null;
     /** Verifies the current password. Injected so this service does not depend
      *  on the signup service, which would be a cycle. */
     verifyCurrent: (email: string, password: string) => Promise<unknown>;
-  }): Promise<void> {
+  }): Promise<{ providerSignedOut: boolean }> {
     if (args.currentPassword === args.newPassword) {
       throw new BadRequestException('The new password must be different from the current one');
     }
@@ -144,13 +178,11 @@ export class IdentityPasswordService {
     // the person who just changed their password, bouncing them to the login
     // screen as a reward for good hygiene. Recovery uses 'global' because there
     // the current session is the one under suspicion; here it is the trusted one.
-    try {
-      await this.admin.signOut(args.userId, 'others');
-    } catch (err) {
-      this.logger.warn(
-        `Password changed but other-session sign-out failed for ${args.userId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    // 'others' keeps the session named by the JWT auth-js admin.signOut is
+    // given, so that JWT must be the caller's own access token (CR-2,
+    // R0-ID-F4: the user id named no session and revoked nothing).
+    const providerSignedOut = await this.revokeProviderSessions(args.accessToken, 'others', args.userId, 'Password change');
+    return { providerSignedOut };
   }
 
   /** Reject a redirect that would send a recovery link off-site. */

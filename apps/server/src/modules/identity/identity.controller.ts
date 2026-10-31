@@ -124,6 +124,32 @@ export class IdentityController {
   }
 
   /**
+   * The caller's Supabase access token: the `Authorization: Bearer` value
+   * AuthMiddleware authenticated this request with, read the same way. It is
+   * what auth-js admin.signOut needs to revoke that user's Supabase sessions
+   * (CR-2, R0-ID-F4). Null when there is none, or when the bearer is an admin
+   * local-auth token (`type: 'admin'`, admin-token.util): that is this server's
+   * own credential, it names no Supabase session, and it is not sent to the
+   * provider.
+   */
+  private supabaseAccessToken(req: Request): string | null {
+    const header = req.headers['authorization'];
+    if (typeof header !== 'string' || !header.startsWith('Bearer ')) return null;
+    const token = header.replace('Bearer ', '').trim();
+    if (!token) return null;
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')) as {
+        type?: unknown;
+      } | null;
+      if (payload?.type === 'admin') return null;
+    } catch {
+      // No decodable payload, so not an admin token. Passed on: SupabaseAdminService.signOut
+      // refuses anything not JWT-shaped, and GoTrue anything it did not sign.
+    }
+    return token;
+  }
+
+  /**
    * Server-driven signup. Creates the user via Supabase Admin API and either
    * auto-confirms (dev / verification disabled) returning a session, or sends
    * the confirmation email through Resend and tells the client to show the
@@ -307,17 +333,20 @@ export class IdentityController {
     }
 
     try {
-      await this.passwordSvc.changePassword({
+      const { providerSignedOut } = await this.passwordSvc.changePassword({
         userId: user.id,
         email: user.email,
         currentPassword: body.currentPassword,
         newPassword: body.newPassword,
+        // The caller's own access JWT: the session 'others' keeps (CR-2).
+        accessToken: this.supabaseAccessToken(req),
         // The signup service owns credential exchange; passing the function in
         // keeps the password service free of a dependency on it.
         verifyCurrent: (email, password) => this.signupSvc.signInWithPassword(email, password),
       });
       await this.authSec.audit({
         event: 'password_changed', outcome: 'success', email: user.email, userId: user.id, ip, userAgent: ua,
+        reason: providerSignedOut ? undefined : 'revocation_incomplete: provider_signout',
       });
       return { status: 'ok', message: 'Password updated. Other sessions have been signed out.' };
     } catch (err) {
@@ -465,9 +494,10 @@ export class IdentityController {
     }
 
     try {
-      const { userId, email } = await this.passwordSvc.completeReset(body.accessToken, body.password);
+      const { userId, email, providerSignedOut } = await this.passwordSvc.completeReset(body.accessToken, body.password);
       await this.authSec.audit({
         event: 'password_reset_completed', outcome: 'success', email, userId, ip, userAgent: ua,
+        reason: providerSignedOut ? undefined : 'revocation_incomplete: provider_signout',
       });
       return { status: 'ok', message: 'Password updated. Please sign in.' };
     } catch (err) {
@@ -494,11 +524,12 @@ export class IdentityController {
   }
 
   /**
-   * Server-driven logout. Asks Supabase to revoke all the user's sessions, and
-   * records the logout time in Redis so that AuthMiddleware refuses every token
-   * of a session authenticated up to now — Supabase and admin, including access
-   * tokens a pre-logout session mints LATER from its refresh token — while
-   * tokens of a session a later login opens are not refused.
+   * Server-driven logout. Records the logout time in Redis so that
+   * AuthMiddleware refuses every token of a session authenticated up to now —
+   * Supabase and admin, including access tokens a pre-logout session mints
+   * LATER from its refresh token — while tokens of a session a later login
+   * opens are not refused; then asks Supabase, with the caller's access JWT,
+   * to revoke all the user's sessions (their refresh tokens).
    * Audits the event, naming any revocation leg that failed, and swallows
    * external failures so the client can always clear its own storage.
    */
@@ -509,21 +540,9 @@ export class IdentityController {
     if (!userId) throw new UnauthorizedException('Missing authenticated user');
     const failed: string[] = [];
 
-    // NOT relied on. signOut reports failure by returning false, not by
-    // throwing, and today it always fails (CR-2: it passes the user id where
-    // auth-js admin.signOut expects the access JWT), so the refresh tokens
-    // survive this logout. The marker below is what makes the logout hold
-    // anyway: it refuses tokens by when their SESSION was authenticated, not
-    // by their iat, so a token refreshed from a surviving refresh token after
-    // the logout is refused too (review findings ST4-R1, F1).
-    let providerSignedOut = false;
-    try {
-      providerSignedOut = (await this.supabaseAdmin.signOut(userId, 'global')) === true;
-    } catch (err: any) {
-      this.logger.warn(`Supabase signOut failed for ${userId}: ${err instanceof Error ? err.message : err}`);
-    }
-    if (!providerSignedOut) failed.push('provider_signout');
-
+    // The local revocation is written FIRST, so nothing the provider call does
+    // (fail, throw or hang) can stand in its way.
+    //
     // Revoke by session authentication time (ST-4, R0-ID-F3). The marker holds
     // the logout time in epoch seconds; AuthMiddleware refuses a Supabase token
     // whose session was authenticated at or before it, and the next login
@@ -552,6 +571,33 @@ export class IdentityController {
       this.logger.warn(`Redis admin-token revocation set failed for ${userId}: ${err instanceof Error ? err.message : err}`);
       failed.push('admin_cutoff');
     }
+
+    // Then the provider. auth-js admin.signOut(jwt, scope) takes the user's
+    // ACCESS JWT, not their id: GoTrue revokes, for 'global', every session of
+    // the user that JWT belongs to, which ends their refresh tokens at
+    // Supabase. The caller's bearer is that JWT. (Until R0-ID-F4 this passed
+    // the user id, GoTrue refused it, and no logout ever revoked a Supabase
+    // session — CR-2.) Access tokens already issued stay valid at Supabase
+    // until their exp; the marker above is what refuses them here. A failure
+    // is not thrown past the local revocation: SupabaseAdminService.signOut
+    // reports it by resolving false, it is logged, and the audit row names it.
+    // With no Supabase access token to present (an admin local-auth token is
+    // never sent to the provider) the leg is not attempted and named the same.
+    const accessToken = this.supabaseAccessToken(req);
+    let providerSignedOut = false;
+    if (!accessToken) {
+      this.logger.warn(`Supabase signOut not attempted for ${userId}: no Supabase access token on the request`);
+    } else {
+      try {
+        providerSignedOut = (await this.supabaseAdmin.signOut(accessToken, 'global')) === true;
+        if (!providerSignedOut) this.logger.warn(`Supabase signOut failed for ${userId}`);
+      } catch (err: any) {
+        this.logger.warn(`Supabase signOut failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    // Listed first, where it stood before the provider call moved after the
+    // local legs, so the audit reason reads as it always has.
+    if (!providerSignedOut) failed.unshift('provider_signout');
 
     const ip = this.clientIp(req);
     const ua = this.clientUa(req);
