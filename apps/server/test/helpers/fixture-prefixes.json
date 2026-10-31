@@ -49,6 +49,11 @@
       "packet": "R0-07-OPTIONAL-SVC-VISIBLE"
     },
     {
+      "prefix": "k08c_",
+      "owner": "apps/server/test/subscriptions-authority.integration.test.ts",
+      "packet": "R0-08 / R0-08c-SUBSCRIPTION-AUTHORITY"
+    },
+    {
       "prefix": "k09a_",
       "owner": "apps/server/test/identity-business-config.integration.test.ts",
       "packet": "R0-09-ID-HARDEN"
