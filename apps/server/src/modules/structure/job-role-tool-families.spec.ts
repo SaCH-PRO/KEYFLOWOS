@@ -17,7 +17,7 @@
  *     FlowOrchestratorService.executeToolAction (lazy `this.getX()` getters and injected
  *     fields). Direct Prisma reads are not service calls and carry no evidence.
  *  2. A service method is governed by module M when every controller handler that calls
- *     it carries `@RequireModuleScope('M', ...)` AND runs ModuleScopeGuard (method- or
+ *     it carries a RequireModuleScope decorator naming M AND runs ModuleScopeGuard (method- or
  *     class-level @UseGuards). One handler that calls it without an enforced scope means
  *     a member reaches it holding no module at all, so it is governed by nothing.
  *  3. A tool is governed by the union of its calls' modules.
