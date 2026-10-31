@@ -89,12 +89,35 @@ const PERMISSION_MODULES = [
   { key: "settings", label: "Settings" },
   { key: "ai", label: "AI / Copilot" },
   { key: "team", label: "Team" },
+  { key: "analytics", label: "Analytics" },
+  { key: "operations", label: "Operations" },
+  { key: "connect", label: "Integrations" },
 ];
 
+/**
+ * R0-ID-WEB-AUTHORITY-UX (V1-07 review CR-REG-1): the invite form's defaults are
+ * the server's role defaults (apps/server/src/core/authority/module-vocabulary.ts
+ * ROLE_DEFAULT_SCOPES) over the same 14 canonical modules, key for key. The server
+ * reads a key missing from an explicit map as 'none', so an 11-key map left an
+ * invited ADMIN without analytics and operations, and that ADMIN was then refused
+ * (correctly, under the grantor ceiling) when inviting a STAFF with server
+ * defaults. `connect` is none for every role, as on the server; it is reachable
+ * only through an explicit grant. Pinned by
+ * __tests__/invite-default-scopes.test.tsx against the server constant.
+ */
+const NONE_FOR_EVERY_ROLE = ["connect"];
+const STAFF_DENIED = ["settings", "team", "ai"];
+
+function roleDefaults(level: (key: string) => string): Record<string, string> {
+  return Object.fromEntries(
+    PERMISSION_MODULES.map((m) => [m.key, NONE_FOR_EVERY_ROLE.includes(m.key) ? "none" : level(m.key)]),
+  );
+}
+
 const DEFAULT_SCOPES: Record<string, Record<string, string>> = {
-  OWNER: Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, "admin"])),
-  ADMIN: Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, m.key === "team" ? "write" : "admin"])),
-  STAFF: Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, ["settings", "team", "ai"].includes(m.key) ? "none" : "read"])),
+  OWNER: roleDefaults(() => "admin"),
+  ADMIN: roleDefaults((key) => (key === "team" ? "write" : "admin")),
+  STAFF: roleDefaults((key) => (STAFF_DENIED.includes(key) ? "none" : "read")),
 };
 
 const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };
@@ -131,6 +154,9 @@ const moduleColor: Record<string, string> = {
   ai: "text-purple-400",
   settings: "text-zinc-400",
   storefront: "text-teal-400",
+  analytics: "text-indigo-400",
+  operations: "text-lime-400",
+  connect: "text-sky-400",
 };
 
 function SkeletonTeam() {
