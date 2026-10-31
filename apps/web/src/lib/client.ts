@@ -363,6 +363,9 @@ export type Invoice = {
   contact?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null;
   items?: InvoiceItem[];
   payments?: PaymentRecord[];
+  /** Served by the tenant-bound detail route: derived from the SUCCESSFUL payment rows. */
+  paidAmount?: number;
+  remaining?: number;
 };
 
 type ApiResult<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null };
@@ -721,8 +724,16 @@ export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
   return { data: res.data?.data ?? (process.env.NODE_ENV === "development" ? fallbackInvoices : []), error: res.error };
 }
 
-export async function getInvoice(invoiceId: string): Promise<ApiResult<Invoice>> {
-  return apiGetSimple<Invoice>(`/commerce/invoices/${encodeURIComponent(invoiceId)}`);
+/**
+ * R0-QI-01: the operator detail and edit pages read the tenant-bound route
+ * (AuthGuard + BusinessGuard + ModuleScopeGuard revenue:read), never the
+ * public bare-id route, whose shareable gate hides DRAFT and VOID and whose
+ * shape depends on who is asking. The public pay page keeps the bare route.
+ */
+export async function getInvoice(businessId: string, invoiceId: string): Promise<ApiResult<Invoice>> {
+  return apiGetSimple<Invoice>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}`,
+  );
 }
 
 export async function createContact(input: {

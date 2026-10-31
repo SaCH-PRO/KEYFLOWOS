@@ -23,6 +23,66 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 
+/**
+ * The full operator shape of an invoice: every payment row (reference, notes,
+ * evidence, who recorded it), the customer's email and the business profile
+ * with its document templates. Shared by `getInvoiceWithBusiness` (the
+ * server-side callers: the email paths, the receipt listener, the token
+ * route, the KEY adapter) and the tenant-bound `getInvoiceForBusiness`
+ * (R0-QI-01) so the two reads cannot drift apart.
+ */
+const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
+  contact: {
+    select: {
+      firstName: true,
+      lastName: true,
+      email: true,
+    },
+  },
+  items: true,
+  // Required by buildInvoiceEmailContext so amountPaid/remaining
+  // render correctly on invoice/reminder/receipt emails — without
+  // payments the customer-facing template falls back to 0 paid.
+  payments: true,
+  business: {
+    select: {
+      id: true,
+      name: true,
+      logoUrl: true,
+      address: true,
+      city: true,
+      country: true,
+      phone: true,
+      email: true,
+      website: true,
+      primaryColor: true,
+      secondaryColor: true,
+      invoiceTemplate: true,
+      quoteTemplate: true,
+      facebook: true,
+      instagram: true,
+      twitter: true,
+      whatsapp: true,
+    },
+  },
+});
+
+/** Older invoices stored subtotal 0 with priced items; derive it so totals render. */
+function withLegacySubtotal<
+  T extends { subtotal: number; taxRate: number | null; taxAmount: number | null; items: Array<{ total: number }> },
+>(invoice: T): T {
+  if ((!invoice.subtotal || invoice.subtotal === 0) && invoice.items?.length > 0) {
+    const computedSubtotal = invoice.items.reduce((sum, item) => sum + (item.total || 0), 0);
+    const computedTaxAmount = invoice.taxRate ? computedSubtotal * (invoice.taxRate / 100) : 0;
+    return {
+      ...invoice,
+      subtotal: computedSubtotal,
+      taxAmount: invoice.taxAmount ?? computedTaxAmount,
+    };
+  }
+  return invoice;
+}
+
 @Injectable()
 export class CommerceService {
   private readonly logger = new Logger(CommerceService.name);
@@ -394,41 +454,7 @@ export class CommerceService {
   async getInvoiceWithBusiness(invoiceId: string, requireShareable = false) {
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      include: {
-        contact: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-        items: true,
-        // Required by buildInvoiceEmailContext so amountPaid/remaining
-        // render correctly on invoice/reminder/receipt emails — without
-        // payments the customer-facing template falls back to 0 paid.
-        payments: true,
-        business: {
-          select: {
-            id: true,
-            name: true,
-            logoUrl: true,
-            address: true,
-            city: true,
-            country: true,
-            phone: true,
-            email: true,
-            website: true,
-            primaryColor: true,
-            secondaryColor: true,
-            invoiceTemplate: true,
-            quoteTemplate: true,
-            facebook: true,
-            instagram: true,
-            twitter: true,
-            whatsapp: true,
-          },
-        },
-      },
+      include: OPERATOR_INVOICE_INCLUDE,
     });
 
     if (!invoice) return null;
@@ -440,17 +466,33 @@ export class CommerceService {
       }
     }
 
-    if ((!invoice.subtotal || invoice.subtotal === 0) && invoice.items?.length > 0) {
-      const computedSubtotal = invoice.items.reduce((sum, item) => sum + (item.total || 0), 0);
-      const computedTaxAmount = invoice.taxRate ? computedSubtotal * (invoice.taxRate / 100) : 0;
-      return {
-        ...invoice,
-        subtotal: computedSubtotal,
-        taxAmount: invoice.taxAmount ?? computedTaxAmount,
-      };
-    }
+    return withLegacySubtotal(invoice);
+  }
 
-    return invoice;
+  /**
+   * R0-QI-01 — the operator app's invoice detail and edit pages read this
+   * instead of the public bare-id route (`getInvoiceForViewer`). Same operator
+   * shape as `getInvoiceWithBusiness`, bound to the tenant the guards
+   * admitted: a cross-tenant id, an unknown id and a soft-deleted row all read
+   * as absent, which the controller turns into one 404. No shareable gate —
+   * the operator opens DRAFT and VOID. `paidAmount`/`remaining` are the same
+   * payments-derived figures `listPayments` serves, so the pages' Payment
+   * Summary needs no second call.
+   */
+  async getInvoiceForBusiness(invoiceId: string, businessId: string) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+      include: OPERATOR_INVOICE_INCLUDE,
+    });
+    if (!invoice) return null;
+    const paidAmount = invoice.payments
+      .filter((p) => p.status === 'SUCCESSFUL')
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    return {
+      ...withLegacySubtotal(invoice),
+      paidAmount,
+      remaining: Math.max(0, Number(invoice.total) - paidAmount),
+    };
   }
 
   /**

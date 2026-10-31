@@ -61,7 +61,7 @@ export default function EditInvoicePage() {
       if (!id) { setLoading(false); return; }
       setBusinessId(id);
       try {
-        const [contactsRes, productsRes, invoiceRes] = await Promise.all([fetchContacts(id), fetchProducts(id), getInvoice(invoiceId)]);
+        const [contactsRes, productsRes, invoiceRes] = await Promise.all([fetchContacts(id), fetchProducts(id), getInvoice(id, invoiceId)]);
         if (!mountedRef.current) return;
         setContacts(contactsRes.data?.contacts ?? []);
         setProducts((productsRes.data ?? []).map(p => p as Product));
