@@ -32,6 +32,11 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
+import {
+  LOGOUT_REVOCATION_TTL_SECONDS,
+  logoutRevocationKey,
+  logoutRevocationValue,
+} from '../../core/auth/auth.middleware';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { CreateBusinessDto } from './dto/create-business.dto';
@@ -116,6 +121,32 @@ export class IdentityController {
 
   private clientUa(req: Request): string {
     return ((req.headers['user-agent'] as string | undefined) ?? '').slice(0, 512);
+  }
+
+  /**
+   * The caller's Supabase access token: the `Authorization: Bearer` value
+   * AuthMiddleware authenticated this request with, read the same way. It is
+   * what auth-js admin.signOut needs to revoke that user's Supabase sessions
+   * (CR-2, R0-ID-F4). Null when there is none, or when the bearer is an admin
+   * local-auth token (`type: 'admin'`, admin-token.util): that is this server's
+   * own credential, it names no Supabase session, and it is not sent to the
+   * provider.
+   */
+  private supabaseAccessToken(req: Request): string | null {
+    const header = req.headers['authorization'];
+    if (typeof header !== 'string' || !header.startsWith('Bearer ')) return null;
+    const token = header.replace('Bearer ', '').trim();
+    if (!token) return null;
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')) as {
+        type?: unknown;
+      } | null;
+      if (payload?.type === 'admin') return null;
+    } catch {
+      // No decodable payload, so not an admin token. Passed on: SupabaseAdminService.signOut
+      // refuses anything not JWT-shaped, and GoTrue anything it did not sign.
+    }
+    return token;
   }
 
   /**
@@ -208,19 +239,16 @@ export class IdentityController {
     }
     try {
       const session = await this.signupSvc.signInWithPassword(email, body.password);
-      // A deliberate re-login supersedes a prior logout's revocation marker.
-      // Without this, logging out sets auth:revoked:user:<id> for 24h and the
-      // middleware rejects EVERY request — including ones bearing this fresh
-      // token — so a logged-out user is locked out for a full day. Supabase
-      // signOut('global') at logout already invalidated the old sessions, so
-      // clearing the marker on a proven re-auth is safe.
-      if (session.userId) {
-        try {
-          await this.redis.del(`auth:revoked:user:${session.userId}`);
-        } catch (err: any) {
-          this.logger.warn(`Redis revocation clear failed for ${session.userId}: ${err instanceof Error ? err.message : err}`);
-        }
-      }
+      // Login deliberately leaves the logout revocation marker alone (ST-4,
+      // R0-ID-F3-REVOCATION-IAT-CUTOFF). It used to delete it, because the
+      // marker was a bare flag that refused every token including this fresh
+      // one — and deleting it re-admitted every token issued before the
+      // logout, a stolen one included, until its own exp. The marker is now the
+      // logout time: AuthMiddleware refuses tokens of every session
+      // authenticated at or before it (refreshed ones too) and admits the
+      // tokens of the session this login opens, authenticated after it. A bare
+      // '1' left by the previous release is read by its TTL as the time it was
+      // written, so this login is admitted under it too.
       await this.authSec.audit({ event: 'login_success', outcome: 'success', email, ip, userAgent: ua });
       return {
         status: 'authenticated',
@@ -305,17 +333,20 @@ export class IdentityController {
     }
 
     try {
-      await this.passwordSvc.changePassword({
+      const { providerSignedOut } = await this.passwordSvc.changePassword({
         userId: user.id,
         email: user.email,
         currentPassword: body.currentPassword,
         newPassword: body.newPassword,
+        // The caller's own access JWT: the session 'others' keeps (CR-2).
+        accessToken: this.supabaseAccessToken(req),
         // The signup service owns credential exchange; passing the function in
         // keeps the password service free of a dependency on it.
         verifyCurrent: (email, password) => this.signupSvc.signInWithPassword(email, password),
       });
       await this.authSec.audit({
         event: 'password_changed', outcome: 'success', email: user.email, userId: user.id, ip, userAgent: ua,
+        reason: providerSignedOut ? undefined : 'revocation_incomplete: provider_signout',
       });
       return { status: 'ok', message: 'Password updated. Other sessions have been signed out.' };
     } catch (err) {
@@ -463,9 +494,10 @@ export class IdentityController {
     }
 
     try {
-      const { userId, email } = await this.passwordSvc.completeReset(body.accessToken, body.password);
+      const { userId, email, providerSignedOut } = await this.passwordSvc.completeReset(body.accessToken, body.password);
       await this.authSec.audit({
         event: 'password_reset_completed', outcome: 'success', email, userId, ip, userAgent: ua,
+        reason: providerSignedOut ? undefined : 'revocation_incomplete: provider_signout',
       });
       return { status: 'ok', message: 'Password updated. Please sign in.' };
     } catch (err) {
@@ -492,36 +524,95 @@ export class IdentityController {
   }
 
   /**
-   * Server-driven logout. Revokes all Supabase sessions for the user and
-   * sets a short-lived Redis revocation marker so that any in-flight access
-   * tokens are rejected by AuthMiddleware until they naturally expire.
-   * Audits the event and swallows external failures so the client can always
-   * clear its own storage.
+   * Server-driven logout. Records the logout time in Redis so that
+   * AuthMiddleware refuses every token of a session authenticated up to now —
+   * Supabase and admin, including access tokens a pre-logout session mints
+   * LATER from its refresh token — while tokens of a session a later login
+   * opens are not refused; then asks Supabase, with the caller's access JWT,
+   * to revoke all the user's sessions (their refresh tokens).
+   * Audits the event, naming any revocation leg that failed, and swallows
+   * external failures so the client can always clear its own storage.
    */
   @UseGuards(AuthGuard)
   @Post('logout')
   async logout(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
     const userId = user?.id;
     if (!userId) throw new UnauthorizedException('Missing authenticated user');
+    const failed: string[] = [];
 
+    // The local revocation is written FIRST, so nothing the provider call does
+    // (fail, throw or hang) can stand in its way.
+    //
+    // Revoke by session authentication time (ST-4, R0-ID-F3). The marker holds
+    // the logout time in epoch seconds; AuthMiddleware refuses a Supabase token
+    // whose session was authenticated at or before it, and the next login
+    // leaves it in place. Its TTL is at least the longest token lifetime, so no
+    // token issued before this logout outlives it, and it is how long a
+    // pre-logout session whose refresh token survived stays refused.
+    // Overwriting rewrites a bare '1' left by the previous release in this
+    // format.
+    const now = Date.now();
+    let markerWritten = false;
     try {
-      await this.supabaseAdmin.signOut(userId, 'global');
-    } catch (err: any) {
-      this.logger.warn(`Supabase signOut failed for ${userId}: ${err instanceof Error ? err.message : err}`);
-    }
-
-    // Revoke in-flight tokens for up to 24 hours. Access tokens are typically
-    // 1-hour JWTs; this window covers the maximum plausible clock skew plus
-    // any long-lived cached token.
-    try {
-      await this.redis.setex(`auth:revoked:user:${userId}`, 86400, '1');
+      await this.redis.setex(logoutRevocationKey(userId), LOGOUT_REVOCATION_TTL_SECONDS, logoutRevocationValue(now));
+      markerWritten = true;
     } catch (err: any) {
       this.logger.warn(`Redis revocation set failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      failed.push('revocation_marker');
     }
+    // Admin tokens are revoked by their own cutoff — the key
+    // POST /api/admin/auth/logout writes and verifyAdminToken reads, in the
+    // admin token's milliseconds — so a logout here revokes them too. Its TTL
+    // is the admin token lifetime (buildAdminToken: 24h), so it outlives every
+    // admin token issued before now.
+    try {
+      await this.redis.set(`admin:user:${userId}:revokedAt`, String(now), 'EX', LOGOUT_REVOCATION_TTL_SECONDS);
+    } catch (err: any) {
+      this.logger.warn(`Redis admin-token revocation set failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      failed.push('admin_cutoff');
+    }
+
+    // Then the provider. auth-js admin.signOut(jwt, scope) takes the user's
+    // ACCESS JWT, not their id: GoTrue revokes, for 'global', every session of
+    // the user that JWT belongs to, which ends their refresh tokens at
+    // Supabase. The caller's bearer is that JWT. (Until R0-ID-F4 this passed
+    // the user id, GoTrue refused it, and no logout ever revoked a Supabase
+    // session — CR-2.) Access tokens already issued stay valid at Supabase
+    // until their exp; the marker above is what refuses them here. A failure
+    // is not thrown past the local revocation: SupabaseAdminService.signOut
+    // reports it by resolving false, it is logged, and the audit row names it.
+    // With no Supabase access token to present (an admin local-auth token is
+    // never sent to the provider) the leg is not attempted and named the same.
+    const accessToken = this.supabaseAccessToken(req);
+    let providerSignedOut = false;
+    if (!accessToken) {
+      this.logger.warn(`Supabase signOut not attempted for ${userId}: no Supabase access token on the request`);
+    } else {
+      try {
+        providerSignedOut = (await this.supabaseAdmin.signOut(accessToken, 'global')) === true;
+        if (!providerSignedOut) this.logger.warn(`Supabase signOut failed for ${userId}`);
+      } catch (err: any) {
+        this.logger.warn(`Supabase signOut failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    // Listed first, where it stood before the provider call moved after the
+    // local legs, so the audit reason reads as it always has.
+    if (!providerSignedOut) failed.unshift('provider_signout');
 
     const ip = this.clientIp(req);
     const ua = this.clientUa(req);
-    await this.authSec.audit({ event: 'logout', outcome: 'success', email: user.email ?? '', userId, ip, userAgent: ua });
+    // 'success' means the server-side revocation (the marker) holds; the
+    // reason names every leg that did not, so a logout that left the provider
+    // sessions alive is not recorded as a clean one.
+    await this.authSec.audit({
+      event: 'logout',
+      outcome: markerWritten ? 'success' : 'error',
+      email: user.email ?? '',
+      userId,
+      ip,
+      userAgent: ua,
+      reason: failed.length > 0 ? `revocation_incomplete: ${failed.join(', ')}` : undefined,
+    });
 
     return { status: 'logged_out' };
   }
@@ -832,8 +923,11 @@ export class IdentityController {
     return this.identity.inviteTeamMember(businessId, body.email, body.role, user.id, body.scopes, body.maxApprovalTier);
   }
 
+  // team:admin, as on .../permissions: a role change rewrites the target's scope map
+  // and approval tier (R0-ID-F1-ROLE-ROUTE-AUTHORITY, ST-1). IdentityService.updateMemberRole
+  // enforces the same gate, self-target and the caller's ceiling for non-HTTP callers.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('team', 'write')
+  @RequireModuleScope('team', 'admin')
   @Patch('businesses/:businessId/team/:membershipId')
   updateMemberRole(
     @Param('businessId') businessId: string,
@@ -841,7 +935,8 @@ export class IdentityController {
     @Body() body: { role: string },
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.identity.updateMemberRole(businessId, membershipId, body.role, user?.id);
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    return this.identity.updateMemberRole(businessId, membershipId, body.role, user.id);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

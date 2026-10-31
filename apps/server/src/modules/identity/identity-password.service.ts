@@ -71,7 +71,10 @@ export class IdentityPasswordService {
    * which passwords the policy accepts, and the HIBP lookup it performs is a
    * network call an anonymous caller should not be able to trigger.
    */
-  async completeReset(accessToken: string, newPassword: string): Promise<{ userId: string; email: string }> {
+  async completeReset(
+    accessToken: string,
+    newPassword: string,
+  ): Promise<{ userId: string; email: string; providerSignedOut: boolean }> {
     const user = await this.auth.getUserFromToken(accessToken);
     if (!user?.id) {
       throw new UnauthorizedException('This password reset link is invalid or has expired');
@@ -81,20 +84,56 @@ export class IdentityPasswordService {
     // password that merely restates the address.
     await this.policy.validate({ password: newPassword, email: user.email ?? undefined });
 
+    // Every session is dropped. Recovery is the flow someone uses when they
+    // believe their account is compromised, so leaving the attacker's existing
+    // sessions alive would defeat the point of the reset.
+    //
+    // auth-js admin.signOut takes the user's access JWT, not their id (CR-2,
+    // R0-ID-F4): the recovery link's access token, verified above, is that JWT,
+    // and 'global' revokes every session of its user, its own included.
+    //
+    // BEFORE the password update, not after (R0-ID-F4 review F4-A / CR-1).
+    // GoTrue's admin user update with a password itself ends every session of
+    // the user (UpdatePassword(tx, nil) -> Logout), the recovery session
+    // included; a sign-out sent after it bears a JWT whose session is gone, is
+    // refused 403 session_not_found, and would report a failed sweep on every
+    // successful reset. Sent first, it revokes what is there and reports
+    // whether that held. A failure is not thrown and does not stop the update
+    // (the reset must still be possible with the provider's logout endpoint
+    // down); it is reported, so the caller's audit row can name it.
+    const providerSignedOut = await this.revokeProviderSessions(accessToken, 'global', user.id, 'Password reset');
+
     await this.admin.updateUserPassword(user.id, newPassword);
 
-    // Every other session is dropped. Recovery is the flow someone uses when
-    // they believe their account is compromised, so leaving the attacker's
-    // existing sessions alive would defeat the point of the reset.
+    return { userId: user.id, email: user.email ?? '', providerSignedOut };
+  }
+
+  /**
+   * Ask Supabase to revoke sessions with the user's access JWT. Called just
+   * before the password update (see completeReset). Never throws; returns
+   * whether the provider confirmed it (SupabaseAdminService.signOut reports
+   * failure by resolving false, and a throw is a failure too).
+   */
+  private async revokeProviderSessions(
+    accessToken: string | null | undefined,
+    scope: 'global' | 'others',
+    userId: string,
+    what: string,
+  ): Promise<boolean> {
+    if (!accessToken) {
+      this.logger.warn(`${what}: no Supabase access token was presented; ${scope} sign-out not attempted for ${userId}`);
+      return false;
+    }
     try {
-      await this.admin.signOut(user.id, 'global');
+      const ok = (await this.admin.signOut(accessToken, scope)) === true;
+      if (!ok) this.logger.warn(`${what}: the ${scope} sign-out failed for ${userId}`);
+      return ok;
     } catch (err) {
       this.logger.warn(
-        `Password reset succeeded but global sign-out failed for ${user.id}: ${err instanceof Error ? err.message : String(err)}`,
+        `${what}: the ${scope} sign-out failed for ${userId}: ${err instanceof Error ? err.message : String(err)}`,
       );
+      return false;
     }
-
-    return { userId: user.id, email: user.email ?? '' };
   }
 
   /**
@@ -116,10 +155,14 @@ export class IdentityPasswordService {
     email: string;
     currentPassword: string;
     newPassword: string;
+    /** The caller's own Supabase access token (the request's bearer): the
+     *  session named by it is the one 'others' keeps. Null when the caller
+     *  authenticated with something else (an admin local-auth token). */
+    accessToken: string | null;
     /** Verifies the current password. Injected so this service does not depend
      *  on the signup service, which would be a cycle. */
     verifyCurrent: (email: string, password: string) => Promise<unknown>;
-  }): Promise<void> {
+  }): Promise<{ providerSignedOut: boolean }> {
     if (args.currentPassword === args.newPassword) {
       throw new BadRequestException('The new password must be different from the current one');
     }
@@ -138,19 +181,29 @@ export class IdentityPasswordService {
     }
 
     await this.policy.validate({ password: args.newPassword, email: args.email });
-    await this.admin.updateUserPassword(args.userId, args.newPassword);
 
     // 'others', NOT 'global'. A global sign-out would invalidate the session of
     // the person who just changed their password, bouncing them to the login
     // screen as a reward for good hygiene. Recovery uses 'global' because there
     // the current session is the one under suspicion; here it is the trusted one.
-    try {
-      await this.admin.signOut(args.userId, 'others');
-    } catch (err) {
-      this.logger.warn(
-        `Password changed but other-session sign-out failed for ${args.userId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    // 'others' keeps the session named by the JWT auth-js admin.signOut is
+    // given, so that JWT must be the caller's own access token (CR-2,
+    // R0-ID-F4: the user id named no session and revoked nothing).
+    //
+    // BEFORE the password update, not after (R0-ID-F4 review F4-A / CR-1):
+    // GoTrue's admin user update with a password ends every session of the
+    // user (UpdatePassword(tx, nil) -> Logout), so a sign-out sent after it
+    // bears a JWT whose session is gone, is refused 403 session_not_found, and
+    // would report a failed sweep on every successful change. Note the same
+    // GoTrue behaviour also ends the CALLER's session at Supabase: its current
+    // access token keeps working until exp, but its refresh token does not
+    // survive the update. Keeping it would need a user-scoped update (PUT /user
+    // with the caller's session), which this service does not make.
+    // A failed sweep is not thrown and does not stop the update; it is reported.
+    const providerSignedOut = await this.revokeProviderSessions(args.accessToken, 'others', args.userId, 'Password change');
+
+    await this.admin.updateUserPassword(args.userId, args.newPassword);
+    return { providerSignedOut };
   }
 
   /** Reject a redirect that would send a recovery link off-site. */
