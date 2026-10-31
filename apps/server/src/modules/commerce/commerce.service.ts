@@ -70,7 +70,7 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
 /**
  * The operator shape of a quote: the customer's name and email, every line
  * item, the invoice it was converted into and the business profile. Shared by
- * `getQuote` (the KEY adapter's server-side read) and the tenant-bound
+ * `getQuote` (the tenant-unbound server-side read) and the tenant-bound
  * `getQuoteForBusiness` (R0-PC-01) so the two reads cannot drift apart.
  */
 const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
@@ -1180,9 +1180,14 @@ export class CommerceService {
   }
 
   /**
-   * Server-side read by id alone (the KEY adapter). No HTTP route serves it
-   * any more: the bare-id GET /commerce/quotes/:quoteId answers 404 for every
-   * id (R0-PC-01) and the operator reads `getQuoteForBusiness` below.
+   * Server-side read by id alone. NOT tenant-bound: it returns any tenant's
+   * quote in the full operator shape, DRAFT included, so a caller holding a
+   * tenant must read `getQuoteForBusiness` below instead. No HTTP route serves it as
+   * a read any more: the bare-id GET /commerce/quotes/:quoteId answers 404 for
+   * every id (R0-PC-01). Remaining callers: the controller's sendQuoteEmail
+   * (compares businessId after the read) and the KEY commerce adapter's
+   * getQuoteStatus, which does not bind input.businessId yet (ST-PC01-1,
+   * follow-up packet: that file is outside the R0-PC-01 write set).
    */
   async getQuote(quoteId: string) {
     const quote = await this.prisma.client.quote.findUnique({

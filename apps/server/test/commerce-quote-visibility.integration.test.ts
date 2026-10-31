@@ -587,3 +587,29 @@ describe('regression control: the signed-token public quote route is unchanged',
     expectNoCanary(res.body);
   });
 });
+
+// ST-PC01-1 (review): the KEY commerce adapter's getQuoteStatus still reads the
+// tenant-unbound CommerceService.getQuote(id) and ignores input.businessId, so
+// a KEY command for one tenant can read another tenant's DRAFT quote, customer
+// email, notes and invoice link (reproduced against this harness). The fix
+// belongs in commerce-adapter.service.ts, outside the R0-PC-01 write set; it is
+// a follow-up packet. Pinned here: the service-level replacement read it needs.
+describe('ST-PC01-1: the tenant-bound server-side quote read a KEY caller must use (service level, real DB)', () => {
+  it('getQuoteForBusiness called directly binds the read to the tenant: another tenant\'s id, an unknown id and a soft-deleted row read as null', async () => {
+    const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+    const commerce = app.get(CommerceService);
+    expect(await commerce.getQuoteForBusiness(ID.qDraft, ID.bizB)).toBeNull();
+    expect(await commerce.getQuoteForBusiness(ID.qB, ID.bizA)).toBeNull();
+    expect(await commerce.getQuoteForBusiness(UNKNOWN_QUOTE, ID.bizA)).toBeNull();
+    expect(await commerce.getQuoteForBusiness(ID.qDeleted, ID.bizA)).toBeNull();
+    // Positive control: the owning tenant reads its DRAFT in the full operator shape.
+    const own = JSON.parse(JSON.stringify(await commerce.getQuoteForBusiness(ID.qDraft, ID.bizA)));
+    expectOperatorShape(own, ID.qDraft);
+  });
+
+  it.todo(
+    'KEY CommerceAdapterService.getQuoteStatus({ businessId: bizB, quoteId: <bizA DRAFT> }) throws NotFound and leaks nothing — ' +
+      'BLOCKED: commerce-adapter.service.ts:291 is outside the R0-PC-01 write set; follow-up packet replaces ' +
+      'commerce.getQuote(input.quoteId) with commerce.getQuoteForBusiness(input.quoteId, input.businessId)',
+  );
+});
