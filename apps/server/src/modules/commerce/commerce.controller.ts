@@ -1349,6 +1349,23 @@ export class CommerceController {
     };
   }
 
+  // V1-49-PUBLIC-RECEIPT (M24, D-07): the customer's receipt by the pay-link
+  // token. The only other receipt route (invoices/:invoiceId/receipt) is behind
+  // AuthGuard, so a customer got 401. Public by design (the public-surface
+  // ledger counts it): the token is the credential, as on the sibling view,
+  // and it is rate limited. An unknown, expired, inactive or foreign-tenant
+  // link, and an invoice no receipt can be shown for, answer one 404; a
+  // payable invoice with nothing received is a 409. Read-only: no view event,
+  // no token rotation, no write.
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
+  @Get('public/invoice-link/:token/receipt')
+  async getPublicReceiptByToken(@Param('token') token: string) {
+    const link = await this.commerce.getPaymentLinkByToken(token);
+    if (!link) throw new NotFoundException('Receipt not found');
+    return this.receipts.buildPublicReceipt(link.invoiceId, link.businessId);
+  }
+
   // ========== PARTIAL PAYMENTS ==========
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

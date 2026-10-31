@@ -4,8 +4,26 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Badge, Button, Card } from "@keyflow/ui";
 import { motion } from "framer-motion";
-import { CheckCircle, Loader2, Mail, Phone, FileText, AlertCircle } from "lucide-react";
+import { CheckCircle, Loader2, Mail, Phone, FileText, AlertCircle, Receipt } from "lucide-react";
 import { getPublicInvoiceByToken, type PublicInvoicePayload } from "@/lib/client";
+import { API_BASE } from "@/lib/api";
+
+/**
+ * V1-49-PUBLIC-RECEIPT: the server's receipt projection for this link
+ * (GET /commerce/public/invoice-link/:token/receipt). Rendered as given.
+ */
+interface PublicReceipt {
+  invoiceNumber: string;
+  status: string;
+  currency: string;
+  total: number;
+  amountPaid: number;
+  amountDue: number;
+  paidAt: string | null;
+  issuedAt?: string | null;
+}
+
+type ReceiptState = { loading: boolean; data: PublicReceipt | null; error: string | null } | null;
 
 function formatCurrency(amount: number, currency: string) {
   try {
@@ -32,6 +50,25 @@ export default function PublicInvoicePage() {
     payload: null,
     error: null,
   });
+  const [receipt, setReceipt] = useState<ReceiptState>(null);
+
+  // Loaded on request only: the receipt is a second public read of the same
+  // token, and most visits are to pay, not to fetch a receipt.
+  async function loadReceipt() {
+    setReceipt({ loading: true, data: null, error: null });
+    try {
+      const res = await fetch(`${API_BASE}/commerce/public/invoice-link/${encodeURIComponent(token)}/receipt`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        setReceipt({ loading: false, data: null, error: "A receipt is not available for this invoice." });
+        return;
+      }
+      setReceipt({ loading: false, data: (await res.json()) as PublicReceipt, error: null });
+    } catch {
+      setReceipt({ loading: false, data: null, error: "We couldn't load the receipt. Please try again." });
+    }
+  }
 
   useEffect(() => {
     if (!token) return;
@@ -85,6 +122,9 @@ export default function PublicInvoicePage() {
   const accent = business?.primaryColor || "#F97316";
   const isPaid = invoice.status === "PAID";
   const isVoid = invoice.status === "VOID";
+  // V1-49: a receipt exists once something has been received (PAID, or
+  // PARTIALLY_PAID with the remaining stated); the server decides the rest.
+  const hasReceipt = isPaid || invoice.status === "PARTIALLY_PAID";
   const contactName = invoice.contact
     ? [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(" ") || "Customer"
     : "Customer";
@@ -227,6 +267,61 @@ export default function PublicInvoicePage() {
               <p className="text-xs text-center text-slate-400">
                 Choose your payment option on the next screen.
               </p>
+            </div>
+          )}
+
+          {hasReceipt && (
+            <div className="space-y-3">
+              {!receipt?.data && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  data-testid="public-invoice-receipt-button"
+                  disabled={receipt?.loading}
+                  onClick={() => void loadReceipt()}
+                >
+                  <Receipt className="w-4 h-4" /> {receipt?.loading ? "Loading receipt…" : "View receipt"}
+                </Button>
+              )}
+              {receipt?.error && (
+                <p className="text-xs text-center text-amber-300" data-testid="public-receipt-error">
+                  {receipt.error}
+                </p>
+              )}
+              {receipt?.data && (
+                <section
+                  className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-2 text-sm"
+                  data-testid="public-receipt"
+                  aria-label="Payment receipt"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold">Receipt for invoice #{receipt.data.invoiceNumber}</p>
+                    <Button variant="ghost" size="xs" onClick={() => window.print()}>
+                      Print
+                    </Button>
+                  </div>
+                  <dl className="divide-y divide-border/30">
+                    <div className="flex items-center justify-between py-1.5">
+                      <dt className="text-slate-400">Received</dt>
+                      <dd className="font-medium text-emerald-300" data-testid="public-receipt-paid">
+                        {formatCurrency(Number(receipt.data.amountPaid), receipt.data.currency)}
+                      </dd>
+                    </div>
+                    <div className="flex items-center justify-between py-1.5">
+                      <dt className="text-slate-400">Remaining</dt>
+                      <dd className="font-medium" data-testid="public-receipt-remaining">
+                        {formatCurrency(Number(receipt.data.amountDue), receipt.data.currency)}
+                      </dd>
+                    </div>
+                    {receipt.data.paidAt && (
+                      <div className="flex items-center justify-between py-1.5">
+                        <dt className="text-slate-400">Paid on</dt>
+                        <dd className="font-medium">{formatDate(receipt.data.paidAt)}</dd>
+                      </div>
+                    )}
+                  </dl>
+                </section>
+              )}
             </div>
           )}
         </Card>
