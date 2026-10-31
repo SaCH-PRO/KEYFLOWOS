@@ -4,7 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import OpenAI from 'openai';
-import { AiUsageService } from '../ai/ai-usage.service';
+import { AiUsageService, directOpenAiKey, directOpenAiNotConfigured } from '../ai/ai-usage.service';
 import {
   CortexVoiceRequest,
   CortexVoiceResponse,
@@ -192,7 +192,8 @@ const VOICE_PREVIEW_PHRASES: Record<CortexPersona, string> = {
 @Injectable()
 export class KeyCortexVoiceService {
   private readonly logger = new Logger(KeyCortexVoiceService.name);
-  private readonly openai: OpenAI;
+  /** Null when no OpenAI key is configured: no client is built with a placeholder key. */
+  private readonly openai: OpenAI | null;
 
   constructor(
     private readonly aiUsageService: AiUsageService,
@@ -202,14 +203,26 @@ export class KeyCortexVoiceService {
     // OPENAI_API_KEY instead, because docker-compose.production.yml maps one to
     // the other. Reading only the bare name meant this worked in production and
     // was unset locally — surviving on this machine solely because the developer
-    // happened to have OPENAI_API_KEY exported in their shell. Accept either.
-    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    // happened to have OPENAI_API_KEY exported in their shell. Accept either
+    // (directOpenAiKey).
+    //
+    // R0-07a: with neither set there is no client. Every synthesis and
+    // transcription answers the structured 503 provider_not_configured before
+    // any provider call, instead of going out with a placeholder key and
+    // failing at OpenAI with a 401.
+    const apiKey = directOpenAiKey();
     if (!apiKey) {
       this.logger.warn(
-        'Neither AI_INTEGRATIONS_OPENAI_API_KEY nor OPENAI_API_KEY is set. Voice synthesis and transcription will be unavailable.',
+        'Neither AI_INTEGRATIONS_OPENAI_API_KEY nor OPENAI_API_KEY is set. Voice synthesis and transcription answer 503 provider_not_configured.',
       );
     }
-    this.openai = new OpenAI({ apiKey: apiKey ?? 'sk-no-key' });
+    this.openai = apiKey ? new OpenAI({ apiKey }) : null;
+  }
+
+  /** The configured client, or the structured 503 (R0-07a) when no OpenAI key is configured. */
+  private client(): OpenAI {
+    if (!this.openai) throw directOpenAiNotConfigured();
+    return this.openai;
   }
 
   // ========================================================================
@@ -225,12 +238,14 @@ export class KeyCortexVoiceService {
    * @param request     Voice synthesis request with text and options
    * @param businessId  Tenant-scoped business identifier for usage tracking
    * @returns           Audio buffer containing the synthesized speech
-   * @throws ServiceUnavailableException if TTS fails or OpenAI is unreachable
+   * @throws ServiceUnavailableException if TTS fails or OpenAI is unreachable;
+   *         the structured 503 provider_not_configured if no OpenAI key is set
    */
   async synthesize(
     request: CortexVoiceRequest,
     businessId: string,
   ): Promise<Buffer> {
+    const openai = this.client();
     const {
       text,
       voice: explicitVoice,
@@ -252,7 +267,7 @@ export class KeyCortexVoiceService {
     const clampedSpeed = Math.max(0.5, Math.min(2.0, speed));
 
     try {
-      const response = await this.openai.audio.speech.create({
+      const response = await openai.audio.speech.create({
         model: 'tts-1',
         voice: voice as string,
         input: text,
@@ -333,12 +348,14 @@ export class KeyCortexVoiceService {
    * @param request     STT request with audio buffer and metadata
    * @param businessId  Tenant-scoped business identifier for usage tracking
    * @returns           Transcribed text string
-   * @throws ServiceUnavailableException if transcription fails
+   * @throws ServiceUnavailableException if transcription fails; the structured
+   *         503 provider_not_configured if no OpenAI key is set
    */
   async transcribe(
     request: CortexSTTRequest,
     businessId: string,
   ): Promise<string> {
+    const openai = this.client();
     const { audioBuffer, mimeType, language, prompt } = request;
 
     this.logger.debug(
@@ -354,7 +371,7 @@ export class KeyCortexVoiceService {
         type: mimeType,
       });
 
-      const transcription = await this.openai.audio.transcriptions.create({
+      const transcription = await openai.audio.transcriptions.create({
         file,
         model: 'whisper-1',
         ...(language ? { language } : {}),

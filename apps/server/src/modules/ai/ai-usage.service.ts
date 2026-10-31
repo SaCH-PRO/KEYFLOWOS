@@ -1,12 +1,43 @@
-import { Inject, Injectable, Logger, ForbiddenException, HttpException } from '@nestjs/common';
+import { Inject, Injectable, Logger, ForbiddenException, HttpException, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD, isBillableAiFeature } from '../subscriptions/plans';
 import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
 import { OutputTemplateService } from './output-template.service';
-import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider, GatewayRequest, GatewayResponse, StreamChunk } from './model-gateway.service';
+import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider, GatewayRequest, GatewayResponse, StreamChunk, AiUnavailableCode } from './model-gateway.service';
 import OpenAI from 'openai';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+
+/**
+ * R0-07a: the platform OpenAI key for the AI calls that bypass the model
+ * gateway (the embedding, vision and audio helpers below, and KEY voice).
+ * `.env` sets AI_INTEGRATIONS_OPENAI_API_KEY; the production container gets
+ * OPENAI_API_KEY (docker-compose.production.yml maps one to the other), which
+ * the OpenAI SDK also falls back to, so either counts. An empty value is not a
+ * key.
+ */
+export function directOpenAiKey(): string | undefined {
+  return process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || undefined;
+}
+
+/**
+ * R0-07a: the answer a direct OpenAI call gives when no OpenAI key is
+ * configured - the same 503 the model gateway answers when no AI provider is
+ * configured (R0-07), which the global filter renders as
+ * { statusCode: 503, code: 'provider_not_configured', message,
+ * details: { service: 'ai' } }. It is thrown before a client is built, the
+ * provider is called, a rate-limit slot or credit is spent, or an AiUsageLog
+ * row is written. The message keeps the gateway's prefix for log readers.
+ */
+export function directOpenAiNotConfigured(): ServiceUnavailableException {
+  const code: AiUnavailableCode = 'provider_not_configured';
+  return new ServiceUnavailableException({
+    code,
+    service: 'ai',
+    message: 'No AI providers available: no OpenAI key is configured for this deployment',
+    error: 'Service Unavailable',
+  });
+}
 
 /**
  * responseMode controls quality directive injection and output validation:
@@ -249,6 +280,17 @@ export class AiUsageService {
 
   onModuleDestroy() {
     clearInterval(this.rateLimitCleanupTimer);
+  }
+
+  /**
+   * R0-07a: the key a direct OpenAI helper builds its client with, or the
+   * structured 503 when none is configured. Called first, so a refused call
+   * spends no rate-limit slot or credit and writes no usage row.
+   */
+  private requireDirectOpenAiKey(): string {
+    const apiKey = directOpenAiKey();
+    if (!apiKey) throw directOpenAiNotConfigured();
+    return apiKey;
   }
 
   checkRateLimit(businessId: string): void {
@@ -841,6 +883,7 @@ export class AiUsageService {
     texts: string[],
     model = 'text-embedding-3-small',
   ): Promise<number[][]> {
+    const apiKey = this.requireDirectOpenAiKey();
     this.checkRateLimit(businessId);
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
@@ -848,7 +891,7 @@ export class AiUsageService {
 
     const startTime = Date.now();
     const client = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      apiKey,
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
     });
 
@@ -904,6 +947,7 @@ export class AiUsageService {
     temperature = 0.2,
     model = 'gpt-4o',
   ): Promise<{ content: string | null; usage: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost: number } }> {
+    const apiKey = this.requireDirectOpenAiKey();
     this.checkRateLimit(businessId);
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
@@ -911,7 +955,7 @@ export class AiUsageService {
 
     const startTime = Date.now();
     const client = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      apiKey,
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
     });
 
@@ -984,6 +1028,7 @@ export class AiUsageService {
       model?: string;
     },
   ): Promise<Buffer | string> {
+    const apiKey = this.requireDirectOpenAiKey();
     this.checkRateLimit(businessId);
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
@@ -991,7 +1036,7 @@ export class AiUsageService {
 
     const startTime = Date.now();
     const client = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      apiKey,
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
     });
 

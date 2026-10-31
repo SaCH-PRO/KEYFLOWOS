@@ -468,6 +468,8 @@ describe('AiUsageService: a direct OpenAI helper answers 503 provider_not_config
       .set(HEADER, ID.owner)
       .send({ text: 'Hello from k07c', provider: 'openai' });
     expect(res.status, JSON.stringify(res.body)).toBe(503);
+    // The provider keeps its own wrapper ('OpenAI TTS failed: ...'), so the cause shows in the message (the code: it.todo below).
+    expect(res.body.message).toContain('no OpenAI key is configured');
     expect(sdk.attempts.slice(before)).toEqual([]);
     expect(sdk.requests).toEqual([]);
     expect(await traces()).toEqual(NO_TRACES);
