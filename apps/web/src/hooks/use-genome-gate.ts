@@ -35,13 +35,27 @@ interface GenomeGateState {
   genesisCompleted: boolean | null;
 }
 
+/**
+ * The state when the onboarding check could not be made (API error, empty
+ * body, network failure). Owner ruling D-03: the gate fails open — onboarding
+ * completes without AI on the manual path, and a failed read must never send
+ * an onboarded owner back to /app/onboarding.
+ */
+const FAIL_OPEN_STATE: GenomeGateState = {
+  checking: false,
+  gateActive: false,
+  threePillarMet: false,
+  genomeIntegrity: null,
+  genesisCompleted: null,
+};
+
 export function useGenomeGate(): GenomeGateState {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [state, setState] = useState<GenomeGateState>(() => ({
     checking: !!getStoredBusinessId(),
-    gateActive: true, // fail closed until verified
+    gateActive: true, // until checked; the layout shows a spinner meanwhile
     threePillarMet: false,
     genomeIntegrity: null,
     genesisCompleted: null,
@@ -69,17 +83,10 @@ export function useGenomeGate(): GenomeGateState {
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error || !data) {
-          // Fail closed on any API error.
-          setState({
-            checking: false,
-            gateActive: true,
-            threePillarMet: false,
-            genomeIntegrity: null,
-            genesisCompleted: null,
-          });
-          if (!isAllowedPath(pathWithQuery)) {
-            router.replace("/app/onboarding");
-          }
+          // Owner ruling D-03: the gate fails open. An unreadable onboarding
+          // state is not evidence that onboarding is unfinished, so the user
+          // stays where they are instead of being bounced to /app/onboarding.
+          setState(FAIL_OPEN_STATE);
           return;
         }
 
@@ -110,16 +117,8 @@ export function useGenomeGate(): GenomeGateState {
         if (cancelled) return;
          
         console.error("Genome gate check failed", err);
-        setState({
-          checking: false,
-          gateActive: true,
-          threePillarMet: false,
-          genomeIntegrity: null,
-          genesisCompleted: null,
-        });
-        if (!isAllowedPath(pathWithQuery)) {
-          router.replace("/app/onboarding");
-        }
+        // Fails open, as above (D-03).
+        setState(FAIL_OPEN_STATE);
       });
 
     return () => {

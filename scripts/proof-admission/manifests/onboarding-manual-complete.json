@@ -1,0 +1,28 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-32-ONBOARD-COMPLETE-SERVER",
+  "proofScope": "onboarding-manual-complete-real-database",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": false,
+  "requiredCases": [
+    "harness — the real built server is serving with AI off dist/main.js exists (build before running this)",
+    "harness — the real built server is serving with AI off reached /readyz on a free port, against DATABASE_URL, with AI_DISABLED=1 and no AI provider key",
+    "harness — the real built server is serving with AI off bootstraps four fresh owners, each with one business that has not completed onboarding",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) the owner sets business name, currency and timezone through the profile route",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) a member of another business gets 403 on /complete and nothing changes",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) ST-R032-1: a STAFF member with role-default scopes gets 403 on /complete and nothing is written",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) POST /complete succeeds (201 {complete: true}) with the three-pillar score below the minimum",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) the three-pillar score is reported as a recommendation, not a gate",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) onboardingComplete is true and the onboarding state reports complete",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) LEDGER: completion wrote exactly one demo contact and one DRAFT demo invoice, and no FinancialTransaction or LedgerEntry",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) ST-R032-1: completion and the legal disclaimer acceptance are recorded against the owner in team_activity_logs",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) a second /complete answers alreadyComplete and writes nothing more",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) ST-R032-1: on a completed business, a STAFF member is still refused (authority is checked before the replay)",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) no model-gateway dispatch: no ai_usage_logs row and no AI or outbound line in the server log during completion",
+    "without the minimal profile, completion is refused with the missing fields blank name, currency and timezone: 403 listing all three, and nothing is written",
+    "without the minimal profile, completion is refused with the missing fields a malformed currency or timezone counts as missing: 403 listing them, and nothing is written",
+    "without the minimal profile, completion is refused with the missing fields once the owner supplies a valid name, currency and timezone, the same business completes",
+    "ST-R032-1: a member whose scope map grants settings:write may complete, and is recorded as the actor a STAFF member with explicit {settings: write} completes a fresh business on the bootstrap defaults",
+    "characterization — the non-AI genome editor path (PATCH /blueprint) after PATCH /blueprint with founder, business and market fields, /complete succeeds and no AI was used"
+  ]
+}

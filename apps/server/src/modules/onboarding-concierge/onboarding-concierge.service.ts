@@ -4,7 +4,9 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
-import { DemoDataSeederService } from './demo-data-seeder.service';
+import { DemoDataSeederService, type DemoSeedResult } from './demo-data-seeder.service';
+import { getTenantContext } from '../../core/tenant/tenant-context';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import type {
   BlueprintData,
   BlueprintRegistrationProfile,
@@ -32,6 +34,36 @@ function isRegistrationStepCompleteForReadiness(status: unknown): boolean {
   const value = status.trim().toUpperCase();
   const incomplete = ['NOT_STARTED', 'UNKNOWN', 'IDEA_ONLY', 'PENDING', 'IN_PROGRESS', ''];
   return !incomplete.includes(value);
+}
+
+/** Owner ruling D-03: the manual minimal profile that completes onboarding. */
+type MinimalProfileField = 'name' | 'currency' | 'timezone';
+
+function isIanaTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The minimal-profile fields that are absent or unusable: a blank name, a
+ * currency that is not a three-letter ISO 4217 code, or a timezone that is
+ * not an IANA zone (an invalid zone throws wherever a date is formatted).
+ */
+function missingMinimalProfileFields(
+  business: { name?: string | null; currency?: string | null; timezone?: string | null } | null | undefined,
+): MinimalProfileField[] {
+  const name = business?.name?.trim() ?? '';
+  const currency = business?.currency?.trim() ?? '';
+  const timezone = business?.timezone?.trim() ?? '';
+  const missing: MinimalProfileField[] = [];
+  if (!name) missing.push('name');
+  if (!/^[A-Za-z]{3}$/.test(currency)) missing.push('currency');
+  if (!timezone || !isIanaTimezone(timezone)) missing.push('timezone');
+  return missing;
 }
 
 export interface SetupStatus {
@@ -1112,27 +1144,39 @@ EXTRACTED: archetype=service_provider`;
     return this.demoSeeder.seedDemoData(businessId);
   }
 
+  /**
+   * Owner ruling D-03 (2026-10-31): onboarding completes on a manual minimal
+   * profile — business name, currency and timezone — without AI. The
+   * three-pillar DNA minimum is no longer a gate; it is returned as a
+   * recommendation so the client can still nudge towards the genome.
+   *
+   * Review ST-R032-1: only the owner or a member with settings write access
+   * may complete (see resolveCompletionActor), checked before anything else,
+   * and the completion and the disclaimer acceptance it records are written to
+   * team_activity_logs against that actor, in the completion transaction.
+   */
   async markOnboardingComplete(businessId: string) {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { onboardingComplete: true, onboardingCompletedAt: true },
+      select: { ownerId: true, onboardingComplete: true, onboardingCompletedAt: true, name: true, currency: true, timezone: true },
     });
+
+    const actorId = await this.resolveCompletionActor(businessId, business?.ownerId);
 
     if (business?.onboardingComplete && business?.onboardingCompletedAt) {
       return { complete: true, alreadyComplete: true };
     }
 
-    const integrity = await this.blueprint.calculateGenomeIntegrity(businessId);
-    if (!integrity.threePillarMinimumMet) {
-      const pillarKeys: DnaSectionKey[] = ['founder', 'business', 'market'];
-      const missingPillars = pillarKeys.filter((key) => integrity.genomeDnaScores[key] < 50);
+    const missingFields = missingMinimalProfileFields(business);
+    if (missingFields.length > 0) {
       throw new ForbiddenException({
-        code: 'GENOME_GATE_BLOCKED',
-        message: 'Three-Pillar Minimum not met. Complete Founder, Business, and Market DNA before finishing onboarding.',
-        genomeIntegrity: integrity.genomeIntegrity,
-        missingPillars,
+        code: 'ONBOARDING_PROFILE_INCOMPLETE',
+        message: 'Add your business name, currency and timezone before finishing onboarding.',
+        missingFields,
       });
     }
+
+    const genomeRecommendation = await this.threePillarRecommendation(businessId);
 
     const demoData = await this.prisma.client.$transaction(async (tx) => {
       await tx.business.update({
@@ -1146,32 +1190,148 @@ EXTRACTED: archetype=service_provider`;
 
       const seeded = await this.demoSeeder.seedDemoData(businessId, tx);
       await this.awardSetupMilestone(businessId, 'onboardingComplete', tx);
-      await this.ensureLegalDisclaimerAccepted(businessId, tx);
+      const disclaimerAcceptedAt = await this.ensureLegalDisclaimerAccepted(businessId, tx);
+      await this.recordCompletionActivity(tx, businessId, actorId, seeded, disclaimerAcceptedAt);
 
       return seeded;
     });
 
-    return { complete: true, demoData };
+    return { complete: true, demoData, genomeRecommendation };
   }
 
-  private async ensureLegalDisclaimerAccepted(businessId: string, tx?: PrismaTx) {
+  /**
+   * Review ST-R032-1: who may finish onboarding. Completion marks the business
+   * complete, records the legal disclaimer acceptance for it and writes a demo
+   * contact (crm) and a DRAFT demo invoice (revenue), so BusinessGuard's "any
+   * member" is not enough. The rule is ModuleScopeGuard's own reading of the
+   * `settings` module at write level — the explicit scope map, else the role
+   * defaults (OWNER and ADMIN yes, STAFF no) — plus the business owner and
+   * SUPER_ADMIN, whom BusinessGuard admits without a membership row.
+   *
+   * The actor is the authenticated user TenantInterceptor bound to this
+   * request; with no request context, or one for another business, completion
+   * fails closed.
+   */
+  private async resolveCompletionActor(businessId: string, ownerId: string | null | undefined): Promise<string> {
+    const context = getTenantContext();
+    const actorId = context?.businessId === businessId ? context.userId : undefined;
+    if (!actorId) throw this.completionForbidden();
+    if (ownerId && ownerId === actorId) return actorId;
+
+    const [membership, user] = await Promise.all([
+      this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: actorId, businessId } },
+        select: { role: true, permissionScopes: true },
+      }),
+      this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } }),
+    ]);
+
+    if (user?.role === 'SUPER_ADMIN') return actorId;
+    if (membership) {
+      if (membership.role === 'OWNER') return actorId;
+      const scopes =
+        membership.permissionScopes && typeof membership.permissionScopes === 'object'
+          ? (membership.permissionScopes as Record<string, string>)
+          : defaultScopesForRole(membership.role);
+      if (rankOf(scopes.settings) >= LEVEL_RANK.write) return actorId;
+    }
+    throw this.completionForbidden();
+  }
+
+  private completionForbidden() {
+    return new ForbiddenException({
+      code: 'ONBOARDING_COMPLETE_FORBIDDEN',
+      message: 'Only the business owner or a member with settings write access can finish onboarding.',
+    });
+  }
+
+  /**
+   * Who completed onboarding, and who the recorded legal disclaimer acceptance
+   * belongs to. Written in the completion transaction: no completion commits
+   * without its actor row.
+   */
+  private async recordCompletionActivity(
+    tx: PrismaTx,
+    businessId: string,
+    actorId: string,
+    demoData: DemoSeedResult | null | undefined,
+    disclaimerAcceptedAt: string | null,
+  ) {
+    await tx.teamActivityLog.create({
+      data: {
+        businessId,
+        userId: actorId,
+        module: 'settings',
+        action: 'onboarding_completed',
+        entityType: 'business',
+        entityId: businessId,
+        title: 'Completed onboarding',
+        meta: {
+          demoContactId: demoData?.contactId ?? null,
+          demoInvoiceId: demoData?.invoiceId ?? null,
+          demoInvoiceNumber: demoData?.invoiceNumber ?? null,
+        },
+      },
+    });
+    if (disclaimerAcceptedAt) {
+      await tx.teamActivityLog.create({
+        data: {
+          businessId,
+          userId: actorId,
+          module: 'settings',
+          action: 'legal_disclaimer_accepted',
+          entityType: 'business',
+          entityId: businessId,
+          title: 'Accepted the legal disclaimer on completing onboarding',
+          meta: { disclaimerAcceptedAt },
+        },
+      });
+    }
+  }
+
+  /**
+   * The three-pillar minimum as advice, never as a gate (D-03). A genome that
+   * cannot be scored must not block completion, so a failure reads as null.
+   */
+  private async threePillarRecommendation(businessId: string) {
+    try {
+      const integrity = await this.blueprint.calculateGenomeIntegrity(businessId);
+      const pillarKeys: DnaSectionKey[] = ['founder', 'business', 'market'];
+      return {
+        threePillarMinimumMet: integrity.threePillarMinimumMet,
+        genomeIntegrity: integrity.genomeIntegrity,
+        missingPillars: pillarKeys.filter((key) => (integrity.genomeDnaScores[key] ?? 0) < 50),
+      };
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Genome recommendation unavailable for ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  /** Records the disclaimer acceptance; returns its timestamp when this call recorded it, else null. */
+  private async ensureLegalDisclaimerAccepted(businessId: string, tx?: PrismaTx): Promise<string | null> {
     try {
       const blueprint = await this.blueprint.getBlueprint(businessId, tx).catch(() => null);
-      if (!blueprint) return;
-      if (blueprint.legalProfile?.disclaimerAcceptedAt) return;
+      if (!blueprint) return null;
+      if (blueprint.legalProfile?.disclaimerAcceptedAt) return null;
 
+      const disclaimerAcceptedAt = new Date().toISOString();
       await this.blueprint.updateBlueprint(
         businessId,
         {
           legalProfile: {
             ...(blueprint.legalProfile || {}),
-            disclaimerAcceptedAt: new Date().toISOString(),
+            disclaimerAcceptedAt,
           },
         },
         tx,
       );
+      return disclaimerAcceptedAt;
     } catch (err: any) {
       this.logger.warn(`Failed to record legal disclaimer acceptance: ${(err as Error).message}`);
+      return null;
     }
   }
 
