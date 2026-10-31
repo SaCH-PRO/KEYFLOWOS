@@ -17,15 +17,24 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { NAV_ROUTE_LABELS, getLabel } from '../semantic-routes';
-import { primaryNav, operateSections } from '../nav-config';
+import { primaryNav, operateSections, mobileBottomNav } from '../nav-config';
 import { MODE_OPERATE_ITEMS } from '../disclosure-mode';
 
 const WEB_SRC = path.join(__dirname, '..', '..');
 const read = (rel: string) => fs.readFileSync(path.join(WEB_SRC, rel), 'utf8');
 
-/** The header title(s) a page passes to WorkspaceShell, read from source. */
+/**
+ * The header title(s) a page passes to WorkspaceShell, read from source. A
+ * title that reads the constant, title={NAV_ROUTE_LABELS["<route>"]}, resolves
+ * to the constant's value; without that alternative the lazy match would skip
+ * past it to the next title="…" in the file, some other component's.
+ */
 function workspaceShellTitles(pageRel: string): string[] {
-  return [...read(pageRel).matchAll(/<WorkspaceShell\b[\s\S]*?\btitle="([^"]+)"/g)].map((m) => m[1]);
+  return [
+    ...read(pageRel).matchAll(
+      /<WorkspaceShell\b[\s\S]*?\btitle=(?:"([^"]+)"|\{NAV_ROUTE_LABELS\["([^"]+)"\]\})/g,
+    ),
+  ].map((m) => m[1] ?? NAV_ROUTE_LABELS[m[2] as keyof typeof NAV_ROUTE_LABELS]);
 }
 
 const COCKPIT = '/app/command-center';
@@ -79,13 +88,12 @@ describe('/app/command-center: nav, breadcrumb and page title agree', () => {
 /* ────────────────────────────────────────────────────────────────────────────
  * The other surfaces that name /app/command-center.
  *
- * The rail rename put the desktop rail in line with the breadcrumb and the
- * header. It also put it out of line with the mobile drawer's cockpit link and
- * the ⌘H shortcut labels, which still say "Cockpit". Before R0-08 the desktop
- * rail and the mobile drawer agreed with each other, so this disagreement is
- * new. Those three files are outside the R0-08 write set, so it is ledgered
- * here instead of going unnoticed. The ledger is shrink-only and cleans itself:
- * once a surface reads the constant, its entry has to go.
+ * The R0-08 rail rename put the desktop rail in line with the breadcrumb and
+ * the header, and out of line with the mobile drawer's cockpit link and the ⌘H
+ * shortcut labels, which still said "Cockpit". Those three were outside the
+ * R0-08 write set and were ledgered here; R0-08b released them, so the ledger
+ * is empty and every surface below must READ the constant. Showing a copy of
+ * today's value is not enough: a copy is what turns a D-09 ruling into a hunt.
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /** Everything inside one <Link …>…</Link> that opens the cockpit (or its stub). */
@@ -96,6 +104,7 @@ const cockpitLink = (tail: string) =>
 interface CockpitSurface {
   file: string;
   what: string;
+  /** In the R0-08 or the R0-08b write set: it must read the constant. */
   inWriteSet: boolean;
   /** The source text the surface shows, or undefined if the extractor broke. */
   extract: (src: string) => string | undefined;
@@ -117,36 +126,34 @@ const COCKPIT_SURFACES: CockpitSurface[] = [
   {
     file: 'components/layout/mobile-drawer.tsx',
     what: 'mobile drawer cockpit link',
-    inWriteSet: false,
+    inWriteSet: true,
     extract: (s) => s.match(cockpitLink('<span>([^<]+)</span>\\s*</Link>'))?.[1],
   },
   {
     file: 'components/functional/keyboard-shortcuts-help.tsx',
     what: '⌘H in the shortcut help',
-    inWriteSet: false,
+    inWriteSet: true,
     extract: (s) => s.match(/keys: \["⌘", "H"\], description: ("[^"]*"|[^}\n]+)/)?.[1],
   },
   {
     file: 'hooks/use-keyboard-shortcuts.ts',
     what: 'kf:go-home shortcut description',
-    inWriteSet: false,
+    inWriteSet: true,
     extract: (s) => s.match(/"kf:go-home"\)\),\s*description: ("[^"]*"|[^,\n]+)/)?.[1],
   },
 ];
 
 /**
- * Surfaces outside the R0-08 write set that still name the cockpit with a
- * label other than NAV_ROUTE_LABELS["/app/command-center"].
+ * Surfaces outside every write set so far that still name the cockpit with a
+ * label other than NAV_ROUTE_LABELS["/app/command-center"]. Empty since R0-08b.
+ * Keyed by surface (file and what), so one file cannot hide a second surface
+ * behind its first (review F3). Shrink-only, self-cleaning below.
  */
-const COCKPIT_LABEL_OUTSIDE_WRITE_SET: Record<string, string> = {
-  'components/layout/mobile-drawer.tsx':
-    '<span>Cockpit</span>, while the desktop rail says the D-09 label (the link also targets the keyflow-command stub)',
-  'components/functional/keyboard-shortcuts-help.tsx': '"Go to Cockpit"',
-  'hooks/use-keyboard-shortcuts.ts': '"Go to Cockpit"',
-};
+const COCKPIT_LABEL_OUTSIDE_WRITE_SET: Record<string, string> = {};
+const surfaceKey = (s: Pick<CockpitSurface, 'file' | 'what'>) => `${s.file} :: ${s.what}`;
 
-const agreesWithConstant = (shown: string) =>
-  shown.includes('NAV_ROUTE_LABELS["/app/command-center"]') || shown.includes(NAV_ROUTE_LABELS[COCKPIT]);
+const readsConstant = (shown: string) => shown.includes('NAV_ROUTE_LABELS["/app/command-center"]');
+const agreesWithConstant = (shown: string) => readsConstant(shown) || shown.includes(NAV_ROUTE_LABELS[COCKPIT]);
 
 describe('/app/command-center: the other nav surfaces agree, or are ledgered', () => {
   const shown = () => COCKPIT_SURFACES.map((s) => ({ ...s, text: s.extract(read(s.file)) }));
@@ -157,29 +164,45 @@ describe('/app/command-center: the other nav surfaces agree, or are ledgered', (
     }
   });
 
-  it('the surfaces in the R0-08 write set name the cockpit with the constant', () => {
+  it('every surface in a write set READS the constant rather than copying its value', () => {
     const off = shown()
-      .filter((s) => s.inWriteSet && !agreesWithConstant(s.text ?? ''))
+      .filter((s) => s.inWriteSet && !readsConstant(s.text ?? ''))
       .map((s) => `${s.what} (${s.file}): ${s.text}`);
-    expect(off).toEqual([]);
+    expect(off, 'use NAV_ROUTE_LABELS["/app/command-center"] so a D-09 ruling is one edit').toEqual([]);
   });
 
-  it('every surface outside the write set agrees, or is a ledgered disagreement', () => {
+  it('every surface outside the write sets agrees, or is a ledgered disagreement', () => {
     const off = shown()
       .filter((s) => !s.inWriteSet && !agreesWithConstant(s.text ?? ''))
-      .filter((s) => !(s.file in COCKPIT_LABEL_OUTSIDE_WRITE_SET))
+      .filter((s) => !(surfaceKey(s) in COCKPIT_LABEL_OUTSIDE_WRITE_SET))
       .map((s) => `${s.what} (${s.file}): ${s.text}`);
     expect(off, `these name the cockpit as something other than "${NAV_ROUTE_LABELS[COCKPIT]}"`).toEqual([]);
   });
 
   it('the label ledger only names surfaces that still disagree', () => {
     const surfaces = shown();
-    for (const [file, reason] of Object.entries(COCKPIT_LABEL_OUTSIDE_WRITE_SET)) {
-      const s = surfaces.find((x) => x.file === file);
-      expect(s, `${file} is ledgered but is not a known cockpit surface`).toBeDefined();
-      expect(s!.inWriteSet, `${file} is in the write set — fix it, do not ledger it`).toBe(false);
-      expect(agreesWithConstant(s!.text ?? ''), `${file} ("${reason}") now agrees — remove its entry`).toBe(false);
+    for (const [key, reason] of Object.entries(COCKPIT_LABEL_OUTSIDE_WRITE_SET)) {
+      const s = surfaces.find((x) => surfaceKey(x) === key);
+      expect(s, `${key} is ledgered but is not a known cockpit surface`).toBeDefined();
+      expect(s!.inWriteSet, `${key} is in a write set — fix it, do not ledger it`).toBe(false);
+      expect(agreesWithConstant(s!.text ?? ''), `${key} ("${reason}") now agrees — remove its entry`).toBe(false);
     }
+  });
+
+  it('the label ledger is empty: every R0-08 entry was fixed, none may return', () => {
+    expect(Object.keys(COCKPIT_LABEL_OUTSIDE_WRITE_SET)).toEqual([]);
+  });
+
+  it('the mobile bottom bar says "Home" for the cockpit on purpose (review F5)', () => {
+    // Pinned, not derived. The bottom bar is five 9px labels across a phone
+    // (mobile-bottom-nav-v2.tsx), and every slot there is a one-word role —
+    // Home, Flows, AI, Inbox, Me — not a screen title. "Command Center" would
+    // wrap or truncate there whatever D-09 decides, and "Home" names the same
+    // role as the kf:go-home shortcut. A D-09 ruling therefore does not move
+    // it; changing it is a deliberate edit to this test.
+    const home = mobileBottomNav.find((i) => i.href === COCKPIT);
+    expect(home, 'no bottom-bar entry for the cockpit').toBeDefined();
+    expect(home!.label).toBe('Home');
   });
 });
 
@@ -200,8 +223,9 @@ describe('/app/commerce: nav, breadcrumb and page title agree', () => {
 
   it('every disclosure mode shows the commerce entry under the same label', () => {
     // use-app-layout filters the Operate nav by an exact-label allowlist, so a
-    // D-09 rename of this entry must also rename it in disclosure-mode.ts or the
-    // money screen disappears from the default nav.
+    // D-09 rename of this entry must reach disclosure-mode.ts or the money
+    // screen disappears from the default nav. Since R0-08b that file reads the
+    // constant (pinned in disclosure-mode.spec.ts), so the rename reaches it.
     for (const mode of ['startup', 'growth', 'enterprise'] as const) {
       expect(MODE_OPERATE_ITEMS[mode], mode).toContain(NAV_ROUTE_LABELS[COMMERCE]);
     }
@@ -211,13 +235,13 @@ describe('/app/commerce: nav, breadcrumb and page title agree', () => {
     expect(workspaceShellTitles('app/app/commerce/page.tsx').length).toBeGreaterThan(0);
   });
 
-  // BLOCKED (R0-08 deviation): app/app/commerce/page.tsx is outside the R0-08
-  // write set and its header says "Revenue" (WorkspaceShell title, plus the
-  // KeyflowUnifiedShell help-context pageTitle). Under the D-09 default the
-  // header should read NAV_ROUTE_LABELS["/app/commerce"]. Restore as:
-  //   for (const t of workspaceShellTitles('app/app/commerce/page.tsx'))
-  //     expect(t).toContain(NAV_ROUTE_LABELS[COMMERCE]);
-  it.todo(
-    'the page header names the screen with the same label — blocked: commerce/page.tsx is outside the R0-08 write set',
-  );
+  it('the page header names the screen with the same label', () => {
+    for (const t of workspaceShellTitles('app/app/commerce/page.tsx')) expect(t).toContain(NAV_ROUTE_LABELS[COMMERCE]);
+  });
+
+  it('the page header and its help context read the constant, not a copy', () => {
+    const page = read('app/app/commerce/page.tsx');
+    expect(page).toMatch(/<WorkspaceShell\b[\s\S]*?\btitle=\{NAV_ROUTE_LABELS\["\/app\/commerce"\]\}/);
+    expect(page).toMatch(/pageTitle=\{NAV_ROUTE_LABELS\["\/app\/commerce"\]\}/);
+  });
 });
