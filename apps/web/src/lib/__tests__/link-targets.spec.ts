@@ -176,3 +176,181 @@ describe('hardcoded links point at routes that exist', () => {
     }
   });
 });
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * R0-08-WEB-NAV-LINKS (CF-20, CF-21, M08)
+ *
+ * The literal-only gate above cannot see these: each is a link to a route that
+ * EXISTS, carrying a query the destination ignores. /app/commerce rewrites
+ * ?tab=invoices to the pipeline tab and never reads ?invoice=, so an owner who
+ * clicks "Invoice" on a payment row lands on a list, not the invoice.
+ * /app/settings/business renders the payments tab whatever ?tab says, so
+ * "Upgrade" lands on gateways, not the plan. The checks below read the source
+ * for the specific shape of each defect.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const read = (rel: string) => fs.readFileSync(path.join(WEB_SRC, rel), 'utf8');
+const relOf = (file: string) => path.relative(WEB_SRC, file).split(path.sep).join('/');
+
+/**
+ * A link into the commerce workspace that carries an invoice id: the template
+ * either interpolates something named invoiceId, or sets an invoice/invoiceId
+ * query key. Only /app/commerce is in scope — quotes-panel deliberately opens
+ * /app/payments filtered by an invoice id, which is a search, not a deep link.
+ */
+const INVOICE_LINK =
+  /`(\/app\/commerce[^`]*(?:\$\{[^}]*invoiceId[^}]*\}|[?&](?:invoice|invoiceId)=)[^`]*)`/g;
+/** The one shape that opens the invoice: the detail route, any query after it. */
+const INVOICE_DETAIL = /^\/app\/commerce\/invoices\/\$\{[^}]+\}(?:\?[^`]*)?$/;
+
+function invoiceLinks(): Array<{ file: string; target: string }> {
+  const out: Array<{ file: string; target: string }> = [];
+  for (const file of sourceFiles()) {
+    for (const m of fs.readFileSync(file, 'utf8').matchAll(INVOICE_LINK)) {
+      out.push({ file: relOf(file), target: m[1] });
+    }
+  }
+  return out;
+}
+
+/**
+ * Files outside the R0-08 write set that still carry an invoice id to a commerce
+ * tab. Shrink-only, and self-cleaning below: fix the link, remove the line.
+ */
+const INVOICE_LINK_OUTSIDE_WRITE_SET: Record<string, string> = {
+  'components/ai/cross-module-links.tsx': 'tab=invoices&invoiceId=',
+  'app/app/money/components/money-activity-feed.tsx': 'tab=pipeline&invoice= (x3)',
+  'app/app/projects/components/project-detail-tabs/revenue-tab.tsx': 'tab=invoices&id= (x2)',
+  'app/app/projects/components/project-detail-tabs/overview-tab.tsx': 'tab=invoices&id=',
+  'app/app/commerce/recurring/recurring-panel.tsx': 'tab=invoices&invoice=',
+  'app/app/bookings/components/booking-detail-drawer.tsx': 'tab=invoices&invoiceId=',
+  'app/app/bookings/page.tsx': 'tab=invoices&invoiceId=',
+};
+
+describe('a link that names an invoice opens that invoice (CF-21)', () => {
+  it('the invoice detail route exists, so the target below is a real screen', () => {
+    expect(resolvesToRoute('/app/commerce/invoices/inv_123')).toBe(true);
+  });
+
+  it('commerce still drops ?tab=invoices onto the pipeline — the defect these links fell into', () => {
+    // Characterises the destination: if commerce ever honours ?tab=invoices
+    // with an id, this fails and the ledger below can be revisited.
+    const commerce = read('app/app/commerce/page.tsx');
+    expect(commerce).toMatch(/\["quotes", "invoices", "payments"\]\.includes\(paramTab\)/);
+    expect(commerce, 'commerce now reads ?invoice= — revisit this gate').not.toMatch(
+      /get\("invoice(Id)?"\)/,
+    );
+  });
+
+  it('the payments console links each transaction to its invoice detail page', () => {
+    const payments = invoiceLinks().filter((l) => l.file === 'app/app/payments/page.tsx');
+
+    // The table row and the detail drawer: two links. Zero would be vacuous.
+    expect(payments.length, 'payments invoice links not found — extractor is broken').toBeGreaterThanOrEqual(2);
+    expect(
+      payments.filter((l) => !INVOICE_DETAIL.test(l.target)).map((l) => l.target),
+      'these payments links carry an invoice id to a commerce tab that ignores it',
+    ).toEqual([]);
+  });
+
+  it('every other commerce link carrying an invoice id opens the detail route, or is ledgered', () => {
+    const broken = invoiceLinks()
+      .filter((l) => !INVOICE_DETAIL.test(l.target))
+      .filter((l) => !(l.file in INVOICE_LINK_OUTSIDE_WRITE_SET))
+      .map((l) => `${l.target}  <- ${l.file}`);
+
+    expect(broken, 'point these at /app/commerce/invoices/${id}').toEqual([]);
+  });
+
+  it('the invoice-link ledger only names files that are still broken', () => {
+    const brokenFiles = new Set(
+      invoiceLinks()
+        .filter((l) => !INVOICE_DETAIL.test(l.target))
+        .map((l) => l.file),
+    );
+    for (const [file, reason] of Object.entries(INVOICE_LINK_OUTSIDE_WRITE_SET)) {
+      expect(brokenFiles.has(file), `${file} ("${reason}") is fixed — remove its entry`).toBe(true);
+    }
+  });
+});
+
+describe('billing links land on the billing screen', () => {
+  it('/app/settings/business ignores ?tab, so ?tab=billing there is a dead deep link', () => {
+    // Characterises the destination. If the page starts honouring ?tab, this
+    // fails and the assertion below can be reconsidered.
+    const business = read('app/app/settings/business/page.tsx');
+    expect(business).not.toMatch(/useSearchParams|get\("tab"\)/);
+    expect(resolvesToRoute('/app/settings/billing'), 'the billing screen moved').toBe(true);
+    expect(read('app/app/settings/billing/page.tsx')).toMatch(/<BillingTab\s*\/>/);
+  });
+
+  it('no file links /app/settings/business?tab=billing', () => {
+    const offenders = sourceFiles()
+      .filter((f) => fs.readFileSync(f, 'utf8').includes('/app/settings/business?tab=billing'))
+      .map(relOf);
+
+    expect(offenders, 'link /app/settings/billing instead').toEqual([]);
+  });
+});
+
+describe('the cockpit is linked directly, not through its redirect stub', () => {
+  it('the /app/keyflow-command stub still exists and still forwards (no route is deleted)', () => {
+    // D-2 consolidation (CWS-BP4/5) is V1+ backlog. This packet re-points
+    // links; it does not remove the stub that bookmarks rely on.
+    expect(read('app/app/keyflow-command/page.tsx')).toMatch(/redirect\("\/app\/command-center"\)/);
+    expect(resolvesToRoute('/app/command-center')).toBe(true);
+  });
+
+  it('the sidebar logo goes straight to /app/command-center', () => {
+    const sidebar = read('components/layout/desktop-sidebar.tsx');
+    expect(sidebar, 'the logo still targets the redirect stub').not.toContain('/app/keyflow-command');
+    expect(sidebar).toMatch(/href="\/app\/command-center"/);
+  });
+
+  it('no file in the R0-08 write set links the redirect stub', () => {
+    const writeSet = [
+      'lib/nav-config.ts',
+      'lib/semantic-routes.ts',
+      'components/layout/desktop-sidebar.tsx',
+      'components/addon-pack-gate.tsx',
+      'components/ui/upgrade-prompt.tsx',
+      'components/ui/upgrade-modal.tsx',
+      'app/app/payments/page.tsx',
+      'app/app/commerce/components/revenue-setup-drawer.tsx',
+    ];
+    expect(writeSet.filter((f) => /["'`]\/app\/keyflow-command["'`#]/.test(read(f)))).toEqual([]);
+  });
+
+  it('the go-home shortcut (kf:go-home) targets /app/command-center', () => {
+    expect(read('hooks/use-keyboard-shortcuts.ts')).toMatch(
+      /goHome = \(\) => router\.push\("\/app\/command-center"\)/,
+    );
+  });
+});
+
+describe('the nav has a door to invoices and quotes (CF-20)', () => {
+  // Read from source, like nav-destinations.spec.ts: label and href literals.
+  const nav = read('lib/nav-config.ts');
+  const operate = nav.slice(nav.indexOf('export const operateSections'), nav.indexOf('export const operateNav'));
+
+  it('Invoices opens the existing invoices hub', () => {
+    expect(operate).toMatch(/label: "Invoices", href: "\/app\/commerce\/invoices"/);
+    expect(resolvesToRoute('/app/commerce/invoices')).toBe(true);
+  });
+
+  it('Quotes opens the existing quotes view of the pipeline', () => {
+    // There is no /app/commerce/quotes page; quotes live in the pipeline tab,
+    // which reads ?view=quotes on mount (finance-pipeline.tsx).
+    expect(operate).toMatch(/label: "Quotes", href: "\/app\/commerce\?tab=pipeline&view=quotes"/);
+    expect(read('app/app/finance/components/finance-pipeline.tsx')).toMatch(/searchParams\.get\("view"\)/);
+  });
+});
+
+describe('the "+ Contact" entry opens the add-contact form', () => {
+  it('new-entity-menu links /app/crm/contacts?action=new, the only action the contacts page reads', () => {
+    expect(read('app/app/crm/contacts/page.tsx')).toMatch(/action === "new"/);
+    expect(read('components/layout/new-entity-menu.tsx')).toMatch(
+      /label: "Contact", icon: Users, href: "\/app\/crm\/contacts\?action=new"/,
+    );
+  });
+});
