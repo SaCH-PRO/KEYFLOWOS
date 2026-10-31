@@ -18,10 +18,16 @@
  *     concurrent duplicate submits  -> exactly one payment (Payment.providerPaymentId @unique)
  *     blank key                     -> treated as no key
  *     non-string key                -> 400 (DTO), nothing written
- *   reference, no key (policy chosen by this packet)
+ *   reference, no key (policy chosen by this packet; the HTTP route only, review CR-1)
  *     same non-empty reference AND same amount on the same invoice -> the existing payment
  *     same reference, different amount                              -> a new payment
  *   neither key nor reference       -> every submit is a new payment (nothing to key on)
+ *   review repairs
+ *     slot held by another tenant's row (ST-D2-1) -> 409, nothing written, never the foreign row
+ *     slot whose payment was refunded (ST-D2-2)   -> 409 naming the refund; a new key/reference records again
+ *     internal callers (CR-1)                     -> a document-derived `reference` never keys the row:
+ *                                                    PaymentEvidenceService / drive intake / Key cortex keep
+ *                                                    one row per call and may opt in with their own idempotencyKey
  *
  * The response envelope is unchanged ({ payment, invoice, paidAmount, remaining })
  * and a replay answers with the current, not doubled, balance even once the
@@ -46,6 +52,11 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { createHash } from 'crypto';
+// Type-only: erased at runtime, so the dynamic-import order below (dotenv
+// before anything that reads DATABASE_URL) is unchanged.
+import type { CommerceService } from '../src/modules/commerce/commerce.service';
+import type { PaymentEvidenceService } from '../src/modules/commerce/payment-evidence.service';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
@@ -72,13 +83,37 @@ const ID = {
   invNoKey: `${P}invNoKey`,
   invBlankKey: `${P}invBlankKey`,
   invBadKey: `${P}invBadKey`,
+  // review repairs
+  invPlantKey: `${P}invPlantKey`, // ST-D2-1: a foreign row holds this invoice's key slot
+  invPlantRef: `${P}invPlantRef`, // ST-D2-1: a foreign row holds this invoice's reference slot
+  invEvidence: `${P}invEvidence`, // CR-1: two receipts through the real PaymentEvidenceService
+  invInternalRef: `${P}invInternalRef`, // CR-1: internal caller, same reference + amount twice
+  invInternalKey: `${P}invInternalKey`, // CR-1: internal caller opting in with its own key
 };
+
+/** ST-D2-1: another tenant whose rows are planted straight into the payments table. */
+const FOREIGN = { owner: `${P}ownerB`, biz: `${P}bizB`, contact: `${P}contactB`, inv: `${P}invB` };
+
+/**
+ * ST-D2-2: the refund cases live in the owner's second tenant so the ledger
+ * invariant at the end (one posting per SUCCESSFUL row in ID.biz) is not
+ * disturbed by refund reversals.
+ */
+const REFUND = { biz: `${P}bizRefund`, contact: `${P}contactRefund`, invRef: `${P}invRefundRef`, invKey: `${P}invRefundKey` };
 
 const INVOICE_TOTAL = 100;
 
 let db: any;
 let app: any;
 let redis: any;
+let commerce: CommerceService;
+let evidence: PaymentEvidenceService;
+
+// CR-1: PaymentEvidenceService is the real one over the real CommerceService;
+// document intelligence (the AI boundary) is the stub and returns what the
+// next receipt "says".
+let nextExtraction: Record<string, unknown> = {};
+const docIntelStub = { extractFromDocument: async () => nextExtraction };
 
 const recordedEvents: Array<{ name: string; payload: unknown }> = [];
 const eventRecorder = {
@@ -136,6 +171,40 @@ function post(inv: string, body: Record<string, unknown>) {
 
 function balance(inv: string) {
   return agent().get(route(inv)).set(HEADER, ID.owner);
+}
+
+const routeIn = (biz: string, inv: string) => `/commerce/businesses/${biz}/invoices/${inv}/payments`;
+
+function postIn(biz: string, inv: string, body: Record<string, unknown>) {
+  return agent().post(routeIn(biz, inv)).set(HEADER, ID.owner).send(body);
+}
+
+function balanceIn(biz: string, inv: string) {
+  return agent().get(routeIn(biz, inv)).set(HEADER, ID.owner);
+}
+
+/** The real refund route, through the same guards. */
+function refund(biz: string, paymentId: string) {
+  return agent().post(`/commerce/businesses/${biz}/payments/${paymentId}/refund`).set(HEADER, ID.owner).send({ reason: 'cpi test refund' });
+}
+
+/** Mirrors CommerceService.manualProviderPaymentId's digest so a test can occupy a slot. */
+const digest = (material: string) => createHash('sha256').update(material, 'utf8').digest('hex').slice(0, 32);
+
+async function seedInvoice(id: string, invoiceNumber: string, businessId: string, contactId: string) {
+  await db.invoice.create({
+    data: {
+      id,
+      invoiceNumber,
+      status: 'SENT',
+      subtotal: INVOICE_TOTAL,
+      total: INVOICE_TOTAL,
+      currency: 'TTD',
+      businessId,
+      contactId,
+      items: { create: [{ id: `${id}_item1`, description: `CPI item ${invoiceNumber}`, quantity: 1, unitPrice: INVOICE_TOTAL, total: INVOICE_TOTAL }] },
+    },
+  });
 }
 
 async function paymentsOf(invoiceId: string): Promise<any[]> {
@@ -214,6 +283,8 @@ beforeAll(async () => {
   const { CommerceVisionService } = await import('../src/modules/commerce/commerce-vision.service');
   const { StoreReadinessService } = await import('../src/modules/commerce/store-readiness.service');
   const { PaymentEvidenceService } = await import('../src/modules/commerce/payment-evidence.service');
+  const { DocumentIntelligenceService } = await import('../src/modules/ai/document-intelligence.service');
+  const { GoogleDriveService } = await import('../src/modules/google-drive/google-drive.service');
   const { TimeEntryService } = await import('../src/modules/time-tracking/time-entry.service');
   const { CatalogService } = await import('../src/modules/catalog/catalog.service');
   const { PublicEventsService } = await import('../src/modules/public-events/public-events.service');
@@ -256,9 +327,15 @@ beforeAll(async () => {
       { provide: GmailService, useValue: {} },
       { provide: CommerceVisionService, useValue: {} },
       { provide: StoreReadinessService, useValue: {} },
-      { provide: PaymentEvidenceService, useValue: {} },
+      // CR-1: the real PaymentEvidenceService over the real CommerceService;
+      // AI extraction and the Drive download are the stubs.
+      PaymentEvidenceService,
+      { provide: DocumentIntelligenceService, useValue: docIntelStub },
+      { provide: GoogleDriveService, useValue: {} },
     ],
   }).compile();
+  commerce = moduleRef.get(CommerceService);
+  evidence = moduleRef.get(PaymentEvidenceService);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -303,6 +380,20 @@ beforeAll(async () => {
       },
     });
   }
+
+  // ST-D2-1: a second tenant with one invoice of its own.
+  await db.user.create({ data: { id: FOREIGN.owner, email: `${FOREIGN.owner}@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: FOREIGN.biz, name: 'CPI Foreign', ownerId: FOREIGN.owner, currency: 'TTD' } });
+  await db.contact.create({ data: { id: FOREIGN.contact, businessId: FOREIGN.biz, firstName: 'Cpi', lastName: 'Foreign', email: `${P}f@test.local` } });
+  await seedInvoice(FOREIGN.inv, 'CPI-B-001', FOREIGN.biz, FOREIGN.contact);
+
+  // ST-D2-2: the owner's second tenant, with its own chart, for the refund cases.
+  await db.business.create({ data: { id: REFUND.biz, name: 'CPI Refund', ownerId: ID.owner, currency: 'TTD' } });
+  await db.membership.create({ data: { id: `${P}m_owner_refund`, userId: ID.owner, businessId: REFUND.biz, role: 'OWNER' } });
+  await db.contact.create({ data: { id: REFUND.contact, businessId: REFUND.biz, firstName: 'Cpi', lastName: 'Refund', email: `${P}r@test.local` } });
+  await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(REFUND.biz);
+  await seedInvoice(REFUND.invRef, 'CPI-R-001', REFUND.biz, REFUND.contact);
+  await seedInvoice(REFUND.invKey, 'CPI-R-002', REFUND.biz, REFUND.contact);
 }, 180_000);
 
 afterAll(async () => {
@@ -545,6 +636,175 @@ describe('reference without idempotencyKey (policy: same invoice + same non-empt
     expect(await paymentsOf(ID.invNoKey)).toHaveLength(2);
     await expectPostedOnce(a.body.payment.id, 15);
     await expectPostedOnce(b.body.payment.id, 15);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review ST-D2-1: the idempotency lookup is scoped to the caller's tenant and
+// invoice. providerPaymentId is unique table-wide and client-chosen on other
+// surfaces, so a foreign row sitting in this invoice's slot must never come
+// back as a "replay" (that handed tenant B's payment to tenant A as a 201 and
+// silently dropped A's genuine receipt). It answers 409 and writes nothing.
+// ---------------------------------------------------------------------------
+describe('review ST-D2-1: a providerPaymentId slot held by another tenant is never a replay', () => {
+  async function plant(id: string, providerPaymentId: string, amount: number) {
+    return db.payment.create({
+      data: { id, amount, currency: 'TTD', status: 'SUCCESSFUL', provider: 'wipay', method: 'card', providerPaymentId, businessId: FOREIGN.biz, invoiceId: FOREIGN.inv },
+    });
+  }
+
+  it('key slot: tenant A answers 409 CONFLICT and records nothing; the foreign row is untouched; another key still records', async () => {
+    const planted = await plant(`${P}pay_plant_key`, `manual_${ID.invPlantKey}_key_${digest('plant')}`, 10);
+
+    const res = await post(ID.invPlantKey, { idempotencyKey: 'plant', amount: 10, method: 'cash' });
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expectErrorEnvelope(res.body, 409, 'CONFLICT');
+    expect(res.body.payment).toBeUndefined();
+    expect(await paymentsOf(ID.invPlantKey)).toHaveLength(0);
+    expect(crmCalls).toEqual([]);
+    const bal = await balance(ID.invPlantKey);
+    expect(bal.body).toMatchObject({ paidAmount: 0, remaining: INVOICE_TOTAL });
+    expect(await db.payment.findUnique({ where: { id: planted.id } })).toMatchObject({
+      businessId: FOREIGN.biz, invoiceId: FOREIGN.inv, amount: 10, status: 'SUCCESSFUL',
+    });
+
+    const ok = await post(ID.invPlantKey, { idempotencyKey: 'plant-2', amount: 10, method: 'cash' });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body.payment).toMatchObject({ businessId: ID.biz, invoiceId: ID.invPlantKey, amount: 10 });
+    expect(await paymentsOf(ID.invPlantKey)).toHaveLength(1);
+  });
+
+  it('reference slot: the same 409, nothing recorded for tenant A, invoice still SENT', async () => {
+    await plant(`${P}pay_plant_ref`, `manual_${ID.invPlantRef}_ref_${digest('cash\n100.00')}`, 100);
+
+    const res = await post(ID.invPlantRef, { reference: 'cash', amount: 100, method: 'cash' });
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expectErrorEnvelope(res.body, 409, 'CONFLICT');
+    expect(res.body.payment).toBeUndefined();
+    expect(await paymentsOf(ID.invPlantRef)).toHaveLength(0);
+    expect(crmCalls).toEqual([]);
+    expect(await invoiceStatus(ID.invPlantRef)).toBe('SENT');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review ST-D2-2: a slot whose payment was refunded is not a replay. Before
+// the repair the same key / reference + amount answered 201 with the REFUNDED
+// row, paidAmount 0, wrote nothing, and the slot was permanently dead. Now it
+// is 409 naming the refund, and a new reference/key records the new receipt.
+// ---------------------------------------------------------------------------
+describe('review ST-D2-2: a refunded payment in the slot answers 409, never a silent no-op', () => {
+  it('reference + amount: record, refund through the real route, same body -> 409; a new reference records again', async () => {
+    const body = { amount: 20, method: 'bank_transfer', reference: 'EFT-9' };
+    const first = await postIn(REFUND.biz, REFUND.invRef, body);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const refunded = await refund(REFUND.biz, first.body.payment.id);
+    expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
+    expect(refunded.body.status).toBe('REFUNDED');
+    crmCalls.length = 0;
+
+    const again = await postIn(REFUND.biz, REFUND.invRef, body);
+    expect(again.status, JSON.stringify(again.body)).toBe(409);
+    expectErrorEnvelope(again.body, 409, 'CONFLICT');
+    expect(again.body.message).toMatch(/refunded/i);
+    expect(again.body.payment).toBeUndefined();
+    expect(await paymentsOf(REFUND.invRef)).toHaveLength(1);
+    expect(crmCalls).toEqual([]);
+    const bal = await balanceIn(REFUND.biz, REFUND.invRef);
+    expect(bal.body).toMatchObject({ paidAmount: 0, remaining: INVOICE_TOTAL });
+
+    // The invoice is not dead: a new reference records the new receipt.
+    const fresh = await postIn(REFUND.biz, REFUND.invRef, { ...body, reference: 'EFT-10' });
+    expect(fresh.status, JSON.stringify(fresh.body)).toBe(201);
+    expect(fresh.body.payment.id).not.toBe(first.body.payment.id);
+    expect(fresh.body.paidAmount).toBe(20);
+    expect(await paymentsOf(REFUND.invRef)).toHaveLength(2);
+    expect(crmCalls).toHaveLength(1);
+  });
+
+  it('idempotencyKey: the same key after the refund -> 409 naming the key and the refund; a new key records again', async () => {
+    const body = { amount: 20, method: 'cash', idempotencyKey: 'kk' };
+    const first = await postIn(REFUND.biz, REFUND.invKey, body);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect((await refund(REFUND.biz, first.body.payment.id)).body.status).toBe('REFUNDED');
+
+    const again = await postIn(REFUND.biz, REFUND.invKey, body);
+    expect(again.status, JSON.stringify(again.body)).toBe(409);
+    expectErrorEnvelope(again.body, 409, 'CONFLICT');
+    expect(again.body.message).toMatch(/idempotency key/i);
+    expect(again.body.message).toMatch(/refunded/i);
+    expect(await paymentsOf(REFUND.invKey)).toHaveLength(1);
+
+    const fresh = await postIn(REFUND.biz, REFUND.invKey, { ...body, idempotencyKey: 'kk-2' });
+    expect(fresh.status, JSON.stringify(fresh.body)).toBe(201);
+    expect(fresh.body.payment.id).not.toBe(first.body.payment.id);
+    expect(fresh.body.paidAmount).toBe(20);
+    expect(await paymentsOf(REFUND.invKey)).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review CR-1: the reference + amount heuristic belongs to the HTTP route
+// only. PaymentEvidenceService.processEvidence passes the invoice number the
+// document cites as `reference`, so with the heuristic at service level a
+// split payment documented by two receipts collapsed onto the first Payment
+// (one row, the second receipt's evidence dropped, success reported, invoice
+// stuck PARTIALLY_PAID). Internal callers get one row per call, as at the
+// merge base, and may opt in with an idempotencyKey of their own identity.
+// ---------------------------------------------------------------------------
+describe('review CR-1: internal callers are not keyed on a document-derived reference', () => {
+  const receipt = (filename: string) => ({
+    businessId: ID.biz,
+    invoiceId: ID.invEvidence,
+    evidenceUrl: `https://evidence.test/${filename}`,
+    evidenceMimeType: 'application/pdf',
+    filename,
+    source: 'upload' as const,
+  });
+
+  it('two receipts citing the invoice number for the same amount record two payments through the real PaymentEvidenceService; the invoice settles', async () => {
+    nextExtraction = { documentType: 'receipt', confidence: 0.9, invoiceData: { invoiceNumber: 'CPI-EVID-001', total: 50, notes: 'bank transfer' } };
+
+    const first = await evidence.processEvidence(receipt('receipt-deposit.pdf'));
+    expect(first.payment).toMatchObject({ amount: 50, reference: 'CPI-EVID-001', evidenceUrl: 'https://evidence.test/receipt-deposit.pdf' });
+    expect(first.invoiceStatus).toBe('PARTIALLY_PAID');
+
+    const second = await evidence.processEvidence(receipt('receipt-balance.pdf'));
+    expect(second.payment.id).not.toBe(first.payment.id);
+    expect(second.payment).toMatchObject({ amount: 50, reference: 'CPI-EVID-001', evidenceUrl: 'https://evidence.test/receipt-balance.pdf' });
+    expect(second.invoiceStatus).toBe('PAID');
+
+    const rows = await paymentsOf(ID.invEvidence);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.evidenceUrl).sort()).toEqual(['https://evidence.test/receipt-balance.pdf', 'https://evidence.test/receipt-deposit.pdf']);
+    expect(new Set(rows.map((r) => r.providerPaymentId)).size).toBe(2);
+    await expectPostedOnce(first.payment.id, 50);
+    await expectPostedOnce(second.payment.id, 50);
+    expect(await invoiceStatus(ID.invEvidence)).toBe('PAID');
+    expect(crmCalls).toHaveLength(2);
+  });
+
+  it('a direct service call (the drive-intake / Key cortex shape) with the same reference and amount twice records two payments', async () => {
+    const input = { amount: 30, method: 'cash', reference: 'INV-CITED' };
+    const a = await commerce.recordPayment(ID.invInternalRef, ID.biz, input);
+    const b = await commerce.recordPayment(ID.invInternalRef, ID.biz, input);
+    expect(a.payment.id).not.toBe(b.payment.id);
+    expect(b.paidAmount).toBe(60);
+    expect(await paymentsOf(ID.invInternalRef)).toHaveLength(2);
+    await expectPostedOnce(a.payment.id, 30);
+    await expectPostedOnce(b.payment.id, 30);
+    expect(crmCalls).toHaveLength(2);
+  });
+
+  it('an internal caller opts in with an idempotencyKey of its own identity: the second call replays, one row', async () => {
+    const input = { amount: 30, method: 'cash', reference: 'INV-CITED', idempotencyKey: 'evidence:https://evidence.test/one.pdf' };
+    const a = await commerce.recordPayment(ID.invInternalKey, ID.biz, input);
+    const b = await commerce.recordPayment(ID.invInternalKey, ID.biz, input);
+    expect(b.payment.id).toBe(a.payment.id);
+    expect(b.paidAmount).toBe(30);
+    expect(await paymentsOf(ID.invInternalKey)).toHaveLength(1);
+    await expectPostedOnce(a.payment.id, 30);
+    expect(crmCalls).toHaveLength(1);
   });
 });
 

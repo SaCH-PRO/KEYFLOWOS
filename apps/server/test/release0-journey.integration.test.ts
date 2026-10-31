@@ -653,7 +653,12 @@ describe('step 4 — offline payment through POST /commerce/businesses/:bizA/inv
     note(4, 'payment / balance / ledger', 'GET .../invoices/:id/payments + financial_transactions', balance.status, `PARTIALLY_PAID paid=100 remaining=150 ledger=${keys.join(',')}`);
   });
 
-  it.fails('a duplicate submit of the same offline payment (same reference) is idempotent — it is not: a second Payment row is created and the balance double-counts', async () => {
+  // R0-D2-MANUAL-PAYMENT-IDEMPOTENCY landed: on this route the same non-empty
+  // reference for the same amount on the same invoice is the same offline
+  // payment (providerPaymentId manual_<invoiceId>_ref_<hash>), so the
+  // duplicate slip is absorbed and the case is back to a plain `it` (it was
+  // `it.fails` while every submit minted manual_<now>_<random>).
+  it('a duplicate submit of the same offline payment (same reference) is absorbed: the first payment is returned, one row, balance unchanged', async () => {
     requireServer();
     expect(S.firstPaymentId).toBeTruthy();
     const before = await db.payment.count({ where: { invoiceId: S.invoiceId } });
@@ -661,10 +666,8 @@ describe('step 4 — offline payment through POST /commerce/businesses/:bizA/inv
     const after = await db.payment.findMany({ where: { invoiceId: S.invoiceId }, orderBy: { createdAt: 'asc' } });
     const balance = await call(4, 'get', `/commerce/businesses/${S.bizA}/invoices/${S.invoiceId}/payments`, { token: OWNER });
     note(4, 'duplicate submit', 'POST .../payments (same reference)', dup.status, `payments ${before}->${after.length} paid=${balance.body?.paidAmount} remaining=${balance.body?.remaining}`);
-    // Intended: the replay is absorbed (same payment returned, or 409), one row, balance unchanged.
-    // Observed: providerPaymentId is minted as manual_<now>_<random> per call and `reference` is not a key,
-    // so the duplicate lands as a second SUCCESSFUL payment and paidAmount doubles.
-    expect([200, 201, 409]).toContain(dup.status);
+    expect(dup.status, JSON.stringify(dup.body)).toBe(201);
+    expect(dup.body.payment.id).toBe(S.firstPaymentId);
     expect(after).toHaveLength(before);
     expect(balance.body.paidAmount).toBe(100);
   });

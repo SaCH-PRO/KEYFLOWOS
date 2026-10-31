@@ -1560,7 +1560,21 @@ export class CommerceService {
     evidenceMimeType?: string;
     /** R0-D2: client idempotency key, scoped to the invoice (see RecordPaymentDto). */
     idempotencyKey?: string;
-  }) {
+  }, options: {
+    /**
+     * R0-D2 review (CR-1): without a key, treat the same non-empty
+     * `reference` for the same amount on this invoice as the same payment.
+     * Only the HTTP route sets this, where `reference` is the operator's
+     * payment reference (the journey's duplicate slip). Internal callers
+     * (PaymentEvidenceService, DriveIntakeOrchestrator, the Key cortex
+     * adapter) pass a document-derived reference such as the invoice number,
+     * which is not a payment identity: for them a reference never keys the
+     * row and every call records its own payment, as before this packet.
+     * They may pass `idempotencyKey` derived from their own identity
+     * (evidence URL, drive file id, tool-call id) to opt in.
+     */
+    dedupeByReference?: boolean;
+  } = {}) {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
       include: { payments: true },
@@ -1597,13 +1611,15 @@ export class CommerceService {
     // the create-or-return race-safe. This runs before the state guard: the
     // first submit may have settled the invoice to PAID, and the client that
     // lost that response still deserves the same answer.
-    const providerPaymentId = CommerceService.manualProviderPaymentId(invoiceId, input);
-    if (providerPaymentId.deterministic) {
-      const existing = await this.prisma.client.payment.findUnique({
-        where: { providerPaymentId: providerPaymentId.value },
-      });
+    const providerPaymentId = CommerceService.manualProviderPaymentId(
+      invoiceId,
+      input,
+      options.dedupeByReference === true,
+    );
+    if (providerPaymentId.keyedOn) {
+      const existing = await this.findRecordedPayment(providerPaymentId.value, businessId, invoiceId);
       if (existing) {
-        return this.replayRecordedPayment(existing, invoiceId, input.amount);
+        return this.replayRecordedPayment(existing, invoiceId, input.amount, providerPaymentId.keyedOn);
       }
     }
 
@@ -1656,14 +1672,16 @@ export class CommerceService {
       // R0-D2 race: a concurrent duplicate submit won the insert between our
       // lookup and our create. Prisma raises P2002 on the unique index, the
       // transaction (payment row + posting) has rolled back, and the winner's
-      // row is the answer. Any other P2002 (nothing under our id) is rethrown.
-      if (providerPaymentId.deterministic && (err as { code?: string } | null)?.code === 'P2002') {
-        const existing = await this.prisma.client.payment.findUnique({
-          where: { providerPaymentId: providerPaymentId.value },
-        });
+      // row is the answer. A P2002 on any other index is rethrown.
+      if (providerPaymentId.keyedOn && CommerceService.isProviderPaymentIdConflict(err)) {
+        const existing = await this.findRecordedPayment(providerPaymentId.value, businessId, invoiceId);
         if (existing) {
-          return this.replayRecordedPayment(existing, invoiceId, input.amount);
+          return this.replayRecordedPayment(existing, invoiceId, input.amount, providerPaymentId.keyedOn);
         }
+        // R0-D2 review (ST-D2-1): the slot is held by a row outside this
+        // tenant/invoice (providerPaymentId is client-chosen on other
+        // surfaces). It is never this caller's replay: say so, write nothing.
+        throw new ConflictException('Payment identifier already in use; use a new idempotency key or reference');
       }
       throw err;
     }
@@ -1712,41 +1730,80 @@ export class CommerceService {
    * R0-D2: providerPaymentId for a manual record.
    *
    *   idempotencyKey (trimmed, non-empty)  -> manual_<invoiceId>_key_<sha256(key)>
-   *   else reference (trimmed, non-empty)  -> manual_<invoiceId>_ref_<sha256(reference + amount)>
-   *   else                                 -> manual_<now>_<random>   (not deterministic)
+   *   else reference (trimmed, non-empty),
+   *        when dedupeByReference          -> manual_<invoiceId>_ref_<sha256(reference + amount)>
+   *   else                                 -> manual_<now>_<random>   (keyedOn: null)
    *
-   * The key is scoped to the invoice. Without a key, the same non-empty
-   * reference for the same amount on the same invoice is the same offline
-   * payment (the journey's duplicate slip); the same reference for a
-   * different amount is a different payment. The hash keeps the unique
-   * column bounded whatever the client sends. The `manual_` prefix is part
-   * of the existing contract for manually recorded payments.
+   * The key is scoped to the invoice. Without a key, on the HTTP route only
+   * (CR-1), the same non-empty reference for the same amount on the same
+   * invoice is the same offline payment (the journey's duplicate slip); the
+   * same reference for a different amount is a different payment. The hash
+   * keeps the unique column bounded whatever the client sends. The `manual_`
+   * prefix is part of the existing contract for manually recorded payments.
    */
   private static manualProviderPaymentId(
     invoiceId: string,
     input: { amount: number; reference?: string; idempotencyKey?: string },
-  ): { value: string; deterministic: boolean } {
+    dedupeByReference: boolean,
+  ): { value: string; keyedOn: 'key' | 'reference' | null } {
     const digest = (material: string) => createHash('sha256').update(material, 'utf8').digest('hex').slice(0, 32);
     const key = typeof input.idempotencyKey === 'string' ? input.idempotencyKey.trim() : '';
     if (key.length > 0) {
-      return { value: `manual_${invoiceId}_key_${digest(key)}`, deterministic: true };
+      return { value: `manual_${invoiceId}_key_${digest(key)}`, keyedOn: 'key' };
     }
-    const reference = typeof input.reference === 'string' ? input.reference.trim() : '';
+    const reference = dedupeByReference && typeof input.reference === 'string' ? input.reference.trim() : '';
     if (reference.length > 0) {
-      return { value: `manual_${invoiceId}_ref_${digest(`${reference}\n${input.amount.toFixed(2)}`)}`, deterministic: true };
+      return { value: `manual_${invoiceId}_ref_${digest(`${reference}\n${input.amount.toFixed(2)}`)}`, keyedOn: 'reference' };
     }
-    return { value: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, deterministic: false };
+    return { value: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, keyedOn: null };
+  }
+
+  /**
+   * R0-D2 review (ST-D2-1): the idempotency record is looked up inside the
+   * caller's tenant AND invoice. Payment.providerPaymentId is unique
+   * table-wide but client-chosen on other surfaces (the public WiPay
+   * callback), so a row from another tenant or invoice occupying this slot
+   * is never handed back as this caller's replay.
+   */
+  private findRecordedPayment(providerPaymentId: string, businessId: string, invoiceId: string) {
+    return this.prisma.client.payment.findFirst({ where: { providerPaymentId, businessId, invoiceId } });
+  }
+
+  /** Prisma P2002 raised by the Payment.providerPaymentId unique index (not by another index inside the same transaction). */
+  private static isProviderPaymentIdConflict(err: unknown): boolean {
+    const e = err as { code?: string; meta?: { target?: unknown } } | null;
+    if (e?.code !== 'P2002') return false;
+    const target = e.meta?.target;
+    if (target == null) return true;
+    const fields = Array.isArray(target) ? target.map(String) : [String(target)];
+    return fields.some((f) => /provider_?payment_?id/i.test(f));
   }
 
   /**
    * R0-D2: answer a duplicate submit with the payment it already recorded, in
    * the same envelope as a fresh record and with the current balance. Nothing
    * is written, reconciled, posted or logged. A key reused for a different
-   * amount is a conflict, not a replay.
+   * amount is a conflict, not a replay; so is a slot whose payment is no
+   * longer SUCCESSFUL.
    */
-  private async replayRecordedPayment(existing: Payment, invoiceId: string, amount: number) {
+  private async replayRecordedPayment(existing: Payment, invoiceId: string, amount: number, keyedOn: 'key' | 'reference') {
     if (Math.abs(Number(existing.amount) - amount) > 0.005) {
       throw new ConflictException('Idempotency key already used on this invoice with a different amount');
+    }
+    // R0-D2 review (ST-D2-2): once the operator refunded the payment in this
+    // slot, a later genuine receipt under the same key or reference + amount
+    // is not a replay of a successful record. A silent 201 no-op would leave
+    // that key/reference permanently dead on this invoice while the API
+    // reports success and writes nothing; answer 409 so the operator records
+    // the new receipt under a new key/reference.
+    if (existing.status !== 'SUCCESSFUL') {
+      const slot = keyedOn === 'key' ? 'idempotency key' : 'reference and amount';
+      const fresh = keyedOn === 'key' ? 'idempotency key' : 'reference';
+      throw new ConflictException(
+        `A payment with this ${slot} was already recorded on this invoice and is now ${existing.status}` +
+          (existing.status === 'REFUNDED' ? ' (refunded)' : '') +
+          `; use a new ${fresh} to record another payment`,
+      );
     }
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },

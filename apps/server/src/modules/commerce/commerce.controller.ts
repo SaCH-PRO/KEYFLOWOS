@@ -1269,7 +1269,11 @@ export class CommerceController {
     // optional idempotencyKey.
     @Body() body: RecordPaymentDto,
   ) {
-    return this.commerce.recordPayment(invoiceId, businessId, body);
+    // R0-D2 review (CR-1): only this route keys a manual record on its
+    // reference + amount. Here `reference` is the operator's payment
+    // reference (the journey's duplicate slip); internal callers pass a
+    // document-derived reference and keep one row per call.
+    return this.commerce.recordPayment(invoiceId, businessId, body, { dedupeByReference: true });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
