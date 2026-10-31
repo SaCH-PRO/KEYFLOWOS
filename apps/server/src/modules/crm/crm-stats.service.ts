@@ -147,10 +147,29 @@ export class CrmStatsService {
     return 'Unnamed';
   }
 
-  private async assertContact(businessId: string, contactId: string) {
-    const contact = await this.prisma.client.contact.findFirst({
-      where: contactWhereWithId(businessId, contactId),
-    });
+  /**
+   * Resolve one contact the way the list path does.
+   *
+   * With an actor, the row must satisfy the actor's effective CRM visibility
+   * (`resolveCrmAccess` + `visibilityClause`, the same rule `listContacts`
+   * applies) as well as the tenant predicate. A row the actor may not see is
+   * reported exactly like an absent one, so a forbidden PRIVATE record is
+   * never disclosed, and nothing related to it is read.
+   *
+   * Without an actor the tenant predicate alone applies, as before. That is
+   * the system context: automation, the flow executor and the KEY adapter
+   * reach this through `CrmService.contactDetail` with no caller identity.
+   */
+  private async assertContact(businessId: string, contactId: string, actorUserId?: string) {
+    const where: Prisma.ContactWhereInput = { ...contactWhereWithId(businessId, contactId) };
+    if (actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+      const visClause = visibilityClause(access, actorUserId);
+      if (visClause) {
+        where.AND = [visClause];
+      }
+    }
+    const contact = await this.prisma.client.contact.findFirst({ where });
     if (!contact) {
       throw new NotFoundException('Contact not found');
     }
@@ -570,40 +589,12 @@ export class CrmStatsService {
   }
 
   /**
-   * Resolve a contact for the detail and dossier routes with RECORD-level access.
-   *
-   * The list route AND's `visibilityClause` onto its query (crm.service.ts
-   * listContacts). Until KF-PRODUCT-CONTACTS-PILOT-001 the detail route resolved
-   * the row by `{ id, businessId, deletedAt: null }` alone, so a "my book" member,
-   * or a view-all member on another person's PRIVATE record, could read by id what
-   * the list hid, together with its notes, tasks, invoices and bookings.
-   *
-   * With an actor, the same `resolveCrmAccess` / `visibilityClause` semantics the
-   * list uses are applied in the SAME query that fetches the row, before any child
-   * row is read. A row the actor may not see resolves exactly like a missing row,
-   * `NotFoundException('Contact not found')`, the established not-found policy, so
-   * a forbidden record is not distinguishable from a nonexistent id.
-   *
-   * Without an actor (system and automation callers through
-   * `CrmService.contactDetail`) behaviour is unchanged: tenant and soft-delete only.
+   * Contact detail projection. `actorUserId` is the caller whose CRM
+   * visibility bounds the lookup (the HTTP route always supplies it); omitted
+   * only by system-context callers, which keep the tenant-only predicate.
    */
-  private async assertContactVisibleTo(businessId: string, contactId: string, actorUserId?: string) {
-    if (!actorUserId) return this.assertContact(businessId, contactId);
-    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
-    const visClause = visibilityClause(access, actorUserId);
-    const contact = await this.prisma.client.contact.findFirst({
-      where: visClause
-        ? { ...contactWhereWithId(businessId, contactId), AND: [visClause] }
-        : contactWhereWithId(businessId, contactId),
-    });
-    if (!contact) {
-      throw new NotFoundException('Contact not found');
-    }
-    return contact;
-  }
-
   async contactDetail(params: { businessId: string; contactId: string; actorUserId?: string }) {
-    const contact = await this.assertContactVisibleTo(params.businessId, params.contactId, params.actorUserId);
+    const contact = await this.assertContact(params.businessId, params.contactId, params.actorUserId);
     const [events, notes, tasks, invoices, bookings, customFieldValues] = await Promise.all([
       this.prisma.client.contactEvent.findMany({
         where: { businessId: params.businessId, contactId: params.contactId },
