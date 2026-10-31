@@ -488,6 +488,15 @@ export class CrmService {
     actorUserId?: string;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
+    // The same M7 edit scope updateContact enforces: a member whose crm_edit
+    // is 'none' passes the module guard on crm:write but may not write
+    // contacts, so creating one is refused before anything is written.
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      if (!access.isOwner && !access.isSuperAdmin && access.editScope === 'none') {
+        throw new ForbiddenException('You do not have permission to create contacts');
+      }
+    }
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
       return trimmed ? trimmed : null;
