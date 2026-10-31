@@ -10,6 +10,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
+import { getTenantContext, runWithTenant } from '../../core/tenant/tenant-context';
 import { EvalHarnessService } from './eval-harness.service';
 import { SelfAssessmentService } from './self-assessment.service';
 import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
@@ -27,7 +28,9 @@ import { ComplianceMapService } from '../key-autonomy/compliance-map.service';
  * a member of business A who named A got every tenant's AutonomyVerdict and
  * ValueConstraint rows. They now take `@GuardedBusinessId()`, the same
  * resolver the guard ran, so a handler cannot act on a tenant the guard did
- * not check.
+ * not check — and they run their reads with the ambient tenant (the one the
+ * Prisma tenant extension injects) pinned to that same tenant; see
+ * `inGuardedTenant`.
  */
 @Controller('/api/v1/cortex')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -51,6 +54,43 @@ export class KeyCortexAuditController {
   private requireGuardedTenant(businessId: string | undefined): string {
     if (!businessId) throw new ForbiddenException('businessId is required');
     return businessId;
+  }
+
+  /**
+   * Run an audit read for the guard-checked tenant, with the ambient tenant
+   * pinned to it.
+   *
+   * R0-34 review ST-1. In production the global TenantInterceptor
+   * (app.module.ts) installs the ambient tenant from
+   * `params.businessId || body.businessId || query.businessId` with no type
+   * check, and the Prisma tenant extension (packages/db) then overwrites every
+   * scoped query's `where.businessId` with it. BusinessGuard and
+   * @GuardedBusinessId take the first non-empty STRING instead. So
+   * `GET audit/decisions?businessId=A` with the JSON body
+   * `{"businessId":{"not":"x"}}` (or `{"equals":"B"}`, or the urlencoded
+   * `businessId[not]=x`) passed the guard against A and reached this handler
+   * with A, and the extension replaced the handler's `where.businessId: 'A'`
+   * with the object, which Prisma reads as a filter: every tenant's rows, or
+   * B's, under a response that said A.
+   *
+   * Re-binding the ambient tenant to the guard-checked string makes the
+   * extension inject exactly what the handler and the guard agreed on. When no
+   * ambient tenant is installed (the interceptor did not run) the extension is
+   * inert and the explicit `where` binds alone. The interceptor itself is
+   * outside this packet; once it resolves the tenant with
+   * resolveRequestBusinessId, this re-bind is a no-op.
+   *
+   * `read` must await its queries itself: a Prisma query runs when it is
+   * awaited, so one returned un-awaited would execute after this context ends.
+   */
+  private async inGuardedTenant<T>(
+    guardedBusinessId: string | undefined,
+    read: (businessId: string) => Promise<T>,
+  ): Promise<T> {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
+    const ambient = getTenantContext();
+    if (!ambient) return read(businessId);
+    return runWithTenant(businessId, ambient.userId, () => read(businessId));
   }
 
   @Get('eval/suites')
@@ -93,41 +133,45 @@ export class KeyCortexAuditController {
 
   @Get('audit/decisions')
   async auditDecisions(@GuardedBusinessId() guardedBusinessId: string | undefined) {
-    const businessId = this.requireGuardedTenant(guardedBusinessId);
-    const [recent, total, blocked] = await Promise.all([
-      this.prisma.client.autonomyVerdict.findMany({
-        where: { businessId },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
-      this.prisma.client.autonomyVerdict.count({ where: { businessId } }),
-      this.prisma.client.autonomyVerdict.count({ where: { businessId, allowed: false } }),
-    ]);
+    return this.inGuardedTenant(guardedBusinessId, async (businessId) => {
+      const [recent, total, blocked] = await Promise.all([
+        this.prisma.client.autonomyVerdict.findMany({
+          where: { businessId },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        }),
+        this.prisma.client.autonomyVerdict.count({ where: { businessId } }),
+        this.prisma.client.autonomyVerdict.count({ where: { businessId, allowed: false } }),
+      ]);
 
-    return { businessId, total, blocked, recent };
+      return { businessId, total, blocked, recent };
+    });
   }
 
   @Get('audit/values')
   async auditValues(@GuardedBusinessId() guardedBusinessId: string | undefined) {
-    const businessId = this.requireGuardedTenant(guardedBusinessId);
-    const constraints = await this.valueLearning.getValueConstraints(businessId, 0);
-    const drift = await this.valueLearning.detectDrift(businessId);
-    return { businessId, constraints, drift };
+    return this.inGuardedTenant(guardedBusinessId, async (businessId) => {
+      const constraints = await this.valueLearning.getValueConstraints(businessId, 0);
+      const drift = await this.valueLearning.detectDrift(businessId);
+      return { businessId, constraints, drift };
+    });
   }
 
   @Get('audit/assessment')
   async auditAssessment(@GuardedBusinessId() guardedBusinessId: string | undefined) {
-    const businessId = this.requireGuardedTenant(guardedBusinessId);
-    const report = await this.selfAssessment.generate(businessId);
-    const compliance = this.compliance.getAll();
-    return { businessId, report, compliance };
+    return this.inGuardedTenant(guardedBusinessId, async (businessId) => {
+      const report = await this.selfAssessment.generate(businessId);
+      const compliance = this.compliance.getAll();
+      return { businessId, report, compliance };
+    });
   }
 
   @Get('audit/acceptance')
   async auditAcceptance(@GuardedBusinessId() guardedBusinessId: string | undefined) {
-    const businessId = this.requireGuardedTenant(guardedBusinessId);
-    const scenario = this.acceptance.getScenario();
-    const result = await this.acceptance.evaluate(businessId);
-    return { businessId, scenario, result };
+    return this.inGuardedTenant(guardedBusinessId, async (businessId) => {
+      const scenario = this.acceptance.getScenario();
+      const result = await this.acceptance.evaluate(businessId);
+      return { businessId, scenario, result };
+    });
   }
 }

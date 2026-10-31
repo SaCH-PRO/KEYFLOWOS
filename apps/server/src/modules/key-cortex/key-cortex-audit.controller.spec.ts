@@ -15,6 +15,9 @@
  *     so the value it receives is the one BusinessGuard checked;
  *   - a handler that receives no tenant (SUPER_ADMIN bypasses BusinessGuard)
  *     refuses instead of calling a service with `undefined`;
+ *   - a handler runs its reads with the ambient tenant (the one the Prisma
+ *     tenant extension injects) pinned to the guard-checked tenant, whatever
+ *     TenantInterceptor installed (R0-34 review ST-1);
  *   - no route on this controller, and no route anywhere in apps/server/src,
  *     reads `@Param('businessId')` on a path without `:businessId`.
  *
@@ -35,6 +38,7 @@ import {
 import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 import { KeyCortexAuditController } from './key-cortex-audit.controller';
 import { resolveRequestBusinessId } from '../../core/auth/request-business-id';
+import { getTenantContext, runWithTenant } from '../../core/tenant/tenant-context';
 
 const SERVER_SRC = join(__dirname, '..', '..');
 
@@ -275,6 +279,40 @@ describe('KeyCortexAuditController tenant binding (R0-34)', () => {
           const tenant = typeof first === 'object' && first !== null ? (first as any).where?.businessId : first;
           expect(tenant).toBe('biz_A');
         }
+      });
+    }
+  });
+
+  // R0-34 review ST-1. In production TenantInterceptor installs the ambient
+  // tenant (the one the Prisma tenant extension writes over every scoped
+  // query's where.businessId) from the first TRUTHY businessId field, so
+  // `?businessId=biz_A` with the body {"businessId":{"not":"x"}} installs the
+  // object while the guard and the handler resolve biz_A.
+  describe('a handler pins the ambient tenant to the guard-checked tenant', () => {
+    for (const handler of AUDIT_HANDLERS) {
+      it(`${handler} runs every read under the guard-checked tenant when another ambient tenant is installed`, async () => {
+        const seen: Array<{ businessId: unknown; userId: unknown }> = [];
+        const reads = [
+          rig.prisma.client.autonomyVerdict.findMany,
+          rig.prisma.client.autonomyVerdict.count,
+          rig.valueLearning.getValueConstraints,
+          rig.valueLearning.detectDrift,
+          rig.selfAssessment.generate,
+          rig.acceptance.evaluate,
+        ];
+        for (const read of reads) {
+          const impl = read.getMockImplementation();
+          read.mockImplementation((...args: unknown[]) => {
+            const ctx = getTenantContext();
+            seen.push({ businessId: ctx?.businessId, userId: ctx?.userId });
+            return impl?.(...args);
+          });
+        }
+        const steered = { not: 'x' } as unknown as string;
+        const body = await runWithTenant(steered, 'user_1', () => call(rig.controller, handler, 'biz_A'));
+        expect(body.businessId).toBe('biz_A');
+        expect(seen.length).toBeGreaterThan(0);
+        expect(seen).toEqual(seen.map(() => ({ businessId: 'biz_A', userId: 'user_1' })));
       });
     }
   });

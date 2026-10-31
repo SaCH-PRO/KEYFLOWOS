@@ -22,6 +22,31 @@
  * seeded user row's `{ id, email, role }`, as AuthMiddleware does after token
  * verification) and EvalHarnessService, which the audit routes never call.
  *
+ * Two request pipelines (R0-34 review ST-1, ST-2):
+ *   - `app` is the PRODUCTION pipeline: TenantInterceptor is installed as an
+ *     APP_INTERCEPTOR (app.module.ts) and the Prisma tenant extension's context
+ *     provider is installed (main.ts, setTenantContextProvider), so every scoped
+ *     query has `where.businessId` overwritten with the ambient tenant the
+ *     interceptor picked. Every case runs here unless it says otherwise.
+ *   - `bareApp` has no TenantInterceptor, so the extension is inert and the
+ *     handler's own binding is the only control. It proves the handler binds
+ *     the tenant by itself, independent of the extension.
+ *
+ * What leaked at the base (5787c722), measured under the production pipeline:
+ * a member of A naming `?businessId=A` already got only A's rows, because the
+ * extension injected A where the handler passed `undefined` (the response still
+ * echoed `businessId: undefined`). What leaked was (1) SUPER_ADMIN naming no
+ * tenant, and (2) a non-string `businessId` in the body (`{"not":"x"}`,
+ * `{"equals":"B"}`, urlencoded `businessId[not]=x`) next to
+ * `?businessId=A`: BusinessGuard checked A, TenantInterceptor installed the
+ * object as the ambient tenant (it takes the first truthy field, with no type
+ * check), and the extension handed the object to Prisma as a filter, so the
+ * route read every tenant, or B, under a response that said A. The first fix
+ * (dddaeef4) closed (1) and the handler-only path; it did not close (2), which
+ * its harness could not see without the interceptor. The handlers now also pin
+ * the ambient tenant to the guard-checked one. TenantInterceptor itself still
+ * picks by truthiness for every other route; that is outside this packet.
+ *
  * Every seeded row carries the `k34a_` prefix and is hard-deleted by raw SQL in
  * beforeAll and afterAll.
  */
@@ -29,6 +54,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
+import type { INestApplication } from '@nestjs/common';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
@@ -74,7 +100,11 @@ const ROUTES = ['audit/decisions', 'audit/values', 'audit/assessment', 'audit/ac
 
 let db: any;
 let app: any;
-let serviceCalls: Array<{ service: string; businessId: unknown }> = [];
+let bareApp: INestApplication;
+let tenant: typeof import('../src/core/tenant/tenant-context');
+// Each real service call: the tenant argument it was handed, and the ambient
+// tenant the Prisma extension would inject into its scoped queries.
+let serviceCalls: Array<{ service: string; businessId: unknown; ambientTenant: unknown }> = [];
 
 async function cleanup() {
   for (const sql of [
@@ -92,10 +122,96 @@ async function cleanup() {
   }
 }
 
-function get(route: string, actor: string | null, businessId?: string) {
+function get(route: string, actor: string | null, businessId?: string, target: INestApplication = app) {
   const qs = businessId === undefined ? '' : `?businessId=${encodeURIComponent(businessId)}`;
-  const req = request(app.getHttpServer()).get(`/api/v1/cortex/${route}${qs}`);
+  const req = request(target.getHttpServer()).get(`/api/v1/cortex/${route}${qs}`);
   return actor ? req.set('x-test-user', actor) : req;
+}
+
+/** The parts of an audit route's JSON body that identify whose rows it carries. */
+type AuditBody = {
+  businessId?: unknown;
+  total?: unknown;
+  blocked?: unknown;
+  recent?: Array<{ id: string; businessId: string }>;
+  constraints?: Array<{ valueKey: string }>;
+  drift?: unknown;
+  report?: { businessId?: unknown; autonomyConsistencyScore?: unknown; valueDriftScore?: unknown };
+  result?: unknown;
+};
+
+/** The audit data a route returns, projected to the fields that identify a tenant's rows. */
+function auditView(route: (typeof ROUTES)[number], body: AuditBody | undefined): Record<string, unknown> {
+  switch (route) {
+    case 'audit/decisions': {
+      const recent = body?.recent ?? [];
+      return {
+        businessId: body?.businessId,
+        total: body?.total,
+        blocked: body?.blocked,
+        recentTenants: [...new Set(recent.map((r) => r.businessId))].sort(),
+        recentIds: recent.map((r) => r.id).sort(),
+      };
+    }
+    case 'audit/values':
+      return {
+        businessId: body?.businessId,
+        constraints: (body?.constraints ?? []).map((c) => c.valueKey),
+        drift: body?.drift,
+      };
+    case 'audit/assessment':
+      return {
+        businessId: body?.businessId,
+        reportBusinessId: body?.report?.businessId,
+        autonomyConsistencyScore: body?.report?.autonomyConsistencyScore,
+        valueDriftScore: body?.report?.valueDriftScore,
+      };
+    case 'audit/acceptance':
+      return { businessId: body?.businessId, result: body?.result };
+  }
+}
+
+/** Exactly A's audit data on each route (the values the 'sees only A' cases below derive). */
+const ONLY_A: Record<(typeof ROUTES)[number], Record<string, unknown>> = {
+  'audit/decisions': {
+    businessId: ID.bizA,
+    total: 3,
+    blocked: 1,
+    recentTenants: [ID.bizA],
+    recentIds: A_VERDICTS.map((v) => v.id).sort(),
+  },
+  'audit/values': {
+    businessId: ID.bizA,
+    constraints: [`${P}valA_honesty`, `${P}valA_drift`],
+    drift: { driftScore: 0.2, conflicting: [`${P}valA_drift`] },
+  },
+  'audit/assessment': {
+    businessId: ID.bizA,
+    reportBusinessId: ID.bizA,
+    autonomyConsistencyScore: 1 - 1 / 3,
+    valueDriftScore: 0.8,
+  },
+  'audit/acceptance': {
+    businessId: ID.bizA,
+    result: { scenario: 'one_week_routine_operations', score: 2 / 3 - 1 / 3, passed: false, gaps: [] },
+  },
+};
+
+/** A 200 carrying exactly A's audit data, nothing of B, and every service read pinned to A. */
+function expectOnlyA(
+  route: (typeof ROUTES)[number],
+  res: { status: number; body: AuditBody },
+  ambientTenant: string | undefined,
+  label: string,
+) {
+  expect({ label, route, status: res.status }).toEqual({ label, route, status: 200 });
+  expect({ label, route, view: auditView(route, res.body) }).toEqual({ label, route, view: ONLY_A[route] });
+  expectNothingOfB(res.body);
+  // audit/decisions reads Prisma directly; every other route goes through a recorded service.
+  if (route !== 'audit/decisions') expect({ label, route, calls: serviceCalls.length > 0 }).toEqual({ label, route, calls: true });
+  for (const c of serviceCalls) {
+    expect({ label, route, ...c }).toEqual({ label, route, service: c.service, businessId: ID.bizA, ambientTenant });
+  }
 }
 
 /** Nothing seeded for tenant B appears anywhere in a response. */
@@ -117,8 +233,14 @@ function expectNoAuditData(body: unknown) {
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
+  tenant = await import('../src/core/tenant/tenant-context');
+  // As main.ts does before the app serves: the extension reads the ambient
+  // tenant that TenantInterceptor installs.
+  dbMod.setTenantContextProvider({ getCurrentBusinessId: tenant.getCurrentBusinessId });
 
   const { Test } = await import('@nestjs/testing');
+  const { APP_INTERCEPTOR } = await import('@nestjs/core');
+  const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
@@ -151,46 +273,58 @@ beforeAll(async () => {
   emitParamTypes(SelfAssessmentService, [PrismaService, ValueLearningService]);
   emitParamTypes(DigitalEmployeeAcceptanceService, [PrismaService]);
 
-  const moduleRef = await Test.createTestingModule({
-    controllers: [KeyCortexAuditController],
-    providers: [
-      PrismaService,
-      AuthGuard,
-      BusinessGuard,
-      ValueLearningService,
-      SelfAssessmentService,
-      DigitalEmployeeAcceptanceService,
-      ComplianceMapService,
-      // Not on the audit routes' path; the eval routes are not under test here.
-      { provide: EvalHarnessService, useValue: { getSuiteNames: () => [], runAll: async () => [], runSuite: async () => ({}) } },
-    ],
-  }).compile();
+  const build = async (withTenantInterceptor: boolean) => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [KeyCortexAuditController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        ValueLearningService,
+        SelfAssessmentService,
+        DigitalEmployeeAcceptanceService,
+        ComplianceMapService,
+        // Not on the audit routes' path; the eval routes are not under test here.
+        { provide: EvalHarnessService, useValue: { getSuiteNames: () => [], runAll: async () => [], runSuite: async () => ({}) } },
+        // Installed globally in production (app.module.ts).
+        ...(withTenantInterceptor ? [{ provide: APP_INTERCEPTOR, useClass: TenantInterceptor }] : []),
+      ],
+    }).compile();
 
-  // Record (and call through) the tenant each real service is handed, so the
-  // claim "the service receives businessId undefined" is observed, not argued.
-  const record = (service: string, instance: any, method: string) => {
-    const original = instance[method].bind(instance);
-    vi.spyOn(instance, method).mockImplementation(async (...args: any[]) => {
-      serviceCalls.push({ service: `${service}.${method}`, businessId: args[0] });
-      return original(...args);
+    // Record (and call through) the tenant each real service is handed, and the
+    // ambient tenant the extension would inject at that moment, so the claim
+    // "the service receives businessId undefined" is observed, not argued.
+    const record = (service: string, instance: any, method: string) => {
+      const original = instance[method].bind(instance);
+      vi.spyOn(instance, method).mockImplementation(async (...args: any[]) => {
+        serviceCalls.push({
+          service: `${service}.${method}`,
+          businessId: args[0],
+          ambientTenant: tenant.getCurrentBusinessId(),
+        });
+        return original(...args);
+      });
+    };
+    record('ValueLearningService', moduleRef.get(ValueLearningService), 'getValueConstraints');
+    record('ValueLearningService', moduleRef.get(ValueLearningService), 'detectDrift');
+    record('SelfAssessmentService', moduleRef.get(SelfAssessmentService), 'generate');
+    record('DigitalEmployeeAcceptanceService', moduleRef.get(DigitalEmployeeAcceptanceService), 'evaluate');
+
+    const nest = moduleRef.createNestApplication();
+    nest.use(async (req: any, _res: any, next: any) => {
+      const header = req.headers['x-test-user'];
+      const id = typeof header === 'string' ? header : undefined;
+      if (id && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
     });
+    await nest.init();
+    return nest;
   };
-  record('ValueLearningService', moduleRef.get(ValueLearningService), 'getValueConstraints');
-  record('ValueLearningService', moduleRef.get(ValueLearningService), 'detectDrift');
-  record('SelfAssessmentService', moduleRef.get(SelfAssessmentService), 'generate');
-  record('DigitalEmployeeAcceptanceService', moduleRef.get(DigitalEmployeeAcceptanceService), 'evaluate');
-
-  app = moduleRef.createNestApplication();
-  app.use(async (req: any, _res: any, next: any) => {
-    const header = req.headers['x-test-user'];
-    const id = typeof header === 'string' ? header : undefined;
-    if (id && id.startsWith(P)) {
-      const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
-      if (user) req.user = { id: user.id, email: user.email, role: user.role };
-    }
-    next();
-  });
-  await app.init();
+  app = await build(true);
+  bareApp = await build(false);
 
   await cleanup(); // in case a prior run aborted
 
@@ -233,7 +367,10 @@ beforeAll(async () => {
 afterAll(async () => {
   vi.restoreAllMocks();
   if (app) await app.close();
+  if (bareApp) await bareApp.close();
   if (db) await cleanup();
+  const dbMod = await import('@keyflow/db');
+  dbMod.setTenantContextProvider({ getCurrentBusinessId: () => undefined });
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -243,6 +380,16 @@ describe('fixture sanity (real rows)', () => {
     expect(await db.valueConstraint.count({ where: { businessId: ID.bizA } })).toBe(2);
     expect(await db.valueConstraint.count({ where: { businessId: ID.bizB } })).toBe(2);
     expect(await db.membership.count({ where: { businessId: ID.bizA, userId: ID.staffA } })).toBe(1);
+  });
+
+  it('the Prisma tenant extension is live in this process (production pipeline)', async () => {
+    // Outside any tenant context the extension is inert; inside A's it rewrites
+    // an unscoped read to A. Without this the TenantInterceptor cases below
+    // would prove nothing about the production pipeline. (A Prisma query runs
+    // when it is awaited, so it is awaited inside the context.)
+    const where = { actionKey: `${P}action` };
+    expect(await db.autonomyVerdict.count({ where })).toBe(7);
+    expect(await tenant.runWithTenant(ID.bizA, ID.ownerA, async () => await db.autonomyVerdict.count({ where }))).toBe(3);
   });
 });
 
@@ -335,8 +482,8 @@ describe('a member of A sees only A through the cortex audit routes', () => {
     });
     expectNothingOfB(res.body);
     expect(serviceCalls).toEqual([
-      { service: 'ValueLearningService.getValueConstraints', businessId: ID.bizA },
-      { service: 'ValueLearningService.detectDrift', businessId: ID.bizA },
+      { service: 'ValueLearningService.getValueConstraints', businessId: ID.bizA, ambientTenant: ID.bizA },
+      { service: 'ValueLearningService.detectDrift', businessId: ID.bizA, ambientTenant: ID.bizA },
     ]);
   });
 
@@ -365,8 +512,8 @@ describe('a member of A sees only A through the cortex audit routes', () => {
     expect(Array.isArray(res.body.compliance) && res.body.compliance.length > 0).toBe(true);
     expectNothingOfB(res.body);
     expect(serviceCalls).toEqual([
-      { service: 'SelfAssessmentService.generate', businessId: ID.bizA },
-      { service: 'ValueLearningService.detectDrift', businessId: ID.bizA },
+      { service: 'SelfAssessmentService.generate', businessId: ID.bizA, ambientTenant: ID.bizA },
+      { service: 'ValueLearningService.detectDrift', businessId: ID.bizA, ambientTenant: ID.bizA },
     ]);
   });
 
@@ -380,7 +527,9 @@ describe('a member of A sees only A through the cortex audit routes', () => {
     });
     expect(res.body.scenario?.name).toBe('one_week_routine_operations');
     expectNothingOfB(res.body);
-    expect(serviceCalls).toEqual([{ service: 'DigitalEmployeeAcceptanceService.evaluate', businessId: ID.bizA }]);
+    expect(serviceCalls).toEqual([
+      { service: 'DigitalEmployeeAcceptanceService.evaluate', businessId: ID.bizA, ambientTenant: ID.bizA },
+    ]);
   });
 });
 
@@ -413,5 +562,76 @@ describe('the handler acts on the tenant the guard checked', () => {
       blocked: res.body.blocked,
       recentIds: recent.map((r) => r.id).sort(),
     }).toEqual({ businessId: ID.bizB, total: 4, blocked: 4, recentIds: [...B_VERDICTS].sort() });
+  });
+});
+
+describe('under the production TenantInterceptor a non-string businessId cannot steer the tenant', () => {
+  // BusinessGuard and @GuardedBusinessId skip a non-string businessId and
+  // resolve A from the query; TenantInterceptor took the first truthy field and
+  // installed the object as the ambient tenant, which the Prisma extension then
+  // wrote over the handler's where.businessId (R0-34 review ST-1).
+  const withBody = (route: string, actor: string, contentType: string, body: string | object) =>
+    get(route, actor, ID.bizA).set('Content-Type', contentType).send(body);
+
+  it('a member of A sending ?businessId=A with the JSON body {businessId:{not:…}} reads only A on every audit route', async () => {
+    for (const actor of [ID.ownerA, ID.staffA]) {
+      for (const route of ROUTES) {
+        serviceCalls = [];
+        const res = await withBody(route, actor, 'application/json', { businessId: { not: 'x' } });
+        expectOnlyA(route, res, ID.bizA, actor);
+      }
+    }
+  });
+
+  it('the JSON body {businessId:{equals:B}} with ?businessId=A reads A, never B, on every audit route', async () => {
+    for (const route of ROUTES) {
+      serviceCalls = [];
+      const res = await withBody(route, ID.ownerA, 'application/json', { businessId: { equals: ID.bizB } });
+      expectOnlyA(route, res, ID.bizA, 'equals-B');
+    }
+  });
+
+  it('the urlencoded body businessId[not]=x with ?businessId=A reads A, never B, on every audit route', async () => {
+    for (const route of ROUTES) {
+      serviceCalls = [];
+      const res = await withBody(route, ID.staffA, 'application/x-www-form-urlencoded', 'businessId[not]=x');
+      expectOnlyA(route, res, ID.bizA, 'urlencoded');
+    }
+  });
+
+  it('SUPER_ADMIN sending ?businessId=A with an object body reads only A', async () => {
+    for (const route of ROUTES) {
+      serviceCalls = [];
+      const res = await withBody(route, ID.superAdmin, 'application/json', { businessId: { not: 'x' } });
+      expectOnlyA(route, res, ID.bizA, 'super-admin');
+    }
+  });
+
+  it('a tenant named only by a non-string query (?businessId[not]=x) is refused on every audit route, SUPER_ADMIN included', async () => {
+    serviceCalls = [];
+    for (const actor of [ID.ownerA, ID.superAdmin]) {
+      for (const route of ROUTES) {
+        const res = await request(app.getHttpServer())
+          .get(`/api/v1/cortex/${route}?businessId%5Bnot%5D=x`)
+          .set('x-test-user', actor);
+        expect({ actor, route, status: res.status }).toEqual({ actor, route, status: 403 });
+        expectNoAuditData(res.body);
+        expectNothingOfB(res.body);
+      }
+    }
+    expect(serviceCalls).toEqual([]);
+  });
+});
+
+describe('without TenantInterceptor the handler alone binds the tenant', () => {
+  it('a member of A naming A sees only A on every audit route (tenant extension inert)', async () => {
+    for (const actor of [ID.ownerA, ID.staffA]) {
+      for (const route of ROUTES) {
+        serviceCalls = [];
+        const res = await get(route, actor, ID.bizA, bareApp);
+        // ambientTenant undefined: nothing but the handler's own binding scoped these reads.
+        expectOnlyA(route, res, undefined, actor);
+      }
+    }
   });
 });
