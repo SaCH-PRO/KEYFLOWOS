@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CommerceAdapterService } from './commerce-adapter.service';
 import { CommerceService } from '../../commerce/commerce.service';
 import { ConnectorCommand } from '../key-cortex-connector.types';
+import { KEY_SYSTEM_ACTOR_ID } from '../../../core/auth/system-actor';
 
 const mkCmd = (action: string, parameters: Record<string, unknown> = {}): ConnectorCommand => ({
   module: 'commerce',
@@ -69,7 +70,28 @@ describe('CommerceAdapterService', () => {
     (commerce.recordPayment as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'pay1' });
     const result = await service.execute(mkCmd('process_payment', { invoiceId: 'inv1', amount: 100, method: 'cash' }));
     expect(result.success).toBe(true);
-    expect(commerce.recordPayment).toHaveBeenCalledWith('inv1', 'biz_123', { amount: 100, method: 'cash', reference: undefined });
+    // R0-PL-07: the same input as before, plus the system actor as the recorder.
+    expect(commerce.recordPayment).toHaveBeenCalledWith(
+      'inv1',
+      'biz_123',
+      { amount: 100, method: 'cash', reference: undefined },
+      { actorId: KEY_SYSTEM_ACTOR_ID },
+    );
+  });
+
+  it('R0-PL-07: process_payment records KEY_SYSTEM_ACTOR_ID as the actor, never the requesting human or a body field', async () => {
+    (commerce.recordPayment as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'pay2' });
+    const result = await service.execute(mkCmd('process_payment', {
+      invoiceId: 'inv2', amount: 12.5, method: 'bank_transfer', reference: 'R-1', actorId: 'user_spoof', recordedBy: 'user_spoof',
+    }));
+    expect(result.success).toBe(true);
+    expect(commerce.recordPayment).toHaveBeenCalledTimes(1);
+    const [invoiceId, businessId, input, options] = (commerce.recordPayment as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect([invoiceId, businessId]).toEqual(['inv2', 'biz_123']);
+    expect(input).toEqual({ amount: 12.5, method: 'bank_transfer', reference: 'R-1' });
+    expect(options).toEqual({ actorId: 'key_ai' });
+    expect(options.actorId).toBe(KEY_SYSTEM_ACTOR_ID);
+    expect(options.actorId).not.toBe('user_456'); // command.userId: the human KEY acts for
   });
 
   it('create_order creates an invoice as order record', async () => {
