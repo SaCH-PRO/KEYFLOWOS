@@ -26,42 +26,103 @@ terms without any change in this repository.
 - The live sign-up leg runs only where a Supabase project is configured (last
   subsection). CI and the real-database suites never contact Supabase.
 - Review of this packet found two blocking defects that documentation cannot
-  fix. Release 0 sign-in does not open until a code packet closes them (next
-  subsection).
+  fix. R0-SEC-01-BOOTSTRAP-TAKEOVER fixed the first (bootstrap account
+  takeover). Release 0 sign-in does not open until a code packet closes the
+  second, or it is configured as described (next subsection).
 
 ### Open defects and stop conditions
 
 Found in review of this packet. Each needs a code change, which is outside
 this packet: D-02 option C rules no identity code change, and the files involved
-are outside its write set. None of them is fixed here.
+are outside its write set. Item 1 is fixed by the code packet
+R0-SEC-01-BOOTSTRAP-TAKEOVER; items 2 and 3 are open.
 
-1. **`POST /identity/bootstrap` takes over an account by email. Blocking.**
-   The controller passes `email: body.email ?? user.email`
-   (`S/modules/identity/identity.controller.ts:906`), so the request body
-   chooses the email. When no local `User` has the token's `sub`,
-   `bootstrapUser` looks up a `User` by that email and calls `reconcileUserId`
-   (`S/modules/identity/identity.service.ts:979-985`). That function recreates
-   the row under the caller's id and copies its role (`:846`, so `SUPER_ADMIN`
-   carries over). It re-points the row's memberships and `Business.ownerId` to
-   the caller (`:859`, `:873`) and deletes the old row (`:876`). Any
-   authenticated caller who has not bootstrapped yet can therefore take any
-   account, and every business it owns or belongs to, by naming its email in
-   the body. That includes a fresh email/password sign-up, with verification on
-   or off, and a Google sign-in. Without a body email the token's `email`
-   claim is trusted the same way. So with verification off, the first person
-   to sign up with the address of a local user who has no account in this
-   Supabase project gets that user's row. That happens, for example, after the
-   deployment moves to a new project.
-   - Measured in review: a scratch real-database test (real controller, service,
-     `AuthMiddleware`, `AuthGuard`, deleted after the run) got 201
-     `{id: <attacker>, email: <victim>, role: SUPER_ADMIN}`. The victim's
-     `OWNER` membership and `businesses.owner_id` now named the attacker.
-   - **Stop condition.** Release 0 sign-in does not open, and the live sign-up
-     leg (#186 step B) does not run against a database that holds any account
-     other than the run's own, until a code packet makes bootstrap unable to
-     move an existing user to a different caller on an email match. That
-     packet decides the design. `T/identity-local-auth.integration.test.ts`
-     holds the required behaviour as `it.todo`.
+1. **Fixed by R0-SEC-01: `POST /identity/bootstrap` took over an account by
+   email.** It was blocking. The controller passed `email: body.email ??
+   user.email`, so the request body chose the email. When no local `User` had
+   the token's `sub`, `bootstrapUser` looked up a `User` by that email and
+   called `reconcileUserId`. That function recreated the row under the
+   caller's id, copied its role (so `SUPER_ADMIN` carried over), re-pointed the
+   row's memberships and `Business.ownerId` to the caller, and deleted the old
+   row. Any authenticated caller who had not bootstrapped could therefore take
+   any account, and every business it owned or belonged to, by naming its
+   email in the body, or by holding a token whose `email` claim was that
+   address.
+   - Measured in review, before the fix: 201
+     `{id: <attacker>, email: <victim>, role: SUPER_ADMIN}`, with the victim's
+     `OWNER` membership and `businesses.owner_id` naming the attacker.
+     `T/identity-local-auth.integration.test.ts` reproduced it (6 cases red on
+     the unmodified source).
+   - **The fix.** A local `User` is bound to the verified token subject, never
+     to a client-supplied attribute (kernel K1).
+     - The bootstrap email is the verified token's `email` claim
+       (`S/modules/identity/identity.controller.ts:1004`). A body `email` is
+       **ignored**, not refused with 400: the web sends the address the user
+       typed (`W/app/auth/signup/page.tsx:185-191`), which can differ from the
+       token's in case or whitespace.
+     - When a `User` with a different id already holds that email,
+       `bootstrapUser` answers **409 `{code: 'account_email_in_use'}`** and
+       writes nothing: no `User` row, no membership, no business, and the
+       holder's row, role, memberships and `Business.ownerId` are unchanged
+       (`S/modules/identity/identity.service.ts:1124-1137`).
+     - `reconcileUserId` is kept but no request handler calls it
+       (`S/modules/identity/identity.service.ts:954`). No operator path calls
+       it either; none exists yet.
+   - **Proof.** `T/identity-local-auth.integration.test.ts`, block "R0-SEC-01",
+     runs the real `IdentityController` and `IdentityService` behind the real
+     `AuthMiddleware` and `AuthGuard` against Postgres. The negative controls
+     are a body email naming a victim, a token whose own `email` claim is a
+     victim's under another `sub`, a free body email sent with such a token,
+     and repeated attempts. Each runs against a plain owner and a
+     `SUPER_ADMIN`, and each victim's row, role, `OWNER` membership and
+     `businesses.owner_id` are unchanged after it. The positive controls are a
+     first-time caller, who gets its own business (journey step 1), and a
+     returning user with the same `sub`, which is idempotent.
+     `T/identity-bootstrap.service.test.ts` pins that the 409 path calls no
+     write.
+   - **Web follow-up (not in this fix).** The OAuth callback page shows its
+     "email already in use" screen only for the code `account_email_conflict`
+     (`W/lib/client.ts:2865`, `W/app/auth/callback/page.tsx:214-216`).
+     `account_email_in_use` currently gets the generic error screen with the
+     server's message.
+   - **Moving an account to a new subject is now a manual operator step.**
+     This is the legitimate case the old reconcile handled automatically: the
+     same person, but a new `sub`, for example after the deployment moves to a
+     new Supabase project or a Supabase user is deleted and recreated. Until
+     the step is done, that person's bootstrap answers 409
+     `account_email_in_use` and writes nothing, so it is safe to retry
+     afterwards.
+     1. Prefer keeping the subject stable. If the auth users move to the new
+        project with their ids unchanged, the token `sub` still equals the
+        local `User.id`, and bootstrap finds the row by id. Nothing needs to
+        move. Check the current Supabase documentation for whether your
+        migration route keeps user ids.
+     2. Otherwise, move one account at a time. First confirm out of band that
+        the person holding the new `sub` owns the old account: they signed in
+        to the new project with the address, and they confirm through a
+        channel the old account already trusts. An email match alone is not
+        proof; that is the defect.
+     3. Read the new `sub` from the user's record in the new project (the
+        `id` of the Supabase auth user). Make sure no local `User` row has
+        that id yet. The 409 guarantees bootstrap created none.
+     4. In one database transaction, in a window when the user is signed out:
+        free the address on the old row (set a placeholder email), create the
+        new row under the new `sub` with the old row's fields (role included),
+        re-point every column that holds the old id, then delete the old row.
+        Do not rely on `reconcileUserId`'s list of references. It re-points
+        memberships, sessions, the AI log, approval and plan rows,
+        `businesses.owner_id` and `team_activity_logs.user_id`. It misses
+        `user_identities`, `contact_shares` and `push_subscriptions` (deleted
+        with the old row by cascade), `support_tickets.assigned_to_id` and
+        `users.referred_by_user_id` (set to null), and user-id columns that
+        have no foreign key. Find them in `packages/db/prisma/schema.prisma`
+        before the run.
+     5. Have the user sign in. Bootstrap then finds the row by id and answers
+        201 with their existing business.
+   - The stop condition this defect set (Release 0 sign-in does not open,
+     and the live sign-up leg does not run against a database holding other
+     accounts) is lifted for this defect. Defect 2 keeps its own stop
+     condition.
 2. **`SUPABASE_JWT_SECRET` is a live acceptance path, not an inert setting.
    Blocking until configured as below.** `verifyLocal` accepts any HS256
    token signed with the secret whose `iss` is absent or equals `SUPABASE_URL`
@@ -213,11 +274,11 @@ failure becomes one 401 `refresh_failed`.
 `AuthGuard`, so `AuthMiddleware` must accept the bearer token first. It never
 calls Supabase. `IdentityService.bootstrapUser`
 (`S/modules/identity/identity.service.ts:912`) finds the local `User` by the
-token's `sub`. If there is none, it looks one up by email, taking the email
-from the request body when one is sent (controller `:906`), and moves that row
-to the caller (`reconcileUserId`, `:979-985`, `:814-876`). Otherwise it
-creates the row. That email reconcile is **not** a safe find-or-create: it is
-open defect 1, the account-takeover path. The default `Business` and `OWNER` membership are created in a
+token's `sub`. If there is none, it creates the row with the token's `email`
+claim; a body `email` is ignored. If another `User` already holds that email,
+bootstrap answers 409 `account_email_in_use` and writes nothing. It never moves
+that row to the caller (fixed by R0-SEC-01, item 1 above; line numbers in this
+paragraph are on the R0-14 base). The default `Business` and `OWNER` membership are created in a
 Serializable transaction (`ensureBootstrapWorkspace`, `:1068-1107`). A
 verified user with no local row is attached with role `USER` so it can reach
 bootstrap (`S/core/auth/auth.middleware.ts:125-135`, `:192-193`). The web calls
@@ -341,10 +402,11 @@ at `W/lib/client.ts:2897`.
   `false` explicitly, because unset means on.
 - **Choosing for Release 0 is an operator decision.** Off keeps Release 0 at a
   single external provider (Supabase) but does not prove the user owns the
-  address. Neither setting protects existing accounts today: bootstrap
-  trusts an email from the request body whether verification is on or off.
-  With verification off, it also trusts the email of an unproven sign-up
-  (open defect 1). On adds Resend: an account, `RESEND_API_KEY`, and an
+  address. Since R0-SEC-01, neither setting is what protects existing
+  accounts: bootstrap ignores a body email and never moves an existing row to
+  a caller with another `sub`, so an unproven sign-up with a taken address gets
+  409 `account_email_in_use`. With verification off, an unproven sign-up with a
+  free address still gets its own new account under that address. On adds Resend: an account, `RESEND_API_KEY`, and an
   `EMAIL_FROM_ADDRESS` Resend will send from. This packet does not choose;
   `.env.example` keeps `false`.
 - **Password recovery is separate.** Supabase's own mailer sends it
@@ -399,15 +461,16 @@ No suite contacts Supabase. There are three patterns.
    probe route. It mints tokens with and without `iss`, sets
    `SUPABASE_URL` to a fake host, sets no anon key, and refuses every `fetch`.
    It proves the Release 0 rule (secret empty means forged tokens get 401) and
-   characterizes the acceptance path of open defect 2. It holds open defect 1
-   as `it.todo`.
+   characterizes the acceptance path of open defect 2. Its R0-SEC-01 block
+   runs the real `IdentityController` and `IdentityService` and proves the
+   fix for item 1 against Postgres.
 
 So CI proves the code after token verification only for the tokens it mints
 itself, which the middleware accepts because they carry no `iss`. It does not
 prove Supabase sign-up, login or refresh. It does not prove that a real hosted
 token is accepted, because no test mints the hosted `iss` shape and expects
-success. And no test covers bootstrap with an email that belongs to another
-user, which is the open account-takeover defect.
+success. Bootstrap with an email that belongs to another user is covered
+(R0-SEC-01), with the tokens the suite mints.
 
 ### Where the live sign-up leg runs
 
@@ -416,11 +479,10 @@ user, which is the open account-takeover defect.
   `/auth/signup`. Under D-02 option C it records the substitution when no
   project is configured (`docs/reconstruction/BUILD-MAP-001.md`, review
   disposition row 2).
-- **Stop condition (open defects 1 and 2).** The run does not start while
-  bootstrap can move an existing user to another caller by email, unless its
-  application database holds no account other than the run's own. Its server
-  runs with `SUPABASE_JWT_SECRET` empty. If either condition fails, the run
-  stops and reports it.
+- **Stop condition (open defect 2).** The run's server runs with
+  `SUPABASE_JWT_SECRET` empty. If it does not, the run stops and reports it.
+  The former condition for defect 1 (no account in the database other than
+  the run's own) was lifted when R0-SEC-01 landed.
 - The minimum environment for that run:
   - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`;
   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`;
@@ -482,7 +544,7 @@ All live in `apps/server/src/modules/identity/identity.controller.ts`.
 | `POST /identity/refresh` | none (refresh token in body) | Exchange a refresh token for a new session | `refresh_unavailable`, `refresh_unreachable`, `refresh_failed` (401), `rate_limited` |
 | `POST /identity/resend-verification` | none | Re-send the verification email | (always 201; throttled at 60s/email + AuthSecurity rate rule) |
 | `GET  /identity/me` | Bearer | Return the authenticated user | 401 when no/invalid token |
-| `POST /identity/bootstrap` | Bearer | Idempotently create the user + default business | 401, 400 |
+| `POST /identity/bootstrap` | Bearer | Idempotently create the user + default business | 401, 400, 409 (`account_email_in_use`) |
 | `GET  /identity/admin/auth-audit` | Bearer + `SUPER_ADMIN` | Read the AuthAuditLog | 401 |
 
 ### Rate limiting
@@ -588,13 +650,13 @@ profile fields, then `POST`s `/identity/bootstrap` against our NestJS
 API with `Authorization: Bearer <supabase token>`. `AuthMiddleware`
 verifies the token via `SupabaseAuthService`, attaches `{ id, email,
 role }` to the request, and `IdentityService.bootstrapUser` either
-reuses the local `User` row, reconciles a row that already exists with
-the same email under a different id (see task #308 —
-`reconcileUserId`), or creates a fresh row, then ensures a default
-`Business` + `Membership` exist. The reconcile step is the open
-account-takeover defect (open defect 1 in the Release 0 section). It trusts
-an email from the request body or the token, and moves that row's role,
-memberships and businesses to the caller.
+reuses the local `User` row with the token's `sub` or creates a fresh row
+with the token's email, then ensures a default `Business` + `Membership`
+exist. When a row with the same email already exists under a different id,
+it answers 409 `account_email_in_use` and writes nothing. Until R0-SEC-01 it
+moved that row, with its role, memberships and businesses, to the caller
+(task #308, `reconcileUserId`), which was an account takeover (item 1 in the
+Release 0 section).
 
 ### Required dashboard configuration
 
@@ -624,7 +686,8 @@ code ever runs. None of these are secrets, only URIs.
   URI does not exactly match `<SUPABASE_URL>/auth/v1/callback`.
 - Callback page renders "Internal Server Error" after "Signing you
   in…" ⇒ historically this was the email-collision 500 fixed in task
-  #308 (`bootstrapUser` now reconciles by email before creating).
+  #308. Since R0-SEC-01 the collision answers 409 `account_email_in_use`
+  (see "Moving an account to a new subject" in the Release 0 section).
 - `AuthMiddleware` log `Token provided but Supabase verification
   failed` ⇒ the access token is expired or signed by a different
   Supabase project than `SUPABASE_URL` points at.

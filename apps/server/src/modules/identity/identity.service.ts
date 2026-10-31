@@ -943,6 +943,13 @@ export class IdentityService {
    * a placeholder email to free the unique-email slot, (2) create the new
    * user with the desired id and original email, (3) re-point all child
    * references (FK and non-FK), (4) delete the parked row.
+   *
+   * NOT CALLED (R0-SEC-01-BOOTSTRAP-TAKEOVER). bootstrapUser called this on an
+   * email match alone, so any caller could take over any account, its role and
+   * its businesses. No request handler may call it: nothing here proves that
+   * `input.userId` is the same person as `oldId`. It is kept for an explicit
+   * operator migration path, which does not exist yet; until one does, the
+   * manual migration in docs/auth-pathway.md ("Fixed by R0-SEC-01") applies.
    */
   private async reconcileUserId(
     oldId: string,
@@ -1104,18 +1111,30 @@ export class IdentityService {
         user = existingUser;
       }
     } else {
-      // Look up by email before creating, to handle the case where a local User
-      // row already exists under a different id (e.g. earlier email/password
-      // signup, or a Supabase user that was recreated with a different id).
-      // Without this, the prisma.user.create below would crash with a
-      // "Unique constraint failed on (email)" 500 and the OAuth callback page
-      // would render "Internal Server Error". See task #308.
+      // Look up by email before creating: a local User may already hold this
+      // address under a different id (task #308). R0-SEC-01-BOOTSTRAP-TAKEOVER:
+      // that row is NEVER moved to the caller. Bootstrap used to call
+      // reconcileUserId here, which re-created the row under the caller's id
+      // with its role (SUPER_ADMIN included) and re-pointed its memberships and
+      // Business.ownerId, on nothing more than an email match: an account
+      // takeover. A local User is bound to the verified token subject, so a
+      // different-id holder is a 409 and nothing is written. Moving a row to a
+      // new subject (same person, new Supabase project) is an operator step
+      // (docs/auth-pathway.md, "Fixed by R0-SEC-01").
       const collidingByEmail = await this.prisma.client.user.findUnique({
         where: { email: input.email },
+        select: { id: true },
       });
 
       if (collidingByEmail && collidingByEmail.id !== input.userId) {
-        user = await this.reconcileUserId(collidingByEmail.id, input);
+        this.logger.warn(
+          `[bootstrap] refused: the token email is held by another local user (userId=${input.userId})`,
+        );
+        throw new ConflictException({
+          code: 'account_email_in_use',
+          message:
+            'This email address already belongs to another account. Sign in with that account, or contact support to move it to this sign-in.',
+        });
       } else {
         const userData: Record<string, unknown> = {};
         if (input.firstName) userData.firstName = input.firstName.trim();

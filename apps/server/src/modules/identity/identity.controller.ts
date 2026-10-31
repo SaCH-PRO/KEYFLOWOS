@@ -998,7 +998,10 @@ export class IdentityController {
 
     return this.identity.bootstrapUser({
       userId: user.id,
-      email: body.email ?? user.email,
+      // R0-SEC-01: the email comes only from the verified token. A body
+      // `email` is ignored, never a 400: the web sends the address the user
+      // typed, which can differ from the token's in case or whitespace.
+      email: user.email,
       username: body.username,
       name: body.name,
       firstName: body.firstName,
