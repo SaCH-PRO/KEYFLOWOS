@@ -928,11 +928,11 @@ describe('step 7 — no step required an external provider', () => {
 // incidental (not on the journey path, seen while driving it)
 // ---------------------------------------------------------------------------
 describe('incidental — seen while driving the journey, not part of its path', () => {
-  it.fails('creating a second contact with an email already in the tenant answers 409 — it does not: the Prisma unique violation surfaces as 500', async () => {
+  it('creating a second contact with an email already in the tenant answers 409 (fixed by R0-D7-CONTACT-EMAIL-409)', async () => {
     requireServer();
     expect(S.contactId).toBeTruthy();
     const res = await call(8, 'post', `/crm/businesses/${S.bizA}/contacts`, { token: OWNER, body: { firstName: `${P}Ada2`, email: `${P}ada@test.local` } });
-    note(8, 'duplicate contact email', 'POST /crm/businesses/:bizA/contacts', res.status, 'expect 409; observed 500');
+    note(8, 'duplicate contact email', 'POST /crm/businesses/:bizA/contacts', res.status, 'expect 409');
     expect(await db.contact.count({ where: { businessId: S.bizA, deletedAt: null } })).toBe(1);
     expect(res.status).toBe(409);
   });

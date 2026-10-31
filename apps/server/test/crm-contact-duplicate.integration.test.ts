@@ -10,9 +10,12 @@
  * Release 0 journey harness (D7) and by CONTACTS lane packet BP-04. The
  * contract proven here: POST/PATCH that would violate one of those uniques
  * answers 409 with `code: contact_email_taken` (or `contact_phone_taken`) and
- * the id of the tenant's existing live holder; the tenant keeps exactly the
- * contacts it had; a different tenant may hold the same email or phone,
- * because the uniqueness is per business.
+ * the id of the tenant's existing live holder when the actor could open that
+ * holder through GET detail (the id is a working key, so it is bounded by the
+ * same M7 visibility the list and detail routes apply; otherwise it is null
+ * and the body reads the same); the tenant keeps exactly the contacts it had;
+ * a different tenant may hold the same email or phone, because the uniqueness
+ * is per business; a member of another tenant is refused by the guards.
  *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the user,
  * business and membership rows, AuthGuard, BusinessGuard, ModuleScopeGuard,
@@ -326,6 +329,136 @@ describe('POST /crm/businesses/:businessId/contacts — email already held in th
   });
 });
 
+describe("the holder id in a 409 is bounded by the actor's CRM visibility (within-tenant control)", () => {
+  // The id in a 409 is a working key (it opens the contact's notes and events
+  // routes), so it is disclosed only when the actor could open the holder
+  // through GET detail. Two STAFF members of bizA with crm write: s1 is
+  // 'my book' (crm_view=owned, crm_edit=owned), s2 is view-all. Ada is turned
+  // PRIVATE and owned by the owner for this block; a TEAM contact Tom is added.
+  // GET detail is the oracle in every case: whichever row a member cannot open,
+  // the 409 names no id for; whichever they can, it does.
+  const STAFF_OWNED = `${P}staffOwned`;
+  const STAFF_ALL = `${P}staffAll`;
+  const TOM_EMAIL = `${P}tom@test.local`;
+  const MINE_EMAIL = `${P}mine@test.local`;
+  let adaId: string;
+  let tomId: string;
+  const created: string[] = [];
+
+  function get(actor: string, businessId: string, contactId: string) {
+    return request(app.getHttpServer())
+      .get(`/crm/businesses/${businessId}/contacts/${contactId}`)
+      .set('x-test-user', actor);
+  }
+
+  beforeAll(async () => {
+    const ada = await db.contact.findFirst({ where: { businessId: ID.bizA, emailNormalized: EMAIL }, select: { id: true } });
+    adaId = ada.id;
+    await db.user.create({ data: { id: STAFF_OWNED, email: `${STAFF_OWNED}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id: STAFF_ALL, email: `${STAFF_ALL}@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}m_staffOwned_bizA`, userId: STAFF_OWNED, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'write', crm_view: 'owned', crm_edit: 'owned' } } });
+    await db.membership.create({ data: { id: `${P}m_staffAll_bizA`, userId: STAFF_ALL, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'write' } } });
+    await db.contact.update({ where: { id: adaId }, data: { visibility: 'PRIVATE', ownerId: ID.owner } });
+    const tom = await post(ID.owner, ID.bizA, { firstName: `${P}Tom`, email: TOM_EMAIL });
+    expect(tom.status).toBe(201);
+    tomId = tom.body.id;
+    created.push(tomId);
+    expect(await db.contact.findUnique({ where: { id: tomId }, select: { visibility: true } })).toEqual({ visibility: 'TEAM' });
+    expect(await liveCount(ID.bizA)).toBe(2);
+  });
+
+  afterAll(async () => {
+    // Leave the tenant as the later cases expect it: Ada alone, TEAM, unowned.
+    if (created.length) await db.$executeRawUnsafe(`DELETE FROM contacts WHERE id IN (${created.map((id) => `'${id}'`).join(',')})`);
+    await db.contact.update({ where: { id: adaId }, data: { visibility: 'TEAM', ownerId: null } });
+    await db.$executeRawUnsafe(`DELETE FROM memberships WHERE id IN ('${P}m_staffOwned_bizA', '${P}m_staffAll_bizA')`);
+    await db.$executeRawUnsafe(`DELETE FROM users WHERE id IN ('${STAFF_OWNED}', '${STAFF_ALL}')`);
+    expect(await liveCount(ID.bizA)).toBe(1);
+  });
+
+  it('CONTROL — neither STAFF member can open the PRIVATE holder (404, nothing disclosed); the view-all member opens the TEAM contact, the my-book member does not', async () => {
+    for (const actor of [STAFF_OWNED, STAFF_ALL]) {
+      const res = await get(actor, ID.bizA, adaId);
+      expect(res.status).toBe(404);
+      // The filter echoes the request path, which is the caller's own input;
+      // nothing of the row itself may appear.
+      expect(res.body.path).toBe(`/crm/businesses/${ID.bizA}/contacts/${adaId}`);
+      expect(JSON.stringify({ ...res.body, path: undefined })).not.toContain(adaId);
+      expect(res.body).not.toHaveProperty('details');
+    }
+    expect((await get(STAFF_ALL, ID.bizA, tomId)).status).toBe(200);
+    expect((await get(STAFF_OWNED, ID.bizA, tomId)).status).toBe(404);
+    expect((await get(ID.owner, ID.bizA, adaId)).status).toBe(200);
+  });
+
+  it("NEGATIVE CONTROL — a my-book STAFF posting the PRIVATE holder's email gets 409 contact_email_taken with existingContactId null and the id nowhere in the body", async () => {
+    const res = await post(STAFF_OWNED, ID.bizA, { firstName: `${P}Probe1`, email: EMAIL });
+    expect(res.status).toBe(409);
+    expectTaken(res.body, 'contact_email_taken', null);
+    expect(JSON.stringify(res.body)).not.toContain(adaId);
+    expect(await liveCount(ID.bizA)).toBe(2);
+  });
+
+  it("NEGATIVE CONTROL — a view-all STAFF posting a variant of the PRIVATE holder's phone gets 409 contact_phone_taken with existingContactId null", async () => {
+    const res = await post(STAFF_ALL, ID.bizA, { firstName: `${P}Probe2`, phone: PHONE_VARIANT });
+    expect(res.status).toBe(409);
+    expectTaken(res.body, 'contact_phone_taken', null);
+    expect(JSON.stringify(res.body)).not.toContain(adaId);
+    expect(await liveCount(ID.bizA)).toBe(2);
+  });
+
+  it("NEGATIVE CONTROL — a my-book STAFF patching a contact they own onto the PRIVATE holder's email gets 409 with existingContactId null, and their row is unchanged", async () => {
+    const mine = await post(STAFF_OWNED, ID.bizA, { firstName: `${P}Mine`, email: MINE_EMAIL, ownerId: STAFF_OWNED });
+    expect(mine.status).toBe(201);
+    created.push(mine.body.id);
+    expect(await db.contact.findUnique({ where: { id: mine.body.id }, select: { ownerId: true } })).toEqual({ ownerId: STAFF_OWNED });
+    expect((await get(STAFF_OWNED, ID.bizA, mine.body.id)).status).toBe(200);
+
+    const res = await patch(STAFF_OWNED, ID.bizA, mine.body.id, { email: EMAIL });
+    expect(res.status).toBe(409);
+    expectTaken(res.body, 'contact_email_taken', null);
+    expect(JSON.stringify(res.body)).not.toContain(adaId);
+    expect(await db.contact.findUnique({ where: { id: mine.body.id } })).toMatchObject({ emailNormalized: MINE_EMAIL });
+  });
+
+  it('the hidden-holder 409 reads exactly like the visible-holder 409 apart from the id: same code, same message', async () => {
+    const hidden = await post(STAFF_OWNED, ID.bizA, { firstName: `${P}Probe3`, email: EMAIL });
+    const visible = await post(ID.owner, ID.bizA, { firstName: `${P}Probe4`, email: EMAIL });
+    expect(hidden.status).toBe(409);
+    expect(visible.status).toBe(409);
+    expect(visible.body.details).toEqual({ existingContactId: adaId });
+    expect(hidden.body.details).toEqual({ existingContactId: null });
+    expect(hidden.body.code).toBe(visible.body.code);
+    expect(hidden.body.message).toBe(visible.body.message);
+  });
+
+  it("positive control — the TEAM contact's email: the view-all STAFF is told the id (they can open it), the my-book STAFF is not, the owner is", async () => {
+    const all = await post(STAFF_ALL, ID.bizA, { firstName: `${P}Probe5`, email: TOM_EMAIL });
+    expect(all.status).toBe(409);
+    expectTaken(all.body, 'contact_email_taken', tomId);
+
+    const owned = await post(STAFF_OWNED, ID.bizA, { firstName: `${P}Probe6`, email: TOM_EMAIL });
+    expect(owned.status).toBe(409);
+    expectTaken(owned.body, 'contact_email_taken', null);
+
+    const owner = await post(ID.owner, ID.bizA, { firstName: `${P}Probe7`, email: TOM_EMAIL });
+    expect(owner.status).toBe(409);
+    expectTaken(owner.body, 'contact_email_taken', tomId);
+    expect(await liveCount(ID.bizA)).toBe(3);
+  });
+
+  it('service callers with no actor (internal jobs) are tenant-scoped only and still receive the holder id', async () => {
+    let caught: any;
+    try {
+      await crm.createContact({ businessId: ID.bizA, firstName: `${P}Probe8`, email: EMAIL });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught?.getStatus?.()).toBe(409);
+    expect(caught.getResponse?.()).toMatchObject({ code: 'contact_email_taken', existingContactId: adaId });
+  });
+});
+
 describe('POST /crm/businesses/:businessId/contacts — phone already held in the tenant (schema has @@unique([businessId, phoneNormalized]))', () => {
   it('NEGATIVE CONTROL — a punctuation variant of an existing phone answers 409 contact_phone_taken with the existing id; still one contact', async () => {
     const ada = await db.contact.findFirst({ where: { businessId: ID.bizA, emailNormalized: EMAIL }, select: { id: true } });
@@ -395,9 +528,13 @@ describe('a soft-deleted holder still occupies the unique (characterized, not a 
   // a live contact and the detail route would answer 404 for it. Whether a
   // deleted holder should be restored or released is a separate decision; this
   // pins what the API does today so that decision starts from evidence.
+  //
+  // The GDPR forget flow soft-deletes a contact for its grace period, so the
+  // body must not say that the holder is deleted: it reads exactly like the
+  // live-holder 409 (same code, same message), only the id is null.
   const GONE_EMAIL = `${P}gone@test.local`;
 
-  it('creating with the email of a soft-deleted contact answers 409 contact_email_taken with existingContactId null', async () => {
+  it('creating with the email of a soft-deleted contact answers 409 contact_email_taken with existingContactId null, and the body does not say the holder is deleted', async () => {
     const created = await post(ID.owner, ID.bizA, { firstName: `${P}Gone`, email: GONE_EMAIL });
     expect(created.status).toBe(201);
     await db.contact.delete({ where: { id: created.body.id } }); // soft-delete extension: sets deleted_at
@@ -408,5 +545,12 @@ describe('a soft-deleted holder still occupies the unique (characterized, not a 
     expect(res.status).toBe(409);
     expectTaken(res.body, 'contact_email_taken', null);
     expect(await db.contact.count({ where: { businessId: ID.bizA, emailNormalized: GONE_EMAIL, deletedAt: null } })).toBe(0);
+
+    const live = await post(ID.owner, ID.bizA, { firstName: `${P}Gone3`, email: EMAIL });
+    expect(live.status).toBe(409);
+    expect(live.body.details.existingContactId).toBeTruthy();
+    expect(res.body.code).toBe(live.body.code);
+    expect(res.body.message).toBe(live.body.message);
+    expect(JSON.stringify(res.body)).not.toMatch(/delet/i);
   });
 });

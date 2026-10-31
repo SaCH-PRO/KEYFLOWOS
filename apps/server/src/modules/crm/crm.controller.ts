@@ -299,8 +299,11 @@ export class CrmController {
   createContact(
     @Param('businessId') businessId: string,
     @Body() body: CreateContactDto,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.crm.createContact({ ...body, businessId });
+    // The actor bounds what a duplicate-identity 409 may name: the existing
+    // holder's id is disclosed only when this member could open that contact.
+    return this.crm.createContact({ ...body, businessId, actorUserId: req?.user?.id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

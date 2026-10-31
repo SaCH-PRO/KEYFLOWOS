@@ -433,8 +433,11 @@ describe('CRM e2e', () => {
   // R0-D7-CONTACT-EMAIL-409: a contact whose email or phone is already held in
   // the tenant is a 409 from the service, and the controller hands it through
   // untouched: the code names the field, the existing id rides along, and the
-  // audit interceptor (tap on success) writes nothing. Mocked service; the
-  // real unique-index proof is crm-contact-duplicate.integration.test.ts.
+  // audit interceptor (tap on success) writes nothing. The controller also
+  // forwards the caller's identity on create (as update already did), which
+  // is what lets the service bound the disclosed id to the actor's CRM
+  // visibility. Mocked service; the real unique-index and visibility proof
+  // is crm-contact-duplicate.integration.test.ts.
   // Without the global filter the body is the thrown object itself; with it
   // (app-bootstrap) `code` stays top-level and the id moves under `details`.
   describe('duplicate contact identity (guarded controller regressions)', () => {
@@ -454,7 +457,7 @@ describe('CRM e2e', () => {
       expect(res.body.existingContactId).toBe('contact_existing');
       expect(res.body).not.toHaveProperty('id');
       expect(crmServiceMock.createContact).toHaveBeenCalledWith(
-        expect.objectContaining({ businessId: 'biz_1', email: 'alice@example.com' }),
+        expect.objectContaining({ businessId: 'biz_1', email: 'alice@example.com', actorUserId: 'user_1' }),
       );
       await new Promise((r) => setImmediate(r));
       expect(prisma.teamActivityLogs).toHaveLength(0);
