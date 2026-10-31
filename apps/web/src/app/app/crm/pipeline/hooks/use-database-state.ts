@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createContext, useState, useEffect, useLayoutEffect, useMemo, useCallback, useContext, useRef } from "react";
 import type { ContactsCacheOwner, LocalContact } from "@/lib/contacts-db";
 import { cacheContacts, clearCachedContacts, contactsCacheKey, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
 import { classifyContactsLoadError, CONTACTS_DENIED_MESSAGE, type ContactsLoadFailure } from "./use-contacts-data";
@@ -213,6 +213,15 @@ function useMediaQuery(query: string): boolean {
 const NO_CONTACTS: LocalContact[] = [];
 const CONTACTS_TABLE_LOAD_FAILED_MESSAGE = "Failed to load contacts. Please try again.";
 
+/**
+ * CONTACTS-v1 section 5 (review CR-1): the table runs its own contacts read,
+ * and a refusal of that read must render the denial, not the table's empty
+ * copy. The screen hosting the table (pipeline-tab-content.tsx) provides this
+ * callback; the table calls it when its own read is refused, and the screen
+ * shows the denial in the table's place.
+ */
+export const ContactsTableDenialContext = createContext<(() => void) | null>(null);
+
 interface UseDatabaseStateOptions {
   businessId: string;
   contacts: LocalContact[];
@@ -299,6 +308,13 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     : serverContacts.length > 0 ? serverContacts : contacts.length > 0 ? contacts : cacheFallback;
   const usingCache = activeContacts === cacheFallback && cacheFallback.length > 0;
   const loadError = readDenied ? CONTACTS_DENIED_MESSAGE : serverFailure ? CONTACTS_TABLE_LOAD_FAILED_MESSAGE : null;
+
+  // A layout effect, so the screen swaps the table for the denial before the
+  // browser paints the table's empty copy.
+  const reportTableDenial = useContext(ContactsTableDenialContext);
+  useLayoutEffect(() => {
+    if (readDenied) reportTableDenial?.();
+  }, [readDenied, reportTableDenial]);
 
   const mapSortFieldToApi = useCallback((field: SortField): string | undefined => {
     switch (field) {

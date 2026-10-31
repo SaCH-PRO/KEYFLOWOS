@@ -21,7 +21,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useEffect } from "react";
-import { act, render, renderHook, screen, waitFor, cleanup } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { useContactsData } from "../use-contacts-data";
 import { useDatabaseState } from "../use-database-state";
 import { PipelineContactList } from "../../pipeline-contact-list";
@@ -502,5 +502,145 @@ describe("contacts focus, table and kanban views: a 403/401 renders the denial, 
 
     expect(result.current.activeContacts.map((c) => c.firstName)).toEqual(["Ownrow"]);
     expect(result.current.usingCache).toBe(true);
+  });
+});
+
+/**
+ * R0-15b review repairs.
+ *
+ * ST-R015b-1: only a refusal of the table's OWN read dropped the device cache.
+ * A refusal of the screen's read (use-contacts-data) in the list, focus,
+ * kanban or table view left this user's and business's rows on the device, and
+ * the next read that merely FAILED (offline, a 5xx, BusinessGuard's "Unable to
+ * verify business access") let the table fall back to them.
+ *
+ * CR-1: the table runs its own read. When the screen's read was allowed but the
+ * table's was refused, the table withdrew the rows but rendered its empty copy
+ * ("No contacts found") with no role=alert.
+ */
+const isTableRead = (url: URL) => url.searchParams.get("sortBy") === "name";
+
+function requestUrl(input: RequestInfo | URL): URL {
+  return new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, "http://localhost");
+}
+
+function contactRow(id: string, firstName: string) {
+  return { id, firstName, lastName: "Row", email: `${id}@rows.example.test`, status: "CLIENT", tags: [] };
+}
+
+/** The screen's read and the table's own read, answered separately. */
+function stubSplitContactsApi(answers: { screen: () => Response; table: () => Response }) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = requestUrl(input);
+    if (url.pathname.endsWith("/contacts/poll")) return jsonResponse(200, { lastUpdatedAt: null, totalCount: 1 });
+    if (url.pathname.endsWith("/contacts/favorites")) return jsonResponse(200, []);
+    if (url.pathname.endsWith("/contacts")) return isTableRead(url) ? answers.table() : answers.screen();
+    return jsonResponse(404, { message: "Not stubbed" }, "Not Found");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function countTableReads(fetchMock: { mock: { calls: unknown[][] } }): number {
+  return fetchMock.mock.calls.filter(([input]) => {
+    const url = requestUrl(input as RequestInfo | URL);
+    return url.pathname.endsWith("/contacts") && isTableRead(url);
+  }).length;
+}
+
+function denialAlerts(): HTMLElement[] {
+  return screen.queryAllByRole("alert").filter((el) => /do not have access/i.test(el.textContent ?? ""));
+}
+
+describe("R0-15b repairs: a refusal in any view drops the device cache; a refused table read shows the denial", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("kf_token", "token-a");
+    window.localStorage.setItem("kf_business_id", "biz_1");
+    setCachedUser({ id: ME.userId, email: "a@example.test" });
+    fakeIdb.databases.clear();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    cleanup();
+    await settle();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+    fakeIdb.databases.clear();
+  });
+
+  it.each(["list", "focus", "kanban", "table"] as const)(
+    "ST-R015b-1, %s view: a 403 on the screen's read drops this owner's cached rows, so a later failed read never shows them in the table",
+    async (view) => {
+      await seedDeviceCache();
+      window.localStorage.setItem("kf_pipeline_view", view);
+      stubContactsApi("forbidden");
+
+      const watch = watchInsertedText(["Ownrow"]);
+      render(<ContactsScreenHarness />);
+      await findDenialAlert();
+
+      await waitFor(async () => expect(await getCachedContacts(ME)).toEqual([]));
+      // Only the refused owner's partition: other users' and businesses' rows
+      // are not this refusal's to drop.
+      expect((await getCachedContacts({ userId: "user_b", businessId: "biz_1" })).map((c) => c.firstName)).toEqual(["Otheruser"]);
+      expect((await getCachedContacts({ userId: "user_a", businessId: "biz_2" })).map((c) => c.firstName)).toEqual(["Othertenant"]);
+
+      // Next the read FAILS rather than being refused (offline, a 5xx), and
+      // the user opens the table, whose offline fallback is that cache.
+      const fetchMock = stubContactsApi("serverError");
+      fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+      await waitFor(() => expect(denialAlerts()).toHaveLength(0));
+      if (view !== "table") fireEvent.click(screen.getByRole("button", { name: "Table view" }));
+      await waitFor(() => expect(countTableReads(fetchMock)).toBeGreaterThan(0));
+      await settle();
+      watch.stop();
+
+      expect([...watch.seen]).toEqual([]);
+    },
+  );
+
+  it("CR-1, table view: the screen's read is allowed but the table's own read is refused: the denial, not 'No contacts found'", async () => {
+    window.localStorage.setItem("kf_pipeline_view", "table");
+    const forbidden = () => jsonResponse(403, { statusCode: 403, message: "No access to this business", error: "Forbidden" }, "Forbidden");
+    let tableAnswer: () => Response = forbidden;
+    const fetchMock = stubSplitContactsApi({
+      screen: () => jsonResponse(200, { contacts: [contactRow("c_screen", "Screenrow")], nextCursor: null, hasMore: false }),
+      table: () => tableAnswer(),
+    });
+
+    render(<ContactsScreenHarness />);
+
+    const alert = await findDenialAlert();
+    expect(alert).toHaveTextContent(/could not load contacts/i);
+    expect(countTableReads(fetchMock)).toBeGreaterThan(0);
+    await settle();
+    expect(screen.queryByText(VIEW_EMPTY_COPY.table)).not.toBeInTheDocument();
+    expect(screen.queryAllByText(/Screenrow/)).toHaveLength(0);
+
+    // Not sticky: once the table's read is allowed again, Try Again brings the
+    // table back with its rows.
+    tableAnswer = () => jsonResponse(200, { contacts: [contactRow("c_table", "Tablerow")], nextCursor: null, hasMore: false });
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+    expect((await screen.findAllByText(/Tablerow/)).length).toBeGreaterThan(0);
+    expect(denialAlerts()).toHaveLength(0);
+  });
+
+  it("CR-1 control, table view: a FAILED (not refused) table read keeps the screen's rows and shows no denial", async () => {
+    window.localStorage.setItem("kf_pipeline_view", "table");
+    const fetchMock = stubSplitContactsApi({
+      screen: () => jsonResponse(200, { contacts: [contactRow("c_screen", "Screenrow")], nextCursor: null, hasMore: false }),
+      table: () => jsonResponse(500, { statusCode: 500, message: "Internal server error" }, "Internal Server Error"),
+    });
+
+    render(<ContactsScreenHarness />);
+    await waitFor(() => expect(countTableReads(fetchMock)).toBeGreaterThan(0));
+    expect((await screen.findAllByText(/Screenrow/)).length).toBeGreaterThan(0);
+    await settle();
+    expect(denialAlerts()).toHaveLength(0);
+    expect(screen.queryAllByText(/Screenrow/).length).toBeGreaterThan(0);
   });
 });

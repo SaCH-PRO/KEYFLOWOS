@@ -5,7 +5,9 @@ import { AnimatePresence, motion } from "framer-motion";
 import { X, List, Heart, ChevronDown, Zap, Bot, AlertTriangle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { createContact, fetchContactLists, fetchContacts } from "@/lib/client";
+import { clearCachedContacts } from "@/lib/contacts-db";
 import { STATUS_COLORS } from "@/lib/crm-utils";
+import { getCachedUser } from "@/lib/workspace";
 import {
   ContactForm,
   ContactImport,
@@ -27,6 +29,7 @@ import { ContactsDatabase } from "./contacts-database";
 import { DuplicateDetector } from "./duplicate-detector";
 import { FocusView } from "./focus-view";
 import { CONTACTS_DENIED_MESSAGE } from "./hooks/use-contacts-data";
+import { ContactsTableDenialContext } from "./hooks/use-database-state";
 import type { PipelineState } from "./use-contacts-pipeline";
 
 interface PipelineTabContentProps {
@@ -114,6 +117,23 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   const [showImport, setShowImport] = useState(false);
   const [showEngageSection, setShowEngageSection] = useState(false);
   const [pipelineLists, setPipelineLists] = useState<{ id: string; name: string }[]>([]);
+  // Review CR-1: the business whose table read was refused (the table reports
+  // it through ContactsTableDenialContext). Cleared by Try Again and by a view
+  // change, so the next table read decides afresh.
+  const [tableDeniedFor, setTableDeniedFor] = useState<string | null>(null);
+  const tableReadDenied = tableDeniedFor !== null && tableDeniedFor === businessId;
+  const reportTableDenial = useCallback(() => {
+    if (businessId) setTableDeniedFor(businessId);
+  }, [businessId]);
+
+  // Review ST-R015b-1: a refusal of the screen's read, in any view, drops this
+  // user's and business's rows from the device cache, so a later read that
+  // merely fails (offline, a 5xx) cannot let the table fall back to rows the
+  // server refused. The table's own refusal drops them in use-database-state.
+  useEffect(() => {
+    if (loadError !== CONTACTS_DENIED_MESSAGE || !businessId) return;
+    void clearCachedContacts({ userId: getCachedUser()?.id ?? null, businessId }).catch(() => {});
+  }, [loadError, businessId]);
 
   useEffect(() => {
     if (!businessId || !selectMode) return;
@@ -127,6 +147,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   }, [businessId, selectMode]);
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
+    setTableDeniedFor(null);
     try { localStorage.setItem(PIPELINE_VIEW_KEY, mode); } catch {}
     if (typeof window !== "undefined") {
       try {
@@ -164,10 +185,10 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     }
   }, [businessId, loadContacts, loadFlowData]);
 
-  const handleRefresh = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
+  const handleRefresh = useCallback(() => { setTableDeniedFor(null); void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
   const handleMergeComplete = useCallback(() => { void loadContacts(); }, [loadContacts]);
   const handleLoadMore = useCallback(() => loadContacts({ append: true }), [loadContacts]);
-  const handleRetry = useCallback(() => { void loadContacts(); }, [loadContacts]);
+  const handleRetry = useCallback(() => { setTableDeniedFor(null); void loadContacts(); }, [loadContacts]);
   const handleOpenAddForm = useCallback(() => setShowAddForm(true), [setShowAddForm]);
   const handleOpenBroadcast = useCallback(() => setShowBroadcast(true), [setShowBroadcast]);
   const openComposer = useOpenComposer();
@@ -224,11 +245,15 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   // copy and the table its empty copy or the device cache, so they show the
   // load failure instead. The table keeps its offline cache for a failed (not
   // refused) read, which use-database-state limits to this user and business.
+  // The table's own read can be refused while the screen's was allowed (CR-1):
+  // the table then shows the denial too, never the screen's rows.
   const loadErrorView =
-    loadError && contacts.length === 0 &&
-    (viewMode === "focus" || viewMode === "kanban" || (viewMode === "table" && loadError === CONTACTS_DENIED_MESSAGE))
-      ? loadError
-      : null;
+    viewMode === "table" && tableReadDenied
+      ? CONTACTS_DENIED_MESSAGE
+      : loadError && contacts.length === 0 &&
+        (viewMode === "focus" || viewMode === "kanban" || (viewMode === "table" && loadError === CONTACTS_DENIED_MESSAGE))
+        ? loadError
+        : null;
 
   return (
     <div className="space-y-6">
@@ -498,16 +523,18 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
       ) : viewMode === "kanban" ? (
         <PipelineKanban state={state} />
       ) : viewMode === "table" && businessId ? (
-        <ContactsDatabase
-          businessId={businessId}
-          contacts={contacts as unknown as import("@/lib/contacts-db").LocalContact[]}
-          onRefresh={handleRefresh}
-          activeListId={activeListId}
-          onSelectList={(listId, contactIds) => { setActiveListId(listId); setActiveListContactIds(contactIds ?? null); }}
-          onSelectContact={selectContact}
-          favoriteIds={favoriteIds}
-          onToggleFavorite={handleToggleFavorite}
-        />
+        <ContactsTableDenialContext.Provider value={reportTableDenial}>
+          <ContactsDatabase
+            businessId={businessId}
+            contacts={contacts as unknown as import("@/lib/contacts-db").LocalContact[]}
+            onRefresh={handleRefresh}
+            activeListId={activeListId}
+            onSelectList={(listId, contactIds) => { setActiveListId(listId); setActiveListContactIds(contactIds ?? null); }}
+            onSelectContact={selectContact}
+            favoriteIds={favoriteIds}
+            onToggleFavorite={handleToggleFavorite}
+          />
+        </ContactsTableDenialContext.Provider>
       ) : viewMode === "data-quality" && businessId ? (
         <DuplicateDetector
           businessId={businessId}
