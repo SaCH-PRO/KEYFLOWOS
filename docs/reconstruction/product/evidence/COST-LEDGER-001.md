@@ -2,10 +2,12 @@
 
 ```yaml
 document_id: COST-LEDGER-001
-for_packet: R0-07-OPTIONAL-SVC-VISIBLE
+for_packet: R0-07-OPTIONAL-SVC-VISIBLE; updated by R0-07a-AI-DIRECT-503 (sections 2, 4 and 7)
 covers: issue #186 step 7 ("no unapproved paid external API; optional services fail visibly") and its "declared cost ledger"; CF-35
-code_anchor: claude/elegant-curie-7azpsb at ab192183 plus this packet
+code_anchor: claude/elegant-curie-7azpsb at ab192183 plus R0-07; R0-07a at bc6dfaba (tests first at 42ead2b7)
 proof: apps/server/test/optional-services-fail-visibly.integration.test.ts, apps/server/src/modules/ai/model-gateway.service.spec.ts,
+       apps/server/test/ai-direct-provider-503.integration.test.ts, apps/server/src/modules/ai/ai-usage.service.spec.ts,
+       apps/server/src/modules/key-cortex/key-cortex-voice.service.spec.ts (R0-07a),
        scripts/proof-admission/manifests/optional-services-fail-visibly.json
 mutations: none (declaration only; no provider is turned on by this document)
 review_status: PENDING_CHATGPT_REVIEW
@@ -25,10 +27,10 @@ Columns:
 - **Code default**: what the code does when the variable is unset. `off` means the operation does not run until it is configured; `on` means it runs unless something turns it off.
 - **Release 0**: the state Release 0 runs in.
 - **Billing**: `paid` (metered by the provider), `free` (no charge; may have quotas), or `host` (part of hosting, not per call).
-- **Failure mode**: what a caller sees when the provider is not configured or is down. **Proven** rows are pinned by the R0-07 suites; the others are read from code at the anchor and are declarations, not proofs.
+- **Failure mode**: what a caller sees when the provider is not configured or is down. **Proven** rows are pinned by the R0-07 and R0-07a suites; the others are read from code at the anchor and are declarations, not proofs.
 - **Cost owner**: who pays. `Platform` is the KeyFlow operator's account; `Tenant` is the business's own account (its OAuth connection or BYOK key).
 
-## 2. Proven by R0-07: optional services that fail visibly
+## 2. Proven by R0-07 and R0-07a: optional services that fail visibly
 
 | Operation | Provider (host) | Code | Env var | Code default | Release 0 | Billing | Failure mode | Cost owner |
 |---|---|---|---|---|---|---|---|---|
@@ -37,6 +39,8 @@ Columns:
 | Gmail connect (auth URL, code exchange) | accounts.google.com, oauth2.googleapis.com | `commerce/gmail.service.ts` | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_STATE_SECRET` | off | off | free | **Proven** for the auth URL: 503 `provider_not_configured`. The OAuth callback redirects with `gmail=error`, as before. | Platform |
 | AI dispatch through the model gateway (`complete`): chat, briefings, generation, classification, tool calling | OpenAI (api.openai.com or `AI_INTEGRATIONS_OPENAI_BASE_URL`), Anthropic, xAI, Kimi, Google Gemini, native, OpenRouter or Ollama | `ai/model-gateway.service.ts` | `AI_INTEGRATIONS_OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, `KIMI_API_KEY`, `GOOGLE_API_KEY` or `GEMINI_API_KEY`, `NATIVE_AI_API_KEY` or `KEYFLOW_NATIVE_AI_URL`, `OPENROUTER_API_KEY` or `OLLAMA_BASE_URL`; per business: BYOK keys (`BYOK_ENCRYPTION_SECRET` to store them) | off | off | paid (per token) | **Proven.** 503 `{code:'provider_not_configured', details:{service:'ai'}}` when no candidate provider has a key; 503 `provider_unavailable` when candidates are configured but every circuit is open. A circuit belongs to the credential that failed (the platform's env key, or one business's BYOK key), so one business's revoked key never makes AI unavailable for another. Nothing is billed: no AiUsageLog row, no LLM cost write, no provider call. A provider that was called and failed keeps its own error. | Platform (env keys); Tenant (BYOK) |
 | AI streaming (`streamComplete`) | as above | `ai/model-gateway.service.ts` | as above | off | off | paid | **Proven.** One `{type:'error', code:'provider_not_configured'}` chunk; no provider call. | Platform or Tenant |
+| Embeddings, image analysis (vision), voice synthesis and transcription through `AiUsageService`, which call OpenAI directly, not through the gateway | OpenAI (api.openai.com or `AI_INTEGRATIONS_OPENAI_BASE_URL`) | `ai/ai-usage.service.ts` (`trackEmbedding`, `trackVision`, `trackAudio`) | `AI_INTEGRATIONS_OPENAI_API_KEY` or `OPENAI_API_KEY`; `AI_INTEGRATIONS_OPENAI_BASE_URL` | off | off | paid | **Proven by R0-07a (bc6dfaba).** With neither key set (an empty value counts as unset), each helper throws the gateway's 503 `{code:'provider_not_configured', details:{service:'ai'}}` before it builds an OpenAI client, calls OpenAI, spends a rate-limit slot or credit, or writes an AiUsageLog row. It used to throw the SDK constructor's plain error. `POST /crm/businesses/:b/import/scan` (vision) now answers this 503; it answered 500. `POST /voice/businesses/:b/tts` answers 503 and builds no client, but its provider wrapper drops the code (section 7 item 7). With a key, nothing changes: same key, base URL, provider call and usage row. | Platform |
+| KEY voice (speech and transcription) | OpenAI | `key-cortex/key-cortex-voice.service.ts` | `AI_INTEGRATIONS_OPENAI_API_KEY` or `OPENAI_API_KEY` | off (warns at boot) | off | paid | **Proven by R0-07a (bc6dfaba).** The sentinel key `sk-no-key` is gone. With neither key set the service builds no client, and `synthesize` and `transcribe` (with the metadata and preview paths that use them) throw the same 503 before any provider call or usage record. `POST /api/v1/cortex/voice/speak` and `/voice/listen` answer 503 and send nothing; they used to send the request to OpenAI with `Authorization: Bearer sk-no-key` (401 in production). `KeyCortexController` still replaces the body with `'Voice synthesis unavailable'` / `'Speech transcription unavailable'` without the code (section 7 item 7). With a key, nothing changes. | Platform |
 
 ## 3. On the Release 0 path, or deciding whether it boots
 
@@ -51,10 +55,12 @@ Columns:
 
 ## 4. AI calls that bypass the gateway (declared; not covered by the R0-07 503)
 
+The `AiUsageService` direct helpers and KEY voice were listed here until
+R0-07a proved their failure mode; they are now in section 2.
+
 | Operation | Provider | Code | Env var | Code default | Release 0 | Billing | Failure mode | Cost owner |
 |---|---|---|---|---|---|---|---|---|
-| Embeddings, image analysis, voice synthesis and transcription through `AiUsageService` | OpenAI | `ai/ai-usage.service.ts` (direct `new OpenAI` at the embedding, vision and audio helpers) | `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` | off | off | paid | Not routed through the gateway, so not the structured 503. With no key the OpenAI SDK throws from its constructor; a route that surfaces it answers 500. Outside R0-07's write set; recorded as a follow-up. | Platform |
-| KEY voice (speech and transcription) | OpenAI | `key-cortex/key-cortex-voice.service.ts` | `AI_INTEGRATIONS_OPENAI_API_KEY` or `OPENAI_API_KEY` | off (warns at boot) | off | paid | Calls with the sentinel key fail with OpenAI's 401. | Platform |
+| KEY document embeddings | OpenAI | `key-cortex/key-cortex-document.service.ts` | `AI_INTEGRATIONS_OPENAI_API_KEY` or `OPENAI_API_KEY` | off (warns at boot) | off | paid | Still builds its client with the sentinel key `sk-no-key`, so an embedding call goes out to OpenAI and fails there with a 401. Found by R0-07a, outside its write set (section 7 item 8). | Platform |
 | Text to speech | ElevenLabs | `voice/elevenlabs-voice.provider.ts` | `ELEVENLABS_API_KEY` | off | off | paid | 503 `ELEVENLABS_API_KEY is not configured.` | Platform |
 | Code execution sandbox | E2B | `ai/code-executor.service.ts` | `E2B_API_KEY` with `PUBLIC_API_URL` | off (local backend) | off | paid | Falls back to the local executor. | Platform |
 | LLM tracing | Langfuse (cloud.langfuse.com or `LANGFUSE_BASE_URL`) | `ai/langfuse.service.ts` | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | off | off | paid above free tier | Tracing disabled; calls still routed and costed. | Platform |
@@ -98,12 +104,18 @@ spawned server), never by stopping the shared container.
 
 ## 7. Follow-ups found by R0-07 (outside its write set)
 
-1. `AiUsageService` and `KeyCortexVoiceService` call OpenAI directly (section 4), so those paths do not get the gateway's structured 503.
+1. **Done by R0-07a-AI-DIRECT-503 (bc6dfaba; tests first at 42ead2b7).** `AiUsageService` and `KeyCortexVoiceService` call OpenAI directly, so they did not get the gateway's structured 503. They now throw it themselves when no OpenAI key is configured, before any client, provider call or usage row (section 2). The proof is `ai-direct-provider-503.integration.test.ts` (real database, prefix `k07c_`), `ai-usage.service.spec.ts` and `key-cortex-voice.service.spec.ts`, bound by the `optional-services-fail-visibly.json` manifest. Items 7 and 8 are what R0-07a found outside its write set.
 2. `POST .../quotes/:id/send-email` moves a DRAFT quote to SENT before it sends (`commerce.controller.ts`, owned by the commerce chain). A refused send now answers 503, but a DRAFT quote is left SENT. A SENT quote, as in the R0-07 suite, is unchanged.
 3. `POST .../invoices/:id/send-email` creates the invoice's payment link before it sends, so a refused send can leave a new PaymentLink row. It writes no ledger rows and does not change the invoice status.
 4. Gmail connect is not bound to the user who started it (R0-07 review ST-2). The signed OAuth state names only the business, and `GET /commerce/gmail/callback` needs no login, so whoever completes Google consent on a forwarded auth URL links their mailbox to that business. R0-07 made a state single-use (per process); binding it to the initiating user, or confirming the link in that user's session, needs `commerce.controller.ts`.
 5. `GET .../gmail/auth-url` is guarded by `revenue:read` (R0-07 review ST-3), so STAFF can start connecting, or replacing, the business mailbox that invoices and receipts are sent from. The guard is in `commerce.controller.ts`.
 6. The web client retries every GET 503 three times and then drops the body (R0-07 review ST-4 / R07-CR-1: `apps/web/src/lib/fetch-with-retry.ts`, `api.ts`). GET consumers of the R0-07 503 (Gmail auth URL, inbox reads, AI GET routes such as the weekly plan) see `HTTP 503: <statusText>` and a "backend unreachable" warning instead of `provider_not_configured`, and spend four requests of their rate limit. The web client should hand a 503 whose body code is `provider_not_configured` to its caller without retrying.
+7. Callers of the direct AI paths lose the R0-07a code or hide the failure (found by R0-07a; recorded as `it.todo` cases in `ai-direct-provider-503.integration.test.ts`):
+   - `KeyCortexController.speak` and `.listen` (`POST /api/v1/cortex/voice/speak`, `/voice/listen`) catch every error and throw a new `ServiceUnavailableException('Voice synthesis unavailable' / 'Speech transcription unavailable')`. The status is 503, but the body code is `UNKNOWN_ERROR`. Owned by `key-cortex.controller.ts`.
+   - `OpenAiVoiceProvider` (`POST /voice/businesses/:b/tts`) and `KeyflowVoiceService` (`POST /keyflow/businesses/:b/voice/tts`, `/voice/transcribe`) rewrap the error the same way. The voice provider keeps the cause in its message (`OpenAI TTS failed: No AI providers available: ...`); KeyflowVoiceService replaces it with `Voice synthesis failed.` or `Voice transcription failed.`. The fix is to rethrow an `HttpException` unchanged.
+   - `CommerceVisionService.extractProductsFromImage` (`POST /commerce/businesses/:b/products/import/scan`) catches every error and returns no products, so a missing key looks like an image with nothing in it.
+   - `SemanticMemoryService.search` and `backfillFromAiMemory` (`GET /ai/businesses/:b/agent/memory/search`, `POST .../agent/memory/backfill`) and the background `store` callers log the error and return empty results. Nothing is billed and no client is built, but nothing tells the user that search is not configured.
+8. `KeyCortexDocumentService` (`key-cortex/key-cortex-document.service.ts`, document embeddings) still builds its OpenAI client with the sentinel key `sk-no-key` (section 4). It should use `directOpenAiKey()` and `directOpenAiNotConfigured()` from `ai/ai-usage.service.ts`, as KEY voice now does. Outside R0-07a's write set.
 
 ## 8. Keeping the ledger true
 
