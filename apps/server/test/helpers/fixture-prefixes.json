@@ -169,6 +169,11 @@
       "legacy": true
     },
     {
+      "prefix": "v46a_",
+      "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
+      "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
+    },
+    {
       "prefix": "v48a_",
       "owner": "apps/server/test/public-invoice-link.integration.test.ts",
       "packet": "V1-48-PUBLIC-TOKEN-VIEW"
