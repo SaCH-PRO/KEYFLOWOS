@@ -173,6 +173,25 @@ const fadeUp = {
 
 type BillingSubTab = "overview" | "usage" | "features" | "history";
 
+/**
+ * R0-08c-SUBSCRIPTION-AUTHORITY: the server refuses a plan change (trial,
+ * activate, cancel, checkout, record-payment) by a member who is not the
+ * business owner with 403 {code: SUBSCRIPTION_OWNER_ONLY}. The tab names who
+ * can act, keyed on the code rather than on the server's wording.
+ */
+const SUBSCRIPTION_OWNER_ONLY = "SUBSCRIPTION_OWNER_ONLY";
+const OWNER_ONLY_PLAN_CHANGE_TEXT = "Only the business owner can change the plan.";
+
+function isOwnerOnlyRefusal(res: { rawError?: Record<string, unknown> | null }): boolean {
+  return res.rawError?.code === SUBSCRIPTION_OWNER_ONLY;
+}
+
+/** What a refused plan change shows: the owner-only rule, or the server's own message. */
+function planChangeErrorText(res: { error: string | null; rawError?: Record<string, unknown> | null }): string {
+  if (isOwnerOnlyRefusal(res)) return OWNER_ONLY_PLAN_CHANGE_TEXT;
+  return res.error ?? "Request failed";
+}
+
 export function BillingTab() {
   const [dashboard, setDashboard] = useState<BillingDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -229,8 +248,11 @@ export function BillingTab() {
     });
 
     if (res.error) {
-      setMessage({ type: "error", text: res.error });
-      toast.error(res.error);
+      const text = planChangeErrorText(res);
+      setMessage({ type: "error", text });
+      toast.error(text);
+      // Retrying cannot succeed for this member: close the dialog so the reason shows.
+      if (isOwnerOnlyRefusal(res)) setCheckoutPlan(null);
     } else {
       setMessage({ type: "success", text: `${checkoutPlan} plan activated!` });
       toast.success(`${checkoutPlan} plan activated with ${methodLabels[checkoutMethod] || checkoutMethod} payment!`);
@@ -252,8 +274,9 @@ export function BillingTab() {
       body: { plan, currency: selectedCurrency },
     });
     if (res.error) {
-      setMessage({ type: "error", text: res.error });
-      toast.error(res.error);
+      const text = planChangeErrorText(res);
+      setMessage({ type: "error", text });
+      toast.error(text);
     } else {
       setMessage({ type: "success", text: `${plan} trial started! You have 1 day to explore.` });
       toast.success(`${plan} trial started!`);
@@ -275,8 +298,9 @@ export function BillingTab() {
           body: {},
         });
         if (res.error) {
-          setMessage({ type: "error", text: res.error });
-          toast.error(res.error);
+          const text = planChangeErrorText(res);
+          setMessage({ type: "error", text });
+          toast.error(text);
         } else {
           setMessage({ type: "success", text: res.data?.message || "Subscription cancelled." });
           toast.success("Subscription cancelled");
