@@ -57,6 +57,7 @@ const ID = {
   bizB: `${P}bizB`,
   inv: `${P}invMut_l1`,
 };
+const QUOTE = `${P}quote_l1`;
 
 interface UserSeed { id: string; role: string }
 interface MembershipSeed { userId: string; businessId: string; role: string; permissionScopes?: Record<string, string> | null }
@@ -168,6 +169,9 @@ const commerceMock = {
   getInvoicePublicView: vi.fn(),
   getInvoiceForViewer: vi.fn(),
   getInvoiceForBusiness: vi.fn(),
+  getQuote: vi.fn(),
+  getQuoteForBusiness: vi.fn(),
+  getStaleQuotes: vi.fn(),
 };
 
 const receiptsMock = {
@@ -254,6 +258,13 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
     commerceMock.getInvoiceForBusiness.mockResolvedValue({
       id: ID.inv, businessId: ID.bizA, status: 'DRAFT', contactId: `${P}contactA`, items: [], payments: [], paidAmount: 0, remaining: 100,
     });
+    commerceMock.getQuote.mockResolvedValue({
+      id: QUOTE, businessId: ID.bizA, status: 'DRAFT', contact: { firstName: 'R', lastName: 'V', email: 'rva@test.local' },
+    });
+    commerceMock.getQuoteForBusiness.mockResolvedValue({
+      id: QUOTE, businessId: ID.bizA, status: 'DRAFT', contactId: `${P}contactA`, items: [], lifecycleStep: 'DRAFT',
+    });
+    commerceMock.getStaleQuotes.mockResolvedValue([]);
   });
 
   // -------------------------------------------------------------------------
@@ -584,6 +595,120 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       await withActor(agent().get(`/commerce/invoices/${ID.inv}`), ID.ownerA).expect(200);
       expect(commerceMock.getInvoiceForViewer).toHaveBeenLastCalledWith(ID.inv, { id: ID.ownerA, role: 'USER' });
       expect(commerceMock.getInvoiceForBusiness).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // R0-PC-01-QUOTE-DETAIL-TENANT-ROUTE (L1 half): quote detail moves to
+  // GET /commerce/businesses/:businessId/quotes/:quoteId, and the unguarded
+  // bare-id GET /commerce/quotes/:quoteId is retired to a uniform 404 behind
+  // the public rate limit. This layer proves decorator metadata, routing,
+  // guard admission and what the controller forwards; the L2 half (real rows,
+  // byte-identical 404 bodies, the operator shape) is
+  // test/commerce-quote-visibility.integration.test.ts.
+  describe('R0-PC-01: tenant-bound quote detail and the retired bare-id route (L1 half)', () => {
+    const tenantQuote = (actor: string | null, businessId = ID.bizA, quoteId = QUOTE) =>
+      withActor(agent().get(`/commerce/businesses/${businessId}/quotes/${quoteId}`), actor);
+    const bareQuote = (actor: string | null, quoteId = QUOTE) =>
+      withActor(agent().get(`/commerce/quotes/${quoteId}`), actor);
+
+    it('PC-01-META: getQuoteDetail is GET businesses/:businessId/quotes/:quoteId behind AuthGuard, BusinessGuard and ModuleScopeGuard with { module: revenue, minLevel: read }', () => {
+      const handler = (CommerceController.prototype as any).getQuoteDetail;
+      expect(typeof handler).toBe('function');
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('businesses/:businessId/quotes/:quoteId');
+      expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.GET);
+      expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual({ module: 'revenue', minLevel: 'read' });
+      const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];
+      expect(guards).toEqual([AuthGuard, BusinessGuard, ModuleScopeGuard]);
+      expect(guards).not.toContain(PublicRateLimitGuard);
+      expect(Reflect.getMetadata(PUBLIC_RATE_LIMIT_KEY, handler)).toBeUndefined();
+    });
+
+    it('PC-01-401: an unauthenticated read of the tenant route is refused before any service call', async () => {
+      const res = await tenantQuote(null);
+      expect(res.status).toBe(401);
+      expect(commerceMock.getQuoteForBusiness).not.toHaveBeenCalled();
+      expect(commerceMock.getQuote).not.toHaveBeenCalled();
+    });
+
+    it('PC-01-403: a non-member and a member of another tenant are refused at BusinessGuard (403 No access to this business)', async () => {
+      for (const actor of [ID.noMember, ID.ownerB]) {
+        const res = await tenantQuote(actor);
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/No access to this business/);
+      }
+      expect(commerceMock.getQuoteForBusiness).not.toHaveBeenCalled();
+    });
+
+    it('PC-01-403: explicit revenue:none is refused at ModuleScopeGuard (403 Insufficient permissions)', async () => {
+      const res = await tenantQuote(ID.staffNoneA);
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/Insufficient permissions/);
+      expect(commerceMock.getQuoteForBusiness).not.toHaveBeenCalled();
+    });
+
+    it('PC-01-200: revenue:read (explicit and STAFF default), write, OWNER and SUPER_ADMIN are admitted, and the controller forwards (quoteId, path businessId)', async () => {
+      for (const actor of [ID.staffReadA, ID.staffDefaultA, ID.staffWriteA, ID.ownerA, ID.superAdmin]) {
+        const res = await tenantQuote(actor);
+        expect(res.status, actor).toBe(200);
+        expect(res.body).toMatchObject({ id: QUOTE, businessId: ID.bizA, status: 'DRAFT' });
+        expect(commerceMock.getQuoteForBusiness).toHaveBeenLastCalledWith(QUOTE, ID.bizA);
+      }
+      expect(commerceMock.getQuoteForBusiness).toHaveBeenCalledTimes(5);
+      expect(commerceMock.getQuote).not.toHaveBeenCalled();
+    });
+
+    it('PC-01-PATH: the tenant forwarded is the path param; a body or query businessId is ignored by the guards and the handler alike', async () => {
+      const res = await withActor(agent().get(`/commerce/businesses/${ID.bizA}/quotes/${QUOTE}?businessId=${ID.bizB}`), ID.ownerA)
+        .set('Content-Type', 'application/json')
+        .send({ businessId: ID.bizB });
+      expect(res.status).toBe(200);
+      expect(commerceMock.getQuoteForBusiness).toHaveBeenCalledTimes(1);
+      expect(commerceMock.getQuoteForBusiness).toHaveBeenCalledWith(QUOTE, ID.bizA);
+    });
+
+    it('PC-01-404: a null from the tenant-bound read (cross-tenant, unknown or soft-deleted id) is a 404 Quote not found', async () => {
+      commerceMock.getQuoteForBusiness.mockResolvedValueOnce(null);
+      const res = await tenantQuote(ID.ownerB, ID.bizB);
+      expect(res.status).toBe(404);
+      expect(res.body.message).toBe('Quote not found');
+      expect(commerceMock.getQuoteForBusiness).toHaveBeenCalledWith(QUOTE, ID.bizB);
+    });
+
+    it('PC-01-STALE: the stale-quote list keeps its route; "stale" is never read as a quote id', async () => {
+      await withActor(agent().get(`/commerce/businesses/${ID.bizA}/quotes/stale`), ID.ownerA).expect(200);
+      expect(commerceMock.getStaleQuotes).toHaveBeenCalledWith(ID.bizA, undefined);
+      expect(commerceMock.getQuoteForBusiness).not.toHaveBeenCalled();
+    });
+
+    it('PC-01-BARE-META: the bare-id handler carries @PublicRateLimit(20, 60000) behind PublicRateLimitGuard and no tenant guard', () => {
+      const handler = CommerceController.prototype.getQuote;
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('quotes/:quoteId');
+      expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.GET);
+      expect(Reflect.getMetadata(PUBLIC_RATE_LIMIT_KEY, handler)).toEqual({ limit: 20, windowMs: 60_000 });
+      const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];
+      expect(guards).toEqual([PublicRateLimitGuard]);
+    });
+
+    it('PC-01-BARE-404 (choice: 404, not a projection): the bare-id route answers 404 Quote not found to every caller without reading the quote', async () => {
+      for (const actor of [null, ID.noMember, ID.staffNoneA, ID.ownerB, ID.ownerA, ID.superAdmin]) {
+        const res = await bareQuote(actor);
+        expect(res.status, `actor ${actor}`).toBe(404);
+        expect(res.body.message).toBe('Quote not found');
+        expect(res.body).not.toHaveProperty('contact');
+        expect(res.body).not.toHaveProperty('id');
+      }
+      expect(commerceMock.getQuote).not.toHaveBeenCalled();
+      expect(commerceMock.getQuoteForBusiness).not.toHaveBeenCalled();
+    });
+
+    it('PC-01-BARE-429: the guard enforces the bare-id limit — the 21st read inside the window is 429', async () => {
+      for (let i = 1; i <= 20; i += 1) {
+        const res = await bareQuote(null, `${QUOTE}_${i}`);
+        expect(res.status, `request ${i}`).toBe(404);
+      }
+      const blocked = await bareQuote(null);
+      expect(blocked.status).toBe(429);
     });
   });
 });
