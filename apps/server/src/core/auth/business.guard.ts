@@ -1,6 +1,33 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveRequestBusinessId } from './request-business-id';
+import type { TenantBearingRequest } from './request-business-id';
+
+/**
+ * A request BusinessGuard has admitted: `guardedBusinessId` is the tenant it
+ * resolved (resolveRequestBusinessId) and verified the caller belongs to.
+ * Request parsing never sets this property; only the guard does, and only on
+ * success.
+ */
+export interface BusinessGuardedRequest extends TenantBearingRequest {
+  guardedBusinessId?: unknown;
+}
+
+/**
+ * The tenant a request is scoped to: the one answer BusinessGuard and
+ * TenantInterceptor share (R0-F24-TENANT-INTERCEPTOR-ALIGN, build map CF-24).
+ *
+ * The string BusinessGuard validated and attached, when it did; otherwise the
+ * resolver the guard runs (params, then body, then query; the first non-empty
+ * string). A non-string candidate is skipped, never coerced. For every request
+ * whose businessId fields are strings (or falsy) this is exactly the legacy
+ * `params.businessId || body.businessId || query.businessId`.
+ */
+export function requestTenantBusinessId(req: BusinessGuardedRequest | undefined): string | undefined {
+  const guarded = req?.guardedBusinessId;
+  if (typeof guarded === 'string' && guarded.length > 0) return guarded;
+  return resolveRequestBusinessId(req);
+}
 
 @Injectable()
 export class BusinessGuard implements CanActivate {
@@ -54,6 +81,10 @@ export class BusinessGuard implements CanActivate {
       throw new ForbiddenException('Unable to verify business access');
     }
 
+    // TenantInterceptor scopes the ambient tenant to exactly this string
+    // (requestTenantBusinessId), so the Prisma tenant extension injects the
+    // tenant checked here and nothing else.
+    (req as BusinessGuardedRequest).guardedBusinessId = businessId;
     return true;
   }
 }

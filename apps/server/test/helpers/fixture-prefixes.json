@@ -65,8 +65,7 @@
     },
     {
       "prefix": "k24a_",
-      "owner": "apps/server/test/tenant-interceptor-alignment.integration.test.ts",
-      "packet": "R0-F24-TENANT-INTERCEPTOR-ALIGN"
+      "owner": "apps/server/test/tenant-interceptor-alignment.integration.test.ts"
     },
     {
       "prefix": "k33a_",
