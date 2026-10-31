@@ -6,6 +6,64 @@ import { verifyAdminToken } from './admin-token.util';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 
+/** Redis key of the per-user logout revocation marker, written by POST /identity/logout. */
+export const logoutRevocationKey = (userId: string): string => `auth:revoked:user:${userId}`;
+
+/**
+ * How long POST /identity/logout keeps the marker. It must be at least the
+ * longest lifetime of a token issued before the logout, or such a token outlives
+ * its revocation: Supabase access tokens live 1h by default, admin tokens 24h.
+ */
+export const LOGOUT_REVOCATION_TTL_SECONDS = 24 * 60 * 60;
+
+/**
+ * Below this a stored value is not a revocation time in epoch seconds
+ * (2001-09-09). The bare flag '1' the previous release wrote is the case this
+ * exists for.
+ */
+const MIN_REVOCATION_EPOCH_S = 1_000_000_000;
+
+/** The marker value POST /identity/logout writes: the revocation time, in epoch seconds. */
+export function logoutRevocationValue(nowMs: number = Date.now()): string {
+  return String(Math.floor(nowMs / 1000));
+}
+
+/**
+ * The cutoff a stored marker stands for, in epoch seconds: a token whose iat is
+ * at or before it is refused.
+ *
+ * A value that is not an epoch-seconds time — the bare flag '1' the previous
+ * release wrote — is a revocation at an unknown time, so its cutoff is NOW:
+ * every token issued up to this moment is refused, exactly as the bare flag
+ * refused every token before. The next POST /identity/logout rewrites it in the
+ * new format; otherwise its TTL ends it.
+ */
+export function logoutRevocationCutoff(stored: string, nowMs: number = Date.now()): number {
+  if (/^\d+$/.test(stored)) {
+    const at = Number(stored);
+    if (Number.isSafeInteger(at) && at >= MIN_REVOCATION_EPOCH_S) return at;
+  }
+  return Math.floor(nowMs / 1000);
+}
+
+/**
+ * The `iat` claim (epoch seconds) of a JWT the verifier has ALREADY accepted,
+ * or null when it has none. The payload bytes are covered by the signature
+ * getUserFromToken checked (locally, or by Supabase), so the claim is
+ * authentic; nothing here verifies anything.
+ */
+function issuedAtOf(token: string): number | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { iat?: unknown } | null;
+    const iat = payload?.iat;
+    return typeof iat === 'number' && Number.isFinite(iat) ? iat : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Server-side authentication gate for every inbound request.
  *
@@ -24,15 +82,18 @@ import { REDIS_CLIENT } from '../redis/redis.constants';
  *     issues those tokens for an existing row.
  *     (Until R0-ID-F2-ADMIN-TOKEN-LOCAL-USER the admin branch attached the
  *     token's own claims and skipped every one of these checks — ST-2.)
- *   - Logout revocation differs by token kind. A Supabase token is refused
- *     while the per-user marker `auth:revoked:user:<id>` (POST /identity/logout)
- *     is set. An admin token is revoked by its own issue-time cutoff
- *     (`admin:user:<id>:revokedAt`, POST /api/admin/auth/logout, checked in
- *     verifyAdminToken), NOT by that marker: the marker carries no issue time
- *     and only POST /identity/login clears it, so honouring it refused every
- *     token a later POST /api/admin/auth/login issued, for 24h. Making
- *     POST /identity/logout revoke admin tokens by issue time is the ST-4 fix
- *     (identity.controller.ts), outside this middleware.
+ *   - Logout revocation is an issue-time cutoff for both token kinds, each in
+ *     its own key. A Supabase token is refused when the per-user marker
+ *     `auth:revoked:user:<id>` (POST /identity/logout) holds a revocation time
+ *     at or after the token's iat, or when the token has no iat at all; a token
+ *     issued after the logout is attached. POST /identity/login no longer
+ *     deletes the marker (ST-4, R0-ID-F3-REVOCATION-IAT-CUTOFF: deleting it
+ *     re-admitted every pre-logout token, a stolen one included). An admin
+ *     token is revoked by its own cutoff (`admin:user:<id>:revokedAt`, in the
+ *     admin token's milliseconds, checked in verifyAdminToken), which
+ *     POST /api/admin/auth/logout and POST /identity/logout both write — NOT by
+ *     the Supabase marker, whose seconds-granularity cutoff would refuse an
+ *     admin login made in the same second as the logout.
  *   - On success, attach `req.user = { id, email, role }`.
  *   - On any failure / missing token, leave `req.user` unset. Downstream
  *     guards/controllers decide whether the route requires authentication
@@ -79,7 +140,7 @@ export class AuthMiddleware implements NestMiddleware {
     try {
       const user = await this.getSupabaseAuth().getUserFromToken(token);
       if (user?.id) {
-        const localUser = await this.resolveLocalUser(user.id);
+        const localUser = await this.resolveLocalUser(user.id, { tokenIssuedAt: issuedAtOf(token) });
         if (!localUser) {
           this.logger.warn(
             { userId: user.id },
@@ -100,9 +161,9 @@ export class AuthMiddleware implements NestMiddleware {
         // still be here, and with which role, is the User row's answer — the
         // same resolveLocalUser row checks as the Supabase branch (ST-2). An
         // admin identity has no bootstrap window, so a missing row is refused
-        // too. Its logout revocation is verifyAdminToken's issue-time cutoff,
-        // not the per-user marker: see the class comment (nothing on the admin
-        // login path clears that marker, so honouring it locked the admin out).
+        // too. Its logout revocation is verifyAdminToken's own issue-time
+        // cutoff (admin:user:<id>:revokedAt, which POST /identity/logout writes
+        // too), not the per-user Supabase marker: see the class comment.
         const adminUser = await verifyAdminToken(token, this.redis);
         if (adminUser) {
           const localUser = await this.resolveLocalUser(adminUser.id, {
@@ -167,9 +228,12 @@ export class AuthMiddleware implements NestMiddleware {
    *                          meaningful, since every business-scoped route
    *                          needs a membership they do not have yet.
    *   row deleted/banned  -> REJECT.
-   *   revocation marker   -> REJECT, whether or not a row exists — checked
+   *   revocation marker   -> REJECT a token issued at or before the marker's
+   *                          revocation time (`opts.tokenIssuedAt`, or no iat
+   *                          at all), whether or not a row exists — checked
    *                          first, so a purged-then-revoked user cannot slip
-   *                          through the absent-row branch.
+   *                          through the absent-row branch. A token issued
+   *                          after the logout goes on to the row checks.
    *
    * `requireRow` turns "row absent" into REJECT. The admin-token branch passes
    * it: an admin identity is only ever issued for an existing User row
@@ -177,16 +241,19 @@ export class AuthMiddleware implements NestMiddleware {
    * defaulting a vanished admin to USER would keep a deleted account attached.
    *
    * `honourLogoutMarker: false` skips the revocation marker. The admin-token
-   * branch passes it. The marker is a per-user flag with no issue time, and only
-   * POST /identity/login clears it. When the admin branch honoured it, an admin
-   * who logged out through POST /identity/logout was refused on every token
-   * POST /api/admin/auth/login issued afterwards, for 24h. Admin tokens are
-   * revoked by issue time instead (`admin:user:<id>:revokedAt`, checked in
-   * verifyAdminToken).
+   * branch passes it. When the marker was a per-user flag with no issue time
+   * (before R0-ID-F3), honouring it there refused every token a later
+   * POST /api/admin/auth/login issued, for 24h. Admin tokens are revoked by
+   * their own issue-time cutoff instead (`admin:user:<id>:revokedAt`, in the
+   * admin token's milliseconds, checked in verifyAdminToken; POST
+   * /identity/logout writes it too).
+   *
+   * `tokenIssuedAt` is the Supabase token's iat (epoch seconds), null when it
+   * has none. It only matters when a marker exists.
    */
   private async resolveLocalUser(
     userId: string,
-    opts: { requireRow?: boolean; honourLogoutMarker?: boolean } = {},
+    opts: { requireRow?: boolean; honourLogoutMarker?: boolean; tokenIssuedAt?: number | null } = {},
   ): Promise<{ role: string } | null> {
     if (!this.prisma?.client) {
       return null;
@@ -221,9 +288,9 @@ export class AuthMiddleware implements NestMiddleware {
     //                         Still fail closed. The app cannot serve anything
     //                         meaningful without the database anyway.
     if (honourLogoutMarker) {
-      let revoked: string | null = null;
+      let marker: string | null = null;
       try {
-        revoked = await this.redis.get(`auth:revoked:user:${userId}`);
+        marker = await this.redis.get(logoutRevocationKey(userId));
       } catch (redisErr) {
         // warn, not debug: this is a real security degradation and should be
         // visible without turning on verbose logging.
@@ -231,8 +298,14 @@ export class AuthMiddleware implements NestMiddleware {
           `Revocation check unavailable (${(redisErr as Error).message}) — proceeding on the database checks alone. Logged-out tokens stay valid until expiry while this persists.`,
         );
       }
-      if (revoked) {
-        return null;
+      // The marker is the logout time (ST-4): a token issued at or before it —
+      // or one with no iat to compare — is refused; a token issued after the
+      // logout, e.g. by the next login, is not.
+      if (marker != null) {
+        const issuedAt = opts.tokenIssuedAt ?? null;
+        if (issuedAt === null || issuedAt <= logoutRevocationCutoff(marker)) {
+          return null;
+        }
       }
     }
 

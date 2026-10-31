@@ -32,6 +32,11 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
+import {
+  LOGOUT_REVOCATION_TTL_SECONDS,
+  logoutRevocationKey,
+  logoutRevocationValue,
+} from '../../core/auth/auth.middleware';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { CreateBusinessDto } from './dto/create-business.dto';
@@ -208,19 +213,13 @@ export class IdentityController {
     }
     try {
       const session = await this.signupSvc.signInWithPassword(email, body.password);
-      // A deliberate re-login supersedes a prior logout's revocation marker.
-      // Without this, logging out sets auth:revoked:user:<id> for 24h and the
-      // middleware rejects EVERY request — including ones bearing this fresh
-      // token — so a logged-out user is locked out for a full day. Supabase
-      // signOut('global') at logout already invalidated the old sessions, so
-      // clearing the marker on a proven re-auth is safe.
-      if (session.userId) {
-        try {
-          await this.redis.del(`auth:revoked:user:${session.userId}`);
-        } catch (err: any) {
-          this.logger.warn(`Redis revocation clear failed for ${session.userId}: ${err instanceof Error ? err.message : err}`);
-        }
-      }
+      // Login deliberately leaves the logout revocation marker alone (ST-4,
+      // R0-ID-F3-REVOCATION-IAT-CUTOFF). It used to delete it, because the
+      // marker was a bare flag that refused every token including this fresh
+      // one — and deleting it re-admitted every token issued before the
+      // logout, a stolen one included, until its own exp. The marker is now the
+      // logout time: AuthMiddleware refuses tokens issued at or before it and
+      // admits this session's token, issued after it.
       await this.authSec.audit({ event: 'login_success', outcome: 'success', email, ip, userAgent: ua });
       return {
         status: 'authenticated',
@@ -493,8 +492,9 @@ export class IdentityController {
 
   /**
    * Server-driven logout. Revokes all Supabase sessions for the user and
-   * sets a short-lived Redis revocation marker so that any in-flight access
-   * tokens are rejected by AuthMiddleware until they naturally expire.
+   * records the logout time in Redis so that every access token issued up to
+   * now — Supabase and admin — is rejected by AuthMiddleware until it
+   * naturally expires, while tokens a later login issues are not.
    * Audits the event and swallows external failures so the client can always
    * clear its own storage.
    */
@@ -510,13 +510,27 @@ export class IdentityController {
       this.logger.warn(`Supabase signOut failed for ${userId}: ${err instanceof Error ? err.message : err}`);
     }
 
-    // Revoke in-flight tokens for up to 24 hours. Access tokens are typically
-    // 1-hour JWTs; this window covers the maximum plausible clock skew plus
-    // any long-lived cached token.
+    // Revoke in-flight tokens by issue time (ST-4, R0-ID-F3). The marker holds
+    // the logout time in epoch seconds; AuthMiddleware refuses a Supabase token
+    // whose iat is at or before it, and the next login leaves it in place. Its
+    // TTL is at least the longest token lifetime, so no token issued before
+    // this logout outlives it. Overwriting rewrites a bare '1' left by the
+    // previous release in this format.
+    const now = Date.now();
     try {
-      await this.redis.setex(`auth:revoked:user:${userId}`, 86400, '1');
+      await this.redis.setex(logoutRevocationKey(userId), LOGOUT_REVOCATION_TTL_SECONDS, logoutRevocationValue(now));
     } catch (err: any) {
       this.logger.warn(`Redis revocation set failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+    }
+    // Admin tokens are revoked by their own cutoff — the key
+    // POST /api/admin/auth/logout writes and verifyAdminToken reads, in the
+    // admin token's milliseconds — so a logout here revokes them too. Its TTL
+    // is the admin token lifetime (buildAdminToken: 24h), so it outlives every
+    // admin token issued before now.
+    try {
+      await this.redis.set(`admin:user:${userId}:revokedAt`, String(now), 'EX', LOGOUT_REVOCATION_TTL_SECONDS);
+    } catch (err: any) {
+      this.logger.warn(`Redis admin-token revocation set failed for ${userId}: ${err instanceof Error ? err.message : err}`);
     }
 
     const ip = this.clientIp(req);

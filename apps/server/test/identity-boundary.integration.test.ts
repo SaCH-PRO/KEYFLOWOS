@@ -76,10 +76,10 @@
  *         required behaviour; see "ST-2 (fixed …)" below). The admin-token
  *         branch attached verifyAdminToken's result directly: no revocation
  *         marker, no deletedAt/bannedAt, role from the token
- *         (auth.middleware.ts). NOT CLOSED on two sibling paths, each pinned
- *         below: POST /identity/logout does not revoke an admin token (ST-4,
- *         admin tokens), and the KEY Cortex WebSocket admin-token path still
- *         skips every local-user check (ST-2-WS).
+ *         (auth.middleware.ts). NOT CLOSED on one sibling path, pinned below:
+ *         the KEY Cortex WebSocket admin-token path still skips every
+ *         local-user check (ST-2-WS). (POST /identity/logout not revoking an
+ *         admin token was the admin half of ST-4, fixed with it.)
  *   ST-2-WS key-cortex-ws-auth.service.ts authenticateSocket takes the role
  *         from an admin token and checks neither deletedAt, bannedAt nor the
  *         marker, and verifyBusinessMembership lets SUPER_ADMIN into any
@@ -87,11 +87,16 @@
  *   ST-3  PATCH /identity/businesses/:id has no ModuleScopeGuard: a
  *         settings:none member rewrites the tenant profile
  *         (identity.controller.ts updateBusiness).
- *   ST-4  the revocation marker is per user with no iat cutoff and
- *         POST /identity/login deletes it, so a pre-logout token is admitted
- *         again after the next login (identity.controller.ts login). For admin
- *         tokens POST /identity/logout revokes nothing at all: it never writes
- *         the admin cutoff (admin:user:<id>:revokedAt).
+ *   ST-4  FIXED by R0-ID-F3-REVOCATION-IAT-CUTOFF (its cases assert the
+ *         required behaviour; see "ST-4 — logout revocation is an issue-time
+ *         cutoff" and "ST-4 (admin tokens)" below). The revocation marker was
+ *         per user with no iat cutoff and POST /identity/login deleted it, so a
+ *         pre-logout token was admitted again after the next login; for admin
+ *         tokens POST /identity/logout revoked nothing at all. The marker now
+ *         holds the logout time (epoch seconds), login leaves it alone, the
+ *         middleware refuses a token issued at or before it, and logout also
+ *         writes the admin cutoff (admin:user:<id>:revokedAt). A bare '1' left
+ *         by the previous release reads as "revoked now".
  *   CR-2  logout's Supabase global sign-out passes the user id where auth-js
  *         admin.signOut expects the user's access JWT, so it never revokes
  *         anything (identity.controller.ts logout, supabase-admin.service.ts
@@ -409,13 +414,20 @@ async function untilAfterSecond(epochSec: number) {
 }
 
 /**
- * The next POST /identity/login's effect on revocation state, applied directly:
- * its Supabase leg (signInWithPassword) cannot run in this provider-free suite
- * (CR-1). Mirrors identity.controller.ts login exactly as it is today: after a
- * successful sign-in it deletes auth:revoked:user:<id> (OPEN DEFECT ST-4).
+ * THE NEXT LOGIN, in this provider-free suite. POST /identity/login's Supabase
+ * leg (signInWithPassword) cannot run here (CR-1), so the ST-4 cases apply its
+ * effect on revocation state directly, exactly as identity.controller.ts login
+ * has it. Until R0-ID-F3-REVOCATION-IAT-CUTOFF that effect was a delete of
+ * auth:revoked:user:<id> after a successful sign-in (OPEN DEFECT ST-4); the
+ * tests-first commit applied that delete and recorded the pre-logout token
+ * served again. Login now touches neither the marker nor the admin cutoff —
+ * pinned against the REAL login handler in auth.middleware.spec.ts ("the real
+ * logout and login handlers, then the middleware") — so the cases apply
+ * nothing and check that both keys still hold what the logout wrote.
  */
-async function applyLoginRevocationEffect(userId: string) {
-  await redis!.del(revocationKey(userId));
+async function expectLoginLeavesRevocation(userId: string, marker: string, adminCutoff: string) {
+  expect(await redis!.get(revocationKey(userId)), 'logout marker after the next login').toBe(marker);
+  expect(await redis!.get(adminCutoffKey(userId)), 'admin cutoff after the next login').toBe(adminCutoff);
 }
 
 async function cleanup() {
@@ -1336,12 +1348,12 @@ describe('ST-1 review repairs — PATCH .../permissions obeys the role route’s
 // identity (AdminAuthService only issues one for an existing row).
 //
 // Review repair (F1): the admin branch no longer honours the per-user logout
-// marker. That marker has no issue time and only POST /identity/login clears
-// it, so after a logout through POST /identity/logout every token a later
-// POST /api/admin/auth/login issued was refused for 24h. An admin token is
-// revoked by its own issue-time cutoff (POST /api/admin/auth/logout). That
-// POST /identity/logout revokes nothing for an admin token is pinned below as
-// OPEN DEFECT ST-4 (admin tokens); it is the ST-4 fix packet's to close.
+// marker. That marker then had no issue time and only POST /identity/login
+// cleared it, so after a logout through POST /identity/logout every token a
+// later POST /api/admin/auth/login issued was refused for 24h. An admin token
+// is revoked by its own issue-time cutoff (admin:user:<id>:revokedAt), which
+// POST /api/admin/auth/logout writes and, since R0-ID-F3 (ST-4, admin tokens),
+// POST /identity/logout writes too.
 // ---------------------------------------------------------------------------
 describe('ST-2 (fixed) — the admin-token branch of AuthMiddleware applies the same AB-P02 checks as a Supabase token', () => {
   // Issued by the production issuer while the User row is SUPER_ADMIN.
@@ -1470,12 +1482,14 @@ describe('ST-2 (fixed) — the admin-token branch of AuthMiddleware applies the 
     // (admin:user:<id>:revokedAt, milliseconds like the admin token iat — the
     // key POST /api/admin/auth/logout writes and verifyAdminToken reads), with a
     // TTL that outlives every admin token issued before it.
-    expect(await redis!.get(adminCutoffKey(ID.adminTok)), 'admin cutoff written by POST /identity/logout').toMatch(/^\d{13,}$/);
+    const adminCutoff = await redis!.get(adminCutoffKey(ID.adminTok));
+    expect(adminCutoff, 'admin cutoff written by POST /identity/logout').toMatch(/^\d{13,}$/);
     expect(await redis!.ttl(adminCutoffKey(ID.adminTok)), 'admin cutoff TTL (seconds)').toBeGreaterThanOrEqual(MAX_TOKEN_LIFETIME_S - 60);
     expect(freshAdminToken, 'the F1 case logs in again after its logout').not.toBe('');
     await expectTokenServed(freshAdminToken, 'admin token issued after /identity/logout');
 
-    await applyLoginRevocationEffect(ID.adminTok);
+    // The next POST /identity/login (see expectLoginLeavesRevocation).
+    await expectLoginLeavesRevocation(ID.adminTok, (await redis!.get(revocationKey(ID.adminTok)))!, adminCutoff!);
     await expectAdminRefused(adminToken, 'pre-logout admin token after the next login');
     await expectTokenServed(freshAdminToken, 'admin token issued after /identity/logout, after the next login');
   });
@@ -1510,7 +1524,8 @@ describe('ST-2 (fixed) — the admin-token branch of AuthMiddleware applies the 
 // certification of that behaviour. It turns red when the fix lands, and the fix
 // packet replaces it with the it.todo next to it. Every fix is in source outside
 // this proof packet's write set (identity.controller.ts, identity.service.ts,
-// auth.middleware.ts for ST-4's issue-time cutoff, supabase-admin.service.ts).
+// supabase-admin.service.ts). ST-4 is fixed (R0-ID-F3); its cases below assert
+// the required behaviour.
 // ---------------------------------------------------------------------------
 describe('OPEN DEFECT ST-3 — PATCH /identity/businesses/:id has no module scope', () => {
   it('OPEN DEFECT ST-3 reproduced — a STAFF member (settings:none) is refused a settings read but rewrites the tenant profile', async () => {
@@ -1553,15 +1568,18 @@ describe('ST-4 — logout revocation is an issue-time cutoff that the next login
     const loggedOutTo = Math.floor(Date.now() / 1000);
     expect(out.status, JSON.stringify(out.body)).toBe(201);
     expect((await call('get', routes.me, t1)).status, 'T1 right after logout').toBe(401);
+    const revokedAt = await expectRevocationTime(ID.relogin, loggedOutFrom, loggedOutTo);
+    const adminCutoff = await redis!.get(adminCutoffKey(ID.relogin));
+    expect(adminCutoff, 'POST /identity/logout also writes the admin-token cutoff').toMatch(/^\d{13,}$/);
 
-    await applyLoginRevocationEffect(ID.relogin);
+    // The next POST /identity/login (see expectLoginLeavesRevocation).
+    await expectLoginLeavesRevocation(ID.relogin, String(revokedAt), adminCutoff!);
     for (const route of [routes.me, routes.biz(ID.bizD), routes.team(ID.bizD)]) {
       const res = await call('get', route, t1);
       expect(res.status, `T1 after the next login: GET ${route} -> ${res.status} ${JSON.stringify(res.body)}`).toBe(401);
       expect(JSON.stringify(res.body ?? {})).not.toContain(BIZ_D_NAME);
     }
 
-    const revokedAt = await expectRevocationTime(ID.relogin, loggedOutFrom, loggedOutTo);
     await untilAfterSecond(revokedAt);
     const t2 = mintToken(ID.relogin);
     const me = await call('get', routes.me, t2);
