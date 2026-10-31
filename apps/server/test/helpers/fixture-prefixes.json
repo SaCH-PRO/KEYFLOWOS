@@ -64,6 +64,11 @@
       "packet": "R0-20-MARKPAID-CONVERGENCE"
     },
     {
+      "prefix": "k24a_",
+      "owner": "apps/server/test/tenant-interceptor-alignment.integration.test.ts",
+      "packet": "R0-F24-TENANT-INTERCEPTOR-ALIGN"
+    },
+    {
       "prefix": "k33a_",
       "owner": "apps/server/test/portal-grant-tenant.integration.test.ts",
       "packet": "R0-33-PORTAL-GRANT-TENANT"
