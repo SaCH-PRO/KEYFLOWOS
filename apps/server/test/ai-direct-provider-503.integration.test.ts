@@ -686,18 +686,20 @@ describe('KeyCortexVoiceService: KEY voice refuses before any provider call when
       return refuse();
     });
     try {
-      // The JSON body names the outsider's own business, the query names this one.
+      // The JSON body names the outsider's own business, the query names this one:
+      // the guard checked its own business, and KEY voice runs for that one only.
       const split = await speak(ID.outsider, ID.biz, { businessId: ID.bizOther });
-      expect([403, 503], JSON.stringify(split.body)).toContain(split.status);
+      expect(split.status, JSON.stringify(split.body)).toBe(503);
 
-      // Multipart: the guard sees only the query (multer parses the body after it).
+      // Multipart: the guard sees only the query (multer parses the body after it),
+      // so this business in the query is refused whatever the fields say ...
       const listenForeignQuery = await listen(ID.outsider, ID.biz, ID.bizOther);
       expect(listenForeignQuery.status, JSON.stringify(listenForeignQuery.body)).toBe(403);
+      // ... and a field naming this business next to the outsider's own query is refused too.
       const listenForeignField = await listen(ID.outsider, ID.bizOther, ID.biz);
-      expect([403, 503], JSON.stringify(listenForeignField.body)).toContain(listenForeignField.status);
+      expect(listenForeignField.status, JSON.stringify(listenForeignField.body)).toBe(403);
 
-      expect(seen.filter((c) => c.businessId === ID.biz)).toEqual([]);
-      for (const c of seen) expect(c.businessId).toBe(ID.bizOther);
+      expect(seen).toEqual([{ method: 'synthesize', businessId: ID.bizOther }]);
     } finally {
       synth.mockRestore();
       trans.mockRestore();

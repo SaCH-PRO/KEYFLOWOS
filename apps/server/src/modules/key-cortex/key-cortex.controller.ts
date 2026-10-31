@@ -37,6 +37,8 @@ import {
   UseInterceptors,
   UseGuards,
   BadRequestException,
+  ForbiddenException,
+  HttpException,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -118,9 +120,45 @@ import {
 } from './key-cortex-connector.types';
 
 import { AuthGuard } from '../../core/auth/auth.guard';
-import { BusinessGuard } from '../../core/auth/business.guard';
+import { BusinessGuard, type BusinessGuardedRequest } from '../../core/auth/business.guard';
+import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
+
+/**
+ * R0-07a / R0-34b (COST-LEDGER-001 section 7 item 7): the structured 503 an
+ * optional AI provider answers when it is not configured or every credential's
+ * circuit is open. A voice handler rethrows it unchanged, so the body keeps its
+ * code; every other failure keeps the handler's own 503.
+ */
+function isAiProviderUnavailable(err: unknown): err is HttpException {
+  if (!(err instanceof HttpException) || err.getStatus() !== HttpStatus.SERVICE_UNAVAILABLE) return false;
+  const body = err.getResponse();
+  const code = typeof body === 'object' && body !== null ? (body as { code?: unknown }).code : undefined;
+  return code === 'provider_not_configured' || code === 'provider_unavailable';
+}
+
+/**
+ * R0-34b: the tenant a multipart (FileInterceptor) handler acts on.
+ *
+ * multer parses a multipart body inside FileInterceptor, after the guards ran,
+ * so BusinessGuard resolved and checked the tenant from the path and query
+ * only. @GuardedBusinessId() resolves again when the handler is called, and by
+ * then `req.body` holds the multipart fields: a `businessId` field the guard
+ * never saw would win over the query it checked. BusinessGuard attaches the
+ * tenant it verified (`req.guardedBusinessId`); the handler acts on exactly
+ * that one and refuses a request whose fields name another. When nothing is
+ * attached (SUPER_ADMIN, whom the guard admits without a check) the resolved
+ * tenant stands.
+ */
+function multipartTenant(resolved: string | undefined, req: BusinessGuardedRequest | undefined): string | undefined {
+  const checked = req?.guardedBusinessId;
+  if (typeof checked !== 'string' || checked.length === 0) return resolved;
+  if (resolved !== checked) {
+    throw new ForbiddenException('businessId does not match the business this request was authorized for');
+  }
+  return checked;
+}
 
 /* ------------------------------------------------------------------ */
 /*  DTOs  (Legacy)                                                     */
@@ -747,6 +785,22 @@ class EvolutionExplainDto {
 /*  Controller                                                         */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Mounted at `/api/v1/cortex` with no `:businessId` path segment, so the tenant
+ * is named by the request and BusinessGuard resolves and checks it from params,
+ * then body, then query (core/auth/request-business-id.ts).
+ *
+ * R0-34b-KEY-TENANT-BINDING (R0-07a review ST-1): 36 handlers here read
+ * `@Query('businessId')` and conscious/stream read it from a whole `@Query()`,
+ * so a member of A sending the JSON body `{businessId: A}` with `?businessId=B`
+ * passed the guard for A and the handler acted on B. Every handler that reads
+ * the tenant from the request now takes `@GuardedBusinessId()`, the resolver
+ * the guard ran (the R0-34 pattern in key-cortex-audit.controller.ts); the two
+ * multipart handlers also go through `multipartTenant`. Handlers that read
+ * `dto.businessId` from a whole JSON `@Body()` read the field the guard
+ * resolves first on these paths, so a non-empty string there is the tenant the
+ * guard checked.
+ */
 @Controller('api/v1/cortex')
 @UseGuards(AuthGuard, BusinessGuard)
 export class KeyCortexController {
@@ -830,7 +884,7 @@ export class KeyCortexController {
    */
   @Get('sessions')
   async listSessions(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('userId') userId?: string,
   ): Promise<CortexSession[]> {
     if (!businessId) {
@@ -943,7 +997,7 @@ export class KeyCortexController {
    */
   @Sse('chat/stream')
   streamChat(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('text') text: string,
     @Query('userId') userId?: string,
     @Query('sessionId') sessionId?: string,
@@ -988,7 +1042,7 @@ export class KeyCortexController {
    */
   @Get('messages')
   async getMessages(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('sessionId') sessionId?: string,
     @Query('limit') limit?: string,
   ): Promise<{ messages: Array<{
@@ -1036,7 +1090,7 @@ export class KeyCortexController {
    */
   @Sse('stream')
   streamEvents(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('message') message?: string,
     @Query('userId') userId?: string,
     @Query('sessionId') sessionId?: string,
@@ -1113,7 +1167,7 @@ export class KeyCortexController {
    * GET /api/v1/cortex/autonomy-profile
    */
   @Get('autonomy-profile')
-  async getAutonomyProfile(@Query('businessId') businessId: string) {
+  async getAutonomyProfile(@GuardedBusinessId() businessId: string) {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
     }
@@ -1170,7 +1224,7 @@ export class KeyCortexController {
   @HttpCode(HttpStatus.OK)
   async speak(
     @Body() dto: VoiceSpeakDto,
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Res({ passthrough: true }) res: Response,
   ): Promise<Buffer> {
     if (!dto.text?.trim()) {
@@ -1200,6 +1254,8 @@ export class KeyCortexController {
 
       return audioBuffer;
     } catch (err: any) {
+      // The structured 503 (provider_not_configured / provider_unavailable) keeps its code.
+      if (isAiProviderUnavailable(err)) throw err;
       this.logger.error(`TTS error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Voice synthesis unavailable');
     }
@@ -1208,19 +1264,23 @@ export class KeyCortexController {
   /**
    * POST /api/v1/cortex/voice/listen
    * Speech-to-Text -- accepts a multipart audio upload and returns transcript.
+   * The tenant is the one BusinessGuard checked (path and query; see
+   * multipartTenant), never a multipart field.
    */
   @Post('voice/listen')
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(FileInterceptor('audio'))
   async listen(
     @UploadedFile() audioFile: Express.Multer.File,
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() resolvedBusinessId: string,
     @Query('language') language?: string,
     @Query('prompt') prompt?: string,
+    @Req() req?: BusinessGuardedRequest,
   ): Promise<{ transcript: string; confidence?: number }> {
     if (!audioFile) {
       throw new BadRequestException('Audio file is required (field name: audio)');
     }
+    const businessId = multipartTenant(resolvedBusinessId, req);
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
     }
@@ -1237,6 +1297,8 @@ export class KeyCortexController {
 
       return { transcript };
     } catch (err: any) {
+      // The structured 503 (provider_not_configured / provider_unavailable) keeps its code.
+      if (isAiProviderUnavailable(err)) throw err;
       this.logger.error(`STT error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Speech transcription unavailable');
     }
@@ -1336,7 +1398,7 @@ export class KeyCortexController {
    */
   @Get('actions/tools')
   async listTools(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
   ): Promise<{
     tools: Array<{ name: string; description: string; params: object }>;
   }> {
@@ -1554,7 +1616,7 @@ export class KeyCortexController {
   @Get('context')
   @HttpCode(HttpStatus.OK)
   async getContext(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
   ): Promise<{
     context: Record<string, unknown>;
     formatted: string;
@@ -1628,7 +1690,7 @@ export class KeyCortexController {
   @Get('insights/profit')
   @HttpCode(HttpStatus.OK)
   async getProfitOpportunities(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
   ): Promise<{
     opportunities: CortexProfitOpportunity[];
   }> {
@@ -1658,7 +1720,7 @@ export class KeyCortexController {
   @Get('insights/revenue')
   @HttpCode(HttpStatus.OK)
   async analyzeRevenue(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('period') period?: string,
   ): Promise<{
     analysis: Record<string, unknown>;
@@ -1687,7 +1749,7 @@ export class KeyCortexController {
   @Get('insights/churn')
   @HttpCode(HttpStatus.OK)
   async analyzeChurnRisk(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
   ): Promise<{
     risks: Array<Record<string, unknown>>;
     summary: Record<string, unknown>;
@@ -1712,7 +1774,7 @@ export class KeyCortexController {
   @Get('insights/pipeline')
   @HttpCode(HttpStatus.OK)
   async analyzePipeline(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
   ): Promise<{
     pipeline: Record<string, unknown>;
   }> {
@@ -1774,7 +1836,7 @@ export class KeyCortexController {
   @Get('monitors')
   @HttpCode(HttpStatus.OK)
   async getMonitors(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
   ): Promise<{
     monitors: Array<Record<string, unknown>>;
   }> {
@@ -1800,7 +1862,7 @@ export class KeyCortexController {
   async updateMonitor(
     @Param('id') monitorId: string,
     @Body() dto: UpdateMonitorDto,
-    @Query('businessId') businessId?: string,
+    @GuardedBusinessId() businessId?: string,
   ): Promise<Record<string, unknown>> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
@@ -1828,7 +1890,7 @@ export class KeyCortexController {
   async toggleMonitor(
     @Param('id') monitorId: string,
     @Body() dto: ToggleMonitorDto,
-    @Query('businessId') businessId?: string,
+    @GuardedBusinessId() businessId?: string,
   ): Promise<{ monitorId: string; active: boolean }> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
@@ -1858,7 +1920,7 @@ export class KeyCortexController {
   @Get('alerts')
   @HttpCode(HttpStatus.OK)
   async getAlerts(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('limit') limit?: number,
   ): Promise<{
     alerts: Array<Record<string, unknown>>;
@@ -2040,7 +2102,7 @@ export class KeyCortexController {
   @Get('report')
   @HttpCode(HttpStatus.OK)
   async getBusinessReport(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('scope') scope: 'daily' | 'weekly' | 'monthly' = 'daily',
   ): Promise<Record<string, unknown>> {
     if (!businessId) {
@@ -2067,7 +2129,7 @@ export class KeyCortexController {
   @Get('recommendations')
   @HttpCode(HttpStatus.OK)
   async getRecommendations(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
   ): Promise<{
     recommendations: Array<Record<string, unknown>>;
     generatedAt: string;
@@ -2398,7 +2460,7 @@ export class KeyCortexController {
   @Get('flows')
   @HttpCode(HttpStatus.OK)
   async flowList(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('status') status?: string,
   ): Promise<{
     flows: Array<Record<string, unknown>>;
@@ -2423,7 +2485,7 @@ export class KeyCortexController {
   @HttpCode(HttpStatus.OK)
   async flowGet(
     @Param('id') flowId: string,
-    @Query('businessId') businessId?: string,
+    @GuardedBusinessId() businessId?: string,
   ): Promise<Record<string, unknown>> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
@@ -2447,7 +2509,7 @@ export class KeyCortexController {
   async flowUpdate(
     @Param('id') flowId: string,
     @Body() dto: FlowUpdateDto,
-    @Query('businessId') businessId?: string,
+    @GuardedBusinessId() businessId?: string,
   ): Promise<Record<string, unknown>> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
@@ -2470,7 +2532,7 @@ export class KeyCortexController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async flowDelete(
     @Param('id') flowId: string,
-    @Query('businessId') businessId?: string,
+    @GuardedBusinessId() businessId?: string,
   ): Promise<void> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
@@ -2492,14 +2554,14 @@ export class KeyCortexController {
   @HttpCode(HttpStatus.OK)
   async flowExecute(
     @Param('id') flowId: string,
-    @Body() body: { inputs?: Record<string, unknown>; businessId?: string },
-    @Query('businessId') queryBusinessId?: string,
+    @Body() body: { inputs?: Record<string, unknown> },
+    // The tenant the guard checked: the body's businessId when it names one, else the query's.
+    @GuardedBusinessId() businessId?: string,
   ): Promise<{
     executionId: string;
     status: string;
     results?: Array<Record<string, unknown>>;
   }> {
-    const businessId = body.businessId ?? queryBusinessId;
     if (!businessId) {
       throw new BadRequestException('businessId is required');
     }
@@ -2521,7 +2583,7 @@ export class KeyCortexController {
   async flowToggle(
     @Param('id') flowId: string,
     @Body() dto: { active: boolean },
-    @Query('businessId') businessId?: string,
+    @GuardedBusinessId() businessId?: string,
   ): Promise<{ flowId: string; active: boolean }> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
@@ -2655,7 +2717,7 @@ export class KeyCortexController {
   @Get('phone/history')
   @HttpCode(HttpStatus.OK)
   async phoneHistory(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('limit') limit?: number,
     @Query('status') status?: string,
   ): Promise<{
@@ -2747,13 +2809,18 @@ export class KeyCortexController {
   @Get('phone/status')
   @HttpCode(HttpStatus.OK)
   async phoneStatus(
-    @Query('businessId') businessId?: string,
+    @GuardedBusinessId() businessId?: string,
   ): Promise<{
     available: boolean;
     provider: string;
     region: string;
     capabilities: string[];
   }> {
+    // BusinessGuard refuses a request naming no tenant; SUPER_ADMIN, whom it admits
+    // without one, is refused here rather than handing the service `undefined`.
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
     try {
       return await this.phone.getStatus(businessId);
     } catch (err: any) {
@@ -2768,21 +2835,24 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/documents
-   * Upload a document.
+   * Upload a document. The tenant is the one BusinessGuard checked (path and
+   * query; see multipartTenant), never a multipart field: this handler used to
+   * prefer `body.businessId`, a field multer parses after the guard ran.
    */
   @Post('documents')
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(FileInterceptor('file'))
   async documentUpload(
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { businessId: string; metadata?: Record<string, unknown> },
-    @Query('businessId') queryBusinessId?: string,
+    @Body() body: { metadata?: Record<string, unknown> },
+    @GuardedBusinessId() resolvedBusinessId?: string,
+    @Req() req?: BusinessGuardedRequest,
   ): Promise<{
     documentId: string;
     status: string;
     uploadedAt: string;
   }> {
-    const businessId = body.businessId ?? queryBusinessId;
+    const businessId = multipartTenant(resolvedBusinessId, req);
     if (!businessId) {
       throw new BadRequestException('businessId is required');
     }
@@ -2807,7 +2877,7 @@ export class KeyCortexController {
   @Get('documents')
   @HttpCode(HttpStatus.OK)
   async documentList(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('type') type?: string,
     @Query('limit') limit?: number,
   ): Promise<{
@@ -2836,7 +2906,7 @@ export class KeyCortexController {
   @HttpCode(HttpStatus.OK)
   async documentGet(
     @Param('id') documentId: string,
-    @Query('businessId') businessId?: string,
+    @GuardedBusinessId() businessId?: string,
   ): Promise<Record<string, unknown>> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
@@ -2859,7 +2929,7 @@ export class KeyCortexController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async documentDelete(
     @Param('id') documentId: string,
-    @Query('businessId') businessId?: string,
+    @GuardedBusinessId() businessId?: string,
   ): Promise<void> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
@@ -2989,7 +3059,7 @@ export class KeyCortexController {
   @Get('evolution/profile')
   @HttpCode(HttpStatus.OK)
   async evolutionProfile(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('userId') userId?: string,
   ): Promise<{
     profile: Record<string, unknown>;
@@ -3014,7 +3084,7 @@ export class KeyCortexController {
   @Get('evolution/patterns')
   @HttpCode(HttpStatus.OK)
   async evolutionPatterns(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('module') moduleName?: string,
     @Query('timeRange') timeRange?: string,
   ): Promise<{
@@ -3078,7 +3148,7 @@ export class KeyCortexController {
   @Get('evolution/report')
   @HttpCode(HttpStatus.OK)
   async evolutionReport(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('period') period?: string,
   ): Promise<{
     report: Record<string, unknown>;
@@ -3103,7 +3173,7 @@ export class KeyCortexController {
   @Get('evolution/decision')
   @HttpCode(HttpStatus.OK)
   async evolutionExplainDecision(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('decisionId') decisionId?: string,
   ): Promise<{
     explanation: string;
@@ -3203,14 +3273,21 @@ export class KeyCortexController {
    * browser EventSource API cannot send a request body on a GET. A body-taking
    * SSE route is therefore uncallable from any standard client — which is the
    * bug the pre-existing `chat/stream` route has.
+   *
+   * The tenant is the one BusinessGuard checked (R0-34b), not the query's
+   * `businessId` field of the DTO: a GET can still carry a JSON body, which the
+   * guard resolves before the query.
    */
   @Sse('conscious/stream')
-  consciousStream(@Query() dto: ConsciousChatDto): Observable<{
+  consciousStream(
+    @Query() dto: ConsciousChatDto,
+    @GuardedBusinessId() businessId?: string,
+  ): Observable<{
     type: string;
     data: Record<string, unknown>;
   }> {
     if (!dto.text?.trim()) throw new BadRequestException('text is required');
-    if (!dto.businessId) throw new BadRequestException('businessId is required');
+    if (!businessId) throw new BadRequestException('businessId is required');
 
     const subject = new Subject<{ type: string; data: Record<string, unknown> }>();
 
@@ -3221,7 +3298,7 @@ export class KeyCortexController {
       try {
         const session = await this.sessionService.getOrCreateSession({
           text: dto.text,
-          businessId: dto.businessId,
+          businessId,
           userId: dto.userId,
           sessionId: dto.sessionId,
         } as CortexQuery);
@@ -3267,7 +3344,7 @@ export class KeyCortexController {
    */
   @Get('awareness')
   async getAwareness(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('kinds') kinds?: string,
     @Query('sinceDays') sinceDays?: string,
   ): Promise<{

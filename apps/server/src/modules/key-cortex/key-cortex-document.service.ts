@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
-import { AiUsageService } from '../ai/ai-usage.service';
+import { AiUsageService, directOpenAiKey, directOpenAiNotConfigured } from '../ai/ai-usage.service';
 import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import OpenAI from 'openai';
 
@@ -108,7 +108,7 @@ export interface DocumentListEntry {
 @Injectable()
 export class KeyCortexDocumentService {
   private readonly logger = new Logger(KeyCortexDocumentService.name);
-  private readonly openai: OpenAI;
+  private readonly openai: OpenAI | null;
 
   // Chunking configuration
   private readonly CHUNK_SIZE = 800;
@@ -127,14 +127,28 @@ export class KeyCortexDocumentService {
     // OPENAI_API_KEY instead, because docker-compose.production.yml maps one to
     // the other. Reading only the bare name meant this worked in production and
     // was unset locally — surviving on this machine solely because the developer
-    // happened to have OPENAI_API_KEY exported in their shell. Accept either.
-    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    // happened to have OPENAI_API_KEY exported in their shell. Accept either
+    // (directOpenAiKey).
+    //
+    // R0-34b (COST-LEDGER-001 section 7 item 8): with neither set there is no
+    // client. It used to be built with a sentinel key, so every embedding went
+    // out to OpenAI and failed there with a 401. Now an upload or a question
+    // that needs an embedding answers the structured 503 provider_not_configured
+    // (directOpenAiNotConfigured) before any write or provider call, as KEY
+    // voice does.
+    const apiKey = directOpenAiKey();
     if (!apiKey) {
       this.logger.warn(
-        'Neither AI_INTEGRATIONS_OPENAI_API_KEY nor OPENAI_API_KEY is set. Document embeddings will be unavailable.',
+        'Neither AI_INTEGRATIONS_OPENAI_API_KEY nor OPENAI_API_KEY is set. Document embeddings answer 503 provider_not_configured.',
       );
     }
-    this.openai = new OpenAI({ apiKey: apiKey ?? 'sk-no-key' });
+    this.openai = apiKey ? new OpenAI({ apiKey }) : null;
+  }
+
+  /** The configured client, or the structured 503 (R0-07a) when no OpenAI key is configured. */
+  private client(): OpenAI {
+    if (!this.openai) throw directOpenAiNotConfigured();
+    return this.openai;
   }
 
   // ========================================================================
@@ -186,6 +200,9 @@ export class KeyCortexDocumentService {
         `Unsupported file type: ${file.mimetype}. Supported: PDF, Word, Excel, PNG, JPEG, TXT, CSV`,
       );
     }
+
+    // Indexing needs embeddings: with no OpenAI key, refuse before any row is written.
+    this.client();
 
     // Store raw file in S3/cloud storage (simulated with a URL)
     const storageUrl = await this.storeFileInCloud(file, businessId);
@@ -946,7 +963,7 @@ Respond in this exact shape:
     // Truncate to model's token limit (~8191 tokens ~> 32000 chars)
     const truncated = text.substring(0, 32000);
 
-    const response = await this.openai.embeddings.create({
+    const response = await this.client().embeddings.create({
       model: this.EMBEDDING_MODEL,
       input: truncated,
       dimensions: this.EMBEDDING_DIMENSION,

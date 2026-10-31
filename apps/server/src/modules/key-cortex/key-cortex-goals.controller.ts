@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { KeyCortexPlannerService, CreateGoalInput } from './key-cortex-planner.service';
 import { KeyCortexTriggerService } from './key-cortex-trigger.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -164,6 +165,14 @@ class UpdateTriggerRuleDto {
   businessId?: string;
 }
 
+/**
+ * R0-34b-KEY-TENANT-BINDING: mounted at `/api/v1/cortex` with no `:businessId`
+ * segment, so BusinessGuard checks the tenant the request names (params, then
+ * body, then query). The four handlers that read `@Query('businessId')` acted on
+ * the query's tenant while the guard had checked the body's; they take
+ * `@GuardedBusinessId()` now. The body handlers read `dto.businessId`, the field
+ * the guard resolves first on these paths.
+ */
 @Controller('/api/v1/cortex')
 @UseGuards(AuthGuard, BusinessGuard)
 export class KeyCortexGoalsController {
@@ -186,7 +195,7 @@ export class KeyCortexGoalsController {
 
   @Get('goals')
   async listGoals(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
     @Query('status') status?: string,
   ) {
     if (!businessId) throw new BadRequestException('businessId is required');
@@ -196,7 +205,7 @@ export class KeyCortexGoalsController {
   @Get('goals/:goalId')
   async getGoal(
     @Param('goalId') goalId: string,
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
   ) {
     if (!businessId) throw new BadRequestException('businessId is required');
     return this.planner.getGoal(businessId, goalId);
@@ -245,7 +254,7 @@ export class KeyCortexGoalsController {
   @Delete('goals/:goalId')
   async deleteGoal(
     @Param('goalId') goalId: string,
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string,
   ) {
     if (!businessId) throw new BadRequestException('businessId is required');
     return this.planner.deleteGoal(businessId, goalId);
@@ -254,7 +263,7 @@ export class KeyCortexGoalsController {
   // -- Phase 4: Trigger Rules --
 
   @Get('triggers')
-  async listTriggerRules(@Query('businessId') businessId: string) {
+  async listTriggerRules(@GuardedBusinessId() businessId: string) {
     if (!businessId) throw new BadRequestException('businessId is required');
     return this.triggerService.listRules(businessId);
   }

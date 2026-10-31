@@ -1,5 +1,19 @@
-import { Injectable, Logger, ServiceUnavailableException, Inject } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus, ServiceUnavailableException, Inject } from '@nestjs/common';
 import { AiUsageService } from '../ai/ai-usage.service';
+
+/**
+ * R0-34b (COST-LEDGER-001 section 7 item 7): the structured 503 AiUsageService
+ * answers when no OpenAI key is configured (provider_not_configured), or the
+ * gateway when every credential's circuit is open (provider_unavailable). It is
+ * rethrown unchanged so the body keeps its code; every other failure keeps this
+ * service's own 503.
+ */
+function isAiProviderUnavailable(err: unknown): err is HttpException {
+  if (!(err instanceof HttpException) || err.getStatus() !== HttpStatus.SERVICE_UNAVAILABLE) return false;
+  const body = err.getResponse();
+  const code = typeof body === 'object' && body !== null ? (body as { code?: unknown }).code : undefined;
+  return code === 'provider_not_configured' || code === 'provider_unavailable';
+}
 
 export interface KeyflowVoiceRequest {
   text: string;
@@ -42,6 +56,7 @@ export class KeyflowVoiceService {
       );
       return { buffer: result as Buffer, format };
     } catch (err: any) {
+      if (isAiProviderUnavailable(err)) throw err;
       this.logger.error(`TTS failed: ${(err as Error).message}`);
       throw new ServiceUnavailableException('Voice synthesis failed.');
     }
@@ -71,6 +86,7 @@ export class KeyflowVoiceService {
       );
       return { text: result as string };
     } catch (err: any) {
+      if (isAiProviderUnavailable(err)) throw err;
       this.logger.error(`STT failed: ${(err as Error).message}`);
       throw new ServiceUnavailableException('Voice transcription failed.');
     }

@@ -24,7 +24,8 @@
  * are refused 403 (they were at the base too). The two multipart routes
  * (voice/listen, documents) are a special case: multer parses the multipart
  * body AFTER the guards, so the guard sees only the query, and the handler
- * must act on that tenant, never on a multipart field.
+ * must act on that tenant, never on a multipart field: a multipart
+ * `businessId` naming another tenant is refused 403.
  *
  * Two request pipelines, as in cortex-audit-tenant.integration.test.ts:
  *   - `production`: TenantInterceptor installed as an APP_INTERCEPTOR and the
@@ -600,103 +601,89 @@ for (const pipeline of PIPELINES) {
       const aBefore = await usageRows(ID.bizA);
       const bBefore = await usageRows(ID.bizB);
       const res = await send(pipeline, { method: 'post', path: 'voice/speak' }, { ...split, body: { ...split.body, text: 'Hello from k34b' } });
-      expect([200, 403], JSON.stringify(res.body)).toContain(res.status);
-      if (res.status === 200) {
-        const aAfter = await waitForUsage(ID.bizA, aBefore + 1);
-        expect(await usageRows(ID.bizB), 'AiUsageLog rows billed to B').toBe(bBefore);
-        expect(aAfter, 'AiUsageLog rows billed to A').toBe(aBefore + 1);
-        // The plan's credit check runs after the usage row is written.
-        await waitFor(() => creditChecks[pipeline].length > creditsFrom);
-        expect(creditChecks[pipeline].slice(creditsFrom), 'tenants the credit check was asked about').toEqual([ID.bizA]);
-        expectOnlyA(pipeline, from);
-      }
-      expect(await usageRows(ID.bizB)).toBe(bBefore);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      const aAfter = await waitForUsage(ID.bizA, aBefore + 1);
+      expect(await usageRows(ID.bizB), 'AiUsageLog rows billed to B').toBe(bBefore);
+      expect(aAfter, 'AiUsageLog rows billed to A').toBe(aBefore + 1);
+      // The plan's credit check runs after the usage row is written.
+      await waitFor(() => creditChecks[pipeline].length > creditsFrom);
+      expect(creditChecks[pipeline].slice(creditsFrom), 'tenants the credit check was asked about').toEqual([ID.bizA]);
+      expectOnlyA(pipeline, from);
     });
 
     it("GET autonomy-profile returns A's profile, never B's", async () => {
       const from = calls[pipeline].length;
       const res = await send(pipeline, { method: 'get', path: 'autonomy-profile' }, split);
-      expect([200, 403], JSON.stringify(res.body)).toContain(res.status);
-      if (res.status === 200) {
-        expect(res.body.businessId).toBe(ID.bizA);
-        expect(res.body.maxDailyAutoActions).not.toBe(B_MAX_DAILY);
-        expectOnlyA(pipeline, from);
-      }
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.businessId).toBe(ID.bizA);
+      expect(res.body.maxDailyAutoActions).not.toBe(B_MAX_DAILY);
+      expectOnlyA(pipeline, from);
     });
 
     it("PATCH autonomy-profile updates A's profile only; B's is unchanged", async () => {
       const from = calls[pipeline].length;
       const value = pipeline === 'production' ? 12 : 13;
       const res = await send(pipeline, { method: 'patch', path: 'autonomy-profile' }, { ...split, body: { ...split.body, maxDailyAutoActions: value } });
-      expect([200, 403], JSON.stringify(res.body)).toContain(res.status);
-      if (res.status === 200) {
-        expect(res.body.businessId).toBe(ID.bizA);
-        expect((await db.businessAutonomyProfile.findUnique({ where: { businessId: ID.bizA } })).maxDailyAutoActions).toBe(value);
-        expectOnlyA(pipeline, from);
-      }
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.businessId).toBe(ID.bizA);
+      expect((await db.businessAutonomyProfile.findUnique({ where: { businessId: ID.bizA } })).maxDailyAutoActions).toBe(value);
+      expectOnlyA(pipeline, from);
       expect((await db.businessAutonomyProfile.findUnique({ where: { businessId: ID.bizB } })).maxDailyAutoActions).toBe(B_MAX_DAILY);
     });
 
     it("GET goals lists A's goals only", async () => {
       const from = calls[pipeline].length;
       const res = await send(pipeline, { method: 'get', path: 'goals' }, split);
-      expect([200, 403], JSON.stringify(res.body)).toContain(res.status);
-      if (res.status === 200) {
-        expect(res.body.map((g: any) => g.businessId)).not.toContain(ID.bizB);
-        expect(res.body.map((g: any) => g.id)).toContain(ID.goalA);
-        expect(JSON.stringify(res.body)).not.toContain(B_MARKER);
-        expectOnlyA(pipeline, from);
-      }
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.map((g: any) => g.businessId)).not.toContain(ID.bizB);
+      expect(res.body.map((g: any) => g.id)).toContain(ID.goalA);
+      expect(JSON.stringify(res.body)).not.toContain(B_MARKER);
+      expectOnlyA(pipeline, from);
     });
 
-    it("DELETE goals/:goalId of one of B's goals answers 403 or 404, and B's goal survives", async () => {
+    it("DELETE goals/:goalId of one of B's goals answers 404 (A has no such goal), and B's goal survives", async () => {
       const from = calls[pipeline].length;
       const res = await send(pipeline, { method: 'delete', path: `goals/${goalB(pipeline)}` }, split);
-      expect([403, 404], JSON.stringify(res.body)).toContain(res.status);
+      // A's tenant has no such goal.
+      expect(res.status, JSON.stringify(res.body)).toBe(404);
       expect(await db.aiGoal.count({ where: { id: goalB(pipeline), businessId: ID.bizB } })).toBe(1);
-      if (res.status === 404) expectOnlyA(pipeline, from);
+      expectOnlyA(pipeline, from);
     });
 
     it("GET triggers lists A's rules only", async () => {
       const from = calls[pipeline].length;
       const res = await send(pipeline, { method: 'get', path: 'triggers' }, split);
-      expect([200, 403], JSON.stringify(res.body)).toContain(res.status);
-      if (res.status === 200) {
-        expect(res.body.map((r: any) => r.id)).toEqual([ID.ruleA]);
-        expectOnlyA(pipeline, from);
-      }
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.map((r: any) => r.id)).toEqual([ID.ruleA]);
+      expectOnlyA(pipeline, from);
     });
 
     it("GET sessions lists A's sessions only", async () => {
       const from = calls[pipeline].length;
       const res = await send(pipeline, { method: 'get', path: 'sessions' }, split);
-      expect([200, 403], JSON.stringify(res.body)).toContain(res.status);
-      if (res.status === 200) {
-        const ids = res.body.map((s: any) => s.id);
-        expect(ids).toContain(ID.sessionA);
-        expect(ids).not.toContain(ID.sessionB);
-        expectOnlyA(pipeline, from);
-      }
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      const ids = res.body.map((s: any) => s.id);
+      expect(ids).toContain(ID.sessionA);
+      expect(ids).not.toContain(ID.sessionB);
+      expectOnlyA(pipeline, from);
     });
 
     it('GET conscious/stream (a session write) creates the session under A and writes nothing under B', async () => {
       const from = calls[pipeline].length;
       const aBefore = await db.cortexSession.count({ where: { businessId: ID.bizA, userId: ID.ownerA } });
       const res = await consciousStream(pipeline, ID.ownerA, { businessId: ID.bizB, text: 'Hello from k34b', userId: ID.ownerA }, split.body);
-      expect([200, 403], String(res.body)).toContain(res.status);
-      if (res.status === 200) {
-        expect(String(res.body)).toContain('k34b answer');
-        expect(await db.cortexSession.count({ where: { businessId: ID.bizA, userId: ID.ownerA } })).toBe(aBefore + 1);
-        expectOnlyA(pipeline, from);
-      }
+      expect(res.status, String(res.body)).toBe(200);
+      expect(String(res.body)).toContain('k34b answer');
+      expect(await db.cortexSession.count({ where: { businessId: ID.bizA, userId: ID.ownerA } })).toBe(aBefore + 1);
+      expectOnlyA(pipeline, from);
       expect(await db.cortexSession.count({ where: { businessId: ID.bizB, userId: ID.ownerA } })).toBe(0);
     });
 
     it('GET awareness reads A only', async () => {
       const from = calls[pipeline].length;
       const res = await send(pipeline, { method: 'get', path: 'awareness' }, split);
-      expect([200, 403], JSON.stringify(res.body)).toContain(res.status);
-      if (res.status === 200) expectOnlyA(pipeline, from);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expectOnlyA(pipeline, from);
     });
 
     it('POST voice/listen with ?businessId=B and a multipart field naming A is refused 403: the guard never sees the multipart body', async () => {
@@ -711,7 +698,7 @@ for (const pipeline of PIPELINES) {
       expect(tenantsSince(pipeline, from)).toEqual([]);
     });
 
-    it('POST voice/listen with ?businessId=A and a multipart field naming B transcribes and bills A only', async () => {
+    it('POST voice/listen with ?businessId=A and a multipart field naming B is refused 403 and transcribes nothing for B', async () => {
       const from = calls[pipeline].length;
       const aBefore = await usageRows(ID.bizA);
       const bBefore = await usageRows(ID.bizB);
@@ -721,15 +708,14 @@ for (const pipeline of PIPELINES) {
         .set(HEADER, ID.ownerA)
         .field('businessId', ID.bizB)
         .attach('audio', Buffer.from(`${P}audio`, 'utf8'), { filename: `${P}utterance.webm`, contentType: 'audio/webm' });
-      expect([200, 403], JSON.stringify(res.body)).toContain(res.status);
-      if (res.status === 200) {
-        expect(res.body.transcript).toBe('k34b transcript');
-        const aAfter = await waitForUsage(ID.bizA, aBefore + 1);
-        expect(await usageRows(ID.bizB), 'AiUsageLog rows billed to B').toBe(bBefore);
-        expect(aAfter, 'AiUsageLog rows billed to A').toBe(aBefore + 1);
-        expectOnlyA(pipeline, from);
-      }
-      expect(await usageRows(ID.bizB)).toBe(bBefore);
+      // At the base the handler read the query (A), which the guard had checked; a
+      // naive @GuardedBusinessId() would re-resolve after multer and act on B.
+      // multipartTenant refuses the conflicting field instead.
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(tenantsSince(pipeline, from)).toEqual([]);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(await usageRows(ID.bizB), 'AiUsageLog rows billed to B').toBe(bBefore);
+      expect(await usageRows(ID.bizA), 'AiUsageLog rows billed to A').toBe(aBefore);
     });
   });
 
