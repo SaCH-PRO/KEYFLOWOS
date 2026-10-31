@@ -704,14 +704,27 @@ export class IdentityService {
     }));
   }
 
+  /**
+   * POST .../team (team:write). V1-07-AUTH-INVITE-CEILING (CF-26; ST-F4 in
+   * identity-boundary.integration.test.ts): the new membership is a grant, so it is
+   * bounded by the inviter's own authority exactly as a role or permissions change is
+   * (K2) — every canonical module level, the approval tier and CRM ownership, the role
+   * defaults included when no scopes are given. Above it the invite is REFUSED with 403
+   * before any User or Membership is written; it is not clamped, which would create a
+   * member with less than was asked for and no signal. The OWNER and a SUPER_ADMIN are
+   * not bounded. Without this a team:write member invited an account it controls with
+   * team:admin, which then rewrote the inviter through the role route.
+   */
   async inviteTeamMember(businessId: string, email: string, role: string, inviterId: string, scopes?: Record<string, string>, maxApprovalTier?: number) {
-    await this.assertTeamAdmin(businessId, inviterId);
+    const { requester, bounded } = await this.assertTeamAdmin(businessId, inviterId);
     this.validateRole(role);
+    const permissionScopes = scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF);
+    const tier = maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0);
     if (scopes || maxApprovalTier !== undefined) {
-      this.validateScopesPayload(
-        scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF),
-        maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0),
-      );
+      this.validateScopesPayload(permissionScopes, tier);
+    }
+    if (bounded && (await this.authorityExcess({ role, permissionScopes, maxApprovalTier: tier }, requester))) {
+      throw new ForbiddenException('You cannot grant more authority than your own');
     }
     let user = await this.prisma.client.user.findUnique({ where: { email } });
     if (!user) {
@@ -728,8 +741,8 @@ export class IdentityService {
         userId: user.id,
         businessId,
         role,
-        permissionScopes: scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF),
-        maxApprovalTier: maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0),
+        permissionScopes,
+        maxApprovalTier: tier,
       },
       include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
     });
@@ -770,11 +783,11 @@ export class IdentityService {
    * The OWNER role is not assignable here (validateRole) and the OWNER membership
    * cannot be changed here; there is no ownership-transfer route.
    *
-   * NOT closed here (routes outside this service's role and permissions writes, pinned
-   * as OPEN DEFECTs in identity-boundary.integration.test.ts): the team:write invite
-   * route mints any scopes and tier for a new account (V1-07), and the team:write
-   * structure routes copy a JobRole's permissions and tier onto any membership in the
-   * business, the caller's own included (V1-21).
+   * The team:write invite route applies the same grant ceiling (V1-07, inviteTeamMember).
+   * NOT closed here (a route outside this service, pinned as OPEN DEFECT CR-1 in
+   * identity-boundary.integration.test.ts): the team:write structure routes copy a
+   * JobRole's permissions and tier onto any membership in the business, the caller's
+   * own included (V1-21).
    */
   async updateMemberRole(businessId: string, membershipId: string, role: string, requesterId: string) {
     this.validateRole(role);
