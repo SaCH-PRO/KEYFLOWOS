@@ -43,6 +43,7 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
@@ -86,11 +87,11 @@ let NotFoundExceptionCtor: any;
 
 async function cleanup() {
   for (const sql of [
-    `DELETE FROM portal_access WHERE business_id LIKE '${P}%' OR contact_id LIKE '${P}%'`,
-    `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM memberships WHERE business_id LIKE '${P}%' OR user_id LIKE '${P}%'`,
-    `DELETE FROM businesses WHERE id LIKE '${P}%'`,
-    `DELETE FROM users WHERE id LIKE '${P}%'`,
+    `DELETE FROM portal_access WHERE business_id LIKE ${sqlLikePrefix(P)} OR contact_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
@@ -118,7 +119,7 @@ function stripVolatile(body: Record<string, unknown>) {
 async function portalRows(): Promise<string[]> {
   const rows: Array<{ j: string }> = await db.$queryRawUnsafe(
     `SELECT row_to_json(p)::text AS j FROM portal_access p
-      WHERE p.business_id LIKE '${P}%' OR p.contact_id LIKE '${P}%' ORDER BY p.id`,
+      WHERE p.business_id LIKE ${sqlLikePrefix(P)} OR p.contact_id LIKE ${sqlLikePrefix(P)} ORDER BY p.id`,
   );
   return rows.map((r) => r.j);
 }
@@ -193,7 +194,7 @@ beforeAll(async () => {
 
   // ---- identities and tenants ---------------------------------------------
   for (const id of [ID.ownerA, ID.ownerB]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'K33A Biz A', ownerId: ID.ownerA } });
   await db.business.create({ data: { id: ID.bizB, name: 'K33A Biz B', ownerId: ID.ownerB } });

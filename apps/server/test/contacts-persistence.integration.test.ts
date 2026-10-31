@@ -78,6 +78,7 @@ import { readFileSync } from 'fs';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -189,14 +190,14 @@ async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension). Contacts may
   // be created through the API with generated ids, so they go by business id.
   for (const sql of [
-    `DELETE FROM invoices WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM contact_audit_entries WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM contact_events WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM team_activity_logs WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM memberships WHERE id LIKE '${P}%'`,
-    `DELETE FROM businesses WHERE id LIKE '${P}%'`,
-    `DELETE FROM users WHERE id LIKE '${P}%'`,
+    `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
@@ -444,7 +445,7 @@ beforeAll(async () => {
 
   // ---- identities, tenant, memberships -----------------------------------
   for (const id of [ID.owner, ID.staffNoEdit, ID.staffNoDel, ID.staffWrite, ID.staffRead, ID.staffAssign, ID.outsider]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'K13A Biz A', ownerId: ID.owner } });
   const m = async (user: string, role: string, permissionScopes?: Record<string, string>) =>
@@ -514,7 +515,7 @@ describe('HARNESS: the body DTO the ValidationPipe validates against is the one 
 
     const { ValidationPipe, BadRequestException } = await import('@nestjs/common');
     const pipe = new ValidationPipe({ whitelist: true, transform: true });
-    const body = { firstName: `${P}Pipe`, email: 'not-an-email' };
+    const body = { firstName: `${P}Pipe`, email: `${P}not-an-email` };
     await expect(pipe.transform({ ...body }, { type: 'body', metatype: Object })).resolves.toMatchObject(body);
     await expect(pipe.transform({ ...body }, { type: 'body', metatype: CreateContactDtoClass }))
       .rejects.toBeInstanceOf(BadRequestException);
@@ -672,7 +673,7 @@ describe('NEGATIVE CONTROL: invalid input is refused 400 with no partial write',
   it('NEGATIVE CONTROL: POST with an invalid email answers 400 and writes nothing', async () => {
     await settle();
     const tracesBefore = await traceCounts();
-    const res = await post(ID.owner, { firstName: `${P}BadEmail`, email: 'not-an-email' });
+    const res = await post(ID.owner, { firstName: `${P}BadEmail`, email: `${P}not-an-email` });
     expect(res.status).toBe(400);
     expect(JSON.stringify(res.body.message)).toMatch(/email/i);
     await settle();
@@ -693,7 +694,7 @@ describe('NEGATIVE CONTROL: invalid input is refused 400 with no partial write',
 
   it('NEGATIVE CONTROL: PATCH with an invalid email beside a valid edit answers 400 and the row and its traces are unchanged (no partial write)', async () => {
     const res = await expectRefusedWithNoChange(
-      () => patch(ID.owner, ID.cTarget, { jobTitle: 'Partial', email: 'still-not-an-email' }),
+      () => patch(ID.owner, ID.cTarget, { jobTitle: 'Partial', email: `${P}still-not-an-email` }),
       400,
     );
     expect(JSON.stringify(res.body.message)).toMatch(/email/i);

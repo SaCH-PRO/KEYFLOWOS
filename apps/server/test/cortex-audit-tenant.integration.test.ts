@@ -56,14 +56,12 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import type { INestApplication } from '@nestjs/common';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'k34a_';
-// LIKE pattern for the prefix with its underscore escaped (an unescaped `_`
-// matches any character and could reach rows this suite did not seed).
-const LIKE = `k34a\\_%`;
 
 const ID = {
   ownerA: `${P}ownerA`, // OWNER of bizA (Business.ownerId)
@@ -108,11 +106,11 @@ let serviceCalls: Array<{ service: string; businessId: unknown; ambientTenant: u
 
 async function cleanup() {
   for (const sql of [
-    `DELETE FROM autonomy_verdicts WHERE business_id LIKE '${LIKE}'`,
-    `DELETE FROM value_constraints WHERE business_id LIKE '${LIKE}'`,
-    `DELETE FROM memberships WHERE id LIKE '${LIKE}'`,
-    `DELETE FROM businesses WHERE id LIKE '${LIKE}'`,
-    `DELETE FROM users WHERE id LIKE '${LIKE}'`,
+    `DELETE FROM autonomy_verdicts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM value_constraints WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try {
       await db.$executeRawUnsafe(sql);
@@ -335,7 +333,7 @@ beforeAll(async () => {
     [ID.nomember, 'USER'],
     [ID.superAdmin, 'SUPER_ADMIN'],
   ] as const) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role } });
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'K34A Biz A', ownerId: ID.ownerA } });
   await db.business.create({ data: { id: ID.bizB, name: 'K34A Biz B', ownerId: ID.ownerB } });

@@ -50,6 +50,7 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -130,7 +131,7 @@ let crmStats: any;
 async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension) by prefix.
   for (const table of TABLES) {
-    try { await db.$executeRawUnsafe(`DELETE FROM ${table} WHERE id LIKE '${P}%'`); } catch { /* best-effort */ }
+    try { await db.$executeRawUnsafe(`DELETE FROM ${table} WHERE id LIKE ${sqlLikePrefix(P)}`); } catch { /* best-effort */ }
   }
 }
 
@@ -139,7 +140,7 @@ async function tenantState(): Promise<string> {
   const out: Record<string, string[]> = {};
   for (const table of TABLES) {
     const rows: Array<{ j: string }> = await db.$queryRawUnsafe(
-      `SELECT row_to_json(t)::text AS j FROM ${table} t WHERE id LIKE '${P}%' ORDER BY id`,
+      `SELECT row_to_json(t)::text AS j FROM ${table} t WHERE id LIKE ${sqlLikePrefix(P)} ORDER BY id`,
     );
     out[table] = rows.map((r) => r.j);
   }
@@ -242,7 +243,7 @@ beforeAll(async () => {
 
   // ---- identities, tenants, memberships ---------------------------------
   for (const id of [ID.ownerA, ID.ownerB, ID.staffAll, ID.staffOwned]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'K12A Biz A', ownerId: ID.ownerA } });
   await db.business.create({ data: { id: ID.bizB, name: 'K12A Biz B', ownerId: ID.ownerB } });

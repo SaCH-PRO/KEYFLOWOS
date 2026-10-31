@@ -44,6 +44,16 @@
       "legacy": true
     },
     {
+      "prefix": "k12a_",
+      "owner": "apps/server/test/contact-scoped-tenancy.integration.test.ts",
+      "packet": "R0-12-CT-TENANT-ROUTES"
+    },
+    {
+      "prefix": "k13a_",
+      "owner": "apps/server/test/contacts-persistence.integration.test.ts",
+      "packet": "R0-13-CT-PERSISTENCE-PROOF"
+    },
+    {
       "prefix": "k17a_",
       "owner": "apps/server/test/payments-manual.integration.test.ts",
       "packet": "R0-17-PAYMENT-TX-INTEGRITY"
@@ -52,6 +62,16 @@
       "prefix": "k20a_",
       "owner": "apps/server/test/payments-mark-paid.integration.test.ts",
       "packet": "R0-20-MARKPAID-CONVERGENCE"
+    },
+    {
+      "prefix": "k33a_",
+      "owner": "apps/server/test/portal-grant-tenant.integration.test.ts",
+      "packet": "R0-33-PORTAL-GRANT-TENANT"
+    },
+    {
+      "prefix": "k34a_",
+      "owner": "apps/server/test/cortex-audit-tenant.integration.test.ts",
+      "packet": "R0-34-KEY-AUDIT-TENANT"
     },
     {
       "prefix": "kab_",
@@ -208,6 +228,10 @@
     {
       "file": "apps/server/test/token-encryption-coverage.integration.test.ts",
       "reason": "Reads schema.prisma and the encryption extension's coverage; touches no rows."
+    },
+    {
+      "file": "apps/server/test/contacts-import-write-scope.integration.test.ts",
+      "reason": "Holds only it.todo hand-offs from R0-13 (import routes pass no actor: ST-1/ST-2); it writes no fixtures. It gets a registered prefix when its cases become real."
     }
   ]
 }
