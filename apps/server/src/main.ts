@@ -6,6 +6,7 @@ config({ path: resolve(process.cwd(), '../../.env') });
 import { NestFactory } from '@nestjs/core';
 import { configureNestApp } from './app-bootstrap';
 import { ensureValidServerEnv, assertNoDevAuthBypass } from './core/config/env';
+import { listenWithIpv4Fallback } from './listen-host';
 import { getReleaseVersion } from '@keyflow/shared/release-version';
 import { setTenantContextProvider } from '@keyflow/db';
 import { getCurrentBusinessId } from './core/tenant/tenant-context';
@@ -74,13 +75,16 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   const port = Number(process.env.PORT) || 3001;
-  // Listen on the dual-stack wildcard so both IPv4 (127.0.0.1) and IPv6 (::1)
-  // localhost clients connect — binding to 0.0.0.0 left IPv6-only resolution
-  // paths (localhost's AAAA record) refusing connections in waves.
-  await app.listen(port, '::');
+  // Dual-stack wildcard '::' first (so 127.0.0.1 and ::1 clients both connect),
+  // 0.0.0.0 on hosts with no IPv6 address family, LISTEN_HOST when an operator
+  // pins one. The selection lives in listen-host.ts so it can be unit-tested
+  // without importing this module (whose scope loads .env and Nest).
+  const host = await listenWithIpv4Fallback(app, port);
   const version = await getReleaseVersion();
 
-  console.log(`[boot] API ready on http://localhost:${port} (commit=${version.short}, env=${process.env.NODE_ENV || 'development'})`);
+  console.log(
+    `[boot] API ready on http://localhost:${port} (host=${host}, commit=${version.short}, env=${process.env.NODE_ENV || 'development'})`,
+  );
   console.log(`[boot] Health: GET /healthz  Readiness: GET /readyz`);
 
   // Global uncaught-exception safety net: log and exit cleanly so the
