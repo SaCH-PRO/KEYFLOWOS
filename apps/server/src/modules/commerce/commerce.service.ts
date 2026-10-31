@@ -16,7 +16,7 @@ import { Service, Prisma } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, computeBalance } from './invoice-workflow.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
@@ -449,6 +449,102 @@ export class CommerceService {
   }
 
   /**
+   * KF-REVENUE-AUTH-PROJECTION-001 (G5) — the public, unauthenticated view of
+   * an invoice for the id-based pay page (`GET /commerce/invoices/:id`).
+   *
+   * `getInvoiceWithBusiness` above is the full operator shape: every payment
+   * row (reference, notes, evidence URL, who recorded it), the customer's
+   * email and the business profile. Five server-side callers depend on that
+   * shape (the email paths, the receipt listener, the token route, the KEY
+   * adapter) and it is unchanged. The public route used to return it to anyone
+   * holding an invoice id; it now returns this projection, which is the shape
+   * the token route already hand-builds as its public-safe contract, plus the
+   * fields the pay page (pay/[invoiceId]/page.tsx) reads beyond that shape:
+   * the invoice's own arithmetic (subtotal, tax, discount — printed on the
+   * invoice), the tenant key for its presence tracker, and `paid`/`remaining`
+   * from the canonical balance so the page can show progress without seeing a
+   * single row.
+   *
+   * Same shareable-status gate as the token route; null otherwise, which the
+   * controller turns into the same 404 as an unknown id.
+   */
+  async getInvoicePublicView(invoiceId: string) {
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: {
+        id: true,
+        businessId: true,
+        invoiceNumber: true,
+        status: true,
+        subtotal: true,
+        taxRate: true,
+        taxAmount: true,
+        discountType: true,
+        discountValue: true,
+        discountAmount: true,
+        total: true,
+        currency: true,
+        issueDate: true,
+        dueDate: true,
+        notes: true,
+        items: { select: { id: true, description: true, quantity: true, unitPrice: true, total: true } },
+        payments: { select: { amount: true, status: true } },
+        contact: { select: { firstName: true, lastName: true } },
+        business: { select: { name: true, logoUrl: true, primaryColor: true, email: true, phone: true } },
+      },
+    });
+    if (!invoice) return null;
+
+    const shareableStatuses = ['SENT', 'PAID', 'OVERDUE', 'PARTIALLY_PAID'];
+    if (!shareableStatuses.includes(invoice.status)) return null;
+
+    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    // Same legacy-row fallback as getInvoiceWithBusiness: older invoices stored
+    // subtotal 0 with priced items.
+    const subtotal =
+      (!invoice.subtotal || invoice.subtotal === 0) && invoice.items.length > 0
+        ? invoice.items.reduce((sum, item) => sum + (item.total || 0), 0)
+        : invoice.subtotal;
+    const taxAmount =
+      (!invoice.subtotal || invoice.subtotal === 0) && invoice.items.length > 0
+        ? invoice.taxAmount ?? (invoice.taxRate ? subtotal * (invoice.taxRate / 100) : 0)
+        : invoice.taxAmount;
+
+    return {
+      id: invoice.id,
+      // The tenant key is already public-facing (public product and gateway
+      // routes are keyed by it); the pay page's presence tracker reads it.
+      businessId: invoice.businessId,
+      invoiceNumber: invoice.invoiceNumber,
+      status: invoice.status,
+      total: invoice.total,
+      currency: invoice.currency,
+      issueDate: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      notes: invoice.notes,
+      subtotal,
+      taxRate: invoice.taxRate,
+      taxAmount,
+      discountType: invoice.discountType,
+      discountValue: invoice.discountValue,
+      discountAmount: invoice.discountAmount,
+      items: invoice.items,
+      contact: invoice.contact ? { firstName: invoice.contact.firstName, lastName: invoice.contact.lastName } : null,
+      business: invoice.business
+        ? {
+            name: invoice.business.name,
+            logoUrl: invoice.business.logoUrl,
+            primaryColor: invoice.business.primaryColor,
+            email: invoice.business.email,
+            phone: invoice.business.phone,
+          }
+        : null,
+      paid: balance.paid,
+      remaining: balance.remaining,
+    };
+  }
+
+  /**
    * @param businessId Tenant the caller believes this invoice belongs to.
    *   Optional for existing callers that reach this behind a BusinessGuard, and
    *   ENFORCED whenever supplied — the lookup below is by primary key alone, so
@@ -461,13 +557,18 @@ export class CommerceService {
       where: { id: invoiceId },
       select: { businessId: true, status: true, total: true, currency: true },
     });
+    // KF-REVENUE-AUTH-PROJECTION-001: these were plain `Error` throws, which the
+    // global filter reports as 500 "Internal server error" — so a cross-tenant
+    // attempt and a crash were indistinguishable to the caller and to the
+    // error registry. They are HTTP errors now; the not-found/not-yours
+    // collapse below is unchanged.
     if (!existingInvoice) {
-      throw new Error('Invoice not found');
+      throw new NotFoundException('Invoice not found');
     }
     if (businessId && existingInvoice.businessId !== businessId) {
       // Indistinguishable from "no such invoice" on purpose: a different error
       // for "exists but is not yours" confirms the id belongs to someone.
-      throw new Error('Invoice not found');
+      throw new NotFoundException('Invoice not found');
     }
     if (isSystemActor(actorId)) {
       // KEY has no Membership by design — see core/auth/system-actor.ts. Its
@@ -477,14 +578,14 @@ export class CommerceService {
       // it for KEY would turn a tool that always failed into one that could
       // mark any invoice in any business paid.
       if (!businessId) {
-        throw new Error('Not authorized to update this invoice');
+        throw new ForbiddenException('Not authorized to update this invoice');
       }
     } else if (actorId) {
       const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingInvoice.businessId, userId: actorId },
       });
       if (!membership) {
-        throw new Error('Not authorized to update this invoice');
+        throw new ForbiddenException('Not authorized to update this invoice');
       }
     }
     // Delegate the state mutation + invoice.paid event emission to the
@@ -500,7 +601,7 @@ export class CommerceService {
     } else {
       invoice = await this.invoiceWorkflow.transition(invoiceId, 'PAID');
     }
-    if (!invoice) throw new Error('Invoice not found');
+    if (!invoice) throw new NotFoundException('Invoice not found');
 
     // Create a Payment record if none exists so reconciliation math works.
     const existingPayments = await this.prisma.client.payment.count({
@@ -542,20 +643,29 @@ export class CommerceService {
     return invoice;
   }
 
-  async markInvoicePaymentFailed(invoiceId: string, actorId?: string | null, reason?: string) {
+  /**
+   * @param businessId Tenant the caller believes this invoice belongs to —
+   *   same contract as markInvoicePaid: optional for existing callers,
+   *   ENFORCED whenever supplied. The controller forwards the guard's tenant.
+   */
+  async markInvoicePaymentFailed(invoiceId: string, actorId?: string | null, reason?: string, businessId?: string) {
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
       select: { businessId: true },
     });
     if (!existingInvoice) {
-      throw new Error('Invoice not found');
+      throw new NotFoundException('Invoice not found');
+    }
+    if (businessId && existingInvoice.businessId !== businessId) {
+      // Indistinguishable from "no such invoice" on purpose — see markInvoicePaid.
+      throw new NotFoundException('Invoice not found');
     }
     if (actorId) {
       const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingInvoice.businessId, userId: actorId },
       });
       if (!membership) {
-        throw new Error('Not authorized to update this invoice');
+        throw new ForbiddenException('Not authorized to update this invoice');
       }
     }
     const invoice = await this.invoiceWorkflow.transition(invoiceId, 'FAILED');
@@ -739,25 +849,25 @@ export class CommerceService {
       select: { businessId: true },
     });
     if (!existingInvoice) {
-      throw new Error('Invoice not found');
+      throw new NotFoundException('Invoice not found');
     }
     if (params.businessId && existingInvoice.businessId !== params.businessId) {
       // Indistinguishable from "no such invoice" on purpose: a different error
       // for "exists but is not yours" confirms the id belongs to someone.
-      throw new Error('Invoice not found');
+      throw new NotFoundException('Invoice not found');
     }
     if (isSystemActor(params.actorId)) {
       // See markInvoicePaid: KEY's authority is the proven tenant scope, so the
       // scope must actually have been supplied and checked above.
       if (!params.businessId) {
-        throw new Error('Not authorized to update this invoice');
+        throw new ForbiddenException('Not authorized to update this invoice');
       }
     } else if (params.actorId) {
       const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingInvoice.businessId, userId: params.actorId },
       });
       if (!membership) {
-        throw new Error('Not authorized to update this invoice');
+        throw new ForbiddenException('Not authorized to update this invoice');
       }
     }
     // Route through the workflow so transitions like PAID -> SENT throw
@@ -1868,7 +1978,8 @@ export class CommerceService {
       where: { id: invoiceId, businessId, deletedAt: null },
     });
     if (!invoice) {
-      throw new Error('Invoice not found');
+      // A cross-tenant read answered 500 here (plain Error); it is a 404.
+      throw new NotFoundException('Invoice not found');
     }
     const payments = await this.prisma.client.payment.findMany({
       where: { invoiceId },

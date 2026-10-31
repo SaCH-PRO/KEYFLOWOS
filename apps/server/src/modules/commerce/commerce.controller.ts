@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
@@ -329,17 +329,25 @@ export class CommerceController {
     return { created, count: created.length, errors, totalAttempted: validProducts.length };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // KF-REVENUE-AUTH-PROJECTION-001 (G4): these three bare-id routes carry no
+  // :businessId param, so BusinessGuard resolves the tenant from the body. The
+  // guard proves the caller belongs to THAT tenant; it does not constrain which
+  // invoice the service touches, so the same tenant is forwarded and bound in
+  // the service. Every other write on this controller already requires
+  // revenue:write — these did not, so a read-only member could mark paid.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('invoices/:invoiceId/paid')
   async markInvoicePaid(
     @Body('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
     @Req() req: any,
   ) {
-    return this.commerce.markInvoicePaid(invoiceId, req?.user?.id);
+    return this.commerce.markInvoicePaid(invoiceId, req?.user?.id, businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('invoices/:invoiceId/payment-failed')
   async markInvoicePaymentFailed(
     @Body('businessId') businessId: string,
@@ -347,10 +355,11 @@ export class CommerceController {
     @Req() req: any,
     @Body() body: { reason?: string },
   ) {
-    return this.commerce.markInvoicePaymentFailed(invoiceId, req?.user?.id, body?.reason);
+    return this.commerce.markInvoicePaymentFailed(invoiceId, req?.user?.id, body?.reason, businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('invoices/:invoiceId/status/:status')
   async updateInvoiceStatus(
     @Body('businessId') businessId: string,
@@ -359,12 +368,20 @@ export class CommerceController {
     @Req() req: any,
     @Body() body: UpdateInvoiceStatusDto,
   ) {
+    // G1: the status comes from the validated body (IsIn SENT/OVERDUE/VOID),
+    // never from the URL. The URL used to win, so `/status/paid` reached the
+    // state machine with no payment behind it. A path that disagrees with the
+    // body is a malformed request, refused before any service call.
+    if (status.toUpperCase() !== body.status) {
+      throw new BadRequestException('status mismatch: the URL status and the body status disagree');
+    }
     return this.commerce.updateInvoiceStatus({
       invoiceId,
-      status: status.toUpperCase() as 'SENT' | 'OVERDUE' | 'VOID',
+      status: body.status,
       actorId: req?.user?.id,
       sentAt: body?.sentAt,
       dueDate: body?.dueDate,
+      businessId,
     });
   }
 
@@ -506,18 +523,26 @@ export class CommerceController {
     }
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // G7: the receipt is bound to the guard's tenant and revenue:read is the
+  // mandatory floor; an explicit revenue:none is refused.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('invoices/:invoiceId/receipt')
   async getReceipt(
     @Query('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
   ) {
-    return this.receipts.buildReceipt(invoiceId);
+    return this.receipts.buildReceipt(invoiceId, businessId);
   }
 
+  // G5: the unauthenticated detail route answers with the public projection
+  // (no payment rows, no customer email, no business profile fields) and 404
+  // for anything not shareable — the same answer as an unknown id.
   @Get('invoices/:invoiceId')
-  getInvoice(@Param('invoiceId') invoiceId: string) {
-    return this.commerce.getInvoiceWithBusiness(invoiceId, true);
+  async getInvoice(@Param('invoiceId') invoiceId: string) {
+    const view = await this.commerce.getInvoicePublicView(invoiceId);
+    if (!view) throw new NotFoundException('Invoice not found');
+    return view;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

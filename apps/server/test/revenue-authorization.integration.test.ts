@@ -970,6 +970,7 @@ describe('List C: post-fix acceptance', () => {
     expect(res.body).toEqual(
       expect.objectContaining({
         id: ID.invSent,
+        businessId: ID.bizA, // pickBusinessId() for the page's PresenceTracker
         invoiceNumber: 'RVA-SENT',
         status: 'SENT',
         total: 100,

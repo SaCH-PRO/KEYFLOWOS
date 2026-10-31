@@ -60,6 +60,11 @@ export class PaymentsController {
     return this.payments.getPaypalClientToken();
   }
 
+  // KF-REVENUE-AUTH-PROJECTION-001 (G5): public and previously unthrottled —
+  // without a decorator the class-level guard returns true. Now limited like
+  // the sibling gateways route, and the service answers with a projection
+  // instead of raw Payment rows.
+  @PublicRateLimit(20, 60_000)
   @Get('invoice/:invoiceId/status')
   async getInvoicePaymentStatus(@Param('invoiceId') invoiceId: string) {
     return this.payments.getInvoicePaymentStatus(invoiceId);
