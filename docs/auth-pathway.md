@@ -7,7 +7,8 @@ probably) can navigate the auth surface in minutes instead of hours.
 ## Release 0 sign-in: hosted Supabase free tier (D-02)
 
 References are `path:line` on the packet base, source commit `e60a6ed1`
-(this packet changes no source file). Prefixes: `S/` is `apps/server/src/`,
+(this packet changes no application source file; its review repair adds the
+test `T/identity-local-auth.integration.test.ts`). Prefixes: `S/` is `apps/server/src/`,
 `W/` is `apps/web/src/`, `T/` is `apps/server/test/`. Supabase platform facts
 were read from the Supabase documentation on 2026-10-31 and are linked.
 Re-check them when you configure a project: Supabase can change free-tier
@@ -24,6 +25,94 @@ terms without any change in this repository.
   caveat below).
 - The live sign-up leg runs only where a Supabase project is configured (last
   subsection). CI and the real-database suites never contact Supabase.
+- Review of this packet found two blocking defects that documentation cannot
+  fix. Release 0 sign-in does not open until a code packet closes them (next
+  subsection).
+
+### Open defects and stop conditions
+
+Found in review of this packet. Each needs a code change, which is outside
+this packet: D-02 option C rules no identity code change, and the files involved
+are outside its write set. None of them is fixed here.
+
+1. **`POST /identity/bootstrap` takes over an account by email. Blocking.**
+   The controller passes `email: body.email ?? user.email`
+   (`S/modules/identity/identity.controller.ts:906`), so the request body
+   chooses the email. When no local `User` has the token's `sub`,
+   `bootstrapUser` looks up a `User` by that email and calls `reconcileUserId`
+   (`S/modules/identity/identity.service.ts:979-985`). That function recreates
+   the row under the caller's id and copies its role (`:846`, so `SUPER_ADMIN`
+   carries over). It re-points the row's memberships and `Business.ownerId` to
+   the caller (`:859`, `:873`) and deletes the old row (`:876`). Any
+   authenticated caller who has not bootstrapped yet can therefore take any
+   account, and every business it owns or belongs to, by naming its email in
+   the body. That includes a fresh email/password sign-up, with verification on
+   or off, and a Google sign-in. Without a body email the token's `email`
+   claim is trusted the same way. So with verification off, the first person
+   to sign up with the address of a local user who has no account in this
+   Supabase project gets that user's row. That happens, for example, after the
+   deployment moves to a new project.
+   - Measured in review: a scratch real-database test (real controller, service,
+     `AuthMiddleware`, `AuthGuard`, deleted after the run) got 201
+     `{id: <attacker>, email: <victim>, role: SUPER_ADMIN}`. The victim's
+     `OWNER` membership and `businesses.owner_id` now named the attacker.
+   - **Stop condition.** Release 0 sign-in does not open, and the live sign-up
+     leg (#186 step B) does not run against a database that holds any account
+     other than the run's own, until a code packet makes bootstrap unable to
+     move an existing user to a different caller on an email match. That
+     packet decides the design. `T/identity-local-auth.integration.test.ts`
+     holds the required behaviour as `it.todo`.
+2. **`SUPABASE_JWT_SECRET` is a live acceptance path, not an inert setting.
+   Blocking until configured as below.** `verifyLocal` accepts any HS256
+   token signed with the secret whose `iss` is absent or equals `SUPABASE_URL`
+   (`S/core/auth/supabase-auth.service.ts:91-95`). Hosted projects issue
+   neither shape. So with a hosted project the secret verifies no real token,
+   but it lets anyone who holds it mint tokens the API accepts as any `sub` and
+   `email`. Together with defect 1, anyone who knows the value can take over a
+   victim's account by naming its email, without any Supabase account. Until this
+   repair, `.env.example` carried the public placeholder
+   `your-supabase-jwt-signing-secret` as the value, and boot does not reject
+   a placeholder (`S/core/config/env.ts:50`). It is also the legacy key that
+   signs `service_role` JWTs for the project, so keeping it on the API server
+   widens the damage of a leak and buys nothing today.
+   - **Release 0 rule.** Leave `SUPABASE_JWT_SECRET` empty (`.env.example`
+     now leaves it blank) and never deploy a placeholder in it. Before
+     emptying it, give `GOOGLE_STATE_SECRET` its own long random value, never
+     the `.env.example` placeholder. The marketing unsubscribe-token HMAC uses
+     `GOOGLE_STATE_SECRET` and falls back to `SUPABASE_JWT_SECRET`
+     (`S/modules/email-marketing/email-marketing.service.ts:108-115`). With
+     both unset, building an unsubscribe link throws `Server
+     misconfiguration: unsubscribe token secret is not set`. If links were
+     already sent signed with `SUPABASE_JWT_SECRET`, changing the effective
+     secret invalidates them. The boot warning `SUPABASE_JWT_SECRET: not set —
+     local JWT verification unavailable` (`S/core/config/env.ts:162-164`) is
+     then expected.
+   - Proven at the real `AuthMiddleware` and `AuthGuard` by
+     `T/identity-local-auth.integration.test.ts`. With the secret empty,
+     forged tokens with no `iss` and with `iss = SUPABASE_URL` both get 401,
+     and nothing leaves the server. With the former placeholder set, both pass
+     the guard carrying the forged email, and the hosted shape is refused.
+     The second group is a characterization that flips when a code packet
+     fixes the issuer check.
+3. **The shared Supabase token bucket is a denial-of-service risk.
+   Should-fix.** Every password and refresh grant leaves from the API server's
+   IP, so all users share one per-IP bucket on `/auth/v1/token` (capacity 30,
+   see "Free-tier limits"). Keyflow lets each client IP make 10 logins per
+   15 min and 120 refreshes per hour
+   (`S/modules/identity/auth-security.service.ts:87`, `:114`). It relays each
+   one to Supabase, including refresh tokens that are garbage. So one
+   unauthenticated client can empty the bucket at once, and a few addresses
+   can keep it empty. While it is empty, a refresh answers 401
+   `refresh_failed` (`S/modules/identity/identity-signup.service.ts:409-418`).
+   The web treats that as an expired session and sends the user to the login
+   page (`W/lib/workspace.ts:243-245`, `W/components/require-auth.tsx:67-80`).
+   Logins fail with `signin_failed` (`:361-364`). This was read from code and
+   Supabase's documentation, not measured; no Supabase project was available.
+   The mitigation is a code change: send the client IP in `Sb-Forwarded-For`,
+   which Supabase honours only with an `sb_secret_…` key and forwarding
+   enabled. Until that lands, Release 0 either accepts this risk explicitly
+   or stays small enough for an operator to watch the `token_refresh_failed`
+   rows in `AuthAuditLog`.
 
 ### Free-tier project configuration
 
@@ -41,9 +130,11 @@ terms without any change in this repository.
    header (`S/modules/identity/identity-signup.service.ts:317-319`, `:393-395`;
    `W/app/auth/callback/page.tsx:101-106`, `:153-157`). No path here has been
    exercised with the newer `sb_publishable_…` / `sb_secret_…` keys.
-3. **Project Settings → JWT.** The legacy JWT secret can go into
-   `SUPABASE_JWT_SECRET`. It is optional, and with a hosted project it does not
-   currently take effect (see the `verifyLocal` caveat).
+3. **Project Settings → JWT.** Do not copy the legacy JWT secret into
+   `SUPABASE_JWT_SECRET`. For Release 0, leave it empty and never deploy a
+   placeholder in it. With a hosted project it verifies no real token, but it
+   is still an acceptance path for tokens signed with it (open defect 2). Set
+   `GOOGLE_STATE_SECRET` first, because unsubscribe links fall back to it.
 4. **Authentication → URL Configuration.** Site URL = `NEXT_PUBLIC_SITE_URL`.
    Allow these redirect URLs: `<site>/auth/callback` (Google sign-in),
    `<site>/auth/login` (verification links land on `/auth/login?verified=1`,
@@ -71,11 +162,13 @@ sign-up, login or bootstrap leg fails without it.
 | `SUPABASE_URL` (falls back to `NEXT_PUBLIC_SUPABASE_URL`) | `S/core/auth/supabase-admin.service.ts:45-48`; `S/modules/identity/identity-signup.service.ts:307`, `:383`; `S/core/auth/supabase-auth.service.ts:26`, `:91` | Required | Admin client, the password and refresh grants, the `getUser` fallback, the issuer check in `verifyLocal` |
 | `SUPABASE_ANON_KEY` (falls back to `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | `S/modules/identity/identity-signup.service.ts:308`, `:384`; `S/core/auth/supabase-auth.service.ts:27` | Required | `apikey` for the password and refresh grants; the anon client behind the `getUser` fallback |
 | `SUPABASE_SERVICE_ROLE_KEY` | `S/core/auth/supabase-admin.service.ts:50-53` | Required | `auth.admin.createUser`, `generateLink`, `listUsers`, `signOut`, recovery mail. Needed for every sign-up, with verification on **or off** |
-| `SUPABASE_JWT_SECRET` | `S/core/auth/supabase-auth.service.ts:38-42` | Optional | Local HS256 verification; see the caveat below |
+| `SUPABASE_JWT_SECRET` | `S/core/auth/supabase-auth.service.ts:38-42`; `S/modules/email-marketing/email-marketing.service.ts:109` | **Leave empty** | Local HS256 verification. It is an acceptance path for any token signed with it (open defect 2, and the caveat below). It is also the fallback HMAC secret for marketing unsubscribe tokens when `GOOGLE_STATE_SECRET` is unset |
+| `GOOGLE_STATE_SECRET` | `S/modules/email-marketing/email-marketing.service.ts:109`, and the Google, Gmail, Calendar and Drive OAuth state | Set before emptying `SUPABASE_JWT_SECRET` | The unsubscribe-token HMAC, preferred over `SUPABASE_JWT_SECRET`. Use a long random value, never the `.env.example` placeholder |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | `S/modules/identity/identity-signup.service.ts:20-25`; `S/main.ts:29-52` | Set it explicitly | On by default when `NODE_ENV=production` |
 | `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | `S/modules/notifications/system-email.service.ts:18-24`, `:41-55` | Only with verification on | Sending the verification mail |
-| `SITE_URL`, else `APP_URL`, else `NEXT_PUBLIC_SITE_URL` | `S/modules/identity/identity-signup.service.ts:53-55`; `S/core/config/runtime-urls.ts:32-38` | Recommended | Where verification links point |
-| `HIBP_DISABLED` | `S/modules/identity/password-policy.service.ts:59` | Recommended `true` | Otherwise each sign-up makes one outbound call to the Pwned Passwords API (`:55`), which fails open (`:145`). The build map sets `HIBP_DISABLED=true` for Release 0 |
+| `SITE_URL`, else `APP_URL`, else `NEXT_PUBLIC_SITE_URL`, else `PUBLIC_BASE_URL` | `S/modules/identity/identity-signup.service.ts:53-55`; `S/core/config/runtime-urls.ts:32-38` | Required on a hosted deployment | Where verification links point |
+| `APP_URL`, else `NEXT_PUBLIC_SITE_URL`, else `PUBLIC_BASE_URL`, else the first `CORS_ALLOWED_ORIGINS` entry | `S/core/config/runtime-urls.ts:93-114`; `S/modules/identity/identity.controller.ts:415-426` | Required on a hosted deployment | Where recovery links point (`SITE_URL` is not read here). With none set, both kinds of link point at `http://localhost:5000` and no error is raised (see the forgot-password row below) |
+| `HIBP_DISABLED` | `S/modules/identity/password-policy.service.ts:59` | `true` for Release 0 | Otherwise each sign-up makes one outbound call to the Pwned Passwords API (`:55`), which fails open (`:145`). The build map sets `HIBP_DISABLED=true` for Release 0, and `.env.example` documents it beside `HIBP_DISABLED`. Only `true`, in any case, disables the call, and with it the breached-password check |
 | `NEXT_PUBLIC_API_BASE_URL` (web) | `W/lib/client.ts:2908` (`identitySignup`), `:2948-2953` (`identityLogin`) | Required | Every `/identity/*` call from the browser |
 | `NEXT_PUBLIC_SUPABASE_URL` (web) | `W/app/auth/signup/page.tsx:39-42`; `W/app/auth/login/login-form.tsx:34-39`; `W/app/auth/callback/page.tsx:101`, `:153`; `W/lib/env.ts:34`, `:73-74` | Required for Google sign-in and the forgot-password button | Email/password sign-up and login never call Supabase from the browser |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` (web) | `W/app/auth/login/login-form.tsx:35-39`; `W/app/auth/callback/page.tsx:106`, `:157` | As above | PKCE token exchange and the user-info call after Google sign-in |
@@ -119,8 +212,12 @@ failure becomes one 401 `refresh_failed`.
 **Bootstrap**, `POST /identity/bootstrap` (controller `:897-915`), sits behind
 `AuthGuard`, so `AuthMiddleware` must accept the bearer token first. It never
 calls Supabase. `IdentityService.bootstrapUser`
-(`S/modules/identity/identity.service.ts:912`) finds or creates the local
-`User`. The default `Business` and `OWNER` membership are created in a
+(`S/modules/identity/identity.service.ts:912`) finds the local `User` by the
+token's `sub`. If there is none, it looks one up by email, taking the email
+from the request body when one is sent (controller `:906`), and moves that row
+to the caller (`reconcileUserId`, `:979-985`, `:814-876`). Otherwise it
+creates the row. That email reconcile is **not** a safe find-or-create: it is
+open defect 1, the account-takeover path. The default `Business` and `OWNER` membership are created in a
 Serializable transaction (`ensureBootstrapWorkspace`, `:1068-1107`). A
 verified user with no local row is attached with role `USER` so it can reach
 bootstrap (`S/core/auth/auth.middleware.ts:125-135`, `:192-193`). The web calls
@@ -172,13 +269,19 @@ A scratch run of `verifyLocal` with `SUPABASE_JWT_SECRET` set and
 So against a hosted project, local verification never accepts a real access
 token, and every authenticated request falls back to the `getUser` round trip
 (`:142-145`). Sign-in still works, but the project must be reachable on every
-request, and `SUPABASE_JWT_SECRET` currently does nothing. The same fallback
+request. `SUPABASE_JWT_SECRET` verifies no real token, but it is **not
+inert**. The first two rows are an acceptance path: any token signed with the
+secret that has no `iss`, or has `iss = SUPABASE_URL`, passes the middleware
+carrying whatever `sub` and `email` it names. That is open defect 2, and it is
+why the Release 0 rule leaves the secret empty. The same fallback
 applies when a project signs with asymmetric JWT signing keys (ES256/RS256,
 [signing keys](https://supabase.com/docs/guides/auth/signing-keys)), because
 `:57` accepts only HS256. The boot warning about the secret
 (`S/core/config/env.ts:162-164`) fires only when the secret is missing; it says
-nothing about the issuer mismatch. Fixing the comparison is a code change,
-outside this documentation-only packet.
+nothing about the issuer mismatch, and boot accepts a placeholder value. Fixing
+the comparison, and refusing tokens with no `iss`, is a code change outside
+this documentation-only packet. `T/identity-local-auth.integration.test.ts`
+reproduces the first three rows at the real `AuthMiddleware` and `AuthGuard`.
 
 ### What happens when the variables are absent
 
@@ -197,7 +300,7 @@ was made. Rows marked "code" are read from source rather than measured.
 | Login with the URL set but unreachable (code) | network | 400 `signin_unreachable` once the fetch fails or the 10 s timeout fires | `:315-330` |
 | `POST /identity/refresh` | URL + anon key | 400 `refresh_unavailable`, "Session refresh is unavailable." | `:382-390` |
 | `POST /identity/resend-verification` | URL + service-role key | 201 `{"status":"ok","verificationRequired":false}`. The answer claims success; only a server log line warns | `:221-226`; controller `:262-270` |
-| `POST /identity/forgot-password` (code) | admin client | 201 `{status:'sent'}` regardless; the admin-client error is logged and swallowed. A 400 is returned only when neither `APP_URL` nor `NEXT_PUBLIC_SITE_URL` gives an allowed origin | controller `:415-439`; `S/modules/identity/identity-password.service.ts:51-60` |
+| `POST /identity/forgot-password` (measured in review) | admin client; `APP_URL` or `NEXT_PUBLIC_SITE_URL` | 201 `{status:'sent'}` regardless; the admin-client error is logged and swallowed. The 400 for "no allowed origin" (controller `:416-420`) never fires, because `allowedCorsOrigins()` always adds `http://localhost:5000`, `http://localhost:3000` and `http://127.0.0.1:5000` (`S/core/config/runtime-urls.ts:109-112`). With `APP_URL`, `NEXT_PUBLIC_SITE_URL`, `PUBLIC_BASE_URL` and `CORS_ALLOWED_ORIGINS` all unset, the server answers 201 and the recovery mail's `redirectTo` is `http://localhost:5000/auth/reset-password`, with no error anywhere. A hosted deployment must set `APP_URL` or `NEXT_PUBLIC_SITE_URL` | controller `:415-439`; `S/modules/identity/identity-password.service.ts:51-60` |
 | Bearer token on any route | `SUPABASE_JWT_SECRET`, or URL + anon key | With neither, `getUserFromToken` returns `null` after logging "Supabase env vars missing; auth will be treated as optional.", and guarded routes (`/identity/me`, `/identity/bootstrap`, …) answer 401 | `S/core/auth/supabase-auth.service.ts:29-31`, `:142-143` |
 | Boot with verification on (set to true, or unset with `NODE_ENV=production`) (code) | `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS` | `[FATAL] AUTH_REQUIRE_EMAIL_VERIFICATION is on but required env vars are missing: … Refusing to start.`, then exit 1. `SUPABASE_URL` is not checked here | `S/main.ts:29-46` |
 | Boot with verification off (code) | `SUPABASE_SERVICE_ROLE_KEY` | Warning only: `[WARN] SUPABASE_SERVICE_ROLE_KEY is not set. POST /identity/signup will return server_misconfigured until this is configured.` | `S/main.ts:47-52` |
@@ -238,7 +341,10 @@ at `W/lib/client.ts:2897`.
   `false` explicitly, because unset means on.
 - **Choosing for Release 0 is an operator decision.** Off keeps Release 0 at a
   single external provider (Supabase) but does not prove the user owns the
-  address. On adds Resend: an account, `RESEND_API_KEY`, and an
+  address. Neither setting protects existing accounts today: bootstrap
+  trusts an email from the request body whether verification is on or off.
+  With verification off, it also trusts the email of an unproven sign-up
+  (open defect 1). On adds Resend: an account, `RESEND_API_KEY`, and an
   `EMAIL_FROM_ADDRESS` Resend will send from. This packet does not choose;
   `.env.example` keeps `false`.
 - **Password recovery is separate.** Supabase's own mailer sends it
@@ -257,13 +363,13 @@ copied here; read them on the project's **Authentication → Rate Limits** page.
 | **Projects.** Two free projects per owner or administrator, across organisations ([billing](https://supabase.com/docs/guides/platform/billing-on-supabase)) | Enough for staging plus one spare |
 | **Monthly active users.** 50,000 MAU, counting users who log in or refresh in the billing cycle. Going over on Free brings a notification and a grace period ([MAU](https://supabase.com/docs/guides/platform/manage-your-usage/monthly-active-users)) | Far above Release 0 needs |
 | **Database and egress.** 500 MB database per project; 5 GB egress ([billing](https://supabase.com/docs/guides/platform/billing-on-supabase)) | Only the `auth` schema lives there, unless `DATABASE_URL` points at the same project. Then 500 MB is the whole application database |
-| **Auth rate limits.** A per-IP token bucket with capacity 30 on `/auth/v1/token` (password and refresh grants) and `/auth/v1/verify`. Supabase answers 429 when it is exhausted ([rate limits](https://supabase.com/docs/guides/auth/rate-limits)) | The API server calls login, refresh and the auto-confirm sign-in (`S/modules/identity/identity-signup.service.ts:317`, `:393`), so every user of a deployment shares the server's egress-IP bucket. The code sends no `Sb-Forwarded-For` header (none appears in `apps/server/src`), and Supabase honours that header only with `sb_secret_…` keys and forwarding enabled. A Supabase 429 surfaces as `signin_failed` on login (`:361-364`) and as `refresh_failed` on refresh (`:409-418`). Keyflow's own limits (`S/modules/identity/auth-security.service.ts:86-121`) are applied first |
+| **Auth rate limits.** A per-IP token bucket with capacity 30 on `/auth/v1/token` (password and refresh grants) and `/auth/v1/verify`. Supabase answers 429 when it is exhausted ([rate limits](https://supabase.com/docs/guides/auth/rate-limits)) | **A Release 0 denial-of-service risk, not only a capacity note (open defect 3).** The API server calls login, refresh and the auto-confirm sign-in (`S/modules/identity/identity-signup.service.ts:317`, `:393`), so every user of a deployment shares the server's egress-IP bucket, and one unauthenticated client can empty it. The code sends no `Sb-Forwarded-For` header (none appears in `apps/server/src`), and Supabase honours that header only with `sb_secret_…` keys and forwarding enabled. A Supabase 429 surfaces as `signin_failed` on login (`:361-364`) and as `refresh_failed` on refresh (`:409-418`), which signs the user out. Keyflow's own per-client-IP limits (`S/modules/identity/auth-security.service.ts:86-121`) are applied first, but they allow 10 logins per 15 min plus 120 refreshes per hour per client IP, which is more than the shared bucket holds |
 | **Built-in SMTP.** It delivers only to the organisation's team addresses, has a low hourly cap, and has no SLA ([custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp)) | It affects password recovery only, because Supabase sends that mail. Sign-up verification goes through Resend |
 | **JWT signing.** Supabase calls the legacy HS256 secret "no longer recommended" and offers asymmetric signing keys ([signing keys](https://supabase.com/docs/guides/auth/signing-keys)) | With either choice, today's code falls back to `getUser` (the `verifyLocal` caveat) |
 
 ### How the real-database tests mint tokens without a project
 
-No suite contacts Supabase. There are two patterns.
+No suite contacts Supabase. There are three patterns.
 
 1. **Spawned-server suites:** `T/identity-boundary.integration.test.ts`,
    `T/release0-journey.integration.test.ts` and
@@ -287,10 +393,21 @@ No suite contacts Supabase. There are two patterns.
 2. **In-process suites**, for example `T/contacts-visibility.integration.test.ts`,
    use no token at all. A test middleware reads `x-test-user`, loads the
    seeded `User` row and attaches it (`:236-248`).
+3. **The boundary suite** `T/identity-local-auth.integration.test.ts` runs the
+   real `AuthMiddleware` (real `SupabaseAuthService`, `PrismaService` and
+   Redis) in front of the real `AuthGuard` under `configureNestApp`, with a
+   probe route. It mints tokens with and without `iss`, sets
+   `SUPABASE_URL` to a fake host, sets no anon key, and refuses every `fetch`.
+   It proves the Release 0 rule (secret empty means forged tokens get 401) and
+   characterizes the acceptance path of open defect 2. It holds open defect 1
+   as `it.todo`.
 
-So CI proves everything after token verification. It does not prove Supabase
-sign-up, login or refresh, and it does not prove the hosted-token issuer path,
-because no test mints a token with `iss`.
+So CI proves the code after token verification only for the tokens it mints
+itself, which the middleware accepts because they carry no `iss`. It does not
+prove Supabase sign-up, login or refresh. It does not prove that a real hosted
+token is accepted, because no test mints the hosted `iss` shape and expects
+success. And no test covers bootstrap with an email that belongs to another
+user, which is the open account-takeover defect.
 
 ### Where the live sign-up leg runs
 
@@ -299,13 +416,21 @@ because no test mints a token with `iss`.
   `/auth/signup`. Under D-02 option C it records the substitution when no
   project is configured (`docs/reconstruction/BUILD-MAP-001.md`, review
   disposition row 2).
+- **Stop condition (open defects 1 and 2).** The run does not start while
+  bootstrap can move an existing user to another caller by email, unless its
+  application database holds no account other than the run's own. Its server
+  runs with `SUPABASE_JWT_SECRET` empty. If either condition fails, the run
+  stops and reports it.
 - The minimum environment for that run:
   - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`;
   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`;
   - `NEXT_PUBLIC_API_BASE_URL`, and `NEXT_PUBLIC_SITE_URL` or `APP_URL`;
   - an explicit `AUTH_REQUIRE_EMAIL_VERIFICATION`, plus the Resend variables
     when it is on;
-  - `HIBP_DISABLED=true` if the run must make no other outbound call.
+  - `SUPABASE_JWT_SECRET` empty, and `GOOGLE_STATE_SECRET` set to a random
+    value;
+  - `HIBP_DISABLED=true`, as Release 0 sets it, so the run makes no other
+    outbound call.
 - Expected results:
   1. `POST /identity/signup` answers 201: `authenticated` with verification
      off, `verification_sent` with it on.
@@ -394,7 +519,7 @@ unless noted):
 | `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL`) | Supabase project URL — used by both the admin client (signup/generateLink) and the anon client (signInWithPassword). |
 | `SUPABASE_SERVICE_ROLE_KEY` | Required for admin actions: `auth.admin.createUser`, `generateLink`. Without it `/identity/signup` answers 400 `server_misconfigured`, whether verification is on or off. |
 | `SUPABASE_ANON_KEY` (or `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | Anon key used for the password and refresh grants and the `getUser()` fallback. The frontend reads `NEXT_PUBLIC_SUPABASE_ANON_KEY` for the Google PKCE exchange and user-info call. |
-| `SUPABASE_JWT_SECRET` | Optional; meant to let the auth middleware verify tokens locally instead of round-tripping `getUser()`. With a hosted project it does not take effect today: see the `verifyLocal` caveat above. |
+| `SUPABASE_JWT_SECRET` | **Leave empty for Release 0.** Meant to let the auth middleware verify tokens locally instead of round-tripping `getUser()`. With a hosted project it verifies no real token, but it still accepts any token signed with it that has no `iss` or has `iss = SUPABASE_URL` (open defect 2). It is also the fallback secret for marketing unsubscribe tokens, so set `GOOGLE_STATE_SECRET` before removing it. |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | `"true"`/`"1"` to require verification, `"false"`/`"0"` to auto-confirm. Defaults to ON in production. |
 | `RESEND_API_KEY` | Required when verification is on — sends the actual verification email via Resend. |
 | `EMAIL_FROM_ADDRESS` | The `From` address on auth emails (e.g. `no-reply@keyflow.os`). |
@@ -466,7 +591,10 @@ role }` to the request, and `IdentityService.bootstrapUser` either
 reuses the local `User` row, reconciles a row that already exists with
 the same email under a different id (see task #308 —
 `reconcileUserId`), or creates a fresh row, then ensures a default
-`Business` + `Membership` exist.
+`Business` + `Membership` exist. The reconcile step is the open
+account-takeover defect (open defect 1 in the Release 0 section). It trusts
+an email from the request body or the token, and moves that row's role,
+memberships and businesses to the caller.
 
 ### Required dashboard configuration
 
