@@ -385,6 +385,39 @@ async function expectIdentityRefused(token: string | null, label: string) {
   }
 }
 
+/** The longest token lifetime the logout marker must outlive: admin tokens live 24h, Supabase access tokens 1h by default. */
+const MAX_TOKEN_LIFETIME_S = 24 * 60 * 60;
+
+/**
+ * ST-4 (R0-ID-F3): the logout marker holds the revocation time in epoch seconds
+ * (within [before, after]) and lives at least as long as the longest token
+ * lifetime. Returns the stored time.
+ */
+async function expectRevocationTime(userId: string, before: number, after: number): Promise<number> {
+  const raw = await redis!.get(revocationKey(userId));
+  expect(raw, 'the marker is the revocation time in epoch seconds, not a bare flag').toMatch(/^\d+$/);
+  const at = Number(raw);
+  expect(at, 'revocation time').toBeGreaterThanOrEqual(before);
+  expect(at, 'revocation time').toBeLessThanOrEqual(after);
+  expect(await redis!.ttl(revocationKey(userId)), 'marker TTL (seconds)').toBeGreaterThanOrEqual(MAX_TOKEN_LIFETIME_S - 60);
+  return at;
+}
+
+/** Resolve once the wall clock is past `epochSec`, so a token minted next carries iat > epochSec. */
+async function untilAfterSecond(epochSec: number) {
+  while (Math.floor(Date.now() / 1000) <= epochSec) await new Promise((r) => setTimeout(r, 50));
+}
+
+/**
+ * The next POST /identity/login's effect on revocation state, applied directly:
+ * its Supabase leg (signInWithPassword) cannot run in this provider-free suite
+ * (CR-1). Mirrors identity.controller.ts login exactly as it is today: after a
+ * successful sign-in it deletes auth:revoked:user:<id> (OPEN DEFECT ST-4).
+ */
+async function applyLoginRevocationEffect(userId: string) {
+  await redis!.del(revocationKey(userId));
+}
+
 async function cleanup() {
   const statements = [
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${LIKE_P} OR user_id LIKE ${LIKE_P}`,
@@ -745,27 +778,33 @@ describe('AB-P02/AB-P04 (Supabase-token branch) — a deleted, banned or revoked
     expect(await db.membership.findUnique({ where: { id: ID.mBanned } })).not.toBeNull();
   });
 
-  it('Redis revocation marker present: 401 on the next request; clearing it restores access (the marker is the cause)', async () => {
-    // Clearing the marker re-admits the SAME pre-revocation token: the marker is
-    // per user and carries no iat cutoff. POST /identity/login performs exactly
-    // this clear — that is OPEN DEFECT ST-4 (see the end of this file).
+  it("Redis revocation marker in the previous release's bare-flag format ('1'): revoked at an unknown time, so every token issued up to now gets 401; once the marker is gone the token is served (the marker is the cause)", async () => {
+    // ST-4 (R0-ID-F3): the marker now holds the revocation time in epoch
+    // seconds. A bare '1' written by the previous release carries no time, so it
+    // is read as "revoked now": the pre-revocation token AND a token minted this
+    // instant are both refused. Nothing in the product deletes the marker any
+    // more (POST /identity/login used to — OPEN DEFECT ST-4, fixed); only its
+    // TTL ends it, and deleting it here stands in for that expiry.
     await expectServed(T[ID.revoked], 'before revocation');
     await redis!.setex(revocationKey(ID.revoked), 300, '1');
-    await expectIdentityRefused(T[ID.revoked], 'revocation marker');
+    await expectIdentityRefused(T[ID.revoked], 'bare-flag marker, pre-revocation token');
+    await expectIdentityRefused(mintToken(ID.revoked), 'bare-flag marker, token minted now');
     await redis!.del(revocationKey(ID.revoked));
-    await expectServed(T[ID.revoked], 'after the marker is cleared');
+    await expectServed(T[ID.revoked], 'after the marker expired');
   });
 
-  it('POST /identity/logout — the production writer of that marker — refuses the same token on the next request', async () => {
+  it('POST /identity/logout — the production writer of that marker — stores the revocation time (epoch seconds, TTL at or above the 24h token lifetime) and refuses the same token on the next request', async () => {
     // Every SUPABASE_* key is pinned to '' in the child (childEnv, CR-1), so
     // SupabaseAdminService has no client: signOut throws locally before any
     // request is built (logged and swallowed). What this case proves is the
     // Redis marker only — NOT a Supabase session revocation, which today never
     // happens even with Supabase configured (OPEN DEFECT CR-2).
+    const before = Math.floor(Date.now() / 1000);
     const out = await call('post', '/identity/logout', T[ID.revoked]);
+    const after = Math.floor(Date.now() / 1000);
     expect(out.status, JSON.stringify(out.body)).toBe(201);
     expect(out.body).toEqual({ status: 'logged_out' });
-    expect(await redis!.get(revocationKey(ID.revoked))).toBe('1');
+    await expectRevocationTime(ID.revoked, before, after);
     await expectIdentityRefused(T[ID.revoked], 'after logout');
   });
 });
@@ -1395,13 +1434,22 @@ describe('ST-2 (fixed) — the admin-token branch of AuthMiddleware applies the 
     expect(biz.body.name).toBe(BIZ_B_NAME);
   }
 
+  /** The F1 case's POST /api/admin/auth/login token, issued after its POST /identity/logout. */
+  let freshAdminToken = '';
+
   it('F1 — after POST /identity/logout (the app shell logout, sent with the admin token) a fresh POST /api/admin/auth/login token is served; the marker still refuses the Supabase token', async () => {
     expect(adminToken, 'the positive control mints the token').not.toBe('');
     await resetToActiveSuperAdmin();
     await expectAdminServed('before logout');
+    // ST-4 backward compatibility: a bare-flag marker ('1') left by the previous
+    // release. It does not gate the admin token, so this logout runs — and it
+    // rewrites the marker as a revocation time in epoch seconds.
+    await redis!.setex(revocationKey(ID.adminTok), 300, '1');
+    const loggedOutFrom = Math.floor(Date.now() / 1000);
     const out = await call('post', '/identity/logout', adminToken);
+    const loggedOutTo = Math.floor(Date.now() / 1000);
     expect(out.status, JSON.stringify(out.body)).toBe(201);
-    expect(await redis!.get(revocationKey(ID.adminTok))).toBe('1');
+    const revokedAt = await expectRevocationTime(ID.adminTok, loggedOutFrom, loggedOutTo);
     // The marker still does its job on the Supabase branch.
     await expectIdentityRefused(T[ID.adminTok], 'after logout, Supabase token');
 
@@ -1410,27 +1458,37 @@ describe('ST-2 (fixed) — the admin-token branch of AuthMiddleware applies the 
     const fresh = await adminLogin('admin login after /identity/logout');
     expect(fresh).not.toBe(adminToken);
     await expectTokenServed(fresh, 'fresh admin token after /identity/logout');
-    expect(await redis!.get(revocationKey(ID.adminTok)), 'served with the marker still set').toBe('1');
+    expect(await redis!.get(revocationKey(ID.adminTok)), 'served with the marker still set').toBe(String(revokedAt));
+    freshAdminToken = fresh;
   });
 
-  it('OPEN DEFECT ST-4 (admin tokens) reproduced — POST /identity/logout does not revoke an admin token issued before it: the pre-logout token is still served', async () => {
+  it('ST-4 (admin tokens) — POST /identity/logout revokes an admin token issued before it by issue time: the pre-logout admin token answers 401, the later admin login’s token is served, and the next login brings the old one back neither', async () => {
     expect(adminToken, 'the positive control mints the token').not.toBe('');
     await resetToActiveSuperAdmin();
-    // Pins today's behaviour (the same as before R0-ID-F2): /identity/logout
-    // writes only the per-user marker, which the admin branch does not read,
-    // and never the admin cutoff. Turns red when the ST-4 fix lands.
-    expect(await redis!.get(revocationKey(ID.adminTok))).toBe('1');
-    expect(await redis!.get(adminCutoffKey(ID.adminTok))).toBeNull();
-    await expectTokenServed(adminToken, 'pre-logout admin token after /identity/logout');
+    await expectAdminRefused(adminToken, 'pre-logout admin token after /identity/logout');
+    // F1's POST /identity/logout wrote the admin token's own cutoff
+    // (admin:user:<id>:revokedAt, milliseconds like the admin token iat — the
+    // key POST /api/admin/auth/logout writes and verifyAdminToken reads), with a
+    // TTL that outlives every admin token issued before it.
+    expect(await redis!.get(adminCutoffKey(ID.adminTok)), 'admin cutoff written by POST /identity/logout').toMatch(/^\d{13,}$/);
+    expect(await redis!.ttl(adminCutoffKey(ID.adminTok)), 'admin cutoff TTL (seconds)').toBeGreaterThanOrEqual(MAX_TOKEN_LIFETIME_S - 60);
+    expect(freshAdminToken, 'the F1 case logs in again after its logout').not.toBe('');
+    await expectTokenServed(freshAdminToken, 'admin token issued after /identity/logout');
+
+    await applyLoginRevocationEffect(ID.adminTok);
+    await expectAdminRefused(adminToken, 'pre-logout admin token after the next login');
+    await expectTokenServed(freshAdminToken, 'admin token issued after /identity/logout, after the next login');
   });
 
-  it("ST-2 — the admin token's own revocation holds: after POST /api/admin/auth/logout the pre-logout admin token is refused with 401, and a later admin login is served", async () => {
-    expect(adminToken, 'the positive control mints the token').not.toBe('');
+  it("ST-2 — the admin token's own revocation holds: after POST /api/admin/auth/logout the admin token it was sent with is refused with 401, and a later admin login is served", async () => {
     await resetToActiveSuperAdmin();
-    const out = await call('post', '/api/admin/auth/logout', adminToken);
+    // The positive control's adminToken was already revoked by POST
+    // /identity/logout (ST-4, above), so log out with a live one.
+    const live = await adminLogin('a live admin token to log out with');
+    const out = await call('post', '/api/admin/auth/logout', live);
     expect(out.status, JSON.stringify(out.body)).toBe(201);
     expect(await redis!.get(adminCutoffKey(ID.adminTok))).not.toBeNull();
-    await expectAdminRefused(adminToken, 'after admin logout, pre-logout admin token');
+    await expectAdminRefused(live, 'after admin logout, pre-logout admin token');
 
     const fresh = await adminLogin('admin login after /api/admin/auth/logout');
     await expectTokenServed(fresh, 'fresh admin token after /api/admin/auth/logout');
@@ -1478,37 +1536,41 @@ describe('OPEN DEFECT ST-3 — PATCH /identity/businesses/:id has no module scop
   );
 });
 
-describe('OPEN DEFECT ST-4 — the revocation marker has no iat cutoff, and login deletes it', () => {
-  it('OPEN DEFECT ST-4 mechanism reproduced — a token issued BEFORE logout is admitted again once the marker is cleared the way POST /identity/login clears it', async () => {
-    const preLogout = T[ID.relogin]; // minted in beforeAll, before this logout
-    const before = await call('get', routes.biz(ID.bizD), preLogout);
+// ST-4 (R0-ID-F3-REVOCATION-IAT-CUTOFF). The marker used to be a per-user flag
+// with no issue time, and POST /identity/login deleted it, so a token issued
+// before logout — a stolen one included — was admitted again after the next
+// login. Required: the marker is the revocation time, login leaves it alone, and
+// a token is refused when its iat is at or before that time. The admin-token
+// half is the "ST-4 (admin tokens)" case in the ST-2 block above.
+describe('ST-4 — logout revocation is an issue-time cutoff that the next login does not lift', () => {
+  it('T1 issued BEFORE POST /identity/logout stays refused after the next login (401), while T2 minted after the logout is served (200)', async () => {
+    const t1 = T[ID.relogin]; // minted in beforeAll, before this logout
+    const before = await call('get', routes.biz(ID.bizD), t1);
     expect(before.status, JSON.stringify(before.body)).toBe(200);
 
-    const out = await call('post', '/identity/logout', preLogout);
+    const loggedOutFrom = Math.floor(Date.now() / 1000);
+    const out = await call('post', '/identity/logout', t1);
+    const loggedOutTo = Math.floor(Date.now() / 1000);
     expect(out.status, JSON.stringify(out.body)).toBe(201);
-    expect((await call('get', routes.me, preLogout)).status).toBe(401);
+    expect((await call('get', routes.me, t1)).status, 'T1 right after logout').toBe(401);
 
-    // POST /identity/login runs exactly this after a successful
-    // signInWithPassword (identity.controller.ts, login: redis.del of
-    // auth:revoked:user:<id>). The Supabase leg cannot run here — no provider
-    // traffic — so the clear is applied directly.
-    await redis!.del(revocationKey(ID.relogin));
-    const after = await call('get', routes.biz(ID.bizD), preLogout);
-    expect(after.status, `pre-logout token after the login clear: ${JSON.stringify(after.body)}`).toBe(200);
+    await applyLoginRevocationEffect(ID.relogin);
+    for (const route of [routes.me, routes.biz(ID.bizD), routes.team(ID.bizD)]) {
+      const res = await call('get', route, t1);
+      expect(res.status, `T1 after the next login: GET ${route} -> ${res.status} ${JSON.stringify(res.body)}`).toBe(401);
+      expect(JSON.stringify(res.body ?? {})).not.toContain(BIZ_D_NAME);
+    }
+
+    const revokedAt = await expectRevocationTime(ID.relogin, loggedOutFrom, loggedOutTo);
+    await untilAfterSecond(revokedAt);
+    const t2 = mintToken(ID.relogin);
+    const me = await call('get', routes.me, t2);
+    expect(me.status, `T2 (minted after logout): /identity/me ${JSON.stringify(me.body)}`).toBe(200);
+    expect(me.body.id).toBe(ID.relogin);
+    const biz = await call('get', routes.biz(ID.bizD), t2);
+    expect(biz.status, `T2 (minted after logout): /identity/businesses/:D ${JSON.stringify(biz.body)}`).toBe(200);
+    expect(biz.body.name).toBe(BIZ_D_NAME);
   });
-
-  it.todo(
-    'REQUIRED (fix packet; identity.controller.ts login/logout + auth.middleware.ts, outside this write set): an access token issued before ' +
-      'POST /identity/logout stays refused after a later POST /identity/login (revocation keyed on issue time, not a per-user flag the login deletes). ' +
-      'The full login leg needs Supabase signInWithPassword and cannot run in this provider-free suite',
-  );
-
-  it.todo(
-    'REQUIRED (ST-4 fix packet; identity.controller.ts logout + auth.middleware.ts / admin-token.util.ts, outside this write set): POST /identity/logout ' +
-      'revokes admin tokens by issue time too — the pre-logout admin token answers 401 (the "OPEN DEFECT ST-4 (admin tokens)" case turns red), a token from a ' +
-      'later POST /api/admin/auth/login is served, and a later POST /identity/login does not bring the pre-logout admin token back. buildAdminToken sets iat ' +
-      'and exp in MILLISECONDS, not the JWT seconds a Supabase cutoff compares against',
-  );
 });
 
 describe('OPEN DEFECT ST-2-WS — the KEY Cortex WebSocket admin-token path skips the local-user checks', () => {
