@@ -2,10 +2,12 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { X, List, Heart, ChevronDown, Zap, Bot } from "lucide-react";
+import { X, List, Heart, ChevronDown, Zap, Bot, AlertTriangle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { createContact, fetchContactLists, fetchContacts } from "@/lib/client";
+import { clearCachedContacts } from "@/lib/contacts-db";
 import { STATUS_COLORS } from "@/lib/crm-utils";
+import { getCachedUser } from "@/lib/workspace";
 import {
   ContactForm,
   ContactImport,
@@ -26,6 +28,8 @@ import { PipelineKanban } from "./pipeline-kanban";
 import { ContactsDatabase } from "./contacts-database";
 import { DuplicateDetector } from "./duplicate-detector";
 import { FocusView } from "./focus-view";
+import { CONTACTS_DENIED_MESSAGE } from "./hooks/use-contacts-data";
+import { ContactsTableDenialContext } from "./hooks/use-database-state";
 import type { PipelineState } from "./use-contacts-pipeline";
 
 interface PipelineTabContentProps {
@@ -55,6 +59,30 @@ function getStoredViewMode(): ViewMode {
   } catch {
     return "focus";
   }
+}
+
+/**
+ * The contacts read failed or was refused and there are no rows to show. Same
+ * copy and shape as the list view's state (pipeline-contact-list.tsx), so the
+ * focus, kanban and table views say the same thing the list does.
+ */
+function ContactsLoadErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="rounded-2xl border border-border/50 bg-card p-10 text-center" role="alert">
+      <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mx-auto mb-3">
+        <AlertTriangle className="w-5 h-5 text-red-400/70" />
+      </div>
+      <p className="text-sm font-semibold tracking-tight mb-1">Could not load contacts</p>
+      <p className="text-xs text-muted-foreground/60 mb-4">{message}</p>
+      <button
+        onClick={onRetry}
+        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-lg bg-gradient-to-r from-[hsl(var(--kf-accent1))]/15 to-[hsl(var(--kf-accent1))]/5 text-[hsl(var(--kf-accent1))] hover:from-[hsl(var(--kf-accent1))]/25 hover:to-[hsl(var(--kf-accent1))]/10 transition-all"
+      >
+        <RefreshCw className="w-3.5 h-3.5" />
+        Try Again
+      </button>
+    </div>
+  );
 }
 
 function PipelineTabContentInner({ state, nextActions, autopilotActions, autopilotPaused, onCompleteNextAction, onViewEngageContact, onDoAction, onToggleAutopilotPause, onApproveAutopilot, onDenyAutopilot }: PipelineTabContentProps) {
@@ -89,6 +117,23 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   const [showImport, setShowImport] = useState(false);
   const [showEngageSection, setShowEngageSection] = useState(false);
   const [pipelineLists, setPipelineLists] = useState<{ id: string; name: string }[]>([]);
+  // Review CR-1: the business whose table read was refused (the table reports
+  // it through ContactsTableDenialContext). Cleared by Try Again and by a view
+  // change, so the next table read decides afresh.
+  const [tableDeniedFor, setTableDeniedFor] = useState<string | null>(null);
+  const tableReadDenied = tableDeniedFor !== null && tableDeniedFor === businessId;
+  const reportTableDenial = useCallback(() => {
+    if (businessId) setTableDeniedFor(businessId);
+  }, [businessId]);
+
+  // Review ST-R015b-1: a refusal of the screen's read, in any view, drops this
+  // user's and business's rows from the device cache, so a later read that
+  // merely fails (offline, a 5xx) cannot let the table fall back to rows the
+  // server refused. The table's own refusal drops them in use-database-state.
+  useEffect(() => {
+    if (loadError !== CONTACTS_DENIED_MESSAGE || !businessId) return;
+    void clearCachedContacts({ userId: getCachedUser()?.id ?? null, businessId }).catch(() => {});
+  }, [loadError, businessId]);
 
   useEffect(() => {
     if (!businessId || !selectMode) return;
@@ -102,6 +147,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   }, [businessId, selectMode]);
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
+    setTableDeniedFor(null);
     try { localStorage.setItem(PIPELINE_VIEW_KEY, mode); } catch {}
     if (typeof window !== "undefined") {
       try {
@@ -139,10 +185,10 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     }
   }, [businessId, loadContacts, loadFlowData]);
 
-  const handleRefresh = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
+  const handleRefresh = useCallback(() => { setTableDeniedFor(null); void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
   const handleMergeComplete = useCallback(() => { void loadContacts(); }, [loadContacts]);
   const handleLoadMore = useCallback(() => loadContacts({ append: true }), [loadContacts]);
-  const handleRetry = useCallback(() => { void loadContacts(); }, [loadContacts]);
+  const handleRetry = useCallback(() => { setTableDeniedFor(null); void loadContacts(); }, [loadContacts]);
   const handleOpenAddForm = useCallback(() => setShowAddForm(true), [setShowAddForm]);
   const handleOpenBroadcast = useCallback(() => setShowBroadcast(true), [setShowBroadcast]);
   const openComposer = useOpenComposer();
@@ -193,6 +239,21 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
       : null),
     [selectedContactId, detailPanelProps, handleDetailClose],
   );
+
+  // CONTACTS-v1 section 5: a refused or failed read is never empty data. The
+  // list view handles loadError itself; focus and kanban would show their empty
+  // copy and the table its empty copy or the device cache, so they show the
+  // load failure instead. The table keeps its offline cache for a failed (not
+  // refused) read, which use-database-state limits to this user and business.
+  // The table's own read can be refused while the screen's was allowed (CR-1):
+  // the table then shows the denial too, never the screen's rows.
+  const loadErrorView =
+    viewMode === "table" && tableReadDenied
+      ? CONTACTS_DENIED_MESSAGE
+      : loadError && contacts.length === 0 &&
+        (viewMode === "focus" || viewMode === "kanban" || (viewMode === "table" && loadError === CONTACTS_DENIED_MESSAGE))
+        ? loadError
+        : null;
 
   return (
     <div className="space-y-6">
@@ -448,7 +509,9 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         ))}
       </div>
 
-      {viewMode === "focus" ? (
+      {loadErrorView ? (
+        <ContactsLoadErrorNotice message={loadErrorView} onRetry={handleRetry} />
+      ) : viewMode === "focus" ? (
         <FocusView
           contacts={displayContacts as ContactCardData[]}
           nextActions={nextActions ?? []}
@@ -460,16 +523,18 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
       ) : viewMode === "kanban" ? (
         <PipelineKanban state={state} />
       ) : viewMode === "table" && businessId ? (
-        <ContactsDatabase
-          businessId={businessId}
-          contacts={contacts as unknown as import("@/lib/contacts-db").LocalContact[]}
-          onRefresh={handleRefresh}
-          activeListId={activeListId}
-          onSelectList={(listId, contactIds) => { setActiveListId(listId); setActiveListContactIds(contactIds ?? null); }}
-          onSelectContact={selectContact}
-          favoriteIds={favoriteIds}
-          onToggleFavorite={handleToggleFavorite}
-        />
+        <ContactsTableDenialContext.Provider value={reportTableDenial}>
+          <ContactsDatabase
+            businessId={businessId}
+            contacts={contacts as unknown as import("@/lib/contacts-db").LocalContact[]}
+            onRefresh={handleRefresh}
+            activeListId={activeListId}
+            onSelectList={(listId, contactIds) => { setActiveListId(listId); setActiveListContactIds(contactIds ?? null); }}
+            onSelectContact={selectContact}
+            favoriteIds={favoriteIds}
+            onToggleFavorite={handleToggleFavorite}
+          />
+        </ContactsTableDenialContext.Provider>
       ) : viewMode === "data-quality" && businessId ? (
         <DuplicateDetector
           businessId={businessId}
