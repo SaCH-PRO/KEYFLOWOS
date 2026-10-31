@@ -25,6 +25,13 @@
  *   PaymentEvidenceService (POST .../payments/from-evidence) -> KEY_SYSTEM_ACTOR_ID, actorType SYSTEM
  *   internal caller passing no actor (drive intake)  -> recordedBy null (no invented actor)
  *
+ * Review repairs (R0-PL-07-PAYMENT-ACTOR-repair):
+ *   PATCH /commerce/invoices/:id/paid by U (no payment yet) -> the manual row's recordedBy = U   (PL07-ST-2, PL07-CR-1)
+ *   refund of an already REFUNDED payment, or of a PENDING / FAILED one -> 409, nothing changes (PL07-ST-1)
+ *   two concurrent refunds of one payment -> one 201, one 409, one reversal                     (PL07-ST-1)
+ *   KEY adapter / from-evidence: recorder stays KEY (SYSTEM); the human it acted for is kept as
+ *     contact event data.initiatedBy, taken from the command / req.user, never from the body   (PL07-ST-3)
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService, ChartOfAccountsSeederService,
@@ -71,6 +78,13 @@ const ID = {
   invKey: `${P}invKey`,
   invEvidence: `${P}invEvidence`,
   invNoActor: `${P}invNoActor`,
+  // review repairs (PL07-ST-1/2/3, PL07-CR-1)
+  invMarkPaid: `${P}invMarkPaid`,
+  invDoubleRefund: `${P}invDoubleRefund`,
+  invNotRefundable: `${P}invNotRefundable`,
+  invRefundRace: `${P}invRefundRace`,
+  invEvidenceV: `${P}invEvidenceV`,
+  invHumanInit: `${P}invHumanInit`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -468,6 +482,8 @@ describe('KEY and evidence paths record the system actor, distinct from a human'
     expect(rows[0].recordedBy).not.toBe(ID.userU);
     await expectPostingBy(rows[0].id, KEY_ACTOR);
     await expectContactEventBy(ID.invKey, KEY_ACTOR, 'SYSTEM');
+    // Review PL07-ST-3: the human the KEY command ran for stays on the trail.
+    expect(((await contactEventsFor(ID.invKey))[0].data as any).initiatedBy).toBe(ID.userU);
   });
 
   it('PA-07: POST .../payments/from-evidence (PaymentEvidenceService) -> recordedBy KEY_SYSTEM_ACTOR_ID, posting createdById KEY, contact event SYSTEM', async () => {
@@ -488,6 +504,8 @@ describe('KEY and evidence paths record the system actor, distinct from a human'
     expect(rows[0].recordedBy).toBe(KEY_ACTOR);
     await expectPostingBy(rows[0].id, KEY_ACTOR);
     await expectContactEventBy(ID.invEvidence, KEY_ACTOR, 'SYSTEM');
+    // Review PL07-ST-3: the authenticated uploader stays on the trail.
+    expect(((await contactEventsFor(ID.invEvidence))[0].data as any).initiatedBy).toBe(ID.userU);
   });
 
   it('PA-08: an internal caller that passes no actor (drive intake) records recordedBy null; no actor is invented', async () => {
@@ -495,5 +513,122 @@ describe('KEY and evidence paths record the system actor, distinct from a human'
     const row = await paymentRow(result.payment.id);
     expect(row.recordedBy).toBeNull();
     await expectPostingBy(result.payment.id, null);
+    const events = await contactEventsFor(ID.invNoActor);
+    expect(events).toHaveLength(1);
+    expect((events[0].data as any).initiatedBy).toBeUndefined();
+  });
+});
+
+describe('review repairs: mark-paid, refund guard, initiating human', () => {
+  it('PA-09 (PL07-ST-2, PL07-CR-1): PATCH /commerce/invoices/:id/paid by U creates the manual row with recordedBy = U', async () => {
+    const res = await agent().patch(`/commerce/invoices/${ID.invMarkPaid}/paid`).set(HEADER, ID.userU).send({ businessId: ID.biz });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const rows = await paymentsOf(ID.invMarkPaid);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: 'manual', method: 'MANUAL', status: 'SUCCESSFUL', amount: INVOICE_TOTAL });
+    expect(rows[0].recordedBy).toBe(ID.userU);
+    const paid = await contactEventsFor(ID.invMarkPaid, 'invoice.paid');
+    expect(paid).toHaveLength(1);
+    expect(paid[0]).toMatchObject({ actorId: ID.userU, actorType: 'USER' });
+  });
+
+  it('PA-10 (PL07-ST-1): U records, V refunds, U refunds again -> 409; status, notes and the single reversal (by V) are unchanged', async () => {
+    const res = await postAs(ID.userU, ID.invDoubleRefund, { amount: 20, method: 'cash', reference: 'PYA-D-1' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const paymentId = res.body.payment.id;
+
+    const first = await refundAs(ID.userV, paymentId, 'first');
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const afterFirst = await paymentRow(paymentId);
+    expect(afterFirst.status).toBe('REFUNDED');
+    expect(afterFirst.notes).toBe('Refunded: first');
+
+    const second = await refundAs(ID.userU, paymentId, 'second');
+    expect(second.status, JSON.stringify(second.body)).toBe(409);
+    expect(second.body.message).toMatch(/already refunded/i);
+
+    const row = await paymentRow(paymentId);
+    expect(row).toMatchObject({ status: 'REFUNDED', notes: 'Refunded: first', recordedBy: ID.userU });
+    const reversals = await reversalsFor(paymentId);
+    expect(reversals).toHaveLength(1);
+    expect(reversals[0].createdById).toBe(ID.userV);
+  });
+
+  it('PA-11 (PL07-ST-1): refunding a PENDING or a FAILED payment -> 409; the row, the ledger and the timeline are untouched', async () => {
+    for (const status of ['PENDING', 'FAILED']) {
+      const id = `${P}pay_${status.toLowerCase()}`;
+      await db.payment.create({
+        data: {
+          id, businessId: ID.biz, invoiceId: ID.invNotRefundable, amount: 10, currency: 'TTD', status,
+          provider: 'wipay', method: 'card', providerPaymentId: `${P}prov_${status.toLowerCase()}`, notes: 'seeded',
+        },
+      });
+      const res = await refundAs(ID.userV, id, 'not refundable');
+      expect(res.status, `${status}: ${JSON.stringify(res.body)}`).toBe(409);
+      expect(res.body.message).toMatch(new RegExp(status, 'i'));
+      expect(await paymentRow(id)).toMatchObject({ status, notes: 'seeded', recordedBy: null });
+      expect(await reversalsFor(id)).toHaveLength(0);
+      expect(await postingsFor(id)).toHaveLength(0);
+    }
+    expect(await contactEventsFor(ID.invNotRefundable, 'invoice.payment_recorded')).toHaveLength(0);
+  });
+
+  it('PA-12 (PL07-ST-1): two concurrent refunds of one payment -> exactly one 201 and one 409, one reversal, one "Refunded:" note', async () => {
+    const res = await postAs(ID.userU, ID.invRefundRace, { amount: 35, method: 'cash', reference: 'PYA-RACE-1' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const paymentId = res.body.payment.id;
+
+    const results = await Promise.all([refundAs(ID.userU, paymentId, 'race'), refundAs(ID.userV, paymentId, 'race')]);
+    expect(results.map((r) => r.status).sort(), JSON.stringify(results.map((r) => r.body))).toEqual([201, 409]);
+    const winner = results.find((r) => r.status === 201)!;
+    const winnerId = winner === results[0] ? ID.userU : ID.userV;
+
+    const row = await paymentRow(paymentId);
+    expect(row.status).toBe('REFUNDED');
+    expect(row.notes).toBe('Refunded: race');
+    const reversals = await reversalsFor(paymentId);
+    expect(reversals).toHaveLength(1);
+    expect(reversals[0].createdById).toBe(winnerId);
+  });
+
+  it.todo(
+    'PA-13 (PL07-ST-1, remainder): refunding a SUCCESSFUL payment that has no ledger posting (the mark-paid manual row, pre-FIN2 rows) records the refunder. '
+      + 'Blocked inside this write set: there is no reversal to carry createdById, no canonical refund ContactEvent type '
+      + '(CONTACT_EVENT_TYPES lives in packages/shared, outside the write set) and Payment has no refunded-by column (no schema change). '
+      + 'Needs a ruling: add invoice.payment_refunded to packages/shared, or post mark-paid rows to the ledger (finance scope).',
+  );
+
+  it('PA-14 (PL07-ST-3): from-evidence by V -> recorder KEY (SYSTEM); initiatedBy = V from req.user, never the body\'s recordedBy / initiatedBy', async () => {
+    nextExtraction = {
+      documentType: 'receipt',
+      confidence: 0.9,
+      invoiceData: { total: 12, invoiceNumber: 'PYA-EVID-V', notes: 'cash' },
+    };
+    const res = await agent()
+      .post(`/commerce/businesses/${ID.biz}/invoices/${ID.invEvidenceV}/payments/from-evidence`)
+      .set(HEADER, ID.userV)
+      .send({
+        evidenceUrl: 'https://evidence.test/pya-v.pdf', evidenceMimeType: 'application/pdf', filename: 'pya-v.pdf', source: 'upload',
+        initiatedBy: ID.userU, recordedBy: ID.userU, actorId: ID.userU,
+      });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+
+    const rows = await paymentsOf(ID.invEvidenceV);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].recordedBy).toBe(KEY_ACTOR);
+    await expectPostingBy(rows[0].id, KEY_ACTOR);
+    await expectContactEventBy(ID.invEvidenceV, KEY_ACTOR, 'SYSTEM');
+    expect(((await contactEventsFor(ID.invEvidenceV))[0].data as any).initiatedBy).toBe(ID.userV);
+  });
+
+  it('PA-15 (PL07-ST-3): initiatedBy is kept only beside the system recorder; a human recorder ignores it', async () => {
+    const result = await commerce.recordPayment(
+      ID.invHumanInit, ID.biz, { amount: 8, method: 'cash', reference: 'PYA-HI-1' }, { actorId: ID.userU, initiatedBy: ID.userV },
+    );
+    expect((await paymentRow(result.payment.id)).recordedBy).toBe(ID.userU);
+    const events = await contactEventsFor(ID.invHumanInit);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actorId: ID.userU, actorType: 'USER' });
+    expect((events[0].data as any).initiatedBy).toBeUndefined();
   });
 });

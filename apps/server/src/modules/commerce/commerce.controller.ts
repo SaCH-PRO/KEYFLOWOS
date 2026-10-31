@@ -1337,10 +1337,15 @@ export class CommerceController {
       source: 'drive' | 'upload';
       driveFileId?: string;
     },
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.paymentEvidence.processEvidence({ ...body, businessId,
-      invoiceId,
-    });
+    // R0-PL-07 review (PL07-ST-3): KEY stays the recorder of the extracted
+    // payment; the authenticated uploader is kept as its initiator. Taken from
+    // req.user, never from the body.
+    return this.paymentEvidence.processEvidence(
+      { ...body, businessId, invoiceId },
+      { initiatedBy: req?.user?.id ?? null },
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

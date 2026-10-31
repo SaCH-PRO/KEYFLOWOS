@@ -782,6 +782,9 @@ export class CommerceService {
           provider: 'manual',
           providerPaymentId: `manual_${invoiceId}_${Date.now()}`,
           method: 'MANUAL',
+          // R0-PL-07 review (PL07-ST-2 / PL07-CR-1): the person (or KEY) who
+          // marked the invoice paid recorded this manual row.
+          recordedBy: actorId ?? null,
         },
       });
     }
@@ -1662,8 +1665,22 @@ export class CommerceService {
      * null. A replay returns the original row and never rewrites its recorder.
      */
     actorId?: string | null;
+    /**
+     * R0-PL-07 review (PL07-ST-3): the person on whose behalf a SYSTEM
+     * recorder (KEY) acted, e.g. the member who uploaded the receipt on the
+     * from-evidence route or the user KEY's tool call ran for. The recorder
+     * stays the system actor; this only keeps the human on the audit trail
+     * (contact event data.initiatedBy). Audit data, never authority. Ignored
+     * unless the recorder is the system actor, and never the system actor
+     * itself. Like actorId it is an option, never part of `input`.
+     */
+    initiatedBy?: string | null;
   } = {}) {
     const actorId = options.actorId ?? null;
+    const initiatedBy =
+      isSystemActor(actorId) && options.initiatedBy && !isSystemActor(options.initiatedBy)
+        ? options.initiatedBy
+        : null;
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
       include: { payments: true },
@@ -1802,6 +1819,7 @@ export class CommerceService {
           newStatus,
           overPaid: isOverPayment ? Number((newPaidTotal - Number(invoice.total)).toFixed(2)) : 0,
           recordedBy: actorId,
+          ...(initiatedBy ? { initiatedBy } : {}),
         },
         // R0-PL-07: KEY (adapter, evidence extraction) is a SYSTEM actor; a
         // person is USER. Without an actor the type stays USER, as before.
@@ -1977,22 +1995,42 @@ export class CommerceService {
    * FinancialTransaction.createdById. The manual refund flips the original
    * Payment row rather than writing a refund row, and Payment has no
    * refunded-by column, so Payment.recordedBy keeps the original recorder.
+   *
+   * R0-PL-07 review (PL07-ST-1): only a SUCCESSFUL payment can be refunded.
+   * An already REFUNDED payment, or a PENDING / FAILED one, answers 409 and
+   * changes nothing, so a second refund can no longer rewrite the notes and
+   * report success while recording no refunder. The SUCCESSFUL -> REFUNDED
+   * flip is conditional on the status, so two concurrent refunds of the same
+   * payment produce one refund and one 409.
    */
   async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null) {
     const payment = await this.prisma.client.payment.findFirst({
       where: { id: paymentId, businessId },
     });
     if (!payment) throw new NotFoundException('Payment not found');
+    const refusal = (status: string) =>
+      new ConflictException(
+        status === 'REFUNDED'
+          ? 'Payment is already refunded'
+          : `Only a successful payment can be refunded (this payment is ${status})`,
+      );
+    if (payment.status !== 'SUCCESSFUL') throw refusal(payment.status);
     // FIN2 — flip the row + reverse the original posting in one tx so the
     // refunded state and the offsetting ledger entries commit together.
     const updated = await this.prisma.client.$transaction(async (tx) => {
-      const next = await tx.payment.update({
-        where: { id: paymentId },
+      const flipped = await tx.payment.updateMany({
+        where: { id: paymentId, businessId, status: 'SUCCESSFUL' },
         data: {
           status: 'REFUNDED',
           notes: reason ? `${payment.notes ? payment.notes + ' | ' : ''}Refunded: ${reason}` : payment.notes,
         },
       });
+      if (flipped.count === 0) {
+        // Lost a race with another refund (or a status change) after the read above.
+        const current = await tx.payment.findUnique({ where: { id: paymentId }, select: { status: true } });
+        throw refusal(current?.status ?? 'missing');
+      }
+      const next = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
       await this.revenuePosting.onPaymentRefunded(paymentId, {
         tx: tx as unknown as Prisma.TransactionClient,
         createdById: actorId ?? null,

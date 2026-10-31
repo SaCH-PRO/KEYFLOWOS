@@ -144,13 +144,16 @@ export class CommerceAdapterService {
     amount: number;
     method: string;
     reference?: string;
+    /** The user the KEY command runs for (ConnectorCommand.userId). */
+    initiatedBy?: string;
   }) {
     // R0-PL-07: KEY records as its system actor, distinct from any human.
+    // Review PL07-ST-3: the human KEY acted for is kept as the initiator.
     return this.commerce.recordPayment(input.invoiceId, input.businessId, {
       amount: input.amount,
       method: input.method,
       reference: input.reference,
-    }, { actorId: KEY_SYSTEM_ACTOR_ID });
+    }, { actorId: KEY_SYSTEM_ACTOR_ID, initiatedBy: input.initiatedBy ?? null });
   }
 
   async createQuote(input: {
@@ -371,6 +374,8 @@ export class CommerceAdapterService {
           amount: command.parameters.amount as number,
           method: command.parameters.method as string,
           reference: command.parameters.reference as string,
+          // From the command envelope, never from the tool parameters.
+          initiatedBy: command.userId,
         });
         return connectorOk(command, start, payment);
       }

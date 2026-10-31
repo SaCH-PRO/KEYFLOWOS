@@ -132,7 +132,17 @@ export class PaymentEvidenceService {
     };
   }
 
-  async processEvidence(input: ProcessEvidenceInput): Promise<ProcessEvidenceResult> {
+  /**
+   * @param options.initiatedBy R0-PL-07 review (PL07-ST-3): the authenticated
+   *   person who submitted the evidence. The recorder stays KEY's system actor
+   *   (the figures are machine-extracted); this keeps the uploader on the
+   *   audit trail. A separate argument, never part of `input`, so a request
+   *   body spread into `input` can not name it.
+   */
+  async processEvidence(
+    input: ProcessEvidenceInput,
+    options: { initiatedBy?: string | null } = {},
+  ): Promise<ProcessEvidenceResult> {
     const { businessId, invoiceId, evidenceUrl, evidenceMimeType, filename, source, driveFileId } = input;
 
     // 1. Resolve file content for AI analysis
@@ -173,7 +183,7 @@ export class PaymentEvidenceService {
       notes: extractedPayment.notes,
       evidenceUrl,
       evidenceMimeType,
-    }, { actorId: KEY_SYSTEM_ACTOR_ID });
+    }, { actorId: KEY_SYSTEM_ACTOR_ID, initiatedBy: options.initiatedBy ?? null });
 
     // 5. Reconcile invoice status
     const reconciled = await this.invoiceWorkflow.reconcileFromPayments(invoiceId);

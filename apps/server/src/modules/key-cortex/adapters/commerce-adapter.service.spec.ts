@@ -70,12 +70,13 @@ describe('CommerceAdapterService', () => {
     (commerce.recordPayment as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'pay1' });
     const result = await service.execute(mkCmd('process_payment', { invoiceId: 'inv1', amount: 100, method: 'cash' }));
     expect(result.success).toBe(true);
-    // R0-PL-07: the same input as before, plus the system actor as the recorder.
+    // R0-PL-07: the same input as before, plus the system actor as the
+    // recorder; review PL07-ST-3: and the command's user as the initiator.
     expect(commerce.recordPayment).toHaveBeenCalledWith(
       'inv1',
       'biz_123',
       { amount: 100, method: 'cash', reference: undefined },
-      { actorId: KEY_SYSTEM_ACTOR_ID },
+      { actorId: KEY_SYSTEM_ACTOR_ID, initiatedBy: 'user_456' },
     );
   });
 
@@ -89,9 +90,22 @@ describe('CommerceAdapterService', () => {
     const [invoiceId, businessId, input, options] = (commerce.recordPayment as ReturnType<typeof vi.fn>).mock.calls[0];
     expect([invoiceId, businessId]).toEqual(['inv2', 'biz_123']);
     expect(input).toEqual({ amount: 12.5, method: 'bank_transfer', reference: 'R-1' });
-    expect(options).toEqual({ actorId: 'key_ai' });
+    expect(options).toEqual({ actorId: 'key_ai', initiatedBy: 'user_456' });
     expect(options.actorId).toBe(KEY_SYSTEM_ACTOR_ID);
     expect(options.actorId).not.toBe('user_456'); // command.userId: the human KEY acts for
+  });
+
+  it('R0-PL-07 review (PL07-ST-3): process_payment keeps the human KEY acted for as initiatedBy, taken from the command envelope and never from tool parameters', async () => {
+    (commerce.recordPayment as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'pay3' });
+    const result = await service.execute(mkCmd('process_payment', {
+      invoiceId: 'inv3', amount: 7, method: 'cash', initiatedBy: 'user_spoof',
+    }));
+    expect(result.success).toBe(true);
+    const [, , input, options] = (commerce.recordPayment as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(input).toEqual({ amount: 7, method: 'cash', reference: undefined });
+    expect(options.initiatedBy).toBe('user_456');
+    expect(options.initiatedBy).not.toBe('user_spoof');
+    expect(options.actorId).toBe(KEY_SYSTEM_ACTOR_ID);
   });
 
   it('create_order creates an invoice as order record', async () => {
