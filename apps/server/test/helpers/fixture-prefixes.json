@@ -44,6 +44,11 @@
       "legacy": true
     },
     {
+      "prefix": "k09a_",
+      "owner": "apps/server/test/identity-business-config.integration.test.ts",
+      "packet": "R0-09-ID-HARDEN"
+    },
+    {
       "prefix": "k12a_",
       "owner": "apps/server/test/contact-scoped-tenancy.integration.test.ts",
       "packet": "R0-12-CT-TENANT-ROUTES"
