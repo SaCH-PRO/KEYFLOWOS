@@ -268,6 +268,27 @@ export class CommerceService {
     }
   }
 
+  /**
+   * Resolve a contact id inside the caller's tenant before it is bound to an
+   * invoice. The invoice is returned with `include: { contact: true }`, so a
+   * foreign id would both bind another tenant's contact and disclose its row.
+   * A foreign, soft-deleted or unknown id answers the same 404, and the caller
+   * writes nothing. R0-D3 review (ST-D3-1) for update; R0-27 for create.
+   */
+  private async assertContactInBusiness(contactId: unknown, businessId: string): Promise<string> {
+    if (typeof contactId !== 'string' || contactId.length === 0) {
+      throw new BadRequestException('contactId must be a non-empty string');
+    }
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId },
+      select: { id: true },
+    });
+    if (!contact) {
+      throw new NotFoundException('Contact not found');
+    }
+    return contactId;
+  }
+
   async createInvoice(input: {
     businessId: string;
     contactId?: string;
@@ -320,8 +341,12 @@ export class CommerceService {
         })),
       },
     };
-    if (input.contactId) {
-      data.contactId = input.contactId;
+    // R0-27 (M19 / CF-37): the contact was bound with no tenant check, so bizA's
+    // contactId under bizB's path created bizB's invoice linked to (and
+    // echoing) bizA's contact. Every caller passes through here: the HTTP
+    // route, invoice-from-time, KEY and the intake flows.
+    if (input.contactId !== undefined) {
+      data.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
     const invoice = await this.prisma.client.invoice.create({
       data,
@@ -2670,17 +2695,7 @@ export class CommerceService {
       // contact (email, phone, notes, every field). Resolve it inside the
       // caller's tenant first; a foreign, deleted or unknown id answers like
       // a missing one, and nothing is written.
-      if (typeof input.contactId !== 'string' || input.contactId.length === 0) {
-        throw new BadRequestException('contactId must be a non-empty string');
-      }
-      const contact = await this.prisma.client.contact.findFirst({
-        where: { id: input.contactId, businessId: input.businessId },
-        select: { id: true },
-      });
-      if (!contact) {
-        throw new NotFoundException('Contact not found');
-      }
-      updateData.contactId = input.contactId;
+      updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
     if (input.currency !== undefined) updateData.currency = input.currency;
     if (input.dueDate !== undefined) {

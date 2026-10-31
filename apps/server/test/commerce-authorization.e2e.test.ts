@@ -41,7 +41,8 @@ import { PublicRateLimitGuard, PUBLIC_RATE_LIMIT_KEY } from '../src/core/guards/
 import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
 import { TeamAuditInterceptor } from '../src/core/interceptors/team-audit.interceptor';
 import { GlobalHttpExceptionFilter } from '../src/core/filters/http-exception.filter';
-import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
+import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 
 // R0-27 (registry hygiene, R0-00 pendingRenames): this suite shared 'rva_'
 // with revenue-authorization.integration.test.ts, the registered owner. It runs
@@ -745,15 +746,25 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
     });
     const messages = (body: Record<string, unknown>) => [body.message].flat().map(String);
 
-    it('CC-META: createInvoice keeps its guards and write scope, and its body is a DTO class (CreateInvoiceDto), not an inline type', () => {
+    it('CC-META: createInvoice keeps its guards and write scope, and its body is bound to a ValidationPipe (whitelist, transform) whose expectedType is CreateInvoiceDto', () => {
       const handler = CommerceController.prototype.createInvoice;
       expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('businesses/:businessId/invoices');
       expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.POST);
       expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual({ module: 'revenue', minLevel: 'write' });
       const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];
       expect(guards).toEqual([AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard]);
-      const params: Array<{ name?: string }> = Reflect.getMetadata('design:paramtypes', CommerceController.prototype, 'createInvoice') ?? [];
-      expect(params[1]?.name, 'the @Body() metatype the ValidationPipe validates and whitelists').toBe('CreateInvoiceDto');
+      // Not `design:paramtypes`: vitest's esbuild transform never emits it, so
+      // the global pipe's metatype cannot be observed (or relied on) here. The
+      // body pipe names its type itself.
+      const args: Record<string, { index: number; pipes?: unknown[] }> =
+        Reflect.getMetadata(ROUTE_ARGS_METADATA, CommerceController, 'createInvoice') ?? {};
+      const body = Object.entries(args).find(([key]) => key.startsWith(`${RouteParamtypes.BODY}:`))?.[1];
+      expect(body?.index, 'the @Body() parameter').toBe(1);
+      const pipe = body?.pipes?.[0] as any;
+      expect(pipe).toBeInstanceOf(ValidationPipe);
+      expect(pipe.expectedType?.name).toBe('CreateInvoiceDto');
+      expect(pipe.validatorOptions).toMatchObject({ whitelist: true });
+      expect(pipe.isTransformEnabled).toBe(true);
     });
 
     const invalid: Array<[string, (b: ReturnType<typeof valid>) => unknown, RegExp]> = [

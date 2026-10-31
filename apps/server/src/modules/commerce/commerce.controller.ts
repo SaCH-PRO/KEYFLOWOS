@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
@@ -14,6 +14,7 @@ import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { appUrl } from '../../core/config/runtime-urls';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { CreateProductDto } from './dto/create-product.dto';
+import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { sanitizeString } from '../../core/utils/sanitize';
@@ -29,6 +30,16 @@ import { buildInvoiceEmailHtml } from './invoice-email.template';
 import { sumSuccessfulPayments, type InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+
+/**
+ * R0-27: the global ValidationPipe's options, with the metatype bound
+ * explicitly. The global pipe finds the DTO through tsc-emitted
+ * `design:paramtypes`, which esbuild (vitest, tsx) does not emit, so there the
+ * body went through unvalidated. `expectedType` makes the create contract the
+ * same wherever the controller runs; on the built app the body is validated
+ * twice with identical options, which is idempotent.
+ */
+const CREATE_INVOICE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: CreateInvoiceDto });
 
 @Controller('commerce')
 export class CommerceController {
@@ -523,18 +534,23 @@ export class CommerceController {
   @Post('businesses/:businessId/invoices')
   createInvoice(
     @Param('businessId') businessId: string,
-    @Body() body: {
-      contactId?: string;
-      items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
-      currency?: string;
-      dueDate?: string;
-      taxRate?: number;
-      discountType?: 'PERCENT' | 'FIXED';
-      discountValue?: number;
-      notes?: string;
-    },
+    @Body(CREATE_INVOICE_BODY_PIPE) body: CreateInvoiceDto,
   ) {
-    return this.commerce.createInvoice({ ...body, businessId });
+    // R0-27: the body is a validated DTO (it was an inline type the
+    // ValidationPipe could not see), and only its declared fields are
+    // forwarded. The service computes subtotal, tax, discount and total; the
+    // tenant is the guarded path param, never a body field.
+    return this.commerce.createInvoice({
+      businessId,
+      contactId: body.contactId,
+      items: body.items.map(({ description, quantity, unitPrice, productId }) => ({ description, quantity, unitPrice, productId })),
+      currency: body.currency,
+      dueDate: body.dueDate,
+      taxRate: body.taxRate,
+      discountType: body.discountType,
+      discountValue: body.discountValue,
+      notes: body.notes,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
