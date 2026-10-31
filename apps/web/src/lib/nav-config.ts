@@ -134,11 +134,19 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Overview", href: "/app/financial-flow", icon: Banknote },
       // Label under decision D-09 (NAV_ROUTE_LABELS["/app/commerce"]). Kept as
-      // a literal on purpose: disclosure-mode.ts allowlists Operate items by
-      // exact label and disclosure-mode.spec.ts reads these literals from
-      // source, so a rename here must also rename it there.
+      // a literal on purpose: nav-destinations.spec.ts and disclosure-mode.spec.ts
+      // read item labels and hrefs from this source as string literals, and a
+      // constant here would drop /app/commerce out of those gates. disclosure-mode.ts
+      // reads the constant, so a D-09 ruling is the constant plus this line;
       // nav-labels-agree.spec.ts fails if this drifts from the constant.
       { label: "Sales", href: "/app/commerce", icon: Receipt },
+      // Doors to the two documents an owner sends (CF-20). Invoices has its own
+      // hub; quotes have no page of their own and live in the pipeline tab,
+      // which opens its quotes view for ?view=quotes (finance-pipeline.tsx).
+      // Both are allowlisted in every disclosure mode, so the default (startup)
+      // nav shows them.
+      { label: "Invoices", href: "/app/commerce/invoices", icon: Receipt },
+      { label: "Quotes", href: "/app/commerce?tab=pipeline&view=quotes", icon: FileText, matchTab: "pipeline" },
       // The gateway console — transactions, links, refunds across three
       // providers — sits under /app/commerce, so the drawer reached its
       // subtree but never named it.

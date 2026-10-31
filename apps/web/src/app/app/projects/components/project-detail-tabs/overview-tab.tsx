@@ -299,7 +299,7 @@ export function OverviewTab({ project, onStageChange: _onStageChange, milestones
               label="Invoice"
               value={project.invoiceId ? `Invoice ${project.invoiceId.slice(0, 8)}...` : "No invoice linked"}
               linked={!!project.invoiceId}
-              href={project.invoiceId ? `/app/commerce?tab=invoices&id=${project.invoiceId}` : undefined}
+              href={project.invoiceId ? `/app/commerce/invoices/${encodeURIComponent(project.invoiceId)}` : undefined}
             />
             <LinkedRecord
               icon={Calendar}

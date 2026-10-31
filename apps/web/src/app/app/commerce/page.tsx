@@ -21,6 +21,7 @@ import {
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 import { KeyflowUnifiedShell } from "@/components/guide/keyflow-unified-shell";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
@@ -313,12 +314,14 @@ export default function CommercePage() {
   return (
     <KeyflowUnifiedShell
       module="revenue"
-      pageTitle="Revenue"
+      pageTitle={NAV_ROUTE_LABELS["/app/commerce"]}
       availableActions={["Create invoice", "Send quote", "Record payment", "Set up recurring billing"]}
     >
+    {/* Header label under decision D-09 — the nav and the breadcrumb read the
+        same constant, so the screen is called what the rail called it. */}
     <WorkspaceShell
       icon={TrendingUp}
-      title="Revenue"
+      title={NAV_ROUTE_LABELS["/app/commerce"]}
       subtitle="Quotes, invoices, collections, and cashflow actions."
       tabs={tabsForShell}
       activeTab={activeTab}

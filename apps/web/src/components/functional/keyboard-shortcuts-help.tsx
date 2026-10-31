@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sparkles } from "lucide-react";
+import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 
 const SHORTCUT_GROUPS = [
   {
@@ -13,7 +14,8 @@ const SHORTCUT_GROUPS = [
       { keys: ["⌘", "K"], description: "Command palette" },
       { keys: ["⇧", "K"], description: "Module launcher" },
       { keys: ["⌘", "J"], description: "Talk to KEY" },
-      { keys: ["⌘", "H"], description: "Go to Cockpit" },
+      // Label under decision D-09 — see NAV_ROUTE_LABELS in semantic-routes.ts.
+      { keys: ["⌘", "H"], description: `Go to ${NAV_ROUTE_LABELS["/app/command-center"]}` },
       { keys: ["Esc"], description: "Close overlays / go back" },
     ],
   },

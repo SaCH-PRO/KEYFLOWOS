@@ -484,7 +484,7 @@ export default function BookingsPage() {
             : `Invoice ${res.data.invoiceNumber} created from booking.`,
           type: "success",
         });
-        router.push(`/app/commerce?tab=invoices&invoiceId=${encodeURIComponent(res.data.invoiceId)}`);
+        router.push(`/app/commerce/invoices/${encodeURIComponent(res.data.invoiceId)}`);
         return;
       }
       setBanner({ text: res.error ?? "Failed to create invoice from booking.", type: "error" });

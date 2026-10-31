@@ -22,7 +22,9 @@ export function NewEntityMenu({ onClose }: { onClose: () => void }) {
   const [focusIdx, setFocusIdx] = useState(-1);
   const items = useMemo(() => {
     const base = [
-      { label: "Contact", icon: Users, href: "/app/crm/contacts", shortcut: "⌘⇧C" },
+      // ?action=new opens the contacts page's quick-add form; the bare list
+      // route made "+ Contact" a link to a list.
+      { label: "Contact", icon: Users, href: "/app/crm/contacts?action=new", shortcut: "⌘⇧C" },
       { label: "Invoice", icon: Receipt, href: "/app/commerce/invoices/new", shortcut: "⌘⇧I" },
       { label: "Quote", icon: FileText, href: "/app/commerce?tab=quotes" },
       { label: "Event", icon: Calendar, href: "/app/events/new", shortcut: "⌘⇧E" },

@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 
 interface ShortcutConfig {
   key: string;
@@ -65,7 +66,7 @@ const SHORTCUTS: ShortcutConfig[] = [
     modifier: "meta",
     global: true,
     handler: () => window.dispatchEvent(new CustomEvent("kf:go-home")),
-    description: "Go to Cockpit",
+    description: `Go to ${NAV_ROUTE_LABELS["/app/command-center"]}`, // D-09 label, see semantic-routes.ts
     category: "Navigation",
   },
   {
@@ -185,7 +186,8 @@ export function useRouteKeyboardShortcuts() {
   const pathname = usePathname();
 
   useEffect(() => {
-    const goHome = () => router.push("/app/keyflow-command");
+    // Straight to the cockpit: /app/keyflow-command is a redirect stub to it.
+    const goHome = () => router.push("/app/command-center");
     const handleEscape = () => {
       // If on a detail page, go back to list
       const segments = pathname.split("/").filter(Boolean);
