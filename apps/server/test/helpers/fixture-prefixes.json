@@ -54,8 +54,18 @@
       "legacy": true
     },
     {
+      "prefix": "pmp_",
+      "owner": "apps/server/test/payments-mark-paid.integration.test.ts",
+      "legacy": true
+    },
+    {
       "prefix": "pya_",
       "owner": "apps/server/test/payments-actor.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "pym_",
+      "owner": "apps/server/test/payments-manual.integration.test.ts",
       "legacy": true
     },
     {
