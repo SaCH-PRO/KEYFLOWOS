@@ -481,13 +481,44 @@ export class CrmService {
     custom?: any;
     customFieldValues?: Record<string, unknown>;
     /**
-     * When provided, bounds the holder named in a duplicate-identity 409 to
-     * the actor's M7 CRM visibility. Server callers (cron, internal jobs) can
-     * omit this and receive the tenant's holder unconditionally.
+     * The member creating the contact. When provided, createContact enforces
+     * that member's M7 CRM permissions (edit scope, assigning another owner)
+     * and bounds the holder named in a duplicate-identity 409 to the member's
+     * visibility. Only POST /crm/businesses/:businessId/contacts passes it
+     * today. Callers that omit it (cron, internal jobs, and the import routes
+     * through findOrCreateContact) get none of these checks and receive the
+     * tenant's holder unconditionally.
      */
     actorUserId?: string;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      const privileged = access.isOwner || access.isSuperAdmin;
+      // The same M7 edit scope updateContact enforces: a member whose crm_edit
+      // is 'none' passes the module guard on crm:write but may not write
+      // contacts, so creating one is refused before anything is written.
+      if (!privileged && access.editScope === 'none') {
+        throw new ForbiddenException('You do not have permission to create contacts');
+      }
+      // Naming someone other than yourself as the owner assigns the contact
+      // to them. That needs the permission updateContact and reassignContacts
+      // require for an ownership change, and, as in reassignContacts, the
+      // owner must be a member of this business. Both are checked before any
+      // write.
+      if (input.ownerId != null && input.ownerId !== input.actorUserId) {
+        if (!privileged && !access.reassign) {
+          throw new ForbiddenException('You do not have permission to assign contacts to another member');
+        }
+        const ownerMembership = await this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId: input.ownerId, businessId: input.businessId } },
+          select: { id: true },
+        });
+        if (!ownerMembership) {
+          throw new BadRequestException('ownerId must belong to a member of this business');
+        }
+      }
+    }
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
       return trimmed ? trimmed : null;
