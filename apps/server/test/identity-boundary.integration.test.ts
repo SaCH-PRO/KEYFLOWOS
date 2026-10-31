@@ -37,10 +37,12 @@
  * the role from the User row — the exact production path of a deployment with
  * the JWT secret configured.
  *
- * SCOPE OF THE AB-P02 CLAIM: it holds on that Supabase-token branch ONLY. The
- * child also gets a test-only ADMIN_JWT_SECRET so the second branch of
- * AuthMiddleware.use — the admin-token fallback — is exercised too, and there
- * AB-P02 does NOT hold (ST-2 below).
+ * SCOPE OF THE AB-P02 CLAIM: it holds on both branches of AuthMiddleware.use.
+ * The child also gets a test-only ADMIN_JWT_SECRET so the second branch — the
+ * admin-token fallback — is exercised too. Until R0-ID-F2-ADMIN-TOKEN-LOCAL-USER
+ * AB-P02 did NOT hold there (ST-2 below); that branch now runs the same
+ * resolveLocalUser checks, reads the role from the User row, and refuses a
+ * subject with no User row.
  *
  * OPEN DEFECTS (review of this packet; NOT fixed here — every fix is in source
  * outside this proof packet's write set, so each is reproduced by an
@@ -67,8 +69,10 @@
  *   CR-1  the structure routes copy a JobRole's permissions and tier onto any
  *         membership in the business, the caller's own included
  *         (structure.service.ts createAssignment; V1-21).
- *   ST-2  the admin-token branch attaches verifyAdminToken's result directly:
- *         no revocation marker, no deletedAt/bannedAt, role from the token
+ *   ST-2  FIXED by R0-ID-F2-ADMIN-TOKEN-LOCAL-USER (its cases assert the
+ *         required behaviour; see "ST-2 (fixed …)" below). The admin-token
+ *         branch attached verifyAdminToken's result directly: no revocation
+ *         marker, no deletedAt/bannedAt, role from the token
  *         (auth.middleware.ts).
  *   ST-3  PATCH /identity/businesses/:id has no ModuleScopeGuard: a
  *         settings:none member rewrites the tenant profile
@@ -183,6 +187,7 @@ const ID = {
   staffD: `${P}staffD`,           // STAFF of bizD, role-default scopes (settings: none) (ST-3)
   relogin: `${P}relogin`,         // STAFF of bizD; logs out, then the login marker clear (ST-4)
   adminTok: `${P}adminTok`,       // User row role SUPER_ADMIN at token issue, no membership (ST-2)
+  adminNoRow: `${P}adminNoRow`,   // subject of a valid admin token, no User row at all (ST-2 fix); not seeded
   // tenants
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
@@ -225,7 +230,7 @@ const revocationKey = (userId: string) => `auth:revoked:user:${userId}`;
 const ALL_USERS = [
   ID.owner, ID.admin, ID.staff, ID.staffNoTeam, ID.ownerB, ID.deleted, ID.banned, ID.revoked, ID.noRow,
   ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin, ID.adminTok,
-  ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ,
+  ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ, ID.adminNoRow,
 ];
 
 const IDLE_MS = 90_000;      // silence from the child counts; slow-but-talking does not
@@ -585,6 +590,8 @@ describe('harness — the real built server is serving, with the ab_ fixtures in
     // The ST-F4 accomplice has a User row and no membership until adminW invites it.
     expect(await db.membership.count({ where: { userId: ID.accomplice } })).toBe(0);
     expect(await db.membership.count({ where: { userId: ID.adminTok } })).toBe(0);
+    // The ST-2 no-row admin-token subject is never seeded.
+    expect(await db.user.findUnique({ where: { id: ID.adminNoRow } })).toBeNull();
   });
 
   it('CR-1: no provider credential can reach the child through its own dotenv.config — every one is pinned, and dotenv never overrides a present key', () => {
@@ -676,8 +683,8 @@ describe('AB-P02 — an invalid identity is refused with 401 and no data', () =>
 // ---------------------------------------------------------------------------
 // AB-P02 / AB-P04 — revoked identity (fresh request)
 // ---------------------------------------------------------------------------
-// Supabase-token branch only. The admin-token branch does NOT apply any of
-// these checks — see "OPEN DEFECT ST-2" at the end of this file.
+// Supabase-token branch. The admin-token branch applies the same checks since
+// R0-ID-F2-ADMIN-TOKEN-LOCAL-USER — see "ST-2 (fixed …)" at the end of this file.
 describe('AB-P02/AB-P04 (Supabase-token branch) — a deleted, banned or revoked identity is refused on the next request', () => {
   async function expectServed(token: string, label: string) {
     const me = await call('get', routes.me, token);
@@ -1244,6 +1251,110 @@ describe('ST-1 review repairs — PATCH .../permissions obeys the role route’s
 });
 
 // ---------------------------------------------------------------------------
+// ST-2 (fixed by R0-ID-F2-ADMIN-TOKEN-LOCAL-USER) — the admin-token branch.
+//
+// The three "OPEN DEFECT ST-2 reproduced" cases that pinned the defect were
+// rewritten to the behaviour their it.todo required: the admin-token fallback
+// of AuthMiddleware.use runs the same resolveLocalUser path as a Supabase
+// token (revocation marker, User.deletedAt, User.bannedAt) and takes the role
+// from the User row, never from the token. Unlike a Supabase token, an admin
+// token whose subject has no User row is refused: there is no bootstrap window
+// for an admin identity (AdminAuthService only issues one for an existing row).
+// ---------------------------------------------------------------------------
+describe('ST-2 (fixed) — the admin-token branch of AuthMiddleware applies the same AB-P02 checks as a Supabase token', () => {
+  // Issued by the production issuer while the User row is SUPER_ADMIN.
+  let adminToken = '';
+
+  /** Each case starts from an active SUPER_ADMIN row, so no case depends on the previous one restoring it. */
+  async function resetToActiveSuperAdmin() {
+    await db.user.update({ where: { id: ID.adminTok }, data: { role: 'SUPER_ADMIN', bannedAt: null, deletedAt: null } });
+  }
+
+  async function expectAdminServed(label: string) {
+    const biz = await call('get', routes.biz(ID.bizB), adminToken);
+    expect(biz.status, `${label}: ${JSON.stringify(biz.body)}`).toBe(200);
+    expect(biz.body.name).toBe(BIZ_B_NAME);
+  }
+
+  /** Refused on every identity route, on the SUPER_ADMIN-only foreign tenant, and on the admin panel's own identity read. */
+  async function expectAdminRefused(token: string, label: string) {
+    await expectIdentityRefused(token, label);
+    for (const route of [routes.biz(ID.bizB), routes.team(ID.bizB), '/api/admin/auth/me']) {
+      const res = await call('get', route, token);
+      expect(res.status, `${label}: GET ${route} -> ${res.status} ${JSON.stringify(res.body)}`).toBe(401);
+      expectNoBusinessData(res);
+    }
+  }
+
+  it('positive control: an admin token for an active SUPER_ADMIN is served — the admin panel identity read and the SUPER_ADMIN cross-tenant read', async () => {
+    adminToken = mintAdminToken(ID.adminTok, 'SUPER_ADMIN');
+    const me = await call('get', '/api/admin/auth/me', adminToken);
+    expect(me.status, JSON.stringify(me.body)).toBe(200);
+    expect(me.body).toEqual({ id: ID.adminTok, email: email(ID.adminTok), role: 'SUPER_ADMIN' });
+    await expectAdminServed('positive control while SUPER_ADMIN');
+  });
+
+  it('ST-2 — the role comes from the User row: after the row is demoted, the admin token can no longer cross into a foreign tenant: 403', async () => {
+    expect(adminToken, 'the positive control mints the token').not.toBe('');
+    await db.user.update({ where: { id: ID.adminTok }, data: { role: 'USER' } });
+    // Supabase-token branch: role read from the row — refused.
+    const viaSupabaseToken = await call('get', routes.biz(ID.bizB), T[ID.adminTok]);
+    expect(viaSupabaseToken.status).toBe(403);
+    expectNoBusinessData(viaSupabaseToken);
+    // Admin-token branch: the token still says SUPER_ADMIN; the row decides — refused, nothing of B returned.
+    const viaAdminToken = await call('get', routes.biz(ID.bizB), adminToken);
+    expect(viaAdminToken.status, JSON.stringify(viaAdminToken.body)).toBe(403);
+    expectNoBusinessData(viaAdminToken);
+    // The identity is still attached, with the row's role.
+    const adminMe = await call('get', '/api/admin/auth/me', adminToken);
+    expect(adminMe.status, JSON.stringify(adminMe.body)).toBe(200);
+    expect(adminMe.body.role).toBe('USER');
+
+    // The row is the cause: restoring it restores access on the next request.
+    await db.user.update({ where: { id: ID.adminTok }, data: { role: 'SUPER_ADMIN' } });
+    await expectAdminServed('row restored to SUPER_ADMIN');
+  });
+
+  it('ST-2 — User.bannedAt and User.deletedAt are checked: each one alone refuses the admin token with 401, and clearing it restores access', async () => {
+    expect(adminToken, 'the positive control mints the token').not.toBe('');
+    await resetToActiveSuperAdmin();
+    await expectAdminServed('before ban');
+
+    await db.user.update({ where: { id: ID.adminTok }, data: { bannedAt: new Date() } });
+    await expectAdminRefused(adminToken, 'bannedAt, admin token');
+    // Supabase-token branch: refused the same way.
+    await expectIdentityRefused(T[ID.adminTok], 'bannedAt, Supabase token');
+
+    await db.user.update({ where: { id: ID.adminTok }, data: { bannedAt: null, deletedAt: new Date() } });
+    await expectAdminRefused(adminToken, 'deletedAt, admin token');
+    await expectIdentityRefused(T[ID.adminTok], 'deletedAt, Supabase token');
+
+    await db.user.update({ where: { id: ID.adminTok }, data: { deletedAt: null } });
+    await expectAdminServed('ban and delete cleared');
+  });
+
+  it('ST-2 — the logout revocation marker is checked: after POST /identity/logout the admin token is refused with 401', async () => {
+    expect(adminToken, 'the positive control mints the token').not.toBe('');
+    await resetToActiveSuperAdmin();
+    await expectAdminServed('before logout');
+    const out = await call('post', '/identity/logout', adminToken);
+    expect(out.status, JSON.stringify(out.body)).toBe(201);
+    expect(await redis!.get(revocationKey(ID.adminTok))).toBe('1');
+    await expectAdminRefused(adminToken, 'after logout, admin token');
+    // The same user's Supabase token is refused by that marker.
+    const me = await call('get', routes.me, T[ID.adminTok]);
+    expect(me.status).toBe(401);
+  });
+
+  it('ST-2 — an admin token whose subject has no User row is refused with 401 (no bootstrap window for an admin identity), and no row is created', async () => {
+    const ghost = mintAdminToken(ID.adminNoRow, 'SUPER_ADMIN');
+    await expectAdminRefused(ghost, 'admin token, no User row');
+    expect(await db.user.findUnique({ where: { id: ID.adminNoRow } })).toBeNull();
+    expect(await db.membership.count({ where: { userId: ID.adminNoRow } })).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // OPEN DEFECTS — found in review, reproduced against the real server.
 //
 // Each "OPEN DEFECT … reproduced" case pins TODAY's observed behaviour so the
@@ -1251,59 +1362,8 @@ describe('ST-1 review repairs — PATCH .../permissions obeys the role route’s
 // certification of that behaviour. It turns red when the fix lands, and the fix
 // packet replaces it with the it.todo next to it. Every fix is in source outside
 // this proof packet's write set (identity.controller.ts, identity.service.ts,
-// auth.middleware.ts, supabase-admin.service.ts).
+// auth.middleware.ts for ST-4's issue-time cutoff, supabase-admin.service.ts).
 // ---------------------------------------------------------------------------
-describe('OPEN DEFECT ST-2 — the admin-token branch of AuthMiddleware skips every AB-P02 check', () => {
-  // Issued by the production issuer while the User row is SUPER_ADMIN.
-  let adminToken = '';
-
-  it('OPEN DEFECT ST-2 reproduced — the role comes from the token: after the User row is demoted, the admin token still crosses into a foreign tenant', async () => {
-    adminToken = mintAdminToken(ID.adminTok, 'SUPER_ADMIN');
-    const legit = await call('get', routes.biz(ID.bizB), adminToken);
-    expect(legit.status, `positive control while SUPER_ADMIN: ${JSON.stringify(legit.body)}`).toBe(200);
-
-    await db.user.update({ where: { id: ID.adminTok }, data: { role: 'USER' } });
-    // Supabase-token branch: role read from the row — refused.
-    const viaSupabaseToken = await call('get', routes.biz(ID.bizB), T[ID.adminTok]);
-    expect(viaSupabaseToken.status).toBe(403);
-    expectNoBusinessData(viaSupabaseToken);
-    // Admin-token branch: role read from the token — admitted, B's row returned.
-    const viaAdminToken = await call('get', routes.biz(ID.bizB), adminToken);
-    expect(viaAdminToken.status, JSON.stringify(viaAdminToken.body)).toBe(200);
-    expect(viaAdminToken.body.name).toBe(BIZ_B_NAME);
-  });
-
-  it('OPEN DEFECT ST-2 reproduced — User.bannedAt and User.deletedAt are not checked: the admin token is still served', async () => {
-    expect(adminToken, 'the previous case mints the token').not.toBe('');
-    await db.user.update({ where: { id: ID.adminTok }, data: { bannedAt: new Date(), deletedAt: new Date() } });
-    // Supabase-token branch: refused (AB-P02 holds there).
-    await expectIdentityRefused(T[ID.adminTok], 'banned+deleted, Supabase token');
-    // Admin-token branch: served.
-    const biz = await call('get', routes.biz(ID.bizB), adminToken);
-    expect(biz.status, JSON.stringify(biz.body)).toBe(200);
-    expect(biz.body.name).toBe(BIZ_B_NAME);
-    const team = await call('get', routes.team(ID.bizB), adminToken);
-    expect(team.status, JSON.stringify(team.body)).toBe(200);
-  });
-
-  it('OPEN DEFECT ST-2 reproduced — the logout revocation marker is not checked: after POST /identity/logout the admin token is still served', async () => {
-    expect(adminToken, 'the first case mints the token').not.toBe('');
-    const out = await call('post', '/identity/logout', adminToken);
-    expect(out.status, JSON.stringify(out.body)).toBe(201);
-    expect(await redis!.get(revocationKey(ID.adminTok))).toBe('1');
-    const biz = await call('get', routes.biz(ID.bizB), adminToken);
-    expect(biz.status, JSON.stringify(biz.body)).toBe(200);
-    // The same user's Supabase token is refused by that marker.
-    const me = await call('get', routes.me, T[ID.adminTok]);
-    expect(me.status).toBe(401);
-  });
-
-  it.todo(
-    'REQUIRED (fix packet; auth.middleware.ts, outside this write set): an admin token passes the same resolveLocalUser checks as a ' +
-      'Supabase token — revocation marker, deletedAt, bannedAt — and its role is read from the User row; the three cases above answer 401 / 403',
-  );
-});
-
 describe('OPEN DEFECT ST-3 — PATCH /identity/businesses/:id has no module scope', () => {
   it('OPEN DEFECT ST-3 reproduced — a STAFF member (settings:none) is refused a settings read but rewrites the tenant profile', async () => {
     const t = T[ID.staffD];
