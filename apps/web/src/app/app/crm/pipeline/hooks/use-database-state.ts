@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import type { LocalContact } from "@/lib/contacts-db";
-import { cacheContacts, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
+import type { ContactsCacheOwner, LocalContact } from "@/lib/contacts-db";
+import { cacheContacts, clearCachedContacts, contactsCacheKey, getCachedContacts, getLastSyncTime, setLastSyncTime } from "@/lib/contacts-db";
+import { classifyContactsLoadError, CONTACTS_DENIED_MESSAGE, type ContactsLoadFailure } from "./use-contacts-data";
 import { exportContacts, type ExportFormat } from "@/lib/contacts-export";
 import { bulkUpdateContacts, bulkDeleteContacts, bulkReassignContacts, addContactsToList, fetchContacts, fetchTeamMembers, fetchSequences, enrollContactsInSequence, type TeamMemberSummary, type CrmSequence } from "@/lib/client";
 import { getCachedUser } from "@/lib/workspace";
@@ -209,6 +210,9 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
+const NO_CONTACTS: LocalContact[] = [];
+const CONTACTS_TABLE_LOAD_FAILED_MESSAGE = "Failed to load contacts. Please try again.";
+
 interface UseDatabaseStateOptions {
   businessId: string;
   contacts: LocalContact[];
@@ -240,8 +244,11 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const [pageSize, setPageSize] = useState(25);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [cachedContacts, setCachedLocal] = useState<LocalContact[]>([]);
-  const [usingCache, setUsingCache] = useState(false);
+  // Cached rows remember the owner they were read for, so a user or business
+  // switch can never surface the previous owner's rows while the new read runs.
+  const [cachedLocal, setCachedLocal] = useState<{ cacheKey: string | null; rows: LocalContact[] }>({ cacheKey: null, rows: NO_CONTACTS });
+  // How the table's own read last failed, or null after a good read.
+  const [serverFailure, setServerFailure] = useState<ContactsLoadFailure | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [allPagesSelected, setAllPagesSelected] = useState(false);
@@ -261,6 +268,9 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const [teamMembers, setTeamMembers] = useState<TeamMemberSummary[]>([]);
   const currentUserId = getCachedUser()?.id ?? null;
   const ownedByMe = activeViewId === "view_my_book" && !!currentUserId;
+  // The device cache is partitioned by signed-in user AND business (ST-2).
+  const cacheOwner = useMemo<ContactsCacheOwner>(() => ({ userId: currentUserId, businessId }), [currentUserId, businessId]);
+  const cacheKey = contactsCacheKey(cacheOwner);
 
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
@@ -271,16 +281,24 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
 
-  const cachedContactsRef = useRef(cachedContacts);
-  cachedContactsRef.current = cachedContacts;
-
   const [serverContacts, setServerContacts] = useState<LocalContact[]>([]);
   const [serverLoading, setServerLoading] = useState(false);
   const [serverHasMore, setServerHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const serverAbortRef = useRef<AbortController | null>(null);
 
-  const activeContacts = serverContacts.length > 0 ? serverContacts : contacts.length > 0 ? contacts : cachedContacts;
+  // CONTACTS-v1 section 5: a refused read is a denial, never data. It shows no
+  // rows at all, cached ones included. The cache is an offline fallback only:
+  // it is shown after a read that FAILED (network, 5xx), never while a read is
+  // pending and never after a refusal.
+  const readDenied = serverFailure === "denied";
+  const cachedContacts = cachedLocal.cacheKey !== null && cachedLocal.cacheKey === cacheKey ? cachedLocal.rows : NO_CONTACTS;
+  const cacheFallback = serverFailure !== null && !readDenied ? cachedContacts : NO_CONTACTS;
+  const activeContacts = readDenied
+    ? NO_CONTACTS
+    : serverContacts.length > 0 ? serverContacts : contacts.length > 0 ? contacts : cacheFallback;
+  const usingCache = activeContacts === cacheFallback && cacheFallback.length > 0;
+  const loadError = readDenied ? CONTACTS_DENIED_MESSAGE : serverFailure ? CONTACTS_TABLE_LOAD_FAILED_MESSAGE : null;
 
   const mapSortFieldToApi = useCallback((field: SortField): string | undefined => {
     switch (field) {
@@ -307,7 +325,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     setServerLoading(true);
     try {
       const apiSortBy = mapSortFieldToApi(sortField);
-      const { data } = await fetchContacts(businessId, {
+      const { data, error } = await fetchContacts(businessId, {
         take: pageSize,
         cursor: append && nextCursor ? nextCursor : undefined,
         skip: append && !nextCursor ? serverContacts.length : undefined,
@@ -328,6 +346,20 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
+      // fetchContacts resolves a refused read with the EMPTY fallback list plus
+      // `error`; reading `data` alone made a 403 look like an empty book and
+      // dropped the table onto the device cache.
+      const failure = error ? (classifyContactsLoadError(error) ?? "failed") : null;
+      setServerFailure(failure);
+      if (failure === "denied") {
+        // A denial withdraws every row: the server's, and this owner's cache.
+        setServerContacts([]);
+        setNextCursor(null);
+        setServerHasMore(false);
+        setCachedLocal({ cacheKey: null, rows: NO_CONTACTS });
+        void clearCachedContacts(cacheOwner).catch(() => {});
+        return;
+      }
       const items = (data?.contacts ?? []) as LocalContact[];
       if (append) {
         setServerContacts((prev) => [...prev, ...items]);
@@ -338,10 +370,11 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
       setServerHasMore(data?.hasMore ?? false);
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") return;
+      setServerFailure("failed");
     } finally {
       if (!controller.signal.aborted) setServerLoading(false);
     }
-  }, [businessId, search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, bestChannelFilter, bestTimeNowFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi, ownedByMe]);
+  }, [businessId, search, statusFilter, ageGroupFilter, relationshipTypeFilter, priorityFilter, relationshipHealthFilter, bestChannelFilter, bestTimeNowFilter, favoriteFilter, includeArchived, sortField, sortDir, pageSize, nextCursor, serverContacts.length, mapSortFieldToApi, ownedByMe, cacheOwner]);
 
   useEffect(() => {
     if (isMobilePrev.current !== isMobile) {
@@ -372,25 +405,31 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     return () => { cancelled = true; };
   }, [businessId]);
 
+  // Read only this owner's partition of the device cache (ST-2).
   useEffect(() => {
-    getLastSyncTime().then(setLastSync);
-    getCachedContacts().then((cached) => {
-      if (cached.length > 0) setCachedLocal(cached);
-    });
-  }, []);
+    let cancelled = false;
+    getLastSyncTime(cacheOwner).then((stamp) => {
+      if (!cancelled) setLastSync(stamp);
+    }).catch(() => {});
+    if (!cacheKey) return () => { cancelled = true; };
+    getCachedContacts(cacheOwner).then((rows) => {
+      if (!cancelled) setCachedLocal({ cacheKey, rows });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [cacheOwner, cacheKey]);
 
   useEffect(() => {
-    if (contacts.length > 0) {
-      setUsingCache(false);
-      setCachedLocal([]);
-      cacheContacts(contacts as LocalContact[]).then(() => {
-        setLastSyncTime();
-        getLastSyncTime().then(setLastSync);
-      });
-    } else if (cachedContactsRef.current.length > 0) {
-      setUsingCache(true);
-    }
-  }, [contacts]);
+    if (contacts.length === 0) return;
+    let cancelled = false;
+    cacheContacts(contacts as LocalContact[], cacheOwner)
+      .then(() => setLastSyncTime(cacheOwner))
+      .then(() => getLastSyncTime(cacheOwner))
+      .then((stamp) => {
+        if (!cancelled) setLastSync(stamp);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [contacts, cacheOwner]);
 
   const filteredContacts = serverContacts.length > 0 ? serverContacts : (() => {
     let list = [...activeContacts] as LocalContact[];
@@ -964,6 +1003,7 @@ export function useDatabaseState({ businessId, contacts, onRefresh }: UseDatabas
     serverLoading,
     serverHasMore,
     loadServerContacts,
+    loadError,
 
     handleSync,
     handleExport,

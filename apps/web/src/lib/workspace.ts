@@ -275,6 +275,10 @@ export function clearStoredBusinessId() {
   clearBusinessIdCookie();
   userCache = null;
   businessCache = null;
+  // The IndexedDB contacts cache holds customer rows at rest; a shared device
+  // must not keep them past sign-out. Loaded lazily so Dexie stays out of every
+  // bundle that only needs the session helpers. Never throws.
+  void import("./contacts-db").then((m) => m.purgeContactsCache()).catch(() => {});
 }
 
 export async function ensureWorkspace(): Promise<string | null> {

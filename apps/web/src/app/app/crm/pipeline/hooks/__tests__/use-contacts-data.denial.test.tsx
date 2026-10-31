@@ -445,6 +445,21 @@ describe("contacts focus, table and kanban views: a 403/401 renders the denial, 
     expect(screen.queryByText(VIEW_EMPTY_COPY[view])).not.toBeInTheDocument();
   });
 
+  it.each(["focus", "kanban"] as const)("%s view, 500: shows the load failure (as the list does), not the empty copy", async (view) => {
+    window.localStorage.setItem("kf_pipeline_view", view);
+    stubContactsApi("serverError");
+    render(<ContactsScreenHarness />);
+
+    const alert = await waitFor(() => {
+      const found = screen.getAllByRole("alert").find((el) => /could not load contacts/i.test(el.textContent ?? ""));
+      if (!found) throw new Error("no load-failure alert yet");
+      return found;
+    });
+    expect(alert).not.toHaveTextContent(/do not have access/i);
+    await settle();
+    expect(screen.queryByText(VIEW_EMPTY_COPY[view])).not.toBeInTheDocument();
+  });
+
   it("table view, 403: never shows rows from the IndexedDB cache, whoever they were cached for", async () => {
     await seedDeviceCache();
     window.localStorage.setItem("kf_pipeline_view", "table");
