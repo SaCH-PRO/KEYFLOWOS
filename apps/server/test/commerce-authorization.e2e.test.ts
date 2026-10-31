@@ -1090,5 +1090,50 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       expect(commerceMock.updateInvoice).not.toHaveBeenCalled();
       expect(commerceMock.markInvoicePaid).not.toHaveBeenCalled();
     });
+
+    // R0-CMF1 review SEC-CMF1-2 (the R28-ST-01 class for invoices): the
+    // service returns the invoice with its whole Contact row and the routes
+    // handed it back, so a revenue:write member read a PRIVATE contact's CRM
+    // fields. The L2 half is payments-actor PA-16l.
+    it('CMF1-CONTACT: PATCH .../invoices/:id (status and edit), mark-paid, payment-failed and the status route answer with the contact projected to id, businessId, firstName, lastName and email; an invoice without a contact passes through', async () => {
+      const fullContact = {
+        id: `${P}contactA`,
+        businessId: ID.bizA,
+        firstName: 'Rva',
+        lastName: 'Customer',
+        email: `${P}c@test.local`,
+        phone: '+18685550000',
+        notesInternal: `${P}INTERNAL`,
+        visibility: 'PRIVATE',
+        ownerId: ID.ownerA,
+        lifetimeValue: 1234,
+        riskFlags: { churn: true },
+      };
+      const projected = { id: `${P}contactA`, businessId: ID.bizA, firstName: 'Rva', lastName: 'Customer', email: `${P}c@test.local` };
+      const row = (status: string) => ({ id: ID.inv, businessId: ID.bizA, status, contactId: `${P}contactA`, items: [], contact: { ...fullContact } });
+      commerceMock.updateInvoice.mockResolvedValue(row('PAID'));
+      commerceMock.markInvoicePaid.mockResolvedValue(row('PAID'));
+      commerceMock.markInvoicePaymentFailed.mockResolvedValue(row('FAILED'));
+      commerceMock.updateInvoiceStatus.mockResolvedValue(row('VOID'));
+
+      const responses: Array<[string, request.Response]> = [
+        ['PATCH status', await patch(ID.staffWriteA, { status: 'PAID' })],
+        ['PATCH edit', await patch(ID.staffWriteA, { notes: 'edited' })],
+        ['mark-paid', await markPaid(ID.staffWriteA, { businessId: ID.bizA })],
+        ['payment-failed', await markFailed(ID.staffWriteA, { businessId: ID.bizA, reason: 'x' })],
+        ['status route', await setStatus(ID.staffWriteA, 'void', { businessId: ID.bizA, status: 'VOID' })],
+      ];
+      for (const [label, res] of responses) {
+        expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(200);
+        expect(res.body.contact, label).toEqual(projected);
+        expect(res.body.contactId, label).toBe(`${P}contactA`);
+        expect(JSON.stringify(res.body), label).not.toContain(`${P}INTERNAL`);
+      }
+
+      commerceMock.updateInvoice.mockResolvedValue({ id: ID.inv, businessId: ID.bizA, status: 'SENT', contactId: null, contact: null });
+      const bare = await patch(ID.staffWriteA, { status: 'SENT' });
+      expect(bare.status).toBe(200);
+      expect(bare.body).toEqual({ id: ID.inv, businessId: ID.bizA, status: 'SENT', contactId: null, contact: null });
+    });
   });
 });

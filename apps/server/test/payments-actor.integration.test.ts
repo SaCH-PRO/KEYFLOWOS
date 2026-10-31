@@ -35,6 +35,12 @@
  *         human; the body is a whitelisted DTO; an invalid status is a 400; a
  *         revenue:read member is refused like the mark-paid route; the owner's
  *         PATCH and mark-paid ledger effects are identical; KEY stays KEY).
+ *         R0-CMF1 review repairs PA-16k..m: the service refuses a status outside
+ *         SENT / OVERDUE / VOID / PAID (SEC-CMF1-1), the invoice write routes
+ *         project the contact (SEC-CMF1-2), KEY's status entries are SYSTEM
+ *         (SEC-CMF1-4). Still open, outside that write set (it.todo):
+ *         PA-16n (SEC-CMF1-3) an omitted actor means KEY; PA-16o (SEC-CMF1-5)
+ *         the ACCRUAL invoice_finalized posting and its reversal name no creator.
  *   PA-17 (ST-R011-2) refunding a SUCCESSFUL payment with no payment_recorded posting
  *         records the refunder nowhere
  *   PA-18 (ST-R011-3) drive-intake approval drops the approver: record_payment records null
@@ -118,6 +124,18 @@ const ID = {
   invRoutePaidU: `${P}invRoutePaidU`,
   invKeyPatchPaid: `${P}invKeyPatchPaid`,
   invKeyPatchVoid: `${P}invKeyPatchVoid`,
+  // R0-CMF1 review repairs: PA-16k..m (SEC-CMF1-1, -2, -4). The PRIVATE
+  // contact owned by U is seeded by that describe block, after the fixture
+  // sanity case.
+  invKeyBadStatus: `${P}invKeyBadStatus`,
+  privContact: `${P}privContact`,
+  invPrivPatchPaid: `${P}invPrivPatchPaid`,
+  invPrivPatchVoid: `${P}invPrivPatchVoid`,
+  invPrivPatchEdit: `${P}invPrivPatchEdit`,
+  invPrivMarkPaid: `${P}invPrivMarkPaid`,
+  invPrivStatusVoid: `${P}invPrivStatusVoid`,
+  invKeySent: `${P}invKeySent`, // moved back to DRAFT by its describe block
+  invKeyOverdue: `${P}invKeyOverdue`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -937,6 +955,10 @@ describe('R0-CMF1: status changes through PATCH .../invoices/:id record the huma
     const paid = await contactEventsFor(inv, 'invoice.paid');
     expect(paid).toHaveLength(1);
     expect(paid[0].actorId).toBe(KEY_ACTOR);
+    // R0-CMF1 review SEC-CMF1-4: KEY is labelled SYSTEM on invoice.paid too,
+    // as on invoice.payment_recorded, never as a USER.
+    expect(paid[0].actorType).toBe('SYSTEM');
+    expect(activityFor(inv, 'invoice.paid')).toEqual([expect.objectContaining({ actorId: KEY_ACTOR, actorType: 'SYSTEM' })]);
   });
 
   it('PA-16j: updateInvoice with KEY_SYSTEM_ACTOR_ID passed explicitly voids the invoice; the invoice.void entry names KEY', async () => {
@@ -947,8 +969,148 @@ describe('R0-CMF1: status changes through PATCH .../invoices/:id record the huma
     const events = await contactEventsFor(inv, 'invoice.void');
     expect(events).toHaveLength(1);
     expect(events[0].actorId).toBe(KEY_ACTOR);
+    // R0-CMF1 review SEC-CMF1-4: labelled SYSTEM, never USER.
+    expect(events[0].actorType).toBe('SYSTEM');
     expect(await paymentsOf(inv)).toHaveLength(0);
   });
+});
+
+// ---------------------------------------------------------------------------
+// R0-CMF1 review repairs (SEC-CMF1-1, -2, -4).
+//
+// SEC-CMF1-1: only the HTTP DTO checked `status`. KEY's commerce_update_invoice
+// calls the service with the model's raw args.status, so a SENT invoice moved
+// to PARTIALLY_PAID / PENDING / FAILED with no payment behind it: the workflow
+// transition committed, then logContactEvent refused the event type and the
+// tool reported a failure for a row that had already changed. The service now
+// checks the same PATCHABLE_INVOICE_STATUSES before anything is read or written.
+//
+// SEC-CMF1-2: the PATCH response carried the invoice's whole Contact row, so a
+// revenue:write member with no CRM scope read a PRIVATE contact's internal
+// notes, phone, visibility and owner (the R28-ST-01 class, fixed for quote
+// status). The invoice write routes now answer with the operator invoice
+// read's customer fields only.
+//
+// SEC-CMF1-4: KEY's invoice.paid / invoice.sent / invoice.overdue / invoice.void
+// entries were labelled actorType USER; they are SYSTEM, as payment_recorded is.
+// ---------------------------------------------------------------------------
+
+/** The customer fields an invoice write response may carry (SEC-CMF1-2). */
+const INVOICE_WRITE_CONTACT_KEYS = ['businessId', 'email', 'firstName', 'id', 'lastName'];
+
+describe('R0-CMF1 review repairs: service-level status allow-list, contact projection, KEY audit label', () => {
+  beforeAll(async () => {
+    await db.contact.create({
+      data: {
+        id: ID.privContact,
+        businessId: ID.biz,
+        firstName: 'Priv',
+        lastName: 'Ate',
+        email: `${P}priv@test.local`,
+        phone: '+18685551234',
+        notesInternal: `${P}INTERNAL do not share`,
+        visibility: 'PRIVATE',
+        ownerId: ID.userU,
+      },
+    });
+    await db.invoice.updateMany({
+      where: { id: { in: [ID.invPrivPatchPaid, ID.invPrivPatchVoid, ID.invPrivPatchEdit, ID.invPrivMarkPaid, ID.invPrivStatusVoid] } },
+      data: { contactId: ID.privContact },
+    });
+    // SENT is reachable only from DRAFT.
+    await db.invoice.update({ where: { id: ID.invKeySent }, data: { status: 'DRAFT' } });
+  });
+
+  it('PA-16k (SEC-CMF1-1): the KEY flow executor call with a status outside SENT / OVERDUE / VOID / PAID (PARTIALLY_PAID, PENDING, FAILED, DRAFT, BOGUS) -> BadRequestException before anything is written; the row stays SENT with no payment, posting or timeline entry', async () => {
+    const { BadRequestException } = await import('@nestjs/common');
+    const inv = ID.invKeyBadStatus;
+    for (const status of ['PARTIALLY_PAID', 'PENDING', 'FAILED', 'DRAFT', 'BOGUS']) {
+      // The call shape of flow-orchestrator.service.ts `commerce_update_invoice`
+      // (args.status is the model's raw string).
+      const call = commerce.updateInvoice({ invoiceId: inv, businessId: ID.biz, status: status as any, notes: `${P}${status}` });
+      await expect(call, status).rejects.toMatchObject({
+        status: 400,
+        message: 'status must be one of the following values: SENT, OVERDUE, VOID, PAID',
+      });
+      await expect(call).rejects.toBeInstanceOf(BadRequestException);
+    }
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null, notes: null });
+    expect(await paymentsOf(inv)).toHaveLength(0);
+    expect(await postingsAbout(inv)).toHaveLength(0);
+    expect(await allContactEventsFor(inv)).toHaveLength(0);
+    expect(activity.filter((a) => a.data?.invoiceId === inv)).toHaveLength(0);
+  });
+
+  it('PA-16l (SEC-CMF1-2): V (STAFF, revenue:write) PATCH {status:"PAID"}, {status:"VOID"} and a notes edit, mark-paid and the status route on invoices of U\'s PRIVATE contact -> 200, and body.contact carries only id, businessId, firstName, lastName and email: no internal notes, phone, visibility or owner', async () => {
+    const responses: Array<[string, request.Response]> = [
+      ['PATCH status PAID', await patchInvoiceAs(ID.userV, ID.invPrivPatchPaid, { status: 'PAID' })],
+      ['PATCH status VOID', await patchInvoiceAs(ID.userV, ID.invPrivPatchVoid, { status: 'VOID' })],
+      ['PATCH notes edit', await patchInvoiceAs(ID.userV, ID.invPrivPatchEdit, { notes: `${P}edited` })],
+      ['mark-paid', await markPaidAs(ID.userV, ID.invPrivMarkPaid)],
+      [
+        'status route VOID',
+        await agent().patch(`/commerce/invoices/${ID.invPrivStatusVoid}/status/void`).set(HEADER, ID.userV).send({ businessId: ID.biz, status: 'VOID' }),
+      ],
+    ];
+    for (const [label, res] of responses) {
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body.contactId, label).toBe(ID.privContact);
+      expect(Object.keys(res.body.contact ?? {}).sort(), label).toEqual(INVOICE_WRITE_CONTACT_KEYS);
+      expect(res.body.contact, label).toEqual({
+        id: ID.privContact,
+        businessId: ID.biz,
+        firstName: 'Priv',
+        lastName: 'Ate',
+        email: `${P}priv@test.local`,
+      });
+      const text = JSON.stringify(res.body);
+      for (const secret of [`${P}INTERNAL do not share`, '+18685551234']) expect(text, `${label}: ${secret}`).not.toContain(secret);
+    }
+    // The operator invoice read (getInvoiceForBusiness) discloses no more than this.
+    const detail: any = await commerce.getInvoiceForBusiness(ID.invPrivPatchPaid, ID.biz);
+    for (const key of Object.keys(detail.contact)) expect(INVOICE_WRITE_CONTACT_KEYS, key).toContain(key);
+    // The writes themselves happened, attributed to V.
+    expect((await invoiceRow(ID.invPrivPatchPaid)).status).toBe('PAID');
+    expect((await invoiceRow(ID.invPrivPatchVoid)).status).toBe('VOID');
+    expect((await invoiceRow(ID.invPrivPatchEdit)).notes).toBe(`${P}edited`);
+    expect((await invoiceRow(ID.invPrivMarkPaid)).status).toBe('PAID');
+    expect((await invoiceRow(ID.invPrivStatusVoid)).status).toBe('VOID');
+    expect((await paymentsOf(ID.invPrivPatchPaid)).map((p) => p.recordedBy)).toEqual([ID.userV]);
+  });
+
+  it('PA-16m (SEC-CMF1-4): KEY\'s status changes through updateInvoice (SENT and OVERDUE with KEY passed explicitly) write invoice.sent / invoice.overdue entries and activity labelled SYSTEM with actorId KEY, never USER', async () => {
+    const update = commerce.updateInvoice as unknown as (input: Record<string, unknown>, actorId?: string) => Promise<any>;
+    const cases: Array<[string, 'SENT' | 'OVERDUE', string]> = [
+      [ID.invKeySent, 'SENT', 'invoice.sent'],
+      [ID.invKeyOverdue, 'OVERDUE', 'invoice.overdue'],
+    ];
+    for (const [inv, status, eventType] of cases) {
+      const result = await update.call(commerce, { invoiceId: inv, businessId: ID.biz, status }, systemActorId);
+      expect(result.status, eventType).toBe(status);
+      const events = await contactEventsFor(inv, eventType);
+      expect(events, eventType).toHaveLength(1);
+      expect(events[0]).toMatchObject({ actorId: KEY_ACTOR, actorType: 'SYSTEM', source: 'commerce' });
+      expect(activityFor(inv, eventType)).toEqual([expect.objectContaining({ actorId: KEY_ACTOR, actorType: 'SYSTEM' })]);
+      expect(await paymentsOf(inv)).toHaveLength(0);
+    }
+  });
+});
+
+// R0-CMF1 review: real gaps whose fixes are in product code outside the
+// R0-CMF1-INVOICE-PATCH-ACTOR write set (commerce.controller.ts,
+// commerce.service.ts, dto/update-invoice.dto.ts). Each it.todo names the
+// behaviour a follow-up packet must make pass and the file it has to change.
+describe('open gaps found by the R0-CMF1 review (outside the R0-CMF1 write set)', () => {
+  it.todo(
+    'PA-16n (SEC-CMF1-3): CommerceService.updateInvoice called with no actor is refused (403) instead of acting as KEY_SYSTEM_ACTOR_ID; KEY\'s ' +
+      'commerce_update_invoice passes KEY_SYSTEM_ACTOR_ID explicitly and still marks PAID as KEY (PA-16i) - needs ai/flow-orchestrator.service.ts ' +
+      'commerce_update_invoice to pass the KEY actor, then actorId made required in commerce.service.ts updateInvoice; outside the R0-CMF1 write set',
+  );
+  it.todo(
+    'PA-16o (SEC-CMF1-5): on an ACCRUAL business, V PATCH {status:"SENT"} then {status:"VOID"} -> the Invoice:<id>:invoice_finalized posting and its ' +
+      ':reversal have createdById = V (today null) - needs invoice-workflow.service.ts transition to take the actor and pass createdById to ' +
+      'RevenuePostingService.onInvoiceFinalized / onInvoiceVoided (PostingOpts already has createdById); outside the R0-CMF1 write set',
+  );
 });
 
 // R0-11 review: real gaps whose fixes are all in product code outside this

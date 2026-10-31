@@ -3,7 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
 import { TimeEntryService } from '../time-tracking/time-entry.service';
-import { CommerceService, OPERATOR_QUOTE_CONTACT_SELECT } from './commerce.service';
+import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT } from './commerce.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
 import { PaymentEvidenceService } from './payment-evidence.service';
@@ -60,6 +60,41 @@ function toQuoteStatusResponse<Q extends { contact?: Record<OperatorQuoteContact
   return {
     ...quote,
     contact: Object.fromEntries(keys.map((key) => [key, contact[key]])) as Pick<NonNullable<Q['contact']>, OperatorQuoteContactKey>,
+  };
+}
+
+/**
+ * The contact keys an invoice write response carries: the operator invoice
+ * read's customer fields (OPERATOR_INVOICE_CONTACT_SELECT), plus `id` and
+ * `businessId`, which repeat the invoice's own `contactId` and the path tenant
+ * and so disclose nothing new (the edit form's own-tenant check reads them).
+ */
+type InvoiceWriteContactKey = 'id' | 'businessId' | keyof typeof OPERATOR_INVOICE_CONTACT_SELECT;
+const INVOICE_WRITE_CONTACT_KEYS: readonly InvoiceWriteContactKey[] = [
+  'id',
+  'businessId',
+  ...(Object.keys(OPERATOR_INVOICE_CONTACT_SELECT) as Array<keyof typeof OPERATOR_INVOICE_CONTACT_SELECT>),
+];
+
+/**
+ * R0-CMF1 review SEC-CMF1-2 (the R28-ST-01 class, for invoices): the HTTP body
+ * of an invoice write. markInvoicePaid, updateInvoiceStatus (through the
+ * workflow transition) and updateInvoice return the invoice with its whole
+ * Contact row, which the invoice listeners need, and the routes handed it
+ * back: a revenue:write member with no CRM access received a PRIVATE contact's
+ * internal notes, phone, owner and visibility. The body now carries only the
+ * customer fields the operator invoice detail discloses; an invoice without a
+ * loaded contact passes through unchanged.
+ */
+function toInvoiceWriteResponse<I extends { contact?: Record<InvoiceWriteContactKey, unknown> | null }>(invoice: I) {
+  const contact = invoice.contact;
+  if (!contact) return invoice;
+  return {
+    ...invoice,
+    contact: Object.fromEntries(INVOICE_WRITE_CONTACT_KEYS.map((key) => [key, contact[key]])) as Pick<
+      NonNullable<I['contact']>,
+      InvoiceWriteContactKey
+    >,
   };
 }
 
@@ -396,7 +431,8 @@ export class CommerceController {
     @Param('invoiceId') invoiceId: string,
     @Req() req: any,
   ) {
-    return this.commerce.markInvoicePaid(invoiceId, req?.user?.id, this.requireGuardedTenant(businessId));
+    // SEC-CMF1-2: the contact is projected (see toInvoiceWriteResponse).
+    return toInvoiceWriteResponse(await this.commerce.markInvoicePaid(invoiceId, req?.user?.id, this.requireGuardedTenant(businessId)));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -408,7 +444,9 @@ export class CommerceController {
     @Req() req: any,
     @Body() body: { reason?: string },
   ) {
-    return this.commerce.markInvoicePaymentFailed(invoiceId, req?.user?.id, body?.reason, this.requireGuardedTenant(businessId));
+    return toInvoiceWriteResponse(
+      await this.commerce.markInvoicePaymentFailed(invoiceId, req?.user?.id, body?.reason, this.requireGuardedTenant(businessId)),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -428,14 +466,16 @@ export class CommerceController {
     if (status.toUpperCase() !== body.status) {
       throw new BadRequestException('status mismatch: the URL status and the body status disagree');
     }
-    return this.commerce.updateInvoiceStatus({
-      invoiceId,
-      status: body.status,
-      actorId: req?.user?.id,
-      sentAt: body?.sentAt,
-      dueDate: body?.dueDate,
-      businessId: this.requireGuardedTenant(businessId),
-    });
+    return toInvoiceWriteResponse(
+      await this.commerce.updateInvoiceStatus({
+        invoiceId,
+        status: body.status,
+        actorId: req?.user?.id,
+        sentAt: body?.sentAt,
+        dueDate: body?.dueDate,
+        businessId: this.requireGuardedTenant(businessId),
+      }),
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -682,10 +722,12 @@ export class CommerceController {
   // beside the body: it used to be hard-coded to KEY in the service. PATCH
   // {status:'PAID'} needs exactly the dedicated mark-paid route's authority:
   // these guards with revenue:write, then markInvoicePaid's Membership check.
+  // R0-CMF1 review SEC-CMF1-2: every branch (PAID, another status, an edit)
+  // answers with the contact projected, as the mark-paid and status routes do.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/invoices/:invoiceId')
-  updateInvoice(
+  async updateInvoice(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
     @Body(new ValidationPipe({ whitelist: true, transform: true, expectedType: UpdateInvoiceDto })) body: UpdateInvoiceDto,
@@ -693,7 +735,7 @@ export class CommerceController {
   ) {
     const actorId = req?.user?.id;
     if (!actorId) throw new ForbiddenException('Authentication required');
-    return this.commerce.updateInvoice({ ...body, invoiceId, businessId }, actorId);
+    return toInvoiceWriteResponse(await this.commerce.updateInvoice({ ...body, invoiceId, businessId }, actorId));
   }
 
   // ========== QUOTES ==========

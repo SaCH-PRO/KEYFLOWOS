@@ -21,8 +21,22 @@ import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
+import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+
+/**
+ * The customer fields an operator invoice read discloses: the customer's name
+ * and email, nothing of the Contact row's CRM fields (internal notes, phone,
+ * owner, visibility). Exported so the invoice write routes project their HTTP
+ * responses to the same fields (R0-CMF1 review SEC-CMF1-2, the R28-ST-01 class)
+ * instead of keeping their own list.
+ */
+export const OPERATOR_INVOICE_CONTACT_SELECT = {
+  firstName: true,
+  lastName: true,
+  email: true,
+} as const;
 
 /**
  * The full operator shape of an invoice: every payment row (reference, notes,
@@ -34,11 +48,7 @@ import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/m
  */
 const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
   contact: {
-    select: {
-      firstName: true,
-      lastName: true,
-      email: true,
-    },
+    select: OPERATOR_INVOICE_CONTACT_SELECT,
   },
   items: true,
   // Required by buildInvoiceEmailContext so amountPaid/remaining
@@ -915,7 +925,10 @@ export class CommerceService {
           paidAt: invoice.paidAt,
           bookingId: invoice.booking?.id,
         },
-        actorType: actorId ? 'USER' : 'SYSTEM',
+        // R0-CMF1 review SEC-CMF1-4: KEY is a SYSTEM actor here as on
+        // invoice.payment_recorded; it was labelled USER, so an audit that
+        // filters actorType USER counted KEY's mark-paid as a person's.
+        actorType: actorId && !isSystemActor(actorId) ? 'USER' : 'SYSTEM',
         actorId: actorId ?? undefined,
         source: 'commerce',
       });
@@ -1184,7 +1197,9 @@ export class CommerceService {
           dueDate: invoice.dueDate,
           bookingId: invoice.booking?.id,
         },
-        actorType: params.actorId ? 'USER' : 'SYSTEM',
+        // R0-CMF1 review SEC-CMF1-4: KEY's invoice.sent / .overdue / .void are
+        // SYSTEM entries (see markInvoicePaid), never a person's.
+        actorType: params.actorId && !isSystemActor(params.actorId) ? 'USER' : 'SYSTEM',
         actorId: params.actorId ?? undefined,
         source: 'commerce',
       });
@@ -2745,8 +2760,22 @@ export class CommerceService {
     discountType?: 'PERCENT' | 'FIXED' | null;
     discountValue?: number | null;
     notes?: string | null;
-    status?: 'SENT' | 'OVERDUE' | 'VOID' | 'PAID' | 'DRAFT';
+    status?: PatchableInvoiceStatus;
   }, actorId?: string) {
+    // R0-CMF1 review SEC-CMF1-1: the DTO's @IsIn does not protect this path.
+    // KEY's commerce_update_invoice calls this with the model's raw
+    // args.status, so a SENT invoice was moved to PARTIALLY_PAID, PENDING or
+    // FAILED with no payment behind it (the transition committed, then the
+    // timeline refused the event type and the tool reported a failure). Every
+    // caller is held to the HTTP contract, with its message, before anything
+    // is read or written.
+    if (
+      input.status !== undefined &&
+      input.status !== null &&
+      !(PATCHABLE_INVOICE_STATUSES as readonly unknown[]).includes(input.status)
+    ) {
+      throw new BadRequestException(`status must be one of the following values: ${PATCHABLE_INVOICE_STATUSES.join(', ')}`);
+    }
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: input.invoiceId, businessId: input.businessId },
     });
