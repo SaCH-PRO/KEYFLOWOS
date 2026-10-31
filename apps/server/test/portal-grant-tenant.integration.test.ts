@@ -18,6 +18,12 @@
  * of an A contact behaves as before (same row, fresh token, enabled, settings
  * kept when none are given). B's tenant state is byte-identical afterwards.
  *
+ * Review repairs: a legacy grant that already names a foreign or soft-deleted
+ * contact is not refreshed (the check runs before the existing-grant lookup),
+ * and the binding is to the businessId ARGUMENT, not to the ambient
+ * AsyncLocalStorage tenant the Prisma extension writes into where.businessId
+ * on Contact (proved with main.ts's provider wiring and runWithTenant).
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * RateLimitGuard (real Redis), PortalService and the production
  * GlobalHttpExceptionFilter + ValidationPipe are real against DATABASE_URL.
@@ -58,10 +64,16 @@ const ID = {
   cB: `${P}cB`,               // live contact of B with its own grant
   gA2: `${P}gA2`,
   gB: `${P}gB`,
+  // Seeded only by the later suites (their own beforeAll), so the earlier cases see none of them.
+  cA3: `${P}cA3`,                         // live contact of A, granted only under an ambient tenant
+  gLegacyForeign: `${P}gLegacyForeign`,   // (bizA, cB): a row the pre-fix bug could have written
+  gLegacyDeleted: `${P}gLegacyDeleted`,   // (bizA, cADeleted): a grant whose contact was soft-deleted later
 };
 const TOKEN = {
   gA2: `${P}token_gA2_seeded`,
   gB: `${P}token_gB_seeded`,
+  gLegacyForeign: `${P}token_gLegacyForeign_seeded`,
+  gLegacyDeleted: `${P}token_gLegacyDeleted_seeded`,
 };
 const SETTINGS_A2 = { invoices: true, projects: false, documents: true, bookings: false };
 const SETTINGS_B = { invoices: true, projects: true, documents: false, bookings: true };
@@ -355,5 +367,139 @@ describe('the guards in front of the grant are unchanged', () => {
     const other = await grant(ID.ownerB, ID.bizA, { contactId: ID.cA1 });
     expect(other.status).toBe(403);
     expect(await portalRows()).toEqual(before);
+  });
+});
+
+/** One portal row, as stored (raw SQL: under every client extension). */
+async function portalRow(id: string): Promise<string | undefined> {
+  const rows: Array<{ j: string }> = await db.$queryRawUnsafe(
+    `SELECT row_to_json(p)::text AS j FROM portal_access p WHERE p.id = '${id}'`,
+  );
+  return rows[0]?.j;
+}
+
+describe('a legacy grant whose contact is not a live contact of the path tenant is not refreshed', () => {
+  // The check runs BEFORE the existing-grant lookup. A fix that only checked
+  // the contact before `create` would let A's owner re-enable these rows and
+  // mint a fresh 90-day bearer token for them through the `existing` branch.
+  beforeAll(async () => {
+    const expired = new Date(Date.now() - 5 * DAY_MS);
+    await db.portalAccess.create({
+      data: {
+        id: ID.gLegacyForeign, businessId: ID.bizA, contactId: ID.cB, token: TOKEN.gLegacyForeign,
+        expiresAt: expired, enabled: false, settings: SETTINGS_A2,
+      },
+    });
+    await db.portalAccess.create({
+      data: {
+        id: ID.gLegacyDeleted, businessId: ID.bizA, contactId: ID.cADeleted, token: TOKEN.gLegacyDeleted,
+        expiresAt: expired, enabled: false, settings: SETTINGS_A2,
+      },
+    });
+  });
+
+  it("a pre-existing (A, B's contact) grant: A's owner re-granting it answers 404 and the row is byte-identical (still disabled, expired, same token)", async () => {
+    const legacy = await portalRow(ID.gLegacyForeign);
+    expect(legacy).toBeDefined();
+    expect(JSON.parse(legacy!)).toMatchObject({ enabled: false, token: TOKEN.gLegacyForeign });
+    const before = await portalRows();
+    const stateB = await tenantBState();
+    expect(stateB).toContain(TOKEN.gLegacyForeign); // the row names B's contact, so it is part of B's state
+
+    for (const body of [{ contactId: ID.cB }, { contactId: ID.cB, settings: { invoices: true } }]) {
+      const res = await grant(ID.ownerA, ID.bizA, body);
+      expect(res.status, JSON.stringify(body)).toBe(404);
+      expect(res.body.message).toBe('Contact not found');
+      expect(JSON.stringify(res.body)).not.toContain('token');
+    }
+    const service = new PortalServiceCtor({ client: db });
+    await expect(service.createAccess(ID.bizA, ID.cB)).rejects.toBeInstanceOf(NotFoundExceptionCtor);
+
+    expect(await portalRow(ID.gLegacyForeign)).toBe(legacy);
+    expect(await portalRows()).toEqual(before);
+    expect(await tenantBState()).toBe(stateB);
+  });
+
+  it("a pre-existing grant whose A contact was soft-deleted: re-granting it answers 404 and the row is byte-identical", async () => {
+    const legacy = await portalRow(ID.gLegacyDeleted);
+    expect(legacy).toBeDefined();
+    expect(JSON.parse(legacy!)).toMatchObject({ enabled: false, token: TOKEN.gLegacyDeleted });
+    const before = await portalRows();
+
+    for (const body of [{ contactId: ID.cADeleted }, { contactId: ID.cADeleted, settings: { invoices: true } }]) {
+      const res = await grant(ID.ownerA, ID.bizA, body);
+      expect(res.status, JSON.stringify(body)).toBe(404);
+      expect(res.body.message).toBe('Contact not found');
+    }
+    const service = new PortalServiceCtor({ client: db });
+    await expect(service.createAccess(ID.bizA, ID.cADeleted)).rejects.toBeInstanceOf(NotFoundExceptionCtor);
+
+    expect(await portalRow(ID.gLegacyDeleted)).toBe(legacy);
+    expect(await portalRows()).toEqual(before);
+  });
+});
+
+describe('the binding holds under an ambient tenant context (main.ts wiring)', () => {
+  // main.ts installs the AsyncLocalStorage tenant as the Prisma extension's
+  // provider; the extension then overwrites where.businessId on Contact with
+  // the ambient tenant, while PortalAccess (unscoped) is written under the
+  // argument. The service must bind the contact to the ARGUMENT tenant.
+  let runWithTenant: <T>(businessId: string, userId: string, fn: () => T) => T;
+  let setTenantContextProvider: (p: { getCurrentBusinessId: () => string | undefined }) => void;
+
+  beforeAll(async () => {
+    const dbMod: any = await import('@keyflow/db');
+    const tenantMod = await import('../src/core/tenant/tenant-context');
+    setTenantContextProvider = dbMod.setTenantContextProvider;
+    runWithTenant = tenantMod.runWithTenant;
+    setTenantContextProvider({ getCurrentBusinessId: tenantMod.getCurrentBusinessId });
+    await db.contact.create({ data: { id: ID.cA3, businessId: ID.bizA, firstName: 'K33A', lastName: 'Three' } });
+  });
+
+  afterAll(() => {
+    if (setTenantContextProvider) setTenantContextProvider({ getCurrentBusinessId: () => undefined });
+  });
+
+  it("NEGATIVE CONTROL: with B as the ambient tenant, granting B's contact under A's id is refused and writes nothing in either tenant", async () => {
+    const service = new PortalServiceCtor({ client: db });
+    const before = await portalRows();
+    const stateB = await tenantBState();
+    await expect(
+      runWithTenant(ID.bizB, ID.ownerB, () => service.createAccess(ID.bizA, ID.cB)),
+    ).rejects.toBeInstanceOf(NotFoundExceptionCtor);
+    await expect(
+      runWithTenant(ID.bizB, ID.ownerB, () => service.createAccess(ID.bizA, ID.cB, { invoices: true })),
+    ).rejects.toBeInstanceOf(NotFoundExceptionCtor);
+    expect(await portalRows()).toEqual(before);
+    expect(await tenantBState()).toBe(stateB);
+    const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM portal_access WHERE business_id = '${ID.bizA}' AND contact_id = '${ID.cB}' AND id <> '${ID.gLegacyForeign}'`,
+    );
+    expect(rows[0].n).toBe(0);
+  });
+
+  it("with B as the ambient tenant, A's own contact under A's id fails closed: 404, nothing written", async () => {
+    const service = new PortalServiceCtor({ client: db });
+    const before = await portalRows();
+    await expect(
+      runWithTenant(ID.bizB, ID.ownerB, () => service.createAccess(ID.bizA, ID.cA3)),
+    ).rejects.toBeInstanceOf(NotFoundExceptionCtor);
+    expect(await portalRows()).toEqual(before);
+  });
+
+  it("with A as the ambient tenant, B's contact is refused and A's own contact is granted in A", async () => {
+    const service = new PortalServiceCtor({ client: db });
+    const before = await portalRows();
+    await expect(
+      runWithTenant(ID.bizA, ID.ownerA, () => service.createAccess(ID.bizA, ID.cB)),
+    ).rejects.toBeInstanceOf(NotFoundExceptionCtor);
+    expect(await portalRows()).toEqual(before);
+
+    const granted = await runWithTenant(ID.bizA, ID.ownerA, () => service.createAccess(ID.bizA, ID.cA3, { invoices: true }));
+    expect(granted).toMatchObject({ businessId: ID.bizA, contactId: ID.cA3, enabled: true, settings: { invoices: true } });
+    expect(granted.token).toMatch(/^[0-9a-f]{64}$/);
+    const rows = await db.portalAccess.findMany({ where: { contactId: ID.cA3 } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: granted.id, businessId: ID.bizA });
   });
 });

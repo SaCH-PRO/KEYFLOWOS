@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "packageId": "R0-33-PORTAL-GRANT-TENANT",
   "proofScope": "portal-grant-tenant-binding-real-database",
-  "description": "A portal access grant binds only a live contact of the path tenant. Run from apps/server: npx vitest run test/portal-grant-tenant.integration.test.ts --reporter=json --outputFile=.proof/r0-33-vitest.json against a migrated local database and REDIS_URL, then node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/portal-grant-tenant.json --report .proof/r0-33-vitest.json. Cases tagged NEGATIVE CONTROL, the soft-deleted case and the service case fail on the unmodified code (c2f6f46d and the R0 working branch before this packet).",
+  "description": "A portal access grant binds only a live contact of the path tenant. Run from apps/server: npx vitest run test/portal-grant-tenant.integration.test.ts --reporter=json --outputFile=.proof/r0-33-vitest.json against a migrated local database and REDIS_URL, then node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/portal-grant-tenant.json --report .proof/r0-33-vitest.json. Cases tagged NEGATIVE CONTROL, the soft-deleted case and the service case fail on the unmodified code (c2f6f46d and the R0 working branch before this packet). Review repairs: the ambient-tenant NEGATIVE CONTROL fails on the first fix (7a8a56b9), which bound the contact through where.businessId only; the two legacy-grant cases fail on a fix that checks the contact only before create.",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
   "requiredCases": [
@@ -17,7 +17,12 @@
     "POST /portal/businesses/:businessId/access binds only a contact of the path tenant positive control: A's owner granting A's own contact answers 201 and writes one row bound to A",
     "POST /portal/businesses/:businessId/access binds only a contact of the path tenant positive control: B granting its own contact on its own path still answers 201 (re-grant of its existing row)",
     "POST /portal/businesses/:businessId/access binds only a contact of the path tenant re-granting an existing grant of an A contact behaves as before: same row, fresh token, enabled, 90 days, settings kept",
-    "the guards in front of the grant are unchanged anonymous answers 401 and a member of another tenant answers 403; neither writes a row"
+    "the guards in front of the grant are unchanged anonymous answers 401 and a member of another tenant answers 403; neither writes a row",
+    "a legacy grant whose contact is not a live contact of the path tenant is not refreshed a pre-existing (A, B's contact) grant: A's owner re-granting it answers 404 and the row is byte-identical (still disabled, expired, same token)",
+    "a legacy grant whose contact is not a live contact of the path tenant is not refreshed a pre-existing grant whose A contact was soft-deleted: re-granting it answers 404 and the row is byte-identical",
+    "the binding holds under an ambient tenant context (main.ts wiring) NEGATIVE CONTROL: with B as the ambient tenant, granting B's contact under A's id is refused and writes nothing in either tenant",
+    "the binding holds under an ambient tenant context (main.ts wiring) with B as the ambient tenant, A's own contact under A's id fails closed: 404, nothing written",
+    "the binding holds under an ambient tenant context (main.ts wiring) with A as the ambient tenant, B's contact is refused and A's own contact is granted in A"
   ],
   "maxReportAgeSeconds": 600
 }
