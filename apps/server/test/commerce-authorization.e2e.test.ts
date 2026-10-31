@@ -804,6 +804,46 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       await quoteStatus(ID.superAdmin, 'sent', { businessId: ID.bizA }).expect(200);
       expect(commerceMock.updateQuoteStatus).toHaveBeenCalledWith({ quoteId: QUOTE, status: 'SENT', actorId: ID.superAdmin, businessId: ID.bizA });
     });
+
+    // R28-ST-01: the service returns the quote with its whole Contact row (the
+    // quote.sent listener needs it); the HTTP body carries only the operator
+    // detail's customer fields.
+    it('QS-L1-PROJECTION: the 200 body is the service quote with its contact projected to { firstName, lastName, email }; the internal note, phone, owner and visibility are not sent, and a quote without a loaded contact passes through unchanged', async () => {
+      commerceMock.updateQuoteStatus.mockResolvedValueOnce({
+        id: QUOTE,
+        businessId: ID.bizA,
+        status: 'SENT',
+        contactId: `${P}contactA`,
+        viewToken: `${P}tok`,
+        contact: {
+          id: `${P}contactA`,
+          businessId: ID.bizA,
+          firstName: 'R',
+          lastName: 'V',
+          email: `${P}quote@test.local`,
+          phone: '+1868555028',
+          notesInternal: 'K28L1_SECRET_NOTE',
+          ownerId: ID.ownerA,
+          visibility: 'PRIVATE',
+        },
+      });
+      const res = await quoteStatus(ID.staffWriteA, 'sent', { businessId: ID.bizA });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toEqual({
+        id: QUOTE,
+        businessId: ID.bizA,
+        status: 'SENT',
+        contactId: `${P}contactA`,
+        viewToken: `${P}tok`,
+        contact: { firstName: 'R', lastName: 'V', email: `${P}quote@test.local` },
+      });
+      expect(JSON.stringify(res.body)).not.toContain('K28L1_SECRET_NOTE');
+      expect(JSON.stringify(res.body)).not.toContain('+1868555028');
+
+      const bare = await quoteStatus(ID.ownerA, 'sent', { businessId: ID.bizA });
+      expect(bare.status).toBe(200);
+      expect(bare.body).toEqual({ id: QUOTE, businessId: ID.bizA, status: 'SENT' });
+    });
   });
 
   // -------------------------------------------------------------------------

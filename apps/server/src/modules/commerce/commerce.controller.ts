@@ -3,7 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
 import { TimeEntryService } from '../time-tracking/time-entry.service';
-import { CommerceService } from './commerce.service';
+import { CommerceService, OPERATOR_QUOTE_CONTACT_SELECT } from './commerce.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
 import { PaymentEvidenceService } from './payment-evidence.service';
@@ -40,6 +40,27 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
  * twice with identical options, which is idempotent.
  */
 const CREATE_INVOICE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: CreateInvoiceDto });
+
+type OperatorQuoteContactKey = keyof typeof OPERATOR_QUOTE_CONTACT_SELECT;
+
+/**
+ * R28-ST-01: the HTTP body of a quote status change. The service returns the
+ * quote with its whole Contact row (`include: { contact: true }`, which the
+ * quote.sent listener needs for the customer's email and phone), and the
+ * route handed that row back: a revenue:write member with no CRM access
+ * received a PRIVATE contact's internal notes, phone, owner and visibility.
+ * The body now carries only the customer fields the operator quote detail
+ * discloses; a quote without a loaded contact passes through unchanged.
+ */
+function toQuoteStatusResponse<Q extends { contact?: Record<OperatorQuoteContactKey, unknown> | null }>(quote: Q) {
+  const contact = quote.contact;
+  if (!contact) return quote;
+  const keys = Object.keys(OPERATOR_QUOTE_CONTACT_SELECT) as OperatorQuoteContactKey[];
+  return {
+    ...quote,
+    contact: Object.fromEntries(keys.map((key) => [key, contact[key]])) as Pick<NonNullable<Q['contact']>, OperatorQuoteContactKey>,
+  };
+}
 
 @Controller('commerce')
 export class CommerceController {
@@ -561,7 +582,8 @@ export class CommerceController {
   // forwards the guard-resolved tenant (same resolver as the guards, as on the
   // invoice status route) for the service to bind: a foreign id answers like
   // an unknown one. Path and `{ businessId }` body are unchanged for the web
-  // client. No state machine here: transitions are V1-50 (D-04).
+  // client. No state machine here: transitions are V1-50 (D-04). The 200 body
+  // is projected (R28-ST-01): the quote, with only the operator contact fields.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('quotes/:quoteId/status/:status')
@@ -581,7 +603,7 @@ export class CommerceController {
         businessId: tenant,
       });
       this.logger.log(`Quote ${quoteId} status updated successfully`);
-      return result;
+      return toQuoteStatusResponse(result);
     } catch (error: any) {
       this.logger.error(`Failed to update quote status: ${error?.message}`, error?.stack);
       throw error;

@@ -69,6 +69,18 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
 });
 
 /**
+ * The customer fields an operator quote read discloses: the customer's name
+ * and email, nothing of the Contact row's CRM fields (internal notes, phone,
+ * owner, visibility). Exported so the quote status route projects its HTTP
+ * response to the same fields (R28-ST-01) instead of keeping its own list.
+ */
+export const OPERATOR_QUOTE_CONTACT_SELECT = {
+  firstName: true,
+  lastName: true,
+  email: true,
+} as const;
+
+/**
  * The operator shape of a quote: the customer's name and email, every line
  * item, the invoice it was converted into and the business profile. Shared by
  * `getQuote` (the tenant-unbound server-side read) and the tenant-bound
@@ -76,11 +88,7 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
  */
 const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
   contact: {
-    select: {
-      firstName: true,
-      lastName: true,
-      email: true,
-    },
+    select: OPERATOR_QUOTE_CONTACT_SELECT,
   },
   items: true,
   invoice: true,

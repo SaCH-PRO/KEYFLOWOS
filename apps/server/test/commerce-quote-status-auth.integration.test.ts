@@ -27,6 +27,13 @@
  *   OWNER / revenue:write naming its own tenant   -> 200 and the status changes (path and body unchanged)
  *   LEDGER: no quote transition writes a FinancialTransaction or a LedgerEntry
  *
+ * Review repairs:
+ *   R28-ST-01 the 200 body's contact is { firstName, lastName, email } (the operator
+ *             detail's shape); the service's whole Contact row reaches the listener only
+ *   R28-ST-02 under the production tenant wiring (TenantInterceptor + the Prisma tenant
+ *             context provider) an object body tenant steering the ambient tenant still
+ *             gets the 404; the number/array 500 is it.todo (TenantInterceptor, CF-24 / R0-L)
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService and the real ledger chain
  * (RevenuePostingService, PostingService, ChartOfAccountsSeederService) run
@@ -98,8 +105,26 @@ const SEEDED_STATUS: Record<string, string> = {
 
 const TENANT_B_QUOTES = new Set<string>([ID.qB, ID.qBOwn]);
 
+/**
+ * R0-28 review repairs (R28-ST-01, R28-ST-02): their own rows, seeded in their
+ * own blocks, so the R0-28 fixture counts above stay as they were. Same
+ * prefix, so the same cleanup removes them.
+ */
+const R = {
+  staffWriteNoCrmA: `${P}r_staffWriteNoCrmA`, // STAFF of bizA, revenue: write, crm: none
+  contactPrivateA: `${P}r_contactPrivateA`,   // bizA, PRIVATE, owned by ownerA, internal note and phone
+  qPrivate: `${P}r_qPrivate`,                 // bizA DRAFT quote of contactPrivateA
+  dualAB: `${P}r_dualAB`,                     // STAFF revenue:read in bizA, OWNER in bizB
+  qSteer: `${P}r_qSteer`,                     // bizA SENT quote: the ambient-tenant steering target
+  qProdB: `${P}r_qProdB`,                     // bizB DRAFT quote: the production-wiring positive control
+};
+const CANARY_NOTE = 'K28R_SECRET_NOTE';
+const CANARY_PHONE = '+1868555028';
+
 let db: any;
 let app: any;
+/** The same controller with the app's TenantInterceptor installed (R28-ST-02). */
+let prodApp: any;
 
 const recordedEvents: Array<{ name: string; payload: any }> = [];
 const eventRecorder = {
@@ -202,10 +227,14 @@ async function expectUntouched(quoteId: string, before: unknown, eventsBefore: n
 
 let ledgerAtStart: { a: { transactions: number; entries: number }; b: { transactions: number; entries: number } };
 
-beforeAll(async () => {
-  const dbMod = await import('@keyflow/db');
-  db = dbMod.db;
-
+/**
+ * The real HTTP path over the real database. `globalInterceptors` adds
+ * app-wide interceptors (installed in order, after the guards, exactly where
+ * Nest runs APP_INTERCEPTOR): the production-wiring block (R28-ST-02) installs
+ * the app's TenantInterceptor this way. The default harness installs none, as
+ * the R0-28 cases always have.
+ */
+async function buildCommerceApp(globalInterceptors: unknown[] = []) {
   const { Test } = await import('@nestjs/testing');
   const { ValidationPipe } = await import('@nestjs/common');
   const { EventEmitter2 } = await import('@nestjs/event-emitter');
@@ -238,7 +267,6 @@ beforeAll(async () => {
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
 
-  // ---- the real HTTP path, wired before any row is seeded -----------------
   const moduleRef = await Test.createTestingModule({
     controllers: [CommerceController],
     providers: [
@@ -274,9 +302,9 @@ beforeAll(async () => {
     ],
   }).compile();
 
-  app = moduleRef.createNestApplication();
+  const built = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
-  app.use(async (req: any, _res: any, next: any) => {
+  built.use(async (req: any, _res: any, next: any) => {
     const header = req.headers[HEADER];
     const id = typeof header === 'string' ? header : undefined;
     if (id && id.startsWith(P)) {
@@ -286,9 +314,21 @@ beforeAll(async () => {
     next();
   });
   // Same filter and pipe as app-bootstrap.ts, so status codes are the production ones.
-  app.useGlobalFilters(new GlobalHttpExceptionFilter());
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  await app.init();
+  built.useGlobalFilters(new GlobalHttpExceptionFilter());
+  built.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  if (globalInterceptors.length > 0) built.useGlobalInterceptors(...(globalInterceptors as any[]));
+  await built.init();
+  return { moduleRef, app: built };
+}
+
+beforeAll(async () => {
+  const dbMod = await import('@keyflow/db');
+  db = dbMod.db;
+  const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+
+  // ---- the real HTTP path, wired before any row is seeded -----------------
+  const { moduleRef, app: harness } = await buildCommerceApp();
+  app = harness;
 
   await cleanup(); // in case a prior run aborted
 
@@ -355,6 +395,7 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
+  if (prodApp) await prodApp.close();
   if (app) await app.close();
   if (db) await cleanup();
 });
@@ -510,6 +551,162 @@ describe('positive controls: the web client contract is unchanged (R0-28)', () =
     expect(res.body).toMatchObject({ id: ID.qBOwn, businessId: ID.bizB, status: 'SENT' });
     expect((await quoteRow(ID.qBOwn)).status).toBe('SENT');
   });
+});
+
+/** A quote for the review-repair blocks, seeded like the R0-28 ones. */
+async function seedRepairQuote(id: string, businessId: string, contactId: string, status: 'DRAFT' | 'SENT', quoteNumber: string) {
+  await db.quote.create({
+    data: {
+      id,
+      quoteNumber,
+      status,
+      subtotal: 100,
+      total: 100,
+      currency: 'TTD',
+      businessId,
+      contactId,
+      ...(status === 'SENT' ? { sentAt: new Date('2026-10-01T10:00:00.000Z'), viewToken: `${P}tok_${id.slice(P.length)}` } : {}),
+      items: { create: [{ id: `${id}_item1`, description: `K28A ${quoteNumber}`, quantity: 1, unitPrice: 100, total: 100 }] },
+    },
+  });
+}
+
+// R28-ST-01: the service loads the quote with `include: { contact: true }`
+// because the quote.sent listener needs the customer's email and phone, and
+// the route used to hand that whole Contact row back: a revenue:write member
+// with no CRM access received a PRIVATE contact's internal notes, phone, owner
+// and visibility. The route now answers with the customer fields the operator
+// quote detail discloses (OPERATOR_QUOTE_CONTACT_SELECT); the service include,
+// and so the listener's payload, is unchanged.
+describe('response projection: the 200 body carries the operator contact shape only (R28-ST-01)', () => {
+  beforeAll(async () => {
+    await db.user.create({ data: { id: R.staffWriteNoCrmA, email: `${P}r_staffWriteNoCrmA@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: {
+        id: `${P}m_r_staffWriteNoCrmA_bizA`,
+        userId: R.staffWriteNoCrmA,
+        businessId: ID.bizA,
+        role: 'STAFF',
+        permissionScopes: { revenue: 'write', crm: 'none' },
+      },
+    });
+    await db.contact.create({
+      data: {
+        id: R.contactPrivateA,
+        businessId: ID.bizA,
+        firstName: 'K28r',
+        lastName: 'Private',
+        email: `${P}r_contactPrivateA@test.local`,
+        phone: CANARY_PHONE,
+        visibility: 'PRIVATE',
+        ownerId: ID.ownerA,
+        notesInternal: CANARY_NOTE,
+      },
+    });
+    await seedRepairQuote(R.qPrivate, ID.bizA, R.contactPrivateA, 'DRAFT', 'K28A-R01');
+  });
+
+  it("QS-13: a revenue:write STAFF member with crm:none sends a quote whose contact is PRIVATE and someone else's: 200 with contact { firstName, lastName, email }, the operator detail's shape, and no internal note, phone, owner or visibility; the quote.sent listener still receives the whole contact", async () => {
+    const res = await setQuoteStatus(R.staffWriteNoCrmA, R.qPrivate, 'sent', { businessId: ID.bizA });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: R.qPrivate, businessId: ID.bizA, status: 'SENT', contactId: R.contactPrivateA });
+    expect(Object.keys(res.body.contact).sort()).toEqual(['email', 'firstName', 'lastName']);
+    const raw = JSON.stringify(res.body);
+    expect(raw).not.toContain(CANARY_NOTE);
+    expect(raw).not.toContain(CANARY_PHONE);
+    expect((await quoteRow(R.qPrivate)).status).toBe('SENT');
+
+    // The listener's payload is the service's, unprojected: the email and phone it needs are still there.
+    expect(recordedEvents.map((e) => e.name)).toEqual(['quote.sent']);
+    expect(recordedEvents[0]!.payload.quote.contact).toMatchObject({
+      id: R.contactPrivateA,
+      email: `${P}r_contactPrivateA@test.local`,
+      phone: CANARY_PHONE,
+    });
+
+    // The same customer fields the operator detail route gives this caller.
+    const detail = await agent().get(`/commerce/businesses/${ID.bizA}/quotes/${R.qPrivate}`).set(HEADER, R.staffWriteNoCrmA);
+    expect(detail.status, JSON.stringify(detail.body)).toBe(200);
+    expect(res.body.contact).toEqual(detail.body.contact);
+  });
+});
+
+// R28-ST-02: the R0-28 harness installs neither the app's TenantInterceptor
+// (APP_INTERCEPTOR in app.module.ts) nor the Prisma tenant context provider
+// (main.ts). Under that production wiring the interceptor picks the ambient
+// Prisma tenant with a truthy params || body || query, while the guards and
+// @GuardedBusinessId accept only a non-empty string: a body tenant that is an
+// object steers the ambient tenant away from the one the guards checked. On
+// this route the service's binding to the guarded tenant is what stops it;
+// this block pins that under the production wiring. The interceptor itself is
+// outside the R0-28 write set (CF-24 / R0-L).
+describe('production tenant wiring: the app TenantInterceptor and the Prisma tenant context provider installed (R28-ST-02)', () => {
+  const ambientSeen: unknown[] = [];
+  let setTenantContextProvider: ((p: { getCurrentBusinessId: () => string | undefined }) => void) | undefined;
+
+  function prodQuoteStatus(actor: string, quoteId: string, status: string, body: Record<string, unknown>, query = '') {
+    return request(prodApp.getHttpServer())
+      .patch(`/commerce/quotes/${quoteId}/status/${status}${query}`)
+      .set(HEADER, actor)
+      .send(body);
+  }
+
+  beforeAll(async () => {
+    const dbMod = await import('@keyflow/db');
+    setTenantContextProvider = dbMod.setTenantContextProvider;
+    const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+    const { getCurrentBusinessId } = await import('../src/core/tenant/tenant-context');
+    // Records the ambient tenant each request runs under (installed after TenantInterceptor, so inside its context).
+    const ambientProbe = {
+      intercept: (_ctx: unknown, next: { handle: () => unknown }) => {
+        ambientSeen.push(getCurrentBusinessId());
+        return next.handle();
+      },
+    };
+    prodApp = (await buildCommerceApp([new TenantInterceptor(), ambientProbe])).app;
+    // main.ts installs this before the app serves. It is module-global, so afterAll resets it.
+    setTenantContextProvider({ getCurrentBusinessId });
+
+    await db.user.create({ data: { id: R.dualAB, email: `${P}r_dualAB@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}m_r_dualAB_bizA`, userId: R.dualAB, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue: 'read' } } });
+    await db.membership.create({ data: { id: `${P}m_r_dualAB_bizB`, userId: R.dualAB, businessId: ID.bizB, role: 'OWNER' } });
+    await seedRepairQuote(R.qSteer, ID.bizA, ID.contactA, 'SENT', 'K28A-R02');
+    await seedRepairQuote(R.qProdB, ID.bizB, ID.contactB, 'DRAFT', 'K28A-R03');
+  });
+
+  afterAll(() => {
+    setTenantContextProvider?.({ getCurrentBusinessId: () => undefined });
+  });
+
+  it("QS-14: a body tenant that is an object steers the ambient Prisma tenant to A while the guards checked B; the service's binding to the guarded tenant still answers A's quote with an unknown id's 404, and A's quote is unchanged", async () => {
+    // Control: the production wiring is live. The owner of B sending B's own quote runs under ambient tenant B.
+    ambientSeen.length = 0;
+    const control = await prodQuoteStatus(ID.ownerB, R.qProdB, 'sent', { businessId: ID.bizB });
+    expect(control.status, JSON.stringify(control.body)).toBe(200);
+    expect(control.body).toMatchObject({ id: R.qProdB, businessId: ID.bizB, status: 'SENT' });
+    expect(ambientSeen).toEqual([ID.bizB]);
+
+    const before = await quoteRow(R.qSteer);
+    const tenantABefore = await tenantQuotes(ID.bizA);
+    const unknown = await prodQuoteStatus(R.dualAB, ID.unknown, 'accepted', { businessId: ID.bizB });
+    expect(unknown.status, JSON.stringify(unknown.body)).toBe(404);
+
+    ambientSeen.length = 0;
+    recordedEvents.length = 0;
+    crmCalls.length = 0;
+    // The guards resolve the query string (B, where the dual member is OWNER; had they checked A, its
+    // revenue:read membership would be a 403). The interceptor takes the body object as the ambient tenant.
+    const steered = await prodQuoteStatus(R.dualAB, R.qSteer, 'accepted', { businessId: { equals: ID.bizA } }, `?businessId=${ID.bizB}`);
+    expect(ambientSeen).toEqual([{ equals: ID.bizA }]);
+    expect(steered.status, JSON.stringify(steered.body)).toBe(404);
+    expect(stripVolatile(steered.body)).toEqual(stripVolatile(unknown.body));
+    await expectUntouched(R.qSteer, before, 0, 0);
+    expect(await tenantQuotes(ID.bizA)).toBe(tenantABefore);
+  });
+
+  it.todo(
+    'QS-15 (R28-ST-02, outside the R0-28 write set): under production wiring a number or array body tenant beside ?businessId=B answers 500 (TenantInterceptor makes it the ambient Prisma tenant and Prisma rejects it) where the harness answers 404; the fix is TenantInterceptor resolving the tenant with resolveRequestBusinessId (CF-24 / R0-L)',
+  );
 });
 
 describe('LEDGER (R0-28)', () => {
