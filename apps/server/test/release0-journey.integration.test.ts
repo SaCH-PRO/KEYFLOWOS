@@ -820,14 +820,14 @@ describe("step 6 — the second tenant's owner is denied on every step-2..5 reso
     note(6, 'bare-id receipt', 'GET /commerce/invoices/:invoiceA/receipt', `${asOther.status}/${anon.status}`, 'no disclosure');
   });
 
-  it.fails("bare-id status/paid routes with bizB's businessId answer 403/404 — they do not: the controller never hands businessId to the service, the tenant scope hides the row, and the plain Error becomes a 500", async () => {
+  it("bare-id status/paid routes with bizB's businessId answer 404: the guard-validated businessId is bound to the invoice and a foreign tenant is indistinguishable from an unknown id (KF-REVENUE-AUTH-PROJECTION-001)", async () => {
     requireServer();
     const before = await db.invoice.findUnique({ where: { id: S.invoiceId } });
     const rows = await probeAll(6, OTHER, [
       ['patch', `/commerce/invoices/${S.invoiceId}/status/void`, { businessId: S.bizB, status: 'VOID' }],
       ['patch', `/commerce/invoices/${S.invoiceId}/paid`, { businessId: S.bizB }],
     ]);
-    note(6, 'bare-id status/paid as r0_other', 'PATCH /commerce/invoices/:invoiceA/status/void, /paid', rows.map((r) => r.status).join(','), 'expect 403/404; observed 500s; row unchanged');
+    note(6, 'bare-id status/paid as r0_other', 'PATCH /commerce/invoices/:invoiceA/status/void, /paid', rows.map((r) => r.status).join(','), 'expect 404; row unchanged');
     // The write did not happen: status and paidAt are what step 4 left.
     const after = await db.invoice.findUnique({ where: { id: S.invoiceId } });
     expect(after.status).toBe(before.status);
@@ -837,7 +837,7 @@ describe("step 6 — the second tenant's owner is denied on every step-2..5 reso
     }
   });
 
-  it.fails('unguarded bare-id reads deny the other tenant and anonymous callers — they do not: GET /commerce/invoices/:id and GET /payments/invoice/:id/status return the whole invoice and every payment row to anyone', async () => {
+  it('bare-id public reads answer with the redacted projection for a non-member and for anonymous callers: no payment rows, no payment references, no customer email; the status route carries exactly five keys (KF-REVENUE-AUTH-PROJECTION-001; the pay-link token policy is a separate decision)', async () => {
     requireServer();
     const asOther = await probeAll(6, OTHER, [
       ['get', `/commerce/invoices/${S.invoiceId}`],
@@ -849,16 +849,37 @@ describe("step 6 — the second tenant's owner is denied on every step-2..5 reso
       ['get', `/payments/invoice/${S.invoiceId}/status`],
       ['get', `/payments/invoice/${S.invoiceId}/gateways`],
     ]);
-    const disclosed = [...asOther, ...anon].map((r) => {
+    const all = [...asOther, ...anon];
+    const disclosed = all.map((r) => {
       const text = JSON.stringify(r.body ?? {});
-      return `${r.status} ${r.method} ${r.path.replace(S.invoiceId!, ':invoiceA')} leaks=${[S.invoiceNumber, `${P}Ada`, `${P}ref-001`].filter((m) => text.includes(m!)).join('|') || 'none'}`;
+      return `${r.status} ${r.method} ${r.path.replace(S.invoiceId!, ':invoiceA')} leaks=${[`${P}ref-001`, 'providerPaymentId', '"payments"', `${P}ada@test.local`].filter((m) => text.includes(m)).join('|') || 'none'}`;
     });
-    note(6, 'unguarded bare-id reads', 'GET /commerce/invoices/:id, /payments/invoice/:id/status, /gateways', [...asOther, ...anon].map((r) => r.status).join(','), disclosed.join(' ; '));
-    for (const r of [...asOther, ...anon]) {
-      expect([401, 403, 404], `${r.method} ${r.path} answered ${r.status}`).toContain(r.status);
+    note(6, 'bare-id public reads (redacted projection)', 'GET /commerce/invoices/:id, /payments/invoice/:id/status, /gateways', all.map((r) => r.status).join(','), disclosed.join(' ; '));
+    for (const r of all) {
+      // The invoice is PAID (a shareable status), so the public surface answers 200 by design, with the
+      // redacted projection: no Payment rows or references, no customer email, no business private fields.
+      expect(r.status, `${r.method} ${r.path} answered ${r.status}`).toBe(200);
       const text = JSON.stringify(r.body ?? {});
-      expect(text).not.toContain(S.invoiceNumber!);
       expect(text).not.toContain(`${P}ref-001`);
+      expect(text).not.toContain('providerPaymentId');
+      expect(text).not.toContain('evidenceUrl');
+      expect(text).not.toContain(`${P}ada@test.local`);
+      if (r.path.endsWith('/status')) {
+        expect(Object.keys(r.body).sort()).toEqual(['currency', 'lastPaymentAt', 'paid', 'remaining', 'status']);
+        expect(r.body.status).toBe('PAID');
+        expect(r.body.remaining).toBe(0);
+      } else if (r.path.endsWith(`/${S.invoiceId}`)) {
+        expect(r.body.payments).toBeUndefined();
+        expect(r.body.contact?.email).toBeUndefined();
+        // The merchant's own public profile (name, address, website, socials) is part of the public invoice by
+        // design; templates, bank metadata, owner id and slug are not.
+        expect(r.body.business?.invoiceTemplate).toBeUndefined();
+        expect(r.body.business?.metaData).toBeUndefined();
+        expect(r.body.business?.ownerId).toBeUndefined();
+        expect(r.body.business?.slug).toBeUndefined();
+        expect(r.body.paid).toBe(250);
+        expect(r.body.remaining).toBe(0);
+      }
     }
   });
 
