@@ -2,6 +2,9 @@
 """
 KEYFLOWOS audit script.
 Logs in, visits key modules, captures console errors, screenshots, and network failures.
+
+The login comes from the environment, never from source:
+    KEYFLOWOS_AUDIT_EMAIL=... KEYFLOWOS_AUDIT_PASSWORD=... python3 audit-keyflowos.py
 """
 import asyncio
 import json
@@ -11,12 +14,27 @@ import sys
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
-from playwright.async_api import async_playwright, Route, Request
+# Checked before Playwright is imported, so a missing login stops the run
+# before any browser launch, HTTP call or output directory.
+EMAIL = os.environ.get("KEYFLOWOS_AUDIT_EMAIL", "")
+PASSWORD = os.environ.get("KEYFLOWOS_AUDIT_PASSWORD", "")
+_MISSING = [
+    name
+    for name, value in (("KEYFLOWOS_AUDIT_EMAIL", EMAIL), ("KEYFLOWOS_AUDIT_PASSWORD", PASSWORD))
+    if not value
+]
+if _MISSING:
+    print(
+        f"audit-keyflowos.py: {' and '.join(_MISSING)} must be set to the audit "
+        "test account login; refusing to run.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+from playwright.async_api import async_playwright, Route, Request  # noqa: E402
 
 BASE_URL = "http://localhost:5000"
 API_URL = "http://localhost:3001"
-EMAIL = "keyflowos.tt@gmail.com"
-PASSWORD = "S@chin1997"
 OUT_DIR = "audit-output"
 
 # Mix of legacy URLs (to verify redirects) and canonical URLs (to test real pages).

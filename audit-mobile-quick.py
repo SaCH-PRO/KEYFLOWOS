@@ -1,17 +1,37 @@
 #!/usr/bin/env python3
-"""Quick mobile viewport audit for KEYFLOWOS."""
+"""Quick mobile viewport audit for KEYFLOWOS.
+
+The login comes from the environment, never from source:
+    KEYFLOWOS_AUDIT_EMAIL=... KEYFLOWOS_AUDIT_PASSWORD=... python3 audit-mobile-quick.py
+"""
 import asyncio
 import json
 import os
+import re
+import sys
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
-from playwright.async_api import async_playwright, Route
-import re
+# Checked before Playwright is imported, so a missing login stops the run
+# before any browser launch, HTTP call or output directory.
+EMAIL = os.environ.get("KEYFLOWOS_AUDIT_EMAIL", "")
+PASSWORD = os.environ.get("KEYFLOWOS_AUDIT_PASSWORD", "")
+_MISSING = [
+    name
+    for name, value in (("KEYFLOWOS_AUDIT_EMAIL", EMAIL), ("KEYFLOWOS_AUDIT_PASSWORD", PASSWORD))
+    if not value
+]
+if _MISSING:
+    print(
+        f"audit-mobile-quick.py: {' and '.join(_MISSING)} must be set to the audit "
+        "test account login; refusing to run.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+from playwright.async_api import async_playwright, Route  # noqa: E402
 
 BASE_URL = "http://localhost:5000"
-EMAIL = "keyflowos.tt@gmail.com"
-PASSWORD = "S@chin1997"
 OUT_DIR = "audit-output"
 
 ROUTES = [
