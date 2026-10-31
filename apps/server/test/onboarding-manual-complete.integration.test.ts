@@ -78,13 +78,12 @@ import { createHmac } from 'node:crypto';
 import { config as loadEnv, parse as parseEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'k32a_';
-/** `_` is a LIKE wildcard; escape it so cleanup matches the literal prefix only. */
-const LIKE_P = `'k32a\\_%'`;
 const SERVER_DIR = path.resolve(__dirname, '..');
 const ENTRY = path.join(SERVER_DIR, 'dist', 'main.js');
 
@@ -270,7 +269,7 @@ async function bootstrap(user: string, company: string) {
 }
 
 async function cleanup() {
-  const biz = `(SELECT id FROM businesses WHERE owner_id LIKE ${LIKE_P} OR name LIKE ${LIKE_P})`;
+  const biz = `(SELECT id FROM businesses WHERE owner_id LIKE ${sqlLikePrefix(P)} OR name LIKE ${sqlLikePrefix(P)})`;
   const tables: Array<{ table_name: string }> = await db.$queryRawUnsafe(
     `SELECT DISTINCT table_name FROM information_schema.columns
       WHERE table_schema = 'public' AND column_name = 'business_id' AND table_name <> 'businesses'`,
@@ -289,17 +288,17 @@ async function cleanup() {
     }
   }
   for (const sql of [
-    `DELETE FROM memberships WHERE business_id IN ${biz} OR user_id LIKE ${LIKE_P}`,
-    `DELETE FROM businesses WHERE owner_id LIKE ${LIKE_P} OR name LIKE ${LIKE_P}`,
-    `DELETE FROM auth_audit_logs WHERE user_id LIKE ${LIKE_P}`,
-    `DELETE FROM user_identities WHERE user_id LIKE ${LIKE_P}`,
-    `DELETE FROM users WHERE id LIKE ${LIKE_P}`,
+    `DELETE FROM memberships WHERE business_id IN ${biz} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE owner_id LIKE ${sqlLikePrefix(P)} OR name LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM auth_audit_logs WHERE user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM user_identities WHERE user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort: cascades cover most of these */ }
   }
   const left = await db.$queryRawUnsafe(
-    `SELECT (SELECT count(*)::int FROM businesses WHERE owner_id LIKE ${LIKE_P} OR name LIKE ${LIKE_P}) AS businesses, ` +
-      `(SELECT count(*)::int FROM users WHERE id LIKE ${LIKE_P}) AS users`,
+    `SELECT (SELECT count(*)::int FROM businesses WHERE owner_id LIKE ${sqlLikePrefix(P)} OR name LIKE ${sqlLikePrefix(P)}) AS businesses, ` +
+      `(SELECT count(*)::int FROM users WHERE id LIKE ${sqlLikePrefix(P)}) AS users`,
   );
   return left?.[0] ?? { businesses: -1, users: -1 };
 }

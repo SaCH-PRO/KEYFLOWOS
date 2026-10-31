@@ -54,6 +54,11 @@
       "packet": "R0-13-CT-PERSISTENCE-PROOF"
     },
     {
+      "prefix": "k14a_",
+      "owner": "apps/server/test/identity-local-auth.integration.test.ts",
+      "packet": "R0-14-AUTH-LOCAL-SIGNIN"
+    },
+    {
       "prefix": "k17a_",
       "owner": "apps/server/test/payments-manual.integration.test.ts",
       "packet": "R0-17-PAYMENT-TX-INTEGRITY"
@@ -62,6 +67,11 @@
       "prefix": "k20a_",
       "owner": "apps/server/test/payments-mark-paid.integration.test.ts",
       "packet": "R0-20-MARKPAID-CONVERGENCE"
+    },
+    {
+      "prefix": "k32a_",
+      "owner": "apps/server/test/onboarding-manual-complete.integration.test.ts",
+      "packet": "R0-32-ONBOARD-COMPLETE-SERVER"
     },
     {
       "prefix": "k33a_",
