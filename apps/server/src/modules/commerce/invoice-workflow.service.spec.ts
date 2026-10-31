@@ -266,6 +266,47 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
     expect(h.events.emit).not.toHaveBeenCalled();
   });
 
+  // R0-PL-03 review (ST-PL03-3 / CR-1): the refund path asks the reconcile to
+  // keep a status it cannot legally move (DRAFT, or a credit-note status the
+  // transition map does not know) instead of refusing the refund.
+  for (const status of ['DRAFT', 'PARTIALLY_CREDITED', 'FULLY_CREDITED', 'PARTIAL']) {
+    it(`onIllegalTransition 'keep' on ${status} with a net balance: status kept, changed false, no write, nothing buffered or emitted`, async () => {
+      const h = build({ ...sent([{ amount: 40, status: 'SUCCESSFUL' }]), status });
+      const buffer: Array<{ name: string; payload: unknown }> = [];
+      const result = await h.service.reconcileFromPayments('inv_1', {
+        tx: h.tx.db as never,
+        eventBuffer: buffer,
+        onIllegalTransition: 'keep',
+      });
+      expect(result).toMatchObject({ status, changed: false, balance: { net: 40 } });
+      expect(h.tx.db.invoice.update).not.toHaveBeenCalled();
+      expect(h.client.calls).toEqual([]);
+      expect(buffer).toEqual([]);
+      expect(h.events.emit).not.toHaveBeenCalled();
+    });
+  }
+
+  it("default (payments): an out-of-map status (PARTIALLY_CREDITED) with a payment still throws 409 and writes nothing", async () => {
+    const h = build({ ...sent([{ amount: 40, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_CREDITED' });
+    await expect(
+      h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: [] }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.db.invoice.update).not.toHaveBeenCalled();
+  });
+
+  it("onIllegalTransition 'keep' does not suppress a legal transition (PAID -> PARTIALLY_PAID on a refund)", async () => {
+    const h = build({ ...sent([{ amount: 40, status: 'SUCCESSFUL' }]), status: 'PAID' });
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', {
+      tx: h.tx.db as never,
+      eventBuffer: buffer,
+      onIllegalTransition: 'keep',
+    });
+    expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true });
+    expect(h.tx.db.invoice.update).toHaveBeenCalledTimes(1);
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.payment_recorded']);
+  });
+
   it('without options (webhook callers): unchanged behaviour, its own $transaction and an immediate emit', async () => {
     const h = build(sent([{ amount: 100, status: 'SUCCESSFUL' }]));
     const result = await h.service.reconcileFromPayments('inv_1');

@@ -217,12 +217,21 @@ export class InvoiceWorkflowService {
    * invoice.paid / invoice.payment_recorded are pushed to the buffer and the
    * caller emits them after its commit. Without options the behaviour is
    * unchanged: own $transaction, immediate emit.
+   *
+   * R0-PL-03 review (ST-PL03-3 / CR-1): `onIllegalTransition` says what to do
+   * when the status derived from the payment rows is not reachable from the
+   * current one (DRAFT -> PARTIALLY_PAID, or any move out of a status the
+   * transition map does not know: PARTIALLY_CREDITED, FULLY_CREDITED,
+   * PARTIAL). 'throw' (default, payments and webhooks): 409. 'keep' (the
+   * manual refund): leave the status as it is, write nothing, queue no event,
+   * and return changed: false with the fresh balance.
    */
   async reconcileFromPayments(
     invoiceId: string,
     extra: {
       tx?: Prisma.TransactionClient;
       eventBuffer?: Array<{ name: string; payload: unknown }>;
+      onIllegalTransition?: 'throw' | 'keep';
     } = {},
   ): Promise<{ status: InvoiceStatus; balance: BalanceSummary; changed: boolean }> {
     const reader = extra.tx ?? (this.prisma.client as unknown as Prisma.TransactionClient);
@@ -239,6 +248,12 @@ export class InvoiceWorkflowService {
     const current = invoice.status as InvoiceStatus;
     const next = deriveStatusAfterPayment(current, balance);
     if (next === current) {
+      return { status: current, balance, changed: false };
+    }
+    if (extra.onIllegalTransition === 'keep' && !isLegalTransition(current, next)) {
+      this.logger.warn(
+        `reconcileFromPayments: invoice ${invoiceId} kept at ${current}; ${current} -> ${next} is not a legal transition (net ${balance.net} of ${balance.total})`,
+      );
       return { status: current, balance, changed: false };
     }
     this.assertLegalTransition(current, next);

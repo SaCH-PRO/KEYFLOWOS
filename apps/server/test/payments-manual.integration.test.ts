@@ -36,6 +36,19 @@
  *                                                   payment SUCCESSFUL, no reversal, invoice status unchanged, no event
  *   refund that reopens a PAID invoice           -> 201; PARTIALLY_PAID; one reversal; one event after commit
  *
+ * Review repairs (R0-PL-03 review). The race cases hold the request at the
+ * invoice lock with a barrier on CommerceService.lockInvoiceForPayment, i.e.
+ * after the pre-transaction guard has already passed:
+ *
+ *   ST-PL03-1 invoice voided / reverted to DRAFT before the lock -> 409 under the lock; nothing written
+ *             invoice soft-deleted before the lock                -> 404 under the lock; nothing written
+ *             two concurrent un-keyed full payments (KEY adapter) -> one PAID payment, the other 409 (PAID)
+ *             two concurrent keyed full payments (same key)       -> one payment, both 201 with it (R0-D2 kept)
+ *   ST-PL03-2 two concurrent payments: each response and contact audit event carries the totals read under
+ *             the lock (totalPaid agrees with newStatus; an overpayment is flagged)
+ *   ST-PL03-3 / CR-1 refund on a DRAFT (undoInvoice) or PARTIALLY_CREDITED invoice that keeps a net
+ *             balance -> 201; refunded and reversed; status left as it is (no legal transition); no event
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService and ChartOfAccountsSeederService write
@@ -85,6 +98,15 @@ const ID = {
   invConcurrent: `${P}invConcurrent`,
   invNotRefundable: `${P}invNotRefundable`,
   invRefundFail: `${P}invRefundFail`,
+  invRaceVoid: `${P}invRaceVoid`,
+  invRaceDraft: `${P}invRaceDraft`,
+  invRaceDeleted: `${P}invRaceDeleted`,
+  invRaceDouble: `${P}invRaceDouble`,
+  invRaceKeyed: `${P}invRaceKeyed`,
+  invRaceAudit: `${P}invRaceAudit`,
+  invRaceOver: `${P}invRaceOver`,
+  invRefundDraft: `${P}invRefundDraft`,
+  invRefundCredited: `${P}invRefundCredited`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -98,6 +120,8 @@ let db: any;
 let app: any;
 let redis: any;
 let commerce: CommerceService;
+/** The CommerceService class itself: lockInvoiceForPayment is a static on it. */
+let CommerceServiceClass: any;
 let workflow: InvoiceWorkflowService;
 let revenuePosting: RevenuePostingService;
 
@@ -126,6 +150,9 @@ const eventStub = {
   once: () => undefined,
   removeListener: () => undefined,
 };
+
+/** Contact timeline audit events (CrmService.logContactEvent is a recording stub). */
+const contactEvents: any[] = [];
 
 // COGS (FIN3) runs inside the reconcile when an invoice goes PAID; the stub
 // fails on demand so a failure *inside the reconcile* can be injected.
@@ -203,6 +230,34 @@ async function expectUntouched(invoiceId: string, status: string) {
   expect(invoiceEventsFor(invoiceId), `events of ${invoiceId}`).toHaveLength(0);
 }
 
+/**
+ * Barrier on CommerceService.lockInvoiceForPayment, the first statement of the
+ * payment / refund transaction and so after the pre-transaction guard: hold
+ * every call until `n` have arrived, then run `before` once (a change another
+ * request commits in the gap), then take the real lock.
+ */
+function holdAtLock(n: number, before?: () => Promise<unknown>) {
+  const original = CommerceServiceClass.lockInvoiceForPayment;
+  let arrived = 0;
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  let ran: Promise<unknown> | null = null;
+  return vi.spyOn(CommerceServiceClass, 'lockInvoiceForPayment').mockImplementation(async (...args: any[]) => {
+    arrived += 1;
+    if (arrived >= n) open();
+    await gate;
+    if (before) {
+      ran ??= before();
+      await ran;
+    }
+    return original.apply(CommerceServiceClass, args);
+  });
+}
+
+function auditsFor(invoiceId: string): any[] {
+  return contactEvents.filter((e) => e.type === 'invoice.payment_recorded' && e.data?.invoiceId === invoiceId);
+}
+
 /** Each event was emitted after its transaction committed: a fresh read at emit time already saw the event's status and payment. */
 async function expectEmittedAfterCommit(event: Emitted, paymentId: string) {
   const seen = await event.seen;
@@ -274,7 +329,7 @@ beforeAll(async () => {
       ChartOfAccountsSeederService,
       { provide: ExpensePostingService, useValue: expensePostingStub },
       { provide: EventEmitter2, useValue: eventStub },
-      { provide: CrmService, useValue: { logContactEvent: async () => null } },
+      { provide: CrmService, useValue: { logContactEvent: async (e: any) => { contactEvents.push(e); return null; } } },
       { provide: EvidenceService, useValue: {} },
       { provide: TaskAssignmentService, useValue: {} },
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
@@ -292,6 +347,7 @@ beforeAll(async () => {
     ],
   }).compile();
   commerce = moduleRef.get(CommerceService);
+  CommerceServiceClass = CommerceService;
   workflow = moduleRef.get(InvoiceWorkflowService);
   revenuePosting = moduleRef.get(RevenuePostingService);
 
@@ -356,6 +412,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   emitted.length = 0;
+  contactEvents.length = 0;
   failCogs = false;
 });
 
@@ -550,5 +607,143 @@ describe('G12: refund preconditions and the refund reconcile', () => {
     const events = invoiceEventsFor(ID.invRefundFail);
     expect(events.map((e) => e.name)).toEqual(['invoice.payment_recorded']);
     await expectEmittedAfterCommit(events[0], forty.id);
+  });
+});
+
+describe('ST-PL03-1: the state guard is re-checked under the invoice lock', () => {
+  it('PM-14: the invoice is voided / reverted to DRAFT after the pre-transaction guard passed -> 409 under the lock; nothing written', async () => {
+    for (const [inv, status] of [[ID.invRaceVoid, 'VOID'], [ID.invRaceDraft, 'DRAFT']] as const) {
+      const spy = holdAtLock(1, () => db.invoice.update({ where: { id: inv }, data: { status } }));
+      const res = await pay(inv, { amount: 40, method: 'cash', reference: `PYM-RACE-${status}` });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(res.status, `${status}: ${JSON.stringify(res.body)}`).toBe(409);
+      expect(res.body.message).toBe(`Cannot record payment on a ${status} invoice`);
+      await expectUntouched(inv, status);
+      expect(auditsFor(inv)).toHaveLength(0);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('PM-15: the invoice is soft-deleted after the pre-transaction guard passed -> 404 under the lock; nothing written', async () => {
+    holdAtLock(1, () => db.invoice.update({ where: { id: ID.invRaceDeleted }, data: { deletedAt: new Date() } }));
+    const res = await pay(ID.invRaceDeleted, { amount: 40, method: 'cash', reference: 'PYM-RACE-DEL' });
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
+    // The shared client hides soft-deleted invoices: read the row raw.
+    const [row] = await db.$queryRawUnsafe(
+      `SELECT status::text AS status, deleted_at AS "deletedAt", invoice_number AS "invoiceNumber" FROM invoices WHERE id = $1`,
+      ID.invRaceDeleted,
+    );
+    expect(row.status).toBe('SENT');
+    expect(row.deletedAt).not.toBeNull();
+    expect(await db.payment.count({ where: { invoiceId: ID.invRaceDeleted } })).toBe(0);
+    expect(
+      await db.financialTransaction.count({ where: { businessId: ID.biz, sourceType: 'Payment', reference: row.invoiceNumber } }),
+    ).toBe(0);
+    expect(invoiceEventsFor(ID.invRaceDeleted)).toHaveLength(0);
+    expect(auditsFor(ID.invRaceDeleted)).toHaveLength(0);
+  });
+
+  it('PM-16: two concurrent un-keyed full payments (KEY adapter path, no dedupe) -> one PAID payment; the other is refused 409 under the lock', async () => {
+    holdAtLock(2);
+    const call = () =>
+      commerce.recordPayment(ID.invRaceDouble, ID.biz, { amount: INVOICE_TOTAL, method: 'cash', reference: 'PYM-X4' }, { actorId: 'key_ai' });
+    const results = await Promise.allSettled([call(), call()]);
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    expect(results.map((r) => r.status).sort(), JSON.stringify(rejected.map((r) => String(r.reason)))).toEqual(['fulfilled', 'rejected']);
+    expect(rejected[0].reason).toMatchObject({ status: 409, message: 'Cannot record payment on a PAID invoice' });
+
+    const rows = await paymentsOf(ID.invRaceDouble);
+    expect(rows.map((p: any) => `${p.amount}:${p.status}`)).toEqual([`${INVOICE_TOTAL}:SUCCESSFUL`]);
+    expect(await paymentPostingsOf(ID.invRaceDouble)).toHaveLength(1);
+    expect((await invoiceRow(ID.invRaceDouble)).status).toBe('PAID');
+    expect(invoiceEventsFor(ID.invRaceDouble).map((e) => e.name)).toEqual(['invoice.paid']);
+    expect(auditsFor(ID.invRaceDouble)).toHaveLength(1);
+  });
+
+  it('PM-17: two concurrent keyed full payments with the same key -> one payment; both 201 with it (R0-D2 replay holds although the winner settled the invoice)', async () => {
+    holdAtLock(2);
+    const body = { amount: INVOICE_TOTAL, method: 'cash', idempotencyKey: 'pym-race-keyed' };
+    const [a, b] = await Promise.all([pay(ID.invRaceKeyed, body), pay(ID.invRaceKeyed, body)]);
+    expect([a.status, b.status], JSON.stringify([a.body, b.body])).toEqual([201, 201]);
+    expect(a.body.payment.id).toBe(b.body.payment.id);
+    expect(await paymentsOf(ID.invRaceKeyed)).toHaveLength(1);
+    expect(await paymentPostingsOf(ID.invRaceKeyed)).toHaveLength(1);
+    expect((await invoiceRow(ID.invRaceKeyed)).status).toBe('PAID');
+    expect(invoiceEventsFor(ID.invRaceKeyed).map((e) => e.name)).toEqual(['invoice.paid']);
+  });
+});
+
+describe('ST-PL03-2: response and audit totals are the ones read under the lock', () => {
+  it('PM-18: concurrent 60 + 40 -> the settling audit event says totalPaid 100 / PAID / overPaid 0; each response agrees with its own audit', async () => {
+    holdAtLock(2);
+    const [a, b] = await Promise.all([
+      pay(ID.invRaceAudit, { amount: 60, method: 'cash', reference: 'PYM-AUD-A' }),
+      pay(ID.invRaceAudit, { amount: 40, method: 'cash', reference: 'PYM-AUD-B' }),
+    ]);
+    expect([a.status, b.status], JSON.stringify([a.body, b.body])).toEqual([201, 201]);
+    expect((await invoiceRow(ID.invRaceAudit)).status).toBe('PAID');
+
+    const audits = auditsFor(ID.invRaceAudit);
+    expect(audits).toHaveLength(2);
+    const settled = audits.find((e) => e.data.newStatus === 'PAID');
+    const partial = audits.find((e) => e.data.newStatus === 'PARTIALLY_PAID');
+    expect(settled?.data, JSON.stringify(audits.map((e) => e.data))).toMatchObject({ totalPaid: 100, overPaid: 0 });
+    expect(partial?.data.totalPaid).toBe(partial?.data.amount);
+    for (const r of [a, b]) {
+      const audit = audits.find((e) => e.data.amount === r.body.payment.amount);
+      expect(r.body.paidAmount, JSON.stringify(r.body)).toBe(audit.data.totalPaid);
+      expect(r.body.remaining).toBe(Math.max(0, INVOICE_TOTAL - audit.data.totalPaid));
+    }
+  });
+
+  it('PM-19: concurrent 70 + 50 (an overpayment) -> the settling audit event says totalPaid 120 and overPaid 20; its response paidAmount 120, remaining 0', async () => {
+    holdAtLock(2);
+    const [a, b] = await Promise.all([
+      pay(ID.invRaceOver, { amount: 70, method: 'cash', reference: 'PYM-OVR-A' }),
+      pay(ID.invRaceOver, { amount: 50, method: 'cash', reference: 'PYM-OVR-B' }),
+    ]);
+    expect([a.status, b.status], JSON.stringify([a.body, b.body])).toEqual([201, 201]);
+    expect((await invoiceRow(ID.invRaceOver)).status).toBe('PAID');
+
+    const audits = auditsFor(ID.invRaceOver);
+    const settled = audits.find((e) => e.data.newStatus === 'PAID');
+    expect(settled?.data, JSON.stringify(audits.map((e) => e.data))).toMatchObject({ totalPaid: 120, overPaid: 20 });
+    const settling = [a, b].find((r) => r.body.payment.amount === settled.data.amount);
+    expect(settling?.body).toMatchObject({ paidAmount: 120, remaining: 0 });
+  });
+});
+
+describe('ST-PL03-3 / CR-1: a refund is not blocked by a status the workflow cannot move', () => {
+  it('PM-20: refund on an invoice reverted to DRAFT (undoInvoice) that keeps a net balance -> 201; REFUNDED, one reversal; still DRAFT; no invoice event', async () => {
+    const a = await pay(ID.invRefundDraft, { amount: 60, method: 'cash', reference: 'PYM-RD-A' });
+    const b = await pay(ID.invRefundDraft, { amount: 30, method: 'cash', reference: 'PYM-RD-B' });
+    expect([a.status, b.status], JSON.stringify([a.body, b.body])).toEqual([201, 201]);
+    await expect(commerce.undoInvoice(ID.invRefundDraft, ID.biz)).resolves.toMatchObject({ status: 'reverted_to_draft' });
+    expect((await invoiceRow(ID.invRefundDraft)).status).toBe('DRAFT');
+
+    emitted.length = 0;
+    const res = await refund(b.body.payment.id, 'booked against the wrong invoice');
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.status).toBe('REFUNDED');
+    expect(await reversalsFor(b.body.payment.id)).toHaveLength(1);
+    expect((await db.payment.findUnique({ where: { id: a.body.payment.id } })).status).toBe('SUCCESSFUL');
+    expect((await invoiceRow(ID.invRefundDraft)).status).toBe('DRAFT');
+    expect(invoiceEventsFor(ID.invRefundDraft)).toHaveLength(0);
+  });
+
+  it('PM-21: refund on a PARTIALLY_CREDITED invoice that keeps a net balance -> 201; REFUNDED, one reversal; still PARTIALLY_CREDITED; no invoice event', async () => {
+    const a = await pay(ID.invRefundCredited, { amount: 40, method: 'cash', reference: 'PYM-RC-A' });
+    const b = await pay(ID.invRefundCredited, { amount: 30, method: 'cash', reference: 'PYM-RC-B' });
+    expect([a.status, b.status], JSON.stringify([a.body, b.body])).toEqual([201, 201]);
+    // What CreditNoteService.apply writes for a partial credit (credit-note.service.ts).
+    await db.invoice.update({ where: { id: ID.invRefundCredited }, data: { status: 'PARTIALLY_CREDITED' } });
+
+    emitted.length = 0;
+    const res = await refund(b.body.payment.id, 'customer returned part');
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.status).toBe('REFUNDED');
+    expect(await reversalsFor(b.body.payment.id)).toHaveLength(1);
+    expect((await invoiceRow(ID.invRefundCredited)).status).toBe('PARTIALLY_CREDITED');
+    expect(invoiceEventsFor(ID.invRefundCredited)).toHaveLength(0);
   });
 });
