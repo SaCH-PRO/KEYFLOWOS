@@ -18,10 +18,11 @@
  * system-context callers (the KEY adapter, automation-style service calls)
  * that pass no audit context keep recording the SYSTEM actor on the
  * ContactAuditEntry and attribute no user (a null actorId) on the
- * ContactEvent. That is all the system-context cases bind: the events those
- * callers write for update, status change and single delete still say
- * actorType 'USER' (with no actorId); only contact.created and bulk delete
- * write no actorType (residual ST-C, it.todo at the end of this file).
+ * ContactEvent. As of R0-13c-CT-PATCH-VISIBILITY (residual ST-C, the cases at
+ * the end of this file) the events those callers write for update, status
+ * change and single delete also say actorType 'SYSTEM', matching the audit
+ * entry, where they used to say 'USER'; contact.created and bulk delete still
+ * write no actorType.
  * DEC-CONTACTS-002 is unchanged: the ContactAuditEntry write stays
  * fire-and-forget, so the cases here wait for the row to land.
  *
@@ -45,10 +46,11 @@
  * Cases tagged NEGATIVE CONTROL are the pre-fix failing controls: on the
  * packet's source base the event has no actorId and the audit actor is SYSTEM.
  *
- * The it.todo cases at the end of the file hand off three findings of the
- * R0-03-CT-AUDIT-ACTOR review (ST-A, ST-B, ST-C), each reproduced against the
- * real database with this harness. Their fix is in crm.service.ts, outside
- * that packet's manifest-only write set, so they are not required cases.
+ * The cases at the end of the file are the three findings of the
+ * R0-03-CT-AUDIT-ACTOR review (ST-A, ST-B, ST-C) that the R0-03 repair handed
+ * off as it.todo, each reproduced against the real database with this harness.
+ * R0-13c-CT-PATCH-VISIBILITY fixed them in crm.service.ts and made them real
+ * cases, required by scripts/proof-admission/manifests/contacts-audit-actor.json.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -668,20 +670,171 @@ describe('ST-3: bulk delete writes traces only for the rows it deleted, naming t
 });
 
 // ---------------------------------------------------------------------------
-// Review hand-offs (R0-03-CT-AUDIT-ACTOR review ST-A, ST-B, ST-C). Each was
-// reproduced against the real database with this harness on the packet head.
-// The fix is in CrmService (crm.service.ts), outside the packet's
-// manifest-only write set, so a follow-up packet turns each into a real case.
+// Review hand-offs (R0-03-CT-AUDIT-ACTOR review ST-A, ST-B, ST-C), each
+// reproduced against the real database with this harness and left here as an
+// it.todo by the R0-03 repair. R0-13c-CT-PATCH-VISIBILITY turns them into real
+// cases (its own suite, contacts-patch-visibility.integration.test.ts, covers
+// ST-A and ST-B in depth). Cases tagged NEGATIVE CONTROL fail on the R0-13c
+// base, where CrmService.updateContact read the row with the tenant predicate
+// only, never checked the new owner's membership, and wrote actorType 'USER'
+// on system-context events.
 // ---------------------------------------------------------------------------
 
-describe('review hand-offs: PATCH access and system-actor residuals (fix outside the R0-03 write set)', () => {
-  it.todo(
-    "FOLLOW-UP PACKET (ST-A): PATCH crm/businesses/:businessId/contacts/:contactId applies the M7 visibility clause, so a crm 'write' STAFF member (editScope 'any', viewAll) who gets 404 on GET for another member's PRIVATE contact also gets 404 on PATCH {} and on PATCH {jobTitle}: no row (email, phone, notesInternal) in the body, no change, no ContactEvent and no ContactAuditEntry. Today both PATCHes answer 200 with the full row and the edit lands. The fix is in CrmService.updateContact (the access block and the in-transaction findFirst, which use only contactWhereWithId).",
+/** A live bizA contact with sensitive fields, seeded directly (no route traffic). */
+async function seedSensitiveContact(visibility: 'PRIVATE' | 'TEAM', ownerId: string) {
+  seq += 1;
+  const email = `${P}handoff-${seq}@test.local`;
+  return db.contact.create({
+    data: {
+      id: `${P}c_handoff_${seq}`, businessId: ID.bizA, firstName: `${P}Handoff${seq}`, ownerId, visibility,
+      email, emailNormalized: email, phone: `+1555013${String(seq).padStart(4, '0')}`, notesInternal: `${P}internal-notes-${seq}`,
+    },
+  });
+}
+
+function detail(actor: string, contactId: string) {
+  return request(app.getHttpServer()).get(`/crm/businesses/${ID.bizA}/contacts/${contactId}`).set('x-test-user', actor);
+}
+
+async function rowSnapshot(contactId: string) {
+  const rows: Array<{ row: string }> = await db.$queryRawUnsafe(
+    'SELECT to_jsonb(c)::text AS row FROM contacts c WHERE c.id = $1', contactId,
   );
-  it.todo(
-    "FOLLOW-UP PACKET (ST-B): a PATCH whose ownerId changes the owner is refused 400 with nothing written when the new owner is not a member of this business (another tenant's user, an unknown id, or ''), as POST /contacts/bulk/reassign and POST /contacts already refuse it. Today the owner and a crm_reassign STAFF member get 200, owner_id is written, and the 'reassigned' audit entry names the outsider. The fix is in CrmService.updateContact (the changesOwner check, which tests only the reassign permission).",
-  );
-  it.todo(
-    "RESIDUAL (ST-C): system-context callers (the KEY adapter, automation) write actorType SYSTEM, never USER, on the contact.updated, status.changed and contact.deleted ContactEvent rows. Today those rows say actorType 'USER' with a null actorId (only contact.created and bulk delete write no actorType), so an AI- or automation-driven edit reads as a user event. The fix is in CrmService.updateContact and softDeleteContact (the hard-coded actorType 'USER' event meta).",
-  );
+  return JSON.parse(rows[0].row);
+}
+
+describe('ST-A: PATCH applies the GET visibility clause', () => {
+  it("NEGATIVE CONTROL: a crm 'write' STAFF member who gets 404 on GET for the owner's PRIVATE contact also gets 404 on PATCH {} and on PATCH {jobTitle}: no row in the body, no change, no ContactEvent and no ContactAuditEntry", async () => {
+    const contact = await seedSensitiveContact('PRIVATE', ID.owner);
+    expect((await detail(ID.staff, contact.id)).status).toBe(404);
+    await settle();
+    const before = await traceCounts();
+    const rowBefore = await rowSnapshot(contact.id);
+
+    for (const body of [{}, { jobTitle: `${P}Hijacked` }]) {
+      const res = await patch(ID.staff, contact.id, body);
+      expect(res.status, JSON.stringify(body)).toBe(404);
+      expect(res.body.message).toBe('Contact not found');
+      for (const key of ['id', 'email', 'phone', 'notesInternal']) expect(res.body).not.toHaveProperty(key);
+      for (const secret of [contact.email, contact.phone, contact.notesInternal]) expect(res.text).not.toContain(String(secret));
+    }
+    await settle();
+    expect(await traceCounts()).toEqual(before);
+    expect(await rowSnapshot(contact.id)).toEqual(rowBefore);
+    expect(await contactTraces(contact.id)).toEqual({ contactEvents: 0, audits: 0 });
+  });
+});
+
+describe('ST-B: a PATCH reassignment must name a member of this business', () => {
+  it("NEGATIVE CONTROL: the owner and a crm_reassign STAFF member PATCHing ownerId to another tenant's user, an unknown id or '' are refused 400 with nothing written, and no 'reassigned' audit entry names the outsider", async () => {
+    for (const actor of [ID.owner, RID.reassigner]) {
+      for (const ownerId of [RID.ownerB, `${P}not-a-user-at-all`, '']) {
+        const label = `${actor} -> '${ownerId}'`;
+        const contact = await seedSensitiveContact('TEAM', ID.owner);
+        await settle();
+        const before = await traceCounts();
+        const res = await patch(actor, contact.id, { ownerId });
+        expect(res.status, label).toBe(400);
+        expect(String(res.body.message), label).toMatch(/must belong to a member of this business/);
+        await settle();
+        expect(await traceCounts(), label).toEqual(before);
+        expect((await liveRow(contact.id)).owner_id, label).toBe(ID.owner);
+        expect(await contactTraces(contact.id), label).toEqual({ contactEvents: 0, audits: 0 });
+      }
+    }
+  });
+});
+
+describe('ST-C: system-context callers record the SYSTEM actor on the ContactEvent too', () => {
+  it('NEGATIVE CONTROL: a KEY adapter update and status change write actorType SYSTEM with no actorId on contact.updated and status.changed, matching the SYSTEM audit entry', async () => {
+    const contact = await keyAdapter.createContact({ businessId: ID.bizA, firstName: `${P}KeyStatus` });
+    await auditEntries(contact.id, 'created');
+
+    await keyAdapter.updateContact({ businessId: ID.bizA, contactId: contact.id, status: 'CLIENT' });
+    const updated = await events(contact.id, 'contact.updated');
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({ actorType: 'SYSTEM', actorId: null });
+    const statusChanged = await events(contact.id, 'status.changed');
+    expect(statusChanged).toHaveLength(1);
+    expect(statusChanged[0]).toMatchObject({ actorType: 'SYSTEM', actorId: null, data: { from: 'LEAD', to: 'CLIENT' } });
+    const audits = await auditEntries(contact.id, 'updated');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].actor).toEqual({ type: 'SYSTEM' });
+  });
+
+  it('NEGATIVE CONTROL: a KEY adapter delete writes actorType SYSTEM with no actorId on contact.deleted, matching the SYSTEM audit entry', async () => {
+    const contact = await keyAdapter.createContact({ businessId: ID.bizA, firstName: `${P}KeyDelete` });
+    await auditEntries(contact.id, 'created');
+
+    await keyAdapter.deleteContact({ businessId: ID.bizA, contactId: contact.id });
+    const deleted = await events(contact.id, 'contact.deleted');
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).toMatchObject({ actorType: 'SYSTEM', actorId: null });
+    const audits = await auditEntries(contact.id, 'deleted');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].actor).toEqual({ type: 'SYSTEM' });
+  });
+
+  it('NEGATIVE CONTROL: the automation / flow-executor shape (CrmService.updateContact with tags, no context) writes actorType SYSTEM with no actorId on contact.updated', async () => {
+    const contact = await crm.createContact({ businessId: ID.bizA, firstName: `${P}AutoSystem` });
+    await auditEntries(contact.id, 'created');
+
+    await crm.updateContact({ businessId: ID.bizA, contactId: contact.id, tags: ['automated'] });
+    const updated = await events(contact.id, 'contact.updated');
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({ actorType: 'SYSTEM', actorId: null });
+    const audits = await auditEntries(contact.id, 'updated');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].actor).toEqual({ type: 'SYSTEM' });
+  });
+
+  it('the same edits through the HTTP routes keep recording the requesting member as USER on contact.updated, status.changed and contact.deleted', async () => {
+    const contact = await seedContact(ID.owner);
+    expect((await patch(ID.staff, contact.id, { status: 'CLIENT' })).status).toBe(200);
+    expect((await events(contact.id, 'contact.updated'))[0]).toMatchObject({ actorType: 'USER', actorId: ID.staff });
+    expect((await events(contact.id, 'status.changed'))[0]).toMatchObject({ actorType: 'USER', actorId: ID.staff });
+    expect((await del(ID.owner, contact.id)).status).toBe(200);
+    expect((await events(contact.id, 'contact.deleted'))[0]).toMatchObject({ actorType: 'USER', actorId: ID.owner });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review repair (R0-13c-CT-PATCH-VISIBILITY review ST-R4) and one hand-off
+// (ST-R3 / CR-1), each reproduced against the real database. The NEGATIVE
+// CONTROL fails on the reviewed head 45ede9cf, where a call that names its
+// member only as actorUserId (no audit context) was recorded as SYSTEM.
+// ---------------------------------------------------------------------------
+
+describe('ST-C: only a call that names no actor is recorded as SYSTEM', () => {
+  it('NEGATIVE CONTROL: POST /contacts/:id/enrich (ContactEnrichmentService hands CrmService.updateContact the member as actorUserId, with no audit context) records that member as USER on contact.updated and on the updated audit entry; a single delete called the same way does too', async () => {
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { ContactEnrichmentService } = await import('../src/modules/crm/enrichment/contact-enrichment.service');
+    // The enabled stand-in for the paid provider: no network, one match.
+    const provider = { key: 'stub', enabled: true, enrich: async () => ({ status: 'match', result: { jobTitle: `${P}Filled` } }) };
+    const enrichment = new ContactEnrichmentService(app.get(PrismaService), crm, provider as any);
+
+    const contact = await seedSensitiveContact('TEAM', ID.owner);
+    // Exactly what ContactEnrichmentController forwards for the requesting member.
+    const outcome = await enrichment.enrichContact({ businessId: ID.bizA, contactId: contact.id, actorUserId: ID.staff, force: true });
+    expect(outcome).toMatchObject({ status: 'enriched', filled: ['jobTitle'] });
+    const updated = await events(contact.id, 'contact.updated');
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({ actorType: 'USER', actorId: ID.staff });
+    const audits = await auditEntries(contact.id, 'updated');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].actor).toEqual({ type: 'USER', id: ID.staff });
+
+    await crm.softDeleteContact({ businessId: ID.bizA, contactId: contact.id, actorUserId: ID.owner });
+    const deleted = await events(contact.id, 'contact.deleted');
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).toMatchObject({ actorType: 'USER', actorId: ID.owner });
+    const deletedAudits = await auditEntries(contact.id, 'deleted');
+    expect(deletedAudits).toHaveLength(1);
+    expect(deletedAudits[0].actor).toEqual({ type: 'USER', id: ID.owner });
+  });
+
+  // Hand-off, not fixed here: the fix is in contact-enrichment.service.ts,
+  // outside the R0-13c write set. Kept in this suite because its manifest
+  // admits non-required cases; contacts-patch-visibility.json is strict.
+  it.todo("review hand-off (R0-13c review ST-R3 / CR-1): POST /contacts/:id/enrich applies the GET visibility clause before the provider call. Reproduced: a crm 'write' STAFF member enriching another member's PRIVATE contact gets 200 no_match (custom.enrichment stamped on the hidden row) or, on a match, a paid lookup that received the contact's email and name followed by 404, where an unknown id gets 404 with no lookup. Fix: visibilityClause in ContactEnrichmentService's contact lookup and assertCanEdit, so a contact the caller cannot see answers 404 like an unknown id with no provider call and nothing stamped");
 });
