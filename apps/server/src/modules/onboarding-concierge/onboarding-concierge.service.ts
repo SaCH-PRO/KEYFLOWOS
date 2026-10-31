@@ -1154,6 +1154,15 @@ EXTRACTED: archetype=service_provider`;
    * resolveCompletionActor), checked before anything else, and the completion
    * and the disclaimer acceptance it records are written to team_activity_logs
    * against that actor, in the completion transaction.
+   *
+   * R0-SEC-04 (review SEC03-2): completion happens once. The read below is
+   * only a fast path; two calls can both read "not complete". The decision is
+   * the claim, a conditional update made first in the completion transaction:
+   * it matches only a business not yet completed here (no flag, or a flag
+   * without onboardingCompletedAt, which only this method writes). A
+   * concurrent claim waits on the row lock and then matches nothing, so that
+   * call answers alreadyComplete and writes no demo data, disclaimer or
+   * activity row.
    */
   async markOnboardingComplete(businessId: string) {
     const business = await this.prisma.client.business.findUnique({
@@ -1178,25 +1187,27 @@ EXTRACTED: archetype=service_provider`;
 
     const genomeRecommendation = await this.threePillarRecommendation(businessId);
 
-    const demoData = await this.prisma.client.$transaction(async (tx) => {
-      await tx.business.update({
-        where: { id: businessId },
+    const completion = await this.prisma.client.$transaction(async (tx) => {
+      const claim = await tx.business.updateMany({
+        where: { id: businessId, OR: [{ onboardingComplete: false }, { onboardingCompletedAt: null }] },
         data: {
           onboardingComplete: true,
           onboardingCompletedAt: new Date(),
           onboardingStep: 'complete',
         },
       });
+      if (claim.count === 0) return null;
 
       const seeded = await this.demoSeeder.seedDemoData(businessId, tx);
       await this.awardSetupMilestone(businessId, 'onboardingComplete', tx);
       const disclaimerAcceptedAt = await this.ensureLegalDisclaimerAccepted(businessId, tx);
       await this.recordCompletionActivity(tx, businessId, actorId, seeded, disclaimerAcceptedAt);
 
-      return seeded;
+      return { demoData: seeded };
     });
 
-    return { complete: true, demoData, genomeRecommendation };
+    if (!completion) return { complete: true, alreadyComplete: true };
+    return { complete: true, demoData: completion.demoData, genomeRecommendation };
   }
 
   /**
@@ -1214,15 +1225,16 @@ EXTRACTED: archetype=service_provider`;
    * keeps the platform bypass BusinessGuard already grants it; nothing here
    * widens that.
    *
-   * This guards POST /complete only. On this base the profile PATCH
-   * (PATCH /identity/businesses/:businessId: AuthGuard and BusinessGuard, then
-   * IdentityService.updateBusiness) still lets any member write
+   * This guards POST /complete. The profile PATCH
+   * (PATCH /identity/businesses/:businessId) used to let any member write
    * onboardingComplete, without an actor row, a disclaimer acceptance or demo
-   * data. Closing that is R0-09-ID-HARDEN (owner-only PATCH, onboardingComplete
-   * dropped from it), so D-11 holds end to end only once R0-09 lands. Until
-   * then markOnboardingComplete does not trust that flag: a business counts as
-   * already complete only with onboardingCompletedAt, which only this method
-   * writes, so a flag the PATCH set is still completed in full by the owner.
+   * data; R0-09-ID-HARDEN closed that (owner-only PATCH, onboardingComplete
+   * dropped from UpdateBusinessDto), so D-11 holds end to end (proven on a
+   * real database by onboarding-manual-complete.integration.test.ts,
+   * R0-SEC-04). markOnboardingComplete still does not trust a flag written
+   * elsewhere (a row from before R0-09, say): a business counts as already
+   * complete only with onboardingCompletedAt, which only this method writes,
+   * so such a flag is still completed in full by the owner.
    *
    * The actor is the authenticated user TenantInterceptor bound to this
    * request; with no request context, or one for another business, completion

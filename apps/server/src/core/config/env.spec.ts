@@ -127,11 +127,76 @@ describe('validateServerEnv — the DEPLOYMENT.md placeholder (review repair SEC
         if (value) values.add(value);
       }
     }
-    // DEPLOYMENT.md carries one today; when a docs packet blanks it, this
-    // still holds with nothing to check.
+    // R0-SEC-04 blanked the DEPLOYMENT.md lines, so this usually has nothing
+    // to check; the emptiness test below is what keeps them blank.
     for (const value of values) {
       const report = validateServerEnv(env({ NODE_ENV: 'production', SUPABASE_JWT_SECRET: value }));
       expect({ value, ok: report.ok }).toEqual({ value, ok: false });
+    }
+  });
+});
+
+/**
+ * R0-SEC-04 review repair CR-1: R0-SEC-04 blanked both DEPLOYMENT.md lines
+ * (local block and the NODE_ENV=production Railway block). The ratchet above
+ * passes with `your-jwt-secret` restored, since that value is on the deny-list,
+ * so this test is what proves the docs and templates ship no value at all.
+ */
+describe('docs and templates leave SUPABASE_JWT_SECRET empty (R0-SEC-04 review repair CR-1)', () => {
+  // Every assignment, wherever it sits on the line: plain, `export`, commented
+  // out, quoted, or inside a command such as `fly secrets set ...`.
+  const ASSIGNMENT = /(?<![A-Za-z0-9_])SUPABASE_JWT_SECRET[ \t]*=[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|([^\s#`|]*))/g;
+  const SOURCES = ['DEPLOYMENT.md', '.env.example', 'infrastructure/production.env.template', 'MIGRATION.md', 'README.md'];
+  const MUST_SET = ['DEPLOYMENT.md', '.env.example', 'infrastructure/production.env.template'];
+
+  function assignments(): Array<{ at: string; value: string }> {
+    const root = resolve(__dirname, '../../../../..');
+    expect(existsSync(resolve(root, 'pnpm-workspace.yaml'))).toBe(true);
+    const found: Array<{ at: string; value: string }> = [];
+    for (const rel of SOURCES) {
+      const file = resolve(root, rel);
+      if (!existsSync(file)) {
+        expect(MUST_SET, `${rel} is missing`).not.toContain(rel);
+        continue;
+      }
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          for (const m of line.matchAll(ASSIGNMENT)) {
+            found.push({ at: `${rel}:${i + 1}`, value: (m[1] ?? m[2] ?? m[3] ?? '').trim() });
+          }
+        });
+    }
+    return found;
+  }
+
+  it('DEPLOYMENT.md, .env.example and the production template each set it, and no source gives it a value', () => {
+    const found = assignments();
+    // Not vacuous: the scan sees the blank lines it is guarding.
+    for (const rel of MUST_SET) {
+      expect(found.filter((a) => a.at.startsWith(`${rel}:`)).length, rel).toBeGreaterThan(0);
+    }
+    expect(found.filter((a) => a.value !== '')).toEqual([]);
+  });
+
+  it.each([
+    ['plain', 'SUPABASE_JWT_SECRET=your-jwt-secret', 'your-jwt-secret'],
+    ['export', 'export SUPABASE_JWT_SECRET="sec04-x"', 'sec04-x'],
+    ['commented out', '# SUPABASE_JWT_SECRET=sec04-y', 'sec04-y'],
+    ['inside a command', 'fly secrets set SUPABASE_JWT_SECRET=sec04-z --app keyflowos', 'sec04-z'],
+    ['blank', 'SUPABASE_JWT_SECRET=', ''],
+    ['blank with a comment', 'SUPABASE_JWT_SECRET=   # leave empty', ''],
+  ])('the scan reads a %s assignment', (_label, line, value) => {
+    expect([...line.matchAll(ASSIGNMENT)].map((m) => (m[1] ?? m[2] ?? m[3] ?? '').trim())).toEqual([value]);
+  });
+
+  it('the scan ignores prose and table cells that name the variable without assigning it', () => {
+    for (const line of [
+      '# Leave SUPABASE_JWT_SECRET empty with a hosted Supabase project, and never deploy',
+      '| `SUPABASE_JWT_SECRET` | Server | Leave empty for Release 0 |',
+      'NEXT_SUPABASE_JWT_SECRET_X=sec04-other',
+    ]) {
+      expect([...line.matchAll(ASSIGNMENT)], line).toEqual([]);
     }
   });
 });

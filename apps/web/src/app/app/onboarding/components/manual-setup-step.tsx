@@ -24,15 +24,19 @@ import { getStoredBusinessId } from "@/lib/workspace";
  * model call (R0-32). Nothing here touches /ai/*, so it works with every AI
  * provider down.
  *
- * Who may finish (review SEC-R006-1). POST .../complete admits only the owner,
- * a SUPER_ADMIN or a member with settings write (R0-32 ST-R032-1), but the
- * PATCH route admits any member and writes no audit row (ST-R032-2, R0-09).
- * So the profile is written first only when the browser can tell the actor is
- * the owner or a SUPER_ADMIN. For anyone else completion is asked for first:
- * the server decides who is acting before it looks at the profile, so a 403
- * ONBOARDING_COMPLETE_FORBIDDEN arrives before anything is written and the
- * form gives way to "ask the owner", while ONBOARDING_PROFILE_INCOMPLETE shows
- * the actor may finish, so the profile is saved and completion asked again.
+ * Who may finish (review SEC-R006-1, then owner ruling D-11). Only the
+ * business owner can finish onboarding: POST .../complete admits the owner
+ * (Business.ownerId or an OWNER membership) or a SUPER_ADMIN on the platform
+ * bypass, and no ADMIN or STAFF member whatever their scopes, settings write
+ * included (R0-SEC-03); PATCH /identity/businesses/:id is owner-only too
+ * (R0-09). The browser knows only Business.ownerId, so the profile is written
+ * first only when it can tell the actor is that owner or a SUPER_ADMIN. For
+ * anyone else completion is asked for first: the server decides who is acting
+ * before it looks at the profile, so a 403 ONBOARDING_COMPLETE_FORBIDDEN
+ * arrives before anything is written and the form gives way to "ask the
+ * owner", while ONBOARDING_PROFILE_INCOMPLETE shows the actor is an owner the
+ * browser could not recognise, so the profile is saved and completion asked
+ * again.
  *
  * The form's state lives in useManualSetup, which the page holds above the
  * onboarding shell's per-step container (review CR-R006-2): a step change
@@ -57,8 +61,8 @@ const COMMON_CURRENCIES = ["TTD", "USD", "JMD", "BBD", "XCD", "GYD", "EUR", "GBP
 
 const FIELD_ORDER: MinimalProfileField[] = ["name", "currency", "timezone"];
 
-const FORBIDDEN_MESSAGE =
-  "Only the business owner or a member with settings write access can finish onboarding.";
+/** The server's own words for the refusal (R0-SEC-03), used when its reply carries none. */
+const FORBIDDEN_MESSAGE = "Only the business owner can finish onboarding.";
 
 const BUSINESS_SWITCHED_MESSAGE =
   "Another tab switched this browser to a different business. Reload this page to finish setup for the business you are using now.";
@@ -124,7 +128,10 @@ function stringList(value: unknown): string[] | null {
 function completionFailure(error: string | null, rawError: Record<string, unknown> | null | undefined): Failure {
   const details = (rawError?.details ?? {}) as Record<string, unknown>;
   if (rawError?.code === "ONBOARDING_COMPLETE_FORBIDDEN") {
-    return { kind: "forbidden", message: error ?? FORBIDDEN_MESSAGE };
+    // The server's message when it sent one; never a transport fallback such
+    // as "Request failed", which says nothing about who may finish.
+    const serverMessage = typeof rawError.message === "string" && rawError.message.trim() ? rawError.message : null;
+    return { kind: "forbidden", message: serverMessage ?? FORBIDDEN_MESSAGE };
   }
   if (rawError?.code === "ONBOARDING_PROFILE_INCOMPLETE") {
     const fields = (stringList(details.missingFields) ?? stringList(rawError.missingFields) ?? []).filter(
