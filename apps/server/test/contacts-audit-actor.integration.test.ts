@@ -318,8 +318,12 @@ describe('a member edits a contact through the HTTP routes: the member is the re
     expect(audits[0].actor).toEqual({ type: 'USER', id: ID.owner });
     expect(audits[0].changedFields).toEqual(['deletedAt']);
 
-    const row = await db.contact.findFirst({ where: { id: contactId }, select: { deletedAt: true } });
-    expect(row?.deletedAt).toBeInstanceOf(Date);
+    // Raw SQL: the soft-delete extension hides the row from the model client.
+    const rows: Array<{ deleted_at: Date | null }> = await db.$queryRawUnsafe(
+      'SELECT deleted_at FROM contacts WHERE id = $1', contactId,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].deleted_at).toBeInstanceOf(Date);
   });
 });
 

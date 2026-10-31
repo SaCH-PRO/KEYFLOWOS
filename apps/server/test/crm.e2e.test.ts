@@ -261,6 +261,7 @@ describe('CRM e2e', () => {
       .expect(200);
     expect(crmServiceMock.updateContact).toHaveBeenCalledWith(
       expect.objectContaining({ businessId: 'biz_2', contactId: 'contact_99', status: 'CLIENT' }),
+      expect.objectContaining({ actor: { type: 'USER', id: 'user_1' } }),
     );
   });
 
@@ -459,6 +460,7 @@ describe('CRM e2e', () => {
       expect(res.body).not.toHaveProperty('id');
       expect(crmServiceMock.createContact).toHaveBeenCalledWith(
         expect.objectContaining({ businessId: 'biz_1', email: 'alice@example.com', actorUserId: 'user_1' }),
+        expect.objectContaining({ actor: { type: 'USER', id: 'user_1' } }),
       );
       await new Promise((r) => setImmediate(r));
       expect(prisma.teamActivityLogs).toHaveLength(0);
@@ -478,6 +480,7 @@ describe('CRM e2e', () => {
       expect(res.body.existingContactId).toBe('contact_existing');
       expect(crmServiceMock.updateContact).toHaveBeenCalledWith(
         expect.objectContaining({ businessId: 'biz_2', contactId: 'contact_99', phone: '+18685550100' }),
+        expect.objectContaining({ actor: { type: 'USER', id: 'user_1' } }),
       );
       await new Promise((r) => setImmediate(r));
       expect(prisma.teamActivityLogs).toHaveLength(0);

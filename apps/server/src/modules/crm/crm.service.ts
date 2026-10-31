@@ -171,6 +171,18 @@ export class CrmService {
     });
   }
 
+  /**
+   * ContactEvent actor fields for an explicit audit actor (a controller
+   * passing the authenticated member). Callers that pass no context (system
+   * jobs, automations, the KEY adapter) get nothing here, so the event meta
+   * they have always written is unchanged and no user is attributed.
+   */
+  private eventActor(ctx?: AuditContext | null): { actorType?: string; actorId?: string } {
+    const actor = ctx?.actor;
+    if (!actor) return {};
+    return { actorType: actor.type, actorId: actor.id ?? undefined };
+  }
+
   async healthPing(): Promise<void> {
     await this.prisma.client.$queryRaw`SELECT 1`;
   }
@@ -543,7 +555,7 @@ export class CrmService {
         lastName,
         email,
         source: input.source ?? 'manual',
-      }, undefined, tx);
+      }, this.eventActor(_audit), tx);
 
       return created;
     }).catch((err: unknown) => this.rejectContactIdentityTaken(err, input.businessId, { emailNormalized, phoneNormalized }, input.actorUserId));
@@ -843,7 +855,7 @@ export class CrmService {
           input.contactId,
           'contact.updated',
           { updatedFields },
-          { actorType: 'USER', source: 'crm' },
+          { actorType: 'USER', source: 'crm', ...this.eventActor(_audit) },
           tx,
         );
       }
@@ -854,7 +866,7 @@ export class CrmService {
           input.contactId,
           'status.changed',
           { from: existingContact.status, to: input.status },
-          { actorType: 'USER', source: 'crm' },
+          { actorType: 'USER', source: 'crm', ...this.eventActor(_audit) },
           tx,
         );
       }
@@ -920,7 +932,7 @@ export class CrmService {
       input.contactId,
       'contact.deleted',
       { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() },
-      { actorType: 'USER', source: 'crm' },
+      { actorType: 'USER', source: 'crm', ...this.eventActor(_audit) },
     );
     const deleted = await this.prisma.client.contact.update({ where: { id: input.contactId }, data: { deletedAt: new Date() } });
     this.auditContact({
