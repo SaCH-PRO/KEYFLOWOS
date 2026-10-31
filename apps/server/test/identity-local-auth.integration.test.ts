@@ -71,6 +71,8 @@ const PINNED_KEYS = [
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',
   'SUPABASE_JWT_SECRET',
   'ADMIN_JWT_SECRET',
+  // The invite block sets it per case; NODE_ENV=test leaves it off when unset.
+  'AUTH_REQUIRE_EMAIL_VERIFICATION',
 ] as const;
 const saved: Partial<Record<(typeof PINNED_KEYS)[number], string | undefined>> = {};
 
@@ -141,6 +143,33 @@ function setSecret(value: string | undefined) {
   else process.env.SUPABASE_JWT_SECRET = value;
 }
 
+/**
+ * Review repair (SEC01-T1, CR-1): the only Supabase call bootstrap can make is
+ * the service-role user lookup that proves an invitee owns its address. The
+ * controller's SupabaseAdminService is this recording stand-in: `records` is
+ * what the Supabase project would answer, `lookups` every id asked about. It
+ * makes no network call.
+ */
+type SupabaseRecord = { id: string; email: string; email_confirmed_at: string | null };
+const supabaseAdmin = {
+  records: new Map<string, SupabaseRecord>(),
+  lookups: [] as string[],
+  isConfigured: () => true,
+  getClient: () => ({
+    auth: {
+      admin: {
+        getUserById: async (id: string) => {
+          supabaseAdmin.lookups.push(id);
+          const user = supabaseAdmin.records.get(id);
+          return user
+            ? { data: { user }, error: null }
+            : { data: { user: null }, error: { message: 'User not found', status: 404 } };
+        },
+      },
+    },
+  }),
+};
+
 let app: INestApplication;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the @keyflow/db client is loaded dynamically after env
 let db: any;
@@ -156,20 +185,28 @@ async function rowsForForgedSubs(): Promise<number> {
 /**
  * Hard-delete every row the bootstrap block seeds or the bootstrap route
  * creates. The businesses bootstrap creates get generated ids, so they are
- * found by their prefixed owner. Raw SQL: User and Business are soft-deleted
- * models, so the client's deleteMany would only set deletedAt.
+ * found by their prefixed owner; an invite placeholder gets a generated id, so
+ * it is found by its prefixed email. Raw SQL: User and Business are
+ * soft-deleted models, so the client's deleteMany would only set deletedAt.
+ *
+ * The forged-sub ids (SUBS) are left out on purpose (review repair CR-2): the
+ * "no row for a forged sub" checks in beforeAll and afterAll run after this
+ * cleanup, and they could never fail if it deleted those rows first.
  */
 async function cleanupBootstrapRows() {
   const owned = `(SELECT id FROM businesses WHERE id LIKE ${sqlLikePrefix(P)} OR owner_id LIKE ${sqlLikePrefix(P)})`;
+  const prefixedUsers = `(SELECT id FROM users WHERE (id LIKE ${sqlLikePrefix(P)} OR email LIKE ${sqlLikePrefix(P)}) AND NOT (id = ANY($1::text[])))`;
+  const forged = Object.values(SUBS);
   for (const sql of [
-    `DELETE FROM team_activity_logs WHERE business_id IN ${owned} OR user_id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM memberships WHERE business_id IN ${owned} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id IN ${owned} OR user_id IN ${prefixedUsers}`,
+    `DELETE FROM memberships WHERE business_id IN ${owned} OR user_id IN ${prefixedUsers}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)} OR owner_id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM sessions WHERE user_id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM user_identities WHERE user_id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)} OR email LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM sessions WHERE user_id IN ${prefixedUsers}`,
+    `DELETE FROM user_identities WHERE user_id IN ${prefixedUsers}`,
+    `DELETE FROM users WHERE id IN ${prefixedUsers}`,
   ]) {
-    await db.$executeRawUnsafe(sql);
+    if (sql.includes('$1')) await db.$executeRawUnsafe(sql, forged);
+    else await db.$executeRawUnsafe(sql);
   }
 }
 
@@ -198,7 +235,9 @@ beforeAll(async () => {
   // are the shipped classes on the real PrismaService; only collaborators the
   // bootstrap path never calls are stood in (the service's blueprint and
   // default-trigger services; the controller's signup, password, AI-usage,
-  // business-context, auth-security and Supabase-admin services).
+  // business-context and auth-security services). The Supabase-admin service
+  // is the recording stand-in above. The team invite and removal routes run
+  // behind the real BusinessGuard and ModuleScopeGuard.
   const { IdentityController } = await import('../src/modules/identity/identity.controller');
   const { IdentityService } = await import('../src/modules/identity/identity.service');
   const { IdentitySignupService } = await import('../src/modules/identity/identity-signup.service');
@@ -236,7 +275,7 @@ beforeAll(async () => {
       { provide: AuthSecurityService, useValue: notUsedByBootstrap },
       { provide: BusinessContextService, useValue: notUsedByBootstrap },
       { provide: AiUsageService, useValue: notUsedByBootstrap },
-      { provide: SupabaseAdminService, useValue: notUsedByBootstrap },
+      { provide: SupabaseAdminService, useValue: supabaseAdmin },
     ],
   }).compile();
 
@@ -518,7 +557,262 @@ describe('R0-SEC-01 — POST /identity/bootstrap binds by verified subject and n
     for (const v of VICTIMS) expect(await victimState(v.id, v.biz)).toEqual(intact(v.id, v.role));
   });
 
-  it('bootstrap never contacted Supabase: no fetch was attempted', () => {
+  it('bootstrap never contacted Supabase: no fetch was attempted, and no account collision asked for an ownership proof', () => {
+    expect(outbound).toEqual([]);
+    expect(supabaseAdmin.lookups).toEqual([]);
+  });
+});
+
+// ── R0-SEC-01 review repair (SEC01-T1, CR-1): team invitations ───────────────
+//
+// inviteTeamMember creates a placeholder User (generated id, role USER, the
+// invited address) for an address with no account, and hangs the pending
+// membership on it. R0-SEC-01's 409 treated that row as an account, so an
+// invitation to anyone without an account could never be accepted, and any
+// signed-up user (OWNER of its own bootstrap business) could lock an address
+// out of sign-up for good by inviting it and removing the membership. Pinned
+// design:
+//   (a) the placeholder carries a server-set marker; bootstrap adopts only a
+//       marked row nobody ever signed in as, re-checked inside the move's
+//       transaction; every other holder is still an account (409
+//       account_email_in_use, the block above);
+//   (b) a pending membership grants authority in the inviting business, so it
+//       moves to the caller only when the caller is proven to own the address:
+//       AUTH_REQUIRE_EMAIL_VERIFICATION on, and the Supabase user with the
+//       token's sub holds the address with email_confirmed_at set. Otherwise
+//       409 invite_email_unverified, and nothing is written;
+//   (c) a placeholder whose invitation was removed carries nothing, and the
+//       owner of the address bootstraps through it without any proof.
+
+const INV = {
+  inviteeSub: `${P}inv_invitee_sub`,
+  inviteeEmail: `${P}inv_invitee@test.local`,
+  /** The real owner of an address a stranger invited and then un-invited. */
+  victimSub: `${P}inv_victim_sub`,
+  victimEmail: `${P}inv_victim@test.local`,
+  /** A row that holds the marker but is no longer a never-bound placeholder. */
+  boundId: `${P}inv_bound`,
+  /** A pre-repair invite placeholder, or any account: no marker. */
+  legacyId: `${P}inv_legacy`,
+};
+
+const confirmed = (id: string, email: string): SupabaseRecord => ({
+  id,
+  email,
+  email_confirmed_at: '2026-10-01T00:00:00Z',
+});
+
+/** The inviter is BOOT.owner, OWNER of BOOT.ownerBiz, through the real team route. */
+function invite(email: string, role = 'STAFF') {
+  return request(app.getHttpServer())
+    .post(`/identity/businesses/${BOOT.ownerBiz}/team`)
+    .set('Authorization', `Bearer ${token(BOOT.owner, bootEmail(BOOT.owner))}`)
+    .set('x-business-id', BOOT.ownerBiz)
+    .send({ email, role });
+}
+
+function uninvite(membershipId: string) {
+  return request(app.getHttpServer())
+    .delete(`/identity/businesses/${BOOT.ownerBiz}/team/${membershipId}`)
+    .set('Authorization', `Bearer ${token(BOOT.owner, bootEmail(BOOT.owner))}`)
+    .set('x-business-id', BOOT.ownerBiz);
+}
+
+async function holdersOf(email: string): Promise<Array<{ id: string; role: string; referral_code: string | null }>> {
+  return db.$queryRawUnsafe('SELECT id, role, referral_code FROM users WHERE email = $1', email);
+}
+
+async function inviterMembers(): Promise<Array<{ user_id: string; role: string }>> {
+  return db.$queryRawUnsafe(
+    'SELECT user_id, role FROM memberships WHERE business_id = $1 ORDER BY role, user_id',
+    BOOT.ownerBiz,
+  );
+}
+
+function setVerification(on: boolean) {
+  process.env.AUTH_REQUIRE_EMAIL_VERIFICATION = on ? 'true' : 'false';
+}
+
+describe("R0-SEC-01 review repair — a team invitation is accepted on the invitee's first bootstrap, and cannot lock an address out (SEC01-T1, CR-1)", () => {
+  beforeEach(async () => {
+    setSecret(BOOT_SECRET);
+    await cleanupBootstrapRows();
+    await seedVictim(BOOT.owner, BOOT.ownerBiz, 'USER');
+    supabaseAdmin.records.clear();
+    supabaseAdmin.lookups.length = 0;
+    setVerification(true);
+  });
+
+  it('fixture: the real invite route creates a marked placeholder (generated id, role USER) holding the STAFF membership', async () => {
+    const inv = await invite(INV.inviteeEmail);
+    expect(inv.status, JSON.stringify(inv.body)).toBe(201);
+
+    const rows = await db.$queryRawUnsafe(
+      'SELECT id, role, referral_code, meta_data FROM users WHERE email = $1',
+      INV.inviteeEmail,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id.startsWith(P)).toBe(false);
+    expect(rows[0]).toMatchObject({ role: 'USER', referral_code: null, meta_data: { invitePlaceholder: true } });
+    expect(await inviterMembers()).toEqual([
+      { user_id: BOOT.owner, role: 'OWNER' },
+      { user_id: rows[0].id, role: 'STAFF' },
+    ]);
+  });
+
+  it('positive control: the invitee, proven to own the address, bootstraps (201) and the STAFF membership moves to its sub', async () => {
+    const inv = await invite(INV.inviteeEmail);
+    expect(inv.status, JSON.stringify(inv.body)).toBe(201);
+    const [placeholder] = await holdersOf(INV.inviteeEmail);
+    supabaseAdmin.records.set(INV.inviteeSub, confirmed(INV.inviteeSub, INV.inviteeEmail));
+
+    const res = await bootstrap(token(INV.inviteeSub, INV.inviteeEmail), { firstName: 'Ivy', company: `${P}ivy co` });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.user).toMatchObject({ id: INV.inviteeSub, email: INV.inviteeEmail, role: 'USER' });
+    expect(res.body.business.id).not.toBe(BOOT.ownerBiz);
+    expect(await inviterMembers()).toEqual([
+      { user_id: BOOT.owner, role: 'OWNER' },
+      { user_id: INV.inviteeSub, role: 'STAFF' },
+    ]);
+    expect(await holdersOf(INV.inviteeEmail)).toEqual([expect.objectContaining({ id: INV.inviteeSub, role: 'USER' })]);
+    expect(await footprint(placeholder.id)).toEqual({ users: 0, memberships: 0, businesses: 0 });
+    // Its own workspace too, as for any first bootstrap: STAFF in the inviting business plus OWNER of its own.
+    expect(await footprint(INV.inviteeSub)).toEqual({ users: 1, memberships: 2, businesses: 1 });
+    expect(supabaseAdmin.lookups).toEqual([INV.inviteeSub]);
+    expect(await victimState(BOOT.owner, BOOT.ownerBiz)).toMatchObject({
+      user: { id: BOOT.owner, role: 'USER' },
+      businessOwner: BOOT.owner,
+    });
+
+    const again = await bootstrap(token(INV.inviteeSub, INV.inviteeEmail));
+    expect(again.status).toBe(201);
+    expect(again.body.business.id).toBe(res.body.business.id);
+    expect(await footprint(INV.inviteeSub)).toEqual({ users: 1, memberships: 2, businesses: 1 });
+  });
+
+  it.each([
+    {
+      label: 'email verification is off (sign-up confirms the address without proving it)',
+      verification: false,
+      record: (sub: string, email: string): SupabaseRecord | null => confirmed(sub, email),
+    },
+    {
+      label: 'the Supabase user has not confirmed the address',
+      verification: true,
+      record: (sub: string, email: string): SupabaseRecord | null => ({ id: sub, email, email_confirmed_at: null }),
+    },
+    {
+      label: 'the Supabase user for the sub holds another address',
+      verification: true,
+      record: (sub: string): SupabaseRecord | null => confirmed(sub, `${P}inv_other@test.local`),
+    },
+    {
+      label: 'Supabase has no user for the sub',
+      verification: true,
+      record: (): SupabaseRecord | null => null,
+    },
+  ])(
+    'negative control: when $label, the pending invitation answers 409 invite_email_unverified and nothing is written',
+    async ({ verification, record }) => {
+      const inv = await invite(INV.inviteeEmail);
+      expect(inv.status, JSON.stringify(inv.body)).toBe(201);
+      const [placeholder] = await holdersOf(INV.inviteeEmail);
+      setVerification(verification);
+      const answer = record(INV.inviteeSub, INV.inviteeEmail);
+      if (answer) supabaseAdmin.records.set(INV.inviteeSub, answer);
+
+      for (let i = 0; i < 2; i += 1) {
+        const res = await bootstrap(token(INV.inviteeSub, INV.inviteeEmail), { company: `${P}mallory co` });
+        expect(res.status, JSON.stringify(res.body)).toBe(409);
+        expect(res.body.code).toBe('invite_email_unverified');
+      }
+
+      expect(await holdersOf(INV.inviteeEmail)).toEqual([{ id: placeholder.id, role: 'USER', referral_code: null }]);
+      expect(await inviterMembers()).toEqual([
+        { user_id: BOOT.owner, role: 'OWNER' },
+        { user_id: placeholder.id, role: 'STAFF' },
+      ]);
+      expect(await footprint(INV.inviteeSub)).toEqual({ users: 0, memberships: 0, businesses: 0 });
+    },
+  );
+
+  it('recovery: after a 409 invite_email_unverified, the same sign-in bootstraps once Supabase has the address confirmed', async () => {
+    expect((await invite(INV.inviteeEmail)).status).toBe(201);
+    supabaseAdmin.records.set(INV.inviteeSub, { id: INV.inviteeSub, email: INV.inviteeEmail, email_confirmed_at: null });
+    const before = await bootstrap(token(INV.inviteeSub, INV.inviteeEmail));
+    expect(before.status).toBe(409);
+
+    supabaseAdmin.records.set(INV.inviteeSub, confirmed(INV.inviteeSub, INV.inviteeEmail));
+    const after = await bootstrap(token(INV.inviteeSub, INV.inviteeEmail));
+    expect(after.status, JSON.stringify(after.body)).toBe(201);
+    expect(await inviterMembers()).toEqual([
+      { user_id: BOOT.owner, role: 'OWNER' },
+      { user_id: INV.inviteeSub, role: 'STAFF' },
+    ]);
+  });
+
+  it('lockout closed: invite then remove leaves a placeholder that no longer blocks the real owner, who bootstraps without proof and gains nothing', async () => {
+    setVerification(false);
+    const inv = await invite(INV.victimEmail);
+    expect(inv.status, JSON.stringify(inv.body)).toBe(201);
+    const del = await uninvite(inv.body.id);
+    expect(del.status, JSON.stringify(del.body)).toBe(200);
+    const [placeholder] = await holdersOf(INV.victimEmail);
+    expect(await footprint(placeholder.id)).toEqual({ users: 1, memberships: 0, businesses: 0 });
+
+    const res = await bootstrap(token(INV.victimSub, INV.victimEmail), { company: `${P}victim co` });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.user).toMatchObject({ id: INV.victimSub, email: INV.victimEmail, role: 'USER' });
+    expect(res.body.isNewBusiness).toBe(true);
+    expect(await footprint(INV.victimSub)).toEqual({ users: 1, memberships: 1, businesses: 1 });
+    expect(await footprint(placeholder.id)).toEqual({ users: 0, memberships: 0, businesses: 0 });
+    expect(await inviterMembers()).toEqual([{ user_id: BOOT.owner, role: 'OWNER' }]);
+    // Nothing to move, so no proof was asked for.
+    expect(supabaseAdmin.lookups).toEqual([]);
+
+    const again = await bootstrap(token(INV.victimSub, INV.victimEmail));
+    expect(again.status).toBe(201);
+    expect(again.body.business.id).toBe(res.body.business.id);
+  });
+
+  it.each([
+    {
+      label: 'carries the marker but has been signed in as (it has a referral code)',
+      id: INV.boundId,
+      data: { referralCode: `${P}INVBND`, metaData: { invitePlaceholder: true } },
+    },
+    {
+      label: 'carries the marker but is a SUPER_ADMIN',
+      id: INV.boundId,
+      data: { role: 'SUPER_ADMIN', metaData: { invitePlaceholder: true } },
+    },
+    {
+      label: 'has no marker (an invite placeholder created before this repair, or any other account)',
+      id: INV.legacyId,
+      data: {},
+    },
+  ])(
+    'negative control: a holder that $label stays an account: 409 account_email_in_use even with proof, nothing moves',
+    async ({ id, data }) => {
+      const email = bootEmail(id);
+      await db.user.create({ data: { id, email, name: id, role: 'USER', ...data } });
+      await db.membership.create(skipTenantIsolation({ data: { userId: id, businessId: BOOT.ownerBiz, role: 'STAFF' } }));
+      supabaseAdmin.records.set(BOOT.claimer, confirmed(BOOT.claimer, email));
+
+      const res = await bootstrap(token(BOOT.claimer, email));
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body.code).toBe('account_email_in_use');
+      expect((await holdersOf(email)).map((r) => r.id)).toEqual([id]);
+      expect(await inviterMembers()).toEqual([
+        { user_id: BOOT.owner, role: 'OWNER' },
+        { user_id: id, role: 'STAFF' },
+      ]);
+      expect(await footprint(BOOT.claimer)).toEqual({ users: 0, memberships: 0, businesses: 0 });
+    },
+  );
+
+  it('no fetch was attempted: the ownership proof went only to the Supabase-admin stand-in', () => {
     expect(outbound).toEqual([]);
   });
 });

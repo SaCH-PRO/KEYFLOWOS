@@ -995,6 +995,9 @@ export class IdentityController {
     if (!user?.id || !user?.email) {
       throw new UnauthorizedException('Missing authenticated user');
     }
+    // Narrowed here; the proof closure below runs later and keeps these.
+    const userId: string = user.id;
+    const tokenEmail: string = user.email;
 
     return this.identity.bootstrapUser({
       userId: user.id,
@@ -1010,7 +1013,34 @@ export class IdentityController {
       avatarUrl: body.avatarUrl,
       company: body.company,
       referralCode: body.referralCode,
+    }, {
+      // Asked only when a pending team invitation holds the token's email.
+      proveEmailOwnership: () => this.tokenEmailOwnershipProven(userId, tokenEmail),
     });
+  }
+
+  /**
+   * Whether the caller is proven to own its token's `email`, which accepting a
+   * pending team invitation on bootstrap requires (R0-SEC-01 review repair).
+   * The token alone is no proof: with AUTH_REQUIRE_EMAIL_VERIFICATION off,
+   * POST /identity/signup creates the Supabase user already confirmed without
+   * proving the address, so anyone could sign up as an invitee and take the
+   * invitation. Proven means: verification is required on this deployment, and
+   * the Supabase user with the token's `sub` holds the same address and has
+   * confirmed it (`email_confirmed_at`, read with the service-role key, not
+   * from the token). Anything missing or failing is unproven.
+   */
+  private async tokenEmailOwnershipProven(userId: string, email: string): Promise<boolean> {
+    if (!isEmailVerificationRequired() || !this.supabaseAdmin.isConfigured()) return false;
+    try {
+      const { data, error } = await this.supabaseAdmin.getClient().auth.admin.getUserById(userId);
+      const record = data?.user;
+      if (error || !record || record.id !== userId || !record.email_confirmed_at) return false;
+      return (record.email ?? '').trim().toLowerCase() === email.trim().toLowerCase();
+    } catch (err: unknown) {
+      this.logger.warn(`Supabase user lookup for invite acceptance failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      return false;
+    }
   }
 
   @UseGuards(AuthGuard)

@@ -82,6 +82,7 @@ function makePrismaMock() {
   };
 
   const businessTable = {
+    count: vi.fn(({ where }: any) => businesses.filter((b) => b.ownerId === where?.ownerId).length),
     findFirst: vi.fn(({ where, orderBy }: any) => {
       let rows = businesses.filter((b) => {
         if (where?.ownerId && b.ownerId !== where.ownerId) return false;
@@ -111,6 +112,10 @@ function makePrismaMock() {
   };
 
   const membershipTable = {
+    count: vi.fn(({ where }: any) => memberships.filter((m) => m.userId === where?.userId).length),
+    findMany: vi.fn(({ where }: any) =>
+      memberships.filter((m) => m.userId === where?.userId).map((m) => ({ role: m.role })),
+    ),
     upsert: vi.fn(({ where, create, update }: any) => {
       const key = where.userId_businessId;
       const existing = memberships.find(
@@ -136,6 +141,7 @@ function makePrismaMock() {
   };
 
   const sessionTable = {
+    count: vi.fn(({ where }: any) => sessions.filter((x) => x.userId === where?.userId).length),
     updateMany: vi.fn(({ where, data }: any) => {
       let count = 0;
       for (const s of sessions) {
@@ -155,11 +161,14 @@ function makePrismaMock() {
     business: businessTable,
     membership: membershipTable,
     session: sessionTable,
+    userIdentity: { count: vi.fn(async () => 0) },
     aiExecutionLog: noopUpdateMany,
     aiApprovalItem: noopUpdateMany,
     aiPlan: noopUpdateMany,
     teamActivityLog: noopUpdateMany,
     $transaction: vi.fn(async (fn: any) => fn(client)),
+    // The row lock adoptInvitePlaceholder takes (SELECT ... FOR UPDATE).
+    $queryRaw: vi.fn(async () => []),
   };
 
   return {
@@ -279,12 +288,150 @@ describe('IdentityService.bootstrapUser', () => {
       role: 'OWNER',
     });
   });
+
+  it('never asks for an ownership proof when an account holds the email (the 409 path stays proof-free)', async () => {
+    const { prisma, state } = makePrismaMock();
+    seedHolder(state, 'SUPER_ADMIN');
+    const service = new IdentityService(prisma, blueprintMock);
+    const proveEmailOwnership = vi.fn(async () => true);
+
+    const attempt = service.bootstrapUser(
+      { userId: 'new-supabase-id', email: 'collision@test.local' },
+      { proveEmailOwnership },
+    );
+
+    await expect(attempt).rejects.toMatchObject({ response: { code: 'account_email_in_use' } });
+    expect(proveEmailOwnership).not.toHaveBeenCalled();
+    expectHolderUntouched(state, 'SUPER_ADMIN');
+  });
 });
 
-describe('IdentityService.reconcileUserId (kept for an explicit operator migration; bootstrap no longer calls it)', () => {
-  // The row-migration mechanics task #308 relied on, kept so an operator path
-  // can reuse them (docs/auth-pathway.md, "Fixed by R0-SEC-01"). Asserted here
-  // directly because no request handler reaches it any more.
+/**
+ * R0-SEC-01 review repair (SEC01-T1, CR-1): the placeholder inviteTeamMember
+ * creates for an address with no account, with its pending STAFF membership.
+ */
+function seedInvitePlaceholder(state: ReturnType<typeof makePrismaMock>['state'], meta: Record<string, unknown> = { invitePlaceholder: true }) {
+  state.users.push({
+    id: 'invite-placeholder-id',
+    email: 'invitee@test.local',
+    name: 'invitee',
+    firstName: null,
+    lastName: null,
+    phone: null,
+    avatarUrl: null,
+    role: 'USER',
+    metaData: meta,
+    referralCode: null,
+    deletedAt: null,
+    bannedAt: null,
+  });
+  state.memberships.push({ userId: 'invite-placeholder-id', businessId: 'biz_inviter', role: 'STAFF' });
+}
+
+describe('IdentityService.bootstrapUser — a pending team invitation (R0-SEC-01 review repair)', () => {
+  it('with proof of email ownership, adopts the placeholder: the STAFF membership moves to the caller, which also gets its own workspace', async () => {
+    const { prisma, state } = makePrismaMock();
+    seedInvitePlaceholder(state);
+    const service = new IdentityService(prisma, blueprintMock);
+    const proveEmailOwnership = vi.fn(async () => true);
+
+    const result = await service.bootstrapUser(
+      { userId: 'invitee-sub', email: 'invitee@test.local', firstName: 'Ivy' },
+      { proveEmailOwnership },
+    );
+
+    expect(proveEmailOwnership).toHaveBeenCalledTimes(1);
+    expect(result.user).toMatchObject({ id: 'invitee-sub', email: 'invitee@test.local', role: 'USER' });
+    expect(state.users.map((u) => u.id)).toEqual(['invitee-sub']);
+    expect(state.memberships).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ userId: 'invitee-sub', businessId: 'biz_inviter', role: 'STAFF' }),
+        expect.objectContaining({ userId: 'invitee-sub', businessId: result.business.id, role: 'OWNER' }),
+      ]),
+    );
+    // The adoption re-checked the row under a lock inside the move's transaction.
+    expect((prisma as any).client.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { label: 'no proof is offered', prove: undefined },
+    { label: 'the proof resolves false', prove: async () => false },
+    {
+      label: 'the proof throws',
+      prove: async () => {
+        throw new Error('supabase down');
+      },
+    },
+  ])('when $label, answers 409 invite_email_unverified and writes nothing', async ({ prove }) => {
+    const { prisma, state } = makePrismaMock();
+    seedInvitePlaceholder(state);
+    const service = new IdentityService(prisma, blueprintMock);
+
+    const attempt = service.bootstrapUser(
+      { userId: 'invitee-sub', email: 'invitee@test.local' },
+      prove ? { proveEmailOwnership: prove } : {},
+    );
+
+    await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+    await attempt.catch((err: ConflictException) => {
+      expect(err.getStatus()).toBe(409);
+      expect(err.getResponse()).toMatchObject({ code: 'invite_email_unverified' });
+    });
+    const client = (prisma as any).client;
+    expect(client.user.create).not.toHaveBeenCalled();
+    expect(client.user.update).not.toHaveBeenCalled();
+    expect(client.user.delete).not.toHaveBeenCalled();
+    expect(client.membership.updateMany).not.toHaveBeenCalled();
+    expect(client.membership.upsert).not.toHaveBeenCalled();
+    expect(state.users.map((u) => u.id)).toEqual(['invite-placeholder-id']);
+    expect(state.memberships).toEqual([{ userId: 'invite-placeholder-id', businessId: 'biz_inviter', role: 'STAFF' }]);
+  });
+
+  it('a placeholder whose invitation was removed carries nothing: adopted without asking for proof', async () => {
+    const { prisma, state } = makePrismaMock();
+    seedInvitePlaceholder(state);
+    state.memberships.length = 0;
+    const service = new IdentityService(prisma, blueprintMock);
+    const proveEmailOwnership = vi.fn(async () => false);
+
+    const result = await service.bootstrapUser(
+      { userId: 'owner-of-address', email: 'invitee@test.local' },
+      { proveEmailOwnership },
+    );
+
+    expect(proveEmailOwnership).not.toHaveBeenCalled();
+    expect(result.user.id).toBe('owner-of-address');
+    expect(state.users.map((u) => u.id)).toEqual(['owner-of-address']);
+    expect(state.memberships).toEqual([
+      expect.objectContaining({ userId: 'owner-of-address', businessId: result.business.id, role: 'OWNER' }),
+    ]);
+  });
+
+  it.each([
+    { label: 'has no invite marker', meta: {} },
+    { label: 'carries a marker that is not exactly true', meta: { invitePlaceholder: 'true' } },
+  ])('a row that $label is an account: 409 account_email_in_use, no proof asked, no transaction', async ({ meta }) => {
+    const { prisma, state } = makePrismaMock();
+    seedInvitePlaceholder(state, meta);
+    const service = new IdentityService(prisma, blueprintMock);
+    const proveEmailOwnership = vi.fn(async () => true);
+
+    const attempt = service.bootstrapUser(
+      { userId: 'invitee-sub', email: 'invitee@test.local' },
+      { proveEmailOwnership },
+    );
+
+    await expect(attempt).rejects.toMatchObject({ response: { code: 'account_email_in_use' } });
+    expect(proveEmailOwnership).not.toHaveBeenCalled();
+    expect((prisma as any).client.$transaction).not.toHaveBeenCalled();
+    expect(state.users.map((u) => u.id)).toEqual(['invite-placeholder-id']);
+  });
+});
+
+describe('IdentityService.reconcileUserId (never for an account; bootstrap uses it only to adopt an invite placeholder)', () => {
+  // The row-migration mechanics task #308 relied on. Since R0-SEC-01 its only
+  // caller is adoptInvitePlaceholder (above); asserted here directly, without
+  // the guard that caller passes.
   it('moves the row, memberships, sessions and Business.ownerId from the old id to the new one', async () => {
     const { prisma, state } = makePrismaMock();
     seedHolder(state, 'USER');

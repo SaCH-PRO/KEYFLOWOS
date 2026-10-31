@@ -65,9 +65,44 @@ R0-SEC-01-BOOTSTRAP-TAKEOVER; items 2 and 3 are open.
        writes nothing: no `User` row, no membership, no business, and the
        holder's row, role, memberships and `Business.ownerId` are unchanged
        (`S/modules/identity/identity.service.ts:1124-1137`).
-     - `reconcileUserId` is kept but no request handler calls it
-       (`S/modules/identity/identity.service.ts:954`). No operator path calls
-       it either; none exists yet.
+     - `reconcileUserId` is never called for an account. Its one caller is the
+       team-invitation case below.
+     - **Team invitations (review repair SEC01-T1, CR-1).** For an address with
+       no account, `inviteTeamMember` creates a placeholder `User` (generated
+       id, role `USER`, the invited address) and attaches the pending
+       membership to it. The first R0-SEC-01 fix treated that row as an
+       account, so an invitation to anyone without an account could never be
+       accepted. It also let any signed-up user lock an address out of sign-up
+       by inviting it and then removing the membership. Now:
+       - `inviteTeamMember` marks the placeholder
+         (`users.meta_data.invitePlaceholder = true`). Only the server writes
+         `User` metadata; no route lets a caller set it.
+       - Bootstrap adopts a marked row (moves it to the caller's `sub` with
+         `reconcileUserId`) only while nobody has ever signed in as it: role
+         `USER`, not deleted or banned, no referral code (every bootstrap sets
+         one), no session, no identity link, no business owned, no `OWNER`
+         membership. It re-checks this inside the move's transaction with the
+         row locked (`SELECT ... FOR UPDATE`). Any other holder is an account
+         and still gets 409 `account_email_in_use`.
+       - A pending membership grants authority in the inviting business, so it
+         moves only when the caller proves it owns the address. Proof means
+         `AUTH_REQUIRE_EMAIL_VERIFICATION` is on, and the Supabase user with the
+         token's `sub` (read with the service-role key, not from the token)
+         holds the same address with `email_confirmed_at` set. Without proof,
+         bootstrap answers **409 `{code: 'invite_email_unverified'}`** and
+         writes nothing. With verification off there is no proof, because
+         sign-up confirms the address without checking it. The invitee then
+         gets this 409 until the inviter removes the invitation; after that
+         the invitee bootstraps and can be invited again as an existing
+         account.
+       - A placeholder with no membership left (the invitation was removed)
+         carries nothing. The owner of the address bootstraps through it
+         without proof, and gets only its own new account and business.
+       - A placeholder created before this repair has no marker, so it still
+         gets 409 `account_email_in_use`. After confirming that nobody has
+         ever signed in as that row, the operator either sets the marker on it
+         (the invitation is then accepted as above) or deletes it, which also
+         deletes its pending memberships.
    - **Proof.** `T/identity-local-auth.integration.test.ts`, block "R0-SEC-01",
      runs the real `IdentityController` and `IdentityService` behind the real
      `AuthMiddleware` and `AuthGuard` against Postgres. The negative controls
@@ -79,12 +114,20 @@ R0-SEC-01-BOOTSTRAP-TAKEOVER; items 2 and 3 are open.
      first-time caller, who gets its own business (journey step 1), and a
      returning user with the same `sub`, which is idempotent.
      `T/identity-bootstrap.service.test.ts` pins that the 409 path calls no
-     write.
+     write. The block "R0-SEC-01 review repair" of the same suite runs the real
+     team invite and removal routes behind the real `BusinessGuard` and
+     `ModuleScopeGuard`. A proven invitee gets 201 and the `STAFF` membership.
+     An unproven one gets 409 `invite_email_unverified` with nothing written:
+     verification off, address not confirmed, another address on the Supabase
+     user, or no Supabase user. Invite-then-remove no longer blocks the real
+     owner. A marked row that has been signed in as, a marked `SUPER_ADMIN`, and
+     an unmarked row all stay accounts. The Supabase lookup is a recording
+     stand-in, and no fetch is made.
    - **Web follow-up (not in this fix).** The OAuth callback page shows its
      "email already in use" screen only for the code `account_email_conflict`
      (`W/lib/client.ts:2865`, `W/app/auth/callback/page.tsx:214-216`).
-     `account_email_in_use` currently gets the generic error screen with the
-     server's message.
+     `account_email_in_use` and `invite_email_unverified` currently get the
+     generic error screen with the server's message.
    - **Moving an account to a new subject is now a manual operator step.**
      This is the legitimate case the old reconcile handled automatically: the
      same person, but a new `sub`, for example after the deployment moves to a
@@ -271,14 +314,16 @@ clears the user's Redis revocation marker (controller `:217-223`).
 failure becomes one 401 `refresh_failed`.
 
 **Bootstrap**, `POST /identity/bootstrap` (controller `:897-915`), sits behind
-`AuthGuard`, so `AuthMiddleware` must accept the bearer token first. It never
-calls Supabase. `IdentityService.bootstrapUser`
+`AuthGuard`, so `AuthMiddleware` must accept the bearer token first. It calls
+Supabase only to prove an invitee owns its address (item 1, team invitations).
+`IdentityService.bootstrapUser`
 (`S/modules/identity/identity.service.ts:912`) finds the local `User` by the
 token's `sub`. If there is none, it creates the row with the token's `email`
 claim; a body `email` is ignored. If another `User` already holds that email,
 bootstrap answers 409 `account_email_in_use` and writes nothing. It never moves
 that row to the caller (fixed by R0-SEC-01, item 1 above; line numbers in this
-paragraph are on the R0-14 base). The default `Business` and `OWNER` membership are created in a
+paragraph are on the R0-14 base). The one exception is a team-invitation
+placeholder that nobody has signed in as (item 1). The default `Business` and `OWNER` membership are created in a
 Serializable transaction (`ensureBootstrapWorkspace`, `:1068-1107`). A
 verified user with no local row is attached with role `USER` so it can reach
 bootstrap (`S/core/auth/auth.middleware.ts:125-135`, `:192-193`). The web calls
@@ -406,7 +451,9 @@ at `W/lib/client.ts:2897`.
   accounts: bootstrap ignores a body email and never moves an existing row to
   a caller with another `sub`, so an unproven sign-up with a taken address gets
   409 `account_email_in_use`. With verification off, an unproven sign-up with a
-  free address still gets its own new account under that address. On adds Resend: an account, `RESEND_API_KEY`, and an
+  free address still gets its own new account under that address. A pending
+  team invitation is accepted on bootstrap only with verification on (409
+  `invite_email_unverified` otherwise; item 1). On adds Resend: an account, `RESEND_API_KEY`, and an
   `EMAIL_FROM_ADDRESS` Resend will send from. This packet does not choose;
   `.env.example` keeps `false`.
 - **Password recovery is separate.** Supabase's own mailer sends it
@@ -544,7 +591,7 @@ All live in `apps/server/src/modules/identity/identity.controller.ts`.
 | `POST /identity/refresh` | none (refresh token in body) | Exchange a refresh token for a new session | `refresh_unavailable`, `refresh_unreachable`, `refresh_failed` (401), `rate_limited` |
 | `POST /identity/resend-verification` | none | Re-send the verification email | (always 201; throttled at 60s/email + AuthSecurity rate rule) |
 | `GET  /identity/me` | Bearer | Return the authenticated user | 401 when no/invalid token |
-| `POST /identity/bootstrap` | Bearer | Idempotently create the user + default business | 401, 400, 409 (`account_email_in_use`) |
+| `POST /identity/bootstrap` | Bearer | Idempotently create the user + default business; accept a pending team invitation | 401, 400, 409 (`account_email_in_use`, `invite_email_unverified`) |
 | `GET  /identity/admin/auth-audit` | Bearer + `SUPER_ADMIN` | Read the AuthAuditLog | 401 |
 
 ### Rate limiting
@@ -656,7 +703,9 @@ exist. When a row with the same email already exists under a different id,
 it answers 409 `account_email_in_use` and writes nothing. Until R0-SEC-01 it
 moved that row, with its role, memberships and businesses, to the caller
 (task #308, `reconcileUserId`), which was an account takeover (item 1 in the
-Release 0 section).
+Release 0 section). It still moves a team-invitation placeholder nobody has
+signed in as, and moves its pending memberships only for a caller proven to
+own the address (item 1).
 
 ### Required dashboard configuration
 
