@@ -264,7 +264,13 @@ export function TimelineTabPanel({
         // The journey tags quotes with ctaModule "commerce" as well as invoices
         // (crm-journey.service.ts), so a quote id must not reach the invoice
         // detail route. Commerce opens its own record drawer for a quote.
-        const hrefFn = item.ctaModule === "commerce" && item.type.startsWith("quote.")
+        // Decide by the entity the row names, never by the event type: a
+        // "quote.converted" event carries the INVOICE it produced
+        // (data.invoiceId, labelled "View Invoice"), so only the journey's quote
+        // rows (id "quote_<id>", labelled "View Quote") are quotes.
+        const namesQuote = item.ctaModule === "commerce" && item.ctaLabel !== "View Invoice"
+          && (item.ctaLabel === "View Quote" || item.id.startsWith("quote_"));
+        const hrefFn = namesQuote
           ? quoteCtaHref
           : item.ctaModule ? CTA_HREF_MAP[item.ctaModule] : undefined;
         return {

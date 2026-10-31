@@ -540,6 +540,28 @@ describe('the nav has a door to invoices and quotes (CF-20)', () => {
       expect(hrefs, mode).toContain('/app/commerce?tab=pipeline&view=quotes');
     }
   });
+
+  // The href is only half the door: Next keeps /app/commerce mounted when a nav
+  // click changes only its search params, so the page must follow ?tab after
+  // mount. That is rendered, not string-matched, in
+  // app/app/commerce/__tests__/commerce-tab-follows-url.test.tsx (review F2).
+  it('the commerce page follows ?tab while mounted, so the Quotes door works from another commerce tab', () => {
+    const commerce = read('app/app/commerce/page.tsx');
+    expect(commerce).toMatch(/const paramTab = searchParams\.get\("tab"\);/);
+    expect(commerce).toMatch(/\}, \[paramTab\]\);/);
+  });
+
+  // BLOCKED (outside the R0-08b write set, review F2): the rail's active state.
+  // use-app-layout.ts refreshes queryTab only when the pathname changes, so a
+  // search-param-only click (Sales -> Quotes on /app/commerce) leaves the rail
+  // lit as it was; and matchTab "pipeline" lights Quotes for every pipeline
+  // view, Invoices included, because isSecondaryActive cannot match ?view.
+  // Both need apps/web/src/hooks/use-app-layout.ts (read the search params
+  // reactively; a matchView on NavItem), which this packet may not edit.
+  // Sales lighting beside Quotes is the existing parent-entry rule (Sales also
+  // lights on /app/commerce/invoices and /app/commerce/gateway), not a defect
+  // of this entry.
+  it.todo('Quotes lights only on the quotes view, and the rail follows a search-param-only click');
 });
 
 describe('the "+ Contact" entry opens the add-contact form', () => {

@@ -144,7 +144,10 @@ export const operateSections: NavSection[] = [
       // hub; quotes have no page of their own and live in the pipeline tab,
       // which opens its quotes view for ?view=quotes (finance-pipeline.tsx).
       // Both are allowlisted in every disclosure mode, so the default (startup)
-      // nav shows them.
+      // nav shows them. The commerce page follows ?tab while mounted, so Quotes
+      // works from its other tabs too; from the pipeline itself the view still
+      // follows ?view only on mount, and matchTab lights Quotes for any pipeline
+      // view (both outside R0-08b: finance-pipeline.tsx, use-app-layout.ts).
       { label: "Invoices", href: "/app/commerce/invoices", icon: Receipt },
       { label: "Quotes", href: "/app/commerce?tab=pipeline&view=quotes", icon: FileText, matchTab: "pipeline" },
       // The gateway console — transactions, links, refunds across three

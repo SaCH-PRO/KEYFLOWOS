@@ -144,9 +144,20 @@ export default function CommercePage() {
     [overview.handleTabChange],
   );
 
+  // The tab follows ?tab for as long as the page is mounted, not only on its
+  // first render. Next keeps this page mounted across a search-param-only
+  // navigation, so a nav door back to /app/commerce (Money > Quotes is
+  // ?tab=pipeline&view=quotes, Money > Sales has no tab) clicked while already
+  // here changed the URL and left the old tab on screen (R0-08b F2). The tab
+  // only leaves the URL by such a navigation, so no tab means the Snapshot.
+  // handleTabChange writes its tab back through replaceState, which Next feeds
+  // into useSearchParams, so following the URL there is a no-op.
+  const paramTab = searchParams.get("tab");
   useEffect(() => {
-    const paramTab = searchParams.get("tab");
-    if (!paramTab) return;
+    if (!paramTab) {
+      setActiveTab("snapshot");
+      return;
+    }
     if (VALID_TABS.has(paramTab as RevenueTabKey)) {
       setActiveTab(paramTab as RevenueTabKey);
     } else if (["products", "billing", "insights"].includes(paramTab)) {
@@ -158,8 +169,7 @@ export default function CommercePage() {
       url.searchParams.set("tab", "pipeline");
       window.history.replaceState({}, "", url.toString());
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time read of the URL `tab` param
-  }, []);
+  }, [paramTab]);
 
   useEffect(() => {
     const recordType = searchParams.get("recordType");
