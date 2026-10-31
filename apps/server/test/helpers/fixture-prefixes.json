@@ -169,6 +169,11 @@
       "legacy": true
     },
     {
+      "prefix": "v48a_",
+      "owner": "apps/server/test/public-invoice-link.integration.test.ts",
+      "packet": "V1-48-PUBLIC-TOKEN-VIEW"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
