@@ -4,6 +4,51 @@ This is the end-to-end map of every sign-in / sign-up code path the
 product currently supports. It exists so the next person on call (you,
 probably) can navigate the auth surface in minutes instead of hours.
 
+## Release 0 sign-in: hosted Supabase free tier (D-02)
+
+<!-- R0-14-AUTH-LOCAL-SIGNIN skeleton: each subsection below is filled with
+     file:line references verified on the packet base in the next commit. -->
+
+### Ruling and scope
+
+_To be filled._
+
+### Free-tier project configuration
+
+_To be filled._
+
+### Environment variables (server and web)
+
+_To be filled._
+
+### How sign-up, login, refresh and bootstrap use them
+
+_To be filled._
+
+### Local HS256 verification (`verifyLocal`)
+
+_To be filled._
+
+### What happens when the variables are absent
+
+_To be filled._
+
+### Email verification and the Resend dependency
+
+_To be filled._
+
+### Free-tier limits that matter for Release 0
+
+_To be filled._
+
+### How the real-database tests mint tokens without a project
+
+_To be filled._
+
+### Where the live sign-up leg runs
+
+_To be filled._
+
 ## High-level diagram
 
 ```
