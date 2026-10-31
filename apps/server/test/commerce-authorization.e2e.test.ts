@@ -43,7 +43,11 @@ import { TeamAuditInterceptor } from '../src/core/interceptors/team-audit.interc
 import { GlobalHttpExceptionFilter } from '../src/core/filters/http-exception.filter';
 import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 
-const P = 'rva_';
+// R0-27 (registry hygiene, R0-00 pendingRenames): this suite shared 'rva_'
+// with revenue-authorization.integration.test.ts, the registered owner. It runs
+// on in-memory stand-ins, so no shared row was ever at risk; the prefix is
+// renamed to its own registered entry all the same.
+const P = 'k27b_';
 const ID = {
   ownerA: `${P}ownerA`,
   staffWriteA: `${P}staffWriteA`,
@@ -117,6 +121,10 @@ class GuardPrismaMock {
       invoice: {
         findUnique: vi.fn(() => Promise.resolve({ businessId: ID.bizA })),
       },
+      // TeamAuditInterceptor on business-path writes (R0-27: invoice create).
+      teamActivityLog: {
+        create: vi.fn(() => Promise.resolve({})),
+      },
     };
   }
 }
@@ -172,6 +180,7 @@ const commerceMock = {
   getQuote: vi.fn(),
   getQuoteForBusiness: vi.fn(),
   getStaleQuotes: vi.fn(),
+  createInvoice: vi.fn(),
 };
 
 const receiptsMock = {
@@ -259,12 +268,13 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       id: ID.inv, businessId: ID.bizA, status: 'DRAFT', contactId: `${P}contactA`, items: [], payments: [], paidAmount: 0, remaining: 100,
     });
     commerceMock.getQuote.mockResolvedValue({
-      id: QUOTE, businessId: ID.bizA, status: 'DRAFT', contact: { firstName: 'R', lastName: 'V', email: 'rva@test.local' },
+      id: QUOTE, businessId: ID.bizA, status: 'DRAFT', contact: { firstName: 'R', lastName: 'V', email: `${P}quote@test.local` },
     });
     commerceMock.getQuoteForBusiness.mockResolvedValue({
       id: QUOTE, businessId: ID.bizA, status: 'DRAFT', contactId: `${P}contactA`, items: [], lifecycleStep: 'DRAFT',
     });
     commerceMock.getStaleQuotes.mockResolvedValue([]);
+    commerceMock.createInvoice.mockResolvedValue({ id: `${P}invNew`, businessId: ID.bizA, status: 'DRAFT', total: 25 });
   });
 
   // -------------------------------------------------------------------------
@@ -709,6 +719,125 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       }
       const blocked = await bareQuote(null);
       expect(blocked.status).toBe(429);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // R0-27-REVENUE-CREATE-CONTRACT (L1 half): POST
+  // /commerce/businesses/:businessId/invoices took an inline body type, so the
+  // global ValidationPipe saw `Object`, validated nothing and stripped nothing:
+  // empty items, quantity 0, a null (NaN) price or a missing contactId reached
+  // CommerceService.createInvoice, and a client total/subtotal/taxAmount was
+  // forwarded and trusted. This layer proves the DTO refuses bad bodies with
+  // 400 field messages before the service is called, and that what the
+  // controller forwards is the path tenant plus the declared fields only. The
+  // L2 half (tenant-checked contact, persisted totals, ledger) is
+  // test/commerce-invoice-errors.integration.test.ts.
+  describe('R0-27: invoice create contract (L1 half)', () => {
+    const create = (actor: string | null, body: unknown, businessId = ID.bizA) =>
+      withActor(agent().post(`/commerce/businesses/${businessId}/invoices`), actor).send(body as object);
+    const valid = () => ({
+      contactId: `${P}contactA`,
+      items: [
+        { description: 'Two hours', quantity: 2, unitPrice: 10 },
+        { description: 'Setup', quantity: 1, unitPrice: 5, productId: `${P}productA` },
+      ],
+    });
+    const messages = (body: Record<string, unknown>) => [body.message].flat().map(String);
+
+    it('CC-META: createInvoice keeps its guards and write scope, and its body is a DTO class (CreateInvoiceDto), not an inline type', () => {
+      const handler = CommerceController.prototype.createInvoice;
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('businesses/:businessId/invoices');
+      expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.POST);
+      expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual({ module: 'revenue', minLevel: 'write' });
+      const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];
+      expect(guards).toEqual([AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard]);
+      const params: Array<{ name?: string }> = Reflect.getMetadata('design:paramtypes', CommerceController.prototype, 'createInvoice') ?? [];
+      expect(params[1]?.name, 'the @Body() metatype the ValidationPipe validates and whitelists').toBe('CreateInvoiceDto');
+    });
+
+    const invalid: Array<[string, (b: ReturnType<typeof valid>) => unknown, RegExp]> = [
+      ['missing items', (b) => ({ contactId: b.contactId }), /^items must contain at least 1 elements$/],
+      ['empty items', (b) => ({ ...b, items: [] }), /^items must contain at least 1 elements$/],
+      ['items not an array', (b) => ({ ...b, items: { description: 'x', quantity: 1, unitPrice: 1 } }), /^items must be an array$/],
+      ['quantity 0', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 0 }] }), /^items\.0\.quantity must be a positive number$/],
+      ['negative quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: -1 }] }), /^items\.0\.quantity must be a positive number$/],
+      ['string quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: '2' }] }), /^items\.0\.quantity must be an integer number$/],
+      // InvoiceItem.quantity is an Int column: 1.5 was stored as 1 under a line total computed from 1.5.
+      ['fractional quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 1.5 }] }), /^items\.0\.quantity must be an integer number$/],
+      ['NaN price (JSON null)', (b) => ({ ...b, items: [{ ...b.items[0], unitPrice: null }] }), /^items\.0\.unitPrice must be a number/],
+      ['non-numeric price', (b) => ({ ...b, items: [b.items[0], { ...b.items[1], unitPrice: 'abc' }] }), /^items\.1\.unitPrice must be a number/],
+      ['negative price', (b) => ({ ...b, items: [{ ...b.items[0], unitPrice: -5 }] }), /^items\.0\.unitPrice must not be less than 0$/],
+      ['missing description', (b) => ({ ...b, items: [{ quantity: 1, unitPrice: 1 }] }), /^items\.0\.description should not be empty$/],
+      ['missing contactId', (b) => ({ items: b.items }), /^contactId should not be empty$/],
+      ['empty contactId', (b) => ({ ...b, contactId: '' }), /^contactId should not be empty$/],
+      ['unknown discountType', (b) => ({ ...b, discountType: 'BOGO', discountValue: 1 }), /^discountType must be one of the following values: PERCENT, FIXED$/],
+      ['string taxRate', (b) => ({ ...b, taxRate: '15' }), /^taxRate must be a number/],
+      ['unparseable dueDate', (b) => ({ ...b, dueDate: 'not-a-date' }), /^dueDate must be a valid ISO 8601 date string$/],
+    ];
+    for (const [label, mutate, field] of invalid) {
+      it(`CC-400 ${label}: 400 BAD_REQUEST with the field message, before CommerceService.createInvoice is called`, async () => {
+        const res = await create(ID.ownerA, mutate(valid()));
+        expect(res.status, label).toBe(400);
+        expect(res.body.code).toBe('BAD_REQUEST');
+        expect(messages(res.body).some((m) => field.test(m)), `${label}: ${JSON.stringify(res.body.message)}`).toBe(true);
+        expect(commerceMock.createInvoice).not.toHaveBeenCalled();
+      });
+    }
+
+    it('CC-STRIP: client total, subtotal, taxAmount, discountAmount, status, invoiceNumber, items[].total and a body businessId never reach the service', async () => {
+      const body = {
+        ...valid(),
+        items: valid().items.map((i) => ({ ...i, total: 1 })),
+        total: 1,
+        subtotal: 1,
+        taxAmount: 0,
+        discountAmount: 99,
+        status: 'PAID',
+        invoiceNumber: `${P}HIJACK`,
+        businessId: ID.bizB,
+      };
+      const res = await create(ID.ownerA, body);
+      expect(res.status).toBe(201);
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(1);
+      const forwarded = commerceMock.createInvoice.mock.calls[0]![0] as Record<string, unknown>;
+      expect(forwarded).toEqual({ businessId: ID.bizA, ...valid() });
+      const keys = Object.entries(forwarded).filter(([, v]) => v !== undefined).map(([k]) => k);
+      for (const k of ['total', 'subtotal', 'taxAmount', 'discountAmount', 'status', 'invoiceNumber']) expect(keys, k).not.toContain(k);
+      for (const item of forwarded.items as Array<Record<string, unknown>>) expect(item).not.toHaveProperty('total');
+    });
+
+    it('CC-FORWARD (control): a valid body from revenue:write, OWNER and SUPER_ADMIN is forwarded with the path tenant and the declared fields', async () => {
+      const full = { ...valid(), currency: 'TTD', dueDate: '2026-12-01', taxRate: 10, discountType: 'FIXED', discountValue: 2, notes: 'k27b notes' };
+      for (const actor of [ID.staffWriteA, ID.ownerA, ID.superAdmin]) {
+        const res = await create(actor, full);
+        expect(res.status, actor).toBe(201);
+        expect(res.body).toMatchObject({ id: `${P}invNew`, status: 'DRAFT' });
+        expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...full });
+      }
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(3);
+    });
+
+    it('CC-RANGE (control): a taxRate or discount out of range passes the DTO; the service keeps the R0-D3 range checks and their exact messages', async () => {
+      for (const extra of [{ taxRate: 150 }, { discountType: 'PERCENT', discountValue: 150 }, { discountType: 'FIXED', discountValue: -1 }]) {
+        await create(ID.ownerA, { ...valid(), ...extra }).expect(201);
+      }
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(3);
+    });
+
+    it('CC-GUARDS (control): unauthenticated 401; a non-member, a member of another tenant and revenue:read are refused 403; the service is not called', async () => {
+      expect((await create(null, valid())).status).toBe(401);
+      for (const actor of [ID.noMember, ID.ownerB]) {
+        const res = await create(actor, valid());
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/No access to this business/);
+      }
+      for (const actor of [ID.staffReadA, ID.staffDefaultA, ID.staffNoneA]) {
+        const res = await create(actor, valid());
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/Insufficient permissions/);
+      }
+      expect(commerceMock.createInvoice).not.toHaveBeenCalled();
     });
   });
 });

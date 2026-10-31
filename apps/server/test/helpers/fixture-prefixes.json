@@ -54,6 +54,11 @@
       "packet": "R0-20-MARKPAID-CONVERGENCE"
     },
     {
+      "prefix": "k27b_",
+      "owner": "apps/server/test/commerce-authorization.e2e.test.ts",
+      "packet": "R0-27-REVENUE-CREATE-CONTRACT"
+    },
+    {
       "prefix": "kab_",
       "owner": "apps/server/test/key-action-boundary.integration.test.ts",
       "legacy": true
@@ -184,14 +189,7 @@
       "legacy": true
     }
   ],
-  "pendingRenames": [
-    {
-      "prefix": "rva_",
-      "file": "apps/server/test/commerce-authorization.e2e.test.ts",
-      "owner": "apps/server/test/revenue-authorization.integration.test.ts",
-      "reason": "The registered owner is revenue-authorization (real DB and Redis). The e2e suite runs on in-memory Prisma and Redis stand-ins, so the shared prefix reaches no shared resource, but it is renamed for registry hygiene. That file is outside the R0-00 write set: the next packet that writes it (R0-27 or R0-28) renames its prefix to a new k<NN><a-z>_ entry and deletes this record."
-    }
-  ],
+  "pendingRenames": [],
   "noPrefixSuites": [
     {
       "file": "apps/server/test/app-module-boots.integration.test.ts",

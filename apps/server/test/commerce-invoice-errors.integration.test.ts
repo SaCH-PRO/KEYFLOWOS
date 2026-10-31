@@ -31,6 +31,23 @@
  * the boundary (CRM timeline, stats cache, Gmail, vision, ledger posting) are
  * recorders so the test can assert they were never reached.
  *
+ * R0-27-REVENUE-CREATE-CONTRACT (L2 half) pins POST .../invoices as well:
+ *   CC-TENANT  a contactId outside the caller's tenant (foreign, unknown or
+ *              soft-deleted) is one 404 'Contact not found'; no invoice row,
+ *              and nothing of the foreign contact in the body
+ *   CC-400     empty items, quantity 0, a null (NaN) price, a missing contactId
+ *              -> 400 with field messages; CommerceService.createInvoice is
+ *              never called and nothing is written
+ *   CC-TOTALS  subtotal, taxAmount and total are computed on the server; the
+ *              client's values (and items[].total) are dropped
+ *   CC-LEDGER  a refused create writes no Invoice and no FinancialTransaction;
+ *              an accepted create posts nothing (CASH and ACCRUAL alike) and,
+ *              under ACCRUAL, issuing it posts AR once
+ *              (Invoice:<id>:invoice_finalized)
+ * For the ledger proof the invoice hooks of RevenuePostingService delegate to
+ * the real ledger chain (RevenuePostingService, PostingService,
+ * ChartOfAccountsSeederService); the payment hooks stay recorders.
+ *
  * Fixtures: prefix `cie_`; hard-deleted by raw SQL in dependency order in
  * beforeAll and afterAll; no $transaction wrapping.
  */
@@ -38,7 +55,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
@@ -70,6 +87,12 @@ const ID = {
   invBindB: `${P}invBindB`,
   // bizB: the one invoice that receives a legal payment (ST-D3-3 positive control)
   invPayB: `${P}invPayB`,
+  // R0-27: a soft-deleted contact of bizB (own tenant, but gone)
+  contactGoneB: `${P}contactGoneB`,
+  // R0-27: an ACCRUAL tenant for the ledger proof (bizB is CASH, the default)
+  ownerC: `${P}ownerC`,
+  bizC: `${P}bizC`,
+  contactC: `${P}contactC`,
 };
 
 const ORIGINAL_NOTES = 'cie original notes';
@@ -77,6 +100,9 @@ const ORIGINAL_NOTES = 'cie original notes';
 let db: any;
 let app: any;
 let redis: any;
+// R0-27: the real CommerceService instance (spied on) and the real ledger chain.
+let commerceSvc: any;
+let realLedger: any;
 
 const recordedEvents: Array<{ name: string; payload: unknown }> = [];
 const eventRecorder = {
@@ -112,6 +138,16 @@ const postingRecorder = {
   onPaymentRefunded: async (paymentId: string) => {
     postingCalls.push(`refunded:${paymentId}`);
   },
+  // R0-27 LEDGER: issuing and voiding run the real accrual posting (a no-op on
+  // CASH), so the proof is the financial_transactions rows themselves.
+  onInvoiceFinalized: async (invoiceId: string, opts?: unknown) => {
+    postingCalls.push(`finalized:${invoiceId}`);
+    return realLedger.onInvoiceFinalized(invoiceId, opts);
+  },
+  onInvoiceVoided: async (invoiceId: string, opts?: unknown) => {
+    postingCalls.push(`voided:${invoiceId}`);
+    return realLedger.onInvoiceVoided(invoiceId, opts);
+  },
 };
 
 async function cleanup() {
@@ -126,6 +162,7 @@ async function cleanup() {
     `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
     `DELETE FROM memberships WHERE business_id LIKE '${P}%' OR user_id LIKE '${P}%'`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE '${P}%'`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE '${P}%'`,
     `DELETE FROM businesses WHERE id LIKE '${P}%'`,
     `DELETE FROM users WHERE id LIKE '${P}%'`,
   ]) {
@@ -225,6 +262,8 @@ beforeAll(async () => {
   const { RevenuePostingService } = await import('../src/modules/finance/revenue-posting.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  const { PostingService } = await import('../src/modules/finance/posting.service');
+  const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
@@ -259,6 +298,11 @@ beforeAll(async () => {
     ],
   }).compile();
 
+  commerceSvc = moduleRef.get(CommerceService);
+  const prismaSvc = moduleRef.get(PrismaService);
+  const coaSeeder = new ChartOfAccountsSeederService(prismaSvc);
+  realLedger = new RevenuePostingService(prismaSvc, new PostingService(prismaSvc), coaSeeder, { recordEvent: async () => null } as any);
+
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
@@ -277,7 +321,7 @@ beforeAll(async () => {
 
   await cleanup(); // in case a prior run aborted
 
-  for (const id of [ID.ownerA, ID.ownerB]) {
+  for (const id of [ID.ownerA, ID.ownerB, ID.ownerC]) {
     await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'CIE Biz A', ownerId: ID.ownerA, currency: 'TTD' } });
@@ -286,6 +330,13 @@ beforeAll(async () => {
   await db.membership.create({ data: { id: `${P}m_ownerB_bizB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
   await db.contact.create({ data: { id: ID.contactA, businessId: ID.bizA, firstName: 'Cie', lastName: 'CustomerA', email: `${P}a@test.local` } });
   await db.contact.create({ data: { id: ID.contactB, businessId: ID.bizB, firstName: 'Cie', lastName: 'CustomerB', email: `${P}b@test.local` } });
+  await db.contact.create({
+    data: { id: ID.contactGoneB, businessId: ID.bizB, firstName: 'Cie', lastName: 'GoneB', email: `${P}gone@test.local`, deletedAt: new Date() },
+  });
+  await db.business.create({ data: { id: ID.bizC, name: 'CIE Biz C', ownerId: ID.ownerC, currency: 'TTD', accountingBasis: 'ACCRUAL' } });
+  await db.membership.create({ data: { id: `${P}m_ownerC_bizC`, userId: ID.ownerC, businessId: ID.bizC, role: 'OWNER' } });
+  await db.contact.create({ data: { id: ID.contactC, businessId: ID.bizC, firstName: 'Cie', lastName: 'CustomerC', email: `${P}c@test.local` } });
+  await coaSeeder.ensureDefaults(ID.bizC);
   await db.product.create({ data: { id: ID.productA, businessId: ID.bizA, name: 'CIE Product A', price: 5 } });
   await db.product.create({ data: { id: ID.productB, businessId: ID.bizB, name: 'CIE Product B', price: 7 } });
 
@@ -703,5 +754,208 @@ describe('positive controls (own tenant, legal state)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].deleted_at).not.toBeNull();
     expect(recordedEvents.filter((e) => e.name === 'invoice.deleted')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R0-27-REVENUE-CREATE-CONTRACT (L2 half): POST .../invoices validates its
+// body, computes totals on the server and resolves contactId inside the
+// caller's tenant. At c2f6f46d createInvoice set data.contactId with no tenant
+// check and answered with `include: { contact: true }`, so bizA's contactId
+// under bizB's path created bizB's invoice linked to bizA's contact and echoed
+// that contact's row (journey step 6). The L1 half (field messages, what the
+// controller forwards) is test/commerce-authorization.e2e.test.ts.
+// ---------------------------------------------------------------------------
+describe('R0-27: POST /commerce/businesses/:businessId/invoices create contract (real rows)', () => {
+  const createRoute = (biz: string) => `/commerce/businesses/${biz}/invoices`;
+  const issueRoute = (inv: string) => `/commerce/invoices/${inv}/status/sent`;
+  const line = (over: Record<string, unknown> = {}) => ({ description: 'CIE line', quantity: 1, unitPrice: 10, ...over });
+  const create = (actor: string, biz: string, body: Record<string, unknown>) => as(actor, agent().post(createRoute(biz))).send(body);
+
+  /** Invoice rows (soft-deleted included) and financial_transactions of one tenant. */
+  async function writes(biz: string): Promise<{ invoices: number; transactions: number }> {
+    const inv: Array<{ n: number }> = await db.$queryRawUnsafe(`SELECT count(*)::int AS n FROM invoices WHERE business_id = '${biz}'`);
+    const ft: Array<{ n: number }> = await db.$queryRawUnsafe(`SELECT count(*)::int AS n FROM financial_transactions WHERE business_id = '${biz}'`);
+    return { invoices: inv[0].n, transactions: ft[0].n };
+  }
+
+  async function linkedToContact(contactId: string): Promise<number> {
+    const rows: Array<{ n: number }> = await db.$queryRawUnsafe(`SELECT count(*)::int AS n FROM invoices WHERE contact_id = '${contactId}'`);
+    return rows[0].n;
+  }
+
+  /** The ledger rows posted for one invoice. */
+  async function invoicePostings(invoiceId: string): Promise<Array<{ external_ref: string; amount: number }>> {
+    return db.$queryRawUnsafe(
+      `SELECT external_ref, amount::float8 AS amount FROM financial_transactions WHERE source_type = 'Invoice' AND source_id = '${invoiceId}' ORDER BY created_at`,
+    );
+  }
+
+  /** Error bodies differ only in volatile envelope fields; strip those before comparing. */
+  function stripVolatile(body: Record<string, unknown>) {
+    const copy = { ...body };
+    delete copy.timestamp;
+    delete copy.path;
+    delete copy.correlationId;
+    return copy;
+  }
+
+  it("CC-TENANT foreign: bizA's contactId under bizB's path -> 404 'Contact not found'; no invoice row, no FinancialTransaction, no event, nothing of A's contact in the body", async () => {
+    const before = await writes(ID.bizB);
+    const linkedA = await linkedToContact(ID.contactA);
+    const res = await create(ID.ownerB, ID.bizB, { contactId: ID.contactA, items: [line()] });
+    expect(res.status).toBe(404);
+    expectErrorEnvelope(res.body, 404, 'NOT_FOUND', 'Contact not found');
+    expect(res.body).not.toHaveProperty('contact');
+    const text = JSON.stringify(res.body);
+    expect(text).not.toContain('CustomerA');
+    expect(text).not.toContain(`${P}a@test.local`);
+    expect(text).not.toContain(ID.bizA);
+    expect(await writes(ID.bizB)).toEqual(before);
+    expect(await linkedToContact(ID.contactA)).toBe(linkedA);
+    expect(recordedEvents.filter((e) => e.name === 'invoice.created')).toEqual([]);
+    expect(postingCalls).toEqual([]);
+  });
+
+  it('CC-TENANT unknown and soft-deleted: an unknown contactId and an own soft-deleted contact get the same 404, byte-identical (volatile fields stripped) to the foreign one; no invoice row', async () => {
+    const before = await writes(ID.bizB);
+    const foreign = await create(ID.ownerB, ID.bizB, { contactId: ID.contactA, items: [line()] });
+    const unknown = await create(ID.ownerB, ID.bizB, { contactId: `${P}no_such_contact`, items: [line()] });
+    const gone = await create(ID.ownerB, ID.bizB, { contactId: ID.contactGoneB, items: [line()] });
+    for (const r of [foreign, unknown, gone]) expect(r.status).toBe(404);
+    expect(stripVolatile(unknown.body)).toEqual(stripVolatile(foreign.body));
+    expect(stripVolatile(gone.body)).toEqual(stripVolatile(foreign.body));
+    expect(await writes(ID.bizB)).toEqual(before);
+    expect(await linkedToContact(ID.contactGoneB)).toBe(0);
+  });
+
+  const invalid: Array<[string, () => Record<string, unknown>, RegExp]> = [
+    ['empty items', () => ({ contactId: ID.contactB, items: [] }), /^items must contain at least 1 elements$/],
+    ['quantity 0', () => ({ contactId: ID.contactB, items: [line({ quantity: 0 })] }), /^items\.0\.quantity must be a positive number$/],
+    // InvoiceItem.quantity is an Int column: before R0-27, 1.5 x 40 was stored as quantity 1 under a line and invoice total of 60.
+    ['fractional quantity 1.5', () => ({ contactId: ID.contactB, items: [line({ quantity: 1.5, unitPrice: 40 })] }), /^items\.0\.quantity must be an integer number$/],
+    ['NaN price (serialised as null)', () => ({ contactId: ID.contactB, items: [line({ unitPrice: Number.NaN })] }), /^items\.0\.unitPrice must be a number/],
+    ['missing contactId', () => ({ items: [line()] }), /^contactId should not be empty$/],
+  ];
+  for (const [label, body, field] of invalid) {
+    it(`CC-400 ${label} -> 400 with the field message; CommerceService.createInvoice is never called; no Invoice, no FinancialTransaction`, async () => {
+      const spy = vi.spyOn(commerceSvc, 'createInvoice');
+      try {
+        const before = await writes(ID.bizB);
+        const res = await create(ID.ownerB, ID.bizB, body());
+        expect(res.status, label).toBe(400);
+        expect(res.body.code).toBe('BAD_REQUEST');
+        expect([res.body.message].flat().some((m: unknown) => field.test(String(m))), JSON.stringify(res.body.message)).toBe(true);
+        expect(spy).not.toHaveBeenCalled();
+        expect(await writes(ID.bizB)).toEqual(before);
+        expect(recordedEvents).toEqual([]);
+        expect(postingCalls).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  }
+
+  it('CC-TOTALS: subtotal, taxAmount, discountAmount and total are computed on the server; the client total, subtotal, taxAmount and items[].total are dropped', async () => {
+    const res = await create(ID.ownerB, ID.bizB, {
+      contactId: ID.contactB,
+      items: [
+        line({ description: 'Two hours', quantity: 2, unitPrice: 10, total: 1 }),
+        line({ description: 'Setup', quantity: 1, unitPrice: 5, total: 1 }),
+      ],
+      taxRate: 10,
+      discountType: 'FIXED',
+      discountValue: 2,
+      subtotal: 1,
+      taxAmount: 0,
+      discountAmount: 0,
+      total: 1,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ businessId: ID.bizB, status: 'DRAFT', subtotal: 25, taxRate: 10, taxAmount: 2.5, discountAmount: 2, total: 25.5 });
+    expect(res.body.contact).toMatchObject({ id: ID.contactB, businessId: ID.bizB });
+    const rows: Array<Record<string, unknown>> = await db.$queryRawUnsafe(
+      `SELECT subtotal, tax_amount, discount_amount, total, status, contact_id FROM invoices WHERE id = '${res.body.id}'`,
+    );
+    expect(rows).toEqual([{ subtotal: 25, tax_amount: 2.5, discount_amount: 2, total: 25.5, status: 'DRAFT', contact_id: ID.contactB }]);
+    const items: Array<{ total: number }> = await db.$queryRawUnsafe(`SELECT total FROM invoice_items WHERE invoice_id = '${res.body.id}' ORDER BY total`);
+    expect(items.map((i) => i.total)).toEqual([5, 20]);
+    expect(recordedEvents.filter((e) => e.name === 'invoice.created')).toHaveLength(1);
+  });
+
+  it('CC-POSITIVE (control): a valid create by the owner of B -> 201 DRAFT invoice with its items and fields, linked to the own-tenant contact', async () => {
+    const res = await create(ID.ownerB, ID.bizB, {
+      contactId: ID.contactB,
+      items: [line({ description: 'Consulting', quantity: 2, unitPrice: 40 })],
+      currency: 'USD',
+      dueDate: '2026-12-01',
+      notes: 'cie r0-27 notes',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ businessId: ID.bizB, contactId: ID.contactB, status: 'DRAFT', currency: 'USD', subtotal: 80, total: 80, notes: 'cie r0-27 notes' });
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0]).toMatchObject({ description: 'Consulting', quantity: 2, unitPrice: 40, total: 80 });
+    expect(new Date(res.body.dueDate).toISOString().slice(0, 10)).toBe('2026-12-01');
+    expect((await rawInvoice(res.body.id)).contact_id).toBe(ID.contactB);
+  });
+
+  it('CC-LEDGER CASH: an accepted create posts nothing, and issuing it on the CASH tenant posts nothing either', async () => {
+    const res = await create(ID.ownerB, ID.bizB, { contactId: ID.contactB, items: [line({ quantity: 3 })] });
+    expect(res.status).toBe(201);
+    const id = res.body.id as string;
+    expect(await invoicePostings(id)).toEqual([]);
+    expect(postingCalls).toEqual([]);
+
+    const sent = await as(ID.ownerB, agent().patch(issueRoute(id))).send({ businessId: ID.bizB, status: 'SENT' });
+    expect(sent.status).toBe(200);
+    expect(postingCalls).toEqual([`finalized:${id}`]);
+    expect(await invoicePostings(id)).toEqual([]);
+  });
+
+  it('CC-LEDGER ACCRUAL: an accepted create posts nothing; issuing it posts AR once (one Invoice:<id>:invoice_finalized) for the server-computed total, not the client total', async () => {
+    const res = await create(ID.ownerC, ID.bizC, { contactId: ID.contactC, items: [line({ quantity: 3 })], subtotal: 1, total: 1 });
+    expect(res.status).toBe(201);
+    const id = res.body.id as string;
+    expect(res.body.total).toBe(30);
+    expect(await invoicePostings(id)).toEqual([]);
+
+    const sent = await as(ID.ownerC, agent().patch(issueRoute(id))).send({ businessId: ID.bizC, status: 'SENT' });
+    expect(sent.status).toBe(200);
+    expect(await invoicePostings(id)).toEqual([{ external_ref: `Invoice:${id}:invoice_finalized`, amount: 30 }]);
+  });
+
+  it('CC-LEDGER refused: on the ACCRUAL tenant a foreign contact (404) and an invalid body (400) write no Invoice and no FinancialTransaction', async () => {
+    const before = await writes(ID.bizC);
+    const foreign = await create(ID.ownerC, ID.bizC, { contactId: ID.contactB, items: [line()] });
+    const empty = await create(ID.ownerC, ID.bizC, { contactId: ID.contactC, items: [] });
+    expect(foreign.status).toBe(404);
+    expectErrorEnvelope(foreign.body, 404, 'NOT_FOUND', 'Contact not found');
+    expect(empty.status).toBe(400);
+    expect(await writes(ID.bizC)).toEqual(before);
+    expect(postingCalls).toEqual([]);
+  });
+
+  it('CC-D3 (control): the R0-D3 contract on create is unchanged: taxRate 150, a negative discount and a 150% discount -> 400 with the exact service message; no invoice row', async () => {
+    const before = await writes(ID.bizB);
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ taxRate: 150 }, 'Tax rate must be between 0 and 100'],
+      [{ discountType: 'FIXED', discountValue: -1 }, 'Discount value must be non-negative'],
+      [{ discountType: 'PERCENT', discountValue: 150 }, 'Percentage discount cannot exceed 100%'],
+    ];
+    for (const [extra, message] of cases) {
+      const res = await create(ID.ownerB, ID.bizB, { contactId: ID.contactB, items: [line()], ...extra });
+      expect(res.status, message).toBe(400);
+      expectErrorEnvelope(res.body, 400, 'BAD_REQUEST', message);
+    }
+    expect(await writes(ID.bizB)).toEqual(before);
+  });
+
+  it('CC-SERVICE (control): createInvoiceForService (booking deposit) is unchanged: one DRAFT line for the deposit amount, linked to the contact it is given, nothing posted', async () => {
+    const inv = await commerceSvc.createInvoiceForService(ID.bizB, ID.contactB, { name: 'CIE Service', price: 40 }, { kind: 'DEPOSIT', amountOverride: 10 });
+    expect(inv).toMatchObject({ businessId: ID.bizB, contactId: ID.contactB, status: 'DRAFT', subtotal: 10, total: 10, currency: 'TTD', notes: 'Deposit for service "CIE Service"' });
+    expect(inv.items).toHaveLength(1);
+    expect(inv.items[0]).toMatchObject({ description: 'Deposit — CIE Service', quantity: 1, unitPrice: 10, total: 10 });
+    expect(inv.contact).toMatchObject({ id: ID.contactB });
+    expect(await invoicePostings(inv.id)).toEqual([]);
   });
 });
