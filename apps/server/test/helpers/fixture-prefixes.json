@@ -49,6 +49,11 @@
       "packet": "R0-07-OPTIONAL-SVC-VISIBLE"
     },
     {
+      "prefix": "k09a_",
+      "owner": "apps/server/test/identity-business-config.integration.test.ts",
+      "packet": "R0-09-ID-HARDEN"
+    },
+    {
       "prefix": "k12a_",
       "owner": "apps/server/test/contact-scoped-tenancy.integration.test.ts",
       "packet": "R0-12-CT-TENANT-ROUTES"
@@ -59,7 +64,7 @@
       "packet": "R0-13-CT-PERSISTENCE-PROOF"
     },
     {
-"prefix": "k13b_",
+      "prefix": "k13b_",
       "owner": "apps/server/test/contacts-import-write-scope.integration.test.ts",
       "packet": "R0-13 / R0-13b-CT-IMPORT-ACTOR"
     },

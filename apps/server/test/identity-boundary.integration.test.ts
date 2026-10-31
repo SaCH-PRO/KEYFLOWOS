@@ -84,9 +84,13 @@
  *         from an admin token and checks neither deletedAt, bannedAt nor the
  *         marker, and verifyBusinessMembership lets SUPER_ADMIN into any
  *         tenant's socket; its Supabase path falls back to USER on a DB error.
- *   ST-3  PATCH /identity/businesses/:id has no ModuleScopeGuard: a
- *         settings:none member rewrites the tenant profile
- *         (identity.controller.ts updateBusiness).
+ *   ST-3  FIXED by R0-09-ID-HARDEN (owner ruling D-11; its cases assert the
+ *         required behaviour; see "ST-3 (fixed …)" below). PATCH
+ *         /identity/businesses/:id had only AuthGuard and BusinessGuard, so a
+ *         settings:none member rewrote the tenant profile
+ *         (identity.controller.ts updateBusiness). It is now OWNER only,
+ *         regardless of granted scopes, and no longer writes
+ *         onboardingComplete.
  *   ST-4  FIXED by R0-ID-F3-REVOCATION-IAT-CUTOFF (its cases assert the
  *         required behaviour; see "ST-4 — logout revocation is an issue-time
  *         cutoff" and "ST-4 (admin tokens)" below). The revocation marker was
@@ -214,6 +218,7 @@ const ID = {
   accomplice: `${P}accomplice`,   // User row only; invited into bizD by adminW mid-suite (OPEN DEFECT ST-F4)
   adminJ: `${P}adminJ`,           // ADMIN of bizD, role-default scopes (team: write) (OPEN DEFECT CR-1)
   staffD: `${P}staffD`,           // STAFF of bizD, role-default scopes (settings: none) (ST-3)
+  adminS: `${P}adminS`,           // ADMIN of bizD, ADMIN defaults with settings: write (ST-3 fix, D-11 owner-only)
   relogin: `${P}relogin`,         // STAFF of bizD; logs out, then the login marker clear (ST-4)
   adminTok: `${P}adminTok`,       // User row role SUPER_ADMIN at token issue, no membership (ST-2)
   adminNoRow: `${P}adminNoRow`,   // subject of a valid admin token, no User row at all (ST-2 fix); not seeded
@@ -244,6 +249,7 @@ const ID = {
   mAdminW: `${P}m_adminW`,
   mAdminJ: `${P}m_adminJ`,
   mStaffD: `${P}m_staffD`,
+  mAdminS: `${P}m_adminS`,
   mRelogin: `${P}m_relogin`,
 };
 
@@ -261,7 +267,7 @@ const adminCutoffKey = (userId: string) => `admin:user:${userId}:revokedAt`;
 const ALL_USERS = [
   ID.owner, ID.admin, ID.staff, ID.staffNoTeam, ID.ownerB, ID.deleted, ID.banned, ID.revoked, ID.noRow,
   ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin, ID.adminTok,
-  ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ, ID.adminNoRow,
+  ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ, ID.adminNoRow, ID.adminS,
 ];
 
 const IDLE_MS = 90_000;      // silence from the child counts; slow-but-talking does not
@@ -498,7 +504,7 @@ async function seed() {
   // OPEN DEFECT fixtures (bizD).
   for (const id of [
     ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin,
-    ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ,
+    ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ, ID.adminS,
   ]) {
     await db.user.create({ data: { id, email: email(id), name: id, role: 'USER' } });
   }
@@ -519,6 +525,7 @@ async function seed() {
     { id: ID.mAdminW, userId: ID.adminW, businessId: ID.bizD, role: 'ADMIN', permissionScopes: { crm: 'read', team: 'write' }, maxApprovalTier: 0 },
     { id: ID.mAdminJ, userId: ID.adminJ, businessId: ID.bizD, role: 'ADMIN' },
     { id: ID.mStaffD, userId: ID.staffD, businessId: ID.bizD, role: 'STAFF' },
+    { id: ID.mAdminS, userId: ID.adminS, businessId: ID.bizD, role: 'ADMIN', permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, settings: 'write' } },
     { id: ID.mRelogin, userId: ID.relogin, businessId: ID.bizD, role: 'STAFF' },
   ];
   for (const m of defectMemberships) await db.membership.create({ data: m });
@@ -669,7 +676,7 @@ describe('harness — the real built server is serving, with the ab_ fixtures in
     expect(await db.membership.count({ where: { businessId: ID.bizB } })).toBe(1);
     expect(await db.user.findUnique({ where: { id: ID.noRow } })).toBeNull();
     // OPEN DEFECT fixtures live in their own tenant.
-    expect(await db.membership.count({ where: { businessId: ID.bizD } })).toBe(14);
+    expect(await db.membership.count({ where: { businessId: ID.bizD } })).toBe(15);
     // The ST-F4 accomplice has a User row and no membership until adminW invites it.
     expect(await db.membership.count({ where: { userId: ID.accomplice } })).toBe(0);
     expect(await db.membership.count({ where: { userId: ID.adminTok } })).toBe(0);
@@ -1538,30 +1545,96 @@ describe('ST-2 (fixed) — the admin-token branch of AuthMiddleware applies the 
 // certification of that behaviour. It turns red when the fix lands, and the fix
 // packet replaces it with the it.todo next to it. Every fix is in source outside
 // this proof packet's write set (identity.controller.ts, identity.service.ts,
-// supabase-admin.service.ts). ST-4 is fixed (R0-ID-F3); its cases below assert
-// the required behaviour.
+// supabase-admin.service.ts). ST-3 (R0-09) and ST-4 (R0-ID-F3) are fixed; their
+// cases below assert the required behaviour.
+//
+// ST-3 — FIXED by R0-09-ID-HARDEN under owner ruling D-11 (2026-10-31): editing
+// the business profile is OWNER only, regardless of granted scopes. The "OPEN
+// DEFECT ST-3 reproduced" case pinned a settings:none STAFF member rewriting the
+// tenant profile; it now asserts the required behaviour and its it.todo is gone.
+// The ruling replaces the it.todo's settings-write wording, so an ADMIN that holds
+// settings:write is refused too. Fields outside the blueprint mirror only (name,
+// currency and the like are mirrored asynchronously into business_blueprints
+// after the response), so a write that lands leaves nothing behind but the row.
 // ---------------------------------------------------------------------------
-describe('OPEN DEFECT ST-3 — PATCH /identity/businesses/:id has no module scope', () => {
-  it('OPEN DEFECT ST-3 reproduced — a STAFF member (settings:none) is refused a settings read but rewrites the tenant profile', async () => {
+
+/** The Business row exactly as Postgres stores it, so "unchanged" means byte-identical. */
+async function businessRowText(id: string): Promise<string> {
+  const rows = await db.$queryRawUnsafe('SELECT row_to_json(b)::text AS j FROM businesses b WHERE b.id = $1', id);
+  expect(rows.length, `business ${id} exists`).toBe(1);
+  return rows[0].j as string;
+}
+
+describe('ST-3 (fixed, R0-09-ID-HARDEN, owner ruling D-11) — PATCH /identity/businesses/:id is OWNER only, regardless of granted scopes', () => {
+  const HIJACK = { slug: `${P}bizd-hijacked-slug`, defaultTaxRate: 99, storeEnabled: false, timezone: 'Pacific/Kiritimati' };
+
+  it('a STAFF member (settings:none) is refused a settings read and the profile rewrite: 403, Business row byte-identical', async () => {
     const t = T[ID.staffD];
     const read = await call('get', routes.settingsRead(ID.bizD), t);
     expect(read.status, JSON.stringify(read.body)).toBe(403);
 
-    // Fields outside the blueprint mirror (name would also be accepted; it is
-    // left out so the server's async BusinessBlueprint mirror writes nothing).
-    const res = await call('patch', routes.biz(ID.bizD), t, {
-      slug: 'ab-bizd-hijacked-slug',
-      defaultTaxRate: 99,
-      storeEnabled: true,
-    });
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const row = await db.business.findUnique({ where: { id: ID.bizD } });
-    expect(row).toMatchObject({ slug: 'ab-bizd-hijacked-slug', defaultTaxRate: 99, storeEnabled: true });
+    const before = await businessRowText(ID.bizD);
+    const res = await call('patch', routes.biz(ID.bizD), t, HIJACK);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expectNoBusinessData(res);
+    expect(await businessRowText(ID.bizD)).toBe(before);
   });
 
+  it('an ADMIN granted settings:write is refused too — the profile is owner-only, not scope-gated: 403, row byte-identical', async () => {
+    const t = T[ID.adminS];
+    // Not vacuous: the same token passes a settings-scoped read.
+    const read = await call('get', routes.settingsRead(ID.bizD), t);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+
+    const before = await businessRowText(ID.bizD);
+    const res = await call('patch', routes.biz(ID.bizD), t, HIJACK);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expectNoBusinessData(res);
+    expect(await businessRowText(ID.bizD)).toBe(before);
+  });
+
+  it('the OWNER rewrites the profile: 200, the row changes and GET reflects it', async () => {
+    const t = T[ID.ownerD];
+    const res = await call('patch', routes.biz(ID.bizD), t, { slug: `${P}bizd-owner-slug`, defaultTaxRate: 12.5, timezone: 'America/New_York' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const read = await call('get', routes.biz(ID.bizD), t);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(read.body).toMatchObject({ id: ID.bizD, slug: `${P}bizd-owner-slug`, defaultTaxRate: 12.5, timezone: 'America/New_York' });
+  });
+
+  it('the OWNER cannot complete onboarding through the generic PATCH: the real ValidationPipe strips onboardingComplete, 200, the flag unchanged', async () => {
+    const t = T[ID.ownerD];
+    const res = await call('patch', routes.biz(ID.bizD), t, { onboardingComplete: true, defaultTaxRate: 7.5 });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const row = await db.business.findUnique({ where: { id: ID.bizD } });
+    expect(row).toMatchObject({ defaultTaxRate: 7.5, onboardingComplete: false, onboardingCompletedAt: null });
+  });
+});
+
+// OPEN DEFECTS — D-11 sibling write paths (R0-09-ID-HARDEN review R09-ST-2,
+// R09-ST-3, R09-ST-4, CR-3). The generic PATCH above is closed, but other
+// routes still write the owner-only profile fields with only AuthGuard and
+// BusinessGuard. Each fix is in source outside the R0-09 write set; each
+// it.todo names the required behaviour for its follow-up packet.
+describe('OPEN DEFECTS — D-11 sibling write paths still change owner-only profile fields', () => {
   it.todo(
-    'REQUIRED (fix packet; identity.controller.ts updateBusiness, outside this write set): PATCH /identity/businesses/:id requires a settings ' +
-      'write scope (ModuleScopeGuard) — the STAFF case above answers 403 with the Business row unchanged',
+    'REQUIRED (follow-up; site/presence/presence.controller.ts, presence.service.ts publish — outside the R0-09 write set; review R09-ST-2): ' +
+      'PUT /site/presence/businesses/:id/draft and POST .../publish copy draft.slug onto Business.slug for any member, so a settings:none STAFF ' +
+      'changes the public slug the generic PATCH refuses; the slug change answers 403 for a non-owner with Business.slug unchanged',
+  );
+  it.todo(
+    'REQUIRED (follow-up, next to R0-SEC owner-only onboarding completion; onboarding-concierge.controller.ts/.service.ts autoConfigure — ' +
+      'outside the R0-09 write set; review R09-ST-3): POST /onboarding-concierge/businesses/:id/auto-configure writes Business.name ' +
+      '(customBusinessName) and overwrites businessHours for any member with no completion precondition; a non-owner answers 403 with the row unchanged',
+  );
+  it.todo(
+    'REQUIRED (follow-up; key-cortex.controller.ts execute — outside the R0-09 write set; review R09-ST-4): POST /api/v1/cortex/execute ' +
+      "builds the ConnectorCommand with userId: dto.userId ?? 'system', so a member attributes a command to the OWNER; the actor comes from req.user",
+  );
+  it.todo(
+    'REQUIRED (follow-up after the R09-ST-4 actor fix; key-cortex/adapters/settings-adapter.service.ts — outside the R0-09 write set; review CR-3): ' +
+      'settings.update_business_profile and settings.update_branding reach IdentityService.updateBusiness with no owner check; they apply ' +
+      'IdentityService.assertBusinessOwner on the non-spoofable actor, so a STAFF command leaves name, timezone, currency and branding unchanged',
   );
 });
 
