@@ -59,6 +59,11 @@
       "packet": "R0-20-MARKPAID-CONVERGENCE"
     },
     {
+      "prefix": "k22a_",
+      "owner": "apps/server/test/public-payment-intent.integration.test.ts",
+      "packet": "R0-22-PUBLIC-INTENT-HARDEN"
+    },
+    {
       "prefix": "k27b_",
       "owner": "apps/server/test/commerce-authorization.e2e.test.ts",
       "packet": "R0-27-REVENUE-CREATE-CONTRACT"
