@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   QuoteCreatedPayload,
@@ -159,18 +159,21 @@ export class CommerceService {
     return 0;
   }
 
+  // R0-D3: invalid input is a 400, not a 500. A plain Error here reached the
+  // global filter as INTERNAL_SERVER_ERROR on every invoice/quote create and
+  // update route.
   private validateTaxAndDiscount(taxRate?: number, discountValue?: number, discountType?: string) {
     if (taxRate !== undefined && taxRate !== null) {
       if (taxRate < 0 || taxRate > 100) {
-        throw new Error('Tax rate must be between 0 and 100');
+        throw new BadRequestException('Tax rate must be between 0 and 100');
       }
     }
     if (discountValue !== undefined && discountValue !== null) {
       if (discountValue < 0) {
-        throw new Error('Discount value must be non-negative');
+        throw new BadRequestException('Discount value must be non-negative');
       }
       if (discountType === 'PERCENT' && discountValue > 100) {
-        throw new Error('Percentage discount cannot exceed 100%');
+        throw new BadRequestException('Percentage discount cannot exceed 100%');
       }
     }
   }
@@ -346,10 +349,11 @@ export class CommerceService {
       where: { id: invoiceId, businessId },
     });
     if (!invoice) {
-      throw new Error('Invoice not found');
+      throw new NotFoundException('Invoice not found');
     }
     if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
-      throw new Error('Cannot delete a paid or partially paid invoice');
+      // R0-D3: a state guard is a 409, not a 500.
+      throw new ConflictException('Cannot delete a paid or partially paid invoice');
     }
     const result = await this.prisma.client.invoice.update({
       where: { id: invoiceId },
@@ -370,7 +374,7 @@ export class CommerceService {
       select: { id: true, status: true },
     });
     if (!invoice) {
-      throw new Error('Invoice not found');
+      throw new NotFoundException('Invoice not found');
     }
     if (invoice.status === 'DRAFT') {
       await this.prisma.client.invoice.update({
@@ -1560,13 +1564,24 @@ export class CommerceService {
       include: { payments: true },
     });
     if (!invoice) {
-      throw new Error('Invoice not found');
+      throw new NotFoundException('Invoice not found');
     }
     if (invoice.status === 'PAID' || invoice.status === 'VOID') {
-      throw new Error(`Cannot record payment on a ${invoice.status} invoice`);
+      // R0-D3: a state guard is a 409, not a 500.
+      throw new ConflictException(`Cannot record payment on a ${invoice.status} invoice`);
+    }
+    // R0-D3 review (ST-D3-3): the controller body is an inline type, so the
+    // global ValidationPipe cannot reject a missing, string or object amount
+    // or a missing method. Those reached tx.payment.create and surfaced as a
+    // PrismaClientValidationError 500 on the exact route this packet pins.
+    if (typeof input.amount !== 'number' || !Number.isFinite(input.amount)) {
+      throw new BadRequestException('Payment amount must be a number');
     }
     if (input.amount <= 0) {
-      throw new Error('Payment amount must be positive');
+      throw new BadRequestException('Payment amount must be positive');
+    }
+    if (typeof input.method !== 'string' || input.method.trim().length === 0) {
+      throw new BadRequestException('Payment method is required');
     }
 
     const existingPaid = invoice.payments
@@ -2103,11 +2118,12 @@ export class CommerceService {
       where: { id: input.invoiceId, businessId: input.businessId },
     });
     if (!invoice) {
-      throw new Error('Invoice not found');
+      throw new NotFoundException('Invoice not found');
     }
     this.validateTaxAndDiscount(input.taxRate, input.discountValue ?? undefined, input.discountType ?? undefined);
     if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
-      throw new Error('Cannot edit a paid or partially paid invoice');
+      // R0-D3: a state guard is a 409, not a 500.
+      throw new ConflictException('Cannot edit a paid or partially paid invoice');
     }
 
     if (input.status && input.status !== invoice.status) {
@@ -2132,7 +2148,25 @@ export class CommerceService {
     }
 
     const updateData: any = {};
-    if (input.contactId !== undefined) updateData.contactId = input.contactId;
+    if (input.contactId !== undefined) {
+      // R0-D3 review (ST-D3-1): the id is bound to the row and the row is
+      // returned with `include: { contact: true }`, so an id from another
+      // tenant both bound a foreign reference and disclosed that tenant's
+      // contact (email, phone, notes, every field). Resolve it inside the
+      // caller's tenant first; a foreign, deleted or unknown id answers like
+      // a missing one, and nothing is written.
+      if (typeof input.contactId !== 'string' || input.contactId.length === 0) {
+        throw new BadRequestException('contactId must be a non-empty string');
+      }
+      const contact = await this.prisma.client.contact.findFirst({
+        where: { id: input.contactId, businessId: input.businessId },
+        select: { id: true },
+      });
+      if (!contact) {
+        throw new NotFoundException('Contact not found');
+      }
+      updateData.contactId = input.contactId;
+    }
     if (input.currency !== undefined) updateData.currency = input.currency;
     if (input.dueDate !== undefined) {
       updateData.dueDate = input.dueDate ? new Date(input.dueDate) : null;
@@ -2140,6 +2174,29 @@ export class CommerceService {
     if (input.notes !== undefined) updateData.notes = input.notes;
 
     if (input.items) {
+      // R0-D3 review (ST-D3-2): InvoiceItem.productId is an FK to Product with
+      // no tenant check, so a line could bind another tenant's product and
+      // downstream catalog/inventory consumers of invoice_items.product_id
+      // would act on it. Every referenced product must resolve inside the
+      // caller's tenant before the existing items are deleted below, so a
+      // denied path writes nothing. The validated set is exactly the set
+      // written: an empty productId is "no product", never an FK value.
+      const productIds = Array.from(
+        new Set(
+          input.items
+            .map((item) => item.productId)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      );
+      if (productIds.length > 0) {
+        const products = await this.prisma.client.product.findMany({
+          where: { id: { in: productIds }, businessId: input.businessId },
+          select: { id: true },
+        });
+        if (products.length !== productIds.length) {
+          throw new NotFoundException('Product not found');
+        }
+      }
       await this.prisma.client.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
       const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
@@ -2167,7 +2224,7 @@ export class CommerceService {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           total: item.quantity * item.unitPrice,
-          productId: item.productId ?? null,
+          productId: item.productId || null,
         })),
       };
     } else if (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined) {
@@ -2251,9 +2308,11 @@ export class CommerceService {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
     });
-    if (!invoice) throw new Error('Invoice not found');
+    if (!invoice) throw new NotFoundException('Invoice not found');
     if (invoice.status === 'PAID' || invoice.status === 'VOID') {
-      throw new Error('Cannot create payment link for a paid or voided invoice');
+      // R0-D3: a state guard is a 409, not a 500. The three callers that
+      // swallow this refusal match on the message text, which is unchanged.
+      throw new ConflictException('Cannot create payment link for a paid or voided invoice');
     }
 
     const existing = await this.prisma.client.paymentLink.findFirst({

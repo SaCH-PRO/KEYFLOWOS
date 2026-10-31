@@ -793,7 +793,10 @@ describe("step 6 — the second tenant's owner is denied on every step-2..5 reso
     expect((await db.contact.findUnique({ where: { id: S.contactId } })).lastName).toBe('Byron');
   });
 
-  it.fails("bizA's invoice id under bizB's own path answers 404 on payments list/record, update and delete — it does not: CommerceService throws a plain Error('Invoice not found') and the API answers 500", async () => {
+  // R0-D3-INVOICE-ROUTE-ERROR-MAPPING landed: CommerceService throws
+  // NotFoundException('Invoice not found') on these paths, so the case is
+  // back to a plain `it` (it was `it.fails` while the API answered 500).
+  it("bizA's invoice id under bizB's own path answers 404 on payments list/record, update and delete", async () => {
     requireServer();
     const rows = await probeAll(6, OTHER, [
       ['get', `/commerce/businesses/${S.bizB}/invoices/${S.invoiceId}/payments`],
@@ -801,8 +804,8 @@ describe("step 6 — the second tenant's owner is denied on every step-2..5 reso
       ['patch', `/commerce/businesses/${S.bizB}/invoices/${S.invoiceId}`, { notes: 'hijacked' }],
       ['delete', `/commerce/businesses/${S.bizB}/invoices/${S.invoiceId}`],
     ]);
-    note(6, 'bizA invoice under bizB path (payments/update/delete)', '4 routes', rows.map((r) => r.status).join(','), 'expect 404; observed 500s');
-    // Nothing crossed the tenant line even so: the row is intact.
+    note(6, 'bizA invoice under bizB path (payments/update/delete)', '4 routes', rows.map((r) => r.status).join(','), 'expect all 404');
+    // Nothing crossed the tenant line: the row is intact.
     const invoice = await db.invoice.findUnique({ where: { id: S.invoiceId } });
     expect(invoice).toMatchObject({ status: 'PAID', deletedAt: null, notes: null });
     expect(await db.payment.count({ where: { invoiceId: S.invoiceId, businessId: S.bizB } })).toBe(0);
