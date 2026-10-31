@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
 import { AuthMiddleware, LOGOUT_REVOCATION_TTL_SECONDS, logoutRevocationKey } from '../src/core/auth/auth.middleware';
+import { buildAdminToken, verifyAdminToken } from '../src/core/auth/admin-token.util';
 import { RiscService } from '../src/modules/risc/risc.service';
 import { RISC_EVENT_TYPES } from '../src/modules/risc/risc.types';
 import { IdentityController } from '../src/modules/identity/identity.controller';
@@ -664,8 +665,9 @@ describe('R0-ID-F4 review F4-A — password flows against GoTrue session semanti
 });
 
 /**
- * R0-ID-F4 review F4-C, fixed by R0-ID-F7-RISC-SIGNOUT-SHAPE: a cross-account
- * protection (RISC) event that requires ending the user's sessions.
+ * R0-ID-F4 review F4-C, fixed by R0-ID-F7-RISC-SIGNOUT-SHAPE and its review
+ * repairs: a cross-account protection (RISC) event that requires ending the
+ * user's sessions.
  *
  * Until this packet RiscService.terminateUserSessions called
  * client.auth.admin.signOut(userId, 'global'): auth-js sends that first
@@ -679,24 +681,35 @@ describe('R0-ID-F4 review F4-A — password flows against GoTrue session semanti
  * admin sessions API); the call it does have that takes a user id is
  * updateUserById, whose AdminUserAttributes.ban_duration bans the user for a
  * Go duration. So the handler now:
- *   1. writes the logout cutoff POST /identity/logout writes
- *      (auth:revoked:user:<id>), so AuthMiddleware refuses every token of a
- *      session authenticated up to the event — FIRST, so nothing the provider
- *      does can stand in its way;
- *   2. bans the user at the provider by id for a duration that outlasts the
- *      default access-token lifetime, so the provider refuses to renew them.
+ *   1. for every session-ending event, writes the logout cutoff
+ *      POST /identity/logout writes (auth:revoked:user:<id>), so AuthMiddleware
+ *      refuses every token of a session authenticated up to the event — FIRST,
+ *      so nothing the provider does can stand in its way — and the admin-token
+ *      cutoff the same logout writes (admin:user:<id>:revokedAt; F7-SEC-4);
+ *   2. for account-disabled/hijacking only (F7-CR-1: Google sends the others
+ *      for ordinary account actions too, and a ban refuses the user's own
+ *      sign-in), bans the user at the provider by id for a duration that
+ *      outlasts the default access-token lifetime, after reading the current
+ *      ban so that a longer one is never cut short (F7-SEC-1, F7-CR-2);
+ *   3. names every leg that did not hold on RiscEvent.actionTaken and in the
+ *      audit (F7-SEC-3).
+ * The ban PAUSES the provider session; it does not revoke it (F7-SEC-2, the
+ * it.todo at the end of this describe).
  *
  * The real RiscService (signed RISC token, real jose verification against a
  * stubbed Google JWKS), the real SupabaseAdminService, the installed auth-js
- * client on a recording fetch, and the real AuthMiddleware reading the cutoff.
- * Nothing leaves the process.
+ * client on a recording fetch, and the real AuthMiddleware and admin-token
+ * verifier reading the cutoffs. GoTrue's ban semantics (Ban(): banned_until =
+ * now + duration, overwriting; banned_until omitted when unset) are modelled
+ * from its source, not observed. Nothing leaves the process.
  */
-describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event ends the sessions with call shapes the installed auth-js accepts', () => {
+describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions locally and, on hijacking, pauses them at the provider, with call shapes the installed auth-js accepts', () => {
   const USER = '6f1c1d36-5d7e-4c38-9a3f-0b7a3b0e2c11';
   const SERVICE_KEY = 'service-role-key-f7';
   const GOOGLE_ISSUER = 'https://accounts.google.com/';
   const CLIENT_ID = 'f7-client.apps.googleusercontent.com';
   const JWKS_URI = 'https://risc.f7.test/certs';
+  const ADMIN_CUTOFF = `admin:user:${USER}:revokedAt`;
   const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
 
   let keyPair: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -725,18 +738,27 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event ends the sessions wit
   });
 
   type Call = { call: string; authorization: string | null; body: unknown };
+  type GoTrueMode = 'up' | 'admin_500' | 'read_500' | 'network_down';
 
   /**
-   * GoTrue at fetch level, for the two calls in question:
-   *   - PUT /admin/users/:id (the service-role key as bearer) applies the
-   *     attributes; ban_duration sets banned_until.
+   * GoTrue at fetch level, for the calls in question:
+   *   - GET /admin/users/:id (the service-role key as bearer) returns the user;
+   *     banned_until is omitted while unset (models/user.go: omitempty).
+   *   - PUT /admin/users/:id applies the attributes; ban_duration sets
+   *     banned_until = now + duration, OVERWRITING whatever was there
+   *     (models/user.go Ban()).
    *   - POST /logout takes the bearer as the user's JWT; a value that is not
    *     one is refused (bad_jwt) — the CR-2 refusal.
    */
-  function fakeGoTrue(order: string[], mode: 'up' | 'admin_500' | 'network_down' = 'up') {
+  function fakeGoTrue(order: string[], state: { bannedUntil: number | null }, mode: GoTrueMode = 'up') {
     const calls: Call[] = [];
     const json = (status: number, body: unknown) =>
       new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    const userBody = (id: string) => ({
+      id,
+      aud: 'authenticated',
+      ...(state.bannedUntil !== null ? { banned_until: new Date(state.bannedUntil).toISOString() } : {}),
+    });
     const fetchImpl = async (input: unknown, init?: { method?: string; headers?: unknown; body?: unknown }) => {
       const url = new URL(String(input));
       const call = `${init?.method ?? 'GET'} ${url.pathname}${url.search}`;
@@ -750,11 +772,12 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event ends the sessions wit
         if (mode === 'admin_500') return json(500, { code: 500, error_code: 'unexpected_failure', msg: 'Database error updating user' });
         const ban = (body as { ban_duration?: string } | undefined)?.ban_duration;
         const seconds = ban ? Number(/^(\d+)s$/.exec(ban)?.[1] ?? NaN) : NaN;
-        return json(200, {
-          id: adminUser[1],
-          aud: 'authenticated',
-          banned_until: Number.isFinite(seconds) ? new Date(Date.now() + seconds * 1000).toISOString() : null,
-        });
+        if (Number.isFinite(seconds)) state.bannedUntil = Date.now() + seconds * 1000;
+        return json(200, userBody(adminUser[1]));
+      }
+      if (adminUser && (init?.method ?? 'GET') === 'GET') {
+        if (mode === 'read_500') return json(500, { code: 500, error_code: 'unexpected_failure', msg: 'Database error finding user' });
+        return json(200, userBody(adminUser[1]));
       }
       if (url.pathname === '/auth/v1/logout') {
         const bearer = (authorization ?? '').replace('Bearer ', '');
@@ -778,14 +801,21 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event ends the sessions wit
         store.set(k, { value: String(v), ttl });
         return 'OK';
       }),
+      set: vi.fn(async (k: string, v: string, mode?: string, ttl?: number) => {
+        order.push(`set ${k}`);
+        if (opts.down) throw new Error('redis down');
+        store.set(k, { value: String(v), ttl: mode === 'EX' ? Number(ttl) : -1 });
+        return 'OK';
+      }),
       get: vi.fn(async (k: string) => store.get(k)?.value ?? null),
       pttl: vi.fn(async (k: string) => (store.has(k) ? (store.get(k)?.ttl ?? 0) * 1000 : -2)),
     };
   }
 
-  function build(opts: { mode?: 'up' | 'admin_500' | 'network_down'; redisDown?: boolean } = {}) {
+  function build(opts: { mode?: GoTrueMode; redisDown?: boolean; bannedUntil?: number | null } = {}) {
     const order: string[] = [];
-    const gt = fakeGoTrue(order, opts.mode);
+    const state = { bannedUntil: opts.bannedUntil ?? null };
+    const gt = fakeGoTrue(order, state, opts.mode);
     const admin = new SupabaseAdminService();
     (admin as unknown as { client: unknown }).client = createClient('http://gotrue.f7.test', SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -795,9 +825,10 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event ends the sessions wit
     process.env.SUPABASE_URL = 'http://gotrue.f7.test';
     process.env.SUPABASE_SERVICE_ROLE_KEY = SERVICE_KEY;
     const redis = memoryRedis(order, { down: opts.redisDown });
+    const riscCreate = vi.fn(async (_args: unknown) => undefined);
     const prisma = {
       client: {
-        riscEvent: { findUnique: vi.fn(async () => null), create: vi.fn(async () => undefined) },
+        riscEvent: { findUnique: vi.fn(async () => null), create: riscCreate },
         userIdentity: { findUnique: vi.fn(async () => ({ userId: USER })) },
         session: {
           deleteMany: vi.fn(async () => {
@@ -808,7 +839,7 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event ends the sessions wit
         user: { findUnique: vi.fn(async () => ({ metaData: {} })), update: vi.fn(async () => undefined) },
       },
     };
-    const audit = vi.fn(async () => undefined);
+    const audit = vi.fn(async (_entry: unknown) => undefined);
     const risc = new RiscService(
       prisma as never,
       admin,
@@ -818,7 +849,9 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event ends the sessions wit
     );
     const warn = vi.fn();
     (risc as unknown as { logger: unknown }).logger = { warn, debug: vi.fn(), log: vi.fn(), error: vi.fn() };
-    return { risc, gt, redis, order, warn, prisma };
+    const actionTaken = () => (riscCreate.mock.calls[0]?.[0] as { data: { actionTaken: string } } | undefined)?.data.actionTaken;
+    const audited = () => audit.mock.calls[0]?.[0] as { outcome: string; reason: string; metadata: Record<string, unknown> } | undefined;
+    return { risc, gt, state, redis, order, warn, prisma, actionTaken, audited };
   }
 
   async function riscToken(eventType: string, reason?: string) {
@@ -831,96 +864,185 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event ends the sessions wit
       .setIssuedAt()
       .sign(keyPair.privateKey);
   }
+  const hijacking = () => riscToken(RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
 
+  const readCall = `GET /auth/v1/admin/users/${USER}`;
   const banCall = `PUT /auth/v1/admin/users/${USER}`;
 
-  it.each([
-    ['sessions-revoked', RISC_EVENT_TYPES.SESSIONS_REVOKED, undefined],
-    ['tokens-revoked', RISC_EVENT_TYPES.TOKENS_REVOKED, undefined],
-    ['token-revoked', RISC_EVENT_TYPES.TOKEN_REVOKED, undefined],
-    ['account-disabled/hijacking', RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking'],
-  ] as Array<[string, string, string | undefined]>)(
-    '%s: GoTrue receives the admin ban by user id under the service-role key, never POST /logout with the user id as its bearer',
-    async (_name, eventType, reason) => {
-      const h = build();
-      await expect(h.risc.receiveEvent(await riscToken(eventType, reason))).resolves.toEqual({ status: 202, processed: true });
+  it('account-disabled/hijacking: GoTrue is read, then receives the admin ban by user id under the service-role key, never POST /logout with the user id as its bearer', async () => {
+    const h = build();
+    await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
 
-      expect(h.gt.calls.filter((c) => c.call.startsWith('POST /auth/v1/logout'))).toEqual([]);
-      expect(h.gt.calls).toEqual([
-        { call: banCall, authorization: `Bearer ${SERVICE_KEY}`, body: { ban_duration: expect.stringMatching(/^\d+s$/) } },
-      ]);
-      expect(JSON.stringify(h.gt.calls)).not.toContain(`Bearer ${USER}`);
+    expect(h.gt.calls.filter((c) => c.call.startsWith('POST /auth/v1/logout'))).toEqual([]);
+    expect(h.gt.calls).toEqual([
+      { call: readCall, authorization: `Bearer ${SERVICE_KEY}`, body: undefined },
+      { call: banCall, authorization: `Bearer ${SERVICE_KEY}`, body: { ban_duration: expect.stringMatching(/^\d+s$/) } },
+    ]);
+    expect(JSON.stringify(h.gt.calls)).not.toContain(`Bearer ${USER}`);
+    expect(h.actionTaken()).toBe('account_disabled_hijacking');
+  });
+
+  it.each([
+    ['sessions-revoked', RISC_EVENT_TYPES.SESSIONS_REVOKED],
+    ['tokens-revoked', RISC_EVENT_TYPES.TOKENS_REVOKED],
+    ['token-revoked', RISC_EVENT_TYPES.TOKEN_REVOKED],
+  ])(
+    '%s: no provider traffic at all — no ban, so GoTrue keeps letting the user sign in (F7-CR-1) — and the local cutoffs are written',
+    async (_name, eventType) => {
+      const h = build();
+      await expect(h.risc.receiveEvent(await riscToken(eventType))).resolves.toEqual({ status: 202, processed: true });
+      expect(h.gt.calls).toEqual([]);
+      expect(h.state.bannedUntil).toBeNull();
+      expect(h.redis.store.get(logoutRevocationKey(USER))?.value).toMatch(/^\d+$/);
+      expect(h.redis.store.get(ADMIN_CUTOFF)?.value).toMatch(/^\d+$/);
     },
   );
 
-  it('the local logout cutoff is written FIRST (then the Session rows, then the provider), in the format and TTL POST /identity/logout uses', async () => {
+  it('the local logout cutoff is written FIRST (then the admin-token cutoff, the Session rows, then the provider), in the format and TTL POST /identity/logout uses', async () => {
     const h = build();
-    const before = Math.floor(Date.now() / 1000);
-    await h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED));
-    const after = Math.floor(Date.now() / 1000);
+    const beforeMs = Date.now();
+    const before = Math.floor(beforeMs / 1000);
+    await h.risc.receiveEvent(await hijacking());
+    const afterMs = Date.now();
+    const after = Math.floor(afterMs / 1000);
 
-    expect(h.order).toEqual([`setex ${logoutRevocationKey(USER)}`, 'local session deleteMany', `provider ${banCall}`]);
+    expect(h.order).toEqual([
+      `setex ${logoutRevocationKey(USER)}`,
+      `set ${ADMIN_CUTOFF}`,
+      'local session deleteMany',
+      `provider ${readCall}`,
+      `provider ${banCall}`,
+    ]);
     const marker = h.redis.store.get(logoutRevocationKey(USER));
     expect(marker?.ttl).toBe(LOGOUT_REVOCATION_TTL_SECONDS);
     expect(Number(marker?.value)).toBeGreaterThanOrEqual(before);
     expect(Number(marker?.value)).toBeLessThanOrEqual(after);
+    const adminCutoff = h.redis.store.get(ADMIN_CUTOFF);
+    expect(adminCutoff?.ttl).toBe(LOGOUT_REVOCATION_TTL_SECONDS);
+    expect(Number(adminCutoff?.value)).toBeGreaterThanOrEqual(beforeMs);
+    expect(Number(adminCutoff?.value)).toBeLessThanOrEqual(afterMs);
   });
 
-  it('the real AuthMiddleware then refuses a token of a session authenticated before the event (a refreshed one included) and attaches one authenticated after it', async () => {
+  it.each([
+    ['sessions-revoked', RISC_EVENT_TYPES.SESSIONS_REVOKED, undefined],
+    ['account-disabled/hijacking', RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking'],
+  ] as Array<[string, string, string | undefined]>)(
+    '%s: the real AuthMiddleware then refuses a token of a session authenticated before the event (a refreshed one included) and attaches one authenticated after it',
+    async (_name, eventType, reason) => {
+      const h = build();
+      await h.risc.receiveEvent(await riscToken(eventType, reason));
+
+      const now = Math.floor(Date.now() / 1000);
+      const tokenFor = (authenticatedAt: number, iat: number) =>
+        `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: 's-f7', role: 'authenticated', iat, exp: iat + 3600, amr: [{ method: 'oauth', timestamp: authenticatedAt }] })}.c2ln`;
+      const supabaseAuth = { getUserFromToken: vi.fn(async () => ({ id: USER, email: 'f7@example.com' })) };
+      const prisma = { client: { user: { findUnique: vi.fn(async () => ({ role: 'USER', deletedAt: null, bannedAt: null })) } } };
+      const mw = new AuthMiddleware(supabaseAuth as never, prisma as never, h.redis as never);
+      const attached = async (token: string) => {
+        const req = { headers: { authorization: `Bearer ${token}` } } as unknown as Request & { user?: { id: string } };
+        await mw.use(req, {} as never, () => undefined);
+        return req.user?.id ?? null;
+      };
+
+      // Signed in an hour ago; this access token minted just now by a refresh.
+      expect(await attached(tokenFor(now - 3600, now))).toBeNull();
+      // A session the user opens after the event.
+      expect(await attached(tokenFor(now + 2, now + 2))).toBe(USER);
+    },
+  );
+
+  it.each([
+    ['sessions-revoked', RISC_EVENT_TYPES.SESSIONS_REVOKED, undefined],
+    ['account-disabled/hijacking', RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking'],
+  ] as Array<[string, string, string | undefined]>)(
+    '%s: an admin local-auth token issued before the event is refused by the real verifier, one issued after it is accepted, as after POST /identity/logout (F7-SEC-4)',
+    async (_name, eventType, reason) => {
+      const secret = 'f7-admin-secret';
+      process.env.ADMIN_JWT_SECRET = secret;
+      const h = build();
+      const identity = { id: USER, email: 'f7@example.com', role: 'ADMIN' };
+      const before = buildAdminToken(identity, secret);
+      await new Promise((r) => setTimeout(r, 5));
+      await h.risc.receiveEvent(await riscToken(eventType, reason));
+      await new Promise((r) => setTimeout(r, 5));
+      const afterEvent = buildAdminToken(identity, secret);
+
+      expect(await verifyAdminToken(before, h.redis as never)).toBeNull();
+      expect(await verifyAdminToken(afterEvent, h.redis as never)).toEqual(identity);
+    },
+  );
+
+  it('the ban outlasts a default (1h) Supabase access token — every live client meets it at its next refresh — and does not outlast the local cutoff', async () => {
     const h = build();
-    await h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED));
-
-    const now = Math.floor(Date.now() / 1000);
-    const tokenFor = (authenticatedAt: number, iat: number) =>
-      `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: 's-f7', role: 'authenticated', iat, exp: iat + 3600, amr: [{ method: 'oauth', timestamp: authenticatedAt }] })}.c2ln`;
-    const supabaseAuth = { getUserFromToken: vi.fn(async () => ({ id: USER, email: 'f7@example.com' })) };
-    const prisma = { client: { user: { findUnique: vi.fn(async () => ({ role: 'USER', deletedAt: null, bannedAt: null })) } } };
-    const mw = new AuthMiddleware(supabaseAuth as never, prisma as never, h.redis as never);
-    const attached = async (token: string) => {
-      const req = { headers: { authorization: `Bearer ${token}` } } as unknown as Request & { user?: { id: string } };
-      await mw.use(req, {} as never, () => undefined);
-      return req.user?.id ?? null;
-    };
-
-    // Signed in an hour ago; this access token minted just now by a refresh.
-    expect(await attached(tokenFor(now - 3600, now))).toBeNull();
-    // A session the user opens after the event.
-    expect(await attached(tokenFor(now + 2, now + 2))).toBe(USER);
-  });
-
-  it('the ban outlasts a default (1h) Supabase access token — every live client meets it at its next refresh — and does not outlast the local cutoff (it is not an account suspension)', async () => {
-    const h = build();
-    await h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED));
-    const ban = (h.gt.calls[0]?.body as { ban_duration?: string } | undefined)?.ban_duration ?? '';
+    await h.risc.receiveEvent(await hijacking());
+    const ban = (h.gt.calls.find((c) => c.call === banCall)?.body as { ban_duration?: string } | undefined)?.ban_duration ?? '';
     const seconds = Number(/^(\d+)s$/.exec(ban)?.[1]);
     expect(seconds).toBeGreaterThan(3600);
     expect(seconds).toBeLessThanOrEqual(LOGOUT_REVOCATION_TTL_SECONDS);
   });
 
+  it("an operator's indefinite ban already on the account survives a hijacking event: GoTrue is read, not written, and banned_until is unchanged (F7-SEC-1, F7-CR-2)", async () => {
+    const indefinite = Date.now() + 100 * 365 * 24 * 3600 * 1000; // the dashboard's "permanent" ban
+    const h = build({ bannedUntil: indefinite });
+    await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
+    expect(h.gt.calls.map((c) => c.call)).toEqual([readCall]);
+    expect(h.state.bannedUntil).toBe(indefinite);
+    expect(h.actionTaken()).toBe('account_disabled_hijacking');
+  });
+
+  it('a ban that would lapse sooner than the RISC ban is extended to it', async () => {
+    const h = build({ bannedUntil: Date.now() + 5 * 60 * 1000 });
+    await h.risc.receiveEvent(await hijacking());
+    expect(h.gt.calls.map((c) => c.call)).toEqual([readCall, banCall]);
+    expect(h.state.bannedUntil).toBeGreaterThan(Date.now() + 3600 * 1000);
+  });
+
   it.each([
-    ['GoTrue answers 500', 'admin_500'],
-    ['the network is down', 'network_down'],
-  ] as Array<[string, 'admin_500' | 'network_down']>)(
-    'a provider failure (%s) is logged, does not skip the local cutoff, and the event is still accepted',
-    async (_name, mode) => {
+    ['GoTrue answers 500 to the ban', 'admin_500', [readCall, banCall]],
+    ['GoTrue answers 500 to the read (nothing is written blind)', 'read_500', [readCall]],
+    ['the network is down', 'network_down', [readCall]],
+  ] as Array<[string, GoTrueMode, string[]]>)(
+    'a provider failure (%s) is logged, named on actionTaken, does not skip the local cutoff, and the event is still accepted',
+    async (_name, mode, expectedCalls) => {
       const h = build({ mode });
-      await expect(h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED))).resolves.toEqual({
-        status: 202,
-        processed: true,
-      });
-      expect(h.gt.calls.map((c) => c.call)).toEqual([banCall]);
+      await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
+      expect(h.gt.calls.map((c) => c.call)).toEqual(expectedCalls);
+      expect(h.state.bannedUntil).toBeNull();
       expect(h.redis.store.get(logoutRevocationKey(USER))?.value).toMatch(/^\d+$/);
       expect(h.warn.mock.calls.some((c) => String(c[0]).includes(USER))).toBe(true);
+      expect(h.actionTaken()).toBe('account_disabled_hijacking:revocation_incomplete:provider_ban');
+      expect(h.audited()?.outcome).toBe('success');
     },
   );
 
   it('a Redis failure is logged and does not skip the provider ban', async () => {
     const h = build({ redisDown: true });
-    await expect(h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED))).resolves.toEqual({
-      status: 202,
-      processed: true,
-    });
-    expect(h.gt.calls.map((c) => c.call)).toEqual([banCall]);
+    await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
+    expect(h.gt.calls.map((c) => c.call)).toEqual([readCall, banCall]);
     expect(JSON.stringify(h.warn.mock.calls)).toContain('redis down');
   });
+
+  it('F7-SEC-3: Redis down and GoTrue refusing the ban — the RiscEvent row and the audit name every failed leg; the audit outcome is error', async () => {
+    const h = build({ mode: 'admin_500', redisDown: true });
+    await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
+    expect(h.redis.store.size).toBe(0);
+    const legs = ['revocation_marker', 'admin_cutoff', 'provider_ban'];
+    expect(h.actionTaken()).toBe(`account_disabled_hijacking:revocation_incomplete:${legs.join(',')}`);
+    expect(h.audited()).toMatchObject({
+      outcome: 'error',
+      reason: `risc:${RISC_EVENT_TYPES.ACCOUNT_DISABLED}; revocation_incomplete: ${legs.join(', ')}`,
+      metadata: { actionTaken: h.actionTaken(), revocationIncomplete: legs },
+    });
+  });
+
+  it('F7-SEC-3: sessions-revoked with Redis down — not recorded as sessions_terminated / success', async () => {
+    const h = build({ redisDown: true });
+    await h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED));
+    expect(h.actionTaken()).toBe('sessions_terminated:revocation_incomplete:revocation_marker,admin_cutoff');
+    expect(h.audited()?.outcome).toBe('error');
+  });
+
+  it.todo(
+    "R0-ID-F7 review F7-SEC-2 (residual, needs a follow-up packet: a durable cutoff is a User-row field or an AuthMiddleware change, and a provider logout needs a user JWT this handler does not have — both outside this repair's write set): a RISC event PAUSES the pre-event Supabase session, it does not revoke it. GoTrue refuses a refresh while the user is banned but keeps the refresh token, and a ban does not log the user out (supabase/auth admin.go:376, tokens/service.go:223). So after account-disabled/hijacking the hijacker's refresh token works at Supabase again once the 65-minute ban lapses, and the real AuthMiddleware attaches its refreshed tokens again once the 24h auth:revoked:user cutoff expires, with no new login; after sessions-revoked/tokens-revoked/token-revoked (no ban, F7-CR-1) only the 24h cutoff holds. Fix: a durable RISC cutoff AuthMiddleware reads, or a GoTrue global logout (POST /logout?scope=global, which with no session_id claim deletes every session and refresh token of the user) under a server-minted user JWT.",
+  );
 });
