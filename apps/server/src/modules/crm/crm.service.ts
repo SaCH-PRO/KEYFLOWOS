@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Contact, Prisma } from '@prisma/client';
 import {
@@ -398,6 +398,52 @@ export class CrmService {
     }
   }
 
+  /**
+   * Contact carries two tenant-scoped uniques, `(business_id, email_normalized)`
+   * and `(business_id, phone_normalized)`. A write that lands on one of them
+   * raises Prisma P2002, which left alone surfaces as an opaque 500. This turns
+   * it into a 409 that names the field and the tenant's existing live holder,
+   * so a client can link to or merge with that contact. A violation of
+   * anything else, or any other error, is rethrown untouched.
+   *
+   * The holder is looked up after the failed transaction, through the
+   * soft-delete-aware client: when the only holder is a soft-deleted contact
+   * the unique is still occupied (the index has no deleted_at term), the
+   * answer is still 409, and `existingContactId` is null.
+   */
+  private async rejectContactIdentityTaken(
+    err: unknown,
+    businessId: string,
+    identity: { emailNormalized?: string | null; phoneNormalized?: string | null },
+  ): Promise<never> {
+    const known = err as { code?: unknown; meta?: { target?: unknown } } | null;
+    if (!known || typeof known !== 'object' || known.code !== 'P2002') throw err;
+    const target = known.meta?.target;
+    const columns = Array.isArray(target) ? target.map(String) : [String(target ?? '')];
+    const field = columns.includes('email_normalized') ? 'email'
+      : columns.includes('phone_normalized') ? 'phone'
+        : null;
+    if (!field) throw err;
+
+    const value = field === 'email' ? identity.emailNormalized : identity.phoneNormalized;
+    const existing = value
+      ? await this.prisma.client.contact.findFirst({
+          where: field === 'email'
+            ? { ...contactWhereBase(businessId), emailNormalized: value }
+            : { ...contactWhereBase(businessId), phoneNormalized: value },
+          select: { id: true },
+        })
+      : null;
+    const label = field === 'email' ? 'email' : 'phone number';
+    throw new ConflictException({
+      code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
+      message: existing
+        ? `A contact with this ${label} already exists in this business`
+        : `This ${label} is held by a deleted contact in this business`,
+      existingContactId: existing?.id ?? null,
+    });
+  }
+
   async createContact(input: {
     businessId: string;
     firstName?: string | null;
@@ -482,7 +528,7 @@ export class CrmService {
       }, undefined, tx);
 
       return created;
-    });
+    }).catch((err: unknown) => this.rejectContactIdentityTaken(err, input.businessId, { emailNormalized, phoneNormalized }));
     if (contact) {
       const payload: ContactCreatedPayload = {
         contact,
@@ -796,7 +842,7 @@ export class CrmService {
       }
 
       return { existing: existingContact, updated: updatedContact };
-    });
+    }).catch((err: unknown) => this.rejectContactIdentityTaken(err, input.businessId, { emailNormalized, phoneNormalized }));
 
     const payload: ContactUpdatedPayload = {
       contact: updated,
