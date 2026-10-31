@@ -289,6 +289,35 @@ export class IdentityService {
     return business;
   }
 
+  /**
+   * R0-09-ID-HARDEN, owner ruling D-11 (2026-10-31): editing the business profile
+   * (PATCH /identity/businesses/:businessId) is OWNER only, regardless of granted
+   * scopes — settings:write or settings:admin does not admit a STAFF or ADMIN.
+   *
+   * The owner is the OWNER membership or the distinguished owner (Business.ownerId),
+   * the two arms BusinessGuard admits an owner by (an ownerId owner may predate the
+   * founding-membership backfill). A SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants it on this route; nothing here widens that.
+   */
+  async assertBusinessOwner(businessId: string, actor: { id: string; role?: string }): Promise<void> {
+    if (actor.role === 'SUPER_ADMIN') return;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return;
+    const owned = await this.prisma.client.business.findFirst({
+      where: { id: businessId, ownerId: actor.id },
+      select: { id: true },
+    });
+    if (owned) return;
+    throw new ForbiddenException('Only the business owner can edit the business profile');
+  }
+
+  /**
+   * The generic profile write. It does not write onboardingComplete (R0-09, CF-22):
+   * completion goes through the onboarding concierge's gated path.
+   */
   async updateBusiness(businessId: string, input: {
     name?: string;
     slug?: string;
@@ -314,7 +343,6 @@ export class IdentityService {
     lastHealthCheck?: string;
     storeEnabled?: boolean;
     businessHours?: Record<string, { open: string; close: string; closed: boolean }>;
-    onboardingComplete?: boolean;
     messageIntakeEnabled?: boolean;
     tagline?: string;
     description?: string;
@@ -375,7 +403,7 @@ export class IdentityService {
     if (positioningStatement !== undefined) data.positioningStatement = positioningStatement?.trim();
 
     const nonStringFields: (keyof typeof rest)[] = [
-      'defaultTaxRate', 'complianceData', 'storeEnabled', 'businessHours', 'onboardingComplete', 'messageIntakeEnabled',
+      'defaultTaxRate', 'complianceData', 'storeEnabled', 'businessHours', 'messageIntakeEnabled',
     ];
     for (const key of nonStringFields) {
       if (rest[key] !== undefined) {

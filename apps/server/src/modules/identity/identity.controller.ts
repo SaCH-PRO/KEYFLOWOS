@@ -707,12 +707,22 @@ export class IdentityController {
     });
   }
 
+  /**
+   * R0-09-ID-HARDEN, owner ruling D-11: editing the business profile is OWNER
+   * only, regardless of granted scopes — BusinessGuard admits any member, so
+   * the owner check runs here before the write. onboardingComplete is not part
+   * of UpdateBusinessDto and the service no longer writes it: completion goes
+   * through the onboarding concierge's gated path.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId')
-  updateBusiness(
+  async updateBusiness(
     @Param('businessId') businessId: string,
     @Body() body: UpdateBusinessDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    await this.identity.assertBusinessOwner(businessId, user);
     return this.identity.updateBusiness(businessId, body);
   }
 
