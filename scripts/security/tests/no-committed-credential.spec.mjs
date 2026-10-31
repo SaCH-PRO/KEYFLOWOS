@@ -2,8 +2,11 @@
  * No committed audit credential (R0-31-SEC-CREDENTIAL-REMOVE, PRS-M06).
  *
  * At c2f6f46d the two root Playwright audit scripts, audit-keyflowos.py and
- * audit-mobile-quick.py, carried a live test-account login as module
- * constants. This spec holds them to three rules.
+ * audit-mobile-quick.py, carried a live login as module constants. It is not
+ * a throwaway test account: the email is SUPER_ADMIN_EMAIL in
+ * apps/server/src/core/seed/seed.service.ts and a bypass email in
+ * feature-flags.service.ts, so this is the platform super-admin login. This
+ * spec holds the two scripts to four rules.
  *
  *   1. Neither file contains the committed literals. The literals are NOT in
  *      this spec: it carries their SHA-256 digests, computed when the spec was
@@ -20,9 +23,19 @@
  *      not inferred: the scripts run under a stub `playwright` package that
  *      announces its import, has no network code, and records what the login
  *      form was given.
+ *   4. When a login step fails, neither login value reaches stdout, stderr or
+ *      any file the script writes. Playwright appends its call log to the
+ *      error message, and the call log line for page.fill repeats the typed
+ *      value verbatim (`fill("<value>")`, playwright-core lib/server/dom.js),
+ *      while audit-output/results.json and audit-output/mobile-results.json
+ *      are tracked files. The stub raises an error of that shape from fill.
  *
- * Removing the literal from the working tree does not make the credential
- * safe: it stays in git history. Rotating it is operator action D-30.
+ * Removing the literal from these two scripts does NOT remove it from the
+ * repository. The password literal is still committed in two tracked files
+ * outside this packet's write set (pinned by the repository-wide tests at the
+ * end), and it stays in history. A follow-up packet must remove it there,
+ * and rotating it is operator action D-30. This spec does not claim the
+ * credential is safe.
  *
  * Run: node --test scripts/security/tests/no-committed-credential.spec.mjs
  */
@@ -35,6 +48,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -167,6 +181,7 @@ const IMPORT_MARK = 'STUB_PLAYWRIGHT_IMPORTED';
 const SUBMIT_MARK = 'STUB_LOGIN_SUBMITTED';
 const SUBMIT_EXIT = 98;
 const LOGIN_LOG = 'stub-login.json';
+const FAIL_SELECTOR_ENV = 'STUB_FILL_FAIL_SELECTOR';
 
 const STUB_INIT = `import sys
 sys.stderr.write("${IMPORT_MARK}\\n")
@@ -177,6 +192,7 @@ sys.stderr.flush()
 // submit. No network code. On submit it records what the form was filled
 // with and exits ${SUBMIT_EXIT}.
 const STUB_ASYNC_API = `import json
+import os
 import sys
 
 
@@ -186,6 +202,16 @@ class Route:
 
 class Request:
     pass
+
+
+class TimeoutError(Exception):
+    pass
+
+
+# When ${FAIL_SELECTOR_ENV} names a selector, fill() on it raises the way
+# Playwright does: the message ends with the call log, whose fill line holds
+# the typed value verbatim (playwright-core lib/server/dom.js: fill("<value>")).
+_FAIL_SELECTOR = os.environ.get("${FAIL_SELECTOR_ENV}", "")
 
 
 class _Page:
@@ -207,7 +233,18 @@ class _Page:
         pass
 
     async def fill(self, selector, value):
+        if selector == _FAIL_SELECTOR:
+            raise TimeoutError(
+                "Page.fill: Timeout 1500ms exceeded.\\n"
+                "Call log:\\n"
+                f"  - waiting for locator('{selector}')\\n"
+                "    - element is not enabled\\n"
+                f'  -   fill("{value}")\\n'
+            )
         self.fills.append([selector, value])
+
+    async def close(self):
+        pass
 
     async def click(self, selector):
         with open("${LOGIN_LOG}", "w") as f:
@@ -273,7 +310,18 @@ function redact(value) {
   return '<some other value, redacted>';
 }
 
-function runUnderStub(script, credentialEnv) {
+/** Every regular file under `dir`, as relative path -> utf8 text. */
+function readTree(dir, rel = '') {
+  const out = {};
+  for (const ent of readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+    const child = rel ? path.join(rel, ent.name) : ent.name;
+    if (ent.isDirectory()) Object.assign(out, readTree(dir, child));
+    else if (ent.isFile()) out[child] = readFileSync(path.join(dir, child), 'utf8');
+  }
+  return out;
+}
+
+function runUnderStub(script, credentialEnv, stubEnv = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'r031-'));
   try {
     const stub = path.join(root, 'stub');
@@ -286,14 +334,21 @@ function runUnderStub(script, credentialEnv) {
     const r = spawnSync(
       'python3',
       ['-I', '-B', '-c', RUNNER, stub, path.join(REPO_ROOT, script)],
-      { cwd, env: { PATH: process.env.PATH ?? '', ...credentialEnv }, encoding: 'utf8', timeout: 30_000 },
+      {
+        cwd,
+        env: { PATH: process.env.PATH ?? '', ...stubEnv, ...credentialEnv },
+        encoding: 'utf8',
+        timeout: 30_000,
+      },
     );
     if (r.error) throw r.error;
     const logPath = path.join(cwd, LOGIN_LOG);
     const raw = existsSync(logPath) ? JSON.parse(readFileSync(logPath, 'utf8')) : null;
     return {
       status: r.status,
+      stdout: r.stdout,
       stderr: r.stderr,
+      files: readTree(cwd),
       importedPlaywright: r.stderr.includes(IMPORT_MARK),
       createdOutputDir: existsSync(path.join(cwd, 'audit-output')),
       reachedLoginForm: raw !== null,
@@ -303,6 +358,26 @@ function runUnderStub(script, credentialEnv) {
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+/**
+ * Where `secret` appears in a run's stdout, stderr or written files, as
+ * labels only ('stdout', 'stderr', 'file audit-output/results.json'), so a
+ * failure names the place without printing the value.
+ */
+function leaksOf(r, secret) {
+  const where = [];
+  if (r.stdout.includes(secret)) where.push('stdout');
+  if (r.stderr.includes(secret)) where.push('stderr');
+  for (const [rel, text] of Object.entries(r.files)) {
+    if (text.includes(secret)) where.push(`file ${rel}`);
+  }
+  return where;
+}
+
+const RESULTS_FILE = {
+  'audit-keyflowos.py': path.join('audit-output', 'results.json'),
+  'audit-mobile-quick.py': path.join('audit-output', 'mobile-results.json'),
+};
 
 
 const MISSING_CASES = [
@@ -342,6 +417,34 @@ for (const script of SCRIPTS) {
         ['input[type="password"]', 'FAKE_PASSWORD'],
       ]);
     });
+
+    for (const field of ['email', 'password']) {
+      const selector = `input[type="${field}"]`;
+      it(`keeps the login out of stdout, stderr and every written file when the ${field} fill fails`, () => {
+        const r = runUnderStub(
+          script,
+          { [ENV_EMAIL]: FAKE_EMAIL, [ENV_PASSWORD]: FAKE_PASSWORD },
+          { [FAIL_SELECTOR_ENV]: selector },
+        );
+        assert.equal(typeof r.status, 'number', 'no exit status');
+        assert.notEqual(r.status, SUBMIT_EXIT, 'reached the login submit although the fill failed');
+        assert.deepEqual(leaksOf(r, FAKE_PASSWORD), [], 'the password leaked');
+        assert.deepEqual(leaksOf(r, FAKE_EMAIL), [], 'the email leaked');
+
+        // The failure is still recorded, with the call log kept and only the
+        // login value replaced.
+        const resultsText = r.files[RESULTS_FILE[script]];
+        assert.ok(resultsText !== undefined, `${RESULTS_FILE[script]} was not written`);
+        const login = JSON.parse(resultsText).filter((e) => e.step === 'login');
+        assert.ok(login.length > 0, 'no login entry recorded');
+        for (const e of login) {
+          assert.equal(e.status, 'failed');
+          assert.equal(typeof e.error, 'string', 'login failure has no error text');
+          assert.ok(e.error.includes('Call log'), 'the call log was dropped instead of redacted');
+          assert.ok(e.error.includes('fill("[REDACTED]")'), 'the fill value was not replaced by [REDACTED]');
+        }
+      });
+    }
   });
 }
 
@@ -349,33 +452,57 @@ for (const script of SCRIPTS) {
 // Repository-wide: outside this packet's write set
 // ---------------------------------------------------------------------------
 
+// The two tracked files that still carry the password literal. Both are
+// outside this packet's write set; removing it there is a follow-up packet.
+// admin-auth.service.spec.ts puts it beside ADMIN_EMAIL and role SUPER_ADMIN.
+const KNOWN_OUTSIDE_WRITE_SET = [
+  'apps/server/src/modules/admin-auth/admin-auth.service.spec.ts',
+  'audit-output/KEYFLOWOS-AUDIT-REPORT.md',
+];
+
+/** Distinct tracked files holding the committed password literal. */
+function trackedFilesWithPassword() {
+  const ls = spawnSync('git', ['ls-files', '-z'], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 << 20 });
+  if (ls.error) throw ls.error;
+  assert.equal(ls.status, 0, ls.stderr);
+  const cache = new Map();
+  const files = new Set();
+  for (const rel of ls.stdout.split('\0').filter(Boolean)) {
+    const abs = path.join(REPO_ROOT, rel);
+    let st;
+    try {
+      st = statSync(abs);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue;
+    const buf = readFileSync(abs);
+    if (buf.subarray(0, 8000).includes(0)) continue;
+    if (digestHits(rel, buf.toString('utf8'), { password: COMMITTED_DIGESTS.password }, cache).length) {
+      files.add(rel);
+    }
+  }
+  return [...files].sort();
+}
+
+// Ratchet: passes today and fails as soon as the literal lands in any other
+// tracked file (including either audit script). It does not claim the
+// repository is clean; the todo below does.
+test('the committed password literal is in no tracked file beyond the two known ones outside the write set', () => {
+  const unexpected = trackedFilesWithPassword().filter((f) => !KNOWN_OUTSIDE_WRITE_SET.includes(f));
+  assert.deepEqual(unexpected, []);
+});
+
 test(
   'no tracked file carries the committed password literal',
   {
     todo:
-      'outside the R0-31 write set: at authoring time the password literal is still in ' +
-      'apps/server/src/modules/admin-auth/admin-auth.service.spec.ts and ' +
-      'audit-output/KEYFLOWOS-AUDIT-REPORT.md; a follow-up packet must remove it there',
+      'outside the R0-31 write set: the platform super-admin password literal is still committed in ' +
+      KNOWN_OUTSIDE_WRITE_SET.join(' and ') +
+      ', so repo-wide the count is not zero; a follow-up packet must remove it there, and D-30 rotation ' +
+      'is still required because the literal stays in history',
   },
   () => {
-    const ls = spawnSync('git', ['ls-files', '-z'], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 << 20 });
-    if (ls.error) throw ls.error;
-    assert.equal(ls.status, 0, ls.stderr);
-    const cache = new Map();
-    const hits = [];
-    for (const rel of ls.stdout.split('\0').filter(Boolean)) {
-      const abs = path.join(REPO_ROOT, rel);
-      let st;
-      try {
-        st = statSync(abs);
-      } catch {
-        continue;
-      }
-      if (!st.isFile()) continue;
-      const buf = readFileSync(abs);
-      if (buf.subarray(0, 8000).includes(0)) continue;
-      hits.push(...digestHits(rel, buf.toString('utf8'), { password: COMMITTED_DIGESTS.password }, cache));
-    }
-    assert.deepEqual(hits, []);
+    assert.deepEqual(trackedFilesWithPassword(), []);
   },
 );
