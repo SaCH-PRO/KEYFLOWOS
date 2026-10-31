@@ -898,7 +898,7 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
                   historyDrawer.entries.map((entry) => (
                     <a
                       key={entry.id}
-                      href={`/app/commerce?tab=invoices&invoice=${entry.id}`}
+                      href={`/app/commerce/invoices/${encodeURIComponent(entry.id)}`}
                       className="rounded-lg border border-border/40 bg-white/[0.02] p-3 flex items-center justify-between gap-3 hover:bg-white/[0.05] hover:border-border/60 transition-colors"
                       title="Open generated invoice"
                     >

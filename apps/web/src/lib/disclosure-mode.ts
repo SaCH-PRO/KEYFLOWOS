@@ -10,6 +10,8 @@
  *   - enterprise: Multi-service, multi-location (40+ people, $5M+)
  */
 
+import { NAV_ROUTE_LABELS } from "./semantic-routes";
+
 export type DisclosureMode = "startup" | "growth" | "enterprise";
 
 const STORAGE_KEY = "kf_disclosure_mode";
@@ -45,19 +47,24 @@ const DEFAULT_MODE: DisclosureMode = "startup";
  *
  * disclosure-mode.spec.ts now asserts every entry here resolves to a real nav
  * label, so the next rename fails a test instead of quietly hiding a feature.
+ *
+ * The commerce entry is decision D-09, so it is read from NAV_ROUTE_LABELS
+ * rather than spelled out: a ruling renames the nav entry, and a copy here
+ * would then match nothing and hide the money screen. "Invoices" and "Quotes"
+ * sit beside it in every mode, so the default nav has a door to both (CF-20).
  */
 export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
   // A solopreneur: talk to KEY, see the money, know the customers, keep the diary.
   startup: [
     "Chat", "Inbox",
-    "Overview", "Sales", "Expenses",
+    "Overview", NAV_ROUTE_LABELS["/app/commerce"], "Invoices", "Quotes", "Expenses",
     "Contacts", "Deals",
     "Calendar", "Bookings",
   ],
   // A team: add delivery, support, campaigns and reporting.
   growth: [
     "Chat", "Inbox", "Worker", "Autonomy",
-    "Overview", "Sales", "Inventory", "Payments", "Expenses", "Budgets", "Reports",
+    "Overview", NAV_ROUTE_LABELS["/app/commerce"], "Invoices", "Quotes", "Inventory", "Payments", "Expenses", "Budgets", "Reports",
     "Accounts & tax setup", "Reconcile bank", "Tax", "Close the month", "General ledger", "Trial balance", "Recurring journals", "Assets & depreciation",
     "Contacts", "Deals", "Sequences", "Support",
     "Calendar", "Bookings",
@@ -70,7 +77,7 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
   // other two got their errors from.
   enterprise: [
     "Chat", "Inbox", "Worker", "Autonomy", "Modes", "Data Inbox", "Capture",
-    "Overview", "Sales", "Inventory", "Payments", "Expenses", "Purchasing", "Retainers", "Budgets", "Reports",
+    "Overview", NAV_ROUTE_LABELS["/app/commerce"], "Invoices", "Quotes", "Inventory", "Payments", "Expenses", "Purchasing", "Retainers", "Budgets", "Reports",
     "Accounts & tax setup", "Reconcile bank", "Tax", "Close the month", "General ledger", "Trial balance", "Recurring journals", "Assets & depreciation",
     "Bank rules", "Credit notes", "Exchange rates", "Accounting sync",
     "Contacts", "Deals", "Sequences", "Support", "Calls", "Insights",

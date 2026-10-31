@@ -134,7 +134,7 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
                   </p>
                 </div>
                 <a
-                  href={`/app/commerce?tab=invoices&id=${invoiceId}`}
+                  href={`/app/commerce/invoices/${encodeURIComponent(invoiceId)}`}
                   className="text-xs px-3 py-1.5 rounded-lg font-medium inline-flex items-center gap-1 transition-colors shrink-0"
                   style={{ background: "hsl(var(--kf-success) / 0.1)", color: "hsl(var(--kf-success))" }}
                 >
@@ -196,7 +196,7 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
                 <p className="text-[10px] text-muted-foreground">ID: {invoiceId.slice(0, 8)}...</p>
               </div>
               <a
-                href={`/app/commerce?tab=invoices&id=${invoiceId}`}
+                href={`/app/commerce/invoices/${encodeURIComponent(invoiceId)}`}
                 className="text-xs px-3 py-1.5 rounded-lg font-medium inline-flex items-center gap-1 transition-colors"
                 style={{ background: "hsl(var(--kf-success) / 0.1)", color: "hsl(var(--kf-success))" }}
               >

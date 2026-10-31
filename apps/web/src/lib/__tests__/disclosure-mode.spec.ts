@@ -36,6 +36,7 @@ import {
   MODE_BUILD_ITEMS,
   type DisclosureMode,
 } from '../disclosure-mode';
+import { NAV_ROUTE_LABELS } from '../semantic-routes';
 
 const MODES: DisclosureMode[] = ['startup', 'growth', 'enterprise'];
 
@@ -102,10 +103,20 @@ describe('the default mode is usable', () => {
     const visible = new Set(MODE_OPERATE_ITEMS.startup.filter((l) => operate.has(l)));
 
     // Names streamlined 2026-08-06: "Revenue" -> "Sales", because one screen
-    // was reached as Revenue, Commerce AND Storefront.
-    expect(visible.has('Sales'), 'no way to see money').toBe(true);
+    // was reached as Revenue, Commerce AND Storefront. Which of the two it is
+    // now is D-09, so the label is read from the constant, not spelled here.
+    expect(visible.has(NAV_ROUTE_LABELS['/app/commerce']), 'no way to see money').toBe(true);
     expect(visible.has('Contacts'), 'no way to see customers').toBe(true);
     expect(visible.has('Calendar'), 'no way to see the diary').toBe(true);
+  });
+
+  it('startup can open invoices and quotes, the doors CF-20 found missing', () => {
+    // R0-08 could not add these: the nav entries alone are filtered out of
+    // startup and growth by this allowlist, so a new owner still saw no door.
+    const visible = new Set(MODE_OPERATE_ITEMS.startup.filter((l) => operate.has(l)));
+
+    expect(visible.has('Invoices'), 'no door to invoices in the default nav').toBe(true);
+    expect(visible.has('Quotes'), 'no door to quotes in the default nav').toBe(true);
   });
 
   it('startup can reach the business profile, which onboarding asks them to fill in', () => {
@@ -115,6 +126,23 @@ describe('the default mode is usable', () => {
     // onboarded. Renamed to "Profile" when the nav was streamlined — genome is
     // internal vocabulary, not something an owner would look for.
     expect(MODE_BUILD_ITEMS.startup.filter((l) => build.has(l))).toContain('Profile');
+  });
+});
+
+describe('the D-09 label is keyed on the constant, not copied (R0-08b)', () => {
+  // A D-09 ruling is a change to NAV_ROUTE_LABELS. If this file spelled the
+  // commerce label out, the ruling would rename the nav entry and every mode
+  // would silently stop matching it — the original drift, reintroduced by a
+  // rename instead of a typo.
+  const src = readFileSync(join(__dirname, '..', 'disclosure-mode.ts'), 'utf8');
+
+  it('every mode lists the commerce entry through NAV_ROUTE_LABELS', () => {
+    expect([...src.matchAll(/NAV_ROUTE_LABELS\["\/app\/commerce"\]/g)], 'one per mode').toHaveLength(3);
+    for (const mode of MODES) expect(MODE_OPERATE_ITEMS[mode], mode).toContain(NAV_ROUTE_LABELS['/app/commerce']);
+  });
+
+  it('no mode spells the current value out beside it', () => {
+    expect(src).not.toContain(`"${NAV_ROUTE_LABELS['/app/commerce']}"`);
   });
 });
 

@@ -15,6 +15,7 @@ import {
   LogOut,
 } from "lucide-react";
 import type { NavItem, NavSection } from "@/lib/nav-config";
+import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 
 interface MobileDrawerProps {
   mobileDrawerOpen: boolean;
@@ -230,20 +231,23 @@ export function MobileDrawer({
         )}
 
         <div className="flex-1 py-2 px-2">
-          {/* Cockpit link */}
+          {/* Cockpit link. Straight to /app/command-center: /app/keyflow-command
+              is a redirect stub to it, so the stub's path is never the one the
+              user is on and the active state keys on the cockpit's own path.
+              Label under decision D-09 — see NAV_ROUTE_LABELS. */}
           <Link
-            href="/app/keyflow-command"
+            href="/app/command-center"
             onClick={closeDrawer}
             className={cn(
               "flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-[13px] transition-all relative active:scale-[0.98] mb-2",
               (pathname === "/app" ||
-                pathname.startsWith("/app/keyflow-command") ||
+                pathname.startsWith("/app/command-center") ||
                 pathname.startsWith("/app/control-tower")) &&
                 "bg-gradient-to-r from-[hsl(var(--kf-accent1))]/8 to-[hsl(var(--kf-accent2))]/4 text-foreground font-medium"
             )}
           >
             {(pathname === "/app" ||
-              pathname.startsWith("/app/keyflow-command") ||
+              pathname.startsWith("/app/command-center") ||
               pathname.startsWith("/app/control-tower")) && (
               <div
                 className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full"
@@ -253,7 +257,7 @@ export function MobileDrawer({
               />
             )}
             <Sparkles className="w-[18px] h-[18px] text-white flex-shrink-0" />
-            <span>Cockpit</span>
+            <span>{NAV_ROUTE_LABELS["/app/command-center"]}</span>
           </Link>
 
           {/* OPERATE */}

@@ -579,7 +579,7 @@ export default function BookingDetailDrawer({
 
             {linkedInvoice && (
               <Link
-                href={`/app/commerce?tab=invoices&invoiceId=${encodeURIComponent(linkedInvoice.id)}`}
+                href={`/app/commerce/invoices/${encodeURIComponent(linkedInvoice.id)}`}
                 className="w-full flex items-center justify-between gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-medium border transition-colors"
                 style={{
                   background: "hsl(var(--kf-success) / 0.08)",
