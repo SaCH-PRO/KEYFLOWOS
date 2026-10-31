@@ -67,6 +67,36 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
   },
 });
 
+/**
+ * The operator shape of a quote: the customer's name and email, every line
+ * item, the invoice it was converted into and the business profile. Shared by
+ * `getQuote` (the tenant-unbound server-side read) and the tenant-bound
+ * `getQuoteForBusiness` (R0-PC-01) so the two reads cannot drift apart.
+ */
+const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
+  contact: {
+    select: {
+      firstName: true,
+      lastName: true,
+      email: true,
+    },
+  },
+  items: true,
+  invoice: true,
+  business: {
+    select: {
+      id: true,
+      name: true,
+      logoUrl: true,
+      address: true,
+      phone: true,
+      email: true,
+      website: true,
+      primaryColor: true,
+    },
+  },
+});
+
 /** Older invoices stored subtotal 0 with priced items; derive it so totals render. */
 function withLegacySubtotal<
   T extends { subtotal: number; taxRate: number | null; taxAmount: number | null; items: Array<{ total: number }> },
@@ -752,6 +782,9 @@ export class CommerceService {
           provider: 'manual',
           providerPaymentId: `manual_${invoiceId}_${Date.now()}`,
           method: 'MANUAL',
+          // R0-PL-07 review (PL07-ST-2 / PL07-CR-1): the person (or KEY) who
+          // marked the invoice paid recorded this manual row.
+          recordedBy: actorId ?? null,
         },
       });
     }
@@ -1149,32 +1182,38 @@ export class CommerceService {
     return this.decorateQuote(updated, now);
   }
 
+  /**
+   * Server-side read by id alone. NOT tenant-bound: it returns any tenant's
+   * quote in the full operator shape, DRAFT included, so a caller holding a
+   * tenant must read `getQuoteForBusiness` below instead. No HTTP route serves it as
+   * a read any more: the bare-id GET /commerce/quotes/:quoteId answers 404 for
+   * every id (R0-PC-01). Remaining callers: the controller's sendQuoteEmail
+   * (compares businessId after the read) and the KEY commerce adapter's
+   * getQuoteStatus, which does not bind input.businessId yet (ST-PC01-1,
+   * follow-up packet: that file is outside the R0-PC-01 write set).
+   */
   async getQuote(quoteId: string) {
     const quote = await this.prisma.client.quote.findUnique({
       where: { id: quoteId },
-      include: {
-        contact: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-        items: true,
-        invoice: true,
-        business: {
-          select: {
-            id: true,
-            name: true,
-            logoUrl: true,
-            address: true,
-            phone: true,
-            email: true,
-            website: true,
-            primaryColor: true,
-          },
-        },
-      },
+      include: OPERATOR_QUOTE_INCLUDE,
+    });
+    if (!quote) return null;
+    return this.decorateQuote(quote);
+  }
+
+  /**
+   * R0-PC-01 — the operator quote detail read behind
+   * GET /commerce/businesses/:businessId/quotes/:quoteId. Same operator shape
+   * as `getQuote`, bound to the tenant the guards admitted: a cross-tenant id,
+   * an unknown id and a soft-deleted row all read as absent, which the
+   * controller turns into one 404. No status gate — the operator opens DRAFT.
+   * A read stamps nothing (no viewedAt, no event): only the signed-token
+   * route records a customer view.
+   */
+  async getQuoteForBusiness(quoteId: string, businessId: string) {
+    const quote = await this.prisma.client.quote.findFirst({
+      where: { id: quoteId, businessId, deletedAt: null },
+      include: OPERATOR_QUOTE_INCLUDE,
     });
     if (!quote) return null;
     return this.decorateQuote(quote);
@@ -1616,7 +1655,32 @@ export class CommerceService {
      * (evidence URL, drive file id, tool-call id) to opt in.
      */
     dedupeByReference?: boolean;
+    /**
+     * R0-PL-07: who records this payment. The HTTP route passes the
+     * authenticated user (req.user.id); the Key cortex adapter and
+     * PaymentEvidenceService pass KEY_SYSTEM_ACTOR_ID. It is written to
+     * Payment.recordedBy, the posting's FinancialTransaction.createdById and
+     * the contact timeline event. It is an option, never part of `input`, so a
+     * client body can not name the recorder. Absent (drive intake) records
+     * null. A replay returns the original row and never rewrites its recorder.
+     */
+    actorId?: string | null;
+    /**
+     * R0-PL-07 review (PL07-ST-3): the person on whose behalf a SYSTEM
+     * recorder (KEY) acted, e.g. the member who uploaded the receipt on the
+     * from-evidence route or the user KEY's tool call ran for. The recorder
+     * stays the system actor; this only keeps the human on the audit trail
+     * (contact event data.initiatedBy). Audit data, never authority. Ignored
+     * unless the recorder is the system actor, and never the system actor
+     * itself. Like actorId it is an option, never part of `input`.
+     */
+    initiatedBy?: string | null;
   } = {}) {
+    const actorId = options.actorId ?? null;
+    const initiatedBy =
+      isSystemActor(actorId) && options.initiatedBy && !isSystemActor(options.initiatedBy)
+        ? options.initiatedBy
+        : null;
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
       include: { payments: true },
@@ -1701,12 +1765,14 @@ export class CommerceService {
             notes: input.notes ?? null,
             evidenceUrl: input.evidenceUrl ?? null,
             evidenceMimeType: input.evidenceMimeType ?? null,
+            recordedBy: actorId,
             businessId,
             invoiceId,
           },
         });
         await this.revenuePosting.onPaymentRecorded(created.id, {
           tx: tx as unknown as Prisma.TransactionClient,
+          createdById: actorId,
         });
         return created;
       });
@@ -1752,8 +1818,13 @@ export class CommerceService {
           invoiceTotal: invoice.total,
           newStatus,
           overPaid: isOverPayment ? Number((newPaidTotal - Number(invoice.total)).toFixed(2)) : 0,
+          recordedBy: actorId,
+          ...(initiatedBy ? { initiatedBy } : {}),
         },
-        actorType: 'USER',
+        // R0-PL-07: KEY (adapter, evidence extraction) is a SYSTEM actor; a
+        // person is USER. Without an actor the type stays USER, as before.
+        actorType: isSystemActor(actorId) ? 'SYSTEM' : 'USER',
+        actorId: actorId ?? undefined,
         source: 'commerce',
       });
     }
@@ -1917,24 +1988,52 @@ export class CommerceService {
     return payments;
   }
 
-  /** Mark a payment refunded (no provider call — local bookkeeping only). */
-  async markPaymentRefunded(paymentId: string, businessId: string, reason?: string) {
+  /**
+   * Mark a payment refunded (no provider call — local bookkeeping only).
+   *
+   * R0-PL-07: `actorId` (the refunding user) is written to the reversal
+   * FinancialTransaction.createdById. The manual refund flips the original
+   * Payment row rather than writing a refund row, and Payment has no
+   * refunded-by column, so Payment.recordedBy keeps the original recorder.
+   *
+   * R0-PL-07 review (PL07-ST-1): only a SUCCESSFUL payment can be refunded.
+   * An already REFUNDED payment, or a PENDING / FAILED one, answers 409 and
+   * changes nothing, so a second refund can no longer rewrite the notes and
+   * report success while recording no refunder. The SUCCESSFUL -> REFUNDED
+   * flip is conditional on the status, so two concurrent refunds of the same
+   * payment produce one refund and one 409.
+   */
+  async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null) {
     const payment = await this.prisma.client.payment.findFirst({
       where: { id: paymentId, businessId },
     });
     if (!payment) throw new NotFoundException('Payment not found');
+    const refusal = (status: string) =>
+      new ConflictException(
+        status === 'REFUNDED'
+          ? 'Payment is already refunded'
+          : `Only a successful payment can be refunded (this payment is ${status})`,
+      );
+    if (payment.status !== 'SUCCESSFUL') throw refusal(payment.status);
     // FIN2 — flip the row + reverse the original posting in one tx so the
     // refunded state and the offsetting ledger entries commit together.
     const updated = await this.prisma.client.$transaction(async (tx) => {
-      const next = await tx.payment.update({
-        where: { id: paymentId },
+      const flipped = await tx.payment.updateMany({
+        where: { id: paymentId, businessId, status: 'SUCCESSFUL' },
         data: {
           status: 'REFUNDED',
           notes: reason ? `${payment.notes ? payment.notes + ' | ' : ''}Refunded: ${reason}` : payment.notes,
         },
       });
+      if (flipped.count === 0) {
+        // Lost a race with another refund (or a status change) after the read above.
+        const current = await tx.payment.findUnique({ where: { id: paymentId }, select: { status: true } });
+        throw refusal(current?.status ?? 'missing');
+      }
+      const next = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
       await this.revenuePosting.onPaymentRefunded(paymentId, {
         tx: tx as unknown as Prisma.TransactionClient,
+        createdById: actorId ?? null,
       });
       return next;
     });

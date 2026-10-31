@@ -714,9 +714,35 @@ export class CommerceController {
     return { success: true, quote, resolvedApprovals: matches.length };
   }
 
+  // R0-PC-01: the operator quote detail read. Declared after `quotes/stale`
+  // so that route keeps matching first. The tenant is the path param the
+  // guards admitted; the service binds the read to it, so a cross-tenant id,
+  // an unknown id and a soft-deleted row answer the same 404.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/quotes/:quoteId')
+  async getQuoteDetail(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+  ) {
+    const quote = await this.commerce.getQuoteForBusiness(quoteId, businessId);
+    if (!quote) throw new NotFoundException('Quote not found');
+    return quote;
+  }
+
+  // R0-PC-01 (PC-F05 / BP-PC-01): retired. This route was unguarded and
+  // unthrottled and served the full operator shape — DRAFT quotes, the
+  // customer's email, internal notes, the linked invoice — to anyone holding a
+  // quote id. No web page reads it: operators read the tenant route above and
+  // customers read the signed-token route below. It answers the same 404 for
+  // every id without reading the quote, so it can neither leak a quote nor
+  // confirm that one exists, and it stays rate limited like the other public
+  // reads. Still public (no AuthGuard): the public-surface ledger counts it.
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(20, 60_000)
   @Get('quotes/:quoteId')
-  getQuote(@Param('quoteId') quoteId: string) {
-    return this.commerce.getQuote(quoteId);
+  getQuote(): never {
+    throw new NotFoundException('Quote not found');
   }
 
   // ----- R2: public endpoints (signed-token authenticated) -----
@@ -1285,12 +1311,17 @@ export class CommerceController {
     // whitelists the existing fields untouched and validates only the new
     // optional idempotencyKey.
     @Body() body: RecordPaymentDto,
+    @Req() req: { user?: { id?: string } },
   ) {
     // R0-D2 review (CR-1): only this route keys a manual record on its
     // reference + amount. Here `reference` is the operator's payment
     // reference (the journey's duplicate slip); internal callers pass a
     // document-derived reference and keep one row per call.
-    return this.commerce.recordPayment(invoiceId, businessId, body, { dedupeByReference: true });
+    // R0-PL-07: the recorder is the authenticated user, never a body field.
+    return this.commerce.recordPayment(invoiceId, businessId, body, {
+      dedupeByReference: true,
+      actorId: req?.user?.id ?? null,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1306,10 +1337,15 @@ export class CommerceController {
       source: 'drive' | 'upload';
       driveFileId?: string;
     },
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.paymentEvidence.processEvidence({ ...body, businessId,
-      invoiceId,
-    });
+    // R0-PL-07 review (PL07-ST-3): KEY stays the recorder of the extracted
+    // payment; the authenticated uploader is kept as its initiator. Taken from
+    // req.user, never from the body.
+    return this.paymentEvidence.processEvidence(
+      { ...body, businessId, invoiceId },
+      { initiatedBy: req?.user?.id ?? null },
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1446,8 +1482,10 @@ export class CommerceController {
     @Param('businessId') businessId: string,
     @Param('paymentId') paymentId: string,
     @Body() body: { reason?: string },
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.commerce.markPaymentRefunded(paymentId, businessId, body?.reason);
+    // R0-PL-07: the refunding user is recorded on the reversal transaction.
+    return this.commerce.markPaymentRefunded(paymentId, businessId, body?.reason, req?.user?.id ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

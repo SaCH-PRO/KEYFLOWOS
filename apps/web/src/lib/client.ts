@@ -2590,8 +2590,16 @@ export async function listQuotes(businessId?: string) {
   return { data: res.data?.data ?? [], error: res.error };
 }
 
-export async function getQuote(quoteId: string) {
-  return apiGetSimple<Quote>(`/commerce/quotes/${encodeURIComponent(quoteId)}`);
+/**
+ * R0-PC-01: the operator quote read is the tenant-bound route (AuthGuard +
+ * BusinessGuard + ModuleScopeGuard revenue:read). The bare-id route
+ * (/commerce/quotes/:id) answers 404 for every id; customers read a shared
+ * quote through `fetchPublicQuote(token)`.
+ */
+export async function getQuote(businessId: string, quoteId: string): Promise<ApiResult<Quote>> {
+  return apiGetSimple<Quote>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(quoteId)}`,
+  );
 }
 
 export async function createQuote(input: {
