@@ -17,6 +17,7 @@ import { UpdateDelegationRuleDto } from './dto/update-delegation-rule.dto';
  * The authenticated caller a JobRole or assignment write is bounded by
  * (V1-21-AUTH-JOBROLE-CEILING): the service refuses to grant more than this caller
  * holds. AuthGuard already requires a user; this keeps the bound from ever being skipped.
+ * Every JobRole and assignment write passes it, deleting a JobRole included (review F4).
  */
 function requesterOf(user: AuthenticatedUser | undefined): string {
   if (!user?.id) throw new ForbiddenException('Authentication required');
@@ -97,8 +98,8 @@ export class StructureController {
 
   @Delete('businesses/:businessId/job-roles/:id')
   @RequireModuleScope('team', 'write')
-  async deleteJobRole(@Param('businessId') businessId: string, @Param('id') id: string) {
-    return this.service.deleteJobRole(businessId, id);
+  async deleteJobRole(@Param('businessId') businessId: string, @Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.deleteJobRole(businessId, id, requesterOf(user));
   }
 
   // ─── Assignments ───

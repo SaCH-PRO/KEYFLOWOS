@@ -41,9 +41,15 @@ const MEMBERSHIPS = [
   { id: 'mem_attacker_b', businessId: B, userId: 'user_mal' },
 ];
 const JOB_ROLES = [
-  { id: 'role_tier4_a', businessId: A },
-  { id: 'role_normal_b', businessId: B },
+  { id: 'role_tier4_a', businessId: A, permissions: null, defaultApprovalTier: 4 },
+  { id: 'role_normal_b', businessId: B, permissions: null, defaultApprovalTier: 4 },
 ];
+/**
+ * The authenticated caller, the OWNER of both businesses (V1-21-AUTH-JOBROLE-CEILING
+ * CR-V21-02: createAssignment requires a requester). The OWNER is not bounded, so the
+ * ceiling never refuses here: every rejection below is the tenant scope's.
+ */
+const OWNER = 'user_owner';
 const ORG_UNITS = [
   { id: 'unit_a', businessId: A },
   { id: 'unit_b', businessId: B },
@@ -67,12 +73,16 @@ function makeService() {
     client: {
       membership: {
         ...scoped(MEMBERSHIPS),
+        findUnique: vi.fn(async ({ where }: any) =>
+          where.userId_businessId?.userId === OWNER ? { role: 'OWNER', permissionScopes: null, maxApprovalTier: 4 } : null,
+        ),
         update: vi.fn(async (args: any) => {
           membershipUpdates.push(args);
           return {};
         }),
       },
       jobRole: scoped(JOB_ROLES),
+      teamActivityLog: { create: vi.fn(async () => ({})) },
       orgUnit: scoped(ORG_UNITS),
       orgAssignment: {
         ...scoped(ASSIGNMENTS),
@@ -103,7 +113,7 @@ describe('an assignment cannot name another business\'s membership', () => {
   it('rejects the escalation instead of performing it', async () => {
     const { service } = makeService();
 
-    await expect(service.createAssignment(A, CROSS_TENANT as never)).rejects.toThrow(
+    await expect(service.createAssignment(A, CROSS_TENANT as never, OWNER)).rejects.toThrow(
       /Membership not found/,
     );
   });
@@ -113,7 +123,7 @@ describe('an assignment cannot name another business\'s membership', () => {
     // return an error to the attacker and leave the escalation in place.
     const { service, membershipUpdates } = makeService();
 
-    await service.createAssignment(A, CROSS_TENANT as never).catch(() => undefined);
+    await service.createAssignment(A, CROSS_TENANT as never, OWNER).catch(() => undefined);
 
     expect(membershipUpdates).toEqual([]);
   });
@@ -121,7 +131,7 @@ describe('an assignment cannot name another business\'s membership', () => {
   it('creates no assignment row either', async () => {
     const { service, created } = makeService();
 
-    await service.createAssignment(A, CROSS_TENANT as never).catch(() => undefined);
+    await service.createAssignment(A, CROSS_TENANT as never, OWNER).catch(() => undefined);
 
     expect(created).toEqual([]);
   });
@@ -140,7 +150,7 @@ describe('every other id in the body is checked too', () => {
         userId: 'user_mal',
         orgUnitId: 'unit_b',
         jobRoleId: 'role_tier4_a',
-      } as never),
+      } as never, OWNER),
     ).rejects.toThrow(/Job role not found/);
   });
 
@@ -152,7 +162,7 @@ describe('every other id in the body is checked too', () => {
         membershipId: 'mem_attacker_b',
         userId: 'user_mal',
         orgUnitId: 'unit_a',
-      } as never),
+      } as never, OWNER),
     ).rejects.toThrow(/Org unit not found/);
   });
 
@@ -165,7 +175,7 @@ describe('every other id in the body is checked too', () => {
         userId: 'user_mal',
         orgUnitId: 'unit_b',
         reportsToId: 'asg_a',
-      } as never),
+      } as never, OWNER),
     ).rejects.toThrow(/Reporting line not found/);
   });
 
@@ -180,7 +190,7 @@ describe('every other id in the body is checked too', () => {
         membershipId: 'mem_attacker_b',
         userId: 'user_someone_else',
         orgUnitId: 'unit_b',
-      } as never),
+      } as never, OWNER),
     ).rejects.toThrow(/does not belong to that membership/);
   });
 });
@@ -195,7 +205,7 @@ describe('the legitimate case still works', () => {
       userId: 'user_mal',
       orgUnitId: 'unit_b',
       jobRoleId: 'role_normal_b',
-    } as never);
+    } as never, OWNER);
 
     expect(result.id).toBe('asg_new');
     expect(membershipUpdates).toHaveLength(1);
@@ -210,7 +220,7 @@ describe('the legitimate case still works', () => {
       userId: 'user_mal',
       orgUnitId: 'unit_b',
       jobRoleId: 'role_normal_b',
-    } as never);
+    } as never, OWNER);
 
     expect(membershipUpdates[0].data).toMatchObject({ maxApprovalTier: 4 });
   });

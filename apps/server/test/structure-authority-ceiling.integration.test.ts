@@ -26,6 +26,21 @@
  * for these tenants does not grow. The OWNER and a SUPER_ADMIN are not bounded
  * (the identity routes' K2 rule).
  *
+ * REVIEW REPAIRS (the V21-F*, E06 cases; each RED-BEFORE at the packet head
+ * edd354e4, and A03/E01-E03 extended):
+ *   - F1: a JobRole on a contact-only position is a grant too (reply approval
+ *     reads jobRole.defaultApprovalTier, KEY's staff channel reads its
+ *     permissions), so it is bounded on POST and PATCH;
+ *   - F2: a position above the requester (its holder or its role) keeps its
+ *     phone, email, channel, reply approval, role, end and row (403);
+ *   - F3: rewriting a membership's copy needs team:admin as the identity routes'
+ *     role and permissions changes do; a default ADMIN (team:write) is refused
+ *     even within its ceiling, a team:admin ADMIN (adminT, adminTS) is bounded;
+ *   - F4: deleting a JobRole is bounded as editing it is, and its holders'
+ *     copies are recomputed; F5: each copy written logs 'permissions_updated';
+ *   - CR-V21-03 (E06): ending a position recomputes only a copy that is still
+ *     that position's.
+ *
  * HOW THE APP IS COMPOSED (the contacts-visibility model): a real Nest app with
  * the real StructureController, StructureService, PrismaService, AuthGuard,
  * BusinessGuard and ModuleScopeGuard against the database at DATABASE_URL. The
@@ -59,11 +74,14 @@ const ID = {
   adminSelf: `${P}adminSelf`, // ADMIN of bizA, role defaults — self-assignment cases (its map changes)
   adminR: `${P}adminR`,       // ADMIN of bizA restricted by the OWNER: { crm: read, team: write }, tier 0
   adminE: `${P}adminE`,       // ADMIN of bizA, role defaults; the OWNER gives it a restricted position (E04)
+  adminT: `${P}adminT`,       // ADMIN of bizA, ADMIN defaults with team: admin, tier 3 — bounded, may rewrite members (F3)
+  adminTS: `${P}adminTS`,     // ADMIN of bizA, as adminT — the team:admin self-assignment (A03)
   staff: `${P}staff`,         // STAFF of bizA, role defaults — assignment target
   staffLow: `${P}staffLow`,   // STAFF of bizA, explicit { crm: read }, tier 0 — within adminR's authority
   staffE: `${P}staffE`,       // STAFF of bizA — one position, ended (E01)
   staffE2: `${P}staffE2`,     // STAFF of bizA — two positions, one ended (E02)
   staffDel: `${P}staffDel`,   // STAFF of bizA — one position, deleted (E03)
+  staffJ: `${P}staffJ`,       // STAFF of bizA — holds a job role that is then deleted (F4)
   ownerB: `${P}ownerB`,       // OWNER of bizB
   staffB: `${P}staffB`,       // STAFF of bizB — the cross-tenant target (A06)
   bizA: `${P}bizA`,
@@ -81,13 +99,18 @@ const ID = {
 };
 const m = (who: string) => `${P}m_${who.slice(P.length)}`;
 const USERS = [
-  ID.owner, ID.admin, ID.adminSelf, ID.adminR, ID.adminE, ID.staff, ID.staffLow, ID.staffE, ID.staffE2, ID.staffDel,
-  ID.ownerB, ID.staffB,
+  ID.owner, ID.admin, ID.adminSelf, ID.adminR, ID.adminE, ID.adminT, ID.adminTS, ID.staff, ID.staffLow, ID.staffE,
+  ID.staffE2, ID.staffDel, ID.staffJ, ID.ownerB, ID.staffB,
 ];
 const emailOf = (id: string) => `${id}@v21a.test.local`;
 const REFUSED_GRANT = 'You cannot grant more authority than your own';
 const REFUSED_TARGET = 'You cannot change a member whose authority exceeds your own';
 const REFUSED_ROLE = 'You cannot change a job role whose authority exceeds your own';
+const REFUSED_POSITION = 'You cannot change a position whose authority exceeds your own';
+/** IdentityService.assertTeamAdmin's refusal, verbatim (review F3). */
+const REFUSED_TEAM_ADMIN = 'Changing a role or permissions requires team admin access';
+/** Contact phones for the contact-only cases (normalizePhone keeps digits and '+'). */
+const phone = (n: number) => `+1555021${String(n).padStart(4, '0')}`;
 /** Inventory classes that are not a stale copy. */
 const NOT_STALE = new Set(['copy_matches_live_jobrole', 'no_copied_authority']);
 
@@ -99,6 +122,8 @@ let staleBaseline = -1;
 
 async function cleanup() {
   for (const sql of [
+    // writeCopy logs each membership rewrite (review F5).
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM org_assignments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM job_roles WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM org_units WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -140,6 +165,18 @@ async function membership(who: string) {
 async function staleCount(): Promise<number> {
   const findings = await inventory.classifyStaleCopies();
   return findings.filter((f: any) => (f.businessId === ID.bizA || f.businessId === ID.bizB) && !NOT_STALE.has(f.classification)).length;
+}
+
+/** The 'permissions_updated' rows written for `who`'s membership (review F5). */
+async function permissionLogs(who: string, by?: string): Promise<any[]> {
+  return db.teamActivityLog.findMany({
+    where: { businessId: ID.bizA, module: 'team', action: 'permissions_updated', entityId: m(who), ...(by ? { userId: by } : {}) },
+  });
+}
+
+/** A contact-only position body, named with the prefix. */
+function contactOnly(name: string, phoneNumber: string, jobRoleId: string) {
+  return { isContactOnly: true, contactName: `${P}${name}`, contactPhone: phoneNumber, orgUnitId: ID.unitA, jobRoleId, autoApprovalViaReply: true };
 }
 
 async function classificationOf(who: string): Promise<string | undefined> {
@@ -193,17 +230,21 @@ beforeAll(async () => {
   }
   await db.business.create({ data: { id: ID.bizA, name: `${P}bizA-name`, ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: `${P}bizB-name`, ownerId: ID.ownerB } });
+  const teamAdmin = { ...ROLE_DEFAULT_SCOPES.ADMIN, team: 'admin' };
   const rows: Array<{ who: string; businessId: string; role: string; permissionScopes?: Record<string, string>; maxApprovalTier?: number }> = [
     { who: ID.owner, businessId: ID.bizA, role: 'OWNER' },
     { who: ID.admin, businessId: ID.bizA, role: 'ADMIN' },
     { who: ID.adminSelf, businessId: ID.bizA, role: 'ADMIN' },
     { who: ID.adminR, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { crm: 'read', team: 'write' }, maxApprovalTier: 0 },
     { who: ID.adminE, businessId: ID.bizA, role: 'ADMIN' },
+    { who: ID.adminT, businessId: ID.bizA, role: 'ADMIN', permissionScopes: teamAdmin, maxApprovalTier: 3 },
+    { who: ID.adminTS, businessId: ID.bizA, role: 'ADMIN', permissionScopes: teamAdmin, maxApprovalTier: 3 },
     { who: ID.staff, businessId: ID.bizA, role: 'STAFF' },
     { who: ID.staffLow, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'read' }, maxApprovalTier: 0 },
     { who: ID.staffE, businessId: ID.bizA, role: 'STAFF' },
     { who: ID.staffE2, businessId: ID.bizA, role: 'STAFF' },
     { who: ID.staffDel, businessId: ID.bizA, role: 'STAFF' },
+    { who: ID.staffJ, businessId: ID.bizA, role: 'STAFF' },
     { who: ID.ownerB, businessId: ID.bizB, role: 'OWNER' },
     { who: ID.staffB, businessId: ID.bizB, role: 'STAFF' },
   ];
@@ -239,14 +280,14 @@ afterAll(async () => {
 }, 60_000);
 
 describe('V1-21 fixture sanity (real rows)', () => {
-  it('[V21-X01] two tenants, twelve users, twelve memberships, seven job roles, no assignments; the restricted fixtures are stale-copy findings already', async () => {
+  it('[V21-X01] two tenants, fifteen users, fifteen memberships, seven job roles, no assignments; the restricted fixtures are stale-copy findings already', async () => {
     expect(await db.business.count({ where: { id: { startsWith: P } } })).toBe(2);
-    expect(await db.user.count({ where: { id: { startsWith: P } } })).toBe(12);
-    expect(await db.membership.count({ where: { id: { startsWith: P } } })).toBe(12);
+    expect(await db.user.count({ where: { id: { startsWith: P } } })).toBe(15);
+    expect(await db.membership.count({ where: { id: { startsWith: P } } })).toBe(15);
     expect(await db.jobRole.count({ where: { businessId: ID.bizA } })).toBe(7);
     expect(await db.orgAssignment.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } })).toBe(0);
-    // adminR and staffLow carry an explicit map with no position behind it.
-    expect(staleBaseline).toBe(2);
+    // adminR, staffLow, adminT and adminTS carry an explicit map with no position behind it.
+    expect(staleBaseline).toBe(4);
     // The default ADMIN passes the structure routes' team:write gate (the route is reachable).
     const list = await call(ID.admin, 'get', jobRoles());
     expect(list.status, JSON.stringify(list.body)).toBe(200);
@@ -364,18 +405,28 @@ describe('V1-21 an assignment cannot sync a JobRole above the assigner (POST/PAT
     expect(await db.orgAssignment.count({ where: { membershipId: m(ID.staff) } })).toBe(0);
   });
 
-  it('[V21-A03] a self-assignment within the ceiling is 201 and leaves the ADMIN at or below what it held; the tier-4 role is still refused afterwards', async () => {
-    const res = await assign(ID.adminSelf, ID.adminSelf, ID.roleAdminish);
+  it('[V21-A03] a self-assignment within the ceiling is 201 for a team:admin ADMIN and leaves it at or below what it held; a default (team:write) ADMIN is refused (review F3); the tier-4 role is still refused afterwards', async () => {
+    // team:write: the sync rewrites a membership, which the identity routes gate on team:admin (review F3).
+    const selfBefore = await rowText('memberships', m(ID.adminSelf));
+    const denied = await assign(ID.adminSelf, ID.adminSelf, ID.roleAdminish);
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403);
+    expect(JSON.stringify(denied.body)).toContain(REFUSED_TEAM_ADMIN);
+    expect(await rowText('memberships', m(ID.adminSelf))).toBe(selfBefore);
+    expect(await db.orgAssignment.count({ where: { membershipId: m(ID.adminSelf) } })).toBe(0);
+
+    const res = await assign(ID.adminTS, ID.adminTS, ID.roleAdminish);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    const row = await membership(ID.adminSelf);
+    const row = await membership(ID.adminTS);
     expect(row.permissionScopes).toEqual({ crm: 'admin', team: 'write' });
     expect(row.maxApprovalTier).toBe(3);
     expect(row.role).toBe('ADMIN');
+    expect(await permissionLogs(ID.adminTS, ID.adminTS)).toHaveLength(1); // review F5
 
-    const before = await rowText('memberships', m(ID.adminSelf));
-    const again = await assign(ID.adminSelf, ID.adminSelf, ID.roleHigh, { isPrimary: false });
+    const before = await rowText('memberships', m(ID.adminTS));
+    const again = await assign(ID.adminTS, ID.adminTS, ID.roleHigh, { isPrimary: false });
     expect(again.status, JSON.stringify(again.body)).toBe(403);
-    expect(await rowText('memberships', m(ID.adminSelf))).toBe(before);
+    expect(JSON.stringify(again.body)).toContain(REFUSED_GRANT);
+    expect(await rowText('memberships', m(ID.adminTS))).toBe(before);
   });
 
   it('[V21-A04] a restricted ADMIN ({ crm: read, team: write }, tier 0) cannot rewrite a member above itself (STAFF defaults) -> 403, unchanged', async () => {
@@ -442,19 +493,192 @@ describe('V1-21 an assignment cannot sync a JobRole above the assigner (POST/PAT
   });
 });
 
+describe('V1-21 review repairs: a JobRole on any position is a grant, and a position above the requester stays as it is (F1, F2)', () => {
+  it('[V21-F1] RED-BEFORE (review F1): a contact-only position confers its job role, so a bounded member cannot put a role above itself on one (403, no row); within its authority it can, and the OWNER can (201)', async () => {
+    const refused: Array<[string, string, string, number]> = [
+      [ID.adminR, ID.roleHigh, 'f1_r_high', 1],     // tier 4, every module admin, by a tier-0 member
+      [ID.admin, ID.roleHigh, 'f1_a_high', 2],      // tier 4 by a default ADMIN (tier 3)
+      [ID.adminR, ID.roleOther, 'f1_r_other', 3],   // { crm: write } tier 1 by { crm: read } tier 0
+      [ID.adminR, ID.roleLegacy, 'f1_r_legacy', 4], // KEY tool-family keys, which no membership map bounds
+    ];
+    for (const [actor, role, name, n] of refused) {
+      const res = await call(actor, 'post', assignments(), contactOnly(name, phone(n), role));
+      expect(res.status, `${actor} ${role} -> ${JSON.stringify(res.body)}`).toBe(403);
+      expect(JSON.stringify(res.body)).toContain(REFUSED_GRANT);
+      expect(await db.orgAssignment.count({ where: { businessId: ID.bizA, contactName: `${P}${name}` } })).toBe(0);
+    }
+    const within = await call(ID.adminR, 'post', assignments(), contactOnly('f1_r_low', phone(11), ID.roleLow));
+    expect(within.status, JSON.stringify(within.body)).toBe(201);
+    // Bounded, not closed: the OWNER grants the tier-4 role, and the tool-family role, to a contact-only position.
+    const high = await call(ID.owner, 'post', assignments(), contactOnly('f1_o_high', phone(12), ID.roleHigh));
+    expect(high.status, JSON.stringify(high.body)).toBe(201);
+    expect(high.body.jobRole.defaultApprovalTier).toBe(4);
+    const legacy = await call(ID.owner, 'post', assignments(), contactOnly('f1_o_legacy', phone(13), ID.roleLegacy));
+    expect(legacy.status, JSON.stringify(legacy.body)).toBe(201);
+  });
+
+  it('[V21-F1b] RED-BEFORE (review F1, F2): PATCH cannot move a contact-only position to a role above the requester, nor change one whose role is above it (403, byte-identical); a cosmetic edit, or a position within the requester, is 200', async () => {
+    const low = await db.orgAssignment.findFirst({ where: { businessId: ID.bizA, contactName: `${P}f1_r_low` } });
+    const lowBefore = await rowText('org_assignments', low.id);
+    const up = await call(ID.adminR, 'patch', assignment(low.id), { jobRoleId: ID.roleHigh, autoApprovalViaReply: true });
+    expect(up.status, JSON.stringify(up.body)).toBe(403);
+    expect(JSON.stringify(up.body)).toContain(REFUSED_GRANT);
+    expect(await rowText('org_assignments', low.id)).toBe(lowBefore);
+
+    const high = await db.orgAssignment.findFirst({ where: { businessId: ID.bizA, contactName: `${P}f1_o_high` } });
+    const highBefore = await rowText('org_assignments', high.id);
+    const bodies: Array<Record<string, unknown>> = [
+      { contactPhone: phone(14) },
+      { contactEmail: `${P}f1b@v21a.test.local` },
+      { preferredChannel: 'sms' },
+      { autoApprovalViaReply: false },
+      { jobRoleId: ID.roleLow },
+      { endedAt: new Date().toISOString() },
+    ];
+    for (const body of bodies) {
+      const res = await call(ID.adminR, 'patch', assignment(high.id), body);
+      expect(res.status, `${JSON.stringify(body)} -> ${JSON.stringify(res.body)}`).toBe(403);
+      expect(JSON.stringify(res.body)).toContain(REFUSED_POSITION);
+    }
+    const del = await call(ID.adminR, 'delete', assignment(high.id));
+    expect(del.status, JSON.stringify(del.body)).toBe(403);
+    expect(JSON.stringify(del.body)).toContain(REFUSED_POSITION);
+    expect(await rowText('org_assignments', high.id)).toBe(highBefore);
+
+    // A cosmetic edit grants nothing and is not bounded; a position within the requester is its to redirect.
+    const cosmetic = await call(ID.adminR, 'patch', assignment(high.id), { contactName: `${P}f1_o_high` });
+    expect(cosmetic.status, JSON.stringify(cosmetic.body)).toBe(200);
+    const moved = await call(ID.adminR, 'patch', assignment(low.id), { contactPhone: phone(15) });
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+    expect((await db.orgAssignment.findUnique({ where: { id: low.id } })).contactPhone).toBe(phone(15));
+  });
+
+  it('[V21-F2] RED-BEFORE (review F2): the position of a member above the requester keeps its phone, email, channel, reply approval, end and row (403, byte-identical); a cosmetic edit is 200; a member within the requester can be redirected (200)', async () => {
+    // A08: the OWNER gave staff the tier-4 role; its membership now exceeds every bounded member here.
+    const a = await db.orgAssignment.findFirst({ where: { membershipId: m(ID.staff), jobRoleId: ID.roleHigh } });
+    const before = await rowText('org_assignments', a.id);
+    const memberBefore = await rowText('memberships', m(ID.staff));
+    const bodies: Array<Record<string, unknown>> = [
+      { contactPhone: phone(21), autoApprovalViaReply: true },
+      { contactPhone: phone(22) },
+      { autoApprovalViaReply: true },
+      { contactEmail: `${P}f2@v21a.test.local` },
+      { preferredChannel: 'sms' },
+      { endedAt: new Date().toISOString() },
+    ];
+    for (const actor of [ID.admin, ID.adminR]) {
+      for (const body of bodies) {
+        const res = await call(actor, 'patch', assignment(a.id), body);
+        expect(res.status, `${actor} ${JSON.stringify(body)} -> ${JSON.stringify(res.body)}`).toBe(403);
+        expect(JSON.stringify(res.body)).toContain(REFUSED_TARGET);
+      }
+      const del = await call(actor, 'delete', assignment(a.id));
+      expect(del.status, JSON.stringify(del.body)).toBe(403);
+      expect(JSON.stringify(del.body)).toContain(REFUSED_TARGET);
+    }
+    expect(await rowText('org_assignments', a.id)).toBe(before);
+    expect(await rowText('memberships', m(ID.staff))).toBe(memberBefore);
+
+    const cosmetic = await call(ID.admin, 'patch', assignment(a.id), { isPrimary: true });
+    expect(cosmetic.status, JSON.stringify(cosmetic.body)).toBe(200);
+    // A05: staffLow's position is within adminR's authority, so adminR may point it at a phone.
+    const own = await db.orgAssignment.findFirst({ where: { membershipId: m(ID.staffLow), jobRoleId: ID.roleLow } });
+    const redirect = await call(ID.adminR, 'patch', assignment(own.id), { contactPhone: phone(23), autoApprovalViaReply: true });
+    expect(redirect.status, JSON.stringify(redirect.body)).toBe(200);
+    expect(redirect.body).toMatchObject({ contactPhone: phone(23), autoApprovalViaReply: true });
+  });
+});
+
+describe('V1-21 review repairs: rewriting a member through a position needs team:admin, and every rewrite is logged (F3, F4, F5)', () => {
+  it('[V21-F3] RED-BEFORE (review F3): a default ADMIN (team:write) cannot strip a peer ADMIN nor lift the OWNER\'s restriction through an assignment, even within its own ceiling (403, byte-identical, no row, no log)', async () => {
+    const empty = await call(ID.owner, 'post', jobRoles(), { name: `${P}f3_empty`, permissions: {}, defaultApprovalTier: 0 });
+    expect(empty.status, JSON.stringify(empty.body)).toBe(201);
+    const cases: Array<[string, string]> = [
+      [ID.adminE, empty.body.id],     // a peer ADMIN (role defaults) stripped to {}: locked out of team
+      [ID.staffLow, ID.roleAdminish], // the OWNER's { crm: read } tier-0 restriction lifted to { crm: admin, team: write } tier 3
+    ];
+    for (const [who, role] of cases) {
+      const before = await rowText('memberships', m(who));
+      const count = await db.orgAssignment.count({ where: { membershipId: m(who) } });
+      const res = await assign(ID.admin, who, role, { isPrimary: false });
+      expect(res.status, `${who} -> ${JSON.stringify(res.body)}`).toBe(403);
+      expect(JSON.stringify(res.body)).toContain(REFUSED_TEAM_ADMIN);
+      expect(await rowText('memberships', m(who))).toBe(before);
+      expect(await db.orgAssignment.count({ where: { membershipId: m(who) } })).toBe(count);
+      expect(await permissionLogs(who)).toHaveLength(0);
+    }
+    // The peer still reaches the structure routes.
+    const peer = await call(ID.adminE, 'get', jobRoles());
+    expect(peer.status, JSON.stringify(peer.body)).toBe(200);
+  });
+
+  it('[V21-F4] RED-BEFORE (review F4): deleting a job role is bounded as editing it is (403, row byte-identical); deleting a held one recomputes its holders (team:admin), so no copy is left without a position, and logs it', async () => {
+    const highBefore = await rowText('job_roles', ID.roleHigh);
+    for (const actor of [ID.adminR, ID.admin]) {
+      const res = await call(actor, 'delete', jobRole(ID.roleHigh));
+      expect(res.status, `${actor} -> ${JSON.stringify(res.body)}`).toBe(403);
+      expect(JSON.stringify(res.body)).toContain(REFUSED_ROLE);
+    }
+    expect(await rowText('job_roles', ID.roleHigh)).toBe(highBefore);
+
+    const held = await call(ID.owner, 'post', jobRoles(), { name: `${P}f4_held`, permissions: { crm: 'write' }, defaultApprovalTier: 1 });
+    expect(held.status, JSON.stringify(held.body)).toBe(201);
+    const a = await assign(ID.owner, ID.staffJ, held.body.id);
+    expect(a.status, JSON.stringify(a.body)).toBe(201);
+    expect(await classificationOf(ID.staffJ)).toBe('copy_matches_live_jobrole');
+
+    // Within the default ADMIN's ceiling, but deleting it rewrites staffJ: team:admin (review F3).
+    const memberBefore = await rowText('memberships', m(ID.staffJ));
+    const denied = await call(ID.admin, 'delete', jobRole(held.body.id));
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403);
+    expect(JSON.stringify(denied.body)).toContain(REFUSED_TEAM_ADMIN);
+    expect(await db.jobRole.count({ where: { id: held.body.id } })).toBe(1);
+    expect(await rowText('memberships', m(ID.staffJ))).toBe(memberBefore);
+
+    const ok = await call(ID.adminT, 'delete', jobRole(held.body.id));
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(await db.jobRole.count({ where: { id: held.body.id } })).toBe(0);
+    const row = await membership(ID.staffJ);
+    expect(row.permissionScopes).toBeNull();
+    expect(row.maxApprovalTier).toBe(0);
+    expect(await classificationOf(ID.staffJ)).toBe('no_copied_authority');
+    expect((await db.orgAssignment.findUnique({ where: { id: a.body.id } })).jobRoleId).toBeNull(); // the FK's SetNull
+    const logs = await permissionLogs(ID.staffJ, ID.adminT);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ meta: { reason: 'job_role_deleted', jobRoleId: held.body.id } });
+
+    // An unheld role within the requester is its to delete.
+    const free = await call(ID.admin, 'delete', jobRole(ID.roleEdit));
+    expect(free.status, JSON.stringify(free.body)).toBe(200);
+  });
+});
+
 describe('V1-21 ending or deleting a position recomputes the copied scopes', () => {
   it('[V21-E01] RED-BEFORE: ending a STAFF member\'s only position returns it to role defaults (no copied map), not the stale copy', async () => {
     const res = await assign(ID.owner, ID.staffE, ID.roleLow);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect((await membership(ID.staffE)).permissionScopes).toEqual({ crm: 'read' });
 
-    const end = await call(ID.admin, 'patch', assignment(res.body.id), { endedAt: new Date().toISOString() });
+    // A default ADMIN (team:write) may not rewrite the member (review F3): 403, nothing changes.
+    const memberBefore = await rowText('memberships', m(ID.staffE));
+    const assignmentBefore = await rowText('org_assignments', res.body.id);
+    const denied = await call(ID.admin, 'patch', assignment(res.body.id), { endedAt: new Date().toISOString() });
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403);
+    expect(JSON.stringify(denied.body)).toContain(REFUSED_TEAM_ADMIN);
+    expect(await rowText('memberships', m(ID.staffE))).toBe(memberBefore);
+    expect(await rowText('org_assignments', res.body.id)).toBe(assignmentBefore);
+
+    const end = await call(ID.adminT, 'patch', assignment(res.body.id), { endedAt: new Date().toISOString() });
     expect(end.status, JSON.stringify(end.body)).toBe(200);
     expect(end.body.endedAt).toBeTruthy();
     const row = await membership(ID.staffE);
     expect(row.permissionScopes).toBeNull();
     expect(row.maxApprovalTier).toBe(0);
     expect(await classificationOf(ID.staffE)).toBe('no_copied_authority');
+    // review F5: the rewrite is a 'permissions_updated' row by the requester, as the identity routes write.
+    const logs = await permissionLogs(ID.staffE, ID.adminT);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ entityType: 'membership', meta: { reason: 'position_ended', assignmentId: res.body.id, scopes: null, maxApprovalTier: 0 } });
   });
 
   it('[V21-E02] RED-BEFORE: ending one of two positions re-copies the remaining active one', async () => {
@@ -464,7 +688,13 @@ describe('V1-21 ending or deleting a position recomputes the copied scopes', () 
     expect(second.status, JSON.stringify(second.body)).toBe(201);
     expect((await membership(ID.staffE2)).permissionScopes).toEqual({ crm: 'read' }); // the last sync wins
 
-    const end = await call(ID.admin, 'patch', assignment(second.body.id), { endedAt: new Date().toISOString() });
+    const memberBefore = await rowText('memberships', m(ID.staffE2));
+    const denied = await call(ID.admin, 'patch', assignment(second.body.id), { endedAt: new Date().toISOString() });
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403); // review F3
+    expect(JSON.stringify(denied.body)).toContain(REFUSED_TEAM_ADMIN);
+    expect(await rowText('memberships', m(ID.staffE2))).toBe(memberBefore);
+
+    const end = await call(ID.adminT, 'patch', assignment(second.body.id), { endedAt: new Date().toISOString() });
     expect(end.status, JSON.stringify(end.body)).toBe(200);
     const row = await membership(ID.staffE2);
     expect(row.permissionScopes).toEqual({ crm: 'write' });
@@ -475,7 +705,14 @@ describe('V1-21 ending or deleting a position recomputes the copied scopes', () 
   it('[V21-E03] RED-BEFORE: deleting a position recomputes as ending does', async () => {
     const res = await assign(ID.owner, ID.staffDel, ID.roleLow);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    const del = await call(ID.admin, 'delete', assignment(res.body.id));
+    const memberBefore = await rowText('memberships', m(ID.staffDel));
+    const denied = await call(ID.admin, 'delete', assignment(res.body.id));
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403); // review F3
+    expect(JSON.stringify(denied.body)).toContain(REFUSED_TEAM_ADMIN);
+    expect(await rowText('memberships', m(ID.staffDel))).toBe(memberBefore);
+    expect(await db.orgAssignment.count({ where: { membershipId: m(ID.staffDel) } })).toBe(1);
+
+    const del = await call(ID.adminT, 'delete', assignment(res.body.id));
     expect(del.status, JSON.stringify(del.body)).toBe(200);
     const row = await membership(ID.staffDel);
     expect(row.permissionScopes).toBeNull();
@@ -508,5 +745,26 @@ describe('V1-21 ending or deleting a position recomputes the copied scopes', () 
   it('[V21-E05] RED-BEFORE: the authority inventory\'s stale-copy count for these tenants did not grow over the suite', async () => {
     expect(staleBaseline).toBeGreaterThanOrEqual(0);
     expect(await staleCount()).toBeLessThanOrEqual(staleBaseline);
+  });
+});
+
+// Runs after E05 on purpose: the map it keeps is the identity route's, which the
+// inventory reports as an explicit map with no position behind it.
+describe('V1-21 review repairs: ending a position recomputes only the copy that is still that position\'s (CR-V21-03)', () => {
+  it('[V21-E06] RED-BEFORE (CR-V21-03): a map set after the assignment (as PATCH /identity/.../permissions stores it) is not undone when the position ends: 200, the map kept, nothing logged, and a default ADMIN may end it', async () => {
+    const res = await assign(ID.owner, ID.staffE, ID.roleLow);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    await db.membership.update({
+      where: { id: m(ID.staffE) },
+      data: { permissionScopes: { crm: 'read', revenue: 'none', bookings: 'none' }, maxApprovalTier: 0 },
+    });
+    const before = await rowText('memberships', m(ID.staffE));
+    const logsBefore = (await permissionLogs(ID.staffE)).length;
+
+    const end = await call(ID.admin, 'patch', assignment(res.body.id), { endedAt: new Date().toISOString() });
+    expect(end.status, JSON.stringify(end.body)).toBe(200);
+    expect(end.body.endedAt).toBeTruthy();
+    expect(await rowText('memberships', m(ID.staffE))).toBe(before);
+    expect((await permissionLogs(ID.staffE)).length).toBe(logsBefore);
   });
 });
