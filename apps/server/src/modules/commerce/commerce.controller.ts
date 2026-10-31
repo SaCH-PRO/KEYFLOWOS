@@ -23,6 +23,7 @@ import { BulkProductsDto } from './dto/bulk-products.dto';
 import { InvoiceReceiptBuilderService, isSettledForReceiptEmail, ownTenantReceiptBalance } from './invoice-receipt-builder.service';
 import { GmailService } from './gmail.service';
 import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
+import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
@@ -673,24 +674,26 @@ export class CommerceController {
     return this.commerce.deleteInvoice(invoiceId, businessId);
   }
 
+  // R0-CMF1-INVOICE-PATCH-ACTOR (R0-11 review ST-R011-1): the body is the
+  // UpdateInvoiceDto, bound with `expectedType` for the same reason as
+  // CREATE_INVOICE_BODY_PIPE, so unknown keys are stripped and `status` is
+  // checked against PATCHABLE_INVOICE_STATUSES (400) wherever the controller
+  // runs. A status change is attributed to the authenticated user, passed
+  // beside the body: it used to be hard-coded to KEY in the service. PATCH
+  // {status:'PAID'} needs exactly the dedicated mark-paid route's authority:
+  // these guards with revenue:write, then markInvoicePaid's Membership check.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/invoices/:invoiceId')
   updateInvoice(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
-    @Body() body: {
-      contactId?: string;
-      items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
-      currency?: string;
-      dueDate?: string;
-      taxRate?: number;
-      discountType?: 'PERCENT' | 'FIXED' | null;
-      discountValue?: number | null;
-      notes?: string | null;
-    },
+    @Body(new ValidationPipe({ whitelist: true, transform: true, expectedType: UpdateInvoiceDto })) body: UpdateInvoiceDto,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.commerce.updateInvoice({ ...body, invoiceId, businessId });
+    const actorId = req?.user?.id;
+    if (!actorId) throw new ForbiddenException('Authentication required');
+    return this.commerce.updateInvoice({ ...body, invoiceId, businessId }, actorId);
   }
 
   // ========== QUOTES ==========

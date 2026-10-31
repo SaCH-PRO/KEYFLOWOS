@@ -2722,10 +2722,22 @@ export class CommerceService {
 
   // ========== UPDATE INVOICE ==========
 
+  /**
+   * @param actorId Who makes a status change (R0-CMF1-INVOICE-PATCH-ACTOR, R0-11
+   *   review ST-R011-1). It is recorded as Payment.recordedBy, the posting's
+   *   createdById and the timeline actor, and checked by markInvoicePaid /
+   *   updateInvoiceStatus exactly as on their own routes (a human needs a
+   *   Membership; KEY needs the tenant, which `input.businessId` is). The HTTP
+   *   PATCH passes the authenticated user. Omitted means KEY: the one caller
+   *   that omits it is KEY's flow tool executor (`commerce_update_invoice` in
+   *   ai/flow-orchestrator.service.ts), and a human caller must always pass it.
+   *   It used to be hard-coded to KEY_SYSTEM_ACTOR_ID for every caller, so a
+   *   person's PATCH {status:'PAID'} was recorded as KEY's payment.
+   */
   async updateInvoice(input: {
     invoiceId: string;
     businessId: string;
-    contactId?: string;
+    contactId?: string | null;
     items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
     currency?: string;
     dueDate?: Date | string | null;
@@ -2734,7 +2746,7 @@ export class CommerceService {
     discountValue?: number | null;
     notes?: string | null;
     status?: 'SENT' | 'OVERDUE' | 'VOID' | 'PAID' | 'DRAFT';
-  }) {
+  }, actorId?: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: input.invoiceId, businessId: input.businessId },
     });
@@ -2756,13 +2768,20 @@ export class CommerceService {
       // from the day it shipped. It is also the tenant proof the system actor
       // now requires: KEY's authority is the scope its caller established, and
       // this caller had established it and thrown it away.
+      //
+      // R0-CMF1: the actor is the caller's, never assumed (see @param actorId).
+      // An empty actor is refused rather than written as no one.
+      const actor = actorId === undefined ? KEY_SYSTEM_ACTOR_ID : actorId;
+      if (!actor) {
+        throw new ForbiddenException('Not authorized to update this invoice');
+      }
       if (input.status === 'PAID') {
-        return this.markInvoicePaid(input.invoiceId, KEY_SYSTEM_ACTOR_ID, input.businessId);
+        return this.markInvoicePaid(input.invoiceId, actor, input.businessId);
       }
       return this.updateInvoiceStatus({
         invoiceId: input.invoiceId,
         status: input.status as 'SENT' | 'OVERDUE' | 'VOID',
-        actorId: KEY_SYSTEM_ACTOR_ID,
+        actorId: actor,
         businessId: input.businessId,
         dueDate: input.dueDate,
       });
