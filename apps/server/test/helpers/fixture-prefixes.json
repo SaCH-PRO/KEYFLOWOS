@@ -49,6 +49,11 @@
       "packet": "R0-17-PAYMENT-TX-INTEGRITY"
     },
     {
+      "prefix": "k19a_",
+      "owner": "apps/server/test/evidence-feed.integration.test.ts",
+      "packet": "R0-19-EVIDENCE-BASELINE"
+    },
+    {
       "prefix": "k20a_",
       "owner": "apps/server/test/payments-mark-paid.integration.test.ts",
       "packet": "R0-20-MARKPAID-CONVERGENCE"
