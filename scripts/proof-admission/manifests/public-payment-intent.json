@@ -19,12 +19,15 @@
     "payable-state gate (R0-22) PI-11: a PAID invoice answers 409; no PENDING row, still PAID, its one payment untouched",
     "payable-state gate (R0-22) PI-12: an unknown method answers 400 before the invoice is read (unchanged)",
     "amount cap and validation (R0-22) PI-13: an amount above the remaining balance is stored as the remaining balance (100 total, 40 paid, 500 asked -> 60)",
-    "amount cap and validation (R0-22) PI-14: an intent with no amount is stored as the remaining balance (60), and an amount under it is kept as given (25)",
+    "amount cap and validation (R0-22) PI-14: an intent with no amount is stored as 0 (no amount declared, as at the base), and an amount under the balance is kept as given (25)",
     "amount cap and validation (R0-22) PI-15: a negative, zero, NaN or non-number amount answers 400; nothing is written",
     "LEDGER and TENANT (R0-22) PI-16 LEDGER: intents change neither computeBalance nor any FinancialTransaction or LedgerEntry count",
     "LEDGER and TENANT (R0-22) PI-17 TENANT: an intent on B's invoice writes one PENDING Payment row carrying B's businessId (Payment table, M31); A's invoices and payments are byte-identical",
     "LEDGER and TENANT (R0-22) PI-18 TENANT: an intent on A's invoice writes A's businessId; B's invoices and payments are byte-identical",
     "LEDGER and TENANT (R0-22) PI-19 LEDGER (whole run): every intent above left both tenants' FinancialTransaction and LedgerEntry counts as they were after seeding",
+    "R0-22 review repairs: status-blind readers, cents and the latest intent per method PI-20: a no-amount intent (what the pay page sends) for every method is stored as 0, so open payables, the overdue-invoice scan and the money health score still see the full balance",
+    "R0-22 review repairs: status-blind readers, cents and the latest intent per method PI-21: a sub-cent amount answers 400 and writes nothing; an amount is stored rounded to cents",
+    "R0-22 review repairs: status-blind readers, cents and the latest intent per method PI-22: a repeat for the same method keeps one row and states the latest intent: an earlier anonymous amount does not stick, an identical repeat writes nothing, and a stale amount is re-capped after an operator part payment",
     "List B: regression controls Positive controls that must keep working PC-08: a customer payment intent still works from a public page and leaves the invoice SENT and shareable (fresh copy; R0-22 no-status-flip contract)"
   ]
 }

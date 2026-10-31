@@ -16,7 +16,7 @@ import { Service, Prisma, Payment } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
@@ -2981,17 +2981,24 @@ export class CommerceService {
    * tenant's SENT invoice. PENDING rows are ignored by computeBalance and post
    * nothing to the ledger; the operator records the money via recordPayment().
    *
-   * - One PENDING intent per invoice and method: a repeat answers the same
-   *   success and writes nothing. The lookup runs under the invoice row lock,
-   *   so concurrent repeats serialize instead of racing, and the row id is
-   *   random, so two intents in one millisecond no longer collide on the
-   *   providerPaymentId unique index (the old manual_<id>_<Date.now()> key
-   *   answered 500).
+   * - One PENDING intent per invoice and method. A repeat answers the same
+   *   success; it writes nothing when it states the same amount, and otherwise
+   *   updates that one row to what the latest intent states (capped at the
+   *   balance as it is now), so neither an earlier anonymous writer nor a stale
+   *   amount from before an operator part payment sticks. The lookup runs
+   *   under the invoice row lock, so concurrent repeats serialize instead of
+   *   racing, and the row id is random, so two intents in one millisecond no
+   *   longer collide on the providerPaymentId unique index (the old
+   *   manual_<id>_<Date.now()> key answered 500).
    * - Payable-state gate: see INTENT_PAYABLE_STATUSES; PAID, or nothing left to
    *   pay, answers 409.
-   * - The amount, when given, must be a positive finite number (400 otherwise)
-   *   and is capped at the remaining balance; when absent it is the remaining
-   *   balance.
+   * - The amount, when given, must be a finite number of at least 0.01 once
+   *   rounded to cents (400 otherwise); it is stored rounded and capped at the
+   *   remaining balance. When absent (the pay page never sends one) it is
+   *   stored as 0, as at the base: the customer declared no amount, and
+   *   several readers (open payables, the overdue-invoice scan, the money
+   *   health score) sum Payment.amount whatever its status, so a defaulted
+   *   balance would read as money paid.
    */
   async recordPublicPaymentIntent(invoiceId: string, method: string, amount?: unknown) {
     const validMethods = ['bank_transfer', 'cash', 'check', 'other', 'google_pay'];
@@ -2999,12 +3006,19 @@ export class CommerceService {
       throw new BadRequestException('Invalid offline payment method');
     }
     // Validated before the invoice is read, so a 400 says nothing about the id.
+    let declared: number | undefined;
     if (amount !== undefined) {
       if (typeof amount !== 'number' || !Number.isFinite(amount)) {
         throw new BadRequestException('Payment amount must be a number');
       }
       if (amount <= 0) {
         throw new BadRequestException('Payment amount must be positive');
+      }
+      // Stored in cents, like every other money value; a sub-cent amount
+      // (1e-9) would otherwise be stored as given and claim the method's slot.
+      declared = roundMoney(amount);
+      if (declared < 0.01) {
+        throw new BadRequestException('Payment amount must be at least 0.01');
       }
     }
 
@@ -3031,11 +3045,23 @@ export class CommerceService {
       const remaining = Math.min(balance.remaining, balance.total);
       if (remaining <= 0) throw new ConflictException('Invoice is already paid');
 
+      // What this intent states: the declared amount capped at what is still
+      // owed now, or 0 when none was declared (see the method comment).
+      const intentAmount = declared === undefined ? 0 : Math.min(declared, remaining);
+
       const existing = await tx.payment.findFirst({
         where: { invoiceId, businessId: invoice.businessId, status: 'PENDING', method, provider: method },
-        select: { id: true },
+        select: { id: true, amount: true },
+        orderBy: { createdAt: 'desc' },
       });
-      if (existing) return;
+      if (existing) {
+        // The latest intent for a method is the one that stands: refresh the
+        // row when it states a different amount; an identical repeat writes nothing.
+        if (Number(existing.amount) !== intentAmount) {
+          await tx.payment.update({ where: { id: existing.id }, data: { amount: intentAmount } });
+        }
+        return;
+      }
 
       // PENDING — customer-asserted intent, no money yet, so no FIN2 posting
       // until the operator records the actual receipt via recordPayment().
@@ -3043,7 +3069,7 @@ export class CommerceService {
         data: {
           invoiceId,
           businessId: invoice.businessId,
-          amount: typeof amount === 'number' ? Math.min(amount, remaining) : remaining,
+          amount: intentAmount,
           currency: invoice.currency || 'TTD',
           status: 'PENDING',
           provider: method,

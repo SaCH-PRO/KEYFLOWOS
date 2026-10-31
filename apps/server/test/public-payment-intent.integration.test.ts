@@ -21,13 +21,18 @@
  *   intent on a payable invoice (SENT, OVERDUE, PARTIALLY_PAID)
  *     -> 2xx { success, method, invoiceNumber }; the invoice status is unchanged
  *        and the public projection still answers after a reload
- *   a second intent for the same invoice and method -> the same answer, still one PENDING row
+ *   a second intent for the same invoice and method -> the same answer, still one PENDING row;
+ *     it writes nothing when it states the same amount, and otherwise updates
+ *     that row to what it states (capped at the balance as it is now)
  *   intents in the same millisecond, or a concurrent burst -> never 500
  *   DRAFT, VOID, FAILED, PENDING, soft-deleted -> 404, identical to an unknown id; nothing written
  *   PAID (or nothing left to pay)               -> 409; nothing written
  *   amount above the remaining balance          -> stored as the remaining balance
- *   no amount                                   -> stored as the remaining balance
- *   negative, zero, NaN or non-number amount    -> 400; nothing written
+ *   amount                                      -> stored rounded to cents
+ *   no amount (what the pay page sends)         -> stored as 0, as at the base
+ *     (open payables, the overdue-invoice scan and the money health score sum
+ *     Payment.amount whatever its status; a defaulted balance read as paid)
+ *   negative, zero, NaN, non-number or sub-cent amount -> 400; nothing written
  *   LEDGER: no intent changes computeBalance, FinancialTransaction or LedgerEntry
  *   TENANT: the PENDING row carries the invoice's own businessId (Payment table
  *           read directly, M31); no other tenant's invoices or payments change
@@ -97,12 +102,18 @@ const ID = {
   invBadMethod: `${P}invBadMethod`,
   invLedger: `${P}invLedger`,
   invTenantA: `${P}invTenantA`,
+  invConsumers: `${P}invConsumers`,
+  invRounding: `${P}invRounding`,
+  invRefresh: `${P}invRefresh`,
   // tenant B
   invB: `${P}invB`,
   unknown: `${P}invNoSuchInvoice`,
 };
 
 const TOTAL = 100;
+
+/** The one tenant-A invoice that is overdue by date (SENT, due 10 days ago): the status-blind readers see it. */
+const OVERDUE_DUE_DATE = new Date(Date.now() - 10 * 86_400_000);
 
 /** Seeded status per invoice (everything else in tenant A is SENT). */
 const SEEDED_STATUS: Record<string, string> = {
@@ -365,6 +376,7 @@ beforeAll(async () => {
         businessId: biz,
         contactId: contact,
         ...(id === ID.invDeleted ? { deletedAt: new Date() } : {}),
+        ...(id === ID.invConsumers ? { dueDate: OVERDUE_DUE_DATE } : {}),
         items: { create: [{ id: `${id}_item1`, description: `K22A item ${n}`, quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
       },
     });
@@ -548,10 +560,13 @@ describe('amount cap and validation (R0-22)', () => {
     expect((await invoiceRow(ID.invCap)).status).toBe('PARTIALLY_PAID');
   });
 
-  it('PI-14: an intent with no amount is stored as the remaining balance (60), and an amount under it is kept as given (25)', async () => {
+  // R0-22 review (CR-R022-1): a no-amount intent used to default to the
+  // remaining balance, and status-blind readers then counted it as paid (PI-20).
+  it('PI-14: an intent with no amount is stored as 0 (no amount declared, as at the base), and an amount under the balance is kept as given (25)', async () => {
     const none = await intent(ID.invNoAmount, { method: 'cash' });
     expect([200, 201], JSON.stringify(none.body)).toContain(none.status);
-    expect((await pendingOf(ID.invNoAmount)).map((p) => p.amount)).toEqual([60]);
+    expect((await pendingOf(ID.invNoAmount)).map((p) => p.amount)).toEqual([0]);
+    expect((await balanceOf(ID.invNoAmount)).remaining).toBe(60);
 
     const under = await intent(ID.invUnderCap, { method: 'cash', amount: 25 });
     expect([200, 201], JSON.stringify(under.body)).toContain(under.status);
@@ -614,5 +629,116 @@ describe('LEDGER and TENANT (R0-22)', () => {
   it('PI-19 LEDGER (whole run): every intent above left both tenants\' FinancialTransaction and LedgerEntry counts as they were after seeding', async () => {
     expect(await ledgerCounts(ID.bizA)).toEqual(ledgerAtStart.a);
     expect(await ledgerCounts(ID.bizB)).toEqual(ledgerAtStart.b);
+  });
+});
+
+// Placed after PI-19: PI-22 records an operator part payment (a real posting),
+// so it must not run inside the whole-run LEDGER window above. Its intents are
+// checked against the ledger counts around them instead.
+describe('R0-22 review repairs: status-blind readers, cents and the latest intent per method', () => {
+  it('PI-20: a no-amount intent (what the pay page sends) for every method is stored as 0, so open payables, the overdue-invoice scan and the money health score still see the full balance', async () => {
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { PaymentsOpsService } = await import('../src/modules/payments/payments-ops.service');
+    const { HealthScoreService } = await import('../src/modules/intelligence/health-score.service');
+    const { ScheduledScansService } = await import('../src/modules/intelligence/scheduled-scans.service');
+    const prisma = app.get(PrismaService);
+    // The three readers on the real PrismaService; only their side channels
+    // (gateways, signal and action writers) are stubs.
+    const ops = new PaymentsOpsService(prisma, {} as any, {} as any, {} as any, {} as any);
+    const health: any = new HealthScoreService(prisma);
+    const signals: Array<{ entityId: string; value: number }> = [];
+    const scans: any = new ScheduledScansService(
+      prisma,
+      {} as any,
+      { upsertSignal: async (_biz: string, key: any, data: any) => { signals.push({ entityId: key.entityId, value: data.value }); return null; } } as any,
+      { bridge: async () => null } as any,
+      health,
+    );
+    const read = async () => {
+      signals.length = 0;
+      await scans.evaluateRules(ID.bizA);
+      return {
+        openPayable: (await ops.listOpenPayables(ID.bizA)).payables.find((p: any) => p.id === ID.invConsumers)?.amount,
+        overdueReceivables: (await health.calculateMoneyHealth(ID.bizA)).metrics.overdueReceivables,
+        overdueSignal: signals.filter((s) => s.entityId === ID.invConsumers).map((s) => s.value),
+      };
+    };
+
+    const before = await read();
+    // invConsumers is tenant A's only SENT invoice with a past due date.
+    expect(before).toEqual({ openPayable: TOTAL, overdueReceivables: TOTAL, overdueSignal: [TOTAL] });
+
+    const methods = ['bank_transfer', 'cash', 'check', 'other', 'google_pay'];
+    for (const method of methods) {
+      const res = await intent(ID.invConsumers, { method });
+      expect([200, 201], `${method}: ${JSON.stringify(res.body)}`).toContain(res.status);
+    }
+    // The readers first (the behaviour), then the stored rows (the cause).
+    expect(await read()).toEqual(before);
+    const pending = await pendingOf(ID.invConsumers);
+    expect(pending.map((p) => p.method).sort()).toEqual([...methods].sort());
+    expect(pending.map((p) => p.amount)).toEqual([0, 0, 0, 0, 0]);
+    expect((await balanceOf(ID.invConsumers)).remaining).toBe(TOTAL);
+    expect((await invoiceRow(ID.invConsumers)).status).toBe('SENT');
+  });
+
+  it('PI-21: a sub-cent amount answers 400 and writes nothing; an amount is stored rounded to cents', async () => {
+    for (const amount of [1e-9, 0.004]) {
+      const res = await intent(ID.invRounding, { method: 'bank_transfer', amount });
+      expect(res.status, `${amount}: ${JSON.stringify(res.body)}`).toBe(400);
+    }
+    await expectNothingWritten(ID.invRounding, 'SENT');
+
+    const res = await intent(ID.invRounding, { method: 'bank_transfer', amount: 25.678 });
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect((await pendingOf(ID.invRounding)).map((p) => p.amount)).toEqual([25.68]);
+  });
+
+  it('PI-22: a repeat for the same method keeps one row and states the latest intent: an earlier anonymous amount does not stick, an identical repeat writes nothing, and a stale amount is re-capped after an operator part payment', async () => {
+    const row = async () => {
+      const pending = await pendingOf(ID.invRefresh);
+      expect(pending, 'one PENDING row').toHaveLength(1);
+      const { id, amount, providerPaymentId, createdAt } = pending[0];
+      return { id, amount, providerPaymentId, createdAt: createdAt.toISOString() };
+    };
+    const ledgerBefore = await ledgerCounts(ID.bizA);
+
+    // An anonymous first writer declares one cent.
+    const first = await intent(ID.invRefresh, { method: 'bank_transfer', amount: 0.01 });
+    expect([200, 201], JSON.stringify(first.body)).toContain(first.status);
+    const seeded = await row();
+    expect(seeded.amount).toBe(0.01);
+
+    // The customer's pay page then sends no amount: same answer, same row, and it now states 0.
+    const fromPayPage = await intent(ID.invRefresh, { method: 'bank_transfer' });
+    expect(fromPayPage.status).toBe(first.status);
+    expect(fromPayPage.body).toEqual(first.body);
+    expect(await row()).toEqual({ ...seeded, amount: 0 });
+
+    // A declared amount replaces it; the identical repeat writes nothing.
+    const declaredRes = await intent(ID.invRefresh, { method: 'bank_transfer', amount: 90 });
+    expect(declaredRes.body).toEqual(first.body);
+    const declared = await row();
+    expect(declared).toEqual({ ...seeded, amount: 90 });
+    const repeat = await intent(ID.invRefresh, { method: 'bank_transfer', amount: 90 });
+    expect(repeat.body).toEqual(first.body);
+    expect(await row()).toEqual(declared);
+    expect(await ledgerCounts(ID.bizA)).toEqual(ledgerBefore);
+
+    // The operator records 40, so 60 is left; the same intent again is re-capped at 60.
+    const paid = await agent()
+      .post(`/commerce/businesses/${ID.bizA}/invoices/${ID.invRefresh}/payments`)
+      .set(HEADER, ID.ownerA)
+      .send({ amount: 40, method: 'cash', reference: `${P}slip_refresh` });
+    expect(paid.status, JSON.stringify(paid.body)).toBe(201);
+    expect((await balanceOf(ID.invRefresh)).remaining).toBe(60);
+    const ledgerAfterPayment = await ledgerCounts(ID.bizA);
+
+    const again = await intent(ID.invRefresh, { method: 'bank_transfer', amount: 90 });
+    expect(again.body).toEqual(first.body);
+    expect(await row()).toEqual({ ...seeded, amount: 60 });
+    expect((await balanceOf(ID.invRefresh)).remaining).toBe(60);
+    expect((await invoiceRow(ID.invRefresh)).status).toBe('PARTIALLY_PAID');
+    expect(await ledgerCounts(ID.bizA)).toEqual(ledgerAfterPayment);
   });
 });

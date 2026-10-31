@@ -522,7 +522,8 @@ function PublicPaymentPageInner() {
   const discountAmount = invoice?.discountAmount ?? 0;
   const total = invoice?.total ?? 0;
   const currency = invoice?.currency ?? "TTD";
-  // R0-22: an offline intent records the remaining balance, not the total.
+  // R0-22: what is still owed (the public projection's remaining), not the
+  // total, so a partly paid invoice does not ask for money already received.
   const amountDue = typeof invoice?.remaining === "number" ? invoice.remaining : total;
 
   const hasWipay = gateways.some((g) => g.id === "wipay");
