@@ -28,6 +28,8 @@
     "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass the business owner completes the same business, and is recorded as the actor",
     "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass on the completed business, the ADMIN granted settings:write is still refused (authority is checked before the replay)",
     "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass a SUPER_ADMIN with no membership completes a fresh business (the platform bypass, as BusinessGuard) and is recorded as the actor",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass SEC03-1: a business flagged complete outside /complete (no onboardingCompletedAt, as the profile PATCH leaves it) still refuses an ADMIN, and nothing is written",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass SEC03-1: the owner's /complete on that flagged business is not alreadyComplete: it records completedAt, the demo data, the disclaimer and the owner as the actor",
     "characterization — the non-AI genome editor path (PATCH /blueprint) after PATCH /blueprint with founder, business and market fields, /complete succeeds and no AI was used"
   ]
 }

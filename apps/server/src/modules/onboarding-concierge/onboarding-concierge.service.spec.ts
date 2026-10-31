@@ -443,11 +443,46 @@ describe('OnboardingConciergeService', () => {
     // Review ST-R032-2: the D-03 invariant "onboarding completes only on a valid
     // minimal profile, by an authorised actor" holds on POST /complete, but the
     // generic profile PATCH still bypasses it. The fix is outside this packet's
-    // write set (identity.controller.ts, identity.service.ts:351,
-    // dto/update-business.dto.ts) and is R0-09-ID-HARDEN's (D-11 owner-only profile).
+    // write set (identity.controller.ts updateBusiness, identity.service.ts
+    // updateBusiness input type and nonStringFields, dto/update-business.dto.ts)
+    // and is R0-09-ID-HARDEN's (D-11 owner-only profile). R0-SEC-03 review
+    // SEC03-1: D-11 completion is closed end to end only once R0-09 lands.
     it.todo(
       'ST-R032-2: PATCH /identity/businesses/:id cannot set onboardingComplete or blank name/currency/timezone, and STAFF cannot change them (R0-09-ID-HARDEN)',
     );
+    it.todo(
+      'R0-SEC-03 SEC03-1: a non-owner PATCH /identity/businesses/:id cannot clear onboardingComplete on a business the owner completed, so the owner\'s /complete does not run again (R0-09-ID-HARDEN)',
+    );
+
+    // R0-SEC-03 review SEC03-1, the part inside this write set: completion does
+    // not trust an onboardingComplete flag written outside it (the profile PATCH
+    // writes the flag but never onboardingCompletedAt).
+    const flaggedByPatch = { ...minimalProfile, ownerId: 'user_owner', onboardingComplete: true, onboardingCompletedAt: null };
+
+    it('R0-SEC-03 SEC03-1: a business flagged complete without onboardingCompletedAt is refused to an ADMIN, before anything is written', async () => {
+      const { service, prisma, demoSeeder, tx } = makeService({
+        business: flaggedByPatch,
+        membership: { role: 'ADMIN', permissionScopes: null },
+      });
+      const error = await asUser('user_admin', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
+      expectRefused(error, prisma, demoSeeder);
+      expect(tx.teamActivityLog.create).not.toHaveBeenCalled();
+    });
+
+    it('R0-SEC-03 SEC03-1: the owner\'s /complete on a business flagged complete without onboardingCompletedAt runs the whole completion', async () => {
+      const { service, demoSeeder, tx } = makeService({ business: flaggedByPatch, membership: { role: 'OWNER', permissionScopes: null } });
+      const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
+      expect(result).toMatchObject({ complete: true });
+      expect((result as { alreadyComplete?: boolean }).alreadyComplete).toBeUndefined();
+      expect(tx.business.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'biz_1' },
+        data: expect.objectContaining({ onboardingComplete: true, onboardingCompletedAt: expect.any(Date) }),
+      }));
+      expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
+      expect(tx.teamActivityLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ userId: 'user_owner', action: 'onboarding_completed' }),
+      });
+    });
 
     it('ST-R032-1: a disclaimer accepted earlier is not re-attributed', async () => {
       const { service, tx } = makeService({ business: minimalProfile, blueprint: FULL_BLUEPRINT });

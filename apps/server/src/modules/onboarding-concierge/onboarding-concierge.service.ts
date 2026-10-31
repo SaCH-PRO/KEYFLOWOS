@@ -1209,10 +1209,20 @@ EXTRACTED: archetype=service_provider`;
    * settings:admin admits no ADMIN or STAFF member (this replaces review
    * ST-R032-1's owner-or-settings:write rule).
    *
-   * The owner is, as for the profile PATCH (IdentityService.assertBusinessOwner),
-   * the distinguished owner (Business.ownerId) or the OWNER membership: the two
-   * arms BusinessGuard admits an owner by. A SUPER_ADMIN keeps the platform
-   * bypass BusinessGuard already grants it; nothing here widens that.
+   * The owner is the distinguished owner (Business.ownerId) or the OWNER
+   * membership: the two arms BusinessGuard admits an owner by. A SUPER_ADMIN
+   * keeps the platform bypass BusinessGuard already grants it; nothing here
+   * widens that.
+   *
+   * This guards POST /complete only. On this base the profile PATCH
+   * (PATCH /identity/businesses/:businessId: AuthGuard and BusinessGuard, then
+   * IdentityService.updateBusiness) still lets any member write
+   * onboardingComplete, without an actor row, a disclaimer acceptance or demo
+   * data. Closing that is R0-09-ID-HARDEN (owner-only PATCH, onboardingComplete
+   * dropped from it), so D-11 holds end to end only once R0-09 lands. Until
+   * then markOnboardingComplete does not trust that flag: a business counts as
+   * already complete only with onboardingCompletedAt, which only this method
+   * writes, so a flag the PATCH set is still completed in full by the owner.
    *
    * The actor is the authenticated user TenantInterceptor bound to this
    * request; with no request context, or one for another business, completion
