@@ -103,7 +103,8 @@ describe('KeyCortexController new endpoints', () => {
 
   describe('Sse /api/v1/cortex/stream', () => {
     it('streams query results when a message is provided', async () => {
-      const observable = controller.streamEvents('biz_1', 'Do something');
+      // The third argument is the principal @CurrentUser() reads (R0-09c): AuthGuard always attaches one.
+      const observable = controller.streamEvents('biz_1', 'Do something', { id: 'user_1' });
       const values: any[] = [];
       await new Promise<void>((resolve, reject) => {
         observable.subscribe({
@@ -114,7 +115,7 @@ describe('KeyCortexController new endpoints', () => {
       });
 
       expect(reasoning.streamQuery).toHaveBeenCalledWith(
-        expect.objectContaining({ businessId: 'biz_1', text: 'Do something', enableActions: true }),
+        expect.objectContaining({ businessId: 'biz_1', userId: 'user_1', text: 'Do something', enableActions: true }),
       );
       expect(values.some((v) => v.type === 'chunk' && v.content === 'Working')).toBe(true);
       expect(values.some((v) => v.type === 'complete')).toBe(true);

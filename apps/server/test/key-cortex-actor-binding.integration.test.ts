@@ -192,6 +192,20 @@ const structured = (action: string, parameters: Record<string, unknown>, extra: 
   businessId: ID.bizA, command: '', module: 'settings', action, parameters, ...extra,
 });
 
+/**
+ * The commands the connector routed since `from`: the settings command itself,
+ * then at most the compensating command the executor tries after a failure
+ * (rollbackOnFailure: `revert_<action>`, which the adapter does not know), all
+ * for `userId`.
+ */
+function expectRouted(from: number, action: string, userId: string) {
+  const routed = connectorCommands.slice(from);
+  expect(routed.length, JSON.stringify(routed)).toBeGreaterThanOrEqual(1);
+  expect(routed.length, JSON.stringify(routed)).toBeLessThanOrEqual(2);
+  expect(routed[0]).toEqual({ module: 'settings', action, businessId: ID.bizA, userId });
+  for (const c of routed.slice(1)) expect(c).toEqual({ module: 'settings', action: `revert_${action}`, businessId: ID.bizA, userId });
+}
+
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
@@ -472,9 +486,7 @@ describe('POST execute attributes the command to the authenticated member, never
     const from = { connector: connectorCommands.length, autonomy: autonomyCalls.length };
     const res = await post('execute', ID.staffA, structured('update_business_profile', HIJACK, { userId: ID.ownerA }));
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(connectorCommands.slice(from.connector)).toEqual([
-      { module: 'settings', action: 'update_business_profile', businessId: ID.bizA, userId: ID.staffA },
-    ]);
+    expectRouted(from.connector, 'update_business_profile', ID.staffA);
     expect(autonomyCalls.slice(from.autonomy).map((c) => c.proposedBy)).toEqual([ID.staffA]);
     expect(res.body.result).toMatchObject({ success: false });
     expect(String(res.body.result.error)).toMatch(OWNER_ONLY);
@@ -486,7 +498,7 @@ describe('POST execute attributes the command to the authenticated member, never
     const from = connectorCommands.length;
     const res = await post('execute', ID.staffA, structured('update_business_profile', HIJACK));
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(connectorCommands.slice(from).map((c) => c.userId)).toEqual([ID.staffA]);
+    expectRouted(from, 'update_business_profile', ID.staffA);
     expect(String(res.body.result.error)).toMatch(OWNER_ONLY);
     expect(await businessRowText(ID.bizA)).toBe(before);
   });
@@ -497,9 +509,7 @@ describe('POST execute attributes the command to the authenticated member, never
     const res = await post('execute', ID.staffA, { businessId: ID.bizA, command: 'rename the business (k34c)', userId: ID.ownerA });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(parseCalls.slice(from.parse).map((c) => c.userId)).toEqual([ID.staffA]);
-    expect(connectorCommands.slice(from.connector)).toEqual([
-      { module: 'settings', action: 'update_business_profile', businessId: ID.bizA, userId: ID.staffA },
-    ]);
+    expectRouted(from.connector, 'update_business_profile', ID.staffA);
     expect(String(res.body.result.error)).toMatch(OWNER_ONLY);
     expect(await businessRowText(ID.bizA)).toBe(before);
   });

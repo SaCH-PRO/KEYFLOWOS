@@ -122,6 +122,7 @@ import {
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard, type BusinessGuardedRequest } from '../../core/auth/business.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
+import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 
@@ -160,15 +161,43 @@ function multipartTenant(resolved: string | undefined, req: BusinessGuardedReque
   return checked;
 }
 
+/**
+ * R0-09c-KEY-ACTOR-BINDING (R0-09-ID-HARDEN review R09-ST-4; R0-34b review
+ * ST-3): the human a KEY request acts for.
+ *
+ * It is the principal AuthGuard admitted (`req.user`, read with
+ * @CurrentUser()), never a body or query `userId`: those were read here, so a
+ * STAFF member attributed a command to the OWNER (POST execute and batch built
+ * the ConnectorCommand with `dto.userId ?? 'system'`), and a member of A wrote
+ * CortexSession rows under A attributed to a user outside A. A request `userId`
+ * is now IGNORED, not refused: the DTOs still accept it as an optional string
+ * so existing clients keep working, and no handler reads it. With no
+ * authenticated user the handler answers 401 instead of acting for 'system',
+ * 'key_user' or nobody (AuthGuard already refuses such a request; this keeps a
+ * handler reached any other way from running unattributed).
+ */
+function requestActorId(user: AuthenticatedUser | undefined): string {
+  const id = user?.id;
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new UnauthorizedException('Authenticated user required');
+  }
+  return id;
+}
+
 /* ------------------------------------------------------------------ */
 /*  DTOs  (Legacy)                                                     */
 /* ------------------------------------------------------------------ */
 
-class CreateSessionDto {
+// The DTOs below that test/key-cortex-actor-binding.integration.test.ts writes as
+// handler parameter types (vitest emits none) are exported for that reason only.
+// Each optional `userId` is accepted and ignored: the actor is requestActorId().
+
+export class CreateSessionDto {
   @IsString()
   businessId: string;
+  @IsOptional()
   @IsString()
-  userId: string;
+  userId?: string;
   @IsOptional()
   @Allow()
   persona?: CortexPersona;
@@ -204,7 +233,9 @@ class UpdateSessionDto {
   status?: CortexSessionStatus;
 }
 
-export class ChatQueryDto implements CortexQuery {
+// The query the handler builds carries the authenticated actor as its userId,
+// so the body's own userId is optional (and ignored).
+export class ChatQueryDto implements Omit<CortexQuery, 'userId'> {
   @IsString()
   text: string;
 
@@ -215,8 +246,9 @@ export class ChatQueryDto implements CortexQuery {
   @IsString()
   businessId: string;
 
+  @IsOptional()
   @IsString()
-  userId: string;
+  userId?: string;
 
   // @Allow() rather than @IsObject()/@IsIn(): these carry union and structured
   // shapes validated downstream. @Allow contributes the metadata that keeps
@@ -310,7 +342,7 @@ class InsightsQueryDto {
   query: string;
 }
 
-class FeedbackDto {
+export class FeedbackDto {
   @IsString()
   sessionId: string;
   @IsString()
@@ -366,14 +398,16 @@ export class UpdateAutonomyProfileDto {
 /* ------------------------------------------------------------------ */
 
 /** Command execution -- natural language or structured command */
-class ExecuteCommandDto {
+export class ExecuteCommandDto {
   /** Natural language command (e.g. "Create an invoice for John for $500") */
   @IsString()
   command: string;
   @IsString()
   businessId: string;
+  /** Accepted and ignored: the command's actor is the authenticated principal. */
+  @IsOptional()
   @IsString()
-  userId: string;
+  userId?: string;
   /** Optional structured override -- bypasses NL parsing */
   @IsOptional()
   @Allow()
@@ -391,7 +425,7 @@ class ExecuteCommandDto {
 }
 
 /** Direct module query */
-class QueryModuleDto {
+export class QueryModuleDto {
   @Allow()
   module: ModuleName;
   @IsString()
@@ -482,8 +516,10 @@ export class ExecuteBatchDto {
   >;
   @IsString()
   businessId: string;
+  /** Accepted and ignored: every command's actor is the authenticated principal. */
+  @IsOptional()
   @IsString()
-  userId: string;
+  userId?: string;
   /** Stop execution on first failure */
   @IsOptional()
   @IsBoolean()
@@ -495,7 +531,7 @@ export class ExecuteBatchDto {
 }
 
 /** Rollback request */
-class RollbackDto {
+export class RollbackDto {
   /** The correlationId of the command to roll back */
   @IsString()
   correlationId: string;
@@ -532,8 +568,9 @@ export class ConsciousChatDto {
   businessId: string;
 
   // Optional: AuthGuard already establishes who the caller is, and the session
-  // is created without it. Requiring it here would 400 every client that does
-  // not happen to know its own user id — including this repo's own web hook.
+  // is created for that principal (R0-09c), never for this field. Requiring it
+  // here would 400 every client that does not happen to know its own user id —
+  // including this repo's own web hook.
   @IsOptional()
   @IsString()
   userId?: string;
@@ -811,6 +848,13 @@ class EvolutionExplainDto {
  * Prisma tenant extension scopes only the database fallback). Every handler
  * that takes a client session id (messages, chat, chat/stream, stream,
  * conscious/chat, conscious/stream) goes through `tenantSessionId` first.
+ *
+ * R0-09c-KEY-ACTOR-BINDING (R0-09 review R09-ST-4; R0-34b review ST-3): the
+ * ACTOR is bound the same way. Every handler that hands a user to a service
+ * takes it from @CurrentUser() (the principal AuthGuard admitted) through
+ * `requestActorId`, never from a body or query `userId`, which is ignored; with
+ * no authenticated user it answers 401 rather than acting as 'system',
+ * 'key_user' or nobody.
  */
 @Controller('api/v1/cortex')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -863,13 +907,17 @@ export class KeyCortexController {
    */
   @Post('sessions')
   @HttpCode(HttpStatus.CREATED)
-  async createSession(@Body() dto: CreateSessionDto): Promise<CortexSession> {
+  async createSession(
+    @Body() dto: CreateSessionDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ): Promise<CortexSession> {
+    const actorId = requestActorId(user);
     this.logger.debug(`Creating session for business=${dto.businessId}`);
 
     try {
       const session = await this.conversation.createSession(
         dto.businessId,
-        dto.userId,
+        actorId,
         {
           persona: dto.persona ?? 'jarvis',
           voice: dto.voice,
@@ -891,19 +939,21 @@ export class KeyCortexController {
 
   /**
    * GET /api/v1/cortex/sessions
-   * List sessions for the authenticated user / business.
+   * List the authenticated user's sessions in the business. A `?userId` naming
+   * another member is ignored (R0-09c): it used to list that member's sessions.
    */
   @Get('sessions')
   async listSessions(
     @GuardedBusinessId() businessId: string,
-    @Query('userId') userId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<CortexSession[]> {
+    const actorId = requestActorId(user);
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
     }
 
     try {
-      return await this.conversation.listSessions(businessId, userId);
+      return await this.conversation.listSessions(businessId, actorId);
     } catch (err: any) {
       this.logger.error(`Failed to list sessions: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to list sessions');
@@ -973,7 +1023,11 @@ export class KeyCortexController {
    */
   @Post('chat')
   @HttpCode(HttpStatus.OK)
-  async chat(@Body() query: ChatQueryDto): Promise<CortexResponse> {
+  async chat(
+    @Body() query: ChatQueryDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ): Promise<CortexResponse> {
+    const actorId = requestActorId(user);
     if (!query.text?.trim()) {
       throw new BadRequestException('Query text is required');
     }
@@ -983,7 +1037,8 @@ export class KeyCortexController {
     const sessionId = await this.tenantSessionId(query.businessId, query.sessionId);
 
     try {
-      const response = await this.reasoning.processQuery({ ...query, sessionId } as any);
+      // The actor overrides any body userId (R0-09c).
+      const response = await this.reasoning.processQuery({ ...query, userId: actorId, sessionId } as any);
       return response;
     } catch (err: any) {
       this.logger.error(`Chat error: ${err.message}`, err.stack);
@@ -1008,15 +1063,17 @@ export class KeyCortexController {
    * non-streaming POST /chat.
    *
    * A session id naming another tenant's session is refused before the stream
-   * starts (review ST-1, `tenantSessionId`).
+   * starts (review ST-1, `tenantSessionId`). The query streams for the
+   * authenticated user; a `?userId` is ignored (R0-09c).
    */
   @Sse('chat/stream')
   async streamChat(
     @GuardedBusinessId() businessId: string,
     @Query('text') text: string,
-    @Query('userId') userId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
     @Query('sessionId') requestedSessionId?: string,
   ): Promise<Observable<CortexStreamChunk>> {
+    const userId = requestActorId(user);
     if (!text?.trim()) {
       throw new BadRequestException('text query parameter is required');
     }
@@ -1105,14 +1162,15 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/stream
    * General SSE event stream for live Cortex updates.
-   * When a `message` query param is supplied, streams the reasoning response;
-   * otherwise sends a periodic heartbeat.
+   * When a `message` query param is supplied, streams the reasoning response
+   * for the authenticated user (a `?userId` is ignored and there is no
+   * 'key_user' default, R0-09c); otherwise sends a periodic heartbeat.
    */
   @Sse('stream')
   streamEvents(
     @GuardedBusinessId() businessId: string,
     @Query('message') message?: string,
-    @Query('userId') userId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
     @Query('sessionId') sessionId?: string,
     @Query('persona') persona?: string,
   ): Observable<{ data: Record<string, unknown> }> {
@@ -1133,10 +1191,11 @@ export class KeyCortexController {
       );
     }
 
+    const userId = requestActorId(user);
     const messageId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const query: CortexQuery = {
       businessId,
-      userId: userId ?? 'key_user',
+      userId,
       text: message,
       sessionId,
       persona: persona as any,
@@ -1226,11 +1285,16 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/feedback
-   * Record user feedback on a recommendation so KEY can learn.
+   * Record user feedback on a recommendation so KEY can learn. The feedback is
+   * the authenticated user's; a body `userId` is ignored (R0-09c).
    */
   @Post('feedback')
   @HttpCode(HttpStatus.OK)
-  async recordFeedback(@Body() dto: FeedbackDto): Promise<{ success: boolean }> {
+  async recordFeedback(
+    @Body() dto: FeedbackDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ): Promise<{ success: boolean }> {
+    const actorId = requestActorId(user);
     if (!dto.sessionId) {
       throw new BadRequestException('sessionId is required');
     }
@@ -1241,7 +1305,7 @@ export class KeyCortexController {
       throw new BadRequestException('userResponse is required');
     }
 
-    await this.learning.recordFeedback(dto);
+    await this.learning.recordFeedback({ ...dto, userId: actorId });
     return { success: true };
   }
 
@@ -1506,12 +1570,19 @@ export class KeyCortexController {
   /**
    * POST /api/v1/cortex/execute
    * Parse natural language intent and execute via the connector.
+   *
+   * R0-09c (review R09-ST-4): the command is the authenticated user's. It was
+   * built with `userId: dto.userId ?? 'system'`, so a STAFF member attributed
+   * it to the OWNER, or to nobody; a body `userId` is now ignored, and with no
+   * authenticated user the request is 401 before anything is parsed or run.
    */
   @Post('execute')
   @HttpCode(HttpStatus.OK)
   async executeCommand(
     @Body() dto: ExecuteCommandDto,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<ConnectorResult & { intent?: string; confidence?: number }> {
+    const actorId = requestActorId(user);
     if (!dto.command?.trim() && !dto.module) {
       throw new BadRequestException('command (natural language) or module+action is required');
     }
@@ -1527,7 +1598,7 @@ export class KeyCortexController {
           action: dto.action,
           parameters: dto.parameters ?? {},
           businessId: dto.businessId,
-          userId: dto.userId ?? 'system',
+          userId: actorId,
           source: 'key_cortex',
           timestamp: new Date(),
           correlationId: this.generateCorrelationId(),
@@ -1545,7 +1616,7 @@ export class KeyCortexController {
 
       const parsedIntents = await this.command.parseIntent(dto.command, {
         businessId: dto.businessId,
-        userId: dto.userId,
+        userId: actorId,
         capabilities,
         context,
       } as any);
@@ -1560,7 +1631,7 @@ export class KeyCortexController {
       const connectorCommand = this.command.toConnectorCommand(
         topIntent,
         dto.businessId,
-        dto.userId ?? 'system',
+        actorId,
       );
 
       const result = await this.executor.execute(connectorCommand, {
@@ -1582,12 +1653,18 @@ export class KeyCortexController {
   /**
    * POST /api/v1/cortex/query
    * Direct module query -- no NL parsing, hits the module directly.
+   *
+   * R0-09c: the connector routes `query` to the module adapter as a command
+   * like any other (settings.update_business_profile included), and this
+   * handler named no actor at all. It names the authenticated user now.
    */
   @Post('query')
   @HttpCode(HttpStatus.OK)
   async queryModule(
     @Body() dto: QueryModuleDto,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<ConnectorResult> {
+    const actorId = requestActorId(user);
     if (!dto.module) {
       throw new BadRequestException('module is required');
     }
@@ -1599,11 +1676,12 @@ export class KeyCortexController {
     }
 
     try {
-      const result = await (this.connector as any).query(
+      const result = await this.connector.query(
         dto.module,
         dto.query,
         dto.parameters ?? {},
         dto.businessId,
+        actorId,
       );
       return result;
     } catch (err: any) {
@@ -1980,12 +2058,14 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/batch
-   * Execute multiple commands in a single batch.
+   * Execute multiple commands in a single batch. Every command, structured or
+   * parsed, is the authenticated user's (R0-09c; it was `dto.userId ?? 'system'`).
    */
   @Post('batch')
   @HttpCode(HttpStatus.OK)
   async executeBatch(
     @Body() dto: ExecuteBatchDto,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<{
     results: ConnectorResult[];
     summary: {
@@ -1995,6 +2075,7 @@ export class KeyCortexController {
       executionTimeMs: number;
     };
   }> {
+    const actorId = requestActorId(user);
     if (!dto.businessId) {
       throw new BadRequestException('businessId is required');
     }
@@ -2017,7 +2098,7 @@ export class KeyCortexController {
           const context = await this.contextV2.getFullContext(dto.businessId);
           const parsed = await this.command.parseIntent(cmd.command, {
             businessId: dto.businessId,
-            userId: dto.userId,
+            userId: actorId,
             capabilities,
             context,
           } as any);
@@ -2026,7 +2107,7 @@ export class KeyCortexController {
               this.command.toConnectorCommand(
                 parsed[0],
                 dto.businessId,
-                dto.userId ?? 'system',
+                actorId,
               ),
             );
           }
@@ -2036,7 +2117,7 @@ export class KeyCortexController {
             action: cmd.action,
             parameters: cmd.parameters,
             businessId: dto.businessId,
-            userId: dto.userId ?? 'system',
+            userId: actorId,
             source: 'key_cortex',
             timestamp: new Date(),
             correlationId: this.generateCorrelationId(),
@@ -2074,17 +2155,20 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/rollback
-   * Rollback a previously executed command.
+   * Rollback a previously executed command, as the authenticated user (R0-09c;
+   * it was 'system').
    */
   @Post('rollback')
   @HttpCode(HttpStatus.OK)
   async rollback(
     @Body() dto: RollbackDto,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<{
     success: boolean;
     correlationId: string;
     message: string;
   }> {
+    const actorId = requestActorId(user);
     if (!dto.correlationId) {
       throw new BadRequestException('correlationId is required');
     }
@@ -2102,7 +2186,7 @@ export class KeyCortexController {
           action: 'rollback',
           parameters: { correlationId: dto.correlationId, reason: dto.reason },
           businessId: dto.businessId,
-          userId: 'system',
+          userId: actorId,
           source: 'key_cortex',
           timestamp: new Date(),
           correlationId: dto.correlationId,
@@ -3087,17 +3171,19 @@ export class KeyCortexController {
 
   /**
    * GET /api/v1/cortex/evolution/profile
-   * Get the preference profile for a business.
+   * Get the authenticated user's preference profile for a business (a
+   * `?userId` naming another member is ignored, R0-09c).
    */
   @Get('evolution/profile')
   @HttpCode(HttpStatus.OK)
   async evolutionProfile(
     @GuardedBusinessId() businessId: string,
-    @Query('userId') userId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<{
     profile: Record<string, unknown>;
     generatedAt: string;
   }> {
+    const userId = requestActorId(user);
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
     }
@@ -3242,11 +3328,15 @@ export class KeyCortexController {
    * Routes a query through all nine cognitive organs and returns the answer
    * together with the reasoning that produced it. Until now processConsciously
    * had no caller anywhere in the repo — the organs were registered and
-   * injectable but nothing drove them.
+   * injectable but nothing drove them. The session is the authenticated
+   * user's; a body `userId` is ignored (R0-09c).
    */
   @Post('conscious/chat')
   @HttpCode(HttpStatus.OK)
-  async consciousChat(@Body() dto: ConsciousChatDto): Promise<{
+  async consciousChat(
+    @Body() dto: ConsciousChatDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ): Promise<{
     text: string;
     phases: ConsciousPhaseEvent[];
     reasoningMode: string;
@@ -3255,13 +3345,14 @@ export class KeyCortexController {
     actions: unknown[];
     meta: Record<string, unknown>;
   }> {
+    const actorId = requestActorId(user);
     if (!dto.text?.trim()) throw new BadRequestException('text is required');
     if (!dto.businessId) throw new BadRequestException('businessId is required');
 
     const session = await this.sessionService.getOrCreateSession({
       text: dto.text,
       businessId: dto.businessId,
-      userId: dto.userId,
+      userId: actorId,
       sessionId: await this.tenantSessionId(dto.businessId, dto.sessionId),
     } as CortexQuery);
 
@@ -3311,16 +3402,19 @@ export class KeyCortexController {
    * `businessId` field of the DTO: a GET can still carry a JSON body, which the
    * guard resolves before the query. A session id naming another tenant's
    * session is refused before the stream starts (review ST-1,
-   * `tenantSessionId`).
+   * `tenantSessionId`). The session it writes is the authenticated user's, never
+   * the query's `userId` (R0-09c, R0-34b review ST-3).
    */
   @Sse('conscious/stream')
   async consciousStream(
     @Query() dto: ConsciousChatDto,
     @GuardedBusinessId() businessId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<Observable<{
     type: string;
     data: Record<string, unknown>;
   }>> {
+    const actorId = requestActorId(user);
     if (!dto.text?.trim()) throw new BadRequestException('text is required');
     if (!businessId) throw new BadRequestException('businessId is required');
     const sessionId = await this.tenantSessionId(businessId, dto.sessionId);
@@ -3335,7 +3429,7 @@ export class KeyCortexController {
         const session = await this.sessionService.getOrCreateSession({
           text: dto.text,
           businessId,
-          userId: dto.userId,
+          userId: actorId,
           sessionId,
         } as CortexQuery);
 

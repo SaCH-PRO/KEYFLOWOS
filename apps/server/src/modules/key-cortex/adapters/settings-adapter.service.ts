@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { IdentityService } from '../../identity/identity.service';
@@ -18,6 +18,7 @@ export class SettingsAdapterService {
     try {
       switch (command.action) {
         case 'update_business_profile': {
+          await this.assertProfileOwner(command);
           const updated = await this.updateBusinessProfile({
             businessId: command.businessId,
             name: command.parameters.name as string | undefined,
@@ -28,6 +29,7 @@ export class SettingsAdapterService {
           return connectorOk(command, start, updated);
         }
         case 'update_branding': {
+          await this.assertProfileOwner(command);
           const updated = await this.updateBranding({
             businessId: command.businessId,
             primaryColor: command.parameters.primaryColor as string | undefined,
@@ -82,6 +84,32 @@ export class SettingsAdapterService {
 
   async getBusinessProfile(businessId: string) {
     return this.identity.getBusiness(businessId);
+  }
+
+  /**
+   * R0-09c-KEY-ACTOR-BINDING (R0-09-ID-HARDEN review CR-3), owner ruling D-11:
+   * editing the business profile is OWNER only, regardless of granted scopes —
+   * the rule PATCH /identity/businesses/:businessId applies. These two actions
+   * reached IdentityService.updateBusiness with no owner check, so a STAFF
+   * command changed the name, timezone, currency and branding that route
+   * refuses it.
+   *
+   * The rule is IdentityService.assertBusinessOwner, applied on the command's
+   * actor: `command.userId` (KeyCortexController takes it from the principal
+   * AuthGuard admitted, never from the request) with the role its User row
+   * holds, which is the role AuthMiddleware attaches. So the OWNER membership,
+   * the distinguished owner (Business.ownerId) and SUPER_ADMIN pass, as on the
+   * PATCH route; a STAFF or ADMIN member, a non-member and a command with no
+   * human actor ('system', KEY's own 'key_ai') do not. A refusal throws, and
+   * execute() answers it as the connector failure shape.
+   */
+  private async assertProfileOwner(command: ConnectorCommand): Promise<void> {
+    const actorId = command.userId;
+    if (typeof actorId !== 'string' || actorId.length === 0) {
+      throw new ForbiddenException('Only the business owner can edit the business profile');
+    }
+    const actor = await this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } });
+    await this.identity.assertBusinessOwner(command.businessId, { id: actorId, role: actor?.role });
   }
 
   private async updateBusinessProfile(input: {
