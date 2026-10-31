@@ -86,7 +86,13 @@
  *         verifyBusinessMembership's SUPER_ADMIN bypass a demoted, deleted or
  *         banned SUPER_ADMIN opened any tenant's socket; its Supabase path fell
  *         back to USER on a DB error. It now takes AuthMiddleware's decision
- *         for the same bearer token.
+ *         for the same bearer token, and reads the handshake businessId as
+ *         BusinessGuard does (review finding ST-WS-R2: a Prisma filter object
+ *         such as { in: [own, foreign] } was authorized as the tenant).
+ *   ST-WS-R1 the KEY Cortex gateway decides at connect only: a socket opened
+ *         before a ban, demotion or logout keeps approving in its tenant and
+ *         keeps its room pushes (key-cortex.gateway.ts; pre-existing, outside
+ *         R0-ID-F6's write set; reproduced, with its it.todo, below).
  *   ST-3  FIXED by R0-09-ID-HARDEN (owner ruling D-11; its cases assert the
  *         required behaviour; see "ST-3 (fixed …)" below). PATCH
  *         /identity/businesses/:id had only AuthGuard and BusinessGuard, so a
@@ -1751,28 +1757,63 @@ describe('ST-4 — logout revocation is an issue-time cutoff that the next login
 // depends on, so no client library is added. The gateway's decision is what the
 // client sees: `key:connected` once the socket is authenticated, authorized and
 // joined to its rooms, or a DISCONNECT and a closed connection.
+//
+// `businessId` is sent as given: the handshake auth payload is client JSON, so
+// a case can name the tenant with something other than a string (ST-WS-R2).
 // ---------------------------------------------------------------------------
-type CortexOutcome = { outcome: 'connected' | 'refused'; userId?: string; businessId?: string; frames: string[] };
+type CortexOutcome = { outcome: 'connected' | 'refused'; userId?: string; businessId?: unknown; frames: string[] };
+type CortexEvent = { event: string; payload: unknown };
+/** A socket kept open after the gateway's decision (ST-WS-R1): emit events on it and read what the gateway answers. */
+type CortexSession = CortexOutcome & {
+  emit(event: string, payload: unknown): void;
+  /** The next server event named `event`, or 'closed' once the server disconnects the socket. */
+  next(event: string, ms?: number): Promise<CortexEvent | 'closed'>;
+  close(): void;
+};
 
-async function cortexConnect(token: string, businessId: string): Promise<CortexOutcome> {
+const CORTEX_NSP = '/key-cortex';
+
+async function cortexOpen(token: string, businessId: unknown): Promise<CortexSession> {
   requireServer();
   const url = `${baseUrl.replace(/^http/, 'ws')}/socket.io/?EIO=4&transport=websocket`;
-  const NSP = '/key-cortex';
+  const NSP = CORTEX_NSP;
   return new Promise((resolve, reject) => {
     const frames: string[] = [];
     const ws = new WebSocket(url);
-    let settled = false;
-    const settle = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      ws.terminate();
-      fn();
+    let decided = false;
+    let closed = false;
+    const waiters: Array<{ event: string; done: (v: CortexEvent | 'closed') => void }> = [];
+    const markClosed = () => {
+      closed = true;
+      for (const w of waiters.splice(0)) w.done('closed');
     };
-    const timer = setTimeout(
-      () => settle(() => reject(new Error(`no gateway decision within 15s; frames: ${frames.join(' | ')}`))),
-      15_000,
-    );
+    const session = (outcome: CortexOutcome['outcome'], payload?: { userId?: string; businessId?: unknown }): CortexSession => ({
+      outcome,
+      userId: payload?.userId,
+      businessId: payload?.businessId,
+      frames,
+      emit: (event, data) => ws.send(`42${NSP},${JSON.stringify([event, data])}`),
+      next: (event, ms = 15_000) =>
+        closed
+          ? Promise.resolve('closed')
+          : new Promise((done, fail) => {
+              const timer = setTimeout(() => fail(new Error(`no ${event} within ${ms}ms; frames: ${frames.join(' | ')}`)), ms);
+              waiters.push({ event, done: (v) => { clearTimeout(timer); done(v); } });
+            }),
+      close: () => ws.terminate(),
+    });
+    const decide = (s: CortexSession) => {
+      if (decided) return;
+      decided = true;
+      clearTimeout(timer);
+      resolve(s);
+    };
+    const timer = setTimeout(() => {
+      if (decided) return;
+      decided = true;
+      ws.terminate();
+      reject(new Error(`no gateway decision within 15s; frames: ${frames.join(' | ')}`));
+    }, 15_000);
     ws.on('message', (data) => {
       const frame = data.toString();
       frames.push(frame);
@@ -1782,17 +1823,35 @@ async function cortexConnect(token: string, businessId: string): Promise<CortexO
       } else if (frame === '2') {
         ws.send('3'); // Engine.IO ping -> pong
       } else if (frame.startsWith(`42${NSP},`)) {
-        const [event, payload] = JSON.parse(frame.slice(`42${NSP},`.length)) as [string, { userId?: string; businessId?: string }];
-        if (event === 'key:connected') {
-          settle(() => resolve({ outcome: 'connected', userId: payload.userId, businessId: payload.businessId, frames }));
-        }
+        const [event, payload] = JSON.parse(frame.slice(`42${NSP},`.length)) as [string, { userId?: string; businessId?: unknown }];
+        if (event === 'key:connected') decide(session('connected', payload));
+        const i = waiters.findIndex((w) => w.event === event);
+        if (i >= 0) waiters.splice(i, 1)[0].done({ event, payload });
       } else if (frame.startsWith(`41${NSP}`) || frame.startsWith(`44${NSP}`)) {
-        settle(() => resolve({ outcome: 'refused', frames }));
+        markClosed();
+        decide(session('refused'));
       }
     });
-    ws.on('close', () => settle(() => resolve({ outcome: 'refused', frames })));
-    ws.on('error', (e) => settle(() => reject(e)));
+    ws.on('close', () => {
+      markClosed();
+      decide(session('refused'));
+    });
+    ws.on('error', (e) => {
+      markClosed();
+      if (!decided) {
+        decided = true;
+        clearTimeout(timer);
+        reject(e);
+      }
+    });
   });
+}
+
+/** The gateway's connect decision only; the socket is closed once it is known. */
+async function cortexConnect(token: string, businessId: unknown): Promise<CortexOutcome> {
+  const s = await cortexOpen(token, businessId);
+  s.close();
+  return { outcome: s.outcome, userId: s.userId, businessId: s.businessId, frames: s.frames };
 }
 
 describe('ST-2-WS (fixed) — the KEY Cortex WebSocket applies the same local-user checks as AuthMiddleware, to both token kinds', () => {
@@ -1857,7 +1916,30 @@ describe('ST-2-WS (fixed) — the KEY Cortex WebSocket applies the same local-us
     expect(await db.user.findUnique({ where: { id: ID.adminNoRow } })).toBeNull();
   });
 
-  it('POST /identity/logout cuts both token kinds off the socket by issue time (the admin cutoff and the logout marker); tokens of a later session are served', async () => {
+  // ST-WS-R2 (R0-ID-F6 review). The handshake businessId is client JSON. It
+  // reached business.findFirst as `id`, where an object is a Prisma filter, so
+  // the owner of bizA opened a socket with { in: [bizA, bizB] } as its tenant
+  // (joined business:[object Object], and that object went on to the chat and
+  // approval handlers). BusinessGuard refuses the same value over HTTP
+  // ('businessId is required'); the socket now reads it the same way.
+  it('ST-WS-R2: a tenant named by anything but a non-empty string is refused — the owner of bizA with { in: [bizA, bizB] } or { not: "" }, and a SUPER_ADMIN with an object; bizA as a string is served', async () => {
+    await resetWsAdmin();
+    const own = await cortexConnect(T[ID.owner], ID.bizA);
+    expect(own.outcome, `control, owner of bizA asks for bizA: ${own.frames.join(' | ')}`).toBe('connected');
+    expect(own.businessId).toBe(ID.bizA);
+
+    for (const businessId of [{ in: [ID.bizA, ID.bizB] }, { not: '' }, [ID.bizA, ID.bizB]]) {
+      const res = await cortexConnect(T[ID.owner], businessId);
+      expect(res.outcome, `owner of bizA, businessId ${JSON.stringify(businessId)}: ${res.frames.join(' | ')}`).toBe('refused');
+    }
+    const admin = await cortexConnect(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), { in: [ID.bizB] });
+    expect(admin.outcome, `SUPER_ADMIN, businessId { in: [bizB] }: ${admin.frames.join(' | ')}`).toBe('refused');
+  });
+
+  // A NEW socket only: cortexConnect closes each socket once the gateway decides.
+  // A socket already open when the logout lands keeps working (OPEN DEFECT
+  // ST-WS-R1, reproduced below).
+  it('POST /identity/logout refuses a new socket to both token kinds issued before it, by issue time (the admin cutoff and the logout marker); tokens of a later session are served', async () => {
     await resetWsAdmin();
     const adminBefore = mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN');
     const supabaseBefore = mintToken(ID.wsAdmin);
@@ -1877,6 +1959,82 @@ describe('ST-2-WS (fixed) — the KEY Cortex WebSocket applies the same local-us
     await expectSocketServed(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), 'admin token issued after the logout');
     await expectSocketServed(mintToken(ID.wsAdmin), 'Supabase token of a session opened after the logout');
   });
+});
+
+// ---------------------------------------------------------------------------
+// OPEN DEFECT ST-WS-R1 (R0-ID-F6 review; pre-existing, NOT fixed here). The
+// gateway decides at connect only: handleConnection stores the connect-time
+// { userId, businessId } (key-cortex.gateway.ts ClientInfo) and handleApprove,
+// handleReject, handleChat, handleTyping and the business:/user: room pushes
+// trust it for the socket's lifetime; nothing in src disconnects a socket on a
+// ban, a demotion, a delete or a logout. The fix is in key-cortex.gateway.ts
+// and the revocation writers, outside R0-ID-F6's write set.
+//
+// The probe is key:approve for an approval id that exists nowhere: the handler
+// answers 'Not authenticated' for a socket it holds no identity for, and
+// 'Approval failed: Approval request not found' once it has looked the id up
+// in the socket's tenant — i.e. it decided as wsAdmin in bizB. Nothing is
+// approved or executed.
+// ---------------------------------------------------------------------------
+describe('OPEN DEFECT ST-WS-R1 — a KEY Cortex socket opened before a ban, demotion or logout keeps acting in the foreign tenant', () => {
+  const NO_SUCH_APPROVAL = `${P}ws_no_such_approval`;
+  const DECIDED_IN_TENANT = 'Approval failed: Approval request not found';
+
+  async function resetWsAdmin() {
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { role: 'SUPER_ADMIN', bannedAt: null, deletedAt: null } });
+  }
+
+  /** key:approve on the open socket: what the gateway answered, or 'closed' if it cut the socket. */
+  async function approveProbe(s: CortexSession): Promise<string> {
+    const answer = s.next('key:error');
+    s.emit('key:approve', { approvalId: NO_SUCH_APPROVAL });
+    const res = await answer;
+    return res === 'closed' ? 'closed' : String((res.payload as { message?: string }).message);
+  }
+
+  it('OPEN DEFECT ST-WS-R1 reproduced — after the row is banned and demoted, a new socket is refused but the open one still decides approvals in bizB as wsAdmin', async () => {
+    await resetWsAdmin();
+    const s = await cortexOpen(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), ID.bizB);
+    try {
+      expect(s.outcome, s.frames.join(' | ')).toBe('connected');
+      expect(await approveProbe(s), 'control, before the ban').toBe(DECIDED_IN_TENANT);
+
+      await db.user.update({ where: { id: ID.wsAdmin }, data: { role: 'USER', bannedAt: new Date() } });
+      const fresh = await cortexConnect(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), ID.bizB);
+      expect(fresh.outcome, 'a new socket after the ban').toBe('refused');
+
+      expect(await approveProbe(s), 'the socket opened before the ban').toBe(DECIDED_IN_TENANT);
+    } finally {
+      s.close();
+      await resetWsAdmin();
+    }
+  });
+
+  it('OPEN DEFECT ST-WS-R1 reproduced — after POST /identity/logout, a new socket with the same token is refused but the open one still decides approvals in bizB', async () => {
+    await resetWsAdmin();
+    const token = mintToken(ID.wsAdmin);
+    const s = await cortexOpen(token, ID.bizB);
+    try {
+      expect(s.outcome, s.frames.join(' | ')).toBe('connected');
+      const out = await call('post', '/identity/logout', token);
+      expect(out.status, JSON.stringify(out.body)).toBe(201);
+      const fresh = await cortexConnect(token, ID.bizB);
+      expect(fresh.outcome, 'a new socket with the logged-out token').toBe('refused');
+
+      expect(await approveProbe(s), 'the socket opened before the logout').toBe(DECIDED_IN_TENANT);
+    } finally {
+      s.close();
+    }
+  });
+
+  it.todo(
+    'REQUIRED (follow-up packet; key-cortex.gateway.ts and the ban/demote/delete/logout writers — identity.controller.ts logout, ' +
+      'admin-auth logout, the admin user routes — outside this write set): a socket loses the tenant once its user is banned, deleted, ' +
+      'demoted below the authority it connected with, or logged out — each case above answers "closed" (the socket is disconnected and ' +
+      'leaves its business:/user: rooms) or "Not authenticated", never "Approval failed: Approval request not found". Re-checking the ' +
+      'handshake token on every message would also cut every socket at the token’s expiry, which has no in-band refresh today; the fix ' +
+      'packet decides between disconnecting user:<id> on revocation and a per-message re-check with a token-refresh event',
+  );
 });
 
 describe('OPEN DEFECT CR-2 — logout never revokes the Supabase sessions', () => {

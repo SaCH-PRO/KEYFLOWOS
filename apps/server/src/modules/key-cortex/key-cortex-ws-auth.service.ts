@@ -8,7 +8,14 @@
  * checks (User.deletedAt, User.bannedAt, a missing row for an admin token),
  * the role from the User row, the logout cutoff and the admin revocation
  * cutoff, and the same fail-closed / Redis-outage rules. Business membership
- * mirrors {@link BusinessGuard}.
+ * mirrors {@link BusinessGuard}, tenant-id resolution included.
+ *
+ * Both decisions are taken at connect only. The gateway keeps the connect-time
+ * identity for the socket's lifetime and nothing disconnects a socket when its
+ * user is demoted, banned, deleted or logged out (review finding ST-WS-R1,
+ * pre-existing; the fix is in key-cortex.gateway.ts and the revocation writers,
+ * outside R0-ID-F6's write set — see the it.todo in
+ * test/identity-boundary.integration.test.ts).
  *
  * Until R0-ID-F6-WS-ADMIN-TOKEN (ST-2-WS) this service verified the token
  * itself and attached an admin token's own claims with none of those checks,
@@ -24,6 +31,7 @@ import type { Socket } from 'socket.io';
 import type { Redis } from 'ioredis';
 import { SupabaseAuthService } from '../../core/auth/supabase-auth.service';
 import { AuthMiddleware } from '../../core/auth/auth.middleware';
+import { resolveRequestBusinessId } from '../../core/auth/request-business-id';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { allowedCorsOrigins } from '../../core/config/runtime-urls';
@@ -110,15 +118,25 @@ export class KeyCortexWsAuthService {
    * SUPER_ADMIN bypasses the check. Otherwise membership is required (owner or
    * member). The `business.findFirst` lookup is soft-delete filtered, so a
    * disabled (soft-deleted) business yields no match and is rejected.
+   *
+   * `businessId` is whatever JSON the client put in the handshake, so it is
+   * read through {@link resolveRequestBusinessId}, the resolver BusinessGuard
+   * uses: only a non-empty string names a tenant. Before the R0-ID-F6 review
+   * repair (ST-WS-R2) any truthy value reached `findFirst` as `id`, where an
+   * object is a Prisma filter — `{ in: [ownBiz, foreignBiz] }` was authorized
+   * for any member of ownBiz, and the gateway then stored that object as the
+   * socket's tenant. Unlike BusinessGuard the socket always needs a tenant, so
+   * this holds for SUPER_ADMIN too (as the empty-id refusal always has).
    */
-  async verifyBusinessMembership(userId: string, role: string, businessId: string): Promise<boolean> {
-    if (!businessId) return false;
+  async verifyBusinessMembership(userId: string, role: string, businessId: unknown): Promise<boolean> {
+    const id = resolveRequestBusinessId({ query: { businessId } });
+    if (!id) return false;
     if (role === 'SUPER_ADMIN') return true;
 
     try {
       const business = await this.prisma.client.business.findFirst({
         where: {
-          id: businessId,
+          id,
           OR: [{ ownerId: userId }, { members: { some: { userId } } }],
         },
         select: { id: true },

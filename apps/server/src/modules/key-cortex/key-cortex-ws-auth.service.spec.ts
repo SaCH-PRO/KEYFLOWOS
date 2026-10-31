@@ -147,6 +147,33 @@ describe('KeyCortexWsAuthService', () => {
       await expect(service.verifyBusinessMembership('u1', 'USER', '')).resolves.toBe(false);
     });
 
+    // ST-WS-R2 (R0-ID-F6 review). The handshake businessId is client JSON; an
+    // object reached findFirst as `id`, where Prisma reads it as a filter, so
+    // { in: [ownBiz, foreignBiz] } was authorized for a member of ownBiz.
+    // BusinessGuard's resolver accepts only a non-empty string; so does this.
+    it('rejects a businessId that is not a non-empty string (a Prisma filter object, an array, a number), for SUPER_ADMIN too, without querying', async () => {
+      prisma.client.business.findFirst.mockResolvedValue({ id: 'b_own' });
+      const notAnId: unknown[] = [{ in: ['b_own', 'b_foreign'] }, { not: '' }, ['b_own', 'b_foreign'], 42, true];
+      for (const businessId of notAnId) {
+        for (const role of ['USER', 'SUPER_ADMIN']) {
+          await expect(
+            service.verifyBusinessMembership('u1', role, businessId),
+            `${role} ${JSON.stringify(businessId)}`,
+          ).resolves.toBe(false);
+        }
+      }
+      expect(prisma.client.business.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('queries membership with the string id unchanged', async () => {
+      prisma.client.business.findFirst.mockResolvedValue({ id: 'b1' });
+      await expect(service.verifyBusinessMembership('u1', 'USER', 'b1')).resolves.toBe(true);
+      expect(prisma.client.business.findFirst).toHaveBeenCalledWith({
+        where: { id: 'b1', OR: [{ ownerId: 'u1' }, { members: { some: { userId: 'u1' } } }] },
+        select: { id: true },
+      });
+    });
+
     it('fails closed if the membership query throws', async () => {
       prisma.client.business.findFirst.mockRejectedValue(new Error('db down'));
       await expect(service.verifyBusinessMembership('u1', 'USER', 'b1')).resolves.toBe(false);
@@ -438,10 +465,10 @@ describe('ST-2-WS — authenticateSocket applies the HTTP AuthMiddleware local-u
       const gateway = new KeyCortexGateway({} as any, {} as any, {} as any, {} as any, c.service);
       return { gateway, ...c };
     }
-    function socketFor(token: string) {
+    function socketFor(token: string, businessId: unknown = 'foreign_biz') {
       return {
         id: 'sock_ws',
-        handshake: { auth: { token, businessId: 'foreign_biz' }, headers: {}, query: {} },
+        handshake: { auth: { token, businessId }, headers: {}, query: {} },
         join: vi.fn(),
         emit: vi.fn(),
         disconnect: vi.fn(),
@@ -481,5 +508,36 @@ describe('ST-2-WS — authenticateSocket applies the HTTP AuthMiddleware local-u
         expect(prisma.client.business.findFirst).not.toHaveBeenCalled();
       }
     });
+
+    it('ST-WS-R2: a Prisma filter object as the handshake businessId is refused for a member and for SUPER_ADMIN — disconnected, no room joined, nothing stored', async () => {
+      for (const row of [ACTIVE('USER'), ACTIVE('SUPER_ADMIN')]) {
+        const { gateway, prisma } = gatewayFor({ row });
+        // A member of b_own: the membership query would match b_own if it ran with the filter.
+        prisma.client.business.findFirst.mockResolvedValue({ id: 'b_own' });
+        const socket = socketFor(adminJwt(), { in: ['b_own', 'foreign_biz'] });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fake socket
+        await gateway.handleConnection(socket as any);
+        expect(socket.disconnect, row?.role).toHaveBeenCalledWith(true);
+        expect(socket.join, row?.role).not.toHaveBeenCalled();
+        expect(prisma.client.business.findFirst, row?.role).not.toHaveBeenCalled();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- private client registry
+        expect((gateway as any).clients.has(socket.id), row?.role).toBe(false);
+      }
+    });
+  });
+
+  // ST-WS-R1 (R0-ID-F6 review, pre-existing, NOT fixed here): the gateway takes
+  // this decision at connect only. What a fix in key-cortex.gateway.ts can reuse
+  // is pinned here — authenticateSocket keeps no per-socket state, so asking
+  // again for the same socket reads the User row again. The open-socket defect
+  // itself is reproduced, with its it.todo, in identity-boundary.integration.test.ts.
+  it('ST-WS-R1 groundwork: authenticateSocket caches nothing per socket — the same socket asked again after its row is banned is refused', async () => {
+    let row: Row = ACTIVE('SUPER_ADMIN');
+    const { service, prisma } = wsService({ lookup: async () => row });
+    const socket = fakeSocket({ authToken: adminJwt() });
+    expect(await service.authenticateSocket(socket)).toEqual({ userId: ADMIN.id, email: ADMIN.email, role: 'SUPER_ADMIN' });
+    row = { role: 'SUPER_ADMIN', deletedAt: null, bannedAt: new Date() };
+    expect(await service.authenticateSocket(socket)).toBeNull();
+    expect(prisma.client.user.findUnique).toHaveBeenCalledTimes(2);
   });
 });
