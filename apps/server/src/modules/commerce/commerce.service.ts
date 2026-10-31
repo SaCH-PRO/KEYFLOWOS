@@ -67,6 +67,36 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
   },
 });
 
+/**
+ * The operator shape of a quote: the customer's name and email, every line
+ * item, the invoice it was converted into and the business profile. Shared by
+ * `getQuote` (the KEY adapter's server-side read) and the tenant-bound
+ * `getQuoteForBusiness` (R0-PC-01) so the two reads cannot drift apart.
+ */
+const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
+  contact: {
+    select: {
+      firstName: true,
+      lastName: true,
+      email: true,
+    },
+  },
+  items: true,
+  invoice: true,
+  business: {
+    select: {
+      id: true,
+      name: true,
+      logoUrl: true,
+      address: true,
+      phone: true,
+      email: true,
+      website: true,
+      primaryColor: true,
+    },
+  },
+});
+
 /** Older invoices stored subtotal 0 with priced items; derive it so totals render. */
 function withLegacySubtotal<
   T extends { subtotal: number; taxRate: number | null; taxAmount: number | null; items: Array<{ total: number }> },
@@ -1149,32 +1179,33 @@ export class CommerceService {
     return this.decorateQuote(updated, now);
   }
 
+  /**
+   * Server-side read by id alone (the KEY adapter). No HTTP route serves it
+   * any more: the bare-id GET /commerce/quotes/:quoteId answers 404 for every
+   * id (R0-PC-01) and the operator reads `getQuoteForBusiness` below.
+   */
   async getQuote(quoteId: string) {
     const quote = await this.prisma.client.quote.findUnique({
       where: { id: quoteId },
-      include: {
-        contact: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-        items: true,
-        invoice: true,
-        business: {
-          select: {
-            id: true,
-            name: true,
-            logoUrl: true,
-            address: true,
-            phone: true,
-            email: true,
-            website: true,
-            primaryColor: true,
-          },
-        },
-      },
+      include: OPERATOR_QUOTE_INCLUDE,
+    });
+    if (!quote) return null;
+    return this.decorateQuote(quote);
+  }
+
+  /**
+   * R0-PC-01 — the operator quote detail read behind
+   * GET /commerce/businesses/:businessId/quotes/:quoteId. Same operator shape
+   * as `getQuote`, bound to the tenant the guards admitted: a cross-tenant id,
+   * an unknown id and a soft-deleted row all read as absent, which the
+   * controller turns into one 404. No status gate — the operator opens DRAFT.
+   * A read stamps nothing (no viewedAt, no event): only the signed-token
+   * route records a customer view.
+   */
+  async getQuoteForBusiness(quoteId: string, businessId: string) {
+    const quote = await this.prisma.client.quote.findFirst({
+      where: { id: quoteId, businessId, deletedAt: null },
+      include: OPERATOR_QUOTE_INCLUDE,
     });
     if (!quote) return null;
     return this.decorateQuote(quote);

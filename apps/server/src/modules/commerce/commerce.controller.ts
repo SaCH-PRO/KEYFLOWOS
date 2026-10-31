@@ -714,9 +714,35 @@ export class CommerceController {
     return { success: true, quote, resolvedApprovals: matches.length };
   }
 
+  // R0-PC-01: the operator quote detail read. Declared after `quotes/stale`
+  // so that route keeps matching first. The tenant is the path param the
+  // guards admitted; the service binds the read to it, so a cross-tenant id,
+  // an unknown id and a soft-deleted row answer the same 404.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/quotes/:quoteId')
+  async getQuoteDetail(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+  ) {
+    const quote = await this.commerce.getQuoteForBusiness(quoteId, businessId);
+    if (!quote) throw new NotFoundException('Quote not found');
+    return quote;
+  }
+
+  // R0-PC-01 (PC-F05 / BP-PC-01): retired. This route was unguarded and
+  // unthrottled and served the full operator shape — DRAFT quotes, the
+  // customer's email, internal notes, the linked invoice — to anyone holding a
+  // quote id. No web page reads it: operators read the tenant route above and
+  // customers read the signed-token route below. It answers the same 404 for
+  // every id without reading the quote, so it can neither leak a quote nor
+  // confirm that one exists, and it stays rate limited like the other public
+  // reads. Still public (no AuthGuard): the public-surface ledger counts it.
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(20, 60_000)
   @Get('quotes/:quoteId')
-  getQuote(@Param('quoteId') quoteId: string) {
-    return this.commerce.getQuote(quoteId);
+  getQuote(): never {
+    throw new NotFoundException('Quote not found');
   }
 
   // ----- R2: public endpoints (signed-token authenticated) -----
