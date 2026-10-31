@@ -19,11 +19,19 @@
  *   the same route without a payment id in the response -> subjectId 'unknown', never the invoice id
  *   contacts, invoices and quotes keep their labels (create / update / delete) and subject ids
  *   the rule is the exact route: from-evidence, refund and GET are not relabelled by it
+ *   R0-19 review (R19-ST-1): an R0-D2 idempotent replay on the route (the
+ *     response's Payment was recorded by another user, or before this request
+ *     started) emits nothing: the replay wrote nothing, and a payment.record row
+ *     would name the replaying member as the recorder. A fresh record (recorded
+ *     by the acting user while the handler ran) still emits exactly one row.
+ *     Residual: two concurrent submits by the SAME user both emit payment.record
+ *     naming that user (the losing submit's Payment is the winner's, recorded by
+ *     the same user after the loser started); the envelope carries no replay flag.
  */
 import 'reflect-metadata';
 import { describe, it, expect } from 'vitest';
 import { Reflector } from '@nestjs/core';
-import { lastValueFrom, of } from 'rxjs';
+import { defer, lastValueFrom, of } from 'rxjs';
 import { BusinessEventInterceptor, SKIP_BUSINESS_EVENT_KEY } from './business-event.interceptor';
 import type { BusinessEventJob } from './business-event.queue';
 
@@ -37,6 +45,8 @@ interface Call {
   params?: Record<string, string>;
   body?: Record<string, unknown>;
   response?: unknown;
+  /** Build the response while the handler runs (after the interceptor took the request). */
+  respond?: () => unknown;
   user?: { id: string } | null;
   skip?: boolean;
 }
@@ -70,7 +80,9 @@ async function run(call: Call): Promise<{ emitted: BusinessEventJob[]; result: u
     switchToHttp: () => ({ getRequest: () => req }),
   };
   const result = await lastValueFrom(
-    interceptor.intercept(ctx as never, { handle: () => of(call.response ?? {}) }),
+    interceptor.intercept(ctx as never, {
+      handle: () => defer(() => of(call.respond ? call.respond() : call.response ?? {})),
+    }),
   );
   // The audit write is a tap(async ...): the response is not held for it.
   await new Promise((resolve) => setImmediate(resolve));
@@ -157,6 +169,111 @@ describe('BusinessEventInterceptor: the manual payment route is audited as a pay
     });
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({ eventType: 'payment.record', actorType: 'system', actorId: 'anonymous' });
+  });
+});
+
+describe('BusinessEventInterceptor: an idempotent replay on the manual payment route is not audited (R0-19 review, R19-ST-1)', () => {
+  const OWNER = 'owner_r19';
+  const ADMIN = 'admin_r19';
+  const LONG_AGO = () => new Date(Date.now() - 60_000);
+
+  /** recordPayment's envelope around a Payment row with its recorder and creation time. */
+  function recorded(paymentId: string, invoiceId: string, recordedBy: string | null, createdAt: Date | string) {
+    const r = paymentResponse(paymentId, invoiceId);
+    return { ...r, payment: { ...r.payment, recordedBy, createdAt } };
+  }
+
+  it("R19-R01: an ADMIN replaying the owner's payment (same reference + amount) emits nothing; the response passes through", async () => {
+    const response = recorded('pay_r1', 'inv_r1', OWNER, LONG_AGO());
+    const { emitted, result } = await run({
+      method: 'POST',
+      routePath: PAYMENT_ROUTE,
+      params: { invoiceId: 'inv_r1' },
+      body: { amount: 100, method: 'cash', reference: 'SLIP-1' },
+      response,
+      user: { id: ADMIN },
+    });
+    expect(result).toEqual(response);
+    expect(emitted, 'no payment.record row naming the ADMIN as recorder').toEqual([]);
+  });
+
+  it('R19-R02: the owner replaying their own payment (recorded before this request) emits nothing', async () => {
+    const { emitted } = await run({
+      method: 'POST',
+      routePath: PAYMENT_ROUTE,
+      params: { invoiceId: 'inv_r2' },
+      response: recorded('pay_r2', 'inv_r2', OWNER, LONG_AGO()),
+      user: { id: OWNER },
+    });
+    expect(emitted).toEqual([]);
+  });
+
+  it('R19-R03: a replay that lost a concurrent insert (the Payment is newer than the request but another member recorded it) emits nothing', async () => {
+    const { emitted } = await run({
+      method: 'POST',
+      routePath: PAYMENT_ROUTE,
+      params: { invoiceId: 'inv_r3' },
+      respond: () => recorded('pay_r3', 'inv_r3', OWNER, new Date(Date.now() + 5)),
+      user: { id: ADMIN },
+    });
+    expect(emitted).toEqual([]);
+  });
+
+  it('R19-R04: a fresh record (recorded by the acting user while the handler ran) still emits exactly one payment.record row; Date or ISO createdAt', async () => {
+    for (const stamp of [(d: Date) => d, (d: Date) => d.toISOString()]) {
+      const { emitted } = await run({
+        method: 'POST',
+        routePath: PAYMENT_ROUTE,
+        params: { invoiceId: 'inv_r4' },
+        respond: () => recorded('pay_r4', 'inv_r4', ADMIN, stamp(new Date())),
+        user: { id: ADMIN },
+      });
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]).toMatchObject({ eventType: 'payment.record', subjectId: 'pay_r4', actorType: 'human', actorId: ADMIN });
+    }
+  });
+
+  it('R19-R05: an anonymous fresh record (recordedBy null) is still a payment.record row; an anonymous replay of a member\'s payment is not', async () => {
+    const fresh = await run({
+      method: 'POST',
+      routePath: PAYMENT_ROUTE,
+      params: { invoiceId: 'inv_r5' },
+      respond: () => recorded('pay_r5', 'inv_r5', null, new Date()),
+      user: null,
+    });
+    expect(fresh.emitted).toHaveLength(1);
+    expect(fresh.emitted[0]).toMatchObject({ eventType: 'payment.record', subjectId: 'pay_r5', actorType: 'system' });
+
+    const replay = await run({
+      method: 'POST',
+      routePath: PAYMENT_ROUTE,
+      params: { invoiceId: 'inv_r5' },
+      respond: () => recorded('pay_r5b', 'inv_r5', OWNER, new Date()),
+      user: null,
+    });
+    expect(replay.emitted).toEqual([]);
+  });
+
+  it('R19-R06: the replay check belongs to the manual payment rule only: other routes with an old or foreign row still emit their label', async () => {
+    const old = LONG_AGO();
+    const invoice = await run({
+      method: 'POST',
+      routePath: '/commerce/businesses/:businessId/invoices',
+      response: { id: 'inv_r6', createdAt: old, recordedBy: OWNER, payment: { id: 'pay_r6', recordedBy: OWNER, createdAt: old } },
+      user: { id: ADMIN },
+    });
+    expect(invoice.emitted).toHaveLength(1);
+    expect(invoice.emitted[0]).toMatchObject({ eventType: 'invoice.create', subjectId: 'inv_r6' });
+
+    const fromEvidence = await run({
+      method: 'POST',
+      routePath: `${PAYMENT_ROUTE}/from-evidence`,
+      params: { invoiceId: 'inv_r6' },
+      response: recorded('pay_r6', 'inv_r6', OWNER, old),
+      user: { id: ADMIN },
+    });
+    expect(fromEvidence.emitted).toHaveLength(1);
+    expect(fromEvidence.emitted[0]).toMatchObject({ eventType: 'invoice.create', subjectType: 'invoice' });
   });
 });
 

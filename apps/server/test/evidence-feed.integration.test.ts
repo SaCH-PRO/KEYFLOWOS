@@ -22,13 +22,17 @@
  *   tenant control: GET /timeline/businesses/B/events (owner B) returns B's rows
  *     and none of A's; owner B on A's timeline is refused; B's payment audit row
  *     is B's
+ *   R0-19 review (R19-ST-1): an R0-D2 idempotent replay (same reference + amount)
+ *     answers 201 with the recorded Payment and writes nothing, the audit row
+ *     included: by the owner (EF-08) or by an ADMIN re-submitting the owner's
+ *     slip (EF-09), the payment keeps exactly one payment.record row, actorId =
+ *     the owner, agreeing with Payment.recordedBy and the ContactEvent
  *
  * CHARACTERIZATION ONLY (not a contract; V1-55 / D-08 own the dedupe):
  *   the Activity rows each payment writes in this harness, and the domain events
  *   it puts on the bus (which, in the full app, also drive the listener writers
  *   activity-event.listener.ts and automation-executor.service.ts; those are not
- *   wired here). An idempotent replay of a payment writes a second payment.record
- *   row for the same payment (the interceptor cannot tell a replay from a record).
+ *   wired here).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CrmRateLimitGuard, CommerceService, InvoiceWorkflowService,
@@ -45,6 +49,17 @@
  * the boundary. TimelineController declares its TimelineService dependency only
  * through tsc-emitted `design:paramtypes`, which vitest's esbuild transform does
  * not emit, so the test defines that one metadata entry exactly as tsc would.
+ * ResilientEmitterService.emit is wrapped by a pass-through recorder (`emits`):
+ * every job still goes to the real queue; the recorder shows, without waiting
+ * on the worker, what the interceptor handed it for a request.
+ *
+ * Queue isolation (R0-19 review, CR-R19-1): 'business-events' is one global
+ * BullMQ queue name, so every app on the same REDIS_URL (a dist/main.js that a
+ * parallel test file spawns) would compete for this run's jobs, and this run's
+ * worker for theirs. BullMQ's real Queue and Worker are therefore constructed
+ * with a BullMQ `prefix` of this run's own (vi.mock below adds only that
+ * option); BusinessEventQueueService itself is unchanged. Its keys are deleted
+ * in afterAll.
  *
  * Fixtures: prefix `k19a_` (registered in test/helpers/fixture-prefixes.json),
  * plus a per-run tag in every id so a BullMQ job left over from an earlier run
@@ -56,8 +71,32 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+
+/** CR-R19-1: this run's own BullMQ key prefix (no other app on REDIS_URL shares it). */
+const BULL = vi.hoisted(() => ({
+  prefix: `k19a-bull-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+}));
+
+// The real BullMQ classes; only the key prefix is set, for every queue and worker
+// this harness builds (BusinessEventQueueService's 'business-events' pair).
+vi.mock('bullmq', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('bullmq')>();
+  type QueueArgs = ConstructorParameters<typeof actual.Queue>;
+  type WorkerArgs = ConstructorParameters<typeof actual.Worker>;
+  class Queue extends actual.Queue {
+    constructor(name: string, opts?: QueueArgs[1], connection?: QueueArgs[2]) {
+      super(name, { ...opts, prefix: BULL.prefix } as QueueArgs[1], connection);
+    }
+  }
+  class Worker extends actual.Worker {
+    constructor(name: string, processor?: WorkerArgs[1], opts?: WorkerArgs[2], connection?: WorkerArgs[3]) {
+      super(name, processor, { ...opts, prefix: BULL.prefix } as WorkerArgs[2], connection);
+    }
+  }
+  return { ...actual, Queue, Worker };
+});
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
@@ -70,6 +109,7 @@ const RUN = Date.now().toString(36);
 
 const ID = {
   ownerA: `${P}${RUN}_ownerA`,
+  adminA: `${P}${RUN}_adminA`,
   ownerB: `${P}${RUN}_ownerB`,
   bizA: `${P}${RUN}_bizA`,
   bizB: `${P}${RUN}_bizB`,
@@ -100,6 +140,9 @@ const eventRecorder = {
   once: () => undefined,
   removeListener: () => undefined,
 };
+
+/** Every job the interceptor handed ResilientEmitterService (pass-through recorder). */
+const emits: Array<{ eventType: string; subjectId: string; actorId: string }> = [];
 
 /** Shared across the ordered cases below. */
 const S: {
@@ -165,6 +208,22 @@ async function newAuditRows(businessId: string, before: number): Promise<any[]> 
   await waitFor(() => auditRows(businessId), (rows) => rows.length >= before + 1);
   await sleep(400);
   return (await auditRows(businessId)).slice(before);
+}
+
+/** This run's audit queue (run-scoped prefix, so only this run's jobs). */
+async function auditQueue(): Promise<any> {
+  const { BusinessEventQueueService } = await import('../src/modules/business-events/business-event.queue');
+  return app.get(BusinessEventQueueService).queue;
+}
+
+/** Wait until this run's audit queue holds no waiting, active or delayed job. */
+async function drainAuditQueue(ms = 10_000): Promise<Record<string, number>> {
+  const queue = await auditQueue();
+  return waitFor(
+    () => queue.getJobCounts('waiting', 'active', 'delayed'),
+    (c: Record<string, number>) => (c.waiting ?? 0) + (c.active ?? 0) + (c.delayed ?? 0) === 0,
+    ms,
+  );
 }
 
 async function activityRows(businessId: string): Promise<Array<{ id: string; module: string; action: string; entityType: string; entityId: string | null }>> {
@@ -366,13 +425,23 @@ beforeAll(async () => {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
 
+  // Pass-through recorder: the real emit still runs for every job.
+  const resilient: InstanceType<typeof ResilientEmitterService> = app.get(ResilientEmitterService);
+  const realEmit = resilient.emit.bind(resilient);
+  resilient.emit = async (job: Parameters<typeof realEmit>[0]) => {
+    emits.push({ eventType: job.eventType, subjectId: job.subjectId, actorId: job.actorId });
+    return realEmit(job);
+  };
+
   await cleanup(); // in case a prior run aborted
 
   await db.user.create({ data: { id: ID.ownerA, email: `${P}${RUN}_ownerA@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.adminA, email: `${P}${RUN}_adminA@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerB, email: `${P}${RUN}_ownerB@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.bizA, name: 'K19A Biz A', ownerId: ID.ownerA, currency: 'TTD' } });
   await db.business.create({ data: { id: ID.bizB, name: 'K19A Biz B', ownerId: ID.ownerB, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}${RUN}_mA`, userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' } });
+  await db.membership.create({ data: { id: `${P}${RUN}_mAa`, userId: ID.adminA, businessId: ID.bizA, role: 'ADMIN' } });
   await db.membership.create({ data: { id: `${P}${RUN}_mB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
   await db.contact.create({ data: { id: ID.contactA, businessId: ID.bizA, firstName: 'K19a', lastName: 'CustomerA', email: `${P}${RUN}_ca@test.local` } });
   await db.contact.create({ data: { id: ID.contactB, businessId: ID.bizB, firstName: 'K19a', lastName: 'CustomerB', email: `${P}${RUN}_cb@test.local` } });
@@ -403,26 +472,44 @@ beforeAll(async () => {
 afterAll(async () => {
   // Let in-flight audit jobs land before the worker stops, so none is left queued.
   if (app) {
-    try {
-      const { BusinessEventQueueService } = await import('../src/modules/business-events/business-event.queue');
-      const queue = app.get(BusinessEventQueueService).queue;
-      await waitFor(
-        () => queue.getJobCounts('waiting', 'active', 'delayed'),
-        (c: Record<string, number>) => (c.waiting ?? 0) + (c.active ?? 0) + (c.delayed ?? 0) === 0,
-        5_000,
-      );
-    } catch { /* best-effort */ }
+    try { await drainAuditQueue(5_000); } catch { /* best-effort */ }
     await app.close();
   }
   if (db) await cleanup();
-  if (redis) await redis.quit();
+  if (redis) {
+    // CR-R19-1: drop this run's BullMQ keys (completed jobs are kept for a day otherwise).
+    try {
+      let cursor = '0';
+      do {
+        const [next, keys] = await redis.scan(cursor, 'MATCH', `${BULL.prefix}:*`, 'COUNT', 500);
+        if (keys.length) await redis.del(...keys);
+        cursor = next;
+      } while (cursor !== '0');
+    } catch { /* best-effort */ }
+    await redis.quit();
+  }
 }, 60_000);
+
+describe('harness isolation (R0-19 review, CR-R19-1)', () => {
+  it("the audit queue and its worker run under this run's own BullMQ prefix, so no other app on REDIS_URL takes this run's jobs", async () => {
+    const { BusinessEventQueueService } = await import('../src/modules/business-events/business-event.queue');
+    const service = app.get(BusinessEventQueueService) as any;
+    expect(service.queue.name).toBe('business-events');
+    expect(service.queue.opts.prefix).toBe(BULL.prefix);
+    expect(service.worker?.opts?.prefix, 'the worker shares the prefix').toBe(BULL.prefix);
+    expect(BULL.prefix).not.toBe('bull');
+  });
+});
 
 describe('fixture sanity (real rows)', () => {
   it('two tenants, each with an OWNER, a system chart of accounts and one SENT invoice; no payment, posting, audit or Activity row yet', async () => {
-    for (const [biz, owner, inv] of [[ID.bizA, ID.ownerA, ID.invA], [ID.bizB, ID.ownerB, ID.invB]]) {
+    const roster: Record<string, string[][]> = {
+      [ID.bizA]: [[ID.ownerA, 'OWNER'], [ID.adminA, 'ADMIN']],
+      [ID.bizB]: [[ID.ownerB, 'OWNER']],
+    };
+    for (const [biz, inv] of [[ID.bizA, ID.invA], [ID.bizB, ID.invB]]) {
       const members = await db.membership.findMany({ where: { businessId: biz } });
-      expect(members.map((m: any) => [m.userId, m.role])).toEqual([[owner, 'OWNER']]);
+      expect(members.map((m: any) => [m.userId, m.role]).sort()).toEqual([...roster[biz]].sort());
       expect(await db.chartOfAccount.count({ where: { businessId: biz, isSystem: true } })).toBeGreaterThan(0);
       expect((await db.invoice.findUnique({ where: { id: inv } })).status).toBe('SENT');
       expect(await db.payment.count({ where: { businessId: biz } })).toBe(0);
@@ -438,11 +525,14 @@ describe('step 4 audit trail: a manual payment is audited as a payment (R0-19, r
     const auditBefore = (await auditRows(ID.bizA)).length;
     const activityBefore = (await activityRows(ID.bizA)).length;
     bus.length = 0;
+    emits.length = 0;
 
     const reference = `${P}${RUN}-partial`;
     const res = await payAs(ID.ownerA, ID.bizA, ID.invA, { amount: 100, method: 'cash', reference });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     S.partialId = res.body.payment.id;
+    // The interceptor handed the emitter this request's one row before the response left.
+    expect(emits).toEqual([{ eventType: 'payment.record', subjectId: S.partialId, actorId: ID.ownerA }]);
     expect((await db.invoice.findUnique({ where: { id: ID.invA } })).status).toBe('PARTIALLY_PAID');
 
     const audit = await newAuditRows(ID.bizA, auditBefore);
@@ -468,11 +558,13 @@ describe('step 4 audit trail: a manual payment is audited as a payment (R0-19, r
     const auditBefore = (await auditRows(ID.bizA)).length;
     const activityBefore = (await activityRows(ID.bizA)).length;
     bus.length = 0;
+    emits.length = 0;
 
     const reference = `${P}${RUN}-full`;
     const res = await payAs(ID.ownerA, ID.bizA, ID.invA, { amount: 150, method: 'bank_transfer', reference });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     S.fullId = res.body.payment.id;
+    expect(emits).toEqual([{ eventType: 'payment.record', subjectId: S.fullId, actorId: ID.ownerA }]);
     expect(S.fullId).not.toBe(S.partialId);
     expect(res.body.remaining).toBe(0);
     expect((await db.invoice.findUnique({ where: { id: ID.invA } })).status).toBe('PAID');
@@ -574,20 +666,49 @@ describe('tenant control on the evidence feed (R0-19)', () => {
   });
 });
 
-describe('CHARACTERIZATION: idempotent replay of a recorded payment (R0-D2), not a contract', () => {
-  it('EF-08: replaying the partial payment (same reference + amount) returns the same Payment, writes no payment, posting or ContactEvent, and writes a second payment.record row for that payment', async () => {
-    const auditBefore = (await auditRows(ID.bizA)).length;
+describe('idempotent replay of a recorded payment (R0-D2) is not audited (R0-19 review, R19-ST-1)', () => {
+  /**
+   * Replay `reference` (100, cash) on invoice A as `user` and pin that nothing
+   * was written: same Payment back, no payment, posting, ContactEvent or audit
+   * row, and the payment's audit trail is still its one payment.record row by
+   * the owner, agreeing with Payment.recordedBy.
+   */
+  async function expectSilentReplay(user: string, reference: string, paymentId: string) {
+    const auditBefore = await auditRows(ID.bizA);
     const txnsBefore = await db.financialTransaction.count({ where: { businessId: ID.bizA } });
-    const reference = `${P}${RUN}-partial`;
-    const res = await payAs(ID.ownerA, ID.bizA, ID.invA, { amount: 100, method: 'cash', reference });
+    const entriesBefore = await db.ledgerEntry.count({ where: { businessId: ID.bizA } });
+    emits.length = 0;
+
+    const res = await payAs(user, ID.bizA, ID.invA, { amount: 100, method: 'cash', reference });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body.payment.id).toBe(S.partialId);
+    expect(res.body.payment.id).toBe(paymentId);
+    expect(emits, 'the interceptor handed the emitter nothing for the replay').toEqual([]);
 
     expect(await db.payment.count({ where: { invoiceId: ID.invA } })).toBe(2);
+    expect((await db.payment.findUnique({ where: { id: paymentId } })).recordedBy, 'Payment.recordedBy').toBe(ID.ownerA);
     expect(await db.financialTransaction.count({ where: { businessId: ID.bizA } })).toBe(txnsBefore);
-    expect(await contactEventsFor(ID.bizA, ID.contactA, reference)).toHaveLength(1);
+    expect(await db.ledgerEntry.count({ where: { businessId: ID.bizA } })).toBe(entriesBefore);
+    const events = await contactEventsFor(ID.bizA, ID.contactA, reference);
+    expect(events.map((e: any) => e.actorId), 'ContactEvent invoice.payment_recorded').toEqual([ID.ownerA]);
 
-    const audit = await newAuditRows(ID.bizA, auditBefore);
-    expect(audit.map((r) => [r.eventType, r.subjectId])).toEqual([['payment.record', S.partialId]]);
+    // Nothing reaches business_events either: this run's queue drains and the
+    // business holds the rows it held before the replay.
+    await sleep(300);
+    await drainAuditQueue();
+    expect((await auditRows(ID.bizA)).map((r) => r.id)).toEqual(auditBefore.map((r) => r.id));
+    const trail = await db.businessEvent.findMany({ where: { subjectType: 'payment', subjectId: paymentId } });
+    expect(trail.map((r: any) => [r.businessId, r.eventType, r.actorType, r.actorId])).toEqual([
+      [ID.bizA, 'payment.record', 'human', ID.ownerA],
+    ]);
+  }
+
+  it('EF-08: the owner replaying the partial payment (same reference + amount) gets the same Payment back and writes nothing: no payment, posting, ContactEvent or audit row', async () => {
+    await expectSilentReplay(ID.ownerA, `${P}${RUN}-partial`, S.partialId!);
+  });
+
+  it("EF-09: an ADMIN re-submitting the owner's slip (same reference + amount) gets the same Payment back and writes no audit row naming the ADMIN; the payment keeps one payment.record row by the owner", async () => {
+    await expectSilentReplay(ID.adminA, `${P}${RUN}-partial`, S.partialId!);
+    const byAdmin = await db.businessEvent.findMany({ where: { businessId: ID.bizA, actorId: ID.adminA } });
+    expect(byAdmin, 'audit rows attributed to the ADMIN').toEqual([]);
   });
 });
