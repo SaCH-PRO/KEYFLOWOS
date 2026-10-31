@@ -23,16 +23,25 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { BadRequestException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
-import { IdentityPasswordService } from './identity-password.service';
+import { createHash } from 'crypto';
+import {
+  IdentityPasswordService,
+  PasswordResetRefusedException,
+  RECOVERY_SESSION_MAX_AGE_SECONDS,
+  recoveryRequestKey,
+  recoveryUseKey,
+} from './identity-password.service';
 
 const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
 /** A JWT-shaped token for user u1. Its signature is never checked here: getUserFromToken is the mocked verifier. */
 const jwt = (claims: Record<string, unknown>) =>
   `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: 'u1', aud: 'authenticated', ...claims })}.sig`;
 /**
- * The access token GoTrue puts in a recovery link: a session whose amr says it
- * was authenticated by the recovery verification (auth-js JWTPayload.amr,
- * AMREntry { method, timestamp }), at `authenticatedAt` (epoch seconds).
+ * The access token of a PKCE recovery session: the code exchange stamps the
+ * flow state's method, so its amr says it was authenticated by the recovery
+ * verification (auth-js JWTPayload.amr, AMREntry { method, timestamp }), at
+ * `authenticatedAt` (epoch seconds). NOT what this app's links carry: see
+ * implicitRecoveryJwt.
  */
 const recoveryJwt = (authenticatedAt: number, claims: Record<string, unknown> = {}) =>
   jwt({
@@ -40,6 +49,24 @@ const recoveryJwt = (authenticatedAt: number, claims: Record<string, unknown> = 
     exp: authenticatedAt + 3600,
     session_id: `s-recovery-${authenticatedAt}`,
     amr: [{ method: 'recovery', timestamp: authenticatedAt }],
+    ...claims,
+  });
+/**
+ * The access token in THIS app's recovery link (R0-ID-F5 review F5-CR-1/CR-2).
+ * The flow is implicit: the admin client sets no flowType (auth-js defaults to
+ * 'implicit') and the web page reads #access_token&type=recovery. GoTrue's
+ * verifyGet mints that session with issueRefreshToken(..., models.OTP, ...)
+ * (supabase/auth internal/api/verify.go, read from source), so its amr method
+ * is 'otp', exactly as a signup-confirmation or magic-link session's is.
+ */
+const implicitRecoveryJwt = (openedAt: number, claims: Record<string, unknown> = {}) =>
+  jwt({
+    iat: openedAt,
+    exp: openedAt + 3600,
+    session_id: `s-implicit-${openedAt}`,
+    aal: 'aal1',
+    email: 'person@example.com',
+    amr: [{ method: 'otp', timestamp: openedAt }],
     ...claims,
   });
 /** A recovery-link token authenticated a minute ago: what every pre-F5 case below presented as the opaque 'good-token'. */
@@ -61,11 +88,30 @@ function build(over: Record<string, any> = {}) {
   const prisma = {
     client: { user: { findUnique: vi.fn(async () => ({ deletedAt: null, bannedAt: null })), ...over.user } },
   };
-  // The logout revocation marker store: no marker unless a case says otherwise.
+  // One in-memory keyspace: the logout revocation marker, the recovery request
+  // record and the single-use claim. Empty (no marker) unless a case says otherwise.
+  const store = new Map<string, string>();
+  const ttl = new Map<string, number>();
   const redis = {
-    get: vi.fn(async () => null as string | null),
+    store,
+    ttl,
+    get: vi.fn(async (k: string) => store.get(k) ?? null),
     // Redis semantics: remaining ms, -1 when the key has no TTL, -2 when it does not exist.
-    pttl: vi.fn(async () => -2),
+    pttl: vi.fn(async (_k: string) => -2),
+    setex: vi.fn(async (k: string, seconds: number, v: string) => {
+      store.set(k, String(v));
+      ttl.set(k, seconds);
+      return 'OK';
+    }),
+    // SET key value EX seconds NX: null when NX and the key exists, as ioredis resolves it.
+    set: vi.fn(async (k: string, v: string, ...args: unknown[]) => {
+      if (args.includes('NX') && store.has(k)) return null;
+      store.set(k, String(v));
+      const ex = args.indexOf('EX');
+      if (ex >= 0) ttl.set(k, Number(args[ex + 1]));
+      return 'OK';
+    }),
+    del: vi.fn(async (...keys: string[]) => keys.filter((k) => store.delete(k)).length),
     ...over.redis,
   };
   const svc = new IdentityPasswordService(admin as never, auth as never, policy as never, prisma as never, redis as never);
@@ -257,12 +303,15 @@ describe('password recovery — completing', () => {
       expect(h.admin.updateUserPassword, `${label}: password update`).not.toHaveBeenCalled();
     }
 
-    it('refuses a token whose session was not authenticated by the recovery verification: a password, otp, magiclink or oauth session, no amr, or not a JWT at all', async () => {
+    it('refuses a token whose session was not authenticated by a recovery link: a password, magiclink or oauth session, an otp session with no recovery link requested, no amr, or not a JWT at all', async () => {
       const session = (method: string) =>
         jwt({ iat: NOW_S - 60, exp: NOW_S + 3540, session_id: 's1', amr: [{ method, timestamp: NOW_S - 60 }] });
       const cases: Array<[string, string]> = [
         ['password session (a stolen ordinary access token)', session('password')],
-        ['email OTP sign-in session', session('otp')],
+        // The implicit recovery link's own method (F5-CR-1), but nothing was
+        // requested for this address: a signup-confirmation, magic-link or
+        // email OTP sign-in session, which the web keeps as an ordinary one.
+        ['otp session with no recovery link requested for its address', session('otp')],
         ['magic-link session', session('magiclink')],
         ['oauth session', session('oauth')],
         ['a method that merely contains the word', session('not-recovery')],
@@ -311,10 +360,11 @@ describe('password recovery — completing', () => {
       await expectRefused(build({ redis: marker(String(NOW_S)) }), refreshed, 'refreshed pre-logout recovery session');
     });
 
-    it('a recovery session that cannot say when it was authenticated is refused while a logout is on record (fail closed); the same token resets with no marker', async () => {
+    it('a recovery session that cannot say when its recovery was verified is refused, with a logout on record and without one (F5-SEC-2: its age cannot be bounded, and a refresh renews its iat)', async () => {
       const untimed = jwt({ iat: NOW_S + 60, exp: NOW_S + 3660, session_id: 's-rec', amr: ['recovery'] });
       await expectRefused(build({ redis: marker(String(NOW_S)) }), untimed, 'string amr, session_id, marker present');
-      await expect(build().svc.completeReset(untimed, PW)).resolves.toMatchObject({ userId: 'u1' });
+      // Before the F5 review repairs the same token reset with no marker.
+      await expectRefused(build(), untimed, 'string amr, session_id, no marker');
     });
 
     it("reads the previous release's bare '1' by its TTL, as AuthMiddleware does: a recovery session from before that logout is refused, one after it resets; no readable TTL is 'revoked now'", async () => {
@@ -363,6 +413,228 @@ describe('password recovery — completing', () => {
       await expect(h.svc.completeReset(recoveryJwt(NOW_S - 60), PW)).rejects.toBeInstanceOf(UnauthorizedException);
       expect(h.redis.get).not.toHaveBeenCalled();
       expect(h.prisma.client.user.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * R0-ID-F5 review repairs. The cases above pinned a token shape the shipped
+   * flow never produces (amr 'recovery', PKCE) and so stayed green while every
+   * real reset was refused (F5-CR-1, F5-CR-2); a recovery session of any age
+   * was accepted (F5-SEC-2); the same token reset again after a reset, and a
+   * reset cut no pre-reset token off locally (F5-SEC-1); and a refusal named
+   * no one (F5-SEC-3).
+   */
+  describe('F5 review repairs: the implicit-flow link resets, once, while it is recent; refusals name the user', () => {
+    const NOW_MS = Date.parse('2026-10-31T12:00:00.000Z');
+    const NOW_S = Math.floor(NOW_MS / 1000);
+    const DAY_S = 24 * 60 * 60;
+    const PW = 'CorrectHorseBattery9!';
+    const EMAIL = 'person@example.com';
+    const REDIRECT = 'https://app.test/auth/reset-password';
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(NOW_MS);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Refused with the reset link's generic 401 naming `reason`, before the policy and before any provider call. */
+    async function expectRefusedFor(h: ReturnType<typeof build>, token: string, reason: string, label: string) {
+      const err = await h.svc.completeReset(token, PW).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err, label).toBeInstanceOf(PasswordResetRefusedException);
+      expect(err, label).toMatchObject({ userId: 'u1', reasonCode: reason });
+      expect(h.policy.validate, `${label}: policy`).not.toHaveBeenCalled();
+      expect(h.admin.signOut, `${label}: provider sign-out`).not.toHaveBeenCalled();
+      expect(h.admin.updateUserPassword, `${label}: password update`).not.toHaveBeenCalled();
+    }
+
+    describe('F5-CR-1 / F5-CR-2: the implicit-flow recovery link (amr otp) this app actually sends', () => {
+      it('forgot-password, then the link, then submit: the otp session opened after the server requested the mail resets, and the request is consumed', async () => {
+        const h = build();
+        await h.svc.requestReset('  Person@Example.COM ', REDIRECT);
+        expect(h.redis.store.get(recoveryRequestKey(EMAIL)), 'recorded at the request').toBe(String(NOW_S));
+
+        vi.setSystemTime(NOW_MS + 120_000);
+        const token = implicitRecoveryJwt(NOW_S + 90);
+        await expect(h.svc.completeReset(token, PW)).resolves.toEqual({ userId: 'u1', email: EMAIL, providerSignedOut: true });
+        expect(h.admin.signOut).toHaveBeenCalledWith(token, 'global');
+        expect(h.admin.updateUserPassword).toHaveBeenCalledWith('u1', PW);
+        expect(h.redis.store.has(recoveryRequestKey(EMAIL)), 'the request record is consumed').toBe(false);
+      });
+
+      it('the request record names no address, is written for every address alike (even when the send fails), and lives for the link lifetime plus the session age bound', async () => {
+        const h = build({ admin: { sendRecoveryEmail: vi.fn(async () => { throw new Error('supabase down'); }) } });
+        await expect(h.svc.requestReset('nobody@example.com', REDIRECT)).resolves.toBeUndefined();
+        const key = `auth:recovery:requested:${createHash('sha256').update('nobody@example.com').digest('hex')}`;
+        expect([...h.redis.store.keys()]).toEqual([key]);
+        expect(key).not.toContain('nobody');
+        expect(h.redis.ttl.get(key)).toBe(2 * 60 * 60);
+
+        // A store failure is not an enumeration signal either: it resolves the same way.
+        const down = build({ redis: { setex: vi.fn(async () => { throw new Error('redis down'); }) } });
+        await expect(down.svc.requestReset(EMAIL, REDIRECT)).resolves.toBeUndefined();
+        expect(down.admin.sendRecoveryEmail).toHaveBeenCalledWith(EMAIL, REDIRECT);
+      });
+
+      it('refuses an otp session that no recovery link of this address accounts for: none requested, opened before the request, opened after the link lifetime, another address requested, or a token with no email', async () => {
+        await expectRefusedFor(build(), implicitRecoveryJwt(NOW_S - 60), 'no_recovery_request', 'nothing requested');
+
+        const before = build();
+        await before.svc.requestReset(EMAIL, REDIRECT);
+        await expectRefusedFor(before, implicitRecoveryJwt(NOW_S - 120), 'outside_recovery_link_window', 'opened before the request');
+
+        const late = build();
+        await late.svc.requestReset(EMAIL, REDIRECT);
+        vi.setSystemTime(NOW_MS + 3_700_000);
+        await expectRefusedFor(late, implicitRecoveryJwt(NOW_S + 3_662), 'outside_recovery_link_window', 'opened after the link lifetime');
+        vi.setSystemTime(NOW_MS);
+
+        const other = build();
+        await other.svc.requestReset('someone-else@example.com', REDIRECT);
+        await expectRefusedFor(other, implicitRecoveryJwt(NOW_S + 30), 'no_recovery_request', 'another address requested');
+
+        const noEmail = build({ auth: { getUserFromToken: vi.fn(async () => ({ id: 'u1', email: '' })) } });
+        await noEmail.svc.requestReset(EMAIL, REDIRECT);
+        await expectRefusedFor(noEmail, implicitRecoveryJwt(NOW_S + 30, { email: undefined }), 'no_recovery_request', 'no email');
+      });
+
+      it('an otp session refuses closed (503) when the request record cannot be read', async () => {
+        const h = build({
+          redis: {
+            get: vi.fn(async (k: string) => {
+              if (k.startsWith('auth:recovery:requested:')) throw new Error('redis down');
+              return null;
+            }),
+          },
+        });
+        await expect(h.svc.completeReset(implicitRecoveryJwt(NOW_S - 60), PW)).rejects.toBeInstanceOf(ServiceUnavailableException);
+        expect(h.admin.updateUserPassword).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('F5-SEC-2: a recovery session resets only within an hour of its recovery verification', () => {
+      it('a refreshed token of an old recovery session is refused though its iat is fresh; the bound is inclusive at one hour', async () => {
+        expect(RECOVERY_SESSION_MAX_AGE_SECONDS).toBe(3600);
+        await expectRefusedFor(
+          build(),
+          recoveryJwt(NOW_S - 90 * DAY_S, { iat: NOW_S, exp: NOW_S + 3600, session_id: 's-old-rec' }),
+          'recovery_session_expired',
+          'a 90-day-old recovery session, freshly refreshed',
+        );
+        await expectRefusedFor(build(), recoveryJwt(NOW_S - 3601, { iat: NOW_S }), 'recovery_session_expired', 'one second past the bound');
+        await expect(build().svc.completeReset(recoveryJwt(NOW_S - 3600), PW), 'exactly one hour').resolves.toMatchObject({ userId: 'u1' });
+
+        // The implicit link too: requested in time, but its session is over an hour old.
+        const implicit = build();
+        implicit.redis.store.set(recoveryRequestKey(EMAIL), String(NOW_S - 3650));
+        await expectRefusedFor(implicit, implicitRecoveryJwt(NOW_S - 3601, { iat: NOW_S }), 'recovery_session_expired', 'old implicit session');
+      });
+
+      it('the age is read from the recovery entry, not a later MFA step-up, and a recovery time in the future is refused', async () => {
+        await expectRefusedFor(
+          build(),
+          jwt({ iat: NOW_S, exp: NOW_S + 3600, session_id: 's-rec', amr: [{ method: 'totp', timestamp: NOW_S - 10 }, { method: 'recovery', timestamp: NOW_S - 7200 }] }),
+          'recovery_session_expired',
+          'recent step-up on an old recovery session',
+        );
+        await expectRefusedFor(build(), recoveryJwt(NOW_S + 120), 'recovery_time_unknown', 'recovery verified in the future');
+      });
+    });
+
+    describe('F5-SEC-1: a recovery token resets once, and the reset cuts every pre-reset token off locally', () => {
+      it('replaying the same token, or a refresh of its session, after a reset is refused; the reset wrote the logout cutoff', async () => {
+        const h = build();
+        const token = recoveryJwt(NOW_S - 60);
+        await expect(h.svc.completeReset(token, PW)).resolves.toMatchObject({ userId: 'u1' });
+        expect(h.redis.setex).toHaveBeenCalledWith('auth:revoked:user:u1', 86_400, String(NOW_S));
+        expect(h.redis.store.get(recoveryUseKey(`session:s-recovery-${NOW_S - 60}`)), 'the session is claimed').toBe(String(NOW_S));
+
+        vi.setSystemTime(NOW_MS + 30_000);
+        await expect(h.svc.completeReset(token, 'AttackerChosenPass42!'), 'replay').rejects.toBeInstanceOf(UnauthorizedException);
+        const refreshed = recoveryJwt(NOW_S - 60, { iat: NOW_S + 30, exp: NOW_S + 3630 });
+        await expect(h.svc.completeReset(refreshed, 'AttackerChosenPass42!'), 'refreshed').rejects.toBeInstanceOf(UnauthorizedException);
+        expect(h.admin.updateUserPassword).toHaveBeenCalledTimes(1);
+        expect(h.admin.updateUserPassword).not.toHaveBeenCalledWith('u1', 'AttackerChosenPass42!');
+      });
+
+      it('the implicit-flow link is single use too: its replay is refused after the request record is consumed and the cutoff written', async () => {
+        const h = build();
+        await h.svc.requestReset(EMAIL, REDIRECT);
+        vi.setSystemTime(NOW_MS + 60_000);
+        const token = implicitRecoveryJwt(NOW_S + 30);
+        await expect(h.svc.completeReset(token, PW)).resolves.toMatchObject({ userId: 'u1' });
+        vi.setSystemTime(NOW_MS + 90_000);
+        await expect(h.svc.completeReset(token, 'AttackerChosenPass42!')).rejects.toBeInstanceOf(UnauthorizedException);
+        expect(h.admin.updateUserPassword).toHaveBeenCalledTimes(1);
+      });
+
+      it('the single-use claim refuses a replay even when the logout cutoff could not be written, and the reset still succeeds', async () => {
+        const h = build({ redis: { setex: vi.fn(async () => { throw new Error('redis write failed'); }) } });
+        const token = recoveryJwt(NOW_S - 60);
+        await expect(h.svc.completeReset(token, PW)).resolves.toMatchObject({ userId: 'u1' });
+        expect(h.redis.store.has('auth:revoked:user:u1')).toBe(false);
+        const err = await h.svc.completeReset(token, 'AttackerChosenPass42!').then(() => null, (e: unknown) => e);
+        expect(err).toBeInstanceOf(PasswordResetRefusedException);
+        expect(err).toMatchObject({ userId: 'u1', reasonCode: 'recovery_session_used' });
+        expect(h.admin.updateUserPassword).toHaveBeenCalledTimes(1);
+      });
+
+      it('two submissions of one recovery session racing each other set the password once', async () => {
+        const h = build();
+        const token = recoveryJwt(NOW_S - 60);
+        const results = await Promise.allSettled([h.svc.completeReset(token, PW), h.svc.completeReset(token, 'AttackerChosenPass42!')]);
+        expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+        expect((results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason).toBeInstanceOf(UnauthorizedException);
+        expect(h.admin.updateUserPassword).toHaveBeenCalledTimes(1);
+      });
+
+      it('a failed password update releases the claim and writes no cutoff, so the same link can be retried', async () => {
+        const updateUserPassword = vi.fn().mockRejectedValueOnce(new Error('provider 500')).mockResolvedValue(undefined);
+        const h = build({ admin: { updateUserPassword } });
+        const token = recoveryJwt(NOW_S - 60);
+        await expect(h.svc.completeReset(token, PW)).rejects.toThrow('provider 500');
+        expect(h.redis.store.has(recoveryUseKey(`session:s-recovery-${NOW_S - 60}`)), 'claim released').toBe(false);
+        expect(h.redis.store.has('auth:revoked:user:u1'), 'no cutoff').toBe(false);
+        await expect(h.svc.completeReset(token, PW), 'retry').resolves.toMatchObject({ userId: 'u1' });
+        expect(updateUserPassword).toHaveBeenCalledTimes(2);
+      });
+
+      it('a claim that cannot be written fails closed (503): nothing reaches the provider', async () => {
+        const h = build({ redis: { set: vi.fn(async () => { throw new Error('redis down'); }) } });
+        await expect(h.svc.completeReset(recoveryJwt(NOW_S - 60), PW)).rejects.toBeInstanceOf(ServiceUnavailableException);
+        expect(h.admin.signOut).not.toHaveBeenCalled();
+        expect(h.admin.updateUserPassword).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('F5-SEC-3: a refusal carries who and why for the audit row, never in the response body', () => {
+      it('each refusal names the verified user and its reason on the exception; the body is the one generic 401', async () => {
+        const banned = build({ user: { findUnique: vi.fn(async () => ({ deletedAt: null, bannedAt: new Date(NOW_MS - 1000) })) } });
+        const loggedOut = build();
+        loggedOut.redis.store.set('auth:revoked:user:u1', String(NOW_S));
+        const cases: Array<[ReturnType<typeof build>, string, string]> = [
+          [build(), jwt({ iat: NOW_S, exp: NOW_S + 3600, session_id: 's1', amr: [{ method: 'password', timestamp: NOW_S }] }), 'not_recovery_session'],
+          [build(), implicitRecoveryJwt(NOW_S - 60), 'no_recovery_request'],
+          [loggedOut, recoveryJwt(NOW_S - 60), 'pre_logout_session'],
+          [banned, recoveryJwt(NOW_S - 60), 'user_deleted_or_banned'],
+        ];
+        for (const [h, token, reason] of cases) {
+          const err = (await h.svc.completeReset(token, PW).then(() => null, (e: unknown) => e)) as PasswordResetRefusedException;
+          expect(err, reason).toBeInstanceOf(UnauthorizedException);
+          expect(err, reason).toMatchObject({ userId: 'u1', reasonCode: reason });
+          expect(err.getResponse(), reason).toEqual({
+            statusCode: 401,
+            message: 'This password reset link is invalid or has expired',
+            error: 'Unauthorized',
+          });
+          expect(JSON.stringify(err.getResponse()), reason).not.toMatch(/u1|_session|_request|banned/);
+        }
+      });
     });
   });
 });

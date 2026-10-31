@@ -4,7 +4,11 @@ import type { Request } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
 import { IdentityController } from '../src/modules/identity/identity.controller';
-import { IdentityPasswordService } from '../src/modules/identity/identity-password.service';
+import {
+  IdentityPasswordService,
+  recoveryRequestKey,
+  recoveryUseKey,
+} from '../src/modules/identity/identity-password.service';
 
 /**
  * Unit tests for SupabaseAdminService.findUserByEmail pagination.
@@ -223,8 +227,16 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
   const USER = 'u-cr2-callers';
   const accessJwt = (claims: Record<string, unknown> = {}) =>
     `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: 's-1', role: 'authenticated', ...claims })}.c2ln`;
-  /** A recovery-link access token: reset-password accepts only a recovery session (R0-ID-F5). */
-  const recoveryJwt = () => accessJwt({ amr: [{ method: 'recovery', timestamp: 1 }] });
+  /**
+   * This app's recovery-link access token (R0-ID-F5 review F5-CR-1/CR-2): the
+   * implicit flow, so GoTrue's verifyGet stamps amr 'otp' (issueRefreshToken(...,
+   * models.OTP, ...)), opened a moment ago, after the forgot-password request
+   * the harness records.
+   */
+  const recoveryJwt = () => {
+    const openedAt = Math.floor(Date.now() / 1000) - 30;
+    return accessJwt({ iat: openedAt, exp: openedAt + 3600, email: 'cr2@example.com', amr: [{ method: 'otp', timestamp: openedAt }] });
+  };
 
   function memoryRedis(order: string[]) {
     const store = new Map<string, string>();
@@ -253,6 +265,9 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
   ) {
     const order: string[] = [];
     const redis = memoryRedis(order);
+    // The forgot-password request the recovery link answers (written by
+    // requestReset; seeded here so it stays out of `order`).
+    redis.store.set(recoveryRequestKey('cr2@example.com'), String(Math.floor(Date.now() / 1000) - 120));
     const audit = vi.fn(async (_entry: Record<string, unknown>) => undefined);
     const authSec = { enforce: vi.fn(async () => undefined), audit };
     const signupSvc = { signInWithPassword: vi.fn(async () => ({ userId: USER, accessToken: 'a', refreshToken: 'r' })) };
@@ -407,7 +422,7 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
   describe('POST /identity/reset-password', () => {
     it("revokes every session with the recovery link's access token (the JWT the caller presents), scope 'global'", async () => {
       const h = harness();
-      const recoveryToken = accessJwt({ amr: [{ method: 'recovery', timestamp: 1 }] });
+      const recoveryToken = recoveryJwt();
       await h.ctrl.resetPassword({ accessToken: recoveryToken, password: 'CorrectHorseBattery9!' } as never, h.req());
       expect(h.supabaseAdmin.signOut).toHaveBeenCalledWith(recoveryToken, 'global');
       expect(h.supabaseAdmin.signOut).not.toHaveBeenCalledWith(USER, expect.anything());
@@ -433,7 +448,15 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
     it('asks the provider to sign out BEFORE it sets the password (R0-ID-F4 review F4-A / CR-1)', async () => {
       const h = harness();
       await h.ctrl.resetPassword({ accessToken: recoveryJwt(), password: 'CorrectHorseBattery9!' } as never, h.req());
-      expect(h.order).toEqual(['provider signOut', 'provider updateUserPassword']);
+      // R0-ID-F5 review F5-SEC-1: the recovery session is claimed (single use)
+      // before any provider call, and the logout cutoff is written once the
+      // password is set.
+      expect(h.order).toEqual([
+        `set ${recoveryUseKey('session:s-1')}`,
+        'provider signOut',
+        'provider updateUserPassword',
+        `setex auth:revoked:user:${USER}`,
+      ]);
     });
   });
 });
@@ -464,9 +487,15 @@ describe('R0-ID-F4 review F4-A — password flows against GoTrue session semanti
   const USER = '6f1c1d36-5d7e-4c38-9a3f-0b7a3b0e2c11';
   const jwtFor = (sessionId: string) =>
     `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated' })}.c2ln`;
-  /** The recovery link's access token: a session GoTrue opened by the recovery verification (R0-ID-F5). */
-  const recoveryJwtFor = (sessionId: string) =>
-    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated', amr: [{ method: 'recovery', timestamp: 1 }] })}.c2ln`;
+  /**
+   * The recovery link's access token as GoTrue issues it for this app's
+   * implicit flow (R0-ID-F5 review F5-CR-2): verifyGet's implicit branch,
+   * issueRefreshToken(..., models.OTP, ...), so amr 'otp', opened a moment ago.
+   */
+  const recoveryJwtFor = (sessionId: string) => {
+    const openedAt = Math.floor(Date.now() / 1000) - 30;
+    return `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated', aal: 'aal1', email: 'f4a@example.com', iat: openedAt, exp: openedAt + 3600, amr: [{ method: 'otp', timestamp: openedAt }] })}.c2ln`;
+  };
 
   function fakeGoTrue(sessions: Map<string, string>, opts: { logoutDown?: boolean } = {}) {
     /** Each provider call, with the sessions left right after it. */
@@ -530,7 +559,15 @@ describe('R0-ID-F4 review F4-A — password flows against GoTrue session semanti
     const signupSvc = { signInWithPassword: vi.fn(async () => ({})) };
     const auth = { getUserFromToken: vi.fn(async () => ({ id: USER, email: 'f4a@example.com' })) };
     const policy = { validate: vi.fn(async () => undefined) };
-    const redis = { setex: vi.fn(async () => 'OK'), set: vi.fn(async () => 'OK'), get: vi.fn(async () => null) };
+    // No logout marker; the forgot-password request the implicit-flow link
+    // answers, made two minutes ago (R0-ID-F5 review F5-CR-1).
+    const requestedAt = String(Math.floor(Date.now() / 1000) - 120);
+    const redis = {
+      setex: vi.fn(async () => 'OK'),
+      set: vi.fn(async () => 'OK'),
+      get: vi.fn(async (k: string) => (k === recoveryRequestKey('f4a@example.com') ? requestedAt : null)),
+      del: vi.fn(async () => 1),
+    };
     // R0-ID-F5: the reset reads the local User row and the logout marker (this redis, no marker).
     const passwordPrisma = { client: { user: { findUnique: vi.fn(async () => ({ deletedAt: null, bannedAt: null })) } } };
     const passwordSvc = new IdentityPasswordService(admin, auth as never, policy as never, passwordPrisma as never, redis as never);

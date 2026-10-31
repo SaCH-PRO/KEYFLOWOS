@@ -630,6 +630,7 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
       const supabaseAdmin = {
         signOut: vi.fn(opts.signOut ?? (async () => undefined)),
         updateUserPassword: vi.fn(async (_userId: string, _password: string) => undefined),
+        sendRecoveryEmail: vi.fn(async (_email: string, _redirectTo: string) => undefined),
       };
       // The REAL IdentityPasswordService behind POST /identity/reset-password,
       // on the same Redis keyspace the logout writes and the middleware reads.
@@ -690,6 +691,7 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
         supabaseAdmin,
         authSec,
         passwordPrisma,
+        passwordSvc,
       };
     }
 
@@ -825,6 +827,47 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
         await expect(c.reset(out.accessToken), 'but it is not a recovery session').rejects.toBeInstanceOf(UnauthorizedException);
 
         expect(c.supabaseAdmin.updateUserPassword).not.toHaveBeenCalled();
+      });
+
+      it("F5-CR-1 / F5-SEC-1: this app's implicit-flow recovery link (amr otp) resets after the forgot-password request; the reset then cuts off every pre-reset token at the middleware, the recovery token included, its replay cannot set the password again, and the next login is attached", async () => {
+        const redis = memoryRedis();
+        const { mw } = middleware(redis);
+        const c = controller(redis, {
+          signOut: async () => true,
+          loginToken: () => sessionToken('s-after-reset', Math.floor(Date.now() / 1000))(),
+        });
+        const preReset = sessionToken('s-before', NOW_S - 600)();
+        expect(await attached(mw, preReset), 'a pre-reset session is attached before the reset').toBeTruthy();
+
+        await c.passwordSvc.requestReset('st4@example.com', 'https://app.test/auth/reset-password');
+        expect(c.supabaseAdmin.sendRecoveryEmail).toHaveBeenCalledWith('st4@example.com', 'https://app.test/auth/reset-password');
+
+        // GoTrue verifyGet, implicit branch: issueRefreshToken(..., models.OTP, ...).
+        vi.setSystemTime(NOW_MS + 60_000);
+        const implicitRecovery = jwt({
+          iat: NOW_S + 60,
+          exp: NOW_S + 3660,
+          session_id: 's-implicit-recovery',
+          aal: 'aal1',
+          amr: [{ method: 'otp', timestamp: NOW_S + 60 }],
+        });
+        await expect(c.reset(implicitRecovery)).resolves.toMatchObject({ status: 'ok' });
+        expect(c.supabaseAdmin.updateUserPassword).toHaveBeenCalledWith(USER, 'CorrectHorseBattery9!');
+        expect(redis.store.get(`auth:revoked:user:${USER}`), 'the reset wrote the logout cutoff').toBe(String(NOW_S + 60));
+
+        expect(await attached(mw, preReset), 'the pre-reset session is cut off').toBeUndefined();
+        expect(await attached(mw, implicitRecovery), 'so is the recovery session').toBeUndefined();
+
+        vi.setSystemTime(NOW_MS + 90_000);
+        await expect(c.reset(implicitRecovery), 'replay').rejects.toBeInstanceOf(UnauthorizedException);
+        expect(c.supabaseAdmin.updateUserPassword).toHaveBeenCalledTimes(1);
+
+        const out = (await c.login()) as { accessToken: string };
+        expect(await attached(mw, out.accessToken), 'the next login is attached').toBeTruthy();
+        expect(auditOf(c, 'password_reset_completed')).toEqual([
+          expect.objectContaining({ outcome: 'success', userId: USER }),
+          expect.objectContaining({ outcome: 'failure' }),
+        ]);
       });
 
       it('a recovery session of a deleted or banned user cannot set the password, as the middleware refuses its other tokens', async () => {
