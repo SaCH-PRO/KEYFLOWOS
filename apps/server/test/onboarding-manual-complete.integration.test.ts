@@ -34,12 +34,25 @@
  *     every completion writes a team_activity_logs row naming the actor, for
  *     completion and for the legal disclaimer acceptance it records;
  *   - a second /complete answers alreadyComplete and writes nothing;
+ *   - CONCURRENCY (R0-SEC-04 SEC03-2): three simultaneous /complete calls from
+ *     the owner write exactly one onboarding_completed row, one legal
+ *     disclaimer acceptance and one demo seed; one call completes, the others
+ *     answer alreadyComplete (the claim is a conditional update inside the
+ *     completion transaction);
  *   - /complete does not trust an onboardingComplete flag written outside it
  *     (review SEC03-1): with the flag set but no onboardingCompletedAt, an
  *     ADMIN is still refused and the owner's /complete runs the whole
- *     completion. NOT PROVEN HERE, and not closed on this base: PATCH
- *     /identity/businesses/:id still lets any member write onboardingComplete;
- *     that is R0-09-ID-HARDEN, so D-11 holds end to end only once R0-09 lands;
+ *     completion;
+ *   - THE PROFILE PATCH CANNOT FINISH ONBOARDING (R0-SEC-04, closing SEC03-1
+ *     now that R0-09-ID-HARDEN has landed, D-11 end to end): a STAFF member on
+ *     the role-default scopes and an ADMIN granted settings:write sending
+ *     {onboardingComplete: true} to PATCH /identity/businesses/:id get 403,
+ *     the Business row is unchanged and the web genome gate's input (the
+ *     onboarding state's onboardingComplete / onboardingCompletedAt) stays
+ *     unset; the owner's PATCH of a profile field still applies while the flag
+ *     beside it is dropped; on a completed business no one's
+ *     {onboardingComplete: false} un-completes it, so the owner's /complete
+ *     does not run again;
  *   - LEDGER: completion writes exactly one demo contact (source 'demo') and
  *     one DRAFT demo invoice, and no FinancialTransaction or LedgerEntry;
  *   - no model-gateway dispatch: no ai_usage_logs row for the business and no
@@ -128,6 +141,10 @@ const ID = {
   platform: `${P}platform`, // SUPER_ADMIN user with no membership anywhere
   fowner: `${P}fowner`, // owner of bizF, whose onboardingComplete flag is set outside /complete (SEC03-1)
   fadmin: `${P}fadmin`, // ADMIN member of bizF on the role-default scopes
+  nowner: `${P}nowner`, // owner of bizN: the profile PATCH cannot finish onboarding (R0-SEC-04)
+  nstaff: `${P}nstaff`, // STAFF member of bizN on the role-default scopes
+  nadmin: `${P}nadmin`, // ADMIN member of bizN with an explicit scope map granting settings:write
+  kowner: `${P}kowner`, // owner of bizK, who sends three /complete calls at once (R0-SEC-04 SEC03-2)
   bizAName: `${P}bizA`,
   bizBName: `${P}bizB`,
   bizXName: `${P}bizX`,
@@ -135,8 +152,13 @@ const ID = {
   bizSName: `${P}bizS`,
   bizPName: `${P}bizP`,
   bizFName: `${P}bizF`,
+  bizNName: `${P}bizN`,
+  bizKName: `${P}bizK`,
 };
-const ALL_USERS = [ID.owner, ID.other, ID.blank, ID.genome, ID.staff, ID.sowner, ID.sadmin, ID.dadmin, ID.sstaff, ID.powner, ID.platform, ID.fowner, ID.fadmin];
+const ALL_USERS = [
+  ID.owner, ID.other, ID.blank, ID.genome, ID.staff, ID.sowner, ID.sadmin, ID.dadmin, ID.sstaff, ID.powner, ID.platform, ID.fowner, ID.fadmin,
+  ID.nowner, ID.nstaff, ID.nadmin, ID.kowner,
+];
 const email = (id: string) => `${id}@k32a.test.local`;
 
 /**
@@ -167,7 +189,7 @@ const serverLog: string[] = [];
 
 const T: Record<string, string> = {};
 /** Ids minted by the server, carried from case to case. */
-const S: { bizA?: string; bizB?: string; bizX?: string; bizG?: string; bizS?: string; bizP?: string; bizF?: string; completedAt?: string; demo?: { contactId: string; invoiceId: string; invoiceNumber: string } } = {};
+const S: { bizA?: string; bizB?: string; bizX?: string; bizG?: string; bizS?: string; bizP?: string; bizF?: string; bizN?: string; bizK?: string; completedAt?: string; demo?: { contactId: string; invoiceId: string; invoiceNumber: string } } = {};
 /** serverLog offsets around the completion request, for the no-AI log filter. */
 const completionWindow: { from?: number; to?: number } = {};
 /** Verbatim characterization, printed for the packet return. */
@@ -721,12 +743,11 @@ describe('R0-SEC-03 (D-11): only the business owner may complete; settings:write
     ]);
   });
 
-  // Review SEC03-1: on this base PATCH /identity/businesses/:id still lets any
-  // member write onboardingComplete (no actor row, no disclaimer, no demo
-  // data); closing that is R0-09-ID-HARDEN, outside this write set. What this
-  // write set owns is that /complete does not trust that flag. The flag is set
-  // here by a direct DB write, the state the PATCH leaves, not through the
-  // PATCH itself, so these cases do not pin the PATCH bypass R0-09 removes.
+  // Review SEC03-1: before R0-09-ID-HARDEN, PATCH /identity/businesses/:id let
+  // any member write onboardingComplete (no actor row, no disclaimer, no demo
+  // data). R0-09 closed that (proven in the R0-SEC-04 block below); these
+  // cases keep /complete's own distrust of a flag written outside it, such as
+  // a row written before R0-09. The flag is set by a direct DB write.
   it('SEC03-1: a business flagged complete outside /complete (no onboardingCompletedAt, as the profile PATCH leaves it) still refuses an ADMIN, and nothing is written', async () => {
     S.bizF = await bootstrap(ID.fowner, ID.bizFName);
     await addMember(ID.fadmin, S.bizF, 'ADMIN');
@@ -758,6 +779,133 @@ describe('R0-SEC-03 (D-11): only the business owner may complete; settings:write
       [ID.fowner, 'legal_disclaimer_accepted'],
       [ID.fowner, 'onboarding_completed'],
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEC03-1 closure: R0-09 has landed, so the profile PATCH cannot finish onboarding
+// ---------------------------------------------------------------------------
+/** The whole Business row, serialized, for an unchanged-row comparison. */
+async function businessRow(businessId: string): Promise<string> {
+  return JSON.stringify(await db.business.findUnique({ where: { id: businessId } }));
+}
+
+/**
+ * What the web genome gate decides on (use-genome-gate.ts): the onboarding
+ * state's onboardingComplete, or an onboardingCompletedAt. Read as the owner.
+ */
+async function genomeGateInput(businessId: string, ownerToken: string) {
+  const state = await call('get', routes.state(businessId), ownerToken);
+  expect(state.status, JSON.stringify(state.body)).toBe(200);
+  return { onboardingComplete: state.body.onboardingComplete, onboardingCompletedAt: state.body.onboardingCompletedAt };
+}
+
+const GATE_CLOSED = { onboardingComplete: false, onboardingCompletedAt: null };
+
+describe('R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:id cannot finish onboarding (D-11)', () => {
+  it('a STAFF member on the role-default scopes sending {onboardingComplete: true} gets 403; the Business row is unchanged and the genome gate input stays unset', async () => {
+    S.bizN = await bootstrap(ID.nowner, ID.bizNName);
+    await addMember(ID.nstaff, S.bizN, 'STAFF');
+    await addMember(ID.nadmin, S.bizN, 'ADMIN', { settings: 'write' });
+    const before = await businessRow(S.bizN);
+    const res = await call('patch', routes.profile(S.bizN), T[ID.nstaff], { onboardingComplete: true });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(await businessRow(S.bizN)).toBe(before);
+    expectNothingWritten(await footprint(S.bizN));
+    expect(await genomeGateInput(S.bizN, T[ID.nowner])).toEqual(GATE_CLOSED);
+    expect(await activity(S.bizN)).toEqual([]);
+  });
+
+  it('an ADMIN granted settings:write sending {onboardingComplete: true} with a profile field gets 403; the Business row is unchanged and the genome gate input stays unset', async () => {
+    expect(S.bizN, 'bizN is bootstrapped by the first case of this block').toBeDefined();
+    const before = await businessRow(S.bizN!);
+    const res = await call('patch', routes.profile(S.bizN!), T[ID.nadmin], { onboardingComplete: true, name: `${P}bizN renamed by admin` });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(await businessRow(S.bizN!)).toBe(before);
+    expectNothingWritten(await footprint(S.bizN!));
+    expect(await genomeGateInput(S.bizN!, T[ID.nowner])).toEqual(GATE_CLOSED);
+    expect(await activity(S.bizN!)).toEqual([]);
+  });
+
+  it("the owner's PATCH of a profile field still applies (200); an onboardingComplete: true beside it is dropped and the genome gate input stays unset", async () => {
+    expect(S.bizN, 'bizN is bootstrapped by the first case of this block').toBeDefined();
+    const res = await call('patch', routes.profile(S.bizN!), T[ID.nowner], { onboardingComplete: true, timezone: 'America/Port_of_Spain' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const f = await footprint(S.bizN!);
+    expect(f.timezone).toBe('America/Port_of_Spain');
+    expectNothingWritten(f);
+    expect(f.demoContacts).toBe(0);
+    expect(await disclaimerAcceptedAt(S.bizN!)).toBeNull();
+    expect(await genomeGateInput(S.bizN!, T[ID.nowner])).toEqual(GATE_CLOSED);
+    expect(await activity(S.bizN!)).toEqual([]);
+  });
+
+  it("on the business the owner completed, no one's {onboardingComplete: false} un-completes it (403 for STAFF and the settings:write ADMIN, dropped for the owner), so /complete does not run again", async () => {
+    expect(S.bizN, 'bizN is bootstrapped by the first case of this block').toBeDefined();
+    const done = await call('post', routes.complete(S.bizN!), T[ID.nowner]);
+    expect(done.status, JSON.stringify(done.body)).toBe(COMPLETE_OK);
+    expect(done.body.alreadyComplete).toBeUndefined();
+    const completed = await businessRow(S.bizN!);
+    const completedAt = (await footprint(S.bizN!)).onboardingCompletedAt as Date;
+    expect(completedAt).toBeInstanceOf(Date);
+
+    for (const actor of [ID.nstaff, ID.nadmin]) {
+      const res = await call('patch', routes.profile(S.bizN!), T[actor], { onboardingComplete: false });
+      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(await businessRow(S.bizN!)).toBe(completed);
+    }
+    const own = await call('patch', routes.profile(S.bizN!), T[ID.nowner], { onboardingComplete: false, timezone: 'America/Port_of_Spain' });
+    expect(own.status, JSON.stringify(own.body)).toBe(200);
+    const f = await footprint(S.bizN!);
+    expect({ onboardingComplete: f.onboardingComplete, onboardingCompletedAt: (f.onboardingCompletedAt as Date).toISOString() })
+      .toEqual({ onboardingComplete: true, onboardingCompletedAt: completedAt.toISOString() });
+    expect(await genomeGateInput(S.bizN!, T[ID.nowner])).toEqual({ onboardingComplete: true, onboardingCompletedAt: completedAt.toISOString() });
+
+    const again = await call('post', routes.complete(S.bizN!), T[ID.nowner]);
+    expect(again.status, JSON.stringify(again.body)).toBe(COMPLETE_OK);
+    expect(again.body).toEqual({ complete: true, alreadyComplete: true });
+    const after = await footprint(S.bizN!);
+    expect({ demoContacts: after.demoContacts, invoices: after.invoices }).toEqual({ demoContacts: 1, invoices: 1 });
+    expect((await activity(S.bizN!)).map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
+      [ID.nowner, 'legal_disclaimer_accepted'],
+      [ID.nowner, 'onboarding_completed'],
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEC03-2: concurrent completion by the owner writes once
+// ---------------------------------------------------------------------------
+describe('R0-SEC-04 SEC03-2: concurrent POST /complete from the owner completes once', () => {
+  it('three simultaneous /complete calls: all answer complete, exactly one is not alreadyComplete, and one onboarding_completed row, one disclaimer acceptance and one demo seed are written', async () => {
+    S.bizK = await bootstrap(ID.kowner, ID.bizKName);
+    expectNothingWritten(await footprint(S.bizK));
+    const results = await Promise.all([1, 2, 3].map(() => call('post', routes.complete(S.bizK!), T[ID.kowner])));
+    const f = await footprint(S.bizK!);
+    const rows = await activity(S.bizK!);
+    // Recorded verbatim for the packet return, before any assertion can stop the case.
+    characterization.concurrentComplete = {
+      responses: results.map((r) => ({ status: r.status, alreadyComplete: r.body?.alreadyComplete ?? false })),
+      activity: rows.map((r: { action: string }) => r.action),
+      demoContacts: f.demoContacts,
+      invoices: f.invoices,
+    };
+    for (const r of results) {
+      expect(r.status, JSON.stringify(r.body)).toBe(COMPLETE_OK);
+      expect(r.body.complete).toBe(true);
+    }
+    expect(results.filter((r) => r.body.alreadyComplete !== true)).toHaveLength(1);
+
+    expect({ onboardingComplete: f.onboardingComplete, contacts: f.contacts, demoContacts: f.demoContacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
+      .toEqual({ onboardingComplete: true, contacts: 1, demoContacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+    expect(f.onboardingCompletedAt).toBeInstanceOf(Date);
+    expect(await disclaimerAcceptedAt(S.bizK!)).toEqual(expect.any(String));
+    expect(rows.map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
+      [ID.kowner, 'legal_disclaimer_accepted'],
+      [ID.kowner, 'onboarding_completed'],
+    ]);
+    const winner = results.find((r) => r.body.alreadyComplete !== true)!;
+    expect(rows[1].meta).toMatchObject({ demoContactId: winner.body.demoData.contactId, demoInvoiceId: winner.body.demoData.invoiceId });
   });
 });
 

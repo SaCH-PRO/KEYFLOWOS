@@ -17,11 +17,15 @@
  * completion to POST .../complete, and a 2xx lands on the command center.
  *
  * Review repairs:
- * - SEC-R006-1: POST .../complete admits only the owner, a SUPER_ADMIN or a
- *   member with settings write, but the PATCH route admits any member. The
- *   stubs answer the way the real server answers a STAFF member (PATCH 200,
- *   POST .../complete 403 ONBOARDING_COMPLETE_FORBIDDEN), and nothing may be
- *   written before that refusal.
+ * - SEC-R006-1: nothing may be written before the server accepts who is
+ *   acting. Since R0-SEC-03 and R0-09 (owner ruling D-11), POST .../complete
+ *   and PATCH /identity/businesses/:id both admit only the owner (or a
+ *   SUPER_ADMIN on the platform bypass); a granted settings scope admits no
+ *   ADMIN or STAFF member. The stubs answer every other member the way the real
+ *   server does (POST .../complete 403 ONBOARDING_COMPLETE_FORBIDDEN, "Only the
+ *   business owner can finish onboarding."), and the page changes nothing.
+ *   R0-SEC-04 (SEC03-3, CR-SEC03-1) retired the "settings write may finish"
+ *   copy and cases.
  * - SEC-R006-2: the form writes only to the business it was loaded for.
  * - CR-R006-1: "no model call" is asserted by method, not by timing. The KEY
  *   chat beside the step reads its session with a GET that fetchWithRetry
@@ -69,6 +73,14 @@ import OnboardingPage from "../onboarding/page";
 const BIZ = "biz_k06a_manual";
 const OWNER = "usr_k06a_owner";
 const STAFF = "usr_k06a_staff";
+/** An ADMIN member whose scopes grant settings:write: the server still refuses them (D-11). */
+const ADMIN = "usr_k06a_admin";
+/**
+ * A second owner: an OWNER membership, not Business.ownerId. The server admits
+ * them (BusinessGuard's two owner arms), but the browser, which knows only
+ * ownerId, cannot tell them from any other member, so completion is asked first.
+ */
+const CO_OWNER = "usr_k06a_coowner";
 
 type Call = { method: string; path: string; body: unknown };
 
@@ -111,11 +123,14 @@ const COMPLETE_OK = json(201, {
   genomeRecommendation: { threePillarMinimumMet: false, genomeIntegrity: 13, missingPillars: ["founder", "business", "market"] },
 });
 
-/** What the real server answers a member without settings write (R0-32 ST-R032-1). */
+/** The real server's message for every non-owner member (R0-SEC-03, owner ruling D-11). */
+const OWNER_ONLY_MESSAGE = "Only the business owner can finish onboarding.";
+
+/** What the real server answers any member who is not the owner, whatever their scopes (R0-SEC-03). */
 const COMPLETE_FORBIDDEN = json(403, {
   statusCode: 403,
   code: "ONBOARDING_COMPLETE_FORBIDDEN",
-  message: "Only the business owner or a member with settings write access can finish onboarding.",
+  message: OWNER_ONLY_MESSAGE,
 });
 
 const PROFILE_INCOMPLETE = json(403, {
@@ -360,8 +375,9 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
 
   it("a failed profile save shows the error and does not ask for completion", async () => {
     // A refusal the real PATCH route sends: UpdateBusinessDto's MaxLength(200)
-    // on name, through the global ValidationPipe. (It does not refuse a member
-    // on authority: see the SEC-R006-1 cases below.)
+    // on name, through the global ValidationPipe. (Since R0-09 it also refuses
+    // a non-owner on authority; the page sends a non-owner's PATCH only after
+    // the server accepted the actor: see the SEC-R006-1 cases below.)
     routes[key("PATCH", businessPath)] = json(400, {
       statusCode: 400,
       message: ["name must be shorter than or equal to 200 characters"],
@@ -397,7 +413,7 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
   describe("SEC-R006-1: nothing is written before the server accepts who is acting", () => {
     it("a STAFF member is refused before any write: no PATCH, and the form gives way to 'ask the owner'", async () => {
       // How the real server answers a STAFF member with role-default scopes:
-      // the PATCH route would accept the write; POST .../complete refuses.
+      // POST .../complete refuses (and so, since R0-09, would the PATCH).
       routes[key("GET", mePath)] = SIGNED_IN_AS(STAFF);
       routes[key("POST", completePath)] = COMPLETE_FORBIDDEN;
       renderPage();
@@ -407,7 +423,8 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
       fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
 
       const alert = await step.findByRole("alert");
-      expect(alert).toHaveTextContent(/only the business owner/i);
+      expect(alert).toHaveTextContent(OWNER_ONLY_MESSAGE);
+      expect(alert).not.toHaveTextContent(/settings write/i);
       expect(alert).toHaveTextContent(/ask the business owner/i);
       expect(callsTo("PATCH", businessPath)).toHaveLength(0);
       expect(writes()).toEqual([key("POST", completePath)]);
@@ -428,8 +445,52 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
       expect(writes()).toEqual([key("POST", completePath)]);
     });
 
-    it("a member the server lets finish (settings write): completion first, then the changed profile is saved", async () => {
-      routes[key("GET", mePath)] = SIGNED_IN_AS("usr_k06a_admin");
+    /** A member the server refuses: the ask-the-owner notice, and nothing changed. */
+    async function expectAskTheOwner(step: ReturnType<typeof within>) {
+      const alert = await step.findByRole("alert");
+      expect(alert).toHaveTextContent(OWNER_ONLY_MESSAGE);
+      expect(alert).not.toHaveTextContent(/settings write/i);
+      expect(alert).toHaveTextContent(/ask the business owner/i);
+      expect(alert).toHaveTextContent(/nothing was changed/i);
+      expect(callsTo("PATCH", businessPath)).toHaveLength(0);
+      expect(writes()).toEqual([key("POST", completePath)]);
+      expect(step.queryByRole("button", { name: /finish setup/i })).not.toBeInTheDocument();
+      expect(nav.router.replace).not.toHaveBeenCalledWith("/app/command-center");
+    }
+
+    it("R0-SEC-04: an ADMIN granted settings write is refused (403 ONBOARDING_COMPLETE_FORBIDDEN): the ask-the-owner notice, and the changed profile is not saved", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS(ADMIN);
+      routes[key("POST", completePath)] = COMPLETE_FORBIDDEN;
+      renderPage();
+      const step = await manualStep();
+      await prefilled(step);
+      await fillProfile(step, { name: "k06a Bread House", currency: "usd", timezone: "America/New_York" });
+      fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+      await expectAskTheOwner(step);
+    });
+
+    it("R0-SEC-04: an ADMIN granted settings write, with the stored profile unchanged, is refused: the ask-the-owner notice, and nothing changes", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS(ADMIN);
+      routes[key("POST", completePath)] = COMPLETE_FORBIDDEN;
+      renderPage();
+      const step = await manualStep();
+      await prefilled(step);
+      fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+      await expectAskTheOwner(step);
+    });
+
+    it("R0-SEC-04: a refusal without a server message falls back to the owner-only copy", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS(ADMIN);
+      routes[key("POST", completePath)] = json(403, { statusCode: 403, code: "ONBOARDING_COMPLETE_FORBIDDEN" });
+      renderPage();
+      const step = await manualStep();
+      await prefilled(step);
+      fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
+      await expectAskTheOwner(step);
+    });
+
+    it("an owner the browser cannot recognise (an OWNER membership, not Business.ownerId), whom the server admits: completion first, then the changed profile is saved", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS(CO_OWNER);
       renderPage();
       const step = await manualStep();
       await prefilled(step);
@@ -440,8 +501,8 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
       expect(callsTo("PATCH", businessPath)[0].body).toEqual({ name: "k06a Bread House", currency: "USD", timezone: "America/New_York" });
     });
 
-    it("a member the server lets finish, with the stored profile unchanged: completion only, no PATCH", async () => {
-      routes[key("GET", mePath)] = SIGNED_IN_AS("usr_k06a_admin");
+    it("that owner, with the stored profile unchanged: completion only, no PATCH", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS(CO_OWNER);
       renderPage();
       const step = await manualStep();
       await prefilled(step);
@@ -450,8 +511,8 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
       expect(writes()).toEqual([key("POST", completePath)]);
     });
 
-    it("ONBOARDING_PROFILE_INCOMPLETE proves the member may finish: the profile is saved, then completion asked again", async () => {
-      routes[key("GET", mePath)] = SIGNED_IN_AS("usr_k06a_admin");
+    it("ONBOARDING_PROFILE_INCOMPLETE proves that owner may finish: the profile is saved, then completion asked again", async () => {
+      routes[key("GET", mePath)] = SIGNED_IN_AS(CO_OWNER);
       let asked = 0;
       routes[key("POST", completePath)] = () => (++asked === 1 ? PROFILE_INCOMPLETE : COMPLETE_OK);
       renderPage();

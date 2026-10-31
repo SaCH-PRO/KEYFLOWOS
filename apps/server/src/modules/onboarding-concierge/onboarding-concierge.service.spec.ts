@@ -65,6 +65,8 @@ function makeService(overrides: {
   integrity?: { threePillarMinimumMet: boolean; genomeDnaScores?: Record<string, number> };
   membership?: { role: string; permissionScopes?: Record<string, string> | null } | null;
   userRole?: string;
+  /** Rows the completion claim (the conditional update in the transaction) matches: 0 when another completion won. */
+  claimCount?: number;
 } = {}) {
   const tx = {
     product: {
@@ -74,6 +76,7 @@ function makeService(overrides: {
       findUnique: vi.fn().mockResolvedValue(overrides.business ?? {}),
       findFirst: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: overrides.claimCount ?? 1 }),
     },
     contact: {
       findFirst: vi.fn().mockResolvedValue(null),
@@ -395,6 +398,7 @@ describe('OnboardingConciergeService', () => {
       const error = await asUser('user_member', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
       expectRefused(error, prisma, demoSeeder);
       expect(tx.business.update).not.toHaveBeenCalled();
+      expect(tx.business.updateMany).not.toHaveBeenCalled();
       expect(tx.teamActivityLog.create).not.toHaveBeenCalled();
     });
 
@@ -440,19 +444,17 @@ describe('OnboardingConciergeService', () => {
       ]);
     });
 
-    // Review ST-R032-2: the D-03 invariant "onboarding completes only on a valid
-    // minimal profile, by an authorised actor" holds on POST /complete, but the
-    // generic profile PATCH still bypasses it. The fix is outside this packet's
-    // write set (identity.controller.ts updateBusiness, identity.service.ts
-    // updateBusiness input type and nonStringFields, dto/update-business.dto.ts)
-    // and is R0-09-ID-HARDEN's (D-11 owner-only profile). R0-SEC-03 review
-    // SEC03-1: D-11 completion is closed end to end only once R0-09 lands.
-    it.todo(
-      'ST-R032-2: PATCH /identity/businesses/:id cannot set onboardingComplete or blank name/currency/timezone, and STAFF cannot change them (R0-09-ID-HARDEN)',
-    );
-    it.todo(
-      'R0-SEC-03 SEC03-1: a non-owner PATCH /identity/businesses/:id cannot clear onboardingComplete on a business the owner completed, so the owner\'s /complete does not run again (R0-09-ID-HARDEN)',
-    );
+    // Review ST-R032-2 / R0-SEC-03 SEC03-1: the generic profile PATCH used to
+    // bypass /complete by writing onboardingComplete. R0-09-ID-HARDEN closed it
+    // (owner-only PATCH, onboardingComplete dropped from UpdateBusinessDto). The
+    // two it.todo cases that waited for it are now real-database cases, on the
+    // built server, in test/onboarding-manual-complete.integration.test.ts
+    // (block "R0-SEC-04 SEC03-1 closure"): a STAFF member and a settings:write
+    // ADMIN cannot set the flag, the owner's profile write still applies with
+    // the flag dropped, and no one's {onboardingComplete: false} un-completes a
+    // completed business. (The owner may still blank name, currency or
+    // timezone through the PATCH; /complete checks them, and a completed
+    // business stays complete.)
 
     // R0-SEC-03 review SEC03-1, the part inside this write set: completion does
     // not trust an onboardingComplete flag written outside it (the profile PATCH
@@ -474,14 +476,54 @@ describe('OnboardingConciergeService', () => {
       const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
       expect(result).toMatchObject({ complete: true });
       expect((result as { alreadyComplete?: boolean }).alreadyComplete).toBeUndefined();
-      expect(tx.business.update).toHaveBeenCalledWith(expect.objectContaining({
-        where: { id: 'biz_1' },
+      // R0-SEC-04 SEC03-2: the completion is written by the claim, a conditional
+      // update that a flag without onboardingCompletedAt still matches.
+      expect(tx.business.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'biz_1', OR: [{ onboardingComplete: false }, { onboardingCompletedAt: null }] },
         data: expect.objectContaining({ onboardingComplete: true, onboardingCompletedAt: expect.any(Date) }),
       }));
       expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
       expect(tx.teamActivityLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ userId: 'user_owner', action: 'onboarding_completed' }),
       });
+    });
+
+    // R0-SEC-04 SEC03-2: concurrent completions. The already-complete read
+    // before the transaction cannot stop two calls that both read "not
+    // complete"; each then wrote its own onboarding_completed row. The claim is
+    // a conditional update inside the completion transaction, made before
+    // anything else is written; when it matches no row, another completion
+    // won, and this call answers alreadyComplete and writes nothing more.
+    it('R0-SEC-04 SEC03-2: completion claims the business with a conditional update, first in the transaction', async () => {
+      const { service, tx, demoSeeder } = makeService({ business: { ...minimalProfile, ownerId: 'user_owner' } });
+      const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
+      expect(result).toMatchObject({ complete: true });
+      expect((result as { alreadyComplete?: boolean }).alreadyComplete).toBeUndefined();
+      expect(tx.business.updateMany).toHaveBeenCalledTimes(1);
+      expect(tx.business.updateMany).toHaveBeenCalledWith({
+        where: { id: 'biz_1', OR: [{ onboardingComplete: false }, { onboardingCompletedAt: null }] },
+        data: { onboardingComplete: true, onboardingCompletedAt: expect.any(Date), onboardingStep: 'complete' },
+      });
+      // The claim precedes the demo seed and the activity row.
+      const claimedAt = tx.business.updateMany.mock.invocationCallOrder[0];
+      expect((demoSeeder.seedDemoData as unknown as { mock: { invocationCallOrder: number[] } }).mock.invocationCallOrder[0]).toBeGreaterThan(claimedAt);
+      expect(tx.teamActivityLog.create.mock.invocationCallOrder[0]).toBeGreaterThan(claimedAt);
+    });
+
+    it('R0-SEC-04 SEC03-2: when the claim matches no row (a concurrent completion won), the call answers alreadyComplete and writes nothing more', async () => {
+      const { service, tx, demoSeeder, blueprint } = makeService({
+        business: { ...minimalProfile, ownerId: 'user_owner' },
+        blueprint: EMPTY_BLUEPRINT,
+        claimCount: 0,
+      });
+      (blueprint as unknown as { updateBlueprint: unknown }).updateBlueprint = vi.fn().mockResolvedValue({});
+      const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
+      expect(result).toEqual({ complete: true, alreadyComplete: true });
+      expect(tx.business.updateMany).toHaveBeenCalledTimes(1);
+      expect(demoSeeder.seedDemoData).not.toHaveBeenCalled();
+      expect(tx.business.update).not.toHaveBeenCalled();
+      expect((blueprint as unknown as { updateBlueprint: ReturnType<typeof vi.fn> }).updateBlueprint).not.toHaveBeenCalled();
+      expect(tx.teamActivityLog.create).not.toHaveBeenCalled();
     });
 
     it('ST-R032-1: a disclaimer accepted earlier is not re-attributed', async () => {
