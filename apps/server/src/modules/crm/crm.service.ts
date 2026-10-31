@@ -468,6 +468,51 @@ export class CrmService {
     });
   }
 
+  /**
+   * The member's CRM access, refusing a member who may not create contacts.
+   * The same M7 edit scope updateContact enforces: a member whose crm_edit is
+   * 'none' passes the module guard on crm:write but may not write contacts.
+   * Callers run it before anything is written (createContact, and the import
+   * routes before they open an import job, fetch a link or call the vision
+   * model).
+   */
+  async assertCanCreateContacts(businessId: string, actorUserId: string): Promise<CrmAccess> {
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    if (!access.isOwner && !access.isSuperAdmin && access.editScope === 'none') {
+      throw new ForbiddenException('You do not have permission to create contacts');
+    }
+    return access;
+  }
+
+  /**
+   * The contacts `actorUserId` may edit, as a where clause: visible to them
+   * (the list and detail visibility clause) and inside their edit scope ('owned'
+   * means owned by or shared with them). Null when they may edit every contact
+   * of the tenant (OWNER, SUPER_ADMIN).
+   */
+  private editableContactClause(access: CrmAccess, actorUserId: string): Prisma.ContactWhereInput | null {
+    if (access.isOwner || access.isSuperAdmin) return null;
+    const clauses: Prisma.ContactWhereInput[] = [];
+    const visClause = visibilityClause(access, actorUserId);
+    if (visClause) clauses.push(visClause as Prisma.ContactWhereInput);
+    if (access.editScope !== 'any') {
+      clauses.push({ OR: [{ ownerId: actorUserId }, { shares: { some: { userId: actorUserId } } }] });
+    }
+    return clauses.length > 0 ? { AND: clauses } : null;
+  }
+
+  /**
+   * True when `access` reaches only contacts the member owns or that are shared
+   * with them (crm_edit 'owned', or crm_view 'owned'). An ownerless contact is
+   * outside editableContactClause for such a member, so a contact they create
+   * through an import is made theirs; otherwise they could not open, merge into
+   * or re-import a contact they had just created.
+   */
+  private reachLimitedToOwned(access: CrmAccess): boolean {
+    if (access.isOwner || access.isSuperAdmin) return false;
+    return access.editScope !== 'any' || !access.viewAll;
+  }
+
   async createContact(input: {
     businessId: string;
     firstName?: string | null;
@@ -484,23 +529,17 @@ export class CrmService {
      * The member creating the contact. When provided, createContact enforces
      * that member's M7 CRM permissions (edit scope, assigning another owner)
      * and bounds the holder named in a duplicate-identity 409 to the member's
-     * visibility. Only POST /crm/businesses/:businessId/contacts passes it
-     * today. Callers that omit it (cron, internal jobs, and the import routes
-     * through findOrCreateContact) get none of these checks and receive the
-     * tenant's holder unconditionally.
+     * visibility. POST /crm/businesses/:businessId/contacts passes it, and so
+     * do the import routes (through findOrCreateContact's actor argument).
+     * Callers that omit it (cron, internal jobs, public intake) get none of
+     * these checks and receive the tenant's holder unconditionally.
      */
     actorUserId?: string;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
     if (input.actorUserId) {
-      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      const access = await this.assertCanCreateContacts(input.businessId, input.actorUserId);
       const privileged = access.isOwner || access.isSuperAdmin;
-      // The same M7 edit scope updateContact enforces: a member whose crm_edit
-      // is 'none' passes the module guard on crm:write but may not write
-      // contacts, so creating one is refused before anything is written.
-      if (!privileged && access.editScope === 'none') {
-        throw new ForbiddenException('You do not have permission to create contacts');
-      }
       // Naming someone other than yourself as the owner assigns the contact
       // to them. That needs the permission updateContact and reassignContacts
       // require for an ownership change, and, as in reassignContacts, the
@@ -617,6 +656,28 @@ export class CrmService {
     return contact;
   }
 
+  /**
+   * Find the tenant's contact matching `input` (EntityResolutionService:
+   * email, then phone) and merge the input's missing fields into it, or create
+   * one.
+   *
+   * `actorUserId` is the member on whose behalf this runs (the import routes
+   * pass the requesting member). With it, the member's M7 permissions apply:
+   * a member who may not create contacts is refused 403 before anything is
+   * read or written; a match is merged into, or returned, only when the member
+   * may edit that contact (editableContactClause); otherwise the input goes to
+   * createContact with the same actor, so a colliding email or phone answers
+   * the bounded 409 POST /contacts gives (the holder named only when the member
+   * can open it) and the existing contact is left untouched. The member is
+   * also the audit actor, as on POST /contacts: a created contact's
+   * contact.created event and audit entry name them, and a merge that changes
+   * a contact writes an 'updated' audit entry naming them. A member whose reach
+   * is limited to owned contacts (reachLimitedToOwned) owns the contact an
+   * import creates, so re-importing the same row merges into it. Without an
+   * actor (bookings, intake, store, KEY and other system-context callers) the
+   * lookup is tenant-scoped only, the owner is left unset and no merge audit is
+   * written, as before.
+   */
   async findOrCreateContact(
     businessId: string,
     input: {
@@ -631,7 +692,19 @@ export class CrmService {
       status?: string;
       custom?: any;
     } & Partial<ContactExtraAttributes>,
+    actorUserId?: string,
   ) {
+    let access: CrmAccess | null = null;
+    let editable: Prisma.ContactWhereInput | null = null;
+    if (actorUserId) {
+      access = await this.assertCanCreateContacts(businessId, actorUserId);
+      editable = this.editableContactClause(access, actorUserId);
+    }
+    // The same actor the controller's userAuditContext records for POST /contacts.
+    const audit: AuditContext | undefined = actorUserId ? { actor: { type: 'USER', id: actorUserId } } : undefined;
+    const ownerId = input.ownerId ?? (actorUserId && access && this.reachLimitedToOwned(access) ? actorUserId : null);
+    const scoped = (where: Prisma.ContactWhereInput): Prisma.ContactWhereInput =>
+      (editable ? { ...where, AND: [editable] } : where);
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
       return trimmed ? trimmed : null;
@@ -651,7 +724,7 @@ export class CrmService {
     return this.prisma.client.$transaction(async (tx) => {
       if (matched) {
         const existing = await tx.contact.findFirst({
-          where: { ...contactWhereWithId(businessId, matched.contactId) },
+          where: scoped({ ...contactWhereWithId(businessId, matched.contactId) }),
         });
         if (existing) {
           return this.mergeContactDetails(existing, businessId, {
@@ -663,20 +736,20 @@ export class CrmService {
             source: input.source,
             sourceDetail: input.sourceDetail,
             tags,
-          });
+          }, audit);
         }
       }
 
       if (!email && !phoneNormalized && input.firstName && input.lastName && input.sourceDetail) {
         const recentMatch = await tx.contact.findFirst({
-          where: {
+          where: scoped({
             ...contactWhereBase(businessId),
             firstName: input.firstName,
             lastName: input.lastName,
             source: input.source ?? 'manual',
             sourceDetail: input.sourceDetail,
             createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
-          },
+          }),
           orderBy: { createdAt: 'desc' },
         });
         if (recentMatch) {
@@ -696,13 +769,21 @@ export class CrmService {
         sourceDetail: input.sourceDetail ?? undefined,
         tags,
         ...extraFields,
-      });
+        ...(ownerId ? { ownerId } : {}),
+        ...(actorUserId ? { actorUserId } : {}),
+      }, audit);
     }, { isolationLevel: 'Serializable' });
   }
 
+  /**
+   * Fill `existing`'s empty fields from `input` (and union the tags). With an
+   * audit context (findOrCreateContact on behalf of a member), a merge that
+   * changes the contact writes an 'updated' audit entry naming that actor, as
+   * updateContact does; system-context merges write none, as before.
+   */
   private async mergeContactDetails(
     existing: Contact,
-    _businessId: string,
+    businessId: string,
     input: {
       firstName?: string | null;
       lastName?: string | null;
@@ -713,6 +794,7 @@ export class CrmService {
       sourceDetail?: string | null;
       tags?: string[];
     },
+    audit?: AuditContext,
   ) {
     const data: Record<string, any> = {};
     if (input.firstName && !existing.firstName) data.firstName = sanitize(input.firstName);
@@ -735,10 +817,22 @@ export class CrmService {
     if (Object.keys(data).length === 0) {
       return existing;
     }
-    return this.prisma.client.contact.update({
+    const updated = await this.prisma.client.contact.update({
       where: { id: existing.id },
       data,
     });
+    if (audit) {
+      this.auditContact({
+        businessId,
+        contactId: existing.id,
+        action: 'updated',
+        before: existing as unknown as Record<string, unknown>,
+        after: updated as unknown as Record<string, unknown>,
+        ctx: audit,
+        extraReason: `merged ${input.source ?? 'unknown'} input into existing contact`,
+      });
+    }
+    return updated;
   }
 
   async updateContact(input: {
