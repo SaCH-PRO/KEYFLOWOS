@@ -9,6 +9,7 @@ import {
   setStoredTokenExpiry,
   setStoredBusinessId,
   getStoredBusinessId,
+  restoreBusinessChoice,
 } from "@/lib/workspace";
 import { apiPatch } from "@/lib/api";
 import { clearOAuthState } from "@/lib/oauth-state";
@@ -182,6 +183,9 @@ function AuthCallbackInner() {
           phone: existingDraft.phone || "",
         };
         window.localStorage.setItem("kf_profile_draft", JSON.stringify(profileDraft));
+        // Bootstrap answers with the oldest owned business and stores it; the
+        // choice held before sign-in is put back below when still a membership.
+        const previousBusinessId = getStoredBusinessId();
         const bootstrap = await bootstrapIdentity({
           email,
           name: fullName || `${profileDraft.firstName} ${profileDraft.lastName}`.trim(),
@@ -211,6 +215,7 @@ function AuthCallbackInner() {
               phone: profileDraft.phone || undefined,
             });
           }
+          if (!bootstrap.data.isNewBusiness) await restoreBusinessChoice(previousBusinessId);
         } else if (bootstrap.errorCode === "account_email_conflict") {
           setConflictEmail(email ?? null);
           setErrorKind("account_email_conflict");

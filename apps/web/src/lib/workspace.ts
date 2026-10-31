@@ -277,42 +277,171 @@ export function clearStoredBusinessId() {
   businessCache = null;
 }
 
+export const BUSINESS_CHANGED_EVENT = "kf:business-changed";
+
+/**
+ * Bumped by every selectBusiness(). A resolution that started under an older
+ * generation was answering for the previous choice: it writes nothing and
+ * hands over to a fresh one, so no caller is told the old business after a
+ * switch and the caches are never written back with it.
+ */
+let selectionGeneration = 0;
+let lastSelectedBusinessId: string | null = null;
+let resolvePromise: Promise<string | null> | null = null;
+
+/**
+ * The one place a user's business choice is written: localStorage and the
+ * `kf_business_id` cookie, with the business and user caches dropped (both
+ * describe the previous business) and `kf:business-changed` announced so the
+ * app shell re-resolves.
+ */
+export function selectBusiness(id: string) {
+  if (typeof window === "undefined") return;
+  selectionGeneration += 1;
+  lastSelectedBusinessId = id;
+  // A resolution already in flight answers for the previous choice; callers
+  // from here on get a new one (it hands over on its own when it lands).
+  resolvePromise = null;
+  setStoredBusinessId(id);
+  window.localStorage.removeItem(BUSINESS_CACHE_KEY);
+  window.localStorage.removeItem(USER_CACHE_KEY);
+  businessCache = null;
+  userCache = null;
+  window.dispatchEvent(new CustomEvent(BUSINESS_CHANGED_EVENT, { detail: { businessId: id } }));
+}
+
+/**
+ * Authenticated GET with the same plain-fetch pattern as refreshAccessToken
+ * above (client.ts is not imported for this: it imports this file). One retry
+ * after a token refresh on 401. Returns null when the answer is unavailable.
+ */
+async function getWithSession(path: string): Promise<unknown> {
+  const send = () => {
+    const token = window.localStorage.getItem(TOKEN_KEY);
+    return fetch(`${getApiBase()}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  };
+  try {
+    let res = await send();
+    if (res.status === 401 && (await refreshAccessToken())) res = await send();
+    if (!res.ok) return null;
+    return await res.json().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+/** GET /identity/businesses: every business the caller owns or is a member of. null = unavailable. */
+export async function listMyBusinesses(): Promise<CachedBusiness[] | null> {
+  if (typeof window === "undefined") return null;
+  const data = await getWithSession("/identity/businesses");
+  if (!Array.isArray(data)) return null;
+  return data.filter(
+    (b): b is CachedBusiness => !!b && typeof b === "object" && typeof (b as CachedBusiness).id === "string",
+  );
+}
+
+async function bootstrapFirstBusiness(
+  generation: number,
+  onSuperseded: () => Promise<string | null>,
+): Promise<string | null> {
+  const result = await bootstrapIdentity({});
+  if (generation !== selectionGeneration) {
+    // bootstrapIdentity (client.ts) has just written its own pick over a
+    // choice made while it ran: put that choice back and resolve it instead.
+    if (lastSelectedBusinessId) setStoredBusinessId(lastSelectedBusinessId);
+    return onSuperseded();
+  }
+  const business = result.data?.business;
+  if (!business?.id) return null;
+  setStoredBusinessId(business.id);
+  setCachedBusiness(business as CachedBusiness);
+  if (result.data?.user) setCachedUser(result.data.user as CachedUser);
+  return business.id;
+}
+
+/**
+ * Membership-first resolution. The first of `preferred` that is one of the
+ * caller's memberships wins; otherwise the first listed membership. Bootstrap
+ * (which answers with the oldest OWNED business and would overwrite a choice)
+ * runs only when the caller has no membership at all. An unavailable list
+ * keeps whatever is stored rather than bootstrapping blind.
+ *
+ * Nothing is written when the choice moved while the lists were in flight (a
+ * selectBusiness(), or any other write of the stored id): `onSuperseded`
+ * answers instead, from the choice as it now stands.
+ */
+async function resolveBusinessSelection(
+  preferred: (string | null)[],
+  onSuperseded: () => Promise<string | null>,
+): Promise<string | null> {
+  if (!window.localStorage.getItem(TOKEN_KEY)) return null;
+  const generation = selectionGeneration;
+  const stored = getStoredBusinessId();
+  const [businesses, me] = await Promise.all([listMyBusinesses(), getWithSession("/identity/me")]);
+  if (generation !== selectionGeneration || getStoredBusinessId() !== stored) return onSuperseded();
+  const user = me && typeof me === "object" && typeof (me as CachedUser).id === "string" ? (me as CachedUser) : null;
+
+  if (businesses === null) {
+    if (user) setCachedUser(user);
+    return stored;
+  }
+  if (businesses.length === 0) return bootstrapFirstBusiness(generation, onSuperseded);
+
+  const chosen =
+    preferred.map((id) => businesses.find((b) => b.id === id)).find((b) => b !== undefined) ??
+    businesses[0];
+  if (chosen.id !== stored) setStoredBusinessId(chosen.id);
+  setCachedBusiness(chosen);
+  if (user) setCachedUser(user);
+  return chosen.id;
+}
+
+/**
+ * Re-validate the stored business against the caller's memberships (see
+ * resolveBusinessSelection). Concurrent callers share one round trip, so an
+ * empty list bootstraps once however many screens ask at the same moment. A
+ * round trip overtaken by a switch is not shared any more, and its own callers
+ * are answered by the resolution of the new choice.
+ */
+export function refreshWorkspace(): Promise<string | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (resolvePromise) return resolvePromise;
+  const promise: Promise<string | null> = resolveBusinessSelection([getStoredBusinessId()], () => {
+    if (resolvePromise === promise) resolvePromise = null;
+    return refreshWorkspace();
+  }).finally(() => {
+    if (resolvePromise === promise) resolvePromise = null;
+  });
+  resolvePromise = promise;
+  return promise;
+}
+
+/** The stored business, or a membership-first resolution when nothing is stored. */
 export async function ensureWorkspace(): Promise<string | null> {
   if (typeof window === "undefined") return null;
   const existing = getStoredBusinessId();
   if (existing) return existing;
-
-  const token = window.localStorage.getItem(TOKEN_KEY);
-  if (!token) return null;
-
-  const result = await bootstrapIdentity({});
-  if (result.data?.business?.id) {
-    setStoredBusinessId(result.data.business.id);
-    setCachedBusiness(result.data.business as CachedBusiness);
-    if (result.data.user) {
-      setCachedUser(result.data.user as CachedUser);
-    }
-    return result.data.business.id;
-  }
-  return null;
+  return refreshWorkspace();
 }
 
-export async function refreshWorkspace(): Promise<string | null> {
+/**
+ * Sign-in flows still bootstrap (it creates or reconciles the User row), and
+ * bootstrap writes its own pick. Called right after, with the id held before
+ * sign-in, this puts that choice back when it is still one of the caller's
+ * memberships; otherwise bootstrap's pick stands.
+ */
+export async function restoreBusinessChoice(previous: string | null): Promise<string | null> {
   if (typeof window === "undefined") return null;
-
-  const token = window.localStorage.getItem(TOKEN_KEY);
-  if (!token) return null;
-
-  const result = await bootstrapIdentity({});
-  if (result.data?.business?.id) {
-    setStoredBusinessId(result.data.business.id);
-    setCachedBusiness(result.data.business as CachedBusiness);
-    if (result.data.user) {
-      setCachedUser(result.data.user as CachedUser);
-    }
-    return result.data.business.id;
-  }
-  return null;
+  const current = getStoredBusinessId();
+  if (!previous || previous === current) return current;
+  const generation = selectionGeneration;
+  // An explicit switch made meanwhile wins over the restore; any other write
+  // of the stored id just means trying the restore again against it.
+  return resolveBusinessSelection([previous, current], () =>
+    generation !== selectionGeneration ? refreshWorkspace() : restoreBusinessChoice(previous),
+  );
 }
 
 export function getCachedAdminUser(): CachedUser | null {
