@@ -2,8 +2,15 @@ import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/comm
 import { createPublicKey, KeyObject } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { jwtVerify } from 'jose';
+import { Redis } from 'ioredis';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
+import {
+  LOGOUT_REVOCATION_TTL_SECONDS,
+  logoutRevocationKey,
+  logoutRevocationValue,
+} from '../../core/auth/auth.middleware';
+import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { AuthSecurityService } from '../identity/auth-security.service';
 import {
   RiscDiscoveryDocument,
@@ -14,6 +21,28 @@ import {
 } from './risc.types';
 
 const RISC_CONFIG_URL = 'https://accounts.google.com/.well-known/risc-configuration';
+
+/**
+ * How long a session-ending RISC event bans the user at Supabase, in seconds.
+ *
+ * A RISC event carries no user JWT, and the installed auth-js (2.94.0) admin
+ * API has no call that ends sessions by user id: admin.signOut(jwt, scope)
+ * takes the user's ACCESS JWT as the bearer of POST /logout (handing it the
+ * user id is the CR-2 defect), and there is no admin sessions API. The call it
+ * has that takes a user id is admin.updateUserById, whose
+ * AdminUserAttributes.ban_duration bans the user for a Go duration; a banned
+ * user's refresh tokens are not renewed while the ban lasts.
+ *
+ * Long enough that every live client meets it: a default Supabase access token
+ * lives 1h, so a client holding one issued just before the event must refresh
+ * within the ban, is refused, and auth-js drops that session. Not longer than
+ * that plus a margin: a ban also refuses NEW sign-ins, and the event is a
+ * signal to end sessions, not to suspend the account (the local cutoff
+ * deliberately lets a session authenticated after it through). The local
+ * logout cutoff, not the ban, is what refuses a pre-event session's tokens at
+ * this API for LOGOUT_REVOCATION_TTL_SECONDS.
+ */
+const RISC_PROVIDER_BAN_SECONDS = 60 * 60 + 5 * 60;
 
 type VerificationKey = KeyObject | CryptoKey;
 
@@ -39,6 +68,7 @@ export class RiscService {
     @Inject(SupabaseAdminService) private readonly supabaseAdmin: SupabaseAdminService,
     @Inject(AuthSecurityService) private readonly authSecurity: AuthSecurityService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   onApplicationBootstrap() {
@@ -311,9 +341,35 @@ export class RiscService {
   }
 
   /**
-   * End all local sessions and revoke Supabase sessions for the user.
+   * End the user's sessions: here, in the local Session rows, and at Supabase.
+   *
+   * A RISC event carries no user JWT, so the provider cannot be asked to sign
+   * the user out (admin.signOut takes the user's ACCESS JWT as the bearer of
+   * POST /logout; until R0-ID-F7 this passed the user id, GoTrue refused it,
+   * and no event ever revoked a Supabase session: R0-ID-F4 review F4-C, the
+   * CR-2 shape). Instead, in this order:
+   *
+   *   1. The logout cutoff POST /identity/logout writes
+   *      (auth:revoked:user:<id>, the revocation time in epoch seconds, for
+   *      LOGOUT_REVOCATION_TTL_SECONDS): AuthMiddleware refuses every token of
+   *      a session authenticated up to now, including one a refresh mints
+   *      later, and attaches a session authenticated after it. Written FIRST,
+   *      so nothing the provider does (fail, throw, hang) stands in its way.
+   *   2. The local Session rows.
+   *   3. The provider: admin.updateUserById(id, { ban_duration }), the
+   *      installed admin call that takes a user id, so Supabase refuses to
+   *      renew the user's sessions while the ban lasts (RISC_PROVIDER_BAN_SECONDS).
+   *
+   * Each leg's failure is logged and does not skip the next. Admin local-auth
+   * tokens (admin:user:<id>:revokedAt) are not touched here.
    */
   private async terminateUserSessions(userId: string): Promise<void> {
+    try {
+      await this.redis.setex(logoutRevocationKey(userId), LOGOUT_REVOCATION_TTL_SECONDS, logoutRevocationValue(Date.now()));
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to write the logout cutoff for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     try {
       await this.prisma.client.session.deleteMany({ where: { userId } });
     } catch (err: unknown) {
@@ -323,13 +379,17 @@ export class RiscService {
     if (this.supabaseAdmin.isConfigured()) {
       try {
         const client = this.supabaseAdmin.getClient();
-        const { error } = await client.auth.admin.signOut(userId, 'global');
+        const { error } = await client.auth.admin.updateUserById(userId, {
+          ban_duration: `${RISC_PROVIDER_BAN_SECONDS}s`,
+        });
         if (error) {
-          this.logger.warn(`Supabase global sign-out failed for ${userId}: ${error.message}`);
+          this.logger.warn(`Supabase session ban failed for ${userId}: ${error.message}`);
         }
       } catch (err: unknown) {
-        this.logger.warn(`Supabase sign-out threw for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.warn(`Supabase session ban threw for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
       }
+    } else {
+      this.logger.warn(`Supabase session ban not attempted for ${userId}: Supabase admin client not configured`);
     }
   }
 
