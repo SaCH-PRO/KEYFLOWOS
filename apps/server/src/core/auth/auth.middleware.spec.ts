@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import type { Request, Response } from 'express';
-import { AuthMiddleware } from './auth.middleware';
+import { AuthMiddleware, logoutRevocationCutoff } from './auth.middleware';
 import { buildAdminToken } from './admin-token.util';
 import { IdentityController } from '../../modules/identity/identity.controller';
 
@@ -352,6 +352,12 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
  * leaves it alone, and the middleware refuses a token whose iat is at or before
  * that time (or that carries no iat at all) while a token issued after it is
  * attached.
+ *
+ * Review repairs: the time compared is when the token's SESSION was
+ * authenticated (amr), not its iat, so a pre-logout session refreshed after the
+ * logout stays refused while the provider sign-out revokes nothing (ST4-R1, F1);
+ * and a bare '1' left by the previous release is read by its TTL as the time it
+ * was written, so it no longer locks the next login out (F2).
  */
 describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user flag', () => {
   const USER = 'u_st4';
@@ -364,14 +370,20 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
   const jwt = (claims: Record<string, unknown>) =>
     `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, aud: 'authenticated', ...claims })}.sig`;
 
-  /** One Redis keyspace shared by the writer (IdentityController) and the reader (AuthMiddleware). */
-  function memoryRedis(initial: Record<string, string> = {}) {
+  /**
+   * One Redis keyspace shared by the writer (IdentityController) and the reader
+   * (AuthMiddleware). `initialTtl` seeds remaining TTLs in seconds; time does not
+   * run them down (only Date is faked).
+   */
+  function memoryRedis(initial: Record<string, string> = {}, initialTtl: Record<string, number> = {}) {
     const store = new Map<string, string>(Object.entries(initial));
-    const ttl = new Map<string, number>();
+    const ttl = new Map<string, number>(Object.entries(initialTtl));
     return {
       store,
       ttl,
       get: vi.fn(async (k: string) => store.get(k) ?? null),
+      // Redis semantics: remaining ms, -1 when the key has no TTL, -2 when it does not exist.
+      pttl: vi.fn(async (k: string) => (!store.has(k) ? -2 : ttl.has(k) ? ttl.get(k)! * 1000 : -1)),
       setex: vi.fn(async (k: string, seconds: number, v: string) => {
         store.set(k, String(v));
         ttl.set(k, seconds);
@@ -457,10 +469,126 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
       expect(await attached(unmarked, 'opaque-token'), 'no marker: opaque token still attached').toBeTruthy();
     });
 
-    it("backward compatible: the previous release's bare flag ('1') is a revocation at an unknown time, so every token issued up to now is refused", async () => {
+    it("backward compatible: the previous release's bare flag ('1') with no readable TTL is a revocation at an unknown time, so every token issued up to now is refused", async () => {
       const { mw } = middleware(marker('1'));
       expect(await attached(mw, jwt({ iat: NOW_S - 3600, exp: NOW_S + 60 })), 'issued an hour ago').toBeUndefined();
       expect(await attached(mw, jwt({ iat: NOW_S, exp: NOW_S + 3600 })), 'issued this second').toBeUndefined();
+    });
+
+    /**
+     * Review findings ST4-R1 / F1. Supabase mints a new access token, with a new
+     * iat, every time a session's refresh token is used, and the provider
+     * sign-out does not revoke refresh tokens today (CR-2). With an iat cutoff,
+     * any surviving refresh token — another device, or a stolen one — got back
+     * in on its next refresh after the logout, with no login in between. The
+     * cutoff is compared against when the token's SESSION was authenticated.
+     */
+    describe('the cutoff is when the token’s session was authenticated (amr), not when the token was minted (iat)', () => {
+      const pw = (timestamp: number) => ({ method: 'password', timestamp });
+
+      it('refuses a token minted AFTER the logout by refreshing a session authenticated BEFORE it; attaches a token of a session authenticated after it', async () => {
+        const { mw } = middleware(marker(String(NOW_S)));
+        const refreshed = jwt({ iat: NOW_S + 300, exp: NOW_S + 3900, session_id: 's-before', amr: [pw(NOW_S - 600)] });
+        expect(await attached(mw, refreshed), 'pre-logout session, refreshed after the logout').toBeUndefined();
+        const relogin = jwt({ iat: NOW_S + 300, exp: NOW_S + 3900, session_id: 's-after', amr: [pw(NOW_S + 200)] });
+        expect(await attached(mw, relogin), 'session authenticated after the logout').toEqual({
+          id: USER,
+          email: 'st4@example.com',
+          role: 'OWNER',
+        });
+      });
+
+      it('a session authenticated in the same second as the logout is refused (at or before is refused)', async () => {
+        const { mw } = middleware(marker(String(NOW_S)));
+        expect(await attached(mw, jwt({ iat: NOW_S + 60, exp: NOW_S + 3660, session_id: 's', amr: [pw(NOW_S)] }))).toBeUndefined();
+      });
+
+      it('an MFA step-up after the logout does not revive a pre-logout session: the earliest amr entry is the session start', async () => {
+        const { mw } = middleware(marker(String(NOW_S)));
+        const token = jwt({
+          iat: NOW_S + 120,
+          exp: NOW_S + 3720,
+          session_id: 's-before',
+          amr: [{ method: 'totp', timestamp: NOW_S + 100 }, pw(NOW_S - 600)],
+        });
+        expect(await attached(mw, token)).toBeUndefined();
+      });
+
+      it('a session token (session_id) that does not say when its session began is refused while a marker exists, whatever its iat; attached with no marker', async () => {
+        const cases: Array<[string, Record<string, unknown>]> = [
+          ['no amr', { session_id: 's1' }],
+          ['empty amr', { session_id: 's1', amr: [] }],
+          ['amr without timestamps', { session_id: 's1', amr: [{ method: 'password' }] }],
+          ['amr as plain strings', { session_id: 's1', amr: ['pwd'] }],
+          ['one amr entry without a timestamp', { session_id: 's1', amr: [pw(NOW_S + 200), { method: 'totp' }] }],
+        ];
+        const { mw } = middleware(marker(String(NOW_S)));
+        const { mw: unmarked } = middleware(memoryRedis());
+        for (const [label, claims] of cases) {
+          const token = jwt({ iat: NOW_S + 300, exp: NOW_S + 3900, ...claims });
+          expect(await attached(mw, token), `${label}: refused with a marker`).toBeUndefined();
+          expect(await attached(unmarked, token), `${label}: attached with no marker`).toBeTruthy();
+        }
+      });
+
+      it('never later than iat: an amr timestamp after the token iat does not move the session start past it', async () => {
+        const { mw } = middleware(marker(String(NOW_S)));
+        expect(await attached(mw, jwt({ iat: NOW_S - 10, exp: NOW_S + 3590, session_id: 's', amr: [pw(NOW_S + 500)] }))).toBeUndefined();
+      });
+    });
+
+    /**
+     * Review finding F2. The previous release wrote the marker only as
+     * setex(key, 86400, '1'). Read as "revoked now" on every request, it locked
+     * out a user who logged out in the 24h before the deploy: the next login
+     * answered 'authenticated' and every token it issued got a 401. Its PTTL
+     * still says when it was written.
+     */
+    describe("the previous release's bare flag ('1') is read by its TTL as the time it was written", () => {
+      const KEY = `auth:revoked:user:${USER}`;
+      /** A bare '1' written `agoS` seconds before NOW by setex(key, 86400, '1'). */
+      const legacy = (agoS: number) => memoryRedis({ [KEY]: '1' }, { [KEY]: DAY_S - agoS });
+
+      it('written 10 minutes ago: a session authenticated after it is attached; one authenticated before it, or within the 1s margin, is refused', async () => {
+        const { mw } = middleware(legacy(600));
+        const session = (startedAt: number) =>
+          jwt({ iat: NOW_S, exp: NOW_S + 3600, session_id: `s${startedAt}`, amr: [{ method: 'password', timestamp: startedAt }] });
+        expect(await attached(mw, session(NOW_S - 300)), 'login 5 minutes ago, after the legacy logout').toBeTruthy();
+        expect(await attached(mw, jwt({ iat: NOW_S - 300, exp: NOW_S + 3300 })), 'no-session token minted after it').toBeTruthy();
+        expect(await attached(mw, session(NOW_S - 900)), 'session from before the legacy logout').toBeUndefined();
+        expect(await attached(mw, session(NOW_S - 600)), 'the second of the legacy logout').toBeUndefined();
+        expect(await attached(mw, session(NOW_S - 599)), 'within the 1s margin').toBeUndefined();
+        expect(await attached(mw, jwt({ iat: NOW_S - 1200, exp: NOW_S + 2400 })), 'access token minted before it').toBeUndefined();
+      });
+
+      it('written this instant (the full 24h left): every token issued up to now is still refused', async () => {
+        const { mw } = middleware(legacy(0));
+        expect(await attached(mw, jwt({ iat: NOW_S, exp: NOW_S + 3600 }))).toBeUndefined();
+      });
+
+      it('fails closed to "revoked now" when the TTL cannot vouch for the write time: no TTL, a TTL over 24h, a PTTL error', async () => {
+        const over = memoryRedis({ [KEY]: '1' }, { [KEY]: DAY_S + 60 });
+        const failing = memoryRedis({ [KEY]: '1' });
+        failing.pttl.mockRejectedValue(new Error('redis down'));
+        for (const [label, redis] of [['no TTL', marker('1')], ['TTL over 24h', over], ['PTTL error', failing]] as const) {
+          const { mw } = middleware(redis);
+          expect(await attached(mw, jwt({ iat: NOW_S, exp: NOW_S + 3600 })), `${label}: token minted now`).toBeUndefined();
+        }
+      });
+
+      it('only the bare flag is read by its TTL; any other value that is not a revocation time is "revoked now", and a revocation time never reads the TTL', async () => {
+        expect(logoutRevocationCutoff('1', NOW_MS, (DAY_S - 600) * 1000)).toBe(NOW_S - 599);
+        expect(logoutRevocationCutoff('2', NOW_MS, (DAY_S - 600) * 1000)).toBe(NOW_S);
+        expect(logoutRevocationCutoff('true', NOW_MS, (DAY_S - 600) * 1000)).toBe(NOW_S);
+        expect(logoutRevocationCutoff('1', NOW_MS, null)).toBe(NOW_S);
+        expect(logoutRevocationCutoff('1', NOW_MS, 0)).toBe(NOW_S);
+        expect(logoutRevocationCutoff(String(NOW_S - 5), NOW_MS, 1000)).toBe(NOW_S - 5);
+
+        const redis = marker(String(NOW_S - 5));
+        const { mw } = middleware(redis);
+        await attached(mw, jwt({ iat: NOW_S, exp: NOW_S + 3600 }));
+        expect(redis.pttl).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -473,12 +601,29 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
    * leg.
    */
   describe('the real logout and login handlers, then the middleware', () => {
-    function controller(redis: MemoryRedis) {
-      const authSec = { enforce: vi.fn(async () => undefined), audit: vi.fn(async () => undefined) };
+    function controller(
+      redis: MemoryRedis,
+      opts: {
+        /** The access token Supabase hands signInWithPassword's caller. */
+        loginToken?: () => string;
+        /** The access token Supabase hands refreshSession's caller. */
+        refreshToken?: () => string;
+        /** What SupabaseAdminService.signOut resolves to: false is its failure report (CR-2: today, always). */
+        signOut?: () => Promise<unknown>;
+      } = {},
+    ) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- audit entries inspected by the cases
+      const authSec = { enforce: vi.fn(async () => undefined), audit: vi.fn(async (_entry: any) => undefined) };
       const signupSvc = {
-        signInWithPassword: vi.fn(async () => ({ userId: USER, email: 'st4@example.com', accessToken: 'fresh', refreshToken: 'r' })),
+        signInWithPassword: vi.fn(async () => ({
+          userId: USER,
+          email: 'st4@example.com',
+          accessToken: opts.loginToken ? opts.loginToken() : 'fresh',
+          refreshToken: 'r',
+        })),
+        refreshSession: vi.fn(async () => ({ accessToken: opts.refreshToken ? opts.refreshToken() : 'refreshed', refreshToken: 'r2' })),
       };
-      const supabaseAdmin = { signOut: vi.fn(async () => undefined) };
+      const supabaseAdmin = { signOut: vi.fn(opts.signOut ?? (async () => undefined)) };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- collaborators the two handlers do not reach
       const unused: any = {};
       const ctrl = new IdentityController(
@@ -499,9 +644,94 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
       return {
         logout: () => ctrl.logout({ id: USER, email: 'st4@example.com' } as never, req),
         login: () => ctrl.login({ email: 'st4@example.com', password: 'pw' }, req),
+        refresh: () => ctrl.refresh({ refreshToken: 'pre-logout-refresh-token' } as never, req),
         signupSvc,
+        supabaseAdmin,
+        authSec,
       };
     }
+
+    /** A Supabase session access token as GoTrue mints it: minted now, carrying its session's id and authentication time. */
+    const sessionToken = (sessionId: string, authenticatedAt: number) => () => {
+      const iat = Math.floor(Date.now() / 1000);
+      return jwt({ iat, exp: iat + 3600, session_id: sessionId, amr: [{ method: 'password', timestamp: authenticatedAt }] });
+    };
+
+    it('ST4-R1 / F1: with the provider sign-out failing as it does today (CR-2: signOut resolves false), a pre-logout session refreshed through the real POST /identity/refresh after the logout is refused, with no login in between; the next login is attached; the audit names the failed leg', async () => {
+      const redis = memoryRedis();
+      const { mw } = middleware(redis);
+      let loginSessionStart = 0;
+      const c = controller(redis, {
+        signOut: async () => false,
+        // Supabase refreshes the pre-logout session s-before (authenticated 10 minutes before the logout).
+        refreshToken: sessionToken('s-before', NOW_S - 600),
+        // The next login opens a new session, authenticated when it happens.
+        loginToken: () => sessionToken('s-after', (loginSessionStart = Math.floor(Date.now() / 1000)))(),
+      });
+      const t1 = sessionToken('s-before', NOW_S - 600)();
+      expect(await attached(mw, t1), 'T1 before logout').toBeTruthy();
+
+      await c.logout();
+      expect(c.supabaseAdmin.signOut).toHaveBeenCalledWith(USER, 'global');
+      expect(await attached(mw, t1), 'T1 after logout').toBeUndefined();
+      expect(c.authSec.audit).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'logout', outcome: 'success', reason: 'revocation_incomplete: provider_signout' }),
+      );
+
+      vi.setSystemTime(NOW_MS + 5_000);
+      const refreshed = (await c.refresh()) as { accessToken: string };
+      expect(c.signupSvc.refreshSession).toHaveBeenCalledTimes(1);
+      expect(await attached(mw, refreshed.accessToken), 'pre-logout session refreshed after the logout').toBeUndefined();
+
+      vi.setSystemTime(NOW_MS + 65_000);
+      const again = (await c.refresh()) as { accessToken: string };
+      expect(await attached(mw, again.accessToken), 'refreshed again a minute later').toBeUndefined();
+
+      const out = (await c.login()) as { accessToken: string };
+      expect(loginSessionStart).toBe(NOW_S + 65);
+      expect(await attached(mw, out.accessToken), 'the next login').toEqual({ id: USER, email: 'st4@example.com', role: 'OWNER' });
+      expect(await attached(mw, again.accessToken), 'the pre-logout session, after the next login').toBeUndefined();
+    });
+
+    it('a logout whose provider sign-out succeeds is audited without a reason; one whose marker write fails is audited as an error', async () => {
+      const ok = controller(memoryRedis(), { signOut: async () => true });
+      await ok.logout();
+      expect(ok.authSec.audit).toHaveBeenCalledWith(expect.objectContaining({ event: 'logout', outcome: 'success', reason: undefined }));
+
+      const broken = memoryRedis();
+      broken.setex.mockRejectedValue(new Error('redis down'));
+      const failing = controller(broken, { signOut: async () => false });
+      await expect(failing.logout()).resolves.toEqual({ status: 'logged_out' });
+      expect(failing.authSec.audit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'logout',
+          outcome: 'error',
+          reason: 'revocation_incomplete: provider_signout, revocation_marker',
+        }),
+      );
+    });
+
+    it("F2: a bare '1' left by a logout 10 minutes before the deploy — the real login's token is attached, a session from before that logout stays refused", async () => {
+      const KEY = `auth:revoked:user:${USER}`;
+      const redis = memoryRedis({ [KEY]: '1' }, { [KEY]: DAY_S - 600 });
+      const { mw } = middleware(redis);
+      const c = controller(redis, { loginToken: () => sessionToken('s-new', Math.floor(Date.now() / 1000))() });
+      const preLogout = sessionToken('s-old', NOW_S - 900)();
+      expect(await attached(mw, preLogout), 'session from before the legacy logout').toBeUndefined();
+
+      const out = (await c.login()) as { status: string; accessToken: string };
+      expect(out.status).toBe('authenticated');
+      expect(await attached(mw, out.accessToken), 'the login after the deploy').toEqual({ id: USER, email: 'st4@example.com', role: 'OWNER' });
+      expect(await attached(mw, preLogout), 'session from before the legacy logout, after the login').toBeUndefined();
+      expect(redis.store.get(KEY), 'login leaves the marker alone').toBe('1');
+    });
+
+    it.todo(
+      'REQUIRED (follow-up packet, review finding ST4-R2; identity-password.service.ts, outside this write set): POST /identity/reset-password ' +
+        'honours the logout cutoff (a token of a session authenticated at or before auth:revoked:user:<id> cannot set the password) and accepts ' +
+        'only a recovery-type session (amr method recovery/otp). Today completeReset accepts any Supabase-verified access token, so a stolen ' +
+        'pre-logout token the middleware refuses can still take the account over',
+    );
 
     it('logout writes the revocation time in epoch seconds, with a TTL at or above the longest token lifetime (24h)', async () => {
       const redis = memoryRedis();

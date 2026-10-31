@@ -94,9 +94,12 @@
  *         pre-logout token was admitted again after the next login; for admin
  *         tokens POST /identity/logout revoked nothing at all. The marker now
  *         holds the logout time (epoch seconds), login leaves it alone, the
- *         middleware refuses a token issued at or before it, and logout also
- *         writes the admin cutoff (admin:user:<id>:revokedAt). A bare '1' left
- *         by the previous release reads as "revoked now".
+ *         middleware refuses a token whose SESSION was authenticated at or
+ *         before it (amr, so a refresh after the logout does not get back in
+ *         while CR-2 leaves the refresh tokens alive), and logout also writes
+ *         the admin cutoff (admin:user:<id>:revokedAt). A bare '1' left by the
+ *         previous release (setex 86400) is read by its TTL as the time it was
+ *         written.
  *   CR-2  logout's Supabase global sign-out passes the user id where auth-js
  *         admin.signOut expects the user's access JWT, so it never revokes
  *         anything (identity.controller.ts logout, supabase-admin.service.ts
@@ -790,17 +793,25 @@ describe('AB-P02/AB-P04 (Supabase-token branch) — a deleted, banned or revoked
     expect(await db.membership.findUnique({ where: { id: ID.mBanned } })).not.toBeNull();
   });
 
-  it("Redis revocation marker in the previous release's bare-flag format ('1'): revoked at an unknown time, so every token issued up to now gets 401; once the marker is gone the token is served (the marker is the cause)", async () => {
+  it("Redis revocation marker in the previous release's bare-flag format ('1', written with setex 86400): read by its TTL as the time it was written — every token issued up to then gets 401, a token issued after it is served; once the marker is gone the pre-revocation token is served (the marker is the cause)", async () => {
     // ST-4 (R0-ID-F3): the marker now holds the revocation time in epoch
-    // seconds. A bare '1' written by the previous release carries no time, so it
-    // is read as "revoked now": the pre-revocation token AND a token minted this
-    // instant are both refused. Nothing in the product deletes the marker any
-    // more (POST /identity/login used to — OPEN DEFECT ST-4, fixed); only its
-    // TTL ends it, and deleting it here stands in for that expiry.
+    // seconds. A bare '1' written by the previous release carries no time, but
+    // that release wrote it only as setex(key, 86400, '1'), so its remaining
+    // TTL says when (review finding F2: read as "revoked now" on every request,
+    // it locked the next login out for up to 24h). The pre-revocation token and
+    // a token minted this instant are refused; a token minted after the write
+    // (plus the 1s margin) is served. Nothing in the product deletes the marker
+    // any more (POST /identity/login used to — OPEN DEFECT ST-4, fixed); only
+    // its TTL ends it, and deleting it here stands in for that expiry.
     await expectServed(T[ID.revoked], 'before revocation');
-    await redis!.setex(revocationKey(ID.revoked), 300, '1');
+    await redis!.setex(revocationKey(ID.revoked), 86400, '1');
+    const writtenBy = Math.floor(Date.now() / 1000);
     await expectIdentityRefused(T[ID.revoked], 'bare-flag marker, pre-revocation token');
     await expectIdentityRefused(mintToken(ID.revoked), 'bare-flag marker, token minted now');
+    await untilAfterSecond(writtenBy + 1);
+    await expectServed(mintToken(ID.revoked), 'bare-flag marker, token minted after it was written');
+    await expectIdentityRefused(T[ID.revoked], 'bare-flag marker, pre-revocation token, later');
+    expect(await redis!.get(revocationKey(ID.revoked)), 'reading it does not rewrite it').toBe('1');
     await redis!.del(revocationKey(ID.revoked));
     await expectServed(T[ID.revoked], 'after the marker expired');
   });
@@ -850,7 +861,10 @@ describe('valid token with no User row — the documented bootstrap-window behav
   });
 
   it('a revocation marker applies even with no User row', async () => {
-    await redis!.setex(revocationKey(ID.noRow), 300, '1');
+    // Written as the previous release wrote it (setex 86400): since the ST-4
+    // review repairs a bare '1' is read by its remaining TTL as the time it was
+    // written, so a shorter TTL would date it before this user's token.
+    await redis!.setex(revocationKey(ID.noRow), 86400, '1');
     const me = await call('get', routes.me, T[ID.noRow]);
     expect(me.status).toBe(401);
     await redis!.del(revocationKey(ID.noRow));
@@ -1555,8 +1569,9 @@ describe('OPEN DEFECT ST-3 — PATCH /identity/businesses/:id has no module scop
 // with no issue time, and POST /identity/login deleted it, so a token issued
 // before logout — a stolen one included — was admitted again after the next
 // login. Required: the marker is the revocation time, login leaves it alone, and
-// a token is refused when its iat is at or before that time. The admin-token
-// half is the "ST-4 (admin tokens)" case in the ST-2 block above.
+// a token is refused when its session was authenticated at or before that time
+// (its iat, for a token with no session behind it). The admin-token half is the
+// "ST-4 (admin tokens)" case in the ST-2 block above.
 describe('ST-4 — logout revocation is an issue-time cutoff that the next login does not lift', () => {
   it('T1 issued BEFORE POST /identity/logout stays refused after the next login (401), while T2 minted after the logout is served (200)', async () => {
     const t1 = T[ID.relogin]; // minted in beforeAll, before this logout
@@ -1587,6 +1602,53 @@ describe('ST-4 — logout revocation is an issue-time cutoff that the next login
     expect(me.body.id).toBe(ID.relogin);
     const biz = await call('get', routes.biz(ID.bizD), t2);
     expect(biz.status, `T2 (minted after logout): /identity/businesses/:D ${JSON.stringify(biz.body)}`).toBe(200);
+    expect(biz.body.name).toBe(BIZ_D_NAME);
+  });
+
+  // Review findings ST4-R1 / F1. Supabase mints a new access token, with a new
+  // iat, each time a session's refresh token is used, and the provider
+  // sign-out revokes no refresh token today (CR-2; in this child it has no
+  // Supabase admin at all). With an iat cutoff a refresh after the logout —
+  // another device, or a stolen refresh token — got straight back in. The
+  // cutoff is now compared against when the token's SESSION was authenticated:
+  // the GoTrue claims every session token carries (session_id, and amr with
+  // the authentication timestamp, carried over unchanged by a refresh).
+  it('a session authenticated BEFORE POST /identity/logout stays refused when it is refreshed after it (new iat, same session_id and amr), and a session token that does not say when it began is refused; a session opened after the logout is served', async () => {
+    const sessionToken = (sessionId: string, authenticatedAt: number) =>
+      mintToken(ID.relogin, { claims: { session_id: sessionId, amr: [{ method: 'password', timestamp: authenticatedAt }] } });
+
+    // A session opened after any earlier logout of this user, so it starts served.
+    const prior = Number(await redis!.get(revocationKey(ID.relogin)));
+    await untilAfterSecond(prior);
+    const startedAt = Math.floor(Date.now() / 1000);
+    const t1 = sessionToken('st4r-before', startedAt);
+    expect((await call('get', routes.biz(ID.bizD), t1)).status, 'T1 (session opened before this logout) before it').toBe(200);
+
+    const loggedOutFrom = Math.floor(Date.now() / 1000);
+    const out = await call('post', '/identity/logout', t1);
+    const loggedOutTo = Math.floor(Date.now() / 1000);
+    expect(out.status, JSON.stringify(out.body)).toBe(201);
+    const revokedAt = await expectRevocationTime(ID.relogin, loggedOutFrom, loggedOutTo);
+    await untilAfterSecond(revokedAt);
+
+    // What Supabase hands back for the surviving refresh token after the
+    // logout: minted now, iat after the cutoff, same session and amr.
+    const refreshed = sessionToken('st4r-before', startedAt);
+    expect(JSON.parse(Buffer.from(refreshed.split('.')[1], 'base64url').toString()).iat, 'the refreshed token is minted after the logout').toBeGreaterThan(revokedAt);
+    const noAmr = mintToken(ID.relogin, { claims: { session_id: 'st4r-before' } });
+    for (const [label, token] of [['refreshed pre-logout session', refreshed], ['session token without amr', noAmr]] as const) {
+      for (const route of [routes.me, routes.biz(ID.bizD)]) {
+        const res = await call('get', route, token);
+        expect(res.status, `${label}: GET ${route} -> ${res.status} ${JSON.stringify(res.body)}`).toBe(401);
+        expect(JSON.stringify(res.body ?? {})).not.toContain(BIZ_D_NAME);
+      }
+    }
+
+    const next = sessionToken('st4r-after', Math.floor(Date.now() / 1000));
+    const me = await call('get', routes.me, next);
+    expect(me.status, `session opened after the logout: /identity/me ${JSON.stringify(me.body)}`).toBe(200);
+    const biz = await call('get', routes.biz(ID.bizD), next);
+    expect(biz.status, `session opened after the logout: /identity/businesses/:D ${JSON.stringify(biz.body)}`).toBe(200);
     expect(biz.body.name).toBe(BIZ_D_NAME);
   });
 });

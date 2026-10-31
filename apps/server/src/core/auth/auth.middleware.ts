@@ -13,6 +13,9 @@ export const logoutRevocationKey = (userId: string): string => `auth:revoked:use
  * How long POST /identity/logout keeps the marker. It must be at least the
  * longest lifetime of a token issued before the logout, or such a token outlives
  * its revocation: Supabase access tokens live 1h by default, admin tokens 24h.
+ * It is also how long a session authenticated before the logout stays refused
+ * when the provider sign-out did not revoke its refresh token (CR-2): the same
+ * 24h the previous release's bare flag refused it for at most.
  */
 export const LOGOUT_REVOCATION_TTL_SECONDS = 24 * 60 * 60;
 
@@ -23,45 +26,113 @@ export const LOGOUT_REVOCATION_TTL_SECONDS = 24 * 60 * 60;
  */
 const MIN_REVOCATION_EPOCH_S = 1_000_000_000;
 
+/**
+ * What the previous release wrote, and how: until R0-ID-F3 the only writer of
+ * the marker was POST /identity/logout, with `setex(key, 86400, '1')`. So the
+ * remaining TTL of a '1' still says when it was written.
+ */
+export const LEGACY_LOGOUT_MARKER = '1';
+export const LEGACY_LOGOUT_MARKER_TTL_MS = 86_400_000;
+
 /** The marker value POST /identity/logout writes: the revocation time, in epoch seconds. */
 export function logoutRevocationValue(nowMs: number = Date.now()): string {
   return String(Math.floor(nowMs / 1000));
 }
 
+/** The revocation time a stored marker holds (epoch seconds), or null when it holds none (the legacy flag). */
+function storedRevocationTime(stored: string): number | null {
+  if (!/^\d+$/.test(stored)) return null;
+  const at = Number(stored);
+  return Number.isSafeInteger(at) && at >= MIN_REVOCATION_EPOCH_S ? at : null;
+}
+
 /**
- * The cutoff a stored marker stands for, in epoch seconds: a token whose iat is
- * at or before it is refused.
+ * The cutoff a stored marker stands for, in epoch seconds: a token whose
+ * session was authenticated at or before it is refused.
  *
- * A value that is not an epoch-seconds time — the bare flag '1' the previous
- * release wrote — is a revocation at an unknown time, so its cutoff is NOW:
- * every token issued up to this moment is refused, exactly as the bare flag
- * refused every token before. The next POST /identity/logout rewrites it in the
- * new format; otherwise its TTL ends it.
+ * The bare flag '1' the previous release wrote carries no time. Its write time
+ * is recovered from `remainingTtlMs` (the key's PTTL): it was always written
+ * with a 24h TTL, so it was written 24h-minus-what-is-left ago. One second of
+ * margin keeps the recovered time from landing before the real one. Reading
+ * it as "revoked now" instead (R0-ID-F3 as first landed) locked out a user who
+ * logged out in the 24h before the deploy: POST /identity/login answered
+ * 'authenticated', every token it issued got a 401, and logout — which would
+ * rewrite the marker — is behind AuthGuard (review finding F2).
+ *
+ * Any other value, or a '1' whose TTL is unreadable or is not a remainder of
+ * 24h, is a revocation at an unknown time: its cutoff is NOW, so every token
+ * issued up to this moment is refused (fail closed). The next
+ * POST /identity/logout rewrites it in the new format; otherwise its TTL ends it.
  */
-export function logoutRevocationCutoff(stored: string, nowMs: number = Date.now()): number {
-  if (/^\d+$/.test(stored)) {
-    const at = Number(stored);
-    if (Number.isSafeInteger(at) && at >= MIN_REVOCATION_EPOCH_S) return at;
+export function logoutRevocationCutoff(
+  stored: string,
+  nowMs: number = Date.now(),
+  remainingTtlMs: number | null = null,
+): number {
+  const at = storedRevocationTime(stored);
+  if (at !== null) return at;
+  if (
+    stored === LEGACY_LOGOUT_MARKER &&
+    typeof remainingTtlMs === 'number' &&
+    Number.isFinite(remainingTtlMs) &&
+    remainingTtlMs > 0 &&
+    remainingTtlMs <= LEGACY_LOGOUT_MARKER_TTL_MS
+  ) {
+    return Math.floor((nowMs - (LEGACY_LOGOUT_MARKER_TTL_MS - remainingTtlMs)) / 1000) + 1;
   }
   return Math.floor(nowMs / 1000);
 }
 
 /**
- * The `iat` claim (epoch seconds) of a JWT the verifier has ALREADY accepted,
- * or null when it has none. The payload bytes are covered by the signature
- * getUserFromToken checked (locally, or by Supabase), so the claim is
- * authentic; nothing here verifies anything.
+ * When the SESSION behind a token the verifier has ALREADY accepted was
+ * authenticated, in epoch seconds — what a logout cutoff is compared against —
+ * or null when the token cannot say. The payload bytes are covered by the
+ * signature getUserFromToken checked (locally, or by Supabase), so the claims
+ * are authentic; nothing here verifies anything.
+ *
+ * NOT the token's iat alone. Supabase mints a new access token, with a new iat,
+ * every time the session's refresh token is used, so iat says when THIS token
+ * was minted, not when its session signed in. A logout whose provider sign-out
+ * left the refresh tokens alive — CR-2: SupabaseAdminService.signOut passes the
+ * user id where auth-js expects the access JWT, so today it never revokes
+ * anything — would be undone by the next refresh, on another device or by
+ * whoever holds a stolen refresh token, with no login in between (review
+ * findings ST4-R1, F1).
+ *
+ * GoTrue stamps a session's access tokens with `amr`: one { method, timestamp }
+ * entry per way the session was authenticated (password, otp, oauth, totp ...),
+ * and a refresh carries them over unchanged. The earliest is when the session
+ * began.
+ *
+ *   amr, every entry timestamped    -> min(iat, ...timestamps)
+ *   a session_id but no usable amr  -> null: a refreshable session that does
+ *                                      not say when it began. Refused while a
+ *                                      marker exists (fail closed).
+ *   neither                         -> iat: there is no session behind it to
+ *                                      refresh, so its mint time is its start.
+ *   no numeric iat                  -> null
  */
-function issuedAtOf(token: string): number | null {
+function sessionAuthenticatedAt(token: string): number | null {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
+  let payload: { iat?: unknown; amr?: unknown; session_id?: unknown } | null;
   try {
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { iat?: unknown } | null;
-    const iat = payload?.iat;
-    return typeof iat === 'number' && Number.isFinite(iat) ? iat : null;
+    payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as typeof payload;
   } catch {
     return null;
   }
+  const iat = payload?.iat;
+  if (typeof iat !== 'number' || !Number.isFinite(iat)) return null;
+  const amr = payload?.amr;
+  if (Array.isArray(amr) && amr.length > 0) {
+    const stamps = amr.map((entry) => (entry as { timestamp?: unknown } | null)?.timestamp);
+    if (stamps.every((t): t is number => typeof t === 'number' && Number.isFinite(t))) {
+      return Math.min(iat, ...stamps);
+    }
+  }
+  const sessionId = payload?.session_id;
+  if (sessionId !== undefined && sessionId !== null && sessionId !== '') return null;
+  return iat;
 }
 
 /**
@@ -82,11 +153,13 @@ function issuedAtOf(token: string): number | null {
  *     issues those tokens for an existing row.
  *     (Until R0-ID-F2-ADMIN-TOKEN-LOCAL-USER the admin branch attached the
  *     token's own claims and skipped every one of these checks — ST-2.)
- *   - Logout revocation is an issue-time cutoff for both token kinds, each in
- *     its own key. A Supabase token is refused when the per-user marker
+ *   - Logout revocation is a time cutoff for both token kinds, each in its own
+ *     key. A Supabase token is refused when the per-user marker
  *     `auth:revoked:user:<id>` (POST /identity/logout) holds a revocation time
- *     at or after the token's iat, or when the token has no iat at all; a token
- *     issued after the logout is attached. POST /identity/login no longer
+ *     at or after the moment the token's SESSION was authenticated (its amr
+ *     timestamps, see sessionAuthenticatedAt — not its iat, which a refresh
+ *     renews), or when the token cannot say when that was; a token of a session
+ *     authenticated after the logout is attached. POST /identity/login no longer
  *     deletes the marker (ST-4, R0-ID-F3-REVOCATION-IAT-CUTOFF: deleting it
  *     re-admitted every pre-logout token, a stolen one included). An admin
  *     token is revoked by its own cutoff (`admin:user:<id>:revokedAt`, in the
@@ -140,7 +213,7 @@ export class AuthMiddleware implements NestMiddleware {
     try {
       const user = await this.getSupabaseAuth().getUserFromToken(token);
       if (user?.id) {
-        const localUser = await this.resolveLocalUser(user.id, { tokenIssuedAt: issuedAtOf(token) });
+        const localUser = await this.resolveLocalUser(user.id, { sessionAuthenticatedAt: sessionAuthenticatedAt(token) });
         if (!localUser) {
           this.logger.warn(
             { userId: user.id },
@@ -228,12 +301,14 @@ export class AuthMiddleware implements NestMiddleware {
    *                          meaningful, since every business-scoped route
    *                          needs a membership they do not have yet.
    *   row deleted/banned  -> REJECT.
-   *   revocation marker   -> REJECT a token issued at or before the marker's
-   *                          revocation time (`opts.tokenIssuedAt`, or no iat
-   *                          at all), whether or not a row exists — checked
+   *   revocation marker   -> REJECT a token whose session was authenticated at
+   *                          or before the marker's revocation time
+   *                          (`opts.sessionAuthenticatedAt`, or null: it cannot
+   *                          say), whether or not a row exists — checked
    *                          first, so a purged-then-revoked user cannot slip
-   *                          through the absent-row branch. A token issued
-   *                          after the logout goes on to the row checks.
+   *                          through the absent-row branch. A token of a session
+   *                          authenticated after the logout goes on to the row
+   *                          checks.
    *
    * `requireRow` turns "row absent" into REJECT. The admin-token branch passes
    * it: an admin identity is only ever issued for an existing User row
@@ -248,12 +323,13 @@ export class AuthMiddleware implements NestMiddleware {
    * admin token's milliseconds, checked in verifyAdminToken; POST
    * /identity/logout writes it too).
    *
-   * `tokenIssuedAt` is the Supabase token's iat (epoch seconds), null when it
-   * has none. It only matters when a marker exists.
+   * `sessionAuthenticatedAt` is when the Supabase token's session was
+   * authenticated (epoch seconds, sessionAuthenticatedAt), null when the token
+   * cannot say. It only matters when a marker exists.
    */
   private async resolveLocalUser(
     userId: string,
-    opts: { requireRow?: boolean; honourLogoutMarker?: boolean; tokenIssuedAt?: number | null } = {},
+    opts: { requireRow?: boolean; honourLogoutMarker?: boolean; sessionAuthenticatedAt?: number | null } = {},
   ): Promise<{ role: string } | null> {
     if (!this.prisma?.client) {
       return null;
@@ -298,12 +374,14 @@ export class AuthMiddleware implements NestMiddleware {
           `Revocation check unavailable (${(redisErr as Error).message}) — proceeding on the database checks alone. Logged-out tokens stay valid until expiry while this persists.`,
         );
       }
-      // The marker is the logout time (ST-4): a token issued at or before it —
-      // or one with no iat to compare — is refused; a token issued after the
-      // logout, e.g. by the next login, is not.
+      // The marker is the logout time (ST-4): a token whose session was
+      // authenticated at or before it — including one minted after the logout
+      // by refreshing that session — or one that cannot say when its session
+      // was authenticated is refused; a token of a later session, e.g. the next
+      // login's, is not.
       if (marker != null) {
-        const issuedAt = opts.tokenIssuedAt ?? null;
-        if (issuedAt === null || issuedAt <= logoutRevocationCutoff(marker)) {
+        const authenticatedAt = opts.sessionAuthenticatedAt ?? null;
+        if (authenticatedAt === null || authenticatedAt <= (await this.logoutCutoff(userId, marker))) {
           return null;
         }
       }
@@ -331,5 +409,25 @@ export class AuthMiddleware implements NestMiddleware {
       this.logger.warn(`Local user lookup failed: ${(lookupErr as Error).message}`);
       return null;
     }
+  }
+
+  /**
+   * The cutoff a stored marker stands for (logoutRevocationCutoff). Only the
+   * previous release's bare flag needs the key's PTTL to recover when it was
+   * written; when that read fails the flag reads as "revoked now" (fail
+   * closed). `now` is taken after the PTTL answer, so the recovered write time
+   * is never earlier than the real one.
+   */
+  private async logoutCutoff(userId: string, stored: string): Promise<number> {
+    if (stored !== LEGACY_LOGOUT_MARKER) return logoutRevocationCutoff(stored);
+    let remainingTtlMs: number | null = null;
+    try {
+      remainingTtlMs = await this.redis.pttl(logoutRevocationKey(userId));
+    } catch (redisErr) {
+      this.logger.warn(
+        `Legacy revocation marker TTL unavailable (${(redisErr as Error).message}) — treating it as revoked now.`,
+      );
+    }
+    return logoutRevocationCutoff(stored, Date.now(), remainingTtlMs);
   }
 }
