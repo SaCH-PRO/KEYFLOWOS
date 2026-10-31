@@ -21,6 +21,42 @@ export const SkipBusinessEvent = () =>
   Reflect.metadata(SKIP_BUSINESS_EVENT_KEY, true);
 
 /**
+ * A route whose audit label is not "<last entity segment>.<HTTP verb>".
+ * `subjectId` reads the subject from the handler's response.
+ */
+interface RouteEventRule {
+  subjectType: string;
+  action: string;
+  subjectId: (response: unknown) => string | undefined;
+}
+
+/** The `id` of `response[key]`, when the handler nests its subject under that key. */
+function nestedId(response: unknown, key: string): string | undefined {
+  if (!response || typeof response !== 'object') return undefined;
+  const inner = (response as Record<string, unknown>)[key];
+  if (!inner || typeof inner !== 'object') return undefined;
+  const id = (inner as Record<string, unknown>).id;
+  return id ? String(id) : undefined;
+}
+
+/**
+ * Route-specific audit labels, keyed on "<METHOD> <route path without leading
+ * slash>" exactly as the router reports it, so no other route's label moves.
+ *
+ * R0-19-EVIDENCE-BASELINE (M16): the manual payment route walked back to
+ * `invoices` and was audited as `invoice.create` on the invoice. It records a
+ * Payment, and its handler answers { payment, invoice, paidAmount, remaining },
+ * so the subject is response.payment.id.
+ */
+const ROUTE_EVENT_RULES: Record<string, RouteEventRule> = {
+  'POST commerce/businesses/:businessId/invoices/:invoiceId/payments': {
+    subjectType: 'payment',
+    action: 'record',
+    subjectId: (response) => nestedId(response, 'payment'),
+  },
+};
+
+/**
  * Auto-log interceptor: creates a BusinessEvent for every mutation.
  *
  * Applied to @Post, @Patch, @Delete handlers.
@@ -61,7 +97,8 @@ export class BusinessEventInterceptor implements NestInterceptor {
 
     // Derive event type from route
     const routePath = req.route?.path ?? req.url ?? '';
-    const { subjectType, action } = this.inferEventMeta(routePath, method);
+    const rule = this.routeRule(routePath, method);
+    const { subjectType, action } = rule ?? this.inferEventMeta(routePath, method);
 
     return next.handle().pipe(
       tap(async (response) => {
@@ -71,7 +108,10 @@ export class BusinessEventInterceptor implements NestInterceptor {
             businessId,
             eventType: `${subjectType}.${action}`,
             subjectType,
-            subjectId: this.extractSubjectId(response, req.params),
+            // A rule names its subject; never fall back to a path id of another entity.
+            subjectId: rule
+              ? (rule.subjectId(response) ?? 'unknown')
+              : this.extractSubjectId(response, req.params),
             actorType,
             actorId,
             action: action.toLowerCase(),
@@ -108,6 +148,11 @@ export class BusinessEventInterceptor implements NestInterceptor {
     }
     // Fallback: look for :id or :entityId in params
     return params.id ?? params.contactId ?? params.taskId ?? params.invoiceId ?? 'unknown';
+  }
+
+  private routeRule(routePath: string, method: string): RouteEventRule | undefined {
+    const key = `${method} ${routePath.split('/').filter(Boolean).join('/')}`;
+    return ROUTE_EVENT_RULES[key];
   }
 
   private inferEventMeta(routePath: string, method: string): { subjectType: string; action: string } {

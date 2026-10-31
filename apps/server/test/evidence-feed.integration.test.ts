@@ -459,7 +459,9 @@ describe('step 4 audit trail: a manual payment is audited as a payment (R0-19, r
       'crm:invoice.payment_recorded:contact',
     ]);
     expect(activity.find((a) => a.module === 'FINANCE')?.entityId).toBe(S.partialId);
-    expect(bus.map((e) => e.name)).toEqual(['invoice.payment_recorded']);
+    // Sorted: business_event.created is the audit worker's fan-out and lands after the response.
+    expect(bus.map((e) => e.name).sort()).toEqual(['business_event.created', 'crm.contact_event.logged', 'invoice.payment_recorded']);
+    expect(bus.filter((e) => e.name === 'business_event.created').map((e) => e.payload.eventType)).toEqual(['payment.record']);
   });
 
   it('EF-02: full payment (the remaining 150) by the owner -> PAID; the same pins for the second payment', async () => {
@@ -490,7 +492,8 @@ describe('step 4 audit trail: a manual payment is audited as a payment (R0-19, r
       'crm:invoice.payment_recorded:contact',
     ]);
     expect(activity.find((a) => a.module === 'FINANCE')?.entityId).toBe(S.fullId);
-    expect(bus.map((e) => e.name)).toEqual(['invoice.paid']);
+    expect(bus.map((e) => e.name).sort()).toEqual(['business_event.created', 'crm.contact_event.logged', 'invoice.paid']);
+    expect(bus.filter((e) => e.name === 'business_event.created').map((e) => e.payload.eventType)).toEqual(['payment.record']);
   });
 
   it('EF-03: business A holds exactly one payment.record row per payment and no invoice.create row, nor any audit row whose subject is the invoice', async () => {
