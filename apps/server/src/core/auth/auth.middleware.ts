@@ -11,10 +11,20 @@ import { REDIS_CLIENT } from '../redis/redis.constants';
  *
  * Behaviour:
  *   - Extract `Authorization: Bearer <token>` if present.
- *   - Verify the token with Supabase (`supabase.auth.getUser(token)`).
- *   - On success, attach `req.user = { id, email, role }` (role read from
- *     our Prisma `User` row, not from the JWT, so role changes take effect
- *     immediately).
+ *   - Verify the token as a Supabase access token
+ *     (`SupabaseAuthService.getUserFromToken`); if that does not verify, as an
+ *     admin local-auth token (`verifyAdminToken`: HMAC with ADMIN_JWT_SECRET,
+ *     plus its own jti / revokedAt checks).
+ *   - EITHER WAY the verified subject then passes the same local-user checks
+ *     (`resolveLocalUser`): the logout revocation marker, User.deletedAt and
+ *     User.bannedAt. The role attached is the one on our Prisma `User` row,
+ *     never a claim in either token, so role changes take effect immediately.
+ *     A Supabase subject with no row yet is attached as USER (the bootstrap
+ *     window, see resolveLocalUser); an admin-token subject with no row is
+ *     refused — AdminAuthService only issues those tokens for an existing row.
+ *     (Until R0-ID-F2-ADMIN-TOKEN-LOCAL-USER the admin branch attached the
+ *     token's own claims and skipped every one of these checks — ST-2.)
+ *   - On success, attach `req.user = { id, email, role }`.
  *   - On any failure / missing token, leave `req.user` unset. Downstream
  *     guards/controllers decide whether the route requires authentication
  *     and respond with 401 accordingly.
@@ -76,11 +86,24 @@ export class AuthMiddleware implements NestMiddleware {
           'Attached user from supabase',
         );
       } else {
-        // Fallback: try admin local-auth token (HMAC-JWT signed with ADMIN_JWT_SECRET)
+        // Fallback: try admin local-auth token (HMAC-JWT signed with ADMIN_JWT_SECRET).
+        // The token establishes WHO the subject is; whether that subject may
+        // still be here, and with which role, is the User row's answer — the
+        // same resolveLocalUser checks as the Supabase branch (ST-2). An admin
+        // identity has no bootstrap window, so a missing row is refused too.
         const adminUser = await verifyAdminToken(token, this.redis);
         if (adminUser) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (req as any).user = adminUser;
+          const localUser = await this.resolveLocalUser(adminUser.id, { requireRow: true });
+          if (!localUser) {
+            this.logger.warn(
+              { userId: adminUser.id },
+              'Admin token valid but local user is missing, deleted, banned, or revoked — rejecting',
+            );
+            next();
+            return;
+          }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express request augmentation; unified user contract elsewhere
+          (req as any).user = { id: adminUser.id, email: adminUser.email, role: localUser.role };
           this.logger.debug(
             { userId: adminUser.id },
             'Attached user from admin token',
@@ -132,8 +155,16 @@ export class AuthMiddleware implements NestMiddleware {
    *   revocation marker   -> REJECT, whether or not a row exists — checked
    *                          first, so a purged-then-revoked user cannot slip
    *                          through the absent-row branch.
+   *
+   * `requireRow` turns "row absent" into REJECT. The admin-token branch passes
+   * it: an admin identity is only ever issued for an existing User row
+   * (AdminAuthService.validateCredentials), so it has no bootstrap window, and
+   * defaulting a vanished admin to USER would keep a deleted account attached.
    */
-  private async resolveLocalUser(userId: string): Promise<{ role: string } | null> {
+  private async resolveLocalUser(
+    userId: string,
+    opts: { requireRow?: boolean } = {},
+  ): Promise<{ role: string } | null> {
     if (!this.prisma?.client) {
       return null;
     }
@@ -186,6 +217,10 @@ export class AuthMiddleware implements NestMiddleware {
       });
 
       if (dbUser && (dbUser.deletedAt || dbUser.bannedAt)) {
+        return null;
+      }
+
+      if (!dbUser && opts.requireRow) {
         return null;
       }
 
