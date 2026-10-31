@@ -379,6 +379,23 @@ beforeAll(async () => {
       },
     });
   }
+  // A PAID invoice is settled by its own payments since V1-49 (CR-V49-2): the
+  // receipt routes refuse a PAID row that no own-tenant SUCCESSFUL payment
+  // covers, before Gmail is consulted. Without this row the resend-receipt case
+  // below would stop at that refusal and never reach the R0-07 503.
+  await db.payment.create({
+    data: {
+      id: `${P}pay_invPaid`,
+      amount: 100,
+      currency: 'TTD',
+      status: 'SUCCESSFUL',
+      provider: 'manual',
+      method: 'cash',
+      providerPaymentId: `${P}pp_invPaid`,
+      businessId: ID.biz,
+      invoiceId: ID.invPaid,
+    },
+  });
   await db.quote.create({
     data: {
       id: ID.quoteSent,

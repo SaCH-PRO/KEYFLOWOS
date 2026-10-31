@@ -653,62 +653,83 @@ describe('ST-PC01-1: the tenant-bound server-side quote read a KEY caller must u
 // Until it lands, this suite is not joined-row tenancy evidence (Release 0
 // journey step 6).
 // ---------------------------------------------------------------------------
-describe("OPEN DEFECT ST-R004-1 — a quote on B's path can join A's contact (createQuote and updateQuote, outside this write set)", () => {
-  it("OPEN DEFECT ST-R004-1 reproduced — B's owner creates and patches B quotes with A's contactId (A's full contact row echoed), and B's detail route then serves A's customer email", async () => {
-    const created: string[] = [];
-    const ledgerBefore = await db.financialTransaction.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } });
+describe("ST-R004-1 — quote create and patch bind only a contact of the path tenant (fixed by R0-27 review ST-27-2)", () => {
+  // R0-27's repair routed createQuote, updateQuote and quote convert through
+  // CommerceService.assertContactInBusiness, so the create and patch halves of
+  // ST-R004-1 are closed: another tenant's contactId answers exactly what an
+  // unknown contactId answers and nothing is written. What remains open is the
+  // read half for rows written BEFORE that fix (pinned below).
+  const strip = (b: Record<string, unknown>) => {
+    const { timestamp: _t, path: _p, ...rest } = b;
+    return rest;
+  };
+
+  it("create on B's path with A's contactId answers the unknown-contact 404 and writes no quote", async () => {
+    const before = await db.quote.count({ where: { businessId: ID.bizB } });
+    const foreign = await withActor(agent().post(`/commerce/businesses/${ID.bizB}/quotes`), ID.ownerB).send({
+      contactId: ID.contactA,
+      items: [{ description: 'CQV probe', quantity: 1, unitPrice: 1 }],
+    });
+    const unknown = await withActor(agent().post(`/commerce/businesses/${ID.bizB}/quotes`), ID.ownerB).send({
+      contactId: `${P}no_such_contact`,
+      items: [{ description: 'CQV probe', quantity: 1, unitPrice: 1 }],
+    });
+    expect(foreign.status, JSON.stringify(foreign.body)).toBe(404);
+    expect(strip(foreign.body)).toEqual(strip(unknown.body));
+    expect(JSON.stringify(foreign.body)).not.toContain(CANARY);
+    expect(await db.quote.count({ where: { businessId: ID.bizB } })).toBe(before);
+    expect(await db.quote.count({ where: { businessId: ID.bizB, contactId: ID.contactA } })).toBe(0);
+  });
+
+  it("patch of a B quote to A's contactId answers the unknown-contact 404 and leaves the quote on B's contact", async () => {
+    const own = await withActor(agent().post(`/commerce/businesses/${ID.bizB}/quotes`), ID.ownerB).send({
+      contactId: ID.contactB,
+      items: [{ description: 'CQV probe', quantity: 1, unitPrice: 1 }],
+    });
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
     try {
-      // (1) create on B's path with A's contact
-      const create = await withActor(agent().post(`/commerce/businesses/${ID.bizB}/quotes`), ID.ownerB).send({
-        contactId: ID.contactA,
-        quoteNumber: 'CQV-ST-R004-1-create',
-        items: [{ description: 'CQV probe', quantity: 1, unitPrice: 1 }],
-      });
-      expect(create.status, JSON.stringify(create.body)).toBe(201);
-      created.push(create.body.id);
-      expect(create.body.businessId).toBe(ID.bizB);
-      expect(create.body.contactId).toBe(ID.contactA);
-      expect(create.body.contact).toMatchObject({
-        id: ID.contactA,
-        businessId: ID.bizA,
-        email: `${CANARY}customer@test.local`,
-        phone: `${CANARY}phone`,
-      });
-
-      const afterCreate = await detail(ID.ownerB, create.body.id, ID.bizB);
-      expect(afterCreate.status).toBe(200);
-      expect(afterCreate.body.businessId).toBe(ID.bizB);
-      expect(afterCreate.body.contact).toEqual({ firstName: 'Cqv', lastName: 'Customer', email: `${CANARY}customer@test.local` });
-
-      // (2) a legitimate B quote (B's own contact), then patched to A's contact
-      const own = await withActor(agent().post(`/commerce/businesses/${ID.bizB}/quotes`), ID.ownerB).send({
-        contactId: ID.contactB,
-        quoteNumber: 'CQV-ST-R004-1-patch',
-        items: [{ description: 'CQV probe', quantity: 1, unitPrice: 1 }],
-      });
-      expect(own.status, JSON.stringify(own.body)).toBe(201);
-      created.push(own.body.id);
-      expect(own.body.contactId).toBe(ID.contactB);
-
-      const patch = await withActor(agent().patch(`/commerce/businesses/${ID.bizB}/quotes/${own.body.id}`), ID.ownerB).send({
+      const foreign = await withActor(agent().patch(`/commerce/businesses/${ID.bizB}/quotes/${own.body.id}`), ID.ownerB).send({
         contactId: ID.contactA,
       });
-      expect(patch.status, JSON.stringify(patch.body)).toBe(200);
-      expect(patch.body.contactId).toBe(ID.contactA);
-      expect(patch.body.contact).toMatchObject({ id: ID.contactA, email: `${CANARY}customer@test.local`, phone: `${CANARY}phone` });
-
-      const afterPatch = await detail(ID.ownerB, own.body.id, ID.bizB);
-      expect(afterPatch.status).toBe(200);
-      expect(afterPatch.body.businessId).toBe(ID.bizB);
-      expect(afterPatch.body.contact.email).toBe(`${CANARY}customer@test.local`);
-
-      // The rows really are B quotes joined to A's contact; no ledger row is written.
-      expect(await db.quote.count({ where: { businessId: ID.bizB, contactId: ID.contactA } })).toBe(2);
-      expect(await db.financialTransaction.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } })).toBe(ledgerBefore);
+      const unknown = await withActor(agent().patch(`/commerce/businesses/${ID.bizB}/quotes/${own.body.id}`), ID.ownerB).send({
+        contactId: `${P}no_such_contact`,
+      });
+      expect(foreign.status, JSON.stringify(foreign.body)).toBe(404);
+      expect(strip(foreign.body)).toEqual(strip(unknown.body));
+      expect(JSON.stringify(foreign.body)).not.toContain(CANARY);
+      expect((await db.quote.findUnique({ where: { id: own.body.id } }))?.contactId).toBe(ID.contactB);
     } finally {
-      // Hard delete (quote_items cascade) so the seeded fixtures are as before.
-      const ids = created.filter(Boolean);
-      if (ids.length) await db.$executeRawUnsafe('DELETE FROM quotes WHERE id = ANY($1::text[])', ids);
+      await db.$executeRawUnsafe('DELETE FROM quotes WHERE id = $1', own.body.id);
+    }
+  });
+
+  // OPEN DEFECT (legacy rows; R0-CMF3-QUOTE-CONTACT-TENANT): OPERATOR_QUOTE_INCLUDE
+  // still joins `contact` with no tenant condition, so a B quote that already
+  // points at A's contact (written before R0-27's fix) still serves A's customer
+  // email on B's detail route. This case pins TODAY's behaviour; CMF3 replaces it
+  // with the required one (the detail returns contact null for a foreign row).
+  it("OPEN DEFECT ST-R004-1 (legacy row) reproduced — a B quote written before the fix with A's contactId still serves A's customer email on B's detail route", async () => {
+    const legacyId = `${P}q_legacy_foreign_contact`;
+    await db.quote.create({
+      data: {
+        id: legacyId,
+        quoteNumber: 'CQV-ST-R004-1-legacy',
+        status: 'DRAFT',
+        subtotal: 1,
+        total: 1,
+        currency: 'TTD',
+        businessId: ID.bizB,
+        contactId: ID.contactA,
+        items: { create: [{ id: `${legacyId}_item1`, description: 'CQV legacy', quantity: 1, unitPrice: 1, total: 1 }] },
+      },
+    });
+    try {
+      const read = await detail(ID.ownerB, legacyId, ID.bizB);
+      expect(read.status).toBe(200);
+      expect(read.body.businessId).toBe(ID.bizB);
+      expect(read.body.contact?.email).toBe(`${CANARY}customer@test.local`);
+    } finally {
+      await db.$executeRawUnsafe('DELETE FROM quotes WHERE id = $1', legacyId);
     }
   });
 });

@@ -678,7 +678,7 @@ describe('production tenant wiring: the app TenantInterceptor and the Prisma ten
     setTenantContextProvider?.({ getCurrentBusinessId: () => undefined });
   });
 
-  it("QS-14: a body tenant that is an object steers the ambient Prisma tenant to A while the guards checked B; the service's binding to the guarded tenant still answers A's quote with an unknown id's 404, and A's quote is unchanged", async () => {
+  it("QS-14: a body tenant that is an object no longer steers the ambient Prisma tenant (R0-F24): the ambient tenant is the guarded B, A's quote answers an unknown id's 404, and A's quote is unchanged", async () => {
     // Control: the production wiring is live. The owner of B sending B's own quote runs under ambient tenant B.
     ambientSeen.length = 0;
     const control = await prodQuoteStatus(ID.ownerB, R.qProdB, 'sent', { businessId: ID.bizB });
@@ -695,18 +695,31 @@ describe('production tenant wiring: the app TenantInterceptor and the Prisma ten
     recordedEvents.length = 0;
     crmCalls.length = 0;
     // The guards resolve the query string (B, where the dual member is OWNER; had they checked A, its
-    // revenue:read membership would be a 403). The interceptor takes the body object as the ambient tenant.
+    // revenue:read membership would be a 403). Before R0-F24 the interceptor took the body object as the
+    // ambient tenant; it now runs the request under the tenant the guards verified.
     const steered = await prodQuoteStatus(R.dualAB, R.qSteer, 'accepted', { businessId: { equals: ID.bizA } }, `?businessId=${ID.bizB}`);
-    expect(ambientSeen).toEqual([{ equals: ID.bizA }]);
+    expect(ambientSeen).toEqual([ID.bizB]);
     expect(steered.status, JSON.stringify(steered.body)).toBe(404);
     expect(stripVolatile(steered.body)).toEqual(stripVolatile(unknown.body));
     await expectUntouched(R.qSteer, before, 0, 0);
     expect(await tenantQuotes(ID.bizA)).toBe(tenantABefore);
   });
 
-  it.todo(
-    'QS-15 (R28-ST-02, outside the R0-28 write set): under production wiring a number or array body tenant beside ?businessId=B answers 500 (TenantInterceptor makes it the ambient Prisma tenant and Prisma rejects it) where the harness answers 404; the fix is TenantInterceptor resolving the tenant with resolveRequestBusinessId (CF-24 / R0-L)',
-  );
+  it('QS-15: a number or array body tenant beside ?businessId=B no longer reaches Prisma (R0-F24): the request runs under the guarded B and answers an unknown id\'s 404, not a 500', async () => {
+    const unknown = await prodQuoteStatus(R.dualAB, ID.unknown, 'accepted', { businessId: ID.bizB });
+    expect(unknown.status, JSON.stringify(unknown.body)).toBe(404);
+    for (const bodyTenant of [42, [ID.bizA]] as unknown[]) {
+      const before = await quoteRow(R.qSteer);
+      ambientSeen.length = 0;
+      recordedEvents.length = 0;
+      crmCalls.length = 0;
+      const res = await prodQuoteStatus(R.dualAB, R.qSteer, 'accepted', { businessId: bodyTenant }, `?businessId=${ID.bizB}`);
+      expect(res.status, `${JSON.stringify(bodyTenant)}: ${JSON.stringify(res.body)}`).toBe(404);
+      expect(stripVolatile(res.body)).toEqual(stripVolatile(unknown.body));
+      expect(ambientSeen).toEqual([ID.bizB]);
+      await expectUntouched(R.qSteer, before, 0, 0);
+    }
+  });
 });
 
 describe('LEDGER (R0-28)', () => {

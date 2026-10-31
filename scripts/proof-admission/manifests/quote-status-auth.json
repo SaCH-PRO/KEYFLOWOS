@@ -26,7 +26,8 @@
     "positive controls: the web client contract is unchanged (R0-28) QS-10: a STAFF member with revenue:write accepts a SENT quote (200, ACCEPTED, acceptedAt) and the owner rejects one (200, REJECTED, rejectedAt)",
     "positive controls: the web client contract is unchanged (R0-28) QS-11: the owner of B sends B's own quote (200, SENT); the tenant it acted on is B's",
     "response projection: the 200 body carries the operator contact shape only (R28-ST-01) QS-13: a revenue:write STAFF member with crm:none sends a quote whose contact is PRIVATE and someone else's: 200 with contact { firstName, lastName, email }, the operator detail's shape, and no internal note, phone, owner or visibility; the quote.sent listener still receives the whole contact",
-    "production tenant wiring: the app TenantInterceptor and the Prisma tenant context provider installed (R28-ST-02) QS-14: a body tenant that is an object steers the ambient Prisma tenant to A while the guards checked B; the service's binding to the guarded tenant still answers A's quote with an unknown id's 404, and A's quote is unchanged",
-    "LEDGER (R0-28) QS-12: no quote transition above (sent, accepted, rejected, refused or not found) wrote a FinancialTransaction or a LedgerEntry in either tenant"
+    "production tenant wiring: the app TenantInterceptor and the Prisma tenant context provider installed (R28-ST-02) QS-14: a body tenant that is an object no longer steers the ambient Prisma tenant (R0-F24): the ambient tenant is the guarded B, A's quote answers an unknown id's 404, and A's quote is unchanged",
+    "LEDGER (R0-28) QS-12: no quote transition above (sent, accepted, rejected, refused or not found) wrote a FinancialTransaction or a LedgerEntry in either tenant",
+    "production tenant wiring: the app TenantInterceptor and the Prisma tenant context provider installed (R28-ST-02) QS-15: a number or array body tenant beside ?businessId=B no longer reaches Prisma (R0-F24): the request runs under the guarded B and answers an unknown id's 404, not a 500"
   ]
 }
