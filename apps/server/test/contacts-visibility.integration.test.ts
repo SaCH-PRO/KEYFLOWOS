@@ -26,6 +26,14 @@
  *
  * The case tagged NEGATIVE CONTROL is the pre-fix failing control: on the
  * directive's source main (b1948d27) it returns 200 with the private row.
+ *
+ * R0-01-CT-RECONCILE adds the ADMIN dossier control. The superseded
+ * working-tree variant (6a5c0c3f) ran the journey collaborators in Promise.all
+ * beside the detail lookup, so a denied dossier still answered 404 after the
+ * collaborators had read the contact's related data. The ADMIN case pins the
+ * accepted order (PR #190, b8565e04): the visible detail is awaited first, and
+ * a denied dossier is byte-identical to an absent id with no collaborator call.
+ * The case list is bound by scripts/proof-admission/manifests/contacts-visibility.json.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -509,6 +517,43 @@ describe('GET contact dossier through the real guard path', () => {
       expect(res.body).not.toHaveProperty(key);
     }
     expect(journeyCalls).toEqual([]);
+  });
+
+  it("NEGATIVE CONTROL (pre-fix FAIL expected): ADMIN with no permission scopes cannot open another member's PRIVATE dossier; it answers byte-identical to an absent id and no collaborator is invoked", async () => {
+    // The ADMIN membership carries no permissionScopes (view-all by role), so
+    // the only thing between it and these rows is the PRIVATE visibility rule.
+    const absentId = `${P}does-not-exist`;
+    for (const contactId of [ID.cPrivOwner, ID.cPrivStaffAll, ID.cPrivStaffOwned, ID.cPrivSharedToOwned]) {
+      journeyCalls = [];
+      const res = await dossier(ID.admin, contactId);
+      expect(res.status, `contact ${contactId}`).toBe(404);
+      // A denied dossier never starts the journey, AI-insight or health lookups.
+      expect(journeyCalls, `contact ${contactId}`).toEqual([]);
+      expectNoDisclosure(res.body);
+      for (const key of ['meta', 'summary', 'timeline', 'insight', 'health']) {
+        expect(res.body, `contact ${contactId}`).not.toHaveProperty(key);
+      }
+
+      journeyCalls = [];
+      const absent = await dossier(ID.admin, absentId);
+      expect(absent.status).toBe(404);
+      expect(journeyCalls).toEqual([]);
+      // No existence oracle: the forbidden row and the absent id are the same bytes.
+      expect(res.text, `contact ${contactId}`).toBe(absent.text);
+      expect(res.headers['content-type']).toBe(absent.headers['content-type']);
+      expect(res.body).toEqual({ statusCode: 404, message: 'Contact not found', error: 'Not Found' });
+    }
+  });
+
+  it('positive control: ADMIN with no permission scopes opens the dossier of a TEAM row and of a PRIVATE row shared to them, and each collaborator is consulted exactly once', async () => {
+    for (const contactId of [ID.cTeamStaffAll, ID.cPrivSharedToAdmin]) {
+      journeyCalls = [];
+      const res = await dossier(ID.admin, contactId);
+      expect(res.status, `contact ${contactId}`).toBe(200);
+      expect(res.body.contact.id).toBe(contactId);
+      expect(res.body.summary).toBe('tcv-journey-summary');
+      expect([...journeyCalls].sort()).toEqual([`cross:${contactId}`, `health:${contactId}`, `insight:${contactId}`]);
+    }
   });
 
   it("an owned-view STAFF member is denied another member's TEAM dossier without any collaborator call", async () => {
