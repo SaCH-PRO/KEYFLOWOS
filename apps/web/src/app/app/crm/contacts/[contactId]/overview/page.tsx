@@ -16,7 +16,10 @@ export default function ContactOverviewPage() {
   const { contact, detail, loading } = useContactDetailContext();
 
   if (loading) return <div className="p-4">Loading...</div>;
-  if (!contact) return <div className="p-4">Contact not found</div>;
+  // No record to show. The layout's ContactHeader states why (no access, not
+  // found, or a failed load); repeating a guess here would contradict it, and
+  // this page must not print record fields for a contact it could not read.
+  if (!contact) return null;
 
   const score = contact.leadScore ?? 0;
   const scoreClass =

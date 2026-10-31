@@ -17,6 +17,33 @@ const PINNED_KEY = "kf_pinned_contacts";
 const RECENT_KEY = "kf_recent_contacts";
 const MAX_RECENT = 8;
 
+/**
+ * CONTACTS-v1 section 5: a refused read is a denial, never empty customer data.
+ *
+ * `apiGet` in lib/client.ts does not throw on a failed read and does not carry
+ * the HTTP status: it resolves `{ data: <fallback>, error: <server message or
+ * statusText> }`. So the class of failure is read from the message the guards
+ * send — BusinessGuard "No access to this business", ModuleScopeGuard "Not a
+ * member of this business" / "Insufficient permissions: …", AuthGuard
+ * "Authentication required", or a bare "Forbidden" / "Unauthorized" statusText.
+ * "Unable to verify business access" is deliberately NOT a denial: the guard
+ * failed, it did not decide.
+ */
+export type ContactsLoadFailure = "denied" | "not_found" | "failed";
+
+const DENIAL_MESSAGE =
+  /\b(no access|not a member|insufficient permissions?|forbidden|unauthori[sz]ed|authentication required|access denied|permission denied)\b/i;
+
+export function classifyContactsLoadError(message: string | null | undefined): ContactsLoadFailure | null {
+  if (!message) return null;
+  if (DENIAL_MESSAGE.test(message)) return "denied";
+  if (/\bnot found\b/i.test(message)) return "not_found";
+  return "failed";
+}
+
+export const CONTACTS_DENIED_MESSAGE = "You do not have access to contacts in this workspace.";
+const CONTACTS_LOAD_FAILED_MESSAGE = "Failed to load contacts. Please try again.";
+
 export const SEGMENT_THRESHOLDS = {
   highValueRevenue: 500,
   highValueInvoiceCount: 3,
@@ -222,11 +249,27 @@ export function useContactsData() {
         sortOrder: (filters.sortBy === "name" || filters.sortBy === "oldest") ? "asc" as const : "desc" as const,
       };
 
+      // fetchContacts resolves a refused or failed read with the EMPTY fallback
+      // list plus `error`. Reading `data` alone rendered a 403 as "No contacts
+      // yet", so the error is checked before any rows are taken.
+      const failLoad = (error: string) => {
+        const denied = classifyContactsLoadError(error) === "denied";
+        logError("Failed to load contacts", error);
+        // A denial withdraws rows already shown; a failed next page keeps them.
+        if (!append || denied) {
+          setContacts([]);
+          nextOffsetRef.current = 0;
+          nextCursorRef.current = null;
+        }
+        setHasMore(false);
+        setLoadError(denied ? CONTACTS_DENIED_MESSAGE : CONTACTS_LOAD_FAILED_MESSAGE);
+      };
+
       setLoading(true);
       setLoadError(null);
       try {
         if (append) {
-          const { data } = await fetchContacts(businessId, {
+          const { data, error } = await fetchContacts(businessId, {
             take: PAGE_SIZE,
             cursor: nextCursorRef.current || undefined,
             skip: nextCursorRef.current ? undefined : nextOffsetRef.current,
@@ -243,6 +286,7 @@ export function useContactsData() {
             signal,
           });
           if (signal.aborted) return;
+          if (error) { failLoad(error); return; }
           const items = data?.contacts ?? [];
           const mapped = items.map((c) => ({ ...c, tags: c.tags ?? [] }));
           setContacts((prev) => [...prev, ...mapped]);
@@ -250,7 +294,7 @@ export function useContactsData() {
           nextCursorRef.current = data?.nextCursor ?? null;
           setHasMore(data?.hasMore ?? false);
         } else {
-          const { data } = await fetchContacts(businessId, {
+          const { data, error } = await fetchContacts(businessId, {
               take: PAGE_SIZE, skip: 0,
               search: search || undefined,
               status: filters.statusFilter !== "ALL" ? filters.statusFilter : undefined,
@@ -265,6 +309,7 @@ export function useContactsData() {
               signal,
             });
           if (signal.aborted) return;
+          if (error) { failLoad(error); return; }
           const items = data?.contacts ?? [];
           const mapped = items.map((c) => ({ ...c, tags: c.tags ?? [] }));
           setContacts(mapped);
