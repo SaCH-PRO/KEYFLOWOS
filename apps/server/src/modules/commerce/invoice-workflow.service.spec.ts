@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { ConflictException } from '@nestjs/common';
 import {
+  InvoiceWorkflowService,
   computeBalance,
   deriveStatusAfterPayment,
   isLegalTransition,
@@ -137,5 +139,140 @@ describe('isLegalTransition', () => {
   });
   it('forbids PARTIALLY_PAID -> VOID', () => {
     expect(isLegalTransition('PARTIALLY_PAID', 'VOID')).toBe(false);
+  });
+});
+
+/**
+ * R0-PL-03-PAYMENT-ATOMIC-RECONCILE: reconcileFromPayments accepts the same
+ * `tx` / `eventBuffer` options as `transition`, so recordPayment and the
+ * refund can reconcile inside their own $transaction and emit the invoice
+ * events only after it commits. Fakes only: the real-database proof is
+ * test/payments-manual.integration.test.ts.
+ */
+describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0-PL-03)', () => {
+  type Inv = {
+    id: string;
+    status: string;
+    total: number;
+    currency: string;
+    businessId: string;
+    paidAt: Date | null;
+    payments: Array<{ amount: number; status: string }>;
+  };
+
+  function fakeDb(invoice: Inv, label: string) {
+    const calls: string[] = [];
+    const db = {
+      invoice: {
+        findUnique: vi.fn(async () => {
+          calls.push(`${label}.invoice.findUnique`);
+          return invoice;
+        }),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          calls.push(`${label}.invoice.update`);
+          return { ...invoice, ...data, items: [], contact: null, booking: null };
+        }),
+      },
+      invoiceItem: {
+        findMany: vi.fn(async () => {
+          calls.push(`${label}.invoiceItem.findMany`);
+          return [{ productId: 'prod_1', quantity: 2 }];
+        }),
+      },
+    };
+    return { db, calls };
+  }
+
+  function build(invoice: Inv) {
+    const client = fakeDb(invoice, 'client');
+    const tx = fakeDb(invoice, 'tx');
+    const $transaction = vi.fn(async (fn: (t: unknown) => unknown) => fn(client.db));
+    const prisma = { client: { ...client.db, $transaction } };
+    const events = { emit: vi.fn() };
+    const revenuePosting = {};
+    const expensePosting = { onProductSold: vi.fn(async () => null) };
+    const service = new InvoiceWorkflowService(
+      prisma as never,
+      events as never,
+      revenuePosting as never,
+      expensePosting as never,
+    );
+    return { service, client, tx, $transaction, events, expensePosting };
+  }
+
+  const sent = (payments: Inv['payments']): Inv => ({
+    id: 'inv_1',
+    status: 'SENT',
+    total: 100,
+    currency: 'TTD',
+    businessId: 'biz_1',
+    paidAt: null,
+    payments,
+  });
+
+  it('with tx + eventBuffer: reads and writes through tx only, opens no transaction of its own, buffers invoice.payment_recorded instead of emitting', async () => {
+    const h = build(sent([{ amount: 40, status: 'SUCCESSFUL' }]));
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: buffer });
+
+    expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true });
+    expect(h.tx.calls).toEqual(['tx.invoice.findUnique', 'tx.invoice.update']);
+    expect(h.client.calls).toEqual([]);
+    expect(h.$transaction).not.toHaveBeenCalled();
+    expect(h.events.emit).not.toHaveBeenCalled();
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.payment_recorded']);
+  });
+
+  it('with tx + eventBuffer reaching PAID: COGS posts through the same tx, invoice.paid is buffered, nothing emitted', async () => {
+    const h = build(sent([{ amount: 100, status: 'SUCCESSFUL' }]));
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: buffer });
+
+    expect(result).toMatchObject({ status: 'PAID', changed: true });
+    expect(h.tx.calls).toEqual(['tx.invoice.findUnique', 'tx.invoice.update', 'tx.invoiceItem.findMany']);
+    expect(h.client.calls).toEqual([]);
+    expect(h.expensePosting.onProductSold).toHaveBeenCalledTimes(1);
+    expect((h.expensePosting.onProductSold.mock.calls[0] as unknown[])[1]).toBe(h.tx.db);
+    expect(h.events.emit).not.toHaveBeenCalled();
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.paid']);
+  });
+
+  it('with tx: an illegal transition (DRAFT with a payment) throws 409 before any write, and buffers nothing', async () => {
+    const h = build({ ...sent([{ amount: 40, status: 'SUCCESSFUL' }]), status: 'DRAFT' });
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    await expect(
+      h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: buffer }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.db.invoice.update).not.toHaveBeenCalled();
+    expect(buffer).toEqual([]);
+  });
+
+  it('with tx but no eventBuffer: writes through tx and emits directly (same rule as transition)', async () => {
+    const h = build(sent([{ amount: 40, status: 'SUCCESSFUL' }]));
+    await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never });
+    expect(h.client.calls).toEqual([]);
+    expect(h.$transaction).not.toHaveBeenCalled();
+    expect(h.events.emit).toHaveBeenCalledTimes(1);
+    expect(h.events.emit.mock.calls[0][0]).toBe('invoice.payment_recorded');
+  });
+
+  it('no status change: writes nothing, buffers nothing', async () => {
+    const h = build({ ...sent([{ amount: 40, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_PAID' });
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: buffer });
+    expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: false });
+    expect(h.tx.db.invoice.update).not.toHaveBeenCalled();
+    expect(buffer).toEqual([]);
+    expect(h.events.emit).not.toHaveBeenCalled();
+  });
+
+  it('without options (webhook callers): unchanged behaviour, its own $transaction and an immediate emit', async () => {
+    const h = build(sent([{ amount: 100, status: 'SUCCESSFUL' }]));
+    const result = await h.service.reconcileFromPayments('inv_1');
+    expect(result).toMatchObject({ status: 'PAID', changed: true });
+    expect(h.$transaction).toHaveBeenCalledTimes(1);
+    expect(h.tx.calls).toEqual([]);
+    expect(h.events.emit).toHaveBeenCalledTimes(1);
+    expect(h.events.emit.mock.calls[0][0]).toBe('invoice.paid');
   });
 });
