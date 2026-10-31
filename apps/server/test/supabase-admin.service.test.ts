@@ -386,6 +386,12 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
         expect.objectContaining({ outcome: 'success', reason: 'revocation_incomplete: provider_signout' }),
       ]);
     });
+
+    it('asks the provider to sign out BEFORE it sets the password (R0-ID-F4 review F4-A / CR-1)', async () => {
+      const h = harness();
+      await h.ctrl.changePassword(body, h.user, h.req(accessJwt()));
+      expect(h.order).toEqual(['provider signOut', 'provider updateUserPassword']);
+    });
   });
 
   describe('POST /identity/reset-password', () => {
@@ -413,5 +419,191 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
         expect.objectContaining({ outcome: 'success', reason: 'revocation_incomplete: provider_signout' }),
       ]);
     });
+
+    it('asks the provider to sign out BEFORE it sets the password (R0-ID-F4 review F4-A / CR-1)', async () => {
+      const h = harness();
+      await h.ctrl.resetPassword({ accessToken: accessJwt(), password: 'CorrectHorseBattery9!' } as never, h.req());
+      expect(h.order).toEqual(['provider signOut', 'provider updateUserPassword']);
+    });
   });
+});
+
+/**
+ * R0-ID-F4 review F4-A / CR-1: the password flows against GoTrue's own session
+ * semantics, not a stub where every sign-out succeeds.
+ *
+ * The fake below is a fetch-level model of supabase/auth (GoTrue) master, read
+ * from its source, not run:
+ *   - PUT /admin/users/:id with a password: adminUserUpdate runs
+ *     user.UpdatePassword(tx, nil), which calls models.Logout(tx, userId) —
+ *     every session of the user ends (admin.go, models/user.go).
+ *   - POST /logout: maybeLoadUserOrSession refuses a JWT whose session_id row
+ *     does not exist, 403 error_code session_not_found (auth.go); otherwise
+ *     'global' ends every session of the JWT's user, 'others' all but the
+ *     JWT's own (logout.go).
+ * Behind it: the real SupabaseAdminService, the installed auth-js client, the
+ * real IdentityPasswordService and the real IdentityController handlers.
+ * Nothing leaves the process.
+ *
+ * Before this repair the sign-out was sent AFTER the password update, found
+ * its session already gone, and every successful reset and change wrote
+ * 'revocation_incomplete: provider_signout' while no session was left.
+ */
+describe('R0-ID-F4 review F4-A — password flows against GoTrue session semantics', () => {
+  const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+  const USER = '6f1c1d36-5d7e-4c38-9a3f-0b7a3b0e2c11';
+  const jwtFor = (sessionId: string) =>
+    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated' })}.c2ln`;
+
+  function fakeGoTrue(sessions: Map<string, string>, opts: { logoutDown?: boolean } = {}) {
+    /** Each provider call, with the sessions left right after it. */
+    const log: Array<{ call: string; sessionsAfter: string[] }> = [];
+    const record = (call: string) => log.push({ call, sessionsAfter: [...sessions.keys()].sort() });
+    const json = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    const fetchImpl = async (input: unknown, init?: { method?: string; headers?: unknown; body?: unknown }) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      const call = `${method} ${url.pathname}${url.search}`;
+      const adminUser = url.pathname.match(/^\/auth\/v1\/admin\/users\/([^/]+)$/);
+      if (adminUser && method === 'PUT') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { password?: string };
+        if (body.password) {
+          for (const [sid, uid] of [...sessions]) if (uid === adminUser[1]) sessions.delete(sid);
+        }
+        record(call);
+        return json(200, { id: adminUser[1] });
+      }
+      if (url.pathname === '/auth/v1/logout' && method === 'POST') {
+        if (opts.logoutDown) {
+          record(call);
+          return json(500, { code: 500, error_code: 'unexpected_failure', msg: 'Error logging out user' });
+        }
+        const bearer = (new Headers(init?.headers as Record<string, string>).get('authorization') ?? '').replace('Bearer ', '');
+        const claims = JSON.parse(Buffer.from(bearer.split('.')[1] ?? '', 'base64url').toString('utf8')) as {
+          sub: string;
+          session_id: string;
+        };
+        if (!sessions.has(claims.session_id)) {
+          record(call);
+          return json(403, { code: 403, error_code: 'session_not_found', msg: 'Session from session_id claim in JWT does not exist' });
+        }
+        const scope = url.searchParams.get('scope') ?? 'global';
+        for (const [sid, uid] of [...sessions]) {
+          if (uid !== claims.sub) continue;
+          if (scope === 'others' && sid === claims.session_id) continue;
+          if (scope === 'local' && sid !== claims.session_id) continue;
+          sessions.delete(sid);
+        }
+        record(call);
+        return new Response(null, { status: 204 });
+      }
+      record(call);
+      return json(404, {});
+    };
+    return { log, fetchImpl };
+  }
+
+  function build(sessions: Map<string, string>, opts: { logoutDown?: boolean } = {}) {
+    const gt = fakeGoTrue(sessions, opts);
+    const admin = new SupabaseAdminService();
+    (admin as unknown as { client: unknown }).client = createClient('http://gotrue.f4a.test', 'service-role-key-f4a', {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: gt.fetchImpl as unknown as typeof fetch },
+    });
+    (admin as unknown as { logger: unknown }).logger = { warn: vi.fn(), debug: vi.fn(), log: vi.fn(), error: vi.fn() };
+    const audit = vi.fn(async (_entry: Record<string, unknown>) => undefined);
+    const authSec = { enforce: vi.fn(async () => undefined), audit };
+    const signupSvc = { signInWithPassword: vi.fn(async () => ({})) };
+    const auth = { getUserFromToken: vi.fn(async () => ({ id: USER, email: 'f4a@example.com' })) };
+    const policy = { validate: vi.fn(async () => undefined) };
+    const passwordSvc = new IdentityPasswordService(admin, auth as never, policy as never);
+    const redis = { setex: vi.fn(async () => 'OK'), set: vi.fn(async () => 'OK'), get: vi.fn(async () => null) };
+    const unused = {} as never;
+    const ctrl = new IdentityController(
+      unused,
+      unused,
+      unused,
+      signupSvc as never,
+      authSec as never,
+      passwordSvc,
+      { client: {} } as never,
+      admin,
+      redis as never,
+    );
+    return { ctrl, audit, gt };
+  }
+
+  const req = (bearer?: string) =>
+    ({ ip: '127.0.0.1', headers: bearer ? { authorization: `Bearer ${bearer}` } : {}, socket: {} }) as unknown as Request;
+  const auditRows = (audit: ReturnType<typeof vi.fn>) => audit.mock.calls.map((c) => c[0] as Record<string, unknown>);
+
+  it('reset-password: the global sign-out reaches GoTrue while the recovery session exists, ends every session, and the success audit row names no failed leg', async () => {
+    const sessions = new Map([
+      ['s-recovery', USER],
+      ['s-attacker', USER],
+    ]);
+    const { ctrl, audit, gt } = build(sessions);
+
+    await expect(
+      ctrl.resetPassword({ accessToken: jwtFor('s-recovery'), password: 'CorrectHorseBattery9!' } as never, req()),
+    ).resolves.toMatchObject({ status: 'ok' });
+
+    expect(gt.log).toEqual([
+      { call: 'POST /auth/v1/logout?scope=global', sessionsAfter: [] },
+      { call: `PUT /auth/v1/admin/users/${USER}`, sessionsAfter: [] },
+    ]);
+    expect(auditRows(audit)).toEqual([
+      expect.objectContaining({ event: 'password_reset_completed', outcome: 'success', reason: undefined }),
+    ]);
+  });
+
+  it("change-password: the 'others' sign-out ends the other session while the caller's exists, and the success audit row names no failed leg", async () => {
+    const sessions = new Map([
+      ['s-caller', USER],
+      ['s-attacker', USER],
+    ]);
+    const { ctrl, audit, gt } = build(sessions);
+
+    await expect(
+      ctrl.changePassword(
+        { currentPassword: 'OldButValid2026!', newPassword: 'BrandNewOne2026!' } as never,
+        { id: USER, email: 'f4a@example.com' } as never,
+        req(jwtFor('s-caller')),
+      ),
+    ).resolves.toMatchObject({ status: 'ok' });
+
+    // The explicit sweep revoked the other session and kept the caller's; the
+    // admin update then ended the caller's too (GoTrue's own behaviour, which
+    // this service cannot avoid with an admin update).
+    expect(gt.log).toEqual([
+      { call: 'POST /auth/v1/logout?scope=others', sessionsAfter: ['s-caller'] },
+      { call: `PUT /auth/v1/admin/users/${USER}`, sessionsAfter: [] },
+    ]);
+    expect(auditRows(audit)).toEqual([
+      expect.objectContaining({ event: 'password_changed', outcome: 'success', reason: undefined }),
+    ]);
+  });
+
+  it('the audit signal still fires when the provider sign-out really fails: logout endpoint down, the reset still completes and its row names provider_signout', async () => {
+    const sessions = new Map([['s-recovery', USER]]);
+    const { ctrl, audit, gt } = build(sessions, { logoutDown: true });
+
+    await expect(
+      ctrl.resetPassword({ accessToken: jwtFor('s-recovery'), password: 'CorrectHorseBattery9!' } as never, req()),
+    ).resolves.toMatchObject({ status: 'ok' });
+
+    expect(gt.log.map((e) => e.call)).toEqual(['POST /auth/v1/logout?scope=global', `PUT /auth/v1/admin/users/${USER}`]);
+    expect(auditRows(audit)).toEqual([
+      expect.objectContaining({
+        event: 'password_reset_completed',
+        outcome: 'success',
+        reason: 'revocation_incomplete: provider_signout',
+      }),
+    ]);
+  });
+
+  it.todo(
+    "R0-ID-F4 review F4-C (outside this packet's write set, needs a follow-up packet): RiscService.terminateUserSessions (src/modules/risc/risc.service.ts) still calls client.auth.admin.signOut(userId, 'global') directly, bypassing SupabaseAdminService; auth-js sends the user id as the bearer, GoTrue refuses it, and no local logout marker is written, so an account-hijacking or sessions-revoked RISC event revokes nothing (CR-2 shape).",
+  );
 });
