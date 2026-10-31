@@ -1,6 +1,6 @@
 /**
- * V1-46-PUB-PAY-LINK-TOKEN-GATE — the customer pay surface is keyed by the
- * pay-link token (REAL database).
+ * V1-46-PUB-PAY-LINK-TOKEN-GATE + V1-46b-TOKEN-PAY-COMPLETE — the customer pay
+ * surface is keyed by the pay-link token (REAL database).
  *
  * M34 (P1). D-07, ruled 2026-10-31 by the owner: token links only, the
  * bare-id pay page is retired. At the V1-49 head:
@@ -17,49 +17,67 @@
  * Contract pinned here:
  *
  *   GET  /commerce/public/invoice-link/:token/pay             live link -> 200, the pay-page projection:
- *                                                             exactly what the kept bare-id public read
+ *                                                             what the bare-id public read
  *                                                             (KF-REVENUE-AUTH-PROJECTION-001) answers an
- *                                                             anonymous caller; no payment rows, bank
- *                                                             details or customer email
+ *                                                             anonymous caller, LESS the invoice id (V1-46b,
+ *                                                             TG-16); no payment rows, bank details or
+ *                                                             customer email
  *   POST /commerce/public/invoice-link/:token/payment-intent  live link -> the R0-22 intent contract
  *                                                             (one PENDING row on the invoice's own
  *                                                             tenant, status unchanged, 409 when settled)
+ *   GET  /payments/public/invoice-link/:token/status          V1-46b: the five-key status of the token's invoice
+ *   GET  /payments/public/invoice-link/:token/gateways        V1-46b: the gateway list of the token's tenant
+ *   POST /payments/public/invoice-link/:token/checkout        V1-46b: a Stripe, WiPay or PayPal checkout for the
+ *                                                             token's invoice ({ gateway, returnUrl | successUrl,
+ *                                                             cancelUrl })
+ *   POST /payments/public/invoice-link/:token/paypal/capture/:orderId
+ *                                                             V1-46b: the PayPal capture, recorded against the
+ *                                                             token's invoice (a body invoiceId is ignored)
  *   deactivated (operator route), expired, inactive, unknown or foreign-tenant link, and a DRAFT,
  *   VOID or deleted invoice behind a live link
  *                                                          -> 404 on every customer action (pay page,
- *                                                             intent, receipt), one body; the link view
- *                                                             answers its invalid_or_expired body
+ *                                                             intent, receipt, status, gateways, checkout,
+ *                                                             capture), one body, no provider called; the
+ *                                                             link view answers its invalid_or_expired body
  *   POST /commerce/invoices/:invoiceId/payment-intent        retired -> 404, nothing written
  *   GET  /commerce/payment-links/:token                       retired -> 404 (the resolver that handed
  *                                                             out the invoice id for the downgrade)
- *   GET  /commerce/invoices/:invoiceId                        kept: the redacted projection
- *   guards                    -> PublicRateLimitGuard only on both token routes (the token is the
- *                                credential); the public-surface ledger stays at 11 (two token
- *                                routes in, two bare routes out)
+ *   POST /payments/invoice/:id/{stripe,wipay,paypal/create-order}, POST /payments/paypal/capture/:orderId
+ *                                                          -> V1-46b: retired (the token routes replace them)
+ *   GET  /commerce/invoices/:invoiceId, GET /payments/invoice/:id/{status,gateways},
+ *   POST /payments/create-checkout (invoice payables), anonymous
+ *                                                          -> V1-46b: the unknown-id 404 for an invoice whose
+ *                                                             own-tenant links are ALL revoked or expired; an
+ *                                                             invoice with a live link, or one that never had
+ *                                                             a link (release0-journey step 6 pins that one),
+ *                                                             keeps the KF-REVENUE-AUTH-PROJECTION-001 answer;
+ *                                                             the operator (authenticated, revenue:read) read
+ *                                                             and the tenant-bound routes are unchanged
+ *   guards                    -> PublicRateLimitGuard only on every token route (the token is the
+ *                                credential); the public-surface ledger stays at 11 on both controllers
+ *   producers                 -> every customer URL is /public/invoice/<token> (CommerceService
+ *                                publicInvoiceUrl: createPaymentLink, else findAnyPaymentLink, as
+ *                                send-email does); no source emits /pay/<invoiceId> or /widgets/pay/<id>
+ *   webhooks                  -> Stripe, PayPal and WiPay callbacks still record the money for an invoice
+ *                                whose link was revoked (keyed by the signed provider event)
  *   LEDGER                    -> no Payment row, FinancialTransaction or LedgerEntry is reachable
  *                                through a revoked token
  *   TENANT                    -> a token of tenant B never reads or writes tenant A's invoice
  *
- * Not in this write set (it.todo below): the provider checkouts (WiPay,
- * PayPal, Stripe), the gateway list and the PayPal capture are routes of
- * payments.controller.ts and stay keyed by the invoice id. The review (ST-1)
- * confirmed what follows from that: the token read returns the id, and after
- * the link is revoked the id still opens the bare-id read and those routes,
- * so a revoked link does not yet stop someone who opened it once (TG-15,
- * TG-16). The embeddable widgets/pay/[invoiceId] page (ST-2, TG-17) and the
- * producers of bare /pay/<invoiceId> URLs (CR-01, TG-18) are outside it too.
- * M34 is not closed by this packet.
- *
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (real
  * Redis at REDIS_URL, this suite's own key namespace), AuthGuard,
- * BusinessGuard, ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
- * InvoiceReceiptBuilderService and the real ledger chain write and read real
- * rows; the production GlobalHttpExceptionFilter + ValidationPipe are
- * installed. Links, payments and the deactivation are made through the real
- * operator routes. Identity attachment (operator routes only) is a test
- * middleware reading `x-v46a-user`; every customer request is anonymous.
- * Collaborators off the boundary (contact timeline, stats cache, Gmail / AI /
- * Drive) are stubs.
+ * BusinessGuard, ModuleScopeGuard, CommerceService, PaymentsService,
+ * InvoiceWorkflowService, InvoiceReceiptBuilderService and the real ledger
+ * chain write and read real rows; the production GlobalHttpExceptionFilter +
+ * ValidationPipe are installed. Links, payments and the deactivation are made
+ * through the real operator routes. Identity attachment (operator routes
+ * only) is a test middleware reading `x-v46a-user`; every customer request is
+ * anonymous. The payment providers are stubbed at the network edge: global
+ * fetch answers Stripe, WiPay and PayPal's verification endpoints and refuses
+ * any other host, and the PayPal SDK client is replaced on the PaymentsService
+ * instance, so no request leaves the process. Collaborators off the boundary
+ * (contact timeline, stats cache, Gmail / AI / Drive, the producers' email
+ * senders) are stubs.
  *
  * Fixtures: prefix `v46a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
@@ -67,11 +85,14 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import fs from 'fs';
+import { createHash, createHmac } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 import { computeBalance } from '../src/modules/commerce/invoice-workflow.service';
+import { appUrl } from '../src/core/config/runtime-urls';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
@@ -79,6 +100,7 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v46a_';
 const HEADER = 'x-v46a-user';
+const REPO = path.resolve(__dirname, '../../..');
 
 /** Every fixture string that must never reach the customer carries this. */
 const CANARY = 'V46A_SECRET_';
@@ -88,6 +110,31 @@ const CANARY = 'V46A_SECRET_';
 const RATE_LIMIT_NS = P;
 const PREVIOUS_RATE_LIMIT_NS = process.env.RATE_LIMIT_KEY_NAMESPACE;
 process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
+
+// Provider configuration for this process only (restored in afterAll). Every
+// provider endpoint is answered by the fetch stub below; nothing goes out.
+const PROVIDER_ENV: Record<string, string> = {
+  STRIPE_SECRET_KEY: `${P}sk_test`,
+  STRIPE_PUBLISHABLE_KEY: `${P}pk_test`,
+  STRIPE_WEBHOOK_SECRET: `${P}whsec`,
+  PUBLIC_URL_ALLOWLIST: 'https://pay.v46a.test',
+  WIPAY_API_KEY: `${P}wipay_key`,
+  WIPAY_ACCOUNT_NUMBER: '4600000000',
+  PAYPAL_CLIENT_ID: `${P}pp_client`,
+  PAYPAL_CLIENT_SECRET: `${P}pp_secret`,
+  PAYPAL_WEBHOOK_ID: `${P}pp_webhook`,
+  PAYPAL_ENVIRONMENT: 'sandbox',
+};
+const PREVIOUS_PROVIDER_ENV: Record<string, string | undefined> = {};
+
+const RETURN_URL = 'https://pay.v46a.test/pay/link/return';
+const STRIPE_REDIRECT = 'https://checkout.v46a.test/stripe-session';
+const WIPAY_REDIRECT = 'https://checkout.v46a.test/wipay-session';
+const CHECKOUT_BODIES: Array<Record<string, string>> = [
+  { gateway: 'stripe', successUrl: `${RETURN_URL}?stripe=success`, cancelUrl: `${RETURN_URL}?stripe=cancel` },
+  { gateway: 'wipay', returnUrl: RETURN_URL },
+  { gateway: 'paypal' },
+];
 
 const ID = {
   ownerA: `${P}ownerA`,
@@ -111,6 +158,17 @@ const ID = {
   invBare: `${P}invBare`,
   invLedger: `${P}invLedger`,
   invResolver: `${P}invResolver`,
+  // V1-46b
+  invTokPay: `${P}invTokPay`,
+  invCapture: `${P}invCapture`,
+  invNoLink: `${P}invNoLink`,
+  invFlowOverdue: `${P}invFlowOverdue`,
+  invDueSoon: `${P}invDueSoon`,
+  invKeySend: `${P}invKeySend`,
+  invRecovery: `${P}invRecovery`,
+  invWhStripe: `${P}invWhStripe`,
+  invWhPaypal: `${P}invWhPaypal`,
+  invWhWipay: `${P}invWhWipay`,
   // tenant B
   invB: `${P}invB`,
 };
@@ -126,6 +184,7 @@ const LINK = {
   deleted: { id: `${P}link_deleted`, token: `${P}tok_deleted` },
 };
 const UNKNOWN_TOKEN = `${P}tok_nosuchlink`;
+const UNKNOWN_INVOICE = `${P}inv_nosuch`;
 
 const TOTAL = 100;
 const DAY_MS = 86_400_000;
@@ -133,9 +192,16 @@ const DAY_MS = 86_400_000;
 let db: any;
 let app: any;
 let redis: any;
+let commerce: any;
+let payments: any;
+let prismaService: any;
 let CommerceControllerRef: any;
+let PaymentsControllerRef: any;
 let PublicRateLimitGuardRef: any;
 let PUBLIC_RATE_LIMIT_KEY_REF: string;
+let FlowListenerRef: any;
+let FlowOrchestratorServiceRef: any;
+let DelegationLoopServiceRef: any;
 
 /** Route-minted links: invoice -> { id, token }. */
 const LINK_OF: Record<string, { id: string; token: string }> = {};
@@ -144,6 +210,59 @@ let unknownPay: { status: number; body: any };
 let unknownIntent: { status: number; body: any };
 let unknownReceipt: { status: number; body: any };
 let unknownView: { status: number; body: any };
+let unknownTokStatus: { status: number; body: any };
+let unknownTokGateways: { status: number; body: any };
+let unknownTokCheckout: { status: number; body: any };
+let unknownTokCapture: { status: number; body: any };
+let unknownBareRead: { status: number; body: any };
+let unknownBareStatus: { status: number; body: any };
+let unknownBareGateways: { status: number; body: any };
+let unknownBareCheckout: { status: number; body: any };
+
+// ---- the provider edge: stubbed, recorded, never on the network -------------
+
+const realFetch = globalThis.fetch;
+const providerCalls: Array<{ url: string; body: string }> = [];
+let checkoutSeq = 0;
+const paypalOrders = {
+  createOrder: vi.fn(async (_req: any) => ({ result: { id: `${P}order_${++checkoutSeq}` } })),
+  captureOrder: vi.fn(async (req: { id: string }) => ({
+    result: {
+      id: req.id,
+      status: 'COMPLETED',
+      purchaseUnits: [{ payments: { captures: [{ id: `${P}cap_${req.id}` }] } }],
+      payer: {},
+    },
+  })),
+};
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+async function providerFetch(input: any, init?: any): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  const body = typeof init?.body === 'string' ? init.body : '';
+  providerCalls.push({ url, body });
+  const { host, pathname } = new URL(url);
+  if (host === 'api.stripe.com' && pathname === '/v1/checkout/sessions') {
+    return jsonResponse({ id: `${P}cs_checkout_${++checkoutSeq}`, url: STRIPE_REDIRECT });
+  }
+  if (host.endsWith('wipayfinancial.com')) {
+    return new Response(null, { status: 302, headers: { location: WIPAY_REDIRECT } });
+  }
+  if (host.startsWith('api-m.') && pathname === '/v1/oauth2/token') {
+    return jsonResponse({ access_token: `${P}pp_access` });
+  }
+  if (host.startsWith('api-m.') && pathname === '/v1/notifications/verify-webhook-signature') {
+    return jsonResponse({ verification_status: 'SUCCESS' });
+  }
+  throw new Error(`V46A: no network in this suite (refused ${url})`);
+}
+
+function paypalCallCount() {
+  return paypalOrders.createOrder.mock.calls.length + paypalOrders.captureOrder.mock.calls.length;
+}
 
 async function cleanup() {
   for (const sql of [
@@ -152,6 +271,7 @@ async function cleanup() {
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM webhook_events WHERE provider_event_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -191,9 +311,43 @@ function view(token: string) {
   return agent().get(`/commerce/public/invoice-link/${encodeURIComponent(token)}`);
 }
 
-/** The kept bare-id public read (KF-REVENUE-AUTH-PROJECTION-001), anonymous. */
+/** V1-46b: the token payment routes of payments.controller.ts. */
+function tokStatus(token: string) {
+  return agent().get(`/payments/public/invoice-link/${encodeURIComponent(token)}/status`);
+}
+
+function tokGateways(token: string) {
+  return agent().get(`/payments/public/invoice-link/${encodeURIComponent(token)}/gateways`);
+}
+
+function tokCheckout(token: string, body: Record<string, unknown>) {
+  return agent().post(`/payments/public/invoice-link/${encodeURIComponent(token)}/checkout`).send(body);
+}
+
+function tokCapture(token: string, orderId: string, body: Record<string, unknown> = {}) {
+  return agent()
+    .post(`/payments/public/invoice-link/${encodeURIComponent(token)}/paypal/capture/${encodeURIComponent(orderId)}`)
+    .send(body);
+}
+
+/** The bare-id public read (KF-REVENUE-AUTH-PROJECTION-001), anonymous. */
 function bareProjection(invoiceId: string) {
   return agent().get(`/commerce/invoices/${encodeURIComponent(invoiceId)}`);
+}
+
+function bareStatus(invoiceId: string) {
+  return agent().get(`/payments/invoice/${encodeURIComponent(invoiceId)}/status`);
+}
+
+function bareGateways(invoiceId: string) {
+  return agent().get(`/payments/invoice/${encodeURIComponent(invoiceId)}/gateways`);
+}
+
+/** The generic checkout with an invoice payable keyed by the bare id (the retired widget's call). */
+function bareCheckout(invoiceId: string) {
+  return agent()
+    .post('/payments/create-checkout')
+    .send({ payableType: 'invoice', payableId: invoiceId, ...CHECKOUT_BODIES[0] });
 }
 
 function bizOf(invoiceId: string) {
@@ -237,6 +391,10 @@ async function pay(invoiceId: string, amount: number, slip: string) {
 
 async function paymentsOf(invoiceId: string): Promise<any[]> {
   return db.payment.findMany({ where: { invoiceId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+}
+
+async function linksOf(invoiceId: string): Promise<any[]> {
+  return db.paymentLink.findMany({ where: { invoiceId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
 }
 
 async function invoiceRow(id: string): Promise<any> {
@@ -320,6 +478,20 @@ function expectNoPaymentRowsOrEmail(body: unknown) {
   expectNoCanary(body);
 }
 
+/** V1-46b: the token payment routes answer one token as they answer an unknown token; no provider is called. */
+async function expectTokenPaymentRoutesRefused(token: string, label: string) {
+  const calls = providerCalls.length;
+  const paypal = paypalCallCount();
+  expectUnknownAnswer(await tokStatus(token), unknownTokStatus, `${label}: status`);
+  expectUnknownAnswer(await tokGateways(token), unknownTokGateways, `${label}: gateways`);
+  for (const body of CHECKOUT_BODIES) {
+    expectUnknownAnswer(await tokCheckout(token, body), unknownTokCheckout, `${label}: checkout ${body.gateway}`);
+  }
+  expectUnknownAnswer(await tokCapture(token, `${P}order_refused`), unknownTokCapture, `${label}: PayPal capture`);
+  expect(providerCalls.length, `${label}: no provider request`).toBe(calls);
+  expect(paypalCallCount(), `${label}: no PayPal SDK call`).toBe(paypal);
+}
+
 /** Every customer action on one token answers as for an unknown token. */
 async function expectEveryActionRefused(token: string, label: string) {
   expectUnknownAnswer(await payPage(token), unknownPay, `${label}: pay page`);
@@ -329,9 +501,21 @@ async function expectEveryActionRefused(token: string, label: string) {
   const v = await view(token);
   expect(v.status, `${label}: view`).toBe(200);
   expect(v.body, `${label}: view`).toEqual(unknownView.body);
+  await expectTokenPaymentRoutesRefused(token, label);
+}
+
+/** Source text of a repo file (static pins). */
+function source(rel: string): string {
+  return fs.readFileSync(path.join(REPO, rel), 'utf8');
 }
 
 beforeAll(async () => {
+  for (const [k, v] of Object.entries(PROVIDER_ENV)) {
+    PREVIOUS_PROVIDER_ENV[k] = process.env[k];
+    process.env[k] = v;
+  }
+  globalThis.fetch = providerFetch as typeof fetch;
+
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
 
@@ -352,6 +536,8 @@ beforeAll(async () => {
   const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
   const { CommerceController } = await import('../src/modules/commerce/commerce.controller');
   const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+  const { PaymentsController } = await import('../src/modules/payments/payments.controller');
+  const { PaymentsService } = await import('../src/modules/payments/payments.service');
   const { CommerceStatsService } = await import('../src/modules/commerce/commerce-stats.service');
   const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
   const { InvoiceReceiptBuilderService } = await import('../src/modules/commerce/invoice-receipt-builder.service');
@@ -372,14 +558,18 @@ beforeAll(async () => {
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  ({ FlowListener: FlowListenerRef } = await import('../src/modules/flow/flow.listener'));
+  ({ FlowOrchestratorService: FlowOrchestratorServiceRef } = await import('../src/modules/ai/flow-orchestrator.service'));
+  ({ DelegationLoopService: DelegationLoopServiceRef } = await import('../src/modules/autopilot/delegation-loop.service'));
   CommerceControllerRef = CommerceController;
+  PaymentsControllerRef = PaymentsController;
   PublicRateLimitGuardRef = PublicRateLimitGuard;
   PUBLIC_RATE_LIMIT_KEY_REF = PUBLIC_RATE_LIMIT_KEY;
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController],
+    controllers: [CommerceController, PaymentsController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -390,6 +580,7 @@ beforeAll(async () => {
       TeamAuditInterceptor,
       { provide: REDIS_CLIENT, useValue: redis },
       CommerceService,
+      PaymentsService,
       InvoiceWorkflowService,
       InvoiceReceiptBuilderService,
       // Real ledger chain: the operator payments post real rows.
@@ -420,7 +611,14 @@ beforeAll(async () => {
     ],
   }).compile();
 
-  app = moduleRef.createNestApplication();
+  commerce = moduleRef.get(CommerceService);
+  payments = moduleRef.get(PaymentsService);
+  prismaService = moduleRef.get(PrismaService);
+  // The PayPal SDK client is the provider edge for orders and captures.
+  vi.spyOn(payments, 'getPaypalClient').mockImplementation(() => ({ client: {}, ordersController: paypalOrders }));
+
+  // rawBody: the Stripe and PayPal webhooks verify the raw payload, as in app-bootstrap.
+  app = moduleRef.createNestApplication({ rawBody: true });
   // Identity attachment only (the operator routes). No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
     const header = req.headers[HEADER];
@@ -456,7 +654,12 @@ beforeAll(async () => {
   await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizB);
 
   // ---- invoices: 100 each; SENT unless the case needs another start state ----
-  const startStatus: Record<string, string> = { [ID.invDraft]: 'DRAFT', [ID.invVoid]: 'VOID' };
+  const startStatus: Record<string, string> = {
+    [ID.invDraft]: 'DRAFT',
+    [ID.invVoid]: 'VOID',
+    [ID.invFlowOverdue]: 'OVERDUE',
+    [ID.invRecovery]: 'OVERDUE',
+  };
   let n = 0;
   for (const id of Object.values(ID).filter((v) => v.startsWith(`${P}inv`))) {
     n += 1;
@@ -472,13 +675,18 @@ beforeAll(async () => {
         notes: 'Thank you for your business',
         businessId: biz,
         contactId: biz === ID.bizB ? ID.contactB : ID.contactA,
-        items: { create: [{ id: `${id}_item1`, description: `V46A item ${n}`, quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
+        dueDate: new Date(Date.now() - 10 * DAY_MS),
+        // Item ids do not embed the invoice id, so TG-16 can look for the id anywhere in a body.
+        items: { create: [{ id: `${P}item_${String(n).padStart(3, '0')}`, description: `V46A item ${n}`, quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
       },
     });
   }
 
   // ---- links minted by the real route while the invoices are payable ------
-  for (const inv of [ID.invLive, ID.invIntent, ID.invPartial, ID.invPaid, ID.invRevoke, ID.invBare, ID.invLedger, ID.invResolver, ID.invB]) {
+  for (const inv of [
+    ID.invLive, ID.invIntent, ID.invPartial, ID.invPaid, ID.invRevoke, ID.invBare, ID.invLedger, ID.invResolver, ID.invB,
+    ID.invTokPay, ID.invCapture, ID.invKeySend, ID.invWhStripe, ID.invWhPaypal, ID.invWhWipay,
+  ]) {
     await mintLink(inv);
   }
 
@@ -488,8 +696,9 @@ beforeAll(async () => {
   await pay(ID.invLedger, 30, 'slip_ledger');
 
   // ---- the links the cases revoke, through the operator route ---------------
-  await deactivate(ID.invBare);
-  await deactivate(ID.invLedger);
+  for (const inv of [ID.invBare, ID.invLedger, ID.invWhStripe, ID.invWhPaypal, ID.invWhWipay]) {
+    await deactivate(inv);
+  }
 
   // ---- seeded rows the routes cannot make -----------------------------------
   await db.paymentLink.create({ data: { id: LINK.expired.id, token: LINK.expired.token, invoiceId: ID.invExpired, businessId: ID.bizA, active: true, expiresAt: new Date(Date.now() - DAY_MS) } });
@@ -505,6 +714,15 @@ beforeAll(async () => {
   unknownIntent = await intent(UNKNOWN_TOKEN, { method: 'bank_transfer' });
   unknownReceipt = await receipt(UNKNOWN_TOKEN);
   unknownView = await view(UNKNOWN_TOKEN);
+  unknownTokStatus = await tokStatus(UNKNOWN_TOKEN);
+  unknownTokGateways = await tokGateways(UNKNOWN_TOKEN);
+  unknownTokCheckout = await tokCheckout(UNKNOWN_TOKEN, CHECKOUT_BODIES[0]);
+  unknownTokCapture = await tokCapture(UNKNOWN_TOKEN, `${P}order_unknown`);
+  unknownBareRead = await bareProjection(UNKNOWN_INVOICE);
+  unknownBareStatus = await bareStatus(UNKNOWN_INVOICE);
+  unknownBareGateways = await bareGateways(UNKNOWN_INVOICE);
+  unknownBareCheckout = await bareCheckout(UNKNOWN_INVOICE);
+  providerCalls.length = 0;
 }, 180_000);
 
 afterAll(async () => {
@@ -513,6 +731,12 @@ afterAll(async () => {
   if (redis) {
     try { await clearRateLimits(); } catch { /* best-effort */ }
     await redis.quit();
+  }
+  globalThis.fetch = realFetch;
+  vi.restoreAllMocks();
+  for (const [k, v] of Object.entries(PREVIOUS_PROVIDER_ENV)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
   }
   if (PREVIOUS_RATE_LIMIT_NS === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
   else process.env.RATE_LIMIT_KEY_NAMESPACE = PREVIOUS_RATE_LIMIT_NS;
@@ -542,11 +766,10 @@ describe('fixture sanity (real rows)', () => {
 });
 
 describe('the pay page is keyed by the token (V1-46)', () => {
-  it('TG-01: a live link answers the pay-page projection, exactly what the kept bare-id public read gives an anonymous caller; no payment rows, bank details or customer email', async () => {
+  it("TG-01: a live link answers the pay-page projection: the bare-id public read's anonymous answer less the invoice id; no payment rows, bank details or customer email", async () => {
     const res = await payPage(LINK_OF[ID.invLive].token);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({
-      id: ID.invLive,
       businessId: ID.bizA,
       status: 'SENT',
       total: TOTAL,
@@ -556,23 +779,26 @@ describe('the pay page is keyed by the token (V1-46)', () => {
       business: { name: 'V46A Biz A' },
       contact: { firstName: 'V46a', lastName: 'Customer' },
     });
+    expect(res.body).not.toHaveProperty('id');
     expect(res.body.items).toHaveLength(1);
     expectNoPaymentRowsOrEmail(res.body);
 
     const bare = await bareProjection(ID.invLive);
     expect(bare.status).toBe(200);
-    expect(res.body).toEqual(bare.body);
+    const { id: bareId, ...bareLessId } = bare.body;
+    expect(bareId).toBe(ID.invLive);
+    expect(res.body).toEqual(bareLessId);
   });
 
   it('TG-02: the projection states what has been paid and what remains (40 of 100), and a settled invoice stays readable through its link as PAID with nothing remaining', async () => {
     const partial = await payPage(LINK_OF[ID.invPartial].token);
     expect(partial.status, JSON.stringify(partial.body)).toBe(200);
-    expect(partial.body).toMatchObject({ id: ID.invPartial, status: 'PARTIALLY_PAID', paid: 40, remaining: 60 });
+    expect(partial.body).toMatchObject({ status: 'PARTIALLY_PAID', paid: 40, remaining: 60 });
     expectNoPaymentRowsOrEmail(partial.body);
 
     const paid = await payPage(LINK_OF[ID.invPaid].token);
     expect(paid.status, JSON.stringify(paid.body)).toBe(200);
-    expect(paid.body).toMatchObject({ id: ID.invPaid, status: 'PAID', paid: TOTAL, remaining: 0 });
+    expect(paid.body).toMatchObject({ status: 'PAID', paid: TOTAL, remaining: 0 });
   });
 
   it('TG-03: a payment intent through a live link answers the R0-22 success, writes one PENDING row on the invoice\'s own tenant, leaves the status and the ledger as they were, and the link still reads', async () => {
@@ -644,6 +870,8 @@ describe('a revoked link stops every customer action (M34)', () => {
       await clearRateLimits();
       expectUnknownAnswer(await payPage(token), unknownPay, `${token}: pay page`);
       expectUnknownAnswer(await intent(token, { method: 'bank_transfer' }), unknownIntent, `${token}: intent`);
+      // V1-46b: the token payment routes refuse what the pay page refuses.
+      await expectTokenPaymentRoutesRefused(token, token);
       expect(await paymentsOf(inv), token).toHaveLength(0);
       expect((await invoiceRow(inv)).status, token).toBe(status);
     }
@@ -662,6 +890,9 @@ describe('a revoked link stops every customer action (M34)', () => {
     }
     expectUnknownAnswer(await payPage(token), unknownPay, 'pay page');
     expectUnknownAnswer(await receipt(token), unknownReceipt, 'receipt');
+    await clearRateLimits();
+    // V1-46b: neither a provider checkout nor a PayPal capture is reachable either.
+    await expectTokenPaymentRoutesRefused(token, 'revoked');
 
     expect(await paymentsOf(ID.invLedger)).toEqual(rowsBefore);
     expect(await balanceOf(ID.invLedger)).toEqual(balanceBefore);
@@ -706,7 +937,7 @@ describe('TENANT and the route contract (V1-46)', () => {
     const aBefore = await tenantSnapshot(ID.bizA);
     const page = await payPage(LINK_OF[ID.invB].token);
     expect(page.status).toBe(200);
-    expect(page.body).toMatchObject({ id: ID.invB, businessId: ID.bizB });
+    expect(page.body).toMatchObject({ businessId: ID.bizB });
     expect(JSON.stringify(page.body)).not.toContain(ID.bizA);
 
     const res = await intent(LINK_OF[ID.invB].token, { method: 'bank_transfer', amount: 10 });
@@ -745,35 +976,451 @@ describe('TENANT and the route contract (V1-46)', () => {
     }
     expect((await payPage(LINK_OF[ID.invLive].token)).status).toBe(429);
   });
-
-  it.todo(
-    'TG-14: the provider checkouts (WiPay, PayPal, Stripe), the gateway list and the PayPal capture answer 404 through a revoked token — ' +
-      'they are routes of payments.controller.ts, outside this write set, and stay keyed by the invoice id; the token page reaches them only after a live-token read',
-  );
 });
 
-// V1-46 review findings that need files outside this packet's write set.
-// Each is a real gap, kept as a todo so the follow-up packet starts from it;
-// none of them is closed by this packet, and M34 is not closed until they are.
-describe('revocation outside the write set (V1-46 review)', () => {
+describe('the payment routes are keyed by the token (V1-46b)', () => {
+  it('TG-14: through a live link the status (five keys), the gateway list and a checkout per provider (Stripe, WiPay, PayPal; stubbed, no network) answer, and each provider request names the token\'s invoice; nothing is recorded by a checkout', async () => {
+    const token = LINK_OF[ID.invTokPay].token;
+
+    const status = await tokStatus(token);
+    expect(status.status, JSON.stringify(status.body)).toBe(200);
+    expect(Object.keys(status.body).sort()).toEqual(['currency', 'lastPaymentAt', 'paid', 'remaining', 'status']);
+    expect(status.body).toMatchObject({ status: 'SENT', paid: 0, remaining: TOTAL, currency: 'TTD' });
+
+    const gateways = await tokGateways(token);
+    expect(gateways.status, JSON.stringify(gateways.body)).toBe(200);
+    expect(gateways.body.map((g: { id: string }) => g.id).sort()).toEqual(['paypal', 'stripe', 'wipay']);
+
+    const stripe = await tokCheckout(token, CHECKOUT_BODIES[0]);
+    expect(stripe.status, JSON.stringify(stripe.body)).toBe(201);
+    expect(stripe.body).toEqual({ type: 'redirect', redirectUrl: STRIPE_REDIRECT });
+    const stripeCall = providerCalls.filter((c) => c.url.startsWith('https://api.stripe.com/')).pop()!;
+    expect(new URLSearchParams(stripeCall.body).get('metadata[invoiceId]')).toBe(ID.invTokPay);
+    expect(new URLSearchParams(stripeCall.body).get('metadata[businessId]')).toBe(ID.bizA);
+
+    const wipay = await tokCheckout(token, CHECKOUT_BODIES[1]);
+    expect(wipay.status, JSON.stringify(wipay.body)).toBe(201);
+    expect(wipay.body).toEqual({ type: 'redirect', redirectUrl: WIPAY_REDIRECT });
+    const wipayCall = providerCalls.filter((c) => c.url.includes('wipayfinancial.com')).pop()!;
+    expect(new URLSearchParams(wipayCall.body).get('order_id')).toBe(ID.invTokPay);
+
+    const paypal = await tokCheckout(token, CHECKOUT_BODIES[2]);
+    expect(paypal.status, JSON.stringify(paypal.body)).toBe(201);
+    expect(paypal.body).toEqual({ type: 'paypal_order', orderId: expect.stringContaining(P) });
+    const order = paypalOrders.createOrder.mock.calls.at(-1)![0];
+    expect(order.body.purchaseUnits[0].customId).toBe(ID.invTokPay);
+
+    // A checkout records nothing: the provider's webhook or the capture does.
+    expect(await paymentsOf(ID.invTokPay)).toHaveLength(0);
+    expect((await invoiceRow(ID.invTokPay)).status).toBe('SENT');
+  });
+
+  it("TG-14b: the PayPal capture through a live link records one SUCCESSFUL row against the token's invoice; an invoiceId in the body naming another invoice is ignored", async () => {
+    const token = LINK_OF[ID.invCapture].token;
+    const liveBefore = await paymentsOf(ID.invLive);
+    const orderId = `${P}order_capture`;
+
+    const res = await tokCapture(token, orderId, { invoiceId: ID.invLive });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ id: orderId, status: 'COMPLETED' });
+    expect(paypalOrders.captureOrder.mock.calls.at(-1)![0]).toMatchObject({ id: orderId });
+
+    const rows = await paymentsOf(ID.invCapture);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      provider: 'paypal',
+      providerPaymentId: `${P}cap_${orderId}`,
+      status: 'SUCCESSFUL',
+      businessId: ID.bizA,
+      invoiceId: ID.invCapture,
+    });
+    expect(await paymentsOf(ID.invLive)).toEqual(liveBefore);
+  });
+
+  it('TG-14c: the route contract: the four token payment routes sit behind the class-level PublicRateLimitGuard alone with their limits; the bare-id per-provider checkouts and the bare-id PayPal capture are gone from payments.controller.ts', async () => {
+    const { PATH_METADATA, METHOD_METADATA, GUARDS_METADATA } = await import('@nestjs/common/constants');
+    const { RequestMethod } = await import('@nestjs/common');
+    const proto = PaymentsControllerRef.prototype;
+
+    expect(Reflect.getMetadata(GUARDS_METADATA, PaymentsControllerRef)).toEqual([PublicRateLimitGuardRef]);
+    for (const [name, routePath, method, limit] of [
+      ['getPaymentStatusByToken', 'public/invoice-link/:token/status', RequestMethod.GET, 20],
+      ['getGatewaysByToken', 'public/invoice-link/:token/gateways', RequestMethod.GET, 20],
+      ['createCheckoutByToken', 'public/invoice-link/:token/checkout', RequestMethod.POST, 5],
+      ['capturePaypalOrderByToken', 'public/invoice-link/:token/paypal/capture/:orderId', RequestMethod.POST, 5],
+    ] as const) {
+      const handler = proto[name];
+      expect(typeof handler, name).toBe('function');
+      expect(Reflect.getMetadata(PATH_METADATA, handler), name).toBe(routePath);
+      expect(Reflect.getMetadata(METHOD_METADATA, handler), name).toBe(method);
+      expect(Reflect.getMetadata(PUBLIC_RATE_LIMIT_KEY_REF, handler), name).toEqual({ limit, windowMs: 60_000 });
+      expect(Reflect.getMetadata(GUARDS_METADATA, handler) ?? [], name).toEqual([]);
+    }
+    for (const gone of ['createWipayCheckout', 'createPaypalOrder', 'capturePaypalOrder', 'createStripeCheckout']) {
+      expect(proto[gone], gone).toBeUndefined();
+    }
+    // Kept, behind the link gate: the bare-id status, gateway list and generic checkout.
+    for (const kept of ['getInvoicePaymentStatus', 'getGateways', 'createCheckout']) {
+      expect(typeof proto[kept], kept).toBe('function');
+    }
+  });
+});
+
+describe('revocation holds on the bare-id routes (V1-46b, ST-1)', () => {
+  it('TG-15 (ST-1): after the only link is revoked or has expired, an anonymous caller holding the invoice id gets the unknown-id 404 from GET /commerce/invoices/:id, GET /payments/invoice/:id/status and /gateways and POST /payments/create-checkout; the bare per-provider checkouts and capture are gone; nothing is written and no provider is called', async () => {
+    for (const inv of [ID.invBare, ID.invExpired, ID.invInactive]) {
+      await clearRateLimits();
+      const calls = providerCalls.length;
+      const paypal = paypalCallCount();
+      const before = await paymentsOf(inv);
+
+      expectUnknownAnswer(await bareProjection(inv), unknownBareRead, `${inv}: GET /commerce/invoices/:id`);
+      expectUnknownAnswer(await bareStatus(inv), unknownBareStatus, `${inv}: status`);
+      expectUnknownAnswer(await bareGateways(inv), unknownBareGateways, `${inv}: gateways`);
+      expectUnknownAnswer(await bareCheckout(inv), unknownBareCheckout, `${inv}: create-checkout`);
+
+      for (const [label, res] of [
+        ['stripe', await agent().post(`/payments/invoice/${inv}/stripe`).send({ successUrl: `${RETURN_URL}?stripe=success`, cancelUrl: RETURN_URL })],
+        ['wipay', await agent().post(`/payments/invoice/${inv}/wipay`).send({ returnUrl: RETURN_URL })],
+        ['paypal create-order', await agent().post(`/payments/invoice/${inv}/paypal/create-order`).send({})],
+        ['paypal capture', await agent().post(`/payments/paypal/capture/${P}order_bare`).send({ invoiceId: inv })],
+      ] as const) {
+        expect(res.status, `${inv}: bare ${label} ${JSON.stringify(res.body)}`).toBe(404);
+        expect(res.body, `${inv}: bare ${label}`).not.toHaveProperty('redirectUrl');
+        expect(res.body, `${inv}: bare ${label}`).not.toHaveProperty('orderId');
+      }
+
+      expect(providerCalls.length, `${inv}: no provider request`).toBe(calls);
+      expect(paypalCallCount(), `${inv}: no PayPal SDK call`).toBe(paypal);
+      expect(await paymentsOf(inv), inv).toEqual(before);
+      expect((await invoiceRow(inv)).status, inv).toBe('SENT');
+    }
+  });
+
+  it('TG-15b: the operator routes are unchanged for that invoice: the owner reads the full shape on GET /commerce/invoices/:id and on the tenant-bound detail route', async () => {
+    const asOwner = await agent().get(`/commerce/invoices/${ID.invBare}`).set(HEADER, ID.ownerA);
+    expect(asOwner.status, JSON.stringify(asOwner.body)).toBe(200);
+    expect(asOwner.body).toMatchObject({ id: ID.invBare, businessId: ID.bizA, status: 'SENT' });
+    expect(Array.isArray(asOwner.body.payments)).toBe(true);
+    expect(asOwner.body.contact?.email).toBe(`${P}${CANARY}customer@test.local`);
+
+    const tenant = await agent().get(`/commerce/businesses/${ID.bizA}/invoices/${ID.invBare}`).set(HEADER, ID.ownerA);
+    expect(tenant.status, JSON.stringify(tenant.body)).toBe(200);
+    expect(tenant.body).toMatchObject({ id: ID.invBare, status: 'SENT' });
+
+    // A member of another tenant is anonymous for revenue purposes: the gate applies.
+    const asOther = await agent().get(`/commerce/invoices/${ID.invBare}`).set(HEADER, ID.ownerB);
+    expectUnknownAnswer(asOther, unknownBareRead, 'tenant B owner');
+  });
+
+  it('TG-15c: an invoice with a live link, and one that never had a link, keep the bare-id projection (KF-REVENUE-AUTH-PROJECTION-001; release0-journey step 6 pins the never-linked case)', async () => {
+    for (const inv of [ID.invResolver, ID.invNoLink]) {
+      await clearRateLimits();
+      const read = await bareProjection(inv);
+      expect(read.status, `${inv}: read`).toBe(200);
+      expect(read.body).toMatchObject({ id: inv, status: 'SENT', remaining: TOTAL });
+      expectNoPaymentRowsOrEmail(read.body);
+      const status = await bareStatus(inv);
+      expect(status.status, `${inv}: status`).toBe(200);
+      expect(Object.keys(status.body).sort()).toEqual(['currency', 'lastPaymentAt', 'paid', 'remaining', 'status']);
+      expect((await bareGateways(inv)).status, `${inv}: gateways`).toBe(200);
+    }
+    expect(await linksOf(ID.invNoLink)).toHaveLength(0);
+  });
+
+  it('TG-16 (ST-1): the token pay read no longer returns the invoice id, and no token payment route answers it', async () => {
+    const token = LINK_OF[ID.invLive].token;
+    const page = await payPage(token);
+    expect(page.status).toBe(200);
+    expect(page.body).not.toHaveProperty('id');
+    // The tenant key stays: the page's presence tracker reads it.
+    expect(page.body.businessId).toBe(ID.bizA);
+    for (const [label, res] of [
+      ['pay page', page],
+      ['status', await tokStatus(token)],
+      ['gateways', await tokGateways(token)],
+      ['stripe checkout', await tokCheckout(token, CHECKOUT_BODIES[0])],
+      ['paypal checkout', await tokCheckout(token, CHECKOUT_BODIES[2])],
+    ] as const) {
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBeLessThan(300);
+      expect(JSON.stringify(res.body), label).not.toContain(ID.invLive);
+    }
+  });
+});
+
+describe('the widget pay page and the producers (V1-46b, ST-2, CR-01)', () => {
+  it("TG-17 (ST-2): widgets/pay/[invoiceId] is retired: it reads and writes nothing and shows the 'no longer used' state of /pay/[invoiceId]; the attendee row links the token link", () => {
+    const retired = source('apps/web/src/app/pay/[invoiceId]/page.tsx');
+    const title = /title="([^"]+)"/.exec(retired)?.[1];
+    expect(title).toBe('This payment address is no longer used');
+
+    const widget = source('apps/web/src/app/widgets/pay/[invoiceId]/page.tsx');
+    expect(widget).toContain(title!);
+    expect(widget).toContain('PublicPageState');
+    for (const banned of ['apiGet', 'apiPost', 'fetch(', '/commerce/', '/payments/', 'create-checkout']) {
+      expect(widget, banned).not.toContain(banned);
+    }
+
+    const row = source('apps/web/src/app/app/events/components/attendee-row.tsx');
+    expect(row).not.toMatch(/widgets\/pay/);
+    expect(row).toContain('createInvoicePaymentLink');
+    expect(row).toMatch(/\/public\/invoice\//);
+  });
+
+  it('TG-18a (CR-01): no source file emits a bare /pay/<invoiceId> or /widgets/pay/<invoiceId> URL, and the pay page and client.ts call only token-keyed payment routes', () => {
+    // The retired pages themselves are allowed to exist; they must emit nothing (TG-17 pins what they read).
+    const ALLOWED: Record<string, string> = {
+      'apps/web/src/app/pay/[invoiceId]/page.tsx': 'the retired bare-id pay page itself',
+      'apps/web/src/app/widgets/pay/[invoiceId]/page.tsx': 'the retired bare-id widget page itself',
+    };
+    const BARE_PAY_URL = [/\/pay\/\$\{/, /["'`]\/pay\/["'`]\s*\+/, /widgets\/pay\/\$\{/];
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (['node_modules', 'dist', '.next', '__tests__'].includes(e.name)) continue;
+          walk(p);
+          continue;
+        }
+        if (!/\.(ts|tsx)$/.test(e.name) || /\.(spec|test)\.tsx?$/.test(e.name)) continue;
+        const rel = path.relative(REPO, p).split(path.sep).join('/');
+        if (rel in ALLOWED) continue;
+        const text = fs.readFileSync(p, 'utf8');
+        for (const re of BARE_PAY_URL) if (re.test(text)) offenders.push(`${rel} ${re}`);
+      }
+    };
+    walk(path.join(REPO, 'apps/server/src'));
+    walk(path.join(REPO, 'apps/web/src'));
+    expect(offenders).toEqual([]);
+
+    // The operator copy-link fallbacks, the booking widget and the bare-id entry page carry no /pay/ address at all.
+    for (const rel of [
+      'apps/web/src/app/app/commerce/invoices/invoices-panel.tsx',
+      'apps/web/src/app/app/commerce/invoices/page.tsx',
+      'apps/web/src/app/app/commerce/invoices/[id]/page.tsx',
+      'apps/web/src/app/widgets/booking/[slug]/page.tsx',
+      'apps/web/src/app/public/pay/page.tsx',
+    ]) {
+      expect(source(rel), rel).not.toMatch(/["'`]\/pay\//);
+    }
+
+    const page = source('apps/web/src/app/pay/link/[token]/page.tsx');
+    for (const re of [/\/payments\/invoice\//, /\/payments\/paypal\/capture\//, /create-checkout/, /\binvoice\.id\b/, /\bloaded\.id\b/, /\/commerce\/invoices\//]) {
+      expect(page, String(re)).not.toMatch(re);
+    }
+    const client = source('apps/web/src/lib/client.ts');
+    for (const re of [/\/payments\/invoice\//, /\/payments\/paypal\/capture\//, /\/payments\/create-checkout/]) {
+      expect(client, String(re)).not.toMatch(re);
+    }
+    expect(client).toContain('/payments/public/invoice-link/');
+  });
+
+  /** A customer email sender stub that records what each producer sends. */
+  function emailRecorder() {
+    const sent: any[] = [];
+    return { sent, send: vi.fn(async (payload: any) => { sent.push(payload); return { status: 'SENT' }; }) };
+  }
+
+  const quietLogger = { debug: () => undefined, log: () => undefined, warn: () => undefined, error: () => undefined };
+
+  async function liveLinkUrl(invoiceId: string) {
+    const live = (await linksOf(invoiceId)).filter((l) => l.active && (!l.expiresAt || l.expiresAt > new Date()));
+    expect(live, `${invoiceId}: one live link`).toHaveLength(1);
+    return `${appUrl()}/public/invoice/${live[0].token}`;
+  }
+
+  it('TG-18b (CR-01): the overdue reminder (flow.listener) emails /public/invoice/<token>, creating the link when the invoice has none', async () => {
+    expect(await linksOf(ID.invFlowOverdue)).toHaveLength(0);
+    const mail = emailRecorder();
+    const listener = Object.assign(Object.create(FlowListenerRef.prototype), {
+      prisma: { client: { notification: { create: async () => ({}) } } },
+      transactionalEmail: { send: mail.send },
+      commerce,
+      logger: quietLogger,
+    });
+    await listener.handleInvoiceOverdue({
+      businessId: ID.bizA,
+      invoice: {
+        id: ID.invFlowOverdue,
+        invoiceNumber: 'V46A-OVERDUE',
+        total: TOTAL,
+        currency: 'TTD',
+        dueDate: new Date(Date.now() - 10 * DAY_MS),
+        contact: { id: ID.contactA, firstName: 'V46a', lastName: 'Customer', email: `${P}overdue@test.local` },
+      },
+    });
+    expect(mail.sent).toHaveLength(1);
+    expect(mail.sent[0].type).toBe('invoice_overdue');
+    expect(mail.sent[0].templateData.invoiceUrl).toBe(await liveLinkUrl(ID.invFlowOverdue));
+    expect(mail.sent[0].templateData.invoiceUrl).not.toContain(ID.invFlowOverdue);
+  });
+
+  it("TG-18c (CR-01): KEY's invoice_sent (flow-orchestrator) emails /public/invoice/<token> and reuses the invoice's live link", async () => {
+    const mail = emailRecorder();
+    const orchestrator = Object.assign(Object.create(FlowOrchestratorServiceRef.prototype), {
+      prisma: prismaService,
+      getTransactionalEmail: () => mail,
+      getCommerce: () => ({
+        publicInvoiceUrl: (invoiceId: string, businessId: string) => commerce.publicInvoiceUrl(invoiceId, businessId),
+        updateInvoiceStatus: async () => ({ id: ID.invKeySend, status: 'SENT' }),
+      }),
+      getActivityLog: () => ({ createActivity: async () => ({}) }),
+    });
+    const result = await orchestrator.executeToolAction(ID.bizA, 'commerce_send_invoice', { invoiceId: ID.invKeySend });
+    expect(result.status).toBe('SENT');
+    expect(mail.sent).toHaveLength(1);
+    expect(mail.sent[0].type).toBe('invoice_sent');
+    expect(mail.sent[0].templateData.invoiceUrl).toBe(`${appUrl()}/public/invoice/${LINK_OF[ID.invKeySend].token}`);
+    expect(await linksOf(ID.invKeySend)).toHaveLength(1);
+  });
+
+  it('TG-18d (CR-01): autopilot payment recovery (delegation-loop) emails /public/invoice/<token>', async () => {
+    expect(await linksOf(ID.invRecovery)).toHaveLength(0);
+    const mail = emailRecorder();
+    const tasks: any[] = [];
+    const loop = Object.assign(Object.create(DelegationLoopServiceRef.prototype), {
+      prisma: {
+        client: {
+          invoice: {
+            findMany: async () => [{
+              id: ID.invRecovery,
+              invoiceNumber: 'V46A-RECOVERY',
+              total: TOTAL,
+              dueDate: new Date(Date.now() - 10 * DAY_MS),
+              status: 'OVERDUE',
+              contact: { id: ID.contactA, firstName: 'V46a', lastName: 'Customer', email: `${P}recovery@test.local`, phone: null, doNotContact: false },
+            }],
+            update: async () => ({}),
+          },
+          autopilotTask: {
+            findFirst: async () => null,
+            create: async ({ data }: any) => { const t = { id: `${P}task_${tasks.length + 1}`, ...data }; tasks.push(t); return t; },
+            update: async () => ({}),
+          },
+        },
+      },
+      timeline: { logEvent: async () => undefined },
+      events: { emit: () => true },
+      emailService: { send: mail.send },
+      logger: quietLogger,
+      contactWindow: async () => ({ allowed: true }),
+      getCommerce: () => commerce,
+    });
+    await loop.runPaymentRecovery(ID.bizA, {}, { itemsScanned: 0, itemsMatched: 0, actionsCreated: 0, results: [] }, false);
+    expect(mail.sent).toHaveLength(1);
+    expect(mail.sent[0].templateData.isPaymentReminder).toBe(true);
+    expect(mail.sent[0].templateData.invoiceUrl).toBe(await liveLinkUrl(ID.invRecovery));
+  });
+
+  it('TG-18e: the due-soon reminder (flow.listener), which linked the non-existent /invoices/<id>, emails /public/invoice/<token>', async () => {
+    expect(await linksOf(ID.invDueSoon)).toHaveLength(0);
+    const mail = emailRecorder();
+    const listener = Object.assign(Object.create(FlowListenerRef.prototype), {
+      prisma: {
+        client: {
+          invoice: {
+            findMany: async () => [{
+              id: ID.invDueSoon,
+              businessId: ID.bizA,
+              invoiceNumber: 'V46A-DUESOON',
+              total: TOTAL,
+              currency: 'TTD',
+              dueDate: new Date(Date.now() + DAY_MS),
+              contact: { id: ID.contactA, firstName: 'V46a', lastName: 'Customer', email: `${P}duesoon@test.local` },
+              items: [],
+            }],
+          },
+          customerNotificationLog: { findFirst: async () => null },
+        },
+      },
+      transactionalEmail: { send: mail.send },
+      commerce,
+      logger: quietLogger,
+    });
+    await listener.handleInvoiceDueSoonReminders();
+    expect(mail.sent).toHaveLength(1);
+    expect(mail.sent[0].type).toBe('invoice_due_soon');
+    expect(mail.sent[0].templateData.invoiceUrl).toBe(await liveLinkUrl(ID.invDueSoon));
+  });
+
+  it('TG-18f: the shared helper gives a settled invoice its existing link (findAnyPaymentLink, as resend-receipt does), never a bare-id URL', async () => {
+    const url = await commerce.publicInvoiceUrl(ID.invPaid, ID.bizA);
+    expect(url).toBe(`${appUrl()}/public/invoice/${LINK_OF[ID.invPaid].token}`);
+    // A foreign tenant gets nothing for this invoice.
+    await expect(commerce.publicInvoiceUrl(ID.invLive, ID.bizB)).rejects.toThrow();
+  });
+});
+
+describe('provider webhooks and callbacks keep working (V1-46b)', () => {
+  it('TG-19: a signed Stripe checkout.session.completed webhook records the payment for an invoice whose link has been revoked (keyed by the signed event; no network)', async () => {
+    expect((await linksOf(ID.invWhStripe)).every((l) => !l.active)).toBe(true);
+    const payload = JSON.stringify({
+      id: `${P}evt_stripe_wh`,
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: `${P}cs_wh`,
+          object: 'checkout.session',
+          amount_total: 2500,
+          currency: 'ttd',
+          client_reference_id: ID.invWhStripe,
+          metadata: { invoiceId: ID.invWhStripe, businessId: ID.bizA },
+          payment_intent: `${P}pi_wh`,
+        },
+      },
+    });
+    const t = Math.floor(Date.now() / 1000);
+    const sig = createHmac('sha256', PROVIDER_ENV.STRIPE_WEBHOOK_SECRET).update(`${t}.${payload}`).digest('hex');
+    const res = await agent()
+      .post('/payments/stripe/webhook')
+      .set('stripe-signature', `t=${t},v1=${sig}`)
+      .set('Content-Type', 'application/json')
+      .send(payload);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const rows = await paymentsOf(ID.invWhStripe);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: 'stripe', providerPaymentId: `${P}cs_wh`, status: 'SUCCESSFUL', amount: 25, businessId: ID.bizA });
+    expect((await invoiceRow(ID.invWhStripe)).status).toBe('PARTIALLY_PAID');
+  });
+
+  it('TG-20: a verified PayPal PAYMENT.CAPTURE.COMPLETED webhook records the capture for an invoice whose link has been revoked (verification stubbed; no network)', async () => {
+    const payload = JSON.stringify({
+      id: `${P}evt_paypal_wh`,
+      event_type: 'PAYMENT.CAPTURE.COMPLETED',
+      resource: { id: `${P}cap_wh`, custom_id: ID.invWhPaypal, status: 'COMPLETED', amount: { value: '25.00', currency_code: 'TTD' } },
+    });
+    const res = await agent()
+      .post('/payments/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .set('paypal-transmission-id', `${P}tx`)
+      .set('paypal-transmission-time', new Date().toISOString())
+      .set('paypal-transmission-sig', `${P}sig`)
+      .set('paypal-cert-url', 'https://api-m.sandbox.paypal.com/cert.pem')
+      .set('paypal-auth-algo', 'SHA256withRSA')
+      .send(payload);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(providerCalls.some((c) => c.url.endsWith('/v1/notifications/verify-webhook-signature'))).toBe(true);
+    const rows = await paymentsOf(ID.invWhPaypal);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: 'paypal', providerPaymentId: `${P}cap_wh`, status: 'SUCCESSFUL', amount: 25, businessId: ID.bizA });
+  });
+
+  it('TG-21: a WiPay success callback records the payment for an invoice whose link has been revoked', async () => {
+    const q = { transaction_id: `${P}wipay_tx`, order_id: ID.invWhWipay, status: 'success', total: '25.00' };
+    const hash = createHash('md5').update(`${q.transaction_id}${q.order_id}${q.total}${q.status}`).digest('hex');
+    const res = await agent().get('/payments/wipay/callback').query({ ...q, hash });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ success: true });
+    const rows = await paymentsOf(ID.invWhWipay);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: 'wipay', providerPaymentId: `${P}wipay_tx`, status: 'SUCCESSFUL', amount: 25, businessId: ID.bizA });
+  });
+
   it.todo(
-    'TG-15 (ST-1): after the only link is revoked, an anonymous caller holding the id the token read returned gets 404 from ' +
-      'GET /commerce/invoices/:id, GET /payments/invoice/:id/status, GET /payments/invoice/:id/gateways and POST /payments/invoice/:id/stripe ' +
-      '(today: 200, 200, 200, and past the payable gate) — needs payments.controller.ts/payments.service.ts keyed by the token, and the ' +
-      'anonymous branch of getInvoiceForViewer dropped once widgets/pay/[invoiceId] no longer reads it (TG-11 and the KF-REVENUE-AUTH-PROJECTION-001 ' +
-      'suites pin that branch today)',
-  );
-  it.todo(
-    'TG-16 (ST-1): the token pay read no longer returns the invoice id — possible only once every route the pay page calls takes the token',
-  );
-  it.todo(
-    'TG-17 (ST-2): apps/web/src/app/widgets/pay/[invoiceId]/page.tsx is retired or keyed by the token (it reads GET /commerce/invoices/:id and ' +
-      'starts POST /payments/create-checkout and the PayPal capture with the bare id; linked from app/events/components/attendee-row.tsx) — outside this write set',
-  );
-  it.todo(
-    'TG-18 (CR-01): every producer of a bare /pay/<invoiceId> URL emits a token link (/public/invoice/<token> via createPaymentLink / findAnyPaymentLink): ' +
-      'flow/flow.listener.ts (overdue reminder), ai/flow-orchestrator.service.ts (invoice_sent), autopilot/delegation-loop.service.ts (payment recovery), ' +
-      'web widgets/booking/[slug]/page.tsx, public/pay/page.tsx, and the operator copy-link fallbacks in commerce/invoices/invoices-panel.tsx, ' +
-      'invoices/page.tsx and invoices/[id]/page.tsx — outside this write set; until they do, those customers land on the retired page and cannot pay',
+    'TG-22 (M35, V1-05; found here, not in this write set\'s remit): the WiPay callback "signature" is md5(transaction_id + order_id + total + status) with no ' +
+      'secret, so anyone holding an invoice id can forge a success callback and record a SUCCESSFUL, ledger-posted payment whatever the link state; ' +
+      'the fix needs WiPay\'s keyed hash spec. The PayPal capture (bare or token) records invoice.total whatever the order captured and posts nothing ' +
+      'to the ledger (payment.create, not createPaymentWithPosting); a later CAPTURE.COMPLETED webhook is then deduplicated and never posts.',
   );
 });
