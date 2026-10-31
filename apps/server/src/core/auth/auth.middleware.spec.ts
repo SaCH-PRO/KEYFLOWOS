@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import type { Request, Response } from 'express';
+import { UnauthorizedException } from '@nestjs/common';
 import { AuthMiddleware, logoutRevocationCutoff } from './auth.middleware';
 import { buildAdminToken } from './admin-token.util';
 import { IdentityController } from '../../modules/identity/identity.controller';
+import { IdentityPasswordService } from '../../modules/identity/identity-password.service';
 
 function makeMiddleware(
   supabaseUser?: { id: string; email?: string } | null,
@@ -610,6 +612,8 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
         refreshToken?: () => string;
         /** What SupabaseAdminService.signOut resolves to: false is its failure report. */
         signOut?: () => Promise<unknown>;
+        /** The local User row the password service reads (null: not bootstrapped yet). Active by default. */
+        userRow?: { deletedAt: Date | null; bannedAt: Date | null } | null;
       } = {},
     ) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- audit entries inspected by the cases
@@ -623,8 +627,34 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
         })),
         refreshSession: vi.fn(async () => ({ accessToken: opts.refreshToken ? opts.refreshToken() : 'refreshed', refreshToken: 'r2' })),
       };
-      const supabaseAdmin = { signOut: vi.fn(opts.signOut ?? (async () => undefined)) };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- collaborators the two handlers do not reach
+      const supabaseAdmin = {
+        signOut: vi.fn(opts.signOut ?? (async () => undefined)),
+        updateUserPassword: vi.fn(async (_userId: string, _password: string) => undefined),
+      };
+      // The REAL IdentityPasswordService behind POST /identity/reset-password,
+      // on the same Redis keyspace the logout writes and the middleware reads.
+      // Like the middleware mock above, the verifier accepts every token as
+      // USER: a signature Supabase accepts is exactly what a stolen token has.
+      const passwordPrisma = {
+        client: {
+          user: {
+            findUnique: vi.fn(async () => (opts.userRow === undefined ? { deletedAt: null, bannedAt: null } : opts.userRow)),
+          },
+        },
+      };
+      const passwordSvc = new IdentityPasswordService(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub
+        supabaseAdmin as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub
+        { getUserFromToken: vi.fn(async () => ({ id: USER, email: 'st4@example.com' })) } as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub
+        { validate: vi.fn(async () => undefined) } as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub
+        passwordPrisma as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub
+        redis as any,
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- collaborators the handlers do not reach
       const unused: any = {};
       const ctrl = new IdentityController(
         unused, unused, unused,
@@ -632,7 +662,7 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
         signupSvc as any,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub
         authSec as any,
-        unused,
+        passwordSvc,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub
         { client: {} } as any,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test stub
@@ -650,17 +680,26 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
         logout: () => ctrl.logout({ id: USER, email: 'st4@example.com' } as never, req),
         login: () => ctrl.login({ email: 'st4@example.com', password: 'pw' }, req),
         refresh: () => ctrl.refresh({ refreshToken: 'pre-logout-refresh-token' } as never, req),
+        /** POST /identity/reset-password: public, no bearer; the body's access token is its only credential. */
+        reset: (accessToken: string) =>
+          ctrl.resetPassword(
+            { accessToken, password: 'CorrectHorseBattery9!' } as never,
+            { ip: '127.0.0.1', headers: {}, socket: {} } as unknown as Request,
+          ),
         signupSvc,
         supabaseAdmin,
         authSec,
+        passwordPrisma,
       };
     }
 
     /** A Supabase session access token as GoTrue mints it: minted now, carrying its session's id and authentication time. */
-    const sessionToken = (sessionId: string, authenticatedAt: number) => () => {
+    const sessionToken = (sessionId: string, authenticatedAt: number, method = 'password') => () => {
       const iat = Math.floor(Date.now() / 1000);
-      return jwt({ iat, exp: iat + 3600, session_id: sessionId, amr: [{ method: 'password', timestamp: authenticatedAt }] });
+      return jwt({ iat, exp: iat + 3600, session_id: sessionId, amr: [{ method, timestamp: authenticatedAt }] });
     };
+    /** The access token in a recovery link: a session GoTrue authenticated by the recovery verification. */
+    const recoveryToken = (sessionId: string, authenticatedAt: number) => sessionToken(sessionId, authenticatedAt, 'recovery')();
 
     it('ST4-R1 / F1: with the provider sign-out failing (signOut resolves false: provider down, or the refresh tokens otherwise left alive), a pre-logout session refreshed through the real POST /identity/refresh after the logout is refused, with no login in between; the next login is attached; the audit names the failed leg', async () => {
       const redis = memoryRedis();
@@ -732,12 +771,77 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
       expect(redis.store.get(KEY), 'login leaves the marker alone').toBe('1');
     });
 
-    it.todo(
-      'REQUIRED (follow-up packet, review finding ST4-R2; identity-password.service.ts, outside this write set): POST /identity/reset-password ' +
-        'honours the logout cutoff (a token of a session authenticated at or before auth:revoked:user:<id> cannot set the password) and accepts ' +
-        'only a recovery-type session (amr method recovery/otp). Today completeReset accepts any Supabase-verified access token, so a stolen ' +
-        'pre-logout token the middleware refuses can still take the account over',
-    );
+    /**
+     * Review finding ST4-R2 (R0-ID-F5-RESET-PASSWORD-RECOVERY). POST
+     * /identity/reset-password is public: the access token in its body is the
+     * only credential, and completeReset accepted any token Supabase verifies.
+     * So a stolen pre-logout token the middleware refuses could still set a new
+     * password and take the account over. The real logout handler, the real
+     * reset handler and the real middleware, on one Redis keyspace.
+     */
+    describe('ST4-R2: POST /identity/reset-password honours the logout cutoff and accepts only a recovery session', () => {
+      const auditOf = (c: ReturnType<typeof controller>, event: string) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- audit entries recorded by the stub
+        c.authSec.audit.mock.calls.map((call: any[]) => call[0]).filter((e: { event: string }) => e.event === event);
+
+      it('a recovery session opened BEFORE the logout cannot set the password after it, though Supabase still verifies its token; a recovery session opened after the logout can (positive control)', async () => {
+        const redis = memoryRedis();
+        const { mw } = middleware(redis);
+        const c = controller(redis, { signOut: async () => true });
+        const preLogoutRecovery = recoveryToken('s-recovery-before', NOW_S - 600);
+
+        await c.logout();
+        expect(await attached(mw, preLogoutRecovery), 'the middleware refuses it').toBeUndefined();
+        await expect(c.reset(preLogoutRecovery), 'and so does the reset').rejects.toBeInstanceOf(UnauthorizedException);
+        expect(c.supabaseAdmin.updateUserPassword).not.toHaveBeenCalled();
+        expect(c.supabaseAdmin.signOut, 'only the logout reached the provider').toHaveBeenCalledTimes(1);
+        expect(auditOf(c, 'password_reset_completed')).toEqual([expect.objectContaining({ outcome: 'failure' })]);
+
+        vi.setSystemTime(NOW_MS + 5_000);
+        const postLogoutRecovery = recoveryToken('s-recovery-after', NOW_S + 5);
+        await expect(c.reset(postLogoutRecovery)).resolves.toMatchObject({ status: 'ok' });
+        expect(c.supabaseAdmin.signOut).toHaveBeenLastCalledWith(postLogoutRecovery, 'global');
+        expect(c.supabaseAdmin.updateUserPassword).toHaveBeenCalledWith(USER, 'CorrectHorseBattery9!');
+        expect(auditOf(c, 'password_reset_completed')).toEqual([
+          expect.objectContaining({ outcome: 'failure' }),
+          expect.objectContaining({ outcome: 'success', userId: USER }),
+        ]);
+      });
+
+      it('an ordinary session token is not a recovery session: neither a stolen pre-logout one nor one the middleware attaches (the next login) can set the password', async () => {
+        const redis = memoryRedis();
+        const { mw } = middleware(redis);
+        const c = controller(redis, { loginToken: () => sessionToken('s-after', Math.floor(Date.now() / 1000))() });
+        const stolen = sessionToken('s-before', NOW_S - 600)();
+
+        await expect(c.reset(stolen), 'stolen password-session token, before any logout').rejects.toBeInstanceOf(UnauthorizedException);
+
+        await c.logout();
+        await expect(c.reset(stolen), 'the same token after the logout').rejects.toBeInstanceOf(UnauthorizedException);
+
+        vi.setSystemTime(NOW_MS + 5_000);
+        const out = (await c.login()) as { accessToken: string };
+        expect(await attached(mw, out.accessToken), 'the next login is attached').toBeTruthy();
+        await expect(c.reset(out.accessToken), 'but it is not a recovery session').rejects.toBeInstanceOf(UnauthorizedException);
+
+        expect(c.supabaseAdmin.updateUserPassword).not.toHaveBeenCalled();
+      });
+
+      it('a recovery session of a deleted or banned user cannot set the password, as the middleware refuses its other tokens', async () => {
+        for (const row of [
+          { deletedAt: new Date(NOW_MS - 1000), bannedAt: null },
+          { deletedAt: null, bannedAt: new Date(NOW_MS - 1000) },
+        ]) {
+          const c = controller(memoryRedis(), { userRow: row });
+          await expect(c.reset(recoveryToken('s-recovery', NOW_S - 60))).rejects.toBeInstanceOf(UnauthorizedException);
+          expect(c.passwordPrisma.client.user.findUnique).toHaveBeenCalledWith({
+            where: { id: USER },
+            select: { deletedAt: true, bannedAt: true },
+          });
+          expect(c.supabaseAdmin.updateUserPassword).not.toHaveBeenCalled();
+        }
+      });
+    });
 
     it('logout writes the revocation time in epoch seconds, with a TTL at or above the longest token lifetime (24h)', async () => {
       const redis = memoryRedis();
