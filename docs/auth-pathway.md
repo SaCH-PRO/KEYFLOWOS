@@ -226,7 +226,9 @@ item 3 is open.
      also reads `DEPLOYMENT.md`, `.env.example`, `MIGRATION.md`, `README.md`
      and `infrastructure/production.env.template`, and fails when any of them
      sets the variable to a value production boot would accept. Every one of
-     them now leaves the variable empty.
+     them now leaves the variable empty, and since the R0-SEC-04 review
+     repair (CR-1) the same spec fails on any value at all, deny-listed or
+     not, including a commented-out or `export` line.
    - **What the fix does not change.** HS256 is a shared secret. Whoever
      holds the value can still mint the hosted shape for any `sub` and
      `email`, exactly as Supabase can, and a server with no provider client
