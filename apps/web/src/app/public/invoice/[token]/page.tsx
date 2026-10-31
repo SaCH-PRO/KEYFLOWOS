@@ -259,10 +259,10 @@ export default function PublicInvoicePage() {
                 className="w-full"
                 style={{ backgroundColor: accent }}
                 onClick={() => {
-                  // Tokenized provider-aware flow: /pay/link/{token} resolves
-                  // the payment link on the API and forwards the customer to
-                  // the appropriate provider checkout (Wipay / manual /
-                  // gateway), avoiding the legacy mark-paid dropout.
+                  // V1-46 (D-07, token links only): /pay/link/{token} is the
+                  // pay page itself, keyed by this same token. It no longer
+                  // downgrades to the retired bare-id /pay/:invoiceId page,
+                  // so deactivating or expiring the link stops payment too.
                   window.location.href = `/pay/link/${encodeURIComponent(token)}`;
                 }}
               >

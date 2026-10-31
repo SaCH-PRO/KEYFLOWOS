@@ -1631,25 +1631,56 @@ export class CommerceController {
     return this.commerce.deactivatePaymentLink(id, businessId);
   }
 
+  // V1-46-PUB-PAY-LINK-TOKEN-GATE (M34; D-07: token links only, the bare-id
+  // pay page is retired). The customer pay page's read and its offline intent
+  // are keyed by the pay-link token, so deactivating or expiring a link stops
+  // those two. It does NOT yet stop someone who opened the page once: the
+  // read returns the invoice id (the provider checkouts need it), and the
+  // id-keyed public routes still answer that id after the link is gone — the
+  // bare-id read below, and payments.controller.ts's gateway list, status,
+  // Stripe / PayPal / WiPay checkouts and PayPal capture (review ST-1; outside
+  // this packet's write set). M34 stays open until those are token-keyed and
+  // the id leaves this read. Two bare routes are retired and two token routes
+  // take their place (the public-surface ledger stays at 11):
+  //   GET  payment-links/:token          -> retired. It handed the invoice id to
+  //                                         /pay/link/[token], which downgraded
+  //                                         to /pay/:invoiceId.
+  //   POST invoices/:invoiceId/payment-intent -> retired. Anyone holding the
+  //                                         id could record an intent whatever
+  //                                         became of the link.
+  // The bare-id public read GET invoices/:invoiceId keeps its redacted
+  // projection (KF-REVENUE-AUTH-PROJECTION-001) for anyone holding the id:
+  // the embeddable widgets/pay/[invoiceId] page still reads it (review ST-2),
+  // so its anonymous branch can go only once that page is retired or keyed by
+  // the token. The operator app reads the tenant-bound route (R0-QI-01).
+  // What stands in for a guard on both token routes: the token IS the
+  // credential (24 crypto-random bytes, V1-48; unknown, inactive, expired and
+  // foreign-tenant links answer one 404) plus the rate limit.
+
+  // The pay page's read: the public projection the bare-id read serves.
   @UseGuards(PublicRateLimitGuard)
-  @PublicRateLimit(20, 60_000)
-  @Get('payment-links/:token')
-  getPaymentLinkByToken(@Param('token') token: string) {
-    return this.commerce.getPaymentLinkByToken(token);
+  @PublicRateLimit(30, 60_000)
+  @Get('public/invoice-link/:token/pay')
+  async getPayPageByToken(@Param('token') token: string) {
+    const view = await this.commerce.getPayPageByToken(token);
+    if (!view) throw new NotFoundException('Invoice not found');
+    return view;
   }
 
+  // The customer's offline intent ("I will pay by bank transfer / cash"):
+  // the R0-22 contract, reachable only through a live link.
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(10, 60_000)
-  @Post('invoices/:invoiceId/payment-intent')
-  recordPublicPaymentIntent(
-    @Param('invoiceId') invoiceId: string,
+  @Post('public/invoice-link/:token/payment-intent')
+  recordPaymentIntentByToken(
+    @Param('token') token: string,
     @Body() body: { method: string; amount?: unknown },
   ) {
     const method = sanitizeString(body?.method ?? '', 50) ?? '';
     // R0-22: the amount is passed through as sent. It used to be dropped when
     // negative or not a number, so a bad amount was silently recorded as 0;
     // the service now answers 400 for it and caps a good one at the balance.
-    return this.commerce.recordPublicPaymentIntent(invoiceId, method, body?.amount);
+    return this.commerce.recordPaymentIntentByToken(token, method, body?.amount);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
