@@ -638,9 +638,18 @@ const flowHighlightsSchema = z.object({
 
 export type FlowHighlights = z.infer<typeof flowHighlightsSchema>;
 
-export async function fetchContactDetail(contactId: string, businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
+/**
+ * With no businessId the read is bound to the member's stored business, never
+ * silently to the demo tenant: BusinessGuard refuses a real member on
+ * DEFAULT_BUSINESS_ID, and the contact screen reports that refusal as "You do
+ * not have access to this contact" (CONTACTS-v1 section 5). The demo id is used
+ * only in explicit demo mode; otherwise no business means no request.
+ */
+export async function fetchContactDetail(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<ContactDetail | null>> {
+  const tenant = businessId ?? getStoredBusinessId() ?? (DEMO_MODE_ENABLED ? DEFAULT_BUSINESS_ID : null);
+  if (!tenant) return { data: null, error: "No business selected" };
   return apiGet(
-    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}`,
+    `/crm/businesses/${encodeURIComponent(tenant)}/contacts/${encodeURIComponent(contactId)}`,
     contactDetailSchema,
     null,
     { signal: opts?.signal },
