@@ -40,14 +40,80 @@ export function providerUnavailableCode(body: unknown): ProviderUnavailableCode 
 }
 
 /**
- * Whether a 503 is the R0-07 optional-service answer. Reads a clone, so the
- * caller still gets the body. An empty, HTML or other non-JSON body is a plain
- * 503 and keeps the retry.
+ * Bounds on the body read that classifies a 503 (R0-07b review ST-1). The
+ * R0-07 body is a few hundred bytes of JSON sent with the headers, so a body
+ * that is larger, or still arriving after this long, is not that answer: it is
+ * handled as a plain 503 (retried), as it was before the check existed. The
+ * read also never outlasts the attempt's own timeout.
  */
-async function isProviderUnavailable503(res: Response): Promise<boolean> {
-  if (res.status !== 503 || typeof res.clone !== "function") return false;
+const PROVIDER_BODY_MAX_BYTES = 16 * 1024;
+const PROVIDER_BODY_READ_MS = 5_000;
+
+/**
+ * Reads at most PROVIDER_BODY_MAX_BYTES of a clone of `res` within `budgetMs`.
+ * Null when the body is missing, too large, not bytes, or still arriving at the
+ * deadline; then both branches of the body are cancelled and `onGiveUp` runs,
+ * so the discarded response does not keep its connection open.
+ */
+async function readSmallBody(res: Response, budgetMs: number, onGiveUp?: () => void): Promise<string | null> {
+  const declared = Number(res.headers?.get?.("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > PROVIDER_BODY_MAX_BYTES) return null;
+  const body = res.clone().body;
+  if (!body || typeof body.getReader !== "function") return null;
+
+  const reader = body.getReader();
+  // Not awaited: a cancelled tee branch settles only once its sibling is
+  // cancelled too, and the caller must not wait on either.
+  const giveUp = (): null => {
+    reader.cancel().catch(() => undefined);
+    res.body?.cancel().catch(() => undefined);
+    onGiveUp?.();
+    return null;
+  };
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<"expired">((resolve) => {
+    timer = setTimeout(() => resolve("expired"), budgetMs);
+  });
+  const chunks: Uint8Array[] = [];
+  let size = 0;
   try {
-    return providerUnavailableCode(JSON.parse(await res.clone().text())) !== null;
+    for (;;) {
+      const step = await Promise.race([reader.read(), expired]);
+      if (step === "expired") return giveUp();
+      if (step.done) break;
+      // isView rather than instanceof: a chunk from another realm is still bytes.
+      const view: unknown = step.value;
+      if (!ArrayBuffer.isView(view)) return giveUp();
+      size += view.byteLength;
+      if (size > PROVIDER_BODY_MAX_BYTES) return giveUp();
+      chunks.push(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Whether a 503 is the R0-07 optional-service answer. Reads a clone, so the
+ * caller still gets the body. Only a small JSON body is read, and only within
+ * `budgetMs`; an empty, HTML, oversized, stalled or other non-JSON body is a
+ * plain 503 and keeps the retry.
+ */
+async function isProviderUnavailable503(res: Response, budgetMs: number, onGiveUp?: () => void): Promise<boolean> {
+  if (res.status !== 503 || typeof res.clone !== "function" || budgetMs <= 0) return false;
+  if (!/json/i.test(res.headers?.get?.("content-type") ?? "")) return false;
+  try {
+    const text = await readSmallBody(res, budgetMs, onGiveUp);
+    return text !== null && providerUnavailableCode(JSON.parse(text)) !== null;
   } catch {
     return false;
   }
@@ -99,13 +165,19 @@ export async function fetchWithRetry(
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
+    // The per-attempt timer stays armed until this attempt is decided, which
+    // includes the 503 body check below. It is cleared before a response is
+    // handed back, so the caller's own body read is not cut off.
+    let controller: AbortController | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const startedAt = Date.now();
     try {
       let res: Response;
       if (options?.timeoutMs) {
-        const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), options.timeoutMs);
-        res = await fetch(input, { ...init, signal: controller.signal });
-        clearTimeout(t);
+        const attemptController = new AbortController();
+        controller = attemptController;
+        timer = setTimeout(() => attemptController.abort(), options.timeoutMs);
+        res = await fetch(input, { ...init, signal: attemptController.signal });
       } else {
         res = await fetch(input, init);
       }
@@ -114,7 +186,10 @@ export async function fetchWithRetry(
       if (res.ok || !retryStatusCodes.includes(res.status) || !shouldRetryMethod) {
         return res;
       }
-      if (await isProviderUnavailable503(res)) {
+      const budgetMs = options?.timeoutMs
+        ? Math.min(PROVIDER_BODY_READ_MS, options.timeoutMs - (Date.now() - startedAt))
+        : PROVIDER_BODY_READ_MS;
+      if (await isProviderUnavailable503(res, budgetMs, () => controller?.abort())) {
         return res;
       }
 
@@ -125,6 +200,8 @@ export async function fetchWithRetry(
       if (!isRetryableError(err) || !shouldRetryMethod) {
         throw err;
       }
+    } finally {
+      clearTimeout(timer);
     }
 
     if (attempt < retries) {

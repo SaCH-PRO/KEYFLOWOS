@@ -205,4 +205,58 @@ describe("api.ts hands an optional-service 503 to its caller (R0-07b)", () => {
     },
     15_000,
   );
+
+  it("apiGet: a 503 whose JSON body stalls does not wedge the shared in-flight GET; the retry answers every joined caller and the entry clears (R0-07b review ST-1)", async () => {
+    // Before the repair the body check read the stalled clone with no bound, so
+    // the first request never settled, the in-flight entry was never removed,
+    // and every later apiGet of the same URL and token joined the hung promise.
+    const head = new TextEncoder().encode('{"statusCode":503,"code":"prov');
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(head);
+              },
+            }),
+            { status: 503, statusText: "Service Unavailable", headers: { "content-type": "application/json" } },
+          ),
+      )
+      .mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ items: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      );
+
+    vi.useFakeTimers();
+    try {
+      const api = await import("@/lib/api");
+      const settled = { first: false, second: false };
+      const first = api.apiGet<{ items: unknown[] }>("/commerce/x").finally(() => {
+        settled.first = true;
+      });
+      await vi.advanceTimersByTimeAsync(500);
+      const second = api.apiGet<{ items: unknown[] }>("/commerce/x").finally(() => {
+        settled.second = true;
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      // Before the repair: { first: false, second: false, requests: 1 }.
+      expect({ ...settled, requests: fetchMock.mock.calls.length }).toEqual({ first: true, second: true, requests: 2 });
+      for (const res of await Promise.all([first, second])) {
+        expect(res).toMatchObject({ data: { items: [] }, error: null });
+      }
+
+      // The entry was removed when the shared request settled: a later caller reaches the network.
+      const third = await api.apiGet<{ items: unknown[] }>("/commerce/x");
+      expect(third.data).toEqual({ items: [] });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(unreachableWarnings()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
