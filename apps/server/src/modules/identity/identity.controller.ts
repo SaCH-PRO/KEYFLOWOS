@@ -832,8 +832,11 @@ export class IdentityController {
     return this.identity.inviteTeamMember(businessId, body.email, body.role, user.id, body.scopes, body.maxApprovalTier);
   }
 
+  // team:admin, as on .../permissions: a role change rewrites the target's scope map
+  // and approval tier (R0-ID-F1-ROLE-ROUTE-AUTHORITY, ST-1). IdentityService.updateMemberRole
+  // enforces the same gate, self-target and the caller's ceiling for non-HTTP callers.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('team', 'write')
+  @RequireModuleScope('team', 'admin')
   @Patch('businesses/:businessId/team/:membershipId')
   updateMemberRole(
     @Param('businessId') businessId: string,
@@ -841,7 +844,8 @@ export class IdentityController {
     @Body() body: { role: string },
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.identity.updateMemberRole(businessId, membershipId, body.role, user?.id);
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    return this.identity.updateMemberRole(businessId, membershipId, body.role, user.id);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

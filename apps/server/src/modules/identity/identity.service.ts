@@ -12,6 +12,7 @@ import {
   CRM_SUBPERMISSION_VALUES,
   DEFAULT_APPROVAL_TIERS as CANONICAL_APPROVAL_TIERS,
   ROLE_DEFAULT_SCOPES,
+  rankOf,
 } from '../../core/authority/module-vocabulary';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 
@@ -534,18 +535,34 @@ export class IdentityService {
     return membershipApprovalTier(membership);
   }
 
-  private async assertTeamAdmin(businessId: string, requesterId: string): Promise<void> {
+  /**
+   * `minLevel` is the team scope a requester who is neither the OWNER nor a
+   * SUPER_ADMIN must hold: 'write' for invite and remove (their routes are guarded at
+   * team:write), 'admin' for a role change, which rewrites the target's scopes exactly
+   * as PATCH .../permissions (team:admin) does (R0-ID-F1-ROLE-ROUTE-AUTHORITY, ST-1).
+   *
+   * Returns the requester's membership, and `bounded: true` when the requester's own
+   * authority caps what it may grant — every member except the OWNER and a SUPER_ADMIN.
+   */
+  private async assertTeamAdmin(
+    businessId: string,
+    requesterId: string,
+    minLevel: 'write' | 'admin' = 'write',
+  ): Promise<{ requester: { userId: string; role: string; permissionScopes: unknown; maxApprovalTier: number }; bounded: boolean }> {
     const requester = await this.prisma.client.membership.findUnique({
       where: { userId_businessId: { userId: requesterId, businessId } },
     });
     if (!requester) throw new ForbiddenException('You are not a member of this business');
-    if (requester.role === 'OWNER') return;
+    if (requester.role === 'OWNER') return { requester, bounded: false };
     const user = await this.prisma.client.user.findUnique({ where: { id: requesterId } });
-    if (user?.role === 'SUPER_ADMIN') return;
+    if (user?.role === 'SUPER_ADMIN') return { requester, bounded: false };
     const scopes = this.resolveScopes(requester);
-    if (scopes.team !== 'admin' && scopes.team !== 'write') {
-      throw new ForbiddenException('You do not have permission to manage team members');
+    if (scopes.team !== 'admin' && (minLevel === 'admin' || scopes.team !== 'write')) {
+      throw new ForbiddenException(
+        minLevel === 'admin' ? 'Changing a team role requires team admin access' : 'You do not have permission to manage team members',
+      );
     }
+    return { requester, bounded: true };
   }
 
   async listTeamMembers(businessId: string) {
@@ -622,9 +639,24 @@ export class IdentityService {
     return { success: true };
   }
 
-  async updateMemberRole(businessId: string, membershipId: string, role: string, requesterId?: string) {
+  /**
+   * R0-ID-F1-ROLE-ROUTE-AUTHORITY (ST-1). A role change overwrites the target's scope
+   * map and approval tier with the role defaults, so it is a permissions write. It
+   * needed only team:write, which let a team:write member undo an OWNER's restriction
+   * on itself or widen anyone else's without the team:admin gate on .../permissions.
+   * Now:
+   *   - the requester must be the OWNER, a SUPER_ADMIN, or hold team:admin, the same
+   *     authority PATCH .../permissions needs; with no requester it fails closed;
+   *   - a non-OWNER cannot change its own membership;
+   *   - a bounded requester cannot grant a role whose defaults exceed its own
+   *     authority: no module above its own level, no approval tier above its own (K2).
+   * The OWNER role is not assignable here (validateRole) and the OWNER membership
+   * cannot be changed here; there is no ownership-transfer route.
+   */
+  async updateMemberRole(businessId: string, membershipId: string, role: string, requesterId: string) {
     this.validateRole(role);
-    if (requesterId) await this.assertTeamAdmin(businessId, requesterId);
+    if (!requesterId) throw new ForbiddenException('A role change needs an authenticated requester');
+    const { requester, bounded } = await this.assertTeamAdmin(businessId, requesterId, 'admin');
     const membership = await this.prisma.client.membership.findUnique({
       where: { id: membershipId },
     });
@@ -634,18 +666,24 @@ export class IdentityService {
     if (membership.role === 'OWNER') {
       throw new BadRequestException('Cannot change owner role');
     }
+    if (membership.userId === requesterId && requester.role !== 'OWNER') {
+      throw new ForbiddenException('You cannot change your own role');
+    }
+    const permissionScopes = IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF;
+    const maxApprovalTier = IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0;
+    if (bounded) {
+      const own = this.resolveScopes(requester);
+      const exceedsScopes = Object.entries(permissionScopes).some(([module, level]) => rankOf(level) > rankOf(own[module]));
+      if (exceedsScopes || maxApprovalTier > this.resolveApprovalTier(requester)) {
+        throw new ForbiddenException(`You cannot grant the ${role} role: it exceeds your own authority`);
+      }
+    }
     const updated = await this.prisma.client.membership.update({
       where: { id: membershipId },
-      data: {
-        role,
-        permissionScopes: IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF,
-        maxApprovalTier: IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0,
-      },
+      data: { role, permissionScopes, maxApprovalTier },
       include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
     });
-    if (requesterId) {
-      await this.logTeamActivity(businessId, requesterId, 'team', 'role_changed', 'membership', membershipId, `Changed ${updated.user.email} role to ${role}`, undefined, { newRole: role });
-    }
+    await this.logTeamActivity(businessId, requesterId, 'team', 'role_changed', 'membership', membershipId, `Changed ${updated.user.email} role to ${role}`, undefined, { newRole: role });
     return updated;
   }
 
