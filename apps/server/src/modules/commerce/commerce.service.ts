@@ -752,42 +752,66 @@ export class CommerceService {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
     }
-    // Delegate the state mutation + invoice.paid event emission to the
-    // workflow service so the (DRAFT|SENT|...) -> PAID transition is
-    // enforced through the canonical state machine. Idempotent: callers
-    // can re-invoke and we just re-load the row.
-    let invoice;
-    if (existingInvoice.status === 'PAID') {
-      invoice = await this.prisma.client.invoice.findUnique({
+    const reload = () =>
+      this.prisma.client.invoice.findUnique({
         where: { id: invoiceId },
         include: { items: true, contact: true, booking: true },
       });
-    } else {
-      invoice = await this.invoiceWorkflow.transition(invoiceId, 'PAID');
+    // Idempotent: an invoice that is already PAID is returned as it is, and
+    // nothing is written (no payment, posting, event or timeline entry).
+    if (existingInvoice.status === 'PAID') {
+      const paid = await reload();
+      if (!paid) throw new NotFoundException('Invoice not found');
+      return paid;
     }
-    if (!invoice) throw new NotFoundException('Invoice not found');
 
-    // Create a Payment record if none exists so reconciliation math works.
-    const existingPayments = await this.prisma.client.payment.count({
+    // R0-PL-04 (G2, PL-F05): the remaining balance is recorded as a payment
+    // through recordPayment, so the payment row, its ledger posting, the
+    // reconcile to PAID (paidAt, COGS) and invoice.paid commit together or not
+    // at all (R0-PL-03), instead of a status flip plus a synthetic, unposted
+    // payment row. A partially paid invoice gets one balancing payment, so a
+    // later reconcile from the rows keeps it PAID. recordPayment owns the state
+    // guard (DRAFT / VOID -> 409) and records the actor (R0-PL-07). The tenant
+    // is the invoice's own, exactly as the synthetic row used; the authority
+    // checks above are unchanged.
+    const rows = await this.prisma.client.payment.findMany({
       where: { invoiceId },
+      select: { amount: true, status: true },
     });
-    if (existingPayments === 0) {
-      await this.prisma.client.payment.create({
-        data: {
-          businessId: existingInvoice.businessId,
+    const balance = computeBalance(Number(existingInvoice.total), rows, existingInvoice.currency);
+    if (balance.remaining > 0) {
+      try {
+        await this.recordPayment(
           invoiceId,
-          amount: existingInvoice.total,
-          currency: existingInvoice.currency,
-          status: 'SUCCESSFUL',
-          provider: 'manual',
-          providerPaymentId: `manual_${invoiceId}_${Date.now()}`,
-          method: 'MANUAL',
-          // R0-PL-07 review (PL07-ST-2 / PL07-CR-1): the person (or KEY) who
-          // marked the invoice paid recorded this manual row.
-          recordedBy: actorId ?? null,
-        },
-      });
+          existingInvoice.businessId,
+          {
+            amount: balance.remaining,
+            method: 'MANUAL',
+            // Deterministic: two concurrent mark-paids of the same balance land
+            // on one row (R0-D2 replay). The refunded total is part of it so a
+            // balance reopened by a refund is a new payment, not a replay of the
+            // refunded one.
+            idempotencyKey: `markpaid:${invoiceId}:${balance.remaining.toFixed(2)}:${balance.refunded.toFixed(2)}`,
+          },
+          { actorId: actorId ?? null, provider: 'manual', expectRemaining: balance.remaining },
+        );
+      } catch (err) {
+        // A payment that settled the invoice committed while this one waited
+        // for the invoice lock: the invoice is PAID, which is what was asked,
+        // and this call wrote nothing. Any other refusal is the answer.
+        if (err instanceof ConflictException) {
+          const now = await reload();
+          if (now?.status === 'PAID') return now;
+        }
+        throw err;
+      }
+    } else {
+      // Nothing left to collect (a zero-total invoice, or payment rows that
+      // already cover the total): no payment is invented; only the status moves.
+      await this.invoiceWorkflow.transition(invoiceId, 'PAID');
     }
+    const invoice = await reload();
+    if (!invoice) throw new NotFoundException('Invoice not found');
 
     if (invoice.contactId) {
       await this.crm.logContactEvent({
@@ -1675,6 +1699,21 @@ export class CommerceService {
      * itself. Like actorId it is an option, never part of `input`.
      */
     initiatedBy?: string | null;
+    /**
+     * R0-PL-04: Payment.provider when it is not the method. markInvoicePaid
+     * keeps its historical row shape (provider 'manual', method 'MANUAL').
+     * Internal: an option, never part of `input`. Default: the method.
+     */
+    provider?: string;
+    /**
+     * R0-PL-04 (G2): internal, markInvoicePaid only. `amount` is the remaining
+     * balance the caller read before this transaction. Under the invoice lock
+     * the remaining balance is read again from the payment rows; if a payment
+     * or refund committed in between it no longer matches, and the stale
+     * amount is refused (409) rather than recorded as an over- or
+     * under-payment. Nothing is written.
+     */
+    expectRemaining?: number;
   } = {}) {
     const actorId = options.actorId ?? null;
     const initiatedBy =
@@ -1784,12 +1823,22 @@ export class CommerceService {
           if (winner) return { kind: 'replay', existing: winner, keyedOn };
         }
         CommerceService.assertInvoiceAcceptsPayment(locked.status);
+        if (options.expectRemaining != null) {
+          const current = await tx.invoice.findUnique({
+            where: { id: invoiceId },
+            select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
+          });
+          const { remaining } = computeBalance(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
+          if (Math.abs(remaining - options.expectRemaining) > 0.005) {
+            throw new ConflictException('The invoice balance changed while it was being marked paid; reload it and try again');
+          }
+        }
         const created = await tx.payment.create({
           data: {
             amount: paymentAmount,
             currency: invoice.currency,
             status: 'SUCCESSFUL',
-            provider: input.method,
+            provider: options.provider ?? input.method,
             method: input.method,
             providerPaymentId: providerPaymentId.value,
             reference: input.reference ?? null,

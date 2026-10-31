@@ -70,9 +70,11 @@ class PrismaMock implements Partial<PrismaService> {
     this.payments.push({ id: `pay_seed_${this.payments.length + 1}`, createdAt: new Date(), ...row });
   }
 
-  private withPayments(invoice: any, include: any) {
+  /** Attach the invoice's payment rows when the query includes or selects them. */
+  private withPayments(invoice: any, args: any) {
     if (!invoice) return null;
-    return include?.payments ? { ...invoice, payments: this.payments.filter((p) => p.invoiceId === invoice.id) } : invoice;
+    const wantsPayments = args?.include?.payments || args?.select?.payments;
+    return wantsPayments ? { ...invoice, payments: this.payments.filter((p) => p.invoiceId === invoice.id) } : invoice;
   }
 
   client: any = {
@@ -98,14 +100,15 @@ class PrismaMock implements Partial<PrismaService> {
         Object.assign(invoice, data);
         return invoice;
       }),
-      findUnique: vi.fn(({ where, include }: any) => {
-        return this.withPayments(this.invoices.find((i) => i.id === where.id) || null, include);
+      findUnique: vi.fn((args: any) => {
+        return this.withPayments(this.invoices.find((i) => i.id === args.where.id) || null, args);
       }),
-      findFirst: vi.fn(({ where, include }: any) => {
+      findFirst: vi.fn((args: any) => {
+        const { where } = args;
         const invoice = this.invoices.find(
           (i) => i.id === where.id && (!where.businessId || i.businessId === where.businessId) && !i.deletedAt,
         );
-        return this.withPayments(invoice || null, include);
+        return this.withPayments(invoice || null, args);
       }),
       create: vi.fn(({ data }: any) => {
         const invoice = {

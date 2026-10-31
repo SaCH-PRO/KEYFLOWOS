@@ -524,6 +524,13 @@ describe('mark-paid records the remaining balance as a posted payment (G2)', () 
     expect(timelineFor(ID.invDraft)).toHaveLength(0);
   });
 
+  it.todo(
+    'MP-12 (V1-29, out of scope): mark-paid after a MANUAL refund records the canonical computeBalance remaining, which counts the '
+      + 'flipped REFUNDED row twice (paid excludes it, refunded subtracts it): a 100 invoice whose 60 payment was refunded gets a 160 '
+      + 'mark-paid payment (net 100 -> PAID). Recording the true 100 would leave net 40 and the invoice PARTIALLY_PAID, so the fix '
+      + 'belongs to the refund/balance convention (V1-29: invoice-workflow.service.ts computeBalance / markPaymentRefunded), outside this write set.',
+  );
+
   it('MP-05: a refund of the mark-paid payment reverses its posting and records the refunder on the reversal', async () => {
     const res = await markPaid(ID.owner, ID.invRefund);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
