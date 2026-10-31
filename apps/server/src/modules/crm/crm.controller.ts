@@ -19,7 +19,7 @@ import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service'
 import { CrmDataQualityService } from './crm-data-quality.service';
 import { DATA_QUALITY_KINDS, type DataQualityKind } from './crm-data-quality.util';
 import { CrmTimelineService } from './crm-timeline.service';
-import { CrmService } from './crm.service';
+import { CrmService, type AuditContext } from './crm.service';
 import { CrmSavedViewsService } from './crm-saved-views.service';
 import {
   CONTACT_RELATIONSHIP_HEALTH_VALUES,
@@ -67,6 +67,21 @@ export class CrmController {
     @Inject(CrmNetworkService) private readonly network: CrmNetworkService,
     @Inject(ContactInsightService) private readonly contactInsight: ContactInsightService,
   ) {}
+
+  /**
+   * The authenticated member as the audit actor of a contact mutation, so the
+   * ContactEvent and ContactAuditEntry the service writes name that member
+   * instead of SYSTEM or nobody. The guards already refuse a request without a
+   * user; this keeps a member's edit from being recorded as SYSTEM if they
+   * ever do not.
+   */
+  private userAuditContext(req: { user?: { id?: string } } | undefined): AuditContext {
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return { actor: { type: 'USER', id: actorUserId } };
+  }
 
   // ---------------------------------------------------------------------------
   // Relationship graph (M5)
@@ -301,9 +316,10 @@ export class CrmController {
     @Body() body: CreateContactDto,
     @Req() req: { user?: { id?: string } },
   ) {
+    const audit = this.userAuditContext(req);
     // The actor bounds what a duplicate-identity 409 may name: the existing
     // holder's id is disclosed only when this member could open that contact.
-    return this.crm.createContact({ ...body, businessId, actorUserId: req?.user?.id });
+    return this.crm.createContact({ ...body, businessId, actorUserId: req?.user?.id }, audit);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -353,10 +369,11 @@ export class CrmController {
     @Body() body: UpdateContactDto,
     @Req() req: any,
   ) {
+    const audit = this.userAuditContext(req);
     return this.crm.updateContact({ ...body, businessId,
       contactId,
       actorUserId: req?.user?.id,
-    });
+    }, audit);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -429,7 +446,8 @@ export class CrmController {
     if (!Array.isArray(body.contactIds) || body.contactIds.length > 100) {
       throw new HttpException('contactIds must be an array of at most 100 items', 400);
     }
-    return this.crm.bulkDeleteContacts({ businessId, contactIds: body.contactIds, actorUserId: req?.user?.id });
+    const audit = this.userAuditContext(req);
+    return this.crm.bulkDeleteContacts({ businessId, contactIds: body.contactIds, actorUserId: req?.user?.id }, audit);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -443,7 +461,8 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: any,
   ) {
-    return this.crm.softDeleteContact({ businessId, contactId, actorUserId: req?.user?.id });
+    const audit = this.userAuditContext(req);
+    return this.crm.softDeleteContact({ businessId, contactId, actorUserId: req?.user?.id }, audit);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
