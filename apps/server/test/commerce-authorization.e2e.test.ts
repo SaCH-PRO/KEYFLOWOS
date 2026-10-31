@@ -182,6 +182,7 @@ const commerceMock = {
   getQuoteForBusiness: vi.fn(),
   getStaleQuotes: vi.fn(),
   createInvoice: vi.fn(),
+  updateQuoteStatus: vi.fn(),
 };
 
 const receiptsMock = {
@@ -276,6 +277,7 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
     });
     commerceMock.getStaleQuotes.mockResolvedValue([]);
     commerceMock.createInvoice.mockResolvedValue({ id: `${P}invNew`, businessId: ID.bizA, status: 'DRAFT', total: 25 });
+    commerceMock.updateQuoteStatus.mockResolvedValue({ id: QUOTE, businessId: ID.bizA, status: 'SENT' });
   });
 
   // -------------------------------------------------------------------------
@@ -720,6 +722,87 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       }
       const blocked = await bareQuote(null);
       expect(blocked.status).toBe(429);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // R0-28-QUOTE-STATUS-AUTH (L1 half): PATCH
+  // /commerce/quotes/:quoteId/status/:status ran AuthGuard and BusinessGuard on
+  // the body tenant only — no ModuleScopeGuard, so revenue:read (and the STAFF
+  // default, and revenue:none) changed quote status — and the handler dropped
+  // the tenant the guards had checked, so the service bound nothing. This
+  // layer proves the decorator metadata, guard admission and what the
+  // controller forwards; the L2 half (real rows, the byte-identical 404, the
+  // ledger) is test/commerce-quote-status-auth.integration.test.ts. The path
+  // and the `{ businessId }` body are the web client's, unchanged.
+  describe('R0-28: quote status route write scope and tenant binding (L1 half)', () => {
+    const quoteStatus = (actor: string | null, pathStatus: string, body: Record<string, unknown>, query = '') =>
+      withActor(agent().patch(`/commerce/quotes/${QUOTE}/status/${pathStatus}${query}`), actor).send(body);
+
+    it('QS-META: updateQuoteStatus is PATCH quotes/:quoteId/status/:status behind AuthGuard, BusinessGuard and ModuleScopeGuard with { module: revenue, minLevel: write }', () => {
+      const handler = CommerceController.prototype.updateQuoteStatus;
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('quotes/:quoteId/status/:status');
+      expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.PATCH);
+      expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual({ module: 'revenue', minLevel: 'write' });
+      const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];
+      expect(guards).toEqual([AuthGuard, BusinessGuard, ModuleScopeGuard]);
+    });
+
+    it('QS-L1-403: revenue:read (explicit and STAFF default) and revenue:none are refused at ModuleScopeGuard (403 Insufficient permissions) before the service is called', async () => {
+      for (const actor of [ID.staffReadA, ID.staffDefaultA, ID.staffNoneA]) {
+        for (const status of ['sent', 'accepted', 'rejected', 'draft']) {
+          const res = await quoteStatus(actor, status, { businessId: ID.bizA });
+          expect(res.status, `${actor} -> ${status}`).toBe(403);
+          expect(res.body.message, `${actor} -> ${status}`).toMatch(/Insufficient permissions/);
+        }
+      }
+      expect(commerceMock.updateQuoteStatus).not.toHaveBeenCalled();
+    });
+
+    it('QS-L1-FORWARD: revenue:write and OWNER are admitted, and the controller forwards { quoteId, upper-cased path status, actorId, guard tenant }', async () => {
+      for (const [actor, pathStatus, status] of [
+        [ID.staffWriteA, 'accepted', 'ACCEPTED'],
+        [ID.ownerA, 'sent', 'SENT'],
+        [ID.ownerA, 'rejected', 'REJECTED'],
+      ] as const) {
+        const res = await quoteStatus(actor, pathStatus, { businessId: ID.bizA });
+        expect(res.status, `${actor} -> ${pathStatus}`).toBe(200);
+        expect(commerceMock.updateQuoteStatus).toHaveBeenLastCalledWith({ quoteId: QUOTE, status, actorId: actor, businessId: ID.bizA });
+      }
+      expect(commerceMock.updateQuoteStatus).toHaveBeenCalledTimes(3);
+    });
+
+    it("QS-L1-TENANT: the tenant forwarded is the one the guards checked — body over query, and the query when it is the only source", async () => {
+      // ownerB is a member of B only: body B admits; query A is ignored by the guards and the handler alike.
+      await quoteStatus(ID.ownerB, 'sent', { businessId: ID.bizB }, `?businessId=${ID.bizA}`).expect(200);
+      expect(commerceMock.updateQuoteStatus).toHaveBeenLastCalledWith(expect.objectContaining({ actorId: ID.ownerB, businessId: ID.bizB }));
+
+      await quoteStatus(ID.ownerA, 'sent', {}, `?businessId=${ID.bizA}`).expect(200);
+      expect(commerceMock.updateQuoteStatus).toHaveBeenLastCalledWith(expect.objectContaining({ actorId: ID.ownerA, businessId: ID.bizA }));
+    });
+
+    it('QS-L1-GUARDS (control): unauthenticated 401; a non-member and a member of another tenant naming A are refused at BusinessGuard; the service is not called', async () => {
+      expect((await quoteStatus(null, 'sent', { businessId: ID.bizA })).status).toBe(401);
+      for (const actor of [ID.noMember, ID.ownerB]) {
+        const res = await quoteStatus(actor, 'sent', { businessId: ID.bizA });
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/No access to this business/);
+      }
+      expect(commerceMock.updateQuoteStatus).not.toHaveBeenCalled();
+    });
+
+    it('QS-L1-NOTENANT: no tenant anywhere is refused (403 businessId is required) — the owner at BusinessGuard, SUPER_ADMIN at the handler — before the service is called', async () => {
+      for (const actor of [ID.ownerA, ID.superAdmin]) {
+        const res = await quoteStatus(actor, 'sent', {});
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message, actor).toMatch(/businessId is required/);
+      }
+      expect(commerceMock.updateQuoteStatus).not.toHaveBeenCalled();
+    });
+
+    it('QS-L1-SUPER: SUPER_ADMIN naming a tenant passes both guards and the controller forwards that tenant (the service then binds it)', async () => {
+      await quoteStatus(ID.superAdmin, 'sent', { businessId: ID.bizA }).expect(200);
+      expect(commerceMock.updateQuoteStatus).toHaveBeenCalledWith({ quoteId: QUOTE, status: 'SENT', actorId: ID.superAdmin, businessId: ID.bizA });
     });
   });
 

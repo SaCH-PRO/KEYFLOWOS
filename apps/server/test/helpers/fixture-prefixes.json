@@ -69,6 +69,11 @@
       "packet": "R0-27-REVENUE-CREATE-CONTRACT"
     },
     {
+      "prefix": "k28a_",
+      "owner": "apps/server/test/commerce-quote-status-auth.integration.test.ts",
+      "packet": "R0-28-QUOTE-STATUS-AUTH"
+    },
+    {
       "prefix": "kab_",
       "owner": "apps/server/test/key-action-boundary.integration.test.ts",
       "legacy": true
