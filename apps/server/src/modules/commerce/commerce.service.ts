@@ -10,9 +10,9 @@ import {
   QuoteConvertedPayload,
   InvoiceCreatedPayload,
 } from '../../core/event-bus/events.types';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { Service, Prisma } from '@keyflow/db';
+import { Service, Prisma, Payment } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
@@ -1558,6 +1558,8 @@ export class CommerceService {
     notes?: string;
     evidenceUrl?: string;
     evidenceMimeType?: string;
+    /** R0-D2: client idempotency key, scoped to the invoice (see RecordPaymentDto). */
+    idempotencyKey?: string;
   }) {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
@@ -1566,14 +1568,12 @@ export class CommerceService {
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
-    if (invoice.status === 'PAID' || invoice.status === 'VOID') {
-      // R0-D3: a state guard is a 409, not a 500.
-      throw new ConflictException(`Cannot record payment on a ${invoice.status} invoice`);
-    }
-    // R0-D3 review (ST-D3-3): the controller body is an inline type, so the
-    // global ValidationPipe cannot reject a missing, string or object amount
-    // or a missing method. Those reached tx.payment.create and surfaced as a
+    // R0-D3 review (ST-D3-3): RecordPaymentDto only whitelists these fields
+    // (it does not validate them), so a missing, string or object amount or a
+    // missing method would still reach tx.payment.create and surface as a
     // PrismaClientValidationError 500 on the exact route this packet pins.
+    // R0-D2 runs these before the state guard: the replay lookup below needs
+    // a well-formed amount and must itself come before that guard.
     if (typeof input.amount !== 'number' || !Number.isFinite(input.amount)) {
       throw new BadRequestException('Payment amount must be a number');
     }
@@ -1582,6 +1582,34 @@ export class CommerceService {
     }
     if (typeof input.method !== 'string' || input.method.trim().length === 0) {
       throw new BadRequestException('Payment method is required');
+    }
+    // R0-D2: RecordPaymentDto declares @IsString() on the key, which the
+    // ValidationPipe enforces on the built app; this keeps the same 400 where
+    // decorator metadata is absent (vitest/esbuild), as ST-D3-3 did above.
+    if (input.idempotencyKey != null && typeof input.idempotencyKey !== 'string') {
+      throw new BadRequestException('Idempotency key must be a string');
+    }
+
+    // R0-D2: a duplicate submit must return the payment the first submit
+    // recorded, never double-credit. providerPaymentId is derived from the
+    // client key (or, without one, from reference + amount) so the row itself
+    // is the idempotency record and Payment.providerPaymentId @unique makes
+    // the create-or-return race-safe. This runs before the state guard: the
+    // first submit may have settled the invoice to PAID, and the client that
+    // lost that response still deserves the same answer.
+    const providerPaymentId = CommerceService.manualProviderPaymentId(invoiceId, input);
+    if (providerPaymentId.deterministic) {
+      const existing = await this.prisma.client.payment.findUnique({
+        where: { providerPaymentId: providerPaymentId.value },
+      });
+      if (existing) {
+        return this.replayRecordedPayment(existing, invoiceId, input.amount);
+      }
+    }
+
+    if (invoice.status === 'PAID' || invoice.status === 'VOID') {
+      // R0-D3: a state guard is a 409, not a 500.
+      throw new ConflictException(`Cannot record payment on a ${invoice.status} invoice`);
     }
 
     const existingPaid = invoice.payments
@@ -1600,28 +1628,45 @@ export class CommerceService {
     // payment row (preserves invariant: every SUCCESSFUL payment has a
     // matching ledger transaction unless basis is CASH and posting silently
     // skipped — also fine, idempotent on replay).
-    const payment = await this.prisma.client.$transaction(async (tx) => {
-      const created = await tx.payment.create({
-        data: {
-          amount: paymentAmount,
-          currency: invoice.currency,
-          status: 'SUCCESSFUL',
-          provider: input.method,
-          method: input.method,
-          providerPaymentId: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          reference: input.reference ?? null,
-          notes: input.notes ?? null,
-          evidenceUrl: input.evidenceUrl ?? null,
-          evidenceMimeType: input.evidenceMimeType ?? null,
-          businessId,
-          invoiceId,
-        },
+    let payment: Payment;
+    try {
+      payment = await this.prisma.client.$transaction(async (tx) => {
+        const created = await tx.payment.create({
+          data: {
+            amount: paymentAmount,
+            currency: invoice.currency,
+            status: 'SUCCESSFUL',
+            provider: input.method,
+            method: input.method,
+            providerPaymentId: providerPaymentId.value,
+            reference: input.reference ?? null,
+            notes: input.notes ?? null,
+            evidenceUrl: input.evidenceUrl ?? null,
+            evidenceMimeType: input.evidenceMimeType ?? null,
+            businessId,
+            invoiceId,
+          },
+        });
+        await this.revenuePosting.onPaymentRecorded(created.id, {
+          tx: tx as unknown as Prisma.TransactionClient,
+        });
+        return created;
       });
-      await this.revenuePosting.onPaymentRecorded(created.id, {
-        tx: tx as unknown as Prisma.TransactionClient,
-      });
-      return created;
-    });
+    } catch (err: unknown) {
+      // R0-D2 race: a concurrent duplicate submit won the insert between our
+      // lookup and our create. Prisma raises P2002 on the unique index, the
+      // transaction (payment row + posting) has rolled back, and the winner's
+      // row is the answer. Any other P2002 (nothing under our id) is rethrown.
+      if (providerPaymentId.deterministic && (err as { code?: string } | null)?.code === 'P2002') {
+        const existing = await this.prisma.client.payment.findUnique({
+          where: { providerPaymentId: providerPaymentId.value },
+        });
+        if (existing) {
+          return this.replayRecordedPayment(existing, invoiceId, input.amount);
+        }
+      }
+      throw err;
+    }
 
     // Single source of truth: workflow recomputes status from payment rows
     // and emits the appropriate event (invoice.paid / invoice.payment_recorded).
@@ -1660,6 +1705,61 @@ export class CommerceService {
       invoice: updatedInvoice,
       paidAmount: newPaidTotal,
       remaining: Math.max(0, Number(invoice.total) - newPaidTotal),
+    };
+  }
+
+  /**
+   * R0-D2: providerPaymentId for a manual record.
+   *
+   *   idempotencyKey (trimmed, non-empty)  -> manual_<invoiceId>_key_<sha256(key)>
+   *   else reference (trimmed, non-empty)  -> manual_<invoiceId>_ref_<sha256(reference + amount)>
+   *   else                                 -> manual_<now>_<random>   (not deterministic)
+   *
+   * The key is scoped to the invoice. Without a key, the same non-empty
+   * reference for the same amount on the same invoice is the same offline
+   * payment (the journey's duplicate slip); the same reference for a
+   * different amount is a different payment. The hash keeps the unique
+   * column bounded whatever the client sends. The `manual_` prefix is part
+   * of the existing contract for manually recorded payments.
+   */
+  private static manualProviderPaymentId(
+    invoiceId: string,
+    input: { amount: number; reference?: string; idempotencyKey?: string },
+  ): { value: string; deterministic: boolean } {
+    const digest = (material: string) => createHash('sha256').update(material, 'utf8').digest('hex').slice(0, 32);
+    const key = typeof input.idempotencyKey === 'string' ? input.idempotencyKey.trim() : '';
+    if (key.length > 0) {
+      return { value: `manual_${invoiceId}_key_${digest(key)}`, deterministic: true };
+    }
+    const reference = typeof input.reference === 'string' ? input.reference.trim() : '';
+    if (reference.length > 0) {
+      return { value: `manual_${invoiceId}_ref_${digest(`${reference}\n${input.amount.toFixed(2)}`)}`, deterministic: true };
+    }
+    return { value: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, deterministic: false };
+  }
+
+  /**
+   * R0-D2: answer a duplicate submit with the payment it already recorded, in
+   * the same envelope as a fresh record and with the current balance. Nothing
+   * is written, reconciled, posted or logged. A key reused for a different
+   * amount is a conflict, not a replay.
+   */
+  private async replayRecordedPayment(existing: Payment, invoiceId: string, amount: number) {
+    if (Math.abs(Number(existing.amount) - amount) > 0.005) {
+      throw new ConflictException('Idempotency key already used on this invoice with a different amount');
+    }
+    const updatedInvoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { payments: true, contact: true, items: true },
+    });
+    const paidAmount = (updatedInvoice?.payments ?? [])
+      .filter((p) => p.status === 'SUCCESSFUL')
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    return {
+      payment: existing,
+      invoice: updatedInvoice,
+      paidAmount,
+      remaining: Math.max(0, Number(updatedInvoice?.total ?? 0) - paidAmount),
     };
   }
 

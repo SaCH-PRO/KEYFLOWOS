@@ -23,6 +23,7 @@ import { InvoiceReceiptBuilderService } from './invoice-receipt-builder.service'
 import { GmailService } from './gmail.service';
 import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
+import { RecordPaymentDto } from './dto/record-payment.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
 import { buildInvoiceEmailHtml } from './invoice-email.template';
 import { sumSuccessfulPayments, type InvoiceForEmail } from './invoice-email.types';
@@ -1263,14 +1264,10 @@ export class CommerceController {
   recordPayment(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
-    @Body() body: {
-      amount: number;
-      method: string;
-      reference?: string;
-      notes?: string;
-      evidenceUrl?: string;
-      evidenceMimeType?: string;
-    },
+    // R0-D2: a DTO class so the global ValidationPipe sees the body; it
+    // whitelists the existing fields untouched and validates only the new
+    // optional idempotencyKey.
+    @Body() body: RecordPaymentDto,
   ) {
     return this.commerce.recordPayment(invoiceId, businessId, body);
   }
