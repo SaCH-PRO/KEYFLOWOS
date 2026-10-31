@@ -21,6 +21,21 @@ export type InvoiceStatus =
   | 'PENDING';
 
 /**
+ * The statuses an invoice may be shown in to someone who holds only its id or
+ * share token: the customer-facing surfaces (`GET /commerce/invoices/:id`, the
+ * token pay link, `GET /payments/invoice/:id/status`). Anything else — DRAFT,
+ * VOID, FAILED, PENDING — must answer exactly like an unknown id, because the
+ * answer itself (that the id exists, what state it is in, what it is worth) is
+ * the disclosure. KF-REVENUE-AUTH-PROJECTION-001 review (ST-3): the status
+ * route carried its own copy of this rule and had lost it; one list now.
+ */
+export const SHAREABLE_INVOICE_STATUSES: ReadonlyArray<InvoiceStatus> = ['SENT', 'PAID', 'OVERDUE', 'PARTIALLY_PAID'];
+
+export function isShareableInvoiceStatus(status: string): boolean {
+  return (SHAREABLE_INVOICE_STATUSES as ReadonlyArray<string>).includes(status);
+}
+
+/**
  * Allowed transitions. Server-side enforcement; UI/clients can request
  * a transition but the workflow throws 409 ConflictException for anything
  * not in this map.

@@ -5,9 +5,15 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export class InvoiceReceiptBuilderService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async buildReceipt(invoiceId: string) {
-    const invoice = await this.prisma.client.invoice.findUnique({
-      where: { id: invoiceId },
+  /**
+   * KF-REVENUE-AUTH-PROJECTION-001 (G7): the receipt is bound to the tenant the
+   * guard validated. The lookup was by id alone, so any authenticated member of
+   * any business could read any invoice's receipt by supplying their own
+   * businessId in the query. A mismatch answers exactly like an unknown id.
+   */
+  async buildReceipt(invoiceId: string, businessId: string) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
       include: { items: true, contact: true, business: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');

@@ -1,9 +1,9 @@
-import { BadRequestException, Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional, forwardRef } from '@nestjs/common';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
-import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
+import { InvoiceWorkflowService, computeBalance, isShareableInvoiceStatus } from '../commerce/invoice-workflow.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
@@ -950,11 +950,50 @@ export class PaymentsService {
     }
   }
 
-  async getInvoicePaymentStatus(invoiceId: string) {
-    return this.prisma.client.payment.findMany({
-      where: { invoiceId },
-      orderBy: { createdAt: 'desc' },
+  /**
+   * KF-REVENUE-AUTH-PROJECTION-001 (G5): the public pay page's post-payment
+   * poll. This returned every Payment row (reference, notes, evidence URL,
+   * who recorded it) to anyone holding an invoice id. It now returns exactly
+   * `{ status, paid, remaining, currency, lastPaymentAt }`, computed from the
+   * canonical balance — PENDING and FAILED rows contribute nothing and no
+   * row-shaped data leaves the server.
+   *
+   * Review (ST-3): the same shareable gate as the public invoice view. A
+   * DRAFT or VOID id answered 200 with its status and full total while an
+   * unknown id answered 404 — the distinction and the amount were both new
+   * disclosures (main answered `[]` for either). Non-shareable now answers
+   * exactly like unknown.
+   */
+  async getInvoicePaymentStatus(invoiceId: string): Promise<{
+    status: string;
+    paid: number;
+    remaining: number;
+    currency: string;
+    lastPaymentAt: Date | null;
+  }> {
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: {
+        status: true,
+        total: true,
+        currency: true,
+        payments: { select: { amount: true, status: true, createdAt: true } },
+      },
     });
+    if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
+    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    let lastPaymentAt: Date | null = null;
+    for (const p of invoice.payments) {
+      if (p.status !== 'SUCCESSFUL') continue;
+      if (!lastPaymentAt || p.createdAt > lastPaymentAt) lastPaymentAt = p.createdAt;
+    }
+    return {
+      status: invoice.status,
+      paid: balance.paid,
+      remaining: balance.remaining,
+      currency: invoice.currency,
+      lastPaymentAt,
+    };
   }
 
   async createWipayCheckout(invoiceId: string, returnUrl: string): Promise<{ redirectUrl: string }> {
