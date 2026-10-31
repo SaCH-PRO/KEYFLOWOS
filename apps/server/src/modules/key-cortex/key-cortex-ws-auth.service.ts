@@ -10,12 +10,15 @@
  * cutoff, and the same fail-closed / Redis-outage rules. Business membership
  * mirrors {@link BusinessGuard}, tenant-id resolution included.
  *
- * Both decisions are taken at connect only. The gateway keeps the connect-time
- * identity for the socket's lifetime and nothing disconnects a socket when its
- * user is demoted, banned, deleted or logged out (review finding ST-WS-R1,
- * pre-existing; the fix is in key-cortex.gateway.ts and the revocation writers,
- * outside R0-ID-F6's write set — see the it.todo in
- * test/identity-boundary.integration.test.ts).
+ * Both decisions are taken at connect AND again for the open socket: the
+ * gateway re-asks authenticateSocket (same socket, so the same handshake token)
+ * and verifyBusinessMembership (the socket's own businessId, the fresh role)
+ * before every client action and in a periodic sweep, and disconnects the
+ * socket when either refuses — see LIVE REVOCATION in key-cortex.gateway.ts
+ * (ST-WS-R1, R0-ID-F6b-WS-LIVE-REVOCATION). Until then a socket kept its
+ * connect-time identity for its lifetime, so a demoted, banned, deleted,
+ * removed or logged-out user kept acting in the tenant. Neither method keeps
+ * any per-socket state; the short reuse window lives in the gateway.
  *
  * Until R0-ID-F6-WS-ADMIN-TOKEN (ST-2-WS) this service verified the token
  * itself and attached an admin token's own claims with none of those checks,

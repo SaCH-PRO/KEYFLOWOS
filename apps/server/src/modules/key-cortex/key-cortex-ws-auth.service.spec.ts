@@ -526,11 +526,12 @@ describe('ST-2-WS — authenticateSocket applies the HTTP AuthMiddleware local-u
     });
   });
 
-  // ST-WS-R1 (R0-ID-F6 review, pre-existing, NOT fixed here): the gateway takes
-  // this decision at connect only. What a fix in key-cortex.gateway.ts can reuse
-  // is pinned here — authenticateSocket keeps no per-socket state, so asking
-  // again for the same socket reads the User row again. The open-socket defect
-  // itself is reproduced, with its it.todo, in identity-boundary.integration.test.ts.
+  // ST-WS-R1 (R0-ID-F6 review; fixed by R0-ID-F6b-WS-LIVE-REVOCATION): the
+  // gateway re-asks this decision for an open socket before every action. What
+  // that relies on is pinned here — authenticateSocket keeps no per-socket
+  // state, so asking again for the same socket reads the User row again. The
+  // open-socket cases are in key-cortex.gateway.spec.ts and, over a real socket,
+  // in identity-boundary.integration.test.ts.
   it('ST-WS-R1 groundwork: authenticateSocket caches nothing per socket — the same socket asked again after its row is banned is refused', async () => {
     let row: Row = ACTIVE('SUPER_ADMIN');
     const { service, prisma } = wsService({ lookup: async () => row });

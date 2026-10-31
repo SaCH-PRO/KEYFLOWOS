@@ -24,7 +24,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy } from '@nestjs/common';
 
 // -- KEY Cortex Services --
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
@@ -37,11 +37,51 @@ import { KeyCortexWsAuthService, isAllowedWsOrigin } from './key-cortex-ws-auth.
 // Types
 // ------------------------------------------------------------------
 
+/**
+ * LIVE REVOCATION (ST-WS-R1, R0-ID-F6b-WS-LIVE-REVOCATION).
+ *
+ * The connect-time decision is not kept for the socket's lifetime. Before every
+ * client action (key:chat, key:approve, key:reject, key:typing) the gateway
+ * re-takes it for that socket — KeyCortexWsAuthService.authenticateSocket on
+ * the handshake token, which is the HTTP AuthMiddleware decision (User row
+ * present, not deleted, not banned; role from the row; the logout marker and
+ * the admin-token cutoff), then verifyBusinessMembership for the socket's own
+ * businessId with that fresh role — and when it fails the gateway emits
+ * {@link KEY_CORTEX_WS_AUTH_ERROR} and disconnects the socket (it leaves its
+ * business:/user: rooms) without performing the action. So a ban, a delete, a
+ * demotion below the authority the socket connected with, a removal from the
+ * business or a logout cuts an open socket the way it refuses the next HTTP
+ * request.
+ *
+ * A successful check is reused for {@link KEY_CORTEX_WS_REVALIDATE_MS},
+ * measured from when it started, to bound DB load (typing indicators fire many
+ * times a second); a revocation written now therefore takes effect on the
+ * socket's next action at most that long after the write. Concurrent actions
+ * share one in-flight check. A socket that sends nothing still receives its
+ * rooms' pushes, so a sweep every {@link KEY_CORTEX_WS_SWEEP_MS} re-takes the
+ * decision for every open socket and cuts the ones that fail.
+ *
+ * Consequence: the handshake token is re-verified, so a socket now lives no
+ * longer than that token (as an HTTP request with it would be refused). There
+ * is no in-band token refresh; a client reconnects with a fresh token.
+ */
+export const KEY_CORTEX_WS_REVALIDATE_MS = 2_000;
+/** How often every open socket is re-validated, so a revoked socket that sends nothing loses its room pushes. */
+export const KEY_CORTEX_WS_SWEEP_MS = 30_000;
+/** Emitted, just before the disconnect, to a socket whose principal no longer passes the connect checks. */
+export const KEY_CORTEX_WS_AUTH_ERROR = 'key:auth_error';
+
 /** Metadata stored for each connected socket. */
 interface ClientInfo {
   userId: string;
   businessId: string;
   rooms: string[];
+  /** The socket itself, for the sweep. */
+  socket: Socket;
+  /** Until when (epoch ms) the last successful connect-check is reused. */
+  verifiedUntil: number;
+  /** The check in flight, shared by concurrent actions. */
+  revalidation?: Promise<boolean>;
 }
 
 /** Payload emitted on key:alert. */
@@ -111,13 +151,16 @@ interface HealthPayload {
   },
 })
 export class KeyCortexGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger(KeyCortexGateway.name);
 
   /** Track connected clients: socketId → client metadata. */
   private clients = new Map<string, ClientInfo>();
+  /** The passive-socket sweep (see KEY_CORTEX_WS_SWEEP_MS); started in afterInit. */
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  private sweeping = false;
 
   constructor(
     private readonly reasoningService: KeyCortexReasoningService,
@@ -133,6 +176,15 @@ export class KeyCortexGateway
 
   afterInit(_server: Server) {
     this.logger.log('KEY Cortex WebSocket initialized on namespace /key-cortex');
+    if (!this.sweepTimer) {
+      this.sweepTimer = setInterval(() => void this.sweep(), KEY_CORTEX_WS_SWEEP_MS);
+      this.sweepTimer.unref?.();
+    }
+  }
+
+  onModuleDestroy() {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    this.sweepTimer = null;
   }
 
   /**
@@ -146,6 +198,7 @@ export class KeyCortexGateway
    * it as unauthenticated. Reconnects re-run this handler with a fresh token.
    */
   async handleConnection(client: Socket) {
+    const checkStartedAt = Date.now();
     try {
       const identity = await this.wsAuth.authenticateSocket(client);
       if (!identity) {
@@ -179,7 +232,14 @@ export class KeyCortexGateway
         return;
       }
 
-      const info: ClientInfo = { userId: identity.userId, businessId, rooms: [] };
+      // The connect decision is the first successful check (LIVE REVOCATION above).
+      const info: ClientInfo = {
+        userId: identity.userId,
+        businessId,
+        rooms: [],
+        socket: client,
+        verifiedUntil: checkStartedAt + KEY_CORTEX_WS_REVALIDATE_MS,
+      };
       this.clients.set(client.id, info);
 
       // Join scoped rooms for targeted broadcasting (only after authorization)
@@ -245,6 +305,7 @@ export class KeyCortexGateway
       client.emit('key:error', { message: 'Not authenticated' });
       return;
     }
+    if (!(await this.stillAuthorized(client, clientInfo))) return;
 
     const { userId, businessId } = clientInfo;
 
@@ -315,6 +376,7 @@ export class KeyCortexGateway
       client.emit('key:error', { message: 'Not authenticated' });
       return;
     }
+    if (!(await this.stillAuthorized(client, clientInfo))) return;
 
     try {
       client.emit('key:status', { status: 'approval_processing', approvalId: data.approvalId });
@@ -364,6 +426,7 @@ export class KeyCortexGateway
       client.emit('key:error', { message: 'Not authenticated' });
       return;
     }
+    if (!(await this.stillAuthorized(client, clientInfo))) return;
 
     try {
       const result = await this.approvalService.rejectAction(data.approvalId, {
@@ -401,6 +464,7 @@ export class KeyCortexGateway
   ): Promise<void> {
     const clientInfo = this.clients.get(client.id);
     if (!clientInfo) return;
+    if (!(await this.stillAuthorized(client, clientInfo))) return;
 
     // Broadcast to all other sockets in the business room
     client
@@ -495,6 +559,84 @@ export class KeyCortexGateway
       ...notification,
       pushedAt: new Date().toISOString(),
     });
+  }
+
+  // ================================================================
+  // Live revocation (ST-WS-R1; see LIVE REVOCATION at the top)
+  // ================================================================
+
+  /**
+   * Whether the socket's principal still passes the connect checks. When it
+   * does not, the socket has already been sent the auth error and disconnected,
+   * and the caller must not act.
+   */
+  private async stillAuthorized(client: Socket, info: ClientInfo): Promise<boolean> {
+    if (await this.revalidate(client, info)) return true;
+    this.cut(client, info);
+    return false;
+  }
+
+  /** The connect checks for this socket, reused for KEY_CORTEX_WS_REVALIDATE_MS after one succeeds. */
+  private revalidate(client: Socket, info: ClientInfo): Promise<boolean> {
+    const startedAt = Date.now();
+    if (startedAt < info.verifiedUntil) return Promise.resolve(true);
+    if (!info.revalidation) {
+      info.revalidation = this.connectChecks(client, info)
+        .catch((err: unknown) => {
+          this.logger.error(`Socket re-validation failed (socket ${client.id}): ${(err as Error)?.message ?? err}`);
+          return false; // fail closed
+        })
+        .then((ok) => {
+          if (ok) info.verifiedUntil = startedAt + KEY_CORTEX_WS_REVALIDATE_MS;
+          return ok;
+        })
+        .finally(() => {
+          info.revalidation = undefined;
+        });
+    }
+    return info.revalidation;
+  }
+
+  /**
+   * handleConnection's decision again: the handshake token through
+   * authenticateSocket (identity and role from the User row), the same user as
+   * at connect, and membership of the socket's own businessId with that role.
+   */
+  private async connectChecks(client: Socket, info: ClientInfo): Promise<boolean> {
+    const identity = await this.wsAuth.authenticateSocket(client);
+    if (!identity || identity.userId !== info.userId) return false;
+    return this.wsAuth.verifyBusinessMembership(identity.userId, identity.role, info.businessId);
+  }
+
+  /** Forget the socket's identity, tell it why, and disconnect it (which leaves its rooms). */
+  private cut(client: Socket, info: ClientInfo): void {
+    if (this.clients.get(client.id) !== info) return; // already cut, or gone (concurrent actions share one check)
+    this.clients.delete(client.id);
+    this.logger.warn(
+      `Socket ${client.id} disconnected: user ${info.userId} no longer passes the connect checks for business ${info.businessId}`,
+    );
+    client.emit(KEY_CORTEX_WS_AUTH_ERROR, {
+      message: 'Not authenticated: this session is no longer authorized for this business. Reconnect with a valid token.',
+    });
+    client.disconnect(true);
+  }
+
+  /** Re-validate every open socket; cut the ones that fail (passive sockets keep receiving room pushes otherwise). */
+  private async sweep(): Promise<void> {
+    if (this.sweeping) return;
+    this.sweeping = true;
+    try {
+      for (const [socketId, info] of [...this.clients]) {
+        if (this.clients.get(socketId) !== info) continue; // disconnected meanwhile
+        try {
+          await this.stillAuthorized(info.socket, info);
+        } catch (err: unknown) {
+          this.logger.error(`Socket sweep error (socket ${socketId}): ${(err as Error)?.message ?? err}`);
+        }
+      }
+    } finally {
+      this.sweeping = false;
+    }
   }
 
   // ================================================================
