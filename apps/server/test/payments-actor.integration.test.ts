@@ -23,7 +23,16 @@
  *     -> Payment.recordedBy stays U (who recorded the receipt is not overwritten)
  *   KEY cortex adapter process_payment               -> KEY_SYSTEM_ACTOR_ID, actorType SYSTEM
  *   PaymentEvidenceService (POST .../payments/from-evidence) -> KEY_SYSTEM_ACTOR_ID, actorType SYSTEM
- *   internal caller passing no actor (drive intake)  -> recordedBy null (no invented actor)
+ *   service caller passing no actor                  -> recordedBy null (no invented actor)
+ *
+ * Open gaps found by the R0-11 review (it.todo at the end of the file; every
+ * fix is in product code outside R0-11-PL07-PAYMENT-ACTOR's manifest-only
+ * write set):
+ *   PA-16 (ST-R011-1) PATCH /commerce/businesses/:b/invoices/:id {status:'PAID'} by a human
+ *         writes a payment attributed to KEY_SYSTEM_ACTOR_ID, with no human recorded
+ *   PA-17 (ST-R011-2) refunding a SUCCESSFUL payment with no payment_recorded posting
+ *         records the refunder nowhere
+ *   PA-18 (ST-R011-3) drive-intake approval drops the approver: record_payment records null
  *
  * Review repairs (R0-PL-07-PAYMENT-ACTOR-repair):
  *   PATCH /commerce/invoices/:id/paid by U (no payment yet) -> the manual row's recordedBy = U   (PL07-ST-2, PL07-CR-1)
@@ -510,7 +519,10 @@ describe('KEY and evidence paths record the system actor, distinct from a human'
     expect(((await contactEventsFor(ID.invEvidence))[0].data as any).initiatedBy).toBe(ID.userU);
   });
 
-  it('PA-08: an internal caller that passes no actor (drive intake) records recordedBy null; no actor is invented', async () => {
+  // R0-11 review (ST-R011-3): this is a direct service call with no actor. It
+  // is not drive intake, which has an authenticated approver and drops it
+  // (PA-18, it.todo below).
+  it('PA-08: a service caller that passes no actor records recordedBy null; no actor is invented', async () => {
     const result = await commerce.recordPayment(ID.invNoActor, ID.biz, { amount: 10, method: 'cash', reference: 'PYA-N-1' });
     const row = await paymentRow(result.payment.id);
     expect(row.recordedBy).toBeNull();
@@ -652,4 +664,26 @@ describe('review repairs: mark-paid, refund guard, initiating human', () => {
     expect(events[0]).toMatchObject({ actorId: ID.userU, actorType: 'USER' });
     expect((events[0].data as any).initiatedBy).toBeUndefined();
   });
+});
+
+// R0-11 review: real gaps whose fixes are all in product code outside this
+// packet's write set (the manifest only). Each it.todo names the behaviour a
+// follow-up packet must make pass and the file it has to change.
+describe('open gaps found by the R0-11 review (outside the R0-11 write set)', () => {
+  it.todo(
+    'PA-16 (ST-R011-1): PATCH /commerce/businesses/:b/invoices/:id {status:"PAID"} by a human (V, revenue:write) never attributes the payment to KEY_SYSTEM_ACTOR_ID: ' +
+      'either status is refused or stripped and no payment is written, or Payment.recordedBy, the posting createdById and the invoice.payment_recorded / invoice.paid ' +
+      'contact events name V (SENT / OVERDUE / VOID likewise never carry the KEY actor for a human) - needs commerce.controller.ts (the inline body type is not ' +
+      'whitelisted by the ValidationPipe, so status reaches updateInvoice) and commerce.service.ts updateInvoice (hard-codes KEY_SYSTEM_ACTOR_ID), outside the R0-11 write set',
+  );
+  it.todo(
+    'PA-17 (ST-R011-2): refunding a SUCCESSFUL payment that has no Payment:<id>:payment_recorded posting (a mark-paid row written before R0-PL-04) records the ' +
+      'refunding user on a durable row (a contact event or audit entry naming V); today onPaymentRefunded returns null and nothing names the refunder - ' +
+      'needs commerce.service.ts markPaymentRefunded or revenue-posting.service.ts onPaymentRefunded, outside the R0-11 write set (Payment has no refunded-by column; no schema change here)',
+  );
+  it.todo(
+    'PA-18 (ST-R011-3): approving a drive-intake plan with a record_payment step (POST /drive/businesses/:b/intake/:id/approve) records the approving user as ' +
+      'Payment.recordedBy and the posting createdById, not null - needs drive-intake-orchestrator.service.ts executePlan to pass { actorId: userId } to ' +
+      'recordPayment, outside the R0-11 write set',
+  );
 });
