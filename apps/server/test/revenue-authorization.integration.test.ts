@@ -994,7 +994,12 @@ describe('List B: regression controls', () => {
     // pay link answer 404. Full contract: public-payment-intent.integration.test.ts.
     it('PC-08: a customer payment intent still works from a public page and leaves the invoice SENT and shareable (fresh copy; R0-22 no-status-flip contract)', async () => {
       const copy = await createCopy('pc_08', { status: 'SENT' });
-      const res = await agent().post(`/commerce/invoices/${copy}/payment-intent`).send({ method: 'bank_transfer' });
+      // V1-46 (D-07) retired the bare-id intent route: the customer reaches it
+      // through the invoice's live pay link.
+      const token = `${P}tok_pc_08`;
+      await db.paymentLink.create({ data: { id: `${P}link_pc_08`, token, invoiceId: copy, businessId: ID.bizA, active: true } });
+      const intentPath = `/commerce/public/invoice-link/${token}/payment-intent`;
+      const res = await agent().post(intentPath).send({ method: 'bank_transfer' });
       expect([200, 201]).toContain(res.status);
       expect(res.body.success).toBe(true);
       expectNoCanary(res.body);
@@ -1007,7 +1012,7 @@ describe('List B: regression controls', () => {
       expect(reload.status).toBe(200);
       expect(reload.body).toMatchObject({ id: copy, status: 'SENT' });
       // The same intent again is the same intent: still one PENDING row.
-      const again = await agent().post(`/commerce/invoices/${copy}/payment-intent`).send({ method: 'bank_transfer' });
+      const again = await agent().post(intentPath).send({ method: 'bank_transfer' });
       expect([200, 201]).toContain(again.status);
       expect(await paymentCount(copy)).toBe(1);
     });

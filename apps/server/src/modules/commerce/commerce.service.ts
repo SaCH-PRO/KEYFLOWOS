@@ -680,6 +680,10 @@ export class CommerceService {
    *
    * Same shareable-status gate as the token route; null otherwise, which the
    * controller turns into the same 404 as an unknown id.
+   *
+   * V1-46: the bare-id pay page is retired (D-07); the customer pay page at
+   * /pay/link/[token] reads this same projection through
+   * `getPayPageByToken`. The bare-id route keeps serving it.
    */
   async getInvoicePublicView(invoiceId: string) {
     const invoice = await this.prisma.client.invoice.findUnique({
@@ -3090,6 +3094,38 @@ export class CommerceService {
     return { ...link, invoice };
   }
 
+  /**
+   * V1-46-PUB-PAY-LINK-TOKEN-GATE (M34, D-07: token links only, the bare-id
+   * pay page is retired): the customer pay page's read, keyed by the pay-link
+   * token. The projection is `getInvoicePublicView`, the one the bare-id
+   * public read serves an anonymous caller (KF-REVENUE-AUTH-PROJECTION-001),
+   * so the token page renders what the retired /pay/:invoiceId page rendered
+   * and discloses nothing more. A link that is unknown, inactive, expired or
+   * of another tenant, and an invoice the projection does not share (DRAFT,
+   * VOID, FAILED, PENDING, deleted), read as absent.
+   */
+  async getPayPageByToken(token: string) {
+    const link = await this.getPaymentLinkByToken(token);
+    if (!link) return null;
+    const view = await this.getInvoicePublicView(link.invoiceId);
+    if (!view || view.businessId !== link.businessId) return null;
+    return view;
+  }
+
+  /**
+   * V1-46 (M34): the customer's payment intent, keyed by the pay-link token.
+   * The link is resolved before anything else, so a deactivated or expired
+   * link answers 404 whatever the body says; behind a live link the intent is
+   * exactly the R0-22 contract of `recordPublicPaymentIntent` (one PENDING
+   * row on the invoice's own tenant, no status change, no posting). The 404
+   * is the same body that method gives a non-payable invoice.
+   */
+  async recordPaymentIntentByToken(token: string, method: string, amount?: unknown) {
+    const link = await this.getPaymentLinkByToken(token);
+    if (!link) throw new NotFoundException('Invoice not found');
+    return this.recordPublicPaymentIntent(link.invoiceId, method, amount);
+  }
+
   async listPaymentLinks(businessId: string) {
     return this.prisma.client.paymentLink.findMany({
       where: { businessId, active: true },
@@ -3114,8 +3150,10 @@ export class CommerceService {
   private static readonly INTENT_PAYABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
 
   /**
-   * A customer's anonymous "I will pay by <method>" from the public pay page
-   * (POST /commerce/invoices/:invoiceId/payment-intent).
+   * A customer's anonymous "I will pay by <method>" from the public pay page.
+   * V1-46: reached only through `recordPaymentIntentByToken` (POST
+   * /commerce/public/invoice-link/:token/payment-intent); the bare-id route
+   * POST /commerce/invoices/:invoiceId/payment-intent is retired (D-07).
    *
    * R0-22-PUBLIC-INTENT-HARDEN (CF-12): the caller holds only a bare invoice
    * id, so this writes nothing but one PENDING Payment row on the invoice's

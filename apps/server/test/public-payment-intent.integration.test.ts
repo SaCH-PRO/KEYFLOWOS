@@ -16,6 +16,13 @@
  *   - silently dropped a negative / non-number amount and stored any positive
  *     amount, however far above the balance.
  *
+ * V1-46-PUB-PAY-LINK-TOKEN-GATE (D-07: token links only) retired the bare-id
+ * route. The same contract is pinned through the only intent route left,
+ * POST /commerce/public/invoice-link/:token/payment-intent, with one live
+ * link seeded per fixture invoice; the unknown case is an unknown token.
+ * The revoked-link and retired-route cases are in
+ * pay-link-token-gate.integration.test.ts.
+ *
  * Contract pinned here:
  *
  *   intent on a payable invoice (SENT, OVERDUE, PARTIALLY_PAID)
@@ -165,9 +172,18 @@ function agent() {
   return request(app.getHttpServer());
 }
 
-/** An anonymous intent: no identity header, exactly as the public pay page sends it. */
+/**
+ * The live pay-link token seeded for each fixture invoice (beforeAll). V1-46
+ * (D-07) retired the bare-id route, so the intent is reached through the
+ * invoice's link; ID.unknown has no link, so its token is unknown.
+ */
+function tokenOf(invoiceId: string) {
+  return `${P}tok_${invoiceId.slice(P.length)}`;
+}
+
+/** An anonymous intent: no identity header, exactly as the public pay page sends it, through the invoice's live link. */
 function intent(invoiceId: string, body: Record<string, unknown>) {
-  return agent().post(`/commerce/invoices/${invoiceId}/payment-intent`).send(body);
+  return agent().post(`/commerce/public/invoice-link/${tokenOf(invoiceId)}/payment-intent`).send(body);
 }
 
 function publicInvoice(invoiceId: string) {
@@ -380,6 +396,8 @@ beforeAll(async () => {
         items: { create: [{ id: `${id}_item1`, description: `K22A item ${n}`, quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
       },
     });
+    // V1-46: one live pay link per invoice, the only way an intent reaches it.
+    await db.paymentLink.create({ data: { id: `${P}link_${id.slice(P.length)}`, token: tokenOf(id), invoiceId: id, businessId: biz, active: true } });
   }
 
   // ---- operator payments through the real route (real postings) -----------
@@ -580,7 +598,7 @@ describe('amount cap and validation (R0-22)', () => {
     }
     // NaN reaches the server as JSON null (JSON has no NaN); a hand-written body with a tiny negative is refused too.
     const raw = await agent()
-      .post(`/commerce/invoices/${ID.invBadAmount}/payment-intent`)
+      .post(`/commerce/public/invoice-link/${tokenOf(ID.invBadAmount)}/payment-intent`)
       .set('Content-Type', 'application/json')
       .send('{"method":"bank_transfer","amount":-0.01}');
     expect(raw.status, JSON.stringify(raw.body)).toBe(400);
