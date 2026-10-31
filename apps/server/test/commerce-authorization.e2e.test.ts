@@ -17,7 +17,7 @@
  */
 import 'reflect-metadata';
 import { Test } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, RequestMethod, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,7 +41,7 @@ import { PublicRateLimitGuard, PUBLIC_RATE_LIMIT_KEY } from '../src/core/guards/
 import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
 import { TeamAuditInterceptor } from '../src/core/interceptors/team-audit.interceptor';
 import { GlobalHttpExceptionFilter } from '../src/core/filters/http-exception.filter';
-import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 
 const P = 'rva_';
 const ID = {
@@ -167,6 +167,7 @@ const commerceMock = {
   getInvoiceWithBusiness: vi.fn(),
   getInvoicePublicView: vi.fn(),
   getInvoiceForViewer: vi.fn(),
+  getInvoiceForBusiness: vi.fn(),
 };
 
 const receiptsMock = {
@@ -250,6 +251,9 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
     receiptsMock.buildReceipt.mockResolvedValue({ invoiceNumber: 'RVA-SENT', status: 'SENT' });
     paymentsMock.getInvoicePaymentStatus.mockResolvedValue({ status: 'SENT', paid: 40, remaining: 60, currency: 'TTD', lastPaymentAt: null });
     commerceMock.getInvoiceForViewer.mockResolvedValue({ id: ID.inv, status: 'SENT', paid: 0, remaining: 100 });
+    commerceMock.getInvoiceForBusiness.mockResolvedValue({
+      id: ID.inv, businessId: ID.bizA, status: 'DRAFT', contactId: `${P}contactA`, items: [], payments: [], paidAmount: 0, remaining: 100,
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -500,6 +504,86 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       commerceMock.getInvoiceForViewer.mockResolvedValueOnce(null);
       const missing = await agent().get(`/commerce/invoices/${ID.inv}`);
       expect(missing.status).toBe(404);
+    });
+  });
+  // -------------------------------------------------------------------------
+  // R0-QI-01-TENANT-INVOICE-DETAIL-ROUTE (L1 half): the operator detail and
+  // edit pages read GET /commerce/businesses/:businessId/invoices/:invoiceId
+  // instead of the public bare-id route. This layer proves the decorator
+  // metadata, guard admission and what the controller forwards; the L2 half
+  // (real rows, every status, the operator shape) is
+  // test/commerce-invoice-detail.integration.test.ts.
+  describe('R0-QI-01: tenant-bound invoice detail (L1 half)', () => {
+    const tenantDetail = (actor: string | null, businessId = ID.bizA) =>
+      withActor(agent().get(`/commerce/businesses/${businessId}/invoices/${ID.inv}`), actor);
+
+    it('QI-01-META: getInvoiceDetail is GET businesses/:businessId/invoices/:invoiceId behind AuthGuard, BusinessGuard and ModuleScopeGuard with { module: revenue, minLevel: read }', () => {
+      const handler = CommerceController.prototype.getInvoiceDetail;
+      expect(typeof handler).toBe('function');
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('businesses/:businessId/invoices/:invoiceId');
+      expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.GET);
+      expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual({ module: 'revenue', minLevel: 'read' });
+      const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];
+      expect(guards).toEqual([AuthGuard, BusinessGuard, ModuleScopeGuard]);
+      // Not a public surface: no public rate limit, no PublicRateLimitGuard.
+      expect(guards).not.toContain(PublicRateLimitGuard);
+      expect(Reflect.getMetadata(PUBLIC_RATE_LIMIT_KEY, handler)).toBeUndefined();
+    });
+
+    it('QI-01-401: an unauthenticated read is refused before any service call', async () => {
+      const res = await tenantDetail(null);
+      expect(res.status).toBe(401);
+      expect(commerceMock.getInvoiceForBusiness).not.toHaveBeenCalled();
+    });
+
+    it('QI-01-403: a non-member and a member of another tenant are refused at BusinessGuard (403 No access to this business)', async () => {
+      for (const actor of [ID.noMember, ID.ownerB]) {
+        const res = await tenantDetail(actor);
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/No access to this business/);
+      }
+      expect(commerceMock.getInvoiceForBusiness).not.toHaveBeenCalled();
+    });
+
+    it('QI-01-403: explicit revenue:none is refused at ModuleScopeGuard (403 Insufficient permissions)', async () => {
+      const res = await tenantDetail(ID.staffNoneA);
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/Insufficient permissions/);
+      expect(commerceMock.getInvoiceForBusiness).not.toHaveBeenCalled();
+    });
+
+    it('QI-01-200: revenue:read (explicit and STAFF default), write, OWNER and SUPER_ADMIN are admitted, and the controller forwards (invoiceId, path businessId)', async () => {
+      for (const actor of [ID.staffReadA, ID.staffDefaultA, ID.staffWriteA, ID.ownerA, ID.superAdmin]) {
+        const res = await tenantDetail(actor);
+        expect(res.status, actor).toBe(200);
+        expect(res.body).toMatchObject({ id: ID.inv, businessId: ID.bizA, status: 'DRAFT' });
+        expect(commerceMock.getInvoiceForBusiness).toHaveBeenLastCalledWith(ID.inv, ID.bizA);
+      }
+      expect(commerceMock.getInvoiceForBusiness).toHaveBeenCalledTimes(5);
+    });
+
+    it('QI-01-PATH: the tenant forwarded is the path param; a body or query businessId is ignored by the guards and the handler alike', async () => {
+      // ownerA is a member of A only: path A admits; body/query B must not
+      // reach the service.
+      const res = await withActor(agent().get(`/commerce/businesses/${ID.bizA}/invoices/${ID.inv}?businessId=${ID.bizB}`), ID.ownerA)
+        .set('Content-Type', 'application/json')
+        .send({ businessId: ID.bizB });
+      expect(res.status).toBe(200);
+      expect(commerceMock.getInvoiceForBusiness).toHaveBeenCalledTimes(1);
+      expect(commerceMock.getInvoiceForBusiness).toHaveBeenCalledWith(ID.inv, ID.bizA);
+    });
+
+    it('QI-01-404: a null from the tenant-bound read is a 404 Invoice not found', async () => {
+      commerceMock.getInvoiceForBusiness.mockResolvedValueOnce(null);
+      const res = await tenantDetail(ID.ownerA);
+      expect(res.status).toBe(404);
+      expect(res.body.message).toBe('Invoice not found');
+    });
+
+    it('QI-01-PUBLIC: the public bare-id route still routes to getInvoiceForViewer and never to the tenant-bound read', async () => {
+      await withActor(agent().get(`/commerce/invoices/${ID.inv}`), ID.ownerA).expect(200);
+      expect(commerceMock.getInvoiceForViewer).toHaveBeenLastCalledWith(ID.inv, { id: ID.ownerA, role: 'USER' });
+      expect(commerceMock.getInvoiceForBusiness).not.toHaveBeenCalled();
     });
   });
 });
