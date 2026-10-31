@@ -42,7 +42,13 @@
  *
  * Not in this write set (it.todo below): the provider checkouts (WiPay,
  * PayPal, Stripe), the gateway list and the PayPal capture are routes of
- * payments.controller.ts and stay keyed by the invoice id.
+ * payments.controller.ts and stay keyed by the invoice id. The review (ST-1)
+ * confirmed what follows from that: the token read returns the id, and after
+ * the link is revoked the id still opens the bare-id read and those routes,
+ * so a revoked link does not yet stop someone who opened it once (TG-15,
+ * TG-16). The embeddable widgets/pay/[invoiceId] page (ST-2, TG-17) and the
+ * producers of bare /pay/<invoiceId> URLs (CR-01, TG-18) are outside it too.
+ * M34 is not closed by this packet.
  *
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (real
  * Redis at REDIS_URL, this suite's own key namespace), AuthGuard,
@@ -743,5 +749,31 @@ describe('TENANT and the route contract (V1-46)', () => {
   it.todo(
     'TG-14: the provider checkouts (WiPay, PayPal, Stripe), the gateway list and the PayPal capture answer 404 through a revoked token — ' +
       'they are routes of payments.controller.ts, outside this write set, and stay keyed by the invoice id; the token page reaches them only after a live-token read',
+  );
+});
+
+// V1-46 review findings that need files outside this packet's write set.
+// Each is a real gap, kept as a todo so the follow-up packet starts from it;
+// none of them is closed by this packet, and M34 is not closed until they are.
+describe('revocation outside the write set (V1-46 review)', () => {
+  it.todo(
+    'TG-15 (ST-1): after the only link is revoked, an anonymous caller holding the id the token read returned gets 404 from ' +
+      'GET /commerce/invoices/:id, GET /payments/invoice/:id/status, GET /payments/invoice/:id/gateways and POST /payments/invoice/:id/stripe ' +
+      '(today: 200, 200, 200, and past the payable gate) — needs payments.controller.ts/payments.service.ts keyed by the token, and the ' +
+      'anonymous branch of getInvoiceForViewer dropped once widgets/pay/[invoiceId] no longer reads it (TG-11 and the KF-REVENUE-AUTH-PROJECTION-001 ' +
+      'suites pin that branch today)',
+  );
+  it.todo(
+    'TG-16 (ST-1): the token pay read no longer returns the invoice id — possible only once every route the pay page calls takes the token',
+  );
+  it.todo(
+    'TG-17 (ST-2): apps/web/src/app/widgets/pay/[invoiceId]/page.tsx is retired or keyed by the token (it reads GET /commerce/invoices/:id and ' +
+      'starts POST /payments/create-checkout and the PayPal capture with the bare id; linked from app/events/components/attendee-row.tsx) — outside this write set',
+  );
+  it.todo(
+    'TG-18 (CR-01): every producer of a bare /pay/<invoiceId> URL emits a token link (/public/invoice/<token> via createPaymentLink / findAnyPaymentLink): ' +
+      'flow/flow.listener.ts (overdue reminder), ai/flow-orchestrator.service.ts (invoice_sent), autopilot/delegation-loop.service.ts (payment recovery), ' +
+      'web widgets/booking/[slug]/page.tsx, public/pay/page.tsx, and the operator copy-link fallbacks in commerce/invoices/invoices-panel.tsx, ' +
+      'invoices/page.tsx and invoices/[id]/page.tsx — outside this write set; until they do, those customers land on the retired page and cannot pay',
   );
 });

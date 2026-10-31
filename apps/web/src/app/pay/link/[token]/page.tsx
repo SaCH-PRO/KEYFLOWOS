@@ -15,12 +15,16 @@
  *   - the bank-transfer, cash and Google Pay intents go through POST
  *     /commerce/public/invoice-link/:token/payment-intent;
  *   - provider returns (WiPay, PayPal, Stripe) come back to this URL and
- *     re-read through the token.
+ *     re-read through the token. When the link has closed by then (paying a
+ *     pre-V1-48 link rotates its token), the page says the payment was
+ *     received or submitted, not that the link is invalid (review CR-02).
  *
  * The provider checkouts, the gateway list and the PayPal capture are routes
  * of payments.controller.ts, still keyed by the invoice id; this page calls
  * them only with the id the live-token read returned, so a revoked link
- * shows the error state and offers none of them.
+ * shows the error state and offers none of them. The routes themselves still
+ * answer that id after the link is revoked (review ST-1, outside this
+ * packet's write set): this page is not yet the whole revocation boundary.
  */
 
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";
@@ -188,6 +192,46 @@ function CopyButton({ text }: { text: string }) {
 /** What the page says when the token does not open a payable invoice. */
 const LINK_UNAVAILABLE = "This payment link is invalid, has expired or has been deactivated.";
 
+/** The token routes' answer for a link that no longer opens (unknown, inactive, expired, rotated). */
+function linkGone(res: { data: unknown; rawError?: Record<string, unknown> | null }): boolean {
+  return !res.data && res.rawError?.statusCode === 404;
+}
+
+/**
+ * V1-46 review CR-02: a provider sent the customer back here after the
+ * payment, and the link no longer opens. Paying a pre-V1-48 (cuid) link
+ * rotates its token (invoice.paid -> receipt listener -> findAnyPaymentLink ->
+ * reissueLink, ST-V48-1), and a link can also lapse or be deactivated while
+ * the customer is at the provider. The page can no longer show the invoice,
+ * but it must not tell a customer who has just paid that their link is
+ * invalid. "received": the WiPay callback or the PayPal capture said the
+ * money was taken. "submitted": Stripe returned to the success URL, which this
+ * page cannot confirm without the link.
+ */
+type ClosedAfterPayment = "received" | "submitted";
+
+function PaymentClosedState({ kind }: { kind: ClosedAfterPayment }) {
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center px-4">
+      <div className="max-w-md w-full backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] rounded-2xl shadow-2xl p-8 space-y-4 text-center">
+        <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto">
+          <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+        </div>
+        <h1 className="text-xl font-bold text-emerald-400">
+          {kind === "received" ? "Payment received" : "Payment submitted"}
+        </h1>
+        <p className="text-sm text-slate-400">
+          {kind === "received"
+            ? "Thank you. Your payment was received."
+            : "Thank you. Your payment was submitted to the card processor."}{" "}
+          This payment link is no longer active, so the invoice cannot be shown here. The business will email your
+          receipt once the payment is confirmed.
+        </p>
+      </div>
+    </main>
+  );
+}
+
 function TokenPaymentPageInner() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -218,6 +262,15 @@ function TokenPaymentPageInner() {
   const _paypalPayerId = searchParams.get("PayerID");
   const stripeReturn = searchParams.get("stripe");
 
+  // CR-02: what the provider said about the payment this return is for, and
+  // whether a token read has since answered 404 (see PaymentClosedState).
+  const [providerOutcome, setProviderOutcome] = useState<ClosedAfterPayment | null>(
+    stripeReturn === "success" ? "submitted" : null,
+  );
+  const [tokenGone, setTokenGone] = useState(false);
+  // A WiPay return decides the page only once its callback has answered.
+  const [wipayPending, setWipayPending] = useState(Boolean(wipayStatus && wipayOrderId));
+
   useEffect(() => {
     if (stripeReturn === "success") {
       let cancelled = false;
@@ -228,6 +281,10 @@ function TokenPaymentPageInner() {
           setInvoice(res.data);
           setPaid(true);
           setShowConfetti(true);
+          return;
+        }
+        if (linkGone(res)) {
+          setTokenGone(true);
           return;
         }
         if (attempt < 8) setTimeout(() => poll(attempt + 1), 1500);
@@ -251,12 +308,15 @@ function TokenPaymentPageInner() {
         if (res.data?.success) {
           setPaid(true);
           setShowConfetti(true);
+          setProviderOutcome("received");
           const invoiceRes = await apiGet<Invoice>(payPath);
           if (invoiceRes.data) setInvoice(invoiceRes.data);
+          else if (linkGone(invoiceRes)) setTokenGone(true);
         } else {
           setError(res.data?.message || res.error || "Payment was not successful");
         }
         setStep("review");
+        setWipayPending(false);
       };
       processWipayReturn();
     }
@@ -277,8 +337,10 @@ function TokenPaymentPageInner() {
         if (res.data?.status === "COMPLETED") {
           setPaid(true);
           setShowConfetti(true);
+          setProviderOutcome("received");
           const invoiceRes = await apiGet<Invoice>(payPath);
           if (invoiceRes.data) setInvoice(invoiceRes.data);
+          else if (linkGone(invoiceRes)) setTokenGone(true);
         } else {
           setError(res.error || "PayPal payment could not be completed");
         }
@@ -297,6 +359,7 @@ function TokenPaymentPageInner() {
       if (invoiceRes.error || !invoiceRes.data) {
         setInvoice(null);
         setError(LINK_UNAVAILABLE);
+        if (linkGone(invoiceRes)) setTokenGone(true);
         setLoading(false);
         return;
       }
@@ -588,7 +651,7 @@ function TokenPaymentPageInner() {
   const glassCard = "backdrop-blur-xl bg-white/[0.04] border border-white/[0.08] rounded-2xl shadow-2xl";
   const glassCardInner = "backdrop-blur-xl bg-white/[0.06] border border-white/[0.06] rounded-xl";
 
-  if (loading) {
+  if (loading || (wipayPending && !invoice)) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white flex items-center justify-center">
         <PresenceTracker businessId={pickBusinessId(invoice) ?? null} />
@@ -608,6 +671,14 @@ function TokenPaymentPageInner() {
         </div>
       </main>
     );
+  }
+
+  // CR-02: the provider took (or was handed) the payment and the link has
+  // since closed. A view of the invoice already on screen as paid is kept
+  // (below); otherwise the customer gets the neutral state, never the
+  // link-error state and never a stale unpaid view.
+  if (providerOutcome && tokenGone && !(paid && invoice)) {
+    return <PaymentClosedState kind={providerOutcome} />;
   }
 
   if (error && !invoice) {

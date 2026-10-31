@@ -683,7 +683,9 @@ export class CommerceService {
    *
    * V1-46: the bare-id pay page is retired (D-07); the customer pay page at
    * /pay/link/[token] reads this same projection through
-   * `getPayPageByToken`. The bare-id route keeps serving it.
+   * `getPayPageByToken`. The bare-id route keeps serving it to anyone holding
+   * the id, revoked link or not, because widgets/pay/[invoiceId] still reads
+   * it (review ST-1/ST-2).
    */
   async getInvoicePublicView(invoiceId: string) {
     const invoice = await this.prisma.client.invoice.findUnique({
@@ -3103,6 +3105,13 @@ export class CommerceService {
    * and discloses nothing more. A link that is unknown, inactive, expired or
    * of another tenant, and an invoice the projection does not share (DRAFT,
    * VOID, FAILED, PENDING, deleted), read as absent.
+   *
+   * Review ST-1: the projection carries the invoice `id`, which the page needs
+   * for the provider checkouts of payments.controller.ts (still keyed by the
+   * id, outside this packet). Whoever has read it once keeps the id-keyed
+   * public routes after the link is revoked or expires, so this read is not
+   * yet the whole revocation boundary; the id leaves it once those routes
+   * take the token.
    */
   async getPayPageByToken(token: string) {
     const link = await this.getPaymentLinkByToken(token);
