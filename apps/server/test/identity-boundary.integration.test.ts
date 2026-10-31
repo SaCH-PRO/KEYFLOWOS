@@ -136,6 +136,7 @@ import { createHmac, scryptSync } from 'node:crypto';
 import { config as loadEnv, parse as parseEnv, populate as populateEnv } from 'dotenv';
 import request from 'supertest';
 import { Redis } from 'ioredis';
+import WebSocket from 'ws';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 // Pure modules (no Nest, no I/O): the production admin-token issuer and the
 // canonical role-default tables the team routes write.
@@ -222,6 +223,7 @@ const ID = {
   relogin: `${P}relogin`,         // STAFF of bizD; logs out, then the login marker clear (ST-4)
   adminTok: `${P}adminTok`,       // User row role SUPER_ADMIN at token issue, no membership (ST-2)
   adminNoRow: `${P}adminNoRow`,   // subject of a valid admin token, no User row at all (ST-2 fix); not seeded
+  wsAdmin: `${P}wsAdmin`,         // User row SUPER_ADMIN, no membership; opens bizB's KEY Cortex socket (ST-2-WS fix)
   // tenants
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
@@ -267,7 +269,7 @@ const adminCutoffKey = (userId: string) => `admin:user:${userId}:revokedAt`;
 const ALL_USERS = [
   ID.owner, ID.admin, ID.staff, ID.staffNoTeam, ID.ownerB, ID.deleted, ID.banned, ID.revoked, ID.noRow,
   ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin, ID.adminTok,
-  ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ, ID.adminNoRow, ID.adminS,
+  ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ, ID.adminNoRow, ID.adminS, ID.wsAdmin,
 ];
 
 const IDLE_MS = 90_000;      // silence from the child counts; slow-but-talking does not
@@ -510,6 +512,8 @@ async function seed() {
   }
   // SUPER_ADMIN when its admin token is issued; demoted mid-suite (ST-2).
   await db.user.create({ data: { id: ID.adminTok, email: email(ID.adminTok), name: ID.adminTok, role: 'SUPER_ADMIN' } });
+  // The same shape for the KEY Cortex socket cases (ST-2-WS), so they depend on no other case's state.
+  await db.user.create({ data: { id: ID.wsAdmin, email: email(ID.wsAdmin), name: ID.wsAdmin, role: 'SUPER_ADMIN' } });
   await db.business.create({ data: { id: ID.bizD, name: BIZ_D_NAME, ownerId: ID.ownerD, defaultTaxRate: 0 } });
   const defectMemberships: Array<{ id: string; userId: string; businessId: string; role: string; permissionScopes?: Record<string, string>; maxApprovalTier?: number }> = [
     { id: ID.mOwnerD, userId: ID.ownerD, businessId: ID.bizD, role: 'OWNER' },
@@ -1726,13 +1730,150 @@ describe('ST-4 — logout revocation is an issue-time cutoff that the next login
   });
 });
 
-describe('OPEN DEFECT ST-2-WS — the KEY Cortex WebSocket admin-token path skips the local-user checks', () => {
-  it.todo(
-    'REQUIRED (follow-up packet; key-cortex-ws-auth.service.ts, outside this write set): authenticateSocket applies the AuthMiddleware local-user ' +
-      'checks to both token kinds — an admin token takes its role from the User row and is refused when the row is missing, deletedAt or bannedAt is set ' +
-      '(and the Supabase path also on the logout marker); a Postgres failure refuses instead of falling back to USER — so verifyBusinessMembership ' +
-      'never admits a demoted, deleted or banned SUPER_ADMIN into another tenant’s socket',
-  );
+// ---------------------------------------------------------------------------
+// ST-2-WS (fixed by R0-ID-F6-WS-ADMIN-TOKEN) — the KEY Cortex WebSocket.
+//
+// KeyCortexWsAuthService.authenticateSocket had its own admin-token path: the
+// role came from the token and neither User.deletedAt, User.bannedAt nor a
+// missing row refused it; its Supabase path ignored the logout marker. A
+// demoted, deleted or banned SUPER_ADMIN therefore still opened another tenant's
+// socket, since verifyBusinessMembership lets SUPER_ADMIN through (as
+// BusinessGuard does over HTTP). It now takes the HTTP AuthMiddleware decision
+// for the same bearer token, so the cases below are the ST-2 / ST-4 cases above
+// asked over the socket instead of over HTTP.
+//
+// The socket is opened the way socket.io-client opens it — Engine.IO v4 over a
+// WebSocket, then a Socket.IO CONNECT to /key-cortex carrying { token,
+// businessId } as its auth payload — with the `ws` package the server already
+// depends on, so no client library is added. The gateway's decision is what the
+// client sees: `key:connected` once the socket is authenticated, authorized and
+// joined to its rooms, or a DISCONNECT and a closed connection.
+// ---------------------------------------------------------------------------
+type CortexOutcome = { outcome: 'connected' | 'refused'; userId?: string; businessId?: string; frames: string[] };
+
+async function cortexConnect(token: string, businessId: string): Promise<CortexOutcome> {
+  requireServer();
+  const url = `${baseUrl.replace(/^http/, 'ws')}/socket.io/?EIO=4&transport=websocket`;
+  const NSP = '/key-cortex';
+  return new Promise((resolve, reject) => {
+    const frames: string[] = [];
+    const ws = new WebSocket(url);
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      ws.terminate();
+      fn();
+    };
+    const timer = setTimeout(
+      () => settle(() => reject(new Error(`no gateway decision within 15s; frames: ${frames.join(' | ')}`))),
+      15_000,
+    );
+    ws.on('message', (data) => {
+      const frame = data.toString();
+      frames.push(frame);
+      if (frame.startsWith('0{')) {
+        // Engine.IO OPEN -> Socket.IO CONNECT to the namespace, with the handshake auth payload.
+        ws.send(`40${NSP},${JSON.stringify({ token, businessId })}`);
+      } else if (frame === '2') {
+        ws.send('3'); // Engine.IO ping -> pong
+      } else if (frame.startsWith(`42${NSP},`)) {
+        const [event, payload] = JSON.parse(frame.slice(`42${NSP},`.length)) as [string, { userId?: string; businessId?: string }];
+        if (event === 'key:connected') {
+          settle(() => resolve({ outcome: 'connected', userId: payload.userId, businessId: payload.businessId, frames }));
+        }
+      } else if (frame.startsWith(`41${NSP}`) || frame.startsWith(`44${NSP}`)) {
+        settle(() => resolve({ outcome: 'refused', frames }));
+      }
+    });
+    ws.on('close', () => settle(() => resolve({ outcome: 'refused', frames })));
+    ws.on('error', (e) => settle(() => reject(e)));
+  });
+}
+
+describe('ST-2-WS (fixed) — the KEY Cortex WebSocket applies the same local-user checks as AuthMiddleware, to both token kinds', () => {
+  /** Each case starts from an active SUPER_ADMIN row. */
+  async function resetWsAdmin() {
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { role: 'SUPER_ADMIN', bannedAt: null, deletedAt: null } });
+  }
+
+  async function expectSocketServed(token: string, label: string) {
+    const res = await cortexConnect(token, ID.bizB);
+    expect(res.outcome, `${label}: ${res.frames.join(' | ')}`).toBe('connected');
+    expect(res.userId).toBe(ID.wsAdmin);
+    expect(res.businessId).toBe(ID.bizB);
+  }
+
+  async function expectSocketRefused(token: string, label: string) {
+    const res = await cortexConnect(token, ID.bizB);
+    expect(res.outcome, `${label}: ${res.frames.join(' | ')}`).toBe('refused');
+    expect(res.frames.join(' '), `${label}: nothing of the foreign tenant is sent`).not.toContain(BIZ_B_NAME);
+  }
+
+  it('fixture: wsAdmin is a SUPER_ADMIN row with no membership, so only the SUPER_ADMIN bypass can open bizB’s socket', async () => {
+    expect(await db.user.findUnique({ where: { id: ID.wsAdmin } })).toMatchObject({ role: 'SUPER_ADMIN', deletedAt: null, bannedAt: null });
+    expect(await db.membership.count({ where: { userId: ID.wsAdmin } })).toBe(0);
+  });
+
+  it('positive control: an admin token and a Supabase token of an active SUPER_ADMIN open the foreign tenant’s socket; the owner of another tenant does not', async () => {
+    await resetWsAdmin();
+    await expectSocketServed(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), 'admin token, active SUPER_ADMIN');
+    await expectSocketServed(mintToken(ID.wsAdmin), 'Supabase token, active SUPER_ADMIN');
+    // The tenant check itself is live: the owner of bizA only is refused bizB's socket.
+    await expectSocketRefused(T[ID.owner], 'Supabase token, owner of bizA only');
+  });
+
+  it('the role comes from the User row: after the row is demoted, an admin token that still says SUPER_ADMIN cannot open the foreign tenant’s socket; restoring the row restores it', async () => {
+    await resetWsAdmin();
+    const adminToken = mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN');
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { role: 'USER' } });
+    await expectSocketRefused(adminToken, 'admin token, row demoted to USER');
+    await expectSocketRefused(mintToken(ID.wsAdmin), 'Supabase token, row demoted to USER');
+    await resetWsAdmin();
+    await expectSocketServed(adminToken, 'admin token, row restored');
+  });
+
+  it('User.bannedAt and User.deletedAt each refuse both token kinds; clearing them restores access', async () => {
+    await resetWsAdmin();
+    const adminToken = mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN');
+    const supabaseToken = mintToken(ID.wsAdmin);
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { bannedAt: new Date() } });
+    await expectSocketRefused(adminToken, 'admin token, bannedAt');
+    await expectSocketRefused(supabaseToken, 'Supabase token, bannedAt');
+    await db.user.update({ where: { id: ID.wsAdmin }, data: { bannedAt: null, deletedAt: new Date() } });
+    await expectSocketRefused(adminToken, 'admin token, deletedAt');
+    await expectSocketRefused(supabaseToken, 'Supabase token, deletedAt');
+    await resetWsAdmin();
+    await expectSocketServed(adminToken, 'admin token, ban and delete cleared');
+    await expectSocketServed(supabaseToken, 'Supabase token, ban and delete cleared');
+  });
+
+  it('an admin token whose subject has no User row cannot open any socket, and no row is created', async () => {
+    await expectSocketRefused(mintAdminToken(ID.adminNoRow, 'SUPER_ADMIN'), 'admin token, no User row');
+    expect(await db.user.findUnique({ where: { id: ID.adminNoRow } })).toBeNull();
+  });
+
+  it('POST /identity/logout cuts both token kinds off the socket by issue time (the admin cutoff and the logout marker); tokens of a later session are served', async () => {
+    await resetWsAdmin();
+    const adminBefore = mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN');
+    const supabaseBefore = mintToken(ID.wsAdmin);
+    await expectSocketServed(supabaseBefore, 'Supabase token before the logout');
+
+    const loggedOutFrom = Math.floor(Date.now() / 1000);
+    const out = await call('post', '/identity/logout', supabaseBefore);
+    const loggedOutTo = Math.floor(Date.now() / 1000);
+    expect(out.status, JSON.stringify(out.body)).toBe(201);
+    const revokedAt = await expectRevocationTime(ID.wsAdmin, loggedOutFrom, loggedOutTo);
+    expect(await redis!.get(adminCutoffKey(ID.wsAdmin)), 'POST /identity/logout also writes the admin-token cutoff').toMatch(/^\d{13,}$/);
+
+    await expectSocketRefused(adminBefore, 'admin token issued before the logout');
+    await expectSocketRefused(supabaseBefore, 'Supabase token issued before the logout');
+
+    await untilAfterSecond(revokedAt);
+    await expectSocketServed(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), 'admin token issued after the logout');
+    await expectSocketServed(mintToken(ID.wsAdmin), 'Supabase token of a session opened after the logout');
+  });
 });
 
 describe('OPEN DEFECT CR-2 — logout never revokes the Supabase sessions', () => {
