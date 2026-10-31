@@ -607,9 +607,23 @@ describe('ST-PC01-1: the tenant-bound server-side quote read a KEY caller must u
     expectOperatorShape(own, ID.qDraft);
   });
 
-  it.todo(
-    'KEY CommerceAdapterService.getQuoteStatus({ businessId: bizB, quoteId: <bizA DRAFT> }) throws NotFound and leaks nothing — ' +
-      'BLOCKED: commerce-adapter.service.ts:291 is outside the R0-PC-01 write set; follow-up packet replaces ' +
-      'commerce.getQuote(input.quoteId) with commerce.getQuoteForBusiness(input.quoteId, input.businessId)',
-  );
+  it('KEY CommerceAdapterService.getQuoteStatus({ businessId: bizB, quoteId: <bizA DRAFT> }) throws NotFound and leaks nothing; the owning tenant still reads it (ST-PC01-1)', async () => {
+    const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+    const { CommerceAdapterService } = await import('../src/modules/key-cortex/adapters/commerce-adapter.service');
+    const adapter = new CommerceAdapterService(app.get(CommerceService));
+    let thrown: any = null;
+    try {
+      await adapter.getQuoteStatus({ businessId: ID.bizB, quoteId: ID.qDraft });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown?.constructor?.name).toBe('NotFoundException');
+    const text = JSON.stringify(thrown?.getResponse?.() ?? {});
+    expect(text).not.toContain(ID.bizA);
+    expect(text).not.toContain('@');
+    // Positive control: the owning tenant reads its own DRAFT through the adapter.
+    const own = await adapter.getQuoteStatus({ businessId: ID.bizA, quoteId: ID.qDraft });
+    expect((own as any).id).toBe(ID.qDraft);
+    expect((own as any).businessId).toBe(ID.bizA);
+  });
 });

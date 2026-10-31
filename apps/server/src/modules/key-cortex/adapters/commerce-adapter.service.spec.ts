@@ -30,6 +30,7 @@ describe('CommerceAdapterService', () => {
       createQuote: vi.fn(),
       bulkUpdateQuotes: vi.fn(),
       getQuote: vi.fn(),
+      getQuoteForBusiness: vi.fn(),
       recordPayment: vi.fn(),
       listAllPayments: vi.fn(),
     } as unknown as CommerceService;
@@ -168,11 +169,22 @@ describe('CommerceAdapterService', () => {
     expect(result.data).toEqual([{ id: 'pay1', invoiceId: 'inv1' }]);
   });
 
-  it('get_quote_status returns quote', async () => {
-    (commerce.getQuote as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'q1', status: 'SENT' });
+  it('get_quote_status reads the quote bound to the command\'s business, never by bare id (ST-PC01-1)', async () => {
+    (commerce.getQuoteForBusiness as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'q1', status: 'SENT' });
     const result = await service.execute(mkCmd('get_quote_status', { quoteId: 'q1' }));
     expect(result.success).toBe(true);
     expect(result.data).toEqual({ id: 'q1', status: 'SENT' });
+    expect(commerce.getQuoteForBusiness).toHaveBeenCalledWith('q1', 'biz_123');
+    expect(commerce.getQuote).not.toHaveBeenCalled();
+  });
+
+  it('get_quote_status fails when the quote does not belong to the command\'s business (ST-PC01-1)', async () => {
+    (commerce.getQuoteForBusiness as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (commerce.getQuote as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'q_other', status: 'DRAFT', businessId: 'biz_other' });
+    // The adapter propagates NotFound to its caller, as its other not-found paths do.
+    await expect(service.execute(mkCmd('get_quote_status', { quoteId: 'q_other' }))).rejects.toThrow('Quote not found');
+    expect(commerce.getQuoteForBusiness).toHaveBeenCalledWith('q_other', 'biz_123');
+    expect(commerce.getQuote).not.toHaveBeenCalled();
   });
 
   it('returns connectorFail for unknown action', async () => {

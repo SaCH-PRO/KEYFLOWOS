@@ -293,7 +293,9 @@ export class CommerceAdapterService {
   }
 
   async getQuoteStatus(input: { businessId: string; quoteId: string }) {
-    const quote = await this.commerce.getQuote(input.quoteId);
+    // Bound to the command's tenant: the bare-id getQuote read any tenant's quote
+    // (ST-PC01-1). A foreign or unknown id answers like a missing one.
+    const quote = await this.commerce.getQuoteForBusiness(input.quoteId, input.businessId);
     if (!quote) {
       throw new NotFoundException('Quote not found');
     }
