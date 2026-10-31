@@ -16,10 +16,11 @@ import { Service, Prisma, Payment } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 
@@ -68,6 +69,18 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
 });
 
 /**
+ * The customer fields an operator quote read discloses: the customer's name
+ * and email, nothing of the Contact row's CRM fields (internal notes, phone,
+ * owner, visibility). Exported so the quote status route projects its HTTP
+ * response to the same fields (R28-ST-01) instead of keeping its own list.
+ */
+export const OPERATOR_QUOTE_CONTACT_SELECT = {
+  firstName: true,
+  lastName: true,
+  email: true,
+} as const;
+
+/**
  * The operator shape of a quote: the customer's name and email, every line
  * item, the invoice it was converted into and the business profile. Shared by
  * `getQuote` (the tenant-unbound server-side read) and the tenant-bound
@@ -75,11 +88,7 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
  */
 const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
   contact: {
-    select: {
-      firstName: true,
-      lastName: true,
-      email: true,
-    },
+    select: OPERATOR_QUOTE_CONTACT_SELECT,
   },
   items: true,
   invoice: true,
@@ -268,6 +277,60 @@ export class CommerceService {
     }
   }
 
+  /**
+   * R0-27 review (ST-27-3, ST-27-4 / R27-CR-1): the server-computed amounts of
+   * an invoice must be storable and postable, checked before anything is
+   * written.
+   *  - A FIXED discount larger than the subtotal made the total negative, and
+   *    RevenuePostingService posts no AR for a total that is not positive, so
+   *    the invoice could be issued (SENT) with no ledger entry. A discount up
+   *    to the subtotal is allowed (the total is then the tax, never negative).
+   *    A PERCENT discount is already capped at 100% by validateTaxAndDiscount.
+   *  - A subtotal or total that is not finite, or above MAX_DOCUMENT_AMOUNT
+   *    (the numeric(18,4) ledger bound), answered 500 from Prisma on create or
+   *    could not be posted on issue.
+   * The computed amounts are checked, so the total/subtotal overrides of the
+   * internal callers (document intelligence) are not affected.
+   */
+  private assertInvoiceAmounts(amounts: {
+    subtotal: number;
+    total: number;
+    discountType?: string | null;
+    discountValue?: number | null;
+  }) {
+    for (const amount of [amounts.subtotal, amounts.total]) {
+      if (!Number.isFinite(amount) || amount > MAX_DOCUMENT_AMOUNT) {
+        throw new BadRequestException(`Invoice amount cannot exceed ${MAX_DOCUMENT_AMOUNT}`);
+      }
+    }
+    if (amounts.discountType === 'FIXED' && amounts.discountValue != null && amounts.discountValue > amounts.subtotal) {
+      throw new BadRequestException('Fixed discount cannot exceed the subtotal');
+    }
+  }
+
+  /**
+   * Resolve a contact id inside the caller's tenant before it is bound to an
+   * invoice or a quote. The row is returned with `include: { contact: true }`,
+   * so a foreign id would both bind another tenant's contact and disclose its
+   * row. A foreign, soft-deleted or unknown id answers the same 404, and the
+   * caller writes nothing. R0-D3 review (ST-D3-1) for invoice update; R0-27 for
+   * invoice create; R0-27 review (ST-27-2) for quote create, quote update and
+   * quote convert, the second path by which a contact reaches an Invoice.
+   */
+  private async assertContactInBusiness(contactId: unknown, businessId: string): Promise<string> {
+    if (typeof contactId !== 'string' || contactId.length === 0) {
+      throw new BadRequestException('contactId must be a non-empty string');
+    }
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId },
+      select: { id: true },
+    });
+    if (!contact) {
+      throw new NotFoundException('Contact not found');
+    }
+    return contactId;
+  }
+
   async createInvoice(input: {
     businessId: string;
     contactId?: string;
@@ -295,7 +358,14 @@ export class CommerceService {
     } else if (input.discountType === 'FIXED' && input.discountValue) {
       discountAmount = input.discountValue;
     }
-    const total = input.total ?? (calculatedSubtotal + calculatedTaxAmount - discountAmount);
+    const calculatedTotal = calculatedSubtotal + calculatedTaxAmount - discountAmount;
+    this.assertInvoiceAmounts({
+      subtotal: calculatedSubtotal,
+      total: calculatedTotal,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+    });
+    const total = input.total ?? calculatedTotal;
     const data: any = {
       businessId: input.businessId,
       invoiceNumber: input.invoiceNumber ?? `INV-${Date.now()}`,
@@ -320,8 +390,12 @@ export class CommerceService {
         })),
       },
     };
-    if (input.contactId) {
-      data.contactId = input.contactId;
+    // R0-27 (M19 / CF-37): the contact was bound with no tenant check, so bizA's
+    // contactId under bizB's path created bizB's invoice linked to (and
+    // echoing) bizA's contact. Every caller passes through here: the HTTP
+    // route, invoice-from-time, KEY and the intake flows.
+    if (input.contactId !== undefined) {
+      data.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
     const invoice = await this.prisma.client.invoice.create({
       data,
@@ -896,20 +970,34 @@ export class CommerceService {
     actorId?: string | null;
     source?: 'public' | 'internal';
     reason?: string | null;
+    /**
+     * R0-28: the tenant the caller was admitted to. Optional for the callers
+     * that resolve the quote themselves (the public token response, the
+     * tenant-checked send-email route), but ENFORCED whenever supplied: the
+     * lookup below is by primary key alone, and a guard proves which tenant is
+     * asking, not which quote it may touch.
+     */
+    businessId?: string;
   }) {
     const existingQuote = await this.prisma.client.quote.findUnique({
       where: { id: params.quoteId },
       select: { businessId: true, status: true, viewToken: true },
     });
+    // R0-28: unknown, soft-deleted and foreign ids answer the same 404 (they
+    // were plain Errors, so 500s): a different answer for "exists but is not
+    // yours" would confirm the id belongs to someone.
     if (!existingQuote) {
-      throw new Error('Quote not found');
+      throw new NotFoundException('Quote not found');
+    }
+    if (params.businessId && existingQuote.businessId !== params.businessId) {
+      throw new NotFoundException('Quote not found');
     }
     if (params.actorId) {
       const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingQuote.businessId, userId: params.actorId },
       });
       if (!membership) {
-        throw new Error('Not authorized to update this quote');
+        throw new ForbiddenException('Not authorized to update this quote');
       }
     }
     const now = new Date();
@@ -1414,6 +1502,11 @@ export class CommerceService {
     quoteNumber?: string;
   }) {
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
+    // R0-27 review (ST-27-2): the contact was bound with no tenant check, so
+    // bizA's contactId under bizB's path created bizB's quote linked to (and
+    // echoing) bizA's contact, and converting it created an Invoice bound to
+    // that contact. Resolve it inside the tenant before anything is written.
+    const contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
     const taxAmount = subtotal * taxRate / 100;
@@ -1427,7 +1520,7 @@ export class CommerceService {
     const quote = await this.prisma.client.quote.create({
       data: {
         businessId: input.businessId,
-        contactId: input.contactId,
+        contactId,
         quoteNumber: input.quoteNumber ?? `QT-${Date.now()}`,
         status: 'DRAFT',
         issueDate: new Date(),
@@ -1492,7 +1585,8 @@ export class CommerceService {
     }
     
     const updateData: any = {};
-    if (input.contactId) updateData.contactId = input.contactId;
+    // R0-27 review (ST-27-2): same tenant check as quote create, before any write.
+    if (input.contactId) updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     if (input.currency) updateData.currency = input.currency;
     if (input.expiryDate !== undefined) {
       updateData.expiryDate = input.expiryDate ? new Date(input.expiryDate) : null;
@@ -1605,6 +1699,15 @@ export class CommerceService {
       discountAmount = input.discountValue;
     }
     const total = subtotal + taxAmount - discountAmount;
+    // R0-27 review (ST-27-3): the converted invoice obeys the same amount rules
+    // as a created one (no FIXED discount above the subtotal, no amount the
+    // ledger cannot hold).
+    this.assertInvoiceAmounts({ subtotal, total, discountType: input.discountType, discountValue: input.discountValue });
+    // R0-27 review (ST-27-2): the invoice inherits the quote's contact. A quote
+    // written before quote create/update checked the tenant can still hold a
+    // foreign (or since deleted) contact; it must not become an Invoice bound
+    // to it. Same 404 as invoice create, and nothing is written.
+    await this.assertContactInBusiness(quote.contactId, input.businessId);
 
     // R2: do the invoice insert + the quote.invoiceId backlink in a single
     // transaction so we never end up with a quote that thinks it was
@@ -2459,8 +2562,11 @@ export class CommerceService {
     // returns the existing active row when present, so this is idempotent.
     let paymentUrl: string | null = null;
     let link = await this.prisma.client.paymentLink.findFirst({
-      where: { invoiceId: invoice.id, businessId: input.businessId, active: true },
+      // V1-48: an active link past its expiry is not reused (it would put a dead link in the reminder).
+      where: { invoiceId: invoice.id, businessId: input.businessId, ...CommerceService.liveLinkWhere() },
     });
+    // ST-V48-1: a live pre-V1-48 cuid token is rotated before it goes into the reminder.
+    if (link) link = await this.reissueLink(link);
     if (!link) {
       try {
         link = await this.createPaymentLink(invoice.id, input.businessId);
@@ -2670,17 +2776,7 @@ export class CommerceService {
       // contact (email, phone, notes, every field). Resolve it inside the
       // caller's tenant first; a foreign, deleted or unknown id answers like
       // a missing one, and nothing is written.
-      if (typeof input.contactId !== 'string' || input.contactId.length === 0) {
-        throw new BadRequestException('contactId must be a non-empty string');
-      }
-      const contact = await this.prisma.client.contact.findFirst({
-        where: { id: input.contactId, businessId: input.businessId },
-        select: { id: true },
-      });
-      if (!contact) {
-        throw new NotFoundException('Contact not found');
-      }
-      updateData.contactId = input.contactId;
+      updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
     if (input.currency !== undefined) updateData.currency = input.currency;
     if (input.dueDate !== undefined) {
@@ -2712,7 +2808,6 @@ export class CommerceService {
           throw new NotFoundException('Product not found');
         }
       }
-      await this.prisma.client.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
       const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
       const taxAmount = (subtotal * taxRate) / 100;
@@ -2725,6 +2820,10 @@ export class CommerceService {
         discountAmount = discountValue;
       }
       const total = subtotal + taxAmount - discountAmount;
+      // R0-27 review (ST-27-3): the same amount rules as create, checked before
+      // the existing items are deleted, so a refused edit writes nothing.
+      this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+      await this.prisma.client.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
 
       updateData.subtotal = subtotal;
       updateData.taxRate = taxRate;
@@ -2755,6 +2854,8 @@ export class CommerceService {
         discountAmount = discountValue;
       }
       const total = subtotal + taxAmount - discountAmount;
+      // R0-27 review (ST-27-3): a FIXED discount above the stored subtotal is refused.
+      this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
       updateData.taxRate = taxRate;
       updateData.taxAmount = taxAmount;
       updateData.discountType = discountType;
@@ -2813,13 +2914,90 @@ export class CommerceService {
    * link first.
    */
   async findAnyPaymentLink(invoiceId: string, businessId: string) {
-    return this.prisma.client.paymentLink.findFirst({
+    const link = await this.prisma.client.paymentLink.findFirst({
       where: { invoiceId, businessId },
       orderBy: { createdAt: 'desc' },
     });
+    // Every caller hands this token out again (resend, receipt email), so a
+    // live legacy token is rotated first (ST-V48-1). A dead link is returned as is.
+    return link ? this.reissueLink(link) : null;
   }
 
+  /**
+   * V1-48-PUBLIC-TOKEN-VIEW (M34): the pay-link token is the customer's whole
+   * credential, so it is 24 crypto-random bytes (32 base64url characters),
+   * the same as a quote's view token. It is passed explicitly on create; the
+   * column default (cuid()) is left alone, so no migration is needed and
+   * links issued before this keep working until they are handed out again
+   * (see reissueLink).
+   */
+  private static newPaymentLinkToken(): string {
+    return randomBytes(24).toString('base64url');
+  }
+
+  /** The shape the cuid() column default gave every token before V1-48: 'c' and 24 lowercase base36. */
+  private static readonly LEGACY_LINK_TOKEN = /^c[a-z0-9]{24}$/;
+
+  /**
+   * An existing link about to be handed out again (POST .../payment-link,
+   * send, reminder, resend, receipt), with `expiresAt` applied when given.
+   *
+   * ST-V48-1: a live link (active, not past its expiry) whose token is still a
+   * pre-V1-48 cuid gets a crypto-random token in place, so no path keeps
+   * re-issuing the guessable credential. The row (id, createdAt, expiry) is
+   * kept and only the token changes: the cuid URL in an earlier email then
+   * answers as unknown, and the message being sent carries the new one. The
+   * swap is a compare-and-set on the old token, so of two concurrent callers
+   * one rotates and the other reads that row back: both hand out one token.
+   * A dead link and a token of any other shape are left as they are; the
+   * customer view never rotates (it would break the URL being opened).
+   */
+  private async reissueLink<T extends { id: string; token: string; active: boolean; expiresAt: Date | null }>(
+    link: T,
+    expiresAt?: Date,
+  ) {
+    const live = link.active && (!link.expiresAt || link.expiresAt > new Date());
+    if (!live || !CommerceService.LEGACY_LINK_TOKEN.test(link.token)) {
+      if (!expiresAt) return link;
+      return this.prisma.client.paymentLink.update({ where: { id: link.id }, data: { expiresAt } });
+    }
+    const swapped = await this.prisma.client.paymentLink.updateMany({
+      where: { id: link.id, token: link.token },
+      data: { token: CommerceService.newPaymentLinkToken(), ...(expiresAt ? { expiresAt } : {}) },
+    });
+    if (swapped.count === 0 && expiresAt) {
+      // A concurrent caller rotated it first; this caller's expiry still applies.
+      return this.prisma.client.paymentLink.update({ where: { id: link.id }, data: { expiresAt } });
+    }
+    return this.prisma.client.paymentLink.findUniqueOrThrow({ where: { id: link.id } });
+  }
+
+  /**
+   * `expiresInDays` as an expiry date: undefined/null means "not given";
+   * anything else must be a positive number of days that yields a real date,
+   * otherwise 400 (at the base a negative value stored a link already
+   * expired, and a string or huge value reached Prisma as an invalid date).
+   */
+  private static paymentLinkExpiry(expiresInDays: unknown): Date | undefined {
+    if (expiresInDays === undefined || expiresInDays === null) return undefined;
+    const days = expiresInDays as number;
+    const at = typeof days === 'number' && Number.isFinite(days) && days > 0 ? new Date(Date.now() + days * 86400000) : null;
+    if (!at || !Number.isFinite(at.getTime())) {
+      throw new BadRequestException('expiresInDays must be a positive number of days');
+    }
+    return at;
+  }
+
+  /**
+   * One active link per invoice, reused. V1-48 (M34): a reusable link is
+   * active and not past its expiry; an active link that has expired is never
+   * handed out again (the customer would get a dead link), and a fresh one is
+   * minted. A new `expiresInDays` is applied to the reused link, keeping its
+   * token so links already sent keep working until the new expiry, unless
+   * that token is a pre-V1-48 cuid, which is rotated (reissueLink, ST-V48-1).
+   */
   async createPaymentLink(invoiceId: string, businessId: string, expiresInDays?: number) {
+    const expiresAt = CommerceService.paymentLinkExpiry(expiresInDays);
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
     });
@@ -2831,17 +3009,54 @@ export class CommerceService {
     }
 
     const existing = await this.prisma.client.paymentLink.findFirst({
-      where: { invoiceId, businessId, active: true },
+      where: { invoiceId, businessId, ...CommerceService.liveLinkWhere() },
+      orderBy: { createdAt: 'desc' },
     });
-    if (existing) return existing;
-
-    const expiresAt = expiresInDays
-      ? new Date(Date.now() + expiresInDays * 86400000)
-      : null;
+    if (existing) return this.reissueLink(existing, expiresAt);
 
     return this.prisma.client.paymentLink.create({
-      data: { invoiceId, businessId, expiresAt },
+      data: { invoiceId, businessId, token: CommerceService.newPaymentLinkToken(), expiresAt: expiresAt ?? null },
     });
+  }
+
+  /** A link that may still be handed to a customer: active and not past its expiry. */
+  private static liveLinkWhere(): Prisma.PaymentLinkWhereInput {
+    return { active: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] };
+  }
+
+  /**
+   * V1-48-PUBLIC-TOKEN-VIEW (CF-18): paid and remaining for the public token
+   * view, so the customer's link shows what has arrived and what is still
+   * owed. The figures are computeBalance's `paid` and `remaining`, the same
+   * the bare-id projection and the status route serve, over this invoice's
+   * Payment rows of its own tenant: Payment sits outside the tenant
+   * extension and has no FK to Business (M31), so a row carrying another
+   * tenant's businessId is not this invoice's money. No row, reference or
+   * amount per payment leaves here. `paidAt` only when the invoice is PAID.
+   *
+   * A manually refunded row is counted twice by computeBalance (M28): it is
+   * dropped from `paid` and subtracted as `refunded`, so `amountDue` can
+   * exceed total - paid until V1-29 settles that convention. This mirrors it
+   * rather than diverging from every other balance reader.
+   */
+  async getPaymentLinkBalance(invoiceId: string, businessId: string) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+      select: {
+        status: true,
+        total: true,
+        currency: true,
+        paidAt: true,
+        payments: { where: { businessId }, select: { amount: true, status: true } },
+      },
+    });
+    if (!invoice) return null;
+    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    return {
+      amountPaid: balance.paid,
+      amountDue: balance.remaining,
+      paidAt: invoice.status === 'PAID' ? invoice.paidAt ?? null : null,
+    };
   }
 
   async getPaymentLinkByToken(token: string) {
@@ -2861,13 +3076,18 @@ export class CommerceService {
             total: true,
             currency: true,
             status: true,
+            businessId: true,
           },
         },
       },
     });
     if (!link || !link.active) return null;
     if (link.expiresAt && link.expiresAt < new Date()) return null;
-    return link;
+    // V1-48 (M31): nothing ties a link's businessId to its invoice's, so a
+    // link row of another tenant would open this invoice. It reads as unknown.
+    const { businessId: invoiceBusinessId, ...invoice } = link.invoice;
+    if (invoiceBusinessId !== link.businessId) return null;
+    return { ...link, invoice };
   }
 
   async listPaymentLinks(businessId: string) {
@@ -2885,43 +3105,125 @@ export class CommerceService {
     });
   }
 
-  async recordPublicPaymentIntent(invoiceId: string, method: string, amount?: number) {
+  /**
+   * The statuses a customer may record a payment intent against: shareable
+   * and not settled. PAID answers 409; every other status (DRAFT, VOID,
+   * FAILED, PENDING), a soft-deleted invoice and an unknown id answer the same
+   * 404, because the public pay page cannot show them either.
+   */
+  private static readonly INTENT_PAYABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
+
+  /**
+   * A customer's anonymous "I will pay by <method>" from the public pay page
+   * (POST /commerce/invoices/:invoiceId/payment-intent).
+   *
+   * R0-22-PUBLIC-INTENT-HARDEN (CF-12): the caller holds only a bare invoice
+   * id, so this writes nothing but one PENDING Payment row on the invoice's
+   * own tenant. It no longer moves the invoice to PENDING: PENDING is not a
+   * shareable status, so the customer's own pay link answered 404 after they
+   * confirmed an offline payment, and anyone holding an id could hide another
+   * tenant's SENT invoice. PENDING rows are ignored by computeBalance and post
+   * nothing to the ledger; the operator records the money via recordPayment().
+   *
+   * - One PENDING intent per invoice and method. A repeat answers the same
+   *   success; it writes nothing when it states the same amount, and otherwise
+   *   updates that one row to what the latest intent states (capped at the
+   *   balance as it is now), so neither an earlier anonymous writer nor a stale
+   *   amount from before an operator part payment sticks. The lookup runs
+   *   under the invoice row lock, so concurrent repeats serialize instead of
+   *   racing, and the row id is random, so two intents in one millisecond no
+   *   longer collide on the providerPaymentId unique index (the old
+   *   manual_<id>_<Date.now()> key answered 500).
+   * - Payable-state gate: see INTENT_PAYABLE_STATUSES; PAID, or nothing left to
+   *   pay, answers 409.
+   * - The amount, when given, must be a finite number of at least 0.01 once
+   *   rounded to cents (400 otherwise); it is stored rounded and capped at the
+   *   remaining balance. When absent (the pay page never sends one) it is
+   *   stored as 0, as at the base: the customer declared no amount, and
+   *   several readers (open payables, the overdue-invoice scan, the money
+   *   health score) sum Payment.amount whatever its status, so a defaulted
+   *   balance would read as money paid.
+   */
+  async recordPublicPaymentIntent(invoiceId: string, method: string, amount?: unknown) {
     const validMethods = ['bank_transfer', 'cash', 'check', 'other', 'google_pay'];
     if (!validMethods.includes(method)) {
       throw new BadRequestException('Invalid offline payment method');
     }
+    // Validated before the invoice is read, so a 400 says nothing about the id.
+    let declared: number | undefined;
+    if (amount !== undefined) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+        throw new BadRequestException('Payment amount must be a number');
+      }
+      if (amount <= 0) {
+        throw new BadRequestException('Payment amount must be positive');
+      }
+      // Stored in cents, like every other money value; a sub-cent amount
+      // (1e-9) would otherwise be stored as given and claim the method's slot.
+      declared = roundMoney(amount);
+      if (declared < 0.01) {
+        throw new BadRequestException('Payment amount must be at least 0.01');
+      }
+    }
 
+    const notFound = () => new NotFoundException('Invoice not found');
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      select: { id: true, status: true, total: true, businessId: true, invoiceNumber: true, currency: true },
+      select: { businessId: true, invoiceNumber: true, currency: true },
     });
+    if (!invoice) throw notFound();
 
-    if (!invoice) throw new NotFoundException('Invoice not found');
-    if (invoice.status === 'PAID') throw new BadRequestException('Invoice is already paid');
+    await this.prisma.client.$transaction(async (tx) => {
+      const locked = await CommerceService.lockInvoiceForPayment(tx as unknown as Prisma.TransactionClient, invoiceId);
+      if (!locked || locked.deletedAt || locked.businessId !== invoice.businessId) throw notFound();
+      if (locked.status === 'PAID') throw new ConflictException('Invoice is already paid');
+      if (!CommerceService.INTENT_PAYABLE_STATUSES.has(locked.status)) throw notFound();
 
-    // PENDING — customer-asserted intent, no money yet, so no FIN2 posting
-    // until the operator records the actual receipt via recordPayment().
-    await this.prisma.client.payment.create({
-      data: {
-        invoiceId,
-        businessId: invoice.businessId,
-        amount: amount || 0,
-        currency: invoice.currency || 'TTD',
-        status: 'PENDING',
-        provider: method || 'cash',
-        providerPaymentId: `manual_${invoiceId}_${Date.now()}`,
-        method,
-        reference: `Intent: ${invoice.invoiceNumber}`,
-        notes: `Customer indicated ${method} payment via public payment page`,
-      },
-    });
-
-    if (method === 'bank_transfer' || method === 'cash') {
-      await this.prisma.client.invoice.update({
+      const current = await tx.invoice.findFirst({
         where: { id: invoiceId },
-        data: { status: 'PENDING' },
+        select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
       });
-    }
+      const balance = computeBalance(Number(current?.total ?? 0), current?.payments ?? [], current?.currency ?? undefined);
+      // A manually refunded row is counted twice by computeBalance (V1-29), so
+      // `remaining` can exceed the total; an intent never asks for more than either.
+      const remaining = Math.min(balance.remaining, balance.total);
+      if (remaining <= 0) throw new ConflictException('Invoice is already paid');
+
+      // What this intent states: the declared amount capped at what is still
+      // owed now, or 0 when none was declared (see the method comment).
+      const intentAmount = declared === undefined ? 0 : Math.min(declared, remaining);
+
+      const existing = await tx.payment.findFirst({
+        where: { invoiceId, businessId: invoice.businessId, status: 'PENDING', method, provider: method },
+        select: { id: true, amount: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existing) {
+        // The latest intent for a method is the one that stands: refresh the
+        // row when it states a different amount; an identical repeat writes nothing.
+        if (Number(existing.amount) !== intentAmount) {
+          await tx.payment.update({ where: { id: existing.id }, data: { amount: intentAmount } });
+        }
+        return;
+      }
+
+      // PENDING — customer-asserted intent, no money yet, so no FIN2 posting
+      // until the operator records the actual receipt via recordPayment().
+      await tx.payment.create({
+        data: {
+          invoiceId,
+          businessId: invoice.businessId,
+          amount: intentAmount,
+          currency: invoice.currency || 'TTD',
+          status: 'PENDING',
+          provider: method,
+          providerPaymentId: `manual_${invoiceId}_intent_${randomBytes(16).toString('hex')}`,
+          method,
+          reference: `Intent: ${invoice.invoiceNumber}`,
+          notes: `Customer indicated ${method} payment via public payment page`,
+        },
+      });
+    });
 
     return { success: true, method, invoiceNumber: invoice.invoiceNumber };
   }

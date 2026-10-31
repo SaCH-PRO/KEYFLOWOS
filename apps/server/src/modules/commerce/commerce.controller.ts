@@ -1,9 +1,9 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
 import { TimeEntryService } from '../time-tracking/time-entry.service';
-import { CommerceService } from './commerce.service';
+import { CommerceService, OPERATOR_QUOTE_CONTACT_SELECT } from './commerce.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
 import { PaymentEvidenceService } from './payment-evidence.service';
@@ -14,21 +14,53 @@ import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { appUrl } from '../../core/config/runtime-urls';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { CreateProductDto } from './dto/create-product.dto';
+import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { sanitizeString } from '../../core/utils/sanitize';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
 import { BulkProductsDto } from './dto/bulk-products.dto';
-import { InvoiceReceiptBuilderService } from './invoice-receipt-builder.service';
+import { InvoiceReceiptBuilderService, isSettledForReceiptEmail, ownTenantReceiptBalance } from './invoice-receipt-builder.service';
 import { GmailService } from './gmail.service';
 import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
 import { buildInvoiceEmailHtml } from './invoice-email.template';
-import { sumSuccessfulPayments, type InvoiceForEmail } from './invoice-email.types';
+import type { InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+
+/**
+ * R0-27: the global ValidationPipe's options, with the metatype bound
+ * explicitly. The global pipe finds the DTO through tsc-emitted
+ * `design:paramtypes`, which esbuild (vitest, tsx) does not emit, so there the
+ * body went through unvalidated. `expectedType` makes the create contract the
+ * same wherever the controller runs; on the built app the body is validated
+ * twice with identical options, which is idempotent.
+ */
+const CREATE_INVOICE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: CreateInvoiceDto });
+
+type OperatorQuoteContactKey = keyof typeof OPERATOR_QUOTE_CONTACT_SELECT;
+
+/**
+ * R28-ST-01: the HTTP body of a quote status change. The service returns the
+ * quote with its whole Contact row (`include: { contact: true }`, which the
+ * quote.sent listener needs for the customer's email and phone), and the
+ * route handed that row back: a revenue:write member with no CRM access
+ * received a PRIVATE contact's internal notes, phone, owner and visibility.
+ * The body now carries only the customer fields the operator quote detail
+ * discloses; a quote without a loaded contact passes through unchanged.
+ */
+function toQuoteStatusResponse<Q extends { contact?: Record<OperatorQuoteContactKey, unknown> | null }>(quote: Q) {
+  const contact = quote.contact;
+  if (!contact) return quote;
+  const keys = Object.keys(OPERATOR_QUOTE_CONTACT_SELECT) as OperatorQuoteContactKey[];
+  return {
+    ...quote,
+    contact: Object.fromEntries(keys.map((key) => [key, contact[key]])) as Pick<NonNullable<Q['contact']>, OperatorQuoteContactKey>,
+  };
+}
 
 @Controller('commerce')
 export class CommerceController {
@@ -523,37 +555,55 @@ export class CommerceController {
   @Post('businesses/:businessId/invoices')
   createInvoice(
     @Param('businessId') businessId: string,
-    @Body() body: {
-      contactId?: string;
-      items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
-      currency?: string;
-      dueDate?: string;
-      taxRate?: number;
-      discountType?: 'PERCENT' | 'FIXED';
-      discountValue?: number;
-      notes?: string;
-    },
+    @Body(CREATE_INVOICE_BODY_PIPE) body: CreateInvoiceDto,
   ) {
-    return this.commerce.createInvoice({ ...body, businessId });
+    // R0-27: the body is a validated DTO (it was an inline type the
+    // ValidationPipe could not see), and only its declared fields are
+    // forwarded. The service computes subtotal, tax, discount and total; the
+    // tenant is the guarded path param, never a body field.
+    return this.commerce.createInvoice({
+      businessId,
+      contactId: body.contactId,
+      items: body.items.map(({ description, quantity, unitPrice, productId }) => ({ description, quantity, unitPrice, productId })),
+      currency: body.currency,
+      dueDate: body.dueDate,
+      taxRate: body.taxRate,
+      discountType: body.discountType,
+      discountValue: body.discountValue,
+      notes: body.notes,
+    });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // R0-28 (M21, CF-15 authorization half): this bare-id write ran AuthGuard and
+  // BusinessGuard only, so a revenue:read member (or the STAFF default, or
+  // revenue:none) sent, accepted or rejected quotes; and the handler dropped
+  // the tenant the guards checked, so the service looked the quote up by id
+  // alone. It now requires revenue:write like every other revenue write, and
+  // forwards the guard-resolved tenant (same resolver as the guards, as on the
+  // invoice status route) for the service to bind: a foreign id answers like
+  // an unknown one. Path and `{ businessId }` body are unchanged for the web
+  // client. No state machine here: transitions are V1-50 (D-04). The 200 body
+  // is projected (R28-ST-01): the quote, with only the operator contact fields.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('quotes/:quoteId/status/:status')
   async updateQuoteStatus(
-    @Body('businessId') businessId: string,
+    @GuardedBusinessId() businessId: string | undefined,
     @Param('quoteId') quoteId: string,
     @Param('status') status: string,
     @Req() req: any,
   ) {
+    const tenant = this.requireGuardedTenant(businessId);
     try {
       this.logger.log(`Updating quote ${quoteId} to status ${status} by user ${req?.user?.id}`);
       const result = await this.commerce.updateQuoteStatus({
         quoteId,
         status: status.toUpperCase() as UpdateQuoteStatusDto['status'],
         actorId: req?.user?.id,
+        businessId: tenant,
       });
       this.logger.log(`Quote ${quoteId} status updated successfully`);
-      return result;
+      return toQuoteStatusResponse(result);
     } catch (error: any) {
       this.logger.error(`Failed to update quote status: ${error?.message}`, error?.stack);
       throw error;
@@ -1096,7 +1146,14 @@ export class CommerceController {
   ) {
     const business = invoice.business;
     const contact = invoice.contact;
-    const paid = sumSuccessfulPayments(invoice.payments);
+    // V1-49 review (SEC-V49-1, CR-V49-2): the amount received is computeBalance's
+    // paid over the invoice's own-tenant rows, the rule the invoice.paid receipt
+    // and the public receipt use. It was sumSuccessfulPayments over every row,
+    // so a SUCCESSFUL row tagged with another businessId (M31) raised the
+    // "received" figure in a customer email. Tenancy does not depend on the
+    // variant, so the invoice and reminder emails use the same rows; their
+    // arithmetic (remaining = total - paid) is unchanged.
+    const paid = ownTenantReceiptBalance(invoice).paid;
     return buildInvoiceEmailHtml({
       businessName: business?.name ?? 'Your business',
       businessLogo: business?.logoUrl,
@@ -1220,6 +1277,14 @@ export class CommerceController {
       | null;
     if (!invoice || invoice.businessId !== businessId) throw new ForbiddenException('Invoice not found');
     if (invoice.status !== 'PAID') throw new ForbiddenException('Invoice is not yet paid');
+    // V1-49 review (CR-V49-2): the same settlement rule as the invoice.paid
+    // receipt. A PAID row whose own-tenant rows do not cover the total (a
+    // foreign-tenant row, no row, a refund that left it PAID) gets the same
+    // refusal, before any link is looked up or minted, rather than a receipt
+    // the automatic path would not send.
+    if (!isSettledForReceiptEmail(invoice, ownTenantReceiptBalance(invoice))) {
+      throw new ForbiddenException('Invoice is not yet paid');
+    }
     const recipient = body.recipientEmail || invoice.contact?.email;
     if (!recipient) throw new ForbiddenException('Recipient email is required');
     const paymentUrl = await this.buildPublicInvoiceUrl(invoiceId, businessId);
@@ -1253,6 +1318,13 @@ export class CommerceController {
 
   // Public viewer for /public/invoice/[token] — records a `invoice.viewed`
   // event on first view so the timeline / dunning logic can react.
+  //
+  // V1-48-PUBLIC-TOKEN-VIEW (CF-18): beside the invoice block (unchanged: the
+  // eleven keys PC-02 pins) the payload carries `balance` — amountPaid,
+  // amountDue and paidAt from the invoice's own-tenant Payment rows — so the
+  // page shows what has been paid and what remains. Still no payment rows,
+  // references or customer email. An unknown, expired, inactive or
+  // foreign-tenant link answers the same body.
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(60, 60_000)
   @Get('public/invoice-link/:token')
@@ -1263,6 +1335,8 @@ export class CommerceController {
       | InvoiceForEmail
       | null;
     if (!invoice) return { ok: false, reason: 'not_found' };
+    const balance = await this.commerce.getPaymentLinkBalance(invoice.id, invoice.businessId);
+    if (!balance) return { ok: false, reason: 'not_found' };
     if (invoice.contactId) {
       // Best-effort, fire-and-forget so a transient CRM failure doesn't break
       // the public view.
@@ -1286,7 +1360,26 @@ export class CommerceController {
         contact: invoice.contact ? { firstName: invoice.contact.firstName, lastName: invoice.contact.lastName } : null,
         business: invoice.business ? { name: invoice.business.name, logoUrl: invoice.business.logoUrl, primaryColor: invoice.business.primaryColor, email: invoice.business.email, phone: invoice.business.phone } : null,
       },
+      balance,
     };
+  }
+
+  // V1-49-PUBLIC-RECEIPT (M24, D-07): the customer's receipt by the pay-link
+  // token. The only other receipt route (invoices/:invoiceId/receipt) is behind
+  // AuthGuard, so a customer got 401. Public by design (the public-surface
+  // ledger counts it): the token is the credential, as on the sibling view,
+  // and it is rate limited. An unknown, expired, inactive or foreign-tenant
+  // link, and an invoice no receipt can be shown for, answer one 404; a
+  // shareable invoice whose own-tenant rows net to zero or less (nothing
+  // received, or refunded away) is a 409. Read-only: no view event,
+  // no token rotation, no write.
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
+  @Get('public/invoice-link/:token/receipt')
+  async getPublicReceiptByToken(@Param('token') token: string) {
+    const link = await this.commerce.getPaymentLinkByToken(token);
+    if (!link) throw new NotFoundException('Receipt not found');
+    return this.receipts.buildPublicReceipt(link.invoiceId, link.businessId);
   }
 
   // ========== PARTIAL PAYMENTS ==========
@@ -1550,14 +1643,13 @@ export class CommerceController {
   @Post('invoices/:invoiceId/payment-intent')
   recordPublicPaymentIntent(
     @Param('invoiceId') invoiceId: string,
-    @Body() body: { method: string; amount?: number },
+    @Body() body: { method: string; amount?: unknown },
   ) {
     const method = sanitizeString(body?.method ?? '', 50) ?? '';
-    const amount =
-      typeof body?.amount === 'number' && Number.isFinite(body.amount) && body.amount >= 0
-        ? body.amount
-        : undefined;
-    return this.commerce.recordPublicPaymentIntent(invoiceId, method, amount);
+    // R0-22: the amount is passed through as sent. It used to be dropped when
+    // negative or not a number, so a bad amount was silently recorded as 0;
+    // the service now answers 400 for it and caps a good one at the balance.
+    return this.commerce.recordPublicPaymentIntent(invoiceId, method, body?.amount);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

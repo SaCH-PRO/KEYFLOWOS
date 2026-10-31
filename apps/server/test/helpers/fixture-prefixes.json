@@ -94,13 +94,33 @@
       "packet": "R0-17-PAYMENT-TX-INTEGRITY"
     },
     {
+      "prefix": "k19a_",
+      "owner": "apps/server/test/evidence-feed.integration.test.ts",
+      "packet": "R0-19-EVIDENCE-BASELINE"
+    },
+    {
       "prefix": "k20a_",
       "owner": "apps/server/test/payments-mark-paid.integration.test.ts",
       "packet": "R0-20-MARKPAID-CONVERGENCE"
     },
     {
+      "prefix": "k22a_",
+      "owner": "apps/server/test/public-payment-intent.integration.test.ts",
+      "packet": "R0-22-PUBLIC-INTENT-HARDEN"
+    },
+    {
       "prefix": "k24a_",
       "owner": "apps/server/test/tenant-interceptor-alignment.integration.test.ts"
+    },
+    {
+      "prefix": "k27b_",
+      "owner": "apps/server/test/commerce-authorization.e2e.test.ts",
+      "packet": "R0-27-REVENUE-CREATE-CONTRACT"
+    },
+    {
+      "prefix": "k28a_",
+      "owner": "apps/server/test/commerce-quote-status-auth.integration.test.ts",
+      "packet": "R0-28-QUOTE-STATUS-AUTH"
     },
     {
       "prefix": "k32a_",
@@ -223,6 +243,16 @@
       "packet": "V1-21-AUTH-JOBROLE-CEILING"
     },
     {
+      "prefix": "v48a_",
+      "owner": "apps/server/test/public-invoice-link.integration.test.ts",
+      "packet": "V1-48-PUBLIC-TOKEN-VIEW"
+    },
+    {
+      "prefix": "v49a_",
+      "owner": "apps/server/test/public-receipt.integration.test.ts",
+      "packet": "V1-49-PUBLIC-RECEIPT"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
@@ -258,14 +288,7 @@
       "legacy": true
     }
   ],
-  "pendingRenames": [
-    {
-      "prefix": "rva_",
-      "file": "apps/server/test/commerce-authorization.e2e.test.ts",
-      "owner": "apps/server/test/revenue-authorization.integration.test.ts",
-      "reason": "The registered owner is revenue-authorization (real DB and Redis). The e2e suite runs on in-memory Prisma and Redis stand-ins, so the shared prefix reaches no shared resource, but it is renamed for registry hygiene. That file is outside the R0-00 write set: the next packet that writes it (R0-27 or R0-28) renames its prefix to a new k<NN><a-z>_ entry and deletes this record."
-    }
-  ],
+  "pendingRenames": [],
   "noPrefixSuites": [
     {
       "file": "apps/server/test/app-module-boots.integration.test.ts",

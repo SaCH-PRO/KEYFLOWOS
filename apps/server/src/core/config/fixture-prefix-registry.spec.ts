@@ -255,10 +255,14 @@ describe('fixture prefixes are registered and unique (R0-00)', () => {
     }
   });
 
-  it.todo(
-    "commerce-authorization.e2e.test.ts renames its 'rva_' prefix to a new k<NN><a-z>_ prefix and the pendingRenames entry is deleted " +
-      '(outside the R0-00 write set; owed by the next packet that writes that file, R0-27 or R0-28)',
-  );
+  it("commerce-authorization.e2e.test.ts renamed its 'rva_' prefix to k27b_ (R0-27) and no pendingRenames entry is left for it", () => {
+    // Was an it.todo owed by the next packet to write that file (R0-27 or R0-28).
+    const file = 'apps/server/test/commerce-authorization.e2e.test.ts';
+    expect(prefixesIn(readFileSync(join(REPO, file), 'utf8'))).toEqual(['k27b_']);
+    expect(registry().prefixes.find((e) => e.prefix === 'k27b_')).toMatchObject({ owner: file, packet: 'R0-27-REVENUE-CREATE-CONTRACT' });
+    expect(registry().pendingRenames.filter((l) => l.file === file)).toEqual([]);
+    expect(declarations().filter((d) => d.prefix === 'rva_').map((d) => d.file)).toEqual(['apps/server/test/revenue-authorization.integration.test.ts']);
+  });
 
   it('every declared prefix is registered to the file that declares it', () => {
     const entries = registry().prefixes;

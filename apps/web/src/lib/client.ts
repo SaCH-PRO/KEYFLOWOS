@@ -2462,6 +2462,13 @@ export interface PublicInvoicePayload {
     contact?: { firstName?: string | null; lastName?: string | null } | null;
     business?: { name: string; logoUrl?: string | null; primaryColor?: string | null; email?: string | null; phone?: string | null } | null;
   };
+  /**
+   * V1-48-PUBLIC-TOKEN-VIEW: what has been paid and what is still owed,
+   * computed on the server from the invoice's Payment rows. The page renders
+   * these figures as given and never derives them from the line items.
+   * Absent from an older server.
+   */
+  balance?: { amountPaid: number; amountDue: number; paidAt?: string | null } | null;
 }
 
 export async function getPublicInvoiceByToken(token: string): Promise<ApiResult<PublicInvoicePayload>> {

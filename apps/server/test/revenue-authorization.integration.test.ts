@@ -989,14 +989,27 @@ describe('List B: regression controls', () => {
       expect(invoice.contact.email).toBe(`${CANARY}customer@test.local`);
     });
 
-    it('PC-08: a customer payment intent still works from a public page (fresh copy; G6 is a later packet)', async () => {
+    // R0-22-PUBLIC-INTENT-HARDEN (CF-12): the intent no longer flips the
+    // invoice to PENDING, which is not shareable and made the customer's own
+    // pay link answer 404. Full contract: public-payment-intent.integration.test.ts.
+    it('PC-08: a customer payment intent still works from a public page and leaves the invoice SENT and shareable (fresh copy; R0-22 no-status-flip contract)', async () => {
       const copy = await createCopy('pc_08', { status: 'SENT' });
       const res = await agent().post(`/commerce/invoices/${copy}/payment-intent`).send({ method: 'bank_transfer' });
       expect([200, 201]).toContain(res.status);
       expect(res.body.success).toBe(true);
+      expectNoCanary(res.body);
       const rows = await db.payment.findMany({ where: { invoiceId: copy } });
       expect(rows).toHaveLength(1);
       expect(rows[0].status).toBe('PENDING');
+      expect(rows[0].businessId).toBe(ID.bizA);
+      expect(await invoiceStatus(copy)).toBe('SENT');
+      const reload = await publicInvoice(copy);
+      expect(reload.status).toBe(200);
+      expect(reload.body).toMatchObject({ id: copy, status: 'SENT' });
+      // The same intent again is the same intent: still one PENDING row.
+      const again = await agent().post(`/commerce/invoices/${copy}/payment-intent`).send({ method: 'bank_transfer' });
+      expect([200, 201]).toContain(again.status);
+      expect(await paymentCount(copy)).toBe(1);
     });
   });
 });

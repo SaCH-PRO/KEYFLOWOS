@@ -124,7 +124,14 @@ const ACKNOWLEDGED_PUBLIC: Record<string, number> = {
   // guards as every other write on this controller. It was the primary
   // invoice-creation route with no auth, no tenant check and no plan limit,
   // which also made it a way around RequirePlanLimit('invoices').
-  'modules/commerce/commerce.controller.ts': 10,
+  // 10 -> 11 (V1-49-PUBLIC-RECEIPT, M24, D-07): GET
+  // public/invoice-link/:token/receipt, the customer's receipt. Necessarily
+  // unauthenticated (the customer has no session). What stands in: the
+  // pay-link token IS the credential (24 crypto-random bytes, V1-48; unknown,
+  // expired, inactive and foreign-tenant links answer one 404) plus
+  // @PublicRateLimit(30, 60_000). Read-only; a projection with no payment
+  // rows, references or customer email.
+  'modules/commerce/commerce.controller.ts': 11,
   'modules/commerce/leverage.controller.ts': 9,
   'modules/communications/communications.controller.ts': 3,
   'modules/communications/inbound-communications.controller.ts': 2,

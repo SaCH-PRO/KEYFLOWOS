@@ -1,0 +1,33 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-22-PUBLIC-INTENT-HARDEN",
+  "proofScope": "public-payment-intent-real-database-and-revenue-authorization-pc-08",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": true,
+  "requiredCases": [
+    "fixture sanity (real rows) two tenants with a system chart of accounts; payable, unpayable and settled invoices as seeded; the operator payments posted to the ledger",
+    "CF-12: an intent never changes the invoice status (R0-22) PI-01: an anonymous bank_transfer intent on a SENT invoice answers success; the invoice stays SENT and the public projection still answers after reload",
+    "CF-12: an intent never changes the invoice status (R0-22) PI-02: a cash intent leaves the SENT invoice SENT and shareable",
+    "CF-12: an intent never changes the invoice status (R0-22) PI-03: OVERDUE and PARTIALLY_PAID invoices accept an intent and keep their status",
+    "dedupe per invoice and method; never 500 (R0-22) PI-04: two intents for the same invoice and method create one PENDING row; both answer the same success",
+    "dedupe per invoice and method; never 500 (R0-22) PI-05: different methods on the same invoice are separate intents (one PENDING row each)",
+    "dedupe per invoice and method; never 500 (R0-22) PI-06: two intents in the same millisecond never answer 500 (no manual_<id>_<Date.now()> collision)",
+    "dedupe per invoice and method; never 500 (R0-22) PI-07: a concurrent burst of five same-method intents in one millisecond never answers 500 and leaves exactly one PENDING row",
+    "payable-state gate (R0-22) PI-08: a DRAFT invoice answers 404, identical to an unknown id; nothing is written",
+    "payable-state gate (R0-22) PI-09: a VOID invoice answers 404, identical to an unknown id; nothing is written",
+    "payable-state gate (R0-22) PI-10: FAILED, PENDING and soft-deleted invoices answer the same 404; nothing is written",
+    "payable-state gate (R0-22) PI-11: a PAID invoice answers 409; no PENDING row, still PAID, its one payment untouched",
+    "payable-state gate (R0-22) PI-12: an unknown method answers 400 before the invoice is read (unchanged)",
+    "amount cap and validation (R0-22) PI-13: an amount above the remaining balance is stored as the remaining balance (100 total, 40 paid, 500 asked -> 60)",
+    "amount cap and validation (R0-22) PI-14: an intent with no amount is stored as 0 (no amount declared, as at the base), and an amount under the balance is kept as given (25)",
+    "amount cap and validation (R0-22) PI-15: a negative, zero, NaN or non-number amount answers 400; nothing is written",
+    "LEDGER and TENANT (R0-22) PI-16 LEDGER: intents change neither computeBalance nor any FinancialTransaction or LedgerEntry count",
+    "LEDGER and TENANT (R0-22) PI-17 TENANT: an intent on B's invoice writes one PENDING Payment row carrying B's businessId (Payment table, M31); A's invoices and payments are byte-identical",
+    "LEDGER and TENANT (R0-22) PI-18 TENANT: an intent on A's invoice writes A's businessId; B's invoices and payments are byte-identical",
+    "LEDGER and TENANT (R0-22) PI-19 LEDGER (whole run): every intent above left both tenants' FinancialTransaction and LedgerEntry counts as they were after seeding",
+    "R0-22 review repairs: status-blind readers, cents and the latest intent per method PI-20: a no-amount intent (what the pay page sends) for every method is stored as 0, so open payables, the overdue-invoice scan and the money health score still see the full balance",
+    "R0-22 review repairs: status-blind readers, cents and the latest intent per method PI-21: a sub-cent amount answers 400 and writes nothing; an amount is stored rounded to cents",
+    "R0-22 review repairs: status-blind readers, cents and the latest intent per method PI-22: a repeat for the same method keeps one row and states the latest intent: an earlier anonymous amount does not stick, an identical repeat writes nothing, and a stale amount is re-capped after an operator part payment",
+    "List B: regression controls Positive controls that must keep working PC-08: a customer payment intent still works from a public page and leaves the invoice SENT and shareable (fresh copy; R0-22 no-status-flip contract)"
+  ]
+}

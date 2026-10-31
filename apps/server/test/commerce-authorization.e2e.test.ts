@@ -41,9 +41,14 @@ import { PublicRateLimitGuard, PUBLIC_RATE_LIMIT_KEY } from '../src/core/guards/
 import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
 import { TeamAuditInterceptor } from '../src/core/interceptors/team-audit.interceptor';
 import { GlobalHttpExceptionFilter } from '../src/core/filters/http-exception.filter';
-import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
+import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 
-const P = 'rva_';
+// R0-27 (registry hygiene, R0-00 pendingRenames): this suite shared 'rva_'
+// with revenue-authorization.integration.test.ts, the registered owner. It runs
+// on in-memory stand-ins, so no shared row was ever at risk; the prefix is
+// renamed to its own registered entry all the same.
+const P = 'k27b_';
 const ID = {
   ownerA: `${P}ownerA`,
   staffWriteA: `${P}staffWriteA`,
@@ -117,6 +122,10 @@ class GuardPrismaMock {
       invoice: {
         findUnique: vi.fn(() => Promise.resolve({ businessId: ID.bizA })),
       },
+      // TeamAuditInterceptor on business-path writes (R0-27: invoice create).
+      teamActivityLog: {
+        create: vi.fn(() => Promise.resolve({})),
+      },
     };
   }
 }
@@ -172,6 +181,8 @@ const commerceMock = {
   getQuote: vi.fn(),
   getQuoteForBusiness: vi.fn(),
   getStaleQuotes: vi.fn(),
+  createInvoice: vi.fn(),
+  updateQuoteStatus: vi.fn(),
 };
 
 const receiptsMock = {
@@ -259,12 +270,14 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       id: ID.inv, businessId: ID.bizA, status: 'DRAFT', contactId: `${P}contactA`, items: [], payments: [], paidAmount: 0, remaining: 100,
     });
     commerceMock.getQuote.mockResolvedValue({
-      id: QUOTE, businessId: ID.bizA, status: 'DRAFT', contact: { firstName: 'R', lastName: 'V', email: 'rva@test.local' },
+      id: QUOTE, businessId: ID.bizA, status: 'DRAFT', contact: { firstName: 'R', lastName: 'V', email: `${P}quote@test.local` },
     });
     commerceMock.getQuoteForBusiness.mockResolvedValue({
       id: QUOTE, businessId: ID.bizA, status: 'DRAFT', contactId: `${P}contactA`, items: [], lifecycleStep: 'DRAFT',
     });
     commerceMock.getStaleQuotes.mockResolvedValue([]);
+    commerceMock.createInvoice.mockResolvedValue({ id: `${P}invNew`, businessId: ID.bizA, status: 'DRAFT', total: 25 });
+    commerceMock.updateQuoteStatus.mockResolvedValue({ id: QUOTE, businessId: ID.bizA, status: 'SENT' });
   });
 
   // -------------------------------------------------------------------------
@@ -709,6 +722,267 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       }
       const blocked = await bareQuote(null);
       expect(blocked.status).toBe(429);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // R0-28-QUOTE-STATUS-AUTH (L1 half): PATCH
+  // /commerce/quotes/:quoteId/status/:status ran AuthGuard and BusinessGuard on
+  // the body tenant only — no ModuleScopeGuard, so revenue:read (and the STAFF
+  // default, and revenue:none) changed quote status — and the handler dropped
+  // the tenant the guards had checked, so the service bound nothing. This
+  // layer proves the decorator metadata, guard admission and what the
+  // controller forwards; the L2 half (real rows, the byte-identical 404, the
+  // ledger) is test/commerce-quote-status-auth.integration.test.ts. The path
+  // and the `{ businessId }` body are the web client's, unchanged.
+  describe('R0-28: quote status route write scope and tenant binding (L1 half)', () => {
+    const quoteStatus = (actor: string | null, pathStatus: string, body: Record<string, unknown>, query = '') =>
+      withActor(agent().patch(`/commerce/quotes/${QUOTE}/status/${pathStatus}${query}`), actor).send(body);
+
+    it('QS-META: updateQuoteStatus is PATCH quotes/:quoteId/status/:status behind AuthGuard, BusinessGuard and ModuleScopeGuard with { module: revenue, minLevel: write }', () => {
+      const handler = CommerceController.prototype.updateQuoteStatus;
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('quotes/:quoteId/status/:status');
+      expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.PATCH);
+      expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual({ module: 'revenue', minLevel: 'write' });
+      const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];
+      expect(guards).toEqual([AuthGuard, BusinessGuard, ModuleScopeGuard]);
+    });
+
+    it('QS-L1-403: revenue:read (explicit and STAFF default) and revenue:none are refused at ModuleScopeGuard (403 Insufficient permissions) before the service is called', async () => {
+      for (const actor of [ID.staffReadA, ID.staffDefaultA, ID.staffNoneA]) {
+        for (const status of ['sent', 'accepted', 'rejected', 'draft']) {
+          const res = await quoteStatus(actor, status, { businessId: ID.bizA });
+          expect(res.status, `${actor} -> ${status}`).toBe(403);
+          expect(res.body.message, `${actor} -> ${status}`).toMatch(/Insufficient permissions/);
+        }
+      }
+      expect(commerceMock.updateQuoteStatus).not.toHaveBeenCalled();
+    });
+
+    it('QS-L1-FORWARD: revenue:write and OWNER are admitted, and the controller forwards { quoteId, upper-cased path status, actorId, guard tenant }', async () => {
+      for (const [actor, pathStatus, status] of [
+        [ID.staffWriteA, 'accepted', 'ACCEPTED'],
+        [ID.ownerA, 'sent', 'SENT'],
+        [ID.ownerA, 'rejected', 'REJECTED'],
+      ] as const) {
+        const res = await quoteStatus(actor, pathStatus, { businessId: ID.bizA });
+        expect(res.status, `${actor} -> ${pathStatus}`).toBe(200);
+        expect(commerceMock.updateQuoteStatus).toHaveBeenLastCalledWith({ quoteId: QUOTE, status, actorId: actor, businessId: ID.bizA });
+      }
+      expect(commerceMock.updateQuoteStatus).toHaveBeenCalledTimes(3);
+    });
+
+    it("QS-L1-TENANT: the tenant forwarded is the one the guards checked — body over query, and the query when it is the only source", async () => {
+      // ownerB is a member of B only: body B admits; query A is ignored by the guards and the handler alike.
+      await quoteStatus(ID.ownerB, 'sent', { businessId: ID.bizB }, `?businessId=${ID.bizA}`).expect(200);
+      expect(commerceMock.updateQuoteStatus).toHaveBeenLastCalledWith(expect.objectContaining({ actorId: ID.ownerB, businessId: ID.bizB }));
+
+      await quoteStatus(ID.ownerA, 'sent', {}, `?businessId=${ID.bizA}`).expect(200);
+      expect(commerceMock.updateQuoteStatus).toHaveBeenLastCalledWith(expect.objectContaining({ actorId: ID.ownerA, businessId: ID.bizA }));
+    });
+
+    it('QS-L1-GUARDS (control): unauthenticated 401; a non-member and a member of another tenant naming A are refused at BusinessGuard; the service is not called', async () => {
+      expect((await quoteStatus(null, 'sent', { businessId: ID.bizA })).status).toBe(401);
+      for (const actor of [ID.noMember, ID.ownerB]) {
+        const res = await quoteStatus(actor, 'sent', { businessId: ID.bizA });
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/No access to this business/);
+      }
+      expect(commerceMock.updateQuoteStatus).not.toHaveBeenCalled();
+    });
+
+    it('QS-L1-NOTENANT: no tenant anywhere is refused (403 businessId is required) — the owner at BusinessGuard, SUPER_ADMIN at the handler — before the service is called', async () => {
+      for (const actor of [ID.ownerA, ID.superAdmin]) {
+        const res = await quoteStatus(actor, 'sent', {});
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message, actor).toMatch(/businessId is required/);
+      }
+      expect(commerceMock.updateQuoteStatus).not.toHaveBeenCalled();
+    });
+
+    it('QS-L1-SUPER: SUPER_ADMIN naming a tenant passes both guards and the controller forwards that tenant (the service then binds it)', async () => {
+      await quoteStatus(ID.superAdmin, 'sent', { businessId: ID.bizA }).expect(200);
+      expect(commerceMock.updateQuoteStatus).toHaveBeenCalledWith({ quoteId: QUOTE, status: 'SENT', actorId: ID.superAdmin, businessId: ID.bizA });
+    });
+
+    // R28-ST-01: the service returns the quote with its whole Contact row (the
+    // quote.sent listener needs it); the HTTP body carries only the operator
+    // detail's customer fields.
+    it('QS-L1-PROJECTION: the 200 body is the service quote with its contact projected to { firstName, lastName, email }; the internal note, phone, owner and visibility are not sent, and a quote without a loaded contact passes through unchanged', async () => {
+      commerceMock.updateQuoteStatus.mockResolvedValueOnce({
+        id: QUOTE,
+        businessId: ID.bizA,
+        status: 'SENT',
+        contactId: `${P}contactA`,
+        viewToken: `${P}tok`,
+        contact: {
+          id: `${P}contactA`,
+          businessId: ID.bizA,
+          firstName: 'R',
+          lastName: 'V',
+          email: `${P}quote@test.local`,
+          phone: '+1868555028',
+          notesInternal: 'K28L1_SECRET_NOTE',
+          ownerId: ID.ownerA,
+          visibility: 'PRIVATE',
+        },
+      });
+      const res = await quoteStatus(ID.staffWriteA, 'sent', { businessId: ID.bizA });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toEqual({
+        id: QUOTE,
+        businessId: ID.bizA,
+        status: 'SENT',
+        contactId: `${P}contactA`,
+        viewToken: `${P}tok`,
+        contact: { firstName: 'R', lastName: 'V', email: `${P}quote@test.local` },
+      });
+      expect(JSON.stringify(res.body)).not.toContain('K28L1_SECRET_NOTE');
+      expect(JSON.stringify(res.body)).not.toContain('+1868555028');
+
+      const bare = await quoteStatus(ID.ownerA, 'sent', { businessId: ID.bizA });
+      expect(bare.status).toBe(200);
+      expect(bare.body).toEqual({ id: QUOTE, businessId: ID.bizA, status: 'SENT' });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // R0-27-REVENUE-CREATE-CONTRACT (L1 half): POST
+  // /commerce/businesses/:businessId/invoices took an inline body type, so the
+  // global ValidationPipe saw `Object`, validated nothing and stripped nothing:
+  // empty items, quantity 0, a null (NaN) price or a missing contactId reached
+  // CommerceService.createInvoice, and a client total/subtotal/taxAmount was
+  // forwarded and trusted. This layer proves the DTO refuses bad bodies with
+  // 400 field messages before the service is called, and that what the
+  // controller forwards is the path tenant plus the declared fields only. The
+  // L2 half (tenant-checked contact, persisted totals, ledger) is
+  // test/commerce-invoice-errors.integration.test.ts.
+  describe('R0-27: invoice create contract (L1 half)', () => {
+    const create = (actor: string | null, body: unknown, businessId = ID.bizA) =>
+      withActor(agent().post(`/commerce/businesses/${businessId}/invoices`), actor).send(body as object);
+    const valid = () => ({
+      contactId: `${P}contactA`,
+      items: [
+        { description: 'Two hours', quantity: 2, unitPrice: 10 },
+        { description: 'Setup', quantity: 1, unitPrice: 5, productId: `${P}productA` },
+      ],
+    });
+    const messages = (body: Record<string, unknown>) => [body.message].flat().map(String);
+
+    it('CC-META: createInvoice keeps its guards and write scope, and its body is bound to a ValidationPipe (whitelist, transform) whose expectedType is CreateInvoiceDto', () => {
+      const handler = CommerceController.prototype.createInvoice;
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('businesses/:businessId/invoices');
+      expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.POST);
+      expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual({ module: 'revenue', minLevel: 'write' });
+      const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];
+      expect(guards).toEqual([AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard]);
+      // Not `design:paramtypes`: vitest's esbuild transform never emits it, so
+      // the global pipe's metatype cannot be observed (or relied on) here. The
+      // body pipe names its type itself.
+      const args: Record<string, { index: number; pipes?: unknown[] }> =
+        Reflect.getMetadata(ROUTE_ARGS_METADATA, CommerceController, 'createInvoice') ?? {};
+      const body = Object.entries(args).find(([key]) => key.startsWith(`${RouteParamtypes.BODY}:`))?.[1];
+      expect(body?.index, 'the @Body() parameter').toBe(1);
+      const pipe = body?.pipes?.[0] as any;
+      expect(pipe).toBeInstanceOf(ValidationPipe);
+      expect(pipe.expectedType?.name).toBe('CreateInvoiceDto');
+      expect(pipe.validatorOptions).toMatchObject({ whitelist: true });
+      expect(pipe.isTransformEnabled).toBe(true);
+    });
+
+    const invalid: Array<[string, (b: ReturnType<typeof valid>) => unknown, RegExp]> = [
+      ['missing items', (b) => ({ contactId: b.contactId }), /^items must contain at least 1 elements$/],
+      ['empty items', (b) => ({ ...b, items: [] }), /^items must contain at least 1 elements$/],
+      ['items not an array', (b) => ({ ...b, items: { description: 'x', quantity: 1, unitPrice: 1 } }), /^items must be an array$/],
+      ['quantity 0', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 0 }] }), /^items\.0\.quantity must be a positive number$/],
+      ['negative quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: -1 }] }), /^items\.0\.quantity must be a positive number$/],
+      ['string quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: '2' }] }), /^items\.0\.quantity must be an integer number$/],
+      // InvoiceItem.quantity is an Int column: 1.5 was stored as 1 under a line total computed from 1.5.
+      ['fractional quantity', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 1.5 }] }), /^items\.0\.quantity must be an integer number$/],
+      ['NaN price (JSON null)', (b) => ({ ...b, items: [{ ...b.items[0], unitPrice: null }] }), /^items\.0\.unitPrice must be a number/],
+      ['non-numeric price', (b) => ({ ...b, items: [b.items[0], { ...b.items[1], unitPrice: 'abc' }] }), /^items\.1\.unitPrice must be a number/],
+      ['negative price', (b) => ({ ...b, items: [{ ...b.items[0], unitPrice: -5 }] }), /^items\.0\.unitPrice must not be less than 0$/],
+      ['missing description', (b) => ({ ...b, items: [{ quantity: 1, unitPrice: 1 }] }), /^items\.0\.description should not be empty$/],
+      ['missing contactId', (b) => ({ items: b.items }), /^contactId should not be empty$/],
+      ['empty contactId', (b) => ({ ...b, contactId: '' }), /^contactId should not be empty$/],
+      ['unknown discountType', (b) => ({ ...b, discountType: 'BOGO', discountValue: 1 }), /^discountType must be one of the following values: PERCENT, FIXED$/],
+      ['string taxRate', (b) => ({ ...b, taxRate: '15' }), /^taxRate must be a number/],
+      ['unparseable dueDate', (b) => ({ ...b, dueDate: 'not-a-date' }), /^dueDate must be a valid ISO 8601 date string$/],
+      // R0-27 review (ST-27-4 / R27-CR-1): these reached the service and answered 500 (int4 overflow, Infinity subtotal).
+      ['quantity above int4 max', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 2147483648 }] }), /^items\.0\.quantity must not be greater than 2147483647$/],
+      ['quantity 2^60', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 2 ** 60 }] }), /^items\.0\.quantity must not be greater than 2147483647$/],
+      ['price above the ledger bound (1e308)', (b) => ({ ...b, items: [{ ...b.items[0], unitPrice: 1e308 }] }), /^items\.0\.unitPrice must not be greater than 99999999999999$/],
+    ];
+    for (const [label, mutate, field] of invalid) {
+      it(`CC-400 ${label}: 400 BAD_REQUEST with the field message, before CommerceService.createInvoice is called`, async () => {
+        const res = await create(ID.ownerA, mutate(valid()));
+        expect(res.status, label).toBe(400);
+        expect(res.body.code).toBe('BAD_REQUEST');
+        expect(messages(res.body).some((m) => field.test(m)), `${label}: ${JSON.stringify(res.body.message)}`).toBe(true);
+        expect(commerceMock.createInvoice).not.toHaveBeenCalled();
+      });
+    }
+
+    it('CC-STRIP: client total, subtotal, taxAmount, discountAmount, status, invoiceNumber, items[].total and a body businessId never reach the service', async () => {
+      const body = {
+        ...valid(),
+        items: valid().items.map((i) => ({ ...i, total: 1 })),
+        total: 1,
+        subtotal: 1,
+        taxAmount: 0,
+        discountAmount: 99,
+        status: 'PAID',
+        invoiceNumber: `${P}HIJACK`,
+        businessId: ID.bizB,
+      };
+      const res = await create(ID.ownerA, body);
+      expect(res.status).toBe(201);
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(1);
+      const forwarded = commerceMock.createInvoice.mock.calls[0]![0] as Record<string, unknown>;
+      expect(forwarded).toEqual({ businessId: ID.bizA, ...valid() });
+      const keys = Object.entries(forwarded).filter(([, v]) => v !== undefined).map(([k]) => k);
+      for (const k of ['total', 'subtotal', 'taxAmount', 'discountAmount', 'status', 'invoiceNumber']) expect(keys, k).not.toContain(k);
+      for (const item of forwarded.items as Array<Record<string, unknown>>) expect(item).not.toHaveProperty('total');
+    });
+
+    it('CC-FORWARD (control): a valid body from revenue:write, OWNER and SUPER_ADMIN is forwarded with the path tenant and the declared fields', async () => {
+      const full = { ...valid(), currency: 'TTD', dueDate: '2026-12-01', taxRate: 10, discountType: 'FIXED', discountValue: 2, notes: 'k27b notes' };
+      for (const actor of [ID.staffWriteA, ID.ownerA, ID.superAdmin]) {
+        const res = await create(actor, full);
+        expect(res.status, actor).toBe(201);
+        expect(res.body).toMatchObject({ id: `${P}invNew`, status: 'DRAFT' });
+        expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...full });
+      }
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(3);
+    });
+
+    it('CC-RANGE (control): a taxRate or discount out of range passes the DTO; the service keeps the R0-D3 range checks and their exact messages', async () => {
+      for (const extra of [{ taxRate: 150 }, { discountType: 'PERCENT', discountValue: 150 }, { discountType: 'FIXED', discountValue: -1 }]) {
+        await create(ID.ownerA, { ...valid(), ...extra }).expect(201);
+      }
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(3);
+    });
+
+    it('CC-BOUND (control): a quantity of exactly 2147483647 and a price of exactly 99999999999999 pass the DTO; the service judges the computed amount', async () => {
+      const body = { ...valid(), items: [{ description: 'At the bound', quantity: 2147483647, unitPrice: 99999999999999 }] };
+      await create(ID.ownerA, body).expect(201);
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(1);
+      expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...body });
+    });
+
+    it('CC-GUARDS (control): unauthenticated 401; a non-member, a member of another tenant and revenue:read are refused 403; the service is not called', async () => {
+      expect((await create(null, valid())).status).toBe(401);
+      for (const actor of [ID.noMember, ID.ownerB]) {
+        const res = await create(actor, valid());
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/No access to this business/);
+      }
+      for (const actor of [ID.staffReadA, ID.staffDefaultA, ID.staffNoneA]) {
+        const res = await create(actor, valid());
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/Insufficient permissions/);
+      }
+      expect(commerceMock.createInvoice).not.toHaveBeenCalled();
     });
   });
 });

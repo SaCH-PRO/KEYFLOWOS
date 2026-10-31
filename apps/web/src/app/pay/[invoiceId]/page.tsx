@@ -69,6 +69,8 @@ type Invoice = {
   issueDate: string;
   dueDate: string | null;
   paidAt: string | null;
+  /** From the public projection (computeBalance): what is still owed. */
+  remaining?: number;
   contact?: {
     firstName: string | null;
     lastName: string | null;
@@ -461,6 +463,18 @@ function PublicPaymentPageInner() {
     setPaying(false);
 
     if (res.error) {
+      // R0-22: an intent on a settled invoice answers 409. Re-read the
+      // invoice so the page shows its paid state instead of a bare error.
+      if (res.rawError?.statusCode === 409) {
+        const fresh = await apiGet<Invoice>(`/commerce/invoices/${encodeURIComponent(invoiceId)}`);
+        if (fresh.data) {
+          setInvoice(fresh.data);
+          if (fresh.data.status === "PAID") {
+            setPaid(true);
+            return;
+          }
+        }
+      }
       setError(res.error);
       return;
     }
@@ -508,6 +522,9 @@ function PublicPaymentPageInner() {
   const discountAmount = invoice?.discountAmount ?? 0;
   const total = invoice?.total ?? 0;
   const currency = invoice?.currency ?? "TTD";
+  // R0-22: what is still owed (the public projection's remaining), not the
+  // total, so a partly paid invoice does not ask for money already received.
+  const amountDue = typeof invoice?.remaining === "number" ? invoice.remaining : total;
 
   const hasWipay = gateways.some((g) => g.id === "wipay");
   const hasPaypal = gateways.some((g) => g.id === "paypal");
@@ -687,7 +704,7 @@ function PublicPaymentPageInner() {
               <div className="flex justify-between text-sm mt-2">
                 <span className="text-slate-400">Amount Due</span>
                 <span className="font-bold" style={{ color: primaryColor }}>
-                  {formatPrice(total, currency)}
+                  {formatPrice(amountDue, currency)}
                 </span>
               </div>
             </div>

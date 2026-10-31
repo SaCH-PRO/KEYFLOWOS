@@ -1,0 +1,32 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-28-QUOTE-STATUS-AUTH",
+  "proofScope": "quote-status-route-auth-real-database-and-l1-http",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": true,
+  "requiredCases": [
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-META: updateQuoteStatus is PATCH quotes/:quoteId/status/:status behind AuthGuard, BusinessGuard and ModuleScopeGuard with { module: revenue, minLevel: write }",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-L1-403: revenue:read (explicit and STAFF default) and revenue:none are refused at ModuleScopeGuard (403 Insufficient permissions) before the service is called",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-L1-FORWARD: revenue:write and OWNER are admitted, and the controller forwards { quoteId, upper-cased path status, actorId, guard tenant }",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-L1-TENANT: the tenant forwarded is the one the guards checked — body over query, and the query when it is the only source",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-L1-GUARDS (control): unauthenticated 401; a non-member and a member of another tenant naming A are refused at BusinessGuard; the service is not called",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-L1-NOTENANT: no tenant anywhere is refused (403 businessId is required) — the owner at BusinessGuard, SUPER_ADMIN at the handler — before the service is called",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-L1-SUPER: SUPER_ADMIN naming a tenant passes both guards and the controller forwards that tenant (the service then binds it)",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-L1-PROJECTION: the 200 body is the service quote with its contact projected to { firstName, lastName, email }; the internal note, phone, owner and visibility are not sent, and a quote without a loaded contact passes through unchanged",
+    "fixture sanity (real rows) two tenants with real memberships and a system chart of accounts; every quote seeded in its status, the soft-deleted one included",
+    "write scope: revenue:write is required (R0-28) QS-01: a STAFF member with revenue:read sending a DRAFT quote is refused 403 (Insufficient permissions); the quote is byte-identical and nothing is emitted",
+    "write scope: revenue:write is required (R0-28) QS-02: the STAFF role default and an explicit revenue:none are refused 403 on sent, accepted, rejected and draft; the quote is byte-identical",
+    "tenant binding: a foreign or unknown quote answers 404 (R0-28) QS-03: a member of B naming B in the body on A's quote answers 404, byte-identical to an unknown id; A's quotes are byte-identical",
+    "tenant binding: a foreign or unknown quote answers 404 (R0-28) QS-04: B in the body and A in the query string binds B, the tenant the guards checked, and answers the same 404 on A's quote",
+    "tenant binding: a foreign or unknown quote answers 404 (R0-28) QS-05: the owner of A naming A on B's quote answers the same 404; B's quotes are byte-identical",
+    "tenant binding: a foreign or unknown quote answers 404 (R0-28) QS-06: a soft-deleted quote of the caller's own tenant answers the same 404; the row is unchanged",
+    "tenant binding: a foreign or unknown quote answers 404 (R0-28) QS-07: SUPER_ADMIN (no membership) naming A on A's quote answers 403, not 500; the quote is byte-identical",
+    "tenant binding: a foreign or unknown quote answers 404 (R0-28) QS-08: no tenant anywhere answers 403 businessId is required (owner at BusinessGuard, SUPER_ADMIN at the handler); unauthenticated answers 401; a non-member is refused at BusinessGuard",
+    "positive controls: the web client contract is unchanged (R0-28) QS-09: the owner sends a DRAFT quote with the body the web client sends: 200, SENT with sentAt and a minted viewToken, quote.sent emitted once, a timeline entry with the actor",
+    "positive controls: the web client contract is unchanged (R0-28) QS-10: a STAFF member with revenue:write accepts a SENT quote (200, ACCEPTED, acceptedAt) and the owner rejects one (200, REJECTED, rejectedAt)",
+    "positive controls: the web client contract is unchanged (R0-28) QS-11: the owner of B sends B's own quote (200, SENT); the tenant it acted on is B's",
+    "response projection: the 200 body carries the operator contact shape only (R28-ST-01) QS-13: a revenue:write STAFF member with crm:none sends a quote whose contact is PRIVATE and someone else's: 200 with contact { firstName, lastName, email }, the operator detail's shape, and no internal note, phone, owner or visibility; the quote.sent listener still receives the whole contact",
+    "production tenant wiring: the app TenantInterceptor and the Prisma tenant context provider installed (R28-ST-02) QS-14: a body tenant that is an object steers the ambient Prisma tenant to A while the guards checked B; the service's binding to the guarded tenant still answers A's quote with an unknown id's 404, and A's quote is unchanged",
+    "LEDGER (R0-28) QS-12: no quote transition above (sent, accepted, rejected, refused or not found) wrote a FinancialTransaction or a LedgerEntry in either tenant"
+  ]
+}
