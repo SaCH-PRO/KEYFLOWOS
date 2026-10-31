@@ -15,6 +15,32 @@ import {
   rankOf,
 } from '../../core/authority/module-vocabulary';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
+import { resolveCrmAccess, type CrmAccess } from '../crm/crm-permissions.helper';
+
+/** The three inputs that make up a membership's authority. */
+type AuthorityEnvelope = { role: string; permissionScopes: unknown; maxApprovalTier: number | null };
+
+/** CRM ownership scopes, weakest first; anything unrecognised ranks lowest. */
+const CRM_SCOPE_RANK: Readonly<Record<string, number>> = { none: 0, owned: 1, any: 2 };
+const crmScopeRank = (scope: string) => CRM_SCOPE_RANK[scope] ?? 0;
+
+/**
+ * The CRM ownership authority a membership's scope map confers (level, crm_view,
+ * crm_edit, crm_reassign, crm_delete), by `resolveCrmAccess` itself — the rule every
+ * CRM read and write enforces — evaluated on an in-memory membership rather than a
+ * stored row. Calling it keeps one rule: a transcription here could drift from it
+ * (crm-permissions.helper.ts is outside R0-ID-F1-ROLE-ROUTE-AUTHORITY's write set).
+ * The user is a plain USER, so SUPER_ADMIN never short-circuits the evaluation.
+ */
+function crmAccessOf(m: AuthorityEnvelope): Promise<CrmAccess> {
+  const inMemory = {
+    client: {
+      user: { findUnique: async () => ({ role: 'USER' }) },
+      membership: { findUnique: async () => ({ role: m.role, permissionScopes: m.permissionScopes }) },
+    },
+  } as unknown as PrismaService;
+  return resolveCrmAccess(inMemory, '', '');
+}
 
 /**
  * Map a Business profile field to the onboarding-answer key that
@@ -538,8 +564,9 @@ export class IdentityService {
   /**
    * `minLevel` is the team scope a requester who is neither the OWNER nor a
    * SUPER_ADMIN must hold: 'write' for invite and remove (their routes are guarded at
-   * team:write), 'admin' for a role change, which rewrites the target's scopes exactly
-   * as PATCH .../permissions (team:admin) does (R0-ID-F1-ROLE-ROUTE-AUTHORITY, ST-1).
+   * team:write), 'admin' for a role or permissions change, both of which rewrite the
+   * target's scope map and tier (PATCH .../permissions and, since
+   * R0-ID-F1-ROLE-ROUTE-AUTHORITY ST-1, PATCH .../team/:m are guarded at team:admin).
    *
    * Returns the requester's membership, and `bounded: true` when the requester's own
    * authority caps what it may grant — every member except the OWNER and a SUPER_ADMIN.
@@ -559,10 +586,65 @@ export class IdentityService {
     const scopes = this.resolveScopes(requester);
     if (scopes.team !== 'admin' && (minLevel === 'admin' || scopes.team !== 'write')) {
       throw new ForbiddenException(
-        minLevel === 'admin' ? 'Changing a team role requires team admin access' : 'You do not have permission to manage team members',
+        minLevel === 'admin' ? 'Changing a role or permissions requires team admin access' : 'You do not have permission to manage team members',
       );
     }
     return { requester, bounded: true };
+  }
+
+  /**
+   * The first dimension in which `subject` holds more authority than `bound`, or null
+   * when it holds no more in any. Each dimension is read the way its enforcer reads it:
+   *   - every canonical module level, as ModuleScopeGuard does (explicit map, missing
+   *     key = none; no map = role defaults);
+   *   - the approval tier, as membershipApprovalTier does;
+   *   - CRM ownership (level, crm_view, crm_edit, crm_reassign, crm_delete), as
+   *     resolveCrmAccess does — a map with no crm_* keys falls back to the level's
+   *     defaults there, so omitting them is not a restriction (ST-F3).
+   */
+  private async authorityExcess(subject: AuthorityEnvelope, bound: AuthorityEnvelope): Promise<string | null> {
+    const s = this.resolveScopes(subject);
+    const b = this.resolveScopes(bound);
+    for (const module of CANONICAL_MODULES) {
+      if (rankOf(s[module]) > rankOf(b[module])) return module;
+    }
+    if (this.resolveApprovalTier(subject) > this.resolveApprovalTier(bound)) return 'maxApprovalTier';
+    const [sc, bc] = await Promise.all([crmAccessOf(subject), crmAccessOf(bound)]);
+    if (rankOf(sc.level) > rankOf(bc.level)) return 'crm';
+    if (sc.viewAll && !bc.viewAll) return 'crm_view';
+    if (crmScopeRank(sc.editScope) > crmScopeRank(bc.editScope)) return 'crm_edit';
+    if (sc.reassign && !bc.reassign) return 'crm_reassign';
+    if (crmScopeRank(sc.deleteScope) > crmScopeRank(bc.deleteScope)) return 'crm_delete';
+    return null;
+  }
+
+  /**
+   * R0-ID-F1-ROLE-ROUTE-AUTHORITY: the rules every write of another member's scope map
+   * and approval tier obeys (PATCH .../team/:m {role} and PATCH .../team/:m/permissions).
+   * Runs after the OWNER-membership check, so the target is never the OWNER here.
+   *   - a non-OWNER cannot change its own membership (ST-1, ST-F1);
+   *   - a bounded requester cannot change a member whose CURRENT authority exceeds its
+   *     own in any dimension (ST-F5) ...
+   *   - ... nor leave it with more authority than its own (K2; ST-F2, ST-F3).
+   * The OWNER and a SUPER_ADMIN are not bounded.
+   */
+  private async assertMayRewriteAuthority(
+    requesterId: string,
+    requester: AuthorityEnvelope,
+    bounded: boolean,
+    target: AuthorityEnvelope & { userId: string },
+    granted: AuthorityEnvelope,
+  ): Promise<void> {
+    if (target.userId === requesterId && requester.role !== 'OWNER') {
+      throw new ForbiddenException('You cannot change your own role or permissions');
+    }
+    if (!bounded) return;
+    if (await this.authorityExcess(target, requester)) {
+      throw new ForbiddenException('You cannot change a member whose authority exceeds your own');
+    }
+    if (await this.authorityExcess(granted, requester)) {
+      throw new ForbiddenException('You cannot grant more authority than your own');
+    }
   }
 
   async listTeamMembers(businessId: string) {
@@ -644,14 +726,22 @@ export class IdentityService {
    * map and approval tier with the role defaults, so it is a permissions write. It
    * needed only team:write, which let a team:write member undo an OWNER's restriction
    * on itself or widen anyone else's without the team:admin gate on .../permissions.
-   * Now:
+   * Now (assertMayRewriteAuthority, shared with updateMemberPermissions):
    *   - the requester must be the OWNER, a SUPER_ADMIN, or hold team:admin, the same
    *     authority PATCH .../permissions needs; with no requester it fails closed;
-   *   - a non-OWNER cannot change its own membership;
-   *   - a bounded requester cannot grant a role whose defaults exceed its own
-   *     authority: no module above its own level, no approval tier above its own (K2).
+   *   - a non-OWNER cannot change its own membership through either route;
+   *   - a bounded requester cannot change a member whose current authority exceeds its
+   *     own, nor grant a role whose defaults exceed its own authority: no module above
+   *     its own level, no approval tier above its own, no CRM ownership authority above
+   *     its own (K2).
    * The OWNER role is not assignable here (validateRole) and the OWNER membership
    * cannot be changed here; there is no ownership-transfer route.
+   *
+   * NOT closed here (routes outside this service's role and permissions writes, pinned
+   * as OPEN DEFECTs in identity-boundary.integration.test.ts): the team:write invite
+   * route mints any scopes and tier for a new account (V1-07), and the team:write
+   * structure routes copy a JobRole's permissions and tier onto any membership in the
+   * business, the caller's own included (V1-21).
    */
   async updateMemberRole(businessId: string, membershipId: string, role: string, requesterId: string) {
     this.validateRole(role);
@@ -666,18 +756,9 @@ export class IdentityService {
     if (membership.role === 'OWNER') {
       throw new BadRequestException('Cannot change owner role');
     }
-    if (membership.userId === requesterId && requester.role !== 'OWNER') {
-      throw new ForbiddenException('You cannot change your own role');
-    }
     const permissionScopes = IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF;
     const maxApprovalTier = IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0;
-    if (bounded) {
-      const own = this.resolveScopes(requester);
-      const exceedsScopes = Object.entries(permissionScopes).some(([module, level]) => rankOf(level) > rankOf(own[module]));
-      if (exceedsScopes || maxApprovalTier > this.resolveApprovalTier(requester)) {
-        throw new ForbiddenException(`You cannot grant the ${role} role: it exceeds your own authority`);
-      }
-    }
+    await this.assertMayRewriteAuthority(requesterId, requester, bounded, membership, { role, permissionScopes, maxApprovalTier });
     const updated = await this.prisma.client.membership.update({
       where: { id: membershipId },
       data: { role, permissionScopes, maxApprovalTier },
@@ -719,8 +800,17 @@ export class IdentityService {
     }
   }
 
+  /**
+   * PATCH .../team/:m/permissions. The service gate is team:admin, as the route's guard
+   * metadata always was (it was team:write here). R0-ID-F1-ROLE-ROUTE-AUTHORITY review
+   * repairs: the same rules as a role change (assertMayRewriteAuthority) — no self-target
+   * for a non-OWNER (ST-F1), no rewrite of a member above the requester (ST-F5), and no
+   * grant above the requester's own authority, CRM ownership sub-permissions included
+   * (K2; ST-F2, ST-F3).
+   */
   async updateMemberPermissions(businessId: string, membershipId: string, scopes: Record<string, string>, maxApprovalTier: number, requesterId: string) {
-    await this.assertTeamAdmin(businessId, requesterId);
+    if (!requesterId) throw new ForbiddenException('A permissions change needs an authenticated requester');
+    const { requester, bounded } = await this.assertTeamAdmin(businessId, requesterId, 'admin');
     this.validateScopesPayload(scopes, maxApprovalTier);
     const membership = await this.prisma.client.membership.findUnique({
       where: { id: membershipId },
@@ -731,6 +821,11 @@ export class IdentityService {
     if (membership.role === 'OWNER') {
       throw new BadRequestException('Cannot modify owner permissions');
     }
+    await this.assertMayRewriteAuthority(requesterId, requester, bounded, membership, {
+      role: membership.role,
+      permissionScopes: scopes,
+      maxApprovalTier,
+    });
     const updated = await this.prisma.client.membership.update({
       where: { id: membershipId },
       data: { permissionScopes: scopes, maxApprovalTier },

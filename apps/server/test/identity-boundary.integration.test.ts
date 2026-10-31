@@ -47,14 +47,26 @@
  * "OPEN DEFECT … reproduced" case that pins today's observed behaviour and
  * turns red when the fix lands, next to an it.todo naming the required
  * behaviour for the fix packet):
- *   ST-1  FIXED by R0-ID-F1-ROLE-ROUTE-AUTHORITY (its cases now assert the
- *         required behaviour; see "ST-1 (fixed …)" at the end of this file).
- *         PATCH /identity/businesses/:id/team/:membershipId {role} needed only
- *         team:write, reset permissionScopes/maxApprovalTier to the role
- *         defaults and had no self-target check — a team:write member got
- *         around the team:admin gate on .../permissions, for itself or others
- *         (identity.controller.ts updateMemberRole, identity.service.ts
- *         updateMemberRole).
+ *   ST-1  FIXED ON THE ROLE AND PERMISSIONS ROUTES by
+ *         R0-ID-F1-ROLE-ROUTE-AUTHORITY and its review repairs (their cases
+ *         assert the required behaviour; see "ST-1 (fixed …)" and "ST-1 review
+ *         repairs" below). PATCH /identity/businesses/:id/team/:membershipId
+ *         {role} needed only team:write, reset permissionScopes/maxApprovalTier
+ *         to the role defaults and had no self-target check — a team:write
+ *         member got around the team:admin gate on .../permissions, for itself
+ *         or others (identity.controller.ts updateMemberRole,
+ *         identity.service.ts updateMemberRole). Both routes now refuse a
+ *         non-OWNER self-target and bound a non-OWNER requester by its own
+ *         authority, on what it grants and on whom it rewrites.
+ *         NOT CLOSED END TO END: the original outcome (a member undoing the
+ *         OWNER's restriction on itself) is still reachable through two
+ *         sibling team:write routes with no grantor ceiling, each pinned below:
+ *   ST-F4 the invite route mints any scopes and tier, so a restricted
+ *         team:write member invites an account it controls with team:admin,
+ *         which then resets the member through the role route (V1-07).
+ *   CR-1  the structure routes copy a JobRole's permissions and tier onto any
+ *         membership in the business, the caller's own included
+ *         (structure.service.ts createAssignment; V1-21).
  *   ST-2  the admin-token branch attaches verifyAdminToken's result directly:
  *         no revocation marker, no deletedAt/bannedAt, role from the token
  *         (auth.middleware.ts).
@@ -162,6 +174,12 @@ const ID = {
   adminT: `${P}adminT`,           // ADMIN of bizD granted team:admin by the OWNER (ADMIN defaults + team: admin), tier 3 (ST-1 fix)
   staffT: `${P}staffT`,           // STAFF of bizD granted team:admin by the OWNER but nothing else: { crm: read, team: admin }, tier 0 (ST-1 fix)
   staffP: `${P}staffP`,           // STAFF of bizD, role-default scopes — the target of the ST-1 fix's allowed role changes
+  staffA: `${P}staffA`,           // STAFF of bizD: STAFF defaults + team: admin, tier 0 — bounded by whom it rewrites (ST-F5)
+  adminC: `${P}adminC`,           // ADMIN of bizD: ADMIN defaults + team: admin + CRM "my book" sub-permissions, tier 3 (ST-F3)
+  staffC: `${P}staffC`,           // STAFF of bizD: { crm: read, crm_view: owned, crm_edit/crm_delete: none, crm_reassign: false } (ST-F3)
+  adminW: `${P}adminW`,           // ADMIN of bizD restricted by the OWNER: { crm: read, team: write }, tier 0 (OPEN DEFECT ST-F4)
+  accomplice: `${P}accomplice`,   // User row only; invited into bizD by adminW mid-suite (OPEN DEFECT ST-F4)
+  adminJ: `${P}adminJ`,           // ADMIN of bizD, role-default scopes (team: write) (OPEN DEFECT CR-1)
   staffD: `${P}staffD`,           // STAFF of bizD, role-default scopes (settings: none) (ST-3)
   relogin: `${P}relogin`,         // STAFF of bizD; logs out, then the login marker clear (ST-4)
   adminTok: `${P}adminTok`,       // User row role SUPER_ADMIN at token issue, no membership (ST-2)
@@ -186,6 +204,11 @@ const ID = {
   mAdminT: `${P}m_adminT`,
   mStaffT: `${P}m_staffT`,
   mStaffP: `${P}m_staffP`,
+  mStaffA: `${P}m_staffA`,
+  mAdminC: `${P}m_adminC`,
+  mStaffC: `${P}m_staffC`,
+  mAdminW: `${P}m_adminW`,
+  mAdminJ: `${P}m_adminJ`,
   mStaffD: `${P}m_staffD`,
   mRelogin: `${P}m_relogin`,
 };
@@ -196,10 +219,13 @@ const BIZ_B_NAME = 'ab_bizB-private-name-91c4f2';
 const BIZ_D_NAME = 'ab_bizD-name-5b28e1';
 
 const email = (id: string) => `${id}@ab04.test.local`;
+/** CRM ownership sub-permissions restricting a member to "my book", with no reassign and no delete (ST-F3). */
+const CRM_OWNED_ONLY = { crm_view: 'owned', crm_edit: 'owned', crm_reassign: 'false', crm_delete: 'none' };
 const revocationKey = (userId: string) => `auth:revoked:user:${userId}`;
 const ALL_USERS = [
   ID.owner, ID.admin, ID.staff, ID.staffNoTeam, ID.ownerB, ID.deleted, ID.banned, ID.revoked, ID.noRow,
   ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin, ID.adminTok,
+  ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ,
 ];
 
 const IDLE_MS = 90_000;      // silence from the child counts; slow-but-talking does not
@@ -296,6 +322,10 @@ const routes = {
   crmContacts: (id: string) => `/crm/businesses/${id}/contacts?take=5`,
   /** A read gated on settings:read (IntelligenceController.listRules). */
   settingsRead: (id: string) => `/intelligence/businesses/${id}/rules`,
+  /** Structure routes, gated on team:write (OPEN DEFECT CR-1). */
+  orgUnits: (id: string) => `/structure/businesses/${id}/org-units`,
+  jobRoles: (id: string) => `/structure/businesses/${id}/job-roles`,
+  assignments: (id: string) => `/structure/businesses/${id}/assignments`,
 };
 
 /** An admin token from the PRODUCTION issuer (buildAdminToken), as AdminAuthService.generateToken mints it. */
@@ -340,6 +370,10 @@ async function cleanup() {
     `DELETE FROM autopilot_settings WHERE business_id LIKE ${LIKE_P}`,
     // PATCH /identity/businesses/:id mirrors some fields into the blueprint (ST-3 case avoids them; defensive).
     `DELETE FROM business_blueprints WHERE business_id LIKE ${LIKE_P}`,
+    // OPEN DEFECT CR-1 creates an org unit, a job role and an assignment in bizD.
+    `DELETE FROM org_assignments WHERE business_id LIKE ${LIKE_P}`,
+    `DELETE FROM job_roles WHERE business_id LIKE ${LIKE_P}`,
+    `DELETE FROM org_units WHERE business_id LIKE ${LIKE_P}`,
     `DELETE FROM memberships WHERE id LIKE ${LIKE_P} OR business_id LIKE ${LIKE_P} OR user_id LIKE ${LIKE_P}`,
     `DELETE FROM businesses WHERE id LIKE ${LIKE_P} OR owner_id LIKE ${LIKE_P}`,
     `DELETE FROM user_identities WHERE user_id LIKE ${LIKE_P}`,
@@ -378,7 +412,10 @@ async function seed() {
   for (const m of memberships) await db.membership.create({ data: m });
 
   // OPEN DEFECT fixtures (bizD).
-  for (const id of [ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin]) {
+  for (const id of [
+    ID.ownerD, ID.adminR, ID.adminD, ID.staffR, ID.adminT, ID.staffT, ID.staffP, ID.staffD, ID.relogin,
+    ID.staffA, ID.adminC, ID.staffC, ID.adminW, ID.accomplice, ID.adminJ,
+  ]) {
     await db.user.create({ data: { id, email: email(id), name: id, role: 'USER' } });
   }
   // SUPER_ADMIN when its admin token is issued; demoted mid-suite (ST-2).
@@ -392,6 +429,11 @@ async function seed() {
     { id: ID.mAdminT, userId: ID.adminT, businessId: ID.bizD, role: 'ADMIN', permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, team: 'admin' }, maxApprovalTier: 3 },
     { id: ID.mStaffT, userId: ID.staffT, businessId: ID.bizD, role: 'STAFF', permissionScopes: { crm: 'read', team: 'admin' }, maxApprovalTier: 0 },
     { id: ID.mStaffP, userId: ID.staffP, businessId: ID.bizD, role: 'STAFF' },
+    { id: ID.mStaffA, userId: ID.staffA, businessId: ID.bizD, role: 'STAFF', permissionScopes: { ...ROLE_DEFAULT_SCOPES.STAFF, team: 'admin' }, maxApprovalTier: 0 },
+    { id: ID.mAdminC, userId: ID.adminC, businessId: ID.bizD, role: 'ADMIN', permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, team: 'admin', ...CRM_OWNED_ONLY }, maxApprovalTier: 3 },
+    { id: ID.mStaffC, userId: ID.staffC, businessId: ID.bizD, role: 'STAFF', permissionScopes: { crm: 'read', ...CRM_OWNED_ONLY, crm_edit: 'none' }, maxApprovalTier: 0 },
+    { id: ID.mAdminW, userId: ID.adminW, businessId: ID.bizD, role: 'ADMIN', permissionScopes: { crm: 'read', team: 'write' }, maxApprovalTier: 0 },
+    { id: ID.mAdminJ, userId: ID.adminJ, businessId: ID.bizD, role: 'ADMIN' },
     { id: ID.mStaffD, userId: ID.staffD, businessId: ID.bizD, role: 'STAFF' },
     { id: ID.mRelogin, userId: ID.relogin, businessId: ID.bizD, role: 'STAFF' },
   ];
@@ -539,7 +581,9 @@ describe('harness — the real built server is serving, with the ab_ fixtures in
     expect(await db.membership.count({ where: { businessId: ID.bizB } })).toBe(1);
     expect(await db.user.findUnique({ where: { id: ID.noRow } })).toBeNull();
     // OPEN DEFECT fixtures live in their own tenant.
-    expect(await db.membership.count({ where: { businessId: ID.bizD } })).toBe(9);
+    expect(await db.membership.count({ where: { businessId: ID.bizD } })).toBe(14);
+    // The ST-F4 accomplice has a User row and no membership until adminW invites it.
+    expect(await db.membership.count({ where: { userId: ID.accomplice } })).toBe(0);
     expect(await db.membership.count({ where: { userId: ID.adminTok } })).toBe(0);
   });
 
@@ -884,7 +928,10 @@ describe('team routes — ModuleScopeGuard over the real membership rows', () =>
 // pin the rest of the fix: the caller's ceiling (K2: an authority change is
 // bounded by the grantor's current authority), the team:admin and OWNER
 // positive controls, the actor on the team_activity_logs row, the OWNER role,
-// and self-target.
+// and self-target. The review repairs after this block extend the same rules
+// to PATCH .../permissions; the two sibling team:write paths that still reach
+// the ST-1 outcome (invite, structure assignments) are pinned as OPEN DEFECTs
+// ST-F4 and CR-1 at the end of this file.
 // ---------------------------------------------------------------------------
 
 /** The membership row exactly as Postgres stores it, so "unchanged" means byte-identical. */
@@ -957,7 +1004,9 @@ describe('ST-1 (fixed, R0-ID-F1-ROLE-ROUTE-AUTHORITY) — the role route needs t
     // staffT holds team:admin, so it passes the permissions-route gate, but its
     // own map is { crm: read, team: admin } at tier 0. ADMIN defaults (admin on
     // every module, tier 3) and STAFF defaults (read on revenue, bookings, ...)
-    // both exceed it.
+    // both exceed it. (staffP's own STAFF defaults exceed it too, so since the
+    // review repairs the target ceiling (ST-F5) refuses first; the grant ceiling
+    // alone is measured in "ST-1 review repairs", ST-F2.)
     const before = await membershipRowText(ID.mStaffP);
     for (const role of ['ADMIN', 'STAFF']) {
       const res = await call('patch', routes.member(ID.bizD, ID.mStaffP), T[ID.staffT], { role });
@@ -1058,6 +1107,139 @@ describe('ST-1 (fixed, R0-ID-F1-ROLE-ROUTE-AUTHORITY) — the role route needs t
       }
       expect(await roleChangeRows(membershipId)).toEqual([]);
     }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// ST-1 review repairs (R0-ID-F1-ROLE-ROUTE-AUTHORITY review). The role route's
+// rules were not applied to its sibling PATCH .../permissions, and its ceiling
+// compared only module levels and the tier of what was granted:
+//   ST-F1  a non-OWNER team:admin member rewrote its OWN map and tier through
+//          .../permissions, so the role route's self-target 403 denied nothing;
+//   ST-F2  .../permissions had no grantor ceiling;
+//   ST-F3  the ceiling ignored the CRM ownership sub-permissions, which
+//          resolveCrmAccess defaults from the crm level when a map omits them;
+//   ST-F5  nothing bounded WHOM a requester rewrote: a tier-0 team:admin member
+//          demoted a tier-3 ADMIN.
+// Both routes now share one rule set (IdentityService.assertMayRewriteAuthority).
+// ---------------------------------------------------------------------------
+
+/** permissions_updated rows the server wrote for one membership. */
+async function permissionsUpdateRows(membershipId: string) {
+  return db.teamActivityLog.findMany({
+    where: { businessId: ID.bizD, action: 'permissions_updated', entityId: membershipId },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
+describe('ST-1 review repairs — PATCH .../permissions obeys the role route’s rules; both are bounded by what the requester holds and by whom it rewrites', () => {
+  it('ST-F1: a non-OWNER team:admin member cannot rewrite its OWN scopes or tier through PATCH .../permissions: 403, row byte-identical', async () => {
+    // staffT is refused settings before and after: its own map is { crm: read, team: admin } at tier 0.
+    expect((await call('get', routes.settingsRead(ID.bizD), T[ID.staffT])).status).toBe(403);
+    for (const [actor, membershipId] of [[ID.adminT, ID.mAdminT], [ID.staffT, ID.mStaffT]] as const) {
+      const before = await membershipRowText(membershipId);
+      const res = await call('patch', routes.perms(ID.bizD, membershipId), T[actor], {
+        scopes: { ...ROLE_DEFAULT_SCOPES.OWNER },
+        maxApprovalTier: 4,
+      });
+      expect(res.status, `${actor} -> own permissions: ${JSON.stringify(res.body)}`).toBe(403);
+      expectNoBusinessData(res);
+      expect(await membershipRowText(membershipId), `${actor} row`).toBe(before);
+      expect(await permissionsUpdateRows(membershipId)).toEqual([]);
+    }
+    expect((await call('get', routes.settingsRead(ID.bizD), T[ID.staffT])).status).toBe(403);
+  });
+
+  it('ST-F2: a team:admin member cannot grant more than its own authority through PATCH .../permissions, nor through the role route: 403, row byte-identical', async () => {
+    // staffR ({ crm: read, team: none }, tier 0) is within staffT's own authority,
+    // so only the grant is measured here.
+    const before = await membershipRowText(ID.mStaffR);
+    for (const body of [
+      { scopes: { ...ROLE_DEFAULT_SCOPES.OWNER }, maxApprovalTier: 4 },
+      { scopes: { crm: 'read', settings: 'read' }, maxApprovalTier: 0 },
+      { scopes: { crm: 'read' }, maxApprovalTier: 1 },
+    ]) {
+      const res = await call('patch', routes.perms(ID.bizD, ID.mStaffR), T[ID.staffT], body);
+      expect(res.status, `${JSON.stringify(body)} -> ${JSON.stringify(res.body)}`).toBe(403);
+      expectNoBusinessData(res);
+    }
+    const viaRole = await call('patch', routes.member(ID.bizD, ID.mStaffR), T[ID.staffT], { role: 'STAFF' });
+    expect(viaRole.status, JSON.stringify(viaRole.body)).toBe(403);
+    expect(await membershipRowText(ID.mStaffR)).toBe(before);
+    expect(await permissionsUpdateRows(ID.mStaffR)).toEqual([]);
+  });
+
+  it('ST-F2 positive control: the same tier-0 team:admin member changes another member within its own authority -> 200, effective on the next request, and back', async () => {
+    const grant = await call('patch', routes.perms(ID.bizD, ID.mStaffR), T[ID.staffT], {
+      scopes: { crm: 'read', team: 'read' },
+      maxApprovalTier: 0,
+    });
+    expect(grant.status, JSON.stringify(grant.body)).toBe(200);
+    expect((await call('get', routes.team(ID.bizD), T[ID.staffR])).status).toBe(200);
+    const rows = await permissionsUpdateRows(ID.mStaffR);
+    expect(rows[rows.length - 1]).toMatchObject({ userId: ID.staffT });
+
+    const revoke = await call('patch', routes.perms(ID.bizD, ID.mStaffR), T[ID.staffT], {
+      scopes: { crm: 'read', team: 'none' },
+      maxApprovalTier: 0,
+    });
+    expect(revoke.status, JSON.stringify(revoke.body)).toBe(200);
+    expect((await call('get', routes.team(ID.bizD), T[ID.staffR])).status).toBe(403);
+    expect((await db.membership.findUnique({ where: { id: ID.mStaffR } })).permissionScopes).toEqual({ crm: 'read', team: 'none' });
+  });
+
+  it('ST-F3: a CRM-restricted grantor cannot confer CRM ownership authority beyond its own, on either route: 403, row byte-identical', async () => {
+    // adminC: ADMIN defaults + team:admin, tier 3, but CRM "my book" only (no view-all,
+    // edit owned, no reassign, no delete). staffC is within that. Role defaults carry
+    // no crm_* keys, so resolveCrmAccess would give staffC the level defaults: view
+    // all (STAFF), or view all + edit any + reassign + delete any (ADMIN).
+    const before = await membershipRowText(ID.mStaffC);
+    for (const role of ['STAFF', 'ADMIN']) {
+      const res = await call('patch', routes.member(ID.bizD, ID.mStaffC), T[ID.adminC], { role });
+      expect(res.status, `{ role: ${role} } ${JSON.stringify(res.body)}`).toBe(403);
+      expectNoBusinessData(res);
+    }
+    for (const scopes of [
+      { crm: 'read' },
+      { crm: 'write', ...CRM_OWNED_ONLY, crm_view: 'all' },
+      { crm: 'write', ...CRM_OWNED_ONLY, crm_reassign: 'true' },
+    ]) {
+      const res = await call('patch', routes.perms(ID.bizD, ID.mStaffC), T[ID.adminC], { scopes, maxApprovalTier: 0 });
+      expect(res.status, `${JSON.stringify(scopes)} -> ${JSON.stringify(res.body)}`).toBe(403);
+    }
+    expect(await membershipRowText(ID.mStaffC)).toBe(before);
+    expect(await roleChangeRows(ID.mStaffC)).toEqual([]);
+
+    // Positive control: the grantor's own CRM restrictions, a higher crm level.
+    const ok = await call('patch', routes.perms(ID.bizD, ID.mStaffC), T[ID.adminC], {
+      scopes: { crm: 'write', ...CRM_OWNED_ONLY },
+      maxApprovalTier: 1,
+    });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect((await db.membership.findUnique({ where: { id: ID.mStaffC } })).permissionScopes).toEqual({ crm: 'write', ...CRM_OWNED_ONLY });
+  });
+
+  it('ST-F5: a team:admin member cannot rewrite a member whose current authority exceeds its own, on either route: 403, the target keeps its authority', async () => {
+    // staffA: STAFF defaults + team:admin at tier 0. STAFF defaults are within its own
+    // authority, so only the target ceiling refuses: adminT is a tier-3 ADMIN with team:admin.
+    const before = await membershipRowText(ID.mAdminT);
+    const demote = await call('patch', routes.member(ID.bizD, ID.mAdminT), T[ID.staffA], { role: 'STAFF' });
+    expect(demote.status, JSON.stringify(demote.body)).toBe(403);
+    expectNoBusinessData(demote);
+    const strip = await call('patch', routes.perms(ID.bizD, ID.mAdminT), T[ID.staffA], { scopes: { crm: 'read' }, maxApprovalTier: 0 });
+    expect(strip.status, JSON.stringify(strip.body)).toBe(403);
+    expect(await membershipRowText(ID.mAdminT)).toBe(before);
+    // The target's authority holds on the very next request.
+    expect((await call('get', routes.team(ID.bizD), T[ID.adminT])).status).toBe(200);
+  });
+
+  it('ST-F5 positive control: the same requester changes a member within its own authority -> 200', async () => {
+    // staffP is STAFF with the STAFF defaults at tier 0 (the OWNER set it back above).
+    const res = await call('patch', routes.member(ID.bizD, ID.mStaffP), T[ID.staffA], { role: 'STAFF' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const rows = await roleChangeRows(ID.mStaffP);
+    expect(rows[rows.length - 1]).toMatchObject({ userId: ID.staffA, meta: { newRole: 'STAFF' } });
   });
 });
 
@@ -1178,5 +1360,84 @@ describe('OPEN DEFECT CR-2 — logout never revokes the Supabase sessions', () =
       "logout's global sign-out revokes the user's Supabase sessions. Today supabaseAdmin.signOut(userId, 'global') hands the USER ID to " +
       "auth-js admin.signOut(jwt, scope), which expects the user's access JWT, so the provider refuses and the refusal is swallowed. " +
       'Not observable here: the child has no Supabase admin (CR-1 pins every SUPABASE_* key blank)',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// OPEN DEFECTS ST-F4 and CR-1 — the ST-1 outcome through sibling team:write
+// routes (R0-ID-F1-ROLE-ROUTE-AUTHORITY review). The role and permissions routes
+// are closed; these two are not, and their fixes belong to queued packets
+// (V1-07-AUTH-INVITE-CEILING, V1-21-AUTH-JOBROLE-CEILING). Each reproduction pins
+// today's behaviour and turns red when its fix lands. They run last and use
+// their own fixtures (adminW, accomplice, adminJ), because they leave those
+// memberships escalated.
+// ---------------------------------------------------------------------------
+describe('OPEN DEFECT ST-F4 — the invite route has no grantor ceiling, so a restricted team:write member resets itself in two requests', () => {
+  it('OPEN DEFECT ST-F4 reproduced — adminW ({ crm: read, team: write }, tier 0) invites an account it controls with team:admin at tier 4; that account resets adminW to the ADMIN defaults', async () => {
+    const t = T[ID.adminW];
+    expect((await call('get', routes.settingsRead(ID.bizD), t)).status).toBe(403);
+    // The direct routes are closed to adminW (team:write only).
+    expect((await call('patch', routes.member(ID.bizD, ID.mAdminW), t, { role: 'ADMIN' })).status).toBe(403);
+
+    const invite = await call('post', routes.team(ID.bizD), t, {
+      email: email(ID.accomplice),
+      role: 'ADMIN',
+      scopes: { ...ROLE_DEFAULT_SCOPES.OWNER },
+      maxApprovalTier: 4,
+    });
+    expect(invite.status, JSON.stringify(invite.body)).toBe(201);
+    const reset = await call('patch', routes.member(ID.bizD, ID.mAdminW), T[ID.accomplice], { role: 'ADMIN' });
+    expect(reset.status, JSON.stringify(reset.body)).toBe(200);
+
+    const row = await db.membership.findUnique({ where: { id: ID.mAdminW } });
+    expect(row.permissionScopes).toEqual(ROLE_DEFAULT_SCOPES.ADMIN);
+    expect(row.maxApprovalTier).toBe(DEFAULT_APPROVAL_TIERS.ADMIN);
+    expect((await call('get', routes.settingsRead(ID.bizD), t)).status).toBe(200);
+  });
+
+  it.todo(
+    'REQUIRED (V1-07-AUTH-INVITE-CEILING; identity.service.ts inviteTeamMember): the invite applies the grantor ceiling the role and ' +
+      'permissions routes apply — adminW’s invite with team:admin at tier 4 answers 403 with no User or Membership created, so no account ' +
+      'adminW controls holds more than adminW and the reset above cannot happen',
+  );
+});
+
+describe('OPEN DEFECT CR-1 — the structure routes (team:write) copy a JobRole’s permissions and tier onto any membership, the caller’s own included', () => {
+  it('OPEN DEFECT CR-1 reproduced — a default ADMIN (team:write) raises itself to team:admin at tier 4 through job-roles + assignments, then passes the gate this packet added', async () => {
+    const t = T[ID.adminJ];
+    // Before: the role route is closed to a team:write member.
+    const before = await call('patch', routes.member(ID.bizD, ID.mStaffP), t, { role: 'STAFF' });
+    expect(before.status, JSON.stringify(before.body)).toBe(403);
+
+    const unit = await call('post', routes.orgUnits(ID.bizD), t, { name: `${P}unit_cr1` });
+    expect(unit.status, JSON.stringify(unit.body)).toBe(201);
+    const jobRole = await call('post', routes.jobRoles(ID.bizD), t, {
+      name: `${P}jobrole_cr1`,
+      permissions: { ...ROLE_DEFAULT_SCOPES.OWNER },
+      defaultApprovalTier: 4,
+    });
+    expect(jobRole.status, JSON.stringify(jobRole.body)).toBe(201);
+    const assign = await call('post', routes.assignments(ID.bizD), t, {
+      membershipId: ID.mAdminJ,
+      userId: ID.adminJ,
+      orgUnitId: unit.body.id,
+      jobRoleId: jobRole.body.id,
+    });
+    expect(assign.status, JSON.stringify(assign.body)).toBe(201);
+
+    const row = await db.membership.findUnique({ where: { id: ID.mAdminJ } });
+    expect(row.permissionScopes).toMatchObject({ team: 'admin' });
+    expect(row.maxApprovalTier).toBe(4);
+    // After: team:admin at tier 4 — the role route now admits it.
+    const after = await call('patch', routes.member(ID.bizD, ID.mStaffP), t, { role: 'STAFF' });
+    expect(after.status, JSON.stringify(after.body)).toBe(200);
+    // The identity routes still refuse its self-target (ST-F1 holds); the escalation came from elsewhere.
+    expect((await call('patch', routes.perms(ID.bizD, ID.mAdminJ), t, { scopes: { crm: 'read' }, maxApprovalTier: 0 })).status).toBe(403);
+  });
+
+  it.todo(
+    'REQUIRED (V1-21-AUTH-JOBROLE-CEILING; structure.service.ts, structure.controller.ts, job-role DTOs — outside this write set): JobRole ' +
+      'permissions are vocabulary-validated and capped by the grantor, and an assignment cannot sync a JobRole above the assigner’s own ' +
+      'authority onto a membership, nor onto the assigner’s own — the escalation above answers 403 with the membership unchanged',
   );
 });
