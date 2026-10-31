@@ -1220,32 +1220,40 @@ export class CrmService {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
     }
-    let allowedIds = input.contactIds;
+    // A member named only as actorUserId (CrmController passes no audit
+    // context) is recorded as USER on the audit entries and the events, as
+    // updateContact records them; a call with no actor (the KEY
+    // flow-orchestrator tool) stays a SYSTEM audit entry with no user on the
+    // event, as bulkDeleteContacts records it.
+    const audit = this.memberAuditContext(_audit, input.actorUserId);
+    // Every caller, the owner and a call with no actor included, writes only
+    // live contacts of this tenant: an id from another tenant is skipped, and
+    // counted, exactly like a missing one, and gets no event or audit entry.
+    // A member who is not the owner or a super admin is further limited to the
+    // contacts they can see (the GET visibility clause) and may edit (their
+    // edit scope), so a hidden id is skipped the same way and the answer never
+    // reveals it.
+    const scopedWhere: Prisma.ContactWhereInput = { ...contactWhereBase(input.businessId) };
+    let limitedMember = false;
     if (input.actorUserId) {
       const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
       if (!access.isOwner && !access.isSuperAdmin) {
         if (access.editScope === 'none') {
           throw new ForbiddenException('You do not have permission to edit contacts');
         }
-        // Only the contacts the member can see (the GET visibility clause) and
-        // may edit (their edit scope) are written: a hidden id is skipped, and
-        // counted, exactly like a missing one, so the answer never reveals it.
         const editableClause = this.editableContactClause(access, input.actorUserId);
-        const editable = await this.prisma.client.contact.findMany({
-          where: {
-            ...contactWhereBase(input.businessId),
-            id: { in: input.contactIds },
-            ...(editableClause ? { AND: [editableClause] } : {}),
-          },
-          select: { id: true },
-        });
-        allowedIds = editable.map((c) => c.id);
-        if (allowedIds.length === 0) {
-          throw new ForbiddenException('You cannot edit any of the selected contacts');
-        }
+        if (editableClause) scopedWhere.AND = [editableClause];
+        limitedMember = true;
       }
     }
-    input = { ...input, contactIds: allowedIds };
+    const contacts = await this.prisma.client.contact.findMany({
+      where: { ...scopedWhere, id: { in: input.contactIds } },
+      select: { id: true, tags: true },
+    });
+    if (limitedMember && contacts.length === 0) {
+      throw new ForbiddenException('You cannot edit any of the selected contacts');
+    }
+    input = { ...input, contactIds: contacts.map((c) => c.id) };
     const auditAfter = {
       ...(input.status ? { status: input.status } : {}),
       ...(input.addTags ? { addedTags: input.addTags } : {}),
@@ -1254,15 +1262,19 @@ export class CrmService {
       ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
       ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
     };
-    for (const cid of allowedIds) {
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: cid,
-        action: 'bulk_updated',
-        after: auditAfter,
-        ctx: _audit,
-      });
-    }
+    // Audited once the write has committed, and only for the rows it wrote.
+    const auditWritten = (writtenIds: string[]) => {
+      for (const cid of writtenIds) {
+        this.auditContact({
+          businessId: input.businessId,
+          contactId: cid,
+          action: 'bulk_updated',
+          after: auditAfter,
+          ctx: audit,
+        });
+      }
+    };
+    const eventMeta = this.eventActor(audit);
     const data: Record<string, unknown> = {};
     if (input.status) data.status = input.status;
     if (input.relationshipType !== undefined) {
@@ -1278,10 +1290,6 @@ export class CrmService {
       data.archivedAt = input.archived ? new Date() : null;
     }
     if (input.addTags && input.addTags.length > 0) {
-      const contacts = await this.prisma.client.contact.findMany({
-        where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
-        select: { id: true, tags: true },
-      });
       const results = await this.prisma.client.$transaction(async (tx) => {
         const updated = [];
         for (const c of contacts) {
@@ -1295,10 +1303,11 @@ export class CrmService {
             ...(input.priority !== undefined ? { priority: input.priority } : {}),
             ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
             ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
-          }, undefined, tx);
+          }, eventMeta, tx);
         }
         return updated;
       });
+      auditWritten(results.map((u) => u.id));
       this.stats.invalidateCache(input.businessId);
       this.flow.invalidateCache(input.businessId);
       return { updated: results.length };
@@ -1306,25 +1315,30 @@ export class CrmService {
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('No update fields provided');
     }
-    const result = await this.prisma.client.$transaction(async (tx) => {
-      const res = await tx.contact.updateMany({
-        where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
+    const writtenIds = await this.prisma.client.$transaction(async (tx) => {
+      // The same scope again at the write, which also says exactly which rows
+      // this call wrote: only those get an event (and, after commit, an audit
+      // entry), so a row deleted meanwhile leaves no trace either.
+      const rows = await tx.contact.updateManyAndReturn({
+        where: { ...scopedWhere, id: { in: input.contactIds } },
         data,
+        select: { id: true },
       });
-      for (const cid of input.contactIds) {
+      for (const { id: cid } of rows) {
         await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', {
           ...(input.status ? { status: input.status } : {}),
           ...(input.relationshipType !== undefined ? { relationshipType: input.relationshipType } : {}),
           ...(input.priority !== undefined ? { priority: input.priority } : {}),
           ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
           ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
-        }, undefined, tx);
+        }, eventMeta, tx);
       }
-      return res;
+      return rows.map((row) => row.id);
     });
+    auditWritten(writtenIds);
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
-    return { updated: result.count };
+    return { updated: writtenIds.length };
   }
 
   async bulkDeleteContacts(input: { businessId: string; contactIds: string[]; actorUserId?: string }, _audit?: AuditContext) {

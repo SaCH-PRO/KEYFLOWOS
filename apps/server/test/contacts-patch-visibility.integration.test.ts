@@ -1065,3 +1065,104 @@ describe('ST-A: enrichment applies the GET visibility clause before the provider
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// R0-13d review repairs. ST-1: every caller of bulkUpdateContacts, the owner
+// and a system call with no actor (the KEY flow-orchestrator
+// 'update_status_with_confirmation' tool) included, writes only live rows of
+// the path tenant, so another tenant's id is skipped like an unknown one: the
+// same count, no event or audit entry under either tenant, and an unknown id no
+// longer fails the contact_events foreign key after an audit entry was written.
+// ST-2: a member's bulk update is recorded as theirs (USER), not SYSTEM.
+// ---------------------------------------------------------------------------
+
+/**
+ * CrmService.bulkUpdateContacts called as the KEY flow-orchestrator
+ * 'update_status_with_confirmation' tool calls it: no actorUserId, no audit
+ * context. Settled like bulkUpdate.
+ */
+async function systemBulkUpdate(contactIds: string[], body: Record<string, unknown>) {
+  try {
+    return { result: await crm.bulkUpdateContacts({ businessId: ID.bizA, contactIds, ...body }) };
+  } catch (err: any) {
+    return { refused: { status: err?.status, response: err?.getResponse?.() ?? String(err) } };
+  }
+}
+
+let foreignSeq = 0;
+/** A live contact of the other tenant (bizB), seeded directly. */
+async function seedForeignContact() {
+  foreignSeq += 1;
+  const id = `${P}c_bizB_${foreignSeq}`;
+  const email = `${P}bizB-${foreignSeq}@test.local`;
+  return db.contact.create({
+    data: { id, businessId: ID.bizB, firstName: `${P}Foreign${foreignSeq}`, email, emailNormalized: email, visibility: 'TEAM', ownerId: ID.outsider },
+  });
+}
+
+describe("R0-13d review repairs: bulk update writes only the path tenant's rows for every caller and records the member who made it", () => {
+  const CALLERS: Array<[string, (ids: string[], body: Record<string, unknown>) => Promise<any>]> = [
+    ['owner', (ids, body) => bulkUpdate(ID.owner, ids, body)],
+    ['system (no actor)', (ids, body) => systemBulkUpdate(ids, body)],
+  ];
+
+  it("NEGATIVE CONTROL: the owner's and a system (no actor) bulk update naming another tenant's contact skip it exactly like an unknown id: the same count alone and next to a TEAM contact, the foreign row unchanged, and no event or audit entry for the foreign or the unknown id under either tenant, for a field update and for added tags (ST-1)", async () => {
+    for (const [who, send] of CALLERS) {
+      for (const body of BULK_BODIES) {
+        const label = `${who} ${JSON.stringify(body)}`;
+        const foreign = await seedForeignContact();
+        const teamA = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+        const teamB = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+        await settle();
+        const foreignBefore = await rawRow(foreign.id);
+
+        const alone = await send([foreign.id], body);
+        expect(alone, label).toEqual(await send([UNKNOWN_CONTACT], body));
+        expect(alone, label).toEqual({ result: { updated: 0 } });
+
+        const withForeign = await send([teamA.id, foreign.id], body);
+        const withUnknown = await send([teamB.id, UNKNOWN_CONTACT], body);
+        expect(withForeign, label).toEqual({ result: { updated: 1 } });
+        expect(withUnknown, label).toEqual(withForeign);
+
+        await settle();
+        expect(await rawRow(foreign.id), label).toEqual(foreignBefore);
+        for (const id of [foreign.id, UNKNOWN_CONTACT]) {
+          expect(await db.contactEvent.count({ where: { contactId: id } }), `${label} ${id}`).toBe(0);
+          expect(await db.contactAuditEntry.count({ where: { contactId: id } }), `${label} ${id}`).toBe(0);
+        }
+        for (const team of [teamA, teamB]) {
+          expect(bulkApplied(await rawRow(team.id), body), `${label} ${team.id}`).toBe(true);
+          expect(await db.contactEvent.count({ where: { contactId: team.id, type: 'bulk.updated' } }), `${label} ${team.id}`).toBe(1);
+          expect(await auditEntries(team.id, 'bulk_updated'), `${label} ${team.id}`).toHaveLength(1);
+        }
+      }
+    }
+  });
+
+  it("NEGATIVE CONTROL: a member's bulk update is recorded as theirs: each bulk_updated audit entry names them as USER and each bulk.updated event carries actorType USER and their id, for a crm 'write' STAFF member and the owner, for a field update and for added tags; a system call (no actor) stays SYSTEM with no user on the event (ST-2)", async () => {
+    for (const body of BULK_BODIES) {
+      const label = JSON.stringify(body);
+      for (const actor of [ID.staff, ID.owner]) {
+        const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+        expect(await bulkUpdate(actor, [team.id], body), `${label} ${actor}`).toEqual({ result: { updated: 1 } });
+        const audits = await auditEntries(team.id, 'bulk_updated');
+        expect(audits, `${label} ${actor}`).toHaveLength(1);
+        expect(audits[0].actor, `${label} ${actor}`).toEqual({ type: 'USER', id: actor });
+        const events = await db.contactEvent.findMany({ where: { contactId: team.id, type: 'bulk.updated' } });
+        expect(events, `${label} ${actor}`).toHaveLength(1);
+        expect(events[0], `${label} ${actor}`).toMatchObject({ businessId: ID.bizA, actorType: 'USER', actorId: actor });
+      }
+
+      const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+      expect(await systemBulkUpdate([team.id], body), label).toEqual({ result: { updated: 1 } });
+      const audits = await auditEntries(team.id, 'bulk_updated');
+      expect(audits, label).toHaveLength(1);
+      expect(audits[0].actor, label).toEqual({ type: 'SYSTEM' });
+      const events = await db.contactEvent.findMany({ where: { contactId: team.id, type: 'bulk.updated' } });
+      expect(events, label).toHaveLength(1);
+      expect(events[0].actorId, label).toBeNull();
+      expect(events[0].actorType, label).not.toBe('USER');
+    }
+  });
+});
