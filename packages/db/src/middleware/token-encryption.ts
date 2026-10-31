@@ -30,16 +30,27 @@ export function tokenEncryptionKeySource(): TokenEncryptionKeyVar | null {
   return KEY_ENV_CHAIN.find((k) => process.env[k]) ?? null;
 }
 
+// scryptSync is synchronous and deliberately slow; deriving on every token read
+// or write blocked the event loop once per OAuth column. The key is a pure
+// function of (secret, salt), so it is derived once per secret value. A rotated
+// secret is a new cache key, so rotation behaves exactly as before.
+const derivedKeys = new Map<string, Buffer>();
+
+function deriveOnce(secret: string): Buffer {
+  let key = derivedKeys.get(secret);
+  if (!key) {
+    const { scryptSync } = getCrypto();
+    key = scryptSync(secret, 'keyflow-token-salt-v1', 32);
+    derivedKeys.set(secret, key);
+  }
+  return key;
+}
+
 function getDerivedKey(): Buffer {
   const secret = tokenEncryptionKeySource()
     ? process.env[tokenEncryptionKeySource() as TokenEncryptionKeyVar]
     : undefined;
-  if (!secret) {
-    const { scryptSync } = getCrypto();
-    return scryptSync('dev-only-local-key-not-for-production', 'keyflow-token-salt-v1', 32);
-  }
-  const { scryptSync } = getCrypto();
-  return scryptSync(secret, 'keyflow-token-salt-v1', 32);
+  return deriveOnce(secret || 'dev-only-local-key-not-for-production');
 }
 
 export function encryptToken(plaintext: string | null | undefined): string | null {

@@ -18,9 +18,24 @@ function getDerivedKey(): Buffer {
         'CONNECTOR_CREDENTIALS_KEY or CREDENTIALS_ENCRYPTION_KEY or JWT_SECRET must be set in production',
       );
     }
-    return scryptSync('dev-only-local-key-not-for-production', 'keyflow-token-salt-v1', KEY_LENGTH);
+    return deriveOnce('dev-only-local-key-not-for-production');
   }
-  return scryptSync(secret, 'keyflow-token-salt-v1', KEY_LENGTH);
+  return deriveOnce(secret);
+}
+
+// scryptSync is synchronous and deliberately slow; deriving on every encrypt
+// and decrypt blocked the event loop once per token. The key is a pure function
+// of (secret, salt), so it is derived once per secret value; a rotated secret is
+// a new cache key, so rotation behaves exactly as before.
+const derivedKeys = new Map<string, Buffer>();
+
+function deriveOnce(secret: string): Buffer {
+  let key = derivedKeys.get(secret);
+  if (!key) {
+    key = scryptSync(secret, 'keyflow-token-salt-v1', KEY_LENGTH);
+    derivedKeys.set(secret, key);
+  }
+  return key;
 }
 
 /**
