@@ -1652,7 +1652,18 @@ export class CommerceService {
      * (evidence URL, drive file id, tool-call id) to opt in.
      */
     dedupeByReference?: boolean;
+    /**
+     * R0-PL-07: who records this payment. The HTTP route passes the
+     * authenticated user (req.user.id); the Key cortex adapter and
+     * PaymentEvidenceService pass KEY_SYSTEM_ACTOR_ID. It is written to
+     * Payment.recordedBy, the posting's FinancialTransaction.createdById and
+     * the contact timeline event. It is an option, never part of `input`, so a
+     * client body can not name the recorder. Absent (drive intake) records
+     * null. A replay returns the original row and never rewrites its recorder.
+     */
+    actorId?: string | null;
   } = {}) {
+    const actorId = options.actorId ?? null;
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
       include: { payments: true },
@@ -1737,12 +1748,14 @@ export class CommerceService {
             notes: input.notes ?? null,
             evidenceUrl: input.evidenceUrl ?? null,
             evidenceMimeType: input.evidenceMimeType ?? null,
+            recordedBy: actorId,
             businessId,
             invoiceId,
           },
         });
         await this.revenuePosting.onPaymentRecorded(created.id, {
           tx: tx as unknown as Prisma.TransactionClient,
+          createdById: actorId,
         });
         return created;
       });
@@ -1788,8 +1801,12 @@ export class CommerceService {
           invoiceTotal: invoice.total,
           newStatus,
           overPaid: isOverPayment ? Number((newPaidTotal - Number(invoice.total)).toFixed(2)) : 0,
+          recordedBy: actorId,
         },
-        actorType: 'USER',
+        // R0-PL-07: KEY (adapter, evidence extraction) is a SYSTEM actor; a
+        // person is USER. Without an actor the type stays USER, as before.
+        actorType: isSystemActor(actorId) ? 'SYSTEM' : 'USER',
+        actorId: actorId ?? undefined,
         source: 'commerce',
       });
     }
@@ -1953,8 +1970,15 @@ export class CommerceService {
     return payments;
   }
 
-  /** Mark a payment refunded (no provider call — local bookkeeping only). */
-  async markPaymentRefunded(paymentId: string, businessId: string, reason?: string) {
+  /**
+   * Mark a payment refunded (no provider call — local bookkeeping only).
+   *
+   * R0-PL-07: `actorId` (the refunding user) is written to the reversal
+   * FinancialTransaction.createdById. The manual refund flips the original
+   * Payment row rather than writing a refund row, and Payment has no
+   * refunded-by column, so Payment.recordedBy keeps the original recorder.
+   */
+  async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null) {
     const payment = await this.prisma.client.payment.findFirst({
       where: { id: paymentId, businessId },
     });
@@ -1971,6 +1995,7 @@ export class CommerceService {
       });
       await this.revenuePosting.onPaymentRefunded(paymentId, {
         tx: tx as unknown as Prisma.TransactionClient,
+        createdById: actorId ?? null,
       });
       return next;
     });

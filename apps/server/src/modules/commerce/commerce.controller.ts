@@ -1311,12 +1311,17 @@ export class CommerceController {
     // whitelists the existing fields untouched and validates only the new
     // optional idempotencyKey.
     @Body() body: RecordPaymentDto,
+    @Req() req: { user?: { id?: string } },
   ) {
     // R0-D2 review (CR-1): only this route keys a manual record on its
     // reference + amount. Here `reference` is the operator's payment
     // reference (the journey's duplicate slip); internal callers pass a
     // document-derived reference and keep one row per call.
-    return this.commerce.recordPayment(invoiceId, businessId, body, { dedupeByReference: true });
+    // R0-PL-07: the recorder is the authenticated user, never a body field.
+    return this.commerce.recordPayment(invoiceId, businessId, body, {
+      dedupeByReference: true,
+      actorId: req?.user?.id ?? null,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1472,8 +1477,10 @@ export class CommerceController {
     @Param('businessId') businessId: string,
     @Param('paymentId') paymentId: string,
     @Body() body: { reason?: string },
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.commerce.markPaymentRefunded(paymentId, businessId, body?.reason);
+    // R0-PL-07: the refunding user is recorded on the reversal transaction.
+    return this.commerce.markPaymentRefunded(paymentId, businessId, body?.reason, req?.user?.id ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

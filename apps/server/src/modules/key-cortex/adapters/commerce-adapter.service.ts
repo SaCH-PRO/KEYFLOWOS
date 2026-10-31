@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { CommerceService } from '../../commerce/commerce.service';
+import { KEY_SYSTEM_ACTOR_ID } from '../../../core/auth/system-actor';
 
 /**
  * Typed adapter that exposes the commerce methods expected by
@@ -144,11 +145,12 @@ export class CommerceAdapterService {
     method: string;
     reference?: string;
   }) {
+    // R0-PL-07: KEY records as its system actor, distinct from any human.
     return this.commerce.recordPayment(input.invoiceId, input.businessId, {
       amount: input.amount,
       method: input.method,
       reference: input.reference,
-    });
+    }, { actorId: KEY_SYSTEM_ACTOR_ID });
   }
 
   async createQuote(input: {

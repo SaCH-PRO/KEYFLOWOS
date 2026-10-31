@@ -4,6 +4,7 @@ import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { ObjectStorageService } from '../../core/object-storage/objectStorage';
 import { CommerceService } from './commerce.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
+import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 
 interface ProcessEvidenceInput {
   businessId: string;
@@ -162,7 +163,9 @@ export class PaymentEvidenceService {
       throw new BadRequestException('Could not extract payment details from the document. Please record the payment manually.');
     }
 
-    // 4. Record the payment with evidence attached
+    // 4. Record the payment with evidence attached. R0-PL-07: the amount,
+    // method and reference are machine-extracted, so the recorder is KEY's
+    // system actor, distinct from a person keying a manual payment.
     const result = await this.commerce.recordPayment(invoiceId, businessId, {
       amount: extractedPayment.amount,
       method: extractedPayment.method,
@@ -170,7 +173,7 @@ export class PaymentEvidenceService {
       notes: extractedPayment.notes,
       evidenceUrl,
       evidenceMimeType,
-    });
+    }, { actorId: KEY_SYSTEM_ACTOR_ID });
 
     // 5. Reconcile invoice status
     const reconciled = await this.invoiceWorkflow.reconcileFromPayments(invoiceId);
