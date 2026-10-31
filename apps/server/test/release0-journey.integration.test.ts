@@ -76,7 +76,6 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 const P = 'r0_';
 const SERVER_DIR = path.resolve(__dirname, '..');
 const ENTRY = path.join(SERVER_DIR, 'dist', 'main.js');
-const LISTEN_SHIM = path.join(__dirname, 'helpers', 'release0-listen-ipv4.cjs');
 
 /** Test-only HS256 secret handed to the spawned server. Not a real secret. */
 const JWT_SECRET = 'r0-journey-test-jwt-secret-not-a-real-secret';
@@ -267,7 +266,6 @@ function bootServer(port: number): Promise<void> {
       SUPABASE_JWT_SECRET: JWT_SECRET,
       RATE_LIMIT_MAX_REQUESTS: '100000',
       // main.ts binds '::'; hosts without IPv6 need the shim (see helpers/).
-      NODE_OPTIONS: `--require ${LISTEN_SHIM}`,
     };
     child = spawn(process.execPath, [ENTRY], { cwd: SERVER_DIR, env, stdio: ['ignore', 'pipe', 'pipe'] });
 
