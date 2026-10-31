@@ -13,6 +13,30 @@ export class PortalService {
   }
 
   async createAccess(businessId: string, contactId: string, settings?: Record<string, boolean>) {
+    // PortalAccess.contactId is a bare column with no relation, so nothing
+    // below would stop a grant in this business from naming another tenant's
+    // contact (CF-46). Bind the contact to the tenant first, before the
+    // existing-grant lookup, so a legacy foreign row is not refreshed either.
+    // A missing, non-string, unknown, soft-deleted or foreign id all answer
+    // the same 404.
+    //
+    // The where.businessId alone is not the binding: the tenant extension
+    // overwrites it on Contact with the ambient (AsyncLocalStorage) tenant,
+    // while PortalAccess is unscoped and is written under the argument. If the
+    // two ever differ, the read would validate one tenant and the write land
+    // in the other. So compare the row's own businessId with the argument, as
+    // flow-orchestrator assetWithinBusiness does; a mismatch fails closed.
+    const contact =
+      typeof contactId === 'string' && contactId.length > 0
+        ? await this.prisma.client.contact.findFirst({
+            where: { id: contactId, businessId },
+            select: { id: true, businessId: true },
+          })
+        : null;
+    if (!contact || contact.businessId !== businessId) {
+      throw new NotFoundException('Contact not found');
+    }
+
     const existing = await this.prisma.client.portalAccess.findFirst({
       where: { businessId, contactId },
     });
