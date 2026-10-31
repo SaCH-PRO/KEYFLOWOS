@@ -1,4 +1,4 @@
-import { apiGet, apiPostSimple as apiPost } from "@/lib/api";
+import { apiGet, apiPatch, apiPostSimple as apiPost } from "@/lib/api";
 
 export type OnboardingStep =
   | "welcome"
@@ -164,9 +164,54 @@ export function snoozeConciergeNudge(businessId: string, nudgeId: string, days?:
   );
 }
 
+/**
+ * The three-pillar DNA score, returned by POST .../complete as a
+ * recommendation (owner ruling D-03): it nudges towards the genome but no
+ * longer gates completion. Null when the genome cannot be scored.
+ */
+export interface GenomeRecommendation {
+  threePillarMinimumMet: boolean;
+  genomeIntegrity: number;
+  missingPillars: string[];
+}
+
 export function markOnboardingComplete(businessId: string) {
-  return apiPost<{ complete: boolean; alreadyComplete?: boolean; demoData?: DemoSeedResult }>(
+  return apiPost<{
+    complete: boolean;
+    alreadyComplete?: boolean;
+    demoData?: DemoSeedResult;
+    genomeRecommendation?: GenomeRecommendation | null;
+  }>(
     `/onboarding-concierge/businesses/${businessId}/complete`,
     {},
+  );
+}
+
+/**
+ * Owner ruling D-03: the manual minimal profile that completes onboarding
+ * without AI. POST .../complete refuses with 403 ONBOARDING_PROFILE_INCOMPLETE
+ * {details: {missingFields}} until all three are valid: a non-blank name, a
+ * three-letter ISO 4217 currency and an IANA timezone.
+ */
+export type MinimalProfileField = "name" | "currency" | "timezone";
+
+export interface MinimalBusinessProfile {
+  name: string;
+  currency: string;
+  timezone: string;
+}
+
+/** The business record's current name, currency and timezone (for prefill). */
+export function fetchBusinessMinimalProfile(businessId: string) {
+  return apiGet<{ id: string } & Partial<Record<MinimalProfileField, string | null>>>(
+    `/identity/businesses/${encodeURIComponent(businessId)}`,
+  );
+}
+
+/** Saves the minimal profile through the business profile route. */
+export function saveBusinessMinimalProfile(businessId: string, profile: MinimalBusinessProfile) {
+  return apiPatch<{ id: string }>(
+    `/identity/businesses/${encodeURIComponent(businessId)}`,
+    profile,
   );
 }

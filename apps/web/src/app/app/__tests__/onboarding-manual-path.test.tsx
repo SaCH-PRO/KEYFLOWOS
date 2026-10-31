@@ -94,7 +94,7 @@ const COMPLETE_OK = json(201, {
 let calls: Call[] = [];
 let routes: Record<string, Stub | (() => Stub)> = {};
 /** A route listed here answers only once its promise settles. */
-let holds: Record<string, Promise<void>> = {};
+let holds: Partial<Record<string, Promise<void>>> = {};
 let fetchSpy: MockInstance<typeof fetch>;
 
 function key(method: string, path: string) {
@@ -115,7 +115,8 @@ function installFetch() {
       }
     }
     calls.push({ method, path, body });
-    if (holds[key(method, path)]) await holds[key(method, path)];
+    const hold = holds[key(method, path)];
+    if (hold) await hold;
     let stub: Stub | (() => Stub) | undefined = routes[key(method, path)];
     if (!stub && path.startsWith("/ai/")) stub = NO_AI;
     if (!stub) stub = json(404, { statusCode: 404, code: "NOT_FOUND", message: `not stubbed: ${method} ${path}` });
