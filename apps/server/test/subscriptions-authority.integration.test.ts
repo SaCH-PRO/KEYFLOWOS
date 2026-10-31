@@ -416,3 +416,153 @@ describe('R0-08c the owner changes the plan, and every change is audited against
     await expectRefused(ID.staffNone, { route: 'trial', businessId: ID.bizPaid, body: { plan: 'FLOW' } }, 403, 'STAFF (every scope none)', OWNER_ONLY);
   });
 });
+
+/**
+ * Review finding ST-R008c-1: plan changes were atomic but not serialized.
+ * Under READ COMMITTED each concurrent record-payment or activate cancelled
+ * only the rows its own snapshot saw and added an ACTIVE row, startTrial's
+ * existing-subscription check ran outside any transaction, and cancel cancelled
+ * one findFirst row. The review's probe (4 parallel owner record-payments)
+ * left 4 ACTIVE subscriptions with every audit row saying
+ * replacedSubscriptions:1, and after a 201 cancel GET /current still reported
+ * KEYFLOW ACTIVE. Each plan change now takes pg_advisory_xact_lock keyed on the
+ * business first. These cases run on their own k08c_ businesses, seeded here.
+ */
+describe('R0-08c concurrent plan changes for one business are serialized (ST-R008c-1)', () => {
+  const RACE = {
+    bizPay: `${P}bizRacePay`,     // ACTIVE FLOW: parallel record-payments
+    bizTrial: `${P}bizRaceTrial`, // no subscription: parallel trial starts
+    bizMix: `${P}bizRaceMix`,     // ACTIVE FLOW: parallel activate and record-payment
+    bizDup: `${P}bizRaceDup`,     // three live rows, the state the pre-lock race left behind
+  };
+  const SEED = {
+    pay: `${P}sub_race_pay_flow`,
+    mix: `${P}sub_race_mix_flow`,
+    dupA: `${P}sub_dup_a_keyflow`,
+    dupB: `${P}sub_dup_b_keyflow`,
+    dupC: `${P}sub_dup_c_trial`,
+  };
+  const N = 5;
+  // The races run in well under a second; the budget covers a loaded shared machine.
+  const RACE_TIMEOUT_MS = 30_000;
+  const live = (businessId: string) =>
+    db.subscription.findMany({
+      where: { businessId, status: { in: ['ACTIVE', 'TRIALING'] } },
+      select: { id: true, plan: true, status: true },
+    });
+
+  beforeAll(async () => {
+    for (const id of Object.values(RACE)) {
+      await db.business.create({ data: { id, name: `${id}-name`, ownerId: ID.owner } });
+      await db.membership.create({ data: { id: `${P}m_owner_${id.slice(P.length)}`, userId: ID.owner, businessId: id, role: 'OWNER' } });
+    }
+    const periodEnd = new Date();
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    const base = { status: 'ACTIVE', currency: 'TTD', gateway: 'wipay', currentPeriodStart: new Date(), currentPeriodEnd: periodEnd };
+    await db.subscription.create({ data: { ...base, id: SEED.pay, businessId: RACE.bizPay, plan: 'FLOW', priceMonthly: 99 } });
+    await db.subscription.create({ data: { ...base, id: SEED.mix, businessId: RACE.bizMix, plan: 'FLOW', priceMonthly: 99 } });
+    const t = Date.now();
+    await db.subscription.create({ data: { ...base, id: SEED.dupA, businessId: RACE.bizDup, plan: 'KEYFLOW', priceMonthly: 299, createdAt: new Date(t - 3000) } });
+    await db.subscription.create({ data: { ...base, id: SEED.dupB, businessId: RACE.bizDup, plan: 'KEYFLOW', priceMonthly: 299, createdAt: new Date(t - 2000) } });
+    await db.subscription.create({
+      data: {
+        ...base, id: SEED.dupC, businessId: RACE.bizDup, plan: 'FLOW', priceMonthly: 99, status: 'TRIALING',
+        trialEndsAt: periodEnd, createdAt: new Date(t - 1000),
+      },
+    });
+  }, 60_000);
+
+  /**
+   * The audit chain of serialized activations: over all the rows, the replaced
+   * ids are the starting live rows plus every created subscription except the
+   * one left live, each exactly once.
+   */
+  function expectReplacementChain(rows: any[], startIds: string[], createdIds: string[], liveId: string) {
+    const replaced = rows.flatMap((r) => r.meta.replacedSubscriptionIds as string[]);
+    expect([...replaced].sort()).toEqual([...startIds, ...createdIds.filter((id) => id !== liveId)].sort());
+    for (const r of rows) expect(r.meta.replacedSubscriptions, r.id).toBe((r.meta.replacedSubscriptionIds as string[]).length);
+  }
+
+  it(`[R0-08c-K01] RED-BEFORE: the review's probe — ${N} parallel OWNER record-payments {plan:'KEYFLOW',currency:'USD',method:'manual'} all answer 201 and leave exactly one live subscription; each audit row lists the one subscription it replaced; one cancel then leaves the business on Free`, async () => {
+    const results = await Promise.all(Array.from({ length: N }, () =>
+      post(ID.owner, RACE.bizPay, 'record-payment', { plan: 'KEYFLOW', currency: 'USD', method: 'manual' })));
+    expect(results.map((r) => r.status), JSON.stringify(results.map((r) => r.body))).toEqual(Array(N).fill(201));
+    const createdIds = results.map((r) => r.body.id as string);
+
+    const after = await live(RACE.bizPay);
+    expect(after, 'one live subscription').toHaveLength(1);
+    expect(after[0]).toMatchObject({ plan: 'KEYFLOW', status: 'ACTIVE' });
+    expect(createdIds).toContain(after[0].id);
+    const payments = await db.subscriptionPayment.findMany({ where: { businessId: RACE.bizPay } });
+    expect(payments.map((p: { status: string }) => p.status)).toEqual(Array(N).fill('COMPLETED'));
+
+    const rows = (await auditRows(RACE.bizPay)).filter((r: { action: string }) => r.action === 'subscription_payment_recorded');
+    expect(rows).toHaveLength(N);
+    for (const r of rows) expect(r.meta.replacedSubscriptionIds, r.id).toHaveLength(1);
+    expectReplacementChain(rows, [SEED.pay], createdIds, after[0].id);
+
+    const cancel = await post(ID.owner, RACE.bizPay, 'cancel', {});
+    expect(cancel.status, JSON.stringify(cancel.body)).toBe(201);
+    expect(await live(RACE.bizPay)).toEqual([]);
+    const current = await get(ID.owner, RACE.bizPay, 'current');
+    expect(current.status).toBe(200);
+    expect(current.body).toMatchObject({ plan: 'FREE', status: 'ACTIVE', subscription: null });
+  }, RACE_TIMEOUT_MS);
+
+  it(`[R0-08c-K02] RED-BEFORE: ${N} parallel OWNER trial starts on a business with no subscription: exactly one 201 TRIALING, the rest 400 'Business already has an active subscription', one TRIALING row and one audit row`, async () => {
+    const results = await Promise.all(Array.from({ length: N }, () =>
+      post(ID.owner, RACE.bizTrial, 'trial', { plan: 'KEYFLOW', currency: 'USD' })));
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses, JSON.stringify(results.map((r) => r.body))).toEqual([201, ...Array(N - 1).fill(400)]);
+    for (const r of results.filter((x) => x.status === 400)) {
+      expect(r.body.message).toBe('Business already has an active subscription');
+    }
+    const winner = results.find((r) => r.status === 201)!;
+    expect(await live(RACE.bizTrial)).toEqual([{ id: winner.body.id, plan: 'KEYFLOW', status: 'TRIALING' }]);
+    const rows = await auditRows(RACE.bizTrial);
+    expect(rows.map((r: { action: string; entityId: string }) => [r.action, r.entityId])).toEqual([['subscription_trial_started', winner.body.id]]);
+  }, RACE_TIMEOUT_MS);
+
+  it(`[R0-08c-K03] RED-BEFORE: ${N} parallel OWNER activates interleaved with ${N} parallel OWNER record-payments leave exactly one live subscription, and the audit rows form one replacement chain`, async () => {
+    const calls = Array.from({ length: N }, () => [
+      post(ID.owner, RACE.bizMix, 'activate', { plan: 'KEYFLOW', currency: 'USD', gateway: 'manual' }),
+      post(ID.owner, RACE.bizMix, 'record-payment', { plan: 'FLOW', currency: 'TTD', method: 'bank_transfer' }),
+    ]).flat();
+    const results = await Promise.all(calls);
+    expect(results.map((r) => r.status), JSON.stringify(results.map((r) => r.body))).toEqual(Array(2 * N).fill(201));
+    const createdIds = results.map((r) => r.body.id as string);
+
+    const after = await live(RACE.bizMix);
+    expect(after, 'one live subscription').toHaveLength(1);
+    expect(createdIds).toContain(after[0].id);
+    const rows = (await auditRows(RACE.bizMix)).filter((r: { action: string }) =>
+      ['subscription_activated', 'subscription_payment_recorded'].includes(r.action));
+    expect(rows).toHaveLength(2 * N);
+    for (const r of rows) expect(r.meta.replacedSubscriptionIds, r.id).toHaveLength(1);
+    expectReplacementChain(rows, [SEED.mix], createdIds, after[0].id);
+  }, RACE_TIMEOUT_MS);
+
+  it('[R0-08c-K04] RED-BEFORE: on a business left with two ACTIVE KEYFLOW rows and a TRIALING FLOW row, one OWNER cancel cancels all three, its audit row names the newest paid row and lists every cancelled id, and GET /current reports Free', async () => {
+    const before = await get(ID.owner, RACE.bizDup, 'current');
+    expect(before.body).toMatchObject({ plan: 'FLOW', status: 'TRIALING' });
+    const rows = await newAuditRows(RACE.bizDup, async () => {
+      const res = await post(ID.owner, RACE.bizDup, 'cancel', {});
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+    });
+    expect(await live(RACE.bizDup)).toEqual([]);
+    const subs = await db.subscription.findMany({ where: { businessId: RACE.bizDup }, orderBy: { id: 'asc' } });
+    expect(subs).toHaveLength(3);
+    for (const s of subs) {
+      expect(s.status, s.id).toBe('CANCELLED');
+      expect(s.cancelledAt, s.id).not.toBeNull();
+    }
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.owner, action: 'subscription_cancelled', entityId: SEED.dupC, title: 'Cancelled the FLOW plan' });
+    expect(rows[0].meta).toMatchObject({ plan: 'FLOW', previousStatus: 'TRIALING', cancelledSubscriptionIds: [SEED.dupA, SEED.dupB, SEED.dupC] });
+    const current = await get(ID.owner, RACE.bizDup, 'current');
+    expect(current.body).toMatchObject({ plan: 'FREE', status: 'ACTIVE', subscription: null });
+
+    const again = await post(ID.owner, RACE.bizDup, 'cancel', {});
+    expect(again.status, 'nothing left to cancel').toBe(404);
+  }, RACE_TIMEOUT_MS);
+});

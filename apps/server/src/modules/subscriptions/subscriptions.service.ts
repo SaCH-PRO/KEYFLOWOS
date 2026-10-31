@@ -21,6 +21,24 @@ type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0
 export const SUBSCRIPTION_OWNER_ONLY = 'SUBSCRIPTION_OWNER_ONLY';
 export const SUBSCRIPTION_OWNER_ONLY_MESSAGE = 'Only the business owner can change the plan.';
 
+/**
+ * Prefix of the text hashed into the advisory lock key, so a business's
+ * plan-change lock never shares a key with another advisory lock that hashes
+ * a bare id.
+ */
+export const PLAN_CHANGE_LOCK_NAMESPACE = 'subscriptions:plan-change:';
+
+/**
+ * A plan change that waits on the business's lock spends that wait inside its
+ * transaction, so Prisma's 5 s interactive-transaction default would turn a
+ * short queue of concurrent changes into a 500. The change itself is a few
+ * statements; the budget only covers the queue in front of it.
+ */
+const PLAN_CHANGE_TX_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const;
+
+/** The subscription statuses that count as the business's live plan. */
+const LIVE_STATUSES = ['ACTIVE', 'TRIALING'] as const;
+
 @Injectable()
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
@@ -92,6 +110,24 @@ export class SubscriptionsService {
     });
   }
 
+  /**
+   * ST-R008c-1: every plan change runs in one transaction, and that
+   * transaction first takes a transaction-scoped advisory lock keyed on the
+   * business. Under READ COMMITTED alone, two concurrent changes each cancelled
+   * only the rows their own snapshot saw and each added an ACTIVE row (N
+   * parallel record-payments left N ACTIVE subscriptions), and a trial's
+   * existing-subscription check ran outside any transaction. With the lock the
+   * plan changes for one business commit one after another, and each one's
+   * reads see every change committed before it, so its audit row states what it
+   * really replaced. Postgres releases the lock at commit or rollback.
+   */
+  private planChangeTransaction<T>(businessId: string, change: (tx: PrismaTx) => Promise<T>): Promise<T> {
+    return this.db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PLAN_CHANGE_LOCK_NAMESPACE + businessId}))`;
+      return change(tx);
+    }, PLAN_CHANGE_TX_OPTIONS);
+  }
+
   getPlan(planId: string): PlanDefinition | null {
     return PLANS[planId] || null;
   }
@@ -147,21 +183,22 @@ export class SubscriptionsService {
     if (!plan) throw new BadRequestException('Invalid plan');
     if (planId === 'FREE') throw new BadRequestException('Free plan does not require a trial');
 
-    const existing = await this.db.subscription.findFirst({
-      where: {
-        businessId,
-        status: { in: ['ACTIVE', 'TRIALING'] },
-        plan: { not: 'FREE' },
-      },
-    });
-    if (existing) throw new BadRequestException('Business already has an active subscription');
-
     const trialEnd = new Date();
     trialEnd.setDate(trialEnd.getDate() + TRIAL_DURATION_DAYS);
 
     const price = currency === 'USD' ? plan.priceUSD : plan.priceTTD;
 
-    const sub = await this.db.$transaction(async (tx) => {
+    const sub = await this.planChangeTransaction(businessId, async (tx) => {
+      // Checked under the lock, so concurrent trial starts cannot all pass it.
+      const existing = await tx.subscription.findFirst({
+        where: {
+          businessId,
+          status: { in: [...LIVE_STATUSES] },
+          plan: { not: 'FREE' },
+        },
+      });
+      if (existing) throw new BadRequestException('Business already has an active subscription');
+
       const created = await tx.subscription.create({
         data: {
           businessId,
@@ -204,13 +241,13 @@ export class SubscriptionsService {
     const plan = PLANS[planId];
     if (!plan) throw new BadRequestException('Invalid plan');
 
-    const sub = await this.db.$transaction(async (tx) => {
-      const { created, replaced } = await this.writeActivation(tx, businessId, plan, planId, currency, gateway, gatewaySubId);
+    const sub = await this.planChangeTransaction(businessId, async (tx) => {
+      const { created, replacedIds } = await this.writeActivation(tx, businessId, plan, planId, currency, gateway, gatewaySubId);
       await this.auditPlanChange(tx, businessId, authority, {
         action: 'subscription_activated',
         title: `Activated the ${planId} plan`,
         entityId: created.id,
-        meta: { plan: planId, currency, gateway, replacedSubscriptions: replaced },
+        meta: { plan: planId, currency, gateway, replacedSubscriptions: replacedIds.length, replacedSubscriptionIds: replacedIds },
       });
       return created;
     });
@@ -219,7 +256,11 @@ export class SubscriptionsService {
     return sub;
   }
 
-  /** Cancels the active and trialing subscriptions and creates the new ACTIVE one, in the caller's transaction. */
+  /**
+   * Cancels every active and trialing subscription and creates the new ACTIVE
+   * one, in the caller's plan-change transaction (which holds the business's
+   * lock). Returns the ids it cancelled, for the audit row.
+   */
   private async writeActivation(
     tx: PrismaTx,
     businessId: string,
@@ -229,13 +270,7 @@ export class SubscriptionsService {
     gateway: string,
     gatewaySubId?: string,
   ) {
-    const { count: replaced } = await tx.subscription.updateMany({
-      where: {
-        businessId,
-        status: { in: ['ACTIVE', 'TRIALING'] },
-      },
-      data: { status: 'CANCELLED', cancelledAt: new Date() },
-    });
+    const replacedIds = await this.cancelLiveSubscriptions(tx, businessId);
 
     const periodEnd = new Date();
     periodEnd.setMonth(periodEnd.getMonth() + 1);
@@ -254,30 +289,54 @@ export class SubscriptionsService {
         currentPeriodEnd: periodEnd,
       },
     });
-    return { created, replaced };
+    return { created, replacedIds };
   }
 
-  async cancelSubscription(businessId: string, actor: SubscriptionActor | undefined) {
-    const authority = await this.assertPlanChangeAuthority(businessId, actor);
-    const sub = await this.db.subscription.findFirst({
-      where: {
-        businessId,
-        status: { in: ['ACTIVE', 'TRIALING'] },
-        plan: { not: 'FREE' },
-      },
+  /**
+   * Cancels every ACTIVE and TRIALING subscription of the business, oldest
+   * first, and returns their ids. Only called under the plan-change lock, so
+   * the rows read are the rows cancelled.
+   */
+  private async cancelLiveSubscriptions(tx: PrismaTx, businessId: string, live?: Array<{ id: string }>): Promise<string[]> {
+    const rows = live ?? await tx.subscription.findMany({
+      where: { businessId, status: { in: [...LIVE_STATUSES] } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true },
     });
-    if (!sub) throw new NotFoundException('No active subscription found');
-
-    await this.db.$transaction(async (tx) => {
-      await tx.subscription.update({
-        where: { id: sub.id },
+    const ids = rows.map((r) => r.id);
+    if (ids.length > 0) {
+      await tx.subscription.updateMany({
+        where: { id: { in: ids }, businessId },
         data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
+    }
+    return ids;
+  }
+
+  /**
+   * Cancels the plan: every ACTIVE and TRIALING subscription, not only the
+   * first one found, so a business left with more than one live row (the state
+   * the pre-lock race left behind) reverts to Free. The audit row names the
+   * newest live paid subscription and lists every id it cancelled.
+   */
+  async cancelSubscription(businessId: string, actor: SubscriptionActor | undefined) {
+    const authority = await this.assertPlanChangeAuthority(businessId, actor);
+
+    await this.planChangeTransaction(businessId, async (tx) => {
+      const live = await tx.subscription.findMany({
+        where: { businessId, status: { in: [...LIVE_STATUSES] } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, plan: true, status: true },
+      });
+      const sub = [...live].reverse().find((s) => s.plan !== 'FREE');
+      if (!sub) throw new NotFoundException('No active subscription found');
+
+      const cancelledIds = await this.cancelLiveSubscriptions(tx, businessId, live);
       await this.auditPlanChange(tx, businessId, authority, {
         action: 'subscription_cancelled',
         title: `Cancelled the ${sub.plan} plan`,
         entityId: sub.id,
-        meta: { plan: sub.plan, previousStatus: sub.status },
+        meta: { plan: sub.plan, previousStatus: sub.status, cancelledSubscriptionIds: cancelledIds },
       });
     });
 
@@ -399,7 +458,7 @@ export class SubscriptionsService {
     const price = currency === 'USD' ? plan.priceUSD : plan.priceTTD;
 
     // A checkout writes nothing else; the row records who started a paid plan change.
-    await this.db.$transaction(async (tx) => {
+    await this.planChangeTransaction(businessId, async (tx) => {
       await this.auditPlanChange(tx, businessId, authority, {
         action: 'subscription_checkout_started',
         title: `Started a ${planId} checkout`,
@@ -438,9 +497,9 @@ export class SubscriptionsService {
     const plan = PLANS[planId];
     if (!plan) throw new BadRequestException('Invalid plan');
 
-    // The activation, its payment and one audit row commit together.
-    const sub = await this.db.$transaction(async (tx) => {
-      const { created, replaced } = await this.writeActivation(tx, businessId, plan, planId, currency, method);
+    // The activation, its payment and one audit row commit together, under the business's plan-change lock.
+    const sub = await this.planChangeTransaction(businessId, async (tx) => {
+      const { created, replacedIds } = await this.writeActivation(tx, businessId, plan, planId, currency, method);
       const payment = await tx.subscriptionPayment.create({
         data: {
           subscriptionId: created.id,
@@ -459,7 +518,10 @@ export class SubscriptionsService {
         action: 'subscription_payment_recorded',
         title: `Recorded a manual ${method} payment for the ${planId} plan`,
         entityId: created.id,
-        meta: { plan: planId, currency, method, amount: created.priceMonthly, paymentId: payment.id, replacedSubscriptions: replaced },
+        meta: {
+          plan: planId, currency, method, amount: created.priceMonthly, paymentId: payment.id,
+          replacedSubscriptions: replacedIds.length, replacedSubscriptionIds: replacedIds,
+        },
       });
       return created;
     });

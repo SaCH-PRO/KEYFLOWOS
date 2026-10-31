@@ -6,7 +6,8 @@
   "notes": [
     "OPEN POLICY QUESTION D-33 (recorded, not decided): an owner's self-declared manual payment (POST /record-payment) still activates a paid plan and records a COMPLETED SubscriptionPayment with no money moving, and POST /activate does the same for any gateway string with no payment at all. Whether manual recording should instead create a PENDING payment that platform staff confirm is a new owner decision. Case R0-08c-O04 pins today's answer so a change is deliberate.",
     "Read routes (current, billing-dashboard, history, check-limit, payments) keep the BusinessGuard membership rule: no billing module scope exists in core/authority/module-vocabulary.ts, and none of these routes carries a RequireModuleScope today, so nothing was tightened (cases G01, G02, U09).",
-    "checkout writes no Subscription row; it is still owner-only and writes one audit row (subscription_checkout_started) so the start of a paid plan change names its actor."
+    "checkout writes no Subscription row; it is still owner-only and writes one audit row (subscription_checkout_started) so the start of a paid plan change names its actor.",
+    "Review finding ST-R008c-1 (repair): plan changes were atomic but not serialized, so concurrent owner record-payments or activates each added an ACTIVE row (the review probe: 4 parallel record-payments left 4 ACTIVE subscriptions, every audit row saying replacedSubscriptions:1, and after a 201 cancel GET /current still reported KEYFLOW ACTIVE), and concurrent trial starts passed a check made outside the transaction. Every plan change now runs in one transaction whose first statement is pg_advisory_xact_lock(hashtext('subscriptions:plan-change:' || businessId)); the trial check runs under it; activations and cancel cancel every ACTIVE/TRIALING row and record the ids (replacedSubscriptionIds, cancelledSubscriptionIds) on the audit row. Cases K01-K04 (real database, parallel requests) and U10-U11 (pure) prove it; K01-K04 and U10 fail on the pre-repair service."
   ],
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
@@ -31,6 +32,10 @@
     "R0-08c the owner changes the plan, and every change is audited against the acting user [R0-08c-O06] pinned: the distinguished owner (Business.ownerId) with no membership row records a payment (201), audited against that owner",
     "R0-08c the owner changes the plan, and every change is audited against the acting user [R0-08c-O07] pinned: a SUPER_ADMIN with no membership keeps the platform bypass and cancels the owner's trial (201), audited against the super admin",
     "R0-08c the owner changes the plan, and every change is audited against the acting user [R0-08c-O08] after the owner changed the plan, a STAFF member is still refused (403 SUBSCRIPTION_OWNER_ONLY, nothing written)",
+    "R0-08c concurrent plan changes for one business are serialized (ST-R008c-1) [R0-08c-K01] RED-BEFORE: the review's probe — 5 parallel OWNER record-payments {plan:'KEYFLOW',currency:'USD',method:'manual'} all answer 201 and leave exactly one live subscription; each audit row lists the one subscription it replaced; one cancel then leaves the business on Free",
+    "R0-08c concurrent plan changes for one business are serialized (ST-R008c-1) [R0-08c-K02] RED-BEFORE: 5 parallel OWNER trial starts on a business with no subscription: exactly one 201 TRIALING, the rest 400 'Business already has an active subscription', one TRIALING row and one audit row",
+    "R0-08c concurrent plan changes for one business are serialized (ST-R008c-1) [R0-08c-K03] RED-BEFORE: 5 parallel OWNER activates interleaved with 5 parallel OWNER record-payments leave exactly one live subscription, and the audit rows form one replacement chain",
+    "R0-08c concurrent plan changes for one business are serialized (ST-R008c-1) [R0-08c-K04] RED-BEFORE: on a business left with two ACTIVE KEYFLOW rows and a TRIALING FLOW row, one OWNER cancel cancels all three, its audit row names the newest paid row and lists every cancelled id, and GET /current reports Free",
     "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U01] the POST routes are exactly trial, activate, cancel, checkout and record-payment, each behind AuthGuard and BusinessGuard",
     "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U02] RED-BEFORE: every POST handler refuses a STAFF member with 403 SUBSCRIPTION_OWNER_ONLY and writes nothing",
     "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U03] RED-BEFORE: every POST handler refuses an ADMIN member the same way and writes nothing",
@@ -39,7 +44,9 @@
     "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U06] the distinguished owner (Business.ownerId) with no membership row is allowed, audited against that owner",
     "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U07] SUPER_ADMIN keeps the platform bypass with no membership, audited against the super admin",
     "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U08] RED-BEFORE: a POST handler reached with no authenticated user refuses (401) and writes nothing",
-    "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U09] the GET handlers keep the membership rule: they take no actor and a member reads current, history, payments and check-limit"
+    "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U09] the GET handlers keep the membership rule: they take no actor and a member reads current, history, payments and check-limit",
+    "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U10] RED-BEFORE (ST-R008c-1): every POST handler takes the business's plan-change advisory lock as the first statement of its transaction, and reads and writes subscriptions, payments and audit rows only after it, inside it (startTrial's existing-subscription check included)",
+    "SubscriptionsController — plan changes are OWNER only and audited (R0-08c) [R0-08c-U11] a refused member never takes the plan-change lock or opens a transaction"
   ],
   "maxReportAgeSeconds": 600
 }

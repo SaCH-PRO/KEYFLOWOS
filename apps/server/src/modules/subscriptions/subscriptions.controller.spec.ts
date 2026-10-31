@@ -16,6 +16,12 @@
  * {code:'SUBSCRIPTION_OWNER_ONLY'} before reading the body and with nothing
  * written, and writes one team_activity_logs row naming the actor on success.
  * The GET handlers keep the membership rule BusinessGuard applies.
+ *
+ * Review finding ST-R008c-1 (U10, U11): each plan change's transaction first
+ * takes pg_advisory_xact_lock keyed on the business, and every subscription,
+ * payment and audit read or write of the change runs after it inside that
+ * transaction, so concurrent changes for one business are serialized. The
+ * real-database race proof is cases K01-K04 of the integration test.
  */
 import 'reflect-metadata';
 import { describe, it, expect } from 'vitest';
@@ -35,21 +41,24 @@ const SUPER = { id: 'u_super', role: 'SUPER_ADMIN' };
 
 const WRITE_METHODS = new Set(['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany']);
 
-interface Call { model: string; method: string; args: any }
+interface Call { model: string; method: string; args: any; inTx: boolean }
 
 /**
  * A Prisma client that records every model call. Reads answer from `state`;
  * writes echo their data back with an id. $transaction runs its callback on
- * the same recorder, so a write inside a transaction is still a write.
+ * the same recorder, so a write inside a transaction is still a write; each
+ * call records whether it ran inside a transaction. $executeRaw is recorded
+ * as model '$raw' with its SQL text and values.
  */
 function fakePrisma(state: { memberships: Record<string, string>; ownerId: string; activeSub: Record<string, unknown> | null }) {
   const calls: Call[] = [];
+  let txDepth = 0;
   const model = (name: string) =>
     new Proxy({}, {
       get(_t, method) {
         if (typeof method !== 'string' || method === 'then') return undefined;
         return async (args: any) => {
-          calls.push({ model: name, method, args });
+          calls.push({ model: name, method, args, inTx: txDepth > 0 });
           if (WRITE_METHODS.has(method)) {
             if (method.endsWith('Many')) return { count: 1 };
             return { id: `fake_${name}_${calls.length}`, currentPeriodStart: new Date(), currentPeriodEnd: new Date(), ...(args?.data ?? {}) };
@@ -66,6 +75,8 @@ function fakePrisma(state: { memberships: Record<string, string>; ownerId: strin
             return { id: BIZ, ownerId: state.ownerId };
           }
           if (name === 'subscription' && method.startsWith('find') && method !== 'findMany') return state.activeSub;
+          // A status-filtered read is a read of the live subscriptions; history reads have no status filter.
+          if (name === 'subscription' && method === 'findMany' && args?.where?.status) return state.activeSub ? [state.activeSub] : [];
           if (method === 'findMany') return [];
           if (method === 'count') return 0;
           return null;
@@ -75,13 +86,26 @@ function fakePrisma(state: { memberships: Record<string, string>; ownerId: strin
   const client: any = new Proxy({}, {
     get(_t, prop) {
       if (typeof prop !== 'string' || prop === 'then') return undefined;
-      if (prop === '$transaction') return async (arg: any) => (typeof arg === 'function' ? arg(client) : Promise.all(arg));
+      if (prop === '$transaction') {
+        return async (arg: any) => {
+          if (typeof arg !== 'function') return Promise.all(arg);
+          txDepth++;
+          try { return await arg(client); } finally { txDepth--; }
+        };
+      }
+      if (prop === '$executeRaw') {
+        return async (strings: TemplateStringsArray, ...values: unknown[]) => {
+          calls.push({ model: '$raw', method: 'executeRaw', args: { sql: strings.join('?'), values }, inTx: txDepth > 0 });
+          return 1;
+        };
+      }
       if (prop.startsWith('$')) return undefined;
       return model(prop);
     },
   });
   return {
     prisma: { client },
+    calls: () => calls,
     writes: () => calls.filter((c) => WRITE_METHODS.has(c.method)),
     auditWrites: () => calls.filter((c) => c.model === 'teamActivityLog' && WRITE_METHODS.has(c.method)),
   };
@@ -206,5 +230,34 @@ describe('SubscriptionsController — plan changes are OWNER only and audited (R
     await expect(controller.getPaymentHistory(BIZ)).resolves.toEqual([]);
     await expect(controller.checkLimit(BIZ, 'contacts')).resolves.toMatchObject({ allowed: true, current: 0 });
     expect(writes()).toEqual([]);
+  });
+
+  it("[R0-08c-U10] RED-BEFORE (ST-R008c-1): every POST handler takes the business's plan-change advisory lock as the first statement of its transaction, and reads and writes subscriptions, payments and audit rows only after it, inside it (startTrial's existing-subscription check included)", async () => {
+    for (const h of POST_HANDLERS) {
+      const { controller, calls } = controllerFor(h.activeSub);
+      await expect(h.call(controller, OWNER), `OWNER ${h.name}`).resolves.toBeTruthy();
+      const all = calls();
+      const locks = all.filter((c) => c.model === '$raw');
+      expect(locks, `${h.name}: one lock`).toHaveLength(1);
+      expect(locks[0].inTx, `${h.name}: lock inside the transaction`).toBe(true);
+      expect(locks[0].args.sql, h.name).toContain('pg_advisory_xact_lock(hashtext(');
+      expect(locks[0].args.values, `${h.name}: keyed on the business`).toEqual([`subscriptions:plan-change:${BIZ}`]);
+      const firstInTx = all.findIndex((c) => c.inTx);
+      expect(all[firstInTx], `${h.name}: the lock is the transaction's first statement`).toBe(locks[0]);
+      const billing = all.filter((c) => ['subscription', 'subscriptionPayment', 'teamActivityLog'].includes(c.model));
+      expect(billing.length, h.name).toBeGreaterThan(0);
+      for (const c of billing) {
+        expect(c.inTx, `${h.name}: ${c.model}.${c.method} runs inside the locked transaction`).toBe(true);
+        expect(all.indexOf(c), `${h.name}: ${c.model}.${c.method} runs after the lock`).toBeGreaterThan(all.indexOf(locks[0]));
+      }
+    }
+  });
+
+  it('[R0-08c-U11] a refused member never takes the plan-change lock or opens a transaction', async () => {
+    for (const h of POST_HANDLERS) {
+      const { controller, calls } = controllerFor(h.activeSub);
+      await expectOwnerOnly(h.call(controller, STAFF), `STAFF ${h.name}`);
+      expect(calls().filter((c) => c.model === '$raw' || c.inTx), h.name).toEqual([]);
+    }
   });
 });
