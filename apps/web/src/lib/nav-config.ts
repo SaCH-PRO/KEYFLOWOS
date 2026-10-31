@@ -57,6 +57,7 @@ import {
   Landmark,
 } from "lucide-react";
 import type { DormantFeatureFlagKey } from "./feature-flags";
+import { NAV_ROUTE_LABELS } from "./semantic-routes";
 
 export interface ResolvedFeatureFlag {
   key: string;
@@ -97,7 +98,8 @@ export interface PrimaryNavItem {
 // ============================================================================
 
 export const primaryNav: PrimaryNavItem[] = [
-  { id: "cockpit", label: "Cockpit", icon: Zap, href: "/app/command-center" },
+  // Label under decision D-09 — see NAV_ROUTE_LABELS in semantic-routes.ts.
+  { id: "cockpit", label: NAV_ROUTE_LABELS["/app/command-center"], icon: Zap, href: "/app/command-center" },
   { id: "key-chat", label: "KEY", icon: Bot, href: "/app/key/chat" },
   { id: "operate", label: "Operate", icon: Briefcase },
   { id: "build", label: "Build", icon: Wrench },
@@ -131,6 +133,11 @@ export const operateSections: NavSection[] = [
     icon: Banknote,
     items: [
       { label: "Overview", href: "/app/financial-flow", icon: Banknote },
+      // Label under decision D-09 (NAV_ROUTE_LABELS["/app/commerce"]). Kept as
+      // a literal on purpose: disclosure-mode.ts allowlists Operate items by
+      // exact label and disclosure-mode.spec.ts reads these literals from
+      // source, so a rename here must also rename it there.
+      // nav-labels-agree.spec.ts fails if this drifts from the constant.
       { label: "Sales", href: "/app/commerce", icon: Receipt },
       // The gateway console — transactions, links, refunds across three
       // providers — sits under /app/commerce, so the drawer reached its

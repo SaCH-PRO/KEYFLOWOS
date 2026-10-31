@@ -180,7 +180,7 @@ export function UpgradePrompt({
             <span className="text-[10px] text-muted-foreground">(US${plan.priceUSD})</span>
           </div>
           <Link
-            href="/app/settings/business?tab=billing"
+            href="/app/settings/billing"
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:scale-105 min-h-[44px]"
             style={{ background: `hsl(var(${plan.color}))`, color: "hsl(var(--kf-foreground))" }}
           >

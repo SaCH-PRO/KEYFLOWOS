@@ -120,13 +120,35 @@ export interface SemanticRoute {
 }
 
 /* ────────────────────────────────────────────────────────────────
+ * Navigation labels under decision D-09
+ * ──────────────────────────────────────────────────────────────── */
+
+/**
+ * The one name each of these screens goes by: the rail/nav entry, the
+ * breadcrumb below and the page header all read or are checked against it
+ * (lib/__tests__/nav-labels-agree.spec.ts).
+ *
+ * D-09 is OPEN: "Cockpit" or "Command Center" for /app/command-center, "Sales"
+ * or "Revenue" for /app/commerce. Until the owner rules, each value is the
+ * label the codebase already showed most (R0-08). The ruling is a change to
+ * the value here; the spec then names anything that still disagrees.
+ *
+ * Lives here rather than in nav-config.ts because nav-config is a "use client"
+ * module and this one is not, so any importer gets a plain string.
+ */
+export const NAV_ROUTE_LABELS = {
+  "/app/command-center": "Command Center",
+  "/app/commerce": "Sales",
+} as const satisfies Record<string, string>;
+
+/* ────────────────────────────────────────────────────────────────
  * Route Registry
  * ──────────────────────────────────────────────────────────────── */
 
 export const SEMANTIC_ROUTES: SemanticRoute[] = [
   /* ─── Core ─── */
   { segment: "app", label: "Home", workspace: "cockpit", icon: Zap },
-  { segment: "command-center", label: "Command Center", workspace: "cockpit", icon: Zap },
+  { segment: "command-center", label: NAV_ROUTE_LABELS["/app/command-center"], workspace: "cockpit", icon: Zap },
   { segment: "keyflow-command", label: "Command", workspace: "cockpit", icon: Zap },
   { segment: "control-tower", label: "KEYFLOW", workspace: "cockpit", icon: Zap },
   { segment: "key", label: "KEY", workspace: "key", icon: Bot },
@@ -140,7 +162,7 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
   { segment: "sequences", label: "Sequences", workspace: "contacts", icon: Mail, isDetailSurface: true, entityType: "sequence" },
 
   /* ─── Commerce ─── */
-  { segment: "commerce", label: "Sales", workspace: "commerce", icon: Banknote, parentOverride: [{ label: "Money", href: "/app/money" }] },
+  { segment: "commerce", label: NAV_ROUTE_LABELS["/app/commerce"], workspace: "commerce", icon: Banknote, parentOverride: [{ label: "Money", href: "/app/money" }] },
   { segment: "invoices", label: "Invoices", workspace: "commerce", icon: Receipt, isDetailSurface: true, entityType: "invoice" },
   { segment: "quotes", label: "Quotes", workspace: "commerce", icon: FileText, isDetailSurface: true, entityType: "quote" },
   { segment: "products", label: "Products", workspace: "commerce", icon: Package, isDetailSurface: true, entityType: "product" },

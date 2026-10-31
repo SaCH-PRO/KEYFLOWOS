@@ -321,36 +321,54 @@ describe('the cockpit is linked directly, not through its redirect stub', () => 
     expect(writeSet.filter((f) => /["'`]\/app\/keyflow-command["'`#]/.test(read(f)))).toEqual([]);
   });
 
-  it('the go-home shortcut (kf:go-home) targets /app/command-center', () => {
-    expect(read('hooks/use-keyboard-shortcuts.ts')).toMatch(
-      /goHome = \(\) => router\.push\("\/app\/command-center"\)/,
-    );
-  });
+  // BLOCKED (R0-08 deviation): goHome lives in hooks/use-keyboard-shortcuts.ts,
+  // outside the R0-08 write set; it still pushes the redirect stub (which works,
+  // one hop late). Restore as a real case once that file is released:
+  //   expect(read('hooks/use-keyboard-shortcuts.ts')).toMatch(
+  //     /goHome = \(\) => router\.push\("\/app\/command-center"\)/);
+  it.todo(
+    'the go-home shortcut (kf:go-home) targets /app/command-center — blocked: use-keyboard-shortcuts.ts is outside the R0-08 write set',
+  );
 });
 
 describe('the nav has a door to invoices and quotes (CF-20)', () => {
-  // Read from source, like nav-destinations.spec.ts: label and href literals.
-  const nav = read('lib/nav-config.ts');
-  const operate = nav.slice(nav.indexOf('export const operateSections'), nav.indexOf('export const operateNav'));
-
-  it('Invoices opens the existing invoices hub', () => {
-    expect(operate).toMatch(/label: "Invoices", href: "\/app\/commerce\/invoices"/);
+  // BLOCKED (R0-08 deviation). Adding "Invoices" and "Quotes" to operateSections
+  // without also adding them to MODE_OPERATE_ITEMS in lib/disclosure-mode.ts
+  // (outside the write set) does two wrong things: disclosure-mode.spec.ts's
+  // "enterprise lists every Operate label" goes red, and the startup and growth
+  // modes — startup is the default — filter the new entries out by exact label,
+  // so a new owner still sees no door. The change needs both files:
+  //   nav-config.ts, Money section, after "Sales":
+  //     { label: "Invoices", href: "/app/commerce/invoices", icon: Receipt },
+  //     { label: "Quotes", href: "/app/commerce?tab=pipeline&view=quotes", icon: FileText, matchTab: "pipeline" },
+  //   disclosure-mode.ts: "Invoices", "Quotes" after "Sales" in all three modes.
+  // There is no /app/commerce/quotes page; quotes live in the pipeline tab,
+  // which reads ?view=quotes on mount (finance-pipeline.tsx). Restore as:
+  //   expect(operate).toMatch(/label: "Invoices", href: "\/app\/commerce\/invoices"/);
+  //   expect(operate).toMatch(/label: "Quotes", href: "\/app\/commerce\?tab=pipeline&view=quotes"/);
+  it('the destinations the entries would use exist today', () => {
     expect(resolvesToRoute('/app/commerce/invoices')).toBe(true);
-  });
-
-  it('Quotes opens the existing quotes view of the pipeline', () => {
-    // There is no /app/commerce/quotes page; quotes live in the pipeline tab,
-    // which reads ?view=quotes on mount (finance-pipeline.tsx).
-    expect(operate).toMatch(/label: "Quotes", href: "\/app\/commerce\?tab=pipeline&view=quotes"/);
     expect(read('app/app/finance/components/finance-pipeline.tsx')).toMatch(/searchParams\.get\("view"\)/);
   });
+
+  it.todo(
+    'Invoices opens the existing invoices hub — blocked: needs lib/disclosure-mode.ts (outside the R0-08 write set)',
+  );
+  it.todo(
+    'Quotes opens the existing quotes view of the pipeline — blocked: needs lib/disclosure-mode.ts (outside the R0-08 write set)',
+  );
 });
 
 describe('the "+ Contact" entry opens the add-contact form', () => {
-  it('new-entity-menu links /app/crm/contacts?action=new, the only action the contacts page reads', () => {
+  it('the contacts page opens quick-add only for ?action=new', () => {
     expect(read('app/app/crm/contacts/page.tsx')).toMatch(/action === "new"/);
-    expect(read('components/layout/new-entity-menu.tsx')).toMatch(
-      /label: "Contact", icon: Users, href: "\/app\/crm\/contacts\?action=new"/,
-    );
   });
+
+  // BLOCKED (R0-08 deviation): the "+ Contact" entry is in
+  // components/layout/new-entity-menu.tsx, outside the write set. Restore as:
+  //   expect(read('components/layout/new-entity-menu.tsx')).toMatch(
+  //     /label: "Contact", icon: Users, href: "\/app\/crm\/contacts\?action=new"/);
+  it.todo(
+    'new-entity-menu links /app/crm/contacts?action=new — blocked: new-entity-menu.tsx is outside the R0-08 write set',
+  );
 });
