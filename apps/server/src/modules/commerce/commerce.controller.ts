@@ -1566,14 +1566,13 @@ export class CommerceController {
   @Post('invoices/:invoiceId/payment-intent')
   recordPublicPaymentIntent(
     @Param('invoiceId') invoiceId: string,
-    @Body() body: { method: string; amount?: number },
+    @Body() body: { method: string; amount?: unknown },
   ) {
     const method = sanitizeString(body?.method ?? '', 50) ?? '';
-    const amount =
-      typeof body?.amount === 'number' && Number.isFinite(body.amount) && body.amount >= 0
-        ? body.amount
-        : undefined;
-    return this.commerce.recordPublicPaymentIntent(invoiceId, method, amount);
+    // R0-22: the amount is passed through as sent. It used to be dropped when
+    // negative or not a number, so a bad amount was silently recorded as 0;
+    // the service now answers 400 for it and caps a good one at the balance.
+    return this.commerce.recordPublicPaymentIntent(invoiceId, method, body?.amount);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

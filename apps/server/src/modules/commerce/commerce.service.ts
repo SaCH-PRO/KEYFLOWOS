@@ -2961,43 +2961,99 @@ export class CommerceService {
     });
   }
 
-  async recordPublicPaymentIntent(invoiceId: string, method: string, amount?: number) {
+  /**
+   * The statuses a customer may record a payment intent against: shareable
+   * and not settled. PAID answers 409; every other status (DRAFT, VOID,
+   * FAILED, PENDING), a soft-deleted invoice and an unknown id answer the same
+   * 404, because the public pay page cannot show them either.
+   */
+  private static readonly INTENT_PAYABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
+
+  /**
+   * A customer's anonymous "I will pay by <method>" from the public pay page
+   * (POST /commerce/invoices/:invoiceId/payment-intent).
+   *
+   * R0-22-PUBLIC-INTENT-HARDEN (CF-12): the caller holds only a bare invoice
+   * id, so this writes nothing but one PENDING Payment row on the invoice's
+   * own tenant. It no longer moves the invoice to PENDING: PENDING is not a
+   * shareable status, so the customer's own pay link answered 404 after they
+   * confirmed an offline payment, and anyone holding an id could hide another
+   * tenant's SENT invoice. PENDING rows are ignored by computeBalance and post
+   * nothing to the ledger; the operator records the money via recordPayment().
+   *
+   * - One PENDING intent per invoice and method: a repeat answers the same
+   *   success and writes nothing. The lookup runs under the invoice row lock,
+   *   so concurrent repeats serialize instead of racing, and the row id is
+   *   random, so two intents in one millisecond no longer collide on the
+   *   providerPaymentId unique index (the old manual_<id>_<Date.now()> key
+   *   answered 500).
+   * - Payable-state gate: see INTENT_PAYABLE_STATUSES; PAID, or nothing left to
+   *   pay, answers 409.
+   * - The amount, when given, must be a positive finite number (400 otherwise)
+   *   and is capped at the remaining balance; when absent it is the remaining
+   *   balance.
+   */
+  async recordPublicPaymentIntent(invoiceId: string, method: string, amount?: unknown) {
     const validMethods = ['bank_transfer', 'cash', 'check', 'other', 'google_pay'];
     if (!validMethods.includes(method)) {
       throw new BadRequestException('Invalid offline payment method');
     }
+    // Validated before the invoice is read, so a 400 says nothing about the id.
+    if (amount !== undefined) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+        throw new BadRequestException('Payment amount must be a number');
+      }
+      if (amount <= 0) {
+        throw new BadRequestException('Payment amount must be positive');
+      }
+    }
 
+    const notFound = () => new NotFoundException('Invoice not found');
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      select: { id: true, status: true, total: true, businessId: true, invoiceNumber: true, currency: true },
+      select: { businessId: true, invoiceNumber: true, currency: true },
     });
+    if (!invoice) throw notFound();
 
-    if (!invoice) throw new NotFoundException('Invoice not found');
-    if (invoice.status === 'PAID') throw new BadRequestException('Invoice is already paid');
+    await this.prisma.client.$transaction(async (tx) => {
+      const locked = await CommerceService.lockInvoiceForPayment(tx as unknown as Prisma.TransactionClient, invoiceId);
+      if (!locked || locked.deletedAt || locked.businessId !== invoice.businessId) throw notFound();
+      if (locked.status === 'PAID') throw new ConflictException('Invoice is already paid');
+      if (!CommerceService.INTENT_PAYABLE_STATUSES.has(locked.status)) throw notFound();
 
-    // PENDING — customer-asserted intent, no money yet, so no FIN2 posting
-    // until the operator records the actual receipt via recordPayment().
-    await this.prisma.client.payment.create({
-      data: {
-        invoiceId,
-        businessId: invoice.businessId,
-        amount: amount || 0,
-        currency: invoice.currency || 'TTD',
-        status: 'PENDING',
-        provider: method || 'cash',
-        providerPaymentId: `manual_${invoiceId}_${Date.now()}`,
-        method,
-        reference: `Intent: ${invoice.invoiceNumber}`,
-        notes: `Customer indicated ${method} payment via public payment page`,
-      },
-    });
-
-    if (method === 'bank_transfer' || method === 'cash') {
-      await this.prisma.client.invoice.update({
+      const current = await tx.invoice.findFirst({
         where: { id: invoiceId },
-        data: { status: 'PENDING' },
+        select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
       });
-    }
+      const balance = computeBalance(Number(current?.total ?? 0), current?.payments ?? [], current?.currency ?? undefined);
+      // A manually refunded row is counted twice by computeBalance (V1-29), so
+      // `remaining` can exceed the total; an intent never asks for more than either.
+      const remaining = Math.min(balance.remaining, balance.total);
+      if (remaining <= 0) throw new ConflictException('Invoice is already paid');
+
+      const existing = await tx.payment.findFirst({
+        where: { invoiceId, businessId: invoice.businessId, status: 'PENDING', method, provider: method },
+        select: { id: true },
+      });
+      if (existing) return;
+
+      // PENDING — customer-asserted intent, no money yet, so no FIN2 posting
+      // until the operator records the actual receipt via recordPayment().
+      await tx.payment.create({
+        data: {
+          invoiceId,
+          businessId: invoice.businessId,
+          amount: typeof amount === 'number' ? Math.min(amount, remaining) : remaining,
+          currency: invoice.currency || 'TTD',
+          status: 'PENDING',
+          provider: method,
+          providerPaymentId: `manual_${invoiceId}_intent_${randomBytes(16).toString('hex')}`,
+          method,
+          reference: `Intent: ${invoice.invoiceNumber}`,
+          notes: `Customer indicated ${method} payment via public payment page`,
+        },
+      });
+    });
 
     return { success: true, method, invoiceNumber: invoice.invoiceNumber };
   }
