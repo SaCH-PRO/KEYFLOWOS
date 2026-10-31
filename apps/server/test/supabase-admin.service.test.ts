@@ -1,6 +1,10 @@
 import 'reflect-metadata';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Request } from 'express';
+import { createClient } from '@supabase/supabase-js';
 import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
+import { IdentityController } from '../src/modules/identity/identity.controller';
+import { IdentityPasswordService } from '../src/modules/identity/identity-password.service';
 
 /**
  * Unit tests for SupabaseAdminService.findUserByEmail pagination.
@@ -83,5 +87,331 @@ describe('SupabaseAdminService.findUserByEmail pagination', () => {
     const { svc } = buildService([{ users: [target] }]);
     const result = await svc.findUserByEmail('  MIXED.case@example.COM  ');
     expect(result?.id).toBe('u-mixed');
+  });
+});
+
+/**
+ * CR-2 (R0-ID-F4-LOGOUT-SUPABASE-SIGNOUT): the Supabase session revocation
+ * call shape.
+ *
+ * auth-js (installed 2.94.0) declares `GoTrueAdminApi.signOut(jwt: string,
+ * scope)` and sends that first argument as the `Authorization: Bearer` of
+ * `POST <auth>/logout?scope=<scope>`; GoTrue revokes the sessions of the user
+ * that JWT belongs to (global: all, others: all but the JWT's own session).
+ * The installed GoTrueAdminApi has no method that revokes sessions by user id.
+ * Until this packet SupabaseAdminService.signOut was handed the USER ID, so
+ * GoTrue received a bearer that is not a JWT, refused it, and nothing was ever
+ * revoked: the refresh tokens kept working at Supabase after every logout.
+ *
+ * Every case here is provider-free: where the request shape matters the
+ * auth-js client is the real one, on a recording `fetch` that never leaves the
+ * process.
+ */
+describe('CR-2 — SupabaseAdminService.signOut takes the JWT auth-js admin.signOut expects', () => {
+  const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+  /** A Supabase-shaped access token. Nothing here verifies its signature. */
+  const accessJwt = (claims: Record<string, unknown> = {}) =>
+    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: 'u-cr2', session_id: 's-cr2', role: 'authenticated', ...claims })}.c2ln`;
+  const USER_ID = '6f1c1d36-5d7e-4c38-9a3f-0b7a3b0e2c11';
+
+  type Call = { url: string; method: string; headers: Record<string, string> };
+
+  /** The real auth-js admin client behind the real service, on a fetch that records and never leaves the process. */
+  function realClient(respond: (call: Call) => Response = () => new Response(null, { status: 204 })) {
+    const calls: Call[] = [];
+    const fetchStub = vi.fn(async (input: unknown, init?: { method?: string; headers?: unknown }) => {
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers as Record<string, string> | undefined).forEach((v, k) => {
+        headers[k.toLowerCase()] = v;
+      });
+      const call = { url: String(input), method: init?.method ?? 'GET', headers };
+      calls.push(call);
+      return respond(call);
+    });
+    const svc = new SupabaseAdminService();
+    (svc as unknown as { client: unknown }).client = createClient('http://supabase.cr2.test', 'service-role-key-cr2', {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: fetchStub as unknown as typeof fetch },
+    });
+    const warn = vi.fn();
+    (svc as unknown as { logger: unknown }).logger = { warn, debug: vi.fn(), log: vi.fn(), error: vi.fn() };
+    return { svc, calls, fetchStub, warn };
+  }
+
+  it("the installed auth-js sends signOut's first argument as the bearer of POST /logout?scope=…: the access JWT reaches GoTrue, and the service reports success", async () => {
+    const { svc, calls } = realClient();
+    const token = accessJwt();
+
+    await expect(svc.signOut(token, 'global')).resolves.toBe(true);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe('POST');
+    expect(calls[0].url).toBe('http://supabase.cr2.test/auth/v1/logout?scope=global');
+    expect(calls[0].headers.authorization).toBe(`Bearer ${token}`);
+  });
+
+  it("passes the scope through: 'others' keeps the JWT's own session", async () => {
+    const { svc, calls } = realClient();
+    const token = accessJwt();
+    await expect(svc.signOut(token, 'others')).resolves.toBe(true);
+    expect(calls[0].url).toBe('http://supabase.cr2.test/auth/v1/logout?scope=others');
+    expect(calls[0].headers.authorization).toBe(`Bearer ${token}`);
+  });
+
+  it('refuses a value that is not a JWT — a bare user id, the CR-2 call shape — without calling auth-js, and reports failure', async () => {
+    const { svc, fetchStub, warn } = realClient();
+    for (const notAJwt of [USER_ID, '', 'a.b', 'a..c']) {
+      await expect(svc.signOut(notAJwt, 'global'), JSON.stringify(notAJwt)).resolves.toBe(false);
+    }
+    expect(fetchStub).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('a GoTrue error result is reported as false, never thrown, and the JWT never reaches the log', async () => {
+    const { svc, warn } = realClient(
+      () =>
+        new Response(
+          JSON.stringify({ code: 403, error_code: 'session_not_found', msg: 'Session from session_id claim in JWT does not exist' }),
+          { status: 403, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const token = accessJwt();
+
+    await expect(svc.signOut(token, 'global')).resolves.toBe(false);
+
+    expect(warn).toHaveBeenCalled();
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain(token.split('.')[1]);
+  });
+
+  it('a thrown failure (network, unconfigured client) is reported as false, never thrown, and the JWT never reaches the log', async () => {
+    const { svc, warn } = realClient(() => {
+      throw new TypeError('fetch failed');
+    });
+    const token = accessJwt();
+    await expect(svc.signOut(token, 'global')).resolves.toBe(false);
+
+    const unconfigured = new SupabaseAdminService();
+    const warn2 = vi.fn();
+    (unconfigured as unknown as { logger: unknown }).logger = { warn: warn2, debug: vi.fn() };
+    const saved = { ...process.env };
+    delete process.env.SUPABASE_URL;
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    try {
+      await expect(unconfigured.signOut(token, 'global')).resolves.toBe(false);
+    } finally {
+      process.env = saved;
+    }
+
+    for (const calls of [warn.mock.calls, warn2.mock.calls]) {
+      expect(calls.length).toBeGreaterThan(0);
+      expect(JSON.stringify(calls)).not.toContain(token.split('.')[1]);
+    }
+  });
+});
+
+/**
+ * CR-2 at the callers: the REAL IdentityController handlers and the REAL
+ * IdentityPasswordService, with the provider behind a recording stub (or, in
+ * the end-to-end case, the real SupabaseAdminService and auth-js client on a
+ * recording fetch).
+ */
+describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JWT", () => {
+  const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+  const USER = 'u-cr2-callers';
+  const accessJwt = (claims: Record<string, unknown> = {}) =>
+    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: 's-1', role: 'authenticated', ...claims })}.c2ln`;
+
+  function memoryRedis(order: string[]) {
+    const store = new Map<string, string>();
+    return {
+      store,
+      setex: vi.fn(async (k: string, _s: number, v: string) => {
+        order.push(`setex ${k}`);
+        store.set(k, String(v));
+        return 'OK';
+      }),
+      set: vi.fn(async (k: string, v: string) => {
+        order.push(`set ${k}`);
+        store.set(k, String(v));
+        return 'OK';
+      }),
+      get: vi.fn(async (k: string) => store.get(k) ?? null),
+      del: vi.fn(async () => 0),
+    };
+  }
+
+  function harness(
+    opts: {
+      signOut?: (jwt: string, scope: string) => Promise<unknown>;
+      supabaseAdmin?: unknown;
+    } = {},
+  ) {
+    const order: string[] = [];
+    const redis = memoryRedis(order);
+    const audit = vi.fn(async (_entry: Record<string, unknown>) => undefined);
+    const authSec = { enforce: vi.fn(async () => undefined), audit };
+    const signupSvc = { signInWithPassword: vi.fn(async () => ({ userId: USER, accessToken: 'a', refreshToken: 'r' })) };
+    const supabaseAdmin = opts.supabaseAdmin ?? {
+      signOut: vi.fn(async (jwt: string, scope: string) => {
+        order.push('provider signOut');
+        return opts.signOut ? opts.signOut(jwt, scope) : true;
+      }),
+      updateUserPassword: vi.fn(async () => {
+        order.push('provider updateUserPassword');
+      }),
+    };
+    const auth = { getUserFromToken: vi.fn(async () => ({ id: USER, email: 'cr2@example.com' })) };
+    const policy = { validate: vi.fn(async () => undefined) };
+    const passwordSvc = new IdentityPasswordService(supabaseAdmin as never, auth as never, policy as never);
+    const unused = {} as never;
+    const ctrl = new IdentityController(
+      unused,
+      unused,
+      unused,
+      signupSvc as never,
+      authSec as never,
+      passwordSvc,
+      { client: {} } as never,
+      supabaseAdmin as never,
+      redis as never,
+    );
+    const req = (bearer?: string) =>
+      ({
+        ip: '127.0.0.1',
+        headers: bearer === undefined ? {} : { authorization: `Bearer ${bearer}` },
+        socket: {},
+      }) as unknown as Request;
+    const user = { id: USER, email: 'cr2@example.com' } as never;
+    return {
+      ctrl,
+      req,
+      user,
+      supabaseAdmin: supabaseAdmin as { signOut: ReturnType<typeof vi.fn> },
+      audit,
+      order,
+      redis,
+    };
+  }
+
+  const auditOf = (audit: ReturnType<typeof vi.fn>, event: string) =>
+    audit.mock.calls.map((c) => c[0] as Record<string, unknown>).filter((e) => e.event === event);
+
+  describe('POST /identity/logout', () => {
+    it("passes the caller's bearer access token — not the user id — to signOut with scope 'global'", async () => {
+      const h = harness();
+      const token = accessJwt();
+      await expect(h.ctrl.logout(h.user, h.req(token))).resolves.toEqual({ status: 'logged_out' });
+      expect(h.supabaseAdmin.signOut).toHaveBeenCalledTimes(1);
+      expect(h.supabaseAdmin.signOut).toHaveBeenCalledWith(token, 'global');
+      expect(h.supabaseAdmin.signOut).not.toHaveBeenCalledWith(USER, expect.anything());
+      expect(auditOf(h.audit, 'logout')).toEqual([expect.objectContaining({ outcome: 'success', reason: undefined })]);
+    });
+
+    it('writes the local revocation (the R0-ID-F3 marker, then the admin cutoff) BEFORE asking the provider', async () => {
+      const h = harness();
+      await h.ctrl.logout(h.user, h.req(accessJwt()));
+      expect(h.order).toEqual([`setex auth:revoked:user:${USER}`, `set admin:user:${USER}:revokedAt`, 'provider signOut']);
+    });
+
+    it('a provider sign-out that fails (false, or a throw) is logged and named in the audit row, never thrown past the local revocation', async () => {
+      const failures = [
+        async () => false,
+        async () => {
+          throw new Error('supabase timeout');
+        },
+      ];
+      for (const signOut of failures) {
+        const h = harness({ signOut });
+        await expect(h.ctrl.logout(h.user, h.req(accessJwt()))).resolves.toEqual({ status: 'logged_out' });
+        expect(h.redis.store.get(`auth:revoked:user:${USER}`), 'marker written').toMatch(/^\d+$/);
+        expect(auditOf(h.audit, 'logout')).toEqual([
+          expect.objectContaining({ outcome: 'success', reason: 'revocation_incomplete: provider_signout' }),
+        ]);
+      }
+    });
+
+    it('an admin local-auth token is never forwarded to Supabase; the provider leg is named as not done', async () => {
+      const h = harness();
+      const adminLike = `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, type: 'admin', jti: 'j' })}.c2ln`;
+      await expect(h.ctrl.logout(h.user, h.req(adminLike))).resolves.toEqual({ status: 'logged_out' });
+      expect(h.supabaseAdmin.signOut).not.toHaveBeenCalled();
+      expect(h.redis.store.get(`auth:revoked:user:${USER}`)).toMatch(/^\d+$/);
+      expect(auditOf(h.audit, 'logout')).toEqual([
+        expect.objectContaining({ outcome: 'success', reason: 'revocation_incomplete: provider_signout' }),
+      ]);
+    });
+
+    it("end to end through the real SupabaseAdminService and the installed auth-js: GoTrue receives POST /logout?scope=global bearing the caller's JWT (recording fetch, no provider traffic)", async () => {
+      const calls: Array<{ url: string; authorization: string | null }> = [];
+      const svc = new SupabaseAdminService();
+      (svc as unknown as { client: unknown }).client = createClient('http://supabase.cr2.test', 'service-role-key-cr2', {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: {
+          fetch: (async (input: unknown, init?: { headers?: unknown }) => {
+            calls.push({
+              url: String(input),
+              authorization: new Headers(init?.headers as Record<string, string>).get('authorization'),
+            });
+            return new Response(null, { status: 204 });
+          }) as unknown as typeof fetch,
+        },
+      });
+      const h = harness({ supabaseAdmin: svc });
+      const token = accessJwt();
+      await h.ctrl.logout(h.user, h.req(token));
+      expect(calls).toEqual([{ url: 'http://supabase.cr2.test/auth/v1/logout?scope=global', authorization: `Bearer ${token}` }]);
+      expect(auditOf(h.audit, 'logout')).toEqual([expect.objectContaining({ outcome: 'success', reason: undefined })]);
+    });
+  });
+
+  describe('POST /identity/change-password', () => {
+    const body = { currentPassword: 'OldButValid2026!', newPassword: 'BrandNewOne2026!' } as never;
+
+    it("revokes the OTHER sessions with the caller's own bearer JWT (scope 'others' keeps that JWT's session)", async () => {
+      const h = harness();
+      const token = accessJwt();
+      await h.ctrl.changePassword(body, h.user, h.req(token));
+      expect(h.supabaseAdmin.signOut).toHaveBeenCalledWith(token, 'others');
+      expect(h.supabaseAdmin.signOut).not.toHaveBeenCalledWith(USER, expect.anything());
+      expect(auditOf(h.audit, 'password_changed')).toEqual([expect.objectContaining({ outcome: 'success', reason: undefined })]);
+    });
+
+    it('a failed provider sign-out is named in the success audit row, not thrown', async () => {
+      const h = harness({ signOut: async () => false });
+      await expect(h.ctrl.changePassword(body, h.user, h.req(accessJwt()))).resolves.toMatchObject({ status: 'ok' });
+      expect(auditOf(h.audit, 'password_changed')).toEqual([
+        expect.objectContaining({ outcome: 'success', reason: 'revocation_incomplete: provider_signout' }),
+      ]);
+    });
+  });
+
+  describe('POST /identity/reset-password', () => {
+    it("revokes every session with the recovery link's access token (the JWT the caller presents), scope 'global'", async () => {
+      const h = harness();
+      const recoveryToken = accessJwt({ amr: [{ method: 'recovery', timestamp: 1 }] });
+      await h.ctrl.resetPassword({ accessToken: recoveryToken, password: 'CorrectHorseBattery9!' } as never, h.req());
+      expect(h.supabaseAdmin.signOut).toHaveBeenCalledWith(recoveryToken, 'global');
+      expect(h.supabaseAdmin.signOut).not.toHaveBeenCalledWith(USER, expect.anything());
+      expect(auditOf(h.audit, 'password_reset_completed')).toEqual([
+        expect.objectContaining({ outcome: 'success', reason: undefined }),
+      ]);
+    });
+
+    it('a failed provider sign-out is named in the success audit row, not thrown', async () => {
+      const h = harness({
+        signOut: async () => {
+          throw new Error('supabase timeout');
+        },
+      });
+      await expect(
+        h.ctrl.resetPassword({ accessToken: accessJwt(), password: 'CorrectHorseBattery9!' } as never, h.req()),
+      ).resolves.toMatchObject({ status: 'ok' });
+      expect(auditOf(h.audit, 'password_reset_completed')).toEqual([
+        expect.objectContaining({ outcome: 'success', reason: 'revocation_incomplete: provider_signout' }),
+      ]);
+    });
   });
 });

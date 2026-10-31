@@ -112,10 +112,27 @@ describe('password recovery — completing', () => {
   });
 
   it('signs out every other session after a successful reset', async () => {
+    // CR-2 (R0-ID-F4): auth-js admin.signOut(jwt, scope) revokes the sessions of
+    // the user the JWT belongs to. The recovery link's access token IS that JWT;
+    // the user id (what this asserted before) never revoked anything.
     const { svc, admin } = build();
     await svc.completeReset('good-token', 'CorrectHorseBattery9!');
     expect(admin.updateUserPassword).toHaveBeenCalledWith('u1', 'CorrectHorseBattery9!');
-    expect(admin.signOut).toHaveBeenCalledWith('u1', 'global');
+    expect(admin.signOut).toHaveBeenCalledWith('good-token', 'global');
+    expect(admin.signOut).not.toHaveBeenCalledWith('u1', expect.anything());
+  });
+
+  it('reports whether the provider sign-out held, so the caller can audit it', async () => {
+    await expect(build().svc.completeReset('good-token', 'CorrectHorseBattery9!')).resolves.toEqual({
+      userId: 'u1',
+      email: 'person@example.com',
+      providerSignedOut: true,
+    });
+    // SupabaseAdminService.signOut reports failure by resolving false.
+    const failing = build({ admin: { signOut: vi.fn(async () => false) } });
+    await expect(failing.svc.completeReset('good-token', 'CorrectHorseBattery9!')).resolves.toMatchObject({
+      providerSignedOut: false,
+    });
   });
 
   it('still reports success when the sign-out sweep fails', async () => {
@@ -127,6 +144,7 @@ describe('password recovery — completing', () => {
     });
     await expect(svc.completeReset('good-token', 'CorrectHorseBattery9!')).resolves.toMatchObject({
       userId: 'u1',
+      providerSignedOut: false,
     });
   });
 });
@@ -169,6 +187,8 @@ describe('changing a password while signed in', () => {
     email: 'person@example.com',
     currentPassword: 'OldButValid2026!',
     newPassword: 'BrandNewOne2026!',
+    /** The caller's own bearer access token (the session that stays signed in). */
+    accessToken: 'callers-access-jwt',
   };
 
   it('re-authenticates BEFORE running the policy', async () => {
@@ -241,9 +261,26 @@ describe('changing a password while signed in', () => {
     // their password — bouncing them to the login screen for good hygiene.
     // Recovery uses 'global' because there the current session is the suspect;
     // here it is the trusted one.
+    //
+    // CR-2 (R0-ID-F4): 'others' keeps the session named by the JWT passed to
+    // auth-js admin.signOut, so it must be the CALLER's access token. With the
+    // user id (what this asserted before) there is no session to keep and
+    // nothing was revoked at all.
     const { svc, admin } = build();
-    await svc.changePassword({ ...base, verifyCurrent: vi.fn(async () => undefined) });
-    expect(admin.signOut).toHaveBeenCalledWith('u1', 'others');
+    await expect(
+      svc.changePassword({ ...base, verifyCurrent: vi.fn(async () => undefined) }),
+    ).resolves.toEqual({ providerSignedOut: true });
+    expect(admin.signOut).toHaveBeenCalledWith('callers-access-jwt', 'others');
+    expect(admin.signOut).not.toHaveBeenCalledWith('u1', expect.anything());
+  });
+
+  it('does not ask the provider when the caller presented no Supabase access token, and reports the sweep as not done', async () => {
+    const { svc, admin } = build();
+    await expect(
+      svc.changePassword({ ...base, accessToken: null, verifyCurrent: vi.fn(async () => undefined) }),
+    ).resolves.toEqual({ providerSignedOut: false });
+    expect(admin.updateUserPassword).toHaveBeenCalledWith('u1', base.newPassword);
+    expect(admin.signOut).not.toHaveBeenCalled();
   });
 
   it('still succeeds when the sign-out sweep fails', async () => {
@@ -254,6 +291,11 @@ describe('changing a password while signed in', () => {
     });
     await expect(
       svc.changePassword({ ...base, verifyCurrent: vi.fn(async () => undefined) }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ providerSignedOut: false });
+    // SupabaseAdminService.signOut reports failure by resolving false.
+    const failing = build({ admin: { signOut: vi.fn(async () => false) } });
+    await expect(
+      failing.svc.changePassword({ ...base, verifyCurrent: vi.fn(async () => undefined) }),
+    ).resolves.toEqual({ providerSignedOut: false });
   });
 });
