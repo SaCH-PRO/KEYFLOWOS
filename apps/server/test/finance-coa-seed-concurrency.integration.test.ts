@@ -22,6 +22,12 @@
  * is not the claim under test. The HTTP 201 form of the same claim stays in
  * the journey harness, whose D1 case the integrator flips.
  *
+ * The tenant-isolation extension is wired the way main.ts wires it: the
+ * AsyncLocalStorage tenant (src/core/tenant/tenant-context) is the provider,
+ * so a case run inside `runWithTenant` has every where.businessId and
+ * create.businessId rewritten to that tenant, and every other case (no ALS
+ * tenant) runs unscoped exactly as before.
+ *
  * Every row has the `fcs_` prefix and is hard-deleted by raw SQL in
  * beforeAll and afterAll. No $transaction wrapping of the cases themselves:
  * the seeder writes with the plain client on purpose (its seed must commit
@@ -45,11 +51,16 @@ const ID = {
   bizCross: `${P}bizCross`, // two seeder instances (two server replicas), one business
   bizPay: `${P}bizPay`,     // first manual payment on a fresh tenant
   bizIdem: `${P}bizIdem`,   // repeated ensureDefaults after a concurrent seed
+  bizLegit: `${P}bizLegit`, // ST-1: the tenant a legitimate caller asks for, under its own context
+  bizOther: `${P}bizOther`, // ST-1: the active tenant of a caller whose argument names bizLegit
   contact: `${P}contact`,
   invoice: `${P}invoice`,
 };
+const FRESH_BUSINESSES = [ID.bizRace, ID.bizCross, ID.bizPay, ID.bizIdem, ID.bizLegit, ID.bizOther];
 
 let db: any;
+let setTenantContextProvider: (p: { getCurrentBusinessId: () => string | undefined }) => void;
+let runWithTenant: <T>(businessId: string, userId: string, fn: () => T) => T;
 let prisma: any;
 let SYSTEM_COA: Array<{ systemKey: string; parentSystemKey?: string }>;
 let ChartOfAccountsSeederService: any;
@@ -102,6 +113,12 @@ function expectOneFullSet(coa: Awaited<ReturnType<typeof coaOf>>) {
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
+  setTenantContextProvider = dbMod.setTenantContextProvider;
+
+  // Same wiring as src/main.ts: the ALS tenant drives the db extension.
+  const tenantMod = await import('../src/core/tenant/tenant-context');
+  runWithTenant = tenantMod.runWithTenant;
+  setTenantContextProvider({ getCurrentBusinessId: tenantMod.getCurrentBusinessId });
 
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const seederMod = await import('../src/modules/finance/chart-of-accounts-seeder.service');
@@ -116,7 +133,7 @@ beforeAll(async () => {
   await cleanup(); // in case a prior run aborted
 
   await db.user.create({ data: { id: ID.owner, email: `${ID.owner}@test.local`, role: 'USER' } });
-  for (const id of [ID.bizRace, ID.bizCross, ID.bizPay, ID.bizIdem]) {
+  for (const id of FRESH_BUSINESSES) {
     await db.business.create({ data: { id, name: id, ownerId: ID.owner } });
   }
   await db.contact.create({ data: { id: ID.contact, businessId: ID.bizPay, firstName: 'Fcs', visibility: 'TEAM' } });
@@ -137,14 +154,39 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (db) await cleanup();
+  if (setTenantContextProvider) setTenantContextProvider({ getCurrentBusinessId: () => undefined });
 });
 
 describe('fixture sanity (real rows)', () => {
   it('every business under test is fresh: no chart of accounts yet', async () => {
-    for (const id of [ID.bizRace, ID.bizCross, ID.bizPay, ID.bizIdem]) {
+    for (const id of FRESH_BUSINESSES) {
       expect(await db.chartOfAccount.count({ where: { businessId: id } }), id).toBe(0);
     }
     expect(await db.payment.count({ where: { businessId: ID.bizPay } })).toBe(0);
+  });
+
+  it('the tenant extension is live: under an active tenant a count for another business is rewritten to it', async () => {
+    // Guards the ST-1 case below: without the extension live, a run started
+    // under another tenant's context would seed the argument's tenant and the
+    // case would pass on any seeder.
+    await db.chartOfAccount.create({ data: { businessId: ID.bizOther, name: 'fcs probe', type: 'ASSET', isSystem: false } });
+    let unscoped: number;
+    let scoped: number;
+    try {
+      unscoped = await db.chartOfAccount.count({ where: { businessId: ID.bizOther } });
+      // Await INSIDE the tenant scope: a Prisma query is a lazy thenable that
+      // executes on `then`, so one handed out of the scope un-awaited would run
+      // unscoped. The seeder's own queries are awaited inside its async bodies.
+      scoped = await runWithTenant(ID.bizLegit, ID.owner, async () => {
+        const n: number = await db.chartOfAccount.count({ where: { businessId: ID.bizOther } });
+        return n;
+      });
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM chart_of_accounts WHERE business_id = '${ID.bizOther}'`);
+    }
+    expect(unscoped).toBe(1);
+    expect(scoped).toBe(0);
+    expect(await db.chartOfAccount.count({ where: { businessId: ID.bizOther } })).toBe(0);
   });
 });
 
@@ -192,6 +234,30 @@ describe('concurrent first-run seeding of one business', () => {
     expect(after.rows.map((r) => r.id).sort()).toEqual(before.rows.map((r) => r.id).sort());
     expect(after.rows.map((r) => `${r.systemKey}:${r.parentId}`).sort())
       .toEqual(before.rows.map((r) => `${r.systemKey}:${r.parentId}`).sort());
+  }, 30_000);
+});
+
+describe('in-flight run keyed by the effective tenant (review ST-1)', () => {
+  it('a caller whose active tenant differs from its businessId argument seeds its active tenant and never pins a legitimate same-tenant caller to that run: the legitimate caller gets its own rows', async () => {
+    const seeder = new ChartOfAccountsSeederService(prisma);
+
+    // Under bizOther's context the extension rewrites every where.businessId
+    // and create.businessId to bizOther, so this run seeds bizOther whatever
+    // its argument says. Its argument is bizLegit.
+    const mismatched = runWithTenant(ID.bizOther, ID.owner, () => seeder.ensureDefaults(ID.bizLegit));
+    // A legitimate request for bizLegit arrives while that run is in flight.
+    // On the packet it joined the run (same argument key), re-read under its
+    // own context, got null, and resolveCoa would have thrown 'missing COA'.
+    const legit = runWithTenant(ID.bizLegit, ID.owner, () => seeder.getBySystemKey(ID.bizLegit, 'CASH'));
+
+    const [m, l] = await Promise.allSettled([mismatched, legit]);
+    expect(m.status).toBe('fulfilled');
+    expect(l.status).toBe('fulfilled');
+    const cash = l.status === 'fulfilled' ? l.value : null;
+    expect(cash?.systemKey).toBe('CASH');
+    expect(cash?.businessId).toBe(ID.bizLegit);
+    expectOneFullSet(await coaOf(ID.bizLegit));
+    expectOneFullSet(await coaOf(ID.bizOther));
   }, 30_000);
 });
 

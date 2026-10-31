@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { getCurrentBusinessId } from '../../core/tenant/tenant-context';
 
 export interface CoaSeed {
   systemKey: string;
@@ -89,11 +90,19 @@ function isUniqueViolation(err: unknown): boolean {
 @Injectable()
 export class ChartOfAccountsSeederService {
   /**
-   * First-run seeding in flight, keyed by businessId. Concurrent callers in
-   * this process (e.g. the deposit and credit lookups of one payment
-   * posting) await the same run instead of racing each other into P2002 on
-   * the (businessId, systemKey) unique index. An entry is removed when its
-   * run settles, so a failed run is retried by the next caller, not pinned.
+   * System-account seeding in flight, keyed by the tenant the run's queries
+   * execute under: the active AsyncLocalStorage tenant when there is one (the
+   * `@keyflow/db` extension rewrites every `where.businessId` and
+   * `create.businessId` to it), else the businessId argument. Keying on the
+   * argument alone would let a run started under another tenant's context be
+   * joined by a legitimate caller for the argument's tenant, which would then
+   * re-read under its own context and find nothing seeded.
+   *
+   * Concurrent callers in this process (e.g. the deposit and credit lookups
+   * of one payment posting) await the same run instead of racing each other
+   * into P2002 on the (businessId, systemKey) unique index. An entry is
+   * removed when its run settles, so a failed run is retried by the next
+   * caller, not pinned.
    */
   private readonly inFlight = new Map<string, Promise<void>>();
 
@@ -101,24 +110,31 @@ export class ChartOfAccountsSeederService {
 
   /**
    * Idempotently ensure the system Chart of Accounts exists for the given
-   * business. Safe to call on every read of `/finance/accounts` — uses
-   * the (businessId, systemKey) unique index so re-runs are no-ops, and
-   * serializes concurrent calls per business so a first run is never
-   * raced by a second one.
+   * business and every ExpenseCategory is linked to its bucket. Safe to call
+   * on every read of `/finance/accounts` — uses the (businessId, systemKey)
+   * unique index so re-runs are no-ops, and serializes concurrent seeding per
+   * tenant so a first run is never raced by a second one.
+   *
+   * Only the seed is shared between concurrent callers. The link pass runs
+   * for every caller after it, so a category committed after a shared run
+   * took its scan is still linked when this call resolves — callers such as
+   * ExpensePostingService re-read `chartOfAccountId` right after this.
    */
   async ensureDefaults(businessId: string): Promise<void> {
-    const running = this.inFlight.get(businessId);
-    if (running) return running;
-    const run = this.seedAndLink(businessId).finally(() => {
-      if (this.inFlight.get(businessId) === run) this.inFlight.delete(businessId);
-    });
-    this.inFlight.set(businessId, run);
-    return run;
+    await this.seedSystemAccountsOnce(businessId);
+    await this.linkExpenseCategories(businessId);
   }
 
-  private async seedAndLink(businessId: string): Promise<void> {
-    await this.seedSystemAccounts(businessId);
-    await this.linkExpenseCategories(businessId);
+  /** One seed run per tenant at a time; concurrent callers await the same run. */
+  private seedSystemAccountsOnce(businessId: string): Promise<void> {
+    const tenant = getCurrentBusinessId() ?? businessId;
+    const running = this.inFlight.get(tenant);
+    if (running) return running;
+    const run = this.seedSystemAccounts(businessId).finally(() => {
+      if (this.inFlight.get(tenant) === run) this.inFlight.delete(tenant);
+    });
+    this.inFlight.set(tenant, run);
+    return run;
   }
 
   private async seedSystemAccounts(businessId: string): Promise<void> {

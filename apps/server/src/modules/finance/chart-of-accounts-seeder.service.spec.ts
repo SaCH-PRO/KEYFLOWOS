@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 import { ChartOfAccountsSeederService, SYSTEM_COA } from './chart-of-accounts-seeder.service';
+import { getCurrentBusinessId, runWithTenant } from '../../core/tenant/tenant-context';
 
 /**
  * Unit tests for `ChartOfAccountsSeederService` covering:
@@ -10,9 +11,26 @@ import { ChartOfAccountsSeederService, SYSTEM_COA } from './chart-of-accounts-se
  *   - R0-D1-COA-SEED-RACE: concurrent first-run seeding of one business is
  *     serialized per business, and a P2002 from the (businessId, systemKey)
  *     unique index is absorbed as "already seeded" (re-read), never thrown.
+ *   - Review repairs: the in-flight run is keyed by the tenant its queries
+ *     execute under (ST-1), and only the seed is shared — every caller runs
+ *     its own ExpenseCategory link pass (R0D1-CR-1).
  *
- * Uses a hand-rolled in-memory Prisma stub so the test is hermetic.
+ * Uses a hand-rolled in-memory Prisma stub so the test is hermetic. The stub
+ * emulates the `@keyflow/db` tenant-isolation extension for the two scoped
+ * models the seeder touches: while an AsyncLocalStorage tenant is active,
+ * every `where.businessId` is rewritten to it (withTenantWhere), a lookup by
+ * id or compound key additionally requires the row to be in it, and an
+ * upsert's `create.businessId` is forced to it (scopedUpsert). With no tenant
+ * active nothing is rewritten, which is how the pre-existing cases run.
  */
+
+/** The tenant a query executes under: the active ALS tenant, else the one requested. */
+const tenantOf = (requested: string) => getCurrentBusinessId() ?? requested;
+/** Row visibility under the active tenant (every row is visible with none active). */
+const inTenant = (row: { businessId: string }) => {
+  const t = getCurrentBusinessId();
+  return !t || row.businessId === t;
+};
 
 type StubOpts = {
   /**
@@ -31,6 +49,13 @@ type StubOpts = {
   foreignInsertOn?: string[];
   /** The first upsert throws this (non-P2002) error once — a transient fault. */
   failOnceWith?: Error;
+  /**
+   * Called by `expenseCategory.findMany` AFTER it has taken its snapshot and
+   * before it returns it. Returning a promise parks the scan there, which is
+   * the window in which another request can commit a new category that this
+   * scan will never see.
+   */
+  afterExpenseCategoryScan?: () => Promise<void> | void;
 };
 
 function uniqueViolation() {
@@ -74,31 +99,40 @@ function makeStub(
   const client = {
     chartOfAccount: {
       findMany: vi.fn(async (args: any) => {
+        const businessId = tenantOf(args.where.businessId);
         const rows = Array.from(coa.values()).filter(
-          (r) => r.businessId === args.where.businessId && (!args.where.systemKey?.in || args.where.systemKey.in.includes(r.systemKey)),
+          (r) => r.businessId === businessId && (!args.where.systemKey?.in || args.where.systemKey.in.includes(r.systemKey)),
         );
         return rows.map((r) => ({ id: r.id, systemKey: r.systemKey, name: r.name, type: r.type, parentId: r.parentId }));
       }),
       findUnique: vi.fn(async (args: any) => {
-        if (args.where.id) return coa.get(args.where.id) ?? null;
+        if (args.where.id) {
+          const row = coa.get(args.where.id);
+          return row && inTenant(row) ? row : null;
+        }
         const k = args.where.businessId_systemKey;
         if (k) {
-          for (const r of coa.values()) if (r.businessId === k.businessId && r.systemKey === k.systemKey) return r;
+          for (const r of coa.values()) {
+            if (r.businessId === k.businessId && r.systemKey === k.systemKey && inTenant(r)) return r;
+          }
         }
         return null;
       }),
       upsert: vi.fn(async (args: any) => {
         const k = args.where.businessId_systemKey;
+        // scopedUpsert: the SELECT also requires the active tenant, and the
+        // INSERT lands in it whatever `create.businessId` says.
+        const businessId = tenantOf(k.businessId);
         if (opts.failOnceWith && !transientThrown) {
           transientThrown = true;
           throw opts.failOnceWith;
         }
-        const existing = findByKey(k.businessId, k.systemKey);
+        const existing = k.businessId === businessId ? findByKey(businessId, k.systemKey) : null;
         if (existing) return existing;
         if (opts.foreignInsertOn?.includes(k.systemKey) && !foreignDone.has(k.systemKey)) {
           // Another process won the INSERT between our SELECT and INSERT.
           foreignDone.add(k.systemKey);
-          insert(args.create);
+          insert({ ...args.create, businessId });
           p2002Thrown += 1;
           throw uniqueViolation();
         }
@@ -106,28 +140,32 @@ function makeStub(
           // Prisma's non-native upsert: SELECT ... then INSERT, with the event
           // loop free in between for a concurrent run to land the same key.
           await new Promise((r) => setImmediate(r));
-          if (findByKey(k.businessId, k.systemKey)) {
-            p2002Thrown += 1;
-            throw uniqueViolation();
-          }
         }
-        return insert(args.create);
+        // The INSERT meets the (businessId, systemKey) unique index.
+        if (findByKey(businessId, k.systemKey)) {
+          p2002Thrown += 1;
+          throw uniqueViolation();
+        }
+        return insert({ ...args.create, businessId });
       }),
       update: vi.fn(async (args: any) => {
         const row = coa.get(args.where.id);
-        if (row) Object.assign(row, args.data);
+        if (row && inTenant(row)) Object.assign(row, args.data);
         return row;
       }),
     },
     expenseCategory: {
       findMany: vi.fn(async (args: any) => {
-        return Array.from(expenseCategories.values()).filter(
-          (c) => c.businessId === args.where.businessId && (args.where.chartOfAccountId === null ? c.chartOfAccountId === null : true),
+        const businessId = tenantOf(args.where.businessId);
+        const snapshot = Array.from(expenseCategories.values()).filter(
+          (c) => c.businessId === businessId && (args.where.chartOfAccountId === null ? c.chartOfAccountId === null : true),
         );
+        if (opts.afterExpenseCategoryScan) await opts.afterExpenseCategoryScan();
+        return snapshot;
       }),
       update: vi.fn(async (args: any) => {
         const row = expenseCategories.get(args.where.id);
-        if (row) Object.assign(row, args.data);
+        if (row && inTenant(row)) Object.assign(row, args.data);
         return row;
       }),
     },
@@ -320,5 +358,86 @@ describe('ChartOfAccountsSeederService concurrency (R0-D1-COA-SEED-RACE)', () =>
     expect(rowsOf(stub, 'biz_1').size).toBe(SYSTEM_COA.length);
     expect(rowsOf(stub, 'biz_2').size).toBe(SYSTEM_COA.length);
     expect(stub.state.callCount).toBe(2 * SYSTEM_COA.length);
+  });
+});
+
+describe('ChartOfAccountsSeederService in-flight key is the effective tenant (review ST-1)', () => {
+  // Every query of a run executes under the AsyncLocalStorage tenant of the
+  // caller that started it: the @keyflow/db extension rewrites where.businessId
+  // and create.businessId to that tenant. A run keyed by the businessId
+  // ARGUMENT while seeding the ALS tenant would be joined by a legitimate
+  // same-tenant caller, which then re-reads under its own (correct) context,
+  // finds nothing, and RevenuePostingService.resolveCoa throws 'missing COA'.
+
+  it('a caller whose active tenant differs from its argument seeds its active tenant and never pins a legitimate same-tenant caller to that run', async () => {
+    const stub = makeStub();
+    const svc = new ChartOfAccountsSeederService(stub.prisma);
+
+    // Under tenant G's context this run seeds G whatever its argument says...
+    const mismatched = runWithTenant('biz_G', 'u_1', () => svc.ensureDefaults('biz_F'));
+    // ...and a legitimate request for F arriving in that window must not join it.
+    const legit = runWithTenant('biz_F', 'u_1', () => svc.getBySystemKey('biz_F', 'CASH'));
+
+    const [m, cash] = await Promise.allSettled([mismatched, legit]);
+    expect(m.status).toBe('fulfilled');
+    expect(cash.status).toBe('fulfilled');
+    const row = cash.status === 'fulfilled' ? cash.value : null;
+    expect(row?.systemKey).toBe('CASH');
+    expect(row?.businessId).toBe('biz_F');
+    expect(rowsOf(stub, 'biz_F').size).toBe(SYSTEM_COA.length);
+    expect(rowsOf(stub, 'biz_G').size).toBe(SYSTEM_COA.length);
+  });
+
+  it('two legitimate callers under the same active tenant (the HTTP shape) still share one in-flight seed', async () => {
+    const stub = makeStub([], { raceUniqueIndex: true });
+    const svc = new ChartOfAccountsSeederService(stub.prisma);
+
+    await Promise.all([
+      runWithTenant('biz_1', 'u_1', () => svc.ensureDefaults('biz_1')),
+      runWithTenant('biz_1', 'u_2', () => svc.ensureDefaults('biz_1')),
+    ]);
+
+    expect(rowsOf(stub, 'biz_1').size).toBe(SYSTEM_COA.length);
+    expect(stub.state.callCount).toBe(SYSTEM_COA.length);
+    expect(stub.state.p2002Thrown).toBe(0);
+  });
+});
+
+describe('ChartOfAccountsSeederService every caller runs its own ExpenseCategory link pass (review R0D1-CR-1)', () => {
+  // ExpensePostingService.resolveExpenseCoa calls ensureDefaults() precisely
+  // to get a just-created category linked, then re-reads chartOfAccountId. A
+  // caller handed another caller's whole run (seed + link) would resolve with
+  // a link scan taken BEFORE its category was committed, read null, and post
+  // the expense to EXPENSE_OTHER instead of the pattern-matched bucket.
+
+  it('a category committed after an in-flight run took its scan is linked when a joining caller resolves', async () => {
+    let parkScan: (() => Promise<void>) | null = null;
+    const stub = makeStub([], { afterExpenseCategoryScan: () => parkScan?.() });
+    const svc = new ChartOfAccountsSeederService(stub.prisma);
+    await svc.ensureDefaults('biz_1'); // seeded steady state, scan not parked
+
+    // Request A: its run takes an (empty) scan and is parked right after it.
+    let reached!: () => void;
+    let release!: () => void;
+    const scanReached = new Promise<void>((r) => { reached = r; });
+    const scanReleased = new Promise<void>((r) => { release = r; });
+    parkScan = () => {
+      parkScan = null;
+      reached();
+      return scanReleased;
+    };
+    const a = svc.ensureDefaults('biz_1');
+    await scanReached;
+
+    // Request B commits a new category after A's scan and calls
+    // ensureDefaults() to get it linked.
+    stub.state.expenseCategories.set('ec_new', { id: 'ec_new', name: 'Marketing & Ads', businessId: 'biz_1', chartOfAccountId: null });
+    const b = svc.ensureDefaults('biz_1');
+
+    release();
+    await Promise.all([a, b]);
+
+    const marketingId = rowsOf(stub, 'biz_1').get('EXPENSE_MARKETING')!.id;
+    expect(stub.state.expenseCategories.get('ec_new')!.chartOfAccountId).toBe(marketingId);
   });
 });
