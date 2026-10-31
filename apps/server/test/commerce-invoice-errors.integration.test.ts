@@ -48,6 +48,18 @@
  * the real ledger chain (RevenuePostingService, PostingService,
  * ChartOfAccountsSeederService); the payment hooks stay recorders.
  *
+ * R0-27 review repairs (RR27-*) pinned here as well:
+ *   RR27-QUOTE   quote create/update and quote convert resolve the contact
+ *                inside the tenant (ST-27-2): the second path to an Invoice
+ *   RR27-DISC    a FIXED discount above the subtotal is a 400 on create,
+ *                update and convert, so no invoice total is negative and an
+ *                issued invoice always posts its AR (ST-27-3)
+ *   RR27-BOUND   quantity above int4, a price or a computed amount above the
+ *                numeric(18,4) ledger bound (or not finite) is a 400, never a
+ *                500 (ST-27-4 / R27-CR-1)
+ *   todo         ST-27-1 (recurring invoices) and ST-27-5 (CRM visibility on
+ *                the bound contact) are recorded as it.todo with the reason.
+ *
  * Fixtures: prefix `cie_`; hard-deleted by raw SQL in dependency order in
  * beforeAll and afterAll; no $transaction wrapping.
  */
@@ -158,6 +170,9 @@ async function cleanup() {
     `DELETE FROM payment_links WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE '${P}%'`,
     `DELETE FROM invoices WHERE business_id LIKE '${P}%'`,
+    // R0-27 review repairs: quotes (quote_items cascade). After invoices
+    // (invoices.quote_id references quotes), before contacts.
+    `DELETE FROM quotes WHERE business_id LIKE '${P}%'`,
     `DELETE FROM products WHERE business_id LIKE '${P}%'`,
     `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
     `DELETE FROM memberships WHERE business_id LIKE '${P}%' OR user_id LIKE '${P}%'`,
@@ -958,4 +973,269 @@ describe('R0-27: POST /commerce/businesses/:businessId/invoices create contract 
     expect(inv.contact).toMatchObject({ id: ID.contactB });
     expect(await invoicePostings(inv.id)).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// R0-27 review repairs (real rows). Each case names the finding it closes.
+// ---------------------------------------------------------------------------
+describe('R0-27 review repairs (real rows)', () => {
+  const MAX_QTY = 2147483647;
+  const MAX_AMOUNT = 99999999999999;
+  const Q = {
+    legacyForeignB: `${P}qLegacyForeignB`,
+    ownAcceptedB: `${P}qOwnAcceptedB`,
+  };
+  const line = (over: Record<string, unknown> = {}) => ({ description: 'CIE line', quantity: 1, unitPrice: 10, ...over });
+  const createInvoice = (actor: string, biz: string, body: Record<string, unknown>) =>
+    as(actor, agent().post(`/commerce/businesses/${biz}/invoices`)).send(body);
+  const issue = (actor: string, biz: string, inv: string) =>
+    as(actor, agent().patch(`/commerce/invoices/${inv}/status/sent`)).send({ businessId: biz, status: 'SENT' });
+  const quoteRoutes = {
+    create: (biz: string) => `/commerce/businesses/${biz}/quotes`,
+    update: (biz: string, q: string) => `/commerce/businesses/${biz}/quotes/${q}`,
+    convert: (biz: string, q: string) => `/commerce/businesses/${biz}/quotes/${q}/convert`,
+  };
+
+  async function count(sql: string): Promise<number> {
+    const rows: Array<{ n: number }> = await db.$queryRawUnsafe(sql);
+    return rows[0].n;
+  }
+
+  /** Every row a create, edit or convert could write for one tenant. */
+  async function writes(biz: string) {
+    return {
+      invoices: await count(`SELECT count(*)::int AS n FROM invoices WHERE business_id = '${biz}'`),
+      invoiceItems: await count(`SELECT count(*)::int AS n FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.business_id = '${biz}'`),
+      quotes: await count(`SELECT count(*)::int AS n FROM quotes WHERE business_id = '${biz}'`),
+      transactions: await count(`SELECT count(*)::int AS n FROM financial_transactions WHERE business_id = '${biz}'`),
+    };
+  }
+
+  /** Invoices and quotes bound to one contact, in any tenant. */
+  async function linked(contactId: string) {
+    return {
+      invoices: await count(`SELECT count(*)::int AS n FROM invoices WHERE contact_id = '${contactId}'`),
+      quotes: await count(`SELECT count(*)::int AS n FROM quotes WHERE contact_id = '${contactId}'`),
+    };
+  }
+
+  async function invoicePostings(invoiceId: string): Promise<Array<{ external_ref: string; amount: number }>> {
+    return db.$queryRawUnsafe(
+      `SELECT external_ref, amount::float8 AS amount FROM financial_transactions WHERE source_type = 'Invoice' AND source_id = '${invoiceId}' ORDER BY created_at`,
+    );
+  }
+
+  async function quoteRow(id: string): Promise<{ contact_id: string; invoice_id: string | null }> {
+    const rows: Array<{ contact_id: string; invoice_id: string | null }> =
+      await db.$queryRawUnsafe(`SELECT contact_id, invoice_id FROM quotes WHERE id = '${id}'`);
+    expect(rows).toHaveLength(1);
+    return rows[0];
+  }
+
+  /** An ACCEPTED, unconverted quote written straight to the table (the shape a pre-repair row can have). */
+  async function seedAcceptedQuote(id: string, biz: string, contactId: string) {
+    await db.quote.create({
+      data: {
+        id, businessId: biz, contactId, quoteNumber: `CIE-${id}`, status: 'ACCEPTED', subtotal: 20, total: 20, currency: 'TTD',
+        items: { create: [{ description: 'CIE quoted line', quantity: 2, unitPrice: 10, total: 20 }] },
+      },
+    });
+  }
+
+  function expectNothingOfContactA(body: unknown) {
+    const text = JSON.stringify(body);
+    expect(text).not.toContain('CustomerA');
+    expect(text).not.toContain(`${P}a@test.local`);
+    expect(text).not.toContain(ID.bizA);
+  }
+
+  // ---- ST-27-2: the quote path to an Invoice -------------------------------
+
+  it("RR27-QUOTE create (ST-27-2): a foreign, unknown or own soft-deleted contactId on bizB's quote path -> one 404 'Contact not found'; no quote row, no event, nothing of A's contact in the body", async () => {
+    const before = await writes(ID.bizB);
+    const linkedA = await linked(ID.contactA);
+    for (const contactId of [ID.contactA, `${P}no_such_contact`, ID.contactGoneB]) {
+      const res = await as(ID.ownerB, agent().post(quoteRoutes.create(ID.bizB))).send({ contactId, items: [line()] });
+      expect(res.status, contactId).toBe(404);
+      expectErrorEnvelope(res.body, 404, 'NOT_FOUND', 'Contact not found');
+      expectNothingOfContactA(res.body);
+    }
+    expect(await writes(ID.bizB)).toEqual(before);
+    expect(await linked(ID.contactA)).toEqual(linkedA);
+    expect(await linked(ID.contactGoneB)).toEqual({ invoices: 0, quotes: 0 });
+    expect(recordedEvents.filter((e) => e.name === 'quote.created')).toEqual([]);
+    expect(crmCalls).toEqual([]);
+  });
+
+  it("RR27-QUOTE update (ST-27-2): PATCH a quote's contactId to bizA's contact -> 404 and the quote keeps its own contact; the own-tenant create and re-bind are the controls", async () => {
+    const created = await as(ID.ownerB, agent().post(quoteRoutes.create(ID.bizB))).send({ contactId: ID.contactB, items: [line({ quantity: 2 })] });
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ businessId: ID.bizB, contactId: ID.contactB, status: 'DRAFT', total: 20 });
+    expect(created.body.contact).toMatchObject({ id: ID.contactB, businessId: ID.bizB });
+    const id = created.body.id as string;
+
+    const linkedA = await linked(ID.contactA);
+    const refused = await as(ID.ownerB, agent().patch(quoteRoutes.update(ID.bizB, id))).send({ contactId: ID.contactA });
+    expect(refused.status).toBe(404);
+    expectErrorEnvelope(refused.body, 404, 'NOT_FOUND', 'Contact not found');
+    expectNothingOfContactA(refused.body);
+    expect((await quoteRow(id)).contact_id).toBe(ID.contactB);
+    expect(await linked(ID.contactA)).toEqual(linkedA);
+    expect(recordedEvents.filter((e) => e.name === 'quote.updated')).toEqual([]);
+
+    const ok = await as(ID.ownerB, agent().patch(quoteRoutes.update(ID.bizB, id))).send({ contactId: ID.contactB });
+    expect(ok.status).toBe(200);
+    expect((await quoteRow(id)).contact_id).toBe(ID.contactB);
+  });
+
+  it('RR27-QUOTE convert (ST-27-2): an ACCEPTED quote that already holds a foreign contact is not converted: 404, no Invoice (no row bound to A\'s contact), the quote stays unconverted, no event', async () => {
+    await seedAcceptedQuote(Q.legacyForeignB, ID.bizB, ID.contactA);
+    const before = await writes(ID.bizB);
+    const linkedA = await linked(ID.contactA);
+    const res = await as(ID.ownerB, agent().post(quoteRoutes.convert(ID.bizB, Q.legacyForeignB))).send({});
+    expect(res.status).toBe(404);
+    expectErrorEnvelope(res.body, 404, 'NOT_FOUND', 'Contact not found');
+    expectNothingOfContactA(res.body);
+    expect(await writes(ID.bizB)).toEqual(before);
+    expect(await linked(ID.contactA)).toEqual(linkedA);
+    expect(await count(`SELECT count(*)::int AS n FROM invoices WHERE business_id = '${ID.bizB}' AND contact_id = '${ID.contactA}'`)).toBe(0);
+    expect((await quoteRow(Q.legacyForeignB)).invoice_id).toBeNull();
+    expect(recordedEvents.filter((e) => e.name === 'invoice.created' || e.name === 'quote.converted')).toEqual([]);
+    expect(crmCalls).toEqual([]);
+  });
+
+  // ---- ST-27-3: a FIXED discount above the subtotal --------------------------
+
+  it('RR27-DISC convert (ST-27-3) and RR27-QUOTE convert (control): an own ACCEPTED quote with a FIXED discount above its subtotal -> 400; without it -> 201, one Invoice bound to the own contact', async () => {
+    await seedAcceptedQuote(Q.ownAcceptedB, ID.bizB, ID.contactB);
+    const before = await writes(ID.bizB);
+    const refused = await as(ID.ownerB, agent().post(quoteRoutes.convert(ID.bizB, Q.ownAcceptedB))).send({ discountType: 'FIXED', discountValue: 1000 });
+    expect(refused.status).toBe(400);
+    expectErrorEnvelope(refused.body, 400, 'BAD_REQUEST', 'Fixed discount cannot exceed the subtotal');
+    expect(await writes(ID.bizB)).toEqual(before);
+    expect((await quoteRow(Q.ownAcceptedB)).invoice_id).toBeNull();
+
+    const ok = await as(ID.ownerB, agent().post(quoteRoutes.convert(ID.bizB, Q.ownAcceptedB))).send({});
+    expect(ok.status).toBe(201);
+    expect(ok.body).toMatchObject({ businessId: ID.bizB, contactId: ID.contactB, quoteId: Q.ownAcceptedB, status: 'DRAFT', subtotal: 20, total: 20 });
+    expect((await writes(ID.bizB)).invoices).toBe(before.invoices + 1);
+    expect((await quoteRow(Q.ownAcceptedB)).invoice_id).toBe(ok.body.id);
+  });
+
+  it("RR27-DISC create (ST-27-3): on the ACCRUAL tenant a FIXED discount above the subtotal -> 400 'Fixed discount cannot exceed the subtotal'; no Invoice, no FinancialTransaction", async () => {
+    const before = await writes(ID.bizC);
+    const res = await createInvoice(ID.ownerC, ID.bizC, { contactId: ID.contactC, items: [line()], discountType: 'FIXED', discountValue: 1000 });
+    expect(res.status).toBe(400);
+    expectErrorEnvelope(res.body, 400, 'BAD_REQUEST', 'Fixed discount cannot exceed the subtotal');
+    expect(await writes(ID.bizC)).toEqual(before);
+    expect(recordedEvents).toEqual([]);
+    expect(postingCalls).toEqual([]);
+  });
+
+  it('RR27-DISC create (control): a FIXED discount equal to the subtotal is accepted (the total is the tax, never negative), and issuing it on ACCRUAL posts AR for that total', async () => {
+    const res = await createInvoice(ID.ownerC, ID.bizC, { contactId: ID.contactC, items: [line()], taxRate: 10, discountType: 'FIXED', discountValue: 10 });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ subtotal: 10, taxAmount: 1, discountAmount: 10, total: 1 });
+    const id = res.body.id as string;
+    const sent = await issue(ID.ownerC, ID.bizC, id);
+    expect(sent.status).toBe(200);
+    expect(await invoicePostings(id)).toEqual([{ external_ref: `Invoice:${id}:invoice_finalized`, amount: 1 }]);
+  });
+
+  it('RR27-DISC update (ST-27-3): PATCH a FIXED discount above the subtotal, alone or with new items -> 400; the invoice, its totals and its items are unchanged; equal to the subtotal is accepted', async () => {
+    const created = await createInvoice(ID.ownerB, ID.bizB, { contactId: ID.contactB, items: [line({ quantity: 2 })] });
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+    const snapshot = async () => ({
+      row: await db.$queryRawUnsafe(`SELECT subtotal, total, discount_type, discount_value, discount_amount FROM invoices WHERE id = '${id}'`),
+      items: await db.$queryRawUnsafe(`SELECT id, quantity, unit_price, total FROM invoice_items WHERE invoice_id = '${id}' ORDER BY id`),
+    });
+    const before = await snapshot();
+
+    for (const body of [
+      { discountType: 'FIXED', discountValue: 21 },
+      { items: [line({ quantity: 1, unitPrice: 5 })], discountType: 'FIXED', discountValue: 6 },
+    ]) {
+      const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, id))).send(body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expectErrorEnvelope(res.body, 400, 'BAD_REQUEST', 'Fixed discount cannot exceed the subtotal');
+    }
+    expect(await snapshot()).toEqual(before);
+    expect(recordedEvents.filter((e) => e.name === 'invoice.updated')).toEqual([]);
+
+    const ok = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, id))).send({ discountType: 'FIXED', discountValue: 20 });
+    expect(ok.status).toBe(200);
+    expect(ok.body).toMatchObject({ subtotal: 20, discountAmount: 20, total: 0 });
+  });
+
+  // ---- ST-27-4 / R27-CR-1: out-of-range amounts are a 400, never a 500 ---------
+
+  const outOfRange: Array<[string, () => Record<string, unknown>, RegExp]> = [
+    ['quantity 2147483648 (int4 max + 1)', () => ({ contactId: ID.contactB, items: [line({ quantity: 2147483648 })] }), /^items\.0\.quantity must not be greater than 2147483647$/],
+    ['quantity 2^60', () => ({ contactId: ID.contactB, items: [line({ quantity: 2 ** 60 })] }), /^items\.0\.quantity must not be greater than 2147483647$/],
+    ['unitPrice 1e308', () => ({ contactId: ID.contactB, items: [line({ quantity: 10, unitPrice: 1e308 })] }), /^items\.0\.unitPrice must not be greater than 99999999999999$/],
+  ];
+  for (const [label, body, field] of outOfRange) {
+    it(`RR27-BOUND ${label} -> 400 with the field message; CommerceService.createInvoice is never called; nothing written`, async () => {
+      const spy = vi.spyOn(commerceSvc, 'createInvoice');
+      try {
+        const before = await writes(ID.bizB);
+        const res = await createInvoice(ID.ownerB, ID.bizB, body());
+        expect(res.status, label).toBe(400);
+        expect(res.body.code).toBe('BAD_REQUEST');
+        expect([res.body.message].flat().some((m: unknown) => field.test(String(m))), JSON.stringify(res.body.message)).toBe(true);
+        expect(spy).not.toHaveBeenCalled();
+        expect(await writes(ID.bizB)).toEqual(before);
+        expect(recordedEvents).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  }
+
+  it("RR27-BOUND computed amount: in-range fields whose subtotal or total passes the ledger bound (max quantity x max price, two max-price lines, a max price plus tax) -> 400 'Invoice amount cannot exceed 99999999999999'; nothing written", async () => {
+    const before = await writes(ID.bizB);
+    for (const body of [
+      { items: [line({ quantity: MAX_QTY, unitPrice: MAX_AMOUNT })] },
+      { items: [line({ unitPrice: MAX_AMOUNT }), line({ unitPrice: MAX_AMOUNT })] },
+      { items: [line({ unitPrice: MAX_AMOUNT })], taxRate: 10 },
+    ]) {
+      const res = await createInvoice(ID.ownerB, ID.bizB, { contactId: ID.contactB, ...body });
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expectErrorEnvelope(res.body, 400, 'BAD_REQUEST', 'Invoice amount cannot exceed 99999999999999');
+    }
+    expect(await writes(ID.bizB)).toEqual(before);
+    expect(recordedEvents).toEqual([]);
+  });
+
+  it('RR27-BOUND (control): an invoice at the bound (one line of the max price) is created and, issued on ACCRUAL, posts AR for exactly that amount', async () => {
+    const res = await createInvoice(ID.ownerC, ID.bizC, { contactId: ID.contactC, items: [line({ unitPrice: MAX_AMOUNT })] });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ subtotal: MAX_AMOUNT, total: MAX_AMOUNT });
+    const id = res.body.id as string;
+    const sent = await issue(ID.ownerC, ID.bizC, id);
+    expect(sent.status).toBe(200);
+    expect(await invoicePostings(id)).toEqual([{ external_ref: `Invoice:${id}:invoice_finalized`, amount: MAX_AMOUNT }]);
+  });
+
+  it('RR27-BOUND update: PATCH items whose computed subtotal is not finite (10 x 1e308) -> 400, not 500; the existing items are not deleted', async () => {
+    const created = await createInvoice(ID.ownerB, ID.bizB, { contactId: ID.contactB, items: [line({ quantity: 3 })] });
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+    const itemsBefore = await rawItems(id);
+    const res = await as(ID.ownerB, agent().patch(routes.update(ID.bizB, id))).send({ items: [line({ quantity: 10, unitPrice: 1e308 })] });
+    expect(res.status).toBe(400);
+    expectErrorEnvelope(res.body, 400, 'BAD_REQUEST', 'Invoice amount cannot exceed 99999999999999');
+    expect(await rawItems(id)).toEqual(itemsBefore);
+    expect(await rawInvoice(id)).toMatchObject({ subtotal: 30, total: 30 });
+  });
+
+  // ---- recorded, not fixed here -----------------------------------------------
+
+  it.todo(
+    'ST-27-1 (deferred, outside the R0-27 write set): POST .../recurring-invoices binds a foreign contactId with no tenant check and echoes it (recurring-invoice.service.ts:51), and processRecurringInvoices issues a SENT Invoice bound to it (line 252); needs its own packet over recurring-invoice.service.ts',
+  );
+  it.todo(
+    "ST-27-5 (deferred, needs a decision): assertContactInBusiness checks the tenant only, not M7 CRM visibility, so a STAFF member with crm_view 'owned' can bind the owner's PRIVATE contact and read it back via include { contact: true } (pre-dates R0-27); whether invoicing obeys CRM visibility, and what a revenue-only member may see of the contact, is an authorization decision",
+  );
 });

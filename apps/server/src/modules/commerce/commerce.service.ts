@@ -20,6 +20,7 @@ import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoi
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 
@@ -269,11 +270,44 @@ export class CommerceService {
   }
 
   /**
+   * R0-27 review (ST-27-3, ST-27-4 / R27-CR-1): the server-computed amounts of
+   * an invoice must be storable and postable, checked before anything is
+   * written.
+   *  - A FIXED discount larger than the subtotal made the total negative, and
+   *    RevenuePostingService posts no AR for a total that is not positive, so
+   *    the invoice could be issued (SENT) with no ledger entry. A discount up
+   *    to the subtotal is allowed (the total is then the tax, never negative).
+   *    A PERCENT discount is already capped at 100% by validateTaxAndDiscount.
+   *  - A subtotal or total that is not finite, or above MAX_DOCUMENT_AMOUNT
+   *    (the numeric(18,4) ledger bound), answered 500 from Prisma on create or
+   *    could not be posted on issue.
+   * The computed amounts are checked, so the total/subtotal overrides of the
+   * internal callers (document intelligence) are not affected.
+   */
+  private assertInvoiceAmounts(amounts: {
+    subtotal: number;
+    total: number;
+    discountType?: string | null;
+    discountValue?: number | null;
+  }) {
+    for (const amount of [amounts.subtotal, amounts.total]) {
+      if (!Number.isFinite(amount) || amount > MAX_DOCUMENT_AMOUNT) {
+        throw new BadRequestException(`Invoice amount cannot exceed ${MAX_DOCUMENT_AMOUNT}`);
+      }
+    }
+    if (amounts.discountType === 'FIXED' && amounts.discountValue != null && amounts.discountValue > amounts.subtotal) {
+      throw new BadRequestException('Fixed discount cannot exceed the subtotal');
+    }
+  }
+
+  /**
    * Resolve a contact id inside the caller's tenant before it is bound to an
-   * invoice. The invoice is returned with `include: { contact: true }`, so a
-   * foreign id would both bind another tenant's contact and disclose its row.
-   * A foreign, soft-deleted or unknown id answers the same 404, and the caller
-   * writes nothing. R0-D3 review (ST-D3-1) for update; R0-27 for create.
+   * invoice or a quote. The row is returned with `include: { contact: true }`,
+   * so a foreign id would both bind another tenant's contact and disclose its
+   * row. A foreign, soft-deleted or unknown id answers the same 404, and the
+   * caller writes nothing. R0-D3 review (ST-D3-1) for invoice update; R0-27 for
+   * invoice create; R0-27 review (ST-27-2) for quote create, quote update and
+   * quote convert, the second path by which a contact reaches an Invoice.
    */
   private async assertContactInBusiness(contactId: unknown, businessId: string): Promise<string> {
     if (typeof contactId !== 'string' || contactId.length === 0) {
@@ -316,7 +350,14 @@ export class CommerceService {
     } else if (input.discountType === 'FIXED' && input.discountValue) {
       discountAmount = input.discountValue;
     }
-    const total = input.total ?? (calculatedSubtotal + calculatedTaxAmount - discountAmount);
+    const calculatedTotal = calculatedSubtotal + calculatedTaxAmount - discountAmount;
+    this.assertInvoiceAmounts({
+      subtotal: calculatedSubtotal,
+      total: calculatedTotal,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+    });
+    const total = input.total ?? calculatedTotal;
     const data: any = {
       businessId: input.businessId,
       invoiceNumber: input.invoiceNumber ?? `INV-${Date.now()}`,
@@ -1439,6 +1480,11 @@ export class CommerceService {
     quoteNumber?: string;
   }) {
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
+    // R0-27 review (ST-27-2): the contact was bound with no tenant check, so
+    // bizA's contactId under bizB's path created bizB's quote linked to (and
+    // echoing) bizA's contact, and converting it created an Invoice bound to
+    // that contact. Resolve it inside the tenant before anything is written.
+    const contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
     const taxAmount = subtotal * taxRate / 100;
@@ -1452,7 +1498,7 @@ export class CommerceService {
     const quote = await this.prisma.client.quote.create({
       data: {
         businessId: input.businessId,
-        contactId: input.contactId,
+        contactId,
         quoteNumber: input.quoteNumber ?? `QT-${Date.now()}`,
         status: 'DRAFT',
         issueDate: new Date(),
@@ -1517,7 +1563,8 @@ export class CommerceService {
     }
     
     const updateData: any = {};
-    if (input.contactId) updateData.contactId = input.contactId;
+    // R0-27 review (ST-27-2): same tenant check as quote create, before any write.
+    if (input.contactId) updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     if (input.currency) updateData.currency = input.currency;
     if (input.expiryDate !== undefined) {
       updateData.expiryDate = input.expiryDate ? new Date(input.expiryDate) : null;
@@ -1630,6 +1677,15 @@ export class CommerceService {
       discountAmount = input.discountValue;
     }
     const total = subtotal + taxAmount - discountAmount;
+    // R0-27 review (ST-27-3): the converted invoice obeys the same amount rules
+    // as a created one (no FIXED discount above the subtotal, no amount the
+    // ledger cannot hold).
+    this.assertInvoiceAmounts({ subtotal, total, discountType: input.discountType, discountValue: input.discountValue });
+    // R0-27 review (ST-27-2): the invoice inherits the quote's contact. A quote
+    // written before quote create/update checked the tenant can still hold a
+    // foreign (or since deleted) contact; it must not become an Invoice bound
+    // to it. Same 404 as invoice create, and nothing is written.
+    await this.assertContactInBusiness(quote.contactId, input.businessId);
 
     // R2: do the invoice insert + the quote.invoiceId backlink in a single
     // transaction so we never end up with a quote that thinks it was
@@ -2727,7 +2783,6 @@ export class CommerceService {
           throw new NotFoundException('Product not found');
         }
       }
-      await this.prisma.client.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
       const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
       const taxAmount = (subtotal * taxRate) / 100;
@@ -2740,6 +2795,10 @@ export class CommerceService {
         discountAmount = discountValue;
       }
       const total = subtotal + taxAmount - discountAmount;
+      // R0-27 review (ST-27-3): the same amount rules as create, checked before
+      // the existing items are deleted, so a refused edit writes nothing.
+      this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+      await this.prisma.client.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
 
       updateData.subtotal = subtotal;
       updateData.taxRate = taxRate;
@@ -2770,6 +2829,8 @@ export class CommerceService {
         discountAmount = discountValue;
       }
       const total = subtotal + taxAmount - discountAmount;
+      // R0-27 review (ST-27-3): a FIXED discount above the stored subtotal is refused.
+      this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
       updateData.taxRate = taxRate;
       updateData.taxAmount = taxAmount;
       updateData.discountType = discountType;

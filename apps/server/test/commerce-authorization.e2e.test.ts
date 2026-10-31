@@ -785,6 +785,10 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       ['unknown discountType', (b) => ({ ...b, discountType: 'BOGO', discountValue: 1 }), /^discountType must be one of the following values: PERCENT, FIXED$/],
       ['string taxRate', (b) => ({ ...b, taxRate: '15' }), /^taxRate must be a number/],
       ['unparseable dueDate', (b) => ({ ...b, dueDate: 'not-a-date' }), /^dueDate must be a valid ISO 8601 date string$/],
+      // R0-27 review (ST-27-4 / R27-CR-1): these reached the service and answered 500 (int4 overflow, Infinity subtotal).
+      ['quantity above int4 max', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 2147483648 }] }), /^items\.0\.quantity must not be greater than 2147483647$/],
+      ['quantity 2^60', (b) => ({ ...b, items: [{ ...b.items[0], quantity: 2 ** 60 }] }), /^items\.0\.quantity must not be greater than 2147483647$/],
+      ['price above the ledger bound (1e308)', (b) => ({ ...b, items: [{ ...b.items[0], unitPrice: 1e308 }] }), /^items\.0\.unitPrice must not be greater than 99999999999999$/],
     ];
     for (const [label, mutate, field] of invalid) {
       it(`CC-400 ${label}: 400 BAD_REQUEST with the field message, before CommerceService.createInvoice is called`, async () => {
@@ -834,6 +838,13 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
         await create(ID.ownerA, { ...valid(), ...extra }).expect(201);
       }
       expect(commerceMock.createInvoice).toHaveBeenCalledTimes(3);
+    });
+
+    it('CC-BOUND (control): a quantity of exactly 2147483647 and a price of exactly 99999999999999 pass the DTO; the service judges the computed amount', async () => {
+      const body = { ...valid(), items: [{ description: 'At the bound', quantity: 2147483647, unitPrice: 99999999999999 }] };
+      await create(ID.ownerA, body).expect(201);
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(1);
+      expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...body });
     });
 
     it('CC-GUARDS (control): unauthenticated 401; a non-member, a member of another tenant and revenue:read are refused 403; the service is not called', async () => {

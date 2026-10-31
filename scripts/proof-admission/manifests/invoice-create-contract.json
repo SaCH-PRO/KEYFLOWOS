@@ -125,6 +125,23 @@
     "R0-27: POST /commerce/businesses/:businessId/invoices create contract (real rows) CC-LEDGER ACCRUAL: an accepted create posts nothing; issuing it posts AR once (one Invoice:<id>:invoice_finalized) for the server-computed total, not the client total",
     "R0-27: POST /commerce/businesses/:businessId/invoices create contract (real rows) CC-LEDGER refused: on the ACCRUAL tenant a foreign contact (404) and an invalid body (400) write no Invoice and no FinancialTransaction",
     "R0-27: POST /commerce/businesses/:businessId/invoices create contract (real rows) CC-D3 (control): the R0-D3 contract on create is unchanged: taxRate 150, a negative discount and a 150% discount -> 400 with the exact service message; no invoice row",
-    "R0-27: POST /commerce/businesses/:businessId/invoices create contract (real rows) CC-SERVICE (control): createInvoiceForService (booking deposit) is unchanged: one DRAFT line for the deposit amount, linked to the contact it is given, nothing posted"
+    "R0-27: POST /commerce/businesses/:businessId/invoices create contract (real rows) CC-SERVICE (control): createInvoiceForService (booking deposit) is unchanged: one DRAFT line for the deposit amount, linked to the contact it is given, nothing posted",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-27: invoice create contract (L1 half) CC-400 quantity above int4 max: 400 BAD_REQUEST with the field message, before CommerceService.createInvoice is called",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-27: invoice create contract (L1 half) CC-400 quantity 2^60: 400 BAD_REQUEST with the field message, before CommerceService.createInvoice is called",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-27: invoice create contract (L1 half) CC-400 price above the ledger bound (1e308): 400 BAD_REQUEST with the field message, before CommerceService.createInvoice is called",
+    "Commerce authorization e2e (L1: real guards, mocked service) R0-27: invoice create contract (L1 half) CC-BOUND (control): a quantity of exactly 2147483647 and a price of exactly 99999999999999 pass the DTO; the service judges the computed amount",
+    "R0-27 review repairs (real rows) RR27-QUOTE create (ST-27-2): a foreign, unknown or own soft-deleted contactId on bizB's quote path -> one 404 'Contact not found'; no quote row, no event, nothing of A's contact in the body",
+    "R0-27 review repairs (real rows) RR27-QUOTE update (ST-27-2): PATCH a quote's contactId to bizA's contact -> 404 and the quote keeps its own contact; the own-tenant create and re-bind are the controls",
+    "R0-27 review repairs (real rows) RR27-QUOTE convert (ST-27-2): an ACCEPTED quote that already holds a foreign contact is not converted: 404, no Invoice (no row bound to A's contact), the quote stays unconverted, no event",
+    "R0-27 review repairs (real rows) RR27-DISC convert (ST-27-3) and RR27-QUOTE convert (control): an own ACCEPTED quote with a FIXED discount above its subtotal -> 400; without it -> 201, one Invoice bound to the own contact",
+    "R0-27 review repairs (real rows) RR27-DISC create (ST-27-3): on the ACCRUAL tenant a FIXED discount above the subtotal -> 400 'Fixed discount cannot exceed the subtotal'; no Invoice, no FinancialTransaction",
+    "R0-27 review repairs (real rows) RR27-DISC create (control): a FIXED discount equal to the subtotal is accepted (the total is the tax, never negative), and issuing it on ACCRUAL posts AR for that total",
+    "R0-27 review repairs (real rows) RR27-DISC update (ST-27-3): PATCH a FIXED discount above the subtotal, alone or with new items -> 400; the invoice, its totals and its items are unchanged; equal to the subtotal is accepted",
+    "R0-27 review repairs (real rows) RR27-BOUND quantity 2147483648 (int4 max + 1) -> 400 with the field message; CommerceService.createInvoice is never called; nothing written",
+    "R0-27 review repairs (real rows) RR27-BOUND quantity 2^60 -> 400 with the field message; CommerceService.createInvoice is never called; nothing written",
+    "R0-27 review repairs (real rows) RR27-BOUND unitPrice 1e308 -> 400 with the field message; CommerceService.createInvoice is never called; nothing written",
+    "R0-27 review repairs (real rows) RR27-BOUND computed amount: in-range fields whose subtotal or total passes the ledger bound (max quantity x max price, two max-price lines, a max price plus tax) -> 400 'Invoice amount cannot exceed 99999999999999'; nothing written",
+    "R0-27 review repairs (real rows) RR27-BOUND (control): an invoice at the bound (one line of the max price) is created and, issued on ACCRUAL, posts AR for exactly that amount",
+    "R0-27 review repairs (real rows) RR27-BOUND update: PATCH items whose computed subtotal is not finite (10 x 1e308) -> 400, not 500; the existing items are not deleted"
   ]
 }
