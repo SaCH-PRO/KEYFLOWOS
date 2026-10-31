@@ -298,10 +298,13 @@ export class RevenuePostingService {
     const depositKey = RevenuePostingService.depositSystemKey(payment.provider, payment.method);
     const creditKey = basis === 'ACCRUAL' ? 'ACCOUNTS_RECEIVABLE' : 'REVENUE';
 
-    const [depositId, creditId] = await Promise.all([
-      this.resolveCoa(payment.businessId, depositKey),
-      this.resolveCoa(payment.businessId, creditKey),
-    ]);
+    // Resolve in sequence, not with Promise.all: on a never-seeded tenant the
+    // first lookup seeds the whole chart of accounts, and two lookups racing
+    // each other into that seed is what failed the first payment a tenant
+    // ever recorded (journey harness D1). The seeder also serializes seeding
+    // per business; resolving in order keeps this path to one run regardless.
+    const depositId = await this.resolveCoa(payment.businessId, depositKey);
+    const creditId = await this.resolveCoa(payment.businessId, creditKey);
     const feeId = fee > 0 ? await this.resolveCoa(payment.businessId, 'EXPENSE_BANK_FEES') : null;
 
     const entries: Array<{ accountId: string; debit?: number; credit?: number; memo: string }> = [
