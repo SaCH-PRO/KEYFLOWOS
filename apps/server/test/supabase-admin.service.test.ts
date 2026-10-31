@@ -223,6 +223,8 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
   const USER = 'u-cr2-callers';
   const accessJwt = (claims: Record<string, unknown> = {}) =>
     `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: 's-1', role: 'authenticated', ...claims })}.c2ln`;
+  /** A recovery-link access token: reset-password accepts only a recovery session (R0-ID-F5). */
+  const recoveryJwt = () => accessJwt({ amr: [{ method: 'recovery', timestamp: 1 }] });
 
   function memoryRedis(order: string[]) {
     const store = new Map<string, string>();
@@ -265,7 +267,15 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
     };
     const auth = { getUserFromToken: vi.fn(async () => ({ id: USER, email: 'cr2@example.com' })) };
     const policy = { validate: vi.fn(async () => undefined) };
-    const passwordSvc = new IdentityPasswordService(supabaseAdmin as never, auth as never, policy as never);
+    // R0-ID-F5: the reset reads the local User row and the logout marker (this redis, no marker).
+    const passwordPrisma = { client: { user: { findUnique: vi.fn(async () => ({ deletedAt: null, bannedAt: null })) } } };
+    const passwordSvc = new IdentityPasswordService(
+      supabaseAdmin as never,
+      auth as never,
+      policy as never,
+      passwordPrisma as never,
+      redis as never,
+    );
     const unused = {} as never;
     const ctrl = new IdentityController(
       unused,
@@ -413,7 +423,7 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
         },
       });
       await expect(
-        h.ctrl.resetPassword({ accessToken: accessJwt(), password: 'CorrectHorseBattery9!' } as never, h.req()),
+        h.ctrl.resetPassword({ accessToken: recoveryJwt(), password: 'CorrectHorseBattery9!' } as never, h.req()),
       ).resolves.toMatchObject({ status: 'ok' });
       expect(auditOf(h.audit, 'password_reset_completed')).toEqual([
         expect.objectContaining({ outcome: 'success', reason: 'revocation_incomplete: provider_signout' }),
@@ -422,7 +432,7 @@ describe("CR-2 — the callers hand SupabaseAdminService.signOut the caller's JW
 
     it('asks the provider to sign out BEFORE it sets the password (R0-ID-F4 review F4-A / CR-1)', async () => {
       const h = harness();
-      await h.ctrl.resetPassword({ accessToken: accessJwt(), password: 'CorrectHorseBattery9!' } as never, h.req());
+      await h.ctrl.resetPassword({ accessToken: recoveryJwt(), password: 'CorrectHorseBattery9!' } as never, h.req());
       expect(h.order).toEqual(['provider signOut', 'provider updateUserPassword']);
     });
   });
@@ -454,6 +464,9 @@ describe('R0-ID-F4 review F4-A — password flows against GoTrue session semanti
   const USER = '6f1c1d36-5d7e-4c38-9a3f-0b7a3b0e2c11';
   const jwtFor = (sessionId: string) =>
     `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated' })}.c2ln`;
+  /** The recovery link's access token: a session GoTrue opened by the recovery verification (R0-ID-F5). */
+  const recoveryJwtFor = (sessionId: string) =>
+    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated', amr: [{ method: 'recovery', timestamp: 1 }] })}.c2ln`;
 
   function fakeGoTrue(sessions: Map<string, string>, opts: { logoutDown?: boolean } = {}) {
     /** Each provider call, with the sessions left right after it. */
@@ -517,8 +530,10 @@ describe('R0-ID-F4 review F4-A — password flows against GoTrue session semanti
     const signupSvc = { signInWithPassword: vi.fn(async () => ({})) };
     const auth = { getUserFromToken: vi.fn(async () => ({ id: USER, email: 'f4a@example.com' })) };
     const policy = { validate: vi.fn(async () => undefined) };
-    const passwordSvc = new IdentityPasswordService(admin, auth as never, policy as never);
     const redis = { setex: vi.fn(async () => 'OK'), set: vi.fn(async () => 'OK'), get: vi.fn(async () => null) };
+    // R0-ID-F5: the reset reads the local User row and the logout marker (this redis, no marker).
+    const passwordPrisma = { client: { user: { findUnique: vi.fn(async () => ({ deletedAt: null, bannedAt: null })) } } };
+    const passwordSvc = new IdentityPasswordService(admin, auth as never, policy as never, passwordPrisma as never, redis as never);
     const unused = {} as never;
     const ctrl = new IdentityController(
       unused,
@@ -546,7 +561,7 @@ describe('R0-ID-F4 review F4-A — password flows against GoTrue session semanti
     const { ctrl, audit, gt } = build(sessions);
 
     await expect(
-      ctrl.resetPassword({ accessToken: jwtFor('s-recovery'), password: 'CorrectHorseBattery9!' } as never, req()),
+      ctrl.resetPassword({ accessToken: recoveryJwtFor('s-recovery'), password: 'CorrectHorseBattery9!' } as never, req()),
     ).resolves.toMatchObject({ status: 'ok' });
 
     expect(gt.log).toEqual([
@@ -590,7 +605,7 @@ describe('R0-ID-F4 review F4-A — password flows against GoTrue session semanti
     const { ctrl, audit, gt } = build(sessions, { logoutDown: true });
 
     await expect(
-      ctrl.resetPassword({ accessToken: jwtFor('s-recovery'), password: 'CorrectHorseBattery9!' } as never, req()),
+      ctrl.resetPassword({ accessToken: recoveryJwtFor('s-recovery'), password: 'CorrectHorseBattery9!' } as never, req()),
     ).resolves.toMatchObject({ status: 'ok' });
 
     expect(gt.log.map((e) => e.call)).toEqual(['POST /auth/v1/logout?scope=global', `PUT /auth/v1/admin/users/${USER}`]);

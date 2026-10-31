@@ -1,7 +1,70 @@
-import { BadRequestException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { Redis } from 'ioredis';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
 import { SupabaseAuthService } from '../../core/auth/supabase-auth.service';
+import { LEGACY_LOGOUT_MARKER, logoutRevocationCutoff, logoutRevocationKey } from '../../core/auth/auth.middleware';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { PasswordPolicyService } from './password-policy.service';
+
+/**
+ * The amr method GoTrue stamps on a session it opened by verifying a recovery
+ * link or recovery OTP (models.Recovery). auth-js types the claim as
+ * JWTPayload.amr: AMREntry[] ({ method, timestamp }) or RFC-8176 string[], and
+ * leaves AMRMethod open, so both shapes are read.
+ */
+const RECOVERY_AMR_METHOD = 'recovery';
+
+const INVALID_RESET_LINK = 'This password reset link is invalid or has expired';
+
+/**
+ * What a reset token's (already verified) payload says about its session:
+ * whether the recovery verification authenticated it, and when the session was
+ * authenticated (epoch seconds) or null when the token cannot say.
+ *
+ * The session start follows AuthMiddleware's sessionAuthenticatedAt exactly
+ * (that function is module-private there): the earliest amr timestamp, never
+ * later than iat; null for a session token (session_id) whose amr is not fully
+ * timestamped; iat for a token with neither. A refresh carries amr over with a
+ * new iat, so a pre-logout session refreshed after the logout still reads as
+ * pre-logout.
+ */
+function readResetSession(token: string): { recovery: boolean; authenticatedAt: number | null } {
+  const none = { recovery: false, authenticatedAt: null };
+  const parts = token.split('.');
+  if (parts.length !== 3) return none;
+  let payload: { iat?: unknown; amr?: unknown; session_id?: unknown } | null;
+  try {
+    payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as typeof payload;
+  } catch {
+    return none;
+  }
+  const amr = Array.isArray(payload?.amr) ? (payload.amr as unknown[]) : [];
+  const recovery = amr.some(
+    (entry) =>
+      entry === RECOVERY_AMR_METHOD ||
+      (typeof entry === 'object' && entry !== null && (entry as { method?: unknown }).method === RECOVERY_AMR_METHOD),
+  );
+
+  const iat = payload?.iat;
+  if (typeof iat !== 'number' || !Number.isFinite(iat)) return { recovery, authenticatedAt: null };
+  if (amr.length > 0) {
+    const stamps = amr.map((entry) => (entry as { timestamp?: unknown } | null)?.timestamp);
+    if (stamps.every((t): t is number => typeof t === 'number' && Number.isFinite(t))) {
+      return { recovery, authenticatedAt: Math.min(iat, ...stamps) };
+    }
+  }
+  const sessionId = payload?.session_id;
+  if (sessionId !== undefined && sessionId !== null && sessionId !== '') return { recovery, authenticatedAt: null };
+  return { recovery, authenticatedAt: iat };
+}
 
 /**
  * Server-owned password recovery.
@@ -37,6 +100,8 @@ export class IdentityPasswordService {
     @Inject(SupabaseAdminService) private readonly admin: SupabaseAdminService,
     @Inject(SupabaseAuthService) private readonly auth: SupabaseAuthService,
     @Inject(PasswordPolicyService) private readonly policy: PasswordPolicyService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   /**
@@ -66,6 +131,14 @@ export class IdentityPasswordService {
    * Verifying it here is what proves the caller actually received the mail —
    * without that check this endpoint would let anyone set anyone's password.
    *
+   * A verified signature is not enough (R0-ID-F5: R0-ID-F4 review F4-B,
+   * R0-ID-F3 review ST4-R2). Any access token verifies, so this endpoint used
+   * to let a stolen ordinary session token — even a pre-logout one that
+   * AuthMiddleware refuses — set a new password without the current one,
+   * which is the re-authentication changePassword exists to demand. See
+   * assertResetSessionAllowed: the session must be a recovery session, opened
+   * after the user's last logout, of a user who is not deleted or banned.
+   *
    * Order matters: the token is verified BEFORE the policy runs. Validating
    * first would let an unauthenticated caller use the endpoint as an oracle for
    * which passwords the policy accepts, and the HIBP lookup it performs is a
@@ -77,8 +150,10 @@ export class IdentityPasswordService {
   ): Promise<{ userId: string; email: string; providerSignedOut: boolean }> {
     const user = await this.auth.getUserFromToken(accessToken);
     if (!user?.id) {
-      throw new UnauthorizedException('This password reset link is invalid or has expired');
+      throw new UnauthorizedException(INVALID_RESET_LINK);
     }
+
+    await this.assertResetSessionAllowed(accessToken, user.id);
 
     // Same policy object signup uses. Passing the email lets it reject a
     // password that merely restates the address.
@@ -106,6 +181,91 @@ export class IdentityPasswordService {
     await this.admin.updateUserPassword(user.id, newPassword);
 
     return { userId: user.id, email: user.email ?? '', providerSignedOut };
+  }
+
+  /**
+   * May the (already verified) reset token's session set the password? Throws
+   * when not. Runs before the policy and before any provider call.
+   *
+   *   recovery     its amr includes 'recovery': GoTrue opened the session by
+   *                verifying a recovery link. An ordinary session (password,
+   *                otp, magiclink, oauth ...) is refused: holding its token is
+   *                not proof of receiving the mail.
+   *   logout       refused when the user's logout cutoff
+   *                (auth:revoked:user:<id>, epoch seconds, R0-ID-F3) is at or
+   *                after the session was authenticated, or when a cutoff exists
+   *                and the token cannot say when that was — the rule
+   *                AuthMiddleware applies to every other request.
+   *   local user   refused when the User row is deleted or banned. No row yet
+   *                (signed up, not bootstrapped) is not a revoked user, as in
+   *                AuthMiddleware.
+   *
+   * Every refusal is the reset link's generic 401, so the endpoint does not
+   * say which account state it found; the reason is logged. Unlike
+   * AuthMiddleware, which proceeds on the database checks alone while Redis is
+   * down rather than lock every request out, a reset FAILS CLOSED when the
+   * cutoff or the row cannot be read (503): it is the act that hands the
+   * account over, and it can be retried.
+   */
+  private async assertResetSessionAllowed(accessToken: string, userId: string): Promise<void> {
+    const session = readResetSession(accessToken);
+    if (!session.recovery) {
+      this.logger.warn(`Password reset refused for ${userId}: the token's session is not a recovery session`);
+      throw new UnauthorizedException(INVALID_RESET_LINK);
+    }
+
+    let marker: string | null;
+    try {
+      marker = await this.redis.get(logoutRevocationKey(userId));
+    } catch (err) {
+      this.logger.warn(
+        `Password reset refused for ${userId}: the logout revocation marker could not be read (${err instanceof Error ? err.message : String(err)})`,
+      );
+      throw new ServiceUnavailableException('Password reset is temporarily unavailable. Please try again shortly.');
+    }
+    if (marker != null) {
+      const cutoff = await this.logoutCutoff(userId, marker);
+      if (session.authenticatedAt === null || session.authenticatedAt <= cutoff) {
+        this.logger.warn(`Password reset refused for ${userId}: the recovery session does not post-date the user's last logout`);
+        throw new UnauthorizedException(INVALID_RESET_LINK);
+      }
+    }
+
+    let row: { deletedAt: Date | null; bannedAt: Date | null } | null;
+    try {
+      row = await this.prisma.client.user.findUnique({
+        where: { id: userId },
+        select: { deletedAt: true, bannedAt: true },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Password reset refused for ${userId}: the local user could not be read (${err instanceof Error ? err.message : String(err)})`,
+      );
+      throw new ServiceUnavailableException('Password reset is temporarily unavailable. Please try again shortly.');
+    }
+    if (row && (row.deletedAt || row.bannedAt)) {
+      this.logger.warn(`Password reset refused for ${userId}: the local user is deleted or banned`);
+      throw new UnauthorizedException(INVALID_RESET_LINK);
+    }
+  }
+
+  /**
+   * The cutoff a stored logout marker stands for (logoutRevocationCutoff), as
+   * AuthMiddleware reads it: only the previous release's bare '1' needs the
+   * key's PTTL to recover when it was written, and an unreadable PTTL makes it
+   * "revoked now" (fail closed).
+   */
+  private async logoutCutoff(userId: string, stored: string): Promise<number> {
+    if (stored !== LEGACY_LOGOUT_MARKER) return logoutRevocationCutoff(stored);
+    let remainingTtlMs: number | null = null;
+    try {
+      remainingTtlMs = await this.redis.pttl(logoutRevocationKey(userId));
+    } catch (err) {
+      this.logger.warn(
+        `Legacy revocation marker TTL unavailable for ${userId} (${err instanceof Error ? err.message : String(err)}) — treating it as revoked now`,
+      );
+    }
+    return logoutRevocationCutoff(stored, Date.now(), remainingTtlMs);
   }
 
   /**
