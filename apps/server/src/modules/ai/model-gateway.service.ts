@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
@@ -117,7 +117,22 @@ export interface StreamChunk {
   fallbackUsed?: boolean;
   fallbackProvider?: AiProvider;
   error?: string;
+  /** On an error chunk emitted because no provider could be dispatched to (R0-07): the 503 body's code. */
+  code?: AiUnavailableCode;
 }
+
+/**
+ * Why AI dispatch was refused before any provider was called (R0-07). AI is an
+ * optional service: with nothing to dispatch to, complete() throws a 503 whose
+ * body carries one of these codes and `service: 'ai'`, which the global filter
+ * renders as { statusCode: 503, code, message, details: { service: 'ai' } }.
+ *
+ *   provider_not_configured  no candidate provider has a key (env or BYOK) or URL
+ *   provider_unavailable     candidates are configured but every one is circuit-open
+ *
+ * A provider that was called and failed is neither: its own error propagates.
+ */
+export type AiUnavailableCode = 'provider_not_configured' | 'provider_unavailable';
 
 export interface ProviderHealth {
   provider: AiProvider;
@@ -825,7 +840,24 @@ export class ModelGatewayService {
       }
     }
 
-    throw lastError || new Error('No AI providers available');
+    throw lastError || this.noProviderAvailable(effectiveCandidates, preferences);
+  }
+
+  /**
+   * The structured 503 for a dispatch that found nothing to call (R0-07). The
+   * message keeps its old prefix, 'No AI providers available', for log readers.
+   */
+  private noProviderAvailable(
+    candidates: Array<{ provider: AiProvider }>,
+    preferences: AiPreferences,
+  ): ServiceUnavailableException {
+    const code: AiUnavailableCode = candidates.some((c) => this.isProviderConfigured(c.provider, preferences))
+      ? 'provider_unavailable'
+      : 'provider_not_configured';
+    const message = code === 'provider_not_configured'
+      ? 'No AI providers available: no AI provider is configured for this deployment or business'
+      : 'No AI providers available: every configured AI provider is temporarily unavailable';
+    return new ServiceUnavailableException({ code, service: 'ai', message, error: 'Service Unavailable' });
   }
 
   private async recordCostFromResponse(
@@ -1021,9 +1053,17 @@ export class ModelGatewayService {
       }
     }
 
+    if (lastError) {
+      yield { type: 'error', error: lastError.message, fallbackUsed, fallbackProvider };
+      return;
+    }
+    // Nothing was dispatched: the same refusal complete() throws, as a chunk.
+    const refusal = this.noProviderAvailable(effectiveCandidates, preferences);
+    const body = refusal.getResponse() as { code: AiUnavailableCode };
     yield {
       type: 'error',
-      error: lastError?.message || 'No AI providers available',
+      error: refusal.message,
+      code: body.code,
       fallbackUsed,
       fallbackProvider,
     };
@@ -1816,6 +1856,11 @@ export class ModelGatewayService {
   }
 
   private isProviderAvailable(provider: AiProvider, preferences: AiPreferences): boolean {
+    return this.isProviderConfigured(provider, preferences) && !this.isCircuitOpen(provider);
+  }
+
+  /** A key (env or BYOK) or base URL exists for this provider; says nothing about its circuit. */
+  private isProviderConfigured(provider: AiProvider, preferences: AiPreferences): boolean {
     let configured = false;
     if (provider === 'openai') {
       configured = !!(preferences.byokOpenai || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
@@ -1839,7 +1884,7 @@ export class ModelGatewayService {
       configured = !!(process.env.OPENROUTER_API_KEY || process.env.OLLAMA_BASE_URL);
     }
 
-    return configured && !this.isCircuitOpen(provider);
+    return configured;
   }
 
   private isCircuitOpen(provider: AiProvider): boolean {

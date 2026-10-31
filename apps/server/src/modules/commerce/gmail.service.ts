@@ -1,8 +1,32 @@
-import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { createHmac, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GmailConnector } from '../../core/connectors/implementations/gmail.connector';
+
+/**
+ * R0-07: Gmail is an optional service, and it fails visibly. When it is not set
+ * up for this request - the business never connected a mailbox, or this
+ * deployment has no Google OAuth client (or state secret) to connect or refresh
+ * one - every Gmail path refuses with this 503 before any outbound call. The
+ * global filter renders it as { statusCode: 503, code: 'provider_not_configured',
+ * message, details: { service: 'gmail' } }, so a client can tell "connect Gmail"
+ * apart from a bad request, and the controllers that send invoice, reminder and
+ * receipt emails need no mapping of their own. The message keeps its old text
+ * ("Gmail not connected", "Google OAuth not configured") for log readers and
+ * message matchers.
+ *
+ * A send that reaches Google and fails is not "not configured"; it keeps its
+ * existing error.
+ */
+function gmailNotConfigured(message: string): ServiceUnavailableException {
+  return new ServiceUnavailableException({
+    code: 'provider_not_configured',
+    service: 'gmail',
+    message,
+    error: 'Service Unavailable',
+  });
+}
 
 interface GoogleToken {
   access_token: string;
@@ -42,7 +66,7 @@ export class GmailService {
 
   private ensureStateSecret(): string {
     if (!this.stateSecret) {
-      throw new BadRequestException('Gmail OAuth state secret not configured');
+      throw gmailNotConfigured('Gmail OAuth state secret not configured');
     }
     return this.stateSecret;
   }
@@ -89,7 +113,7 @@ export class GmailService {
 
   getAuthUrl(businessId: string): string {
     if (!this.clientId) {
-      throw new BadRequestException('Google OAuth not configured');
+      throw gmailNotConfigured('Google OAuth not configured');
     }
     
     const state: OAuthState = {
@@ -123,7 +147,7 @@ export class GmailService {
 
   async exchangeCodeForTokens(code: string): Promise<GoogleToken> {
     if (!this.clientId || !this.clientSecret || !this.redirectUri) {
-      throw new BadRequestException('Google OAuth not configured');
+      throw gmailNotConfigured('Google OAuth not configured');
     }
 
     const response = await fetch('https://oauth2.googleapis.com/token', {
@@ -149,7 +173,7 @@ export class GmailService {
 
   async refreshAccessToken(refreshToken: string): Promise<GoogleToken> {
     if (!this.clientId || !this.clientSecret) {
-      throw new BadRequestException('Google OAuth not configured');
+      throw gmailNotConfigured('Google OAuth not configured');
     }
 
     const response = await fetch('https://oauth2.googleapis.com/token', {
@@ -242,7 +266,7 @@ export class GmailService {
     });
 
     if (!business?.gmailRefreshToken) {
-      throw new BadRequestException('Gmail not connected');
+      throw gmailNotConfigured('Gmail not connected');
     }
 
     const now = new Date();
@@ -315,10 +339,10 @@ export class GmailService {
     });
 
     if (!business?.gmailEmail) {
-      throw new BadRequestException('Gmail not connected');
+      throw gmailNotConfigured('Gmail not connected');
     }
 
-    const from = business.name 
+    const from = business.name
       ? `${business.name} <${business.gmailEmail}>`
       : business.gmailEmail;
 
@@ -459,7 +483,7 @@ export class GmailService {
       where: { id: params.businessId },
       select: { gmailEmail: true, name: true },
     });
-    if (!business?.gmailEmail) throw new BadRequestException('Gmail not connected');
+    if (!business?.gmailEmail) throw gmailNotConfigured('Gmail not connected');
 
     const from = business.name ? `${business.name} <${business.gmailEmail}>` : business.gmailEmail;
     const boundary = 'boundary_' + Date.now();
