@@ -352,6 +352,23 @@ export class CrmController {
     return this.crmStats.getFavorites(businessId);
   }
 
+  // Declared before its contacts/:contactId sibling: Express answers the first
+  // route that matches, so declared after it this route was never reached (M15;
+  // core/config/route-shadowing.spec.ts keeps every controller in this order).
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
+  @CrmRateLimit(120, 60_000)
+  @Get('businesses/:businessId/contacts/unread-counts')
+  async unreadCounts(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.id;
+    if (!userId) return { counts: {} };
+    const counts = await this.communication.unreadCounts(businessId, userId);
+    return { counts };
+  }
+
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
@@ -371,25 +388,9 @@ export class CrmController {
     return this.crmStats.contactDetail({ businessId, contactId, actorUserId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('crm', 'write')
-  @UseInterceptors(TeamAuditInterceptor)
-  @AuditAction('crm', 'contact_updated', 'contact')
-  @CrmRateLimit(30, 60_000)
-  @Patch('businesses/:businessId/contacts/:contactId')
-  updateContact(
-    @Param('businessId') businessId: string,
-    @Param('contactId') contactId: string,
-    @Body() body: UpdateContactDto,
-    @Req() req: any,
-  ) {
-    const audit = this.userAuditContext(req);
-    return this.crm.updateContact({ ...body, businessId,
-      contactId,
-      actorUserId: req?.user?.id,
-    }, audit);
-  }
-
+  // Declared before its contacts/:contactId sibling: Express answers the first
+  // route that matches, so declared after it this route was never reached (M15;
+  // core/config/route-shadowing.spec.ts keeps every controller in this order).
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(10, 60_000)
@@ -421,6 +422,25 @@ export class CrmController {
       archived: body.archived,
       actorUserId: req?.user?.id,
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('crm', 'contact_updated', 'contact')
+  @CrmRateLimit(30, 60_000)
+  @Patch('businesses/:businessId/contacts/:contactId')
+  updateContact(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: UpdateContactDto,
+    @Req() req: any,
+  ) {
+    const audit = this.userAuditContext(req);
+    return this.crm.updateContact({ ...body, businessId,
+      contactId,
+      actorUserId: req?.user?.id,
+    }, audit);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1647,20 +1667,6 @@ export class CrmController {
     if (!userId) throw new BadRequestException('Authenticated user required');
     const state = await this.communication.markRead(businessId, userId, contactId);
     return { ok: true, lastReadAt: state.lastReadAt.toISOString() };
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('crm', 'read')
-  @CrmRateLimit(120, 60_000)
-  @Get('businesses/:businessId/contacts/unread-counts')
-  async unreadCounts(
-    @Param('businessId') businessId: string,
-    @Req() req: any,
-  ) {
-    const userId = req?.user?.id;
-    if (!userId) return { counts: {} };
-    const counts = await this.communication.unreadCounts(businessId, userId);
-    return { counts };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

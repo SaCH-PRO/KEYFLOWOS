@@ -87,9 +87,15 @@ interface Offender {
   shadowedBy: Route;
 }
 
-function decoratorCalls(node: ts.Node): Array<{ name: string; call: ts.CallExpression | undefined; node: ts.Decorator }> {
+interface DecoratorCall {
+  name: string;
+  call: ts.CallExpression | undefined;
+  node: ts.Decorator;
+}
+
+function decoratorCalls(node: ts.Node): DecoratorCall[] {
   if (!ts.canHaveDecorators(node)) return [];
-  return (ts.getDecorators(node) ?? []).flatMap((d) => {
+  return (ts.getDecorators(node) ?? []).flatMap((d): DecoratorCall[] => {
     const e = d.expression;
     if (ts.isCallExpression(e)) return [{ name: e.expression.getText(), call: e, node: d }];
     if (ts.isIdentifier(e)) return [{ name: e.text, call: undefined, node: d }];
