@@ -174,8 +174,9 @@ export class CrmService {
   /**
    * ContactEvent actor fields for an explicit audit actor (a controller
    * passing the authenticated member). Callers that pass no context (system
-   * jobs, automations, the KEY adapter) get nothing here, so the event meta
-   * they have always written is unchanged and no user is attributed.
+   * jobs, automations, the KEY adapter) get nothing here and no user is
+   * attributed; updateContact and softDeleteContact then record their events
+   * as actorType 'SYSTEM', matching the SYSTEM ContactAuditEntry.
    */
   private eventActor(ctx?: AuditContext | null): { actorType?: string; actorId?: string } {
     const actor = ctx?.actor;
@@ -852,16 +853,29 @@ export class CrmService {
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
     let access: CrmAccess | null = null;
+    // The row the caller may reach: the tenant predicate and, with an actor,
+    // the same M7 visibility clause GET detail applies (CrmStatsService
+    // assertContact). A contact outside it answers exactly like an unknown id,
+    // here and in the in-transaction read below, so PATCH neither discloses
+    // nor edits a PRIVATE row the caller cannot open. Without an actor (KEY
+    // adapter, automation) the tenant predicate alone applies, as before.
+    const reachableWhere: Prisma.ContactWhereInput = { ...contactWhereWithId(input.businessId, input.contactId) };
     if (input.actorUserId) {
       access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      const visClause = visibilityClause(access, input.actorUserId);
+      if (visClause) reachableWhere.AND = [visClause];
       if (!access.isOwner && !access.isSuperAdmin) {
         if (access.editScope === 'none') {
           throw new ForbiddenException('You do not have permission to edit contacts');
         }
+        const visible = await this.prisma.client.contact.findFirst({ where: reachableWhere, select: { id: true } });
+        if (!visible) {
+          throw new NotFoundException('Contact not found');
+        }
         if (access.editScope === 'owned') {
           const owned = await this.prisma.client.contact.findFirst({
             where: {
-              ...contactWhereWithId(input.businessId, input.contactId),
+              ...reachableWhere,
               OR: [
                 { ownerId: input.actorUserId },
                 { shares: { some: { userId: input.actorUserId } } },
@@ -899,7 +913,7 @@ export class CrmService {
       const baseCustom =
         (input.custom as Record<string, unknown>) ??
         ((await this.prisma.client.contact.findFirst({
-          where: contactWhereWithId(input.businessId, input.contactId),
+          where: reachableWhere,
           select: { custom: true },
         }))?.custom as Record<string, unknown>) ??
         {};
@@ -961,18 +975,23 @@ export class CrmService {
 
     const { existing, updated } = await this.prisma.client.$transaction(async (tx) => {
       const existingContact = await tx.contact.findFirst({
-        where: contactWhereWithId(input.businessId, input.contactId),
+        where: reachableWhere,
       });
       if (!existingContact) {
         throw new NotFoundException('Contact not found');
       }
       // Changing the owner through PATCH is a reassignment and needs the same
-      // permission as reassignContacts. Resending the current owner is not.
-      // Checked against the row read in this transaction, before any write.
+      // permission as reassignContacts, and, as there, the new owner must be a
+      // member of this business ('' and unknown ids included), for every
+      // caller. Resending the current owner is not a reassignment. Checked
+      // against the row read in this transaction, before any write.
       // (A null ownerId is written as "unchanged", see `data` above.)
       const changesOwner = input.ownerId != null && input.ownerId !== existingContact.ownerId;
       if (changesOwner && access && !access.isOwner && !access.isSuperAdmin && !access.reassign) {
         throw new ForbiddenException('You do not have permission to reassign contacts');
+      }
+      if (changesOwner) {
+        await this.assertNewOwnerIsMember(input.businessId, input.ownerId as string, tx);
       }
 
       const updatedContact = await tx.contact.update({
@@ -989,7 +1008,7 @@ export class CrmService {
           input.contactId,
           'contact.updated',
           { updatedFields },
-          { actorType: 'USER', source: 'crm', ...this.eventActor(_audit) },
+          { actorType: 'SYSTEM', source: 'crm', ...this.eventActor(_audit) },
           tx,
         );
       }
@@ -1000,7 +1019,7 @@ export class CrmService {
           input.contactId,
           'status.changed',
           { from: existingContact.status, to: input.status },
-          { actorType: 'USER', source: 'crm', ...this.eventActor(_audit) },
+          { actorType: 'SYSTEM', source: 'crm', ...this.eventActor(_audit) },
           tx,
         );
       }
@@ -1079,7 +1098,7 @@ export class CrmService {
         input.contactId,
         'contact.deleted',
         { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() },
-        { actorType: 'USER', source: 'crm', ...this.eventActor(_audit) },
+        { actorType: 'SYSTEM', source: 'crm', ...this.eventActor(_audit) },
         tx,
       );
       return claimed;
@@ -1318,6 +1337,26 @@ export class CrmService {
   }
 
   /**
+   * Refuses (400) a new contact owner who is not a member of `businessId`:
+   * the one membership check reassignContacts and updateContact (a PATCH that
+   * changes ownerId) apply. An unknown id or '' has no membership either.
+   * `client` is the transaction when the caller holds one.
+   */
+  private async assertNewOwnerIsMember(
+    businessId: string,
+    userId: string,
+    client: Pick<PrismaService['client'], 'membership'> = this.prisma.client,
+  ): Promise<void> {
+    const membership = await client.membership.findUnique({
+      where: { userId_businessId: { userId, businessId } },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw new BadRequestException('newOwnerId must belong to a member of this business');
+    }
+  }
+
+  /**
    * Reassign ownership of one or more contacts. Verifies that
    *   - the actor has crm_reassign permission (or is OWNER/SUPER_ADMIN);
    *   - the new owner is a member of the same business; and
@@ -1342,12 +1381,7 @@ export class CrmService {
       }
     }
 
-    const newOwnerMembership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: input.newOwnerId, businessId: input.businessId } },
-    });
-    if (!newOwnerMembership) {
-      throw new BadRequestException('newOwnerId must belong to a member of this business');
-    }
+    await this.assertNewOwnerIsMember(input.businessId, input.newOwnerId);
 
     const eligibleWhere: any = {
       ...contactWhereBase(input.businessId),
