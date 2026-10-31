@@ -1729,7 +1729,11 @@ export class CommerceService {
       }
     }
 
-    if (invoice.status === 'PAID' || invoice.status === 'VOID') {
+    // R0-PL-03 (G3): a DRAFT invoice has not been issued, and DRAFT ->
+    // PARTIALLY_PAID / PAID is not a legal transition. Refuse it here, before
+    // anything is written, rather than commit the payment and then fail the
+    // reconcile (the in-transaction reconcile below would also roll it back).
+    if (invoice.status === 'PAID' || invoice.status === 'VOID' || invoice.status === 'DRAFT') {
       // R0-D3: a state guard is a 409, not a 500.
       throw new ConflictException(`Cannot record payment on a ${invoice.status} invoice`);
     }
@@ -1750,9 +1754,19 @@ export class CommerceService {
     // payment row (preserves invariant: every SUCCESSFUL payment has a
     // matching ledger transaction unless basis is CASH and posting silently
     // skipped — also fine, idempotent on replay).
+    //
+    // R0-PL-03 (G3, PL-P10): the invoice reconcile runs inside the same
+    // transaction, so the payment row, its posting, the status change and the
+    // COGS posting commit or roll back together. invoice.paid /
+    // invoice.payment_recorded are buffered and emitted only after commit; a
+    // rolled-back attempt (including the R0-D2 P2002 race below) emits nothing.
+    const pendingEvents: Array<{ name: string; payload: unknown }> = [];
     let payment: Payment;
+    let reconciled: Awaited<ReturnType<InvoiceWorkflowService['reconcileFromPayments']>>;
     try {
-      payment = await this.prisma.client.$transaction(async (tx) => {
+      ({ payment, reconciled } = await this.prisma.client.$transaction(async (tx) => {
+        const txClient = tx as unknown as Prisma.TransactionClient;
+        await CommerceService.lockInvoiceForPayment(txClient, invoiceId);
         const created = await tx.payment.create({
           data: {
             amount: paymentAmount,
@@ -1771,11 +1785,17 @@ export class CommerceService {
           },
         });
         await this.revenuePosting.onPaymentRecorded(created.id, {
-          tx: tx as unknown as Prisma.TransactionClient,
+          tx: txClient,
           createdById: actorId,
         });
-        return created;
-      });
+        // Single source of truth: workflow recomputes status from payment rows
+        // and queues the appropriate event (invoice.paid / invoice.payment_recorded).
+        const r = await this.invoiceWorkflow.reconcileFromPayments(invoiceId, {
+          tx: txClient,
+          eventBuffer: pendingEvents,
+        });
+        return { payment: created, reconciled: r };
+      }));
     } catch (err: unknown) {
       // R0-D2 race: a concurrent duplicate submit won the insert between our
       // lookup and our create. Prisma raises P2002 on the unique index, the
@@ -1794,9 +1814,10 @@ export class CommerceService {
       throw err;
     }
 
-    // Single source of truth: workflow recomputes status from payment rows
-    // and emits the appropriate event (invoice.paid / invoice.payment_recorded).
-    const reconciled = await this.invoiceWorkflow.reconcileFromPayments(invoiceId);
+    // Committed: now listeners may see the payment and the new status.
+    for (const evt of pendingEvents) {
+      this.events.emit(evt.name, evt.payload);
+    }
     const newPaidTotal = existingPaid + paymentAmount;
     const newStatus = reconciled.status;
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
@@ -1869,6 +1890,20 @@ export class CommerceService {
       return { value: `manual_${invoiceId}_ref_${digest(`${reference}\n${input.amount.toFixed(2)}`)}`, keyedOn: 'reference' };
     }
     return { value: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, keyedOn: null };
+  }
+
+  /**
+   * R0-PL-03: serialize payment writes per invoice. Taken first inside the
+   * payment and refund transactions, so a concurrent payment or refund on the
+   * same invoice waits for this one to commit, and its in-transaction
+   * reconcile then reads every committed row: two partial payments that
+   * together settle the invoice end PAID with one invoice.paid, instead of
+   * each reconciling against a snapshot without the other. FOR NO KEY UPDATE
+   * is the lock a plain UPDATE of the row takes; it does not block the
+   * foreign-key checks of rows that reference the invoice.
+   */
+  private static async lockInvoiceForPayment(tx: Prisma.TransactionClient, invoiceId: string): Promise<void> {
+    await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${invoiceId} FOR NO KEY UPDATE`;
   }
 
   /**
@@ -2017,7 +2052,15 @@ export class CommerceService {
     if (payment.status !== 'SUCCESSFUL') throw refusal(payment.status);
     // FIN2 — flip the row + reverse the original posting in one tx so the
     // refunded state and the offsetting ledger entries commit together.
+    //
+    // R0-PL-03 (G12): the invoice reconcile runs in the same transaction. A
+    // reconcile error is no longer swallowed: it rolls the refund back and is
+    // the caller's response, so the payment, the ledger and the invoice
+    // status never disagree. Invoice events are emitted after commit.
+    const pendingEvents: Array<{ name: string; payload: unknown }> = [];
     const updated = await this.prisma.client.$transaction(async (tx) => {
+      const txClient = tx as unknown as Prisma.TransactionClient;
+      if (payment.invoiceId) await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
       const flipped = await tx.payment.updateMany({
         where: { id: paymentId, businessId, status: 'SUCCESSFUL' },
         data: {
@@ -2032,13 +2075,19 @@ export class CommerceService {
       }
       const next = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
       await this.revenuePosting.onPaymentRefunded(paymentId, {
-        tx: tx as unknown as Prisma.TransactionClient,
+        tx: txClient,
         createdById: actorId ?? null,
       });
+      if (payment.invoiceId) {
+        await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId, {
+          tx: txClient,
+          eventBuffer: pendingEvents,
+        });
+      }
       return next;
     });
-    if (payment.invoiceId) {
-      await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId).catch(() => null);
+    for (const evt of pendingEvents) {
+      this.events.emit(evt.name, evt.payload);
     }
     this.statsCache.invalidateCache(businessId);
     return updated;
