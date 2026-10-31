@@ -31,6 +31,12 @@
  * owner and STAFF members edit their own, shared and TEAM contacts, and a
  * reassignment to a real member works.
  *
+ * Review repairs (the cases at the end of the file): resending the current
+ * owner is decided on the row locked in the PATCH transaction, so it cannot
+ * undo a reassignment committing concurrently (ST-R1); DELETE and bulk DELETE
+ * apply the same visibility clause, so a contact the caller cannot see answers
+ * a single DELETE like an unknown id and is skipped by a bulk one (ST-R2).
+ *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the user,
  * business, membership, contact and share rows, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CrmRateLimitGuard, PlanLimitGuard, TeamAuditInterceptor,
@@ -118,6 +124,21 @@ function detail(actor: string, contactId: string) {
     .get(`/crm/businesses/${ID.bizA}/contacts/${contactId}`)
     .set('x-test-user', actor)
     .set('x-forwarded-for', nextIp());
+}
+
+function del(actor: string, contactId: string) {
+  return request(app.getHttpServer())
+    .delete(`/crm/businesses/${ID.bizA}/contacts/${contactId}`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp());
+}
+
+function bulkDelete(actor: string, contactIds: string[]) {
+  return request(app.getHttpServer())
+    .delete(`/crm/businesses/${ID.bizA}/contacts/bulk`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
+    .send({ contactIds });
 }
 
 function bulkReassign(actor: string, contactIds: string[], newOwnerId: string) {
@@ -209,8 +230,16 @@ async function expectAnswersLikeUnknown(
   contact: { id: string; email: string | null; phone: string | null; notesInternal: string | null },
   body: Record<string, unknown>,
 ) {
-  const forbidden = await patch(actor, contact.id, body);
-  const absent = await patch(actor, UNKNOWN_CONTACT, body);
+  await expectRefusedLikeUnknown((contactId) => patch(actor, contactId, body), contact);
+}
+
+/** The same contract for any single-contact request `send` (PATCH, DELETE). */
+async function expectRefusedLikeUnknown(
+  send: (contactId: string) => Promise<{ status: number; body: any; text: string; headers: Record<string, string> }>,
+  contact: { id: string; email: string | null; phone: string | null; notesInternal: string | null },
+) {
+  const forbidden = await send(contact.id);
+  const absent = await send(UNKNOWN_CONTACT);
   expect(forbidden.status).toBe(404);
   expect(absent.status).toBe(404);
   expect(forbidden.body).toMatchObject({ statusCode: 404, message: 'Contact not found', error: 'Not Found' });
@@ -578,5 +607,138 @@ describe('ST-B: a PATCH that changes ownerId must name a member of this business
     expect(updated).toHaveLength(1);
     await settle();
     expect(await db.contactAuditEntry.count({ where: { contactId: contact.id, action: 'reassigned' } })).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review repairs (R0-13c-CT-PATCH-VISIBILITY review ST-R1, ST-R2), each
+// reproduced against the real database. Cases tagged NEGATIVE CONTROL fail on
+// the reviewed head 45ede9cf.
+// ---------------------------------------------------------------------------
+
+/** Poll `probe` until it holds, or fail with `what` after `timeoutMs`. */
+async function waitUntil(what: string, probe: () => Promise<boolean>, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await probe())) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+describe('ST-B: resending the current owner is decided on the locked row, so it cannot undo a concurrent reassignment', () => {
+  it('NEGATIVE CONTROL: a member without crm_reassign who resends the stale owner while a reassignment commits is refused 403 like the same request sent afterwards; the new owner stays and nothing else is written', async () => {
+    // DEPARTED names nobody in bizA, so restoring it would also bypass the membership check.
+    const contact = await seedContact({ visibility: 'TEAM', ownerId: DEPARTED });
+    const body = { ownerId: DEPARTED, jobTitle: `${P}Stale form` };
+    await settle();
+    const tracesBefore = await traceCounts();
+
+    // A legitimate reassignment DEPARTED -> staffB holds the row lock and commits
+    // only once the PATCH is blocked behind it, so the PATCH has necessarily
+    // started its transaction while owner_id still read DEPARTED to everyone else.
+    let patched: any;
+    let patchDone: Promise<void> | undefined;
+    await db.$transaction(async (tx: any) => {
+      await tx.$executeRawUnsafe('UPDATE contacts SET owner_id = $1 WHERE id = $2', ID.staffB, contact.id);
+      const [{ pid }] = await tx.$queryRawUnsafe('SELECT pg_backend_pid() AS pid');
+      patchDone = patch(ID.staff, contact.id, body).then((res) => { patched = res; });
+      await waitUntil("the PATCH waits on the reassignment's row lock", async () => {
+        const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
+          'SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))', pid,
+        );
+        return rows[0].n > 0;
+      });
+    }, { timeout: 15_000, maxWait: 5_000 });
+    await patchDone;
+
+    expect(patched.status).toBe(403);
+    expect(patched.body.message).toBe('You do not have permission to reassign contacts');
+    await settle();
+    expect(await rawRow(contact.id)).toMatchObject({ owner_id: ID.staffB, job_title: null });
+    expect(await traceCounts()).toEqual(tracesBefore);
+    expect(await db.contactAuditEntry.count({ where: { contactId: contact.id } })).toBe(0);
+
+    // The control: the same request sent after the reassignment, with no race.
+    const sequential = await patch(ID.staff, contact.id, body);
+    expect(sequential.status).toBe(403);
+    expect(sequential.body.message).toBe(patched.body.message);
+    expect(await rawRow(contact.id)).toMatchObject({ owner_id: ID.staffB, job_title: null });
+  }, 30_000);
+});
+
+describe('ST-A: DELETE applies the GET visibility clause: a contact the caller cannot see answers like an unknown id', () => {
+  // An ADMIN-role member with no scope overrides: full CRM access, but not the
+  // business owner, so another member's PRIVATE contact is hidden from it on GET.
+  const ADMIN = `${P}admin`;
+  beforeAll(async () => {
+    await db.user.create({ data: { id: ADMIN, email: `${P}admin@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}m_admin`, userId: ADMIN, businessId: ID.bizA, role: 'ADMIN' } });
+  });
+
+  it("NEGATIVE CONTROL: DELETE by a crm 'write' STAFF member on another member's PRIVATE contact answers 404 byte-identical to an unknown id, not the delete-scope 403, and writes nothing", async () => {
+    const contact = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    await expectNothingWritten(contact.id, () => expectRefusedLikeUnknown((id) => del(ID.staff, id), contact));
+  });
+
+  it("NEGATIVE CONTROL: an ADMIN-role member who gets 404 on GET for another member's PRIVATE contact gets 404 on DELETE like an unknown id, and the contact stays live", async () => {
+    const contact = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    expect((await detail(ADMIN, contact.id)).status).toBe(404);
+    await expectNothingWritten(contact.id, () => expectRefusedLikeUnknown((id) => del(ADMIN, id), contact));
+    expect((await rawRow(contact.id)).deleted_at).toBeNull();
+  });
+
+  it("NEGATIVE CONTROL: an ADMIN-role member's bulk delete naming another member's PRIVATE contact deletes nothing and answers exactly as for an unknown id; next to a visible TEAM id in one call, only the TEAM contact is deleted", async () => {
+    const contact = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    await expectNothingWritten(contact.id, async () => {
+      const hidden = await bulkDelete(ADMIN, [contact.id]);
+      const absent = await bulkDelete(ADMIN, [UNKNOWN_CONTACT]);
+      expect(hidden.status).toBe(200);
+      expect(hidden.body).toEqual({ deleted: 0 });
+      expect(hidden.text).toBe(absent.text);
+    });
+    expect((await rawRow(contact.id)).deleted_at).toBeNull();
+
+    const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    const mixed = await bulkDelete(ADMIN, [team.id, contact.id]);
+    expect(mixed.status).toBe(200);
+    expect(mixed.body).toEqual({ deleted: 1 });
+    expect((await rawRow(team.id)).deleted_at).not.toBeNull();
+    expect((await rawRow(contact.id)).deleted_at).toBeNull();
+    await settle();
+    expect(await db.contactEvent.count({ where: { contactId: contact.id } })).toBe(0);
+    expect(await db.contactAuditEntry.count({ where: { contactId: contact.id } })).toBe(0);
+  });
+
+  it("a visible contact the member may not delete keeps today's 403: a crm 'write' STAFF member (delete owned) on another member's TEAM contact, nothing written", async () => {
+    const contact = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    expect((await detail(ID.staff, contact.id)).status).toBe(200);
+    await expectNothingWritten(contact.id, async () => {
+      const res = await del(ID.staff, contact.id);
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe('You can only delete contacts you own');
+    });
+  });
+
+  it("positive control: the owner deletes another member's PRIVATE contact, an ADMIN-role member deletes another member's TEAM contact (single and bulk) and a crm 'write' STAFF member deletes their own PRIVATE contact", async () => {
+    const byOwner = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+    const byAdmin = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    const byStaff = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staff });
+    for (const [actor, contact] of [[ID.owner, byOwner], [ADMIN, byAdmin], [ID.staff, byStaff]] as const) {
+      const res = await del(actor, contact.id);
+      expect(res.status, `${actor} ${contact.id}`).toBe(200);
+      expect((await rawRow(contact.id)).deleted_at, contact.id).not.toBeNull();
+      const audits = await auditEntries(contact.id, 'deleted');
+      expect(audits, contact.id).toHaveLength(1);
+      expect(audits[0].actor, contact.id).toEqual({ type: 'USER', id: actor });
+    }
+
+    const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+    const bulk = await bulkDelete(ADMIN, [team.id]);
+    expect(bulk.status).toBe(200);
+    expect(bulk.body).toEqual({ deleted: 1 });
+    expect((await rawRow(team.id)).deleted_at).not.toBeNull();
+    const bulkAudits = await auditEntries(team.id, 'bulk_deleted');
+    expect(bulkAudits).toHaveLength(1);
+    expect(bulkAudits[0].actor).toEqual({ type: 'USER', id: ADMIN });
   });
 });

@@ -797,3 +797,44 @@ describe('ST-C: system-context callers record the SYSTEM actor on the ContactEve
     expect((await events(contact.id, 'contact.deleted'))[0]).toMatchObject({ actorType: 'USER', actorId: ID.owner });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Review repair (R0-13c-CT-PATCH-VISIBILITY review ST-R4) and one hand-off
+// (ST-R3 / CR-1), each reproduced against the real database. The NEGATIVE
+// CONTROL fails on the reviewed head 45ede9cf, where a call that names its
+// member only as actorUserId (no audit context) was recorded as SYSTEM.
+// ---------------------------------------------------------------------------
+
+describe('ST-C: only a call that names no actor is recorded as SYSTEM', () => {
+  it('NEGATIVE CONTROL: POST /contacts/:id/enrich (ContactEnrichmentService hands CrmService.updateContact the member as actorUserId, with no audit context) records that member as USER on contact.updated and on the updated audit entry; a single delete called the same way does too', async () => {
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { ContactEnrichmentService } = await import('../src/modules/crm/enrichment/contact-enrichment.service');
+    // The enabled stand-in for the paid provider: no network, one match.
+    const provider = { key: 'stub', enabled: true, enrich: async () => ({ status: 'match', result: { jobTitle: `${P}Filled` } }) };
+    const enrichment = new ContactEnrichmentService(app.get(PrismaService), crm, provider as any);
+
+    const contact = await seedSensitiveContact('TEAM', ID.owner);
+    // Exactly what ContactEnrichmentController forwards for the requesting member.
+    const outcome = await enrichment.enrichContact({ businessId: ID.bizA, contactId: contact.id, actorUserId: ID.staff, force: true });
+    expect(outcome).toMatchObject({ status: 'enriched', filled: ['jobTitle'] });
+    const updated = await events(contact.id, 'contact.updated');
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({ actorType: 'USER', actorId: ID.staff });
+    const audits = await auditEntries(contact.id, 'updated');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].actor).toEqual({ type: 'USER', id: ID.staff });
+
+    await crm.softDeleteContact({ businessId: ID.bizA, contactId: contact.id, actorUserId: ID.owner });
+    const deleted = await events(contact.id, 'contact.deleted');
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).toMatchObject({ actorType: 'USER', actorId: ID.owner });
+    const deletedAudits = await auditEntries(contact.id, 'deleted');
+    expect(deletedAudits).toHaveLength(1);
+    expect(deletedAudits[0].actor).toEqual({ type: 'USER', id: ID.owner });
+  });
+
+  // Hand-off, not fixed here: the fix is in contact-enrichment.service.ts,
+  // outside the R0-13c write set. Kept in this suite because its manifest
+  // admits non-required cases; contacts-patch-visibility.json is strict.
+  it.todo("review hand-off (R0-13c review ST-R3 / CR-1): POST /contacts/:id/enrich applies the GET visibility clause before the provider call. Reproduced: a crm 'write' STAFF member enriching another member's PRIVATE contact gets 200 no_match (custom.enrichment stamped on the hidden row) or, on a match, a paid lookup that received the contact's email and name followed by 404, where an unknown id gets 404 with no lookup. Fix: visibilityClause in ContactEnrichmentService's contact lookup and assertCanEdit, so a contact the caller cannot see answers 404 like an unknown id with no provider call and nothing stamped");
+});
