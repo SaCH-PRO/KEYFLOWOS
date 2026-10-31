@@ -2565,6 +2565,8 @@ export class CommerceService {
       // V1-48: an active link past its expiry is not reused (it would put a dead link in the reminder).
       where: { invoiceId: invoice.id, businessId: input.businessId, ...CommerceService.liveLinkWhere() },
     });
+    // ST-V48-1: a live pre-V1-48 cuid token is rotated before it goes into the reminder.
+    if (link) link = await this.reissueLink(link);
     if (!link) {
       try {
         link = await this.createPaymentLink(invoice.id, input.businessId);
@@ -2912,10 +2914,13 @@ export class CommerceService {
    * link first.
    */
   async findAnyPaymentLink(invoiceId: string, businessId: string) {
-    return this.prisma.client.paymentLink.findFirst({
+    const link = await this.prisma.client.paymentLink.findFirst({
       where: { invoiceId, businessId },
       orderBy: { createdAt: 'desc' },
     });
+    // Every caller hands this token out again (resend, receipt email), so a
+    // live legacy token is rotated first (ST-V48-1). A dead link is returned as is.
+    return link ? this.reissueLink(link) : null;
   }
 
   /**
@@ -2923,10 +2928,48 @@ export class CommerceService {
    * credential, so it is 24 crypto-random bytes (32 base64url characters),
    * the same as a quote's view token. It is passed explicitly on create; the
    * column default (cuid()) is left alone, so no migration is needed and
-   * links issued before this keep working.
+   * links issued before this keep working until they are handed out again
+   * (see reissueLink).
    */
   private static newPaymentLinkToken(): string {
     return randomBytes(24).toString('base64url');
+  }
+
+  /** The shape the cuid() column default gave every token before V1-48: 'c' and 24 lowercase base36. */
+  private static readonly LEGACY_LINK_TOKEN = /^c[a-z0-9]{24}$/;
+
+  /**
+   * An existing link about to be handed out again (POST .../payment-link,
+   * send, reminder, resend, receipt), with `expiresAt` applied when given.
+   *
+   * ST-V48-1: a live link (active, not past its expiry) whose token is still a
+   * pre-V1-48 cuid gets a crypto-random token in place, so no path keeps
+   * re-issuing the guessable credential. The row (id, createdAt, expiry) is
+   * kept and only the token changes: the cuid URL in an earlier email then
+   * answers as unknown, and the message being sent carries the new one. The
+   * swap is a compare-and-set on the old token, so of two concurrent callers
+   * one rotates and the other reads that row back: both hand out one token.
+   * A dead link and a token of any other shape are left as they are; the
+   * customer view never rotates (it would break the URL being opened).
+   */
+  private async reissueLink<T extends { id: string; token: string; active: boolean; expiresAt: Date | null }>(
+    link: T,
+    expiresAt?: Date,
+  ) {
+    const live = link.active && (!link.expiresAt || link.expiresAt > new Date());
+    if (!live || !CommerceService.LEGACY_LINK_TOKEN.test(link.token)) {
+      if (!expiresAt) return link;
+      return this.prisma.client.paymentLink.update({ where: { id: link.id }, data: { expiresAt } });
+    }
+    const swapped = await this.prisma.client.paymentLink.updateMany({
+      where: { id: link.id, token: link.token },
+      data: { token: CommerceService.newPaymentLinkToken(), ...(expiresAt ? { expiresAt } : {}) },
+    });
+    if (swapped.count === 0 && expiresAt) {
+      // A concurrent caller rotated it first; this caller's expiry still applies.
+      return this.prisma.client.paymentLink.update({ where: { id: link.id }, data: { expiresAt } });
+    }
+    return this.prisma.client.paymentLink.findUniqueOrThrow({ where: { id: link.id } });
   }
 
   /**
@@ -2950,7 +2993,8 @@ export class CommerceService {
    * active and not past its expiry; an active link that has expired is never
    * handed out again (the customer would get a dead link), and a fresh one is
    * minted. A new `expiresInDays` is applied to the reused link, keeping its
-   * token so links already sent keep working until the new expiry.
+   * token so links already sent keep working until the new expiry, unless
+   * that token is a pre-V1-48 cuid, which is rotated (reissueLink, ST-V48-1).
    */
   async createPaymentLink(invoiceId: string, businessId: string, expiresInDays?: number) {
     const expiresAt = CommerceService.paymentLinkExpiry(expiresInDays);
@@ -2968,10 +3012,7 @@ export class CommerceService {
       where: { invoiceId, businessId, ...CommerceService.liveLinkWhere() },
       orderBy: { createdAt: 'desc' },
     });
-    if (existing) {
-      if (!expiresAt) return existing;
-      return this.prisma.client.paymentLink.update({ where: { id: existing.id }, data: { expiresAt } });
-    }
+    if (existing) return this.reissueLink(existing, expiresAt);
 
     return this.prisma.client.paymentLink.create({
       data: { invoiceId, businessId, token: CommerceService.newPaymentLinkToken(), expiresAt: expiresAt ?? null },

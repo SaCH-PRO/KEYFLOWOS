@@ -27,7 +27,11 @@
  *   PAID                     -> amountDue 0, paidAt = the invoice's paidAt
  *   new link token           -> randomBytes(24) base64url (32 chars), passed explicitly; the
  *                               schema default is still cuid(), so no migration
- *   expiresInDays            -> honoured on a new link and on the existing active link;
+ *   legacy cuid link (ST-V48-1) -> a live link minted before V1-48 is rotated in place (same
+ *                               row, random token) the next time POST .../payment-link, send,
+ *                               reminder or resend hands it out; the cuid then reads as unknown;
+ *                               a dead legacy link is left as it is
+ *   expiresInDays           -> honoured on a new link and on the existing active link;
  *                               an active link past its expiry is never handed out again;
  *                               a non-positive or non-number value is a 400 and writes nothing
  *   expired / inactive / foreign-tenant link -> the same body as an unknown token
@@ -101,6 +105,14 @@ const ID = {
   invLedger: `${P}invLedger`,
   invRefund: `${P}invRefund`,
   invTenantA: `${P}invTenantA`,
+  // ST-V48-1: invoices whose link was minted before V1-48 (a cuid() token)
+  invLegacy: `${P}invLegacy`,
+  invLegacyExpiry: `${P}invLegacyExpiry`,
+  invLegacySend: `${P}invLegacySend`,
+  invLegacyRemind: `${P}invLegacyRemind`,
+  invLegacyPaid: `${P}invLegacyPaid`,
+  invLegacyDead: `${P}invLegacyDead`,
+  invLegacyRace: `${P}invLegacyRace`,
   // tenant B
   invB: `${P}invB`,
 };
@@ -129,6 +141,9 @@ const CUID_SHAPE = /^c[a-z0-9]{24}$/;
 let db: any;
 let app: any;
 let redis: any;
+
+/** Emails the operator routes hand to GmailService.sendEmail (stubbed: nothing leaves the process). */
+const sentEmails: Array<{ businessId: string; to: string; subject: string; htmlBody: string }> = [];
 
 /** Route-minted links: invoice -> token. */
 const TOKEN: Record<string, string> = {};
@@ -261,6 +276,21 @@ async function linksOf(invoiceId: string): Promise<any[]> {
   return db.paymentLink.findMany({ where: { invoiceId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
 }
 
+/**
+ * A link row as every link was minted before V1-48: no token passed, so the
+ * column default cuid() fills it (ST-V48-1).
+ */
+async function seedLegacyLink(invoiceId: string, extra: Record<string, unknown> = {}): Promise<any> {
+  const row = await db.paymentLink.create({ data: { invoiceId, businessId: bizOf(invoiceId), ...extra } });
+  expect(row.token, 'seeded legacy token').toMatch(CUID_SHAPE);
+  return row;
+}
+
+/** The token in the /public/invoice/<token> URL of an email or a paymentUrl. */
+function linkTokenIn(text: string | null | undefined): string | undefined {
+  return /\/public\/invoice\/([A-Za-z0-9_-]+)/.exec(text ?? '')?.[1];
+}
+
 function expectNoCanary(body: unknown) {
   expect(JSON.stringify(body ?? {})).not.toContain(CANARY);
 }
@@ -362,7 +392,16 @@ beforeAll(async () => {
       { provide: PublicEventsService, useValue: {} },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
       { provide: TimeEntryService, useValue: {} },
-      { provide: GmailService, useValue: {} },
+      // Captures send-email / send-reminder / resend-receipt mail (ST-V48-1 reads the pay link in it).
+      {
+        provide: GmailService,
+        useValue: {
+          sendEmail: async (m: any) => {
+            sentEmails.push(m);
+            return { messageId: `${P}msg_${sentEmails.length}` };
+          },
+        },
+      },
       { provide: CommerceVisionService, useValue: {} },
       { provide: StoreReadinessService, useValue: {} },
       PaymentEvidenceService,
@@ -690,5 +729,124 @@ describe('LEDGER and TENANT (V1-48)', () => {
     const text = JSON.stringify(res.body);
     for (const inv of [ID.invPartial, ID.invTenantA, ID.invPaid]) expect(text).not.toContain(inv);
     expect(text).not.toContain('V48A Biz A');
+  });
+});
+
+describe('ST-V48-1: a live link still carrying a cuid() token is rotated the next time it is handed out (V1-48 review)', () => {
+  it('L-18: POST .../payment-link rotates a live legacy link in place: same row, a random token, the cuid answers unknown; a second POST hands out the same new token', async () => {
+    const legacy = await seedLegacyLink(ID.invLegacy);
+    // Until it is handed out again the legacy link keeps working.
+    expect((await view(legacy.token)).body.ok).toBe(true);
+
+    const res = await createLink(ID.invLegacy);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.id).toBe(legacy.id);
+    expect(res.body.token).toMatch(RANDOM_TOKEN);
+    expect(res.body.token).not.toMatch(CUID_SHAPE);
+    expect(res.body.expiresAt).toBeNull();
+    expect((await view(legacy.token)).body).toEqual(unknownBody);
+    const fresh = await view(res.body.token);
+    expect(fresh.body.ok).toBe(true);
+    expect(fresh.body.invoice.id).toBe(ID.invLegacy);
+
+    const again = await createLink(ID.invLegacy);
+    expect(again.status).toBe(201);
+    expect(again.body.token).toBe(res.body.token);
+    const stored = await linksOf(ID.invLegacy);
+    expect(stored.map((l: any) => [l.id, l.token, l.active])).toEqual([[legacy.id, res.body.token, true]]);
+  });
+
+  it('L-19: POST with expiresInDays on a live legacy link rotates the token and applies the expiry in the same answer', async () => {
+    const legacy = await seedLegacyLink(ID.invLegacyExpiry);
+    const res = await createLink(ID.invLegacyExpiry, { expiresInDays: 7 });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.id).toBe(legacy.id);
+    expect(res.body.token).toMatch(RANDOM_TOKEN);
+    expectExpiryAbout(res.body.expiresAt, 7);
+    const stored = await linksOf(ID.invLegacyExpiry);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].token).toBe(res.body.token);
+    expectExpiryAbout(stored[0].expiresAt, 7);
+    expect((await view(legacy.token)).body).toEqual(unknownBody);
+    expect((await view(res.body.token)).body.ok).toBe(true);
+  });
+
+  it('L-20: send-email and send-reminder put the rotated random token in the pay link, never the cuid', async () => {
+    const sendLegacy = await seedLegacyLink(ID.invLegacySend);
+    sentEmails.length = 0;
+    const sent = await agent()
+      .post(`/commerce/businesses/${ID.bizA}/invoices/${ID.invLegacySend}/send-email`)
+      .set(HEADER, ID.ownerA)
+      .send({ recipientEmail: `${P}payer@test.local` });
+    expect([200, 201], JSON.stringify(sent.body)).toContain(sent.status);
+    const sentToken = linkTokenIn(sent.body.paymentUrl);
+    expect(sentToken).toMatch(RANDOM_TOKEN);
+    expect(sentEmails).toHaveLength(1);
+    expect(linkTokenIn(sentEmails[0]!.htmlBody)).toBe(sentToken);
+    expect(sentEmails[0]!.htmlBody).not.toContain(sendLegacy.token);
+    expect((await linksOf(ID.invLegacySend)).map((l: any) => [l.id, l.token])).toEqual([[sendLegacy.id, sentToken]]);
+
+    const remindLegacy = await seedLegacyLink(ID.invLegacyRemind);
+    sentEmails.length = 0;
+    const reminded = await agent()
+      .post(`/commerce/businesses/${ID.bizA}/invoices/${ID.invLegacyRemind}/send-reminder`)
+      .set(HEADER, ID.ownerA)
+      .send({ recipientEmail: `${P}payer@test.local`, channel: 'email' });
+    expect([200, 201], JSON.stringify(reminded.body)).toContain(reminded.status);
+    expect(reminded.body.delivered).toBe(true);
+    const remindToken = linkTokenIn(reminded.body.paymentUrl);
+    expect(remindToken).toMatch(RANDOM_TOKEN);
+    expect(sentEmails).toHaveLength(1);
+    expect(linkTokenIn(sentEmails[0]!.htmlBody)).toBe(remindToken);
+    expect(sentEmails[0]!.htmlBody).not.toContain(remindLegacy.token);
+    expect((await linksOf(ID.invLegacyRemind)).map((l: any) => [l.id, l.token])).toEqual([[remindLegacy.id, remindToken]]);
+    expect((await view(remindLegacy.token)).body).toEqual(unknownBody);
+    expect((await view(remindToken!)).body.ok).toBe(true);
+  });
+
+  it('L-21: resend-receipt on a PAID invoice (createPaymentLink refuses, the latest link is surfaced) hands out the rotated token, which opens the paid invoice', async () => {
+    const legacy = await seedLegacyLink(ID.invLegacyPaid);
+    await pay(ID.invLegacyPaid, TOTAL, 'cash', 'slip_legacy_paid');
+    expect((await invoiceRow(ID.invLegacyPaid)).status).toBe('PAID');
+    sentEmails.length = 0;
+    const res = await agent()
+      .post(`/commerce/businesses/${ID.bizA}/invoices/${ID.invLegacyPaid}/resend-receipt`)
+      .set(HEADER, ID.ownerA)
+      .send({ recipientEmail: `${P}payer@test.local` });
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(sentEmails).toHaveLength(1);
+    const token = linkTokenIn(sentEmails[0]!.htmlBody);
+    expect(token).toMatch(RANDOM_TOKEN);
+    expect(sentEmails[0]!.htmlBody).not.toContain(legacy.token);
+    expect((await linksOf(ID.invLegacyPaid)).map((l: any) => [l.id, l.token, l.active])).toEqual([[legacy.id, token, true]]);
+    const paid = await view(token!);
+    expect(paid.body.ok).toBe(true);
+    expect(paid.body.invoice.status).toBe('PAID');
+    expect((await view(legacy.token)).body).toEqual(unknownBody);
+  });
+
+  it('L-22 control: an expired or inactive legacy link is not live, so it is left as it is (no write) and a fresh random link is minted beside it', async () => {
+    const expired = await seedLegacyLink(ID.invLegacyDead, { expiresAt: new Date(Date.now() - DAY_MS), createdAt: new Date(Date.now() - 3 * DAY_MS) });
+    const inactive = await seedLegacyLink(ID.invLegacyDead, { active: false, createdAt: new Date(Date.now() - 2 * DAY_MS) });
+    const res = await createLink(ID.invLegacyDead);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.token).toMatch(RANDOM_TOKEN);
+    expect([expired.id, inactive.id]).not.toContain(res.body.id);
+    const stored = await linksOf(ID.invLegacyDead);
+    expect(stored.map((l: any) => [l.id, l.token, l.active])).toEqual([
+      [expired.id, expired.token, true],
+      [inactive.id, inactive.token, false],
+      [res.body.id, res.body.token, true],
+    ]);
+  });
+
+  it('L-23 race: two concurrent POSTs on one live legacy link converge on a single random token on the same row', async () => {
+    const legacy = await seedLegacyLink(ID.invLegacyRace);
+    const [a, b] = await Promise.all([createLink(ID.invLegacyRace), createLink(ID.invLegacyRace)]);
+    expect(a.status, JSON.stringify(a.body)).toBe(201);
+    expect(b.status, JSON.stringify(b.body)).toBe(201);
+    expect(a.body.token).toMatch(RANDOM_TOKEN);
+    expect(b.body.token).toBe(a.body.token);
+    expect((await linksOf(ID.invLegacyRace)).map((l: any) => [l.id, l.token])).toEqual([[legacy.id, a.body.token]]);
   });
 });
