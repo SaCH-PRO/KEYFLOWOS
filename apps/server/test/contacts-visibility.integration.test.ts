@@ -34,6 +34,9 @@
  * accepted order (PR #190, b8565e04): the visible detail is awaited first, and
  * a denied dossier is byte-identical to an absent id with no collaborator call.
  * The case list is bound by scripts/proof-admission/manifests/contacts-visibility.json.
+ * That manifest sets allowAdditionalCases false: a change that adds, renames or
+ * removes a case here must make the same change to its requiredCases, or the
+ * report is rejected (KF_PROOF_UNEXPECTED_CASE / KF_PROOF_REQUIRED_CASE_MISSING).
  */
 import 'reflect-metadata';
 import path from 'path';

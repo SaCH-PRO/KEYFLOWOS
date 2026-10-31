@@ -2,6 +2,7 @@
   "manifestVersion": 1,
   "packageId": "R0-01-CT-RECONCILE",
   "proofScope": "contacts-visibility-real-database",
+  "description": "Contact detail and dossier apply the caller's CRM record visibility before any child row or journey collaborator is read, and a denied row answers like an absent one. Run from apps/server: npx vitest run test/contacts-visibility.integration.test.ts --reporter=json --outputFile=.proof/r0-01-vitest.json against a migrated local database and REDIS_URL, then node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/contacts-visibility.json --report .proof/r0-01-vitest.json. Cases tagged NEGATIVE CONTROL fail at b1948d27; the ADMIN dossier NEGATIVE CONTROL also fails at the superseded variant 6a5c0c3f (collaborators in Promise.all beside the detail lookup). allowAdditionalCases is false so that every case in the file is binding: a later packet that adds a case to contacts-visibility.integration.test.ts (V1-08-CT-SIBLING-VISIBILITY) must add its full title here in the same change, so its write_set must include this manifest, otherwise this manifest rejects its report with KF_PROOF_UNEXPECTED_CASE. Review repair CR-1: as of R0-01 the queue entry for V1-08 does not list this manifest; the integrating session adds it to V1-08's write_set and tests_first (BUILD-QUEUE-001.json is outside this packet's write set).",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
   "requiredCases": [
