@@ -7,6 +7,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { DemoDataSeederService } from './demo-data-seeder.service';
 import type { BlueprintData } from '../blueprint/blueprint.types';
+import { runWithTenant } from '../../core/tenant/tenant-context';
 
 const EMPTY_BLUEPRINT = {
   legalProfile: {},
@@ -62,6 +63,8 @@ function makeService(overrides: {
   productCount?: number;
   contactCount?: number;
   integrity?: { threePillarMinimumMet: boolean; genomeDnaScores?: Record<string, number> };
+  membership?: { role: string; permissionScopes?: Record<string, string> | null } | null;
+  userRole?: string;
 } = {}) {
   const tx = {
     product: {
@@ -80,6 +83,9 @@ function makeService(overrides: {
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({ id: 'demo_invoice_1', invoiceNumber: 'DEMO-001' }),
     },
+    teamActivityLog: {
+      create: vi.fn().mockResolvedValue({}),
+    },
   };
 
   const prisma = {
@@ -94,6 +100,14 @@ function makeService(overrides: {
       },
       contact: {
         count: vi.fn().mockResolvedValue(overrides.contactCount ?? 0),
+      },
+      membership: {
+        findUnique: vi.fn().mockResolvedValue(
+          overrides.membership === undefined ? { role: 'OWNER', permissionScopes: null } : overrides.membership,
+        ),
+      },
+      user: {
+        findUnique: vi.fn().mockResolvedValue({ role: overrides.userRole ?? 'USER' }),
       },
     },
   } as unknown as PrismaService;
@@ -283,10 +297,12 @@ describe('OnboardingConciergeService', () => {
     // Owner ruling D-03: the gate is the minimal profile (name, currency,
     // timezone); the three-pillar minimum is a recommendation, not a gate.
     const minimalProfile = { name: 'Biz One', currency: 'TTD', timezone: 'America/Port_of_Spain' };
+    // The request's tenant context, as TenantInterceptor binds it for POST /complete.
+    const asUser = <T>(userId: string, fn: () => Promise<T>, businessId = 'biz_1') => runWithTenant(businessId, userId, fn);
 
     it('throws ForbiddenException listing the missing fields when the minimal profile is absent (D-03)', async () => {
       const { service, prisma, demoSeeder } = makeService({ integrity: { threePillarMinimumMet: true } });
-      const error = await service.markOnboardingComplete('biz_1').catch((e: unknown) => e);
+      const error = await asUser('user_owner', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(ForbiddenException);
       expect((error as ForbiddenException).getResponse()).toMatchObject({
         code: 'ONBOARDING_PROFILE_INCOMPLETE',
@@ -301,7 +317,7 @@ describe('OnboardingConciergeService', () => {
         business: minimalProfile,
         integrity: { threePillarMinimumMet: false, genomeDnaScores: { founder: 30, business: 80, market: 80 } },
       });
-      const result = await service.markOnboardingComplete('biz_1');
+      const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
       expect(result.complete).toBe(true);
       expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
       expect(result).toMatchObject({ genomeRecommendation: { threePillarMinimumMet: false, missingPillars: ['founder'] } });
@@ -309,11 +325,108 @@ describe('OnboardingConciergeService', () => {
 
     it('marks onboarding complete and seeds demo data when the gate passes', async () => {
       const { service, prisma, demoSeeder } = makeService({ business: minimalProfile, integrity: { threePillarMinimumMet: true } });
-      const result = await service.markOnboardingComplete('biz_1');
+      const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
 
       expect(result.complete).toBe(true);
       expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
       expect(prisma.client.$transaction).toHaveBeenCalled();
+    });
+
+    // Review ST-R032-1: completion needs the owner or settings write access,
+    // and the actor is recorded in the completion transaction.
+    const expectRefused = (error: unknown, prisma: PrismaService, demoSeeder: DemoDataSeederService) => {
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).getResponse()).toMatchObject({ code: 'ONBOARDING_COMPLETE_FORBIDDEN' });
+      expect(prisma.client.$transaction).not.toHaveBeenCalled();
+      expect(demoSeeder.seedDemoData).not.toHaveBeenCalled();
+    };
+
+    it('ST-R032-1: a STAFF member with role-default scopes (settings none) is refused before anything is written', async () => {
+      const { service, prisma, demoSeeder } = makeService({ business: minimalProfile, membership: { role: 'STAFF', permissionScopes: null } });
+      const error = await asUser('user_staff', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
+      expectRefused(error, prisma, demoSeeder);
+    });
+
+    it('ST-R032-1: an explicit scope map with settings read only is refused', async () => {
+      const { service, prisma, demoSeeder } = makeService({
+        business: minimalProfile,
+        membership: { role: 'ADMIN', permissionScopes: { settings: 'read', crm: 'admin' } },
+      });
+      const error = await asUser('user_admin', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
+      expectRefused(error, prisma, demoSeeder);
+    });
+
+    it('ST-R032-1: the replay of an already-complete business is refused to a member without settings write', async () => {
+      const { service, prisma, demoSeeder } = makeService({
+        business: { ...minimalProfile, onboardingComplete: true, onboardingCompletedAt: new Date() },
+        membership: { role: 'STAFF', permissionScopes: null },
+      });
+      const error = await asUser('user_staff', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
+      expectRefused(error, prisma, demoSeeder);
+    });
+
+    it('ST-R032-1: without a request tenant context, or with one for another business, completion fails closed', async () => {
+      const none = makeService({ business: minimalProfile });
+      expectRefused(await none.service.markOnboardingComplete('biz_1').catch((e: unknown) => e), none.prisma, none.demoSeeder);
+      const other = makeService({ business: minimalProfile });
+      const error = await asUser('user_owner', () => other.service.markOnboardingComplete('biz_1'), 'biz_2').catch((e: unknown) => e);
+      expectRefused(error, other.prisma, other.demoSeeder);
+    });
+
+    it('ST-R032-1: a non-member who is not the owner is refused', async () => {
+      const { service, prisma, demoSeeder } = makeService({ business: minimalProfile, membership: null });
+      const error = await asUser('user_stranger', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
+      expectRefused(error, prisma, demoSeeder);
+    });
+
+    it.each([
+      ['the business owner (ownerId, no membership row)', { business: { ...minimalProfile, ownerId: 'user_x' }, membership: null }],
+      ['an OWNER membership', { business: minimalProfile, membership: { role: 'OWNER', permissionScopes: { settings: 'none' } } }],
+      ['an ADMIN with role-default scopes', { business: minimalProfile, membership: { role: 'ADMIN', permissionScopes: null } }],
+      ['a STAFF member granted settings:write', { business: minimalProfile, membership: { role: 'STAFF', permissionScopes: { settings: 'write' } } }],
+      ['a SUPER_ADMIN without a membership', { business: minimalProfile, membership: null, userRole: 'SUPER_ADMIN' }],
+    ])('ST-R032-1: %s may complete, and the completion is recorded against them', async (_label, overrides) => {
+      const { service, tx } = makeService(overrides as Parameters<typeof makeService>[0]);
+      const result = await asUser('user_x', () => service.markOnboardingComplete('biz_1'));
+      expect(result.complete).toBe(true);
+      expect(tx.teamActivityLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          businessId: 'biz_1',
+          userId: 'user_x',
+          module: 'settings',
+          action: 'onboarding_completed',
+          entityType: 'business',
+          entityId: 'biz_1',
+          meta: { demoContactId: 'c1', demoInvoiceId: 'i1', demoInvoiceNumber: 'DEMO-001' },
+        }),
+      });
+    });
+
+    it('ST-R032-1: the legal disclaimer acceptance this completion records is attributed to the actor', async () => {
+      const { service, tx, blueprint } = makeService({ business: minimalProfile, blueprint: EMPTY_BLUEPRINT });
+      (blueprint as unknown as { updateBlueprint: unknown }).updateBlueprint = vi.fn().mockResolvedValue({});
+      await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
+      const rows = tx.teamActivityLog.create.mock.calls.map((call) => (call[0] as { data: Record<string, unknown> }).data);
+      expect(rows).toEqual([
+        expect.objectContaining({ action: 'onboarding_completed', userId: 'user_owner' }),
+        expect.objectContaining({ action: 'legal_disclaimer_accepted', userId: 'user_owner', meta: { disclaimerAcceptedAt: expect.any(String) } }),
+      ]);
+    });
+
+    // Review ST-R032-2: the D-03 invariant "onboarding completes only on a valid
+    // minimal profile, by an authorised actor" holds on POST /complete, but the
+    // generic profile PATCH still bypasses it. The fix is outside this packet's
+    // write set (identity.controller.ts, identity.service.ts:351,
+    // dto/update-business.dto.ts) and is R0-09-ID-HARDEN's (D-11 owner-only profile).
+    it.todo(
+      'ST-R032-2: PATCH /identity/businesses/:id cannot set onboardingComplete or blank name/currency/timezone, and STAFF cannot change them (R0-09-ID-HARDEN)',
+    );
+
+    it('ST-R032-1: a disclaimer accepted earlier is not re-attributed', async () => {
+      const { service, tx } = makeService({ business: minimalProfile, blueprint: FULL_BLUEPRINT });
+      await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
+      expect(tx.teamActivityLog.create).toHaveBeenCalledTimes(1);
+      expect((tx.teamActivityLog.create.mock.calls[0][0] as { data: { action: string } }).data.action).toBe('onboarding_completed');
     });
   });
 

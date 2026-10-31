@@ -23,6 +23,12 @@
  *   - an absent or malformed minimal profile is refused with 403 and the list
  *     of missing fields, and nothing is written;
  *   - a member of another business is refused and nothing changes;
+ *   - IN-TENANT AUTHORITY (review ST-R032-1): a STAFF member with the role
+ *     default scopes (settings none) is refused and nothing is written — no
+ *     flag, no demo contact or invoice, no disclaimer acceptance; a member
+ *     whose scope map grants settings:write may complete; every completion
+ *     writes a team_activity_logs row naming the actor, for completion and
+ *     for the legal disclaimer acceptance it records;
  *   - a second /complete answers alreadyComplete and writes nothing;
  *   - LEDGER: completion writes exactly one demo contact (source 'demo') and
  *     one DRAFT demo invoice, and no FinancialTransaction or LedgerEntry;
@@ -104,12 +110,16 @@ const ID = {
   other: `${P}other`,   // owner of bizB only: a member of another business
   blank: `${P}blank`,   // owner of bizX, whose minimal profile is blanked, then malformed, then filled
   genome: `${P}genome`, // owner of bizG: characterization of the non-AI genome editor path
+  staff: `${P}staff`,   // STAFF member of bizA with role-default scopes (settings none)
+  sowner: `${P}sowner`, // owner of bizS, which a settings:write STAFF member completes
+  sstaff: `${P}sstaff`, // STAFF member of bizS with an explicit scope map granting settings:write
   bizAName: `${P}bizA`,
   bizBName: `${P}bizB`,
   bizXName: `${P}bizX`,
   bizGName: `${P}bizG`,
+  bizSName: `${P}bizS`,
 };
-const ALL_USERS = [ID.owner, ID.other, ID.blank, ID.genome];
+const ALL_USERS = [ID.owner, ID.other, ID.blank, ID.genome, ID.staff, ID.sowner, ID.sstaff];
 const email = (id: string) => `${id}@k32a.test.local`;
 
 /**
@@ -137,7 +147,7 @@ const serverLog: string[] = [];
 
 const T: Record<string, string> = {};
 /** Ids minted by the server, carried from case to case. */
-const S: { bizA?: string; bizB?: string; bizX?: string; bizG?: string; completedAt?: string; demo?: { contactId: string; invoiceId: string; invoiceNumber: string } } = {};
+const S: { bizA?: string; bizB?: string; bizX?: string; bizG?: string; bizS?: string; completedAt?: string; demo?: { contactId: string; invoiceId: string; invoiceNumber: string } } = {};
 /** serverLog offsets around the completion request, for the no-AI log filter. */
 const completionWindow: { from?: number; to?: number } = {};
 /** Verbatim characterization, printed for the packet return. */
@@ -216,6 +226,30 @@ async function footprint(businessId: string) {
     db.aiUsageLog.count({ where: { businessId } }),
   ]);
   return { ...biz, contacts, demoContacts, invoices, transactions, ledger, aiUsage };
+}
+
+/**
+ * The team_activity_logs rows of a business, by action name: who did what.
+ * Rows written in one transaction can share a createdAt, so order by action.
+ */
+async function activity(businessId: string) {
+  return db.teamActivityLog.findMany({
+    where: { businessId },
+    orderBy: [{ action: 'asc' }, { createdAt: 'asc' }],
+    select: { userId: true, module: true, action: true, entityType: true, entityId: true, meta: true },
+  });
+}
+
+/** The recorded legal disclaimer acceptance, or null when none was recorded. */
+async function disclaimerAcceptedAt(businessId: string): Promise<string | null> {
+  const row = await db.businessBlueprint.findUnique({ where: { businessId }, select: { legalProfile: true } });
+  return (row?.legalProfile as { disclaimerAcceptedAt?: string } | null)?.disclaimerAcceptedAt ?? null;
+}
+
+/** A user row plus a membership in `businessId`, written directly (no invite flow in this packet). */
+async function addMember(userId: string, businessId: string, role: string, permissionScopes?: Record<string, string>) {
+  await db.user.create({ data: { id: userId, email: email(userId), name: userId, role: 'USER' } });
+  await db.membership.create({ data: { userId, businessId, role, ...(permissionScopes ? { permissionScopes } : {}) } });
 }
 
 function expectNothingWritten(f: Awaited<ReturnType<typeof footprint>>) {
@@ -439,6 +473,23 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
     expectNothingWritten(await footprint(S.bizB!));
   });
 
+  it('ST-R032-1: a STAFF member with role-default scopes gets 403 on /complete and nothing is written', async () => {
+    await addMember(ID.staff, S.bizA!, 'STAFF');
+    // Control: the same member is denied an ordinary revenue write (read-only scopes).
+    const control = await call('post', `/commerce/businesses/${S.bizA}/invoices`, T[ID.staff], { items: [] });
+    expect(control.status, JSON.stringify(control.body)).toBe(403);
+
+    const res = await call('post', routes.complete(S.bizA!), T[ID.staff]);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
+    expect(JSON.stringify(res.body)).not.toContain('demoData');
+    const f = await footprint(S.bizA!);
+    expectNothingWritten(f);
+    expect(f.demoContacts).toBe(0);
+    expect(await disclaimerAcceptedAt(S.bizA!)).toBeNull();
+    expect(await activity(S.bizA!)).toEqual([]);
+  });
+
   it('POST /complete succeeds (201 {complete: true}) with the three-pillar score below the minimum', async () => {
     completionWindow.from = serverLog.length;
     const res = await call('post', routes.complete(S.bizA!), T[ID.owner]);
@@ -486,6 +537,21 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
     expect(await db.payment.count({ where: { businessId: S.bizA } })).toBe(0);
   });
 
+  it('ST-R032-1: completion and the legal disclaimer acceptance are recorded against the owner in team_activity_logs', async () => {
+    expect(S.demo).toBeDefined();
+    const accepted = await disclaimerAcceptedAt(S.bizA!);
+    expect(accepted).toEqual(expect.any(String));
+    const rows = await activity(S.bizA!);
+    expect(rows).toEqual([
+      expect.objectContaining({ userId: ID.owner, module: 'settings', action: 'legal_disclaimer_accepted', entityType: 'business', entityId: S.bizA }),
+      expect.objectContaining({ userId: ID.owner, module: 'settings', action: 'onboarding_completed', entityType: 'business', entityId: S.bizA }),
+    ]);
+    expect(rows[0].meta).toMatchObject({ disclaimerAcceptedAt: accepted });
+    expect(rows[1].meta).toMatchObject({ demoContactId: S.demo!.contactId, demoInvoiceId: S.demo!.invoiceId });
+    // The STAFF member's refused attempt left no row naming them.
+    expect(rows.filter((r: { userId: string }) => r.userId === ID.staff)).toEqual([]);
+  });
+
   it('a second /complete answers alreadyComplete and writes nothing more', async () => {
     const res = await call('post', routes.complete(S.bizA!), T[ID.owner]);
     expect(res.status, JSON.stringify(res.body)).toBe(COMPLETE_OK);
@@ -494,6 +560,14 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
     expect((f.onboardingCompletedAt as Date).toISOString()).toBe(S.completedAt);
     expect({ contacts: f.contacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
       .toEqual({ contacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+    expect(await activity(S.bizA!)).toHaveLength(2);
+  });
+
+  it('ST-R032-1: on a completed business, a STAFF member is still refused (authority is checked before the replay)', async () => {
+    const res = await call('post', routes.complete(S.bizA!), T[ID.staff]);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
+    expect(await activity(S.bizA!)).toHaveLength(2);
   });
 
   it('no model-gateway dispatch: no ai_usage_logs row and no AI or outbound line in the server log during completion', async () => {
@@ -541,6 +615,25 @@ describe('without the minimal profile, completion is refused with the missing fi
     const f = await footprint(S.bizX!);
     expect({ onboardingComplete: f.onboardingComplete, demoContacts: f.demoContacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
       .toEqual({ onboardingComplete: true, demoContacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// in-tenant authority: the gate is the settings scope, not the role name
+// ---------------------------------------------------------------------------
+describe('ST-R032-1: a member whose scope map grants settings:write may complete, and is recorded as the actor', () => {
+  it('a STAFF member with explicit {settings: write} completes a fresh business on the bootstrap defaults', async () => {
+    S.bizS = await bootstrap(ID.sowner, ID.bizSName);
+    await addMember(ID.sstaff, S.bizS, 'STAFF', { settings: 'write' });
+    expectNothingWritten(await footprint(S.bizS));
+    const res = await call('post', routes.complete(S.bizS), T[ID.sstaff]);
+    expect(res.status, JSON.stringify(res.body)).toBe(COMPLETE_OK);
+    expect(res.body.complete).toBe(true);
+    const rows = await activity(S.bizS);
+    expect(rows.map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
+      [ID.sstaff, 'legal_disclaimer_accepted'],
+      [ID.sstaff, 'onboarding_completed'],
+    ]);
   });
 });
 
