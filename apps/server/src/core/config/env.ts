@@ -110,6 +110,35 @@ function validateOAuthGroups(env: NodeJS.ProcessEnv): string[] {
   return warnings;
 }
 
+/**
+ * R0-SEC-02: values for SUPABASE_JWT_SECRET that are public, so a server
+ * holding one lets anyone mint tokens it verifies locally. Every non-empty
+ * value the repository has shipped for the variable (log -S on
+ * 'SUPABASE_JWT_SECRET='):
+ *   - `your-supabase-jwt-signing-secret`: `.env.example` until the R0-14 review
+ *     repair (added in ecb7bba7, removed in f6554848);
+ *   - `your-jwt-secret`: DEPLOYMENT.md, for local use (:73) and inside the
+ *     NODE_ENV=production Railway block (:183) (review repair SEC02-R1 / CR-2).
+ * Compared after trimming. env.spec.ts fails when a doc or template ships a
+ * value that is not listed here.
+ */
+const PUBLIC_SUPABASE_JWT_SECRET_PLACEHOLDERS = new Set(['your-supabase-jwt-signing-secret', 'your-jwt-secret']);
+
+/**
+ * Production refuses to boot with a public placeholder in SUPABASE_JWT_SECRET;
+ * any other NODE_ENV gets a warning. The value is never echoed.
+ */
+function validateJwtSecretPlaceholder(env: NodeJS.ProcessEnv): { errors: string[]; warnings: string[] } {
+  const value = (env.SUPABASE_JWT_SECRET ?? '').trim();
+  if (!PUBLIC_SUPABASE_JWT_SECRET_PLACEHOLDERS.has(value)) return { errors: [], warnings: [] };
+  const message =
+    'SUPABASE_JWT_SECRET: is a public placeholder (from .env.example or DEPLOYMENT.md), so anyone can sign tokens this server verifies locally. ' +
+    'For Release 0 leave it empty (docs/auth-pathway.md); never deploy a placeholder in it';
+  return env.NODE_ENV === 'production'
+    ? { errors: [message], warnings: [] }
+    : { errors: [], warnings: [message] };
+}
+
 export type ServerEnv = z.infer<typeof RequiredSchema> & z.infer<typeof RecommendedSchema>;
 
 export interface EnvValidationReport {
@@ -172,6 +201,10 @@ export function validateServerEnv(env: NodeJS.ProcessEnv = process.env): EnvVali
       warnings.push('KEYFLOW_DEV_AUTH_BYPASS is enabled — the server will exit immediately to prevent insecure boot');
     }
   }
+
+  const placeholder = validateJwtSecretPlaceholder(env);
+  missingRequired.push(...placeholder.errors);
+  warnings.push(...placeholder.warnings);
 
   missingRequired.push(...validateS3Group(env));
   warnings.push(...validateOAuthGroups(env));

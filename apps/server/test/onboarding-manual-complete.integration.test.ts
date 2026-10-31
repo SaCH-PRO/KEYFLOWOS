@@ -23,13 +23,23 @@
  *   - an absent or malformed minimal profile is refused with 403 and the list
  *     of missing fields, and nothing is written;
  *   - a member of another business is refused and nothing changes;
- *   - IN-TENANT AUTHORITY (review ST-R032-1): a STAFF member with the role
- *     default scopes (settings none) is refused and nothing is written — no
- *     flag, no demo contact or invoice, no disclaimer acceptance; a member
- *     whose scope map grants settings:write may complete; every completion
- *     writes a team_activity_logs row naming the actor, for completion and
- *     for the legal disclaimer acceptance it records;
+ *   - IN-TENANT AUTHORITY (review ST-R032-1, then R0-SEC-03 on owner ruling
+ *     D-11, 2026-10-31: OWNER only): a STAFF member with the role default
+ *     scopes (settings none) is refused and nothing is written — no flag, no
+ *     demo contact or invoice, no disclaimer acceptance; so is an ADMIN or a
+ *     STAFF member whose scopes grant settings:write (403
+ *     ONBOARDING_COMPLETE_FORBIDDEN, "Only the business owner can finish
+ *     onboarding."); the business owner completes; a SUPER_ADMIN with no
+ *     membership completes too (the platform bypass BusinessGuard grants);
+ *     every completion writes a team_activity_logs row naming the actor, for
+ *     completion and for the legal disclaimer acceptance it records;
  *   - a second /complete answers alreadyComplete and writes nothing;
+ *   - /complete does not trust an onboardingComplete flag written outside it
+ *     (review SEC03-1): with the flag set but no onboardingCompletedAt, an
+ *     ADMIN is still refused and the owner's /complete runs the whole
+ *     completion. NOT PROVEN HERE, and not closed on this base: PATCH
+ *     /identity/businesses/:id still lets any member write onboardingComplete;
+ *     that is R0-09-ID-HARDEN, so D-11 holds end to end only once R0-09 lands;
  *   - LEDGER: completion writes exactly one demo contact (source 'demo') and
  *     one DRAFT demo invoice, and no FinancialTransaction or LedgerEntry;
  *   - no model-gateway dispatch: no ai_usage_logs row for the business and no
@@ -110,15 +120,23 @@ const ID = {
   blank: `${P}blank`,   // owner of bizX, whose minimal profile is blanked, then malformed, then filled
   genome: `${P}genome`, // owner of bizG: characterization of the non-AI genome editor path
   staff: `${P}staff`,   // STAFF member of bizA with role-default scopes (settings none)
-  sowner: `${P}sowner`, // owner of bizS, which a settings:write STAFF member completes
+  sowner: `${P}sowner`, // owner of bizS: the only member of bizS who may complete it (D-11)
+  sadmin: `${P}sadmin`, // ADMIN member of bizS with an explicit scope map granting settings:write
+  dadmin: `${P}dadmin`, // ADMIN member of bizS on the role-default scopes (settings write by default)
   sstaff: `${P}sstaff`, // STAFF member of bizS with an explicit scope map granting settings:write
+  powner: `${P}powner`, // owner of bizP, which a SUPER_ADMIN completes
+  platform: `${P}platform`, // SUPER_ADMIN user with no membership anywhere
+  fowner: `${P}fowner`, // owner of bizF, whose onboardingComplete flag is set outside /complete (SEC03-1)
+  fadmin: `${P}fadmin`, // ADMIN member of bizF on the role-default scopes
   bizAName: `${P}bizA`,
   bizBName: `${P}bizB`,
   bizXName: `${P}bizX`,
   bizGName: `${P}bizG`,
   bizSName: `${P}bizS`,
+  bizPName: `${P}bizP`,
+  bizFName: `${P}bizF`,
 };
-const ALL_USERS = [ID.owner, ID.other, ID.blank, ID.genome, ID.staff, ID.sowner, ID.sstaff];
+const ALL_USERS = [ID.owner, ID.other, ID.blank, ID.genome, ID.staff, ID.sowner, ID.sadmin, ID.dadmin, ID.sstaff, ID.powner, ID.platform, ID.fowner, ID.fadmin];
 const email = (id: string) => `${id}@k32a.test.local`;
 
 /**
@@ -127,6 +145,9 @@ const email = (id: string) => `${id}@k32a.test.local`;
  * controller is outside this packet's write set.
  */
 const COMPLETE_OK = 201;
+
+/** R0-SEC-03 (owner ruling D-11): the refusal every non-owner member gets on /complete. */
+const OWNER_ONLY_MESSAGE = 'Only the business owner can finish onboarding.';
 
 /** The minimal profile D-03 names, set by the owner through the ordinary profile route. */
 const MINIMAL_PROFILE = { name: `${P}bizA Bakery`, currency: 'USD', timezone: 'America/New_York' };
@@ -146,7 +167,7 @@ const serverLog: string[] = [];
 
 const T: Record<string, string> = {};
 /** Ids minted by the server, carried from case to case. */
-const S: { bizA?: string; bizB?: string; bizX?: string; bizG?: string; bizS?: string; completedAt?: string; demo?: { contactId: string; invoiceId: string; invoiceNumber: string } } = {};
+const S: { bizA?: string; bizB?: string; bizX?: string; bizG?: string; bizS?: string; bizP?: string; bizF?: string; completedAt?: string; demo?: { contactId: string; invoiceId: string; invoiceNumber: string } } = {};
 /** serverLog offsets around the completion request, for the no-AI log filter. */
 const completionWindow: { from?: number; to?: number } = {};
 /** Verbatim characterization, printed for the packet return. */
@@ -481,6 +502,7 @@ describe('a fresh owner completes onboarding with the minimal profile and no AI 
     const res = await call('post', routes.complete(S.bizA!), T[ID.staff]);
     expect(res.status, JSON.stringify(res.body)).toBe(403);
     expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
+    expect(res.body.message).toBe(OWNER_ONLY_MESSAGE);
     expect(JSON.stringify(res.body)).not.toContain('demoData');
     const f = await footprint(S.bizA!);
     expectNothingWritten(f);
@@ -618,20 +640,123 @@ describe('without the minimal profile, completion is refused with the missing fi
 });
 
 // ---------------------------------------------------------------------------
-// in-tenant authority: the gate is the settings scope, not the role name
+// in-tenant authority: OWNER only (R0-SEC-03, owner ruling D-11)
 // ---------------------------------------------------------------------------
-describe('ST-R032-1: a member whose scope map grants settings:write may complete, and is recorded as the actor', () => {
-  it('a STAFF member with explicit {settings: write} completes a fresh business on the bootstrap defaults', async () => {
+/**
+ * A member's refused attempt on a fresh business: 403 ONBOARDING_COMPLETE_FORBIDDEN
+ * with the owner-only message, and nothing written — no flag, no demo contact
+ * or invoice, no disclaimer acceptance, no activity row.
+ */
+async function expectOwnerOnlyRefusal(businessId: string, actor: string) {
+  const res = await call('post', routes.complete(businessId), T[actor]);
+  expect(res.status, JSON.stringify(res.body)).toBe(403);
+  expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
+  expect(res.body.message).toBe(OWNER_ONLY_MESSAGE);
+  expect(JSON.stringify(res.body)).not.toContain('demoData');
+  const f = await footprint(businessId);
+  expectNothingWritten(f);
+  expect(f.demoContacts).toBe(0);
+  expect(await disclaimerAcceptedAt(businessId)).toBeNull();
+  expect(await activity(businessId)).toEqual([]);
+}
+
+describe('R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass', () => {
+  it('an ADMIN granted settings:write gets 403 ONBOARDING_COMPLETE_FORBIDDEN and nothing is written', async () => {
     S.bizS = await bootstrap(ID.sowner, ID.bizSName);
-    await addMember(ID.sstaff, S.bizS, 'STAFF', { settings: 'write' });
+    await addMember(ID.sadmin, S.bizS, 'ADMIN', { settings: 'write' });
     expectNothingWritten(await footprint(S.bizS));
-    const res = await call('post', routes.complete(S.bizS), T[ID.sstaff]);
+    await expectOwnerOnlyRefusal(S.bizS, ID.sadmin);
+  });
+
+  it('an ADMIN on the role-default scopes (settings write by default) gets 403 and nothing is written', async () => {
+    expect(S.bizS, 'bizS is bootstrapped by the first case of this block').toBeDefined();
+    await addMember(ID.dadmin, S.bizS!, 'ADMIN');
+    await expectOwnerOnlyRefusal(S.bizS!, ID.dadmin);
+  });
+
+  it('a STAFF member granted settings:write gets 403 and nothing is written', async () => {
+    expect(S.bizS, 'bizS is bootstrapped by the first case of this block').toBeDefined();
+    await addMember(ID.sstaff, S.bizS!, 'STAFF', { settings: 'write' });
+    await expectOwnerOnlyRefusal(S.bizS!, ID.sstaff);
+  });
+
+  it('the business owner completes the same business, and is recorded as the actor', async () => {
+    expect(S.bizS, 'bizS is bootstrapped by the first case of this block').toBeDefined();
+    const res = await call('post', routes.complete(S.bizS!), T[ID.sowner]);
     expect(res.status, JSON.stringify(res.body)).toBe(COMPLETE_OK);
     expect(res.body.complete).toBe(true);
-    const rows = await activity(S.bizS);
+    expect(res.body.alreadyComplete).toBeUndefined();
+    const f = await footprint(S.bizS!);
+    expect({ onboardingComplete: f.onboardingComplete, demoContacts: f.demoContacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
+      .toEqual({ onboardingComplete: true, demoContacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+    const rows = await activity(S.bizS!);
     expect(rows.map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
-      [ID.sstaff, 'legal_disclaimer_accepted'],
-      [ID.sstaff, 'onboarding_completed'],
+      [ID.sowner, 'legal_disclaimer_accepted'],
+      [ID.sowner, 'onboarding_completed'],
+    ]);
+  });
+
+  it('on the completed business, the ADMIN granted settings:write is still refused (authority is checked before the replay)', async () => {
+    expect(S.bizS, 'bizS is bootstrapped by the first case of this block').toBeDefined();
+    const res = await call('post', routes.complete(S.bizS!), T[ID.sadmin]);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
+    expect(res.body.message).toBe(OWNER_ONLY_MESSAGE);
+    expect(await activity(S.bizS!)).toHaveLength(2);
+  });
+
+  it('a SUPER_ADMIN with no membership completes a fresh business (the platform bypass, as BusinessGuard) and is recorded as the actor', async () => {
+    S.bizP = await bootstrap(ID.powner, ID.bizPName);
+    await db.user.create({ data: { id: ID.platform, email: email(ID.platform), name: ID.platform, role: 'SUPER_ADMIN' } });
+    expect(await db.membership.count({ where: { userId: ID.platform } })).toBe(0);
+    expectNothingWritten(await footprint(S.bizP));
+    const res = await call('post', routes.complete(S.bizP), T[ID.platform]);
+    expect(res.status, JSON.stringify(res.body)).toBe(COMPLETE_OK);
+    expect(res.body.complete).toBe(true);
+    expect((await footprint(S.bizP)).onboardingComplete).toBe(true);
+    const rows = await activity(S.bizP);
+    expect(rows.map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
+      [ID.platform, 'legal_disclaimer_accepted'],
+      [ID.platform, 'onboarding_completed'],
+    ]);
+  });
+
+  // Review SEC03-1: on this base PATCH /identity/businesses/:id still lets any
+  // member write onboardingComplete (no actor row, no disclaimer, no demo
+  // data); closing that is R0-09-ID-HARDEN, outside this write set. What this
+  // write set owns is that /complete does not trust that flag. The flag is set
+  // here by a direct DB write, the state the PATCH leaves, not through the
+  // PATCH itself, so these cases do not pin the PATCH bypass R0-09 removes.
+  it('SEC03-1: a business flagged complete outside /complete (no onboardingCompletedAt, as the profile PATCH leaves it) still refuses an ADMIN, and nothing is written', async () => {
+    S.bizF = await bootstrap(ID.fowner, ID.bizFName);
+    await addMember(ID.fadmin, S.bizF, 'ADMIN');
+    await db.business.update({ where: { id: S.bizF }, data: { onboardingComplete: true } });
+    const res = await call('post', routes.complete(S.bizF), T[ID.fadmin]);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.code).toBe('ONBOARDING_COMPLETE_FORBIDDEN');
+    expect(res.body.message).toBe(OWNER_ONLY_MESSAGE);
+    const f = await footprint(S.bizF);
+    expect({ onboardingComplete: f.onboardingComplete, onboardingCompletedAt: f.onboardingCompletedAt, contacts: f.contacts, invoices: f.invoices })
+      .toEqual({ onboardingComplete: true, onboardingCompletedAt: null, contacts: 0, invoices: 0 });
+    expect(await disclaimerAcceptedAt(S.bizF)).toBeNull();
+    expect(await activity(S.bizF)).toEqual([]);
+  });
+
+  it('SEC03-1: the owner\'s /complete on that flagged business is not alreadyComplete: it records completedAt, the demo data, the disclaimer and the owner as the actor', async () => {
+    expect(S.bizF, 'bizF is bootstrapped by the previous case').toBeDefined();
+    const res = await call('post', routes.complete(S.bizF!), T[ID.fowner]);
+    expect(res.status, JSON.stringify(res.body)).toBe(COMPLETE_OK);
+    expect(res.body.complete).toBe(true);
+    expect(res.body.alreadyComplete).toBeUndefined();
+    const f = await footprint(S.bizF!);
+    expect(f.onboardingCompletedAt).toBeInstanceOf(Date);
+    expect({ onboardingComplete: f.onboardingComplete, demoContacts: f.demoContacts, invoices: f.invoices, transactions: f.transactions, ledger: f.ledger })
+      .toEqual({ onboardingComplete: true, demoContacts: 1, invoices: 1, transactions: 0, ledger: 0 });
+    expect(await disclaimerAcceptedAt(S.bizF!)).toEqual(expect.any(String));
+    const rows = await activity(S.bizF!);
+    expect(rows.map((r: { userId: string; action: string }) => [r.userId, r.action])).toEqual([
+      [ID.fowner, 'legal_disclaimer_accepted'],
+      [ID.fowner, 'onboarding_completed'],
     ]);
   });
 });

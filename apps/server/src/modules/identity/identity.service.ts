@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { skipTenantIsolation } from '@keyflow/db';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { DefaultTriggersService } from '../ai/default-triggers.service';
@@ -715,8 +716,17 @@ export class IdentityService {
     }
     let user = await this.prisma.client.user.findUnique({ where: { email } });
     if (!user) {
+      // The invitee has no account yet, so this row is a placeholder that holds
+      // the address and the pending membership. The marker is what lets the
+      // invitee's first bootstrap adopt it (adoptInvitePlaceholder); a row
+      // without it is never moved to another sign-in (R0-SEC-01).
       user = await this.prisma.client.user.create({
-        data: { email, name: email.split('@')[0], role: 'USER' },
+        data: {
+          email,
+          name: email.split('@')[0],
+          role: 'USER',
+          metaData: { [IdentityService.INVITE_PLACEHOLDER_KEY]: true },
+        },
       });
     }
     const existing = await this.prisma.client.membership.findUnique({
@@ -799,6 +809,21 @@ export class IdentityService {
     });
     await this.logTeamActivity(businessId, requesterId, 'team', 'role_changed', 'membership', membershipId, `Changed ${updated.user.email} role to ${role}`, undefined, { newRole: role });
     return updated;
+  }
+
+  /**
+   * `users.meta_data` key that inviteTeamMember sets on the placeholder User it
+   * creates for an address with no account. Only the server writes User
+   * metadata; no route lets a caller set it.
+   */
+  private static readonly INVITE_PLACEHOLDER_KEY = 'invitePlaceholder';
+
+  private static isMarkedInvitePlaceholder(metaData: unknown): boolean {
+    return (
+      typeof metaData === 'object' &&
+      metaData !== null &&
+      (metaData as Record<string, unknown>)[IdentityService.INVITE_PLACEHOLDER_KEY] === true
+    );
   }
 
   private static readonly ASSIGNABLE_ROLES = ['ADMIN', 'STAFF'] as const;
@@ -976,6 +1001,15 @@ export class IdentityService {
    * a placeholder email to free the unique-email slot, (2) create the new
    * user with the desired id and original email, (3) re-point all child
    * references (FK and non-FK), (4) delete the parked row.
+   *
+   * NEVER CALLED FOR AN ACCOUNT (R0-SEC-01-BOOTSTRAP-TAKEOVER). bootstrapUser
+   * called this on an email match alone, so any caller could take over any
+   * account, its role and its businesses: nothing here proves that
+   * `input.userId` is the same person as `oldId`. Its one caller is
+   * adoptInvitePlaceholder, for a row inviteTeamMember created and nobody ever
+   * signed in as, and it passes `guard`, which re-checks that inside this
+   * transaction with the row locked. Moving a real account to a new subject is
+   * the manual operator migration in docs/auth-pathway.md ("Fixed by R0-SEC-01").
    */
   private async reconcileUserId(
     oldId: string,
@@ -989,15 +1023,17 @@ export class IdentityService {
       phone?: string;
       avatarUrl?: string;
     },
+    // Runs first, inside the transaction; a throw rolls everything back.
+    guard?: (tx: Prisma.TransactionClient) => Promise<void>,
   ) {
     const newId = input.userId;
     const desiredName = input.username ?? input.name;
-    this.logger.warn(
-      `Reconciling User id ${oldId} -> ${newId} for email=${input.email} (Supabase auth id changed).`,
-    );
 
     try {
       return await this.prisma.client.$transaction(async (tx) => {
+        if (guard) await guard(tx as unknown as Prisma.TransactionClient);
+        // Logged once the guard has admitted the move, not for a refused one.
+        this.logger.warn(`Reconciling User id ${oldId} -> ${newId} for email=${input.email}.`);
         const placeholderEmail = `__migrated_${oldId}_${Date.now()}@local.invalid`;
         const oldUser = await tx.user.update({
           where: { id: oldId },
@@ -1087,7 +1123,14 @@ export class IdentityService {
     company?: string;
     referralCode?: string;
     identities?: UserIdentityDataDto[];
-  }) {
+  }, options: {
+    /**
+     * Resolves true only when the caller is proven to own `input.email`. Asked
+     * only when a pending team invitation holds the address, and never for an
+     * account. Absent means unproven.
+     */
+    proveEmailOwnership?: () => Promise<boolean>;
+  } = {}) {
     if (input.username) {
       const usernameInUse = await this.prisma.client.user.findFirst({
         where: { name: input.username, NOT: { id: input.userId } },
@@ -1137,18 +1180,30 @@ export class IdentityService {
         user = existingUser;
       }
     } else {
-      // Look up by email before creating, to handle the case where a local User
-      // row already exists under a different id (e.g. earlier email/password
-      // signup, or a Supabase user that was recreated with a different id).
-      // Without this, the prisma.user.create below would crash with a
-      // "Unique constraint failed on (email)" 500 and the OAuth callback page
-      // would render "Internal Server Error". See task #308.
+      // Look up by email before creating: a local User may already hold this
+      // address under a different id (task #308). R0-SEC-01-BOOTSTRAP-TAKEOVER:
+      // an account is NEVER moved to the caller. Bootstrap used to call
+      // reconcileUserId here, which re-created the row under the caller's id
+      // with its role (SUPER_ADMIN included) and re-pointed its memberships and
+      // Business.ownerId, on nothing more than an email match: an account
+      // takeover. A local User is bound to the verified token subject, so a
+      // different-id holder is a 409 and nothing is written. Moving a row to a
+      // new subject (same person, new Supabase project) is an operator step
+      // (docs/auth-pathway.md, "Fixed by R0-SEC-01"). The one row that is not
+      // an account is the marked placeholder inviteTeamMember creates for an
+      // address with no account; the invitee's first bootstrap adopts it
+      // under the conditions in adoptInvitePlaceholder (review repair
+      // SEC01-T1/CR-1).
       const collidingByEmail = await this.prisma.client.user.findUnique({
         where: { email: input.email },
+        select: { id: true, metaData: true },
       });
 
       if (collidingByEmail && collidingByEmail.id !== input.userId) {
-        user = await this.reconcileUserId(collidingByEmail.id, input);
+        if (!IdentityService.isMarkedInvitePlaceholder(collidingByEmail.metaData)) {
+          throw this.emailInUse(input.userId);
+        }
+        user = await this.adoptInvitePlaceholder(collidingByEmail.id, input, options.proveEmailOwnership);
       } else {
         const userData: Record<string, unknown> = {};
         if (input.firstName) userData.firstName = input.firstName.trim();
@@ -1197,6 +1252,125 @@ export class IdentityService {
     const { business, isNewBusiness } = await this.ensureBootstrapWorkspace(user.id, businessName);
 
     return { user, business, isNewBusiness };
+  }
+
+  /** 409 for an address another local account holds; bootstrap writes nothing. */
+  private emailInUse(userId: string): ConflictException {
+    this.logger.warn(`[bootstrap] refused: the token email is held by another local user (userId=${userId})`);
+    return new ConflictException({
+      code: 'account_email_in_use',
+      message:
+        'This email address already belongs to another account. Sign in with that account, or contact support to move it to this sign-in.',
+    });
+  }
+
+  /** 409 for a pending invitation the caller has not proven the address for; bootstrap writes nothing. */
+  private inviteNeedsProvenEmail(userId: string): ConflictException {
+    this.logger.warn(`[bootstrap] refused: a pending invitation holds the token email, ownership not proven (userId=${userId})`);
+    return new ConflictException({
+      code: 'invite_email_unverified',
+      message:
+        'This email address has a pending team invitation. It can be accepted only by a sign-in that has confirmed the address. ' +
+        'Confirm your email address and sign in again, or ask the person who invited you to remove the invitation and invite you again after you sign up.',
+    });
+  }
+
+  /**
+   * R0-SEC-01 review repair (SEC01-T1, CR-1): accept a team invitation on the
+   * invitee's first bootstrap.
+   *
+   * For an address with no account, inviteTeamMember creates a placeholder
+   * User (generated id, role USER, the invited address, the invite marker) and
+   * hangs the pending membership on it. Before R0-SEC-01 bootstrap adopted it
+   * through reconcileUserId on the email match; R0-SEC-01 answered 409 like for
+   * an account, so an invitation to anyone without an account could never be
+   * accepted, and any user could lock an address out of sign-up by inviting it
+   * and removing the membership.
+   *
+   * The placeholder is moved to the caller's id (reconcileUserId) only while it
+   * is still exactly what inviteTeamMember made. assertAdoptableInvitePlaceholder
+   * re-checks that inside the move's transaction with the row locked; anything
+   * else is an account and keeps the 409 account_email_in_use. The pending
+   * memberships grant authority in the inviting business, so they move only when
+   * the caller is proven to own the address (`proveEmailOwnership`); otherwise
+   * 409 invite_email_unverified and nothing is written. A placeholder with no
+   * membership left (the invitation was removed) carries nothing and is adopted
+   * without proof.
+   */
+  private async adoptInvitePlaceholder(
+    placeholderId: string,
+    input: {
+      userId: string;
+      email: string;
+      username?: string;
+      name?: string;
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+      avatarUrl?: string;
+    },
+    proveEmailOwnership?: () => Promise<boolean>,
+  ) {
+    // Ask for proof before the transaction, so its round trip holds no lock,
+    // and only when there is a pending membership to move.
+    const pending = await this.prisma.client.membership.count(
+      skipTenantIsolation({ where: { userId: placeholderId } }),
+    );
+    let proven = false;
+    if (pending > 0 && proveEmailOwnership) {
+      try {
+        proven = (await proveEmailOwnership()) === true;
+      } catch {
+        proven = false;
+      }
+    }
+    const user = await this.reconcileUserId(placeholderId, input, (tx) =>
+      this.assertAdoptableInvitePlaceholder(tx, placeholderId, input, proven),
+    );
+    this.logger.log(`[bootstrap] adopted an invite placeholder (userId=${input.userId}, pendingMemberships=${pending})`);
+    return user;
+  }
+
+  /**
+   * Inside reconcileUserId's transaction: throw unless `placeholderId` is a
+   * never-bound invite placeholder for `input.email` whose pending memberships
+   * (if any) the caller may take. Nothing has been written when it throws.
+   */
+  private async assertAdoptableInvitePlaceholder(
+    tx: Prisma.TransactionClient,
+    placeholderId: string,
+    input: { userId: string; email: string },
+    proven: boolean,
+  ): Promise<void> {
+    // Lock the row. An invite that adds a membership to it takes a key-share
+    // lock on it, so it waits for this transaction: the memberships read
+    // below are exactly the ones that move.
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${placeholderId} FOR UPDATE`;
+    const row = await tx.user.findUnique({
+      where: { id: placeholderId },
+      select: { email: true, role: true, metaData: true, referralCode: true, deletedAt: true, bannedAt: true },
+    });
+    // Never bound: nobody has signed in as it. Every bootstrap sets a referral
+    // code, and only a sign-in creates a session, an identity link or an owned
+    // business.
+    const neverBound =
+      row !== null &&
+      row.email === input.email &&
+      IdentityService.isMarkedInvitePlaceholder(row.metaData) &&
+      row.role === 'USER' &&
+      !row.deletedAt &&
+      !row.bannedAt &&
+      !row.referralCode &&
+      (await tx.session.count({ where: { userId: placeholderId } })) === 0 &&
+      (await tx.userIdentity.count({ where: { userId: placeholderId } })) === 0 &&
+      (await tx.business.count({ where: { ownerId: placeholderId } })) === 0;
+    if (!neverBound) throw this.emailInUse(input.userId);
+
+    const memberships = await tx.membership.findMany(
+      skipTenantIsolation({ where: { userId: placeholderId }, select: { role: true } }),
+    );
+    if (memberships.some((m) => m.role === 'OWNER')) throw this.emailInUse(input.userId);
+    if (memberships.length > 0 && !proven) throw this.inviteNeedsProvenEmail(input.userId);
   }
 
   /**

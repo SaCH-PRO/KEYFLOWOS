@@ -20,18 +20,23 @@ export class SupabaseAuthService {
   private readonly logger = new Logger(SupabaseAuthService.name);
   private client: SupabaseClient | null = null;
 
+  /** The pair the getUser() client is built from; null when either is missing. */
+  private providerConfig(): { url: string; anonKey: string } | null {
+    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    return url && anonKey ? { url, anonKey } : null;
+  }
+
   private get supabase(): SupabaseClient | null {
     if (this.client) return this.client;
 
-    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!url || !anonKey) {
+    const config = this.providerConfig();
+    if (!config) {
       this.logger.warn('Supabase env vars missing; auth will be treated as optional.');
       return null;
     }
 
-    this.client = createClient(url, anonKey, { auth: { persistSession: false } });
+    this.client = createClient(config.url, config.anonKey, { auth: { persistSession: false } });
     return this.client;
   }
 
@@ -39,6 +44,29 @@ export class SupabaseAuthService {
     const secret = process.env.SUPABASE_JWT_SECRET;
     if (!secret) return null;
     return secret;
+  }
+
+  /**
+   * R0-SEC-02: the only issuer a hosted project puts on its access tokens is
+   * its GoTrue URL, `${SUPABASE_URL}/auth/v1` (supabase-js builds the same URL:
+   * `new URL('auth/v1', baseUrl)` in SupabaseClient; claim reference
+   * https://supabase.com/docs/guides/auth/jwt-fields). A token with no `iss`,
+   * or with `iss = SUPABASE_URL`, is a shape no hosted project issues, so it is
+   * refused.
+   *
+   * With no Supabase URL there is nothing to compare against. The one shape
+   * still accepted then is a token with NO `iss`, and only under
+   * NODE_ENV=test: the real-database harnesses (release0-journey,
+   * identity-boundary, onboarding-manual-complete, identity-local-auth) mint
+   * that shape against a server with SUPABASE_URL empty. Production,
+   * development and an unset NODE_ENV refuse it.
+   */
+  private issuerAccepted(iss: unknown): boolean {
+    const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+    if (url) {
+      return typeof iss === 'string' && iss === `${url.replace(/\/+$/, '')}/auth/v1`;
+    }
+    return process.env.NODE_ENV === 'test' && iss === undefined;
   }
 
   private verifyLocal(token: string): JwtPayload | null {
@@ -75,7 +103,11 @@ export class SupabaseAuthService {
       ) as JwtPayload;
 
       const nowSeconds = Math.floor(Date.now() / 1000);
-      if (typeof payload.exp === 'number' && payload.exp < nowSeconds) {
+      if (typeof payload.exp !== 'number') {
+        this.logger.debug('Local JWT verification: exp missing');
+        return null;
+      }
+      if (payload.exp < nowSeconds) {
         this.logger.debug('Local JWT verification: token expired');
         return null;
       }
@@ -88,14 +120,13 @@ export class SupabaseAuthService {
         return null;
       }
 
-      const expectedIss = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (expectedIss && payload.iss && payload.iss !== expectedIss) {
+      if (!this.issuerAccepted(payload.iss)) {
         this.logger.debug('Local JWT verification: issuer mismatch');
         return null;
       }
 
       const expectedAud = 'authenticated';
-      if (payload.aud && payload.aud !== expectedAud) {
+      if (payload.aud !== expectedAud) {
         this.logger.debug('Local JWT verification: audience mismatch');
         return null;
       }
@@ -122,23 +153,38 @@ export class SupabaseAuthService {
   /**
    * Resolve a Supabase access token to a verified user.
    *
-   * When SUPABASE_JWT_SECRET is configured, tokens are verified locally
-   * using HMAC-SHA256 signature validation (faster, works offline).
-   * Otherwise we round-trip to Supabase auth.getUser() (requires network).
+   * With a provider client (a Supabase URL and an anon key), Supabase
+   * auth.getUser() decides, whether or not SUPABASE_JWT_SECRET is set. Only
+   * without one are tokens verified locally, using HMAC-SHA256 with
+   * SUPABASE_JWT_SECRET (works offline).
    *
-   * SECURITY: local verification uses the exact same secret Supabase uses
-   * to sign tokens, so a forged signature is cryptographically infeasible.
+   * SECURITY: local verification accepts only the hosted token shape (`iss` =
+   * `${SUPABASE_URL}/auth/v1`, `aud` = `authenticated`, a live `exp`); see
+   * issuerAccepted (R0-SEC-02). It proves only that whoever holds the secret
+   * signed the token: it cannot see provider-side revocation (a session ended
+   * by logout, by admin signOut or by a password reset, answered 403
+   * session_not_found by getUser) nor a Supabase `banned_at`. Before R0-SEC-02
+   * no hosted token passed it, so every hosted token got those checks from
+   * getUser(), and two callers still rely on them, checking nothing after this
+   * method: IdentityPasswordService.completeReset (a used recovery link must
+   * not set the password again) and KeyCortexWsAuthService.authenticateSocket
+   * (no logout-marker check). So local acceptance never overrides a provider
+   * client (review repair CR-1). It also means a token signed with anything
+   * but the project's own key (a placeholder secret, say) is refused whenever
+   * the provider is configured, because Supabase checks the signature itself.
    */
   async getUserFromToken(token?: string): Promise<User | null> {
     if (!token) return null;
 
-    // Primary path: local verification with SUPABASE_JWT_SECRET
-    const localPayload = this.verifyLocal(token);
-    if (localPayload?.sub) {
-      return this.buildUserFromPayload(localPayload);
+    // No provider client: local verification is the only check available.
+    if (!this.providerConfig()) {
+      const localPayload = this.verifyLocal(token);
+      if (localPayload?.sub) {
+        return this.buildUserFromPayload(localPayload);
+      }
     }
 
-    // Fallback: round-trip to Supabase (when JWT secret is not configured)
+    // Provider client: the round trip decides (session revocation, bans).
     const supabase = this.supabase;
     if (!supabase) return null;
 

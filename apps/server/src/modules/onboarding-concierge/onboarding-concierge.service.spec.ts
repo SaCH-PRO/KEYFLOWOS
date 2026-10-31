@@ -332,11 +332,16 @@ describe('OnboardingConciergeService', () => {
       expect(prisma.client.$transaction).toHaveBeenCalled();
     });
 
-    // Review ST-R032-1: completion needs the owner or settings write access,
-    // and the actor is recorded in the completion transaction.
+    // Review ST-R032-1, then R0-SEC-03 on owner ruling D-11 (2026-10-31):
+    // completion is OWNER only — the business owner, or a SUPER_ADMIN on the
+    // platform bypass BusinessGuard grants; granted settings scopes admit no
+    // one — and the actor is recorded in the completion transaction.
     const expectRefused = (error: unknown, prisma: PrismaService, demoSeeder: DemoDataSeederService) => {
       expect(error).toBeInstanceOf(ForbiddenException);
-      expect((error as ForbiddenException).getResponse()).toMatchObject({ code: 'ONBOARDING_COMPLETE_FORBIDDEN' });
+      expect((error as ForbiddenException).getResponse()).toMatchObject({
+        code: 'ONBOARDING_COMPLETE_FORBIDDEN',
+        message: 'Only the business owner can finish onboarding.',
+      });
       expect(prisma.client.$transaction).not.toHaveBeenCalled();
       expect(demoSeeder.seedDemoData).not.toHaveBeenCalled();
     };
@@ -380,11 +385,33 @@ describe('OnboardingConciergeService', () => {
     });
 
     it.each([
+      ['an ADMIN with role-default scopes (settings write by default)', { role: 'ADMIN', permissionScopes: null }],
+      ['an ADMIN granted settings:write', { role: 'ADMIN', permissionScopes: { settings: 'write' } }],
+      ['an ADMIN granted settings:admin', { role: 'ADMIN', permissionScopes: { settings: 'admin', crm: 'admin' } }],
+      ['a STAFF member granted settings:write', { role: 'STAFF', permissionScopes: { settings: 'write' } }],
+      ['a STAFF member granted settings:admin', { role: 'STAFF', permissionScopes: { settings: 'admin' } }],
+    ])('R0-SEC-03 (D-11): %s is refused before anything is written', async (_label, membership) => {
+      const { service, prisma, demoSeeder, tx } = makeService({ business: { ...minimalProfile, ownerId: 'user_owner' }, membership });
+      const error = await asUser('user_member', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
+      expectRefused(error, prisma, demoSeeder);
+      expect(tx.business.update).not.toHaveBeenCalled();
+      expect(tx.teamActivityLog.create).not.toHaveBeenCalled();
+    });
+
+    it('R0-SEC-03 (D-11): the replay of an already-complete business is refused to an ADMIN granted settings:write', async () => {
+      const { service, prisma, demoSeeder } = makeService({
+        business: { ...minimalProfile, ownerId: 'user_owner', onboardingComplete: true, onboardingCompletedAt: new Date() },
+        membership: { role: 'ADMIN', permissionScopes: { settings: 'write' } },
+      });
+      const error = await asUser('user_admin', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
+      expectRefused(error, prisma, demoSeeder);
+    });
+
+    it.each([
       ['the business owner (ownerId, no membership row)', { business: { ...minimalProfile, ownerId: 'user_x' }, membership: null }],
       ['an OWNER membership', { business: minimalProfile, membership: { role: 'OWNER', permissionScopes: { settings: 'none' } } }],
-      ['an ADMIN with role-default scopes', { business: minimalProfile, membership: { role: 'ADMIN', permissionScopes: null } }],
-      ['a STAFF member granted settings:write', { business: minimalProfile, membership: { role: 'STAFF', permissionScopes: { settings: 'write' } } }],
-      ['a SUPER_ADMIN without a membership', { business: minimalProfile, membership: null, userRole: 'SUPER_ADMIN' }],
+      ['a SUPER_ADMIN without a membership (platform bypass, as BusinessGuard)', { business: minimalProfile, membership: null, userRole: 'SUPER_ADMIN' }],
+      ['a SUPER_ADMIN who is a STAFF member with settings none (platform bypass)', { business: minimalProfile, membership: { role: 'STAFF', permissionScopes: { settings: 'none' } }, userRole: 'SUPER_ADMIN' }],
     ])('ST-R032-1: %s may complete, and the completion is recorded against them', async (_label, overrides) => {
       const { service, tx } = makeService(overrides as Parameters<typeof makeService>[0]);
       const result = await asUser('user_x', () => service.markOnboardingComplete('biz_1'));
@@ -416,11 +443,46 @@ describe('OnboardingConciergeService', () => {
     // Review ST-R032-2: the D-03 invariant "onboarding completes only on a valid
     // minimal profile, by an authorised actor" holds on POST /complete, but the
     // generic profile PATCH still bypasses it. The fix is outside this packet's
-    // write set (identity.controller.ts, identity.service.ts:351,
-    // dto/update-business.dto.ts) and is R0-09-ID-HARDEN's (D-11 owner-only profile).
+    // write set (identity.controller.ts updateBusiness, identity.service.ts
+    // updateBusiness input type and nonStringFields, dto/update-business.dto.ts)
+    // and is R0-09-ID-HARDEN's (D-11 owner-only profile). R0-SEC-03 review
+    // SEC03-1: D-11 completion is closed end to end only once R0-09 lands.
     it.todo(
       'ST-R032-2: PATCH /identity/businesses/:id cannot set onboardingComplete or blank name/currency/timezone, and STAFF cannot change them (R0-09-ID-HARDEN)',
     );
+    it.todo(
+      'R0-SEC-03 SEC03-1: a non-owner PATCH /identity/businesses/:id cannot clear onboardingComplete on a business the owner completed, so the owner\'s /complete does not run again (R0-09-ID-HARDEN)',
+    );
+
+    // R0-SEC-03 review SEC03-1, the part inside this write set: completion does
+    // not trust an onboardingComplete flag written outside it (the profile PATCH
+    // writes the flag but never onboardingCompletedAt).
+    const flaggedByPatch = { ...minimalProfile, ownerId: 'user_owner', onboardingComplete: true, onboardingCompletedAt: null };
+
+    it('R0-SEC-03 SEC03-1: a business flagged complete without onboardingCompletedAt is refused to an ADMIN, before anything is written', async () => {
+      const { service, prisma, demoSeeder, tx } = makeService({
+        business: flaggedByPatch,
+        membership: { role: 'ADMIN', permissionScopes: null },
+      });
+      const error = await asUser('user_admin', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
+      expectRefused(error, prisma, demoSeeder);
+      expect(tx.teamActivityLog.create).not.toHaveBeenCalled();
+    });
+
+    it('R0-SEC-03 SEC03-1: the owner\'s /complete on a business flagged complete without onboardingCompletedAt runs the whole completion', async () => {
+      const { service, demoSeeder, tx } = makeService({ business: flaggedByPatch, membership: { role: 'OWNER', permissionScopes: null } });
+      const result = await asUser('user_owner', () => service.markOnboardingComplete('biz_1'));
+      expect(result).toMatchObject({ complete: true });
+      expect((result as { alreadyComplete?: boolean }).alreadyComplete).toBeUndefined();
+      expect(tx.business.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'biz_1' },
+        data: expect.objectContaining({ onboardingComplete: true, onboardingCompletedAt: expect.any(Date) }),
+      }));
+      expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
+      expect(tx.teamActivityLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ userId: 'user_owner', action: 'onboarding_completed' }),
+      });
+    });
 
     it('ST-R032-1: a disclaimer accepted earlier is not re-attributed', async () => {
       const { service, tx } = makeService({ business: minimalProfile, blueprint: FULL_BLUEPRINT });

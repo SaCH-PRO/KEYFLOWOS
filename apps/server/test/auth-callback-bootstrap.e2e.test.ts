@@ -114,6 +114,8 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
         firstName: 'Ada',
         lastName: 'Lovelace',
       }),
+      // R0-SEC-01 review repair: the proof a pending team invitation needs.
+      expect.objectContaining({ proveEmailOwnership: expect.any(Function) }),
     );
     expect(res.body).toMatchObject({
       user: { id: FAKE_USER.id, email: FAKE_USER.email },
