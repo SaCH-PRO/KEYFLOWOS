@@ -52,24 +52,30 @@
  * CR-3: a PATCH naming a non-member owner says 'ownerId must belong to a
  * member of this business' (the field the PATCH body has), and POST /contacts
  * uses the same membership helper.
- * PATCH contacts/bulk is declared after PATCH contacts/:contactId in
- * crm.controller.ts and is answered by it today (M15, fixed by V1-54, whose
- * write set holds the controller), so the bulk cases drive the real
- * CrmService exactly as CrmController.bulkUpdateContacts forwards a member's
- * request, and one HTTP case proves the route answers a hidden id like an
- * unknown one whichever handler it reaches.
+ * PATCH contacts/bulk was declared after PATCH contacts/:contactId in
+ * crm.controller.ts and answered by it (M15), so the R0-13d bulk cases drive
+ * the real CrmService exactly as CrmController.bulkUpdateContacts forwards a
+ * member's request, and one HTTP case proves the route answers a hidden id like
+ * an unknown one whichever handler it reaches.
+ *
+ * R0-13e-ROUTE-SHADOWING (the last cases): the literal routes are declared
+ * before their parameterised siblings, so PATCH contacts/bulk reaches
+ * bulkUpdateContacts over HTTP (a hidden id skipped like a missing one) and GET
+ * contacts/unread-counts reaches unreadCounts; route-shadowing.spec.ts keeps
+ * every controller in that order.
  *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the user,
  * business, membership, contact and share rows, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CrmRateLimitGuard, PlanLimitGuard, TeamAuditInterceptor,
  * the global ValidationPipe and GlobalHttpExceptionFilter, CrmController,
  * ContactEnrichmentController, CrmService, ContactEnrichmentService,
- * CrmStatsService, CrmTimelineService and ContactAuditService are all real
- * against DATABASE_URL. The stand-ins: identity attachment (a test middleware
- * reads `x-test-user` and attaches the seeded user row as AuthMiddleware
- * would), the timeline service's side channels, the caches, the plan limit (a
- * stub that allows) and the enrichment provider (a recording stub in place of
- * ApolloEnrichmentProvider: no real provider is ever called). The app trusts
+ * CrmStatsService, CrmTimelineService, CrmCommunicationService and
+ * ContactAuditService are all real against DATABASE_URL. The stand-ins:
+ * identity attachment (a test middleware reads `x-test-user` and attaches the
+ * seeded user row as AuthMiddleware would), the timeline service's side
+ * channels, the caches, the plan limit (a stub that allows), the WhatsApp
+ * service (no case sends anything) and the enrichment provider (a recording
+ * stub in place of ApolloEnrichmentProvider: no real provider is ever called). The app trusts
  * the proxy header as app-bootstrap.ts does and every request carries its own
  * x-forwarded-for address, so the real rate-limit guard runs without capping
  * the case count.
@@ -387,6 +393,7 @@ beforeAll(async () => {
   const { CrmSavedViewsService } = await import('../src/modules/crm/crm-saved-views.service');
   const { CrmRelationshipHealthService } = await import('../src/modules/crm/crm-relationship-health.service');
   const { CrmCommunicationService } = await import('../src/modules/crm/crm-communication.service');
+  const { WhatsAppService } = await import('../src/modules/whatsapp/whatsapp.service');
   const { BestChannelService } = await import('../src/modules/crm/best-channel.service');
   const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
   const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
@@ -442,7 +449,11 @@ beforeAll(async () => {
       { provide: CrmDataQualityService, useValue: {} },
       { provide: CrmSavedViewsService, useValue: {} },
       { provide: CrmRelationshipHealthService, useValue: {} },
-      { provide: CrmCommunicationService, useValue: {} },
+      // Real: GET contacts/unread-counts reaches unreadCounts (R0-13e). It
+      // never sends anything; the WhatsApp service it holds for replies is a
+      // stand-in no case reaches.
+      CrmCommunicationService,
+      { provide: WhatsAppService, useValue: {} },
       { provide: BestChannelService, useValue: {} },
       { provide: ConversationAiService, useValue: {} },
       { provide: CrmNetworkService, useValue: {} },
@@ -959,7 +970,7 @@ describe('ST-A: bulk update applies the GET visibility clause: a contact the cal
     expect(await db.contactEvent.count({ where: { contactId: owned.id, type: 'bulk.updated' } })).toBe(1);
   });
 
-  it("over HTTP, PATCH contacts/bulk naming another member's PRIVATE contact answers byte-identical to the same request naming an unknown id, alone and next to a visible TEAM contact, and the hidden contact is not written, whichever handler the route reaches (M15: PATCH contacts/:contactId today, bulkUpdateContacts once V1-54 reorders the routes)", async () => {
+  it("over HTTP, PATCH contacts/bulk naming another member's PRIVATE contact answers byte-identical to the same request naming an unknown id, alone and next to a visible TEAM contact, and the hidden contact is not written, whichever handler the route reaches (M15: PATCH contacts/:contactId before R0-13e, bulkUpdateContacts since R0-13e reordered the routes)", async () => {
     const hidden = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
     const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
     await settle();
@@ -1164,5 +1175,93 @@ describe("R0-13d review repairs: bulk update writes only the path tenant's rows 
       expect(events[0].actorId, label).toBeNull();
       expect(events[0].actorType, label).not.toBe('USER');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R0-13e-ROUTE-SHADOWING (M15): crm.controller.ts declared PATCH contacts/bulk
+// after PATCH contacts/:contactId and GET contacts/unread-counts after GET
+// contacts/:contactId, so Express answered both literal routes with the
+// parameterised handler (contact 'bulk', contact 'unread-counts': 404) and the
+// web's bulk edit had never worked over HTTP. With the literal routes declared
+// first, these requests reach bulkUpdateContacts and unreadCounts, and the
+// R0-13d bulk semantics hold over HTTP: a hidden id is skipped exactly like a
+// missing one. src/core/config/route-shadowing.spec.ts keeps the order.
+// Cases tagged NEGATIVE CONTROL fail on the unmodified controller.
+// ---------------------------------------------------------------------------
+
+describe('R0-13e: PATCH contacts/bulk and GET contacts/unread-counts reach their own handlers over HTTP, not the :contactId sibling', () => {
+  it("NEGATIVE CONTROL: the owner's PATCH contacts/bulk naming two visible contacts updates both and answers bulkUpdateContacts' { updated: 2 }, recorded as the owner's bulk update, for a field update and for added tags", async () => {
+    for (const body of BULK_BODIES) {
+      const label = JSON.stringify(body);
+      const priv = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+      const team = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+      const res = await bulkUpdateHttp(ID.owner, [priv.id, team.id], body);
+      expect(res.status, `${label} ${res.text}`).toBe(200);
+      expect(res.body, label).toEqual({ updated: 2 });
+      for (const contact of [priv, team]) {
+        expect(bulkApplied(await rawRow(contact.id), body), `${label} ${contact.id}`).toBe(true);
+        const events = await db.contactEvent.findMany({ where: { contactId: contact.id, type: 'bulk.updated' } });
+        expect(events, `${label} ${contact.id}`).toHaveLength(1);
+        expect(events[0], `${label} ${contact.id}`).toMatchObject({ businessId: ID.bizA, actorType: 'USER', actorId: ID.owner });
+        const audits = await auditEntries(contact.id, 'bulk_updated');
+        expect(audits, `${label} ${contact.id}`).toHaveLength(1);
+        expect(audits[0].actor, `${label} ${contact.id}`).toEqual({ type: 'USER', id: ID.owner });
+      }
+    }
+  });
+
+  it("NEGATIVE CONTROL: over HTTP a crm 'write' STAFF member's PATCH contacts/bulk skips another member's PRIVATE contact exactly like a missing id: next to a visible TEAM contact 200 { updated: 1 }, the answer an unknown id in its place gets, and alone bulkUpdateContacts' 403 refusal, byte-identical to an unknown id; the hidden contact gets no write, event or audit entry", async () => {
+    for (const body of BULK_BODIES) {
+      const label = JSON.stringify(body);
+      const hidden = await seedContact({ visibility: 'PRIVATE', ownerId: ID.staffB });
+      const teamA = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+      const teamB = await seedContact({ visibility: 'TEAM', ownerId: ID.staffB });
+      expect((await detail(ID.staff, hidden.id)).status, label).toBe(404);
+      await settle();
+      const hiddenBefore = await rawRow(hidden.id);
+
+      const withHidden = await bulkUpdateHttp(ID.staff, [teamA.id, hidden.id], body);
+      const withUnknown = await bulkUpdateHttp(ID.staff, [teamB.id, UNKNOWN_CONTACT], body);
+      expect(withHidden.status, `${label} ${withHidden.text}`).toBe(200);
+      expect(withHidden.body, label).toEqual({ updated: 1 });
+      expect(withUnknown.status, label).toBe(200);
+      expect(withUnknown.text, label).toBe(withHidden.text);
+
+      const alone = await bulkUpdateHttp(ID.staff, [hidden.id], body);
+      const absent = await bulkUpdateHttp(ID.staff, [UNKNOWN_CONTACT], body);
+      expect(alone.status, `${label} ${alone.text}`).toBe(403);
+      expect(alone.body, label).toMatchObject({ statusCode: 403, message: BULK_REFUSAL });
+      expect(absent.status, label).toBe(403);
+      expect(normalisedError(alone, hidden.id), label).toBe(normalisedError(absent, UNKNOWN_CONTACT));
+      expect(alone.headers['content-type'], label).toBe(absent.headers['content-type']);
+      for (const res of [withHidden, alone]) {
+        for (const secret of [hidden.id, hidden.email, hidden.phone, hidden.notesInternal]) {
+          expect(res.text, label).not.toContain(String(secret));
+        }
+      }
+
+      await settle();
+      expect(await rawRow(hidden.id), label).toEqual(hiddenBefore);
+      expect(await db.contactEvent.count({ where: { contactId: hidden.id } }), label).toBe(0);
+      expect(await db.contactAuditEntry.count({ where: { contactId: hidden.id } }), label).toBe(0);
+      for (const team of [teamA, teamB]) {
+        expect(bulkApplied(await rawRow(team.id), body), `${label} ${team.id}`).toBe(true);
+        expect(await db.contactEvent.count({ where: { contactId: team.id, type: 'bulk.updated' } }), `${label} ${team.id}`).toBe(1);
+      }
+    }
+  });
+
+  it("NEGATIVE CONTROL: GET contacts/unread-counts answers unreadCounts' { counts } (a contact with an inbound form submission counts 1), not the contact detail 404 for contact 'unread-counts'", async () => {
+    const contact = await seedContact({ visibility: 'TEAM', ownerId: ID.owner });
+    await db.contactEvent.create({
+      data: { id: `${P}ev_form_${contact.id.slice(P.length)}`, businessId: ID.bizA, contactId: contact.id, type: 'form.submitted', data: {} },
+    });
+    const res = await request(app.getHttpServer())
+      .get(`/crm/businesses/${ID.bizA}/contacts/unread-counts`)
+      .set('x-test-user', ID.owner)
+      .set('x-forwarded-for', nextIp());
+    expect(res.status, res.text).toBe(200);
+    expect(res.body).toEqual({ counts: { [contact.id]: 1 } });
   });
 });
