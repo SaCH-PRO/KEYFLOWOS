@@ -762,14 +762,16 @@
       "apps/server/test/release0-journey.integration.test.ts",
       "docs/TESTING.md",
       "scripts/ci/test-local.selftest.sh",
-      "scripts/proof-admission/manifests/release0-landed.json"
+      "scripts/proof-admission/manifests/release0-landed.json",
+      "scripts/proof-admission/manifests/payments-actor.json"
     ],
     "tests_first": [
       "apps/server/src/core/config/proof-admission.spec.ts",
       "scripts/ci/test-local.selftest.sh",
       "scripts/proof-admission/manifests/release0-journey.json",
       "apps/server/test/release0-journey.integration.test.ts",
-      "scripts/proof-admission/manifests/release0-landed.json"
+      "scripts/proof-admission/manifests/release0-landed.json",
+      "scripts/proof-admission/manifests/payments-actor.json"
     ],
     "proof": [
       "RED-BEFORE at its base: the evaluator verdict carries no evaluated HEAD and accepts a wrong --expect-head. The only proof steps in ci-cd.yml are admit-resources (:423) and proof:k12 (the K12 self-test), so no CI step evaluates the action-001, contacts-visibility, revenue-auth-001 or Release 0 manifests. The journey step-4 case is still titled 'FIRST FAILING STEP ... dies with 500' (release0-journey.integration.test.ts:589), and the 'recovery (harness, not product behaviour)' case (:607) still runs.",
@@ -781,7 +783,7 @@
     ],
     "estimate_hours": 10,
     "v1_relevance": "release0",
-    "rationale": "M59, CF-07 and CF-31: issue #186 requires exact-head proof, and without manifests a skipped journey case hides behind an aggregate green. No product code changes. It stays early so every later packet can run the local runner; the draft's dependency on R0-10 existed only through release0-journey.integration.test.ts and is gone with R0-10's move to V1."
+    "rationale": "M59, CF-07 and CF-31: issue #186 requires exact-head proof, and without manifests a skipped journey case hides behind an aggregate green. No product code changes. It stays early so every later packet can run the local runner; the draft's dependency on R0-10 existed only through release0-journey.integration.test.ts and is gone with R0-10's move to V1. INTEGRATION NOTE (2026-10-31): a strict case manifest (allowAdditionalCases false, or required cases this packet renames) binds a suite this packet edits; the manifest was added to the write set so the proof gate moves with the suite (R0-01 review CR-1, R0-11 review R011-CR-1)."
   },
   {
     "id": "R0-23-WEB-R0-SCREENS",
@@ -1227,7 +1229,8 @@
       "apps/web/src/lib/api/business-command-center.ts",
       "apps/web/src/app/app/command-center/page.tsx",
       "apps/web/src/app/app/__tests__/newly-reachable-screens-mount.test.tsx",
-      "apps/server/test/release0-journey.integration.test.ts"
+      "apps/server/test/release0-journey.integration.test.ts",
+      "scripts/proof-admission/manifests/payments-actor.json"
     ],
     "tests_first": [
       "apps/server/src/modules/business-command-center/business-command-center.service.spec.ts",
@@ -1243,7 +1246,7 @@
     ],
     "estimate_hours": 8,
     "v1_relevance": "v1",
-    "rationale": "Formerly R0-10, moved to V1 per the release0-first judge: issue #186 step 5 asks to inspect contacts, invoices and payments, which the existing routes and R0-23/R0-25 cover; V1-MODULE-SCOPE P0-6 asks only for a minimal route and result, which the existing cockpit route meets. CF-19 for P0-6 'minimal route and result': a failed source renders as a healthy zero, and Release 0 records are not visible from the cockpit. COMMAND-001 requires missing and zero to be distinct."
+    "rationale": "Formerly R0-10, moved to V1 per the release0-first judge: issue #186 step 5 asks to inspect contacts, invoices and payments, which the existing routes and R0-23/R0-25 cover; V1-MODULE-SCOPE P0-6 asks only for a minimal route and result, which the existing cockpit route meets. CF-19 for P0-6 'minimal route and result': a failed source renders as a healthy zero, and Release 0 records are not visible from the cockpit. COMMAND-001 requires missing and zero to be distinct. INTEGRATION NOTE (2026-10-31): payments-actor.json requires every release0-journey case by title (R0-11 review R011-CR-1); a renamed or removed journey case must update that manifest in the same packet."
   },
   {
     "id": "V1-54-CT-ROUTE-ORDER-CALLER",
@@ -1839,11 +1842,13 @@
       "apps/server/src/modules/crm/crm.service.ts",
       "apps/server/src/modules/crm/crm.controller.ts",
       "apps/server/test/contacts-visibility.integration.test.ts",
-      "apps/server/test/crm.e2e.test.ts"
+      "apps/server/test/crm.e2e.test.ts",
+      "scripts/proof-admission/manifests/contacts-visibility.json"
     ],
     "tests_first": [
       "apps/server/test/contacts-visibility.integration.test.ts",
-      "apps/server/test/crm.e2e.test.ts"
+      "apps/server/test/crm.e2e.test.ts",
+      "scripts/proof-admission/manifests/contacts-visibility.json"
     ],
     "proof": [
       "RED-BEFORE at the V1 base: a STAFF owned-view actor GET of events, notes, journey, cross-journey, story, revenue-summary, health-metrics, relationships, network, data-quality, playbook, conversations, conversation-context or best-channel for another member's PRIVATE contact returns 200 with child rows (crm-timeline.service.ts:54-62 is tenant-only). A STAFF PATCH ownerId without crm_reassign succeeds.",
@@ -1852,7 +1857,7 @@
     ],
     "estimate_hours": 6,
     "v1_relevance": "v1",
-    "rationale": "M13 and PRS-M12, for constitution promise 6 (private/shared/owned scopes): #190 closed detail and dossier, but 14 sibling reads still disclose PRIVATE contacts by id."
+    "rationale": "M13 and PRS-M12, for constitution promise 6 (private/shared/owned scopes): #190 closed detail and dossier, but 14 sibling reads still disclose PRIVATE contacts by id. INTEGRATION NOTE (2026-10-31): a strict case manifest (allowAdditionalCases false, or required cases this packet renames) binds a suite this packet edits; the manifest was added to the write set so the proof gate moves with the suite (R0-01 review CR-1, R0-11 review R011-CR-1)."
   },
   {
     "id": "V1-24-KEY-KILL-SWITCHES",
@@ -1888,7 +1893,8 @@
       "apps/server/src/modules/key-cortex/memory-consolidation.service.ts",
       "apps/server/src/modules/key-cortex/key-cortex-homeostasis.service.ts",
       "apps/server/src/modules/key-cortex/key-cortex-cerebellum.service.ts",
-      "apps/server/test/release0-journey.integration.test.ts"
+      "apps/server/test/release0-journey.integration.test.ts",
+      "scripts/proof-admission/manifests/payments-actor.json"
     ],
     "tests_first": [
       "apps/server/src/core/config/scheduler-kill-switch.spec.ts",
@@ -1902,7 +1908,7 @@
     ],
     "estimate_hours": 12,
     "v1_relevance": "v1",
-    "rationale": "M47, M52 and PRS-M05: the manual product survives today only because providers are unconfigured. About 18 cortex crons spend or fail on every cycle, and four schedulers tick during integration runs."
+    "rationale": "M47, M52 and PRS-M05: the manual product survives today only because providers are unconfigured. About 18 cortex crons spend or fail on every cycle, and four schedulers tick during integration runs. INTEGRATION NOTE (2026-10-31): payments-actor.json requires every release0-journey case by title (R0-11 review R011-CR-1); a renamed or removed journey case must update that manifest in the same packet."
   },
   {
     "id": "V1-20-SEC-VERIFY-UP",
@@ -2743,7 +2749,8 @@
       "RED-BEFORE at its base (lines at 87ca2b90): quote edit, delete and convert on an unknown id answer 500. Converting a not-ACCEPTED or already-converted quote answers 500. Two parallel converts answer P2002 500 (commerce.service.ts:832-839, 1408-1515). A quote create with empty items or a NaN price reaches the service.",
       "GREEN-AFTER: 400 with field messages on create, and the service spy is not called. Quote errors answer 404 or 409. Two parallel converts give one invoice, and the loser gets 409. Totals are computed on the server. It reuses R0-27's document-line-item.dto.ts.",
       "LEDGER: a refused create or convert writes no Invoice, Quote or FinancialTransaction.",
-      "RESOURCES: database kf_wt_v1_53 and a Redis index from scripts/worktree-resources.sh (R0-00); fixture prefixes commerce-quote-errors.integration.test.ts = v53a_ (new). Values in globally unique columns embed the prefix."
+      "RESOURCES: database kf_wt_v1_53 and a Redis index from scripts/worktree-resources.sh (R0-00); fixture prefixes commerce-quote-errors.integration.test.ts = v53a_ (new). Values in globally unique columns embed the prefix.",
+      "ADDED 2026-10-31 (R0-04 review ST-R004-1, reproduced on a real DB): createQuote and updateQuote must refuse a contactId that is not a contact of the path tenant (404 byte-identical to an unknown contact; no Quote row written or changed), and OPERATOR_QUOTE_INCLUDE must not join a foreign-tenant contact. If V1-53 is not scheduled before Release 0, this moves to the R0 commerce follow-up group (R0-CM-F1)."
     ],
     "estimate_hours": 4,
     "v1_relevance": "v1",
