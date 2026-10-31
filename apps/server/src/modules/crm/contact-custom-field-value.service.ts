@@ -1,5 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { contactWhereWithId } from './crm.helpers';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
 
 export interface ContactCustomFieldValueInput {
   contactId: string;
@@ -11,7 +14,29 @@ export interface ContactCustomFieldValueInput {
 export class ContactCustomFieldValueService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getValuesForContact(contactId: string) {
+  /**
+   * Values of one contact, read through the path tenant and the actor's CRM
+   * visibility. ContactCustomFieldValue carries no businessId, so both are
+   * bound through the contact, with the same predicate the contact detail
+   * route applies (CrmStatsService.assertContact): the tenant row, ANDed with
+   * `visibilityClause(resolveCrmAccess(...))`. A contact of another tenant, or
+   * one the actor may not see (another member's PRIVATE contact; another
+   * member's TEAM contact for a crm_view=owned member), answers exactly like an
+   * absent one (404), before any value is read.
+   */
+  async getValuesForContact(businessId: string, contactId: string, actorUserId: string) {
+    const where: Prisma.ContactWhereInput = { ...contactWhereWithId(businessId, contactId) };
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const visClause = visibilityClause(access, actorUserId);
+    if (visClause) {
+      where.AND = [visClause];
+    }
+    const contact = await this.prisma.client.contact.findFirst({
+      where,
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+
     return this.prisma.client.contactCustomFieldValue.findMany({
       where: { contactId },
       include: { definition: true },

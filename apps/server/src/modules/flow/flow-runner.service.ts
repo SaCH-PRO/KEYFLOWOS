@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { FlowActionRegistry, ActionContext } from './flow-action.registry';
@@ -416,7 +416,19 @@ export class FlowRunnerService {
     return { items, total };
   }
 
-  async findRunSteps(runId: string) {
+  /**
+   * Steps of one run, read through the path tenant and flow. FlowRunStep carries
+   * no businessId, so both are bound through the run: a run of another tenant or
+   * of another flow answers exactly like an absent one (404), before any step is
+   * read.
+   */
+  async findRunSteps(businessId: string, flowId: string, runId: string) {
+    const run = await this.prisma.client.flowRun.findFirst({
+      where: { id: runId, businessId, flowId },
+      select: { id: true },
+    });
+    if (!run) throw new NotFoundException('Flow run not found');
+
     return this.prisma.client.flowRunStep.findMany({
       where: { runId },
       orderBy: { createdAt: 'asc' },

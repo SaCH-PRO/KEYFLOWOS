@@ -301,11 +301,11 @@ export class FlowController {
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('automations', 'read')
   async getRunSteps(
-    @Param('businessId') _businessId: string,
-    @Param('flowId') _flowId: string,
+    @Param('businessId') businessId: string,
+    @Param('flowId') flowId: string,
     @Param('runId') runId: string,
   ) {
-    const items = await this.runner.findRunSteps(runId);
+    const items = await this.runner.findRunSteps(businessId, flowId, runId);
     return { items, total: items.length };
   }
 
