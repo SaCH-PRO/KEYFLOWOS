@@ -20,6 +20,19 @@
  *   - TODAY'S BEHAVIOUR, handed to V1-17: the soft-deleted holder still
  *     occupies the email, so re-creating it answers 409 with
  *     existingContactId null.
+ *   - OWNER ON CREATE (review repair ST-3): naming another member as ownerId
+ *     on POST needs the reassign permission PATCH already requires (403
+ *     otherwise), and a non-member or unknown ownerId is refused 400, both
+ *     with nothing written. Naming yourself stays allowed.
+ *
+ * SCOPE OF THE CREATE DENIAL. The crm_edit 'none' refusal and the bounded 409
+ * are proven for POST /crm/businesses/:businessId/contacts, the one route that
+ * passes the actor to CrmService.createContact. The import routes
+ * (import/image/ocr, import/file, import/link) reach createContact through
+ * CrmImportService and CrmService.findOrCreateContact with no actor, so
+ * neither check runs there. Closing that needs crm.controller.ts and
+ * crm-import.service.ts, which are outside this packet's write set. It is
+ * handed off as it.todo in test/contacts-import-write-scope.integration.test.ts.
  *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the user,
  * business, membership, contact and invoice rows, CrmRateLimitGuard,
@@ -40,13 +53,20 @@
  * (emitDecoratorMetadata, the production build) and vitest's esbuild transform
  * does not: in-process the pipe sees no metatype and lets any body through
  * (observed on this suite's first run: an invalid email answered 201). The
- * harness therefore installs, before app.init(), exactly the entries tsc
- * emits for the two handlers under test (read from the tsc-built
- * dist/modules/crm/crm.controller.js):
+ * harness therefore installs, before app.init() and only where absent, the
+ * entries tsc emits for the two handlers under test. They are DERIVED, not
+ * written out: crm.controller.ts is transpiled with ts.transpileModule under
+ * the server tsconfig's decorator options (experimentalDecorators,
+ * emitDecoratorMetadata), the design:paramtypes array of each handler is read
+ * from the output, and each imported class is resolved through the emitted
+ * require(). Today that gives
  *   createContact  [String, CreateContactDto, Object]
  *   updateContact  [String, String, UpdateContactDto, Object]
- * and only when they are absent. The DTO classes, their decorators and the
- * pipe options are the production ones.
+ * If the controller's @Body() lost its DTO type (say `body: any`), tsc would
+ * emit Object, the harness would install Object, the pipe would skip
+ * validation and the 400 cases would turn red, just as production would
+ * accept the body. The HARNESS cases prove that tie. The DTO classes, their
+ * decorators and the pipe options are the production ones.
  *
  * Requires DATABASE_URL. Every seeded row carries the `k13a_` prefix (contacts
  * created through the API are deleted by their business id) and is
@@ -54,6 +74,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { readFileSync } from 'fs';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -69,6 +90,8 @@ const ID = {
   staffNoDel: `${P}staffNoDel`,   // STAFF, crm: write, crm_delete: none (passes the module guard)
   staffWrite: `${P}staffWrite`,   // STAFF, crm: write (default delete scope: owned)
   staffRead: `${P}staffRead`,     // STAFF, crm: read  (module guard refuses writes)
+  staffAssign: `${P}staffAssign`, // STAFF, crm: write, crm_reassign: true (seeded by the owner-on-create block)
+  outsider: `${P}outsider`,       // a user with NO membership in bizA
   // tenant
   bizA: `${P}bizA`,
   // contacts
@@ -83,6 +106,84 @@ const TARGET_EMAIL = `${P}target@test.local`;
 
 let db: any;
 let app: any;
+
+// ---- DTO validation metadata, derived from the controller source ---------
+const CONTROLLER_DIR = path.resolve(__dirname, '../src/modules/crm');
+const CONTROLLER_FILE = path.join(CONTROLLER_DIR, 'crm.controller.ts');
+const PARAMTYPES = 'design:paramtypes';
+const BODY_HANDLERS = ['createContact', 'updateContact'] as const;
+let ts: any;
+let CrmControllerClass: any;
+let CreateContactDtoClass: any;
+let UpdateContactDtoClass: any;
+/** What tsc emits for each body-validated handler, derived in beforeAll. */
+const derivedParamTypes: Record<string, unknown[]> = {};
+
+/** Split a JS list at its top-level commas (none inside (), [] or {}). */
+function splitTopLevel(list: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of list) {
+    if ('([{'.includes(ch)) depth += 1;
+    if (')]}'.includes(ch)) depth -= 1;
+    if (ch === ',' && depth === 0) {
+      parts.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+/**
+ * The design:paramtypes tsc emits for `handler` on CrmController, given the
+ * controller's source text. Transpiled with the decorator options of
+ * apps/server/tsconfig.json. An imported class is resolved through the
+ * emitted require() and loaded from its module; anything else must be a
+ * global constructor, and an unrecognised entry fails loudly.
+ */
+async function emittedParamTypes(source: string, handler: string): Promise<unknown[]> {
+  const js: string = ts.transpileModule(source, {
+    fileName: CONTROLLER_FILE,
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      experimentalDecorators: true,
+      emitDecoratorMetadata: true,
+    },
+  }).outputText;
+  const block = js.match(new RegExp(
+    `__decorate\\(\\[((?:(?!__decorate\\(\\[)[\\s\\S])*?)\\],\\s*CrmController\\.prototype,\\s*"${handler}",\\s*null\\)`,
+  ));
+  if (!block) throw new Error(`no decorated method ${handler} in the transpiled controller`);
+  const list = block[1].match(/__metadata\("design:paramtypes",\s*\[([\s\S]*?)\]\)/);
+  if (!list) throw new Error(`no ${PARAMTYPES} emitted for ${handler}`);
+
+  const required = new Map<string, string>();
+  for (const m of js.matchAll(/(\w+)\s*=\s*require\("([^"]+)"\)/g)) required.set(m[1], m[2]);
+  const globals: Record<string, unknown> = { String, Number, Boolean, Object, Array, Function };
+
+  const types: unknown[] = [];
+  for (const entry of splitTopLevel(list[1])) {
+    if (Object.hasOwn(globals, entry)) {
+      types.push(globals[entry]);
+      continue;
+    }
+    // e.g. typeof (_u = typeof create_contact_dto_1.CreateContactDto !== "undefined" && ...) === "function" ? _u : Object
+    const ref = entry.match(/\b(\w+)\.(\w+)\b/);
+    const specifier = ref ? required.get(ref[1]) : undefined;
+    if (!ref || !specifier) throw new Error(`unrecognised ${PARAMTYPES} entry for ${handler}: ${entry}`);
+    const mod: Record<string, unknown> = await import(
+      specifier.startsWith('.') ? path.resolve(CONTROLLER_DIR, specifier) : specifier
+    );
+    if (typeof mod[ref[2]] !== 'function') throw new Error(`${specifier} has no class ${ref[2]}`);
+    types.push(mod[ref[2]]);
+  }
+  return types;
+}
 
 async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension). Contacts may
@@ -256,16 +357,19 @@ beforeAll(async () => {
   const { CreateContactDto } = await import('../src/modules/crm/dto/create-contact.dto');
   const { UpdateContactDto } = await import('../src/modules/crm/dto/update-contact.dto');
 
-  // ---- the parameter metadata tsc emits for the body-validated handlers
-  // (see DTO VALIDATION IN-PROCESS above). Only filled in where absent. -----
-  const PARAMTYPES = 'design:paramtypes';
-  const emitted: Array<[string, unknown[]]> = [
-    ['createContact', [String, CreateContactDto, Object]],
-    ['updateContact', [String, String, UpdateContactDto, Object]],
-  ];
-  for (const [handler, types] of emitted) {
+  // ---- the parameter metadata tsc emits for the body-validated handlers,
+  // derived from crm.controller.ts (see DTO VALIDATION IN-PROCESS above).
+  // Only filled in where absent. ------------------------------------------
+  const tsModule: any = await import('typescript');
+  ts = tsModule.default ?? tsModule;
+  CrmControllerClass = CrmController;
+  CreateContactDtoClass = CreateContactDto;
+  UpdateContactDtoClass = UpdateContactDto;
+  const controllerSource = readFileSync(CONTROLLER_FILE, 'utf8');
+  for (const handler of BODY_HANDLERS) {
+    derivedParamTypes[handler] = await emittedParamTypes(controllerSource, handler);
     if (!Reflect.getMetadata(PARAMTYPES, CrmController.prototype, handler)) {
-      Reflect.defineMetadata(PARAMTYPES, types, CrmController.prototype, handler);
+      Reflect.defineMetadata(PARAMTYPES, derivedParamTypes[handler], CrmController.prototype, handler);
     }
   }
 
@@ -339,7 +443,7 @@ beforeAll(async () => {
   await cleanup(); // in case a prior run aborted
 
   // ---- identities, tenant, memberships -----------------------------------
-  for (const id of [ID.owner, ID.staffNoEdit, ID.staffNoDel, ID.staffWrite, ID.staffRead]) {
+  for (const id of [ID.owner, ID.staffNoEdit, ID.staffNoDel, ID.staffWrite, ID.staffRead, ID.staffAssign, ID.outsider]) {
     await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'K13A Biz A', ownerId: ID.owner } });
@@ -385,6 +489,35 @@ describe('fixture sanity (real rows)', () => {
     expect(await traceCounts()).toEqual({ contacts: 2, live: 2, contactEvents: 0, audits: 0, teamLogs: 0 });
     const inv = await rawInvoice(ID.invMain);
     expect(inv).toMatchObject({ contact_id: ID.cMain, business_id: ID.bizA, deleted_at: null });
+  });
+});
+
+describe('HARNESS: the body DTO the ValidationPipe validates against is the one crm.controller.ts declares', () => {
+  it('the design:paramtypes in effect for createContact and updateContact are the ones tsc emits from the controller source, binding CreateContactDto and UpdateContactDto', () => {
+    expect(derivedParamTypes.createContact).toEqual([String, CreateContactDtoClass, Object]);
+    expect(derivedParamTypes.updateContact).toEqual([String, String, UpdateContactDtoClass, Object]);
+    for (const handler of BODY_HANDLERS) {
+      const inEffect: unknown[] = Reflect.getMetadata(PARAMTYPES, CrmControllerClass.prototype, handler);
+      expect(inEffect, handler).toHaveLength(derivedParamTypes[handler].length);
+      inEffect.forEach((type, i) => expect(type, `${handler}[${i}]`).toBe(derivedParamTypes[handler][i]));
+    }
+  });
+
+  it('negative control: a copy of the controller whose @Body() is typed any derives Object, and the production ValidationPipe lets an invalid email through Object but refuses it 400 through CreateContactDto', async () => {
+    const source = readFileSync(CONTROLLER_FILE, 'utf8');
+    const mutated = source
+      .replace('@Body() body: CreateContactDto', '@Body() body: any')
+      .replace('@Body() body: UpdateContactDto', '@Body() body: any');
+    expect(mutated).not.toBe(source);
+    expect(await emittedParamTypes(mutated, 'createContact')).toEqual([String, Object, Object]);
+    expect(await emittedParamTypes(mutated, 'updateContact')).toEqual([String, String, Object, Object]);
+
+    const { ValidationPipe, BadRequestException } = await import('@nestjs/common');
+    const pipe = new ValidationPipe({ whitelist: true, transform: true });
+    const body = { firstName: `${P}Pipe`, email: 'not-an-email' };
+    await expect(pipe.transform({ ...body }, { type: 'body', metatype: Object })).resolves.toMatchObject(body);
+    await expect(pipe.transform({ ...body }, { type: 'body', metatype: CreateContactDtoClass }))
+      .rejects.toBeInstanceOf(BadRequestException);
   });
 });
 
@@ -459,6 +592,77 @@ describe('NEGATIVE CONTROL: STAFF with crm_edit none cannot create or edit', () 
       403,
     );
     expect(String(res.body.message)).toMatch(/Insufficient permissions/);
+  });
+});
+
+describe('NEGATIVE CONTROL: naming an owner on create obeys the reassign permission and business membership', () => {
+  beforeAll(async () => {
+    // Seeded here and not with the fixture, so the fixture sanity count stays
+    // the tenant's original five memberships.
+    await db.membership.create({
+      data: {
+        id: `${P}m_staffAssign`, userId: ID.staffAssign, businessId: ID.bizA, role: 'STAFF',
+        permissionScopes: { crm: 'write', crm_reassign: 'true' },
+      },
+    });
+  });
+
+  async function rowsWithEmail(email: string) {
+    const rows: Array<{ id: string; owner_id: string | null }> = await db.$queryRawUnsafe(
+      'SELECT id, owner_id FROM contacts WHERE business_id = $1 AND email_normalized = $2', ID.bizA, email,
+    );
+    return rows;
+  }
+
+  it('NEGATIVE CONTROL: POST by STAFF without the reassign permission naming another member as ownerId answers 403 and writes nothing', async () => {
+    await settle();
+    const tracesBefore = await traceCounts();
+    const email = `${P}planted@test.local`;
+    const res = await post(ID.staffWrite, { firstName: `${P}Planted`, email, ownerId: ID.staffNoDel });
+    expect(res.status).toBe(403);
+    expect(res.body.statusCode).toBe(403);
+    expect(String(res.body.message)).toMatch(/permission to assign contacts/i);
+    expect(res.body).not.toHaveProperty('id');
+    await settle();
+    expect(await traceCounts()).toEqual(tracesBefore);
+    expect(await rowsWithEmail(email)).toHaveLength(0);
+  });
+
+  it('NEGATIVE CONTROL: POST naming a user who is not a member of the business, or no user at all, as ownerId answers 400 and writes nothing, for the owner and for STAFF with crm_reassign', async () => {
+    await settle();
+    const tracesBefore = await traceCounts();
+    const cases: Array<[string, string]> = [
+      [ID.owner, ID.outsider],
+      [ID.owner, `${P}no-such-user`],
+      [ID.staffAssign, ID.outsider],
+    ];
+    for (const [actor, ownerId] of cases) {
+      const email = `${P}orphan-${actor.slice(P.length)}-${ownerId.slice(P.length)}@test.local`;
+      const res = await post(actor, { firstName: `${P}Orphan`, email, ownerId });
+      expect(res.status, `${actor} -> ${ownerId}`).toBe(400);
+      expect(String(res.body.message), `${actor} -> ${ownerId}`).toMatch(/member of this business/);
+      expect(res.body).not.toHaveProperty('id');
+      expect(await rowsWithEmail(email)).toHaveLength(0);
+    }
+    await settle();
+    expect(await traceCounts()).toEqual(tracesBefore);
+  });
+
+  it('positive control: STAFF without the reassign permission may name themselves as ownerId (201, owner_id persisted as that member)', async () => {
+    const email = `${P}self-owned@test.local`;
+    const res = await post(ID.staffWrite, { firstName: `${P}SelfOwned`, email, ownerId: ID.staffWrite });
+    expect(res.status).toBe(201);
+    expect(await rawContact(res.body.id)).toMatchObject({ business_id: ID.bizA, owner_id: ID.staffWrite, deleted_at: null });
+  });
+
+  it('positive control: the owner, and STAFF with crm_reassign true, may assign a new contact to another member (201, owner_id persisted)', async () => {
+    const byOwner = await post(ID.owner, { firstName: `${P}AssignedByOwner`, email: `${P}assigned-owner@test.local`, ownerId: ID.staffWrite });
+    expect(byOwner.status).toBe(201);
+    expect(await rawContact(byOwner.body.id)).toMatchObject({ owner_id: ID.staffWrite, deleted_at: null });
+
+    const byStaff = await post(ID.staffAssign, { firstName: `${P}AssignedByStaff`, email: `${P}assigned-staff@test.local`, ownerId: ID.staffNoDel });
+    expect(byStaff.status).toBe(201);
+    expect(await rawContact(byStaff.body.id)).toMatchObject({ owner_id: ID.staffNoDel, deleted_at: null });
   });
 });
 
