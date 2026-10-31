@@ -64,6 +64,11 @@
       "packet": "R0-09-ID-HARDEN"
     },
     {
+      "prefix": "k09b_",
+      "owner": "apps/server/test/d11-sibling-writes.integration.test.ts",
+      "packet": "R0-09 / R0-09b-D11-SIBLING-WRITES"
+    },
+    {
       "prefix": "k12a_",
       "owner": "apps/server/test/contact-scoped-tenancy.integration.test.ts",
       "packet": "R0-12-CT-TENANT-ROUTES"
