@@ -16,8 +16,13 @@
  * ContactAuditEntry, whose before/after diff lists exactly the fields that
  * changed; a request with no identity is refused (401) and writes nothing;
  * system-context callers (the KEY adapter, automation-style service calls)
- * that pass no audit context keep recording the SYSTEM actor and attribute
- * no user. DEC-CONTACTS-002 is unchanged: the ContactAuditEntry write stays
+ * that pass no audit context keep recording the SYSTEM actor on the
+ * ContactAuditEntry and attribute no user (a null actorId) on the
+ * ContactEvent. That is all the system-context cases bind: the events those
+ * callers write for update, status change and single delete still say
+ * actorType 'USER' (with no actorId); only contact.created and bulk delete
+ * write no actorType (residual ST-C, it.todo at the end of this file).
+ * DEC-CONTACTS-002 is unchanged: the ContactAuditEntry write stays
  * fire-and-forget, so the cases here wait for the row to land.
  *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the user,
@@ -39,6 +44,11 @@
  *
  * Cases tagged NEGATIVE CONTROL are the pre-fix failing controls: on the
  * packet's source base the event has no actorId and the audit actor is SYSTEM.
+ *
+ * The it.todo cases at the end of the file hand off three findings of the
+ * R0-03-CT-AUDIT-ACTOR review (ST-A, ST-B, ST-C), each reproduced against the
+ * real database with this harness. Their fix is in crm.service.ts, outside
+ * that packet's manifest-only write set, so they are not required cases.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -655,4 +665,23 @@ describe('ST-3: bulk delete writes traces only for the rows it deleted, naming t
     expect(audits).toHaveLength(1);
     expect(audits[0].actor).toEqual({ type: 'SYSTEM' });
   });
+});
+
+// ---------------------------------------------------------------------------
+// Review hand-offs (R0-03-CT-AUDIT-ACTOR review ST-A, ST-B, ST-C). Each was
+// reproduced against the real database with this harness on the packet head.
+// The fix is in CrmService (crm.service.ts), outside the packet's
+// manifest-only write set, so a follow-up packet turns each into a real case.
+// ---------------------------------------------------------------------------
+
+describe('review hand-offs: PATCH access and system-actor residuals (fix outside the R0-03 write set)', () => {
+  it.todo(
+    "FOLLOW-UP PACKET (ST-A): PATCH crm/businesses/:businessId/contacts/:contactId applies the M7 visibility clause, so a crm 'write' STAFF member (editScope 'any', viewAll) who gets 404 on GET for another member's PRIVATE contact also gets 404 on PATCH {} and on PATCH {jobTitle}: no row (email, phone, notesInternal) in the body, no change, no ContactEvent and no ContactAuditEntry. Today both PATCHes answer 200 with the full row and the edit lands. The fix is in CrmService.updateContact (the access block and the in-transaction findFirst, which use only contactWhereWithId).",
+  );
+  it.todo(
+    "FOLLOW-UP PACKET (ST-B): a PATCH whose ownerId changes the owner is refused 400 with nothing written when the new owner is not a member of this business (another tenant's user, an unknown id, or ''), as POST /contacts/bulk/reassign and POST /contacts already refuse it. Today the owner and a crm_reassign STAFF member get 200, owner_id is written, and the 'reassigned' audit entry names the outsider. The fix is in CrmService.updateContact (the changesOwner check, which tests only the reassign permission).",
+  );
+  it.todo(
+    "RESIDUAL (ST-C): system-context callers (the KEY adapter, automation) write actorType SYSTEM, never USER, on the contact.updated, status.changed and contact.deleted ContactEvent rows. Today those rows say actorType 'USER' with a null actorId (only contact.created and bulk delete write no actorType), so an AI- or automation-driven edit reads as a user event. The fix is in CrmService.updateContact and softDeleteContact (the hard-coded actorType 'USER' event meta).",
+  );
 });
