@@ -101,6 +101,9 @@ describe("the operator pages read the invoice through the tenant-bound client ca
     const source = fs.readFileSync(file, "utf8");
     expect(source).toMatch(/\bgetInvoice\(\s*[\w.]+\s*,\s*[\w.]+\s*\)/);
     expect(source).not.toMatch(/\bgetInvoice\(\s*[\w.]+\s*\)/);
-    expect(source).not.toMatch(/\/commerce\/invoices\/\$\{/);
+    // No hand-built bare-id API URL either. The app's own route
+    // (`/app/commerce/invoices/${id}`) is a page path, not the API path, so
+    // the match is anchored on the template literal's opening backtick.
+    expect(source).not.toMatch(/`\/commerce\/invoices\//);
   });
 });

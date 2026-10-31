@@ -458,6 +458,23 @@ export class CommerceController {
     );
   }
 
+  // R0-QI-01: the operator app's invoice detail and edit pages read this
+  // tenant-bound route, not the public bare-id route below (which keeps its
+  // shareable gate and viewer-aware shape for the customer pay page, RCR-01).
+  // The tenant is the path param the guards admitted; the service binds the
+  // read to it, so a cross-tenant id answers like an unknown one.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/invoices/:invoiceId')
+  async getInvoiceDetail(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+  ) {
+    const invoice = await this.commerce.getInvoiceForBusiness(invoiceId, businessId);
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    return invoice;
+  }
+
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
   @RequireModuleScope('revenue', 'write')
   @UseInterceptors(TeamAuditInterceptor)

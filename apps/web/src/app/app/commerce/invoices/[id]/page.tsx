@@ -85,23 +85,30 @@ export default function InvoiceDetailPage() {
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
   useEffect(() => {
-    const init = async () => { const fresh = await refreshWorkspace(); const id = fresh ?? getStoredBusinessId(); if (id) setBusinessId(id); };
+    const init = async () => {
+      const fresh = await refreshWorkspace();
+      const id = fresh ?? getStoredBusinessId();
+      if (!mountedRef.current) return;
+      if (id) setBusinessId(id);
+      else { setError("Select a workspace to view this invoice"); setLoading(false); }
+    };
     void init();
   }, []);
 
+  // R0-QI-01: the invoice is read through the tenant-bound detail route, so
+  // the load waits for the workspace id instead of falling back to the public
+  // bare-id route (which hid DRAFT and VOID behind its shareable gate).
   useEffect(() => {
-    if (!invoiceId) return;
+    if (!invoiceId || !businessId) return;
     const load = async () => {
       setLoading(true);
       try {
-        const { data, error } = await getInvoice(invoiceId);
+        const { data, error } = await getInvoice(businessId, invoiceId);
         if (!mountedRef.current) return;
         if (error || !data) { setError(error ?? "Not found"); setLoading(false); return; }
         setInvoice(data);
-        if (businessId) {
-          const tl = await getInvoiceTimeline(businessId, invoiceId);
-          if (tl.data && mountedRef.current) setTimeline(tl.data.entries);
-        }
+        const tl = await getInvoiceTimeline(businessId, invoiceId);
+        if (tl.data && mountedRef.current) setTimeline(tl.data.entries);
       } catch { setError("Failed to load"); }
       finally { if (mountedRef.current) setLoading(false); }
     };
