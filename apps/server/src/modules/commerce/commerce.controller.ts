@@ -1303,6 +1303,13 @@ export class CommerceController {
 
   // Public viewer for /public/invoice/[token] — records a `invoice.viewed`
   // event on first view so the timeline / dunning logic can react.
+  //
+  // V1-48-PUBLIC-TOKEN-VIEW (CF-18): beside the invoice block (unchanged: the
+  // eleven keys PC-02 pins) the payload carries `balance` — amountPaid,
+  // amountDue and paidAt from the invoice's own-tenant Payment rows — so the
+  // page shows what has been paid and what remains. Still no payment rows,
+  // references or customer email. An unknown, expired, inactive or
+  // foreign-tenant link answers the same body.
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(60, 60_000)
   @Get('public/invoice-link/:token')
@@ -1313,6 +1320,8 @@ export class CommerceController {
       | InvoiceForEmail
       | null;
     if (!invoice) return { ok: false, reason: 'not_found' };
+    const balance = await this.commerce.getPaymentLinkBalance(invoice.id, invoice.businessId);
+    if (!balance) return { ok: false, reason: 'not_found' };
     if (invoice.contactId) {
       // Best-effort, fire-and-forget so a transient CRM failure doesn't break
       // the public view.
@@ -1336,6 +1345,7 @@ export class CommerceController {
         contact: invoice.contact ? { firstName: invoice.contact.firstName, lastName: invoice.contact.lastName } : null,
         business: invoice.business ? { name: invoice.business.name, logoUrl: invoice.business.logoUrl, primaryColor: invoice.business.primaryColor, email: invoice.business.email, phone: invoice.business.phone } : null,
       },
+      balance,
     };
   }
 

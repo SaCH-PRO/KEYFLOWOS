@@ -76,6 +76,11 @@ export default function PublicInvoicePage() {
   }
 
   const invoice = state.payload.invoice;
+  // V1-48 (CF-18): Paid and Remaining are the server's figures, rendered as
+  // given. Without a balance block (an older server) the page shows the
+  // total as due and no paid figure, rather than inventing one.
+  const balance = state.payload.balance ?? null;
+  const amountDue = balance ? Number(balance.amountDue) : Number(invoice.total);
   const business = invoice.business;
   const accent = business?.primaryColor || "#F97316";
   const isPaid = invoice.status === "PAID";
@@ -125,8 +130,8 @@ export default function PublicInvoicePage() {
             </div>
             <div className="text-right">
               <p className="text-xs uppercase tracking-wider text-slate-400">Amount due</p>
-              <p className="text-2xl font-semibold" style={{ color: accent }}>
-                {formatCurrency(Number(invoice.total), invoice.currency)}
+              <p className="text-2xl font-semibold" style={{ color: accent }} data-testid="public-invoice-amount-due">
+                {formatCurrency(amountDue, invoice.currency)}
               </p>
               <p className="text-xs text-slate-400 mt-1">Due {formatDate(invoice.dueDate)}</p>
             </div>
@@ -154,6 +159,37 @@ export default function PublicInvoicePage() {
                 ))}
               </ul>
             </div>
+          )}
+
+          {balance && (
+            <dl className="rounded-xl border border-border/40 divide-y divide-border/30 text-sm">
+              <div className="flex items-center justify-between px-4 py-2">
+                <dt className="text-slate-400">Total</dt>
+                <dd className="font-medium" data-testid="public-invoice-total">
+                  {formatCurrency(Number(invoice.total), invoice.currency)}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2">
+                <dt className="text-slate-400">Paid</dt>
+                <dd className="font-medium text-emerald-300" data-testid="public-invoice-paid">
+                  {formatCurrency(Number(balance.amountPaid), invoice.currency)}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2">
+                <dt className="text-slate-400">Remaining</dt>
+                <dd className="font-semibold" data-testid="public-invoice-remaining">
+                  {formatCurrency(Number(balance.amountDue), invoice.currency)}
+                </dd>
+              </div>
+              {isPaid && balance.paidAt && (
+                <div className="flex items-center justify-between px-4 py-2">
+                  <dt className="text-slate-400">Paid on</dt>
+                  <dd className="font-medium" data-testid="public-invoice-paid-at">
+                    {formatDate(balance.paidAt)}
+                  </dd>
+                </div>
+              )}
+            </dl>
           )}
 
           {invoice.notes && (

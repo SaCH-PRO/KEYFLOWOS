@@ -2562,7 +2562,8 @@ export class CommerceService {
     // returns the existing active row when present, so this is idempotent.
     let paymentUrl: string | null = null;
     let link = await this.prisma.client.paymentLink.findFirst({
-      where: { invoiceId: invoice.id, businessId: input.businessId, active: true },
+      // V1-48: an active link past its expiry is not reused (it would put a dead link in the reminder).
+      where: { invoiceId: invoice.id, businessId: input.businessId, ...CommerceService.liveLinkWhere() },
     });
     if (!link) {
       try {
@@ -2917,7 +2918,42 @@ export class CommerceService {
     });
   }
 
+  /**
+   * V1-48-PUBLIC-TOKEN-VIEW (M34): the pay-link token is the customer's whole
+   * credential, so it is 24 crypto-random bytes (32 base64url characters),
+   * the same as a quote's view token. It is passed explicitly on create; the
+   * column default (cuid()) is left alone, so no migration is needed and
+   * links issued before this keep working.
+   */
+  private static newPaymentLinkToken(): string {
+    return randomBytes(24).toString('base64url');
+  }
+
+  /**
+   * `expiresInDays` as an expiry date: undefined/null means "not given";
+   * anything else must be a positive number of days that yields a real date,
+   * otherwise 400 (at the base a negative value stored a link already
+   * expired, and a string or huge value reached Prisma as an invalid date).
+   */
+  private static paymentLinkExpiry(expiresInDays: unknown): Date | undefined {
+    if (expiresInDays === undefined || expiresInDays === null) return undefined;
+    const days = expiresInDays as number;
+    const at = typeof days === 'number' && Number.isFinite(days) && days > 0 ? new Date(Date.now() + days * 86400000) : null;
+    if (!at || !Number.isFinite(at.getTime())) {
+      throw new BadRequestException('expiresInDays must be a positive number of days');
+    }
+    return at;
+  }
+
+  /**
+   * One active link per invoice, reused. V1-48 (M34): a reusable link is
+   * active and not past its expiry; an active link that has expired is never
+   * handed out again (the customer would get a dead link), and a fresh one is
+   * minted. A new `expiresInDays` is applied to the reused link, keeping its
+   * token so links already sent keep working until the new expiry.
+   */
   async createPaymentLink(invoiceId: string, businessId: string, expiresInDays?: number) {
+    const expiresAt = CommerceService.paymentLinkExpiry(expiresInDays);
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
     });
@@ -2929,17 +2965,57 @@ export class CommerceService {
     }
 
     const existing = await this.prisma.client.paymentLink.findFirst({
-      where: { invoiceId, businessId, active: true },
+      where: { invoiceId, businessId, ...CommerceService.liveLinkWhere() },
+      orderBy: { createdAt: 'desc' },
     });
-    if (existing) return existing;
-
-    const expiresAt = expiresInDays
-      ? new Date(Date.now() + expiresInDays * 86400000)
-      : null;
+    if (existing) {
+      if (!expiresAt) return existing;
+      return this.prisma.client.paymentLink.update({ where: { id: existing.id }, data: { expiresAt } });
+    }
 
     return this.prisma.client.paymentLink.create({
-      data: { invoiceId, businessId, expiresAt },
+      data: { invoiceId, businessId, token: CommerceService.newPaymentLinkToken(), expiresAt: expiresAt ?? null },
     });
+  }
+
+  /** A link that may still be handed to a customer: active and not past its expiry. */
+  private static liveLinkWhere(): Prisma.PaymentLinkWhereInput {
+    return { active: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] };
+  }
+
+  /**
+   * V1-48-PUBLIC-TOKEN-VIEW (CF-18): paid and remaining for the public token
+   * view, so the customer's link shows what has arrived and what is still
+   * owed. The figures are computeBalance's `paid` and `remaining`, the same
+   * the bare-id projection and the status route serve, over this invoice's
+   * Payment rows of its own tenant: Payment sits outside the tenant
+   * extension and has no FK to Business (M31), so a row carrying another
+   * tenant's businessId is not this invoice's money. No row, reference or
+   * amount per payment leaves here. `paidAt` only when the invoice is PAID.
+   *
+   * A manually refunded row is counted twice by computeBalance (M28): it is
+   * dropped from `paid` and subtracted as `refunded`, so `amountDue` can
+   * exceed total - paid until V1-29 settles that convention. This mirrors it
+   * rather than diverging from every other balance reader.
+   */
+  async getPaymentLinkBalance(invoiceId: string, businessId: string) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+      select: {
+        status: true,
+        total: true,
+        currency: true,
+        paidAt: true,
+        payments: { where: { businessId }, select: { amount: true, status: true } },
+      },
+    });
+    if (!invoice) return null;
+    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    return {
+      amountPaid: balance.paid,
+      amountDue: balance.remaining,
+      paidAt: invoice.status === 'PAID' ? invoice.paidAt ?? null : null,
+    };
   }
 
   async getPaymentLinkByToken(token: string) {
@@ -2959,13 +3035,18 @@ export class CommerceService {
             total: true,
             currency: true,
             status: true,
+            businessId: true,
           },
         },
       },
     });
     if (!link || !link.active) return null;
     if (link.expiresAt && link.expiresAt < new Date()) return null;
-    return link;
+    // V1-48 (M31): nothing ties a link's businessId to its invoice's, so a
+    // link row of another tenant would open this invoice. It reads as unknown.
+    const { businessId: invoiceBusinessId, ...invoice } = link.invoice;
+    if (invoiceBusinessId !== link.businessId) return null;
+    return { ...link, invoice };
   }
 
   async listPaymentLinks(businessId: string) {
