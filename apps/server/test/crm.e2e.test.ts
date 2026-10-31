@@ -90,6 +90,7 @@ const crmServiceMock = {
     return item;
   }),
   updateContact: vi.fn(),
+  softDeleteContact: vi.fn(),
   mergeContacts: vi.fn(),
   addTask: vi.fn(),
 };
@@ -480,6 +481,87 @@ describe('CRM e2e', () => {
       );
       await new Promise((r) => setImmediate(r));
       expect(prisma.teamActivityLogs).toHaveLength(0);
+    });
+  });
+
+  // R0-CT-03-CONTACT-AUDIT-ACTOR: the contact mutation routes hand the
+  // authenticated member to the service as the audit actor, so the ContactEvent
+  // and ContactAuditEntry the service writes name that member instead of SYSTEM
+  // or nobody. Mocked service; the real-database proof of what is persisted is
+  // contacts-audit-actor.integration.test.ts.
+  describe('contact mutation audit actor (guarded controller regressions)', () => {
+    const userActor = { actor: { type: 'USER', id: 'user_1' } };
+
+    it('create forwards req.user.id as the USER audit actor', async () => {
+      await request(app.getHttpServer())
+        .post('/crm/businesses/biz_1/contacts')
+        .send({ firstName: 'Actor', email: 'actor@example.com' })
+        .expect(201);
+      expect(crmServiceMock.createContact).toHaveBeenCalledTimes(1);
+      expect(crmServiceMock.createContact).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: 'biz_1', firstName: 'Actor', actorUserId: 'user_1' }),
+        expect.objectContaining(userActor),
+      );
+    });
+
+    it('update forwards req.user.id as the USER audit actor', async () => {
+      crmServiceMock.updateContact.mockResolvedValue({ id: 'contact_99', firstName: 'Renamed' });
+      await request(app.getHttpServer())
+        .patch('/crm/businesses/biz_2/contacts/contact_99')
+        .send({ firstName: 'Renamed' })
+        .expect(200);
+      expect(crmServiceMock.updateContact).toHaveBeenCalledTimes(1);
+      expect(crmServiceMock.updateContact).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: 'biz_2', contactId: 'contact_99', firstName: 'Renamed', actorUserId: 'user_1' }),
+        expect.objectContaining(userActor),
+      );
+    });
+
+    it('delete forwards req.user.id as the USER audit actor', async () => {
+      crmServiceMock.softDeleteContact.mockResolvedValue({ id: 'contact_42', deletedAt: new Date() });
+      await request(app.getHttpServer())
+        .delete('/crm/businesses/biz_1/contacts/contact_42')
+        .expect(200);
+      expect(crmServiceMock.softDeleteContact).toHaveBeenCalledTimes(1);
+      expect(crmServiceMock.softDeleteContact).toHaveBeenCalledWith(
+        { businessId: 'biz_1', contactId: 'contact_42', actorUserId: 'user_1' },
+        expect.objectContaining(userActor),
+      );
+    });
+
+    it('a request with no identity reaches none of the mutation services', async () => {
+      const agent = request(app.getHttpServer());
+      for (const res of [
+        await agent.post('/crm/businesses/biz_1/contacts').set('x-test-anonymous', '1').send({ firstName: 'Anon' }),
+        await agent.patch('/crm/businesses/biz_1/contacts/contact_1').set('x-test-anonymous', '1').send({ firstName: 'Anon' }),
+        await agent.delete('/crm/businesses/biz_1/contacts/contact_1').set('x-test-anonymous', '1'),
+      ]) {
+        expect([401, 403]).toContain(res.status);
+      }
+      expect(crmServiceMock.createContact).not.toHaveBeenCalled();
+      expect(crmServiceMock.updateContact).not.toHaveBeenCalled();
+      expect(crmServiceMock.softDeleteContact).not.toHaveBeenCalled();
+    });
+
+    it('the handlers themselves refuse a request that carries no user id, even if every guard were bypassed, and never record it as SYSTEM', async () => {
+      const crmStub = { createContact: vi.fn(), updateContact: vi.fn(), softDeleteContact: vi.fn() };
+      const stubs: unknown[] = Array.from({ length: 18 }, () => ({}));
+      stubs[0] = crmStub;
+      const controller = new (CrmController as any)(...stubs);
+      for (const req of [{ user: undefined }, { user: {} }]) {
+        await expect(
+          Promise.resolve().then(() => controller.createContact('biz_1', { firstName: 'X' }, req)),
+        ).rejects.toMatchObject({ status: 401 });
+        await expect(
+          Promise.resolve().then(() => controller.updateContact('biz_1', 'contact_1', { firstName: 'X' }, req)),
+        ).rejects.toMatchObject({ status: 401 });
+        await expect(
+          Promise.resolve().then(() => controller.softDeleteContact('biz_1', 'contact_1', req)),
+        ).rejects.toMatchObject({ status: 401 });
+      }
+      expect(crmStub.createContact).not.toHaveBeenCalled();
+      expect(crmStub.updateContact).not.toHaveBeenCalled();
+      expect(crmStub.softDeleteContact).not.toHaveBeenCalled();
     });
   });
 
