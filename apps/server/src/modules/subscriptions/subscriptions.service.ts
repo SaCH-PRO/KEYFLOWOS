@@ -1,6 +1,25 @@
-import { Inject, Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PLANS, TRIAL_DURATION_DAYS, PlanDefinition, FEATURE_REGISTRY, FEATURE_CATEGORIES, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from './plans';
+
+/** The authenticated user changing a plan, as AuthMiddleware attaches it. */
+export interface SubscriptionActor {
+  id: string;
+  role?: string;
+}
+
+/** Who may change the plan, and as what; the standing is recorded on the audit row. */
+interface PlanChangeAuthority {
+  actor: SubscriptionActor;
+  standing: 'SUPER_ADMIN' | 'OWNER';
+}
+
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
+
+/** The answer every member who is not the owner gets from a plan-change route (R0-08c). */
+export const SUBSCRIPTION_OWNER_ONLY = 'SUBSCRIPTION_OWNER_ONLY';
+export const SUBSCRIPTION_OWNER_ONLY_MESSAGE = 'Only the business owner can change the plan.';
 
 @Injectable()
 export class SubscriptionsService {
@@ -14,6 +33,63 @@ export class SubscriptionsService {
 
   getPlans() {
     return Object.values(PLANS);
+  }
+
+  /**
+   * R0-08 / R0-08c-SUBSCRIPTION-AUTHORITY: changing the plan (trial, activate,
+   * cancel, checkout, manual record-payment) is OWNER only, the rule owner
+   * ruling D-11 set for the business profile. BusinessGuard admits any member,
+   * and R0-08 made /app/settings/billing the one-click destination of every
+   * plan-limit prompt any member sees, so a STAFF member with every scope
+   * 'none' could move the tenant to the top plan or cancel it (ST-R008-1).
+   *
+   * The owner is the OWNER membership or the distinguished owner
+   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
+   * BusinessGuard admit an owner by. SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants. It runs before the body is read, so a refused
+   * member learns nothing about plans or state. The rule is restated here rather
+   * than imported: IdentityModule imports AiModule, which imports this module.
+   */
+  async assertPlanChangeAuthority(businessId: string, actor: SubscriptionActor | undefined): Promise<PlanChangeAuthority> {
+    if (!actor?.id) throw new UnauthorizedException('Authentication required');
+    if (actor.role === 'SUPER_ADMIN') return { actor, standing: 'SUPER_ADMIN' };
+    const membership = await this.db.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return { actor, standing: 'OWNER' };
+    const owned = await this.db.business.findFirst({
+      where: { id: businessId, ownerId: actor.id },
+      select: { id: true },
+    });
+    if (owned) return { actor, standing: 'OWNER' };
+    throw new ForbiddenException({ code: SUBSCRIPTION_OWNER_ONLY, message: SUBSCRIPTION_OWNER_ONLY_MESSAGE });
+  }
+
+  /**
+   * One team_activity_logs row per successful plan change, naming the acting
+   * user: the mechanism IdentityService.logTeamActivity and the onboarding
+   * completion already write. It is written in the change's own transaction,
+   * so no plan change commits without its actor row.
+   */
+  private async auditPlanChange(
+    tx: PrismaTx,
+    businessId: string,
+    { actor, standing }: PlanChangeAuthority,
+    change: { action: string; title: string; entityId: string | null; meta: Record<string, unknown> },
+  ) {
+    await tx.teamActivityLog.create({
+      data: {
+        businessId,
+        userId: actor.id,
+        module: 'billing',
+        action: change.action,
+        entityType: 'subscription',
+        entityId: change.entityId,
+        title: change.title,
+        meta: { ...change.meta, actorStanding: standing } as Prisma.InputJsonValue,
+      },
+    });
   }
 
   getPlan(planId: string): PlanDefinition | null {
@@ -65,7 +141,8 @@ export class SubscriptionsService {
     };
   }
 
-  async startTrial(businessId: string, planId: string, currency: string = 'TTD') {
+  async startTrial(businessId: string, actor: SubscriptionActor | undefined, planId: string, currency: string = 'TTD') {
+    const authority = await this.assertPlanChangeAuthority(businessId, actor);
     const plan = PLANS[planId];
     if (!plan) throw new BadRequestException('Invalid plan');
     if (planId === 'FREE') throw new BadRequestException('Free plan does not require a trial');
@@ -84,34 +161,75 @@ export class SubscriptionsService {
 
     const price = currency === 'USD' ? plan.priceUSD : plan.priceTTD;
 
-    const sub = await this.db.subscription.create({
-      data: {
-        businessId,
-        plan: planId,
-        status: 'TRIALING',
-        currency,
-        priceMonthly: price,
-        trialEndsAt: trialEnd,
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: trialEnd,
-      },
+    const sub = await this.db.$transaction(async (tx) => {
+      const created = await tx.subscription.create({
+        data: {
+          businessId,
+          plan: planId,
+          status: 'TRIALING',
+          currency,
+          priceMonthly: price,
+          trialEndsAt: trialEnd,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: trialEnd,
+        },
+      });
+      await this.auditPlanChange(tx, businessId, authority, {
+        action: 'subscription_trial_started',
+        title: `Started a ${planId} trial`,
+        entityId: created.id,
+        meta: { plan: planId, currency, trialEndsAt: trialEnd.toISOString() },
+      });
+      return created;
     });
 
     this.logger.log(`Started ${TRIAL_DURATION_DAYS}-day trial for business ${businessId} on ${planId} plan`);
     return sub;
   }
 
+  /**
+   * OPEN POLICY QUESTION (D-33, not decided by R0-08c): like a manual payment,
+   * this activates a paid plan for whatever gateway string the owner sends,
+   * with no payment verified.
+   */
   async activateSubscription(
     businessId: string,
+    actor: SubscriptionActor | undefined,
     planId: string,
     currency: string,
     gateway: string,
     gatewaySubId?: string,
   ) {
+    const authority = await this.assertPlanChangeAuthority(businessId, actor);
     const plan = PLANS[planId];
     if (!plan) throw new BadRequestException('Invalid plan');
 
-    await this.db.subscription.updateMany({
+    const sub = await this.db.$transaction(async (tx) => {
+      const { created, replaced } = await this.writeActivation(tx, businessId, plan, planId, currency, gateway, gatewaySubId);
+      await this.auditPlanChange(tx, businessId, authority, {
+        action: 'subscription_activated',
+        title: `Activated the ${planId} plan`,
+        entityId: created.id,
+        meta: { plan: planId, currency, gateway, replacedSubscriptions: replaced },
+      });
+      return created;
+    });
+
+    this.logger.log(`Activated ${planId} subscription for business ${businessId} via ${gateway}`);
+    return sub;
+  }
+
+  /** Cancels the active and trialing subscriptions and creates the new ACTIVE one, in the caller's transaction. */
+  private async writeActivation(
+    tx: PrismaTx,
+    businessId: string,
+    plan: PlanDefinition,
+    planId: string,
+    currency: string,
+    gateway: string,
+    gatewaySubId?: string,
+  ) {
+    const { count: replaced } = await tx.subscription.updateMany({
       where: {
         businessId,
         status: { in: ['ACTIVE', 'TRIALING'] },
@@ -123,7 +241,7 @@ export class SubscriptionsService {
     periodEnd.setMonth(periodEnd.getMonth() + 1);
     const price = currency === 'USD' ? plan.priceUSD : plan.priceTTD;
 
-    const sub = await this.db.subscription.create({
+    const created = await tx.subscription.create({
       data: {
         businessId,
         plan: planId,
@@ -136,12 +254,11 @@ export class SubscriptionsService {
         currentPeriodEnd: periodEnd,
       },
     });
-
-    this.logger.log(`Activated ${planId} subscription for business ${businessId} via ${gateway}`);
-    return sub;
+    return { created, replaced };
   }
 
-  async cancelSubscription(businessId: string) {
+  async cancelSubscription(businessId: string, actor: SubscriptionActor | undefined) {
+    const authority = await this.assertPlanChangeAuthority(businessId, actor);
     const sub = await this.db.subscription.findFirst({
       where: {
         businessId,
@@ -151,9 +268,17 @@ export class SubscriptionsService {
     });
     if (!sub) throw new NotFoundException('No active subscription found');
 
-    await this.db.subscription.update({
-      where: { id: sub.id },
-      data: { status: 'CANCELLED', cancelledAt: new Date() },
+    await this.db.$transaction(async (tx) => {
+      await tx.subscription.update({
+        where: { id: sub.id },
+        data: { status: 'CANCELLED', cancelledAt: new Date() },
+      });
+      await this.auditPlanChange(tx, businessId, authority, {
+        action: 'subscription_cancelled',
+        title: `Cancelled the ${sub.plan} plan`,
+        entityId: sub.id,
+        meta: { plan: sub.plan, previousStatus: sub.status },
+      });
     });
 
     this.logger.log(`Cancelled subscription for business ${businessId}`);
@@ -264,13 +389,24 @@ export class SubscriptionsService {
     }
   }
 
-  async createCheckout(businessId: string, planId: string, currency: string, gateway: string) {
+  async createCheckout(businessId: string, actor: SubscriptionActor | undefined, planId: string, currency: string, gateway: string) {
+    const authority = await this.assertPlanChangeAuthority(businessId, actor);
     const plan = PLANS[planId];
     if (!plan) throw new BadRequestException('Invalid plan');
     if (planId === 'FREE') throw new BadRequestException('Free plan does not require payment');
     if (!['wipay', 'paypal', 'stripe'].includes(gateway)) throw new BadRequestException('Invalid gateway');
 
     const price = currency === 'USD' ? plan.priceUSD : plan.priceTTD;
+
+    // A checkout writes nothing else; the row records who started a paid plan change.
+    await this.db.$transaction(async (tx) => {
+      await this.auditPlanChange(tx, businessId, authority, {
+        action: 'subscription_checkout_started',
+        title: `Started a ${planId} checkout`,
+        entityId: null,
+        meta: { plan: planId, currency, gateway, amount: price },
+      });
+    });
 
     return {
       plan: planId,
@@ -283,32 +419,49 @@ export class SubscriptionsService {
     };
   }
 
+  /**
+   * OPEN POLICY QUESTION (D-33, not decided by R0-08c): the owner's
+   * self-declared payment activates the paid plan and is recorded COMPLETED with
+   * no money moving. Whether manual recording should instead create a PENDING
+   * payment that platform staff confirm is a new owner decision.
+   */
   async recordManualPayment(
     businessId: string,
+    actor: SubscriptionActor | undefined,
     planId: string,
     currency: string,
     method: string,
     reference?: string,
     notes?: string,
   ) {
+    const authority = await this.assertPlanChangeAuthority(businessId, actor);
     const plan = PLANS[planId];
     if (!plan) throw new BadRequestException('Invalid plan');
 
-    const sub = await this.activateSubscription(businessId, planId, currency, method);
-
-    await this.db.subscriptionPayment.create({
-      data: {
-        subscriptionId: sub.id,
-        businessId,
-        amount: sub.priceMonthly,
-        currency,
-        method,
-        status: 'COMPLETED',
-        reference: reference || null,
-        notes: notes || null,
-        periodStart: sub.currentPeriodStart,
-        periodEnd: sub.currentPeriodEnd,
-      },
+    // The activation, its payment and one audit row commit together.
+    const sub = await this.db.$transaction(async (tx) => {
+      const { created, replaced } = await this.writeActivation(tx, businessId, plan, planId, currency, method);
+      const payment = await tx.subscriptionPayment.create({
+        data: {
+          subscriptionId: created.id,
+          businessId,
+          amount: created.priceMonthly,
+          currency,
+          method,
+          status: 'COMPLETED',
+          reference: reference || null,
+          notes: notes || null,
+          periodStart: created.currentPeriodStart,
+          periodEnd: created.currentPeriodEnd,
+        },
+      });
+      await this.auditPlanChange(tx, businessId, authority, {
+        action: 'subscription_payment_recorded',
+        title: `Recorded a manual ${method} payment for the ${planId} plan`,
+        entityId: created.id,
+        meta: { plan: planId, currency, method, amount: created.priceMonthly, paymentId: payment.id, replacedSubscriptions: replaced },
+      });
+      return created;
     });
 
     this.logger.log(`Recorded manual ${method} payment for business ${businessId} on ${planId} plan`);
