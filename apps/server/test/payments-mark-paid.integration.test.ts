@@ -59,7 +59,7 @@
  * CommerceService.lockInvoiceForPayment and commit the competing payment by a
  * direct write in the gap.
  *
- * Fixtures: prefix `pmp_`; hard-deleted by raw SQL in dependency order in
+ * Fixtures: prefix `k20a_` (registered in test/helpers/fixture-prefixes.json); hard-deleted by raw SQL in dependency order in
  * beforeAll and afterAll; no $transaction wrapping.
  */
 import 'reflect-metadata';
@@ -68,6 +68,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { createHash } from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 import type { CommerceService } from '../src/modules/commerce/commerce.service';
 import type { InvoiceWorkflowService } from '../src/modules/commerce/invoice-workflow.service';
 
@@ -75,7 +76,7 @@ import type { InvoiceWorkflowService } from '../src/modules/commerce/invoice-wor
 // shell / CI env wins because dotenv never overrides an existing variable).
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
-const P = 'pmp_';
+const P = 'k20a_';
 const HEADER = 'x-pmp-user';
 /** Mirrors KEY_SYSTEM_ACTOR_ID (src/core/auth/system-actor.ts); asserted equal below. */
 const KEY_ACTOR = 'key_ai';
@@ -153,19 +154,19 @@ const contactEvents: any[] = [];
 
 async function cleanup() {
   for (const sql of [
-    `DELETE FROM contact_events WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM webhook_events WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM ledger_entries WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM financial_transactions WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM payments WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
-    `DELETE FROM payment_links WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
-    `DELETE FROM invoice_items WHERE invoice_id LIKE '${P}%'`,
-    `DELETE FROM invoices WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM memberships WHERE business_id LIKE '${P}%' OR user_id LIKE '${P}%'`,
-    `DELETE FROM chart_of_accounts WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM businesses WHERE id LIKE '${P}%'`,
-    `DELETE FROM users WHERE id LIKE '${P}%'`,
+    `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM webhook_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
@@ -296,7 +297,7 @@ async function commitCompetingPayment(invoiceId: string, amount: number, settle:
       status: 'SUCCESSFUL',
       provider: 'cash',
       method: 'cash',
-      providerPaymentId: `${invoiceId}_competing`,
+      providerPaymentId: `${P}pp_${invoiceId}_competing`,
     },
   });
   await db.invoice.update({
@@ -415,8 +416,8 @@ beforeAll(async () => {
 
   await cleanup(); // in case a prior run aborted
 
-  await db.user.create({ data: { id: ID.owner, email: `${ID.owner}@test.local`, role: 'USER' } });
-  await db.user.create({ data: { id: ID.staff, email: `${ID.staff}@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.staff, email: `${P}staff@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.biz, name: 'PMP Biz', ownerId: ID.owner, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
   // A second human with revenue:write, so "the acting user" is never just "the owner".
@@ -764,13 +765,13 @@ describe('review repairs (R0-PL-04 review)', () => {
     await db.payment.create({
       data: {
         id: `${inv}_charge`, businessId: ID.biz, invoiceId: inv, amount: INVOICE_TOTAL, currency: 'TTD',
-        status: 'SUCCESSFUL', provider: 'stripe', method: 'card', providerPaymentId: `${inv}_charge`,
+        status: 'SUCCESSFUL', provider: 'stripe', method: 'card', providerPaymentId: `${P}pp_${inv}_charge`,
       },
     });
     await db.payment.create({
       data: {
         id: `${inv}_refund`, businessId: ID.biz, invoiceId: inv, amount: -40, currency: 'TTD',
-        status: 'REFUNDED', provider: 'stripe', providerPaymentId: `${inv}_refund`, reference: `${inv}_charge`,
+        status: 'REFUNDED', provider: 'stripe', providerPaymentId: `${P}pp_${inv}_refund`, reference: `${inv}_charge`,
       },
     });
     await db.invoice.update({ where: { id: inv }, data: { status: 'PARTIALLY_PAID' } });

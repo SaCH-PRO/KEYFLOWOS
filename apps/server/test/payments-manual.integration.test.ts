@@ -61,7 +61,7 @@
  * services are stubs off the boundary. Failures are injected with vi.spyOn on
  * the real service instances and restored after each case.
  *
- * Fixtures: prefix `pym_`; hard-deleted by raw SQL in dependency order in
+ * Fixtures: prefix `k17a_` (registered in test/helpers/fixture-prefixes.json); hard-deleted by raw SQL in dependency order in
  * beforeAll and afterAll; no $transaction wrapping.
  */
 import 'reflect-metadata';
@@ -69,6 +69,7 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
 import type { CommerceService } from '../src/modules/commerce/commerce.service';
 import type { InvoiceWorkflowService } from '../src/modules/commerce/invoice-workflow.service';
 import type { RevenuePostingService } from '../src/modules/finance/revenue-posting.service';
@@ -77,7 +78,7 @@ import type { RevenuePostingService } from '../src/modules/finance/revenue-posti
 // shell / CI env wins because dotenv never overrides an existing variable).
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
-const P = 'pym_';
+const P = 'k17a_';
 const HEADER = 'x-pym-user';
 
 const ID = {
@@ -166,19 +167,19 @@ const expensePostingStub = {
 
 async function cleanup() {
   for (const sql of [
-    `DELETE FROM contact_events WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM ledger_entries WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM financial_transactions WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM payments WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
-    `DELETE FROM payment_links WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
-    `DELETE FROM invoice_items WHERE invoice_id LIKE '${P}%'`,
-    `DELETE FROM invoices WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM products WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM memberships WHERE business_id LIKE '${P}%' OR user_id LIKE '${P}%'`,
-    `DELETE FROM chart_of_accounts WHERE business_id LIKE '${P}%'`,
-    `DELETE FROM businesses WHERE id LIKE '${P}%'`,
-    `DELETE FROM users WHERE id LIKE '${P}%'`,
+    `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
@@ -369,7 +370,7 @@ beforeAll(async () => {
 
   await cleanup(); // in case a prior run aborted
 
-  await db.user.create({ data: { id: ID.owner, email: `${ID.owner}@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.biz, name: 'PYM Biz', ownerId: ID.owner, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
   await db.contact.create({ data: { id: ID.contact, businessId: ID.biz, firstName: 'Pym', lastName: 'Customer', email: `${P}c@test.local` } });
