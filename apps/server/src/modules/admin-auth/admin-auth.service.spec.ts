@@ -77,7 +77,7 @@ describe('AdminAuthService', () => {
     });
 
     it('returns user when credentials are valid', async () => {
-      const password = 'S@chin1997';
+      const password = 'admin-test-password-not-a-secret';
       const crypto = await import('crypto');
       const salt = crypto.randomBytes(16).toString('hex');
       const derived = await new Promise<Buffer>((resolve, reject) => {

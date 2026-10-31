@@ -452,13 +452,10 @@ for (const script of SCRIPTS) {
 // Repository-wide: outside this packet's write set
 // ---------------------------------------------------------------------------
 
-// The two tracked files that still carry the password literal. Both are
-// outside this packet's write set; removing it there is a follow-up packet.
-// admin-auth.service.spec.ts puts it beside ADMIN_EMAIL and role SUPER_ADMIN.
-const KNOWN_OUTSIDE_WRITE_SET = [
-  'apps/server/src/modules/admin-auth/admin-auth.service.spec.ts',
-  'audit-output/KEYFLOWOS-AUDIT-REPORT.md',
-];
+// No tracked file may carry the committed password literal (R0-31 follow-up removed the last two
+// copies: the admin-auth unit-test fixture and the audit report). The ratchet below and the strict
+// test after it now assert the same thing; the ratchet keeps its name so history stays readable.
+const KNOWN_OUTSIDE_WRITE_SET = [];
 
 /** Distinct tracked files holding the committed password literal. */
 function trackedFilesWithPassword() {
@@ -493,16 +490,6 @@ test('the committed password literal is in no tracked file beyond the two known 
   assert.deepEqual(unexpected, []);
 });
 
-test(
-  'no tracked file carries the committed password literal',
-  {
-    todo:
-      'outside the R0-31 write set: the platform super-admin password literal is still committed in ' +
-      KNOWN_OUTSIDE_WRITE_SET.join(' and ') +
-      ', so repo-wide the count is not zero; a follow-up packet must remove it there, and D-30 rotation ' +
-      'is still required because the literal stays in history',
-  },
-  () => {
-    assert.deepEqual(trackedFilesWithPassword(), []);
-  },
-);
+test('no tracked file carries the committed password literal', () => {
+  assert.deepEqual(trackedFilesWithPassword(), []);
+});

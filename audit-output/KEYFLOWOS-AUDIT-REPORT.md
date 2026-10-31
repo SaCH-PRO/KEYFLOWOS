@@ -3,7 +3,7 @@
 **Date:** 2026-07-23  
 **Auditor:** Kimi Code CLI  
 **Environment:** Local dev (API `:3001`, Web `:5000`)  
-**Credentials used:** keyflowos.tt@gmail.com / S@chin1997  
+**Credentials used:** keyflowos.tt@gmail.com / [redacted: supply via KEYFLOWOS_AUDIT_PASSWORD]  
 **Tooling:** Playwright + Chromium (headless), manual code inspection, server log review  
 
 ---
