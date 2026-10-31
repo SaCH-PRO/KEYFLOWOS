@@ -74,6 +74,11 @@
       "packet": "R0-13 / R0-13b-CT-IMPORT-ACTOR"
     },
     {
+      "prefix": "k13c_",
+      "owner": "apps/server/test/contacts-patch-visibility.integration.test.ts",
+      "packet": "R0-13 / R0-13c-CT-PATCH-VISIBILITY"
+    },
+    {
       "prefix": "k14a_",
       "owner": "apps/server/test/identity-local-auth.integration.test.ts",
       "packet": "R0-14-AUTH-LOCAL-SIGNIN"
