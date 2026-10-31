@@ -27,15 +27,17 @@ terms without any change in this repository.
   subsection). CI and the real-database suites never contact Supabase.
 - Review of this packet found two blocking defects that documentation cannot
   fix. R0-SEC-01-BOOTSTRAP-TAKEOVER fixed the first (bootstrap account
-  takeover). Release 0 sign-in does not open until a code packet closes the
-  second, or it is configured as described (next subsection).
+  takeover). R0-SEC-02-VERIFYLOCAL-ISSUER fixed the second (local token
+  verification accepted shapes hosted Supabase never issues). The Release 0
+  rule for `SUPABASE_JWT_SECRET` (next subsection) still applies.
 
 ### Open defects and stop conditions
 
 Found in review of this packet. Each needs a code change, which is outside
 this packet: D-02 option C rules no identity code change, and the files involved
 are outside its write set. Item 1 is fixed by the code packet
-R0-SEC-01-BOOTSTRAP-TAKEOVER; items 2 and 3 are open.
+R0-SEC-01-BOOTSTRAP-TAKEOVER and item 2 by R0-SEC-02-VERIFYLOCAL-ISSUER;
+item 3 is open.
 
 1. **Fixed by R0-SEC-01: `POST /identity/bootstrap` took over an account by
    email.** It was blocking. The controller passed `email: body.email ??
@@ -164,21 +166,44 @@ R0-SEC-01-BOOTSTRAP-TAKEOVER; items 2 and 3 are open.
         201 with their existing business.
    - The stop condition this defect set (Release 0 sign-in does not open,
      and the live sign-up leg does not run against a database holding other
-     accounts) is lifted for this defect. Defect 2 keeps its own stop
-     condition.
-2. **`SUPABASE_JWT_SECRET` is a live acceptance path, not an inert setting.
-   Blocking until configured as below.** `verifyLocal` accepts any HS256
-   token signed with the secret whose `iss` is absent or equals `SUPABASE_URL`
-   (`S/core/auth/supabase-auth.service.ts:91-95`). Hosted projects issue
-   neither shape. So with a hosted project the secret verifies no real token,
-   but it lets anyone who holds it mint tokens the API accepts as any `sub` and
-   `email`. Together with defect 1, anyone who knows the value can take over a
-   victim's account by naming its email, without any Supabase account. Until this
-   repair, `.env.example` carried the public placeholder
-   `your-supabase-jwt-signing-secret` as the value, and boot does not reject
-   a placeholder (`S/core/config/env.ts:50`). It is also the legacy key that
-   signs `service_role` JWTs for the project, so keeping it on the API server
-   widens the damage of a leak and buys nothing today.
+     accounts) is lifted for this defect. The Release 0 rule of item 2
+     keeps its own stop condition.
+2. **Fixed by R0-SEC-02: `SUPABASE_JWT_SECRET` was a live acceptance path
+   for token shapes hosted Supabase never issues.** Until
+   R0-SEC-02-VERIFYLOCAL-ISSUER, `verifyLocal` accepted any HS256 token signed
+   with the secret whose `iss` was absent or equal to `SUPABASE_URL`. Hosted
+   projects issue neither shape. So with a hosted project the secret verified
+   no real token, but it let anyone who held it mint tokens the API accepted
+   as any `sub` and `email`. Together with defect 1, anyone who knew the value
+   could take over a victim's account by naming its email, without any
+   Supabase account. Until the R0-14 repair, `.env.example` carried the public
+   placeholder `your-supabase-jwt-signing-secret` as the value, and boot did
+   not reject it.
+   - **The fix.** `verifyLocal` accepts a token only when `iss` is exactly
+     `${SUPABASE_URL}/auth/v1`, `aud` is `authenticated`, and `exp` is present
+     and not passed (`S/core/auth/supabase-auth.service.ts:59-65`,
+     `:100-127`). That is the issuer hosted GoTrue puts on its access tokens
+     ([JWT claims](https://supabase.com/docs/guides/auth/jwt-fields));
+     supabase-js serves auth from the same URL (`new URL('auth/v1', baseUrl)`
+     in `@supabase/supabase-js` `SupabaseClient.ts`, and `iss` is a required
+     claim in `@supabase/auth-js` `RequiredClaims`). A token with no `iss`, or
+     with `iss = SUPABASE_URL`, is refused in every `NODE_ENV`. With no
+     Supabase URL there is no issuer to compare against: the only token still
+     accepted is one with **no** `iss`, and only under `NODE_ENV=test` (the
+     shape the real-database suites mint, see "How the real-database tests
+     mint tokens"); production, development and an unset `NODE_ENV` refuse it.
+   - **Boot.** With `NODE_ENV=production`, the former placeholder (compared
+     after trimming) fails the env check:
+     `SUPABASE_JWT_SECRET: is the public placeholder from .env.example, …` is
+     printed under `[FATAL] Environment validation failed` and the process
+     exits 1. Any other `NODE_ENV` prints the same line as a warning and boots
+     (`S/core/config/env.ts:119-134`, `:199-201`). The value itself is never
+     printed.
+   - **What the fix does not change.** HS256 is a shared secret. Whoever
+     holds the value can still mint the hosted shape for any `sub` and
+     `email`, exactly as Supabase can. It is also the legacy key that signs
+     `service_role` JWTs for the project, so keeping it on the API server
+     widens the damage of a leak, and Release 0 does not need it.
    - **Release 0 rule.** Leave `SUPABASE_JWT_SECRET` empty (`.env.example`
      now leaves it blank) and never deploy a placeholder in it. Before
      emptying it, give `GOOGLE_STATE_SECRET` its own long random value, never
@@ -189,15 +214,22 @@ R0-SEC-01-BOOTSTRAP-TAKEOVER; items 2 and 3 are open.
      misconfiguration: unsubscribe token secret is not set`. If links were
      already sent signed with `SUPABASE_JWT_SECRET`, changing the effective
      secret invalidates them. The boot warning `SUPABASE_JWT_SECRET: not set —
-     local JWT verification unavailable` (`S/core/config/env.ts:162-164`) is
+     local JWT verification unavailable` (`S/core/config/env.ts:185-187`) is
      then expected.
    - Proven at the real `AuthMiddleware` and `AuthGuard` by
      `T/identity-local-auth.integration.test.ts`. With the secret empty,
-     forged tokens with no `iss` and with `iss = SUPABASE_URL` both get 401,
-     and nothing leaves the server. With the former placeholder set, both pass
-     the guard carrying the forged email, and the hosted shape is refused.
-     The second group is a characterization that flips when a code packet
-     fixes the issuer check.
+     forged tokens with no `iss`, with `iss = SUPABASE_URL` and with the
+     hosted shape all get 401, and nothing leaves the server. The block
+     "R0-SEC-02" is the former characterization, flipped: with the former
+     placeholder set, the no-`iss` and `iss = SUPABASE_URL` tokens now get 401
+     (they got 200 carrying the forged email), the hosted shape now passes,
+     a hosted-shape token signed with another secret gets 401, and with no
+     Supabase URL the no-`iss` token passes under `NODE_ENV=test` and gets
+     401 under `NODE_ENV=production`. `S/core/auth/supabase-auth.service.spec.ts`
+     pins the rule per `NODE_ENV` (missing `aud` or `exp`, another project's
+     issuer, a trailing slash on `SUPABASE_URL`, the `NEXT_PUBLIC_SUPABASE_URL`
+     fallback), and `S/core/config/env.spec.ts` pins the boot refusal and the
+     warning.
 3. **The shared Supabase token bucket is a denial-of-service risk.
    Should-fix.** Every password and refresh grant leaves from the API server's
    IP, so all users share one per-IP bucket on `/auth/v1/token` (capacity 30,
@@ -236,8 +268,8 @@ R0-SEC-01-BOOTSTRAP-TAKEOVER; items 2 and 3 are open.
    exercised with the newer `sb_publishable_…` / `sb_secret_…` keys.
 3. **Project Settings → JWT.** Do not copy the legacy JWT secret into
    `SUPABASE_JWT_SECRET`. For Release 0, leave it empty and never deploy a
-   placeholder in it. With a hosted project it verifies no real token, but it
-   is still an acceptance path for tokens signed with it (open defect 2). Set
+   placeholder in it. Since R0-SEC-02 it verifies only the hosted token shape,
+   but whoever holds it can still mint that shape for any user (item 2). Set
    `GOOGLE_STATE_SECRET` first, because unsubscribe links fall back to it.
 4. **Authentication → URL Configuration.** Site URL = `NEXT_PUBLIC_SITE_URL`.
    Allow these redirect URLs: `<site>/auth/callback` (Google sign-in),
@@ -263,10 +295,10 @@ sign-up, login or bootstrap leg fails without it.
 
 | Variable | Read at | R0 | Used for |
 |---|---|---|---|
-| `SUPABASE_URL` (falls back to `NEXT_PUBLIC_SUPABASE_URL`) | `S/core/auth/supabase-admin.service.ts:45-48`; `S/modules/identity/identity-signup.service.ts:307`, `:383`; `S/core/auth/supabase-auth.service.ts:26`, `:91` | Required | Admin client, the password and refresh grants, the `getUser` fallback, the issuer check in `verifyLocal` |
+| `SUPABASE_URL` (falls back to `NEXT_PUBLIC_SUPABASE_URL`) | `S/core/auth/supabase-admin.service.ts:45-48`; `S/modules/identity/identity-signup.service.ts:307`, `:383`; `S/core/auth/supabase-auth.service.ts:26`, `:60` | Required | Admin client, the password and refresh grants, the `getUser` fallback, the issuer check in `verifyLocal` (`iss` must be this URL + `/auth/v1`) |
 | `SUPABASE_ANON_KEY` (falls back to `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | `S/modules/identity/identity-signup.service.ts:308`, `:384`; `S/core/auth/supabase-auth.service.ts:27` | Required | `apikey` for the password and refresh grants; the anon client behind the `getUser` fallback |
 | `SUPABASE_SERVICE_ROLE_KEY` | `S/core/auth/supabase-admin.service.ts:50-53` | Required | `auth.admin.createUser`, `generateLink`, `listUsers`, `signOut`, recovery mail. Needed for every sign-up, with verification on **or off** |
-| `SUPABASE_JWT_SECRET` | `S/core/auth/supabase-auth.service.ts:38-42`; `S/modules/email-marketing/email-marketing.service.ts:109` | **Leave empty** | Local HS256 verification. It is an acceptance path for any token signed with it (open defect 2, and the caveat below). It is also the fallback HMAC secret for marketing unsubscribe tokens when `GOOGLE_STATE_SECRET` is unset |
+| `SUPABASE_JWT_SECRET` | `S/core/auth/supabase-auth.service.ts:38-42`; `S/modules/email-marketing/email-marketing.service.ts:109` | **Leave empty** | Local HS256 verification. Since R0-SEC-02 it accepts only the hosted `iss` shape, but whoever holds it can mint that shape for any user (item 2, and the caveat below). Production boot refuses the former `.env.example` placeholder. It is also the fallback HMAC secret for marketing unsubscribe tokens when `GOOGLE_STATE_SECRET` is unset |
 | `GOOGLE_STATE_SECRET` | `S/modules/email-marketing/email-marketing.service.ts:109`, and the Google, Gmail, Calendar and Drive OAuth state | Set before emptying `SUPABASE_JWT_SECRET` | The unsubscribe-token HMAC, preferred over `SUPABASE_JWT_SECRET`. Use a long random value, never the `.env.example` placeholder |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | `S/modules/identity/identity-signup.service.ts:20-25`; `S/main.ts:29-52` | Set it explicitly | On by default when `NODE_ENV=production` |
 | `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | `S/modules/notifications/system-email.service.ts:18-24`, `:41-55` | Only with verification on | Sending the verification mail |
@@ -332,62 +364,64 @@ bootstrap right after an authenticated sign-up
 (`W/app/auth/login/login-form.tsx:150-170`).
 
 **Every authenticated request**: `AuthMiddleware` (`S/core/auth/auth.middleware.ts:48-97`)
-calls `SupabaseAuthService.getUserFromToken` (`S/core/auth/supabase-auth.service.ts:132-162`).
-That tries `verifyLocal` first (`:136-139`). If `verifyLocal` returns nothing,
-it calls `supabase.auth.getUser(token)` with the anon client (`:142-145`), a
+calls `SupabaseAuthService.getUserFromToken` (`S/core/auth/supabase-auth.service.ts:160-190`).
+That tries `verifyLocal` first (`:164-167`). If `verifyLocal` returns nothing,
+it calls `supabase.auth.getUser(token)` with the anon client (`:170-173`), a
 network round trip to the project. If both fail, the middleware tries the
 admin-token fallback (`auth.middleware.ts:79-90`) and otherwise leaves
 `req.user` unset, and `AuthGuard` answers 401.
 
 ### Local HS256 verification (`verifyLocal`)
 
-`S/core/auth/supabase-auth.service.ts:44-108` accepts a token only when all of
+`S/core/auth/supabase-auth.service.ts:67-134` accepts a token only when all of
 these hold:
 
-- `SUPABASE_JWT_SECRET` is set (`:45-46`);
-- the header `alg` is `HS256` (`:57-60`);
-- the HMAC-SHA256 signature matches, compared in constant time (`:62-71`);
-- `exp` has not passed, `nbf` is not in the future, and `iat` is at most 60 s
-  ahead (`:77-90`);
-- if `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL`) is set and the token has
-  an `iss`, then `iss` equals that URL exactly (`:91-95`);
-- `aud`, when present, is `authenticated` (`:97-101`).
+- `SUPABASE_JWT_SECRET` is set (`:68-69`);
+- the header `alg` is `HS256` (`:80-83`);
+- the HMAC-SHA256 signature matches, compared in constant time (`:86-94`);
+- `exp` is present and has not passed, `nbf` is not in the future, and `iat`
+  is at most 60 s ahead (`:100-116`);
+- the issuer is accepted (`:118-121`, rule at `:59-65`): with `SUPABASE_URL`
+  (or `NEXT_PUBLIC_SUPABASE_URL`) set, `iss` equals that URL, without a
+  trailing slash, followed by `/auth/v1`; with neither set, the token has no
+  `iss` and `NODE_ENV` is `test` (the test-only path);
+- `aud` is `authenticated` (`:123-127`).
 
-On success the user comes from the `sub` and `email` claims (`:110-120`). The
+On success the user comes from the `sub` and `email` claims (`:136-146`). The
 role used for authorisation still comes from the local `User` row
 (`S/core/auth/auth.middleware.ts:182-193`).
 
-**Caveat, measured on this base.** Hosted Supabase access tokens carry
+**Caveat.** Hosted Supabase access tokens carry
 `iss = https://<ref>.supabase.co/auth/v1`
-([JWT claims](https://supabase.com/docs/guides/auth/jwt-fields)). The check at
-`:91-95` compares `iss` with `SUPABASE_URL`, which has no `/auth/v1` suffix.
-A scratch run of `verifyLocal` with `SUPABASE_JWT_SECRET` set and
-`SUPABASE_URL=https://example-ref.supabase.co` gave these results:
+([JWT claims](https://supabase.com/docs/guides/auth/jwt-fields)). Before
+R0-SEC-02 the check compared `iss` with `SUPABASE_URL`, which has no
+`/auth/v1` suffix, and skipped a token with no `iss`. With
+`SUPABASE_JWT_SECRET` set and `SUPABASE_URL=https://example-ref.supabase.co`:
 
-| Token | Result |
-|---|---|
-| No `iss` | accepted |
-| `iss` = `SUPABASE_URL` | accepted |
-| `iss` = `SUPABASE_URL` + `/auth/v1` (the hosted shape) | **rejected** |
-| `alg` = `ES256` | rejected |
-| `aud` = `service_role` | rejected |
+| Token | Before R0-SEC-02 | Since R0-SEC-02 |
+|---|---|---|
+| No `iss` | accepted | **rejected** |
+| `iss` = `SUPABASE_URL` | accepted | **rejected** |
+| `iss` = `SUPABASE_URL` + `/auth/v1` (the hosted shape) | rejected | **accepted** |
+| No `aud`, or no `exp` | accepted | **rejected** |
+| `alg` = `ES256` | rejected | rejected |
+| `aud` = `service_role` | rejected | rejected |
 
-So against a hosted project, local verification never accepts a real access
-token, and every authenticated request falls back to the `getUser` round trip
-(`:142-145`). Sign-in still works, but the project must be reachable on every
-request. `SUPABASE_JWT_SECRET` verifies no real token, but it is **not
-inert**. The first two rows are an acceptance path: any token signed with the
-secret that has no `iss`, or has `iss = SUPABASE_URL`, passes the middleware
-carrying whatever `sub` and `email` it names. That is open defect 2, and it is
-why the Release 0 rule leaves the secret empty. The same fallback
-applies when a project signs with asymmetric JWT signing keys (ES256/RS256,
-[signing keys](https://supabase.com/docs/guides/auth/signing-keys)), because
-`:57` accepts only HS256. The boot warning about the secret
-(`S/core/config/env.ts:162-164`) fires only when the secret is missing; it says
-nothing about the issuer mismatch, and boot accepts a placeholder value. Fixing
-the comparison, and refusing tokens with no `iss`, is a code change outside
-this documentation-only packet. `T/identity-local-auth.integration.test.ts`
-reproduces the first three rows at the real `AuthMiddleware` and `AuthGuard`.
+The first two rows were the acceptance path of item 2 (**Fixed by R0-SEC-02**): any token
+signed with the secret that had no `iss`, or had `iss = SUPABASE_URL`, passed
+the middleware carrying whatever `sub` and `email` it named. Now a project's
+own HS256 access tokens verify locally when the secret is its legacy JWT
+secret. The Release 0 rule still leaves the secret empty (item 2), so every
+authenticated request falls back to the `getUser` round trip (`:170-173`):
+sign-in works, but the project must be reachable on every request. The same
+fallback applies when a project signs with asymmetric JWT signing keys
+(ES256/RS256, [signing keys](https://supabase.com/docs/guides/auth/signing-keys)),
+because `:80` accepts only HS256. The boot check warns when the secret is
+missing (`S/core/config/env.ts:185-187`), and refuses the former
+`.env.example` placeholder in production (`:119-134`).
+`T/identity-local-auth.integration.test.ts` proves the first three rows at the
+real `AuthMiddleware` and `AuthGuard`, and
+`S/core/auth/supabase-auth.service.spec.ts` proves every row.
 
 ### What happens when the variables are absent
 
@@ -407,10 +441,10 @@ was made. Rows marked "code" are read from source rather than measured.
 | `POST /identity/refresh` | URL + anon key | 400 `refresh_unavailable`, "Session refresh is unavailable." | `:382-390` |
 | `POST /identity/resend-verification` | URL + service-role key | 201 `{"status":"ok","verificationRequired":false}`. The answer claims success; only a server log line warns | `:221-226`; controller `:262-270` |
 | `POST /identity/forgot-password` (measured in review) | admin client; `APP_URL` or `NEXT_PUBLIC_SITE_URL` | 201 `{status:'sent'}` regardless; the admin-client error is logged and swallowed. The 400 for "no allowed origin" (controller `:416-420`) never fires, because `allowedCorsOrigins()` always adds `http://localhost:5000`, `http://localhost:3000` and `http://127.0.0.1:5000` (`S/core/config/runtime-urls.ts:109-112`). With `APP_URL`, `NEXT_PUBLIC_SITE_URL`, `PUBLIC_BASE_URL` and `CORS_ALLOWED_ORIGINS` all unset, the server answers 201 and the recovery mail's `redirectTo` is `http://localhost:5000/auth/reset-password`, with no error anywhere. A hosted deployment must set `APP_URL` or `NEXT_PUBLIC_SITE_URL` | controller `:415-439`; `S/modules/identity/identity-password.service.ts:51-60` |
-| Bearer token on any route | `SUPABASE_JWT_SECRET`, or URL + anon key | With neither, `getUserFromToken` returns `null` after logging "Supabase env vars missing; auth will be treated as optional.", and guarded routes (`/identity/me`, `/identity/bootstrap`, …) answer 401 | `S/core/auth/supabase-auth.service.ts:29-31`, `:142-143` |
+| Bearer token on any route | `SUPABASE_JWT_SECRET`, or URL + anon key | With neither, `getUserFromToken` returns `null` after logging "Supabase env vars missing; auth will be treated as optional.", and guarded routes (`/identity/me`, `/identity/bootstrap`, …) answer 401 | `S/core/auth/supabase-auth.service.ts:29-31`, `:170-171` |
 | Boot with verification on (set to true, or unset with `NODE_ENV=production`) (code) | `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS` | `[FATAL] AUTH_REQUIRE_EMAIL_VERIFICATION is on but required env vars are missing: … Refusing to start.`, then exit 1. `SUPABASE_URL` is not checked here | `S/main.ts:29-46` |
 | Boot with verification off (code) | `SUPABASE_SERVICE_ROLE_KEY` | Warning only: `[WARN] SUPABASE_SERVICE_ROLE_KEY is not set. POST /identity/signup will return server_misconfigured until this is configured.` | `S/main.ts:47-52` |
-| Boot, any mode (code) | `SUPABASE_URL`, `SUPABASE_JWT_SECRET` | Warnings from the env check; boot is never blocked | `S/core/config/env.ts:159-164` |
+| Boot, any mode (code) | `SUPABASE_URL`, `SUPABASE_JWT_SECRET` | Warnings from the env check when either is missing; these never block boot. The former `.env.example` placeholder in `SUPABASE_JWT_SECRET` blocks boot (exit 1) with `NODE_ENV=production` and is a warning otherwise (R0-SEC-02) | `S/core/config/env.ts:182-187`, `:199-201` |
 | Web built without `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY`, or with the `your-project` placeholder (code) | — | The Google buttons are hidden. Forgot-password shows "Email password reset isn't configured yet — ask your admin for a password reset." Email/password sign-up and login still post to the API and get the answers above. `W/lib/env.ts` logs a warning | `W/app/auth/signup/page.tsx:42`, `:570`; `W/app/auth/login/login-form.tsx:38-39`, `:140`, `:413`; `W/lib/env.ts:73-74` |
 
 The sign-up body, exactly as measured (`timestamp` varies, and `path` is the
@@ -495,8 +529,10 @@ No suite contacts Supabase. There are three patterns.
      `{sub, email, aud:'authenticated', role:'authenticated', iat, exp}` and
      **no `iss`** (identity-boundary `:219-240`, release0-journey `:139-147`,
      onboarding-manual-complete `:162-170`).
-   - With `SUPABASE_URL` empty, the issuer check is skipped, and the real
-     `AuthMiddleware` accepts these tokens through `verifyLocal`.
+   - With `SUPABASE_URL` empty and `NODE_ENV=test`, `verifyLocal` takes its
+     test-only path, and the real `AuthMiddleware` accepts these tokens. The
+     same token is refused under `NODE_ENV=production` or `development`, and
+     whenever a Supabase URL is set (R0-SEC-02).
    - The `User` row and business come from the real `POST /identity/bootstrap`.
      `POST /identity/signup` is not exercised (release0-journey `:36-49`).
 2. **In-process suites**, for example `T/contacts-visibility.integration.test.ts`,
@@ -508,15 +544,17 @@ No suite contacts Supabase. There are three patterns.
    probe route. It mints tokens with and without `iss`, sets
    `SUPABASE_URL` to a fake host, sets no anon key, and refuses every `fetch`.
    It proves the Release 0 rule (secret empty means forged tokens get 401) and
-   characterizes the acceptance path of open defect 2. Its R0-SEC-01 block
-   runs the real `IdentityController` and `IdentityService` and proves the
-   fix for item 1 against Postgres.
+   the R0-SEC-02 fix for item 2 (only the hosted `iss` shape passes; the
+   no-`iss` shape only on the test-only path). Its R0-SEC-01 blocks unset
+   `SUPABASE_URL` to use that test-only path, run the real
+   `IdentityController` and `IdentityService`, and prove the fix for item 1
+   against Postgres.
 
 So CI proves the code after token verification only for the tokens it mints
-itself, which the middleware accepts because they carry no `iss`. It does not
-prove Supabase sign-up, login or refresh. It does not prove that a real hosted
-token is accepted, because no test mints the hosted `iss` shape and expects
-success. Bootstrap with an email that belongs to another user is covered
+itself. It does not prove Supabase sign-up, login or refresh. It proves that
+a token minted with the hosted `iss` shape passes `verifyLocal`
+(identity-local-auth, block "R0-SEC-02"), not that a token a real project
+issued does. Bootstrap with an email that belongs to another user is covered
 (R0-SEC-01), with the tokens the suite mints.
 
 ### Where the live sign-up leg runs
@@ -526,7 +564,7 @@ success. Bootstrap with an email that belongs to another user is covered
   `/auth/signup`. Under D-02 option C it records the substitution when no
   project is configured (`docs/reconstruction/BUILD-MAP-001.md`, review
   disposition row 2).
-- **Stop condition (open defect 2).** The run's server runs with
+- **Stop condition (Release 0 rule, item 2).** The run's server runs with
   `SUPABASE_JWT_SECRET` empty. If it does not, the run stops and reports it.
   The former condition for defect 1 (no account in the database other than
   the run's own) was lifted when R0-SEC-01 landed.
@@ -628,7 +666,7 @@ unless noted):
 | `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL`) | Supabase project URL — used by both the admin client (signup/generateLink) and the anon client (signInWithPassword). |
 | `SUPABASE_SERVICE_ROLE_KEY` | Required for admin actions: `auth.admin.createUser`, `generateLink`. Without it `/identity/signup` answers 400 `server_misconfigured`, whether verification is on or off. |
 | `SUPABASE_ANON_KEY` (or `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | Anon key used for the password and refresh grants and the `getUser()` fallback. The frontend reads `NEXT_PUBLIC_SUPABASE_ANON_KEY` for the Google PKCE exchange and user-info call. |
-| `SUPABASE_JWT_SECRET` | **Leave empty for Release 0.** Meant to let the auth middleware verify tokens locally instead of round-tripping `getUser()`. With a hosted project it verifies no real token, but it still accepts any token signed with it that has no `iss` or has `iss = SUPABASE_URL` (open defect 2). It is also the fallback secret for marketing unsubscribe tokens, so set `GOOGLE_STATE_SECRET` before removing it. |
+| `SUPABASE_JWT_SECRET` | **Leave empty for Release 0.** Meant to let the auth middleware verify tokens locally instead of round-tripping `getUser()`. Since R0-SEC-02 it accepts only the hosted shape `iss = ${SUPABASE_URL}/auth/v1`, but whoever holds it can mint that shape for any user, and production boot refuses the former `.env.example` placeholder. It is also the fallback secret for marketing unsubscribe tokens, so set `GOOGLE_STATE_SECRET` before removing it. |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | `"true"`/`"1"` to require verification, `"false"`/`"0"` to auto-confirm. Defaults to ON in production. |
 | `RESEND_API_KEY` | Required when verification is on — sends the actual verification email via Resend. |
 | `EMAIL_FROM_ADDRESS` | The `From` address on auth emails (e.g. `no-reply@keyflow.os`). |

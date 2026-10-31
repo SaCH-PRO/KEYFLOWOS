@@ -110,6 +110,29 @@ function validateOAuthGroups(env: NodeJS.ProcessEnv): string[] {
   return warnings;
 }
 
+/**
+ * R0-SEC-02: values for SUPABASE_JWT_SECRET that are public, so a server
+ * holding one lets anyone mint tokens it verifies locally. The only entry is
+ * the value `.env.example` carried until the R0-14 review repair (added in
+ * ecb7bba7, removed in f6554848). Compared after trimming.
+ */
+const PUBLIC_SUPABASE_JWT_SECRET_PLACEHOLDERS = new Set(['your-supabase-jwt-signing-secret']);
+
+/**
+ * Production refuses to boot with a public placeholder in SUPABASE_JWT_SECRET;
+ * any other NODE_ENV gets a warning. The value is never echoed.
+ */
+function validateJwtSecretPlaceholder(env: NodeJS.ProcessEnv): { errors: string[]; warnings: string[] } {
+  const value = (env.SUPABASE_JWT_SECRET ?? '').trim();
+  if (!PUBLIC_SUPABASE_JWT_SECRET_PLACEHOLDERS.has(value)) return { errors: [], warnings: [] };
+  const message =
+    'SUPABASE_JWT_SECRET: is the public placeholder from .env.example, so anyone can sign tokens this server verifies locally. ' +
+    'For Release 0 leave it empty (docs/auth-pathway.md); never deploy a placeholder in it';
+  return env.NODE_ENV === 'production'
+    ? { errors: [message], warnings: [] }
+    : { errors: [], warnings: [message] };
+}
+
 export type ServerEnv = z.infer<typeof RequiredSchema> & z.infer<typeof RecommendedSchema>;
 
 export interface EnvValidationReport {
@@ -172,6 +195,10 @@ export function validateServerEnv(env: NodeJS.ProcessEnv = process.env): EnvVali
       warnings.push('KEYFLOW_DEV_AUTH_BYPASS is enabled — the server will exit immediately to prevent insecure boot');
     }
   }
+
+  const placeholder = validateJwtSecretPlaceholder(env);
+  missingRequired.push(...placeholder.errors);
+  warnings.push(...placeholder.warnings);
 
   missingRequired.push(...validateS3Group(env));
   warnings.push(...validateOAuthGroups(env));

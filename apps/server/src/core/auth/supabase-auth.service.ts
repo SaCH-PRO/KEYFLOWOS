@@ -41,6 +41,29 @@ export class SupabaseAuthService {
     return secret;
   }
 
+  /**
+   * R0-SEC-02: the only issuer a hosted project puts on its access tokens is
+   * its GoTrue URL, `${SUPABASE_URL}/auth/v1` (supabase-js builds the same URL:
+   * `new URL('auth/v1', baseUrl)` in SupabaseClient; claim reference
+   * https://supabase.com/docs/guides/auth/jwt-fields). A token with no `iss`,
+   * or with `iss = SUPABASE_URL`, is a shape no hosted project issues, so it is
+   * refused.
+   *
+   * With no Supabase URL there is nothing to compare against. The one shape
+   * still accepted then is a token with NO `iss`, and only under
+   * NODE_ENV=test: the real-database harnesses (release0-journey,
+   * identity-boundary, onboarding-manual-complete, identity-local-auth) mint
+   * that shape against a server with SUPABASE_URL empty. Production,
+   * development and an unset NODE_ENV refuse it.
+   */
+  private issuerAccepted(iss: unknown): boolean {
+    const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+    if (url) {
+      return typeof iss === 'string' && iss === `${url.replace(/\/+$/, '')}/auth/v1`;
+    }
+    return process.env.NODE_ENV === 'test' && iss === undefined;
+  }
+
   private verifyLocal(token: string): JwtPayload | null {
     const secret = this.getJwtSecret();
     if (!secret) return null;
@@ -75,7 +98,11 @@ export class SupabaseAuthService {
       ) as JwtPayload;
 
       const nowSeconds = Math.floor(Date.now() / 1000);
-      if (typeof payload.exp === 'number' && payload.exp < nowSeconds) {
+      if (typeof payload.exp !== 'number') {
+        this.logger.debug('Local JWT verification: exp missing');
+        return null;
+      }
+      if (payload.exp < nowSeconds) {
         this.logger.debug('Local JWT verification: token expired');
         return null;
       }
@@ -88,14 +115,13 @@ export class SupabaseAuthService {
         return null;
       }
 
-      const expectedIss = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (expectedIss && payload.iss && payload.iss !== expectedIss) {
+      if (!this.issuerAccepted(payload.iss)) {
         this.logger.debug('Local JWT verification: issuer mismatch');
         return null;
       }
 
       const expectedAud = 'authenticated';
-      if (payload.aud && payload.aud !== expectedAud) {
+      if (payload.aud !== expectedAud) {
         this.logger.debug('Local JWT verification: audience mismatch');
         return null;
       }
@@ -128,6 +154,8 @@ export class SupabaseAuthService {
    *
    * SECURITY: local verification uses the exact same secret Supabase uses
    * to sign tokens, so a forged signature is cryptographically infeasible.
+   * It accepts only the hosted token shape (`iss` = `${SUPABASE_URL}/auth/v1`,
+   * `aud` = `authenticated`, a live `exp`); see issuerAccepted (R0-SEC-02).
    */
   async getUserFromToken(token?: string): Promise<User | null> {
     if (!token) return null;
