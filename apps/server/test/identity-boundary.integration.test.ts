@@ -97,10 +97,15 @@
  *         for the same bearer token, and reads the handshake businessId as
  *         BusinessGuard does (review finding ST-WS-R2: a Prisma filter object
  *         such as { in: [own, foreign] } was authorized as the tenant).
- *   ST-WS-R1 the KEY Cortex gateway decides at connect only: a socket opened
- *         before a ban, demotion or logout keeps approving in its tenant and
- *         keeps its room pushes (key-cortex.gateway.ts; pre-existing, outside
- *         R0-ID-F6's write set; reproduced, with its it.todo, below).
+ *   ST-WS-R1 FIXED by R0-ID-F6b-WS-LIVE-REVOCATION (its cases keep a real
+ *         socket open; see "ST-WS-R1 (fixed …)" below). The KEY Cortex gateway
+ *         decided at connect only: a socket opened before a ban, demotion or
+ *         logout kept approving in its tenant and kept its room pushes. It now
+ *         re-takes the connect decision before every client action (reused for
+ *         at most 2s) and on a schedule (30s after the last success), refuses
+ *         the action when it fails, and cuts the socket when a check 5s later
+ *         confirms it (review repair: one refused check cannot tell a revocation
+ *         from a DB or provider blip). key:auth_refresh renews its token in-band.
  *   ST-3  FIXED by R0-09-ID-HARDEN (owner ruling D-11; its cases assert the
  *         required behaviour; see "ST-3 (fixed …)" below). PATCH
  *         /identity/businesses/:id had only AuthGuard and BusinessGuard, so a
@@ -1946,8 +1951,8 @@ describe('ST-2-WS (fixed) — the KEY Cortex WebSocket applies the same local-us
   });
 
   // A NEW socket only: cortexConnect closes each socket once the gateway decides.
-  // A socket already open when the logout lands keeps working (OPEN DEFECT
-  // ST-WS-R1, reproduced below).
+  // A socket already open when the logout lands is cut at its next action
+  // (ST-WS-R1, fixed, below).
   it('POST /identity/logout refuses a new socket to both token kinds issued before it, by issue time (the admin cutoff and the logout marker); tokens of a later session are served', async () => {
     await resetWsAdmin();
     const adminBefore = mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN');
@@ -1971,27 +1976,80 @@ describe('ST-2-WS (fixed) — the KEY Cortex WebSocket applies the same local-us
 });
 
 // ---------------------------------------------------------------------------
-// OPEN DEFECT ST-WS-R1 (R0-ID-F6 review; pre-existing, NOT fixed here). The
-// gateway decides at connect only: handleConnection stores the connect-time
+// ST-WS-R1 — FIXED by R0-ID-F6b-WS-LIVE-REVOCATION (and its review repair).
+// The gateway decided at connect only: handleConnection stored the connect-time
 // { userId, businessId } (key-cortex.gateway.ts ClientInfo) and handleApprove,
 // handleReject, handleChat, handleTyping and the business:/user: room pushes
-// trust it for the socket's lifetime; nothing in src disconnects a socket on a
-// ban, a demotion, a delete or a logout. The fix is in key-cortex.gateway.ts
-// and the revocation writers, outside R0-ID-F6's write set.
+// trusted it for the socket's lifetime, so nothing cut a socket on a ban, a
+// demotion, a delete, a removal from the business or a logout. The two "OPEN
+// DEFECT ST-WS-R1 reproduced" cases pinned the open socket still deciding
+// approvals in bizB after a ban + demotion and after POST /identity/logout; they
+// now assert the behaviour their it.todo required, and the it.todo is gone.
 //
-// The probe is key:approve for an approval id that exists nowhere: the handler
-// answers 'Not authenticated' for a socket it holds no identity for, and
-// 'Approval failed: Approval request not found' once it has looked the id up
-// in the socket's tenant — i.e. it decided as wsAdmin in bizB. Nothing is
-// approved or executed.
+// Before every client action the gateway re-takes the connect decision for
+// the socket — authenticateSocket on the socket's token (AuthMiddleware's
+// decision: the row, deletedAt, bannedAt, the role from the row, the logout
+// marker and the admin-token cutoff), then verifyBusinessMembership for the
+// socket's own businessId — and acts only when it passes. A successful check
+// is reused for at most WS_REVALIDATE_BOUND_MS, so each case below waits that
+// long after the revocation is written before it probes: the bound is pinned
+// here end to end, and to the millisecond in key-cortex.gateway.spec.ts.
+//
+// One refused check refuses the action ('Not performed: …') but does not
+// disconnect: AuthMiddleware reports a database or provider failure exactly as
+// it reports a revoked user, so one refusal cannot tell them apart (review
+// finding CR-1). The socket is cut — key:auth_error, then the disconnect, which
+// takes it out of its business:/user: rooms — when a check started
+// WS_CONFIRM_BOUND_MS or more later refuses too; each case waits that long and
+// probes again. (The schedule that re-checks a socket that sends nothing, the
+// timeout and the 95s hard bound are proven in the gateway spec, not waited for
+// here.)
+//
+// The probe is key:approve for an approval id that exists nowhere: 'Approval
+// failed: Approval request not found' means the gateway looked the id up in the
+// socket's tenant — it decided as that user in bizB; 'Not performed: …' means
+// the re-check refused it; 'closed' means it cut the socket. Nothing is
+// approved or executed in any case.
 // ---------------------------------------------------------------------------
-describe('OPEN DEFECT ST-WS-R1 — a KEY Cortex socket opened before a ban, demotion or logout keeps acting in the foreign tenant', () => {
+/**
+ * KEY_CORTEX_WS_REVALIDATE_MS and KEY_CORTEX_WS_CONFIRM_MS in
+ * key-cortex.gateway.ts, pinned to these values by key-cortex.gateway.spec.ts.
+ * Not imported: the gateway module pulls in the Nest graph, and this suite
+ * imports only pure modules from src.
+ */
+const WS_REVALIDATE_BOUND_MS = 2_000;
+const WS_CONFIRM_BOUND_MS = 5_000;
+/** A case below waits out both, sometimes twice; vitest's 5s default is too short. */
+const WS_CASE_TIMEOUT_MS = 30_000;
+
+describe('ST-WS-R1 (fixed, R0-ID-F6b-WS-LIVE-REVOCATION) — a KEY Cortex socket opened before a ban, demotion, delete, removal or logout acts no more at its next action and is cut by the check that confirms it', () => {
   const NO_SUCH_APPROVAL = `${P}ws_no_such_approval`;
   const DECIDED_IN_TENANT = 'Approval failed: Approval request not found';
+  /** KEY_CORTEX_WS_RECHECK_REFUSED's opening words. */
+  const NOT_PERFORMED = 'Not performed:';
+  const AUTH_ERROR_FRAME = `42${CORTEX_NSP},["key:auth_error"`;
+  /** A STAFF member of bizB for the removal and token-refresh cases; the ab_ prefix puts it under the suite's cleanup. */
+  const WS_MEMBER = `${P}wsMember`;
+  const M_WS_MEMBER = `${P}m_wsMember`;
+
+  beforeAll(async () => {
+    if (!db) return;
+    await db.user.create({ data: { id: WS_MEMBER, email: email(WS_MEMBER), name: WS_MEMBER, role: 'USER' } });
+    await db.membership.create({ data: { id: M_WS_MEMBER, userId: WS_MEMBER, businessId: ID.bizB, role: 'STAFF' } });
+  });
+  afterAll(async () => {
+    if (!db) return;
+    await db.$executeRawUnsafe(`DELETE FROM memberships WHERE id = '${M_WS_MEMBER}'`);
+    await db.$executeRawUnsafe(`DELETE FROM users WHERE id = '${WS_MEMBER}'`);
+  });
 
   async function resetWsAdmin() {
     await db.user.update({ where: { id: ID.wsAdmin }, data: { role: 'SUPER_ADMIN', bannedAt: null, deletedAt: null } });
   }
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
+  /** Waits out the gateway's check cache, measured from now, so the next action re-validates. */
+  const pastTheBound = () => sleep(WS_REVALIDATE_BOUND_MS + 100);
 
   /** key:approve on the open socket: what the gateway answered, or 'closed' if it cut the socket. */
   async function approveProbe(s: CortexSession): Promise<string> {
@@ -2001,7 +2059,91 @@ describe('OPEN DEFECT ST-WS-R1 — a KEY Cortex socket opened before a ban, demo
     return res === 'closed' ? 'closed' : String((res.payload as { message?: string }).message);
   }
 
-  it('OPEN DEFECT ST-WS-R1 reproduced — after the row is banned and demoted, a new socket is refused but the open one still decides approvals in bizB as wsAdmin', async () => {
+  /**
+   * The required behaviour, for each socket: its next probe is refused and
+   * decides nothing; WS_CONFIRM_BOUND_MS later the probe is answered by an auth
+   * error and a disconnect. Never a decision in the tenant.
+   */
+  async function expectCut(sessions: Array<[CortexSession, string]>) {
+    const from = sessions.map(([s]) => s.frames.length);
+    for (const [s, label] of sessions) {
+      const first = await approveProbe(s);
+      expect(first.startsWith(NOT_PERFORMED), `${label}: the first refused re-check refuses the action; got ${first}`).toBe(true);
+    }
+    await sleep(WS_CONFIRM_BOUND_MS + 100);
+    sessions.forEach(([s, label], i) => {
+      expect(s.frames.slice(from[i]).some((f) => f.startsWith(AUTH_ERROR_FRAME)), `${label}: not cut on one refusal`).toBe(false);
+    });
+    for (const [[s, label], i] of sessions.map((e, i) => [e, i] as const)) {
+      expect(await approveProbe(s), `${label}: the confirming check`).toBe('closed');
+      const after = s.frames.slice(from[i]);
+      expect(after.some((f) => f.startsWith(AUTH_ERROR_FRAME)), `${label}: key:auth_error before the close; frames: ${after.join(' | ')}`).toBe(true);
+      const text = after.join(' ');
+      expect(text, `${label}: nothing started`).not.toContain('approval_processing');
+      expect(text, `${label}: nothing decided`).not.toContain('Approval failed');
+      expect(text, `${label}: nothing of the tenant`).not.toContain(BIZ_B_NAME);
+    }
+  }
+
+  it('fixture: wsMember is a STAFF member of bizB, so only its membership opens bizB’s socket', async () => {
+    expect(await db.membership.findUnique({ where: { id: M_WS_MEMBER } })).toMatchObject({ userId: WS_MEMBER, businessId: ID.bizB });
+  });
+
+  it('positive control: a healthy socket keeps deciding in its tenant past the bound — each action re-validated, none refused', async () => {
+    await resetWsAdmin();
+    const s = await cortexOpen(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), ID.bizB);
+    try {
+      expect(s.outcome, s.frames.join(' | ')).toBe('connected');
+      expect(await approveProbe(s), 'first action').toBe(DECIDED_IN_TENANT);
+      await pastTheBound();
+      expect(await approveProbe(s), 'past the bound, re-validated').toBe(DECIDED_IN_TENANT);
+      await pastTheBound();
+      expect(await approveProbe(s), 'past the bound again').toBe(DECIDED_IN_TENANT);
+      expect(s.frames.some((f) => f.startsWith(AUTH_ERROR_FRAME)), 'no auth error for a healthy socket').toBe(false);
+    } finally {
+      s.close();
+    }
+  });
+
+  // CR-3 (review repair): re-checking the socket's token means the socket lives
+  // no longer than that token. key:auth_refresh hands it a fresh one in-band.
+  it('CR-3: a socket whose handshake token expires is cut, unless it sends key:auth_refresh with a fresh token for its own user first; a refresh with another bizB member’s token is refused and changes nothing', async () => {
+    const shortLived = () => mintToken(WS_MEMBER, { expiresInSec: 2 });
+    const expOf = (t: string) => (JSON.parse(Buffer.from(t.split('.')[1], 'base64url').toString('utf8')) as { exp: number }).exp;
+    const keptToken = shortLived();
+    const lapsedToken = shortLived();
+    const kept = await cortexOpen(keptToken, ID.bizB);
+    const lapsed = await cortexOpen(lapsedToken, ID.bizB);
+    try {
+      expect(kept.outcome, kept.frames.join(' | ')).toBe('connected');
+      expect(lapsed.outcome, lapsed.frames.join(' | ')).toBe('connected');
+
+      const refusal = kept.next('key:error');
+      kept.emit('key:auth_refresh', { token: T[ID.ownerB] }); // bizB's owner: a member, but not this socket's user
+      const refused = await refusal;
+      expect(refused === 'closed' ? 'closed' : String((refused.payload as { message?: string }).message)).toContain('Token refresh refused');
+
+      const refreshed = kept.next('key:auth_refreshed');
+      kept.emit('key:auth_refresh', { token: mintToken(WS_MEMBER) });
+      expect(await refreshed, kept.frames.join(' | ')).not.toBe('closed');
+
+      // verifyLocal refuses once exp < now in whole seconds; then past the reuse bound.
+      await sleep((Math.max(expOf(keptToken), expOf(lapsedToken)) + 1) * 1000 + 200 - Date.now());
+      await pastTheBound();
+      const fresh = await cortexConnect(lapsedToken, ID.bizB);
+      expect(fresh.outcome, 'the expired handshake token opens no new socket').toBe('refused');
+
+      expect(await approveProbe(kept), 'served on the refreshed token').toBe(DECIDED_IN_TENANT);
+      await expectCut([[lapsed, 'the socket that did not refresh']]);
+      expect(await approveProbe(kept), 'still served').toBe(DECIDED_IN_TENANT);
+      expect(kept.frames.some((f) => f.startsWith(AUTH_ERROR_FRAME)), 'the refreshed socket is never cut').toBe(false);
+    } finally {
+      kept.close();
+      lapsed.close();
+    }
+  }, WS_CASE_TIMEOUT_MS);
+
+  it('after the row is banned and demoted, a new socket is refused and the open one acts no more — refused at its next key:approve, cut by the next — never decided in bizB as wsAdmin', async () => {
     await resetWsAdmin();
     const s = await cortexOpen(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), ID.bizB);
     try {
@@ -2012,38 +2154,81 @@ describe('OPEN DEFECT ST-WS-R1 — a KEY Cortex socket opened before a ban, demo
       const fresh = await cortexConnect(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), ID.bizB);
       expect(fresh.outcome, 'a new socket after the ban').toBe('refused');
 
-      expect(await approveProbe(s), 'the socket opened before the ban').toBe(DECIDED_IN_TENANT);
+      await pastTheBound();
+      await expectCut([[s, 'the socket opened before the ban']]);
     } finally {
       s.close();
       await resetWsAdmin();
     }
-  });
+  }, WS_CASE_TIMEOUT_MS);
 
-  it('OPEN DEFECT ST-WS-R1 reproduced — after POST /identity/logout, a new socket with the same token is refused but the open one still decides approvals in bizB', async () => {
+  it('demoted below the authority it connected with (SUPER_ADMIN -> USER, no membership), or deleted: the open socket acts no more and is cut', async () => {
+    const revocations: Array<[string, Record<string, unknown>]> = [
+      ['demoted to USER', { role: 'USER' }],
+      ['deletedAt set', { deletedAt: new Date() }],
+    ];
+    for (const [label, data] of revocations) {
+      await resetWsAdmin();
+      const s = await cortexOpen(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), ID.bizB);
+      try {
+        expect(s.outcome, `${label}: ${s.frames.join(' | ')}`).toBe('connected');
+        expect(await approveProbe(s), `${label}: control`).toBe(DECIDED_IN_TENANT);
+        await db.user.update({ where: { id: ID.wsAdmin }, data });
+        await pastTheBound();
+        await expectCut([[s, label]]);
+      } finally {
+        s.close();
+        await resetWsAdmin();
+      }
+    }
+  }, WS_CASE_TIMEOUT_MS);
+
+  it('removed from the business through the real team route: the member’s open socket acts no more and is cut', async () => {
+    const s = await cortexOpen(mintToken(WS_MEMBER), ID.bizB);
+    try {
+      expect(s.outcome, s.frames.join(' | ')).toBe('connected');
+      expect(s.userId).toBe(WS_MEMBER);
+      expect(await approveProbe(s), 'control, a member of bizB').toBe(DECIDED_IN_TENANT);
+
+      const removed = await call('delete', routes.member(ID.bizB, M_WS_MEMBER), T[ID.ownerB]);
+      expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+      expect(await db.membership.findUnique({ where: { id: M_WS_MEMBER } })).toBeNull();
+      const fresh = await cortexConnect(mintToken(WS_MEMBER), ID.bizB);
+      expect(fresh.outcome, 'a new socket after the removal').toBe('refused');
+
+      await pastTheBound();
+      await expectCut([[s, 'the socket opened before the removal']]);
+    } finally {
+      s.close();
+    }
+  }, WS_CASE_TIMEOUT_MS);
+
+  it('after POST /identity/logout, a new socket with the same token is refused and the open ones — the Supabase token’s and an admin token’s issued before it — act no more and are cut', async () => {
     await resetWsAdmin();
     const token = mintToken(ID.wsAdmin);
     const s = await cortexOpen(token, ID.bizB);
+    const a = await cortexOpen(mintAdminToken(ID.wsAdmin, 'SUPER_ADMIN'), ID.bizB);
     try {
       expect(s.outcome, s.frames.join(' | ')).toBe('connected');
+      expect(a.outcome, a.frames.join(' | ')).toBe('connected');
+      expect(await approveProbe(s), 'control, Supabase-token socket').toBe(DECIDED_IN_TENANT);
+      expect(await approveProbe(a), 'control, admin-token socket').toBe(DECIDED_IN_TENANT);
+
       const out = await call('post', '/identity/logout', token);
       expect(out.status, JSON.stringify(out.body)).toBe(201);
       const fresh = await cortexConnect(token, ID.bizB);
       expect(fresh.outcome, 'a new socket with the logged-out token').toBe('refused');
 
-      expect(await approveProbe(s), 'the socket opened before the logout').toBe(DECIDED_IN_TENANT);
+      await pastTheBound();
+      await expectCut([
+        [s, 'the Supabase-token socket opened before the logout'],
+        [a, 'the admin-token socket opened before the logout'],
+      ]);
     } finally {
       s.close();
+      a.close();
     }
-  });
-
-  it.todo(
-    'REQUIRED (follow-up packet; key-cortex.gateway.ts and the ban/demote/delete/logout writers — identity.controller.ts logout, ' +
-      'admin-auth logout, the admin user routes — outside this write set): a socket loses the tenant once its user is banned, deleted, ' +
-      'demoted below the authority it connected with, or logged out — each case above answers "closed" (the socket is disconnected and ' +
-      'leaves its business:/user: rooms) or "Not authenticated", never "Approval failed: Approval request not found". Re-checking the ' +
-      'handshake token on every message would also cut every socket at the token’s expiry, which has no in-band refresh today; the fix ' +
-      'packet decides between disconnecting user:<id> on revocation and a per-message re-check with a token-refresh event',
-  );
+  }, WS_CASE_TIMEOUT_MS);
 });
 
 describe('OPEN DEFECT CR-2 — logout never revokes the Supabase sessions', () => {

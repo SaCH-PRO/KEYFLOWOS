@@ -526,11 +526,12 @@ describe('ST-2-WS — authenticateSocket applies the HTTP AuthMiddleware local-u
     });
   });
 
-  // ST-WS-R1 (R0-ID-F6 review, pre-existing, NOT fixed here): the gateway takes
-  // this decision at connect only. What a fix in key-cortex.gateway.ts can reuse
-  // is pinned here — authenticateSocket keeps no per-socket state, so asking
-  // again for the same socket reads the User row again. The open-socket defect
-  // itself is reproduced, with its it.todo, in identity-boundary.integration.test.ts.
+  // ST-WS-R1 (R0-ID-F6 review; fixed by R0-ID-F6b-WS-LIVE-REVOCATION): the
+  // gateway re-asks this decision for an open socket before every action. What
+  // that relies on is pinned here — authenticateSocket keeps no per-socket
+  // state, so asking again for the same socket reads the User row again. The
+  // open-socket cases are in key-cortex.gateway.spec.ts and, over a real socket,
+  // in identity-boundary.integration.test.ts.
   it('ST-WS-R1 groundwork: authenticateSocket caches nothing per socket — the same socket asked again after its row is banned is refused', async () => {
     let row: Row = ACTIVE('SUPER_ADMIN');
     const { service, prisma } = wsService({ lookup: async () => row });
@@ -539,5 +540,45 @@ describe('ST-2-WS — authenticateSocket applies the HTTP AuthMiddleware local-u
     row = { role: 'SUPER_ADMIN', deletedAt: null, bannedAt: new Date() };
     expect(await service.authenticateSocket(socket)).toBeNull();
     expect(prisma.client.user.findUnique).toHaveBeenCalledTimes(2);
+  });
+
+  // CR-3 (R0-ID-F6b review repair): the gateway's key:auth_refresh puts a token
+  // the socket sent in-band through authenticateToken. It must be exactly the
+  // decision authenticateSocket takes for that token in the handshake.
+  describe('authenticateToken (the in-band token of key:auth_refresh)', () => {
+    const cases: Array<[string, Setup, () => string]> = [
+      ['admin token, active SUPER_ADMIN row', {}, () => adminJwt()],
+      ['admin token, demoted row', { row: ACTIVE('USER') }, () => adminJwt()],
+      ['admin token, banned row', { row: { role: 'SUPER_ADMIN', deletedAt: null, bannedAt: new Date() } }, () => adminJwt()],
+      ['admin token, no row', { row: null }, () => adminJwt()],
+      ['admin token, wrong secret', {}, () => adminJwt('another-secret-not-real')],
+      ['Supabase token, member row', { supabaseUser: USER, row: ACTIVE('USER') }, () => supabaseJwt()],
+      ['Supabase token, logged out', { supabaseUser: USER, row: ACTIVE('USER'), keys: { [`auth:revoked:user:${USER.id}`]: String(nowS() + 5) } }, () => supabaseJwt()],
+      ['Supabase token, deleted row', { supabaseUser: USER, row: { role: 'USER', deletedAt: new Date(), bannedAt: null } }, () => supabaseJwt()],
+    ];
+
+    it('parity: for every case authenticateToken(token) is authenticateSocket’s decision for the same token in the handshake, which is the HTTP decision', async () => {
+      for (const [label, setup, token] of cases) {
+        const t = token();
+        const viaToken = await wsService(setup).service.authenticateToken(t);
+        const { identity: viaHandshake } = await viaSocket(setup, t);
+        expect(viaToken, label).toEqual(viaHandshake);
+        expect(viaToken, `${label} (HTTP)`).toEqual(await viaHttp(setup, t));
+      }
+      // The positive and the refused cases are both represented.
+      expect(await wsService({}).service.authenticateToken(adminJwt())).toEqual({ userId: ADMIN.id, email: ADMIN.email, role: 'SUPER_ADMIN' });
+    });
+
+    it('reads the token as handshake.auth.token is read: a Bearer prefix is stripped; anything but a non-empty string is null without asking the verifier', async () => {
+      const { service, supabaseAuth, prisma } = wsService({});
+      expect(await service.authenticateToken(`Bearer ${adminJwt()}`)).toEqual({ userId: ADMIN.id, email: ADMIN.email, role: 'SUPER_ADMIN' });
+      supabaseAuth.getUserFromToken.mockClear();
+      prisma.client.user.findUnique.mockClear();
+      for (const raw of [undefined, null, '', '   ', 'Bearer ', 42, { token: adminJwt() }]) {
+        expect(await service.authenticateToken(raw), JSON.stringify(raw)).toBeNull();
+      }
+      expect(supabaseAuth.getUserFromToken).not.toHaveBeenCalled();
+      expect(prisma.client.user.findUnique).not.toHaveBeenCalled();
+    });
   });
 });

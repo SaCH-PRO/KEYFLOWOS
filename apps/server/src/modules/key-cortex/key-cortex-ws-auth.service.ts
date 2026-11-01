@@ -10,12 +10,20 @@
  * cutoff, and the same fail-closed / Redis-outage rules. Business membership
  * mirrors {@link BusinessGuard}, tenant-id resolution included.
  *
- * Both decisions are taken at connect only. The gateway keeps the connect-time
- * identity for the socket's lifetime and nothing disconnects a socket when its
- * user is demoted, banned, deleted or logged out (review finding ST-WS-R1,
- * pre-existing; the fix is in key-cortex.gateway.ts and the revocation writers,
- * outside R0-ID-F6's write set — see the it.todo in
- * test/identity-boundary.integration.test.ts).
+ * Both decisions are taken at connect AND again for the open socket: the
+ * gateway re-asks authenticateSocket (same socket, so the same handshake token;
+ * or authenticateToken for a token the socket sent with key:auth_refresh) and
+ * verifyBusinessMembership (the socket's own businessId, the fresh role) before
+ * every client action and on a schedule, refuses the action when either
+ * refuses, and disconnects the socket when a later check confirms the refusal
+ * — see LIVE REVOCATION in key-cortex.gateway.ts (ST-WS-R1,
+ * R0-ID-F6b-WS-LIVE-REVOCATION). Until then a socket kept its connect-time
+ * identity for its lifetime, so a demoted, banned, deleted, removed or
+ * logged-out user kept acting in the tenant. No method here keeps any
+ * per-socket state; the reuse window, the timeout and the confirmation live in
+ * the gateway. Both report a refusal and a failure to decide (a Postgres or
+ * provider error) the same way, as null / false, which is why the gateway
+ * never disconnects on one refused check.
  *
  * Until R0-ID-F6-WS-ADMIN-TOKEN (ST-2-WS) this service verified the token
  * itself and attached an admin token's own claims with none of those checks,
@@ -101,7 +109,23 @@ export class KeyCortexWsAuthService {
    * middleware reads.
    */
   async authenticateSocket(client: Socket): Promise<WsIdentity | null> {
-    const token = this.extractToken(client);
+    return this.decide(this.extractToken(client));
+  }
+
+  /**
+   * authenticateSocket's decision for a bearer token the socket presented
+   * in-band rather than in its handshake (the gateway's key:auth_refresh, see
+   * LIVE REVOCATION in key-cortex.gateway.ts): the same AuthMiddleware decision,
+   * the same null for every refusal. Read as `handshake.auth.token` is: a
+   * `Bearer ` prefix is stripped; anything but a non-empty string is null.
+   */
+  async authenticateToken(raw: unknown): Promise<WsIdentity | null> {
+    if (typeof raw !== 'string') return null;
+    return this.decide(raw.startsWith('Bearer ') ? raw.slice(7).trim() : raw.trim());
+  }
+
+  /** AuthMiddleware's decision for `Authorization: Bearer <token>` (see authenticateSocket). */
+  private async decide(token: string | undefined): Promise<WsIdentity | null> {
     if (!token) return null;
 
     const req = { headers: { authorization: `Bearer ${token}` } } as unknown as Request & {
