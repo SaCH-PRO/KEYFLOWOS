@@ -58,6 +58,25 @@ export class ApprovalController {
     });
   }
 
+  /**
+   * The requests whose current step waits on the caller, in the path business
+   * only (getPendingForUser filters on businessId and the caller's id).
+   *
+   * Declared BEFORE `approvals/:approvalId` (R0-13f): Express answers with the
+   * first matching route, and below it this route was answered by getById as
+   * approval 'pending-for-me' (404), so the approvals and operations screens
+   * always showed an empty "waiting on me" list. route-shadowing.spec.ts keeps
+   * the order.
+   */
+  @Get('businesses/:businessId/approvals/pending-for-me')
+  @RateLimit(60, 60_000)
+  async pendingForMe(
+    @Param('businessId') businessId: string,
+    @Request() req: ExpressRequest & { user?: { id: string } },
+  ) {
+    return this.approvals.getPendingForUser(businessId, req.user?.id ?? 'system');
+  }
+
   @Get('businesses/:businessId/approvals/:approvalId')
   @RateLimit(60, 60_000)
   async getById(@Param('approvalId') approvalId: string) {
@@ -116,15 +135,6 @@ export class ApprovalController {
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
     return this.approvals.cancelRequest(approvalId, req.user?.id ?? 'system');
-  }
-
-  @Get('businesses/:businessId/approvals/pending-for-me')
-  @RateLimit(60, 60_000)
-  async pendingForMe(
-    @Param('businessId') businessId: string,
-    @Request() req: ExpressRequest & { user?: { id: string } },
-  ) {
-    return this.approvals.getPendingForUser(businessId, req.user?.id ?? 'system');
   }
 
   @Post('businesses/:businessId/approvals/:approvalId/escalate')

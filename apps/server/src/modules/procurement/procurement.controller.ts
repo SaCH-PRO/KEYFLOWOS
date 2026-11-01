@@ -25,6 +25,29 @@ export class ProcurementController {
     return this.service.create(businessId, dto, req.user?.id);
   }
 
+  /**
+   * The business's active supplier connections and its request counts.
+   *
+   * Declared BEFORE `businesses/:businessId/:id` (R0-13f): below it both were
+   * answered by get as request 'suppliers' / 'stats' (404), so the suppliers
+   * page, the vendor picker on a request and the procurement stats never
+   * loaded. Both read only the path business's rows, behind the guards the
+   * single-request read runs behind. route-shadowing.spec.ts keeps the order.
+   */
+  @Get('businesses/:businessId/suppliers')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(60, 60_000)
+  async listSuppliers(@Param('businessId') businessId: string) {
+    return this.service.listSuppliers(businessId);
+  }
+
+  @Get('businesses/:businessId/stats')
+  @UseGuards(BusinessGuard)
+  @CrmRateLimit(60, 60_000)
+  async stats(@Param('businessId') businessId: string) {
+    return this.service.getStats(businessId);
+  }
+
   @Get('businesses/:businessId/:id')
   @UseGuards(BusinessGuard)
   @CrmRateLimit(60, 60_000)
@@ -60,13 +83,6 @@ export class ProcurementController {
     return this.service.updateStatus(businessId, id, 'REJECTED', req.user?.id, body.reason);
   }
 
-  @Get('businesses/:businessId/suppliers')
-  @UseGuards(BusinessGuard)
-  @CrmRateLimit(60, 60_000)
-  async listSuppliers(@Param('businessId') businessId: string) {
-    return this.service.listSuppliers(businessId);
-  }
-
   @Post('businesses/:businessId/:id/vendor')
   @UseGuards(BusinessGuard)
   @CrmRateLimit(30, 60_000)
@@ -100,12 +116,5 @@ export class ProcurementController {
   @CrmRateLimit(30, 60_000)
   async markInvoiced(@Param('businessId') businessId: string, @Param('id') id: string) {
     return this.service.markInvoiced(businessId, id);
-  }
-
-  @Get('businesses/:businessId/stats')
-  @UseGuards(BusinessGuard)
-  @CrmRateLimit(60, 60_000)
-  async stats(@Param('businessId') businessId: string) {
-    return this.service.getStats(businessId);
   }
 }

@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { PickType } from '@nestjs/mapped-types';
+import { IsArray, IsString } from 'class-validator';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -18,6 +20,23 @@ import {
 import { DealForecastService } from './deal-forecast.service';
 import { DealVelocityService } from './deal-velocity.service';
 import { WonLostReasonService } from './won-lost-reason.service';
+
+/**
+ * The POST deals/bulk/move-stage body (R0-13f): BulkMoveStageDto's stageId rule
+ * (PickType copies its validation metadata) and dealIds an array of strings.
+ * BulkMoveStageDto checks only that dealIds is an array, so an element such as
+ * `{ not: '' }` passed the global ValidationPipe and reached moveStage's
+ * findFirst({ where: { id, businessId } }) as a Prisma filter, matching a deal
+ * of the tenant the caller never named. The empty-list and 100-id checks stay
+ * in CrmDealsService.bulkMoveStage with their own messages. Declared before
+ * CrmDealsController, whose decorator metadata names it when the class is
+ * defined.
+ */
+export class BulkMoveDealsStageDto extends PickType(BulkMoveStageDto, ['stageId'] as const) {
+  @IsArray()
+  @IsString({ each: true })
+  dealIds!: string[];
+}
 
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
@@ -225,6 +244,29 @@ export class CrmDealsController {
     return this.deals.deleteDeal({ businessId, dealId, actorId: req?.user?.id });
   }
 
+  /**
+   * Move several deals of the path business to one of its stages.
+   *
+   * Declared BEFORE `deals/:dealId/move-stage` (R0-13f): below it this route
+   * was answered by moveStage as deal 'bulk' (404), so the deals board's and
+   * list's bulk move never worked. It needs the single move's guards and crm
+   * 'write', and CrmDealsService.bulkMoveStage hands each id to moveStage, the
+   * single move's own tenant check: another tenant's deal or an unknown id is
+   * skipped with the same per-id result, and another tenant's stage moves
+   * nothing. route-shadowing.spec.ts keeps the order.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/deals/bulk/move-stage')
+  bulkMoveStage(
+    @Param('businessId') businessId: string,
+    @Body() body: BulkMoveDealsStageDto,
+    @Req() req: any,
+  ) {
+    return this.deals.bulkMoveStage({ businessId, dealIds: body.dealIds, stageId: body.stageId, actorId: req?.user?.id });
+  }
+
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(60, 60_000)
@@ -236,18 +278,6 @@ export class CrmDealsController {
     @Req() req: any,
   ) {
     return this.deals.moveStage({ businessId, dealId, stageId: body.stageId, actorId: req?.user?.id });
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('crm', 'write')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/deals/bulk/move-stage')
-  bulkMoveStage(
-    @Param('businessId') businessId: string,
-    @Body() body: BulkMoveStageDto,
-    @Req() req: any,
-  ) {
-    return this.deals.bulkMoveStage({ businessId, dealIds: body.dealIds, stageId: body.stageId, actorId: req?.user?.id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
