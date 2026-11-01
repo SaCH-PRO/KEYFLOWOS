@@ -38,8 +38,10 @@ import {
  * reachable only through a key whose tier (read 1, write 2, admin 3) covers the
  * tool's risk tier and, for a table tool, whose level reaches the level its
  * routes require (SEC-V21b-03). The canonical `crm` grant is further bounded by
- * the crm_edit / crm_delete sub-permissions resolveCrmAccess applies over HTTP
- * (review 2 ESC-4). A registry tool some pattern matches but no grant covers is
+ * the crm_view / crm_edit / crm_delete sub-permissions resolveCrmAccess applies over
+ * HTTP (review 2 ESC-4, review 3 IC-1). A position with no JobRole gets the baseline
+ * envelope, never none (envelopeForPosition, review 3 IC-2). A registry tool some
+ * pattern matches but no grant covers is
  * listed in `blockedTools`, which `isToolAllowed` checks first, so
  * AiOversightService.evaluate refuses it and the chat never advertises it.
  * `maxRiskTier` stays the strongest key's tier, as before; it is the coarse cap,
@@ -178,7 +180,8 @@ export const GOVERNED_UNGRANTED: Readonly<Record<string, string>> = {
  * softDeleteContact). The dispatcher calls those methods with no actor, so the check
  * never runs on the KEY path; the canonical `crm` grant makes it instead, and reaches
  * these tools only when the scope is `any` — an `owned` scope cannot be kept to the
- * holder's own contacts without an actor (V1-21b review 2 ESC-4). Derived in
+ * holder's own contacts without an actor (V1-21b review 2 ESC-4) — and only when crm_view
+ * resolves to all, for the same reason (review 3 IC-1; see crmWithheld). Derived in
  * job-role-tool-families.spec.ts from the methods that read editScope / deleteScope.
  */
 export const CRM_SUBPERMISSION_TOOLS: Readonly<Record<'crm_edit' | 'crm_delete', readonly string[]>> = {
@@ -236,12 +239,25 @@ function covers(grant: Grant, toolName: string, riskTier: number): boolean {
 }
 
 /**
- * The table tools a canonical `crm` grant at `level` withholds, from the crm_edit /
- * crm_delete scopes resolveCrmAccess would compute for the same map: the stored override
- * (exact key, value as stored), else the default of the crm level.
+ * The table tools a canonical `crm` grant at `level` withholds, from the crm_view /
+ * crm_edit / crm_delete scopes resolveCrmAccess would compute for the same map: the stored
+ * override (exact key, value as stored, read as resolveCrmAccess reads it), else the
+ * default of the crm level.
+ *
+ * crm_view bounds the same tools as crm_edit and crm_delete (V1-21b review 3 IC-1): with
+ * an actor, updateContact and softDeleteContact AND the visibility clause onto the row
+ * they reach, so a 'my book' member (viewAll false) edits and deletes only contacts they
+ * own or that are shared with them, and createContact makes what they create theirs. The
+ * dispatcher passes no actor, so KEY could not be kept to that book; every one of these
+ * tools is withheld unless viewAll is true.
  */
 function crmWithheld(permissions: Record<string, unknown>, level: GrantLevel): ReadonlySet<string> {
   const defaults = defaultCrmAccessForLevel(level);
+  const viewOverride = own(permissions, 'crm_view');
+  const viewAll = viewOverride ? viewOverride === 'all' : defaults.viewAll;
+  if (!viewAll) {
+    return new Set([...CRM_SUBPERMISSION_TOOLS.crm_edit, ...CRM_SUBPERMISSION_TOOLS.crm_delete]);
+  }
   const editScope = own(permissions, 'crm_edit') ?? defaults.editScope;
   const deleteScope = own(permissions, 'crm_delete') ?? defaults.deleteScope;
   return new Set([
@@ -249,6 +265,17 @@ function crmWithheld(permissions: Record<string, unknown>, level: GrantLevel): R
     ...(deleteScope === 'any' ? [] : CRM_SUBPERMISSION_TOOLS.crm_delete),
   ]);
 }
+
+/**
+ * What a position with no JobRole is: one whose role was deleted (OrgAssignment.jobRole is
+ * onDelete SetNull) or never set. It holds no module, so it keeps the baseline reads and
+ * nothing else (V1-21b review 3 IC-2), the same as an empty permissions map.
+ */
+export const NO_JOB_ROLE: Readonly<Pick<JobRole, 'id' | 'name' | 'permissions'>> = {
+  id: '',
+  name: 'Unassigned',
+  permissions: {},
+};
 
 @Injectable()
 export class JobRolePolicyService {
@@ -307,6 +334,17 @@ export class JobRolePolicyService {
       blockedTools: blocked,
       maxRiskTier,
     };
+  }
+
+  /**
+   * The envelope of a staff position, whether or not it still has a JobRole. A position
+   * without one gets the NO_JOB_ROLE envelope (baseline reads only), never none at all:
+   * with no envelope AiOversightService.evaluate answers from the crew RoleEngine detects
+   * in the message text, which reaches CRM writes, refunds and execute_custom_logic for a
+   * holder with no HTTP access (V1-21b review 3 IC-2). Fail closed.
+   */
+  envelopeForPosition(jobRole: Pick<JobRole, 'id' | 'name' | 'permissions'> | null | undefined): JobRoleEnvelope {
+    return this.envelopeForJobRole(jobRole ?? NO_JOB_ROLE);
   }
 
   /** Same wildcard semantics as RoleEngine: exact match or trailing-* prefix. */

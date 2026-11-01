@@ -100,10 +100,11 @@ export class StaffChatBridgeService {
     const history = sessionId ? await orchestrator.getConversationHistory(businessId, sessionId) : [];
 
     // Position-scoped governance: the staff position's JobRole.permissions
-    // decide which tools KEY may use in this conversation.
-    const envelope = assignment.jobRole
-      ? this.getJobRolePolicy().envelopeForJobRole(assignment.jobRole)
-      : undefined;
+    // decide which tools KEY may use in this conversation. A position with no
+    // JobRole (deleted: onDelete SetNull, or never set) gets the baseline
+    // envelope, never none — no envelope would let the text-detected crew
+    // decide (V1-21b review 3 IC-2).
+    const envelope = this.getJobRolePolicy().envelopeForPosition(assignment.jobRole);
 
     const hints = [
       `You are talking to ${displayName}, a staff member${assignment.jobRole ? ` (position: ${assignment.jobRole.name})` : ''} over ${channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}, not the in-app chat. Keep replies short and text-message appropriate.`,
