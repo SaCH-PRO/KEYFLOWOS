@@ -20,12 +20,22 @@
  * rows written before V1-21 still carry; the level-to-tier ladder; and deny-by-default.
  * Which tools each module grants, and at which level, is derived from the HTTP route
  * decorators in job-role-tool-families.spec.ts.
+ *
+ * The second review (ESC-1..4, C1..C3) and a re-probe of its repair (ESC-5) are pinned at
+ * the end, each next to the real ModuleScopeGuard / resolveCrmAccess answer for the same
+ * scope map, with a property over some 2,800 maps: a governed tool KEY reaches is one HTTP
+ * allows. Cases above that encoded the defects were corrected in place (crm_add_note at
+ * crm:read, `Revenue: 'WRITE'`, legacy keys reaching governed tools, the C1/C2 tools in
+ * the deny lists).
  */
 import { describe, it, expect } from 'vitest';
 import { FLOW_TOOLS } from '../ai/flow-tool-registry';
 import { AiOversightService, type AutonomySettingsReader } from '../ai/ai-oversight.service';
 import { CANONICAL_MODULES, type CanonicalModule } from '../../core/authority/module-vocabulary';
+import { ModuleScopeGuard, MODULE_SCOPE_KEY } from '../../core/auth/module-scope.guard';
+import { resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { jobRolePermissionsProblem } from './dto/create-job-role.dto';
+import * as policyExports from './job-role-policy.service';
 import { CANONICAL_MODULE_TOOLS, JobRolePolicyService, type JobRoleEnvelope } from './job-role-policy.service';
 
 const policy = new JobRolePolicyService();
@@ -58,22 +68,24 @@ const LEVELS: Level[] = ['read', 'write', 'admin'];
  */
 const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: string[]; deny: string[] }> = {
   crm: {
-    // crm_list_contacts / crm_search_contacts ride on the legacy `crm` key (crm_*).
+    // crm_list_contacts / crm_search_contacts read what GET .../contacts (crm:read) lists (review 2 ESC-5).
     read: ['deals_list', 'deals_get', 'deals_forecast', 'call_list_tasks', 'crm_find_duplicates', 'crm_merge_preview', 'crm_list_contacts', 'crm_search_contacts'],
     // tier 1, but the routes require crm:write (SEC-V21b-03)
-    write: ['crm_create_contact', 'crm_update_contact', 'call_generate_script', 'deals_create', 'deals_mark_won', 'crm_update_deal', 'call_log_outcome', 'tag_contact'],
+    // crm_add_note / crm_add_task: CrmService forwards to CrmTimelineService, whose routes need crm:write (review 2 ESC-1)
+    write: ['crm_create_contact', 'crm_update_contact', 'call_generate_script', 'deals_create', 'deals_mark_won', 'crm_update_deal', 'call_log_outcome', 'tag_contact', 'crm_add_note', 'crm_add_task'],
     admin: ['crm_delete_contact', 'crm_merge_execute', 'deals_delete'],
     deny: ['commerce_create_invoice', 'structure_list_job_roles', 'payments_refund_charge', 'sequence_enroll'],
   },
   revenue: {
-    read: ['payments_list_links', 'payments_list_transactions', 'payments_list_gateways', 'payments_search_transactions'],
-    write: ['commerce_create_invoice', 'commerce_create_quote', 'commerce_convert_quote', 'commerce_update_invoice', 'payments_create_link', 'payments_revoke_link'],
+    // commerce_list_invoices reads what GET .../invoices (revenue:read) lists (review 2 C2)
+    read: ['payments_list_links', 'payments_list_transactions', 'payments_list_gateways', 'payments_search_transactions', 'commerce_list_invoices'],
+    // commerce_mark_invoice_paid: PATCH invoices/:id/paid needs revenue:write; the Stripe
+    // webhook that also calls it is not a member route (review 2 C1)
+    write: ['commerce_create_invoice', 'commerce_create_quote', 'commerce_convert_quote', 'commerce_update_invoice', 'payments_create_link', 'payments_revoke_link', 'commerce_mark_invoice_paid'],
     admin: ['commerce_send_invoice', 'commerce_delete_invoice', 'payments_refund_charge'],
     deny: [
-      // reached unscoped (Stripe webhook / catalog.controller) or by a direct Prisma read
-      'commerce_mark_invoice_paid',
+      // reached unscoped (catalog.controller)
       'commerce_create_product',
-      'commerce_list_invoices',
       'finance_post_journal_entry',
       'finance_profit_and_loss',
       'crm_create_contact',
@@ -97,18 +109,19 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     deny: ['commerce_create_invoice', 'calendar_create_event', 'structure_get_org_tree'],
   },
   content: {
-    read: ['assets_list', 'assets_list_folders', 'content_list_requests'],
+    // assets_get calls AssetService.getAsset through the assetWithinBusiness helper (review 2 C2)
+    read: ['assets_list', 'assets_list_folders', 'content_list_requests', 'assets_get'],
     // assets_tag / assets_untag are tier 1, but POST .../tag and .../untag need content:write
     write: ['assets_tag', 'assets_untag', 'assets_update', 'content_create_request'],
     admin: ['assets_delete', 'content_deliver_request'],
-    deny: ['assets_get', 'social_publish_post', 'marketing_send_campaign', 'commerce_create_invoice'],
+    deny: ['social_publish_post', 'marketing_send_campaign', 'commerce_create_invoice'],
   },
   expenses: {
-    read: ['finance_list_bills', 'finance_view_payables'],
+    // expenses_list reads what GET .../expenses (expenses:read) lists (review 2 C2)
+    read: ['finance_list_bills', 'finance_view_payables', 'expenses_list'],
     write: ['expenses_create', 'finance_create_bill'],
     admin: ['finance_pay_bill'],
     deny: [
-      'expenses_list',
       'finance_post_journal_entry',
       'finance_profit_and_loss',
       'finance_create_coa_account',
@@ -313,12 +326,13 @@ describe('an ungoverned tool is never granted by a canonical key (SEC-V21b-02)',
     },
   );
 
-  it('crm_add_note is reached only through the legacy crm_* family, as before V1-21b', () => {
-    // CrmService.addNote backs no route, so the canonical table does not grant it; the
-    // `crm` key is also a legacy key whose pre-V1-21 family crm_* is kept (rows written
-    // before V1-21 keep their envelope).
+  it('crm_add_note is reached by crm at write, as POST contacts/:id/notes, and not at read (review 2 ESC-1)', () => {
+    // CrmService.addNote only forwards to CrmTimelineService.addNote, which that route
+    // (crm:write) calls; the legacy crm_* family no longer reaches it, being governed.
     for (const m of CANONICAL_MODULES.filter((k) => k !== 'crm')) expect(allows(envelope({ [m]: 'admin' }), 'crm_add_note'), m).toBe(false);
-    expect(passes(envelope({ crm: 'read' }), 'crm_add_note')).toBe(true);
+    expect(allows(envelope({ crm: 'read' }), 'crm_add_note')).toBe(false);
+    expect(allows(envelope({ sales: 'admin' }), 'crm_add_note')).toBe(false);
+    expect(passes(envelope({ crm: 'write' }), 'crm_add_note')).toBe(true);
   });
 });
 
@@ -448,34 +462,62 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
     const env = envelope(permissions);
     return REGISTRY.filter((t) => passes(env, t)).sort();
   };
-  /** The tools whose routes require write: a read grant no longer reaches them (SEC-V21b-03). */
-  const ROUTE_WRITE = new Set(
-    Object.values(CANONICAL_MODULE_TOOLS).flatMap((tools) => Object.entries(tools).filter(([, l]) => l !== 'read').map(([t]) => t)),
-  );
+  /**
+   * Every tool a route governs (the table, and GOVERNED_UNGRANTED): a legacy key no longer
+   * reaches one, whatever its level - only the governing canonical module does (review 2
+   * ESC-3; before it, `finance` reached the expenses tools, `inbox` the operations ones).
+   */
+  const ROUTE_GOVERNED = new Set([
+    ...Object.values(CANONICAL_MODULE_TOOLS).flatMap((tools) => Object.keys(tools)),
+    ...Object.keys(((policyExports as Record<string, unknown>).GOVERNED_UNGRANTED ?? {}) as Record<string, string>),
+  ]);
 
   for (const [key, families] of Object.entries(LEGACY).filter(([k]) => !(CANONICAL_MODULES as readonly string[]).includes(k))) {
-    it(`{ ${key}: 'write' | 'admin' } reaches exactly what it reached before the repair`, () => {
-      for (const level of ['write', 'admin'] as const) expect(reachedNow({ [key]: level }), level).toEqual(reachedBefore(families, level));
-    });
-
-    it(`{ ${key}: 'read' } reaches what it did before, less tools whose routes require write`, () => {
-      expect(reachedNow({ [key]: 'read' })).toEqual(reachedBefore(families, 'read').filter((t) => !ROUTE_WRITE.has(t)));
+    it(`{ ${key}: <level> } reaches what it reached before the repair, less the tools a route governs`, () => {
+      for (const level of LEVELS) {
+        expect(reachedNow({ [key]: level }), level).toEqual(reachedBefore(families, level).filter((t) => !ROUTE_GOVERNED.has(t)));
+      }
     });
   }
 
-  it('a read-level legacy grant no longer reaches a tier-1 tool whose route needs write (SEC-V21b-03)', () => {
+  it('the governed tools a legacy key loses, pinned (an owner decision whether to migrate such rows)', () => {
+    const lost = (key: string) => reachedBefore(LEGACY[key], 'admin').filter((t) => ROUTE_GOVERNED.has(t));
+    expect(lost('finance')).toEqual(['expenses_create', 'expenses_list', 'finance_create_bill', 'finance_list_bills', 'finance_pay_bill', 'finance_view_payables']);
+    expect(lost('commerce')).toEqual([
+      'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_delete_invoice',
+      'commerce_list_invoices', 'commerce_mark_invoice_paid', 'commerce_send_invoice', 'commerce_update_invoice',
+    ]);
+    expect(lost('calendar')).toEqual(['calendar_create_event', 'calendar_list_events']);
+    expect(lost('sales').filter((t) => t.startsWith('crm_'))).toEqual([
+      'crm_add_note', 'crm_add_task', 'crm_create_contact', 'crm_delete_contact', 'crm_find_duplicates', 'crm_list_contacts',
+      'crm_list_deals', 'crm_merge_execute', 'crm_merge_preview', 'crm_move_deal_stage', 'crm_search_contacts', 'crm_update_contact', 'crm_update_deal',
+    ]);
+    expect(lost('inbox')).toEqual(['inbox_brief', 'inbox_list_threads', 'inbox_mark_resolved', 'inbox_read_thread', 'inbox_reply_thread', 'inbox_update_thread_status']);
+    expect(lost('hr')).toEqual(lost('structure'));
+    expect(lost('legal')).toEqual(lost('contracts'));
+    expect(lost('contracts')).toEqual(['contract_create_tag', 'contract_extract_terms', 'contract_list_tags']);
+  });
+
+  it('a legacy grant no longer reaches a tool a route governs, at any level (SEC-V21b-03, review 2 ESC-3)', () => {
     expect(allows(envelope({ crm: 'read' }), 'crm_create_contact')).toBe(false);
     expect(allows(envelope({ crm: 'read' }), 'crm_update_contact')).toBe(false);
     expect(allows(envelope({ sales: 'read' }), 'crm_create_contact')).toBe(false);
     expect(allows(envelope({ inbox: 'read' }), 'inbox_mark_resolved')).toBe(false);
-    expect(passes(envelope({ inbox: 'write' }), 'inbox_mark_resolved')).toBe(true);
+    expect(allows(envelope({ inbox: 'write' }), 'inbox_mark_resolved')).toBe(false);
+    expect(allows(envelope({ sales: 'write' }), 'crm_create_contact')).toBe(false);
     expect(passes(envelope({ crm: 'write' }), 'crm_create_contact')).toBe(true);
-    expect(passes(envelope({ sales: 'write' }), 'crm_create_contact')).toBe(true);
+    expect(passes(envelope({ operations: 'write' }), 'inbox_mark_resolved')).toBe(true);
   });
 
-  it('matches keys case-insensitively, as before', () => {
-    expect(allows(envelope({ Revenue: 'WRITE' }), 'commerce_create_invoice')).toBe(true);
+  it('matches a legacy key case-insensitively, as before, but a canonical key only exactly (review 2 ESC-2)', () => {
+    expect(allows(envelope({ Revenue: 'WRITE' }), 'commerce_create_invoice')).toBe(false);
+    expect(allows(envelope({ revenue: 'WRITE' }), 'commerce_create_invoice')).toBe(false);
+    expect(allows(envelope({ revenue: 'write' }), 'commerce_create_invoice')).toBe(true);
     expect(allows(envelope({ FINANCE: 'Write' }), 'finance_cashflow')).toBe(true);
+    expect(allows(envelope({ HELPDESK: 'Write' }), 'helpdesk_create_ticket')).toBe(true);
+    // `CRM` is the legacy crm_* family alone: every crm_* tool is governed, so it reaches none (review 2 ESC-5)
+    expect(allows(envelope({ CRM: 'admin' }), 'crm_list_contacts')).toBe(false);
+    expect(allows(envelope({ CRM: 'admin' }), 'crm_delete_contact')).toBe(false);
   });
 });
 
@@ -525,5 +567,348 @@ describe('JobRolePolicyService — deny by default', () => {
       expect([...env.approvedTools].sort(), JSON.stringify(p)).toEqual([...BASELINE].sort());
       expect(env.maxRiskTier).toBe(1);
     }
+  });
+});
+
+/**
+ * V1-21b second review (ESC-1..4, C1..C3). Kernel K2: a position never lets KEY do what
+ * its holder could not do over HTTP with the same scope map, and the union of keys
+ * reaches exactly the union of what each key reaches alone. Each repro below is the
+ * review's own input, run through the real AiOversightService.evaluate, next to the real
+ * ModuleScopeGuard (and, for the CRM sub-permissions, the real resolveCrmAccess) on a
+ * membership carrying the same map: the HTTP answer the envelope must not exceed.
+ */
+describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)', () => {
+  const oversight = new AiOversightService({ client: {} } as any, {} as any, {} as any, {} as any, {} as any, policy);
+  const reader = (autonomyLevel?: number): AutonomySettingsReader => ({
+    autopilotSettings: {
+      findUnique: async () =>
+        autonomyLevel === undefined ? null : { autonomyLevel, blockedTools: [], approvedTools: [], approvalTimeoutHours: 24 },
+    },
+    aiMemory: { findUnique: async () => null },
+  });
+  const evaluate = (permissions: Record<string, unknown>, tool: string, autonomyLevel?: number) =>
+    oversight.evaluate('biz_1', tool, undefined, [], envelope(permissions), reader(autonomyLevel));
+
+  /** A STAFF membership whose permissionScopes is `scopes`, as ModuleScopeGuard and resolveCrmAccess read it. */
+  const membershipPrisma = (scopes: Record<string, unknown>) =>
+    ({
+      client: {
+        membership: { findUnique: async () => ({ userId: 'u_1', businessId: 'biz_1', role: 'STAFF', permissionScopes: scopes }) },
+        user: { findUnique: async () => ({ id: 'u_1', role: 'STAFF' }) },
+      },
+    }) as any;
+
+  /** The real ModuleScopeGuard on a route that requires `module` at `minLevel`. */
+  const httpAllows = async (scopes: Record<string, unknown>, module: string, minLevel: Level): Promise<boolean> => {
+    const reflector = { get: (key: string) => (key === MODULE_SCOPE_KEY ? { module, minLevel } : undefined) } as any;
+    const guard = new ModuleScopeGuard(membershipPrisma(scopes), reflector);
+    const ctx = {
+      getHandler: () => ({}),
+      switchToHttp: () => ({ getRequest: () => ({ user: { id: 'u_1', role: 'STAFF' }, params: { businessId: 'biz_1' } }) }),
+    } as any;
+    try {
+      return await guard.canActivate(ctx);
+    } catch {
+      return false;
+    }
+  };
+
+  const GOVERNED_UNGRANTED = ((policyExports as Record<string, unknown>).GOVERNED_UNGRANTED ?? {}) as Record<string, string>;
+
+  /** Every tool the canonical table grants, with the module and the level its routes require. */
+  const ROUTED: Array<[string, CanonicalModule, Level]> = Object.entries(CANONICAL_MODULE_TOOLS).flatMap(([m, tools]) =>
+    Object.entries(tools).map(([t, l]) => [t, m as CanonicalModule, l as Level] as [string, CanonicalModule, Level]),
+  );
+  const routeOf = new Map(ROUTED.map(([t, m, l]) => [t, { module: m, level: l }]));
+
+  describe('ESC-1 — crm:read does not write CRM notes or tasks', () => {
+    it.each(['crm_add_note', 'crm_add_task'])('%s needs crm:write, as POST contacts/:id/notes|tasks does', async (tool) => {
+      expect(jobRolePermissionsProblem({ crm: 'read' })).toBeNull();
+      expect(await httpAllows({ crm: 'read' }, 'crm', 'write')).toBe(false);
+      for (const autonomyLevel of [undefined, 3]) {
+        const d = await evaluate({ crm: 'read' }, tool, autonomyLevel);
+        expect(d.allowed, `${tool} @ ${autonomyLevel}`).toBe(false);
+        expect(d.reason).toMatch(/outside the Position position's scope/);
+      }
+      expect(routeOf.get(tool)).toEqual({ module: 'crm', level: 'write' });
+      // positive control: the holder who may add a note by hand may ask KEY to
+      expect(await httpAllows({ crm: 'write' }, 'crm', 'write')).toBe(true);
+      expect(await evaluate({ crm: 'write' }, tool)).toMatchObject({ allowed: true });
+    });
+  });
+
+  describe('ESC-2 — a canonical key and its level are matched exactly, as ModuleScopeGuard reads them', () => {
+    it.each([
+      [{ Operations: 'Write' }, 'inbox_mark_resolved', 'operations', 'write'],
+      [{ Operations: 'Write' }, 'contracts_create', 'operations', 'write'],
+      [{ Operations: 'Write' }, 'performance_take_snapshot', 'operations', 'write'],
+      [{ Operations: 'Write' }, 'contracts_list', 'operations', 'read'],
+      [{ REVENUE: 'ADMIN' }, 'payments_create_link', 'revenue', 'write'],
+      [{ REVENUE: 'ADMIN' }, 'payments_refund_charge', 'revenue', 'write'],
+      [{ REVENUE: 'ADMIN' }, 'commerce_delete_invoice', 'revenue', 'write'],
+      [{ TEAM: 'admin' }, 'structure_create_delegation_rule', 'team', 'write'],
+      [{ Expenses: 'write' }, 'finance_create_bill', 'expenses', 'write'],
+      [{ crm: 'WRITE' }, 'crm_update_contact', 'crm', 'write'],
+      [{ crm: 'Admin' }, 'deals_delete', 'crm', 'write'],
+      [{ crm: 'read', CRM: 'admin' }, 'crm_delete_contact', 'crm', 'write'],
+      [{ crm: 'read', Crm: 'write' }, 'crm_create_contact', 'crm', 'write'],
+      [{ content: 'read', CONTENT: 'admin' }, 'assets_delete', 'content', 'write'],
+      [{ bookings: 'read', Bookings: 'write' }, 'calendar_create_event', 'bookings', 'write'],
+    ] as const)('%j: HTTP refuses %s (%s:%s), so KEY does too', async (permissions, tool, module, level) => {
+      expect(await httpAllows(permissions, module, level)).toBe(false);
+      for (const autonomyLevel of [undefined, 2, 3]) {
+        expect((await evaluate(permissions, tool, autonomyLevel)).allowed, `${tool} @ ${autonomyLevel}`).toBe(false);
+      }
+    });
+
+    it('a key that is canonical only once lower-cased grants no more than an empty map', () => {
+      const reached = (p: Record<string, string>) => {
+        const env = envelope(p);
+        return REGISTRY.filter((t) => passes(env, t)).sort();
+      };
+      const none = reached({});
+      const maps: Record<string, string>[] = [{ Operations: 'Write' }, { REVENUE: 'ADMIN' }, { TEAM: 'write' }, { Expenses: 'admin' }, { Revenue: 'write' }];
+      for (const p of maps) {
+        expect(reached(p), JSON.stringify(p)).toEqual(none);
+      }
+    });
+
+    it('the exact key and level still grant (positive control)', async () => {
+      expect(await evaluate({ operations: 'write' }, 'inbox_mark_resolved')).toMatchObject({ allowed: true });
+      expect(await evaluate({ revenue: 'admin' }, 'payments_create_link')).toMatchObject({ allowed: true });
+      expect(await evaluate({ crm: 'write' }, 'crm_update_contact')).toMatchObject({ allowed: true });
+    });
+  });
+
+  describe('ESC-3 — a legacy key never reaches a tool a canonical module governs', () => {
+    it.each([
+      [{ operations: 'none', inbox: 'write' }, 'inbox_mark_resolved', 'operations', 'write'],
+      [{ operations: 'none', comms: 'admin' }, 'inbox_reply_thread', 'operations', 'write'],
+      [{ inbox: 'write' }, 'inbox_update_thread_status', 'operations', 'write'],
+      [{ expenses: 'read', finance: 'write' }, 'finance_create_bill', 'expenses', 'write'],
+      [{ expenses: 'none', finance: 'admin' }, 'finance_pay_bill', 'expenses', 'write'],
+      [{ finance: 'write' }, 'expenses_create', 'expenses', 'write'],
+      [{ revenue: 'read', commerce: 'write' }, 'commerce_update_invoice', 'revenue', 'write'],
+      [{ revenue: 'none', sales: 'admin' }, 'commerce_delete_invoice', 'revenue', 'write'],
+      [{ sales: 'write' }, 'crm_create_contact', 'crm', 'write'],
+      [{ crm: 'read', sales: 'write' }, 'crm_update_contact', 'crm', 'write'],
+      [{ bookings: 'read', calendar: 'write' }, 'calendar_create_event', 'bookings', 'write'],
+      [{ team: 'read', hr: 'admin' }, 'structure_create_delegation_rule', 'team', 'write'],
+      [{ team: 'none', structure: 'read' }, 'structure_get_org_tree', 'team', 'read'],
+      [{ operations: 'read', contracts: 'write' }, 'contract_create_tag', 'operations', 'write'],
+      [{ operations: 'none', legal: 'write' }, 'contract_extract_terms', 'operations', 'write'],
+    ] as const)('%j: HTTP refuses %s (%s:%s), so KEY does too', async (permissions, tool, module, level) => {
+      expect(await httpAllows(permissions, module, level)).toBe(false);
+      for (const autonomyLevel of [undefined, 2, 3]) {
+        expect((await evaluate(permissions, tool, autonomyLevel)).allowed, `${tool} @ ${autonomyLevel}`).toBe(false);
+      }
+    });
+
+    it('the governing module itself still grants it (positive control)', async () => {
+      expect(await evaluate({ operations: 'write', inbox: 'read' }, 'inbox_mark_resolved')).toMatchObject({ allowed: true });
+      expect(await evaluate({ expenses: 'write', finance: 'read' }, 'finance_create_bill')).toMatchObject({ allowed: true });
+      expect(await evaluate({ revenue: 'write', commerce: 'read' }, 'commerce_update_invoice')).toMatchObject({ allowed: true });
+    });
+
+    it('a legacy key keeps the tools a member reaches over HTTP with no module (finance_cashflow, commerce_create_product, helpdesk_*)', async () => {
+      expect(await evaluate({ finance: 'write' }, 'finance_cashflow')).toMatchObject({ allowed: true });
+      expect(await evaluate({ sales: 'read' }, 'commerce_create_product')).toMatchObject({ allowed: true });
+      expect(await evaluate({ helpdesk: 'read' }, 'helpdesk_list_tickets')).toMatchObject({ allowed: true });
+      expect(await evaluate({ helpdesk: 'write' }, 'helpdesk_create_ticket')).toMatchObject({ allowed: true });
+    });
+  });
+
+  describe('ESC-4 — the crm_edit / crm_delete sub-permissions bound the KEY CRM writes', () => {
+    const access = (scopes: Record<string, unknown>) => resolveCrmAccess(membershipPrisma(scopes), 'biz_1', 'u_1');
+
+    it.each([
+      [{ crm: 'write', crm_edit: 'none' }, 'crm_update_contact'],
+      [{ crm: 'write', crm_edit: 'none' }, 'tag_contact'],
+      [{ crm: 'write', crm_edit: 'none' }, 'crm_create_contact'],
+      [{ crm: 'admin', crm_edit: 'none' }, 'crm_update_contact'],
+    ])('%j refuses %s: resolveCrmAccess gives editScope none', async (permissions, tool) => {
+      expect(jobRolePermissionsProblem(permissions)).toBeNull();
+      expect((await access(permissions)).editScope).toBe('none');
+      for (const autonomyLevel of [undefined, 3]) {
+        expect((await evaluate(permissions, tool, autonomyLevel)).allowed, `${tool} @ ${autonomyLevel}`).toBe(false);
+      }
+    });
+
+    it.each([
+      [{ crm: 'admin', crm_delete: 'none' }, 'none'],
+      [{ crm: 'admin', crm_delete: 'owned' }, 'owned'],
+    ])('%j refuses crm_delete_contact at autonomy 3: deleteScope %s', async (permissions, scope) => {
+      expect(jobRolePermissionsProblem(permissions)).toBeNull();
+      expect((await access(permissions)).deleteScope).toBe(scope);
+      for (const autonomyLevel of [undefined, 3]) {
+        expect((await evaluate(permissions, 'crm_delete_contact', autonomyLevel)).allowed).toBe(false);
+      }
+    });
+
+    it("an 'owned' edit scope is refused too: the dispatcher passes no actor, so KEY cannot keep to the holder's own contacts", async () => {
+      const permissions = { crm: 'write', crm_edit: 'owned' };
+      expect((await access(permissions)).editScope).toBe('owned');
+      expect((await evaluate(permissions, 'crm_update_contact')).allowed).toBe(false);
+      expect((await evaluate(permissions, 'tag_contact')).allowed).toBe(false);
+    });
+
+    it('positive controls: the defaults of the crm level, and an explicit any', async () => {
+      expect((await access({ crm: 'write' })).editScope).toBe('any');
+      expect(await evaluate({ crm: 'write' }, 'crm_update_contact')).toMatchObject({ allowed: true });
+      expect(await evaluate({ crm: 'write', crm_edit: 'any' }, 'tag_contact')).toMatchObject({ allowed: true });
+      expect((await access({ crm: 'admin' })).deleteScope).toBe('any');
+      expect(await evaluate({ crm: 'admin' }, 'crm_delete_contact', 3)).toMatchObject({ allowed: true });
+      expect(await evaluate({ crm: 'admin', crm_delete: 'any' }, 'crm_delete_contact', 3)).toMatchObject({ allowed: true });
+      // the sub-permissions bound only the tools whose service checks them: deals and notes need crm:write alone
+      expect(await evaluate({ crm: 'write', crm_edit: 'none' }, 'deals_mark_won')).toMatchObject({ allowed: true });
+      expect(await evaluate({ crm: 'write', crm_edit: 'none' }, 'crm_add_note')).toMatchObject({ allowed: true });
+    });
+  });
+
+  describe('C1 — a revenue position records a payment through KEY', () => {
+    it.each(['write', 'admin'])('{ revenue: %s } reaches commerce_mark_invoice_paid with a quick confirm, as PATCH invoices/:id/paid', async (level) => {
+      expect(await httpAllows({ revenue: level }, 'revenue', 'write')).toBe(true);
+      expect(await evaluate({ revenue: level }, 'commerce_mark_invoice_paid')).toMatchObject({ allowed: true, requiresQuickConfirm: true });
+    });
+
+    it('{ revenue: read } does not', async () => {
+      expect(await httpAllows({ revenue: 'read' }, 'revenue', 'write')).toBe(false);
+      expect((await evaluate({ revenue: 'read' }, 'commerce_mark_invoice_paid')).allowed).toBe(false);
+    });
+  });
+
+  describe('C2 — a read tool whose HTTP equivalent needs read is reached at read', () => {
+    it.each([
+      ['revenue', 'commerce_list_invoices'],
+      ['expenses', 'expenses_list'],
+      ['content', 'assets_get'],
+    ] as const)('{ %s: read | write | admin } reaches %s', async (module, tool) => {
+      for (const level of LEVELS) {
+        expect(await httpAllows({ [module]: level }, module, 'read')).toBe(true);
+        expect(await evaluate({ [module]: level }, tool), `${module}:${level}`).toMatchObject({ allowed: true });
+      }
+      expect((await evaluate({ [module]: 'none' }, tool)).allowed).toBe(false);
+    });
+  });
+
+  describe('ESC-5 (found re-probing this repair) — a legacy or case-variant key does not read what crm:read / bookings:read guard', () => {
+    // crm_list_contacts / crm_search_contacts / crm_list_deals / calendar_list_events read
+    // Prisma directly, so the first derivation called them ungoverned and every legacy
+    // alias of crm_* / calendar_* reached them — beside an explicit crm:'none'.
+    it.each([
+      [{ crm: 'none', CRM: 'admin' }, 'crm_list_contacts', 'crm'],
+      [{ crm: 'none', sales: 'read' }, 'crm_search_contacts', 'crm'],
+      [{ crm: 'none', sales: 'read' }, 'crm_list_deals', 'crm'],
+      [{ Crm: 'read' }, 'crm_list_contacts', 'crm'],
+      [{ bookings: 'none', calendar: 'read' }, 'calendar_list_events', 'bookings'],
+      [{ bookings: 'none', Bookings: 'read' }, 'calendar_list_events', 'bookings'],
+    ] as const)('%j: HTTP refuses %s (%s:read), so KEY does too', async (permissions, tool, module) => {
+      expect(await httpAllows(permissions, module, 'read')).toBe(false);
+      expect((await evaluate(permissions, tool)).allowed).toBe(false);
+    });
+
+    it.each([
+      [{ crm: 'read' }, 'crm_list_contacts'],
+      [{ crm: 'read' }, 'crm_search_contacts'],
+      [{ crm: 'read' }, 'crm_list_deals'],
+      [{ bookings: 'read' }, 'calendar_list_events'],
+    ])('positive control: %j reaches %s', async (permissions, tool) => {
+      expect(await evaluate(permissions, tool)).toMatchObject({ allowed: true });
+    });
+  });
+
+  describe('C3 — kept: the level-to-tier ladder caps a write grant at tier 2 (owner decision)', () => {
+    /** Table entries a write grant meets by route level but not by tier: they need admin. */
+    const tierCapped = ROUTED.filter(([t, , l]) => l !== 'admin' && TIER.get(t)! > 2).map(([t, m]) => `${m}:${t}`).sort();
+
+    it('pins exactly which write-route tools need admin, so a change to the ladder is a reviewed change', () => {
+      expect(tierCapped).toEqual(
+        [
+          'content:assets_delete',
+          'crm:crm_delete_contact',
+          'crm:crm_merge_execute',
+          'crm:deals_delete',
+          'expenses:finance_pay_bill',
+          'operations:contracts_delete',
+          'operations:inbox_reply_thread',
+          'operations:payroll_approve_run',
+          'operations:payroll_mark_paid',
+          'revenue:commerce_delete_invoice',
+          'revenue:commerce_send_invoice',
+          'revenue:payments_refund_charge',
+          'team:structure_create_delegation_rule',
+          'team:structure_update_delegation_rule',
+        ].sort(),
+      );
+      for (const entry of tierCapped) {
+        const [m, t] = entry.split(':');
+        expect(allows(envelope({ [m]: 'write' }), t), `${entry} @ write`).toBe(false);
+        expect(passes(envelope({ [m]: 'admin' }), t), `${entry} @ admin`).toBe(true);
+      }
+    });
+  });
+
+  describe('K2 property: over many scope maps, every governed tool KEY reaches is one HTTP gives the same map', () => {
+    const levelSpellings = ['read', 'write', 'admin', 'none', 'READ', 'Write', 'ADMIN'];
+    const legacyKeys = ['finance', 'sales', 'commerce', 'calendar', 'time', 'marketing', 'social', 'helpdesk', 'comms', 'inbox', 'structure', 'hr', 'contracts', 'legal', 'procurement', 'documents'];
+    const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+    const maps: Record<string, unknown>[] = [];
+    for (const m of CANONICAL_MODULES) {
+      for (const l of levelSpellings) maps.push({ [m]: l }, { [m.toUpperCase()]: l }, { [cap(m)]: l });
+    }
+    for (const k of legacyKeys) for (const l of levelSpellings) maps.push({ [k]: l }, { [k.toUpperCase()]: l });
+    for (const m of CANONICAL_MODULES) {
+      for (const k of [...legacyKeys, 'crm', 'bookings', 'content', 'projects']) {
+        for (const [lm, lk] of [['none', 'admin'], ['read', 'admin'], ['read', 'write'], ['write', 'admin']]) {
+          maps.push({ [m]: lm, [k]: lk }, { [m]: lm, [k.toUpperCase()]: lk });
+        }
+      }
+    }
+    for (const edit of [undefined, 'any', 'owned', 'none', 'ANY', 'bogus']) {
+      for (const del of [undefined, 'any', 'owned', 'none']) {
+        for (const crm of ['read', 'write', 'admin']) {
+          const p: Record<string, unknown> = { crm };
+          if (edit !== undefined) p.crm_edit = edit;
+          if (del !== undefined) p.crm_delete = del;
+          maps.push(p);
+        }
+      }
+    }
+    maps.push(Object.fromEntries(CANONICAL_MODULES.map((m) => [m.toUpperCase(), 'admin'])));
+    maps.push(Object.fromEntries(legacyKeys.map((k) => [k, 'admin'])));
+
+    /** The tools whose service call makes resolveCrmAccess's edit / delete check over HTTP. */
+    const CRM_EDIT = ['crm_create_contact', 'crm_update_contact', 'tag_contact'];
+    const CRM_DELETE = ['crm_delete_contact'];
+
+    it(`over ${maps.length} maps: a governed tool KEY reaches is allowed over HTTP`, async () => {
+      const memo = new Map<string, boolean>();
+      const violations: string[] = [];
+      for (const p of maps) {
+        const env = envelope(p);
+        for (const [tool, module, level] of ROUTED) {
+          if (!passes(env, tool)) continue;
+          const key = `${JSON.stringify(p)}|${module}|${level}`;
+          if (!memo.has(key)) memo.set(key, await httpAllows(p, module, level));
+          if (!memo.get(key)) violations.push(`${JSON.stringify(p)} -> ${tool} (${module}:${level})`);
+          if (CRM_EDIT.includes(tool) && (await resolveCrmAccess(membershipPrisma(p), 'biz_1', 'u_1')).editScope !== 'any') {
+            violations.push(`${JSON.stringify(p)} -> ${tool} (crm_edit is not any)`);
+          }
+          if (CRM_DELETE.includes(tool) && (await resolveCrmAccess(membershipPrisma(p), 'biz_1', 'u_1')).deleteScope !== 'any') {
+            violations.push(`${JSON.stringify(p)} -> ${tool} (crm_delete is not any)`);
+          }
+        }
+      }
+      expect(violations).toEqual([]);
+    });
+
+    it('a tool the routes govern but no single module grants is reached by no map', () => {
+      expect(Object.keys(GOVERNED_UNGRANTED)).toEqual(expect.arrayContaining(['update_status_with_confirmation', 'send_message_with_approval']));
+      for (const p of maps) {
+        const env = envelope(p);
+        for (const tool of Object.keys(GOVERNED_UNGRANTED)) expect(passes(env, tool), `${JSON.stringify(p)} -> ${tool}`).toBe(false);
+      }
+    });
   });
 });
