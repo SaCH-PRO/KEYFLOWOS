@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { JobRole, Membership } from '@prisma/client';
+import type { JobRole, Membership, User } from '@prisma/client';
 import { FLOW_TOOLS } from '../ai/flow-tool-registry';
 import { defaultCrmAccessForLevel } from '../crm/crm-permissions.helper';
 import {
@@ -295,8 +295,18 @@ export const NO_JOB_ROLE: Readonly<Pick<JobRole, 'id' | 'name' | 'permissions'>>
   permissions: {},
 };
 
-/** The holder's Membership, as ModuleScopeGuard and resolveCrmAccess read it. */
-export type HolderMembership = Pick<Membership, 'role' | 'permissionScopes'>;
+/**
+ * The holder's account, as AuthMiddleware reads it before any guard runs: a token whose User
+ * row is soft-deleted (deletedAt) or banned (bannedAt) is dropped, so every route answers
+ * 'Authentication required' (V1-21b review 5 INP4-1).
+ */
+export type HolderUser = Pick<User, 'deletedAt' | 'bannedAt'>;
+
+/**
+ * The holder's Membership, as ModuleScopeGuard and resolveCrmAccess read it, with the
+ * membership's user as AuthMiddleware reads it.
+ */
+export type HolderMembership = Pick<Membership, 'role' | 'permissionScopes'> & { user?: HolderUser | null };
 
 /**
  * A staff position as StructureService.resolveStaffByPhone returns it: its JobRole and, on the
@@ -318,6 +328,16 @@ export interface StaffPosition {
 function effectiveScopes(membership: HolderMembership): Record<string, unknown> {
   const scopes = membership.permissionScopes;
   return scopes && typeof scopes === 'object' ? (scopes as Record<string, unknown>) : defaultScopesForRole(membership.role);
+}
+
+/**
+ * Whether HTTP lets the membership's user in at all: its User row is given and neither
+ * soft-deleted nor banned, the checks AuthMiddleware.resolveLocalUser makes (any value set
+ * refuses). A user not given cannot be shown to be active (fail closed).
+ */
+function holderMayAuthenticate(membership: HolderMembership): boolean {
+  const user = membership.user;
+  return !!user && !user.deletedAt && !user.bannedAt;
 }
 
 /** Both envelope checks AiOversightService.evaluate applies: the tool is allowed and its tier within the cap. */
@@ -416,12 +436,18 @@ export class JobRolePolicyService {
    * scopes reach. A membership-backed position whose membership is not given keeps the
    * baseline only (fail closed). A contact-only position has no account and no HTTP access;
    * its JobRole map is its whole scope, as before.
+   *
+   * HTTP checks the account before any scope (V1-21b review 5 INP4-1): AuthMiddleware drops
+   * the token of a soft-deleted or banned user, so that holder reaches no route whatever its
+   * membership holds. Such a holder, and one whose User row is not given with the membership
+   * (fail closed), keeps the baseline only, as a holder with no membership does.
    */
   envelopeForPosition(position: StaffPosition | null | undefined): JobRoleEnvelope {
     const scoped = this.envelopeForJobRole(position?.jobRole ?? NO_JOB_ROLE);
     const membershipBacked = !!(position?.membershipId || position?.userId || position?.membership);
     if (!membershipBacked) return scoped;
-    const held = position?.membership ? effectiveScopes(position.membership) : {};
+    const membership = position?.membership;
+    const held = membership && holderMayAuthenticate(membership) ? effectiveScopes(membership) : {};
     return boundBy(
       scoped,
       this.envelopeForJobRole({ id: scoped.jobRoleId, name: scoped.jobRoleName, permissions: held as JobRole['permissions'] }),

@@ -874,14 +874,20 @@ export class StructureService {
    * numbers (the normal case — most inbound messages are from customers). The
    * holder's membership comes with it: on the membership path its scopes, not
    * the JobRole map, are what HTTP enforces, and they bound the position's KEY
-   * envelope (JobRolePolicyService.envelopeForPosition, V1-21b review 4 IC3-1).
+   * envelope (JobRolePolicyService.envelopeForPosition, V1-21b review 4 IC3-1), and so
+   * does its user's account state: AuthMiddleware refuses a soft-deleted or banned user
+   * every route, and the envelope then keeps the baseline only (review 5 INP4-1).
    */
   async resolveStaffByPhone(businessId: string, phone: string) {
     const normalized = normalizePhone(phone);
     if (!normalized) return null;
     return this.prisma.client.orgAssignment.findFirst({
       where: { businessId, contactPhone: normalized, endedAt: null },
-      include: { jobRole: true, orgUnit: true, membership: true },
+      include: {
+        jobRole: true,
+        orgUnit: true,
+        membership: { include: { user: { select: { deletedAt: true, bannedAt: true } } } },
+      },
     });
   }
 
