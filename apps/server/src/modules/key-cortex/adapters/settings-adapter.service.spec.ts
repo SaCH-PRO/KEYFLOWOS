@@ -41,7 +41,8 @@ describe('SettingsAdapterService', () => {
 
     prisma = {
       client: {
-        membership: { findFirst: vi.fn() },
+        // The command's actor holds connect:write, which configure_integration needs (R0-09c review ST-6).
+        membership: { findFirst: vi.fn(), findUnique: vi.fn().mockResolvedValue({ role: 'ADMIN', permissionScopes: { connect: 'write' } }) },
         user: { findUnique: vi.fn().mockResolvedValue({ role: 'USER' }) },
       },
     } as unknown as PrismaService;
@@ -230,5 +231,149 @@ describe('SettingsAdapterService — the D-11 owner rule on the command actor (R
     expect(result.success).toBe(true);
     expect(invite).toHaveBeenCalledWith(BIZ, 'a@example.com', 'STAFF', 'admin_member');
     expect(assertOwner).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * R0-09c review CR-1: remove_team_member and update_role looked their target up
+ * with membership.findFirst({ where: { userId: parameters.userId, businessId } }),
+ * and Prisma drops a key whose value is undefined, so a command with no
+ * parameters.userId matched whichever membership of the business came back
+ * first. The executor's compensation for a failed add_team_member is exactly
+ * such a command (remove_team_member with the add's {email, role}). Now a
+ * missing or non-string target is refused before any lookup, and nothing
+ * reaches IdentityService.
+ */
+describe('SettingsAdapterService — a team command names its target member (R0-09c review CR-1)', () => {
+  let service: SettingsAdapterService;
+  let identity: any;
+  let prisma: any;
+
+  const cmd = (action: string, parameters: Record<string, unknown>): ConnectorCommand => ({
+    module: 'settings', action, parameters, businessId: 'biz_cr1', userId: 'owner_cr1',
+    source: 'key_cortex', timestamp: new Date(), correlationId: 'corr_cr1',
+  });
+
+  beforeEach(() => {
+    identity = { removeTeamMember: vi.fn().mockResolvedValue({ success: true }), updateMemberRole: vi.fn().mockResolvedValue({ id: 'mem_any' }) };
+    // Like Postgres for a where clause Prisma has reduced to { businessId }, the stand-in answers some membership.
+    prisma = { client: { membership: { findFirst: vi.fn().mockResolvedValue({ id: 'mem_any', userId: 'whoever' }) } } };
+    service = new SettingsAdapterService(identity, {} as IntegrationHubService, prisma as PrismaService);
+  });
+
+  it("RED-BEFORE: remove_team_member and update_role with no parameters.userId (the add_team_member compensation's {email, role}) are refused and nothing is looked up, removed or re-roled", async () => {
+    for (const [action, parameters] of [
+      ['remove_team_member', { email: 'staff@example.com', role: 'STAFF' }],
+      ['update_role', { role: 'STAFF' }],
+    ] as const) {
+      const result = await service.execute(cmd(action, parameters));
+      expect(result, action).toMatchObject({ success: false, error: `settings.${action} needs parameters.userId, the member to change` });
+    }
+    expect(prisma.client.membership.findFirst).not.toHaveBeenCalled();
+    expect(identity.removeTeamMember).not.toHaveBeenCalled();
+    expect(identity.updateMemberRole).not.toHaveBeenCalled();
+  });
+
+  it('RED-BEFORE: an empty or non-string parameters.userId is refused the same way', async () => {
+    for (const userId of ['', null, 42, { not: 'x' }, ['usr_1']]) {
+      for (const action of ['remove_team_member', 'update_role']) {
+        const result = await service.execute(cmd(action, { userId, role: 'STAFF' }));
+        expect(result, `${action} ${JSON.stringify(userId)}`).toMatchObject({ success: false });
+      }
+    }
+    expect(prisma.client.membership.findFirst).not.toHaveBeenCalled();
+    expect(identity.removeTeamMember).not.toHaveBeenCalled();
+    expect(identity.updateMemberRole).not.toHaveBeenCalled();
+  });
+
+  it('a named target is looked up by that userId in the command business, as before', async () => {
+    await service.execute(cmd('remove_team_member', { userId: 'usr_target' }));
+    await service.execute(cmd('update_role', { userId: 'usr_target', role: 'ADMIN' }));
+    expect(prisma.client.membership.findFirst.mock.calls.map(([args]: any[]) => args.where)).toEqual([
+      { userId: 'usr_target', businessId: 'biz_cr1' },
+      { userId: 'usr_target', businessId: 'biz_cr1' },
+    ]);
+    expect(identity.removeTeamMember).toHaveBeenCalledWith('biz_cr1', 'mem_any', 'owner_cr1');
+    expect(identity.updateMemberRole).toHaveBeenCalledWith('biz_cr1', 'mem_any', 'ADMIN', 'owner_cr1');
+  });
+});
+
+/**
+ * R0-09c review ST-6: settings.configure_integration connected and disconnected
+ * integrations with no authority check, while the HTTP routes admit only
+ * connect:write (ModuleScopeGuard; connect is 'none' for every role by
+ * default). The adapter applies ModuleScopeGuard's rule on the command actor.
+ */
+describe('SettingsAdapterService — configure_integration needs connect:write, as the HTTP route does (R0-09c review ST-6)', () => {
+  const BIZ = 'biz_st6';
+  const MEMBERSHIPS: Record<string, { role: string; permissionScopes: unknown }> = {
+    owner_default: { role: 'OWNER', permissionScopes: null },
+    admin_default: { role: 'ADMIN', permissionScopes: null },
+    staff_default: { role: 'STAFF', permissionScopes: null },
+    admin_settings_write: { role: 'ADMIN', permissionScopes: { settings: 'write' } },
+    staff_connect_read: { role: 'STAFF', permissionScopes: { connect: 'read' } },
+    staff_connect_write: { role: 'STAFF', permissionScopes: { connect: 'write' } },
+    admin_connect_admin: { role: 'ADMIN', permissionScopes: { connect: 'admin' } },
+  };
+  const USERS: Record<string, string> = {
+    ...Object.fromEntries(Object.keys(MEMBERSHIPS).map((id) => [id, 'USER'])),
+    outsider: 'USER',
+    platform: 'SUPER_ADMIN',
+  };
+  let service: SettingsAdapterService;
+  let integrations: any;
+  let prisma: any;
+
+  const cmd = (userId: unknown, parameters: Record<string, unknown>): ConnectorCommand => ({
+    module: 'settings', action: 'configure_integration', parameters, businessId: BIZ, userId: userId as string,
+    source: 'key_cortex', timestamp: new Date(), correlationId: 'corr_st6',
+  });
+  const CONNECT = { integration: 'stripe', config: { key: 'x' } };
+  const DISCONNECT = { integration: 'stripe', enabled: false };
+
+  beforeEach(() => {
+    prisma = {
+      client: {
+        membership: {
+          findUnique: vi.fn(async ({ where }: any) => {
+            const { userId, businessId } = where.userId_businessId;
+            return businessId === BIZ ? MEMBERSHIPS[userId] ?? null : null;
+          }),
+        },
+        user: { findUnique: vi.fn(async ({ where }: any) => (USERS[where.id] ? { role: USERS[where.id] } : null)) },
+      },
+    };
+    integrations = { createConnection: vi.fn().mockResolvedValue({ id: 'conn_1' }), disconnect: vi.fn().mockResolvedValue(undefined) };
+    service = new SettingsAdapterService({} as IdentityService, integrations, prisma as PrismaService);
+  });
+
+  it('RED-BEFORE: a member below connect:write (every role default, an explicit map without connect, connect:read) is refused both connect and disconnect, and the integration hub is never called', async () => {
+    for (const actor of ['staff_default', 'admin_default', 'owner_default', 'admin_settings_write', 'staff_connect_read']) {
+      for (const parameters of [CONNECT, DISCONNECT]) {
+        const result = await service.execute(cmd(actor, parameters));
+        expect(result, `${actor} ${JSON.stringify(parameters)}`).toMatchObject({ success: false });
+        expect(String(result.error)).toMatch(/^Insufficient permissions: connect requires write access \(you have (none|read)\)$/);
+      }
+    }
+    expect(integrations.createConnection).not.toHaveBeenCalled();
+    expect(integrations.disconnect).not.toHaveBeenCalled();
+  });
+
+  it("RED-BEFORE: a non-member and a command with no human actor (missing, empty, 'system', 'key_ai') are refused", async () => {
+    for (const actor of ['outsider', undefined, '', 'system', 'key_ai']) {
+      const result = await service.execute(cmd(actor, DISCONNECT));
+      expect(result, String(actor)).toMatchObject({ success: false });
+    }
+    expect(integrations.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('a member granted connect write or admin, and SUPER_ADMIN, connect and disconnect', async () => {
+    for (const actor of ['staff_connect_write', 'admin_connect_admin', 'platform']) {
+      expect((await service.execute(cmd(actor, CONNECT))).success, actor).toBe(true);
+      expect((await service.execute(cmd(actor, DISCONNECT))).success, actor).toBe(true);
+    }
+    expect(integrations.createConnection).toHaveBeenCalledTimes(3);
+    expect(integrations.disconnect).toHaveBeenCalledTimes(3);
+    for (const [businessId, providerKey] of integrations.disconnect.mock.calls) expect([businessId, providerKey]).toEqual([BIZ, 'stripe']);
   });
 });

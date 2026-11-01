@@ -73,31 +73,35 @@ describe('KeyCortexController new endpoints', () => {
   });
 
   describe('GET /api/v1/cortex/messages', () => {
+    // The fourth argument is the principal @CurrentUser() reads (R0-09c): the session is that user's own.
+    const USER_1 = { id: 'user_1' };
+
     it('returns messages for the latest session when no sessionId is given', async () => {
-      const result = await controller.getMessages('biz_1');
-      expect(conversation.listSessions).toHaveBeenCalledWith('biz_1');
+      const result = await controller.getMessages('biz_1', undefined, undefined, USER_1);
+      // R0-09c review ST-3: the caller's own newest session, not the business's.
+      expect(conversation.listSessions).toHaveBeenCalledWith('biz_1', 'user_1');
       expect(result.messages).toHaveLength(2);
       expect(result.messages[1].sender).toBe('key');
     });
 
     it('returns messages for a specific sessionId', async () => {
-      const result = await controller.getMessages('biz_1', 'sess_1');
+      const result = await controller.getMessages('biz_1', 'sess_1', undefined, USER_1);
       expect(conversation.getSession).toHaveBeenCalledWith('sess_1');
       expect(result.messages).toHaveLength(2);
     });
 
     it('throws when businessId is missing', async () => {
-      await expect(controller.getMessages('')).rejects.toThrow(BadRequestException);
+      await expect(controller.getMessages('', undefined, undefined, USER_1)).rejects.toThrow(BadRequestException);
     });
 
     it("refuses a session id whose (cached) session belongs to another business (review ST-1)", async () => {
       (conversation.getSession as any) = vi.fn().mockResolvedValue({ ...mockSession, businessId: 'biz_2' });
-      await expect(controller.getMessages('biz_1', 'sess_1')).rejects.toThrow(NotFoundException);
+      await expect(controller.getMessages('biz_1', 'sess_1', undefined, USER_1)).rejects.toThrow(NotFoundException);
     });
 
     it('throws when no session exists', async () => {
       (conversation.listSessions as any) = vi.fn().mockResolvedValue([]);
-      await expect(controller.getMessages('biz_1')).rejects.toThrow(NotFoundException);
+      await expect(controller.getMessages('biz_1', undefined, undefined, USER_1)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -351,5 +355,136 @@ describe('R0-09c-KEY-ACTOR-BINDING — every handler acts for the authenticated 
       // A userId that is present is still a string, or the body is refused.
       await expect(pipe.transform({ ...body, userId: { id: 'x' } }, { type: 'body', metatype: mod[name] }), name).rejects.toThrow();
     }
+  });
+});
+
+/**
+ * R0-09c review ST-1..ST-4: a session is the member's who opened it. Every
+ * handler that takes a client session id hands the session services only one
+ * of the authenticated user's own sessions in the guard-checked tenant
+ * (`ownSession`): another member's session, like another tenant's, is not
+ * found. Before, GET/PATCH/DELETE sessions/:id and personalities/switch checked
+ * neither tenant nor owner, and messages, chat, chat/stream, stream,
+ * conscious/chat, conscious/stream and feedback checked only the tenant, so a
+ * STAFF member naming the OWNER's session read it, changed it, ran KEY on it
+ * (as the OWNER, for the conscious pipeline) and rewrote the OWNER's feedback.
+ */
+describe('R0-09c-KEY-ACTOR-BINDING — a session id names one of the caller\'s own sessions (review ST-1..ST-4)', () => {
+  const ME = { id: 'user_me', email: 'me@test.local', role: 'USER' };
+  const OWNERS_SESSION = { id: 'sess_owner', businessId: 'biz_1', userId: 'user_owner', messages: [{ id: 'm1', role: 'user', content: 'owner private' }] };
+  const MY_SESSION = { id: 'sess_me', businessId: 'biz_1', userId: ME.id, messages: [{ id: 'm2', role: 'user', content: 'mine' }] };
+  const SESSIONS: Record<string, unknown> = { sess_owner: OWNERS_SESSION, sess_me: MY_SESSION };
+  let ctl: any;
+  let conversation: any;
+  let sessionService: any;
+  let reasoning: any;
+  let learning: any;
+  let consciousness: any;
+  let personality: any;
+
+  const drain = (observable: { subscribe: (o: any) => unknown }) =>
+    new Promise<unknown[]>((resolve, reject) => {
+      const seen: unknown[] = [];
+      observable.subscribe({ next: (v: unknown) => seen.push(v), error: reject, complete: () => resolve(seen) });
+    });
+
+  beforeEach(() => {
+    conversation = {
+      getSession: vi.fn(async (id: string) => SESSIONS[id] ?? null),
+      listSessions: vi.fn().mockResolvedValue([MY_SESSION]),
+      updateSession: vi.fn(async (id: string, dto: any) => ({ ...(SESSIONS[id] as object), ...dto })),
+      deleteSession: vi.fn().mockResolvedValue(undefined),
+    };
+    sessionService = { getOrCreateSession: vi.fn(async (q: any) => ({ id: q.sessionId ?? 'sess_new', businessId: q.businessId, userId: q.userId })) };
+    reasoning = {
+      processQuery: vi.fn().mockResolvedValue({ text: 'ok' }),
+      streamQuery: vi.fn().mockImplementation(async function* () { yield { type: 'done' }; }),
+    };
+    learning = { recordFeedback: vi.fn().mockResolvedValue(undefined) };
+    consciousness = { processConsciously: vi.fn().mockResolvedValue({ text: 'ok', meta: {} }) };
+    personality = { switchPersona: vi.fn(async (session: any, persona: string) => ({ ...session, persona })) };
+    ctl = new KeyCortexController(
+      reasoning, conversation, {} as any, personality, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, learning,
+      {} as any, {} as any, consciousness, sessionService, {} as any,
+    );
+  });
+
+  it("RED-BEFORE: another member's session id in this tenant is not found on every route that takes one, and nothing reads, changes or runs on it", async () => {
+    const id = 'sess_owner';
+    await expect(ctl.getSession(id, 'biz_1', ME)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctl.updateSession(id, { title: 'hijacked' }, 'biz_1', ME)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctl.deleteSession(id, 'biz_1', ME)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctl.getMessages('biz_1', id, undefined, ME)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctl.chat({ text: 'hello', businessId: 'biz_1', sessionId: id }, ME)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctl.streamChat('biz_1', 'hello', ME, id)).rejects.toBeInstanceOf(NotFoundException);
+    const events = await drain(ctl.streamEvents('biz_1', 'hello', ME, id));
+    expect(events.map((e: any) => e.data)).toEqual([
+      expect.objectContaining({ type: 'error', content: 'Session not found' }),
+      expect.objectContaining({ type: 'complete' }),
+    ]);
+    await expect(ctl.consciousChat({ text: 'hello', businessId: 'biz_1', sessionId: id }, ME)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctl.consciousStream({ text: 'hello', businessId: 'biz_1', sessionId: id }, 'biz_1', ME)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctl.recordFeedback({ sessionId: id, businessId: 'biz_1', userResponse: 'rejected' }, ME)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctl.switchPersonality({ sessionId: id, persona: 'jarvis' }, 'biz_1', ME)).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(conversation.updateSession).not.toHaveBeenCalled();
+    expect(conversation.deleteSession).not.toHaveBeenCalled();
+    expect(reasoning.processQuery).not.toHaveBeenCalled();
+    expect(reasoning.streamQuery).not.toHaveBeenCalled();
+    expect(sessionService.getOrCreateSession).not.toHaveBeenCalled();
+    expect(consciousness.processConsciously).not.toHaveBeenCalled();
+    expect(learning.recordFeedback).not.toHaveBeenCalled();
+    expect(personality.switchPersona).not.toHaveBeenCalled();
+  });
+
+  it("RED-BEFORE: GET sessions/:id and personalities/switch refuse another tenant's (cached) session too", async () => {
+    await expect(ctl.getSession('sess_me', 'biz_2', ME)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctl.switchPersonality({ sessionId: 'sess_me', persona: 'jarvis' }, 'biz_2', ME)).rejects.toBeInstanceOf(NotFoundException);
+    expect(personality.switchPersona).not.toHaveBeenCalled();
+  });
+
+  it("RED-BEFORE: GET messages with no sessionId reads the caller's own newest session (listSessions(businessId, req.user))", async () => {
+    const result = await ctl.getMessages('biz_1', undefined, undefined, ME);
+    expect(conversation.listSessions.mock.calls).toEqual([['biz_1', ME.id]]);
+    expect(result.messages.map((m: any) => m.content)).toEqual(['mine']);
+  });
+
+  it("the caller's own session is used as before: GET/PATCH/DELETE sessions/:id, messages, chat, the streams, the conscious pipeline, feedback and personalities/switch", async () => {
+    const id = 'sess_me';
+    expect(await ctl.getSession(id, 'biz_1', ME)).toBe(MY_SESSION);
+    expect(await ctl.updateSession(id, { title: 'renamed' }, 'biz_1', ME)).toMatchObject({ id, title: 'renamed' });
+    await ctl.deleteSession(id, 'biz_1', ME);
+    expect(conversation.deleteSession).toHaveBeenCalledWith(id);
+    expect((await ctl.getMessages('biz_1', id, undefined, ME)).messages.map((m: any) => m.content)).toEqual(['mine']);
+    await ctl.chat({ text: 'hello', businessId: 'biz_1', sessionId: id }, ME);
+    await drain(await ctl.streamChat('biz_1', 'hello', ME, id));
+    await drain(ctl.streamEvents('biz_1', 'hello', ME, id));
+    expect(reasoning.processQuery.mock.calls.map(([q]: any[]) => q.sessionId)).toEqual([id]);
+    expect(reasoning.streamQuery.mock.calls.map(([q]: any[]) => q.sessionId)).toEqual([id, id]);
+    await ctl.consciousChat({ text: 'hello', businessId: 'biz_1', sessionId: id }, ME);
+    await drain(await ctl.consciousStream({ text: 'hello', businessId: 'biz_1', sessionId: id }, 'biz_1', ME));
+    expect(sessionService.getOrCreateSession.mock.calls.map(([q]: any[]) => [q.sessionId, q.userId])).toEqual([[id, ME.id], [id, ME.id]]);
+    await ctl.recordFeedback({ sessionId: id, businessId: 'biz_1', userResponse: 'accepted' }, ME);
+    expect(learning.recordFeedback).toHaveBeenCalledWith(expect.objectContaining({ sessionId: id, userId: ME.id }));
+    expect(await ctl.switchPersonality({ sessionId: id, persona: 'jarvis' }, 'biz_1', ME)).toMatchObject({ id, persona: 'jarvis' });
+  });
+
+  it('a session id found nowhere still starts a new session for the caller, and feedback on it still records a new row for the caller', async () => {
+    await ctl.chat({ text: 'hello', businessId: 'biz_1', sessionId: 'sess_unknown' }, ME);
+    expect(reasoning.processQuery.mock.calls[0][0]).toMatchObject({ sessionId: undefined, userId: ME.id });
+    await ctl.recordFeedback({ sessionId: 'sess_unknown', businessId: 'biz_1', userResponse: 'accepted' }, ME);
+    expect(learning.recordFeedback).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'sess_unknown', userId: ME.id }));
+  });
+
+  it('RED-BEFORE: GET/PATCH/DELETE sessions/:id and personalities/switch with no authenticated user answer 401 before any session read', async () => {
+    await expect(ctl.getSession('sess_me', 'biz_1', undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(ctl.updateSession('sess_me', { title: 'x' }, 'biz_1', undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(ctl.deleteSession('sess_me', 'biz_1', undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(ctl.getMessages('biz_1', 'sess_me', undefined, undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(ctl.switchPersonality({ sessionId: 'sess_me', persona: 'jarvis' }, 'biz_1', undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(conversation.getSession).not.toHaveBeenCalled();
+    expect(conversation.listSessions).not.toHaveBeenCalled();
   });
 });

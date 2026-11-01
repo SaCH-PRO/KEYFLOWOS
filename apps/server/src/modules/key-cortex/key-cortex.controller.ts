@@ -847,7 +847,9 @@ class EvolutionExplainDto {
  * `cortex:session:<id>` before the database and check no tenant there (the
  * Prisma tenant extension scopes only the database fallback). Every handler
  * that takes a client session id (messages, chat, chat/stream, stream,
- * conscious/chat, conscious/stream) goes through `tenantSessionId` first.
+ * conscious/chat, conscious/stream, and since R0-09c review ST-1..ST-4 also
+ * GET/PATCH/DELETE sessions/:id, personalities/switch and feedback) goes
+ * through `ownSession` first, which also refuses another member's session.
  *
  * R0-09c-KEY-ACTOR-BINDING (R0-09 review R09-ST-4; R0-34b review ST-3): the
  * ACTOR is bound the same way. Every handler that hands a user to a service
@@ -962,13 +964,22 @@ export class KeyCortexController {
 
   /**
    * GET /api/v1/cortex/sessions/:id
-   * Retrieve a single session including its messages.
+   * Retrieve a single session including its messages: only the authenticated
+   * user's own session in the business the guard checked (R0-09c review ST-1,
+   * ST-3). Another tenant's session (cached or not) and another member's
+   * session are not found, exactly like an unknown id (`ownSession`).
    */
   @Get('sessions/:id')
   async getSession(
     @Param('id') sessionId: string,
+    @GuardedBusinessId() businessId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<CortexSession> {
-    const session = await this.conversation.getSession(sessionId);
+    const actorId = requestActorId(user);
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+    const session = await this.ownSession(businessId, actorId, sessionId);
     if (!session) {
       throw new NotFoundException(`Session ${sessionId} not found`);
     }
@@ -977,13 +988,17 @@ export class KeyCortexController {
 
   /**
    * PATCH /api/v1/cortex/sessions/:id
-   * Update session metadata (persona, voice, provider, mood, title, status).
+   * Update session metadata (persona, voice, provider, mood, title, status) of
+   * the authenticated user's own session (R0-09c review ST-3, `ownSession`).
    */
   @Patch('sessions/:id')
   async updateSession(
     @Param('id') sessionId: string,
     @Body() dto: UpdateSessionDto,
+    @GuardedBusinessId() businessId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<CortexSession> {
+    await this.requireOwnSession(businessId, user, sessionId);
     try {
       return await this.conversation.updateSession(sessionId, dto as any);
     } catch (err: any) {
@@ -997,11 +1012,17 @@ export class KeyCortexController {
 
   /**
    * DELETE /api/v1/cortex/sessions/:id
-   * Delete a session and all associated messages.
+   * Delete (archive) the authenticated user's own session (R0-09c review ST-3,
+   * `ownSession`).
    */
   @Delete('sessions/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteSession(@Param('id') sessionId: string): Promise<void> {
+  async deleteSession(
+    @Param('id') sessionId: string,
+    @GuardedBusinessId() businessId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
+  ): Promise<void> {
+    await this.requireOwnSession(businessId, user, sessionId);
     try {
       await this.conversation.deleteSession(sessionId);
     } catch (err: any) {
@@ -1034,7 +1055,7 @@ export class KeyCortexController {
     if (!query.businessId) {
       throw new BadRequestException('businessId is required');
     }
-    const sessionId = await this.tenantSessionId(query.businessId, query.sessionId);
+    const sessionId = await this.ownSessionId(query.businessId, actorId, query.sessionId);
 
     try {
       // The actor overrides any body userId (R0-09c).
@@ -1063,8 +1084,9 @@ export class KeyCortexController {
    * non-streaming POST /chat.
    *
    * A session id naming another tenant's session is refused before the stream
-   * starts (review ST-1, `tenantSessionId`). The query streams for the
-   * authenticated user; a `?userId` is ignored (R0-09c).
+   * starts (review ST-1, `ownSessionId`), and so is another member's
+   * (R0-09c review ST-2). The query streams for the authenticated user; a
+   * `?userId` is ignored (R0-09c).
    */
   @Sse('chat/stream')
   async streamChat(
@@ -1080,7 +1102,7 @@ export class KeyCortexController {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
     }
-    const sessionId = await this.tenantSessionId(businessId, requestedSessionId);
+    const sessionId = await this.ownSessionId(businessId, userId, requestedSessionId);
 
     const subject = new Subject<CortexStreamChunk>();
 
@@ -1110,14 +1132,17 @@ export class KeyCortexController {
 
   /**
    * GET /api/v1/cortex/messages
-   * Retrieve recent messages for a business/session.
-   * If no sessionId is provided, the most recent session for the business is used.
+   * Retrieve recent messages of one of the authenticated user's own sessions.
+   * If no sessionId is provided, the user's most recent session in the
+   * business is used (R0-09c review ST-3: it was the business's most recent
+   * session, whoever owned it).
    */
   @Get('messages')
   async getMessages(
     @GuardedBusinessId() businessId: string,
     @Query('sessionId') sessionId?: string,
     @Query('limit') limit?: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<{ messages: Array<{
     id: string;
     sender: 'user' | 'key' | 'system';
@@ -1125,19 +1150,19 @@ export class KeyCortexController {
     timestamp: string;
     metadata?: Record<string, unknown>;
   }> }> {
+    const actorId = requestActorId(user);
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
     }
 
     let session: CortexSession | null;
     if (sessionId) {
-      session = await this.conversation.getSession(sessionId);
       // Review ST-1: getSession reads the session cache before the tenant-scoped
-      // database, so another tenant's cached session comes back here. Not
-      // found, as for an id that does not exist.
-      if (session && session.businessId !== businessId) session = null;
+      // database, so another tenant's cached session came back here; another
+      // member's session is refused the same way (R0-09c review ST-3).
+      session = await this.ownSession(businessId, actorId, sessionId);
     } else {
-      const sessions = await this.conversation.listSessions(businessId);
+      const sessions = await this.conversation.listSessions(businessId, actorId);
       session = sessions[0] ?? null;
     }
 
@@ -1203,9 +1228,10 @@ export class KeyCortexController {
     };
 
     // Review ST-1: a session id naming another tenant's session ends the stream
-    // with an error event before the reasoning engine runs (`tenantSessionId`).
-    const chunks = defer(() => this.tenantSessionId(businessId, sessionId)).pipe(
-      switchMap((ownSessionId) => from(this.reasoning.streamQuery({ ...query, sessionId: ownSessionId }))),
+    // with an error event before the reasoning engine runs, and so does another
+    // member's (`ownSessionId`).
+    const chunks = defer(() => this.ownSessionId(businessId, userId, sessionId)).pipe(
+      switchMap((checkedSessionId) => from(this.reasoning.streamQuery({ ...query, sessionId: checkedSessionId }))),
     );
 
     return chunks.pipe(
@@ -1304,6 +1330,12 @@ export class KeyCortexController {
     if (!dto.userResponse) {
       throw new BadRequestException('userResponse is required');
     }
+    // R0-09c review ST-4: recordFeedback rewrites the newest cognition memory of
+    // the session in place (its userResponse and lessons) and attributes nothing
+    // to the caller there, so feedback on another member's session (or another
+    // tenant's) is refused as not found. An id that names no session still
+    // records a new row for the caller, as before.
+    await this.ownSession(dto.businessId, actorId, dto.sessionId);
 
     await this.learning.recordFeedback({ ...dto, userId: actorId });
     return { success: true };
@@ -1449,22 +1481,31 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/personalities/switch
-   * Switch personality mid-session.
+   * Switch personality mid-session, on the authenticated user's own session in
+   * the business the guard checked (R0-09c review ST-1: this handler takes a
+   * client session id too, and answered with that session, messages included,
+   * whichever tenant or member it belonged to).
    */
   @Post('personalities/switch')
   @HttpCode(HttpStatus.OK)
   async switchPersonality(
     @Body() dto: SwitchPersonalityDto,
+    @GuardedBusinessId() businessId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Promise<CortexSession> {
+    const actorId = requestActorId(user);
     if (!dto.sessionId) {
       throw new BadRequestException('sessionId is required');
     }
     if (!dto.persona) {
       throw new BadRequestException('persona is required');
     }
+    if (!businessId) {
+      throw new BadRequestException('businessId is required');
+    }
 
     try {
-      const session = await this.conversation.getSession(dto.sessionId);
+      const session = await this.ownSession(businessId, actorId, dto.sessionId);
       if (!session) {
         throw new NotFoundException(`Session ${dto.sessionId} not found`);
       }
@@ -3353,7 +3394,7 @@ export class KeyCortexController {
       text: dto.text,
       businessId: dto.businessId,
       userId: actorId,
-      sessionId: await this.tenantSessionId(dto.businessId, dto.sessionId),
+      sessionId: await this.ownSessionId(dto.businessId, actorId, dto.sessionId),
     } as CortexQuery);
 
     // Collect the phases the pipeline actually emits. Deriving them from
@@ -3402,8 +3443,9 @@ export class KeyCortexController {
    * `businessId` field of the DTO: a GET can still carry a JSON body, which the
    * guard resolves before the query. A session id naming another tenant's
    * session is refused before the stream starts (review ST-1,
-   * `tenantSessionId`). The session it writes is the authenticated user's, never
-   * the query's `userId` (R0-09c, R0-34b review ST-3).
+   * `ownSessionId`), and so is another member's (R0-09c review ST-2). The
+   * session it writes is the authenticated user's, never the query's `userId`
+   * (R0-09c, R0-34b review ST-3).
    */
   @Sse('conscious/stream')
   async consciousStream(
@@ -3417,7 +3459,7 @@ export class KeyCortexController {
     const actorId = requestActorId(user);
     if (!dto.text?.trim()) throw new BadRequestException('text is required');
     if (!businessId) throw new BadRequestException('businessId is required');
-    const sessionId = await this.tenantSessionId(businessId, dto.sessionId);
+    const sessionId = await this.ownSessionId(businessId, actorId, dto.sessionId);
 
     const subject = new Subject<{ type: string; data: Record<string, unknown> }>();
 
@@ -3519,8 +3561,9 @@ export class KeyCortexController {
   }
 
   /**
-   * Review ST-1: the session id a handler may hand the session services for
-   * `businessId`, the tenant the guard checked.
+   * Review ST-1, and R0-09c review ST-1..ST-4: the authenticated user's own
+   * session `sessionId` in `businessId`, the tenant the guard checked, or null
+   * when no session has that id.
    *
    * KeyCortexConversationService.getSession and
    * KeyCortexSessionService.getOrCreateSession read the Redis entry
@@ -3528,20 +3571,55 @@ export class KeyCortexController {
    * Prisma tenant extension scopes only the database fallback. So a member of
    * A naming B's session id, once B's own traffic had cached it, read B's
    * messages and ran chat, the streams and the conscious pipeline on B's
-   * session (appending A's turns to B's cached session).
+   * session (appending A's turns to B's cached session). Within one tenant the
+   * services check no owner either, so a STAFF member naming the OWNER's
+   * session id read the OWNER's conversation (GET sessions/:id, GET messages),
+   * renamed or archived it (PATCH, DELETE), ran the reasoning engine and the
+   * conscious pipeline on it (the pipeline then acted for session.userId, the
+   * OWNER) and rewrote the OWNER's feedback on it.
    *
-   * A session of another tenant is refused as not found (an `error` event once
-   * an SSE stream is committed). A session found nowhere in this tenant gives
-   * `undefined`, so the services start a new session under `businessId`
-   * exactly as they did for an unknown id; the caller's id never reaches their
-   * cache read, so a session cached after this check cannot be picked up.
-   * Sessions never change tenant, so an id returned here stays this tenant's.
+   * A session is its creator's: POST sessions and the session services create
+   * it for the authenticated actor (R0-09c), and GET sessions lists only the
+   * actor's own. A session of another tenant, or of another member of this
+   * one, is refused as not found, like an unknown id on the routes that read
+   * one (an `error` event once an SSE stream is committed); there is no
+   * cross-member read here, SUPER_ADMIN included.
    */
-  private async tenantSessionId(businessId: string, sessionId: string | undefined): Promise<string | undefined> {
-    if (!sessionId) return undefined;
+  private async ownSession(businessId: string, actorId: string, sessionId: string): Promise<CortexSession | null> {
     const session = await this.conversation.getSession(sessionId);
-    if (!session) return undefined;
-    if (session.businessId !== businessId) throw new NotFoundException('Session not found');
-    return sessionId;
+    if (!session) return null;
+    if (session.businessId !== businessId || session.userId !== actorId) {
+      throw new NotFoundException('Session not found');
+    }
+    return session;
+  }
+
+  /**
+   * The session id a handler may hand the session services (chat, the
+   * streams, the conscious pipeline): one of the actor's own sessions in this
+   * tenant (`ownSession`), or `undefined` when no session has that id, so the
+   * services start a new session for the actor under `businessId` exactly as
+   * they did for an unknown id; the caller's id never reaches their cache
+   * read, so a session cached after this check cannot be picked up. Sessions
+   * never change tenant or owner, so an id returned here stays the actor's.
+   */
+  private async ownSessionId(businessId: string, actorId: string, sessionId: string | undefined): Promise<string | undefined> {
+    if (!sessionId) return undefined;
+    return (await this.ownSession(businessId, actorId, sessionId)) ? sessionId : undefined;
+  }
+
+  /** PATCH and DELETE sessions/:id: the session must exist and be the actor's own (`ownSession`). */
+  private async requireOwnSession(
+    businessId: string | undefined,
+    user: AuthenticatedUser | undefined,
+    sessionId: string,
+  ): Promise<void> {
+    const actorId = requestActorId(user);
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+    if (!(await this.ownSession(businessId, actorId, sessionId))) {
+      throw new NotFoundException(`Session ${sessionId} not found`);
+    }
   }
 }

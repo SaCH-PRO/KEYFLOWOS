@@ -53,9 +53,11 @@
  * the reasoning engine and the consciousness pipeline (answer at once,
  * recording the user and session they are handed, exactly as R0-34b's suite
  * does); the blueprint mirror and the default-trigger seeder IdentityService
- * holds; globalThis.fetch (recorded and refused); and the collaborators the
- * controller holds for its other routes (an allow-listed mocker). Vitest's
- * esbuild transform emits no parameter types, so the suite writes the ones tsc
+ * holds; the integration hub (records what settings.configure_integration
+ * reaches; no provider is contacted); globalThis.fetch (recorded and refused);
+ * and the collaborators the controller holds for its other routes (an
+ * allow-listed mocker). Vitest's esbuild transform emits no parameter types,
+ * so the suite writes the ones tsc
  * emits for the controller's constructor and for the handlers it drives
  * (key-cortex.controller.spec.ts checks them against tsc's own output).
  *
@@ -86,7 +88,14 @@ const ID = {
   bizB: `${P}bizB`,
   sessionOwnerA: `${P}session_ownerA`,
   sessionStaffA: `${P}session_staffA`,
+  sessionOutsiderB: `${P}session_outsiderB`,
 };
+
+/** What each seeded session holds, so a read of someone else's session is visible in the response body. */
+const OWNER_PRIVATE = 'k34c OWNER private note';
+const STAFF_NOTE = 'k34c STAFF own note';
+const B_PRIVATE = 'k34c B private note';
+const note = (id: string, content: string) => ({ id, role: 'user', content, timestamp: '2026-10-31T00:00:00.000Z', metadata: {} });
 
 const A_PROFILE = { name: 'K34C Biz A', timezone: 'UTC', currency: 'USD' };
 const A_BRANDING = { primaryColor: '#111111', logoUrl: 'https://k34c.test/logo-a.png' };
@@ -121,9 +130,11 @@ const autonomyCalls: Array<{ businessId: unknown; actionType: unknown; proposedB
 /** Every natural-language parse, with the user it was handed. */
 const parseCalls: Array<{ text: unknown; businessId: unknown; userId: unknown }> = [];
 /** Every query the reasoning engine was handed (chat, chat/stream, stream). */
-const reasoningCalls: Array<{ method: string; businessId: unknown; userId: unknown }> = [];
+const reasoningCalls: Array<{ method: string; businessId: unknown; userId: unknown; sessionId?: unknown }> = [];
 /** Every session the consciousness pipeline was handed (conscious/chat, conscious/stream). */
 const consciousCalls: Array<{ sessionId: unknown; businessId: unknown; userId: unknown }> = [];
+/** Every call the integration hub stand-in received (settings.configure_integration). */
+const integrationCalls: unknown[][] = [];
 /** Every globalThis.fetch the process attempted during the suite (refused). */
 const outbound: string[] = [];
 const cache = new Map<string, string>();
@@ -150,6 +161,7 @@ async function cleanup() {
     `DELETE FROM cognition_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -296,17 +308,18 @@ beforeAll(async () => {
   const registry = { getAllCapabilities: () => [], getCapabilities: () => [], formatCapabilitiesForPrompt: () => '' };
   const blueprint = { inferFromOnboarding: async () => undefined };
   const defaultTriggers = { seedForBusiness: async () => 0 };
+  // Records what settings.configure_integration reaches (no provider is contacted).
   const integrationsOff = {
-    createConnection: async () => { throw new Error('k34c: integrations are off this path'); },
-    disconnect: async () => { throw new Error('k34c: integrations are off this path'); },
+    createConnection: async (...args: unknown[]) => { integrationCalls.push(['createConnection', ...args.slice(0, 2)]); return { id: `${P}conn` }; },
+    disconnect: async (...args: unknown[]) => { integrationCalls.push(['disconnect', ...args.slice(0, 2)]); return undefined; },
   };
   const reasoning = {
     processQuery: async (q: any) => {
-      reasoningCalls.push({ method: 'processQuery', businessId: q?.businessId, userId: q?.userId });
+      reasoningCalls.push({ method: 'processQuery', businessId: q?.businessId, userId: q?.userId, sessionId: q?.sessionId });
       return { text: 'k34c answer' };
     },
     streamQuery: async function* (q: any) {
-      reasoningCalls.push({ method: 'streamQuery', businessId: q?.businessId, userId: q?.userId });
+      reasoningCalls.push({ method: 'streamQuery', businessId: q?.businessId, userId: q?.userId, sessionId: q?.sessionId });
       yield { type: 'text_delta', content: 'k34c answer' };
       yield { type: 'done' };
     },
@@ -447,8 +460,9 @@ beforeAll(async () => {
   await db.membership.create({ data: { id: `${P}m_staffA`, userId: ID.staffA, businessId: ID.bizA, role: 'STAFF' } });
   await db.membership.create({ data: { id: `${P}m_adminA`, userId: ID.adminA, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { settings: 'write' } } });
   await db.membership.create({ data: { id: `${P}m_outsider`, userId: ID.outsider, businessId: ID.bizB, role: 'OWNER' } });
-  await db.cortexSession.create({ data: { id: ID.sessionOwnerA, businessId: ID.bizA, userId: ID.ownerA, title: 'k34c owner session', messages: [] } });
-  await db.cortexSession.create({ data: { id: ID.sessionStaffA, businessId: ID.bizA, userId: ID.staffA, title: 'k34c staff session', messages: [] } });
+  await db.cortexSession.create({ data: { id: ID.sessionOwnerA, businessId: ID.bizA, userId: ID.ownerA, title: 'k34c owner session', messages: [note(`${P}msg_owner`, OWNER_PRIVATE)] } });
+  await db.cortexSession.create({ data: { id: ID.sessionStaffA, businessId: ID.bizA, userId: ID.staffA, title: 'k34c staff session', messages: [note(`${P}msg_staff`, STAFF_NOTE)] } });
+  await db.cortexSession.create({ data: { id: ID.sessionOutsiderB, businessId: ID.bizB, userId: ID.outsider, title: 'k34c B session', messages: [note(`${P}msg_b`, B_PRIVATE)] } });
 
   // No case below may reach a real provider: every global fetch is recorded and refused.
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
@@ -705,6 +719,215 @@ describe('the session and reasoning routes act for the authenticated member, nev
     const rows = await db.cognitionMemory.findMany({ where: { businessId: ID.bizA, sessionId }, select: { userId: true } });
     expect(rows).toEqual([{ userId: ID.staffA }]);
   });
+});
+
+/**
+ * R0-09c review ST-1..ST-4: a session is the member's who opened it (POST
+ * sessions and the session services create it for the authenticated actor, and
+ * GET sessions lists only the actor's own). The handlers that take a client
+ * session id checked no owner, and GET/PATCH/DELETE sessions/:id and
+ * personalities/switch no tenant either, while the session services read the
+ * Redis entry before the tenant-scoped database. So a member of B read A's
+ * cached conversation, a STAFF member read, renamed and archived the OWNER's,
+ * ran the reasoning engine and the conscious pipeline on it (the pipeline then
+ * acting as the OWNER), got it from GET messages as the business's newest
+ * session, and rewrote the OWNER's feedback on it.
+ */
+describe("a session id names one of the caller's own sessions (review ST-1, ST-2, ST-3, ST-4)", () => {
+  const sessionRow = (id: string) => db.cortexSession.findUnique({ where: { id }, select: { title: true, status: true, userId: true, messages: true } });
+  const getAs = (user: string, path: string, query: Record<string, string>) =>
+    request(app.getHttpServer()).get(`/api/v1/cortex/${path}`).set(HEADER, user).query(query);
+
+  it("RED-BEFORE: GET sessions/:id naming A's session from B, with A's session cached by its owner's own traffic, is 404 and returns none of its messages (review ST-1)", async () => {
+    // The OWNER reads its own session: the cache now holds it, as in production.
+    const warm = await getAs(ID.ownerA, 'messages', { businessId: ID.bizA, sessionId: ID.sessionOwnerA });
+    expect(warm.status, JSON.stringify(warm.body)).toBe(200);
+    expect(JSON.stringify(warm.body)).toContain(OWNER_PRIVATE);
+    expect(cache.has(`cortex:session:${ID.sessionOwnerA}`)).toBe(true);
+
+    const res = await getAs(ID.outsider, `sessions/${ID.sessionOwnerA}`, { businessId: ID.bizB });
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
+    expect(JSON.stringify(res.body)).not.toContain(OWNER_PRIVATE);
+  });
+
+  it("RED-BEFORE: GET, PATCH and DELETE sessions/:id naming the OWNER's session are 404 for a STAFF member, and the session is unchanged (review ST-3)", async () => {
+    const before = await sessionRow(ID.sessionOwnerA);
+    const read = await getAs(ID.staffA, `sessions/${ID.sessionOwnerA}`, { businessId: ID.bizA });
+    expect(read.status, JSON.stringify(read.body)).toBe(404);
+    expect(JSON.stringify(read.body)).not.toContain(OWNER_PRIVATE);
+
+    const patch = await request(app.getHttpServer())
+      .patch(`/api/v1/cortex/sessions/${ID.sessionOwnerA}`).set(HEADER, ID.staffA).query({ businessId: ID.bizA }).send({ title: `${P}hijacked title` });
+    expect(patch.status, JSON.stringify(patch.body)).toBe(404);
+    const del = await request(app.getHttpServer())
+      .delete(`/api/v1/cortex/sessions/${ID.sessionOwnerA}`).set(HEADER, ID.staffA).query({ businessId: ID.bizA });
+    expect(del.status, JSON.stringify(del.body)).toBe(404);
+
+    expect(await sessionRow(ID.sessionOwnerA)).toEqual(before);
+    expect(before).toMatchObject({ title: 'k34c owner session', status: 'active', userId: ID.ownerA });
+  });
+
+  it("the OWNER reads and renames its own session, and a STAFF member archives its own (positive control)", async () => {
+    const read = await getAs(ID.ownerA, `sessions/${ID.sessionOwnerA}`, { businessId: ID.bizA });
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(read.body).toMatchObject({ id: ID.sessionOwnerA, userId: ID.ownerA });
+    expect(JSON.stringify(read.body)).toContain(OWNER_PRIVATE);
+
+    const renamed = await request(app.getHttpServer())
+      .patch(`/api/v1/cortex/sessions/${ID.sessionOwnerA}`).set(HEADER, ID.ownerA).query({ businessId: ID.bizA }).send({ title: 'k34c owner session' });
+    expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+
+    const created = await post('sessions', ID.staffA, { businessId: ID.bizA, title: 'k34c staff throwaway' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const del = await request(app.getHttpServer())
+      .delete(`/api/v1/cortex/sessions/${created.body.id}`).set(HEADER, ID.staffA).query({ businessId: ID.bizA });
+    expect(del.status, JSON.stringify(del.body)).toBe(204);
+    expect(await sessionRow(created.body.id)).toMatchObject({ status: 'archived', userId: ID.staffA });
+  });
+
+  it("RED-BEFORE: GET messages with no sessionId gives a STAFF member its own newest session, never the OWNER's newer one (review ST-3)", async () => {
+    const soon = Date.now() + 86_400_000;
+    await db.cortexSession.update({ where: { id: ID.sessionStaffA }, data: { lastAccessedAt: new Date(soon) } });
+    await db.cortexSession.update({ where: { id: ID.sessionOwnerA }, data: { lastAccessedAt: new Date(soon + 60_000) } });
+
+    const res = await getAs(ID.staffA, 'messages', { businessId: ID.bizA });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(JSON.stringify(res.body)).not.toContain(OWNER_PRIVATE);
+    expect(res.body.messages.map((m: any) => m.content)).toEqual([STAFF_NOTE]);
+  });
+
+  it("RED-BEFORE: a STAFF member naming the OWNER's session on POST chat, POST conscious/chat, GET chat/stream, GET stream and GET conscious/stream is refused, and neither the reasoning engine nor the conscious pipeline is handed that session or acts as the OWNER (review ST-2)", async () => {
+    const before = await sessionRow(ID.sessionOwnerA);
+    const from = { reasoning: reasoningCalls.length, conscious: consciousCalls.length };
+    const body = { businessId: ID.bizA, text: 'Hello from k34c', sessionId: ID.sessionOwnerA };
+
+    const chat = await post('chat', ID.staffA, body);
+    expect(chat.status, JSON.stringify(chat.body)).toBe(404);
+    const conscious = await post('conscious/chat', ID.staffA, body);
+    expect(conscious.status, JSON.stringify(conscious.body)).toBe(404);
+    // Under the production TenantInterceptor an SSE handler runs once the stream is subscribed: the refusal is an error event.
+    for (const [path, query] of [
+      ['chat/stream', { businessId: ID.bizA, text: 'Hello from k34c', sessionId: ID.sessionOwnerA }],
+      ['conscious/stream', { businessId: ID.bizA, text: 'Hello from k34c', sessionId: ID.sessionOwnerA }],
+    ] as const) {
+      const res = await sse(path, ID.staffA, query);
+      expect(res.status, `${path} ${String(res.body)}`).toBe(200);
+      expect(String(res.body), path).toMatch(/event: error\n(?:id: [^\n]*\n)?data: [^\n]*Session not found/);
+      expect(String(res.body), path).not.toContain('k34c answer');
+    }
+    const stream = await sse('stream', ID.staffA, { businessId: ID.bizA, message: 'Hello from k34c', sessionId: ID.sessionOwnerA });
+    expect(stream.status).toBe(200);
+    expect(String(stream.body)).toMatch(/"type":"error"[^\n]*"content":"Session not found"/);
+
+    expect(reasoningCalls.slice(from.reasoning), 'queries handed to the reasoning engine').toEqual([]);
+    expect(consciousCalls.slice(from.conscious), 'sessions handed to the conscious pipeline').toEqual([]);
+    expect(await sessionRow(ID.sessionOwnerA)).toEqual(before);
+  });
+
+  it("a STAFF member naming its own session runs chat and the conscious pipeline on it, as itself (positive control)", async () => {
+    const from = { reasoning: reasoningCalls.length, conscious: consciousCalls.length };
+    const body = { businessId: ID.bizA, text: 'Hello from k34c', sessionId: ID.sessionStaffA };
+    expect((await post('chat', ID.staffA, body)).status).toBe(200);
+    expect((await post('conscious/chat', ID.staffA, body)).status).toBe(200);
+    expect(reasoningCalls.slice(from.reasoning)).toEqual([{ method: 'processQuery', businessId: ID.bizA, userId: ID.staffA, sessionId: ID.sessionStaffA }]);
+    expect(consciousCalls.slice(from.conscious)).toEqual([{ sessionId: ID.sessionStaffA, businessId: ID.bizA, userId: ID.staffA }]);
+  });
+
+  it("RED-BEFORE: feedback from a STAFF member on the OWNER's session is 404 and the OWNER's cognition memory is unchanged; the OWNER's own feedback updates it (review ST-4)", async () => {
+    const memoryId = `${P}cm_owner`;
+    await db.cognitionMemory.create({
+      data: {
+        id: memoryId, businessId: ID.bizA, userId: ID.ownerA, sessionId: ID.sessionOwnerA,
+        query: 'k34c owner question', recommendation: 'k34c recommendation', userResponse: 'accepted', confidence: 0.7,
+      },
+    });
+    const rowsOf = () => db.cognitionMemory.findMany({ where: { sessionId: ID.sessionOwnerA }, select: { id: true, userId: true, userResponse: true } });
+
+    const staff = await post('feedback', ID.staffA, { businessId: ID.bizA, sessionId: ID.sessionOwnerA, userResponse: 'rejected' });
+    expect(staff.status, JSON.stringify(staff.body)).toBe(404);
+    expect(await rowsOf()).toEqual([{ id: memoryId, userId: ID.ownerA, userResponse: 'accepted' }]);
+
+    const owner = await post('feedback', ID.ownerA, { businessId: ID.bizA, sessionId: ID.sessionOwnerA, userResponse: 'modified' });
+    expect(owner.status, JSON.stringify(owner.body)).toBe(200);
+    expect(await rowsOf()).toEqual([{ id: memoryId, userId: ID.ownerA, userResponse: 'modified' }]);
+  });
+
+  it("RED-BEFORE: POST personalities/switch naming the OWNER's session is 404 for a STAFF member and for a member of B, and returns none of its messages (review ST-1)", async () => {
+    for (const [user, businessId] of [[ID.staffA, ID.bizA], [ID.outsider, ID.bizB]] as const) {
+      const res = await post('personalities/switch', user, { businessId, sessionId: ID.sessionOwnerA, persona: 'jarvis' });
+      expect(res.status, `${user} ${JSON.stringify(res.body)}`).toBe(404);
+      expect(JSON.stringify(res.body)).not.toContain(OWNER_PRIVATE);
+    }
+  });
+});
+
+/**
+ * R0-09c review CR-1 and ST-6. Binding the real actor let settings commands run
+ * as the OWNER that used to run as 'system' and fail IdentityService's team
+ * check. remove_team_member and update_role looked their target up with
+ * membership.findFirst({ where: { userId: parameters.userId, businessId } }):
+ * with no parameters.userId, Prisma drops the key and the lookup returns
+ * whichever membership Postgres reads first. The executor compensates a failed
+ * add_team_member with exactly such a remove_team_member (the add's {email,
+ * role}). And settings.configure_integration checked no authority at all, while
+ * the HTTP routes need connect:write (connect is 'none' for every role by
+ * default).
+ */
+describe('the settings adapter: team commands name their target member, integrations need connect:write (review CR-1, ST-6)', () => {
+  const members = async () =>
+    ((await db.$queryRawUnsafe('SELECT id, role FROM memberships WHERE business_id = $1 ORDER BY id', ID.bizA)) as any[]).map((r) => `${r.id}:${r.role}`);
+
+  it("RED-BEFORE: a failed add_team_member is compensated with a remove_team_member naming no member, which is refused: no membership is deleted, even when the OWNER row is not the first Postgres reads (review CR-1)", async () => {
+    // A write to the OWNER membership row moves its tuple, so it is no longer the first one a scan returns.
+    await db.$executeRawUnsafe('UPDATE memberships SET daily_capacity_hours = 8 WHERE id = $1', `${P}m_ownerA`);
+    const before = await members();
+    expect(before).toHaveLength(3);
+    const from = connectorCommands.length;
+    const res = await post('execute', ID.ownerA, structured('add_team_member', { email: `${P}staffA@test.local`, role: 'STAFF' }));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.result).toMatchObject({ success: false });
+    for (const c of connectorCommands.slice(from)) expect(c.userId).toBe(ID.ownerA);
+    expect(await members()).toEqual(before);
+  });
+
+  it('RED-BEFORE: update_role and remove_team_member with no target member change no membership (review CR-1)', async () => {
+    const before = await members();
+    for (const [action, parameters] of [['update_role', { role: 'STAFF' }], ['remove_team_member', {}]] as const) {
+      const res = await post('execute', ID.ownerA, structured(action, parameters));
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.result, action).toMatchObject({ success: false });
+      expect(String(res.body.result.error), action).toContain('needs parameters.userId');
+    }
+    expect(await members()).toEqual(before);
+  });
+
+  it("RED-BEFORE: settings.configure_integration from a STAFF member, an ADMIN granted settings:write and the OWNER (none holds connect:write) is refused, connect and disconnect alike, and the integration hub is not called (review ST-6)", async () => {
+    const from = integrationCalls.length;
+    for (const actor of [ID.staffA, ID.adminA, ID.ownerA]) {
+      for (const enabled of [false, true]) {
+        const res = await post('execute', actor, structured('configure_integration', { integration: 'stripe', enabled }));
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
+        expect(res.body.result, `${actor} enabled=${enabled}`).toMatchObject({ success: false });
+        expect(String(res.body.result.error)).toMatch(/connect requires write access/);
+      }
+    }
+    expect(integrationCalls.slice(from)).toEqual([]);
+  });
+
+  it("SUPER_ADMIN's settings.configure_integration reaches the integration hub (ModuleScopeGuard's platform bypass)", async () => {
+    const from = integrationCalls.length;
+    for (const enabled of [false, true]) {
+      const res = await post('execute', ID.superAdmin, structured('configure_integration', { integration: 'stripe', enabled }));
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.result, JSON.stringify(res.body.result)).toMatchObject({ success: true });
+    }
+    expect(integrationCalls.slice(from)).toEqual([['disconnect', ID.bizA, 'stripe'], ['createConnection', ID.bizA, 'stripe']]);
+  });
+});
+
+describe('open review hand-offs outside this write set (review ST-5 / CR-2, ST-7)', () => {
+  it.todo("review ST-5 / CR-2: KEY plans do not act for the authenticated member. POST /api/v1/cortex/plans and goals/:id/plans hand the planner dto.userId (key-cortex-goals.controller.ts), the planner builds every step's ConnectorCommand as plan.userId ?? 'key_cortex' (key-cortex-planner.service.ts buildCommand), and POST plans/:id/execute takes no actor, so a STAFF member naming the OWNER's id runs KEY commands as the OWNER (settings.update_business_profile then passes the owner rule). Fix, in those two files: the goals controller takes the actor from @CurrentUser() for plan creation and execution, and the planner never runs a member's plan as 'key_cortex'");
+  it.todo("review ST-7: the execute audit record is never written. KeyCortexExecutorService.logExecution (key-cortex-executor.service.ts) writes fields AiExecutionLog does not have (Prisma: Unknown argument `traceId`) and its call is fire-and-forget, so no ai_execution_logs row carries the actor this packet binds. Fix, in that file: map the record onto AiExecutionLog's columns (userId, module, action, inputSummary, outputSummary, success, errorMessage, durationMs); then this suite asserts one row per execute naming the authenticated member");
 });
 
 describe('nothing left the process (suite-wide)', () => {
