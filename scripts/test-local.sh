@@ -13,6 +13,13 @@
 #                  keyflowos on localhost, the docker-compose default) without
 #                  the CI identity.
 #              A non-local DATABASE_URL, DIRECT_URL or REDIS_URL is refused here.
+#              Before it, a URL whose query parameters override the connection
+#              target is refused (KF_PROOF_RESOURCE_TARGET_OVERRIDE): node-postgres
+#              and Prisma take ?host= over the URL's host, and pg also ?user= and
+#              ?port=, so postgresql://...@localhost/keyflowos?host=<remote>
+#              names localhost and connects elsewhere. Refused for Postgres:
+#              host, hostaddr, port, user, dbname, service, options; for Redis
+#              (ioredis fills what the URL leaves out): host, port, path, db.
 #   compose    docker compose up -d db redis
 #   generate   pnpm db:generate
 #   workspace  pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
@@ -186,6 +193,37 @@ load_env_file() {
   done < "$file"
 }
 load_env_file "$ROOT/.env"
+
+# --- 1a. connection-target overrides (before admission, in every mode) -------
+# admit-resources.mjs judges the URL's host, port, user and database name; a
+# query parameter that a client reads in their place would go unjudged. Only
+# the variable and parameter names are printed, never a value.
+refuse_target_overrides() {
+  node --input-type=module -e '
+    const refused = {
+      postgres: new Set(["host", "hostaddr", "port", "user", "dbname", "service", "options"]),
+      redis: new Set(["host", "port", "path", "db"]),
+    };
+    for (const env of ["DATABASE_URL", "DIRECT_URL", "REDIS_URL"]) {
+      const raw = process.env[env];
+      if (!raw) continue;
+      let url;
+      try {
+        url = new URL(raw);
+      } catch {
+        continue; // admission refuses an unparsable URL (KF_PROOF_RESOURCE_URL_INVALID)
+      }
+      const kind = /^postgres(?:ql)?:$/.test(url.protocol) ? "postgres" : /^rediss?:$/.test(url.protocol) ? "redis" : null;
+      if (!kind) continue;
+      const parameters = [...new Set([...url.searchParams.keys()].filter((key) => refused[kind].has(key.toLowerCase())))];
+      if (parameters.length > 0) {
+        console.log(JSON.stringify({ status: "REJECTED", reasons: ["KF_PROOF_RESOURCE_TARGET_OVERRIDE"], env, kind, parameters }));
+        process.exit(2);
+      }
+    }
+  '
+}
+refuse_target_overrides || die 'a connection URL overrides its target in its query string (see the receipt above); nothing was run'
 
 # --- 1. admission ------------------------------------------------------------
 echo "test-local: admitting resources ($mode checkout)"

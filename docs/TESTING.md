@@ -74,7 +74,14 @@ runs. It is `scripts/proof-admission/admit-resources.mjs`: in a worktree with
 Redis index (provisioned by `bash scripts/worktree-resources.sh provision <id>`
 from the main tree), in CI it uses `scripts/proof-admission/manifests/ci-resources.json`,
 and in a main checkout the same local-only rules without the CI identity. A
-non-local `DATABASE_URL`, `DIRECT_URL` or `REDIS_URL` is refused. Values come
+non-local `DATABASE_URL`, `DIRECT_URL` or `REDIS_URL` is refused. So, before
+admission, is a URL whose query string overrides its connection target
+(`KF_PROOF_RESOURCE_TARGET_OVERRIDE`): node-postgres and Prisma read `?host=`
+in place of the URL's host (pg also `?user=` and `?port=`), so
+`postgresql://...@localhost:5432/keyflowos?host=<remote>` would connect to the
+remote. Refused for Postgres: `host`, `hostaddr`, `port`, `user`, `dbname`,
+`service`, `options`; for Redis: `host`, `port`, `path`, `db`. Other
+parameters (`schema`, `sslmode`, `connection_limit`) are allowed. Values come
 from the shell, else from the repo-root `.env`; an exported value wins.
 `--skip compose,generate,workspace,deploy,build` drops steps you have already
 done. CI runs `bash scripts/ci/test-local.selftest.sh`, which drives the
@@ -88,8 +95,11 @@ manifest in `scripts/proof-admission/manifests/`: its `requiredCases` (full
 vitest titles), `allowAdditionalCases`, `requireReportSuccess`, and the
 `suites` it binds, as paths relative to `apps/server` (an entry may be
 `{ "path": ..., "needsDist": true }` for a suite that spawns `dist/main.js`).
-A manifest without `suites` binds the files of the `npx vitest run` command
+A manifest without `suites` binds the files of every `npx vitest run` command
 in its description; one with neither is rejected `KF_PROOF_MANIFEST_UNBOUND`.
+A manifest is exactly one of case (`requiredCases`), negative-controls
+(`controls`) or resource (`resources`); one with more than one of these keys
+is rejected `KF_PROOF_MANIFEST_TYPE_AMBIGUOUS`.
 
 `pnpm --filter server proof:manifests` (`scripts/proof-admission/run-manifests.mjs`)
 reads every manifest, skips the resource manifests by type, unions the
@@ -97,11 +107,24 @@ suites, builds the server when a suite needs it, runs vitest once over the
 union with the JSON reporter, and judges every manifest against that one
 report with `scripts/proof-admission/evaluate.mjs --expect-head <HEAD>`. It
 prints one line per manifest and exits non-zero unless every one is
-SATISFIED. Every check is scoped to the manifest's own suites, so a case of a
-suite another manifest binds is not "unexpected", and a verdict for a
-different head is `KF_PROOF_HEAD_MISMATCH`. `--only <a.json,b.json>` judges a
-subset, `--plan` prints the union without running it, and `--report <file>`
-judges an existing report.
+SATISFIED and vitest itself exited 0 (vitest's JSON report leaves out an
+unhandled error, so a suite that passes its assertions and leaks a rejection
+fails only through vitest's exit). Every check is scoped to the manifest's own
+suites, so a case of a suite another manifest binds is not "unexpected", and
+a verdict for a different head is `KF_PROOF_HEAD_MISMATCH`. `--only
+<a.json,b.json>` judges a subset, `--plan` prints the union without running
+it, and `--report <file>` judges an existing report.
+
+A receipt is an **exact-head receipt** only when the runner ran the suites
+itself, from the committed manifests directory, on a tree where no tracked
+file differs from HEAD and no untracked file sits under `apps/server`,
+`packages` or `scripts/proof-admission` (node_modules and `apps/server/.proof`
+excepted). Otherwise (a dirty tree, `--report`, `--manifests-dir`) every
+SATISFIED line ends `NOT-EXACT-HEAD` and the summary says why. Cite only an
+exact-head receipt as proof for a commit. With `--skip-build` the runner
+refuses a `dist/` whose newest file is older than the newest
+`apps/server/src` file (the build is incremental, so `dist/main.js` alone can
+be older than an up-to-date build).
 
 CI runs it after the server tests. **To bind a new suite, add one manifest;
 do not edit the workflow.**

@@ -16,13 +16,26 @@
  *                      run by negative-controls.mjs, not here);
  *   case               has `requiredCases`: judged by evaluate.mjs;
  *   anything else      REJECTED (KF_PROOF_MANIFEST_TYPE_UNKNOWN).
+ * A manifest is exactly one type: one with more than one of `resources`,
+ * `controls` and `requiredCases` is REJECTED (KF_PROOF_MANIFEST_TYPE_AMBIGUOUS),
+ * so adding `controls` to a case manifest cannot swap its own requiredCases
+ * and strictness for the lenient set the controls name.
  * It unions the suites the case and negative-controls manifests bind (their
  * `suites`, else the files of their description's `npx vitest run` command;
  * see evaluate.mjs), builds dist/main.js first when a suite needsDist, runs
  * vitest ONCE over the union with the JSON reporter, then judges every
  * manifest against that one report with --expect-head set to the HEAD the run
  * started at. One line per manifest; exit 0 only when every case and
- * negative-controls manifest is SATISFIED.
+ * negative-controls manifest is SATISFIED and, when this run ran vitest, vitest
+ * itself exited 0 (an unhandled error fails vitest but not one assertion).
+ *
+ * EXACT HEAD. A receipt binds what was tested to HEAD only when this run ran
+ * the suites itself, from the committed manifests directory, on a tree where
+ * no tracked file differs from HEAD and no untracked file sits under
+ * apps/server, packages or scripts/proof-admission (evaluate.mjs
+ * sourceTreeState). Anything else (a dirty tree, --report, --manifests-dir) is
+ * still judged, but every SATISFIED line says NOT-EXACT-HEAD and the summary
+ * says why: such a receipt is not evidence for the commit it names.
  *
  * So a packet binds its suites by adding one manifest; CI (ci-cd.yml, after
  * the server tests) runs this, and nobody edits the workflow to add a proof.
@@ -31,9 +44,12 @@
  *   --only a.json,b.json   judge (and run the suites of) only these manifests
  *   --manifests-dir <dir>  another manifests directory (the self-test uses this)
  *   --report <file>        judge an existing vitest JSON report; run nothing
+ *                          (NOT-EXACT-HEAD: a report does not say which commit
+ *                          it was produced at)
  *   --out <file>           also write every receipt as JSON
- *   --skip-build           do not build dist/main.js (it must exist and be newer
- *                          than every apps/server/src file)
+ *   --skip-build           do not build dist/main.js (it must exist, and the
+ *                          newest file under dist/ must be newer than every
+ *                          apps/server/src file)
  *   --vitest-arg <arg>     pass one more argument to vitest (repeatable),
  *                          e.g. --vitest-arg --no-file-parallelism
  *   --plan                 print the manifests, their types and suites and the
@@ -45,11 +61,21 @@
  * reads none of it and prints none of it.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { manifestSuites, sourceHead, sourceTreeClean } from './evaluate.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { manifestSuites, sourceHead, sourceTreeState } from './evaluate.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -58,7 +84,6 @@ const EVALUATOR = join(SCRIPT_DIR, 'evaluate.mjs');
 const DEFAULT_MANIFESTS = join(SCRIPT_DIR, 'manifests');
 const VITEST = join(SERVER_DIR, 'node_modules', 'vitest', 'vitest.mjs');
 const VITEST_BIN = join(SERVER_DIR, 'node_modules', '.bin', process.platform === 'win32' ? 'vitest.cmd' : 'vitest');
-const DIST_MAIN = join(SERVER_DIR, 'dist', 'main.js');
 
 const EXIT = Object.freeze({ SATISFIED: 0, REJECTED: 2, INCOMPLETE: 3 });
 
@@ -91,8 +116,17 @@ function parseArgs(argv) {
 
 const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
-function classify(manifest) {
+const TYPE_KEYS = Object.freeze(['requiredCases', 'controls', 'resources']);
+
+/** The type keys a manifest carries (present at all, whatever their value). */
+export function typeKeys(manifest) {
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return [];
+  return TYPE_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(manifest, key));
+}
+
+export function classify(manifest) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return 'unknown';
+  if (typeKeys(manifest).length > 1) return 'ambiguous';
   if (Array.isArray(manifest.resources)) return 'resource';
   if (Array.isArray(manifest.controls)) return 'negative-controls';
   if (Array.isArray(manifest.requiredCases)) return 'case';
@@ -153,6 +187,13 @@ function loadManifests(dir, only, checkFiles) {
       entry.problem = { reason: 'KF_PROOF_MANIFEST_TYPE_UNKNOWN', detail: 'no requiredCases, controls or resources' };
       return entry;
     }
+    if (entry.type === 'ambiguous') {
+      entry.problem = {
+        reason: 'KF_PROOF_MANIFEST_TYPE_AMBIGUOUS',
+        detail: `has ${typeKeys(manifest).join(' and ')}; a manifest is exactly one of case (requiredCases), negative-controls (controls) or resource (resources)`,
+      };
+      return entry;
+    }
     entry.evaluated = entry.type === 'negative-controls' ? controlsAsCaseManifest(manifest) : manifest;
     if (entry.type === 'negative-controls' && entry.evaluated.requiredCases.length === 0) {
       entry.problem = { reason: 'KF_PROOF_MANIFEST_UNTRUSTED', detail: 'no control names a test' };
@@ -174,25 +215,79 @@ function loadManifests(dir, only, checkFiles) {
   });
 }
 
-function newestMtime(dir) {
+const isBuildInput = (name) => /\.ts$/.test(name) && !/\.spec\.ts$/.test(name);
+
+/** The newest mtime of the files under dir that `keep` accepts (0 when there are none). */
+function newestMtime(dir, keep) {
   let newest = 0;
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) newest = Math.max(newest, newestMtime(p));
-    else if (/\.ts$/.test(e.name) && !/\.spec\.ts$/.test(e.name)) newest = Math.max(newest, statSync(p).mtimeMs);
+    if (e.isDirectory()) newest = Math.max(newest, newestMtime(p, keep));
+    else if (keep(e.name)) newest = Math.max(newest, statSync(p).mtimeMs);
   }
   return newest;
 }
 
-/** dist/main.js exists and is newer than every non-spec source file, or the reason it is not. */
-function distProblem() {
-  if (!existsSync(DIST_MAIN)) return `${DIST_MAIN} does not exist`;
-  const built = statSync(DIST_MAIN).mtimeMs;
-  const newest = Math.max(newestMtime(join(SERVER_DIR, 'src')), statSync(join(SERVER_DIR, 'tsconfig.json')).mtimeMs);
-  return built >= newest ? null : `${DIST_MAIN} is older than the newest apps/server/src file: rebuild it`;
+/**
+ * dist/main.js exists and the build is at least as new as its inputs, or the
+ * reason it is not. apps/server/tsconfig.json builds incrementally
+ * (dist/.tsbuildinfo), so a build re-emits only the files an edit affects and
+ * dist/main.js alone can be older than an up-to-date build. The build is fresh
+ * when its newest output (any file under dist/, .tsbuildinfo included) is at
+ * least as new as every non-spec source file and tsconfig.json.
+ */
+export function distProblem(serverDir = SERVER_DIR) {
+  const distDir = join(serverDir, 'dist');
+  const distMain = join(distDir, 'main.js');
+  if (!existsSync(distMain)) return `${distMain} does not exist`;
+  const built = newestMtime(distDir, () => true);
+  const newest = Math.max(newestMtime(join(serverDir, 'src'), isBuildInput), statSync(join(serverDir, 'tsconfig.json')).mtimeMs);
+  return built >= newest
+    ? null
+    : `the newest file under ${distDir} is older than the newest apps/server/src file: rebuild it (pnpm --filter server build). ` +
+        'If a rebuild does not clear this, a source file was touched without a change (tsc then emits nothing): ' +
+        'delete dist/.tsbuildinfo and rebuild';
 }
 
-function lineFor(entry, receipt) {
+const sameDir = (a, b) => {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Whether this run's receipts bind what was tested to HEAD: { exact, reasons }.
+ * Only a run that executed the suites itself, from the committed manifests
+ * directory, on a clean source tree (evaluate.mjs sourceTreeState) is exact.
+ */
+export function headBinding({ reportGiven, manifestsDir, tree }) {
+  const reasons = [];
+  const some = (list) => `${list.slice(0, 3).join(', ')}${list.length > 3 ? ` (+${list.length - 3} more)` : ''}`;
+  if (reportGiven) reasons.push('the report was given by --report, not produced by this run at HEAD');
+  if (!sameDir(manifestsDir, DEFAULT_MANIFESTS)) reasons.push(`the manifests are from ${manifestsDir}, not the committed directory`);
+  if (!tree || tree.clean === null) reasons.push('git cannot report the tree state');
+  else {
+    if (tree.modified.length > 0) reasons.push(`${tree.modified.length} tracked file(s) differ from HEAD: ${some(tree.modified)}`);
+    if (tree.untracked.length > 0) reasons.push(`${tree.untracked.length} untracked source file(s): ${some(tree.untracked)}`);
+  }
+  return { exact: reasons.length === 0, reasons };
+}
+
+/**
+ * The run's exit code: SATISFIED only when no manifest failed and, when this
+ * run ran vitest, vitest exited 0. vitest 2's JSON report leaves an unhandled
+ * error out of `success` and of every file status, so a suite that passes its
+ * assertions and leaks an unhandled rejection is visible only in vitest's exit.
+ */
+export function runExitCode({ failures, vitestExit }) {
+  if (failures > 0) return EXIT.REJECTED;
+  if (vitestExit !== null && vitestExit !== undefined && vitestExit !== 0) return EXIT.REJECTED;
+  return EXIT.SATISFIED;
+}
+
+function lineFor(entry, receipt, binding) {
   const pad = (s, n) => String(s).padEnd(n);
   if (entry.type === 'resource') {
     return `${pad('SKIPPED', 10)}${pad(entry.file, 40)} resource manifest (judged by admit-resources.mjs)`;
@@ -202,7 +297,8 @@ function lineFor(entry, receipt) {
   }
   if (receipt?.status === 'SATISFIED_AT_DECLARED_SCOPE') {
     const kind = entry.type === 'negative-controls' ? ' named-by-controls' : '';
-    return `${pad('SATISFIED', 10)}${pad(entry.file, 40)} ${entry.packageId} required=${receipt.requiredCaseCount}${kind} suites=${receipt.boundSuites.length} head=${receipt.sourceHead}`;
+    const exact = binding?.exact ? '' : ' NOT-EXACT-HEAD';
+    return `${pad('SATISFIED', 10)}${pad(entry.file, 40)} ${entry.packageId} required=${receipt.requiredCaseCount}${kind} suites=${receipt.boundSuites.length} head=${receipt.sourceHead}${exact}`;
   }
   const reasons = (receipt?.reasons ?? ['KF_PROOF_EVALUATOR_FAILED']).join(',');
   const detail = [
@@ -295,7 +391,9 @@ function runAndJudge({ args, dir, entries, runnable, union, needsDist, head, wor
         return EXIT.REJECTED;
       }
     }
-    if (needsDist) {
+    // A build this run just ran (exit 0) is as fresh as tsc makes it. With
+    // --skip-build the caller vouches for dist/, so it is checked.
+    if (needsDist && args['skip-build']) {
       const problem = distProblem();
       if (problem) {
         console.error(`run-manifests: ${problem}`);
@@ -325,10 +423,12 @@ function runAndJudge({ args, dir, entries, runnable, union, needsDist, head, wor
     return EXIT.INCOMPLETE;
   }
 
-  const clean = sourceTreeClean();
-  console.log(
-    `run-manifests: judging ${entries.length} manifests from ${basename(dir)}/ against one report at ${head} (${clean === true ? 'tree clean' : clean === false ? 'tree has modified tracked files' : 'tree state unknown'})`,
-  );
+  const tree = sourceTreeState();
+  const binding = headBinding({ reportGiven: Boolean(args.report), manifestsDir: dir, tree });
+  const bindingText = binding.exact
+    ? 'exact-head receipt: tree clean, suites run by this run, committed manifests'
+    : `NOT an exact-head receipt: ${binding.reasons.join('; ')}`;
+  console.log(`run-manifests: judging ${entries.length} manifests from ${basename(dir)}/ against one report at ${head} (${bindingText})`);
   const derivedDir = join(work, 'derived');
   mkdirSync(derivedDir, { recursive: true });
   const results = [];
@@ -354,7 +454,7 @@ function runAndJudge({ args, dir, entries, runnable, union, needsDist, head, wor
     }
     const satisfied = entry.type === 'resource' || receipt?.status === 'SATISFIED_AT_DECLARED_SCOPE';
     if (!satisfied) failures += 1;
-    console.log(lineFor(entry, receipt));
+    console.log(lineFor(entry, receipt, binding));
     results.push({
       file: entry.file,
       type: entry.type,
@@ -366,20 +466,40 @@ function runAndJudge({ args, dir, entries, runnable, union, needsDist, head, wor
   }
 
   const judged = results.filter((r) => r.type !== 'resource').length;
+  const code = runExitCode({ failures, vitestExit });
   console.log(
-    `run-manifests: ${judged - failures} of ${judged} manifests SATISFIED, ${failures} not, ${results.length - judged} resource manifests skipped; vitest exit ${vitestExit ?? 'n/a'}; head ${head}`,
+    `run-manifests: ${judged - failures} of ${judged} manifests SATISFIED, ${failures} not, ${results.length - judged} resource manifests skipped; vitest exit ${vitestExit ?? 'n/a'}; head ${head}${binding.exact ? ' (exact-head receipt)' : ' (NOT an exact-head receipt)'}`,
   );
+  if (failures === 0 && code !== EXIT.SATISFIED) {
+    console.log(
+      `run-manifests: REJECTED: vitest exited ${vitestExit} although every manifest is satisfied (an unhandled error, a failing hook or a crashed worker is not in the JSON report); see vitest's output above`,
+    );
+  }
   if (args.out) {
     writeFileSync(
       resolve(args.out),
       JSON.stringify(
-        { head, treeClean: clean, vitestExit, report: args.report ? reportPath : null, suites: union, manifests: results },
+        {
+          head,
+          exactHead: binding.exact,
+          notExactHeadReasons: binding.reasons,
+          treeClean: tree.clean,
+          modified: tree.modified,
+          untracked: tree.untracked,
+          vitestExit,
+          exitCode: code,
+          report: args.report ? reportPath : null,
+          suites: union,
+          manifests: results,
+        },
         null,
         2,
       ),
     );
   }
-  return failures === 0 ? EXIT.SATISFIED : EXIT.REJECTED;
+  return code;
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

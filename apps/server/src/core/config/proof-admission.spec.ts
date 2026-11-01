@@ -1,5 +1,15 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -520,5 +530,203 @@ describe('proof manifest runner (R0-16-PROOF-BINDING)', () => {
     for (const suite of plan.suites) {
       expect(existsSync(join(REPO, 'apps', 'server', suite)), suite).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R0-16-PROOF-BINDING review repairs: a manifest is exactly one type, every
+// `vitest run` command of a description binds, a receipt says whether it is
+// bound to HEAD, vitest's own exit counts, and an incremental build is fresh.
+// ---------------------------------------------------------------------------
+
+type TreeState = { clean: boolean | null; modified: string[]; untracked: string[] };
+type EvaluateModule = { sourceTreeState: (repoRoot?: string) => TreeState };
+type RunManifestsModule = { distProblem: (serverDir?: string) => string | null };
+
+/** This worker's environment without vitest's own variables, for a nested vitest run. */
+function envWithoutVitest(extra: Record<string, string>) {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !key.startsWith('VITEST')) env[key] = value;
+  }
+  return { ...env, ...extra };
+}
+
+describe('proof manifest runner: review repairs (R0-16-PROOF-BINDING)', () => {
+  it('[K12-P37] NEGATIVE CONTROL: a manifest with more than one of requiredCases, controls and resources is KF_PROOF_MANIFEST_TYPE_AMBIGUOUS', () => {
+    const { dir, manifests } = fixtureManifestsDir();
+    // A strict case manifest that gains `controls` naming one of its cases was
+    // judged as negative-controls: required = that one case, extra cases allowed.
+    writeJson(join(manifests, 'alpha.json'), {
+      ...boundManifest({}),
+      controls: [
+        { id: 'NC-ALPHA-1', claim: 'alpha', mutation: { file: 'x.ts', find: 'a', replace: 'b' }, mustFail: { unit: ['alpha one'] } },
+      ],
+    });
+    // A case manifest that gains `resources` was skipped as a resource manifest.
+    writeJson(join(manifests, 'gamma.json'), { ...boundManifest({ packageId: 'KF-R0-16-GAMMA' }), resources: [] });
+    const alpha = { name: ALPHA.name, cases: [passed('alpha one'), passed('alpha unexpected')] };
+    const reportPath = join(dir, 'report-tampered.json');
+    writeJson(reportPath, makeCombinedReport([alpha, BETA]));
+
+    const run = runRunner(['--manifests-dir', manifests, '--report', reportPath]);
+    expect(run.status, run.stdout + run.stderr).toBe(2);
+    expect(run.stdout).toMatch(/^REJECTED\s+alpha\.json\b.*KF_PROOF_MANIFEST_TYPE_AMBIGUOUS/m);
+    expect(run.stdout).toMatch(/^REJECTED\s+gamma\.json\b.*KF_PROOF_MANIFEST_TYPE_AMBIGUOUS/m);
+    expect(run.stdout).not.toMatch(/^(SATISFIED|SKIPPED)\s+(alpha|gamma)\.json/m);
+
+    const plan = runRunner(['--manifests-dir', manifests, '--plan', '--skip-file-check']);
+    expect(plan.status).toBe(2);
+    const problems = JSON.parse(plan.stdout).problems as Array<{ file: string; reason: string }>;
+    expect(problems.map((p) => `${p.file}:${p.reason}`)).toEqual([
+      'alpha.json:KF_PROOF_MANIFEST_TYPE_AMBIGUOUS',
+      'gamma.json:KF_PROOF_MANIFEST_TYPE_AMBIGUOUS',
+    ]);
+  });
+
+  it('[K12-P38] every `vitest run` command in a one-line description binds its files, and a prose mention before the command binds nothing', () => {
+    const twoCommands = {
+      ...withoutSuites(boundManifest({ requiredCases: ['alpha one', 'beta one'], allowAdditionalCases: true })),
+      description:
+        'Alpha holds. Run from apps/server: npx vitest run test/alpha.integration.test.ts --reporter=json --outputFile=.proof/a.json, ' +
+        'then node ../../scripts/proof-admission/evaluate.mjs --manifest alpha.json --report .proof/a.json. A LATER REPAIR ' +
+        'added beta. Run from apps/server: npx vitest run test/alpha.integration.test.ts src/beta/beta.service.spec.ts ' +
+        '--reporter=json --outputFile=.proof/b.json.',
+    };
+    const both = runEvaluator(twoCommands, makeCombinedReport([ALPHA, BETA]), ['--expect-head', HEAD]);
+    expect(both.status, JSON.stringify(both.result)).toBe(0);
+    expect(both.result.boundSuites).toEqual([ALPHA.name, BETA.name]);
+
+    const proseFirst = {
+      ...withoutSuites(boundManifest({})),
+      description: 'Never use vitest run --watch for a proof. Run: npx vitest run test/alpha.integration.test.ts --reporter=json.',
+    };
+    const prose = runEvaluator(proseFirst, makeCombinedReport([ALPHA, BETA]), ['--expect-head', HEAD]);
+    expect(prose.status, JSON.stringify(prose.result)).toBe(0);
+    expect(prose.result.boundSuites).toEqual([ALPHA.name]);
+  });
+
+  it('[K12-P39] NEGATIVE CONTROL: receipts judged from --report or another manifests directory are labelled NOT-EXACT-HEAD, with the reasons', () => {
+    const { dir, manifests, reportPath } = fixtureManifestsDir();
+    const out = join(dir, 'receipts.json');
+    const run = runRunner(['--manifests-dir', manifests, '--report', reportPath, '--out', out]);
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    for (const file of ['alpha', 'beta', 'beta-controls']) {
+      expect(run.stdout).toMatch(new RegExp(`^SATISFIED\\s+${file}\\.json\\b.*head=${HEAD} NOT-EXACT-HEAD$`, 'm'));
+    }
+    expect(run.stdout).toContain('NOT an exact-head receipt');
+    const receipts = JSON.parse(readFileSync(out, 'utf8'));
+    expect(receipts.exactHead).toBe(false);
+    const reasons = (receipts.notExactHeadReasons as string[]).join('\n');
+    expect(reasons).toContain('given by --report');
+    expect(reasons).toContain('not the committed directory');
+  });
+
+  it('[K12-P40] the tree is clean only with no modified tracked file and no untracked source file; node_modules and .proof output are not source', async () => {
+    const { sourceTreeState } = (await import(EVALUATOR)) as EvaluateModule;
+    const repo = mkdtempSync(join(tmpdir(), 'kf-proof-tree-'));
+    const identity = ['-c', 'user.email=k12@example.invalid', '-c', 'user.name=k12', '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main'];
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...identity, ...args], { encoding: 'utf8' });
+    git('init', '-q');
+    mkdirSync(join(repo, 'apps', 'server', 'test'), { recursive: true });
+    mkdirSync(join(repo, 'scripts', 'proof-admission', 'manifests'), { recursive: true });
+    writeFileSync(join(repo, '.gitignore'), 'node_modules/\n');
+    writeFileSync(join(repo, 'apps', 'server', 'test', 'a.spec.ts'), 'a');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+    expect(sourceTreeState(repo)).toEqual({ clean: true, modified: [], untracked: [] });
+
+    // Not source: a node_modules symlink (`node_modules/` ignores only a directory),
+    // proof output under apps/server/.proof, an untracked note outside the source paths.
+    symlinkSync(tmpdir(), join(repo, 'apps', 'server', 'node_modules'));
+    mkdirSync(join(repo, 'apps', 'server', '.proof'));
+    writeFileSync(join(repo, 'apps', 'server', '.proof', 'k12-vitest.json'), '{}');
+    writeFileSync(join(repo, 'NOTES.txt'), 'n');
+    expect(sourceTreeState(repo).clean).toBe(true);
+
+    // An untracked suite and an untracked manifest are judged but are not at HEAD.
+    writeFileSync(join(repo, 'apps', 'server', 'test', 'zz-untracked.spec.ts'), 'b');
+    writeFileSync(join(repo, 'scripts', 'proof-admission', 'manifests', 'zz.json'), '{}');
+    const untracked = sourceTreeState(repo);
+    expect(untracked.clean).toBe(false);
+    expect([...untracked.untracked].sort()).toEqual([
+      'apps/server/test/zz-untracked.spec.ts',
+      'scripts/proof-admission/manifests/zz.json',
+    ]);
+
+    writeFileSync(join(repo, 'apps', 'server', 'test', 'a.spec.ts'), 'changed');
+    expect(sourceTreeState(repo).modified).toEqual(['apps/server/test/a.spec.ts']);
+  });
+
+  it('[K12-P41] NEGATIVE CONTROL: a bound suite that passes its assertions but leaks an unhandled rejection fails the run, and its untracked file is NOT-EXACT-HEAD', () => {
+    const nonce = `${process.pid}-${Date.now()}`;
+    const probeName = `zz-k12-p41-unhandled-${nonce}.spec.ts`;
+    const probe = join(REPO, 'apps', 'server', 'test', probeName);
+    const dir = mkdtempSync(join(tmpdir(), 'kf-proof-p41-'));
+    writeJson(join(dir, 'probe.json'), {
+      manifestVersion: 1,
+      packageId: 'KF-R0-16-P41-PROBE',
+      requireReportSuccess: true,
+      allowAdditionalCases: false,
+      suites: [`test/${probeName}`],
+      requiredCases: ['k12 p41 probe passes its only assertion'],
+    });
+    // The rejection is raised only under this run's nonce, so another vitest
+    // run that happens to collect the file while it exists sees one passing test.
+    writeFileSync(
+      probe,
+      [
+        "import { expect, it } from 'vitest';",
+        "it('k12 p41 probe passes its only assertion', async () => {",
+        '  expect(1).toBe(1);',
+        `  if (process.env.KF_K12_P41_PROBE === '${nonce}') {`,
+        "    setTimeout(() => void Promise.reject(new Error('K12-P41 leaked rejection')), 0);",
+        '  }',
+        '  await new Promise((done) => setTimeout(done, 100));',
+        '});',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const child = spawnSync(process.execPath, [RUNNER, '--manifests-dir', dir], {
+        cwd: REPO,
+        encoding: 'utf8',
+        env: envWithoutVitest({ KF_K12_P41_PROBE: nonce }),
+        timeout: 150_000,
+      });
+      const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
+      expect(child.status, output).toBe(2);
+      expect(child.stdout).toMatch(/^SATISFIED\s+probe\.json\b.*NOT-EXACT-HEAD$/m);
+      expect(child.stdout).toMatch(/REJECTED: vitest exited 1 although every manifest is satisfied/);
+      expect(child.stdout).toMatch(/untracked source file/);
+    } finally {
+      rmSync(probe, { force: true });
+    }
+  }, 180_000);
+
+  it('[K12-P42] an incremental build that re-emitted only the edited file is fresh; a source edit after the newest build output is not', async () => {
+    const { distProblem } = (await import(RUNNER)) as RunManifestsModule;
+    const server = mkdtempSync(join(tmpdir(), 'kf-proof-dist-'));
+    mkdirSync(join(server, 'src', 'modules'), { recursive: true });
+    mkdirSync(join(server, 'dist', 'modules'), { recursive: true });
+    const t0 = 1_700_000_000;
+    const at = (path: string, seconds: number) => {
+      if (!existsSync(path)) writeFileSync(path, 'x');
+      utimesSync(path, t0 + seconds, t0 + seconds);
+    };
+    at(join(server, 'tsconfig.json'), 0);
+    at(join(server, 'src', 'main.ts'), 0);
+    at(join(server, 'dist', 'main.js'), 10); // the full build
+    at(join(server, 'src', 'modules', 'a.service.ts'), 20); // a body-only edit after it
+    at(join(server, 'src', 'modules', 'a.service.spec.ts'), 500); // a spec is not a build input
+    at(join(server, 'dist', 'modules', 'a.service.js'), 30); // the incremental rebuild re-emitted only this
+    at(join(server, 'dist', '.tsbuildinfo'), 30);
+    expect(distProblem(server)).toBeNull();
+
+    at(join(server, 'src', 'modules', 'a.service.ts'), 40); // edited again, not rebuilt
+    expect(distProblem(server)).toMatch(/older than the newest apps\/server\/src file/);
+
+    rmSync(join(server, 'dist', 'main.js'));
+    expect(distProblem(server)).toMatch(/does not exist/);
   });
 });

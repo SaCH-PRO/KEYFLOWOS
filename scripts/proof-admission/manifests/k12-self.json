@@ -44,7 +44,13 @@
     "proof manifest runner (R0-16-PROOF-BINDING) [K12-P33] NEGATIVE CONTROL: a negative-controls manifest whose named test is skipped or renamed fails the run",
     "proof manifest runner (R0-16-PROOF-BINDING) [K12-P34] NEGATIVE CONTROL: an unbound case manifest or a file of unknown type fails the run",
     "proof manifest runner (R0-16-PROOF-BINDING) [K12-P35] --plan unions the suites of every case manifest, marks the ones that need dist/main.js, and runs nothing",
-    "proof manifest runner (R0-16-PROOF-BINDING) [K12-P36] every committed case manifest declares the suites it binds, and every declared suite file exists"
+    "proof manifest runner (R0-16-PROOF-BINDING) [K12-P36] every committed case manifest declares the suites it binds, and every declared suite file exists",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P37] NEGATIVE CONTROL: a manifest with more than one of requiredCases, controls and resources is KF_PROOF_MANIFEST_TYPE_AMBIGUOUS",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P38] every `vitest run` command in a one-line description binds its files, and a prose mention before the command binds nothing",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P39] NEGATIVE CONTROL: receipts judged from --report or another manifests directory are labelled NOT-EXACT-HEAD, with the reasons",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P40] the tree is clean only with no modified tracked file and no untracked source file; node_modules and .proof output are not source",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P41] NEGATIVE CONTROL: a bound suite that passes its assertions but leaks an unhandled rejection fails the run, and its untracked file is NOT-EXACT-HEAD",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P42] an incremental build that re-emitted only the edited file is fresh; a source edit after the newest build output is not"
   ],
   "maxReportAgeSeconds": 600
 }

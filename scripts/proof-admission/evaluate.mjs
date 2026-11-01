@@ -20,9 +20,13 @@
  * here. A bound suite absent from the report is KF_PROOF_BOUND_SUITE_MISSING.
  *
  * EXACT HEAD. The receipt carries sourceHead (HEAD of the checkout this
- * script belongs to) and sourceTreeClean (no tracked file differs from HEAD).
- * With --expect-head the verdict is REJECTED (KF_PROOF_HEAD_MISMATCH) unless
- * sourceHead is exactly that sha.
+ * script belongs to) and sourceTreeClean (no tracked file differs from HEAD
+ * and no untracked file sits under SOURCE_PATHS; see sourceTreeState). With
+ * --expect-head the verdict is REJECTED (KF_PROOF_HEAD_MISMATCH) unless
+ * sourceHead is exactly that sha. sourceHead names the evaluator's checkout,
+ * not the report: a vitest report carries no commit, so this script alone
+ * cannot say where a report came from. Only run-manifests.mjs, which runs the
+ * suites itself on a clean tree, issues an exact-head receipt.
  */
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -94,15 +98,20 @@ const OPTIONS_WITH_VALUE = new Set(['-c', '--config', '--project', '--dir', '--r
 /**
  * The files named by every `npx vitest run ...` command in a description: the
  * test-file tokens after `vitest run`, skipping options, up to the first token
- * that is neither (so prose after the command binds nothing).
+ * that is neither (so prose after the command binds nothing). Each occurrence
+ * of `vitest run` is scanned on its own: a description is one line of JSON,
+ * so a later command on the same line (or a real command after a prose
+ * mention of `vitest run`) binds its files too.
  */
 export function descriptionSuites(description) {
   if (typeof description !== 'string') return [];
   const found = [];
-  const command = /\bvitest\s+run\b([^\n]*)/g;
+  const command = /\bvitest\s+run\b/g;
   let match;
   while ((match = command.exec(description)) !== null) {
-    const tokens = match[1].trim().split(/\s+/);
+    // The rest of this line; the next exec starts right after this `vitest run`.
+    const rest = description.slice(command.lastIndex).split('\n', 1)[0];
+    const tokens = rest.trim().split(/\s+/);
     for (let i = 0; i < tokens.length; i += 1) {
       const token = tokens[i].replace(/[,;)]+$/, '');
       if (OPTIONS_WITH_VALUE.has(token)) {
@@ -350,13 +359,42 @@ export function sourceHead(repoRoot = REPO_ROOT) {
   }
 }
 
-/** true when no tracked file differs from HEAD (untracked files are not source). */
-export function sourceTreeClean(repoRoot = REPO_ROOT) {
+/**
+ * Where an untracked file is source for a proof: the server and its suites,
+ * the workspace packages they import, and the proof scripts and manifests. An
+ * untracked suite or manifest under these is run and judged, but is not at HEAD.
+ */
+export const SOURCE_PATHS = Object.freeze(['apps/server', 'packages', 'scripts/proof-admission']);
+
+/**
+ * Untracked paths that are never source: node_modules (the .gitignore entry
+ * `node_modules/` matches a directory, not a node_modules symlink) and
+ * apps/server/.proof/, where the proof commands write their reports.
+ */
+const NOT_SOURCE = /(?:^|\/)node_modules(?:\/|$)|^apps\/server\/\.proof\//;
+
+/**
+ * The checkout's source against HEAD: { clean, modified, untracked }.
+ * `modified` lists the tracked files that differ from HEAD (anywhere),
+ * `untracked` the untracked, unignored files under SOURCE_PATHS. clean is
+ * true only when both are empty, and null when git cannot say.
+ */
+export function sourceTreeState(repoRoot = REPO_ROOT) {
   try {
-    return git(repoRoot, ['status', '--porcelain', '--untracked-files=no']).trim().length === 0;
+    const lines = (text) => text.split('\n').filter((line) => line.length > 0);
+    const modified = lines(git(repoRoot, ['status', '--porcelain', '--untracked-files=no'])).map((line) => line.slice(3));
+    const untracked = lines(git(repoRoot, ['ls-files', '--others', '--exclude-standard', '--', ...SOURCE_PATHS])).filter(
+      (path) => !NOT_SOURCE.test(path),
+    );
+    return { clean: modified.length === 0 && untracked.length === 0, modified, untracked };
   } catch {
-    return null;
+    return { clean: null, modified: [], untracked: [] };
   }
+}
+
+/** true when no tracked file differs from HEAD and no untracked source file exists (sourceTreeState). */
+export function sourceTreeClean(repoRoot = REPO_ROOT) {
+  return sourceTreeState(repoRoot).clean;
 }
 
 function main() {
