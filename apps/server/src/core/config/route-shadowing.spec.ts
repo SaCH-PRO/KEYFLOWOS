@@ -44,6 +44,19 @@
  * database, with the tenant binding. The R0-13f controllers may never appear in
  * ALLOW_LISTED again.
  *
+ * R0-13g-KEY-FLOWS-ROUTES took the last two entries off: GET
+ * /api/v1/cortex/flows/templates and GET flows/nodes (key-cortex.controller.ts)
+ * are declared before GET flows/:id, which answered them as flow 'templates' and
+ * 'nodes'. ALLOW_LISTED is empty and a case below keeps it empty: a new
+ * offender is fixed where it is found, never listed. The R0-13g cases check
+ * from the decorators that both handlers run behind every guard of flowGet (the
+ * class's AuthGuard and BusinessGuard; flowGet has no module scope) and read
+ * nothing from the request but the optional template category: no tenant (the
+ * guard's job, R0-34b) and no actor (R0-09c). They answer a global catalogue.
+ * test/key-cortex-flows-routes.integration.test.ts proves the same on a real
+ * database. No web screen calls either route: apps/web's flow screens read
+ * templates from /api/flows/businesses/:businessId/templates (modules/flow).
+ *
  * Allow-list entries match on file, method, path and shadowing path, not on the
  * line: an unrelated edit above a listed route moves it without hiding it, and
  * the failure message prints the current line.
@@ -292,29 +305,13 @@ interface AllowListed {
 
 /**
  * Offenders in controllers outside the R0-13e write set, recorded when this
- * landed. Each is a live defect owned by a follow-up packet; this list may only
- * shrink. R0-13f removed the six in its four controllers; the two key-cortex
- * flows routes are owned by a later packet.
+ * landed. Each was a live defect owned by a follow-up packet; this list could
+ * only shrink. R0-13f removed the six in its four controllers and R0-13g the
+ * two key-cortex flows routes (GET flows/templates and flows/nodes, answered by
+ * flowGet as flow 'templates' and 'nodes'). It is empty and stays empty: the
+ * tree case below fails on any entry.
  */
-const FOLLOW_UP = 'outside R0-13e write set, follow-up';
-const ALLOW_LISTED: AllowListed[] = [
-  {
-    file: 'modules/key-cortex/key-cortex.controller.ts',
-    line: 2638,
-    method: 'GET',
-    path: '/api/v1/cortex/flows/templates',
-    shadowedBy: '/api/v1/cortex/flows/:id',
-    reason: `${FOLLOW_UP}: answered by flowGet as flow 'templates'`,
-  },
-  {
-    file: 'modules/key-cortex/key-cortex.controller.ts',
-    line: 2691,
-    method: 'GET',
-    path: '/api/v1/cortex/flows/nodes',
-    shadowedBy: '/api/v1/cortex/flows/:id',
-    reason: `${FOLLOW_UP}: answered by flowGet as flow 'nodes'`,
-  },
-];
+const ALLOW_LISTED: AllowListed[] = [];
 
 const allowKey = (file: string, method: string, path: string, shadowedBy: string) =>
   `${file} ${method} ${path} <- ${shadowedBy}`;
@@ -390,6 +387,52 @@ const R0_13F_ROUTES: LiveRoute[] = [
   },
 ];
 const R0_13F_FILES = [...new Set(R0_13F_ROUTES.map((r) => r.file))];
+
+/**
+ * R0-13g-KEY-FLOWS-ROUTES: the last two, both answered by flowGet (GET
+ * flows/:id) with the literal as a flow id, and the request parameters each
+ * handler reads (as written): only the optional template category.
+ */
+const KEY_CORTEX_CONTROLLER = 'modules/key-cortex/key-cortex.controller.ts';
+const R0_13G_ROUTES: Array<LiveRoute & { params: string[] }> = [
+  {
+    file: KEY_CORTEX_CONTROLLER,
+    method: 'GET',
+    path: '/api/v1/cortex/flows/templates',
+    handler: 'flowTemplates',
+    sibling: '/api/v1/cortex/flows/:id',
+    siblingHandler: 'flowGet',
+    web: 'no screen calls it (apps/web reads flow templates from /api/flows/businesses/:businessId/templates, modules/flow)',
+    params: ["@Query('category')"],
+  },
+  {
+    file: KEY_CORTEX_CONTROLLER,
+    method: 'GET',
+    path: '/api/v1/cortex/flows/nodes',
+    handler: 'flowNodes',
+    sibling: '/api/v1/cortex/flows/:id',
+    siblingHandler: 'flowGet',
+    web: 'no screen calls it',
+    params: [],
+  },
+];
+
+/** The decorators on each parameter of a handler, as written (one string per parameter, decorators joined by a space). */
+function handlerParams(file: string, text: string, cls: string, handler: string): string[] | undefined {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let found: string[] | undefined;
+  const visit = (node: ts.Node) => {
+    if (ts.isClassDeclaration(node) && node.name?.text === cls) {
+      for (const member of node.members) {
+        if (!ts.isMethodDeclaration(member) || member.name.getText(sf) !== handler) continue;
+        found = member.parameters.map((p) => (ts.getDecorators(p) ?? []).map((d) => d.getText(sf)).join(' '));
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
 
 interface HandlerGuards {
   /** The @UseGuards arguments of the class and the method, as written. */
@@ -581,9 +624,18 @@ describe('the tree: no controller under apps/server/src answers a literal route 
     for (const a of ALLOW_LISTED) {
       expect(a.file, 'the R0-13e write set is fixed, never allow-listed').not.toBe(CRM_CONTROLLER);
       expect(R0_13F_FILES, 'the R0-13f controllers are fixed, never allow-listed').not.toContain(a.file);
+      expect(a.file, 'the R0-13g controller is fixed, never allow-listed').not.toBe(KEY_CORTEX_CONTROLLER);
       expect(a.reason).toContain('outside R0-13e write set, follow-up');
     }
     expect(new Set(ALLOW_LISTED.map((a) => allowKey(a.file, a.method, a.path, a.shadowedBy))).size).toBe(ALLOW_LISTED.length);
+  });
+
+  it('R0-13g: the allow-list is empty and stays empty, and the tree has no offender at all', () => {
+    expect(
+      ALLOW_LISTED.map((a) => `${a.file}:${a.line} ${a.method} ${a.path} <- ${a.shadowedBy}`),
+      'ALLOW_LISTED is closed (R0-13g): declare the literal route before its parameterised sibling instead of listing it.',
+    ).toEqual([]);
+    expect(tree.offenders.map(describeOffender)).toEqual([]);
   });
 });
 
@@ -648,5 +700,53 @@ describe('R0-13f: the six formerly shadowed routes are declared before their par
     expect(handlerGuards('f.controller.ts', text, 'A', 'three')?.scope).toEqual({ module: 'crm', level: 'read' });
     expect(handlerGuards('f.controller.ts', text, 'B', 'four')).toEqual({ guards: [], scope: undefined });
     expect(handlerGuards('f.controller.ts', text, 'A', 'missing')).toBeUndefined();
+  });
+});
+
+describe('R0-13g: GET cortex flows/templates and flows/nodes are declared before flows/:id and carry its guards', () => {
+  const tree = scanTree();
+  const at = (file: string, method: string, path: string) =>
+    tree.routes.find((r) => r.file === file && r.method === method && r.path === path);
+
+  it('key-cortex.controller.ts has no offender, and each of the two routes reaches its own handler, declared above flows/:id (flowGet), which answered it', () => {
+    expect(tree.offenders.filter((o) => o.route.file === KEY_CORTEX_CONTROLLER).map(describeOffender)).toEqual([]);
+    for (const r of R0_13G_ROUTES) {
+      const route = at(r.file, r.method, r.path);
+      const sibling = at(r.file, r.method, r.sibling);
+      expect(route?.handler, `${r.method} ${r.path}`).toBe(r.handler);
+      expect(sibling?.handler, `${r.method} ${r.sibling}`).toBe(r.siblingHandler);
+      expect(route!.line, `${r.method} ${r.path} (${r.web}) is declared after ${r.sibling}`).toBeLessThan(sibling!.line);
+    }
+  });
+
+  it('each handler runs behind every guard of flowGet (AuthGuard and BusinessGuard on the class) and at least its module scope (flowGet has none)', () => {
+    const text = readFileSync(join(SERVER_SRC, KEY_CORTEX_CONTROLLER), 'utf8');
+    const sib = handlerGuards(KEY_CORTEX_CONTROLLER, text, 'KeyCortexController', 'flowGet');
+    expect(sib).toEqual({ guards: ['AuthGuard', 'BusinessGuard'], scope: undefined });
+    for (const r of R0_13G_ROUTES) {
+      const own = handlerGuards(r.file, text, 'KeyCortexController', r.handler);
+      expect(own, r.handler).toBeDefined();
+      expect(own!.guards, r.handler).toEqual(expect.arrayContaining(sib!.guards));
+      expect(own!.guards, `${r.handler}: no handler here runs unauthenticated`).toEqual(expect.arrayContaining(['AuthGuard', 'BusinessGuard']));
+    }
+  });
+
+  it('neither handler reads a tenant or an actor from the request: flowTemplates reads only the optional category, flowNodes nothing (no businessId, userId, body, request or principal)', () => {
+    const text = readFileSync(join(SERVER_SRC, KEY_CORTEX_CONTROLLER), 'utf8');
+    for (const r of R0_13G_ROUTES) {
+      const params = handlerParams(r.file, text, 'KeyCortexController', r.handler);
+      expect(params, r.handler).toEqual(r.params);
+      for (const p of params!) expect(p, r.handler).not.toMatch(/businessId|userId|GuardedBusinessId|CurrentUser|@Body|@Req|@Request|@Headers/);
+    }
+    // Anti-vacuity: the reader sees a tenant and a principal where they are read.
+    expect(handlerParams(KEY_CORTEX_CONTROLLER, text, 'KeyCortexController', 'flowGet')).toEqual([
+      "@Param('id')",
+      '@GuardedBusinessId()',
+    ]);
+    expect(handlerParams(KEY_CORTEX_CONTROLLER, text, 'KeyCortexController', 'listSessions')).toEqual([
+      '@GuardedBusinessId()',
+      '@CurrentUser()',
+    ]);
+    expect(handlerParams(KEY_CORTEX_CONTROLLER, text, 'KeyCortexController', 'missing')).toBeUndefined();
   });
 });
