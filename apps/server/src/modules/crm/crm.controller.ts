@@ -42,6 +42,40 @@ import { FeatureFlagGuard, RequireFeature } from './guards/feature-flag.guard';
 import { checkAiRateLimit } from './ai-rate-limit.util';
 import { memoryStorage } from 'multer';
 import type { Express } from 'express';
+import type { Prisma } from '@prisma/client';
+import { PickType } from '@nestjs/mapped-types';
+import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import { contactWhereBase } from './crm.helpers';
+
+/**
+ * The PATCH contacts/bulk body. status, relationshipType, priority and favorite
+ * carry UpdateContactDto's own rules (PickType copies its validation metadata),
+ * so the global ValidationPipe refuses with 400 any value the single PATCH
+ * refuses; null, which the web sends to clear relationshipType or priority,
+ * passes as IsOptional lets it. contactIds and addTags must be arrays of
+ * strings, so a malformed id or tag is a 400 here instead of a Prisma
+ * validation error (500). A class, not an inline type: tsc emits it as the
+ * parameter's design:paramtypes, which is what the pipe validates against (an
+ * inline type is emitted as Object and passes unchecked). The 100-id cap stays
+ * in the handler with its own message. Declared before CrmController, whose
+ * decorator metadata names it when the class is defined.
+ */
+export class BulkUpdateContactsDto extends PickType(UpdateContactDto, ['status', 'relationshipType', 'priority', 'favorite'] as const) {
+  @IsArray()
+  @IsString({ each: true })
+  contactIds!: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  addTags?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  archived?: boolean;
+}
 
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
@@ -66,6 +100,7 @@ export class CrmController {
     @Inject(ConversationAiService) private readonly conversationAi: ConversationAiService,
     @Inject(CrmNetworkService) private readonly network: CrmNetworkService,
     @Inject(ContactInsightService) private readonly contactInsight: ContactInsightService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -366,7 +401,38 @@ export class CrmController {
     const userId = req?.user?.id;
     if (!userId) return { counts: {} };
     const counts = await this.communication.unreadCounts(businessId, userId);
-    return { counts };
+    return { counts: await this.visibleCounts(businessId, userId, counts) };
+  }
+
+  /**
+   * `counts` (contact id -> number) cut to the live contacts `userId` can see:
+   * the tenant predicate with deletedAt null plus the visibility clause GET
+   * contacts/:contactId applies (resolveCrmAccess + visibilityClause).
+   * CrmCommunicationService.unreadCounts counts every contact of the tenant
+   * with inbound activity, so without this a member would receive the ids of
+   * another member's PRIVATE contacts, of TEAM contacts outside a 'my book'
+   * scope and of deleted contacts, all of which GET answers 404; with it such
+   * an id is left out exactly like an id with no inbound activity.
+   */
+  private async visibleCounts(
+    businessId: string,
+    userId: string,
+    counts: Record<string, number>,
+  ): Promise<Record<string, number>> {
+    const ids = Object.keys(counts);
+    if (ids.length === 0) return {};
+    const access = await resolveCrmAccess(this.prisma, businessId, userId);
+    const where: Prisma.ContactWhereInput = { ...contactWhereBase(businessId), id: { in: ids } };
+    const visClause = visibilityClause(access, userId);
+    if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+    const visible = new Set(
+      (await this.prisma.client.contact.findMany({ where, select: { id: true } })).map((c) => c.id),
+    );
+    const result: Record<string, number> = {};
+    for (const id of ids) {
+      if (visible.has(id)) result[id] = counts[id];
+    }
+    return result;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -397,15 +463,7 @@ export class CrmController {
   @Patch('businesses/:businessId/contacts/bulk')
   bulkUpdateContacts(
     @Param('businessId') businessId: string,
-    @Body() body: {
-      contactIds: string[];
-      status?: string;
-      addTags?: string[];
-      relationshipType?: string | null;
-      priority?: string | null;
-      favorite?: boolean;
-      archived?: boolean;
-    },
+    @Body() body: BulkUpdateContactsDto,
     @Req() req: any,
   ) {
     if (!Array.isArray(body.contactIds) || body.contactIds.length > 100) {
