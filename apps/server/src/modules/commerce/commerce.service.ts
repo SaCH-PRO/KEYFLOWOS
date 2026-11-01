@@ -1025,6 +1025,12 @@ export class CommerceService {
      * asking, not which quote it may touch.
      */
     businessId?: string;
+    /**
+     * R0-CMF4: the view token the send-email route already put in the
+     * message Gmail accepted (newQuoteViewToken). Stored on SENT when the
+     * quote has none; a quote that has one keeps it.
+     */
+    viewToken?: string;
   }) {
     const existingQuote = await this.prisma.client.quote.findUnique({
       where: { id: params.quoteId },
@@ -1053,7 +1059,7 @@ export class CommerceService {
       data.sentAt = now;
       // Make sure a public-link token exists so the email URL works.
       if (!existingQuote.viewToken) {
-        data.viewToken = this.generateQuoteToken();
+        data.viewToken = params.viewToken ?? this.generateQuoteToken();
       }
     } else if (params.status === 'ACCEPTED') {
       data.acceptedAt = now;
@@ -1113,6 +1119,17 @@ export class CommerceService {
 
   private generateQuoteToken(): string {
     return randomBytes(24).toString('base64url');
+  }
+
+  /**
+   * R0-CMF4-SEND-EMAIL-ORDER: a view token for the first send of a DRAFT
+   * quote, drawn but not stored. The send-email route puts it in the message
+   * and hands it to updateQuoteStatus(SENT) only after Gmail accepted it, so
+   * a refused or failed send leaves the DRAFT with no token (R2: no public
+   * link exists before the quote is sent).
+   */
+  newQuoteViewToken(): string {
+    return this.generateQuoteToken();
   }
 
   private isStaleQuote(quote: {
@@ -2980,7 +2997,9 @@ export class CommerceService {
    * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the single
    * place a customer-facing invoice URL is built. The operator's invoice
    * emails (send-email, reminder, resend-receipt in commerce.controller.ts)
-   * use it directly; the automated producers (overdue, due-soon and
+   * use it directly (send-email through sendWithPublicInvoiceUrl, which
+   * builds the same URL for a link it writes only once the send went out,
+   * R0-CMF4); the automated producers (overdue, due-soon and
    * payment-failed emails, KEY's invoice_sent, autopilot payment recovery)
    * go through automatedInvoiceUrl, which never mints a link for an invoice
    * whose links were all revoked or expired (V1-46b review SEC-V46B-1/2).
@@ -3024,6 +3043,49 @@ export class CommerceService {
     const now = new Date();
     if (links.length > 0 && !links.some((l) => l.active && (!l.expiresAt || l.expiresAt > now))) return null;
     return this.publicInvoiceUrl(invoiceId, businessId);
+  }
+
+  /**
+   * R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 3): the
+   * operator's invoice send-email, with the pay link publicInvoiceUrl would
+   * hand out (D-07), where a send the provider did not accept leaves no new
+   * PaymentLink row. `send` gets the URL to put in the message and resolves
+   * once the provider accepted it.
+   *
+   * - The invoice has a live link (or is PAID or VOID, or unknown):
+   *   publicInvoiceUrl, unchanged. It reuses that link (a live pre-V1-48
+   *   token is still rotated before it goes out, ST-V48-1), surfaces the
+   *   latest one, or throws its 404. No row is created, so a failed send
+   *   leaves no new one.
+   * - It has none: the link's token is drawn first and the row is written
+   *   only after `send` resolved, so a refused (503) or failed send writes
+   *   nothing, and an accepted one leaves exactly one live link, the one the
+   *   message carries. A later send reuses it.
+   *
+   * Two concurrent first sends can each write their own link; both work.
+   */
+  async sendWithPublicInvoiceUrl<T>(
+    invoiceId: string,
+    businessId: string,
+    send: (paymentUrl: string | null) => Promise<T>,
+  ): Promise<T> {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+      select: { status: true },
+    });
+    const mintable = !!invoice && invoice.status !== 'PAID' && invoice.status !== 'VOID';
+    const live = mintable
+      ? await this.prisma.client.paymentLink.findFirst({
+          where: { invoiceId, businessId, ...CommerceService.liveLinkWhere() },
+          select: { id: true },
+        })
+      : null;
+    if (!mintable || live) return send(await this.publicInvoiceUrl(invoiceId, businessId));
+
+    const token = CommerceService.newPaymentLinkToken();
+    const result = await send(`${appUrl()}/public/invoice/${token}`);
+    await this.prisma.client.paymentLink.create({ data: { invoiceId, businessId, token, expiresAt: null } });
+    return result;
   }
 
   /**

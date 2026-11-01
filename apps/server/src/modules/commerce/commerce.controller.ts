@@ -1051,27 +1051,22 @@ export class CommerceController {
       throw new Error('Quote not found');
     }
 
-    // Transition to SENT *before* composing the email so the public
-    // accept/reject viewToken is minted and present in the URL we send.
-    // Without this, draft → first-send would email a `/quote/{id}` link
-    // that the public endpoint can't resolve.
-    if (existing.status === 'DRAFT') {
-      await this.commerce.updateQuoteStatus({
-        quoteId,
-        status: 'SENT',
-        actorId: undefined,
-      });
-    }
-    const quote = await this.commerce.getQuote(quoteId);
-    if (!quote) {
-      throw new Error('Quote not found');
-    }
+    // R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 2): the email
+    // carries the public accept/reject link, so a first send of a DRAFT needs
+    // a view token in the URL before the quote is SENT. It is drawn here and
+    // stored, with the DRAFT -> SENT move, only after Gmail accepted the
+    // message: a refused (503) or failed send leaves the DRAFT as it was, with
+    // no token (R2), no sentAt and no quote.sent event. It used to move the
+    // quote to SENT first, so a send that never reached the customer left it
+    // SENT.
+    const quote = existing;
+    const viewToken = quote.viewToken ?? (quote.status === 'DRAFT' ? this.commerce.newQuoteViewToken() : null);
 
     const business = quote.business;
     const contact = quote.contact;
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
 
-    if (!quote.viewToken) {
+    if (!viewToken) {
       throw new Error('Quote view token missing — cannot send email.');
     }
 
@@ -1101,7 +1096,7 @@ export class CommerceController {
       total: quote.total,
       currency: quote.currency,
       notes: quote.notes,
-      quoteUrl: `${appUrl}/quote/${quote.viewToken}`,
+      quoteUrl: `${appUrl}/quote/${viewToken}`,
       customMessage: body.message,
     });
 
@@ -1112,7 +1107,18 @@ export class CommerceController {
       htmlBody: emailHtml,
     });
 
-    return { success: true, quote };
+    if (quote.status !== 'DRAFT') return { success: true, quote };
+    await this.commerce.updateQuoteStatus({
+      quoteId,
+      status: 'SENT',
+      actorId: undefined,
+      viewToken,
+    });
+    const sent = await this.commerce.getQuote(quoteId);
+    if (!sent) {
+      throw new Error('Quote not found');
+    }
+    return { success: true, quote: sent };
   }
 
   // ========== INVOICE EMAIL / REMINDER / RECEIPT ==========
@@ -1209,13 +1215,19 @@ export class CommerceController {
     if (invoice.status === 'VOID') throw new ForbiddenException('Cannot email a voided invoice');
     const recipient = body.recipientEmail || invoice.contact?.email;
     if (!recipient) throw new ForbiddenException('Recipient email is required');
-    const paymentUrl = await this.buildPublicInvoiceUrl(invoiceId, businessId);
-    const html = this.buildInvoiceEmailContext(invoice, paymentUrl, body.message, 'invoice');
-    const send = await this.gmail.sendEmail({
-      businessId,
-      to: recipient,
-      subject: `Invoice #${invoice.invoiceNumber} from ${invoice.business?.name ?? 'us'}`,
-      htmlBody: html,
+    // R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 3): the pay
+    // link is the one buildPublicInvoiceUrl would hand out (D-07), but one the
+    // invoice does not have yet is written only after Gmail accepted the
+    // message, so a refused (503) or failed send leaves no new PaymentLink.
+    const { send, paymentUrl } = await this.commerce.sendWithPublicInvoiceUrl(invoiceId, businessId, async (url) => {
+      const html = this.buildInvoiceEmailContext(invoice, url, body.message, 'invoice');
+      const result = await this.gmail.sendEmail({
+        businessId,
+        to: recipient,
+        subject: `Invoice #${invoice.invoiceNumber} from ${invoice.business?.name ?? 'us'}`,
+        htmlBody: html,
+      });
+      return { send: result, paymentUrl: url };
     });
     if (invoice.status === 'DRAFT') {
       await this.commerce.updateInvoiceStatus({
