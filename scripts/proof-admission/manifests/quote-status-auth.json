@@ -4,6 +4,10 @@
   "proofScope": "quote-status-route-auth-real-database-and-l1-http",
   "requireReportSuccess": true,
   "allowAdditionalCases": true,
+  "suites": [
+    "test/commerce-quote-status-auth.integration.test.ts",
+    "test/commerce-authorization.e2e.test.ts"
+  ],
   "requiredCases": [
     "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-META: updateQuoteStatus is PATCH quotes/:quoteId/status/:status behind AuthGuard, BusinessGuard and ModuleScopeGuard with { module: revenue, minLevel: write }",
     "Commerce authorization e2e (L1: real guards, mocked service) R0-28: quote status route write scope and tenant binding (L1 half) QS-L1-403: revenue:read (explicit and STAFF default) and revenue:none are refused at ModuleScopeGuard (403 Insufficient permissions) before the service is called",

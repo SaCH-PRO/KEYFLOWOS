@@ -4,6 +4,10 @@
   "proofScope": "key-action-boundary-real-database",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/key-action-boundary.integration.test.ts",
+    "test/key-action-boundary-surfaces.integration.test.ts"
+  ],
   "requiredCases": [
     "P1 — capability identity: a wrapper never substitutes for the capability an EXECUTE_TOOL proposal for the tool is sealed as helpdesk_create_ticket",
     "P1 — capability identity: a wrapper never substitutes for the capability it is governed as helpdesk_create_ticket, never as key_autonomy.EXECUTE_TOOL",
