@@ -141,6 +141,11 @@ const batches: CommandSeen[][] = [];
 const rollbacks: CommandSeen[] = [];
 /** Every verdict request the autonomy orchestrator stand-in received. */
 const autonomyCalls: Array<{ businessId: unknown; actionType: unknown; proposedBy: unknown }> = [];
+/**
+ * What the autonomy orchestrator stand-in answers: null allows (every case but
+ * the R0-09e repair refusals), a reason denies, 'throw' is a gate error.
+ */
+let autonomyVerdict: { reason: string } | 'throw' | null = null;
 /** Every natural-language parse, with the user it was handed. */
 const parseCalls: Array<{ text: unknown; businessId: unknown; userId: unknown }> = [];
 /** Every query the reasoning engine was handed (chat, chat/stream, stream). */
@@ -178,6 +183,7 @@ async function cleanup() {
     `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_goals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM saga_executions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM business_settings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -337,6 +343,9 @@ beforeAll(async () => {
   const autonomy = {
     evaluateAction: async (businessId: unknown, actionType: unknown, _params: unknown, opts?: { proposedBy?: unknown }) => {
       autonomyCalls.push({ businessId, actionType, proposedBy: opts?.proposedBy });
+      // R0-09e repair: a case may make the verdict a deny or a gate error (see autonomyVerdict).
+      if (autonomyVerdict === 'throw') throw new Error('k34c: the autonomy orchestrator is down');
+      if (autonomyVerdict) return { allowed: false, requiresApproval: false, reason: autonomyVerdict.reason };
       return { allowed: true, requiresApproval: false };
     },
   };
@@ -1034,6 +1043,11 @@ const PLAN = {
   staffAudit: `${P}plan_staff_audit`,
   systemTrigger: `${P}plan_system_trigger`,
   staffTrigger: `${P}plan_staff_trigger`,
+  // R0-09e repair
+  staffBlocked: `${P}plan_staff_blocked`,
+  ownerTwice: `${P}plan_owner_twice`,
+  ownerConcurrent: `${P}plan_owner_concurrent`,
+  ownerManual: `${P}plan_owner_manual`,
 };
 
 /** A one-step settings plan in A, written directly (the creation path is tested on its own). */
@@ -1224,6 +1238,184 @@ describe('every execute writes its ai_execution_logs row naming the actor (revie
     const rows = await auditRowsSince(audit);
     expect(rows, JSON.stringify(rows)).toHaveLength(1);
     expect(rows[0]).toMatchObject({ userId: ID.ownerA, actor: 'user', module: 'settings', action: 'update_branding', success: true });
+  });
+});
+
+/**
+ * R0-09e repair (review ST-1 / CR-1). execute() returned before logExecution on
+ * every path that refuses a command before the connector (a blocked action, an
+ * autonomy-orchestrator deny, a legacy-gate BLOCK, a gate error, approval
+ * pending), so the executes an audit most needs left no ai_execution_logs row,
+ * on POST execute and on a plan step alike. Required: each writes its one row
+ * naming the member, with the refusal. (The legacy-gate BLOCK is reached only
+ * with no orchestrator; key-cortex-executor.service.spec.ts pins it. Approval
+ * pending is in the approval-policy block below.)
+ */
+describe('a refused execute writes its ai_execution_logs row too, naming the member (R0-09e repair, review ST-1 / CR-1)', () => {
+  it("RED-BEFORE: POST execute of a blocked action (settings.UPDATE_RECORD) by a STAFF member answers 200 with the refusal, routes nothing, and writes one row naming the STAFF member", async () => {
+    const audit = await auditIds();
+    const from = connectorCommands.length;
+    const res = await post('execute', ID.staffA, structured('UPDATE_RECORD', { name: HIJACK.name }));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.result).toMatchObject({ success: false });
+    expect(connectorCommands.slice(from)).toEqual([]);
+    const rows = await auditRowsSince(audit);
+    expect(rows, JSON.stringify(rows)).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.staffA, actor: 'user', module: 'settings', action: 'UPDATE_RECORD', success: false });
+    expect(String(rows[0].errorMessage)).toMatch(/disabled in this build/);
+    expect(rows[0].inputSummary).toMatchObject({ actorId: ID.staffA });
+  });
+
+  it('RED-BEFORE: an autonomy-orchestrator deny and an orchestrator error on POST execute each write one row naming the member, with the refusal; nothing is routed', async () => {
+    for (const [verdict, message] of [
+      [{ reason: 'k34c: tier locked for this member' }, /k34c: tier locked for this member/],
+      ['throw', /Autonomy gate unavailable; execution blocked for safety/],
+    ] as const) {
+      const audit = await auditIds();
+      const from = connectorCommands.length;
+      autonomyVerdict = verdict;
+      try {
+        const res = await post('execute', ID.staffA, structured('update_branding', { primaryColor: '#999999' }));
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
+        expect(res.body.result).toMatchObject({ success: false });
+      } finally {
+        autonomyVerdict = null;
+      }
+      expect(connectorCommands.slice(from)).toEqual([]);
+      const rows = await auditRowsSince(audit);
+      expect(rows, JSON.stringify(rows)).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ userId: ID.staffA, actor: 'user', module: 'settings', action: 'update_branding', success: false });
+      expect(String(rows[0].errorMessage)).toMatch(message);
+    }
+  });
+
+  it('RED-BEFORE: a plan step refused before the connector (settings.UPDATE_RECORD) writes one row naming the executing member, and nothing is routed', async () => {
+    await seedPlan(PLAN.staffBlocked, ID.staffA, 'UPDATE_RECORD', { name: HIJACK.name });
+    const audit = await auditIds();
+    const from = connectorCommands.length;
+    const res = await executePlanAs(ID.staffA, PLAN.staffBlocked);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ status: 'failed', executed: 1 });
+    expect(connectorCommands.slice(from)).toEqual([]);
+    const rows = await auditRowsSince(audit);
+    expect(rows, JSON.stringify(rows)).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.staffA, actor: 'user', module: 'settings', action: 'UPDATE_RECORD', success: false });
+    expect(String(rows[0].errorMessage)).toMatch(/disabled in this build/);
+  });
+});
+
+/**
+ * R0-09e repair (review ST-2). executePlan set the plan 'running'
+ * unconditionally and never checked its status, so POST plans/:planId/execute
+ * re-ran a completed plan's side-effecting steps under a new saga, and two
+ * concurrent executes of one pending plan both ran it. Required: the plan is
+ * claimed in one conditional write over the runnable statuses; a plan that is
+ * running or completed answers 409 and nothing runs.
+ */
+describe('a plan runs once: a completed or already-claimed plan is refused 409 (R0-09e repair, review ST-2)', () => {
+  const sagaCount = () => db.sagaExecution.count({ where: { businessId: ID.bizA } });
+
+  it('RED-BEFORE: re-posting execute on a completed plan answers 409: the step is not routed again, no second saga starts and no second audit row is written', async () => {
+    await seedPlan(PLAN.ownerTwice, ID.ownerA, 'update_branding', { primaryColor: '#555555' });
+    const audit = await auditIds();
+    const sagas = await sagaCount();
+    const from = connectorCommands.length;
+    const first = await executePlanAs(ID.ownerA, PLAN.ownerTwice);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(first.body).toMatchObject({ status: 'completed', executed: 1 });
+    const second = await executePlanAs(ID.ownerA, PLAN.ownerTwice);
+    expect(second.status, JSON.stringify(second.body)).toBe(409);
+    expect(connectorCommands.slice(from)).toEqual([{ module: 'settings', action: 'update_branding', businessId: ID.bizA, userId: ID.ownerA }]);
+    expect(await sagaCount()).toBe(sagas + 1);
+    expect(await auditRowsSince(audit)).toHaveLength(1);
+    expect(await planRow(PLAN.ownerTwice)).toMatchObject({ status: 'completed' });
+  });
+
+  it('RED-BEFORE: two concurrent executes of one pending plan: one runs it (201) and the other answers 409; the step is routed once', async () => {
+    await seedPlan(PLAN.ownerConcurrent, ID.ownerA, 'update_branding', { primaryColor: '#666666' });
+    const sagas = await sagaCount();
+    const from = connectorCommands.length;
+    const results = await Promise.all([executePlanAs(ID.ownerA, PLAN.ownerConcurrent), executePlanAs(ID.ownerA, PLAN.ownerConcurrent)]);
+    expect(results.map((r) => r.status).sort(), JSON.stringify(results.map((r) => r.body))).toEqual([201, 409]);
+    expect(results.find((r) => r.status === 201)!.body).toMatchObject({ status: 'completed', executed: 1 });
+    expect(connectorCommands.slice(from)).toEqual([{ module: 'settings', action: 'update_branding', businessId: ID.bizA, userId: ID.ownerA }]);
+    expect(await sagaCount()).toBe(sagas + 1);
+  });
+});
+
+/**
+ * R0-09e repair (review ST-3). fetchApprovalPolicy counted ai_execution_logs by
+ * `startedAt`, which AiExecutionLog does not have, so Prisma refused the query,
+ * the fallback policy answered, and the business's BusinessSetting was never
+ * applied: plan execute (no skipApproval) and POST execute with requireApproval
+ * ignored aiAutonomyLevel 'manual', aiAlwaysRequireApproval and the hourly cap.
+ * Required: the real executor reads A's BusinessSetting and its real
+ * ai_execution_logs count. Each case writes A's setting and removes it after.
+ */
+describe("the business's approval policy applies to KEY executes (R0-09e repair, review ST-3)", () => {
+  async function withPolicy(data: Record<string, unknown>, run: () => Promise<void>) {
+    await db.businessSetting.create({ data: { id: `${P}setting_bizA`, businessId: ID.bizA, ...data } });
+    try {
+      await run();
+    } finally {
+      await db.businessSetting.deleteMany({ where: { businessId: ID.bizA } });
+    }
+  }
+  const asCommand = (action: string, userId: string) => ({
+    module: 'settings' as any, action, parameters: {}, businessId: ID.bizA, userId, source: 'key_cortex', timestamp: new Date(),
+  });
+
+  it("RED-BEFORE: aiAlwaysRequireApproval ['settings.update_branding'] at full autonomy makes the real executor require approval for update_branding, not for update_business_profile", async () => {
+    await withPolicy({ aiAutonomyLevel: 'full', aiAlwaysRequireApproval: ['settings.update_branding'] }, async () => {
+      expect(await executor.requiresApproval(asCommand('update_branding', ID.ownerA))).toBe(true);
+      expect(await executor.requiresApproval(asCommand('update_business_profile', ID.ownerA))).toBe(false);
+    });
+  });
+
+  it("RED-BEFORE: aiMaxAutoExecutionsPerHour is checked against A's successful ai_execution_logs rows of the last hour", async () => {
+    const since = new Date(Date.now() - 60 * 60 * 1000);
+    const recent = await db.aiExecutionLog.count({ where: { businessId: ID.bizA, success: true, createdAt: { gte: since } } });
+    expect(recent, 'earlier cases left successful rows in A').toBeGreaterThan(0);
+    await withPolicy({ aiAutonomyLevel: 'full', aiMaxAutoExecutionsPerHour: recent }, async () => {
+      expect(await executor.requiresApproval(asCommand('update_business_profile', ID.ownerA))).toBe(true);
+    });
+    await withPolicy({ aiAutonomyLevel: 'full', aiMaxAutoExecutionsPerHour: recent + 100 }, async () => {
+      expect(await executor.requiresApproval(asCommand('update_business_profile', ID.ownerA))).toBe(false);
+    });
+  });
+
+  it("RED-BEFORE: with aiAutonomyLevel 'manual' the OWNER's plan stops at approval: the step waits for approval, nothing is routed, the branding is unchanged, and one row names the OWNER with 'Approval pending'", async () => {
+    await seedPlan(PLAN.ownerManual, ID.ownerA, 'update_branding', { primaryColor: '#777777' });
+    await withPolicy({ aiAutonomyLevel: 'manual' }, async () => {
+      const before = await businessRowText(ID.bizA);
+      const audit = await auditIds();
+      const from = connectorCommands.length;
+      const res = await executePlanAs(ID.ownerA, PLAN.ownerManual);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toMatchObject({ executed: 1 });
+      expect(connectorCommands.slice(from)).toEqual([]);
+      expect((await planRow(PLAN.ownerManual)).steps).toEqual([{ status: 'waiting_approval', errorMessage: null }]);
+      expect(await businessRowText(ID.bizA)).toBe(before);
+      const rows = await auditRowsSince(audit);
+      expect(rows, JSON.stringify(rows)).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ userId: ID.ownerA, actor: 'user', module: 'settings', action: 'update_branding', success: false, errorMessage: 'Approval pending' });
+    });
+  });
+
+  it("RED-BEFORE: with aiAutonomyLevel 'manual' the OWNER's POST execute with requireApproval answers 'Approval pending', routes nothing, and writes one row naming the OWNER", async () => {
+    await withPolicy({ aiAutonomyLevel: 'manual' }, async () => {
+      const before = await businessRowText(ID.bizA);
+      const audit = await auditIds();
+      const from = connectorCommands.length;
+      const res = await post('execute', ID.ownerA, structured('update_branding', { primaryColor: '#888888' }, { requireApproval: true }));
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.result).toMatchObject({ success: false, error: 'Approval pending', data: { approvalStatus: 'pending' } });
+      expect(connectorCommands.slice(from)).toEqual([]);
+      expect(await businessRowText(ID.bizA)).toBe(before);
+      const rows = await auditRowsSince(audit);
+      expect(rows, JSON.stringify(rows)).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ userId: ID.ownerA, actor: 'user', action: 'update_branding', success: false, errorMessage: 'Approval pending' });
+    });
   });
 });
 

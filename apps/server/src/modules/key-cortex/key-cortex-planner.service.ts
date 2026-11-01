@@ -1,5 +1,6 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException, Optional, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, ConflictException, Optional, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { Prisma } from '@prisma/client';
 import { PlannerService } from '../ai/planner.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { ParsedIntent } from '../ai/intent-parser.service';
@@ -56,6 +57,15 @@ export interface PlanExecutionActor {
  * records it as `actor: 'system'` with no userId.
  */
 export const SYSTEM_PLAN_ACTOR = 'key_cortex';
+
+/**
+ * The AiPlan statuses executePlan may claim (R0-09e repair, review ST-2): a plan
+ * not yet run ('draft', 'pending', 'approved') and one a member may run again
+ * ('failed', 'waiting_approval'; the goals page offers Run on both). Never
+ * 'running' (another execute holds it), 'completed', or the other executor's
+ * 'executing'.
+ */
+export const RUNNABLE_PLAN_STATUSES: readonly string[] = ['draft', 'pending', 'approved', 'failed', 'waiting_approval'];
 
 export interface PlanGoal {
   objective: string;
@@ -416,7 +426,9 @@ export class KeyCortexPlannerService {
    * that EXECUTING member, never as the creator named in the row and never as
    * SYSTEM_PLAN_ACTOR. With no member (a system trigger or the query pipeline,
    * which call this directly): a member's plan runs as that member, and only a
-   * plan no member created runs as SYSTEM_PLAN_ACTOR.
+   * plan no member created runs as SYSTEM_PLAN_ACTOR. On either path a plan
+   * runs only once it is claimed out of RUNNABLE_PLAN_STATUSES (409 otherwise:
+   * running, completed, or a concurrent execute claimed it first).
    */
   async executePlan(planId: string, options: ExecuteOptions = {}, member?: PlanExecutionActor) {
     const plan = member
@@ -432,11 +444,42 @@ export class KeyCortexPlannerService {
     if (member) await this.assertMayExecutePlan(plan, member);
     const actorId = member ? member.userId : (plan.userId ?? SYSTEM_PLAN_ACTOR);
 
-    await this.prisma.client.aiPlan.update({
-      where: { id: planId },
+    // R0-09e repair (review ST-2): claim the plan atomically. This set the
+    // status to 'running' unconditionally, so a 'completed' plan re-ran every
+    // side-effecting step under a new saga, and two concurrent executes of one
+    // pending plan both ran it. Only a plan in RUNNABLE_PLAN_STATUSES is
+    // claimed, in one conditional write; a plan that is running, completed or
+    // in any other state is refused 409 and nothing runs.
+    const claimed = await this.prisma.client.aiPlan.updateMany({
+      where: { id: planId, businessId: plan.businessId, status: { in: [...RUNNABLE_PLAN_STATUSES] } },
       data: { status: 'running', startedAt: new Date() },
     });
+    if (claimed.count !== 1) {
+      throw new ConflictException('Plan is already running, completed or otherwise not runnable');
+    }
 
+    try {
+      return await this.runClaimedPlan(planId, plan, actorId, options);
+    } catch (err) {
+      // An unexpected error while the plan is still 'running' must not leave it
+      // so for ever (no execute could claim it again): it is released as
+      // 'failed', which a member may run again, and the error is rethrown. Only
+      // a plan still 'running' is released, so an error after the final status
+      // was written never turns a 'completed' plan runnable again.
+      await this.prisma.client.aiPlan
+        .updateMany({ where: { id: planId, status: 'running' }, data: { status: 'failed', completedAt: null } })
+        .catch((releaseErr: unknown) => this.logger.error(`Plan ${planId} release failed: ${(releaseErr as Error).message}`));
+      throw err;
+    }
+  }
+
+  /** Runs the steps of a plan executePlan has claimed ('running'), as `actorId`. */
+  private async runClaimedPlan(
+    planId: string,
+    plan: Prisma.AiPlanGetPayload<{ include: { steps: true } }>,
+    actorId: string,
+    options: ExecuteOptions,
+  ) {
     const saga = await this.saga.start({
       businessId: plan.businessId,
       sagaType: 'ai_plan',

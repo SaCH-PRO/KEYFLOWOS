@@ -157,3 +157,167 @@ describe('KeyCortexExecutorService.logExecution — one ai_execution_logs row pe
     expect(errors.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/Audit log failed: db down/);
   });
 });
+
+/**
+ * R0-09e repair (review ST-1 / CR-1): execute() returned before logExecution on
+ * five paths, all before the connector: a blocked action, an autonomy-
+ * orchestrator deny, a legacy-gate BLOCK, a gate error and approval pending. So
+ * a refused execute, the kind an audit most needs, left no ai_execution_logs
+ * row. Pinned here: each of those paths writes exactly one row naming the
+ * command's actor, with the refusal, before execute() resolves, and the record
+ * execute() answers is unchanged.
+ */
+describe('KeyCortexExecutorService.execute — a refused execute writes its ai_execution_logs row too (R0-09e repair, review ST-1 / CR-1)', () => {
+  function buildWith(opts: { orchestrator?: any; gate?: any; setting?: any } = {}) {
+    const prisma = {
+      client: {
+        aiExecutionLog: { create: vi.fn(async (_args: any) => ({})), count: vi.fn(async () => 0) },
+        user: { findUnique: vi.fn(async ({ where }: any) => (where.id === HUMAN ? { id: HUMAN } : null)) },
+        businessSetting: { findUnique: vi.fn(async () => opts.setting ?? null) },
+      },
+    };
+    const connector = {
+      execute: vi.fn(async (c: ConnectorCommand) => ({ success: true, data: { id: 'row_1' }, executionTimeMs: 1, command: c })),
+      getAllCapabilities: () => [],
+    };
+    const orchestrator = 'orchestrator' in opts
+      ? opts.orchestrator
+      : { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false })) };
+    executor = new KeyCortexExecutorService(connector as any, prisma as any, { emit: vi.fn() } as any, (opts.gate ?? {}) as any, orchestrator);
+    return { prisma, connector };
+  }
+  const rows = (prisma: any) => prisma.client.aiExecutionLog.create.mock.calls.map((c: any[]) => c[0].data);
+
+  it('RED-BEFORE: a blocked action (UPDATE_RECORD, EXECUTE_TOOL, QUERY_DATABASE) writes one row naming the actor, success false, with the refusal; the connector is not called', async () => {
+    for (const action of ['UPDATE_RECORD', 'EXECUTE_TOOL', 'QUERY_DATABASE']) {
+      const { prisma, connector } = buildWith();
+      const rec = await executor.execute(command({ action }), { skipApproval: true });
+      expect(rec.result.success, action).toBe(false);
+      expect(connector.execute, action).not.toHaveBeenCalled();
+      expect(rows(prisma), action).toHaveLength(1);
+      expect(rows(prisma)[0], action).toMatchObject({
+        id: rec.id, userId: HUMAN, actor: 'user', action, success: false, errorMessage: rec.result.error,
+      });
+      expect(String(rows(prisma)[0].errorMessage)).toMatch(/disabled in this build/);
+    }
+  });
+
+  it('RED-BEFORE: an autonomy-orchestrator deny writes one row with the reason; the connector is not called', async () => {
+    const { prisma, connector } = buildWith({ orchestrator: { evaluateAction: vi.fn(async () => ({ allowed: false, reason: 'tier 4 is locked' })) } });
+    const rec = await executor.execute(command(), { skipApproval: true });
+    expect(rec.result).toMatchObject({ success: false, error: 'tier 4 is locked' });
+    expect(connector.execute).not.toHaveBeenCalled();
+    expect(rows(prisma)).toHaveLength(1);
+    expect(rows(prisma)[0]).toMatchObject({ id: rec.id, userId: HUMAN, actor: 'user', success: false, errorMessage: 'tier 4 is locked' });
+  });
+
+  it('RED-BEFORE: a legacy-gate BLOCK (no orchestrator) writes one row with the blocking reasons; the connector is not called', async () => {
+    const gate = { checkGate: vi.fn(async () => ({ decision: 'BLOCK', blockingReasons: ['genome says no'] })) };
+    const { prisma, connector } = buildWith({ orchestrator: undefined, gate });
+    const rec = await executor.execute(command(), { skipApproval: true });
+    expect(gate.checkGate).toHaveBeenCalledTimes(1);
+    expect(rec.result).toMatchObject({ success: false, error: 'genome says no' });
+    expect(connector.execute).not.toHaveBeenCalled();
+    expect(rows(prisma)).toHaveLength(1);
+    expect(rows(prisma)[0]).toMatchObject({ id: rec.id, userId: HUMAN, success: false, errorMessage: 'genome says no' });
+  });
+
+  it('RED-BEFORE: a gate error writes one row with the fail-closed refusal; the connector is not called', async () => {
+    const { prisma, connector } = buildWith({ orchestrator: { evaluateAction: vi.fn(async () => { throw new Error('orchestrator down'); }) } });
+    const rec = await executor.execute(command(), { skipApproval: true });
+    expect(rec.result).toMatchObject({ success: false, error: 'Autonomy gate unavailable; execution blocked for safety.' });
+    expect(connector.execute).not.toHaveBeenCalled();
+    expect(rows(prisma)).toHaveLength(1);
+    expect(rows(prisma)[0]).toMatchObject({ id: rec.id, userId: HUMAN, success: false, errorMessage: 'Autonomy gate unavailable; execution blocked for safety.' });
+  });
+
+  it("RED-BEFORE: approval pending writes one row naming the actor, with 'Approval pending' and the approval status; the record keeps the approval id and the connector is not called", async () => {
+    const { prisma, connector } = buildWith();
+    vi.spyOn(executor, 'requiresApproval').mockResolvedValue(true);
+    vi.spyOn(executor, 'executeWithApproval').mockResolvedValue({ id: 'proposal_1', status: 'pending' });
+    const rec = await executor.execute(command());
+    expect(rec.id).toBe('proposal_1');
+    expect(rec.result).toMatchObject({ success: false, error: 'Approval pending', data: { approvalStatus: 'pending' } });
+    expect(connector.execute).not.toHaveBeenCalled();
+    expect(rows(prisma)).toHaveLength(1);
+    expect(rows(prisma)[0]).toMatchObject({
+      id: 'proposal_1', userId: HUMAN, actor: 'user', success: false, errorMessage: 'Approval pending',
+      outputSummary: { data: { approvalStatus: 'pending' } },
+    });
+  });
+
+  it('RED-BEFORE: a refused execute whose audit write fails still answers its refusal, and the failure is logged', async () => {
+    const { prisma } = buildWith();
+    prisma.client.aiExecutionLog.create.mockRejectedValue(new Error('db down'));
+    const errors = vi.spyOn(executor.logger, 'error').mockImplementation(() => undefined);
+    const rec = await executor.execute(command({ action: 'UPDATE_RECORD' }), { skipApproval: true });
+    expect(rec.result.success).toBe(false);
+    expect(String(rec.result.error)).toMatch(/disabled in this build/);
+    expect(errors.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/Audit log failed: db down/);
+  });
+});
+
+/**
+ * R0-09e repair (review ST-3): fetchApprovalPolicy counted aiExecutionLog rows
+ * by `startedAt`, a column AiExecutionLog does not have, through an untyped
+ * client. Prisma refused the count, the catch answered the fallback policy, and
+ * the business's BusinessSetting (aiAutonomyLevel, aiAlwaysRequireApproval, the
+ * spending limits, the hourly cap) was never applied. Pinned here: the count
+ * filters on AiExecutionLog's own columns (createdAt), the setting decides, and
+ * a business that sets no spending threshold keeps the 1000 every business was
+ * in fact held to. The real-database half is in key-cortex-actor-binding.
+ */
+describe('KeyCortexExecutorService.requiresApproval — the business approval policy applies (R0-09e repair, review ST-3)', () => {
+  function buildPolicy(setting: any, recent = 0) {
+    const prisma = {
+      client: {
+        aiExecutionLog: { create: vi.fn(async () => ({})), count: vi.fn(async (_args: any) => recent) },
+        user: { findUnique: vi.fn(async () => null) },
+        businessSetting: { findUnique: vi.fn(async () => setting) },
+      },
+    };
+    executor = new KeyCortexExecutorService({ execute: vi.fn(), getAllCapabilities: () => [] } as any, prisma as any, { emit: vi.fn() } as any, {} as any, undefined);
+    return prisma;
+  }
+  const policySetting = (over: Record<string, unknown> = {}) => ({
+    aiAutonomyLevel: 'supervised', aiAlwaysRequireApproval: [], aiNeverRequireApproval: [],
+    aiSpendingThreshold: null, aiActionSpendingLimits: {}, aiMaxAutoExecutionsPerHour: 100, ...over,
+  });
+
+  it('RED-BEFORE: the hourly count filters only on AiExecutionLog columns (createdAt, not startedAt)', async () => {
+    const prisma = buildPolicy(policySetting());
+    await executor.requiresApproval(command());
+    const where = prisma.client.aiExecutionLog.count.mock.calls[0][0].where;
+    const columns = modelColumns('AiExecutionLog');
+    expect(Object.keys(where).filter((k) => !columns.has(k))).toEqual([]);
+    expect(where).toMatchObject({ businessId: 'biz_1', success: true, createdAt: { gte: expect.any(Date) } });
+  });
+
+  it("aiAutonomyLevel 'manual' requires approval for every action", async () => {
+    buildPolicy(policySetting({ aiAutonomyLevel: 'manual' }));
+    expect(await executor.requiresApproval(command())).toBe(true);
+  });
+
+  it('aiAlwaysRequireApproval names an action that then needs approval, even at full autonomy; another action does not', async () => {
+    buildPolicy(policySetting({ aiAutonomyLevel: 'full', aiAlwaysRequireApproval: ['settings.update_branding'] }));
+    expect(await executor.requiresApproval(command({ action: 'update_branding' }))).toBe(true);
+    expect(await executor.requiresApproval(command({ action: 'update_business_profile' }))).toBe(false);
+  });
+
+  it("the hourly cap counts the business's recent successful executes", async () => {
+    buildPolicy(policySetting({ aiAutonomyLevel: 'full', aiMaxAutoExecutionsPerHour: 3 }), 3);
+    expect(await executor.requiresApproval(command())).toBe(true);
+    buildPolicy(policySetting({ aiAutonomyLevel: 'full', aiMaxAutoExecutionsPerHour: 3 }), 2);
+    expect(await executor.requiresApproval(command())).toBe(false);
+  });
+
+  it('a configured spending threshold applies; with none set (no row, or a null threshold) a supervised business keeps the 1000 threshold', async () => {
+    buildPolicy(policySetting({ aiSpendingThreshold: 50 }));
+    expect(await executor.requiresApproval(command({ parameters: { amount: 60 } }))).toBe(true);
+    for (const setting of [null, policySetting()]) {
+      buildPolicy(setting);
+      expect(await executor.requiresApproval(command({ parameters: { amount: 1500 } }))).toBe(true);
+      expect(await executor.requiresApproval(command({ parameters: { amount: 500 } }))).toBe(false);
+    }
+  });
+});

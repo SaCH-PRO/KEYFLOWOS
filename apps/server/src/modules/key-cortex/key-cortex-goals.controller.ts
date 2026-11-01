@@ -284,7 +284,8 @@ export class KeyCortexGoalsController {
   /**
    * R0-09e: the planner re-checks that the executing member may run this plan
    * (its creator, the business OWNER or SUPER_ADMIN; 403 otherwise, 404 for a
-   * plan outside the checked tenant) and runs every step as that member.
+   * plan outside the checked tenant) and runs every step as that member. A
+   * plan that is running or completed is refused 409 (R0-09e repair, ST-2).
    */
   @Post('plans/:planId/execute')
   async executePlan(
