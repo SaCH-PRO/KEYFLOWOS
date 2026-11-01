@@ -781,14 +781,16 @@ export class FlowOrchestratorService {
    * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the customer's
    * invoice link in commerce_send_invoice is /public/invoice/<token>, built
    * exactly as the operator's send-email builds it
-   * (CommerceService.publicInvoiceUrl: the live link, or a new one). It was
+   * (CommerceService.publicInvoiceUrl: the live link, or a new one). V1-46b
+   * review (SEC-V46B-2, CR-V46B-01): through automatedInvoiceUrl, so it never
+   * mints a link for an invoice whose links were all revoked or expired. It was
    * /pay/<invoiceId>, the retired bare-id page. A link that cannot be issued
    * leaves the email without a button (the template renders none), never a
    * bare-id URL.
    */
   private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
     try {
-      return (await this.getCommerce().publicInvoiceUrl(invoiceId, businessId)) ?? undefined;
+      return (await this.getCommerce().automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
     } catch (e) {
       Logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`, FlowOrchestratorService.name);
       return undefined;

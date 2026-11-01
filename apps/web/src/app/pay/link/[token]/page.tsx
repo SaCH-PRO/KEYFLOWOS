@@ -24,7 +24,13 @@
  * token routes of payments.controller.ts (/payments/public/invoice-link/
  * :token/..., through lib/client.ts), so every call this page makes is keyed
  * by the token and stops when the link is revoked or expires. The token read
- * no longer returns the invoice id, and the page never uses one.
+ * no longer returns the invoice id, and the page never uses one. The one
+ * place the id still travels is WiPay (review SEC-V46B-4): WiPay keys its
+ * hosted page and its callback by order_id, which is the invoice id, so a
+ * WiPay return brings it back in this URL and the page forwards the query
+ * to /payments/wipay/callback as it is. Once the link is revoked or expires
+ * that id opens no bare-id route (the server answers 404) and no reminder
+ * mints a new link.
  */
 
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";

@@ -231,6 +231,10 @@ export class PaymentsService {
    * V1-46b: the PayPal capture for the token's invoice. The invoice is the
    * token's, never one named by the caller (the bare route took
    * `body.invoiceId`, so any order could be captured against any invoice).
+   * The token alone does not bind the ORDER to that invoice: capturePaypalOrder
+   * reads the order first and refuses one created for another invoice, order
+   * or tenant, or for another amount (V1-46b review SEC-V46B-3,
+   * assertPaypalOrderForInvoice).
    */
   async capturePaypalOrderByToken(token: string, orderId: string) {
     const { invoiceId } = await this.payLinkInvoice(token);
@@ -1585,6 +1589,9 @@ export class PaymentsService {
     const paypal = this.getPaypalClient(paypalClientId, paypalClientSecret);
     if (!paypal) throw new Error('PayPal is not configured');
 
+    // V1-46b review (SEC-V46B-3): before anything is captured or written.
+    await this.assertPaypalOrderForInvoice(paypal.ordersController, orderId, invoice);
+
     try {
       const { result } = await paypal.ordersController.captureOrder({
         id: orderId,
@@ -1656,6 +1663,40 @@ export class PaymentsService {
       }
 
       throw new Error('Failed to capture PayPal order', { cause: error });
+    }
+  }
+
+  /**
+   * V1-46b review (SEC-V46B-3): the order a capture names must be the one
+   * createPaypalOrder made for this invoice: exactly one purchase unit, its
+   * custom_id this invoice's id and its amount this invoice's total. The
+   * PayPal credentials may be shared by every tenant (the env pair), so an
+   * order id alone could name another invoice's, a storefront order's or
+   * another tenant's order, and the capture recorded it as a SUCCESSFUL
+   * payment of this invoice's whole total. An order that does not match, or
+   * cannot be read, is refused (400) before it is captured; nothing is written
+   * and no FAILED row is left behind.
+   */
+  private async assertPaypalOrderForInvoice(
+    ordersController: OrdersController,
+    orderId: string,
+    invoice: { id: string; total: number },
+  ): Promise<void> {
+    const refusal = 'This PayPal order does not belong to this invoice';
+    let units: Array<{ customId?: string; amount?: { value?: string } }> | undefined;
+    try {
+      const { result } = await ordersController.getOrder({ id: orderId });
+      units = result.purchaseUnits;
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`PayPal order ${orderId} could not be read for invoice ${invoice.id}: ${errMsg}`);
+      throw new BadRequestException(refusal);
+    }
+    const unit = units?.length === 1 ? units[0] : undefined;
+    const value = Number(unit?.amount?.value);
+    if (!unit || unit.customId !== invoice.id || !Number.isFinite(value) || value.toFixed(2) !== Number(invoice.total).toFixed(2)) {
+      this.logger.warn(`PayPal order ${orderId} is not an order for invoice ${invoice.id}; capture refused`);
+      throw new BadRequestException(refusal);
     }
   }
 

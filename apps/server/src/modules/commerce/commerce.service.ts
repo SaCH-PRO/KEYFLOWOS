@@ -2978,11 +2978,13 @@ export class CommerceService {
    * one. Any other refusal (unknown invoice, another tenant's) is thrown.
    *
    * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the single
-   * place a customer-facing invoice URL is built. The invoice emails
-   * (send-email, reminder, resend-receipt in commerce.controller.ts), the
-   * overdue and due-soon reminders (flow.listener), KEY's invoice_sent
-   * (flow-orchestrator) and autopilot payment recovery (delegation-loop) all
-   * use it; none of them emits a bare /pay/<invoiceId> URL any more.
+   * place a customer-facing invoice URL is built. The operator's invoice
+   * emails (send-email, reminder, resend-receipt in commerce.controller.ts)
+   * use it directly; the automated producers (overdue, due-soon and
+   * payment-failed emails, KEY's invoice_sent, autopilot payment recovery)
+   * go through automatedInvoiceUrl, which never mints a link for an invoice
+   * whose links were all revoked or expired (V1-46b review SEC-V46B-1/2).
+   * None of them emits a bare /pay/<invoiceId> URL any more.
    */
   async publicInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
     try {
@@ -2996,6 +2998,32 @@ export class CommerceService {
       const existing = await this.findAnyPaymentLink(invoiceId, businessId);
       return existing ? `${appUrl()}/public/invoice/${existing.token}` : null;
     }
+  }
+
+  /**
+   * V1-46b review (SEC-V46B-1, SEC-V46B-2, CR-V46B-01): the customer invoice
+   * URL for a message no operator asked for at that moment: the overdue,
+   * due-soon and payment-failed emails (flow.listener), KEY's invoice_sent
+   * (flow-orchestrator) and autopilot payment recovery (delegation-loop).
+   *
+   * It reuses the invoice's live link, and mints one only for an invoice that
+   * has never had a link of its own tenant (publicInvoiceUrl). When every link
+   * the invoice has is revoked or past its expiry it answers null: the
+   * message goes without a pay button. Minting there would undo the
+   * operator's revocation or expiry with a link that never expires, reopen
+   * the bare-id routes (isBareIdPublicAccessOpen) and mail the new token,
+   * and an anonymous WiPay failure callback (payment.failed) could trigger
+   * it. Only the operator's own send-email, reminder and payment-link routes
+   * issue a new link for such an invoice (publicInvoiceUrl).
+   */
+  async automatedInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
+    const links = await this.prisma.client.paymentLink.findMany({
+      where: { invoiceId, businessId },
+      select: { active: true, expiresAt: true },
+    });
+    const now = new Date();
+    if (links.length > 0 && !links.some((l) => l.active && (!l.expiresAt || l.expiresAt > now))) return null;
+    return this.publicInvoiceUrl(invoiceId, businessId);
   }
 
   /**
@@ -3179,10 +3207,18 @@ export class CommerceService {
    * carries the invoice `id`. The page needed it only for the provider
    * checkouts, the gateway list and the PayPal capture, which are now keyed
    * by the token too (payments.controller.ts, public/invoice-link/:token/...),
-   * so a customer never learns the id and a revoked link leaves them nothing
-   * to call; the bare-id routes close behind a revoked link as well
+   * so no JSON answer of the pay page or its token routes carries the id; the
+   * bare-id routes close behind a revoked link as well
    * (isBareIdPublicAccessOpen). `businessId` stays: the tenant key is public
    * and the page's presence tracker reads it.
+   *
+   * Review SEC-V46B-4: this is not "the customer never learns the id". A
+   * WiPay checkout hands it to WiPay as `order_id` (WiPay's hosted page and
+   * callback are keyed by it), so it is in the WiPay redirect and comes back
+   * on the return URL. Holding it gives nothing after the link is revoked or
+   * expires: the bare-id routes answer 404 and no automated producer mints a
+   * new link (automatedInvoiceUrl). The unsigned WiPay callback keyed by it is
+   * TG-22 (M35, V1-05).
    */
   async getPayPageByToken(token: string) {
     const link = await this.getPaymentLinkByToken(token);

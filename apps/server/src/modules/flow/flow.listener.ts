@@ -45,16 +45,21 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
 
   /**
    * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the customer's
-   * invoice URL for a reminder, /public/invoice/<token> through
-   * CommerceService.publicInvoiceUrl (the send-email path: the live link, or
-   * a new one). The overdue reminder sent /pay/<invoiceId>, the retired
-   * bare-id page; the due-soon reminder sent /invoices/<invoiceId>, which no
-   * web route serves. A link that cannot be issued leaves the reminder
-   * without a button (the templates render none) rather than failing it.
+   * invoice URL for a reminder, /public/invoice/<token>. The overdue reminder
+   * sent /pay/<invoiceId>, the retired bare-id page; the due-soon reminder
+   * sent /invoices/<invoiceId>, which no web route serves. A link that cannot
+   * be issued leaves the reminder without a button (the templates render
+   * none) rather than failing it.
+   *
+   * V1-46b review (SEC-V46B-1/2, CR-V46B-01): through
+   * CommerceService.automatedInvoiceUrl, so a reminder reuses the live link
+   * and never mints one for an invoice whose links were all revoked or
+   * expired (an anonymous WiPay failure callback reaches the payment-failed
+   * email). Callers build it only once the contact has an email.
    */
   private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
     try {
-      return (await this.commerce.publicInvoiceUrl(invoiceId, businessId)) ?? undefined;
+      return (await this.commerce.automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
     } catch (e) {
       this.logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`);
       return undefined;
@@ -179,6 +184,8 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
 
     // Send customer overdue reminder
     const inv = payload.invoice;
+    // V1-46b review (CR-V46B-01): no email, no reminder, so no pay link is touched.
+    if (!inv.contact?.email) return;
     const daysOverdue = inv.dueDate
       ? Math.max(1, Math.floor((Date.now() - new Date(inv.dueDate).getTime()) / (1000 * 60 * 60 * 24)))
       : 1;
@@ -596,6 +603,8 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
           },
         });
         if (alreadySent) continue;
+        // V1-46b review (CR-V46B-01): no email, no reminder, so no pay link is touched.
+        if (!inv.contact?.email) continue;
 
         const invoiceUrl = await this.customerInvoiceUrl(inv.id, inv.businessId);
 

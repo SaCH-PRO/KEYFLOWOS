@@ -1127,7 +1127,10 @@ export class CommerceController {
    * V1-46b-TOKEN-PAY-COMPLETE (CR-01): the logic moved, unchanged, to
    * CommerceService.publicInvoiceUrl, so every producer of a customer
    * invoice URL (these emails, the flow reminders, KEY's invoice_sent and
-   * autopilot payment recovery) builds the same token link.
+   * autopilot payment recovery) builds the same token link. These operator
+   * sends may issue a new link for an invoice whose links were all revoked
+   * or expired; the automated producers may not (automatedInvoiceUrl, V1-46b
+   * review SEC-V46B-1/2).
    */
   private async buildPublicInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
     return this.commerce.publicInvoiceUrl(invoiceId, businessId);
