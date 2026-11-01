@@ -20,6 +20,24 @@ import {
 import { fetchTemplates, applyTemplate, type BusinessTemplate } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
+/**
+ * R0-09f-D11-FINANCE-TAX-AND-WEB (R0-09d review CR-1): applying a template is
+ * OWNER only (owner ruling D-11; POST .../templates/:templateId/apply answers a
+ * non-owner 403 BUSINESS_PROFILE_OWNER_ONLY). apiPost returns a refusal as
+ * `{ data: null, error, status }` rather than throwing, so handleApply reads the
+ * result: a refused apply shows the server's refusal on the template's card (a
+ * 403 without a usable message names the owner-only rule) and no success state.
+ */
+const OWNER_ONLY_FALLBACK_TEXT = "Only the business owner can apply a template.";
+const APPLY_FAILED_TEXT = "Could not apply the template.";
+const GENERIC_FORBIDDEN = new Set(["forbidden", "forbidden resource", "request failed"]);
+
+function applyRefusalText(res: { error: string | null; status?: number }): string {
+  const message = res.error?.trim() ?? "";
+  if (res.status === 403 && (!message || GENERIC_FORBIDDEN.has(message.toLowerCase()))) return OWNER_ONLY_FALLBACK_TEXT;
+  return message || APPLY_FAILED_TEXT;
+}
+
 const INDUSTRY_ICONS: Record<string, React.ElementType> = {
   consulting: Briefcase,
   salon: Scissors,
@@ -48,6 +66,7 @@ export default function TemplatesPage() {
   const [applying, setApplying] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [successId, setSuccessId] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<{ templateId: string; message: string } | null>(null);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -73,13 +92,18 @@ export default function TemplatesPage() {
     if (!businessId) return;
     setApplying(templateId);
     setConfirmId(null);
+    setRefusal(null);
     try {
-      const res = await applyTemplate(businessId, templateId);
+      const res: { data: unknown; error: string | null; status?: number } = await applyTemplate(businessId, templateId);
       if (res.data) {
         setSuccessId(templateId);
         setTimeout(() => setSuccessId(null), 3000);
+      } else {
+        setRefusal({ templateId, message: applyRefusalText(res) });
       }
-    } catch {}
+    } catch (err) {
+      setRefusal({ templateId, message: err instanceof Error && err.message ? err.message : APPLY_FAILED_TEXT });
+    }
     setApplying(null);
   };
 
@@ -193,13 +217,20 @@ export default function TemplatesPage() {
                       </div>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => setConfirmId(template.id)}
-                      disabled={!!applying}
-                      className="w-full px-4 py-2 rounded-xl text-sm font-medium bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all disabled:opacity-50"
-                    >
-                      Apply Template
-                    </button>
+                    <div className="space-y-2">
+                      {refusal?.templateId === template.id && (
+                        <p role="alert" className="text-xs text-[hsl(var(--kf-error))]">
+                          {refusal.message}
+                        </p>
+                      )}
+                      <button
+                        onClick={() => setConfirmId(template.id)}
+                        disabled={!!applying}
+                        className="w-full px-4 py-2 rounded-xl text-sm font-medium bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all disabled:opacity-50"
+                      >
+                        Apply Template
+                      </button>
+                    </div>
                   )}
                 </div>
               </motion.div>

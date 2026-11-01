@@ -586,8 +586,7 @@ describe('R0-09d template apply cannot change the business profile for a non-own
   });
 });
 
-describe('R0-09d open follow-ups (outside the R0-09d write set)', () => {
-  it.todo(
-    'REQUIRED (follow-up; apps/web/src/app/app/templates/page.tsx — outside the R0-09d write set; review CR-1): a non-owner who clicks Apply on the templates page sees the server refusal (403 BUSINESS_PROFILE_OWNER_ONLY, "Only the business owner can apply a business template."), or is not offered Apply: handleApply reads only res.data and swallows errors, and apiPost answers a 403 with {data:null, error} without throwing, so since the R0-09d gate the click ends with no message at all',
-  );
-});
+// R0-09d review CR-1 (the templates page swallowed the 403 a non-owner's apply
+// now answers) is FIXED by R0-09f-D11-FINANCE-TAX-AND-WEB: the page shows the
+// server's refusal and no success state, proven in
+// apps/web/src/app/app/templates/__tests__/templates-apply-refusal.test.tsx.

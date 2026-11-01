@@ -1640,14 +1640,16 @@ describe('ST-3 (fixed, R0-09-ID-HARDEN, owner ruling D-11) — PATCH /identity/b
 });
 
 // OPEN DEFECTS — D-11 sibling write paths (R0-09-ID-HARDEN review R09-ST-2,
-// R09-ST-3, R09-ST-4, CR-3; R0-09b review SEC-1; R0-09d sweep). The generic
-// PATCH above is closed, but other routes still write the owner-only profile
-// fields with only AuthGuard and BusinessGuard. Each fix is in source outside
-// the R0-09, R0-09b and R0-09d write sets; each it.todo names the required
-// behaviour for its follow-up packet. The R0-09d grep of every Business-row
-// writer in apps/server/src for name, slug, currency, timezone, tax, store
-// settings, industry, archetype, country, businessIntent and the setup keys of
-// metaData found the one route below besides those already fixed.
+// R09-ST-3, R09-ST-4, CR-3; R0-09b review SEC-1; R0-09d sweep; R0-09f sweep).
+// The generic PATCH above is closed, but other routes still write the
+// owner-only profile fields without the owner rule. Each fix is in source
+// outside the R0-09, R0-09b, R0-09d and R0-09f write sets; each it.todo names
+// the required behaviour for its follow-up packet. Since R0-09f the sweep is a
+// static spec run on every test run (src/core/config/d11-owner-writes.spec.ts:
+// every business.update/updateMany/upsert in apps/server/src that writes an
+// UpdateBusinessDto field, archetype, onboardingComplete or a setup key of
+// metaData is allow-listed with the owner check it sits behind); it found the
+// one route below besides those already fixed, and pins it as kind 'open'.
 describe('OPEN DEFECTS — D-11 sibling write paths still change owner-only profile fields', () => {
   // R09-ST-2 (presence draft/publish slug), R09-ST-3 (concierge auto-configure)
   // and the concierge chat intake (R0-09b review SEC-2) are FIXED by
@@ -1658,11 +1660,17 @@ describe('OPEN DEFECTS — D-11 sibling write paths still change owner-only prof
   // /businesses/:id/templates/:templateId/apply writing industry and archetype)
   // is FIXED by R0-09d-D11-GENESIS-TEMPLATES; its cases assert the required
   // behaviour on a real database in d11-genesis-templates.integration.test.ts.
+  // The R0-09d sweep's finding (PATCH /finance/businesses/:id/settings writing
+  // Business.defaultTaxRate for any member) is FIXED by
+  // R0-09f-D11-FINANCE-TAX-AND-WEB; its cases assert the required behaviour on
+  // a real database in d11-finance-settings.integration.test.ts.
   it.todo(
-    'REQUIRED (follow-up; finance/finance.controller.ts:436 patchSettings -> finance/finance-settings.service.ts:105,116 update — outside the ' +
-      'R0-09d write set; found by the R0-09d grep, by reading the code): PATCH /finance/businesses/:id/settings writes Business.defaultTaxRate ' +
-      '(the tax rate the owner-only PATCH /identity/businesses/:id writes) for any member — the route has AuthGuard, BusinessGuard and ' +
-      'ensureAccess (any member) only; a non-owner answers 403 for defaultTaxRate with the Business row unchanged',
+    'REQUIRED (follow-up; commerce/commerce.controller.ts setDocumentTemplate — outside the R0-09f write set, commerce/** belongs to ' +
+      'another packet; found by the R0-09f static sweep, d11-owner-writes.spec.ts kind open): PATCH /commerce/businesses/:id/document-templates ' +
+      'writes Business.invoiceTemplate and quoteTemplate (UpdateBusinessDto fields, so part of the owner-only profile the PATCH ' +
+      '/identity/businesses/:id writes) for any member holding revenue:write — the route has AuthGuard, BusinessGuard and ModuleScopeGuard ' +
+      'only; a non-owner answers 403 BUSINESS_PROFILE_OWNER_ONLY with the Business row unchanged, or the owner rules that the document ' +
+      'templates leave the owner-only profile',
   );
   // R09-ST-4 and CR-3 — FIXED by R0-09c-KEY-ACTOR-BINDING; proven in test/key-cortex-actor-binding.integration.test.ts.
 });

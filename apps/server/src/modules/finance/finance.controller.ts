@@ -433,6 +433,12 @@ export class FinanceController {
     await this.ensureAccess(req.user.id, businessId);
     return this.settings.get(businessId);
   }
+  /**
+   * R0-09f (owner ruling D-11, R0-09d sweep): Business.defaultTaxRate is a field
+   * of the owner-only business profile, so a non-owner's change to it is
+   * refused (403 BUSINESS_PROFILE_OWNER_ONLY) before anything is written; the
+   * other finance settings keep ensureAccess (any member).
+   */
   @Patch('settings')
   async patchSettings(
     @Param('businessId') businessId: string,
@@ -440,7 +446,8 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.settings.update(businessId, body);
+    const input = await this.settings.assertTaxRateOwner(businessId, body ?? {}, req.user);
+    return this.settings.update(businessId, input);
   }
 
   // ---------- Bank Rules ----------
