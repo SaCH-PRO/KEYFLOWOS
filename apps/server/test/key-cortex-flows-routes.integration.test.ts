@@ -55,8 +55,10 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { readFileSync } from 'node:fs';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
+import * as ts from 'typescript';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
@@ -118,6 +120,41 @@ function get(route: string, opts: { user?: string; query?: string; body?: Record
   if (opts.body) req = req.send(opts.body);
   return req;
 }
+
+const CONTROLLER_SOURCE = path.resolve(__dirname, '../src/modules/key-cortex/key-cortex.controller.ts');
+
+/**
+ * The design:paramtypes tsc emits (emitDecoratorMetadata, the production build)
+ * for one KeyCortexController handler, as written in the emitted JavaScript;
+ * undefined when the handler has no such metadata.
+ */
+function emittedParamTypes(handler: string): string[] | undefined {
+  const out = ts.transpileModule(readFileSync(CONTROLLER_SOURCE, 'utf8'), {
+    compilerOptions: { experimentalDecorators: true, emitDecoratorMetadata: true, target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  const sf = ts.createSourceFile('emitted.js', out, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  let found: string[] | undefined;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(sf) === '__decorate' && node.arguments.length >= 3) {
+      const [decorators, target, name] = node.arguments;
+      if (ts.isArrayLiteralExpression(decorators) && ts.isStringLiteral(name) && name.text === handler
+        && target.getText(sf) === 'KeyCortexController.prototype') {
+        for (const d of decorators.elements) {
+          if (ts.isCallExpression(d) && d.expression.getText(sf) === '__metadata' && ts.isStringLiteral(d.arguments[0])
+            && d.arguments[0].text === 'design:paramtypes' && ts.isArrayLiteralExpression(d.arguments[1])) {
+            found = d.arguments[1].elements.map((e) => e.getText(sf));
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+const PRIMITIVES: Record<string, unknown> = { String, Number, Boolean, Object, Array };
+/** tsc's parameter types for flowTemplates, read once (the category case asserts them). */
+const FLOW_TEMPLATES_PARAM_TYPES = emittedParamTypes('flowTemplates');
 
 const json = (value: unknown) => JSON.parse(JSON.stringify(value));
 const flowRows = () => db.flowDefinition.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } });
@@ -184,6 +221,17 @@ beforeAll(async () => {
       KeyCortexDocumentService, KeyCortexLearningService, KeyAutonomySafetyService, KeyCortexApprovalOrchestratorService,
       KeyCortexConsciousnessService, KeyCortexSessionService, KeyCortexAwarenessService,
     ], KeyCortexController);
+  }
+  // The same for flowTemplates' query parameter, which the global
+  // ValidationPipe transforms by its emitted type (a String joins a repeated
+  // ?category into one string; an Object passes it through as an array).
+  if (FLOW_TEMPLATES_PARAM_TYPES && !Reflect.getMetadata('design:paramtypes', KeyCortexController.prototype, 'flowTemplates')) {
+    Reflect.defineMetadata(
+      'design:paramtypes',
+      FLOW_TEMPLATES_PARAM_TYPES.map((t) => PRIMITIVES[t] ?? Object),
+      KeyCortexController.prototype,
+      'flowTemplates',
+    );
   }
 
   // The flow studio's AI collaborators are off this path: any use of one throws.
@@ -311,7 +359,8 @@ describe('R0-13g: each formerly shadowed route reaches its own handler over HTTP
     expect(studioCalls.slice(from)).toEqual(['getNodeRegistry']);
   });
 
-  it('NEGATIVE CONTROL: GET flows/templates?category= narrows the catalogue to that category, matched without regard to case; an unknown category answers an empty list; a repeated category answers 400', async () => {
+  it('NEGATIVE CONTROL: GET flows/templates?category= narrows the catalogue to that category, matched without regard to case; an unknown category answers an empty list; a repeated category answers 400 (tsc emits Object for it, so the ValidationPipe does not join it into one string)', async () => {
+    expect(FLOW_TEMPLATES_PARAM_TYPES).toEqual(['Object']);
     const sales = expectedTemplates.filter((t) => t.category === 'Sales');
     expect(sales.length).toBeGreaterThan(1);
     for (const category of ['Sales', 'sales', 'SALES']) {

@@ -87,6 +87,7 @@ import { KeyCortexMonitorV2Service } from './key-cortex-monitor-v2.service';
 // -- v3 Phase 3 & 4 Services --
 import { KeyCortexSandboxService } from './key-cortex-sandbox.service';
 import { KeyCortexFlowStudioService } from './key-cortex-flow-studio.service';
+import type { FlowTemplate, NodeRegistryEntry } from './key-cortex-flow-studio.types';
 import { KeyCortexEvolutionService } from './key-cortex-evolution.service';
 import { KeyCortexPhoneService } from './key-cortex-phone.service';
 import { KeyCortexDocumentService } from './key-cortex-document.service';
@@ -2635,6 +2636,59 @@ export class KeyCortexController {
     }
   }
 
+  /*
+   * R0-13g-KEY-FLOWS-ROUTES: GET flows/templates and flows/nodes are declared
+   * before GET flows/:id. Express answers with the first route that matches, so
+   * while they sat below it flowGet answered them as flow 'templates' and
+   * 'nodes' (src/core/config/route-shadowing.spec.ts keeps the order). Both run
+   * behind the class guards, as flowGet does, and read no tenant and no actor:
+   * they answer the flow studio's built-in catalogues, which are the same for
+   * every tenant (test/key-cortex-flows-routes.integration.test.ts).
+   */
+
+  /**
+   * GET /api/v1/cortex/flows/templates
+   * List the built-in flow templates, optionally narrowed to one category
+   * (matched without regard to case). A repeated `category` is 400.
+   * `category` is typed `unknown` so tsc emits Object for it and the
+   * ValidationPipe passes a repeated value through as an array (typed `string`,
+   * the pipe would join it into one string) for the check below to refuse.
+   */
+  @Get('flows/templates')
+  @HttpCode(HttpStatus.OK)
+  async flowTemplates(
+    @Query('category') category?: unknown,
+  ): Promise<{ templates: FlowTemplate[] }> {
+    if (category !== undefined && typeof category !== 'string') {
+      throw new BadRequestException('category must be a single string');
+    }
+    const studio: KeyCortexFlowStudioService = this.flowStudio;
+    try {
+      const templates = studio.getTemplates();
+      const wanted = category?.trim().toLowerCase();
+      return { templates: wanted ? templates.filter((t) => t.category.toLowerCase() === wanted) : templates };
+    } catch (err: any) {
+      this.logger.error(`Flow templates error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to list flow templates');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/flows/nodes
+   * Get the node registry (available node types).
+   */
+  @Get('flows/nodes')
+  @HttpCode(HttpStatus.OK)
+  async flowNodes(): Promise<{ nodes: NodeRegistryEntry[] }> {
+    const studio: KeyCortexFlowStudioService = this.flowStudio;
+    try {
+      return { nodes: studio.getNodeRegistry() };
+    } catch (err: any) {
+      this.logger.error(`Flow nodes error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve node registry');
+    }
+  }
+
   /**
    * GET /api/v1/cortex/flows/:id
    * Get a single flow by ID.
@@ -2757,25 +2811,6 @@ export class KeyCortexController {
   }
 
   /**
-   * GET /api/v1/cortex/flows/templates
-   * List available flow templates.
-   */
-  @Get('flows/templates')
-  @HttpCode(HttpStatus.OK)
-  async flowTemplates(
-    @Query('category') category?: string,
-  ): Promise<{
-    templates: Array<Record<string, unknown>>;
-  }> {
-    try {
-      return await this.flowStudio.listTemplates(category);
-    } catch (err: any) {
-      this.logger.error(`Flow templates error: ${err.message}`, err.stack);
-      throw new ServiceUnavailableException('Unable to list flow templates');
-    }
-  }
-
-  /**
    * POST /api/v1/cortex/flows/apply-template
    * Apply a template to create a new flow.
    */
@@ -2809,29 +2844,6 @@ export class KeyCortexController {
     }
   }
 
-  /**
-   * GET /api/v1/cortex/flows/nodes
-   * Get the node registry (available node types).
-   */
-  @Get('flows/nodes')
-  @HttpCode(HttpStatus.OK)
-  async flowNodes(): Promise<{
-    nodes: Array<{
-      type: string;
-      name: string;
-      description: string;
-      inputs: Array<Record<string, unknown>>;
-      outputs: Array<Record<string, unknown>>;
-      configSchema?: Record<string, unknown>;
-    }>;
-  }> {
-    try {
-      return await this.flowStudio.getNodeRegistry();
-    } catch (err: any) {
-      this.logger.error(`Flow nodes error: ${err.message}`, err.stack);
-      throw new ServiceUnavailableException('Unable to retrieve node registry');
-    }
-  }
   /* ═══════════════════════════════════════════════════════════════════ */
   /*  v3 -- PHONE AGENT  (Voice Calls)                                  */
   /* ═══════════════════════════════════════════════════════════════════ */
