@@ -65,8 +65,10 @@ class CommercePrismaMock {
           if (include) {
             return Promise.resolve({
               ...match,
+              // The joined contact carries its businessId, as Prisma returns it:
+              // the service serves it only for the quote's own tenant (R0-CMF3).
               contact: match.contactId
-                ? { firstName: 'Test', lastName: 'User', email: 'user@example.com' }
+                ? { firstName: 'Test', lastName: 'User', email: 'user@example.com', businessId: match.businessId }
                 : null,
               items: [],
               invoice: match.invoiceId
@@ -96,7 +98,7 @@ class CommercePrismaMock {
             return Promise.resolve({
               ...updated,
               contact: updated.contactId
-                ? { id: updated.contactId, firstName: 'Test', lastName: 'User', email: 'user@example.com' }
+                ? { id: updated.contactId, firstName: 'Test', lastName: 'User', email: 'user@example.com', businessId: updated.businessId }
                 : null,
             });
           }

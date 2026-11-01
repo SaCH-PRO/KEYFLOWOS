@@ -27,6 +27,20 @@
  *   same-tenant create, update and detail                    -> unchanged (positive controls)
  *   LEDGER: no refused create or patch writes a FinancialTransaction
  *
+ * R0-CMF3 review (ST-CMF3-1/2/3, CR-CMF3-1): every other reader in
+ * commerce.service.ts that joins the quote's contact, on the same legacy rows:
+ *
+ *   PATCH /commerce/quotes/:id/status/sent, POST businesses/B/quotes/:id/send-email (updateQuoteStatus)
+ *         -> contact null in the answer; quote.sent carries neither A's contact nor its id (flow.listener
+ *         emails quote.contact; the CRM listeners log quote.contactId), no timeline write names A's contact
+ *   GET public/quotes/:token, POST public/quotes/:token/accept|reject
+ *         -> contact null; quote.viewed / accepted / rejected, the timeline and the visitor stitch never
+ *         name A's contact; on B's own quote accept/reject answers only { firstName, lastName, email }
+ *         (it answered the whole Contact row, phone and internal notes included, to an anonymous caller)
+ *   GET businesses/B/quotes, quotes/stale, POST quotes/:id/follow-up
+ *         -> contact null for the legacy row; quote.stale and the follow-up timeline write never name A's
+ *         contact; B's own rows keep their contact (the list shape is otherwise unchanged)
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService and the production
  * GlobalHttpExceptionFilter + ValidationPipe run against DATABASE_URL.
@@ -114,6 +128,23 @@ const crmRecorder = {
   },
 };
 
+// R0-CMF3 review: the visitor stitch and the outbound email are recorded too,
+// so a case can show that nothing was attached to (or sent about) A's contact.
+const visitorAttaches: unknown[] = [];
+const publicEventsRecorder = {
+  attachVisitorToContact: async (input: unknown) => {
+    visitorAttaches.push(input);
+    return undefined;
+  },
+};
+const gmailCalls: unknown[] = [];
+const gmailRecorder = {
+  sendEmail: async (input: unknown) => {
+    gmailCalls.push(input);
+    return { id: `${P}mail_${gmailCalls.length}` };
+  },
+};
+
 async function cleanup() {
   for (const sql of [
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -195,6 +226,44 @@ async function ledgerCount() {
   return db.financialTransaction.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } });
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Seed one SENT B quote with a signed view token (the public and stale cases). */
+async function seedSentQuote(id: string, contactId: string, opts: { token?: string; sentDaysAgo?: number } = {}) {
+  return db.quote.create({
+    data: {
+      id,
+      quoteNumber: `${P}${id.slice(P.length)}`,
+      status: 'SENT',
+      subtotal: 20,
+      total: 20,
+      currency: 'TTD',
+      businessId: ID.bizB,
+      contactId,
+      viewToken: opts.token ?? null,
+      sentAt: new Date(Date.now() - (opts.sentDaysAgo ?? 0) * DAY_MS),
+      items: { create: [{ id: `${id}_item1`, description: `K04B item ${id}`, quantity: 2, unitPrice: 10, total: 20 }] },
+    },
+  });
+}
+
+/**
+ * Nothing that leaves the request (an event, a timeline write, a visitor
+ * stitch, an email) names A's contact: neither its id nor any of its fields.
+ */
+function expectNoForeignContactSideEffects() {
+  const sideEffects = JSON.stringify({ recordedEvents, crmCalls, visitorAttaches, gmailCalls });
+  expect(sideEffects).not.toContain(CANARY);
+  expect(sideEffects).not.toContain(ID.contactA);
+}
+
+/** The recorded events of one name, by quote id. */
+function eventsFor(name: string, quoteId: string) {
+  return recordedEvents
+    .filter((e) => e.name === name && (e.payload as { quote?: { id?: string } }).quote?.id === quoteId)
+    .map((e) => e.payload as { quote: { id: string; contactId: string | null; contact: Record<string, unknown> | null } });
+}
+
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
@@ -254,10 +323,10 @@ beforeAll(async () => {
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
       { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
       { provide: CatalogService, useValue: {} },
-      { provide: PublicEventsService, useValue: { attachVisitorToContact: async () => undefined } },
+      { provide: PublicEventsService, useValue: publicEventsRecorder },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
       { provide: TimeEntryService, useValue: {} },
-      { provide: GmailService, useValue: {} },
+      { provide: GmailService, useValue: gmailRecorder },
       { provide: CommerceVisionService, useValue: {} },
       { provide: StoreReadinessService, useValue: {} },
       { provide: PaymentEvidenceService, useValue: {} },
@@ -315,6 +384,8 @@ afterAll(async () => {
 beforeEach(() => {
   recordedEvents.length = 0;
   crmCalls.length = 0;
+  visitorAttaches.length = 0;
+  gmailCalls.length = 0;
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -486,5 +557,211 @@ describe("GET /commerce/businesses/:businessId/quotes/:quoteId: the operator inc
     const own = await agent().get(`/commerce/businesses/${ID.bizA}/quotes/${qid}`).set(HEADER, ID.ownerA);
     expect(own.status).toBe(200);
     expect(own.body.contact).toEqual({ firstName: A_CONTACT.firstName, lastName: A_CONTACT.lastName, email: A_CONTACT.email });
+  });
+});
+
+// R0-CMF3 review (ST-CMF3-1, CR-CMF3-1): updateQuoteStatus, behind the status
+// route, send-email and the public accept/reject, joined the contact with no
+// tenant condition: A's name and email in the 200, A's whole row in quote.sent
+// (which flow.listener uses to email the customer), and a timeline write naming
+// A's contact under B.
+describe("PATCH /commerce/quotes/:quoteId/status/:status and send-email (updateQuoteStatus) act only on a contact of the quote's tenant", () => {
+  it("the status route on a legacy B quote joined to A's contact answers 200 with contact null; quote.sent carries neither A's contact nor its id, and nothing is logged against it", async () => {
+    const qid = `${P}qStatusLegacy`;
+    await seedQuote(qid, ID.contactA, 'STATUS-LEGACY');
+    const res = await asOwnerB(agent().patch(`/commerce/quotes/${qid}/status/sent`)).send({ businessId: ID.bizB });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.id).toBe(qid);
+    expect(res.body.status).toBe('SENT');
+    expect(res.body.contact).toBeNull();
+    expectNoCanary(res.body);
+
+    const sent = eventsFor('quote.sent', qid);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].quote.contact).toBeNull();
+    expect(sent[0].quote.contactId).toBeNull();
+    expect(crmCalls).toEqual([]);
+    expectNoForeignContactSideEffects();
+
+    // The status change itself is written; the stored contact is not re-pointed behind the operator's back.
+    const row = await db.quote.findUnique({ where: { id: qid }, select: { status: true, contactId: true } });
+    expect(row).toEqual({ status: 'SENT', contactId: ID.contactA });
+  });
+
+  it("send-email on a legacy DRAFT B quote joined to A's contact answers 201 with contact null; the quote.sent it emits and the email it sends never name A's contact", async () => {
+    const qid = `${P}qSendLegacy`;
+    await seedQuote(qid, ID.contactA, 'SEND-LEGACY');
+    const res = await asOwnerB(agent().post(`/commerce/businesses/${ID.bizB}/quotes/${qid}/send-email`)).send({ recipientEmail: `${P}operator-choice@test.local` });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.quote.contact).toBeNull();
+    expectNoCanary(res.body);
+
+    const sent = eventsFor('quote.sent', qid);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].quote.contact).toBeNull();
+    expect(sent[0].quote.contactId).toBeNull();
+    // Only the address the operator typed is emailed.
+    expect(gmailCalls).toHaveLength(1);
+    expect((gmailCalls[0] as { to: string }).to).toBe(`${P}operator-choice@test.local`);
+    expect(crmCalls).toEqual([]);
+    expectNoForeignContactSideEffects();
+  });
+
+  it("positive control: the status route on B's own quote answers exactly { firstName, lastName, email } of B's contact, and quote.sent and the timeline still name B's contact", async () => {
+    const qid = `${P}qStatusOwn`;
+    await seedQuote(qid, ID.contactB, 'STATUS-OWN');
+    const res = await asOwnerB(agent().patch(`/commerce/quotes/${qid}/status/sent`)).send({ businessId: ID.bizB });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.contact).toEqual(B_CONTACT);
+
+    const sent = eventsFor('quote.sent', qid);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].quote.contactId).toBe(ID.contactB);
+    expect(sent[0].quote.contact).toMatchObject({ id: ID.contactB, email: B_CONTACT.email });
+    expect(crmCalls).toEqual([expect.objectContaining({ businessId: ID.bizB, contactId: ID.contactB, type: 'quote.sent' })]);
+  });
+});
+
+// R0-CMF3 review (ST-CMF3-2, CR-CMF3-1): the signed-token readers served A's
+// name and email to the link holder, and accept/reject answered A's WHOLE
+// Contact row (phone, internal notes, owner, visibility) to an anonymous
+// caller; the whole-row answer was a disclosure for B's own contacts too.
+describe("the signed-token public quote routes serve and act on only a contact of the quote's tenant", () => {
+  it("GET /commerce/public/quotes/:token of a legacy B quote joined to A's contact answers 200 with contact null; quote.viewed, the timeline and the visitor stitch never name A's contact", async () => {
+    const qid = `${P}qPubViewLegacy`;
+    const token = `${P}tok_view_legacy_0123456789`;
+    await seedSentQuote(qid, ID.contactA, { token });
+    const res = await agent().get(`/commerce/public/quotes/${token}`).set('x-visitor-id', `${P}visitor_view`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.id).toBe(qid);
+    expect(res.body.contact).toBeNull();
+    expectNoCanary(res.body);
+
+    const viewed = eventsFor('quote.viewed', qid);
+    expect(viewed).toHaveLength(1);
+    expect(viewed[0].quote.contact).toBeNull();
+    expect(viewed[0].quote.contactId).toBeNull();
+    expect(crmCalls).toEqual([]);
+    expect(visitorAttaches).toEqual([]);
+    expectNoForeignContactSideEffects();
+  });
+
+  it("POST accept and reject of legacy B quotes joined to A's contact answer 201 with contact null; the decision is recorded, and quote.accepted / quote.rejected, the timeline and the visitor stitch never name A's contact", async () => {
+    const accepted = `${P}qPubAcceptLegacy`;
+    const rejected = `${P}qPubRejectLegacy`;
+    await seedSentQuote(accepted, ID.contactA, { token: `${P}tok_accept_legacy_0123456789` });
+    await seedSentQuote(rejected, ID.contactA, { token: `${P}tok_reject_legacy_0123456789` });
+
+    const acc = await agent().post(`/commerce/public/quotes/${P}tok_accept_legacy_0123456789/accept`).send({ visitorId: `${P}visitor_acc` });
+    const rej = await agent().post(`/commerce/public/quotes/${P}tok_reject_legacy_0123456789/reject`).send({ reason: 'no', visitorId: `${P}visitor_rej` });
+    for (const [res, id, status] of [[acc, accepted, 'ACCEPTED'], [rej, rejected, 'REJECTED']] as const) {
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.id).toBe(id);
+      expect(res.body.status).toBe(status);
+      expect(res.body.contact).toBeNull();
+      expectNoCanary(res.body);
+      expect((await db.quote.findUnique({ where: { id }, select: { status: true } })).status).toBe(status);
+    }
+
+    for (const [name, id] of [['quote.accepted', accepted], ['quote.rejected', rejected]]) {
+      const emitted = eventsFor(name, id);
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0].quote.contact).toBeNull();
+      expect(emitted[0].quote.contactId).toBeNull();
+    }
+    expect(crmCalls).toEqual([]);
+    expect(visitorAttaches).toEqual([]);
+    expectNoForeignContactSideEffects();
+  });
+
+  it("positive control: on B's own quote the token view and the accept answer exactly { firstName, lastName, email } (never the contact's phone or internal notes), and quote.accepted, the timeline and the visitor stitch still name B's contact", async () => {
+    const contactId = `${P}contactBPrivate`;
+    const PRIVATE = 'K04B_BPRIVATE_';
+    const named = { firstName: 'K04b', lastName: 'CustomerBPrivate', email: `${P}bprivate@test.local` };
+    await db.contact.create({
+      data: { id: contactId, businessId: ID.bizB, ...named, phone: `${PRIVATE}phone`, notesInternal: `${PRIVATE}notes` },
+    });
+    const qid = `${P}qPubOwn`;
+    const token = `${P}tok_own_0123456789abcdef`;
+    await seedSentQuote(qid, contactId, { token });
+
+    const view = await agent().get(`/commerce/public/quotes/${token}`);
+    expect(view.status, JSON.stringify(view.body)).toBe(200);
+    expect(view.body.contact).toEqual(named);
+
+    const acc = await agent().post(`/commerce/public/quotes/${token}/accept`).send({ visitorId: `${P}visitor_own` });
+    expect(acc.status, JSON.stringify(acc.body)).toBe(201);
+    expect(acc.body.status).toBe('ACCEPTED');
+    expect(acc.body.contact).toEqual(named);
+    expect(JSON.stringify(acc.body)).not.toContain(PRIVATE);
+
+    const emitted = eventsFor('quote.accepted', qid);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].quote.contactId).toBe(contactId);
+    expect(emitted[0].quote.contact).toMatchObject({ id: contactId, email: named.email });
+    expect(crmCalls).toEqual(
+      expect.arrayContaining([expect.objectContaining({ businessId: ID.bizB, contactId, type: 'quote.accepted' })]),
+    );
+    expect(visitorAttaches).toEqual(
+      expect.arrayContaining([expect.objectContaining({ businessId: ID.bizB, contactId, visitorId: `${P}visitor_own` })]),
+    );
+  });
+});
+
+// R0-CMF3 review (ST-CMF3-3): the list, stale and follow-up readers joined the
+// contact's whole row with no tenant condition, and the stale scan and the
+// follow-up named A's contact in an event and a timeline write under B.
+describe("GET businesses/:businessId/quotes, quotes/stale and POST quotes/:quoteId/follow-up serve and act on only a contact of the quote's tenant", () => {
+  it("the quote list serves a legacy B quote joined to A's contact with contact null, and nothing of A's contact anywhere in the page; B's own quote keeps its contact", async () => {
+    const res = await asOwnerB(agent().get(`/commerce/businesses/${ID.bizB}/quotes`));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const byId = new Map<string, any>(res.body.data.map((q: any) => [q.id, q]));
+    expect(byId.has(ID.qLegacyRead)).toBe(true);
+    expect(byId.get(ID.qLegacyRead).contact).toBeNull();
+    expectNoCanary(res.body);
+    expect(byId.get(ID.qOwnB)?.contact).toMatchObject({ id: ID.contactB, email: B_CONTACT.email });
+  });
+
+  it("the stale list serves a stale legacy B quote with contact null, and its quote.stale event carries neither A's contact nor its id; B's own stale quote keeps its contact", async () => {
+    const legacy = `${P}qStaleLegacy`;
+    const own = `${P}qStaleOwn`;
+    await seedSentQuote(legacy, ID.contactA, { sentDaysAgo: 30 });
+    await seedSentQuote(own, ID.contactB, { sentDaysAgo: 30 });
+    const res = await asOwnerB(agent().get(`/commerce/businesses/${ID.bizB}/quotes/stale`));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const byId = new Map<string, any>(res.body.map((q: any) => [q.id, q]));
+    expect(byId.has(legacy)).toBe(true);
+    expect(byId.get(legacy).contact).toBeNull();
+    expectNoCanary(res.body);
+
+    const legacyEvents = eventsFor('quote.stale', legacy);
+    expect(legacyEvents).toHaveLength(1);
+    expect(legacyEvents[0].quote.contact).toBeNull();
+    expect(legacyEvents[0].quote.contactId).toBeNull();
+    expectNoForeignContactSideEffects();
+
+    expect(byId.get(own).contact).toMatchObject({ id: ID.contactB });
+    expect(eventsFor('quote.stale', own)[0]?.quote.contactId).toBe(ID.contactB);
+  });
+
+  it("the follow-up of a stale legacy B quote answers with contact null and logs nothing against A's contact; B's own quote is still logged against B's contact", async () => {
+    const legacy = `${P}qFollowLegacy`;
+    const own = `${P}qFollowOwn`;
+    await seedSentQuote(legacy, ID.contactA, { sentDaysAgo: 30 });
+    await seedSentQuote(own, ID.contactB, { sentDaysAgo: 30 });
+
+    const res = await asOwnerB(agent().post(`/commerce/businesses/${ID.bizB}/quotes/${legacy}/follow-up`)).send({});
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.quote.id).toBe(legacy);
+    expect(res.body.quote.contact).toBeNull();
+    expect(res.body.quote.lastFollowUpAt).toBeTruthy();
+    expectNoCanary(res.body);
+    expect(crmCalls).toEqual([]);
+    expectNoForeignContactSideEffects();
+
+    const ownRes = await asOwnerB(agent().post(`/commerce/businesses/${ID.bizB}/quotes/${own}/follow-up`)).send({});
+    expect(ownRes.status, JSON.stringify(ownRes.body)).toBe(201);
+    expect(ownRes.body.quote.contact).toMatchObject({ id: ID.contactB });
+    expect(crmCalls).toEqual([expect.objectContaining({ businessId: ID.bizB, contactId: ID.contactB, type: 'quote.follow_up_sent' })]);
   });
 });

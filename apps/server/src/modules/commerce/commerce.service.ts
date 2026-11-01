@@ -124,33 +124,68 @@ const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
   },
 });
 
+/*
+ * R0-04 review (ST-R004-1) and R0-CMF3 review (ST-CMF3-1/2/3, CR-CMF3-1): a
+ * quote serves, and acts on, only a contact of its own tenant. createQuote and
+ * updateQuote resolve contactId inside the path tenant and
+ * convertQuoteToInvoice refuses a foreign contact (R0-27 review ST-27-2), but
+ * a row written before those checks can still point at another tenant's
+ * contact, and a nested include has no tenant condition (neither Prisma
+ * extension filters one). Every reader in THIS service that joins a quote's
+ * contact passes the row through the helpers below: the operator detail reads,
+ * updateQuote, updateQuoteStatus (the status route, send-email and the public
+ * accept/reject), listQuotes, getStaleQuotes, markQuoteFollowedUp and the
+ * signed-token view. Readers in other modules are not covered; the manifest
+ * scripts/proof-admission/manifests/quote-contact-tenant.json lists them.
+ */
+
+/** True when the quote's joined contact belongs to another tenant (a legacy row). */
+function hasForeignContact(quote: { businessId: string; contact?: { businessId: string } | null }): boolean {
+  return !!quote.contact && quote.contact.businessId !== quote.businessId;
+}
+
 /**
- * R0-04 review (ST-R004-1): a quote serves only a contact of its own tenant.
- * createQuote and updateQuote resolve contactId inside the path tenant (R0-27
- * review ST-27-2), but a row written before that check can still point at
- * another tenant's contact, and the join itself has no tenant condition. That
- * contact reads as null, so its name, email and phone never reach the quote's
- * tenant (belt and braces for legacy rows).
+ * The quote as served: a foreign contact reads as null, so this service never
+ * serves its name, email or phone to the quote's tenant. contactId keeps the
+ * stored value.
  */
 function withTenantContact<Q extends { businessId: string; contact: { businessId: string } | null }>(
   quote: Q,
 ): Omit<Q, 'contact'> & { contact: Q['contact'] | null } {
-  if (quote.contact && quote.contact.businessId !== quote.businessId) return { ...quote, contact: null };
-  return quote;
+  return hasForeignContact(quote) ? { ...quote, contact: null } : quote;
 }
 
 /**
- * The operator quote read: the contact only when it belongs to the quote's
- * tenant, projected back to OPERATOR_QUOTE_CONTACT_SELECT (the businessId it
- * was joined with for the check is not served).
+ * The quote an event or a timeline write carries: a foreign contact is
+ * dropped together with its id, so no listener emails that customer
+ * (flow.listener on quote.sent), names them in this tenant's activity feed, or
+ * logs a ContactEvent under this tenant against them (the CRM listeners log
+ * quote.contactId), and this service logs nothing against them either.
+ * `row` is the quote as read (with its contact's businessId), `served` the
+ * shape the event carries.
+ */
+function forQuoteEvent<S extends { contactId: string | null; contact: unknown }>(
+  row: { businessId: string; contact: { businessId: string } | null },
+  served: S,
+): Omit<S, 'contactId' | 'contact'> & { contactId: S['contactId'] | null; contact: S['contact'] | null } {
+  return hasForeignContact(row) ? { ...served, contact: null, contactId: null } : served;
+}
+
+type OperatorQuoteContact = Prisma.ContactGetPayload<{ select: typeof OPERATOR_QUOTE_CONTACT_SELECT }>;
+
+/**
+ * The served contact of a quote read: only OPERATOR_QUOTE_CONTACT_SELECT (name
+ * and email), and null when the contact belongs to another tenant. Neither the
+ * businessId it was joined with for the check nor any other field of a whole
+ * Contact row is served. Used by the operator detail reads, the signed-token
+ * view and the signed-token accept/reject response.
  */
 function toOperatorQuote<Q extends { businessId: string; contact: OperatorQuoteContactRow | null }>(
   quote: Q,
-): Omit<Q, 'contact'> & { contact: Omit<OperatorQuoteContactRow, 'businessId'> | null } {
+): Omit<Q, 'contact'> & { contact: OperatorQuoteContact | null } {
   const { contact, ...rest } = quote;
-  if (!contact) return { ...rest, contact: null };
-  const { businessId: contactBusinessId, ...fields } = contact;
-  return { ...rest, contact: contactBusinessId === quote.businessId ? fields : null };
+  if (!contact || hasForeignContact(quote)) return { ...rest, contact: null };
+  return { ...rest, contact: { firstName: contact.firstName, lastName: contact.lastName, email: contact.email } };
 }
 
 /** Older invoices stored subtotal 0 with priced items; derive it so totals render. */
@@ -1063,18 +1098,24 @@ export class CommerceService {
     } else if (params.status === 'REJECTED') {
       data.rejectedAt = now;
     }
-    const quote = await this.prisma.client.quote.update({
+    // R0-CMF3 review (ST-CMF3-1, CR-CMF3-1): the status route, send-email and
+    // the public accept/reject all land here. A legacy quote can still point
+    // at another tenant's contact: the returned quote reads contact null, and
+    // the events and the timeline write carry neither that contact nor its id.
+    const row = await this.prisma.client.quote.update({
       where: { id: params.quoteId },
       data,
       include: { contact: true },
     });
+    const quote = withTenantContact(row);
+    const eventQuote = forQuoteEvent(row, quote);
     const source = params.source ?? 'internal';
     if (params.status === 'SENT' && existingQuote.status !== 'SENT') {
-      this.events.emit('quote.sent', { quote, businessId: quote.businessId } as QuoteSentPayload);
+      this.events.emit('quote.sent', { quote: eventQuote, businessId: quote.businessId } as QuoteSentPayload);
     }
     if (params.status === 'ACCEPTED' && existingQuote.status !== 'ACCEPTED') {
       this.events.emit('quote.accepted', {
-        quote,
+        quote: eventQuote,
         businessId: quote.businessId,
         acceptedAt: now,
         source,
@@ -1082,17 +1123,17 @@ export class CommerceService {
     }
     if (params.status === 'REJECTED' && existingQuote.status !== 'REJECTED') {
       this.events.emit('quote.rejected', {
-        quote,
+        quote: eventQuote,
         businessId: quote.businessId,
         rejectedAt: now,
         source,
         reason: params.reason ?? null,
       } as QuoteRejectedPayload);
     }
-    if (quote.contactId) {
+    if (eventQuote.contactId) {
       await this.crm.logContactEvent({
         businessId: quote.businessId,
-        contactId: quote.contactId,
+        contactId: eventQuote.contactId,
         type: `quote.${params.status.toLowerCase()}`,
         data: {
           quoteId: quote.id,
@@ -1265,7 +1306,8 @@ export class CommerceService {
     ]);
     const now = new Date();
     return {
-      data: data.map((q) => this.decorateQuote(q, now)),
+      // R0-CMF3 review (ST-CMF3-3): a legacy row's foreign contact reads null.
+      data: data.map((q) => this.decorateQuote(withTenantContact(q), now)),
       total,
       page,
       pageSize,
@@ -1301,27 +1343,30 @@ export class CommerceService {
       const lastFollowUp = new Date(q.lastFollowUpAt);
       return lastFollowUp.getTime() <= cutoff.getTime();
     });
+    // R0-CMF3 review (ST-CMF3-3): a legacy row's foreign contact reads null,
+    // and its quote.stale event carries neither that contact nor its id.
     const decoratedRows = stale.map((q) => {
-      const decorated = this.decorateQuote(q, now);
+      const decorated = this.decorateQuote(withTenantContact(q), now);
       const reference = q.lastFollowUpAt && new Date(q.lastFollowUpAt) > new Date(q.sentAt!)
         ? new Date(q.lastFollowUpAt)
         : new Date(q.sentAt!);
       const daysSinceSent = Math.floor((now.getTime() - reference.getTime()) / (1000 * 60 * 60 * 24));
-      return { ...decorated, daysSinceSent };
+      const served = { ...decorated, daysSinceSent };
+      return { served, event: forQuoteEvent(q, served) };
     });
     // Emit one canonical quote.stale event per stale row so the Action
     // Queue / notification consumers can pick them up. Idempotency is
     // delegated to the caller (typically a once-per-day scheduled scan)
     // so we never silently swallow events here.
-    for (const row of decoratedRows) {
+    for (const { event } of decoratedRows) {
       this.events.emit('quote.stale', {
-        quote: row,
+        quote: event,
         businessId,
-        sentAt: row.sentAt ?? now,
-        daysSinceSent: row.daysSinceSent,
+        sentAt: event.sentAt ?? now,
+        daysSinceSent: event.daysSinceSent,
       } as QuoteStalePayload);
     }
-    return decoratedRows;
+    return decoratedRows.map(({ served }) => served);
   }
 
   /**
@@ -1348,10 +1393,13 @@ export class CommerceService {
       data: { lastFollowUpAt: now },
       include: { contact: true, items: true, invoice: true },
     });
-    if (existing.contactId) {
+    // R0-CMF3 review (ST-CMF3-3): a legacy row's foreign contact reads null,
+    // and nothing is logged against it under this tenant.
+    const contactId = hasForeignContact(updated) ? null : existing.contactId;
+    if (contactId) {
       await this.crm.logContactEvent({
         businessId: params.businessId,
-        contactId: existing.contactId,
+        contactId,
         type: 'quote.follow_up_sent',
         data: { quoteId: params.quoteId, followUpAt: now.toISOString() },
         actorType: params.actorId ? 'USER' : 'SYSTEM',
@@ -1359,7 +1407,7 @@ export class CommerceService {
         source: 'commerce',
       }).catch(() => undefined);
     }
-    return this.decorateQuote(updated, now);
+    return this.decorateQuote(withTenantContact(updated), now);
   }
 
   /**
@@ -1401,12 +1449,15 @@ export class CommerceService {
 
   // ----- R2: public quote-view + accept/reject by signed token -----
 
+  // R0-CMF3 review (ST-CMF3-2): the token holder reads the same customer fields
+  // as before, joined with the contact's businessId so that a legacy quote
+  // pointing at another tenant's contact reads contact null.
   async getQuoteByToken(token: string) {
     if (!token) return null;
     const quote = await this.prisma.client.quote.findUnique({
       where: { viewToken: token },
       include: {
-        contact: { select: { firstName: true, lastName: true, email: true } },
+        contact: { select: OPERATOR_QUOTE_CONTACT_JOIN },
         items: true,
         invoice: { select: { id: true, invoiceNumber: true, status: true, total: true } },
         business: {
@@ -1424,7 +1475,7 @@ export class CommerceService {
       },
     });
     if (!quote || quote.deletedAt) return null;
-    return this.decorateQuote(quote);
+    return this.decorateQuote(toOperatorQuote(quote));
   }
 
   async markQuoteViewedByToken(token: string, visitorId?: string | null) {
@@ -1451,16 +1502,20 @@ export class CommerceService {
       data: { viewedAt: now },
       include: { contact: true },
     });
+    // R0-CMF3 review (CR-CMF3-1): a legacy quote pointing at another tenant's
+    // contact emits quote.viewed without that contact or its id, and nothing
+    // is logged or attached to it under this tenant.
+    const eventQuote = forQuoteEvent(updated, withTenantContact(updated));
     this.events.emit('quote.viewed', {
-      quote: updated,
+      quote: eventQuote,
       businessId: quote.businessId,
       viewedAt: now,
       source: 'public',
     } as QuoteViewedPayload);
-    if (quote.contactId) {
+    if (eventQuote.contactId) {
       await this.crm.logContactEvent({
         businessId: quote.businessId,
-        contactId: quote.contactId,
+        contactId: eventQuote.contactId,
         type: 'quote.viewed',
         data: { quoteId: quote.id, source: 'public' },
         actorType: 'SYSTEM',
@@ -1470,7 +1525,7 @@ export class CommerceService {
         await this.publicEvents
           .attachVisitorToContact({
             businessId: quote.businessId,
-            contactId: quote.contactId,
+            contactId: eventQuote.contactId,
             visitorId,
             sourceDetail: `quote:${quote.id}`,
           })
@@ -1527,8 +1582,10 @@ export class CommerceService {
     // Stitch the public visitor cookie onto the quote's contact so first-touch
     // attribution (firstSource / utmMedium / utmCampaign / firstReferrer /
     // firstLandingPath) lands on the Contact even though it was originally
-    // created internally without a visitorId.
-    if (visitorId && quote.contactId) {
+    // created internally without a visitorId. R0-CMF3 review (ST-CMF3-2):
+    // updateQuoteStatus reads a foreign contact (a legacy row) as null, and no
+    // visitor is attached to it under this tenant.
+    if (visitorId && quote.contactId && result.contact) {
       await this.publicEvents
         .attachVisitorToContact({
           businessId: quote.businessId,
@@ -1538,7 +1595,11 @@ export class CommerceService {
         })
         .catch(() => undefined);
     }
-    return result;
+    // R0-CMF3 review (ST-CMF3-2): the anonymous token holder received the
+    // whole Contact row (phone, internal notes, owner, visibility). The answer
+    // now carries the customer fields the signed-token view serves (name and
+    // email), and null for a foreign contact.
+    return toOperatorQuote(result);
   }
 
   async createQuote(input: {
@@ -1680,24 +1741,25 @@ export class CommerceService {
     }
     
     // R0-04 review (ST-R004-1): a legacy quote can still point at another
-    // tenant's contact; the response and the events never carry that row.
-    const updated = withTenantContact(
-      await this.prisma.client.quote.update({
-        where: { id: input.quoteId },
-        data: updateData,
-        include: { items: true, contact: true },
-      }),
-    );
+    // tenant's contact; the response never carries that row, and the events
+    // carry neither the row nor its id (R0-CMF3 review).
+    const row = await this.prisma.client.quote.update({
+      where: { id: input.quoteId },
+      data: updateData,
+      include: { items: true, contact: true },
+    });
+    const updated = withTenantContact(row);
+    const eventQuote = forQuoteEvent(row, updated);
     const prevExp = quote.expiryDate ? new Date(quote.expiryDate).getTime() : null;
     const newExp = updated.expiryDate ? new Date(updated.expiryDate).getTime() : null;
     if (input.expiryDate !== undefined && prevExp !== newExp) {
       this.events.emit('quote.expiry_changed', {
-        quote: updated,
+        quote: eventQuote,
         businessId: input.businessId,
         previousExpiryDate: quote.expiryDate ?? null,
       });
     }
-    this.events.emit('quote.updated', { quote: updated, businessId: input.businessId });
+    this.events.emit('quote.updated', { quote: eventQuote, businessId: input.businessId });
     this.statsCache.invalidateCache(input.businessId);
     return updated;
   }
