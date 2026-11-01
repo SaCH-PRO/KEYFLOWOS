@@ -1051,69 +1051,63 @@ export class CommerceController {
       throw new Error('Quote not found');
     }
 
-    // R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 2): the email
-    // carries the public accept/reject link, so a first send of a DRAFT needs
-    // a view token in the URL before the quote is SENT. It is drawn here and
-    // stored, with the DRAFT -> SENT move, only after Gmail accepted the
-    // message: a refused (503) or failed send leaves the DRAFT as it was, with
-    // no token (R2), no sentAt and no quote.sent event. It used to move the
+    // R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 2) and its
+    // review (SEC-CMF4-1/2, CR-CMF4-1): the email carries the public
+    // accept/reject link, so a first send of a DRAFT needs a view token in the
+    // URL. sendQuoteWithViewToken reserves it on the DRAFT before the send
+    // (the public accept and reject routes refuse a DRAFT, and only this
+    // message carries the token), clears it when Gmail did not accept
+    // the message (a refused or failed send leaves the DRAFT as it was: no
+    // token, no sentAt, no quote.sent), and moves the DRAFT to SENT only
+    // after the send, as a compare-and-set, so a rejection, acceptance or
+    // second send made meanwhile is never overwritten. It used to move the
     // quote to SENT first, so a send that never reached the customer left it
     // SENT.
     const quote = existing;
-    const viewToken = quote.viewToken ?? (quote.status === 'DRAFT' ? this.commerce.newQuoteViewToken() : null);
-
     const business = quote.business;
     const contact = quote.contact;
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
 
-    if (!viewToken) {
-      throw new Error('Quote view token missing — cannot send email.');
-    }
+    await this.commerce.sendQuoteWithViewToken(quoteId, async (viewToken) => {
+      const emailHtml = buildQuoteEmailHtml({
+        businessName: business.name,
+        businessLogo: business.logoUrl,
+        businessEmail: business.email,
+        businessPhone: business.phone,
+        businessAddress: business.address,
+        businessWebsite: business.website,
+        primaryColor: business.primaryColor || '#F97316',
+        contactName: contact ? `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email || 'Customer' : 'Customer',
+        quoteNumber: quote.quoteNumber,
+        quoteDate: new Date(quote.createdAt).toLocaleDateString('en-TT', { dateStyle: 'medium' }),
+        expiryDate: quote.expiryDate ? new Date(quote.expiryDate).toLocaleDateString('en-TT', { dateStyle: 'medium' }) : null,
+        items: quote.items.map((item: { description: string; quantity: number; unitPrice: number }) => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        })),
+        subtotal: quote.subtotal,
+        taxRate: quote.taxRate,
+        taxAmount: quote.taxAmount,
+        discountType: quote.discountType,
+        discountValue: quote.discountValue,
+        discountAmount: quote.discountAmount,
+        total: quote.total,
+        currency: quote.currency,
+        notes: quote.notes,
+        quoteUrl: `${appUrl}/quote/${viewToken}`,
+        customMessage: body.message,
+      });
 
-    const emailHtml = buildQuoteEmailHtml({
-      businessName: business.name,
-      businessLogo: business.logoUrl,
-      businessEmail: business.email,
-      businessPhone: business.phone,
-      businessAddress: business.address,
-      businessWebsite: business.website,
-      primaryColor: business.primaryColor || '#F97316',
-      contactName: contact ? `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email || 'Customer' : 'Customer',
-      quoteNumber: quote.quoteNumber,
-      quoteDate: new Date(quote.createdAt).toLocaleDateString('en-TT', { dateStyle: 'medium' }),
-      expiryDate: quote.expiryDate ? new Date(quote.expiryDate).toLocaleDateString('en-TT', { dateStyle: 'medium' }) : null,
-      items: quote.items.map((item: { description: string; quantity: number; unitPrice: number }) => ({
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-      })),
-      subtotal: quote.subtotal,
-      taxRate: quote.taxRate,
-      taxAmount: quote.taxAmount,
-      discountType: quote.discountType,
-      discountValue: quote.discountValue,
-      discountAmount: quote.discountAmount,
-      total: quote.total,
-      currency: quote.currency,
-      notes: quote.notes,
-      quoteUrl: `${appUrl}/quote/${viewToken}`,
-      customMessage: body.message,
-    });
-
-    await this.gmail.sendEmail({
-      businessId,
-      to: body.recipientEmail,
-      subject: `Quote #${quote.quoteNumber} from ${business.name}`,
-      htmlBody: emailHtml,
+      await this.gmail.sendEmail({
+        businessId,
+        to: body.recipientEmail,
+        subject: `Quote #${quote.quoteNumber} from ${business.name}`,
+        htmlBody: emailHtml,
+      });
     });
 
     if (quote.status !== 'DRAFT') return { success: true, quote };
-    await this.commerce.updateQuoteStatus({
-      quoteId,
-      status: 'SENT',
-      actorId: undefined,
-      viewToken,
-    });
     const sent = await this.commerce.getQuote(quoteId);
     if (!sent) {
       throw new Error('Quote not found');
@@ -1215,10 +1209,13 @@ export class CommerceController {
     if (invoice.status === 'VOID') throw new ForbiddenException('Cannot email a voided invoice');
     const recipient = body.recipientEmail || invoice.contact?.email;
     if (!recipient) throw new ForbiddenException('Recipient email is required');
-    // R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 3): the pay
-    // link is the one buildPublicInvoiceUrl would hand out (D-07), but one the
-    // invoice does not have yet is written only after Gmail accepted the
-    // message, so a refused (503) or failed send leaves no new PaymentLink.
+    // R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 3) and its
+    // review (SEC-CMF4-3): the pay link is the one buildPublicInvoiceUrl
+    // would hand out (D-07). One the invoice does not have yet is written
+    // before the send as a pending link that every other request reuses, and
+    // removed when Gmail did not accept the message unless another request
+    // handed it out meanwhile, so a refused (503) or failed send leaves no
+    // new PaymentLink and two overlapping sends share one live link.
     const { send, paymentUrl } = await this.commerce.sendWithPublicInvoiceUrl(invoiceId, businessId, async (url) => {
       const html = this.buildInvoiceEmailContext(invoice, url, body.message, 'invoice');
       const result = await this.gmail.sendEmail({

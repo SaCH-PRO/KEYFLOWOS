@@ -1026,9 +1026,18 @@ export class CommerceService {
      */
     businessId?: string;
     /**
-     * R0-CMF4: the view token the send-email route already put in the
-     * message Gmail accepted (newQuoteViewToken). Stored on SENT when the
-     * quote has none; a quote that has one keeps it.
+     * R0-CMF4 review (SEC-CMF4-1): a compare-and-set. The move is written only
+     * while the quote is still in this status (and, with `viewToken`, has no
+     * view token or that one). Otherwise nothing is written: a quote another
+     * request already moved to the same status with the same token is
+     * returned as it is, with no event, and any other state is a 409
+     * `quote_status_changed`. Without it the move overwrites whatever the
+     * quote became meanwhile.
+     */
+    ifStatus?: 'DRAFT';
+    /**
+     * R0-CMF4: with `ifStatus`, the view token the send-email route put in
+     * the message Gmail accepted (sendQuoteWithViewToken). The move stores it.
      */
     viewToken?: string;
   }) {
@@ -1058,24 +1067,55 @@ export class CommerceService {
     if (params.status === 'SENT') {
       data.sentAt = now;
       // Make sure a public-link token exists so the email URL works.
-      if (!existingQuote.viewToken) {
-        data.viewToken = params.viewToken ?? this.generateQuoteToken();
+      if (params.ifStatus && params.viewToken) {
+        data.viewToken = params.viewToken;
+      } else if (!existingQuote.viewToken) {
+        data.viewToken = this.generateQuoteToken();
       }
     } else if (params.status === 'ACCEPTED') {
       data.acceptedAt = now;
     } else if (params.status === 'REJECTED') {
       data.rejectedAt = now;
     }
-    const quote = await this.prisma.client.quote.update({
-      where: { id: params.quoteId },
-      data,
-      include: { contact: true },
-    });
+    if (params.ifStatus) {
+      const moved = await this.prisma.client.quote.updateMany({
+        where: {
+          id: params.quoteId,
+          status: params.ifStatus,
+          ...(params.viewToken ? { OR: [{ viewToken: null }, { viewToken: params.viewToken }] } : {}),
+        },
+        data,
+      });
+      if (moved.count === 0) {
+        const current = await this.prisma.client.quote.findUnique({
+          where: { id: params.quoteId },
+          include: { contact: true },
+        });
+        if (!current) throw new NotFoundException('Quote not found');
+        if (current.status === params.status && (!params.viewToken || current.viewToken === params.viewToken)) {
+          return current;
+        }
+        throw new ConflictException({
+          code: 'quote_status_changed',
+          message: `The quote is ${current.status}, not ${params.ifStatus}: it was not moved to ${params.status}.`,
+          quoteStatus: current.status,
+        });
+      }
+    }
+    const quote = params.ifStatus
+      ? await this.prisma.client.quote.findUniqueOrThrow({ where: { id: params.quoteId }, include: { contact: true } })
+      : await this.prisma.client.quote.update({
+          where: { id: params.quoteId },
+          data,
+          include: { contact: true },
+        });
+    // The status the move was made from: with ifStatus, the compare-and-set proved it.
+    const priorStatus = params.ifStatus ?? existingQuote.status;
     const source = params.source ?? 'internal';
-    if (params.status === 'SENT' && existingQuote.status !== 'SENT') {
+    if (params.status === 'SENT' && priorStatus !== 'SENT') {
       this.events.emit('quote.sent', { quote, businessId: quote.businessId } as QuoteSentPayload);
     }
-    if (params.status === 'ACCEPTED' && existingQuote.status !== 'ACCEPTED') {
+    if (params.status === 'ACCEPTED' && priorStatus !== 'ACCEPTED') {
       this.events.emit('quote.accepted', {
         quote,
         businessId: quote.businessId,
@@ -1083,7 +1123,7 @@ export class CommerceService {
         source,
       } as QuoteAcceptedPayload);
     }
-    if (params.status === 'REJECTED' && existingQuote.status !== 'REJECTED') {
+    if (params.status === 'REJECTED' && priorStatus !== 'REJECTED') {
       this.events.emit('quote.rejected', {
         quote,
         businessId: quote.businessId,
@@ -1122,14 +1162,77 @@ export class CommerceService {
   }
 
   /**
-   * R0-CMF4-SEND-EMAIL-ORDER: a view token for the first send of a DRAFT
-   * quote, drawn but not stored. The send-email route puts it in the message
-   * and hands it to updateQuoteStatus(SENT) only after Gmail accepted it, so
-   * a refused or failed send leaves the DRAFT with no token (R2: no public
-   * link exists before the quote is sent).
+   * R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 2) and its
+   * review (SEC-CMF4-1, SEC-CMF4-2, CR-CMF4-1): the operator's quote
+   * send-email. `send` gets the view token to put in the accept/reject link
+   * and resolves once Gmail accepted the message.
+   *
+   * - A quote with a view token sends that one. A non-DRAFT quote with none
+   *   cannot be sent ('Quote view token missing').
+   * - A DRAFT with none reserves one first: a compare-and-set on
+   *   (DRAFT, no token), so of two overlapping sends one writes it and the
+   *   other mails the same token, and a "mark sent" made meanwhile keeps it
+   *   (updateQuoteStatus keeps a stored token). The public accept/reject
+   *   routes refuse a DRAFT, and only the message being sent carries it.
+   * - A send Gmail did not accept (503, transport error, Gmail's refusal)
+   *   clears the token it reserved while the quote is still that DRAFT, so
+   *   the DRAFT is left with no token (R2), no sentAt and no event.
+   * - An accepted send moves the DRAFT to SENT with that token as a
+   *   compare-and-set (updateQuoteStatus ifStatus). A quote another request
+   *   moved to SENT with the same token is left as it is (one quote.sent);
+   *   a quote rejected, accepted or given another token meanwhile is not
+   *   overwritten, and the route answers 409 quote_changed_during_send,
+   *   saying the email went out.
    */
-  newQuoteViewToken(): string {
-    return this.generateQuoteToken();
+  async sendQuoteWithViewToken<T>(quoteId: string, send: (viewToken: string) => Promise<T>): Promise<T> {
+    const quote = await this.prisma.client.quote.findUnique({
+      where: { id: quoteId },
+      select: { status: true, viewToken: true },
+    });
+    if (!quote) throw new NotFoundException('Quote not found');
+    let viewToken = quote.viewToken;
+    let reserved = false;
+    if (!viewToken && quote.status === 'DRAFT') {
+      const token = this.generateQuoteToken();
+      const won = await this.prisma.client.quote.updateMany({
+        where: { id: quoteId, status: 'DRAFT', viewToken: null },
+        data: { viewToken: token },
+      });
+      reserved = won.count === 1;
+      viewToken = reserved
+        ? token
+        : ((await this.prisma.client.quote.findUnique({ where: { id: quoteId }, select: { viewToken: true } }))?.viewToken ?? null);
+    }
+    if (!viewToken) {
+      throw new Error('Quote view token missing — cannot send email.');
+    }
+
+    let result: T;
+    try {
+      result = await send(viewToken);
+    } catch (err) {
+      if (reserved) {
+        await this.prisma.client.quote.updateMany({
+          where: { id: quoteId, status: 'DRAFT', viewToken },
+          data: { viewToken: null },
+        });
+      }
+      throw err;
+    }
+    if (quote.status !== 'DRAFT') return result;
+    try {
+      await this.updateQuoteStatus({ quoteId, status: 'SENT', actorId: undefined, ifStatus: 'DRAFT', viewToken });
+    } catch (err) {
+      if (!(err instanceof ConflictException)) throw err;
+      const quoteStatus = (err.getResponse() as { quoteStatus?: string }).quoteStatus ?? null;
+      throw new ConflictException({
+        code: 'quote_changed_during_send',
+        message: `The email was sent, but the quote changed while it was with Gmail (it is ${quoteStatus ?? 'gone'} now), so this send left it as it is.`,
+        emailSent: true,
+        quoteStatus,
+      });
+    }
+    return result;
   }
 
   private isStaleQuote(quote: {
@@ -2998,8 +3101,8 @@ export class CommerceService {
    * place a customer-facing invoice URL is built. The operator's invoice
    * emails (send-email, reminder, resend-receipt in commerce.controller.ts)
    * use it directly (send-email through sendWithPublicInvoiceUrl, which
-   * builds the same URL for a link it writes only once the send went out,
-   * R0-CMF4); the automated producers (overdue, due-soon and
+   * hands out the same link and removes one it wrote when the send did not
+   * go out, R0-CMF4); the automated producers (overdue, due-soon and
    * payment-failed emails, KEY's invoice_sent, autopilot payment recovery)
    * go through automatedInvoiceUrl, which never mints a link for an invoice
    * whose links were all revoked or expired (V1-46b review SEC-V46B-1/2).
@@ -3057,12 +3160,17 @@ export class CommerceService {
    *   token is still rotated before it goes out, ST-V48-1), surfaces the
    *   latest one, or throws its 404. No row is created, so a failed send
    *   leaves no new one.
-   * - It has none: the link's token is drawn first and the row is written
-   *   only after `send` resolved, so a refused (503) or failed send writes
-   *   nothing, and an accepted one leaves exactly one live link, the one the
-   *   message carries. A later send reuses it.
-   *
-   * Two concurrent first sends can each write their own link; both work.
+   * - It has none: the row is written before the send, with the pending
+   *   expiry PENDING_SEND_EXPIRY (R0-CMF4 review SEC-CMF4-3). It is live, so
+   *   any request made while the message is with the provider (a second
+   *   send-email, a reminder, POST payment-link, an automated email) hands
+   *   out this one link instead of writing another, and reissueLink clears
+   *   the pending expiry when it does. An accepted send clears it too
+   *   (expiresAt null: exactly one live link, the one the message carries;
+   *   a resend reuses it). A refused (503) or failed send deletes the row
+   *   only while it is still pending and active, so it leaves no new
+   *   PaymentLink unless another request handed the link out meanwhile
+   *   (then it is that request's link too) or the operator revoked it.
    */
   async sendWithPublicInvoiceUrl<T>(
     invoiceId: string,
@@ -3082,11 +3190,30 @@ export class CommerceService {
       : null;
     if (!mintable || live) return send(await this.publicInvoiceUrl(invoiceId, businessId));
 
-    const token = CommerceService.newPaymentLinkToken();
-    const result = await send(`${appUrl()}/public/invoice/${token}`);
-    await this.prisma.client.paymentLink.create({ data: { invoiceId, businessId, token, expiresAt: null } });
+    const link = await this.prisma.client.paymentLink.create({
+      data: { invoiceId, businessId, token: CommerceService.newPaymentLinkToken(), expiresAt: CommerceService.PENDING_SEND_EXPIRY },
+    });
+    const pending = { id: link.id, expiresAt: CommerceService.PENDING_SEND_EXPIRY };
+    let result: T;
+    try {
+      result = await send(`${appUrl()}/public/invoice/${link.token}`);
+    } catch (err) {
+      await this.prisma.client.paymentLink.deleteMany({ where: { ...pending, active: true } });
+      throw err;
+    }
+    await this.prisma.client.paymentLink.updateMany({ where: pending, data: { expiresAt: null } });
     return result;
   }
+
+  /**
+   * R0-CMF4 review (SEC-CMF4-3): the expiry of a pay link sendWithPublicInvoiceUrl
+   * wrote for a send that is still with the provider. It is in the future, so
+   * the link is live and every other caller hands out this one; a value no
+   * expiresInDays produces, so reissueLink knows the row is still only that
+   * send's to remove. The send, or the first other caller to hand the link
+   * out, sets it back to null (no expiry).
+   */
+  private static readonly PENDING_SEND_EXPIRY = new Date('9999-12-31T23:59:59.999Z');
 
   /**
    * V1-48-PUBLIC-TOKEN-VIEW (M34): the pay-link token is the customer's whole
@@ -3116,11 +3243,26 @@ export class CommerceService {
    * one rotates and the other reads that row back: both hand out one token.
    * A dead link and a token of any other shape are left as they are; the
    * customer view never rotates (it would break the URL being opened).
+   *
+   * R0-CMF4 review (SEC-CMF4-3): a live link whose send-email is still with
+   * the provider (PENDING_SEND_EXPIRY) is claimed first: its pending expiry
+   * is cleared, so a send that fails afterwards no longer removes the link
+   * this caller hands out. It is read back; if that send already removed it,
+   * the 409 asks the caller to try again rather than hand out a dead link.
    */
   private async reissueLink<T extends { id: string; token: string; active: boolean; expiresAt: Date | null }>(
     link: T,
     expiresAt?: Date,
   ) {
+    if (link.active && link.expiresAt?.getTime() === CommerceService.PENDING_SEND_EXPIRY.getTime()) {
+      await this.prisma.client.paymentLink.updateMany({
+        where: { id: link.id, expiresAt: CommerceService.PENDING_SEND_EXPIRY },
+        data: { expiresAt: null },
+      });
+      const claimed = await this.prisma.client.paymentLink.findUnique({ where: { id: link.id } });
+      if (!claimed) throw new ConflictException('The pay link was withdrawn while it was being handed out; try again.');
+      link = { ...link, ...claimed };
+    }
     const live = link.active && (!link.expiresAt || link.expiresAt > new Date());
     if (!live || !CommerceService.LEGACY_LINK_TOKEN.test(link.token)) {
       if (!expiresAt) return link;
