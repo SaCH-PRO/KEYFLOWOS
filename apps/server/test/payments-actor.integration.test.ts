@@ -43,7 +43,15 @@
  *         the ACCRUAL invoice_finalized posting and its reversal name no creator.
  *   PA-17 (ST-R011-2) refunding a SUCCESSFUL payment with no payment_recorded posting
  *         records the refunder nowhere
+ *         CLOSED by R0-CMF2-PAYMENT-ACTOR-GAPS: PA-17a..e below. Every manual
+ *         refund, posted or not, writes one FINANCE payment_refunded activity
+ *         row naming the refunder, after the refund commits (a rolled-back
+ *         refund leaves none). The contact-event registry has no canonical
+ *         refund type (packages/shared, outside that write set), so the audit
+ *         row is the unified activity row the posted-refund path already wrote.
  *   PA-18 (ST-R011-3) drive-intake approval drops the approver: record_payment records null
+ *         CLOSED by R0-CMF2-PAYMENT-ACTOR-GAPS: PA-18a..b below (the approve
+ *         route names the approver; an approval with no human records null).
  *
  * Review repairs (R0-PL-07-PAYMENT-ACTOR-repair):
  *   PATCH /commerce/invoices/:id/paid by U (no payment yet) -> the manual row's recordedBy = U   (PL07-ST-2, PL07-CR-1)
@@ -60,8 +68,13 @@
  * attachment is the one stand-in: a test middleware reads `x-pya-user`, loads
  * that seeded user row and attaches `{ id, email, role }` exactly as the
  * Supabase-verifying AuthMiddleware would. Document intelligence (the AI
- * boundary), Gmail, vision, stats cache and the unified activity timeline are
- * stubs off the boundary (the activity stub records what it is handed).
+ * boundary), Gmail, vision and stats cache are stubs off the boundary. The
+ * unified activity timeline records what it is handed and (R0-CMF2) passes it
+ * on to the real TimelineService, so each entry is also a real `activities`
+ * row. R0-CMF2 also mounts DriveIntakeController over the real
+ * DriveIntakeOrchestrator; its connector, messaging, email, oversight and
+ * credit-note collaborators are stubs off the boundary (the plans seeded here
+ * use none of them).
  *
  * Fixtures: prefix `pya_` (legacy registry entry); hard-deleted by raw SQL
  * (LIKE through sqlLikePrefix) in dependency order in beforeAll and afterAll;
@@ -136,6 +149,16 @@ const ID = {
   invPrivStatusVoid: `${P}invPrivStatusVoid`,
   invKeySent: `${P}invKeySent`, // moved back to DRAFT by its describe block
   invKeyOverdue: `${P}invKeyOverdue`,
+  // R0-CMF2-PAYMENT-ACTOR-GAPS: PA-17a..e (refund audit row), PA-18a..b
+  // (drive-intake approver). The unposted payment and the intake files are
+  // seeded by their cases, after the fixture sanity case.
+  invUnpostedRefund: `${P}invUnpostedRefund`,
+  invPostedRefundAudit: `${P}invPostedRefundAudit`,
+  invRefundNoActor: `${P}invRefundNoActor`,
+  invRefundRollback: `${P}invRefundRollback`,
+  invRefundKey: `${P}invRefundKey`,
+  invDriveV: `${P}invDriveV`,
+  invDriveSystem: `${P}invDriveSystem`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -146,6 +169,10 @@ let redis: any;
 let commerce: CommerceService;
 let adapter: CommerceAdapterService;
 let systemActorId: string;
+let workflow: any;
+let driveOrchestrator: any;
+/** The real TimelineService the recorder below passes every entry on to. */
+let realTimeline: { recordEvent: (input: any) => Promise<unknown> } | null = null;
 
 // PaymentEvidenceService is the real one over the real CommerceService;
 // document intelligence (the AI boundary) is the stub and returns what the
@@ -162,13 +189,15 @@ const eventStub = {
   removeListener: () => undefined,
 };
 
-// The unified activity ledger (TimelineService) is off the boundary; it
-// records what CrmTimelineService.logEvent and RevenuePostingService hand it.
+// The unified activity ledger (TimelineService): a recorder of what
+// CrmTimelineService.logEvent and RevenuePostingService hand it, which (R0-CMF2)
+// passes each entry on to the real TimelineService, so the entry is also a real
+// `activities` row (the refund audit row PA-17 reads back).
 const activity: Array<Record<string, any>> = [];
 const timelineStub = {
   recordEvent: async (input: Record<string, any>) => {
     activity.push(input);
-    return null;
+    return realTimeline ? realTimeline.recordEvent(input) : null;
   },
 };
 
@@ -176,6 +205,8 @@ async function cleanup() {
   // `pya_` matched literally: a bare LIKE 'pya_%' would also match any 'pya?…' prefix.
   const like = sqlLikePrefix(P);
   for (const sql of [
+    `DELETE FROM activities WHERE business_id LIKE ${like}`,
+    `DELETE FROM drive_intake_files WHERE business_id LIKE ${like}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${like}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${like}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${like}`,
@@ -305,13 +336,29 @@ beforeAll(async () => {
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  // R0-CMF2 (PA-18): the drive-intake approve route over the real orchestrator.
+  const { DriveIntakeController } = await import('../src/modules/commerce/drive-intake.controller');
+  const { DriveIntakeOrchestrator } = await import('../src/modules/commerce/drive-intake-orchestrator.service');
+  const { ConnectorIntelligenceService } = await import('../src/modules/ai/connector-intelligence.service');
+  const { CrmCommunicationService } = await import('../src/modules/crm/crm-communication.service');
+  const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
+  const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
+  const { CreditNoteService } = await import('../src/modules/finance/credit-note.service');
 
   systemActorId = KEY_SYSTEM_ACTOR_ID;
+
+  // What tsc emits for DriveIntakeController's constructor (it declares its
+  // dependencies only through `design:paramtypes`, which vitest's esbuild
+  // transform does not emit; the evidence-feed suite does the same for
+  // TimelineController).
+  if (!Reflect.getMetadata('design:paramtypes', DriveIntakeController)) {
+    Reflect.defineMetadata('design:paramtypes', [ConnectorIntelligenceService, DriveIntakeOrchestrator, PrismaService], DriveIntakeController);
+  }
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController],
+    controllers: [CommerceController, DriveIntakeController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -356,9 +403,21 @@ beforeAll(async () => {
       PaymentEvidenceService,
       { provide: DocumentIntelligenceService, useValue: docIntelStub },
       { provide: GoogleDriveService, useValue: {} },
+      // R0-CMF2 (PA-18): the real DriveIntakeOrchestrator over the real
+      // CommerceService and InvoiceWorkflowService. The seeded plans carry
+      // only record_payment steps and no contact, so none of these is called.
+      DriveIntakeOrchestrator,
+      { provide: ConnectorIntelligenceService, useValue: {} },
+      { provide: CrmCommunicationService, useValue: {} },
+      { provide: TransactionalEmailService, useValue: {} },
+      { provide: AiOversightService, useValue: { resolveApproval: async () => undefined } },
+      { provide: CreditNoteService, useValue: {} },
     ],
   }).compile();
   commerce = moduleRef.get(CommerceService);
+  workflow = moduleRef.get(InvoiceWorkflowService);
+  driveOrchestrator = moduleRef.get(DriveIntakeOrchestrator);
+  realTimeline = new TimelineService(moduleRef.get(PrismaService));
   // The KEY cortex adapter, constructed exactly as KeyCortexModule wires it.
   adapter = new CommerceAdapterService(commerce);
 
@@ -1113,19 +1172,200 @@ describe('open gaps found by the R0-CMF1 review (outside the R0-CMF1 write set)'
   );
 });
 
-// R0-11 review: real gaps whose fixes are all in product code outside this
-// packet's write set (the manifest only). Each it.todo names the behaviour a
-// follow-up packet must make pass and the file it has to change. PA-16 is
-// closed above (R0-CMF1-INVOICE-PATCH-ACTOR).
-describe('open gaps found by the R0-11 review (outside the R0-11 write set)', () => {
-  it.todo(
-    'PA-17 (ST-R011-2): refunding a SUCCESSFUL payment that has no Payment:<id>:payment_recorded posting (a mark-paid row written before R0-PL-04) records the ' +
-      'refunding user on a durable row (a contact event or audit entry naming V); today onPaymentRefunded returns null and nothing names the refunder - ' +
-      'needs commerce.service.ts markPaymentRefunded or revenue-posting.service.ts onPaymentRefunded, outside the R0-11 write set (Payment has no refunded-by column; no schema change here)',
-  );
-  it.todo(
-    'PA-18 (ST-R011-3): approving a drive-intake plan with a record_payment step (POST /drive/businesses/:b/intake/:id/approve) records the approving user as ' +
-      'Payment.recordedBy and the posting createdById, not null - needs drive-intake-orchestrator.service.ts executePlan to pass { actorId: userId } to ' +
-      'recordPayment, outside the R0-11 write set',
-  );
+// ---------------------------------------------------------------------------
+// R0-CMF2-PAYMENT-ACTOR-GAPS (R0-11 review ST-R011-2, ST-R011-3): PA-17, PA-18.
+//
+// ST-R011-2: markPaymentRefunded handed the refunder only to
+// RevenuePostingService.onPaymentRefunded, which wrote it on the reversal
+// FinancialTransaction and returned null when the payment had no
+// Payment:<id>:payment_recorded posting (a mark-paid row written before
+// R0-PL-04). Such a refund named its refunder on no row at all; a posted one
+// named it only on the reversal, and its FINANCE payment_refunded activity
+// entry carried no actor and was written inside the refund transaction, so a
+// refund that rolled back still left "Payment refunded" behind.
+//
+// The contact-event registry (packages/shared CONTACT_EVENT_TYPES) has no
+// refund type for invoices and is outside this write set, so the audit row is
+// the unified activity row the posted-refund path already wrote, now for every
+// manual refund, naming the refunder, and recorded once the refund commits.
+// Payment has no refunded-by column and none is added: Payment.recordedBy
+// keeps the recorder.
+//
+// ST-R011-3: DriveIntakeOrchestrator.executePlan(businessId, intakeFileId,
+// userId) passed userId to credit notes, messages and tasks but called
+// recordPayment with no actor, so a payment written by an approved intake plan
+// had recordedBy null and a posting with no creator.
+// ---------------------------------------------------------------------------
+
+/** The `activities` rows (real, fresh read) the refund audit wrote for one payment. */
+async function refundActivityRows(paymentId: string): Promise<any[]> {
+  return db.activity.findMany({
+    where: { businessId: ID.biz, module: 'FINANCE', action: 'payment_refunded', entityType: 'payment', entityId: paymentId },
+    orderBy: { occurredAt: 'asc' },
+  });
+}
+
+/** The payment_refunded entries handed to the unified timeline for one payment. */
+function refundActivityHanded(paymentId: string): Array<Record<string, any>> {
+  return activity.filter((a) => a.module === 'FINANCE' && a.action === 'payment_refunded' && a.entityId === paymentId);
+}
+
+/** Exactly one refund audit row for this payment, naming `actor` (null: none). */
+async function expectOneRefundAuditBy(paymentId: string, actor: string | null, actorType: 'USER' | 'SYSTEM' | null, ledgerReversed: boolean) {
+  const rows = await refundActivityRows(paymentId);
+  expect(rows, `refund audit rows for ${paymentId}`).toHaveLength(1);
+  expect(rows[0].actorId, `refund audit actorId for ${paymentId}`).toBe(actor);
+  expect(rows[0].actorType, `refund audit actorType for ${paymentId}`).toBe(actorType);
+  expect(rows[0].contactId).toBe(ID.contact);
+  expect(rows[0].data).toMatchObject({ refundedBy: actor, ledgerReversed });
+  expect(refundActivityHanded(paymentId), `refund entries handed for ${paymentId}`).toHaveLength(1);
+}
+
+/** Seed a SUCCESSFUL payment row with no ledger posting (a mark-paid row written before R0-PL-04). */
+async function seedUnpostedPayment(id: string, invoiceId: string, recordedBy: string | null) {
+  await db.invoice.update({ where: { id: invoiceId }, data: { status: 'PAID', paidAt: new Date() } });
+  await db.payment.create({
+    data: {
+      id, businessId: ID.biz, invoiceId, amount: INVOICE_TOTAL, currency: 'TTD', status: 'SUCCESSFUL',
+      provider: 'manual', method: 'MANUAL', providerPaymentId: `${id}_prov`, notes: 'seeded pre-R0-PL-04 mark-paid', recordedBy,
+    },
+  });
+}
+
+describe('R0-CMF2: a refund names its refunder on a durable row, posted or not (PA-17, ST-R011-2)', () => {
+  it('PA-17a: V refunds a SUCCESSFUL payment with no payment_recorded posting -> 201 REFUNDED; one payment_refunded activity row names V (USER); no ledger row is invented; recordedBy is not overwritten; a second refund (409) adds nothing', async () => {
+    const paymentId = `${P}pay_unposted`;
+    await seedUnpostedPayment(paymentId, ID.invUnpostedRefund, null);
+    expect(await postingsFor(paymentId)).toHaveLength(0);
+
+    const res = await refundAs(ID.userV, paymentId, 'unposted');
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.status).toBe('REFUNDED');
+
+    const row = await paymentRow(paymentId);
+    expect(row).toMatchObject({ status: 'REFUNDED', recordedBy: null });
+    // Nothing to reverse, and no posting is invented to make one.
+    expect(await postingsFor(paymentId)).toHaveLength(0);
+    expect(await reversalsFor(paymentId)).toHaveLength(0);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.biz, sourceId: paymentId } })).toBe(0);
+
+    await expectOneRefundAuditBy(paymentId, ID.userV, 'USER', false);
+    const [audit] = await refundActivityRows(paymentId);
+    expect(audit.data).toMatchObject({ invoiceId: ID.invUnpostedRefund, amount: INVOICE_TOTAL, currency: 'TTD' });
+
+    const again = await refundAs(ID.userU, paymentId, 'again');
+    expect(again.status, JSON.stringify(again.body)).toBe(409);
+    await expectOneRefundAuditBy(paymentId, ID.userV, 'USER', false);
+  });
+
+  it('PA-17b: U records, V refunds a posted payment -> the reversal createdById = V and one payment_refunded activity row names V (USER) with ledgerReversed true', async () => {
+    const res = await postAs(ID.userU, ID.invPostedRefundAudit, { amount: 55, method: 'cash', reference: 'PYA-RA-1' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const paymentId = res.body.payment.id;
+
+    const refunded = await refundAs(ID.userV, paymentId);
+    expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
+    const reversals = await reversalsFor(paymentId);
+    expect(reversals).toHaveLength(1);
+    expect(reversals[0].createdById).toBe(ID.userV);
+    await expectOneRefundAuditBy(paymentId, ID.userV, 'USER', true);
+    expect((await paymentRow(paymentId)).recordedBy).toBe(ID.userU);
+  });
+
+  it('PA-17c: a service caller refunding with no actor writes the audit row with actorId null and refundedBy null; no actor is invented', async () => {
+    const paymentId = `${P}pay_noactor_refund`;
+    await seedUnpostedPayment(paymentId, ID.invRefundNoActor, null);
+    const updated = await commerce.markPaymentRefunded(paymentId, ID.biz, 'no actor');
+    expect(updated.status).toBe('REFUNDED');
+    await expectOneRefundAuditBy(paymentId, null, null, false);
+  });
+
+  it('PA-17d: a refund that rolls back (reconcile fails inside the transaction) leaves no audit row and hands the timeline nothing; the payment stays SUCCESSFUL and its posting POSTED', async () => {
+    const res = await postAs(ID.userU, ID.invRefundRollback, { amount: 45, method: 'cash', reference: 'PYA-RB-1' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const paymentId = res.body.payment.id;
+
+    const spy = vi.spyOn(workflow, 'reconcileFromPayments').mockRejectedValueOnce(new Error(`${P}forced reconcile failure`));
+    try {
+      const refunded = await refundAs(ID.userV, paymentId, 'rolled back');
+      expect(refunded.status, JSON.stringify(refunded.body)).toBe(500);
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await paymentRow(paymentId)).status).toBe('SUCCESSFUL');
+    expect(await reversalsFor(paymentId)).toHaveLength(0);
+    expect((await postingsFor(paymentId))[0].status).toBe('POSTED');
+    expect(refundActivityHanded(paymentId)).toHaveLength(0);
+    expect(await refundActivityRows(paymentId)).toHaveLength(0);
+  });
+
+  it('PA-17e: a refund with KEY_SYSTEM_ACTOR_ID as the actor labels its audit row SYSTEM with actorId KEY, never USER', async () => {
+    const paymentId = `${P}pay_key_refund`;
+    await seedUnpostedPayment(paymentId, ID.invRefundKey, null);
+    await commerce.markPaymentRefunded(paymentId, ID.biz, 'key', systemActorId);
+    await expectOneRefundAuditBy(paymentId, KEY_ACTOR, 'SYSTEM', false);
+  });
+});
+
+/** Seed a drive intake file awaiting approval whose plan records one payment on `invoiceId`. */
+async function seedDriveIntake(id: string, invoiceId: string, payload: Record<string, unknown>) {
+  await db.driveIntakeFile.create({
+    data: {
+      id,
+      businessId: ID.biz,
+      driveFileId: `${id}_file`,
+      name: `${id}.pdf`,
+      mimeType: 'application/pdf',
+      modifiedTime: new Date(),
+      status: 'reviewing',
+      documentType: 'receipt',
+      proposedActions: {
+        intakeFileId: id,
+        documentType: 'receipt',
+        summary: 'pya drive receipt',
+        actions: [{ type: 'record_payment', payload: { invoiceId, ...payload } }],
+      },
+    },
+  });
+}
+
+describe('R0-CMF2: drive-intake approval names the approver on the payment it records (PA-18, ST-R011-3)', () => {
+  it('PA-18a: V approves a plan with a record_payment step (POST /drive/businesses/:b/intake/:id/approve) -> Payment.recordedBy, the posting createdById and the invoice.payment_recorded entry name V; a recorder named in the plan payload is ignored', async () => {
+    const intakeId = `${P}drive_v`;
+    await seedDriveIntake(intakeId, ID.invDriveV, {
+      amount: 30, method: 'bank_transfer', reference: 'PYA-DRV-1', recordedBy: ID.userU, actorId: ID.userU,
+    });
+
+    const res = await agent().post(`/drive/businesses/${ID.biz}/intake/${intakeId}/approve`).set(HEADER, ID.userV).send({});
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.success, JSON.stringify(res.body)).toBe(true);
+    expect(res.body.results).toEqual([expect.objectContaining({ action: 'record_payment', success: true })]);
+
+    const rows = await paymentsOf(ID.invDriveV);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ amount: 30, status: 'SUCCESSFUL', reference: 'PYA-DRV-1' });
+    expect(rows[0].id).toBe(res.body.results[0].entityId);
+    expect(rows[0].recordedBy).toBe(ID.userV);
+    await expectPostingBy(rows[0].id, ID.userV);
+    await expectContactEventBy(ID.invDriveV, ID.userV, 'USER');
+    expect((await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).status).toBe('approved');
+  });
+
+  it('PA-18b: the ingestion auto-execute runs the plan with no human (approver "system") -> recordedBy null, posting createdById null, contact event with no actor; "system" is recorded nowhere (PA-08 holds)', async () => {
+    const intakeId = `${P}drive_sys`;
+    await seedDriveIntake(intakeId, ID.invDriveSystem, { amount: 20, method: 'cash', reference: 'PYA-DRV-SYS' });
+
+    const result = await driveOrchestrator.executePlan(ID.biz, intakeId, 'system');
+    expect(result.success, JSON.stringify(result)).toBe(true);
+
+    const rows = await paymentsOf(ID.invDriveSystem);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].recordedBy).toBeNull();
+    await expectPostingBy(rows[0].id, null);
+    const events = await contactEventsFor(ID.invDriveSystem);
+    expect(events).toHaveLength(1);
+    expect(events[0].actorId).toBeNull();
+    expect((events[0].data as any).recordedBy).toBeNull();
+    expect(crmActivityFor(ID.invDriveSystem).map((a) => a.actorId ?? null)).toEqual([null]);
+  });
 });
