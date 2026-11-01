@@ -9,6 +9,10 @@
  * twice. The server reads the key from the BODY (RecordPaymentDto.idempotencyKey;
  * there is no header), so that is what the client sends.
  *
+ * Review R021-ST-1 / CR-R021-1: the server prefers the key to the reference, so
+ * a submit that carries a reference sends no key and the server's reference +
+ * amount slot identifies the slip across opens (attemptIdempotencyKey).
+ *
  * This file holds the client contract, a source guard over every caller of
  * recordInvoicePayment, and the invoice detail page's form (the other two forms
  * have their own files: payment-record-modal.test.tsx and
@@ -323,5 +327,60 @@ describe("invoice detail page: one key per form open, reused on retry, single su
     // (the PENDING 500 row is not cash).
     await waitFor(() => expect(paid()).toMatch(/70\.00/));
     expect(remaining()).toMatch(/30\.00/);
+  });
+
+  it("review R021-ST-1: the same slip entered in two opens (lost response, Cancel, reopen) is sent with its reference and no key both times", async () => {
+    const posts = installServer([
+      async () => jsonResponse(502, { message: "Bad gateway" }),
+      async () => jsonResponse(201, recorded),
+    ]);
+    await mountPage();
+
+    for (let open = 0; open < 2; open++) {
+      await openForm();
+      fireEvent.change(form().getByRole("spinbutton"), { target: { value: "40" } });
+      // The first textbox is Reference (the second is the Notes textarea).
+      fireEvent.change(form().getAllByRole("textbox")[0]!, { target: { value: "SLIP-77" } });
+      fireEvent.click(form().getByRole("button", { name: "Record Payment" }));
+      await waitFor(() => expect(posts).toHaveLength(open + 1));
+      if (open === 0) {
+        await waitFor(() => expect(form().getByRole("button", { name: "Record Payment" })).not.toBeDisabled());
+        fireEvent.click(form().getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(screen.queryByRole("heading", { name: "Record Payment" })).toBeNull());
+      }
+    }
+
+    for (const post of posts) {
+      expect(post).toMatchObject({ amount: 40, reference: "SLIP-77" });
+      expect(post).not.toHaveProperty("idempotencyKey");
+    }
+  });
+});
+
+describe("review R021-ST-1 / CR-R021-1: attemptIdempotencyKey leaves a reference to the server's reference slot", () => {
+  it("a submit with a reference sends no key; a blank or whitespace reference sends the open's key", async () => {
+    const { attemptIdempotencyKey } = await import("@/app/app/finance/components/payment-record-modal");
+    expect(attemptIdempotencyKey({ key: "k1", keySent: false }, "SLIP-77")).toBeUndefined();
+    expect(attemptIdempotencyKey({ key: "k2", keySent: false }, "")).toBe("k2");
+    expect(attemptIdempotencyKey({ key: "k3", keySent: false }, "   ")).toBe("k3");
+    expect(attemptIdempotencyKey({ key: "k4", keySent: false }, undefined)).toBe("k4");
+  });
+
+  it("once an open has sent its key, every later submit of that open keeps it, reference or not", async () => {
+    const { attemptIdempotencyKey } = await import("@/app/app/finance/components/payment-record-modal");
+    const attempt = { key: "k-open", keySent: false };
+    expect(attemptIdempotencyKey(attempt, "SLIP-1")).toBeUndefined();
+    expect(attempt.keySent).toBe(false);
+    expect(attemptIdempotencyKey(attempt, undefined)).toBe("k-open");
+    expect(attemptIdempotencyKey(attempt, "SLIP-1")).toBe("k-open");
+  });
+
+  it("newPaymentAttempt makes a fresh v4 key per attempt", async () => {
+    const { newPaymentAttempt } = await import("@/app/app/finance/components/payment-record-modal");
+    const a = newPaymentAttempt();
+    const b = newPaymentAttempt();
+    expect(a.keySent).toBe(false);
+    expect(a.key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(a.key).not.toBe(b.key);
   });
 });

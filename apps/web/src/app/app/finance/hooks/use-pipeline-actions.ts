@@ -27,7 +27,7 @@ export interface PaymentForm {
   method: string;
   reference: string;
   notes: string;
-  /** R0-21: the form open's idempotency key (PaymentRecordModal), sent as-is. */
+  /** R0-21: the form open's idempotency key (PaymentRecordModal), sent as-is; absent for a submit with a reference. */
   idempotencyKey?: string;
 }
 

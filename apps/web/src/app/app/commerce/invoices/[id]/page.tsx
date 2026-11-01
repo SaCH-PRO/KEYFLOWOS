@@ -45,7 +45,7 @@ import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
 import { formatAmount, getDaysUntilDue } from "../../utils/commerce-utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { newPaymentAttemptKey } from "../../../finance/components/payment-record-modal";
+import { attemptIdempotencyKey, newPaymentAttempt, type PaymentAttempt } from "../../../finance/components/payment-record-modal";
 
 const STATUS_ORDER = ["DRAFT", "SENT", "PAID", "OVERDUE", "VOID"];
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
@@ -139,11 +139,13 @@ export default function InvoiceDetailPage() {
   const remaining = serverFigures ? serverFigures.remaining : Math.max(0, Number(invoice?.total ?? 0) - paidAmount);
   const dueInfo = invoice ? getDaysUntilDue(invoice.dueDate) : null;
 
-  // R0-21 (M26, CF-08): one idempotency key per open of the payment form,
-  // made on its first submit and reused by every retry; closing drops it.
-  const paymentKeyRef = useRef<string | null>(null);
+  // R0-21 (M26, CF-08): one payment attempt per open of the payment form. Its
+  // key is made on the first submit and reused by every retry; closing drops
+  // it. A submit with a reference is keyed by the server's reference slot
+  // instead (attemptIdempotencyKey, review R021-ST-1).
+  const paymentAttemptRef = useRef<PaymentAttempt | null>(null);
   const recordingPaymentRef = useRef(false);
-  useEffect(() => { if (!showPaymentForm) paymentKeyRef.current = null; }, [showPaymentForm]);
+  useEffect(() => { if (!showPaymentForm) paymentAttemptRef.current = null; }, [showPaymentForm]);
 
   const withLoading = async (key: string, fn: () => Promise<void>) => {
     setActionLoading(prev => ({ ...prev, [key]: true }));
@@ -199,11 +201,11 @@ export default function InvoiceDetailPage() {
     if (amount > remaining + 0.005) {
       if (!window.confirm(`Over-payment of ${formatAmount(amount - remaining, invoice.currency)}: this invoice has ${formatAmount(remaining, invoice.currency)} remaining. Record it anyway? It will need a refund.`)) return;
     }
-    if (!paymentKeyRef.current) paymentKeyRef.current = newPaymentAttemptKey();
+    if (!paymentAttemptRef.current) paymentAttemptRef.current = newPaymentAttempt();
     recordingPaymentRef.current = true;
     setRecordingPayment(true);
     try {
-      const { data, error } = await recordInvoicePayment(businessId, invoice.id, { amount, method: paymentForm.method, reference: paymentForm.reference || undefined, notes: paymentForm.notes || undefined, idempotencyKey: paymentKeyRef.current });
+      const { data, error } = await recordInvoicePayment(businessId, invoice.id, { amount, method: paymentForm.method, reference: paymentForm.reference || undefined, notes: paymentForm.notes || undefined, idempotencyKey: attemptIdempotencyKey(paymentAttemptRef.current, paymentForm.reference) });
       if (!error && data) {
         setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments, paidAmount: data.paidAmount, remaining: data.remaining } : prev);
         // A keyed retry answers the payment already recorded: list it once.

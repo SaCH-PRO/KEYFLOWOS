@@ -74,6 +74,8 @@ type Call = { method: string; path: string; body: Record<string, unknown> | null
 
 function installServer(opts: {
   list?: { payments: PaymentRecord[]; paidAmount: number; remaining: number };
+  /** Overrides `list`: the raw answer to GET .../payments (deferred, failed). */
+  listResponse?: () => Promise<Response>;
   pay?: Array<() => Promise<Response>>;
   create?: () => Promise<Response>;
 } = {}) {
@@ -90,6 +92,7 @@ function installServer(opts: {
       return jsonResponse(201, { ...invoiceWith([], "DRAFT", 112.5), id: "inv_created" });
     }
     if (method === "GET" && url.pathname === PAY_PATH) {
+      if (opts.listResponse) return opts.listResponse();
       const list = opts.list ?? { payments: [], paidAmount: 0, remaining: 100 };
       return jsonResponse(200, { ...list, invoiceTotal: 100 });
     }
@@ -228,6 +231,8 @@ describe("R0-21 invoices-panel: record payment carries one key per open and show
   async function openPayment() {
     fireEvent.click(screen.getAllByRole("button", { name: /^Record payment$/ })[0]!);
     await screen.findByPlaceholderText("Payment amount");
+    // Review R021-ST-2: Record Payment waits for the server's figures.
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Record Payment$/ })).not.toBeDisabled());
   }
 
   function figure(label: string): string {
@@ -300,5 +305,147 @@ describe("R0-21 invoices-panel: record payment carries one key per open and show
     expect(String(confirmSpy.mock.calls[0]![0])).toMatch(/20\.00/);
     await new Promise((r) => setTimeout(r, 20));
     expect(server.payPosts()).toHaveLength(0);
+  });
+});
+
+/**
+ * Review repairs.
+ *
+ * R021-ST-1 / CR-R021-1: on the HTTP route the server keys a manual payment on
+ * the client key whenever one is sent and then skips its reference + amount
+ * slot (commerce.service.ts manualProviderPaymentId). A key made per open
+ * therefore turned one bank slip entered in two opens into two payments. A
+ * submit with a reference now sends no key, so the server's reference slot
+ * (R0-D2, pinned by commerce-payment-idempotency.integration.test.ts and the
+ * journey's step 4) absorbs the second entry; a blank-reference submit keeps
+ * the open's key (CF-08).
+ *
+ * R021-ST-2: until the server's payments read answers, the list row (which may
+ * be stale) decided the overpayment confirm. Record Payment now waits for the
+ * server's figures, and only a failed read falls back to the row.
+ */
+describe("R0-21 review: invoices-panel payment form", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("kf_token", "token-r021p");
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  const recordButton = () => screen.getByRole("button", { name: /^(Record Payment|Recording\.\.\.)$/ }) as HTMLButtonElement;
+  const amountInput = () => screen.getByPlaceholderText("Payment amount") as HTMLInputElement;
+  const referenceInput = () => screen.getByPlaceholderText("Transaction reference") as HTMLInputElement;
+  function figure(label: string): string {
+    const el = screen.getAllByText(label).find((e) => e.nextElementSibling);
+    return el?.nextElementSibling?.textContent ?? "";
+  }
+  async function openPayment() {
+    fireEvent.click(screen.getAllByRole("button", { name: /^Record payment$/ })[0]!);
+    await screen.findByPlaceholderText("Payment amount");
+  }
+  async function openWithFigures() {
+    await openPayment();
+    await waitFor(() => expect(recordButton()).not.toBeDisabled());
+  }
+
+  it("R021-ST-1: the same slip entered in two opens (lost response, Cancel, reopen) is sent with its reference and no key both times", async () => {
+    const server = installServer({
+      list: { payments: [row("p_ok", 30, "SUCCESSFUL")], paidAmount: 30, remaining: 70 },
+      pay: [async () => jsonResponse(502, { message: "Bad gateway" }), async () => jsonResponse(201, recorded(40))],
+    });
+    render(<Panel invoices={[invoiceWith([row("p_ok", 30, "SUCCESSFUL")])]} />);
+
+    await openWithFigures();
+    fireEvent.change(amountInput(), { target: { value: "40" } });
+    fireEvent.change(referenceInput(), { target: { value: "SLIP-77" } });
+    fireEvent.click(recordButton());
+    await waitFor(() => expect(server.payPosts()).toHaveLength(1));
+    await waitFor(() => expect(recordButton()).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    await waitFor(() => expect(screen.queryByPlaceholderText("Payment amount")).toBeNull());
+
+    await openWithFigures();
+    fireEvent.change(amountInput(), { target: { value: "40" } });
+    fireEvent.change(referenceInput(), { target: { value: "SLIP-77" } });
+    fireEvent.click(recordButton());
+    await waitFor(() => expect(server.payPosts()).toHaveLength(2));
+
+    for (const post of server.payPosts()) {
+      expect(post.body).toMatchObject({ amount: 40, reference: "SLIP-77" });
+      // No key: the server's reference + amount slot identifies the slip, so
+      // the second entry returns the payment the first recorded.
+      expect(post.body).not.toHaveProperty("idempotencyKey");
+    }
+  });
+
+  it("R021-ST-1: a blank-reference submit keeps the open's key on its retry, even after a reference is added", async () => {
+    const server = installServer({
+      list: { payments: [row("p_ok", 30, "SUCCESSFUL")], paidAmount: 30, remaining: 70 },
+      pay: [async () => jsonResponse(502, { message: "Bad gateway" }), async () => jsonResponse(201, recorded(20))],
+    });
+    render(<Panel invoices={[invoiceWith([row("p_ok", 30, "SUCCESSFUL")])]} />);
+
+    await openWithFigures();
+    fireEvent.change(amountInput(), { target: { value: "20" } });
+    fireEvent.click(recordButton());
+    await waitFor(() => expect(server.payPosts()).toHaveLength(1));
+    await waitFor(() => expect(recordButton()).not.toBeDisabled());
+    fireEvent.change(referenceInput(), { target: { value: "SLIP-9" } });
+    fireEvent.click(recordButton());
+    await waitFor(() => expect(server.payPosts()).toHaveLength(2));
+
+    const [first, retry] = server.payPosts();
+    expect(typeof first!.body?.idempotencyKey).toBe("string");
+    expect(first!.body).not.toHaveProperty("reference");
+    expect(retry!.body).toMatchObject({ reference: "SLIP-9", idempotencyKey: first!.body?.idempotencyKey });
+  });
+
+  it("R021-ST-2: Record Payment waits for the server's figures, so a stale row cannot skip the overpayment confirm", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    let answer: (r: Response) => void = () => {};
+    const server = installServer({ listResponse: () => new Promise<Response>((resolve) => { answer = resolve; }) });
+    // The list row predates a SUCCESSFUL 30 the server holds (remaining 70).
+    render(<Panel invoices={[invoiceWith([], "SENT")]} />);
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await openPayment();
+
+    expect(amountInput().value).toBe("100.00");
+    expect(recordButton()).toBeDisabled();
+    expect(figure("Remaining")).not.toMatch(/\d\.\d\d/);
+    fireEvent.click(recordButton());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(server.payPosts()).toHaveLength(0);
+
+    await act(async () => {
+      answer(jsonResponse(200, { payments: [row("p_ok", 30, "SUCCESSFUL")], paidAmount: 30, remaining: 70, invoiceTotal: 100 }));
+    });
+    await waitFor(() => expect(recordButton()).not.toBeDisabled());
+    expect(figure("Remaining")).toMatch(/\b70\.00\b/);
+    fireEvent.change(amountInput(), { target: { value: "100" } });
+    fireEvent.click(recordButton());
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(String(confirmSpy.mock.calls[0]![0])).toMatch(/30\.00/);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(server.payPosts()).toHaveLength(0);
+  });
+
+  it("R021-ST-2: a failed payments read falls back to the row's SUCCESSFUL payments and the form records", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const server = installServer({ listResponse: async () => jsonResponse(500, { message: "boom" }) });
+    render(<Panel invoices={[invoiceWith([row("p_ok", 30, "SUCCESSFUL"), row("p_pend", 999, "PENDING")])]} />);
+    await openWithFigures();
+
+    expect(figure("Already Paid")).toMatch(/\b30\.00\b/);
+    expect(figure("Remaining")).toMatch(/\b70\.00\b/);
+    fireEvent.change(amountInput(), { target: { value: "70" } });
+    fireEvent.click(recordButton());
+    await waitFor(() => expect(server.payPosts()).toHaveLength(1));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(server.payPosts()[0]!.body).toMatchObject({ amount: 70 });
   });
 });

@@ -2319,7 +2319,9 @@ export async function recordInvoicePayment(businessId: string, invoiceId: string
   /**
    * R0-21: one key per payment-form open, reused on retry (RecordPaymentDto,
    * R0-D2). The same key returns the payment already recorded instead of a
-   * second one.
+   * second one. The server keys on it in preference to the reference, so the
+   * forms leave it out when the submit carries a reference
+   * (attemptIdempotencyKey in payment-record-modal.tsx).
    */
   idempotencyKey?: string;
 }): Promise<ApiResult<{ payment: PaymentRecord; invoice: Invoice; paidAmount: number; remaining: number }>> {

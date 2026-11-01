@@ -51,6 +51,41 @@ export function newPaymentAttemptKey(): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
+/**
+ * R0-21: one payment attempt (one form open). `keySent` records that a submit
+ * of this open already went out under `key`.
+ */
+export interface PaymentAttempt {
+  key: string;
+  keySent: boolean;
+}
+
+export function newPaymentAttempt(): PaymentAttempt {
+  return { key: newPaymentAttemptKey(), keySent: false };
+}
+
+/**
+ * R0-21 review (R021-ST-1, CR-R021-1): the idempotencyKey one submit of
+ * `attempt` sends, given the reference that submit carries.
+ *
+ * On the HTTP route the server (R0-D2) keys a manual payment on the client key
+ * whenever one is sent, and then never checks its reference slot (same invoice
+ * + same non-empty reference + same amount = the same slip). A key made per
+ * open would make one slip entered in two opens two payments: a lost response,
+ * Cancel, reopen and re-enter; or two staff entering it from two forms. So a
+ * submit that carries a reference sends no key, and the server's reference slot
+ * identifies the slip across every open and every form. A blank-reference
+ * submit has nothing else to key on (CF-08), so it sends the open's key; once
+ * it has, every later retry of that open keeps sending it (even with a
+ * reference added meanwhile), so the retry still finds what the first recorded.
+ */
+export function attemptIdempotencyKey(attempt: PaymentAttempt, reference: string | null | undefined): string | undefined {
+  const hasReference = typeof reference === "string" && reference.trim().length > 0;
+  if (hasReference && !attempt.keySent) return undefined;
+  attempt.keySent = true;
+  return attempt.key;
+}
+
 /** Status-aware: only SUCCESSFUL rows are collected cash (PENDING, FAILED and REFUNDED are not). */
 function successfulPaid(invoice: Invoice): number {
   return (invoice.payments ?? [])
@@ -63,7 +98,10 @@ export interface PaymentRecordForm {
   method: string;
   reference: string;
   notes: string;
-  /** R0-21: one key per modal open, reused by every retry of that open. */
+  /**
+   * R0-21: the open's key, reused by every retry of that open; absent when the
+   * submit carries a reference (attemptIdempotencyKey).
+   */
   idempotencyKey?: string;
 }
 
@@ -135,13 +173,15 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
   const paidSoFar = balance?.paidAmount ?? 0;
   const remaining = balance?.remaining ?? 0;
 
-  // R0-21 (M26, CF-08): one idempotency key per open. It is made on the first
-  // submit of this open and reused by every retry, so a resubmit after a lost
-  // response returns the payment already recorded (R0-D2). A close, or another
-  // invoice, drops it: the next open is a new payment attempt.
-  const attemptKeyRef = useRef<string | null>(null);
+  // R0-21 (M26, CF-08): one payment attempt per open. Its key is made on the
+  // first submit of this open and reused by every retry, so a resubmit after a
+  // lost response returns the payment already recorded (R0-D2). A close, or
+  // another invoice, drops it: the next open is a new payment attempt. A submit
+  // with a reference is keyed by the server's reference slot instead
+  // (attemptIdempotencyKey).
+  const attemptRef = useRef<PaymentAttempt | null>(null);
   useEffect(() => {
-    attemptKeyRef.current = null;
+    attemptRef.current = null;
   }, [openInvoiceId]);
 
   // R0-21 (M29): an amount above the remaining balance is confirmed explicitly.
@@ -221,8 +261,8 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
   const submit = () => {
     if (!invoice) return;
     setOverpay(null);
-    if (!attemptKeyRef.current) attemptKeyRef.current = newPaymentAttemptKey();
-    onSubmit(invoice, { amount, method, reference, notes, idempotencyKey: attemptKeyRef.current });
+    if (!attemptRef.current) attemptRef.current = newPaymentAttempt();
+    onSubmit(invoice, { amount, method, reference, notes, idempotencyKey: attemptIdempotencyKey(attemptRef.current, reference) });
   };
 
   const handleSubmit = () => {

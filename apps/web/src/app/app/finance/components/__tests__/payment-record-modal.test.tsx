@@ -344,3 +344,79 @@ describe("R0-21 payment-record-modal: one idempotency key per open, single submi
     expect(server.posts()).toHaveLength(1);
   });
 });
+
+/**
+ * Review R021-ST-1 / CR-R021-1: the server keys on the client key whenever one
+ * is sent and then skips its reference + amount slot, so a key per open made
+ * one slip entered in two opens two payments. A submit with a reference sends
+ * no key (the server's R0-D2 reference slot absorbs the second entry); a
+ * blank-reference submit keeps the open's key.
+ */
+describe("R0-21 review: payment-record-modal leaves the reference slot to the server", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("kf_token", "token-r021");
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  const referenceInput = () => screen.getByPlaceholderText("Transaction ID, check number...") as HTMLInputElement;
+
+  it("the same slip entered in two opens (lost response, Cancel, reopen) is sent with its reference and no key both times", async () => {
+    const payments = [row("p_ok", 30, "SUCCESSFUL")];
+    const server = installServer({
+      detail: { paidAmount: 30, remaining: 70, payments },
+      post: [async () => jsonResponse(502, { message: "Bad gateway" }), async () => jsonResponse(201, okRecord(40))],
+    });
+    render(<PipelineHarness invoice={invoiceWith(payments)} />);
+
+    await openModal();
+    await waitFor(() => expect(summaryFigure("Remaining")).toMatch(/\b70\.00\b/));
+    fireEvent.change(amountInput(), { target: { value: "40" } });
+    fireEvent.change(referenceInput(), { target: { value: "SLIP-77" } });
+    fireEvent.click(recordButton());
+    await waitFor(() => expect(server.posts()).toHaveLength(1));
+    await waitFor(() => expect(recordButton()).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    await waitFor(() => expect(screen.queryByText("Already paid")).toBeNull());
+
+    await openModal();
+    await waitFor(() => expect(summaryFigure("Remaining")).toMatch(/\b70\.00\b/));
+    fireEvent.change(amountInput(), { target: { value: "40" } });
+    fireEvent.change(referenceInput(), { target: { value: "SLIP-77" } });
+    fireEvent.click(recordButton());
+    await waitFor(() => expect(server.posts()).toHaveLength(2));
+
+    for (const post of server.posts()) {
+      expect(post.body).toMatchObject({ amount: 40, reference: "SLIP-77" });
+      expect(post.body).not.toHaveProperty("idempotencyKey");
+    }
+  });
+
+  it("a blank-reference submit keeps the open's key on its retry, even after a reference is added", async () => {
+    const payments = [row("p_ok", 30, "SUCCESSFUL")];
+    const server = installServer({
+      detail: { paidAmount: 30, remaining: 70, payments },
+      post: [async () => jsonResponse(502, { message: "Bad gateway" }), async () => jsonResponse(201, okRecord(20))],
+    });
+    render(<PipelineHarness invoice={invoiceWith(payments)} />);
+
+    await openModal();
+    await waitFor(() => expect(summaryFigure("Remaining")).toMatch(/\b70\.00\b/));
+    fireEvent.change(amountInput(), { target: { value: "20" } });
+    fireEvent.click(recordButton());
+    await waitFor(() => expect(server.posts()).toHaveLength(1));
+    await waitFor(() => expect(recordButton()).not.toBeDisabled());
+    fireEvent.change(referenceInput(), { target: { value: "SLIP-9" } });
+    fireEvent.click(recordButton());
+    await waitFor(() => expect(server.posts()).toHaveLength(2));
+
+    const [first, retry] = server.posts();
+    expect(typeof first!.body?.idempotencyKey).toBe("string");
+    expect(retry!.body).toMatchObject({ reference: "SLIP-9", idempotencyKey: first!.body?.idempotencyKey });
+  });
+});
