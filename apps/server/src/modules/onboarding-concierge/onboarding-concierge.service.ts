@@ -428,39 +428,55 @@ export class OnboardingConciergeService {
    * owner ruling D-11 (2026-10-31: editing the business profile is OWNER only,
    * regardless of granted scopes; review R09-ST-3). autoConfigureFromTemplate
    * writes Business.name (customBusinessName), overwrites businessHours, turns
-   * the store on and mints a slug when there is none, and every call rewrites
-   * Business.metaData (conciergeTemplateId, conciergeSetupAt, the setup
-   * milestone). Those are fields of the owner-only profile PATCH
-   * (PATCH /identity/businesses/:businessId, R0-09), so no auto-configure call
-   * writes no owner-only field and the route is refused as a whole: 403
-   * BUSINESS_PROFILE_OWNER_ONLY, before anything is read or written.
+   * the store on and mints a slug when there is none, and every call writes the
+   * business's setup configuration into Business.metaData (conciergeTemplateId,
+   * conciergeSetupAt, the setup milestone; paymentMethodsConfigured and
+   * paymentRecommendations unless setPaymentMethods is false). Those are
+   * fields of the owner-only profile PATCH (PATCH /identity/businesses/
+   * :businessId, R0-09), so no auto-configure call writes no owner-only field
+   * and the route is refused as a whole: 403 BUSINESS_PROFILE_OWNER_ONLY,
+   * before anything is read or written.
    *
-   * The owner is the OWNER membership or the distinguished owner
-   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
-   * BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform bypass
-   * BusinessGuard already grants. The actor is the authenticated user
-   * AuthMiddleware attached (req.user); none fails closed. The rule is
-   * restated rather than imported, as R0-08c did: injecting IdentityService
-   * would need OnboardingConciergeModule to import IdentityModule.
+   * Business.metaData is not owner-only as a bag: the concierge's own
+   * display-state keys (conciergeDismissed and conciergeDismissedAt from
+   * dismiss/resume, snoozedNudges from snooze, nudgeHistory from GET nudges)
+   * are fixed keys with server-chosen values that carry no profile content, so
+   * those routes keep the BusinessGuard rule (any member; review CR-2).
+   *
+   * The owner test is isProfileOwner.
    */
   async assertProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<void> {
-    if (actor?.id) {
-      if (actor.role === 'SUPER_ADMIN') return;
-      const membership = await this.prisma.client.membership.findUnique({
-        where: { userId_businessId: { userId: actor.id, businessId } },
-        select: { role: true },
-      });
-      if (membership?.role === 'OWNER') return;
-      const owned = await this.prisma.client.business.findFirst({
-        where: { id: businessId, ownerId: actor.id },
-        select: { id: true },
-      });
-      if (owned) return;
-    }
+    if (await this.isProfileOwner(businessId, actor)) return;
     throw new ForbiddenException({
       code: BUSINESS_PROFILE_OWNER_ONLY,
       message: 'Only the business owner can auto-configure the business profile.',
     });
+  }
+
+  /**
+   * Whether the actor is the business owner for owner ruling D-11
+   * (R0-09b-D11-SIBLING-WRITES): the OWNER membership or the distinguished
+   * owner (Business.ownerId), the two arms IdentityService.assertBusinessOwner
+   * and BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform
+   * bypass BusinessGuard already grants. The actor is the authenticated user
+   * AuthMiddleware attached (req.user); none is not the owner (fails closed).
+   * The rule is restated rather than imported, as R0-08c did: injecting
+   * IdentityService would need OnboardingConciergeModule to import
+   * IdentityModule.
+   */
+  async isProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<boolean> {
+    if (!actor?.id) return false;
+    if (actor.role === 'SUPER_ADMIN') return true;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return true;
+    const owned = await this.prisma.client.business.findFirst({
+      where: { id: businessId, ownerId: actor.id },
+      select: { id: true },
+    });
+    return !!owned;
   }
 
   async autoConfigureFromTemplate(
@@ -633,10 +649,20 @@ export class OnboardingConciergeService {
       }));
   }
 
+  /**
+   * Any member may chat with the concierge (BusinessGuard), but only the
+   * owner's answers are persisted as onboarding intake — R0-09b, owner ruling
+   * D-11, review SEC-2. persistIntakeAnswers writes Business.businessIntent
+   * (the raw message), industry, archetype and country (from the reply's
+   * EXTRACTED lines, which the message can steer) and infers the blueprint
+   * identity; those are owner-only profile fields, so for a non-owner, or with
+   * no actor, the reply is returned and nothing is persisted.
+   */
   async generateConciergeResponse(
     businessId: string,
     userMessage: string,
     conversationHistory: Array<{ role: string; content: string }>,
+    actor?: { id?: string; role?: string },
   ): Promise<ConciergeMessage> {
     if (!userMessage || typeof userMessage !== 'string' || userMessage.trim().length === 0) {
       throw new BadRequestException('Message is required');
@@ -686,9 +712,12 @@ export class OnboardingConciergeService {
       });
 
       const parsed = this.parseAiResponse(result.content, setupStatus);
-      // Persist extracted intake answers synchronously so nothing is lost.
+      // Persist extracted intake answers synchronously so nothing is lost —
+      // the owner's only (D-11, see the docstring).
       try {
-        await this.persistIntakeAnswers(businessId, userMessage, parsed.extracted || {}, detection);
+        if (await this.isProfileOwner(businessId, actor)) {
+          await this.persistIntakeAnswers(businessId, userMessage, parsed.extracted || {}, detection);
+        }
       } catch (err) {
         this.logger.warn(`Intake persistence failed: ${(err as Error).message}`);
       }

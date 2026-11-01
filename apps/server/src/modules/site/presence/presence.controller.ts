@@ -53,7 +53,10 @@ export class PresenceController {
     return this.presence.createPreviewToken(businessId);
   }
 
-  /** A publish that changes Business.slug is OWNER only (R0-09b, owner ruling D-11). */
+  /**
+   * Any member publishes; only the owner's publish moves Business.slug, and a
+   * non-owner's goes live at the current address (R0-09b, owner ruling D-11).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/publish')
   publish(@Param('businessId') businessId: string, @Req() req: any) {

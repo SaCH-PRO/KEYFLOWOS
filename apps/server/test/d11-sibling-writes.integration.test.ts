@@ -1,7 +1,16 @@
 /**
  * R0-09b-D11-SIBLING-WRITES — owner ruling D-11 (editing the business profile is
- * OWNER only, regardless of granted scopes) holds on the two routes that wrote
- * the same Business fields beside the generic PATCH. REAL database.
+ * OWNER only, regardless of granted scopes) holds on the routes R0-09's review
+ * named, R09-ST-2 and R09-ST-3, and on the concierge chat intake beside them
+ * (R0-09b review SEC-2). REAL database.
+ *
+ * SCOPE, NOT A SWEEP: these are not all the siblings of the generic PATCH.
+ * POST /business-genesis/businesses/:id/answers (name, currency, country,
+ * businessIntent) and POST /businesses/:id/templates/:templateId/apply
+ * (industry, archetype) still write owner-only profile fields for any member;
+ * their fixes are outside this write set and they are tracked as it.todo in
+ * identity-boundary.integration.test.ts, "OPEN DEFECTS — D-11 sibling write
+ * paths" (R0-09b review SEC-1).
  *
  * R0-09-ID-HARDEN made PATCH /identity/businesses/:businessId owner-only. Its
  * review found two sibling routes, guarded by AuthGuard and BusinessGuard only
@@ -17,7 +26,7 @@
  *             metaData, for any member and with no completion precondition
  *             (onboarding-concierge.service.ts autoConfigureFromTemplate).
  *
- * REQUIRED (the it.todo entries this packet removes from
+ * REQUIRED (the R09-ST-2 and R09-ST-3 it.todo entries this packet removes from
  * identity-boundary.integration.test.ts, "OPEN DEFECTS — D-11 sibling write
  * paths"): a non-owner — STAFF of any scope, ADMIN with settings:write — is
  * refused 403 for the slug change and for the auto-configure profile writes,
@@ -29,15 +38,30 @@
  * succeed.
  *
  * OWNER-ONLY FIELDS: the ones PATCH /identity/businesses/:id writes (R0-09):
- * name, slug, currency, timezone, tax, store settings, businessHours, metaData
- * and the rest of UpdateBusinessDto. The presence routes put exactly one of
- * them on the Business row (slug, at publish); every other presence field
- * (branding, sections, seo, customDomain) lives in site_page_drafts /
+ * name, slug, currency, timezone, tax, store settings, businessHours,
+ * businessIntent, industry, archetype, country, the configuration kept in
+ * metaData and the rest of UpdateBusinessDto. The presence routes put exactly
+ * one of them on the Business row (slug, at publish); every other presence
+ * field (branding, sections, seo, customDomain) lives in site_page_drafts /
  * site_pages_published only, so those edits keep today's rule (any member) and
  * the cases tagged "today's rule kept" pin that nothing else was tightened.
- * Every auto-configure call writes Business.metaData (conciergeTemplateId,
- * conciergeSetupAt, the setup milestone), so no auto-configure call writes no
- * owner-only field: the route is owner-only as a whole (case C02).
+ * A non-owner may not put a new slug in the draft (403), and a non-owner's
+ * publish never moves Business.slug: the page goes live at the current
+ * address and a pending draft slug waits for the owner's publish (cases S02,
+ * S09; review CR-1: a draft slug left behind by the owner's PATCH must not
+ * block a content publish).
+ * Every auto-configure call writes the business's setup configuration into
+ * Business.metaData (conciergeTemplateId, conciergeSetupAt, the setup
+ * milestone; paymentMethodsConfigured and paymentRecommendations by default),
+ * so no auto-configure call writes no owner-only field: the route is
+ * owner-only as a whole (case C02). The concierge chat stays open to any
+ * member, but only the owner's answers are persisted as intake (businessIntent,
+ * industry, archetype, country and the blueprint; cases C07, C08).
+ * Business.metaData is not owner-only as a bag: the concierge's display-state
+ * keys (conciergeDismissed, conciergeDismissedAt, snoozedNudges, nudgeHistory),
+ * which dismiss, resume, snooze and GET nudges write with server-chosen
+ * values, carry no profile content and stay open to any member (case C09,
+ * review CR-2).
  *
  * HOW THE APP IS COMPOSED (the contacts-visibility model): a real Nest app with
  * the real PresenceController, PresenceService, OnboardingConciergeController,
@@ -48,9 +72,11 @@
  * reads `x-test-user`, loads that seeded User row and attaches
  * `{ id, email, role }` exactly as AuthMiddleware does after token
  * verification. Collaborators these routes never authorize with are stubs or
- * recorders (EventEmitter2 records emits; BlueprintService's mirror is
- * best-effort; the presence overview, storefront intelligence, AI usage, demo
- * seeder and onboarding state are not on these routes). The production
+ * recorders (EventEmitter2 records emits; BlueprintService's mirror records
+ * which business it was asked to infer for; AiUsageService.callAi answers a
+ * fixed concierge reply with EXTRACTED lines, so no provider is called; the
+ * presence overview, storefront intelligence, demo seeder and onboarding state
+ * are not on these routes). The production
  * ValidationPipe needs the parameter types tsc emits, which vitest's esbuild
  * transform does not, so in-process bodies are not whitelisted; nothing here
  * depends on the whitelist.
@@ -110,6 +136,10 @@ const LIVE: Record<string, string> = {
 /** The owner-set hours on bizQ, so "overwritten" is visible (the template's hours differ). */
 const SEEDED_HOURS = { sat: { open: '07:00', close: '11:00', closed: false } };
 const TEMPLATE = 'consulting';
+/** What the stubbed AI extracts from any concierge chat message (EXTRACTED lines a caller's message can steer). */
+const AI_COUNTRY = 'k09b-country';
+const AI_INDUSTRY = 'k09b-industry';
+const AI_REPLY = `Welcome to KeyFlow!\nEXTRACTED: country=${AI_COUNTRY}\nEXTRACTED: industry=${AI_INDUSTRY}`;
 
 /** The refusal codes the server answers with (asserted, so a 403 from another layer does not pass). */
 const SLUG_CODE = 'PRESENCE_SLUG_OWNER_ONLY';
@@ -119,6 +149,8 @@ let db: any;
 let app: any;
 let templateHours: unknown;
 const emitted: string[] = [];
+/** The business ids BlueprintService.inferFromOnboarding was called for (intake persistence). */
+const blueprintInferred: string[] = [];
 
 async function cleanup() {
   for (const sql of [
@@ -173,13 +205,28 @@ async function resetPresence(businessId: string, draft?: Record<string, unknown>
   if (draft) await db.sitePageDraft.create({ data: { businessId, payload: draft, status: 'DRAFT', version: 1 } });
 }
 
-/** The seeded profile back on a concierge business (name, slug, hours, store off, empty metaData) and no products. */
+/**
+ * The seeded profile back on a concierge business (name, slug, hours, store off,
+ * empty metaData, no intake answers), no products, and the blueprint recorder
+ * cleared.
+ */
 async function resetConcierge(businessId: string) {
   await db.$executeRawUnsafe('DELETE FROM products WHERE business_id = $1', businessId);
   await db.$executeRawUnsafe(
-    `UPDATE businesses SET name = $2, slug = $3, business_hours = $4::jsonb, store_enabled = false, meta_data = '{}'::jsonb WHERE id = $1`,
+    `UPDATE businesses SET name = $2, slug = $3, business_hours = $4::jsonb, store_enabled = false, meta_data = '{}'::jsonb,
+       business_intent = NULL, industry = NULL, archetype = NULL, country = NULL WHERE id = $1`,
     businessId, `${businessId}-name`, LIVE[businessId], JSON.stringify(SEEDED_HOURS),
   );
+  blueprintInferred.length = 0;
+}
+
+/** The Business row as Postgres stores it, without meta_data and updated_at: "every other column". */
+async function businessRowTextExceptMeta(id: string): Promise<string> {
+  const rows = await db.$queryRawUnsafe(
+    `SELECT (to_jsonb(b) - 'meta_data' - 'updated_at')::text AS j FROM businesses b WHERE b.id = $1`, id,
+  );
+  expect(rows.length, `business ${id} exists`).toBe(1);
+  return rows[0].j as string;
 }
 
 async function draftRowText(businessId: string): Promise<string | null> {
@@ -189,6 +236,18 @@ async function draftRowText(businessId: string): Promise<string | null> {
 
 async function publishedCount(businessId: string): Promise<number> {
   return db.sitePagePublished.count({ where: { businessId } });
+}
+
+/** The live page's payload (site_pages_published), or undefined. */
+async function publishedPayload(businessId: string): Promise<Record<string, any> | undefined> {
+  const page = await db.sitePagePublished.findUnique({ where: { businessId } });
+  return (page?.payload as Record<string, any> | undefined) ?? undefined;
+}
+
+/** The draft's payload (site_page_drafts), or undefined. */
+async function draftPayload(businessId: string): Promise<Record<string, any> | undefined> {
+  const draft = await db.sitePageDraft.findUnique({ where: { businessId } });
+  return (draft?.payload as Record<string, any> | undefined) ?? undefined;
 }
 
 function putDraft(actor: string, businessId: string, body: unknown) {
@@ -207,6 +266,28 @@ function autoConfigure(actor: string, businessId: string, body: Record<string, u
     .post(`/onboarding-concierge/businesses/${businessId}/auto-configure`)
     .set('x-test-user', actor)
     .send(body);
+}
+
+function chat(actor: string, businessId: string, message: string) {
+  return request(app.getHttpServer())
+    .post(`/onboarding-concierge/businesses/${businessId}/chat`)
+    .set('x-test-user', actor)
+    .send({ message, history: [] });
+}
+
+function conciergePost(actor: string, businessId: string, suffix: string, body: Record<string, unknown> = {}) {
+  return request(app.getHttpServer())
+    .post(`/onboarding-concierge/businesses/${businessId}/${suffix}`)
+    .set('x-test-user', actor)
+    .send(body);
+}
+
+/** The intake columns a concierge chat persists. */
+async function intakeColumns(businessId: string) {
+  return db.business.findUnique({
+    where: { id: businessId },
+    select: { businessIntent: true, industry: true, archetype: true, country: true },
+  });
 }
 
 async function productCount(businessId: string): Promise<number> {
@@ -257,13 +338,20 @@ beforeAll(async () => {
       OnboardingConciergeService,
       CatalogService,
       { provide: EventEmitter2, useValue: { emit: (event: string) => { emitted.push(event); return true; } } },
-      { provide: BlueprintService, useValue: { inferFromOnboarding: async () => null } },
-      // Not on the draft, publish or auto-configure path.
+      {
+        provide: BlueprintService,
+        useValue: {
+          inferFromOnboarding: async (businessId: string) => { blueprintInferred.push(businessId); return null; },
+          getBlueprint: async () => null,
+        },
+      },
+      // The concierge chat's model call: a fixed reply, no provider traffic.
+      { provide: AiUsageService, useValue: { callAi: async () => ({ content: AI_REPLY }) } },
+      // Not on the draft, publish, auto-configure, chat, dismiss, resume or snooze path.
       { provide: PresenceOverviewService, useValue: {} },
       { provide: StorefrontIntelligenceService, useValue: {} },
       { provide: OnboardingStateService, useValue: {} },
       { provide: DemoDataSeederService, useValue: {} },
-      { provide: AiUsageService, useValue: {} },
       { provide: REDIS_CLIENT, useValue: {} },
     ],
   }).compile();
@@ -343,19 +431,26 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     expect(await publishedCount(ID.bizP)).toBe(0);
   });
 
-  it('[D11-S02] RED-BEFORE: a STAFF member (settings:none) publishing a draft that already carries another slug is refused (403): Business row byte-identical, nothing published, the draft untouched', async () => {
-    await resetPresence(ID.bizP, payload({ slug: slugOf('pending-slug') }));
+  it('[D11-S02] RED-BEFORE: a STAFF member (settings:none) publishing a draft that already carries another slug cannot change Business.slug: the page goes live at the current address (201), the Business row is byte-identical and the pending slug waits in the draft until the OWNER publishes it', async () => {
+    await resetPresence(ID.bizP, payload({ slug: slugOf('pending-slug'), headline: 'k09b pending content' }));
     const before = await businessRowText(ID.bizP);
-    const draftBefore = await draftRowText(ID.bizP);
     const pub = await publish(ID.staff, ID.bizP);
     expect((await businessRow(ID.bizP))?.slug, `publish ${pub.status}: Business.slug`).toBe(LIVE[ID.bizP]);
     expect(await businessRowText(ID.bizP), 'the Business row is byte-identical').toBe(before);
-    expectRefusal(pub, SLUG_CODE, 'STAFF publish of a draft slug');
-    expect(await publishedCount(ID.bizP), 'nothing published').toBe(0);
-    expect(await draftRowText(ID.bizP), 'the draft row is untouched').toBe(draftBefore);
+    expect(pub.status, JSON.stringify(pub.body)).toBe(201);
+    const page = await publishedPayload(ID.bizP);
+    expect(page?.slug, 'the page is live at the current Business.slug').toBe(LIVE[ID.bizP]);
+    expect(JSON.stringify(page)).toContain('k09b pending content');
+    expect((await draftPayload(ID.bizP))?.slug, 'the pending slug is still in the draft').toBe(slugOf('pending-slug'));
+
+    // The owner's publish of the same draft moves the address (the pending slug is the owner's to apply).
+    const ownerPub = await publish(ID.owner, ID.bizP);
+    expect(ownerPub.status, JSON.stringify(ownerPub.body)).toBe(201);
+    expect((await businessRow(ID.bizP))?.slug).toBe(slugOf('pending-slug'));
+    expect((await publishedPayload(ID.bizP))?.slug).toBe(slugOf('pending-slug'));
   });
 
-  it('[D11-S03] RED-BEFORE: STAFF with every scope admin, ADMIN on role defaults and ADMIN granted settings:write are refused both ways (403): a new slug in the draft, and publishing a draft slug; Business row byte-identical', async () => {
+  it('[D11-S03] RED-BEFORE: STAFF with every scope admin, ADMIN on role defaults and ADMIN granted settings:write cannot change Business.slug either way: a new slug in the draft is refused (403), and a draft slug they publish does not go live (201 at the current address); Business row byte-identical', async () => {
     for (const { id, label } of NON_OWNERS.slice(1)) {
       await resetPresence(ID.bizP);
       const before = await businessRowText(ID.bizP);
@@ -367,8 +462,8 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
       await resetPresence(ID.bizP, payload({ slug: slugOf('pending-slug') }));
       const pub2 = await publish(id, ID.bizP);
       expect((await businessRow(ID.bizP))?.slug, `${label}: publish of a draft slug ${pub2.status}`).toBe(LIVE[ID.bizP]);
-      expectRefusal(pub2, SLUG_CODE, `${label}: publish of a draft slug`);
-      expect(await publishedCount(ID.bizP), `${label}: nothing published`).toBe(0);
+      expect(pub2.status, `${label}: publish of a draft slug: ${JSON.stringify(pub2.body)}`).toBe(201);
+      expect((await publishedPayload(ID.bizP))?.slug, `${label}: the page is live at the current address`).toBe(LIVE[ID.bizP]);
       expect(await businessRowText(ID.bizP), `${label}: the Business row is byte-identical`).toBe(before);
     }
   });
@@ -428,6 +523,28 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     expect(pub.status, JSON.stringify(pub.body)).toBe(201);
     expect((await businessRow(ID.bizL))?.slug).toBe(slugOf('legacy-new'));
   });
+
+  it("[D11-S09] RED-BEFORE (review CR-1): after the OWNER moves Business.slug through the owner-only PATCH, a STAFF member (settings:none) whose draft still carries the old slug saves a content edit (200) and publishes it (201): the page goes live at the owner's address and the Business row is byte-identical", async () => {
+    await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP] }));
+    // PATCH /identity/businesses/:id (owner-only since R0-09) as raw SQL: the draft is not told about the new slug.
+    await db.$executeRawUnsafe('UPDATE businesses SET slug = $2 WHERE id = $1', ID.bizP, slugOf('owner-renamed'));
+    const before = await businessRowText(ID.bizP);
+    const put = await putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff content edit' }));
+    expect(put.status, JSON.stringify(put.body)).toBe(200);
+    const pub = await publish(ID.staff, ID.bizP);
+    expect((await businessRow(ID.bizP))?.slug, `publish ${pub.status}: Business.slug`).toBe(slugOf('owner-renamed'));
+    expect(pub.status, JSON.stringify(pub.body)).toBe(201);
+    expect(await businessRowText(ID.bizP), 'the Business row is byte-identical').toBe(before);
+    const page = await publishedPayload(ID.bizP);
+    expect(page?.slug, "the page is live at the owner's address").toBe(slugOf('owner-renamed'));
+    expect(JSON.stringify(page)).toContain('k09b staff content edit');
+  });
+
+  it.todo(
+    'REQUIRED (follow-up; identity.service.ts updateBusiness — outside the R0-09b write set; review CR-1, already true before R0-09b): ' +
+      'when the OWNER moves Business.slug through PATCH /identity/businesses/:id, a draft still carrying the old slug follows it, so the ' +
+      "owner's next presence publish does not put the old slug back on Business.slug (the draft cannot tell a stale slug from a pending one)",
+  );
 });
 
 describe('R0-09b onboarding concierge auto-configure cannot change the business profile for a non-owner (D-11, review R09-ST-3)', () => {
@@ -443,7 +560,7 @@ describe('R0-09b onboarding concierge auto-configure cannot change the business 
     expect(await productCount(ID.bizQ), 'no product created').toBe(0);
   });
 
-  it('[D11-C02] RED-BEFORE: a STAFF member (settings:none) asking for no name, hours or storefront (products and payment methods only) is refused too: every auto-configure writes Business.metaData; row byte-identical, no product', async () => {
+  it("[D11-C02] RED-BEFORE: a STAFF member (settings:none) asking for no name, hours or storefront (products and payment methods only) is refused too: every auto-configure writes the business's setup configuration (template, payment methods) into Business.metaData; row byte-identical, no product", async () => {
     await resetConcierge(ID.bizQ);
     const before = await businessRowText(ID.bizQ);
     const res = await autoConfigure(ID.staff, ID.bizQ, {
@@ -493,5 +610,47 @@ describe('R0-09b onboarding concierge auto-configure cannot change the business 
     const row = await businessRow(ID.bizL);
     expect(row).toMatchObject({ name: `${P}legacy-name`, storeEnabled: true });
     expect(row?.businessHours).toEqual(templateHours);
+  });
+
+  it('[D11-C07] RED-BEFORE (review SEC-2): STAFF on role defaults (settings:none) or every scope admin, ADMIN on role defaults and ADMIN granted settings:write chat with the concierge and get the reply (201), but their answers are not persisted: businessIntent, industry, archetype and country stay unset, the Business row is byte-identical and no blueprint inference runs', async () => {
+    for (const { id, label } of NON_OWNERS) {
+      await resetConcierge(ID.bizQ);
+      const before = await businessRowText(ID.bizQ);
+      const res = await chat(id, ID.bizQ, `k09b ${label} intent`);
+      expect(await businessRowText(ID.bizQ), `${label}: chat ${res.status}: the Business row is byte-identical`).toBe(before);
+      expect(await intakeColumns(ID.bizQ), `${label}: no intake answer persisted`).toEqual({ businessIntent: null, industry: null, archetype: null, country: null });
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(201);
+      expect(res.body?.content, `${label}: the reply`).toContain('Welcome to KeyFlow');
+      expect(blueprintInferred, `${label}: no blueprint inference`).toEqual([]);
+    }
+  });
+
+  it("[D11-C08] positive control: the OWNER's and the distinguished owner's (Business.ownerId, no membership) concierge chats persist the intake (201): businessIntent is the message, industry and country come from the EXTRACTED lines, and the blueprint is inferred", async () => {
+    for (const [actor, businessId] of [[ID.owner, ID.bizQ], [ID.legacyOwner, ID.bizL]] as const) {
+      await resetConcierge(businessId);
+      const res = await chat(actor, businessId, `k09b ${actor} intent`);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(await intakeColumns(businessId)).toMatchObject({ businessIntent: `k09b ${actor} intent`, industry: AI_INDUSTRY, country: AI_COUNTRY });
+      expect(blueprintInferred).toEqual([businessId]);
+    }
+  });
+
+  it("[D11-C09] today's rule kept (review CR-2): a STAFF member (settings:none) dismisses the concierge, snoozes a nudge and resumes (201 each): only the concierge's display-state keys of Business.metaData change; every other column and every other metaData key stays as the owner left it", async () => {
+    await resetConcierge(ID.bizQ);
+    const ownerMeta = { conciergeTemplateId: TEMPLATE, paymentMethodsConfigured: true, setupMilestones: ['conciergeSetupComplete'] };
+    await db.$executeRawUnsafe('UPDATE businesses SET meta_data = $2::jsonb WHERE id = $1', ID.bizQ, JSON.stringify(ownerMeta));
+    const before = await businessRowTextExceptMeta(ID.bizQ);
+    const dismiss = await conciergePost(ID.staff, ID.bizQ, 'dismiss');
+    expect(dismiss.status, JSON.stringify(dismiss.body)).toBe(201);
+    const snooze = await conciergePost(ID.staff, ID.bizQ, 'nudges/products/snooze', { days: 2 });
+    expect(snooze.status, JSON.stringify(snooze.body)).toBe(201);
+    const resume = await conciergePost(ID.staff, ID.bizQ, 'resume');
+    expect(resume.status, JSON.stringify(resume.body)).toBe(201);
+
+    expect(await businessRowTextExceptMeta(ID.bizQ), 'every column but meta_data and updated_at is byte-identical').toBe(before);
+    const meta = (await businessRow(ID.bizQ))?.metaData as Record<string, unknown>;
+    expect(meta).toMatchObject({ ...ownerMeta, conciergeDismissed: false });
+    const DISPLAY_STATE = ['conciergeDismissed', 'conciergeDismissedAt', 'snoozedNudges'];
+    expect(Object.keys(meta).filter((k) => !(k in ownerMeta)).sort(), 'only display-state keys were added').toEqual(DISPLAY_STATE);
   });
 });

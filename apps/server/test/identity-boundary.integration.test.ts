@@ -1635,14 +1635,28 @@ describe('ST-3 (fixed, R0-09-ID-HARDEN, owner ruling D-11) — PATCH /identity/b
 });
 
 // OPEN DEFECTS — D-11 sibling write paths (R0-09-ID-HARDEN review R09-ST-2,
-// R09-ST-3, R09-ST-4, CR-3). The generic PATCH above is closed, but other
-// routes still write the owner-only profile fields with only AuthGuard and
-// BusinessGuard. Each fix is in source outside the R0-09 write set; each
-// it.todo names the required behaviour for its follow-up packet.
+// R09-ST-3, R09-ST-4, CR-3; R0-09b review SEC-1). The generic PATCH above is
+// closed, but other routes still write the owner-only profile fields with only
+// AuthGuard and BusinessGuard. Each fix is in source outside the R0-09 and
+// R0-09b write sets; each it.todo names the required behaviour for its
+// follow-up packet. This list is what review has found, not a sweep of every
+// route that writes the businesses row.
 describe('OPEN DEFECTS — D-11 sibling write paths still change owner-only profile fields', () => {
-  // R09-ST-2 (presence draft/publish slug) and R09-ST-3 (concierge auto-configure)
-  // are FIXED by R0-09b-D11-SIBLING-WRITES; their cases assert the required
-  // behaviour on a real database in d11-sibling-writes.integration.test.ts.
+  // R09-ST-2 (presence draft/publish slug), R09-ST-3 (concierge auto-configure)
+  // and the concierge chat intake (R0-09b review SEC-2) are FIXED by
+  // R0-09b-D11-SIBLING-WRITES; their cases assert the required behaviour on a
+  // real database in d11-sibling-writes.integration.test.ts.
+  it.todo(
+    'REQUIRED (follow-up; business-genesis/business-genesis.controller.ts, business-genesis.service.ts submitAnswers — outside the R0-09b write set; ' +
+      'R0-09b review SEC-1, confirmed on a real database): POST /business-genesis/businesses/:id/answers copies answers.businessName, currency, ' +
+      'country and businessIntent onto Business.name, currency, country and businessIntent for any member, so a settings:none STAFF renames the ' +
+      'business the generic PATCH refuses; a non-owner answers 403 for those fields (or they are not persisted for a non-owner) with the row unchanged',
+  );
+  it.todo(
+    'REQUIRED (follow-up; templates/templates.controller.ts, templates.service.ts applyTemplate — outside the R0-09b write set; R0-09b review ' +
+      'SEC-1, found by reading the code): POST /businesses/:id/templates/:templateId/apply writes the template\'s archetype and industry onto the ' +
+      'Business row for any member; a non-owner answers 403 for the profile write with Business.archetype and industry unchanged',
+  );
   it.todo(
     'REQUIRED (follow-up; key-cortex.controller.ts execute — outside the R0-09 write set; review R09-ST-4): POST /api/v1/cortex/execute ' +
       "builds the ConnectorCommand with userId: dto.userId ?? 'system', so a member attributes a command to the OWNER; the actor comes from req.user",

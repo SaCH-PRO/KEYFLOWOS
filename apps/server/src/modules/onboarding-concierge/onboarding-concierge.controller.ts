@@ -65,15 +65,22 @@ export class OnboardingConciergeController {
     return this.concierge.getTemplatePreview(templateId);
   }
 
+  /**
+   * Any member chats; only the owner's answers are persisted as intake
+   * (R0-09b, owner ruling D-11, review SEC-2), decided in the service from the
+   * authenticated caller.
+   */
   @Post('chat')
   async chat(
     @Param('businessId') businessId: string,
     @Body() body: ChatDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
     return this.concierge.generateConciergeResponse(
       businessId,
       body.message,
       body.history || [],
+      user,
     );
   }
 
