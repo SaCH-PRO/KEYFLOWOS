@@ -21,8 +21,22 @@ import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
+import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+
+/**
+ * The customer fields an operator invoice read discloses: the customer's name
+ * and email, nothing of the Contact row's CRM fields (internal notes, phone,
+ * owner, visibility). Exported so the invoice write routes project their HTTP
+ * responses to the same fields (R0-CMF1 review SEC-CMF1-2, the R28-ST-01 class)
+ * instead of keeping their own list.
+ */
+export const OPERATOR_INVOICE_CONTACT_SELECT = {
+  firstName: true,
+  lastName: true,
+  email: true,
+} as const;
 
 /**
  * The full operator shape of an invoice: every payment row (reference, notes,
@@ -34,11 +48,7 @@ import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/m
  */
 const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
   contact: {
-    select: {
-      firstName: true,
-      lastName: true,
-      email: true,
-    },
+    select: OPERATOR_INVOICE_CONTACT_SELECT,
   },
   items: true,
   // Required by buildInvoiceEmailContext so amountPaid/remaining
@@ -85,10 +95,18 @@ export const OPERATOR_QUOTE_CONTACT_SELECT = {
  * item, the invoice it was converted into and the business profile. Shared by
  * `getQuote` (the tenant-unbound server-side read) and the tenant-bound
  * `getQuoteForBusiness` (R0-PC-01) so the two reads cannot drift apart.
+ *
+ * R0-04 review (ST-R004-1): a nested include carries no tenant condition and
+ * neither Prisma extension filters one, so the contact is joined with its
+ * businessId and both readers pass the row through `toOperatorQuote`, which
+ * serves the contact only when it belongs to the quote's tenant.
  */
+const OPERATOR_QUOTE_CONTACT_JOIN = { ...OPERATOR_QUOTE_CONTACT_SELECT, businessId: true } as const;
+type OperatorQuoteContactRow = Prisma.ContactGetPayload<{ select: typeof OPERATOR_QUOTE_CONTACT_JOIN }>;
+
 const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
   contact: {
-    select: OPERATOR_QUOTE_CONTACT_SELECT,
+    select: OPERATOR_QUOTE_CONTACT_JOIN,
   },
   items: true,
   invoice: true,
@@ -105,6 +123,70 @@ const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
     },
   },
 });
+
+/*
+ * R0-04 review (ST-R004-1) and R0-CMF3 review (ST-CMF3-1/2/3, CR-CMF3-1): a
+ * quote serves, and acts on, only a contact of its own tenant. createQuote and
+ * updateQuote resolve contactId inside the path tenant and
+ * convertQuoteToInvoice refuses a foreign contact (R0-27 review ST-27-2), but
+ * a row written before those checks can still point at another tenant's
+ * contact, and a nested include has no tenant condition (neither Prisma
+ * extension filters one). Every reader in THIS service that joins a quote's
+ * contact passes the row through the helpers below: the operator detail reads,
+ * updateQuote, updateQuoteStatus (the status route, send-email and the public
+ * accept/reject), listQuotes, getStaleQuotes, markQuoteFollowedUp and the
+ * signed-token view. Readers in other modules are not covered; the manifest
+ * scripts/proof-admission/manifests/quote-contact-tenant.json lists them.
+ */
+
+/** True when the quote's joined contact belongs to another tenant (a legacy row). */
+function hasForeignContact(quote: { businessId: string; contact?: { businessId: string } | null }): boolean {
+  return !!quote.contact && quote.contact.businessId !== quote.businessId;
+}
+
+/**
+ * The quote as served: a foreign contact reads as null, so this service never
+ * serves its name, email or phone to the quote's tenant. contactId keeps the
+ * stored value.
+ */
+function withTenantContact<Q extends { businessId: string; contact: { businessId: string } | null }>(
+  quote: Q,
+): Omit<Q, 'contact'> & { contact: Q['contact'] | null } {
+  return hasForeignContact(quote) ? { ...quote, contact: null } : quote;
+}
+
+/**
+ * The quote an event or a timeline write carries: a foreign contact is
+ * dropped together with its id, so no listener emails that customer
+ * (flow.listener on quote.sent), names them in this tenant's activity feed, or
+ * logs a ContactEvent under this tenant against them (the CRM listeners log
+ * quote.contactId), and this service logs nothing against them either.
+ * `row` is the quote as read (with its contact's businessId), `served` the
+ * shape the event carries.
+ */
+function forQuoteEvent<S extends { contactId: string | null; contact: unknown }>(
+  row: { businessId: string; contact: { businessId: string } | null },
+  served: S,
+): Omit<S, 'contactId' | 'contact'> & { contactId: S['contactId'] | null; contact: S['contact'] | null } {
+  return hasForeignContact(row) ? { ...served, contact: null, contactId: null } : served;
+}
+
+type OperatorQuoteContact = Prisma.ContactGetPayload<{ select: typeof OPERATOR_QUOTE_CONTACT_SELECT }>;
+
+/**
+ * The served contact of a quote read: only OPERATOR_QUOTE_CONTACT_SELECT (name
+ * and email), and null when the contact belongs to another tenant. Neither the
+ * businessId it was joined with for the check nor any other field of a whole
+ * Contact row is served. Used by the operator detail reads, the signed-token
+ * view and the signed-token accept/reject response.
+ */
+function toOperatorQuote<Q extends { businessId: string; contact: OperatorQuoteContactRow | null }>(
+  quote: Q,
+): Omit<Q, 'contact'> & { contact: OperatorQuoteContact | null } {
+  const { contact, ...rest } = quote;
+  if (!contact || hasForeignContact(quote)) return { ...rest, contact: null };
+  return { ...rest, contact: { firstName: contact.firstName, lastName: contact.lastName, email: contact.email } };
+}
 
 /** Older invoices stored subtotal 0 with priced items; derive it so totals render. */
 function withLegacySubtotal<
@@ -915,7 +997,10 @@ export class CommerceService {
           paidAt: invoice.paidAt,
           bookingId: invoice.booking?.id,
         },
-        actorType: actorId ? 'USER' : 'SYSTEM',
+        // R0-CMF1 review SEC-CMF1-4: KEY is a SYSTEM actor here as on
+        // invoice.payment_recorded; it was labelled USER, so an audit that
+        // filters actorType USER counted KEY's mark-paid as a person's.
+        actorType: actorId && !isSystemActor(actorId) ? 'USER' : 'SYSTEM',
         actorId: actorId ?? undefined,
         source: 'commerce',
       });
@@ -1013,18 +1098,24 @@ export class CommerceService {
     } else if (params.status === 'REJECTED') {
       data.rejectedAt = now;
     }
-    const quote = await this.prisma.client.quote.update({
+    // R0-CMF3 review (ST-CMF3-1, CR-CMF3-1): the status route, send-email and
+    // the public accept/reject all land here. A legacy quote can still point
+    // at another tenant's contact: the returned quote reads contact null, and
+    // the events and the timeline write carry neither that contact nor its id.
+    const row = await this.prisma.client.quote.update({
       where: { id: params.quoteId },
       data,
       include: { contact: true },
     });
+    const quote = withTenantContact(row);
+    const eventQuote = forQuoteEvent(row, quote);
     const source = params.source ?? 'internal';
     if (params.status === 'SENT' && existingQuote.status !== 'SENT') {
-      this.events.emit('quote.sent', { quote, businessId: quote.businessId } as QuoteSentPayload);
+      this.events.emit('quote.sent', { quote: eventQuote, businessId: quote.businessId } as QuoteSentPayload);
     }
     if (params.status === 'ACCEPTED' && existingQuote.status !== 'ACCEPTED') {
       this.events.emit('quote.accepted', {
-        quote,
+        quote: eventQuote,
         businessId: quote.businessId,
         acceptedAt: now,
         source,
@@ -1032,17 +1123,17 @@ export class CommerceService {
     }
     if (params.status === 'REJECTED' && existingQuote.status !== 'REJECTED') {
       this.events.emit('quote.rejected', {
-        quote,
+        quote: eventQuote,
         businessId: quote.businessId,
         rejectedAt: now,
         source,
         reason: params.reason ?? null,
       } as QuoteRejectedPayload);
     }
-    if (quote.contactId) {
+    if (eventQuote.contactId) {
       await this.crm.logContactEvent({
         businessId: quote.businessId,
-        contactId: quote.contactId,
+        contactId: eventQuote.contactId,
         type: `quote.${params.status.toLowerCase()}`,
         data: {
           quoteId: quote.id,
@@ -1184,7 +1275,9 @@ export class CommerceService {
           dueDate: invoice.dueDate,
           bookingId: invoice.booking?.id,
         },
-        actorType: params.actorId ? 'USER' : 'SYSTEM',
+        // R0-CMF1 review SEC-CMF1-4: KEY's invoice.sent / .overdue / .void are
+        // SYSTEM entries (see markInvoicePaid), never a person's.
+        actorType: params.actorId && !isSystemActor(params.actorId) ? 'USER' : 'SYSTEM',
         actorId: params.actorId ?? undefined,
         source: 'commerce',
       });
@@ -1213,7 +1306,8 @@ export class CommerceService {
     ]);
     const now = new Date();
     return {
-      data: data.map((q) => this.decorateQuote(q, now)),
+      // R0-CMF3 review (ST-CMF3-3): a legacy row's foreign contact reads null.
+      data: data.map((q) => this.decorateQuote(withTenantContact(q), now)),
       total,
       page,
       pageSize,
@@ -1249,27 +1343,30 @@ export class CommerceService {
       const lastFollowUp = new Date(q.lastFollowUpAt);
       return lastFollowUp.getTime() <= cutoff.getTime();
     });
+    // R0-CMF3 review (ST-CMF3-3): a legacy row's foreign contact reads null,
+    // and its quote.stale event carries neither that contact nor its id.
     const decoratedRows = stale.map((q) => {
-      const decorated = this.decorateQuote(q, now);
+      const decorated = this.decorateQuote(withTenantContact(q), now);
       const reference = q.lastFollowUpAt && new Date(q.lastFollowUpAt) > new Date(q.sentAt!)
         ? new Date(q.lastFollowUpAt)
         : new Date(q.sentAt!);
       const daysSinceSent = Math.floor((now.getTime() - reference.getTime()) / (1000 * 60 * 60 * 24));
-      return { ...decorated, daysSinceSent };
+      const served = { ...decorated, daysSinceSent };
+      return { served, event: forQuoteEvent(q, served) };
     });
     // Emit one canonical quote.stale event per stale row so the Action
     // Queue / notification consumers can pick them up. Idempotency is
     // delegated to the caller (typically a once-per-day scheduled scan)
     // so we never silently swallow events here.
-    for (const row of decoratedRows) {
+    for (const { event } of decoratedRows) {
       this.events.emit('quote.stale', {
-        quote: row,
+        quote: event,
         businessId,
-        sentAt: row.sentAt ?? now,
-        daysSinceSent: row.daysSinceSent,
+        sentAt: event.sentAt ?? now,
+        daysSinceSent: event.daysSinceSent,
       } as QuoteStalePayload);
     }
-    return decoratedRows;
+    return decoratedRows.map(({ served }) => served);
   }
 
   /**
@@ -1296,10 +1393,13 @@ export class CommerceService {
       data: { lastFollowUpAt: now },
       include: { contact: true, items: true, invoice: true },
     });
-    if (existing.contactId) {
+    // R0-CMF3 review (ST-CMF3-3): a legacy row's foreign contact reads null,
+    // and nothing is logged against it under this tenant.
+    const contactId = hasForeignContact(updated) ? null : existing.contactId;
+    if (contactId) {
       await this.crm.logContactEvent({
         businessId: params.businessId,
-        contactId: existing.contactId,
+        contactId,
         type: 'quote.follow_up_sent',
         data: { quoteId: params.quoteId, followUpAt: now.toISOString() },
         actorType: params.actorId ? 'USER' : 'SYSTEM',
@@ -1307,7 +1407,7 @@ export class CommerceService {
         source: 'commerce',
       }).catch(() => undefined);
     }
-    return this.decorateQuote(updated, now);
+    return this.decorateQuote(withTenantContact(updated), now);
   }
 
   /**
@@ -1326,7 +1426,7 @@ export class CommerceService {
       include: OPERATOR_QUOTE_INCLUDE,
     });
     if (!quote) return null;
-    return this.decorateQuote(quote);
+    return this.decorateQuote(toOperatorQuote(quote));
   }
 
   /**
@@ -1344,17 +1444,20 @@ export class CommerceService {
       include: OPERATOR_QUOTE_INCLUDE,
     });
     if (!quote) return null;
-    return this.decorateQuote(quote);
+    return this.decorateQuote(toOperatorQuote(quote));
   }
 
   // ----- R2: public quote-view + accept/reject by signed token -----
 
+  // R0-CMF3 review (ST-CMF3-2): the token holder reads the same customer fields
+  // as before, joined with the contact's businessId so that a legacy quote
+  // pointing at another tenant's contact reads contact null.
   async getQuoteByToken(token: string) {
     if (!token) return null;
     const quote = await this.prisma.client.quote.findUnique({
       where: { viewToken: token },
       include: {
-        contact: { select: { firstName: true, lastName: true, email: true } },
+        contact: { select: OPERATOR_QUOTE_CONTACT_JOIN },
         items: true,
         invoice: { select: { id: true, invoiceNumber: true, status: true, total: true } },
         business: {
@@ -1372,7 +1475,7 @@ export class CommerceService {
       },
     });
     if (!quote || quote.deletedAt) return null;
-    return this.decorateQuote(quote);
+    return this.decorateQuote(toOperatorQuote(quote));
   }
 
   async markQuoteViewedByToken(token: string, visitorId?: string | null) {
@@ -1399,16 +1502,20 @@ export class CommerceService {
       data: { viewedAt: now },
       include: { contact: true },
     });
+    // R0-CMF3 review (CR-CMF3-1): a legacy quote pointing at another tenant's
+    // contact emits quote.viewed without that contact or its id, and nothing
+    // is logged or attached to it under this tenant.
+    const eventQuote = forQuoteEvent(updated, withTenantContact(updated));
     this.events.emit('quote.viewed', {
-      quote: updated,
+      quote: eventQuote,
       businessId: quote.businessId,
       viewedAt: now,
       source: 'public',
     } as QuoteViewedPayload);
-    if (quote.contactId) {
+    if (eventQuote.contactId) {
       await this.crm.logContactEvent({
         businessId: quote.businessId,
-        contactId: quote.contactId,
+        contactId: eventQuote.contactId,
         type: 'quote.viewed',
         data: { quoteId: quote.id, source: 'public' },
         actorType: 'SYSTEM',
@@ -1418,7 +1525,7 @@ export class CommerceService {
         await this.publicEvents
           .attachVisitorToContact({
             businessId: quote.businessId,
-            contactId: quote.contactId,
+            contactId: eventQuote.contactId,
             visitorId,
             sourceDetail: `quote:${quote.id}`,
           })
@@ -1475,8 +1582,10 @@ export class CommerceService {
     // Stitch the public visitor cookie onto the quote's contact so first-touch
     // attribution (firstSource / utmMedium / utmCampaign / firstReferrer /
     // firstLandingPath) lands on the Contact even though it was originally
-    // created internally without a visitorId.
-    if (visitorId && quote.contactId) {
+    // created internally without a visitorId. R0-CMF3 review (ST-CMF3-2):
+    // updateQuoteStatus reads a foreign contact (a legacy row) as null, and no
+    // visitor is attached to it under this tenant.
+    if (visitorId && quote.contactId && result.contact) {
       await this.publicEvents
         .attachVisitorToContact({
           businessId: quote.businessId,
@@ -1486,7 +1595,11 @@ export class CommerceService {
         })
         .catch(() => undefined);
     }
-    return result;
+    // R0-CMF3 review (ST-CMF3-2): the anonymous token holder received the
+    // whole Contact row (phone, internal notes, owner, visibility). The answer
+    // now carries the customer fields the signed-token view serves (name and
+    // email), and null for a foreign contact.
+    return toOperatorQuote(result);
   }
 
   async createQuote(input: {
@@ -1627,21 +1740,26 @@ export class CommerceService {
       };
     }
     
-    const updated = await this.prisma.client.quote.update({
+    // R0-04 review (ST-R004-1): a legacy quote can still point at another
+    // tenant's contact; the response never carries that row, and the events
+    // carry neither the row nor its id (R0-CMF3 review).
+    const row = await this.prisma.client.quote.update({
       where: { id: input.quoteId },
       data: updateData,
       include: { items: true, contact: true },
     });
+    const updated = withTenantContact(row);
+    const eventQuote = forQuoteEvent(row, updated);
     const prevExp = quote.expiryDate ? new Date(quote.expiryDate).getTime() : null;
     const newExp = updated.expiryDate ? new Date(updated.expiryDate).getTime() : null;
     if (input.expiryDate !== undefined && prevExp !== newExp) {
       this.events.emit('quote.expiry_changed', {
-        quote: updated,
+        quote: eventQuote,
         businessId: input.businessId,
         previousExpiryDate: quote.expiryDate ?? null,
       });
     }
-    this.events.emit('quote.updated', { quote: updated, businessId: input.businessId });
+    this.events.emit('quote.updated', { quote: eventQuote, businessId: input.businessId });
     this.statsCache.invalidateCache(input.businessId);
     return updated;
   }
@@ -1795,7 +1913,9 @@ export class CommerceService {
      * which is not a payment identity: for them a reference never keys the
      * row and every call records its own payment, as before this packet.
      * They may pass `idempotencyKey` derived from their own identity
-     * (evidence URL, drive file id, tool-call id) to opt in.
+     * (evidence URL, drive file id, tool-call id) to opt in;
+     * DriveIntakeOrchestrator passes `drive:<intakeFileId>:<actionIndex>`
+     * (R0-CMF2 review SEC-CMF2-2).
      */
     dedupeByReference?: boolean;
     /**
@@ -1804,8 +1924,10 @@ export class CommerceService {
      * PaymentEvidenceService pass KEY_SYSTEM_ACTOR_ID. It is written to
      * Payment.recordedBy, the posting's FinancialTransaction.createdById and
      * the contact timeline event. It is an option, never part of `input`, so a
-     * client body can not name the recorder. Absent (drive intake) records
-     * null. A replay returns the original row and never rewrites its recorder.
+     * client body can not name the recorder. Drive intake passes the approving
+     * user (R0-CMF2). Absent (a caller with no human, e.g. an auto-executed
+     * intake plan) records null. A replay returns the original row and never
+     * rewrites its recorder.
      */
     actorId?: string | null;
     /**
@@ -2300,6 +2422,15 @@ export class CommerceService {
    * report success while recording no refunder. The SUCCESSFUL -> REFUNDED
    * flip is conditional on the status, so two concurrent refunds of the same
    * payment produce one refund and one 409.
+   *
+   * R0-CMF2-PAYMENT-ACTOR-GAPS (ST-R011-2): every refund, posted or not,
+   * writes one FINANCE payment_refunded activity row naming the refunder
+   * (actorId; KEY is SYSTEM). A payment with no payment_recorded posting (a
+   * mark-paid row written before R0-PL-04) used to name its refunder nowhere.
+   * The row is written inside the refund transaction (R0-CMF2 review
+   * SEC-CMF2-1 / CR-CMF2-1): a committed refund always has it, a refund that
+   * rolls back leaves none, and a failed insert fails the refund rather than
+   * committing a REFUNDED payment that names nobody.
    */
   async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null) {
     const payment = await this.prisma.client.payment.findFirst({
@@ -2340,6 +2471,9 @@ export class CommerceService {
       await this.revenuePosting.onPaymentRefunded(paymentId, {
         tx: txClient,
         createdById: actorId ?? null,
+        // The refund's audit row (posted or not) names the refunder and
+        // commits or rolls back with the refund.
+        auditInTransaction: true,
       });
       if (payment.invoiceId) {
         await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId, {
@@ -2722,10 +2856,22 @@ export class CommerceService {
 
   // ========== UPDATE INVOICE ==========
 
+  /**
+   * @param actorId Who makes a status change (R0-CMF1-INVOICE-PATCH-ACTOR, R0-11
+   *   review ST-R011-1). It is recorded as Payment.recordedBy, the posting's
+   *   createdById and the timeline actor, and checked by markInvoicePaid /
+   *   updateInvoiceStatus exactly as on their own routes (a human needs a
+   *   Membership; KEY needs the tenant, which `input.businessId` is). The HTTP
+   *   PATCH passes the authenticated user. Omitted means KEY: the one caller
+   *   that omits it is KEY's flow tool executor (`commerce_update_invoice` in
+   *   ai/flow-orchestrator.service.ts), and a human caller must always pass it.
+   *   It used to be hard-coded to KEY_SYSTEM_ACTOR_ID for every caller, so a
+   *   person's PATCH {status:'PAID'} was recorded as KEY's payment.
+   */
   async updateInvoice(input: {
     invoiceId: string;
     businessId: string;
-    contactId?: string;
+    contactId?: string | null;
     items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
     currency?: string;
     dueDate?: Date | string | null;
@@ -2733,8 +2879,22 @@ export class CommerceService {
     discountType?: 'PERCENT' | 'FIXED' | null;
     discountValue?: number | null;
     notes?: string | null;
-    status?: 'SENT' | 'OVERDUE' | 'VOID' | 'PAID' | 'DRAFT';
-  }) {
+    status?: PatchableInvoiceStatus;
+  }, actorId?: string) {
+    // R0-CMF1 review SEC-CMF1-1: the DTO's @IsIn does not protect this path.
+    // KEY's commerce_update_invoice calls this with the model's raw
+    // args.status, so a SENT invoice was moved to PARTIALLY_PAID, PENDING or
+    // FAILED with no payment behind it (the transition committed, then the
+    // timeline refused the event type and the tool reported a failure). Every
+    // caller is held to the HTTP contract, with its message, before anything
+    // is read or written.
+    if (
+      input.status !== undefined &&
+      input.status !== null &&
+      !(PATCHABLE_INVOICE_STATUSES as readonly unknown[]).includes(input.status)
+    ) {
+      throw new BadRequestException(`status must be one of the following values: ${PATCHABLE_INVOICE_STATUSES.join(', ')}`);
+    }
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: input.invoiceId, businessId: input.businessId },
     });
@@ -2756,13 +2916,20 @@ export class CommerceService {
       // from the day it shipped. It is also the tenant proof the system actor
       // now requires: KEY's authority is the scope its caller established, and
       // this caller had established it and thrown it away.
+      //
+      // R0-CMF1: the actor is the caller's, never assumed (see @param actorId).
+      // An empty actor is refused rather than written as no one.
+      const actor = actorId === undefined ? KEY_SYSTEM_ACTOR_ID : actorId;
+      if (!actor) {
+        throw new ForbiddenException('Not authorized to update this invoice');
+      }
       if (input.status === 'PAID') {
-        return this.markInvoicePaid(input.invoiceId, KEY_SYSTEM_ACTOR_ID, input.businessId);
+        return this.markInvoicePaid(input.invoiceId, actor, input.businessId);
       }
       return this.updateInvoiceStatus({
         invoiceId: input.invoiceId,
         status: input.status as 'SENT' | 'OVERDUE' | 'VOID',
-        actorId: KEY_SYSTEM_ACTOR_ID,
+        actorId: actor,
         businessId: input.businessId,
         dueDate: input.dueDate,
       });

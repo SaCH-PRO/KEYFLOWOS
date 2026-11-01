@@ -57,6 +57,19 @@ export class DriveIntakeOrchestrator {
   ) {}
 
   /**
+   * R0-CMF2-PAYMENT-ACTOR-GAPS: the placeholders callers pass when no person
+   * approved the plan: the ingestion auto-execute ('system') and the data-inbox
+   * fallback when the request carries no user ('user'). Neither is a User id,
+   * so neither is recorded as a payment's recorder: none is invented (the
+   * payments-actor PA-08 rule).
+   */
+  private static readonly NO_HUMAN_APPROVER_IDS: ReadonlySet<string> = new Set(['system', 'user']);
+
+  private static approverActorId(userId: string | null | undefined): string | null {
+    return userId && !DriveIntakeOrchestrator.NO_HUMAN_APPROVER_IDS.has(userId) ? userId : null;
+  }
+
+  /**
    * Build an action plan from an extracted Drive file. This resolves/creates the
    * contact and prepares the financial actions, but it does NOT post anything.
    */
@@ -274,7 +287,7 @@ export class DriveIntakeOrchestrator {
     let createdInvoiceId: string | undefined;
 
     try {
-      for (const action of plan.actions) {
+      for (const [actionIndex, action] of plan.actions.entries()) {
         switch (action.type) {
           case 'create_invoice': {
             const payload = action.payload as {
@@ -306,11 +319,23 @@ export class DriveIntakeOrchestrator {
             };
             const invoiceId = payload.invoiceId ?? createdInvoiceId;
             if (!invoiceId) throw new BadRequestException('No invoice available for payment');
+            // R0-CMF2-PAYMENT-ACTOR-GAPS (ST-R011-3): the approver records the
+            // payment (Payment.recordedBy, the posting's createdById, the
+            // contact event). The recorder comes from the caller, never from
+            // the extracted plan payload.
+            //
+            // R0-CMF2 review (SEC-CMF2-2): the status check above is a read,
+            // and the intake flips to 'approved' only after every write, so
+            // two concurrent approvals (or a re-run after a crash before that
+            // flip) both reach this step. The key, derived from this intake
+            // file and this step, makes recordPayment answer the second with
+            // the first's payment instead of crediting the invoice twice.
             const res = await this.commerce.recordPayment(invoiceId, businessId, {
               amount: payload.amount,
               method: payload.method,
               reference: payload.reference,
-            });
+              idempotencyKey: `drive:${intakeFileId}:${actionIndex}`,
+            }, { actorId: DriveIntakeOrchestrator.approverActorId(userId) });
             results.push({ action: 'record_payment', success: true, entityId: res.payment.id });
             break;
           }

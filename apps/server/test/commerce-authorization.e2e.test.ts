@@ -182,6 +182,7 @@ const commerceMock = {
   getQuoteForBusiness: vi.fn(),
   getStaleQuotes: vi.fn(),
   createInvoice: vi.fn(),
+  updateInvoice: vi.fn(),
   updateQuoteStatus: vi.fn(),
 };
 
@@ -277,6 +278,7 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
     });
     commerceMock.getStaleQuotes.mockResolvedValue([]);
     commerceMock.createInvoice.mockResolvedValue({ id: `${P}invNew`, businessId: ID.bizA, status: 'DRAFT', total: 25 });
+    commerceMock.updateInvoice.mockResolvedValue({ id: ID.inv, businessId: ID.bizA, status: 'PAID' });
     commerceMock.updateQuoteStatus.mockResolvedValue({ id: QUOTE, businessId: ID.bizA, status: 'SENT' });
   });
 
@@ -983,6 +985,155 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
         expect(res.body.message).toMatch(/Insufficient permissions/);
       }
       expect(commerceMock.createInvoice).not.toHaveBeenCalled();
+    });
+  });
+
+  // R0-CMF1-INVOICE-PATCH-ACTOR (R0-11 review ST-R011-1): the L1 half of
+  // payments-actor.integration.test.ts PA-16a..j. The PATCH body was an inline
+  // type, so nothing was stripped or validated and the service hard-coded KEY
+  // as the actor of every status change.
+  describe('R0-CMF1: invoice PATCH actor and body contract (L1 half)', () => {
+    const patch = (actor: string | null, body: unknown, businessId = ID.bizA) =>
+      withActor(agent().patch(`/commerce/businesses/${businessId}/invoices/${ID.inv}`), actor).send(body as object);
+    const messages = (body: Record<string, unknown>) => [body.message].flat().map(String);
+
+    it('CMF1-META: updateInvoice requires the guards and revenue:write scope of the mark-paid route, and its body is bound to a ValidationPipe (whitelist, transform) whose expectedType is UpdateInvoiceDto', () => {
+      const handler = CommerceController.prototype.updateInvoice;
+      const markPaidHandler = CommerceController.prototype.markInvoicePaid;
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('businesses/:businessId/invoices/:invoiceId');
+      expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.PATCH);
+      expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual({ module: 'revenue', minLevel: 'write' });
+      expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual(Reflect.getMetadata(MODULE_SCOPE_KEY, markPaidHandler));
+      expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual([AuthGuard, BusinessGuard, ModuleScopeGuard]);
+      expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual(Reflect.getMetadata(GUARDS_METADATA, markPaidHandler));
+      const args: Record<string, { index: number; pipes?: unknown[] }> =
+        Reflect.getMetadata(ROUTE_ARGS_METADATA, CommerceController, 'updateInvoice') ?? {};
+      const body = Object.entries(args).find(([key]) => key.startsWith(`${RouteParamtypes.BODY}:`))?.[1];
+      expect(body?.index, 'the @Body() parameter').toBe(2);
+      const pipe = body?.pipes?.[0] as any;
+      expect(pipe).toBeInstanceOf(ValidationPipe);
+      expect(pipe.expectedType?.name).toBe('UpdateInvoiceDto');
+      expect(pipe.validatorOptions).toMatchObject({ whitelist: true });
+      expect(pipe.isTransformEnabled).toBe(true);
+    });
+
+    it('CMF1-ACTOR: revenue:write and OWNER -> the service is handed the path tenant and the authenticated user as the actor; actorId / recordedBy / initiatedBy / total / invoiceNumber / businessId in the body never reach it', async () => {
+      for (const actor of [ID.staffWriteA, ID.ownerA]) {
+        const res = await patch(actor, {
+          status: 'PAID',
+          notes: 'k27b edit',
+          actorId: 'key_ai',
+          recordedBy: ID.ownerA,
+          initiatedBy: ID.ownerA,
+          total: 1,
+          invoiceNumber: `${P}HIJACK`,
+          businessId: ID.bizB,
+        });
+        expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(200);
+        const [input, forwardedActor] = commerceMock.updateInvoice.mock.lastCall as [Record<string, unknown>, unknown];
+        expect(forwardedActor, actor).toBe(actor);
+        expect(input).toEqual({ status: 'PAID', notes: 'k27b edit', invoiceId: ID.inv, businessId: ID.bizA });
+        const keys = Object.entries(input).filter(([, v]) => v !== undefined).map(([k]) => k);
+        for (const k of ['actorId', 'recordedBy', 'initiatedBy', 'total', 'invoiceNumber']) expect(keys, k).not.toContain(k);
+      }
+      expect(commerceMock.updateInvoice).toHaveBeenCalledTimes(2);
+    });
+
+    it('CMF1-400: a status outside SENT / OVERDUE / VOID / PAID, a non-string notes or an unparseable dueDate -> 400 before CommerceService.updateInvoice is called', async () => {
+      const invalid: Array<[unknown, RegExp]> = [
+        [{ status: 'BOGUS' }, /^status must be one of the following values: SENT, OVERDUE, VOID, PAID$/],
+        [{ status: 'PARTIALLY_PAID' }, /^status must be one of the following values: SENT, OVERDUE, VOID, PAID$/],
+        [{ status: 'DRAFT' }, /^status must be one of the following values: SENT, OVERDUE, VOID, PAID$/],
+        [{ status: 7 }, /^status must be one of the following values: SENT, OVERDUE, VOID, PAID$/],
+        [{ notes: 42 }, /^notes must be a string$/],
+        [{ dueDate: 'not-a-date' }, /^dueDate must be a valid ISO 8601 date string$/],
+        [{ discountType: 'BOGO' }, /^discountType must be one of the following values: PERCENT, FIXED$/],
+      ];
+      for (const [body, field] of invalid) {
+        const res = await patch(ID.ownerA, body);
+        expect(res.status, JSON.stringify(body)).toBe(400);
+        expect(res.body.code).toBe('BAD_REQUEST');
+        expect(messages(res.body).some((m) => field.test(m)), `${JSON.stringify(body)}: ${JSON.stringify(res.body.message)}`).toBe(true);
+      }
+      expect(commerceMock.updateInvoice).not.toHaveBeenCalled();
+    });
+
+    it('CMF1-NULLS (control): the operator edit form clears dueDate, discountType, discountValue and notes with null, and that body is forwarded as sent', async () => {
+      const body = {
+        contactId: `${P}contactA`,
+        items: [{ description: 'Two hours', quantity: 2, unitPrice: 10 }],
+        dueDate: null,
+        taxRate: 0,
+        discountType: null,
+        discountValue: null,
+        notes: null,
+      };
+      await patch(ID.staffWriteA, body).expect(200);
+      expect(commerceMock.updateInvoice).toHaveBeenLastCalledWith({ ...body, invoiceId: ID.inv, businessId: ID.bizA }, ID.staffWriteA);
+    });
+
+    it('CMF1-GUARDS (control): unauthenticated 401; a non-member and another tenant 403; revenue:read / none / default 403 for {status:"PAID"}, exactly as mark-paid refuses them; the service is not called', async () => {
+      expect((await patch(null, { status: 'PAID' })).status).toBe(401);
+      for (const actor of [ID.noMember, ID.ownerB]) {
+        const res = await patch(actor, { status: 'PAID' });
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/No access to this business/);
+      }
+      for (const actor of [ID.staffReadA, ID.staffDefaultA, ID.staffNoneA]) {
+        const res = await patch(actor, { status: 'PAID' });
+        expect(res.status, actor).toBe(403);
+        expect(res.body.message).toMatch(/Insufficient permissions/);
+        const viaRoute = await markPaid(actor, { businessId: ID.bizA });
+        expect(viaRoute.status, `mark-paid ${actor}`).toBe(403);
+        expect(viaRoute.body.message).toBe(res.body.message);
+      }
+      expect(commerceMock.updateInvoice).not.toHaveBeenCalled();
+      expect(commerceMock.markInvoicePaid).not.toHaveBeenCalled();
+    });
+
+    // R0-CMF1 review SEC-CMF1-2 (the R28-ST-01 class for invoices): the
+    // service returns the invoice with its whole Contact row and the routes
+    // handed it back, so a revenue:write member read a PRIVATE contact's CRM
+    // fields. The L2 half is payments-actor PA-16l.
+    it('CMF1-CONTACT: PATCH .../invoices/:id (status and edit), mark-paid, payment-failed and the status route answer with the contact projected to id, businessId, firstName, lastName and email; an invoice without a contact passes through', async () => {
+      const fullContact = {
+        id: `${P}contactA`,
+        businessId: ID.bizA,
+        firstName: 'Rva',
+        lastName: 'Customer',
+        email: `${P}c@test.local`,
+        phone: '+18685550000',
+        notesInternal: `${P}INTERNAL`,
+        visibility: 'PRIVATE',
+        ownerId: ID.ownerA,
+        lifetimeValue: 1234,
+        riskFlags: { churn: true },
+      };
+      const projected = { id: `${P}contactA`, businessId: ID.bizA, firstName: 'Rva', lastName: 'Customer', email: `${P}c@test.local` };
+      const row = (status: string) => ({ id: ID.inv, businessId: ID.bizA, status, contactId: `${P}contactA`, items: [], contact: { ...fullContact } });
+      commerceMock.updateInvoice.mockResolvedValue(row('PAID'));
+      commerceMock.markInvoicePaid.mockResolvedValue(row('PAID'));
+      commerceMock.markInvoicePaymentFailed.mockResolvedValue(row('FAILED'));
+      commerceMock.updateInvoiceStatus.mockResolvedValue(row('VOID'));
+
+      const responses: Array<[string, request.Response]> = [
+        ['PATCH status', await patch(ID.staffWriteA, { status: 'PAID' })],
+        ['PATCH edit', await patch(ID.staffWriteA, { notes: 'edited' })],
+        ['mark-paid', await markPaid(ID.staffWriteA, { businessId: ID.bizA })],
+        ['payment-failed', await markFailed(ID.staffWriteA, { businessId: ID.bizA, reason: 'x' })],
+        ['status route', await setStatus(ID.staffWriteA, 'void', { businessId: ID.bizA, status: 'VOID' })],
+      ];
+      for (const [label, res] of responses) {
+        expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(200);
+        expect(res.body.contact, label).toEqual(projected);
+        expect(res.body.contactId, label).toBe(`${P}contactA`);
+        expect(JSON.stringify(res.body), label).not.toContain(`${P}INTERNAL`);
+      }
+
+      commerceMock.updateInvoice.mockResolvedValue({ id: ID.inv, businessId: ID.bizA, status: 'SENT', contactId: null, contact: null });
+      const bare = await patch(ID.staffWriteA, { status: 'SENT' });
+      expect(bare.status).toBe(200);
+      expect(bare.body).toEqual({ id: ID.inv, businessId: ID.bizA, status: 'SENT', contactId: null, contact: null });
     });
   });
 });

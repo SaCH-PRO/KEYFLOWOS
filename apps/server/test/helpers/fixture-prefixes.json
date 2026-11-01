@@ -44,6 +44,11 @@
       "legacy": true
     },
     {
+      "prefix": "k04b_",
+      "owner": "apps/server/test/quote-contact-tenant.integration.test.ts",
+      "packet": "R0-04 / R0-CMF3-QUOTE-CONTACT-TENANT"
+    },
+    {
       "prefix": "k07a_",
       "owner": "apps/server/test/optional-services-fail-visibly.integration.test.ts",
       "packet": "R0-07-OPTIONAL-SVC-VISIBLE"

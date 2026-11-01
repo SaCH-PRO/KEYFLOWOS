@@ -1,9 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { PostingService, buildExternalRef } from './posting.service';
+import { PostingService, buildExternalRef, type PostingResult } from './posting.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
-import { TimelineService } from '../timeline/timeline.service';
+import { TimelineService, type RecordEventInput } from '../timeline/timeline.service';
+import { isSystemActor } from '../../core/auth/system-actor';
 
 export type AccountingBasis = 'CASH' | 'ACCRUAL';
 
@@ -12,6 +13,16 @@ interface PostingOpts {
   /** Override the basis (used by backfill to replay accrual flows). */
   basis?: AccountingBasis;
   createdById?: string | null;
+}
+
+interface RefundPostingOpts extends PostingOpts {
+  /**
+   * R0-CMF2-PAYMENT-ACTOR-GAPS: write the refund's audit row, posted or not,
+   * with `tx` (the caller's refund transaction), so it commits with the
+   * refund and rolls back with it. A failed insert is not swallowed: it fails
+   * the refund (R0-CMF2 review SEC-CMF2-1 / CR-CMF2-1).
+   */
+  auditInTransaction?: boolean;
 }
 
 /**
@@ -355,12 +366,32 @@ export class RevenuePostingService {
   /**
    * Reverse the payment recording when the payment is refunded. Idempotent
    * — re-running on an already-reversed transaction is a no-op.
+   *
+   * R0-CMF2-PAYMENT-ACTOR-GAPS (ST-R011-2): the FINANCE payment_refunded
+   * activity entry names the refunder (`createdById`, the actor the reversal
+   * already carries). With `auditInTransaction` (the manual refund,
+   * CommerceService.markPaymentRefunded) the entry is written for every
+   * refund, posted or not, as an `activities` row through `tx`, inside the
+   * refund transaction: it commits with the refund, a refund that rolls back
+   * leaves none, and a failed insert fails the refund instead of leaving a
+   * REFUNDED payment that names nobody (R0-CMF2 review SEC-CMF2-1 /
+   * CR-CMF2-1: the best-effort TimelineService swallows every error, so it
+   * is not used for this row). Without it (provider refunds) nothing changes:
+   * a reversal records its entry best-effort at once, and a payment with no
+   * posting records nothing.
    */
-  async onPaymentRefunded(paymentId: string, opts: PostingOpts = {}) {
+  async onPaymentRefunded(paymentId: string, opts: RefundPostingOpts = {}) {
     const db = this.db(opts);
     const payment = await db.payment.findUnique({
       where: { id: paymentId },
-      select: { id: true, businessId: true },
+      select: {
+        id: true,
+        businessId: true,
+        invoiceId: true,
+        amount: true,
+        currency: true,
+        invoice: { select: { contactId: true, invoiceNumber: true } },
+      },
     });
     if (!payment) return null;
     const externalRef = buildExternalRef('Payment', payment.id, 'payment_recorded');
@@ -369,25 +400,62 @@ export class RevenuePostingService {
       where: { businessId_externalRef: { businessId: payment.businessId, externalRef } },
       select: { id: true, status: true },
     });
-    if (!original) return null;
-    if (original.status === 'REVERSED') {
-      return { transactionId: original.id, externalRef, alreadyPosted: true };
+    let result: PostingResult | null = null;
+    let reversed = false;
+    if (original?.status === 'REVERSED') {
+      result = { transactionId: original.id, externalRef, alreadyPosted: true };
+    } else if (original) {
+      result = await this.posting.reverse(
+        payment.businessId,
+        original.id,
+        { reason: 'Payment refunded', createdById: opts.createdById ?? null },
+        opts.tx,
+      );
+      reversed = true;
     }
-    const result = await this.posting.reverse(
-      payment.businessId,
-      original.id,
-      { reason: 'Payment refunded', createdById: opts.createdById ?? null },
-      opts.tx,
-    );
-    Promise.resolve(this.timeline.recordEvent({
+    const refundedBy = opts.createdById ?? null;
+    const entry: RecordEventInput = {
       businessId: payment.businessId,
       module: 'FINANCE',
       action: 'payment_refunded',
       entityType: 'payment',
       entityId: payment.id,
-      title: 'Payment refunded — ledger reversed',
+      title: reversed ? 'Payment refunded — ledger reversed' : 'Payment refunded',
+      detail: `Invoice ${payment.invoice?.invoiceNumber ?? payment.invoiceId}`,
+      contactId: payment.invoice?.contactId ?? undefined,
+      data: {
+        invoiceId: payment.invoiceId,
+        amount: payment.amount,
+        currency: payment.currency,
+        ledgerReversed: reversed,
+        refundedBy,
+      },
+      // KEY is a SYSTEM actor, a person is USER; with no actor none is named.
+      actorType: refundedBy ? (isSystemActor(refundedBy) ? 'SYSTEM' : 'USER') : undefined,
+      actorId: refundedBy ?? undefined,
       occurredAt: new Date(),
-    })).catch(() => {});
+    };
+    if (opts.auditInTransaction) {
+      // Not caught: an audit row that cannot be written rolls the refund back.
+      await db.activity.create({
+        data: {
+          businessId: entry.businessId,
+          module: entry.module,
+          action: entry.action,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          title: entry.title,
+          detail: entry.detail,
+          contactId: entry.contactId,
+          data: entry.data as Prisma.InputJsonValue,
+          actorType: entry.actorType,
+          actorId: entry.actorId,
+          occurredAt: entry.occurredAt,
+        },
+      });
+    } else if (reversed) {
+      Promise.resolve(this.timeline.recordEvent(entry)).catch(() => {});
+    }
     return result;
   }
 
