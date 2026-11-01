@@ -84,6 +84,11 @@
       "packet": "R0-13 / R0-13c-CT-PATCH-VISIBILITY"
     },
     {
+      "prefix": "k13f_",
+      "owner": "apps/server/test/shadowed-routes-live.integration.test.ts",
+      "packet": "R0-13 / R0-13f-ROUTE-SHADOWING-SIBLINGS"
+    },
+    {
       "prefix": "k14a_",
       "owner": "apps/server/test/identity-local-auth.integration.test.ts",
       "packet": "R0-14-AUTH-LOCAL-SIGNIN"
