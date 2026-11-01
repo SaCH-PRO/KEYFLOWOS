@@ -1810,7 +1810,9 @@ export class CommerceService {
      * which is not a payment identity: for them a reference never keys the
      * row and every call records its own payment, as before this packet.
      * They may pass `idempotencyKey` derived from their own identity
-     * (evidence URL, drive file id, tool-call id) to opt in.
+     * (evidence URL, drive file id, tool-call id) to opt in;
+     * DriveIntakeOrchestrator passes `drive:<intakeFileId>:<actionIndex>`
+     * (R0-CMF2 review SEC-CMF2-2).
      */
     dedupeByReference?: boolean;
     /**
@@ -2322,8 +2324,10 @@ export class CommerceService {
    * writes one FINANCE payment_refunded activity row naming the refunder
    * (actorId; KEY is SYSTEM). A payment with no payment_recorded posting (a
    * mark-paid row written before R0-PL-04) used to name its refunder nowhere.
-   * The row is recorded after the refund commits, so a refund that rolls back
-   * leaves none.
+   * The row is written inside the refund transaction (R0-CMF2 review
+   * SEC-CMF2-1 / CR-CMF2-1): a committed refund always has it, a refund that
+   * rolls back leaves none, and a failed insert fails the refund rather than
+   * committing a REFUNDED payment that names nobody.
    */
   async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null) {
     const payment = await this.prisma.client.payment.findFirst({
@@ -2345,7 +2349,6 @@ export class CommerceService {
     // the caller's response, so the payment, the ledger and the invoice
     // status never disagree. Invoice events are emitted after commit.
     const pendingEvents: Array<{ name: string; payload: unknown }> = [];
-    const refundActivity: Parameters<RevenuePostingService['recordRefundActivity']>[0] = [];
     const updated = await this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
       if (payment.invoiceId) await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
@@ -2365,7 +2368,9 @@ export class CommerceService {
       await this.revenuePosting.onPaymentRefunded(paymentId, {
         tx: txClient,
         createdById: actorId ?? null,
-        activityBuffer: refundActivity,
+        // The refund's audit row (posted or not) names the refunder and
+        // commits or rolls back with the refund.
+        auditInTransaction: true,
       });
       if (payment.invoiceId) {
         await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId, {
@@ -2383,8 +2388,6 @@ export class CommerceService {
       }
       return next;
     });
-    // Committed: the refund's audit row (posted or not) names the refunder.
-    if (refundActivity.length > 0) await this.revenuePosting.recordRefundActivity(refundActivity);
     for (const evt of pendingEvents) {
       this.events.emit(evt.name, evt.payload);
     }

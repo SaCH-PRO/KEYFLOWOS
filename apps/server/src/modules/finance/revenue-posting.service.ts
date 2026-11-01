@@ -17,11 +17,12 @@ interface PostingOpts {
 
 interface RefundPostingOpts extends PostingOpts {
   /**
-   * R0-CMF2-PAYMENT-ACTOR-GAPS: collect the refund's audit entry here, posted
-   * or not, instead of recording it inside the caller's transaction. The
-   * caller records it with recordRefundActivity after commit.
+   * R0-CMF2-PAYMENT-ACTOR-GAPS: write the refund's audit row, posted or not,
+   * with `tx` (the caller's refund transaction), so it commits with the
+   * refund and rolls back with it. A failed insert is not swallowed: it fails
+   * the refund (R0-CMF2 review SEC-CMF2-1 / CR-CMF2-1).
    */
-  activityBuffer?: RecordEventInput[];
+  auditInTransaction?: boolean;
 }
 
 /**
@@ -368,13 +369,16 @@ export class RevenuePostingService {
    *
    * R0-CMF2-PAYMENT-ACTOR-GAPS (ST-R011-2): the FINANCE payment_refunded
    * activity entry names the refunder (`createdById`, the actor the reversal
-   * already carries). With `activityBuffer` (the manual refund,
+   * already carries). With `auditInTransaction` (the manual refund,
    * CommerceService.markPaymentRefunded) the entry is written for every
-   * refund, posted or not, and is handed back instead of recorded inside the
-   * caller's transaction; the caller records it with recordRefundActivity once
-   * the refund has committed, so a refund that rolls back leaves no entry.
-   * Without a buffer (provider refunds) nothing changes: a reversal records
-   * its entry at once, and a payment with no posting records nothing.
+   * refund, posted or not, as an `activities` row through `tx`, inside the
+   * refund transaction: it commits with the refund, a refund that rolls back
+   * leaves none, and a failed insert fails the refund instead of leaving a
+   * REFUNDED payment that names nobody (R0-CMF2 review SEC-CMF2-1 /
+   * CR-CMF2-1: the best-effort TimelineService swallows every error, so it
+   * is not used for this row). Without it (provider refunds) nothing changes:
+   * a reversal records its entry best-effort at once, and a payment with no
+   * posting records nothing.
    */
   async onPaymentRefunded(paymentId: string, opts: RefundPostingOpts = {}) {
     const db = this.db(opts);
@@ -431,22 +435,28 @@ export class RevenuePostingService {
       actorId: refundedBy ?? undefined,
       occurredAt: new Date(),
     };
-    if (opts.activityBuffer) {
-      opts.activityBuffer.push(entry);
+    if (opts.auditInTransaction) {
+      // Not caught: an audit row that cannot be written rolls the refund back.
+      await db.activity.create({
+        data: {
+          businessId: entry.businessId,
+          module: entry.module,
+          action: entry.action,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          title: entry.title,
+          detail: entry.detail,
+          contactId: entry.contactId,
+          data: entry.data as Prisma.InputJsonValue,
+          actorType: entry.actorType,
+          actorId: entry.actorId,
+          occurredAt: entry.occurredAt,
+        },
+      });
     } else if (reversed) {
       Promise.resolve(this.timeline.recordEvent(entry)).catch(() => {});
     }
     return result;
-  }
-
-  /**
-   * R0-CMF2-PAYMENT-ACTOR-GAPS: record the refund entries onPaymentRefunded
-   * handed back through `activityBuffer`, after the refund has committed.
-   */
-  async recordRefundActivity(entries: RecordEventInput[]): Promise<void> {
-    for (const entry of entries) {
-      await Promise.resolve(this.timeline.recordEvent(entry)).catch(() => {});
-    }
   }
 
   /**

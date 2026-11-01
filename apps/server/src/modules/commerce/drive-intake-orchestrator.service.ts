@@ -287,7 +287,7 @@ export class DriveIntakeOrchestrator {
     let createdInvoiceId: string | undefined;
 
     try {
-      for (const action of plan.actions) {
+      for (const [actionIndex, action] of plan.actions.entries()) {
         switch (action.type) {
           case 'create_invoice': {
             const payload = action.payload as {
@@ -323,10 +323,18 @@ export class DriveIntakeOrchestrator {
             // payment (Payment.recordedBy, the posting's createdById, the
             // contact event). The recorder comes from the caller, never from
             // the extracted plan payload.
+            //
+            // R0-CMF2 review (SEC-CMF2-2): the status check above is a read,
+            // and the intake flips to 'approved' only after every write, so
+            // two concurrent approvals (or a re-run after a crash before that
+            // flip) both reach this step. The key, derived from this intake
+            // file and this step, makes recordPayment answer the second with
+            // the first's payment instead of crediting the invoice twice.
             const res = await this.commerce.recordPayment(invoiceId, businessId, {
               amount: payload.amount,
               method: payload.method,
               reference: payload.reference,
+              idempotencyKey: `drive:${intakeFileId}:${actionIndex}`,
             }, { actorId: DriveIntakeOrchestrator.approverActorId(userId) });
             results.push({ action: 'record_payment', success: true, entityId: res.payment.id });
             break;

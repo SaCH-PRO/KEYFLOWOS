@@ -15,10 +15,18 @@
  *   approver U, record_payment on a plan invoice      -> recordPayment(..., { actorId: U })
  *   approver U, record_payment on the invoice the plan created -> { actorId: U }
  *   a recorder named in the plan payload (it comes from document extraction)
- *     never reaches recordPayment: input is { amount, method, reference }
+ *     never reaches recordPayment: input is { amount, method, reference,
+ *     idempotencyKey }
  *   no human approver: the ingestion auto-execute ('system') and the data-inbox
  *     fallback when the request carries no user ('user') -> actorId null; the
  *     placeholder is recorded nowhere (payments-actor PA-08: no actor is invented)
+ *
+ * R0-CMF2 review (SEC-CMF2-2): the record_payment step passes
+ * idempotencyKey `drive:<intakeFileId>:<actionIndex>`, so a second execution
+ * of the same step (two concurrent approvals, or a re-run after a crash before
+ * the 'approved' flip) replays the first payment instead of crediting the
+ * invoice twice; two record_payment steps of one plan keep distinct keys.
+ * The real replay is proven in payments-actor PA-18c..d.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DriveIntakeOrchestrator, type DriveIntakePlan } from './drive-intake-orchestrator.service';
@@ -80,7 +88,7 @@ describe('DriveIntakeOrchestrator.executePlan record_payment names the approver 
     expect(commerce.recordPayment).toHaveBeenCalledWith(
       'inv_dio',
       BIZ,
-      { amount: 40, method: 'bank_transfer', reference: 'DIO-1' },
+      { amount: 40, method: 'bank_transfer', reference: 'DIO-1', idempotencyKey: `drive:${INTAKE}:0` },
       { actorId: APPROVER },
     );
   });
@@ -96,7 +104,7 @@ describe('DriveIntakeOrchestrator.executePlan record_payment names the approver 
     expect(commerce.recordPayment).toHaveBeenCalledWith(
       'inv_created_by_plan',
       BIZ,
-      { amount: 25, method: 'cash', reference: undefined },
+      { amount: 25, method: 'cash', reference: undefined, idempotencyKey: `drive:${INTAKE}:1` },
       { actorId: APPROVER },
     );
   });
@@ -115,7 +123,7 @@ describe('DriveIntakeOrchestrator.executePlan record_payment names the approver 
     );
     await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
     const [, , input, options] = commerce.recordPayment.mock.calls[0];
-    expect(input).toEqual({ amount: 10, method: 'cash', reference: 'DIO-3' });
+    expect(input).toEqual({ amount: 10, method: 'cash', reference: 'DIO-3', idempotencyKey: `drive:${INTAKE}:0` });
     expect(options).toEqual({ actorId: APPROVER });
   });
 
@@ -132,4 +140,23 @@ describe('DriveIntakeOrchestrator.executePlan record_payment names the approver 
       expect(JSON.stringify(commerce.recordPayment.mock.calls[0])).not.toContain(`"${placeholder}"`);
     });
   }
+
+  it('DIO-05 (SEC-CMF2-2): each record_payment step is keyed on the intake file and its own position; re-running the plan reuses the same keys, two steps never share one', async () => {
+    const plan: DriveIntakePlan = {
+      intakeFileId: INTAKE,
+      documentType: 'receipt',
+      summary: 'dio two payments',
+      actions: [
+        { type: 'record_payment', payload: { invoiceId: 'inv_dio', amount: 10, method: 'cash', reference: 'SAME' } },
+        { type: 'record_payment', payload: { invoiceId: 'inv_dio', amount: 10, method: 'cash', reference: 'SAME' } },
+      ],
+    };
+    const { orchestrator, commerce } = makeOrchestrator(plan);
+    await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
+    await orchestrator.executePlan(BIZ, INTAKE, 'user_dio_second_approver');
+    const keys = commerce.recordPayment.mock.calls.map((c: unknown[]) => (c[2] as { idempotencyKey?: string }).idempotencyKey);
+    expect(keys).toEqual([`drive:${INTAKE}:0`, `drive:${INTAKE}:1`, `drive:${INTAKE}:0`, `drive:${INTAKE}:1`]);
+    // The key is the plan step's identity, never the approver's.
+    expect(keys.join(' ')).not.toContain(APPROVER);
+  });
 });

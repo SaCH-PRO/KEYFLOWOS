@@ -45,13 +45,22 @@
  *         records the refunder nowhere
  *         CLOSED by R0-CMF2-PAYMENT-ACTOR-GAPS: PA-17a..e below. Every manual
  *         refund, posted or not, writes one FINANCE payment_refunded activity
- *         row naming the refunder, after the refund commits (a rolled-back
- *         refund leaves none). The contact-event registry has no canonical
- *         refund type (packages/shared, outside that write set), so the audit
- *         row is the unified activity row the posted-refund path already wrote.
+ *         row naming the refunder, inside the refund transaction (a
+ *         rolled-back refund leaves none). The contact-event registry has no
+ *         canonical refund type (packages/shared, outside that write set), so
+ *         the audit row is the unified activity row the posted-refund path
+ *         already wrote. R0-CMF2 review repairs PA-17f..g (SEC-CMF2-1,
+ *         CR-CMF2-1): the row no longer goes through the best-effort timeline,
+ *         so a failing timeline cannot drop it, and a failed insert fails the
+ *         refund rather than committing one that names nobody.
  *   PA-18 (ST-R011-3) drive-intake approval drops the approver: record_payment records null
  *         CLOSED by R0-CMF2-PAYMENT-ACTOR-GAPS: PA-18a..b below (the approve
  *         route names the approver; an approval with no human records null).
+ *         R0-CMF2 review repairs PA-18c..d (SEC-CMF2-2): the record_payment
+ *         step is keyed on the intake file and step, so two concurrent
+ *         approvals, or a re-run, credit the invoice once. Still open,
+ *         outside that write set (it.todo): PA-18e (SEC-CMF2-3) the approve
+ *         route requires no revenue:write.
  *
  * Review repairs (R0-PL-07-PAYMENT-ACTOR-repair):
  *   PATCH /commerce/invoices/:id/paid by U (no payment yet) -> the manual row's recordedBy = U   (PL07-ST-2, PL07-CR-1)
@@ -159,6 +168,12 @@ const ID = {
   invRefundKey: `${P}invRefundKey`,
   invDriveV: `${P}invDriveV`,
   invDriveSystem: `${P}invDriveSystem`,
+  // R0-CMF2 review repairs: PA-17f..g (SEC-CMF2-1, CR-CMF2-1), PA-18c..d (SEC-CMF2-2).
+  invRefundTimelineReject: `${P}invRefundTimelineReject`,
+  invRefundTimelineSwallow: `${P}invRefundTimelineSwallow`,
+  invRefundAuditFail: `${P}invRefundAuditFail`,
+  invDriveRace: `${P}invDriveRace`,
+  invDriveRerun: `${P}invDriveRerun`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -171,8 +186,11 @@ let adapter: CommerceAdapterService;
 let systemActorId: string;
 let workflow: any;
 let driveOrchestrator: any;
+let revenuePosting: any;
 /** The real TimelineService the recorder below passes every entry on to. */
 let realTimeline: { recordEvent: (input: any) => Promise<unknown> } | null = null;
+/** The TimelineService class, for PA-17f's timeline whose insert fails. */
+let TimelineServiceClass: any;
 
 // PaymentEvidenceService is the real one over the real CommerceService;
 // document intelligence (the AI boundary) is the stub and returns what the
@@ -417,6 +435,8 @@ beforeAll(async () => {
   commerce = moduleRef.get(CommerceService);
   workflow = moduleRef.get(InvoiceWorkflowService);
   driveOrchestrator = moduleRef.get(DriveIntakeOrchestrator);
+  revenuePosting = moduleRef.get(RevenuePostingService);
+  TimelineServiceClass = TimelineService;
   realTimeline = new TimelineService(moduleRef.get(PrismaService));
   // The KEY cortex adapter, constructed exactly as KeyCortexModule wires it.
   adapter = new CommerceAdapterService(commerce);
@@ -1187,9 +1207,15 @@ describe('open gaps found by the R0-CMF1 review (outside the R0-CMF1 write set)'
 // The contact-event registry (packages/shared CONTACT_EVENT_TYPES) has no
 // refund type for invoices and is outside this write set, so the audit row is
 // the unified activity row the posted-refund path already wrote, now for every
-// manual refund, naming the refunder, and recorded once the refund commits.
+// manual refund, naming the refunder, written inside the refund transaction.
 // Payment has no refunded-by column and none is added: Payment.recordedBy
 // keeps the recorder.
+//
+// R0-CMF2 review (SEC-CMF2-1, CR-CMF2-1): the packet first recorded that row
+// after commit through TimelineService.recordEvent, which swallows every
+// error, so a failed insert committed a REFUNDED payment naming nobody. The
+// row is now written with the refund's transaction client and is never handed
+// to the best-effort timeline: it commits with the refund or not at all.
 //
 // ST-R011-3: DriveIntakeOrchestrator.executePlan(businessId, intakeFileId,
 // userId) passed userId to credit notes, messages and tasks but called
@@ -1205,7 +1231,7 @@ async function refundActivityRows(paymentId: string): Promise<any[]> {
   });
 }
 
-/** The payment_refunded entries handed to the unified timeline for one payment. */
+/** The payment_refunded entries handed to the best-effort unified timeline for one payment. */
 function refundActivityHanded(paymentId: string): Array<Record<string, any>> {
   return activity.filter((a) => a.module === 'FINANCE' && a.action === 'payment_refunded' && a.entityId === paymentId);
 }
@@ -1218,7 +1244,31 @@ async function expectOneRefundAuditBy(paymentId: string, actor: string | null, a
   expect(rows[0].actorType, `refund audit actorType for ${paymentId}`).toBe(actorType);
   expect(rows[0].contactId).toBe(ID.contact);
   expect(rows[0].data).toMatchObject({ refundedBy: actor, ledgerReversed });
-  expect(refundActivityHanded(paymentId), `refund entries handed for ${paymentId}`).toHaveLength(1);
+  // R0-CMF2 review (SEC-CMF2-1): the row is written by the refund transaction
+  // itself, never handed to the best-effort timeline that swallows errors.
+  expect(refundActivityHanded(paymentId), `refund entries handed to the best-effort timeline for ${paymentId}`).toHaveLength(0);
+}
+
+/**
+ * The refund transaction client with an `activities` insert that fails (the
+ * database refusing the audit row); every other model and method is the real
+ * transaction's, so the reversal and the payment flip run for real.
+ */
+function txWithFailingActivityInsert(tx: any, onAttempt: () => void) {
+  return new Proxy(tx, {
+    get(target, prop) {
+      if (prop === 'activity') {
+        return {
+          create: async () => {
+            onAttempt();
+            throw new Error(`${P}activities insert failed`);
+          },
+        };
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 /** Seed a SUCCESSFUL payment row with no ledger posting (a mark-paid row written before R0-PL-04). */
@@ -1305,6 +1355,71 @@ describe('R0-CMF2: a refund names its refunder on a durable row, posted or not (
     await commerce.markPaymentRefunded(paymentId, ID.biz, 'key', systemActorId);
     await expectOneRefundAuditBy(paymentId, KEY_ACTOR, 'SYSTEM', false);
   });
+
+  it('PA-17f (SEC-CMF2-1, CR-CMF2-1): the audit row does not depend on the best-effort timeline: with the unified timeline rejecting, or its insert failing and being swallowed, V refunds an unposted payment -> 201 REFUNDED and exactly one payment_refunded row names V (USER)', async () => {
+    // (a) The unified timeline rejects every entry.
+    const rejected = `${P}pay_tl_reject`;
+    await seedUnpostedPayment(rejected, ID.invRefundTimelineReject, null);
+    const spy = vi.spyOn(timelineStub, 'recordEvent').mockRejectedValue(new Error(`${P}timeline down`));
+    try {
+      const res = await refundAs(ID.userV, rejected, 'timeline rejects');
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.status).toBe('REFUNDED');
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await paymentRow(rejected)).status).toBe('REFUNDED');
+    await expectOneRefundAuditBy(rejected, ID.userV, 'USER', false);
+
+    // (b) The real TimelineService over a client whose activities insert
+    // fails: it logs and swallows, as in production.
+    const swallowed = `${P}pay_tl_swallow`;
+    await seedUnpostedPayment(swallowed, ID.invRefundTimelineSwallow, null);
+    const saved = realTimeline;
+    realTimeline = new TimelineServiceClass({
+      client: { activity: { create: async () => { throw new Error(`${P}db down`); } } },
+    });
+    try {
+      const res = await refundAs(ID.userV, swallowed, 'timeline swallows');
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+    } finally {
+      realTimeline = saved;
+    }
+    await expectOneRefundAuditBy(swallowed, ID.userV, 'USER', false);
+  });
+
+  it('PA-17g (SEC-CMF2-1, CR-CMF2-1): the audit row is part of the refund: when its insert fails inside the refund transaction, V\'s refund rolls back (500); the payment stays SUCCESSFUL with its notes, its posting POSTED, no reversal and no audit row; the retried refund then names V once', async () => {
+    const res = await postAs(ID.userU, ID.invRefundAuditFail, { amount: 35, method: 'cash', reference: 'PYA-AF-1' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const paymentId = res.body.payment.id;
+    const notesBefore = (await paymentRow(paymentId)).notes;
+
+    let insertAttempts = 0;
+    const real = revenuePosting.onPaymentRefunded;
+    const spy = vi.spyOn(revenuePosting, 'onPaymentRefunded').mockImplementationOnce((id: any, opts: any) =>
+      real.call(revenuePosting, id, { ...opts, tx: txWithFailingActivityInsert(opts.tx, () => { insertAttempts += 1; }) }),
+    );
+    try {
+      const refunded = await refundAs(ID.userV, paymentId, 'audit insert fails');
+      expect(refunded.status, JSON.stringify(refunded.body)).toBe(500);
+    } finally {
+      spy.mockRestore();
+    }
+    // The insert was attempted with the refund's own transaction client.
+    expect(insertAttempts).toBe(1);
+    const row = await paymentRow(paymentId);
+    expect(row.status).toBe('SUCCESSFUL');
+    expect(row.notes).toBe(notesBefore);
+    expect(await reversalsFor(paymentId)).toHaveLength(0);
+    expect((await postingsFor(paymentId))[0].status).toBe('POSTED');
+    expect(await refundActivityRows(paymentId)).toHaveLength(0);
+    expect(refundActivityHanded(paymentId)).toHaveLength(0);
+
+    const retried = await refundAs(ID.userV, paymentId, 'retried');
+    expect(retried.status, JSON.stringify(retried.body)).toBe(201);
+    expect(await reversalsFor(paymentId)).toHaveLength(1);
+    await expectOneRefundAuditBy(paymentId, ID.userV, 'USER', true);
+  });
 });
 
 /** Seed a drive intake file awaiting approval whose plan records one payment on `invoiceId`. */
@@ -1368,4 +1483,71 @@ describe('R0-CMF2: drive-intake approval names the approver on the payment it re
     expect((events[0].data as any).recordedBy).toBeNull();
     expect(crmActivityFor(ID.invDriveSystem).map((a) => a.actorId ?? null)).toEqual([null]);
   });
+});
+
+function approveIntakeAs(user: string, intakeId: string) {
+  return agent().post(`/drive/businesses/${ID.biz}/intake/${intakeId}/approve`).set(HEADER, user).send({});
+}
+
+describe('R0-CMF2 review repairs: a drive-intake payment step credits the invoice once (PA-18, SEC-CMF2-2)', () => {
+  it('PA-18c: U and V approve the same intake concurrently -> one SUCCESSFUL payment, one posting and one contact event, all naming the same approver; every successful answer is that payment; the invoice is credited once', async () => {
+    const intakeId = `${P}drive_race`;
+    await seedDriveIntake(intakeId, ID.invDriveRace, { amount: 30, method: 'bank_transfer', reference: 'PYA-DRV-RACE' });
+
+    const answers = await Promise.all([approveIntakeAs(ID.userU, intakeId), approveIntakeAs(ID.userV, intakeId)]);
+
+    const rows = await paymentsOf(ID.invDriveRace);
+    expect(rows.map((r: any) => [r.amount, r.status])).toEqual([[30, 'SUCCESSFUL']]);
+    const recorder = rows[0].recordedBy;
+    expect([ID.userU, ID.userV]).toContain(recorder);
+    await expectPostingBy(rows[0].id, recorder);
+    await expectContactEventBy(ID.invDriveRace, recorder, 'USER');
+    // Each answer is the one payment (the second replayed) or, if the first
+    // had already flipped the intake to approved, the already-executed refusal.
+    for (const res of answers) {
+      if (res.status === 201) {
+        expect(res.body.success, JSON.stringify(res.body)).toBe(true);
+        expect(res.body.results).toEqual([expect.objectContaining({ action: 'record_payment', success: true, entityId: rows[0].id })]);
+      } else {
+        expect(res.status, JSON.stringify(res.body)).toBe(400);
+      }
+    }
+    expect(answers.map((r) => r.status)).toContain(201);
+    const invoice = await db.invoice.findUnique({ where: { id: ID.invDriveRace }, select: { status: true } });
+    expect(invoice.status).toBe('PARTIALLY_PAID');
+  });
+
+  it('PA-18d: U approves an intake; it is run again by V (status back to reviewing, as after a crash before the approved flip) -> no second payment; the replay answers with U\'s payment and U stays the recorder', async () => {
+    const intakeId = `${P}drive_rerun`;
+    await seedDriveIntake(intakeId, ID.invDriveRerun, { amount: 25, method: 'cash', reference: 'PYA-DRV-RERUN' });
+
+    const first = await approveIntakeAs(ID.userU, intakeId);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(first.body.success, JSON.stringify(first.body)).toBe(true);
+    await db.driveIntakeFile.update({ where: { id: intakeId }, data: { status: 'reviewing', processedAt: null } });
+
+    const second = await approveIntakeAs(ID.userV, intakeId);
+    expect(second.status, JSON.stringify(second.body)).toBe(201);
+    expect(second.body.success, JSON.stringify(second.body)).toBe(true);
+    expect(second.body.results[0].entityId).toBe(first.body.results[0].entityId);
+
+    const rows = await paymentsOf(ID.invDriveRerun);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ amount: 25, status: 'SUCCESSFUL', recordedBy: ID.userU });
+    await expectPostingBy(rows[0].id, ID.userU);
+    await expectContactEventBy(ID.invDriveRerun, ID.userU, 'USER');
+  });
+});
+
+// R0-CMF2 review SEC-CMF2-3: the drive-intake approve route writes payments
+// behind AuthGuard and BusinessGuard only. The fix is a module-scope
+// requirement on DriveIntakeController (src/modules/commerce/
+// drive-intake.controller.ts), outside the R0-CMF2 write set.
+describe('open gaps found by the R0-CMF2 review (outside the R0-CMF2 write set)', () => {
+  it.todo(
+    'PA-18e (SEC-CMF2-3): a STAFF member with revenue:read, or with only crm:read, POST /drive/businesses/:b/intake/:id/approve on a plan with a ' +
+      'record_payment step -> 403 like POST .../invoices/:id/payments, and no payment is written - needs RequireModuleScope(\'revenue\', \'write\') ' +
+      'with ModuleScopeGuard on DriveIntakeController.approve (drive-intake.controller.ts); the data-inbox approve route (operations:write, and ' +
+      'correctItem rewrites proposedActions) needs the same review; outside the R0-CMF2 write set',
+  );
 });
