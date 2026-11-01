@@ -80,6 +80,41 @@ export class CommandController {
     return this.commandService.update(businessId, id, dto);
   }
 
+  /**
+   * Bulk complete, dismiss and delete of the path business's items.
+   *
+   * Declared BEFORE the `items/:id/...` routes (R0-13f): below them
+   * `items/bulk/complete` and `items/bulk/dismiss` were answered by complete and
+   * dismiss as item 'bulk' (404). The service scopes every id to the path
+   * business and refuses the whole call when any id is not one of its items,
+   * so another tenant's id answers exactly as an unknown one. The guards are
+   * the class's (AuthGuard, BusinessGuard), the ones the single-item routes
+   * run behind. route-shadowing.spec.ts keeps the order.
+   */
+  @Post('items/bulk/complete')
+  async bulkComplete(
+    @Param('businessId') businessId: string,
+    @Body() dto: BulkCommandItemsDto,
+  ) {
+    return this.commandService.bulkComplete(businessId, dto.ids);
+  }
+
+  @Post('items/bulk/dismiss')
+  async bulkDismiss(
+    @Param('businessId') businessId: string,
+    @Body() dto: BulkCommandItemsDto,
+  ) {
+    return this.commandService.bulkDismiss(businessId, dto.ids);
+  }
+
+  @Post('items/bulk/delete')
+  async bulkDelete(
+    @Param('businessId') businessId: string,
+    @Body() dto: BulkCommandItemsDto,
+  ) {
+    return this.commandService.bulkDelete(businessId, dto.ids);
+  }
+
   @Post('items/:id/dismiss')
   async dismiss(
     @Param('businessId') businessId: string,
@@ -166,30 +201,6 @@ export class CommandController {
     @Param('id') id: string,
   ) {
     return this.commandService.delete(businessId, id);
-  }
-
-  @Post('items/bulk/complete')
-  async bulkComplete(
-    @Param('businessId') businessId: string,
-    @Body() dto: BulkCommandItemsDto,
-  ) {
-    return this.commandService.bulkComplete(businessId, dto.ids);
-  }
-
-  @Post('items/bulk/dismiss')
-  async bulkDismiss(
-    @Param('businessId') businessId: string,
-    @Body() dto: BulkCommandItemsDto,
-  ) {
-    return this.commandService.bulkDismiss(businessId, dto.ids);
-  }
-
-  @Post('items/bulk/delete')
-  async bulkDelete(
-    @Param('businessId') businessId: string,
-    @Body() dto: BulkCommandItemsDto,
-  ) {
-    return this.commandService.bulkDelete(businessId, dto.ids);
   }
 
   @Post('generate')

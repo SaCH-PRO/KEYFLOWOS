@@ -32,6 +32,18 @@
  *     allow-list may only shrink: an entry whose offender is gone fails here,
  *     and crm.controller.ts (the write set) may never appear in it.
  *
+ * R0-13f-ROUTE-SHADOWING-SIBLINGS took six entries off the allow-list: GET
+ * approvals/pending-for-me, POST command items/bulk/complete and
+ * items/bulk/dismiss, POST deals/bulk/move-stage and GET procurement
+ * suppliers and stats are declared before their parameterised siblings. Each
+ * of those handlers had never run over HTTP, so the R0-13f cases below also
+ * check, from the decorators, that each carries at least the guards and the
+ * module scope of the single-item sibling that used to answer it (Nest reads
+ * @RequireModuleScope from the handler only, so only the method's counts);
+ * test/shadowed-routes-live.integration.test.ts proves the same on a real
+ * database, with the tenant binding. The R0-13f controllers may never appear in
+ * ALLOW_LISTED again.
+ *
  * Allow-list entries match on file, method, path and shadowing path, not on the
  * line: an unrelated edit above a listed route moves it without hiding it, and
  * the failure message prints the current line.
@@ -47,6 +59,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import * as ts from 'typescript';
+import { LEVEL_RANK } from '../authority/module-vocabulary';
 
 const SERVER_SRC = resolve(__dirname, '../..');
 const CRM_CONTROLLER = 'modules/crm/crm.controller.ts';
@@ -280,42 +293,11 @@ interface AllowListed {
 /**
  * Offenders in controllers outside the R0-13e write set, recorded when this
  * landed. Each is a live defect owned by a follow-up packet; this list may only
- * shrink.
+ * shrink. R0-13f removed the six in its four controllers; the two key-cortex
+ * flows routes are owned by a later packet.
  */
 const FOLLOW_UP = 'outside R0-13e write set, follow-up';
 const ALLOW_LISTED: AllowListed[] = [
-  {
-    file: 'modules/approvals/approval.controller.ts',
-    line: 121,
-    method: 'GET',
-    path: '/businesses/:businessId/approvals/pending-for-me',
-    shadowedBy: '/businesses/:businessId/approvals/:approvalId',
-    reason: `${FOLLOW_UP}: answered by getById as approval 'pending-for-me'`,
-  },
-  {
-    file: 'modules/command/command.controller.ts',
-    line: 171,
-    method: 'POST',
-    path: '/command/businesses/:businessId/items/bulk/complete',
-    shadowedBy: '/command/businesses/:businessId/items/:id/complete',
-    reason: `${FOLLOW_UP}: answered by complete as item 'bulk'`,
-  },
-  {
-    file: 'modules/command/command.controller.ts',
-    line: 179,
-    method: 'POST',
-    path: '/command/businesses/:businessId/items/bulk/dismiss',
-    shadowedBy: '/command/businesses/:businessId/items/:id/dismiss',
-    reason: `${FOLLOW_UP}: answered by dismiss as item 'bulk'`,
-  },
-  {
-    file: 'modules/crm/crm-deals.controller.ts',
-    line: 244,
-    method: 'POST',
-    path: '/crm/businesses/:businessId/deals/bulk/move-stage',
-    shadowedBy: '/crm/businesses/:businessId/deals/:dealId/move-stage',
-    reason: `${FOLLOW_UP}: answered by moveStage as deal 'bulk'`,
-  },
   {
     file: 'modules/key-cortex/key-cortex.controller.ts',
     line: 2638,
@@ -332,26 +314,119 @@ const ALLOW_LISTED: AllowListed[] = [
     shadowedBy: '/api/v1/cortex/flows/:id',
     reason: `${FOLLOW_UP}: answered by flowGet as flow 'nodes'`,
   },
-  {
-    file: 'modules/procurement/procurement.controller.ts',
-    line: 63,
-    method: 'GET',
-    path: '/procurement/businesses/:businessId/suppliers',
-    shadowedBy: '/procurement/businesses/:businessId/:id',
-    reason: `${FOLLOW_UP}: answered by get as procurement request 'suppliers'`,
-  },
-  {
-    file: 'modules/procurement/procurement.controller.ts',
-    line: 105,
-    method: 'GET',
-    path: '/procurement/businesses/:businessId/stats',
-    shadowedBy: '/procurement/businesses/:businessId/:id',
-    reason: `${FOLLOW_UP}: answered by get as procurement request 'stats'`,
-  },
 ];
 
 const allowKey = (file: string, method: string, path: string, shadowedBy: string) =>
   `${file} ${method} ${path} <- ${shadowedBy}`;
+
+/**
+ * R0-13f-ROUTE-SHADOWING-SIBLINGS: the six routes it made live, each with the
+ * single-item sibling that answered it before (and whose guards it must carry
+ * at least), and the web screens that call it.
+ */
+interface LiveRoute {
+  file: string;
+  method: string;
+  path: string;
+  handler: string;
+  sibling: string;
+  siblingHandler: string;
+  web: string;
+}
+const R0_13F_ROUTES: LiveRoute[] = [
+  {
+    file: 'modules/approvals/approval.controller.ts',
+    method: 'GET',
+    path: '/businesses/:businessId/approvals/pending-for-me',
+    handler: 'pendingForMe',
+    sibling: '/businesses/:businessId/approvals/:approvalId',
+    siblingHandler: 'getById',
+    web: 'fetchPendingApprovalsForMe: app/approvals/page.tsx, app/operations/page.tsx',
+  },
+  {
+    file: 'modules/command/command.controller.ts',
+    method: 'POST',
+    path: '/command/businesses/:businessId/items/bulk/complete',
+    handler: 'bulkComplete',
+    sibling: '/command/businesses/:businessId/items/:id/complete',
+    siblingHandler: 'complete',
+    web: 'bulkCompleteCommands (lib/api/command.ts; no screen calls it)',
+  },
+  {
+    file: 'modules/command/command.controller.ts',
+    method: 'POST',
+    path: '/command/businesses/:businessId/items/bulk/dismiss',
+    handler: 'bulkDismiss',
+    sibling: '/command/businesses/:businessId/items/:id/dismiss',
+    siblingHandler: 'dismiss',
+    web: 'bulkDismissCommands (lib/api/command.ts; no screen calls it)',
+  },
+  {
+    file: 'modules/crm/crm-deals.controller.ts',
+    method: 'POST',
+    path: '/crm/businesses/:businessId/deals/bulk/move-stage',
+    handler: 'bulkMoveStage',
+    sibling: '/crm/businesses/:businessId/deals/:dealId/move-stage',
+    siblingHandler: 'moveStage',
+    web: 'bulkMoveDealStage: app/crm/deals/deals-board-view.tsx, deals-list-view.tsx',
+  },
+  {
+    file: 'modules/procurement/procurement.controller.ts',
+    method: 'GET',
+    path: '/procurement/businesses/:businessId/suppliers',
+    handler: 'listSuppliers',
+    sibling: '/procurement/businesses/:businessId/:id',
+    siblingHandler: 'get',
+    web: 'fetchProcurementSuppliers: app/procurement/suppliers/page.tsx, app/procurement/[requestId]/page.tsx',
+  },
+  {
+    file: 'modules/procurement/procurement.controller.ts',
+    method: 'GET',
+    path: '/procurement/businesses/:businessId/stats',
+    handler: 'stats',
+    sibling: '/procurement/businesses/:businessId/:id',
+    siblingHandler: 'get',
+    web: 'fetchProcurementStats: app/procurement/page.tsx',
+  },
+];
+const R0_13F_FILES = [...new Set(R0_13F_ROUTES.map((r) => r.file))];
+
+interface HandlerGuards {
+  /** The @UseGuards arguments of the class and the method, as written. */
+  guards: string[];
+  /** The method's @RequireModuleScope (Nest reads it from the handler only). */
+  scope: { module: string; level: string } | undefined;
+}
+
+/** The guards and module scope a handler of a controller class runs behind, read from its decorators. */
+function handlerGuards(file: string, text: string, cls: string, handler: string): HandlerGuards | undefined {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let found: HandlerGuards | undefined;
+  const literal = (e: ts.Expression | undefined) =>
+    e && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : undefined;
+  const visit = (node: ts.Node) => {
+    if (ts.isClassDeclaration(node) && node.name?.text === cls) {
+      const onClass = decoratorCalls(node);
+      for (const member of node.members) {
+        if (!ts.isMethodDeclaration(member) || member.name.getText(sf) !== handler) continue;
+        const onMethod = decoratorCalls(member);
+        const guards = [...onClass, ...onMethod]
+          .filter((d) => d.name === 'UseGuards')
+          .flatMap((d) => d.call?.arguments.map((a) => a.getText(sf)) ?? []);
+        const scopeCall = onMethod.find((d) => d.name === 'RequireModuleScope')?.call;
+        found = {
+          guards: [...new Set(guards)].sort(),
+          scope: scopeCall
+            ? { module: literal(scopeCall.arguments[0]) ?? '<unreadable>', level: literal(scopeCall.arguments[1]) ?? 'read' }
+            : undefined,
+        };
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -505,8 +580,73 @@ describe('the tree: no controller under apps/server/src answers a literal route 
     ).toEqual([]);
     for (const a of ALLOW_LISTED) {
       expect(a.file, 'the R0-13e write set is fixed, never allow-listed').not.toBe(CRM_CONTROLLER);
+      expect(R0_13F_FILES, 'the R0-13f controllers are fixed, never allow-listed').not.toContain(a.file);
       expect(a.reason).toContain('outside R0-13e write set, follow-up');
     }
     expect(new Set(ALLOW_LISTED.map((a) => allowKey(a.file, a.method, a.path, a.shadowedBy))).size).toBe(ALLOW_LISTED.length);
+  });
+});
+
+describe('R0-13f: the six formerly shadowed routes are declared before their parameterised siblings and carry at least their guards', () => {
+  const tree = scanTree();
+  const at = (file: string, method: string, path: string) =>
+    tree.routes.find((r) => r.file === file && r.method === method && r.path === path);
+
+  it('approval.controller.ts, command.controller.ts, crm-deals.controller.ts and procurement.controller.ts have no offender, and each of the six routes reaches its own handler, declared above the sibling that answered it', () => {
+    expect(tree.offenders.filter((o) => R0_13F_FILES.includes(o.route.file)).map(describeOffender)).toEqual([]);
+    for (const r of R0_13F_ROUTES) {
+      const route = at(r.file, r.method, r.path);
+      const sibling = at(r.file, r.method, r.sibling);
+      expect(route?.handler, `${r.method} ${r.path}`).toBe(r.handler);
+      expect(sibling?.handler, `${r.method} ${r.sibling}`).toBe(r.siblingHandler);
+      expect(route!.line, `${r.method} ${r.path} (${r.web}) is declared after ${r.sibling}`).toBeLessThan(sibling!.line);
+    }
+  });
+
+  it('each of the six handlers runs behind every guard of its single-item sibling and requires at least its module scope (class and method @UseGuards, method @RequireModuleScope)', () => {
+    for (const r of R0_13F_ROUTES) {
+      const text = readFileSync(join(SERVER_SRC, r.file), 'utf8');
+      const route = at(r.file, r.method, r.path)!;
+      const own = handlerGuards(r.file, text, route.cls, r.handler);
+      const sib = handlerGuards(r.file, text, route.cls, r.siblingHandler);
+      const label = `${route.cls}.${r.handler} vs ${r.siblingHandler}`;
+      expect(own, label).toBeDefined();
+      expect(sib, label).toBeDefined();
+      expect(own!.guards, label).toEqual(expect.arrayContaining(sib!.guards));
+      expect(own!.guards, `${label}: no handler here runs unauthenticated`).toEqual(expect.arrayContaining(['AuthGuard', 'BusinessGuard']));
+      if (sib!.scope) {
+        expect(own!.scope?.module, label).toBe(sib!.scope.module);
+        expect(LEVEL_RANK[own!.scope!.level as keyof typeof LEVEL_RANK], label).toBeGreaterThanOrEqual(
+          LEVEL_RANK[sib!.scope.level as keyof typeof LEVEL_RANK],
+        );
+      }
+    }
+    // The one sibling with a module scope: the bulk move needs the single move's crm write.
+    const deals = R0_13F_ROUTES.find((r) => r.handler === 'bulkMoveStage')!;
+    const text = readFileSync(join(SERVER_SRC, deals.file), 'utf8');
+    expect(handlerGuards(deals.file, text, 'CrmDealsController', 'bulkMoveStage')?.scope).toEqual({ module: 'crm', level: 'write' });
+  });
+
+  it('the guard reader sees class and method guards and the method scope only (anti-vacuity)', () => {
+    const text = `
+      @Controller('x') @UseGuards(AuthGuard, RateLimitGuard)
+      export class A {
+        @UseGuards(BusinessGuard, ModuleScopeGuard) @RequireModuleScope('crm', 'write') @Post('a/:id') one() {}
+        @UseGuards(BusinessGuard) @Get('b') two() {}
+        @RequireModuleScope('crm') @Get('c') three() {}
+      }
+      @Controller('y') @RequireModuleScope('crm', 'admin')
+      export class B {
+        @Get('d') four() {}
+      }
+    `;
+    expect(handlerGuards('f.controller.ts', text, 'A', 'one')).toEqual({
+      guards: ['AuthGuard', 'BusinessGuard', 'ModuleScopeGuard', 'RateLimitGuard'],
+      scope: { module: 'crm', level: 'write' },
+    });
+    expect(handlerGuards('f.controller.ts', text, 'A', 'two')).toEqual({ guards: ['AuthGuard', 'BusinessGuard', 'RateLimitGuard'], scope: undefined });
+    expect(handlerGuards('f.controller.ts', text, 'A', 'three')?.scope).toEqual({ module: 'crm', level: 'read' });
+    expect(handlerGuards('f.controller.ts', text, 'B', 'four')).toEqual({ guards: [], scope: undefined });
+    expect(handlerGuards('f.controller.ts', text, 'A', 'missing')).toBeUndefined();
   });
 });
