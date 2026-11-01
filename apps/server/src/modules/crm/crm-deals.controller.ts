@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { PickType } from '@nestjs/mapped-types';
-import { IsArray, IsString } from 'class-validator';
+import { IsArray, IsString, ValidateBy, buildMessage, type ValidationOptions } from 'class-validator';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -22,6 +22,42 @@ import { DealVelocityService } from './deal-velocity.service';
 import { WonLostReasonService } from './won-lost-reason.service';
 
 /**
+ * True when `value` is a string the database can compare: no NUL code unit
+ * (Postgres refuses it in text, 22021) and no unpaired UTF-16 surrogate (Prisma
+ * refuses it before the query is sent). Every other string, a paired surrogate
+ * and any other control character included, is left to the lookup.
+ */
+function isComparableText(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  for (let i = 0; i < value.length; i += 1) {
+    const unit = value.charCodeAt(i);
+    if (unit === 0) return false;
+    if (unit >= 0xdc00 && unit <= 0xdfff) return false;
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      i += 1;
+    }
+  }
+  return true;
+}
+
+const IsComparableText = (validationOptions?: ValidationOptions) =>
+  ValidateBy(
+    {
+      name: 'isComparableText',
+      validator: {
+        validate: (value) => isComparableText(value),
+        defaultMessage: buildMessage(
+          (eachPrefix) => `${eachPrefix}$property must not contain a NUL character or an unpaired surrogate`,
+          validationOptions,
+        ),
+      },
+    },
+    validationOptions,
+  );
+
+/**
  * The POST deals/bulk/move-stage body (R0-13f): BulkMoveStageDto's stageId rule
  * (PickType copies its validation metadata) and dealIds an array of strings.
  * BulkMoveStageDto checks only that dealIds is an array, so an element such as
@@ -31,11 +67,23 @@ import { WonLostReasonService } from './won-lost-reason.service';
  * in CrmDealsService.bulkMoveStage with their own messages. Declared before
  * CrmDealsController, whose decorator metadata names it when the class is
  * defined.
+ *
+ * Each deal id and the stageId must also be text the database can compare
+ * (R0-13f review): bulkMoveStage catches each id's error and returns its
+ * message in the 201 body, so a NUL byte or an unpaired surrogate made
+ * moveStage's findFirst throw Prisma's raw error (the server source path, a
+ * code frame, the PostgresError) to the caller, where the single move answers
+ * the same input with GlobalHttpExceptionFilter's sanitised 500. Refused here
+ * with 400 before any deal moves.
  */
 export class BulkMoveDealsStageDto extends PickType(BulkMoveStageDto, ['stageId'] as const) {
   @IsArray()
   @IsString({ each: true })
+  @IsComparableText({ each: true })
   dealIds!: string[];
+
+  @IsComparableText()
+  stageId!: string;
 }
 
 @Controller('crm')

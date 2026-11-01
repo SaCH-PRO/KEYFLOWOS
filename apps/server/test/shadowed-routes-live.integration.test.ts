@@ -56,6 +56,18 @@
  *     suite applies the bulk handlers' parameter types tsc emits, and one case
  *     per controller reads them from the source as tsc compiles it.
  *
+ * Review repairs (R0-13f review, two cases at the end):
+ *   - bulkMoveStage returns each id's error message in its 201 body, so a deal
+ *     id or stageId holding a NUL byte or an unpaired surrogate (text Postgres
+ *     or Prisma refuses) sent Prisma's raw error, with the server source path
+ *     and a code frame, to the caller. BulkMoveDealsStageDto now refuses such
+ *     text per id and in stageId with 400 before any deal moves.
+ *   - the approvals siblings (get, approve, reject, delegate, cancel,
+ *     escalate) looked a request up by id alone, so a member of any business
+ *     could read or escalate another tenant's request through their own
+ *     business's path. ApprovalController now answers another tenant's request
+ *     exactly like an unknown id before any service call.
+ *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the user,
  * business, membership, approval, command item, deal, stage, contact,
  * procurement request and supplier connection rows, AuthGuard, BusinessGuard,
@@ -164,7 +176,7 @@ function nextIp() {
 }
 
 /** A request as `actor` (undefined: no identity attached, as an unauthenticated caller). */
-function send(method: 'get' | 'post', url: string, actor: string | undefined, body?: unknown) {
+function send(method: 'get' | 'post' | 'delete', url: string, actor: string | undefined, body?: unknown) {
   let r = (request(app.getHttpServer()) as any)[method](url).set('x-forwarded-for', nextIp());
   if (actor) r = r.set('x-test-user', actor);
   return body === undefined ? r : r.send(body);
@@ -256,6 +268,7 @@ async function seedApproval(opts: {
   businessId: string;
   status?: string;
   currentStep?: number;
+  requesterId?: string;
   steps: Array<{ approverId: string; status?: string }>;
 }) {
   seq += 1;
@@ -264,7 +277,7 @@ async function seedApproval(opts: {
       id: opts.id,
       businessId: opts.businessId,
       requestType: 'expense',
-      requesterId: ID.owner,
+      requesterId: opts.requesterId ?? ID.owner,
       title: `${opts.id} title`,
       payload: { amount: 100 },
       status: opts.status ?? 'pending',
@@ -827,5 +840,131 @@ describe('R0-13f: the newly reachable bodies are validated', () => {
     }
     expect(await writableState()).toEqual(before);
     expect((await rawRow('command_items', item.id)).status).toBe('OPEN');
+  });
+
+  it("NEGATIVE CONTROL: deals bulk move-stage refuses a deal id or stageId the database cannot compare (a NUL byte, an unpaired surrogate) with 400 before any deal moves, alone and next to an own deal, where bulkMoveStage's per-id catch answered 201 with Prisma's raw error (server source path, code frame, PostgresError); a well-formed id still gets its per-id result", async () => {
+    const deal = await seedDeal(ID.bizA);
+    const before = await writableState();
+    // Postgres refuses NUL in text (22021); Prisma refuses a lone surrogate
+    // before the query is sent. Both threw out of moveStage's findFirst, and
+    // bulkMoveStage returned err.message per id.
+    const unrepresentable = ['x\u0000y', `${P}deal\u0000`, '\ud800', `${P}deal\udc00x`];
+    const bodies: unknown[] = [];
+    for (const bad of unrepresentable) {
+      bodies.push({ dealIds: [bad], stageId: STAGE.aWon });
+      bodies.push({ dealIds: [deal.id, bad], stageId: STAGE.aWon });
+      bodies.push({ dealIds: [deal.id], stageId: bad });
+    }
+    const leaks = ['Prisma', 'invocation', 'PostgresError', 'ConnectorError', 'findFirst', 'crm-deals.service', '.ts:', '22021', path.resolve(__dirname, '..')];
+    for (const body of bodies) {
+      const label = JSON.stringify(body);
+      const res = await bulkMove(ID.owner, body);
+      expect(res.status, `${label} ${res.text}`).toBe(400);
+      expect(res.body, label).toMatchObject({ statusCode: 400 });
+      for (const leak of leaks) expect(res.text, `${label} carries ${leak}`).not.toContain(leak);
+    }
+    expect(await writableState()).toEqual(before);
+    expect((await rawRow('deals', deal.id)).stage_id).toBe(STAGE.aLead);
+
+    // Only text the database cannot hold is refused: an unknown id, a control
+    // character other than NUL and a paired surrogate reach moveStage and get
+    // the unknown id's per-id result, and the own deal next to them moves.
+    const wellFormed = [UNKNOWN, `${P}deal\u0001`, `${P}deal😀`];
+    const res = await bulkMove(ID.owner, { dealIds: [deal.id, ...wellFormed], stageId: STAGE.aWon });
+    expect(res.status, res.text).toBe(201);
+    expect(res.body).toEqual({
+      moved: 1,
+      failed: wellFormed.length,
+      results: [
+        { id: deal.id, ok: true, stageId: STAGE.aWon, status: 'WON' },
+        ...wellFormed.map((id) => ({ id, ok: false, error: 'Deal not found' })),
+      ],
+    });
+  });
+});
+
+describe('R0-13f: the approval siblings of pending-for-me are bound to the path tenant', () => {
+  /** The request row and its steps, every column, read past the soft-delete extension. */
+  async function approvalState(id: string) {
+    const steps: Array<{ row: string }> = await db.$queryRawUnsafe(
+      `SELECT to_jsonb(t)::text AS row FROM approval_steps t WHERE t.approval_request_id = $1 ORDER BY t.id`, id,
+    );
+    return { request: await rawRow('approval_requests', id), steps: steps.map((s) => JSON.parse(s.row)) };
+  }
+
+  /** The seven per-request calls, each on `approvalId` under `biz` as `actor`. */
+  const perRequest = (approvalId: string, biz: string, actor: string) => {
+    const base = `/businesses/${biz}/approvals/${approvalId}`;
+    return {
+      getById: () => send('get', base, actor),
+      approve: () => send('post', `${base}/approve`, actor, { decision: 'approve' }),
+      reject: () => send('post', `${base}/reject`, actor, { decision: 'reject' }),
+      delegate: () => send('post', `${base}/delegate`, actor, { delegatedTo: ID.crmWrite }),
+      cancel: () => send('delete', base, actor),
+      escalate: () => send('post', `${base}/escalate`, actor, { reason: 'k13f' }),
+    };
+  };
+
+  it("NEGATIVE CONTROL: get, approve, reject, delegate, cancel and escalate of another tenant's approval request, through a business the caller is a member of, are refused exactly like an unknown id (404, byte-identical but for the id in the path), write nothing and emit nothing; the same calls through the request's own business still answer", async () => {
+    const emitter = app.get((await import('@nestjs/event-emitter')).EventEmitter2);
+    const emitted: string[] = [];
+    const listener = (event: string | string[]) => { emitted.push(String(event)); };
+    emitter.onAny(listener);
+    try {
+      // bizA's request waiting on the approver (a member of both tenants), who
+      // also requested it, so every verb's own actor check would pass.
+      const foreign = `${P}ar_x_foreign`;
+      await seedApproval({ id: foreign, businessId: ID.bizA, requesterId: ID.approver, steps: [{ approverId: ID.approver }] });
+      const foreignBefore = await approvalState(foreign);
+      const verbs = ['getById', 'approve', 'reject', 'delegate', 'cancel', 'escalate'] as const;
+      // The approver through bizB, and bizB's owner (no bizA membership,
+      // getById and escalate need no actor of the request).
+      for (const [actor, names] of [
+        [ID.approver, verbs],
+        [ID.outsider, ['getById', 'escalate'] as const],
+      ] as const) {
+        const refusedCalls = perRequest(foreign, ID.bizB, actor);
+        const absentCalls = perRequest(UNKNOWN, ID.bizB, actor);
+        for (const verb of names) {
+          const refused = await refusedCalls[verb]();
+          const absent = await absentCalls[verb]();
+          expect(refused.status, `${actor} ${verb} ${refused.text}`).toBe(404);
+          expect(refused.body, `${actor} ${verb}`).toMatchObject({ statusCode: 404, message: 'Approval request not found' });
+          expect(normalisedError(refused).split(foreign).join(UNKNOWN), `${actor} ${verb}`).toBe(normalisedError(absent));
+          expect(refused.text, `${actor} ${verb}`).not.toContain(`${foreign} title`);
+          expect(refused.text, `${actor} ${verb}`).not.toContain(ID.bizA);
+        }
+      }
+      expect(await approvalState(foreign)).toEqual(foreignBefore);
+      expect(emitted).toEqual([]);
+
+      // Through bizA, the request's own business, each verb still runs.
+      const own = perRequest(foreign, ID.bizA, ID.approver);
+      const read = await own.getById();
+      expect(read.status, read.text).toBe(200);
+      expect(read.body).toMatchObject({ id: foreign, businessId: ID.bizA, status: 'pending' });
+      const approved = await own.approve();
+      expect(approved.status, approved.text).toBe(201);
+      expect(approved.body).toMatchObject({ id: foreign, status: 'approved' });
+
+      const verbsOwn: Array<[keyof ReturnType<typeof perRequest>, number, Record<string, unknown>]> = [
+        ['reject', 201, { status: 'rejected' }],
+        ['delegate', 201, { status: 'pending' }],
+        ['cancel', 200, { status: 'cancelled' }],
+        ['escalate', 201, { status: 'escalated' }],
+      ];
+      for (const [verb, status, shape] of verbsOwn) {
+        const id = `${P}ar_x_own_${verb}`;
+        await seedApproval({ id, businessId: ID.bizA, requesterId: ID.approver, steps: [{ approverId: ID.approver }] });
+        const res = await perRequest(id, ID.bizA, ID.approver)[verb]();
+        expect(res.status, `${verb} ${res.text}`).toBe(status);
+        expect(res.body, verb).toMatchObject({ id, ...shape });
+      }
+      expect((await approvalState(`${P}ar_x_own_delegate`)).steps[0]).toMatchObject({ status: 'delegated', delegated_to: ID.crmWrite });
+      // The listener saw the own-business writes, so its silence above was no blind spot.
+      expect(emitted).toEqual(expect.arrayContaining(['approval.step_approved', 'approval.cancelled', 'approval.escalated']));
+    } finally {
+      emitter.offAny(listener);
+    }
   });
 });
