@@ -629,86 +629,73 @@ describe('ST-PC01-1: the tenant-bound server-side quote read a KEY caller must u
 });
 
 // ---------------------------------------------------------------------------
-// OPEN DEFECT ST-R004-1 (review of R0-04-QT-DETAIL-ROUTE) — reproduced, NOT
-// fixed here.
+// ST-R004-1 (review of R0-04-QT-DETAIL-ROUTE) — fixed.
 //
 // The cases above prove that the tenant detail route binds the QUOTE ROW to
-// the path tenant. They do not prove that the rows the route joins belong to
-// that tenant, and today they need not: createQuote (commerce.service.ts:1404)
-// and updateQuote (:1471) write body.contactId with no check that the contact
-// belongs to the path tenant, and OPERATOR_QUOTE_INCLUDE (:76) joins `contact`
-// with no tenant condition (neither Prisma extension filters a nested include
-// or a nested create). A tenant-B owner can point a B quote at A's contact,
-// and B's detail read then serves A's customer name and email.
-//
-// The case below pins TODAY's observed behaviour so the defect is recorded by
-// an executing test, not by prose; it is NOT a certification of that
-// behaviour. It turns red when the fix lands, and the fix packet replaces it
-// with the required behaviour: a contactId of another tenant on quote create
-// or patch answers 404, byte-identical to an unknown contact, and writes or
-// changes no Quote row; the operator detail never serves another tenant's
-// contact. The fix is in commerce.service.ts (and the quote create DTO),
-// outside this proof packet's write set (the manifest only). It belongs with
-// V1-53-QUOTE-CREATE-ERRORS, the quote half of R0-27's tenant-checked contact.
-// Until it lands, this suite is not joined-row tenancy evidence (Release 0
-// journey step 6).
+// the path tenant. The case below proves that the contact it joins belongs to
+// that tenant too. Until the fix, createQuote and updateQuote wrote
+// body.contactId with no tenant check and OPERATOR_QUOTE_INCLUDE joined
+// `contact` with no tenant condition (neither Prisma extension filters a
+// nested include or a nested create), so a tenant-B owner could point a B
+// quote at A's contact and B's detail read then served A's customer name and
+// email. This file pinned that as an executing OPEN DEFECT case; it is
+// replaced here by the required behaviour. R0-27 review ST-27-2 (76e1c59d)
+// resolves contactId inside the path tenant on create and patch;
+// R0-CMF3-QUOTE-CONTACT-TENANT makes the operator include serve a contact
+// only of the quote's own tenant, so a legacy row already joined to a foreign
+// contact reads contact null (test/quote-contact-tenant.integration.test.ts).
 // ---------------------------------------------------------------------------
-describe("OPEN DEFECT ST-R004-1 — a quote on B's path can join A's contact (createQuote and updateQuote, outside this write set)", () => {
-  it("OPEN DEFECT ST-R004-1 reproduced — B's owner creates and patches B quotes with A's contactId (A's full contact row echoed), and B's detail route then serves A's customer email", async () => {
-    const created: string[] = [];
+describe("ST-R004-1 (fixed) — a quote on B's path cannot join A's contact", () => {
+  it("B's owner naming A's contactId on quote create or patch gets 404, byte-identical to an unknown contact; no Quote row is written or changed, and B's detail route never serves A's customer", async () => {
+    const unknownContact = `${P}contact_unknown`;
+    const items = [{ description: 'CQV probe', quantity: 1, unitPrice: 1 }];
     const ledgerBefore = await db.financialTransaction.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } });
+    const quotesBefore = await db.quote.count({ where: { businessId: ID.bizB } });
+    const qBState = async () =>
+      JSON.parse(JSON.stringify(await db.quote.findUnique({ where: { id: ID.qB }, include: { items: { orderBy: { id: 'asc' } } } })));
+    const qBBefore = await qBState();
+    const createOnB = (contactId: string, quoteNumber: string) =>
+      withActor(agent().post(`/commerce/businesses/${ID.bizB}/quotes`), ID.ownerB).send({ contactId, quoteNumber, items });
+    const patchQB = (contactId: string) =>
+      withActor(agent().patch(`/commerce/businesses/${ID.bizB}/quotes/${ID.qB}`), ID.ownerB).send({ contactId });
     try {
       // (1) create on B's path with A's contact
-      const create = await withActor(agent().post(`/commerce/businesses/${ID.bizB}/quotes`), ID.ownerB).send({
-        contactId: ID.contactA,
-        quoteNumber: 'CQV-ST-R004-1-create',
-        items: [{ description: 'CQV probe', quantity: 1, unitPrice: 1 }],
-      });
-      expect(create.status, JSON.stringify(create.body)).toBe(201);
-      created.push(create.body.id);
-      expect(create.body.businessId).toBe(ID.bizB);
-      expect(create.body.contactId).toBe(ID.contactA);
-      expect(create.body.contact).toMatchObject({
-        id: ID.contactA,
-        businessId: ID.bizA,
-        email: `${CANARY}customer@test.local`,
-        phone: `${CANARY}phone`,
-      });
+      const create = await createOnB(ID.contactA, 'CQV-ST-R004-1-create');
+      const createUnknown = await createOnB(unknownContact, 'CQV-ST-R004-1-unknown');
+      expect(create.status, JSON.stringify(create.body)).toBe(404);
+      expect(createUnknown.status, JSON.stringify(createUnknown.body)).toBe(404);
+      expect(create.body.message).toBe('Contact not found');
+      expect(stripVolatile(create.body)).toEqual(stripVolatile(createUnknown.body));
+      expectNoCanary(create.body);
+      expect(await db.quote.count({ where: { businessId: ID.bizB } })).toBe(quotesBefore);
 
-      const afterCreate = await detail(ID.ownerB, create.body.id, ID.bizB);
-      expect(afterCreate.status).toBe(200);
-      expect(afterCreate.body.businessId).toBe(ID.bizB);
-      expect(afterCreate.body.contact).toEqual({ firstName: 'Cqv', lastName: 'Customer', email: `${CANARY}customer@test.local` });
+      // (2) B's own quote patched to A's contact
+      const patch = await patchQB(ID.contactA);
+      const patchUnknown = await patchQB(unknownContact);
+      expect(patch.status, JSON.stringify(patch.body)).toBe(404);
+      expect(patchUnknown.status, JSON.stringify(patchUnknown.body)).toBe(404);
+      expect(patch.body.message).toBe('Contact not found');
+      expect(stripVolatile(patch.body)).toEqual(stripVolatile(patchUnknown.body));
+      expectNoCanary(patch.body);
+      expect(await qBState()).toEqual(qBBefore);
 
-      // (2) a legitimate B quote (B's own contact), then patched to A's contact
-      const own = await withActor(agent().post(`/commerce/businesses/${ID.bizB}/quotes`), ID.ownerB).send({
-        contactId: ID.contactB,
-        quoteNumber: 'CQV-ST-R004-1-patch',
-        items: [{ description: 'CQV probe', quantity: 1, unitPrice: 1 }],
-      });
-      expect(own.status, JSON.stringify(own.body)).toBe(201);
-      created.push(own.body.id);
-      expect(own.body.contactId).toBe(ID.contactB);
+      // (3) B's detail read still serves B's own contact, never A's
+      const afterAttempts = await detail(ID.ownerB, ID.qB, ID.bizB);
+      expect(afterAttempts.status).toBe(200);
+      expect(afterAttempts.body.contactId).toBe(ID.contactB);
+      expect(afterAttempts.body.contact).toEqual({ firstName: 'Cqv', lastName: 'CustomerB', email: 'b@test.local' });
+      // (B's own notes carry the canary too, so check A's contact fields by value.)
+      expect(JSON.stringify(afterAttempts.body)).not.toContain(`${CANARY}customer@test.local`);
+      expect(JSON.stringify(afterAttempts.body)).not.toContain(`${CANARY}phone`);
 
-      const patch = await withActor(agent().patch(`/commerce/businesses/${ID.bizB}/quotes/${own.body.id}`), ID.ownerB).send({
-        contactId: ID.contactA,
-      });
-      expect(patch.status, JSON.stringify(patch.body)).toBe(200);
-      expect(patch.body.contactId).toBe(ID.contactA);
-      expect(patch.body.contact).toMatchObject({ id: ID.contactA, email: `${CANARY}customer@test.local`, phone: `${CANARY}phone` });
-
-      const afterPatch = await detail(ID.ownerB, own.body.id, ID.bizB);
-      expect(afterPatch.status).toBe(200);
-      expect(afterPatch.body.businessId).toBe(ID.bizB);
-      expect(afterPatch.body.contact.email).toBe(`${CANARY}customer@test.local`);
-
-      // The rows really are B quotes joined to A's contact; no ledger row is written.
-      expect(await db.quote.count({ where: { businessId: ID.bizB, contactId: ID.contactA } })).toBe(2);
+      // No B quote is joined to A's contact, and no ledger row is written.
+      expect(await db.quote.count({ where: { businessId: ID.bizB, contactId: ID.contactA } })).toBe(0);
       expect(await db.financialTransaction.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } })).toBe(ledgerBefore);
     } finally {
-      // Hard delete (quote_items cascade) so the seeded fixtures are as before.
-      const ids = created.filter(Boolean);
-      if (ids.length) await db.$executeRawUnsafe('DELETE FROM quotes WHERE id = ANY($1::text[])', ids);
+      // A regression would write rows: hard delete them (quote_items cascade) so the seeded fixtures are as before.
+      await db.$executeRawUnsafe(
+        `DELETE FROM quotes WHERE business_id = '${ID.bizB}' AND quote_number IN ('CQV-ST-R004-1-create', 'CQV-ST-R004-1-unknown')`,
+      );
     }
   });
 });

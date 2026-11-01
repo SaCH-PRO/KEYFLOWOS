@@ -95,10 +95,18 @@ export const OPERATOR_QUOTE_CONTACT_SELECT = {
  * item, the invoice it was converted into and the business profile. Shared by
  * `getQuote` (the tenant-unbound server-side read) and the tenant-bound
  * `getQuoteForBusiness` (R0-PC-01) so the two reads cannot drift apart.
+ *
+ * R0-04 review (ST-R004-1): a nested include carries no tenant condition and
+ * neither Prisma extension filters one, so the contact is joined with its
+ * businessId and both readers pass the row through `toOperatorQuote`, which
+ * serves the contact only when it belongs to the quote's tenant.
  */
+const OPERATOR_QUOTE_CONTACT_JOIN = { ...OPERATOR_QUOTE_CONTACT_SELECT, businessId: true } as const;
+type OperatorQuoteContactRow = Prisma.ContactGetPayload<{ select: typeof OPERATOR_QUOTE_CONTACT_JOIN }>;
+
 const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
   contact: {
-    select: OPERATOR_QUOTE_CONTACT_SELECT,
+    select: OPERATOR_QUOTE_CONTACT_JOIN,
   },
   items: true,
   invoice: true,
@@ -115,6 +123,35 @@ const OPERATOR_QUOTE_INCLUDE = Prisma.validator<Prisma.QuoteInclude>()({
     },
   },
 });
+
+/**
+ * R0-04 review (ST-R004-1): a quote serves only a contact of its own tenant.
+ * createQuote and updateQuote resolve contactId inside the path tenant (R0-27
+ * review ST-27-2), but a row written before that check can still point at
+ * another tenant's contact, and the join itself has no tenant condition. That
+ * contact reads as null, so its name, email and phone never reach the quote's
+ * tenant (belt and braces for legacy rows).
+ */
+function withTenantContact<Q extends { businessId: string; contact: { businessId: string } | null }>(
+  quote: Q,
+): Omit<Q, 'contact'> & { contact: Q['contact'] | null } {
+  if (quote.contact && quote.contact.businessId !== quote.businessId) return { ...quote, contact: null };
+  return quote;
+}
+
+/**
+ * The operator quote read: the contact only when it belongs to the quote's
+ * tenant, projected back to OPERATOR_QUOTE_CONTACT_SELECT (the businessId it
+ * was joined with for the check is not served).
+ */
+function toOperatorQuote<Q extends { businessId: string; contact: OperatorQuoteContactRow | null }>(
+  quote: Q,
+): Omit<Q, 'contact'> & { contact: Omit<OperatorQuoteContactRow, 'businessId'> | null } {
+  const { contact, ...rest } = quote;
+  if (!contact) return { ...rest, contact: null };
+  const { businessId: contactBusinessId, ...fields } = contact;
+  return { ...rest, contact: contactBusinessId === quote.businessId ? fields : null };
+}
 
 /** Older invoices stored subtotal 0 with priced items; derive it so totals render. */
 function withLegacySubtotal<
@@ -1341,7 +1378,7 @@ export class CommerceService {
       include: OPERATOR_QUOTE_INCLUDE,
     });
     if (!quote) return null;
-    return this.decorateQuote(quote);
+    return this.decorateQuote(toOperatorQuote(quote));
   }
 
   /**
@@ -1359,7 +1396,7 @@ export class CommerceService {
       include: OPERATOR_QUOTE_INCLUDE,
     });
     if (!quote) return null;
-    return this.decorateQuote(quote);
+    return this.decorateQuote(toOperatorQuote(quote));
   }
 
   // ----- R2: public quote-view + accept/reject by signed token -----
@@ -1642,11 +1679,15 @@ export class CommerceService {
       };
     }
     
-    const updated = await this.prisma.client.quote.update({
-      where: { id: input.quoteId },
-      data: updateData,
-      include: { items: true, contact: true },
-    });
+    // R0-04 review (ST-R004-1): a legacy quote can still point at another
+    // tenant's contact; the response and the events never carry that row.
+    const updated = withTenantContact(
+      await this.prisma.client.quote.update({
+        where: { id: input.quoteId },
+        data: updateData,
+        include: { items: true, contact: true },
+      }),
+    );
     const prevExp = quote.expiryDate ? new Date(quote.expiryDate).getTime() : null;
     const newExp = updated.expiryDate ? new Date(updated.expiryDate).getTime() : null;
     if (input.expiryDate !== undefined && prevExp !== newExp) {

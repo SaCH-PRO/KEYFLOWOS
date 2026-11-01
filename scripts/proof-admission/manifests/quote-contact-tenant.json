@@ -1,0 +1,21 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-04 / R0-CMF3-QUOTE-CONTACT-TENANT",
+  "proofScope": "quote-contact-tenant-real-database",
+  "description": "A quote binds and serves only a contact of its own tenant (R0-04 review finding ST-R004-1). Run from apps/server: npx vitest run test/quote-contact-tenant.integration.test.ts --reporter=json --outputFile=.proof/k04b-vitest.json against a migrated isolated database and REDIS_URL, then node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/quote-contact-tenant.json --report .proof/k04b-vitest.json. createQuote and updateQuote resolve contactId inside the path tenant (assertContactInBusiness, R0-27 review ST-27-2 at 76e1c59d): a foreign, unknown or soft-deleted contact answers the same 404 'Contact not found' and no Quote row is written or changed. OPERATOR_QUOTE_INCLUDE joins the contact with its businessId and getQuote / getQuoteForBusiness serve it only when it belongs to the quote's tenant; updateQuote's response and events drop a foreign contact the same way, so a legacy B quote already pointing at an A contact reads contact null. RED-BEFORE at 8f19d686: the three legacy-row cases fail (A's contact served); the create and patch refusal cases already pass there (ST-27-2) and fail when assertContactInBusiness is removed from createQuote and updateQuote (mutation probe, 4 cases). Out of this scope: listQuotes, getStaleQuotes and markQuoteFollowedUp still include the contact with no tenant condition. The flipped joined-row case in commerce-quote-visibility.integration.test.ts is bound by quote-detail-route.json.",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": false,
+  "requiredCases": [
+    "fixture sanity (real rows) seeded two tenants, B's live and soft-deleted contacts, A's canary contact, B's own quote and two legacy B quotes joined to A's contact",
+    "POST /commerce/businesses/:businessId/quotes resolves contactId inside the path tenant B's owner naming A's contact gets 404, byte-identical to an unknown contact; no Quote row is written, A's contact is not echoed, nothing is emitted",
+    "POST /commerce/businesses/:businessId/quotes resolves contactId inside the path tenant a soft-deleted contact of B answers the same 404 on create, and nothing is written",
+    "POST /commerce/businesses/:businessId/quotes resolves contactId inside the path tenant positive control: B's owner creating with B's own contact gets 201 with B's contact, and B's detail route serves it",
+    "PATCH /commerce/businesses/:businessId/quotes/:quoteId resolves contactId inside the path tenant B's owner re-pointing a B quote at A's contact (with new items and notes) gets 404, byte-identical to an unknown contact; the quote row and its items are byte-identical",
+    "PATCH /commerce/businesses/:businessId/quotes/:quoteId resolves contactId inside the path tenant a soft-deleted contact of B answers the same 404 on patch, and the quote is unchanged",
+    "PATCH /commerce/businesses/:businessId/quotes/:quoteId resolves contactId inside the path tenant positive control: B's owner re-pointing a B quote at another B contact gets 200, and B's detail route serves the new contact",
+    "PATCH /commerce/businesses/:businessId/quotes/:quoteId resolves contactId inside the path tenant a PATCH of a legacy B quote already joined to A's contact (no contactId in the body) answers 200 with contact null, never A's row; re-pointing it at B's contact repairs it",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId: the operator include joins only a contact of the quote's tenant a legacy B quote already joined to A's contact answers 200 with contact null: A's customer name and email are not served, and the read writes nothing",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId: the operator include joins only a contact of the quote's tenant the server-side readers of the operator include, getQuote (sendQuoteEmail) and getQuoteForBusiness (KEY getQuoteStatus), answer contact null for the legacy row too",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId: the operator include joins only a contact of the quote's tenant positive control: B's own quote still carries exactly { firstName, lastName, email } of its contact (shape unchanged), and A's owner still reads A's contact on A's own quotes"
+  ]
+}
