@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import type { JobRole } from '@prisma/client';
+import type { JobRole, Membership } from '@prisma/client';
 import { FLOW_TOOLS } from '../ai/flow-tool-registry';
 import { defaultCrmAccessForLevel } from '../crm/crm-permissions.helper';
 import {
   LEVEL_RANK,
+  defaultScopesForRole,
   type AccessLevel,
   type CanonicalModule,
 } from '../../core/authority/module-vocabulary';
@@ -39,8 +40,11 @@ import {
  * tool's risk tier and, for a table tool, whose level reaches the level its
  * routes require (SEC-V21b-03). The canonical `crm` grant is further bounded by
  * the crm_view / crm_edit / crm_delete sub-permissions resolveCrmAccess applies over
- * HTTP (review 2 ESC-4, review 3 IC-1). A position with no JobRole gets the baseline
- * envelope, never none (envelopeForPosition, review 3 IC-2). A registry tool some
+ * HTTP (review 2 ESC-4, review 3 IC-1), and never reaches the contact writes whose
+ * service bounds the row by visibilityClause (CRM_ROW_VISIBILITY_TOOLS, review 4 DRV-1).
+ * A position with no JobRole gets the baseline envelope, never none, and a
+ * membership-backed position is bounded by its holder's Membership scopes
+ * (envelopeForPosition, review 3 IC-2, review 4 IC3-1). A registry tool some
  * pattern matches but no grant covers is
  * listed in `blockedTools`, which `isToolAllowed` checks first, so
  * AiOversightService.evaluate refuses it and the chat never advertises it.
@@ -189,6 +193,19 @@ export const CRM_SUBPERMISSION_TOOLS: Readonly<Record<'crm_edit' | 'crm_delete',
   crm_delete: ['crm_delete_contact'],
 };
 
+/**
+ * Table tools whose service call, with an actor, ANDs visibilityClause onto the contact it
+ * writes (CrmService.updateContact, softDeleteContact). crm_view 'all' does not mean the whole
+ * book: for every member but the OWNER the clause still keeps another member's PRIVATE contact
+ * out, so PATCH / DELETE contacts/:contactId answer 404 on it. The dispatcher calls these
+ * methods with no actor and reaches that row, and no scope map can keep KEY to the rows its
+ * holder sees, so the canonical `crm` grant never reaches them, at any level or
+ * sub-permission (V1-21b review 4 DRV-1). Derived in job-role-tool-families.spec.ts from the
+ * methods that reach visibilityClause( (a holder-aware dispatcher that passes the actor is the
+ * way back; an owner decision).
+ */
+export const CRM_ROW_VISIBILITY_TOOLS: readonly string[] = ['crm_delete_contact', 'crm_update_contact', 'tag_contact'];
+
 /** Baseline reads every position keeps regardless of grants (tools no route governs). */
 export const BASELINE_READS: readonly string[] = ['fetch_*', 'calendar_check_conflicts', 'documents_list'];
 
@@ -250,20 +267,21 @@ function covers(grant: Grant, toolName: string, riskTier: number): boolean {
  * own or that are shared with them, and createContact makes what they create theirs. The
  * dispatcher passes no actor, so KEY could not be kept to that book; every one of these
  * tools is withheld unless viewAll is true.
+ *
+ * Even viewAll is not the whole book (V1-21b review 4 DRV-1): the visibility clause keeps
+ * other members' PRIVATE contacts out of updateContact and softDeleteContact for every
+ * member but the OWNER, so CRM_ROW_VISIBILITY_TOOLS are withheld whatever the map says.
  */
 function crmWithheld(permissions: Record<string, unknown>, level: GrantLevel): ReadonlySet<string> {
+  const withheld = new Set<string>(CRM_ROW_VISIBILITY_TOOLS);
   const defaults = defaultCrmAccessForLevel(level);
   const viewOverride = own(permissions, 'crm_view');
   const viewAll = viewOverride ? viewOverride === 'all' : defaults.viewAll;
-  if (!viewAll) {
-    return new Set([...CRM_SUBPERMISSION_TOOLS.crm_edit, ...CRM_SUBPERMISSION_TOOLS.crm_delete]);
-  }
   const editScope = own(permissions, 'crm_edit') ?? defaults.editScope;
   const deleteScope = own(permissions, 'crm_delete') ?? defaults.deleteScope;
-  return new Set([
-    ...(editScope === 'any' ? [] : CRM_SUBPERMISSION_TOOLS.crm_edit),
-    ...(deleteScope === 'any' ? [] : CRM_SUBPERMISSION_TOOLS.crm_delete),
-  ]);
+  if (!viewAll || editScope !== 'any') for (const t of CRM_SUBPERMISSION_TOOLS.crm_edit) withheld.add(t);
+  if (!viewAll || deleteScope !== 'any') for (const t of CRM_SUBPERMISSION_TOOLS.crm_delete) withheld.add(t);
+  return withheld;
 }
 
 /**
@@ -276,6 +294,53 @@ export const NO_JOB_ROLE: Readonly<Pick<JobRole, 'id' | 'name' | 'permissions'>>
   name: 'Unassigned',
   permissions: {},
 };
+
+/** The holder's Membership, as ModuleScopeGuard and resolveCrmAccess read it. */
+export type HolderMembership = Pick<Membership, 'role' | 'permissionScopes'>;
+
+/**
+ * A staff position as StructureService.resolveStaffByPhone returns it: its JobRole and, on the
+ * membership path (membershipId / userId set), the holder's Membership.
+ */
+export interface StaffPosition {
+  jobRole?: Pick<JobRole, 'id' | 'name' | 'permissions'> | null;
+  membershipId?: string | null;
+  userId?: string | null;
+  membership?: HolderMembership | null;
+}
+
+/**
+ * The scope map ModuleScopeGuard enforces for a membership: an explicit permissionScopes
+ * object as stored (a missing key is none), else the role defaults. resolveCrmAccess reads
+ * the same map for the CRM sub-permissions; with no explicit map its base level (admin for
+ * ADMIN, read otherwise, full for the OWNER) is the role default's `crm` level.
+ */
+function effectiveScopes(membership: HolderMembership): Record<string, unknown> {
+  const scopes = membership.permissionScopes;
+  return scopes && typeof scopes === 'object' ? (scopes as Record<string, unknown>) : defaultScopesForRole(membership.role);
+}
+
+/** Both envelope checks AiOversightService.evaluate applies: the tool is allowed and its tier within the cap. */
+function passesEnvelope(envelope: JobRoleEnvelope, toolName: string, riskTier: number): boolean {
+  if (envelope.blockedTools.includes(toolName)) return false;
+  return matches(envelope.approvedTools, toolName) && riskTier <= envelope.maxRiskTier;
+}
+
+/**
+ * The position's envelope bounded by its holder's: exactly the registry tools both pass, by
+ * name, under the lower tier cap. Named after the position.
+ */
+function boundBy(position: JobRoleEnvelope, holder: JobRoleEnvelope): JobRoleEnvelope {
+  return {
+    jobRoleId: position.jobRoleId,
+    jobRoleName: position.jobRoleName,
+    approvedTools: FLOW_TOOLS.filter(
+      (t) => passesEnvelope(position, t.name, t.riskTier) && passesEnvelope(holder, t.name, t.riskTier),
+    ).map((t) => t.name),
+    blockedTools: [],
+    maxRiskTier: Math.min(position.maxRiskTier, holder.maxRiskTier),
+  };
+}
 
 @Injectable()
 export class JobRolePolicyService {
@@ -342,9 +407,25 @@ export class JobRolePolicyService {
    * with no envelope AiOversightService.evaluate answers from the crew RoleEngine detects
    * in the message text, which reaches CRM writes, refunds and execute_custom_logic for a
    * holder with no HTTP access (V1-21b review 3 IC-2). Fail closed.
+   *
+   * A membership-backed position is further bounded by its holder's Membership (V1-21b
+   * review 4 IC3-1): ModuleScopeGuard and resolveCrmAccess enforce Membership.permissionScopes,
+   * not the JobRole map, and the two drift apart when the member holds a second position
+   * whose copy the membership carries, is narrowed by PATCH team/:m/permissions, or changes
+   * role. The envelope is then what both the JobRole map and the membership's effective
+   * scopes reach. A membership-backed position whose membership is not given keeps the
+   * baseline only (fail closed). A contact-only position has no account and no HTTP access;
+   * its JobRole map is its whole scope, as before.
    */
-  envelopeForPosition(jobRole: Pick<JobRole, 'id' | 'name' | 'permissions'> | null | undefined): JobRoleEnvelope {
-    return this.envelopeForJobRole(jobRole ?? NO_JOB_ROLE);
+  envelopeForPosition(position: StaffPosition | null | undefined): JobRoleEnvelope {
+    const scoped = this.envelopeForJobRole(position?.jobRole ?? NO_JOB_ROLE);
+    const membershipBacked = !!(position?.membershipId || position?.userId || position?.membership);
+    if (!membershipBacked) return scoped;
+    const held = position?.membership ? effectiveScopes(position.membership) : {};
+    return boundBy(
+      scoped,
+      this.envelopeForJobRole({ id: scoped.jobRoleId, name: scoped.jobRoleName, permissions: held as JobRole['permissions'] }),
+    );
   }
 
   /** Same wildcard semantics as RoleEngine: exact match or trailing-* prefix. */

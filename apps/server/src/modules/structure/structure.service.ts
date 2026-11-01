@@ -871,14 +871,17 @@ export class StructureService {
    * Resolve an inbound WhatsApp/SMS phone number to the staff position it belongs
    * to, so a message from that number can be routed to KEY as a staff command
    * instead of the customer-contact intake pipeline. Returns null for unmatched
-   * numbers (the normal case — most inbound messages are from customers).
+   * numbers (the normal case — most inbound messages are from customers). The
+   * holder's membership comes with it: on the membership path its scopes, not
+   * the JobRole map, are what HTTP enforces, and they bound the position's KEY
+   * envelope (JobRolePolicyService.envelopeForPosition, V1-21b review 4 IC3-1).
    */
   async resolveStaffByPhone(businessId: string, phone: string) {
     const normalized = normalizePhone(phone);
     if (!normalized) return null;
     return this.prisma.client.orgAssignment.findFirst({
       where: { businessId, contactPhone: normalized, endedAt: null },
-      include: { jobRole: true, orgUnit: true },
+      include: { jobRole: true, orgUnit: true, membership: true },
     });
   }
 

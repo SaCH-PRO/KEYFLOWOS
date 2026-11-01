@@ -1067,6 +1067,77 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     });
   });
 
+  /**
+   * Review 4 DRV-1: the sub-permissions are not the only actor check. With an actor, a
+   * service method that ANDs visibilityClause onto the row it reaches keeps another
+   * member's PRIVATE contact out for every member but the OWNER, whatever crm_view says;
+   * the dispatcher passes no actor. A tool is row-visibility-bound when one of its calls,
+   * followed through the services and own-class helpers it calls, reaches visibilityClause(.
+   */
+  describe('review 4 DRV-1 — the tools whose service bounds the row by visibilityClause', () => {
+    const crm = read('modules/crm/crm.service.ts');
+    const cases = dispatcherCases();
+    /**
+     * Reviewed: methods that read the clause only to decide what a refusal names, not which
+     * row is written. Asserted below.
+     */
+    const ERROR_ONLY: Record<string, string> = {
+      'CrmService.rejectContactIdentityTaken':
+        'names the holder of a 409 (existingContactId) only when the actor sees it; executeTool returns error.message alone',
+    };
+    const reachesClause = (call: string, seen = new Set<string>()): boolean => {
+      if (call in ERROR_ONLY || seen.has(call)) return false;
+      seen.add(call);
+      const sm = serviceMethod(call);
+      if (!sm) return false;
+      return /\bvisibilityClause\(/.test(sm.body) || serviceDelegates(call).some((d) => reachesClause(d, seen));
+    };
+    const grantedTools = Object.entries(derived.mapping).flatMap(([, tools]) => Object.entries(tools) as Array<[string, Level]>);
+    const bound = grantedTools.filter(([t]) => (calls.get(t) ?? []).some((c) => reachesClause(c)));
+    const writes = bound.filter(([, l]) => l !== 'read').map(([t]) => t).sort();
+    const reads = bound.filter(([, l]) => l === 'read').map(([t]) => t).sort();
+    const ROW = ((policyModule as Record<string, unknown>).CRM_ROW_VISIBILITY_TOOLS ?? []) as readonly string[];
+
+    it('the CrmService methods that call visibilityClause themselves', () => {
+      const methods = [...crm.matchAll(/^ {2}(?:private |public )?(?:async )?([a-zA-Z]+)\(/gm)].map((m) => m[1]);
+      const direct = [...new Set(methods.filter((m) => /\bvisibilityClause\(/.test(memberBody(crm, m) ?? '')))].sort();
+      expect(direct).toEqual(
+        ['bulkDeleteContacts', 'editableContactClause', 'listContacts', 'reassignContacts', 'rejectContactIdentityTaken', 'softDeleteContact', 'updateContact'].sort(),
+      );
+    });
+
+    it('CRM_ROW_VISIBILITY_TOOLS is exactly the granted write tools whose service reaches the clause', () => {
+      expect(writes).toEqual(['crm_delete_contact', 'crm_update_contact', 'tag_contact']);
+      expect([...ROW].sort()).toEqual(writes);
+    });
+
+    it('the read tools it bounds are the accepted read follow-up (KEY CRM / calendar reads apply no row visibility)', () => {
+      expect(reads).toEqual(['calendar_list_events', 'crm_list_contacts', 'crm_search_contacts']);
+    });
+
+    it('the dispatcher passes them no actor, so the clause never runs on the KEY path', () => {
+      for (const t of writes) {
+        expect(cases.get(t), t).toBeDefined();
+        expect(cases.get(t), t).not.toMatch(/actorUserId|actorId|userId/);
+      }
+    });
+
+    it('ERROR_ONLY is what it says: the clause names the 409 holder only, and KEY returns error.message alone', () => {
+      const body = memberBody(crm, 'rejectContactIdentityTaken')!;
+      expect(body).toMatch(/const visClause = visibilityClause\(access, actorUserId\);/);
+      expect(body).toMatch(/existing = await this\.prisma\.client\.contact\.findFirst\(\{ where, select: \{ id: true \} \}\);/);
+      expect(body).toMatch(/existingContactId: existing\?\.id \?\? null/);
+      // it never writes
+      expect(body).not.toMatch(/\.(update|create|delete|upsert)(Many)?\(/);
+      for (const caller of ['createContact', 'updateContact']) {
+        expect(memberBody(crm, caller), caller).toMatch(/\.catch\(\(err: unknown\) => this\.rejectContactIdentityTaken\(/);
+      }
+      const executeTool = memberBody(read(ORCHESTRATOR), 'executeTool')!;
+      expect(executeTool).toContain('error: (error as Error).message,');
+      expect(executeTool).not.toMatch(/getResponse\(\)|existingContactId/);
+    });
+  });
+
   it('every registry family either has a granted tool or is listed as unmapped with a reason', () => {
     const grantingFamilies = new Set([...granted.keys()].map(family));
     const registryFamilies = [...new Set(FLOW_TOOLS.map((t) => family(t.name)))].sort();

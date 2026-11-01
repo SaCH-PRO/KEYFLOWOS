@@ -39,11 +39,12 @@ import { FLOW_TOOLS } from '../ai/flow-tool-registry';
 import { AiOversightService, type AutonomySettingsReader } from '../ai/ai-oversight.service';
 import { RoleEngineService, type BusinessRole } from '../ai/role-engine.service';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
-import { CANONICAL_MODULES, type CanonicalModule } from '../../core/authority/module-vocabulary';
+import { CANONICAL_MODULES, defaultScopesForRole, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import { ModuleScopeGuard, MODULE_SCOPE_KEY } from '../../core/auth/module-scope.guard';
-import { resolveCrmAccess } from '../crm/crm-permissions.helper';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { CrmService } from '../crm/crm.service';
 import { StaffChatBridgeService } from './staff-chat-bridge.service';
+import { StructureService } from './structure.service';
 import { jobRolePermissionsProblem } from './dto/create-job-role.dto';
 import * as policyExports from './job-role-policy.service';
 import { CANONICAL_MODULE_TOOLS, JobRolePolicyService, type JobRoleEnvelope } from './job-role-policy.service';
@@ -82,9 +83,11 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     read: ['deals_list', 'deals_get', 'deals_forecast', 'call_list_tasks', 'crm_find_duplicates', 'crm_merge_preview', 'crm_list_contacts', 'crm_search_contacts'],
     // tier 1, but the routes require crm:write (SEC-V21b-03)
     // crm_add_note / crm_add_task: CrmService forwards to CrmTimelineService, whose routes need crm:write (review 2 ESC-1)
-    write: ['crm_create_contact', 'crm_update_contact', 'call_generate_script', 'deals_create', 'deals_mark_won', 'crm_update_deal', 'call_log_outcome', 'tag_contact', 'crm_add_note', 'crm_add_task'],
-    admin: ['crm_delete_contact', 'crm_merge_execute', 'deals_delete'],
-    deny: ['commerce_create_invoice', 'structure_list_job_roles', 'payments_refund_charge', 'sequence_enroll'],
+    write: ['crm_create_contact', 'call_generate_script', 'deals_create', 'deals_mark_won', 'crm_update_deal', 'call_log_outcome', 'crm_add_note', 'crm_add_task'],
+    admin: ['crm_merge_execute', 'deals_delete'],
+    // crm_update_contact / tag_contact / crm_delete_contact: their service bounds the row by
+    // visibilityClause for every member but the OWNER, and KEY passes no actor (review 4 DRV-1)
+    deny: ['commerce_create_invoice', 'structure_list_job_roles', 'payments_refund_charge', 'sequence_enroll', 'crm_update_contact', 'tag_contact', 'crm_delete_contact'],
   },
   revenue: {
     // commerce_list_invoices reads what GET .../invoices (revenue:read) lists (review 2 C2)
@@ -300,7 +303,7 @@ describe('a grant on one key never widens another (SEC-V21b-01, CR-1)', () => {
 
   it('the same tools are reached once the granting module itself holds the level', () => {
     expect(passes(envelope({ crm: 'write' }), 'deals_mark_won')).toBe(true);
-    expect(passes(envelope({ crm: 'admin' }), 'crm_delete_contact')).toBe(true);
+    expect(passes(envelope({ crm: 'admin' }), 'deals_delete')).toBe(true);
     expect(passes(envelope({ revenue: 'admin' }), 'payments_refund_charge')).toBe(true);
     expect(passes(envelope({ bookings: 'admin' }), 'bookings_cancel_booking')).toBe(true);
     expect(passes(envelope({ content: 'admin', operations: 'read' }), 'assets_delete')).toBe(true);
@@ -391,7 +394,7 @@ describe('through the real AiOversightService.evaluate (the review repros)', () 
 
   it.each([
     [{ crm: 'write' }, 'deals_mark_won', { requiresQuickConfirm: true }],
-    [{ crm: 'admin' }, 'crm_delete_contact', { requiresFormalApproval: true }],
+    [{ crm: 'admin' }, 'deals_delete', { requiresFormalApproval: true }],
     [{ revenue: 'admin' }, 'payments_refund_charge', { requiresFormalApproval: true }],
     [{ revenue: 'write', team: 'read' }, 'commerce_create_invoice', { requiresQuickConfirm: true }],
     [{ content: 'write' }, 'assets_tag', { requiresQuickConfirm: false, requiresFormalApproval: false }],
@@ -687,7 +690,7 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
     it('the exact key and level still grant (positive control)', async () => {
       expect(await evaluate({ operations: 'write' }, 'inbox_mark_resolved')).toMatchObject({ allowed: true });
       expect(await evaluate({ revenue: 'admin' }, 'payments_create_link')).toMatchObject({ allowed: true });
-      expect(await evaluate({ crm: 'write' }, 'crm_update_contact')).toMatchObject({ allowed: true });
+      expect(await evaluate({ crm: 'write' }, 'deals_mark_won')).toMatchObject({ allowed: true });
     });
   });
 
@@ -765,11 +768,16 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
 
     it('positive controls: the defaults of the crm level, and an explicit any', async () => {
       expect((await access({ crm: 'write' })).editScope).toBe('any');
-      expect(await evaluate({ crm: 'write' }, 'crm_update_contact')).toMatchObject({ allowed: true });
-      expect(await evaluate({ crm: 'write', crm_edit: 'any' }, 'tag_contact')).toMatchObject({ allowed: true });
+      expect(await evaluate({ crm: 'write' }, 'crm_create_contact')).toMatchObject({ allowed: true });
+      expect(await evaluate({ crm: 'write', crm_edit: 'any' }, 'crm_create_contact')).toMatchObject({ allowed: true });
+      // an edit or delete scope of any no longer releases crm_update_contact / tag_contact /
+      // crm_delete_contact: their service also bounds the row by visibilityClause (review 4 DRV-1)
       expect((await access({ crm: 'admin' })).deleteScope).toBe('any');
-      expect(await evaluate({ crm: 'admin' }, 'crm_delete_contact', 3)).toMatchObject({ allowed: true });
-      expect(await evaluate({ crm: 'admin', crm_delete: 'any' }, 'crm_delete_contact', 3)).toMatchObject({ allowed: true });
+      for (const tool of ['crm_update_contact', 'tag_contact']) {
+        expect((await evaluate({ crm: 'write', crm_edit: 'any' }, tool)).allowed, tool).toBe(false);
+      }
+      expect((await evaluate({ crm: 'admin' }, 'crm_delete_contact', 3)).allowed).toBe(false);
+      expect((await evaluate({ crm: 'admin', crm_delete: 'any' }, 'crm_delete_contact', 3)).allowed).toBe(false);
       // the sub-permissions bound only the tools whose service checks them: deals and notes need crm:write alone
       expect(await evaluate({ crm: 'write', crm_edit: 'none' }, 'deals_mark_won')).toMatchObject({ allowed: true });
       expect(await evaluate({ crm: 'write', crm_edit: 'none' }, 'crm_add_note')).toMatchObject({ allowed: true });
@@ -854,7 +862,8 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
       for (const entry of tierCapped) {
         const [m, t] = entry.split(':');
         expect(allows(envelope({ [m]: 'write' }), t), `${entry} @ write`).toBe(false);
-        expect(passes(envelope({ [m]: 'admin' }), t), `${entry} @ admin`).toBe(true);
+        // crm_delete_contact is withheld at every level (review 4 DRV-1)
+        expect(passes(envelope({ [m]: 'admin' }), t), `${entry} @ admin`).toBe(t !== 'crm_delete_contact');
       }
     });
   });
@@ -896,6 +905,8 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
     /** The tools whose service call makes resolveCrmAccess's edit / delete check over HTTP. */
     const CRM_EDIT = ['crm_create_contact', 'crm_update_contact', 'tag_contact'];
     const CRM_DELETE = ['crm_delete_contact'];
+    /** The tools whose service ANDs visibilityClause onto the row it writes (review 4 DRV-1). */
+    const CRM_ROW_VISIBILITY = ['crm_update_contact', 'tag_contact', 'crm_delete_contact'];
 
     it(`over ${maps.length} maps: a governed tool KEY reaches is allowed over HTTP`, async () => {
       const memo = new Map<string, boolean>();
@@ -915,6 +926,10 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
           }
           if ([...CRM_EDIT, ...CRM_DELETE].includes(tool) && !(await resolveCrmAccess(membershipPrisma(p), 'biz_1', 'u_1')).viewAll) {
             violations.push(`${JSON.stringify(p)} -> ${tool} (crm_view is not all)`);
+          }
+          // review 4 DRV-1: the clause hides other members' PRIVATE rows from this STAFF holder whatever crm_view says
+          if (CRM_ROW_VISIBILITY.includes(tool) && visibilityClause(await resolveCrmAccess(membershipPrisma(p), 'biz_1', 'u_1'), 'u_1') !== null) {
+            violations.push(`${JSON.stringify(p)} -> ${tool} (the service bounds the row by visibilityClause)`);
           }
         }
       }
@@ -1042,12 +1057,16 @@ describe('V1-21b review 3 — KEY never exceeds HTTP on the same scope map (IC-1
     });
 
     it('positive controls: crm_view all, or the level default, keeps them; tools crm_view does not bound stay reached', async () => {
+      // of SUB_TOOLS only crm_create_contact: the others' service also bounds the row by
+      // visibilityClause, which crm_view 'all' does not lift (review 4 DRV-1)
       for (const permissions of [{ crm: 'admin' }, { crm: 'admin', crm_view: 'all' }]) {
         expect((await resolveCrmAccess(membershipPrisma(permissions), 'biz_1', 'u_1')).viewAll).toBe(true);
-        for (const tool of SUB_TOOLS) expect(passes(envelope(permissions), tool), `${JSON.stringify(permissions)} ${tool}`).toBe(true);
+        for (const tool of SUB_TOOLS) {
+          expect(passes(envelope(permissions), tool), `${JSON.stringify(permissions)} ${tool}`).toBe(tool === 'crm_create_contact');
+        }
       }
       expect(
-        await oversight.evaluate('biz_1', 'crm_update_contact', undefined, [], envelope({ crm: 'write', crm_view: 'all' }), reader()),
+        await oversight.evaluate('biz_1', 'crm_create_contact', undefined, [], envelope({ crm: 'write', crm_view: 'all' }), reader()),
       ).toMatchObject({ allowed: true });
       // CrmDealsService and CrmTimelineService.addNote apply no CRM visibility over HTTP either
       const owned = envelope({ crm: 'write', crm_view: 'owned' });
@@ -1135,6 +1154,380 @@ describe('V1-21b review 3 — KEY never exceeds HTTP on the same scope map (IC-1
       expect(
         await oversight.evaluate('biz_1', 'calendar_list_events', undefined, ['general'], ctx!.jobRoleEnvelope, reader(3)),
       ).toMatchObject({ allowed: true });
+    });
+  });
+});
+
+/**
+ * V1-21b review 4 (DRV-1, IC3-1). Each case is the review's repro next to the HTTP answer
+ * for the same holder.
+ *
+ * DRV-1: crm_view 'all' does not mean the whole book. For every member but the OWNER,
+ * visibilityClause keeps another member's PRIVATE contact out of what updateContact and
+ * softDeleteContact reach with an actor (PATCH / DELETE contacts/:contactId answer 404). The
+ * dispatcher passes no actor, so KEY reached that row on the default { crm: 'write' } map.
+ *
+ * IC3-1: the bridge built the envelope from the phone's position's JobRole alone, while
+ * ModuleScopeGuard and resolveCrmAccess enforce the holder's Membership.permissionScopes.
+ * The two drift apart when the member holds a second position, is narrowed by PATCH
+ * team/:m/permissions, or changes role; a membership-backed position is now bounded by the
+ * membership's own scopes.
+ */
+describe('V1-21b review 4 — KEY never exceeds HTTP for the same holder (DRV-1, IC3-1)', () => {
+  const roleEngine = new RoleEngineService({} as never, {} as never, {} as never);
+  const oversight = new AiOversightService({ client: {} } as any, {} as any, {} as any, roleEngine, {} as any, policy);
+  const reader = (autonomyLevel?: number): AutonomySettingsReader => ({
+    autopilotSettings: {
+      findUnique: async () =>
+        autonomyLevel === undefined ? null : { autonomyLevel, blockedTools: [], approvedTools: [], approvalTimeoutHours: 24 },
+    },
+    aiMemory: { findUnique: async () => null },
+  });
+
+  /** A membership row as ModuleScopeGuard and resolveCrmAccess read it (null: none at all). */
+  type MembershipRow = { role: string; permissionScopes: unknown };
+  const STAFF = (permissionScopes: unknown): MembershipRow => ({ role: 'STAFF', permissionScopes });
+  const memberPrisma = (m: MembershipRow | null, extra: Record<string, unknown> = {}) =>
+    ({
+      client: {
+        membership: { findUnique: async () => (m === null ? null : { userId: 'u_1', businessId: 'biz_1', ...m }) },
+        user: { findUnique: async () => ({ id: 'u_1', role: 'USER' }) },
+        ...extra,
+      },
+    }) as any;
+
+  /** The real ModuleScopeGuard on a route requiring `module` at `minLevel`: true, or the refusal message. */
+  const httpAnswer = async (m: MembershipRow | null, module: string, minLevel: Level): Promise<true | string> => {
+    const reflector = { get: (key: string) => (key === MODULE_SCOPE_KEY ? { module, minLevel } : undefined) } as any;
+    const guard = new ModuleScopeGuard(memberPrisma(m), reflector);
+    const ctx = {
+      getHandler: () => ({}),
+      switchToHttp: () => ({ getRequest: () => ({ user: { id: 'u_1', role: 'USER' }, params: { businessId: 'biz_1' } }) }),
+    } as any;
+    try {
+      return (await guard.canActivate(ctx)) as true;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  };
+
+  const ROW_VISIBILITY = ((policyExports as Record<string, unknown>).CRM_ROW_VISIBILITY_TOOLS ?? []) as readonly string[];
+  const VISIBILITY_BOUND = ['crm_delete_contact', 'crm_update_contact', 'tag_contact'];
+
+  describe("DRV-1 — crm_view 'all' is not the whole book: KEY does not edit, tag or delete contacts", () => {
+    /** Just enough of Prisma's `where` to evaluate the tenant predicate and visibilityClause on one row. */
+    const rowMatches = (row: Record<string, any>, where: Record<string, any> | null | undefined): boolean =>
+      Object.entries(where ?? {}).every(([k, v]) => {
+        if (k === 'AND') return (v as Record<string, any>[]).every((w) => rowMatches(row, w));
+        if (k === 'OR') return (v as Record<string, any>[]).some((w) => rowMatches(row, w));
+        if (k === 'shares') return (row.shares as { userId: string }[]).some((s) => s.userId === v.some.userId);
+        if (v && typeof v === 'object' && 'in' in v) return (v.in as unknown[]).includes(row[k]);
+        return row[k] === v;
+      });
+
+    /** The real CrmService over one contact; a write that gets past every check throws REACHED_WRITE. */
+    const crmOn = (m: MembershipRow, contact: Record<string, any>) =>
+      new CrmService(
+        memberPrisma(m, {
+          contact: { findFirst: async ({ where }: { where: Record<string, any> }) => (rowMatches(contact, where) ? contact : null) },
+          $transaction: async () => {
+            throw new Error('REACHED_WRITE');
+          },
+        }),
+        ...([{}, {}, {}, {}, {}, {}, {}, {}, {}] as never[]),
+      );
+
+    // staffB's PRIVATE contact; the holder is u_1
+    const PRIVATE_OF_B = { id: 'c', businessId: 'biz_1', deletedAt: null, ownerId: 'u_staffB', visibility: 'PRIVATE', shares: [], notesInternal: 'secret' };
+    const TEAM_OF_B = { ...PRIVATE_OF_B, id: 'c_team', visibility: 'TEAM' };
+
+    it('the policy names the tools whose service bounds the row by visibilityClause', () => {
+      expect([...ROW_VISIBILITY].sort()).toEqual(VISIBILITY_BOUND);
+    });
+
+    it.each([
+      [{ crm: 'write' }, 'crm_update_contact', { companyName: 'KEY-EDIT' }],
+      [{ crm: 'write' }, 'tag_contact', { tags: ['vip'] }],
+      [{ crm: 'admin' }, 'crm_update_contact', { companyName: 'KEY-EDIT' }],
+      [{ crm: 'write', crm_view: 'all', crm_edit: 'any' }, 'crm_update_contact', { companyName: 'KEY-EDIT' }],
+      [{ crm: 'admin', crm_view: 'all', crm_edit: 'any' }, 'tag_contact', { tags: ['vip'] }],
+    ])("%j: PATCH answers 404 on another member's PRIVATE contact, the dispatcher's call reaches it, so KEY refuses %s", async (permissions, tool, patch) => {
+      expect(jobRolePermissionsProblem(permissions)).toBeNull();
+      expect(await httpAnswer(STAFF(permissions), 'crm', 'write')).toBe(true);
+      expect(await resolveCrmAccess(memberPrisma(STAFF(permissions)), 'biz_1', 'u_1')).toMatchObject({ viewAll: true, editScope: 'any' });
+
+      const crm = crmOn(STAFF(permissions), PRIVATE_OF_B);
+      // HTTP: crm.controller passes the member as the actor; the visibility clause hides the row
+      await expect(crm.updateContact({ businessId: 'biz_1', contactId: 'c', ...patch, actorUserId: 'u_1' })).rejects.toThrow('Contact not found');
+      // KEY: the dispatcher passes no actor, so the clause never runs and the row is written
+      await expect(crm.updateContact({ businessId: 'biz_1', contactId: 'c', ...patch })).rejects.toThrow('REACHED_WRITE');
+
+      for (const autonomyLevel of [undefined, 3]) {
+        const d = await oversight.evaluate('biz_1', tool, undefined, [], envelope(permissions), reader(autonomyLevel));
+        expect(d.allowed, `${tool} @ ${autonomyLevel}`).toBe(false);
+        expect(d.reason).toMatch(/outside the Position position's scope/);
+      }
+    });
+
+    it.each([[{ crm: 'admin' }], [{ crm: 'admin', crm_view: 'all', crm_delete: 'any' }]])(
+      "%j: DELETE answers 404 on another member's PRIVATE contact, the dispatcher's call reaches it, so KEY refuses crm_delete_contact",
+      async (permissions) => {
+        expect(await httpAnswer(STAFF(permissions), 'crm', 'write')).toBe(true);
+        expect(await resolveCrmAccess(memberPrisma(STAFF(permissions)), 'biz_1', 'u_1')).toMatchObject({ viewAll: true, deleteScope: 'any' });
+        const crm = crmOn(STAFF(permissions), PRIVATE_OF_B);
+        await expect(crm.softDeleteContact({ businessId: 'biz_1', contactId: 'c', actorUserId: 'u_1' })).rejects.toThrow(NotFoundException);
+        await expect(crm.softDeleteContact({ businessId: 'biz_1', contactId: 'c' })).rejects.toThrow('REACHED_WRITE');
+        for (const autonomyLevel of [undefined, 3]) {
+          const d = await oversight.evaluate('biz_1', 'crm_delete_contact', undefined, [], envelope(permissions), reader(autonomyLevel));
+          expect(d.allowed, `crm_delete_contact @ ${autonomyLevel}`).toBe(false);
+          expect(d.reason).toMatch(/outside the Position position's scope/);
+        }
+      },
+    );
+
+    it('no member but the OWNER escapes the clause, so no scope map reaches these tools', async () => {
+      for (const role of ['STAFF', 'ADMIN', 'MANAGER']) {
+        for (const scopes of [null, { crm: 'admin' }, { crm: 'admin', crm_view: 'all' }, { crm: 'write', crm_view: 'all', crm_edit: 'any', crm_delete: 'any' }]) {
+          const access = await resolveCrmAccess(memberPrisma({ role, permissionScopes: scopes }), 'biz_1', 'u_1');
+          const clause = visibilityClause(access, 'u_1');
+          expect(clause, `${role} ${JSON.stringify(scopes)}`).not.toBeNull();
+          expect(rowMatches(PRIVATE_OF_B, clause), `${role} ${JSON.stringify(scopes)}`).toBe(false);
+        }
+      }
+      // the OWNER sees the whole book; a JobRole map cannot say who holds it (an owner decision)
+      expect(visibilityClause(await resolveCrmAccess(memberPrisma({ role: 'OWNER', permissionScopes: { crm: 'write' } }), 'biz_1', 'u_1'), 'u_1')).toBeNull();
+
+      const maps: Record<string, unknown>[] = [Object.fromEntries(CANONICAL_MODULES.map((m) => [m, 'admin'])), { crm: 'admin', sales: 'admin', finance: 'admin' }];
+      for (const crm of LEVELS) {
+        for (const view of [undefined, 'all', 'owned']) {
+          for (const edit of [undefined, 'any', 'owned', 'none']) {
+            for (const del of [undefined, 'any', 'owned', 'none']) {
+              const p: Record<string, unknown> = { crm };
+              if (view) p.crm_view = view;
+              if (edit) p.crm_edit = edit;
+              if (del) p.crm_delete = del;
+              maps.push(p);
+            }
+          }
+        }
+      }
+      for (const k of ['CRM', 'Crm', 'sales', 'SALES']) for (const l of ['read', 'write', 'admin', 'ADMIN']) maps.push({ [k]: l });
+      for (const p of maps) {
+        for (const tool of VISIBILITY_BOUND) expect(passes(envelope(p), tool), `${JSON.stringify(p)} -> ${tool}`).toBe(false);
+      }
+    });
+
+    it('positive controls: the CRM tools the clause does not bound on the KEY path stay reached', async () => {
+      // the holder does edit a TEAM contact by hand; KEY still cannot be kept to the rows the holder sees
+      await expect(
+        crmOn(STAFF({ crm: 'write' }), TEAM_OF_B).updateContact({ businessId: 'biz_1', contactId: 'c_team', companyName: 'X', actorUserId: 'u_1' }),
+      ).rejects.toThrow('REACHED_WRITE');
+      // createContact applies the clause only to name the holder of a 409, and the dispatcher returns error.message alone
+      expect(await oversight.evaluate('biz_1', 'crm_create_contact', undefined, [], envelope({ crm: 'write' }), reader())).toMatchObject({ allowed: true });
+      for (const tool of ['deals_mark_won', 'crm_add_note', 'crm_add_task', 'deals_create', 'crm_update_deal']) {
+        expect(passes(envelope({ crm: 'write' }), tool), tool).toBe(true);
+      }
+      expect(await oversight.evaluate('biz_1', 'deals_delete', undefined, [], envelope({ crm: 'admin' }), reader())).toMatchObject({
+        allowed: true,
+        requiresFormalApproval: true,
+      });
+    });
+  });
+
+  describe('IC3-1 — a membership-backed position is bounded by the membership HTTP enforces', () => {
+    const PHONE = '+18685550100';
+    const MESSAGE = 'invoice the lead, send a payment link, mark the deal won and update the contact';
+    const SALES_LEAD = { id: 'jr_A', name: 'Sales Lead', permissions: { revenue: 'admin', crm: 'admin' } };
+    const BOOKINGS_READ = { id: 'jr_B', name: 'Front desk', permissions: { bookings: 'read' } };
+    const REVENUE_WRITES = ['commerce_create_invoice', 'payments_create_link', 'commerce_mark_invoice_paid', 'payments_refund_charge'];
+    const CRM_WRITES = ['deals_mark_won', 'crm_create_contact', 'crm_add_note', 'deals_delete'];
+
+    type Position = { membershipId: string | null; userId: string | null; jobRole: typeof SALES_LEAD | null };
+
+    /**
+     * The real StructureService.resolveStaffByPhone over one assignment row (Prisma answers only
+     * the relations it asks for), then the real StaffChatBridgeService; returns the envelope KEY
+     * chat was given and the include resolveStaffByPhone asked for.
+     */
+    const routeThroughBridge = async (position: Position, membership: MembershipRow | null) => {
+      let include: Record<string, unknown> | undefined;
+      const prisma = {
+        client: {
+          orgAssignment: {
+            findFirst: async (args: { include?: Record<string, unknown> }) => {
+              include = args.include;
+              return {
+                id: 'as_1',
+                businessId: 'biz_1',
+                contactPhone: PHONE,
+                contactName: null,
+                contactEmail: null,
+                isContactOnly: position.membershipId === null,
+                membershipId: position.membershipId,
+                userId: position.userId,
+                jobRoleId: position.jobRole?.id ?? null,
+                orgUnitId: 'ou_1',
+                autoApprovalViaReply: false,
+                activeFlowSessionId: null,
+                ...(args.include?.jobRole ? { jobRole: position.jobRole } : {}),
+                ...(args.include?.orgUnit ? { orgUnit: { id: 'ou_1' } } : {}),
+                ...(args.include?.membership ? { membership: membership === null ? null : { id: position.membershipId, ...membership } } : {}),
+              };
+            },
+            update: async () => ({}),
+          },
+        },
+      };
+      const structure = new StructureService(prisma as any);
+      let pageContext: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
+      const orchestrator = {
+        getConversationHistory: async () => [],
+        chat: async (_b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext) => {
+          pageContext = ctx;
+          return { reply: 'ok', sessionId: 's_1' };
+        },
+      };
+      const moduleRef = {
+        get: (token: unknown) =>
+          token === FlowOrchestratorService ? orchestrator : token === JobRolePolicyService ? policy : token === AiOversightService ? oversight : undefined,
+      };
+      const bridge = new StaffChatBridgeService(structure, { client: {} } as any, moduleRef as any);
+      expect(await bridge.routeInboundMessage('biz_1', PHONE, MESSAGE, 'whatsapp')).toMatchObject({ handled: true });
+      expect(pageContext?.jobRoleEnvelope, 'the bridge passes an envelope').toBeDefined();
+      return { env: pageContext!.jobRoleEnvelope!, include };
+    };
+    const MEMBER: Position = { membershipId: 'm_1', userId: 'u_1', jobRole: SALES_LEAD };
+    const reachedBy = (env: JobRoleEnvelope) => REGISTRY.filter((t) => passes(env, t)).sort();
+
+    it('the repro: the Sales Lead envelope alone lets KEY take revenue and CRM writes', async () => {
+      expect(jobRolePermissionsProblem(SALES_LEAD.permissions)).toBeNull();
+      expect(jobRolePermissionsProblem(BOOKINGS_READ.permissions)).toBeNull();
+      const alone = policy.envelopeForJobRole(SALES_LEAD);
+      expect(await oversight.evaluate('biz_1', 'commerce_create_invoice', undefined, [], alone, reader())).toMatchObject({
+        allowed: true,
+        tier: 2,
+        requiresQuickConfirm: true,
+      });
+      expect(await oversight.evaluate('biz_1', 'deals_mark_won', undefined, [], alone, reader())).toMatchObject({ allowed: true, requiresQuickConfirm: true });
+      expect(await oversight.evaluate('biz_1', 'payments_refund_charge', undefined, [], alone, reader())).toMatchObject({
+        allowed: true,
+        requiresFormalApproval: true,
+      });
+    });
+
+    it.each([
+      // (a) the member's primary position (Front desk) holds the membership copy; the phone sits on Sales Lead
+      ['(a) a second, primary position holds the copy', 'revenue', STAFF(BOOKINGS_READ.permissions), 'Insufficient permissions: revenue requires write access (you have none)'],
+      ['(a) a second, primary position holds the copy', 'crm', STAFF(BOOKINGS_READ.permissions), 'Insufficient permissions: crm requires write access (you have none)'],
+      // (b) PATCH team/:m/permissions narrowed the member
+      ['(b) narrowed by updateMemberPermissions', 'crm', STAFF({ crm: 'read' }), 'Insufficient permissions: crm requires write access (you have read)'],
+      ['(b) narrowed by updateMemberPermissions', 'revenue', STAFF({ crm: 'read' }), 'Insufficient permissions: revenue requires write access (you have none)'],
+      // (c) updateMemberRole reset the scopes to the STAFF defaults (written out, or left to the role)
+      ['(c) role change to the STAFF defaults', 'revenue', STAFF(defaultScopesForRole('STAFF')), 'Insufficient permissions: revenue requires write access (you have read)'],
+      ['(c) role change to the STAFF defaults', 'crm', STAFF(defaultScopesForRole('STAFF')), 'Insufficient permissions: crm requires write access (you have read)'],
+      ['(c) role defaults, no explicit map', 'revenue', STAFF(null), 'Insufficient permissions: revenue requires write access (you have read)'],
+    ] as Array<[string, 'revenue' | 'crm', MembershipRow, string]>)('%s: HTTP refuses %s:write, and so does KEY', async (_label, module, membership, refusal) => {
+      expect(await httpAnswer(membership, module, 'write')).toBe(refusal);
+      const { env, include } = await routeThroughBridge(MEMBER, membership);
+      expect(include, 'resolveStaffByPhone loads the holder membership with the position').toMatchObject({ jobRole: true, membership: true });
+      expect(env.jobRoleName).toBe('Sales Lead');
+      for (const tool of module === 'revenue' ? REVENUE_WRITES : CRM_WRITES) {
+        for (const autonomyLevel of [undefined, 3]) {
+          const d = await oversight.evaluate('biz_1', tool, undefined, ['general'], env, reader(autonomyLevel));
+          expect(d.allowed, `${tool} @ ${autonomyLevel}`).toBe(false);
+          expect(d.reason).toMatch(/Sales Lead position's (scope|tier)/);
+        }
+      }
+    });
+
+    it('what the bounded envelope still reaches is what both the position and the membership reach', async () => {
+      // (a) the membership copy is { bookings: read }, which Sales Lead does not hold: the baseline is left
+      expect(reachedBy((await routeThroughBridge(MEMBER, STAFF(BOOKINGS_READ.permissions))).env)).toEqual(reachedBy(envelope({})));
+      // (b) crm:read: the CRM reads both reach stay reached
+      const narrowed = (await routeThroughBridge(MEMBER, STAFF({ crm: 'read' }))).env;
+      for (const tool of ['deals_list', 'crm_list_contacts', 'call_list_tasks']) expect(passes(narrowed, tool), tool).toBe(true);
+      expect(narrowed.maxRiskTier).toBe(1);
+      // (c) the STAFF defaults read revenue and crm: the reads stay reached, the writes do not
+      for (const scopes of [defaultScopesForRole('STAFF'), null]) {
+        const reset = (await routeThroughBridge(MEMBER, STAFF(scopes))).env;
+        for (const tool of ['payments_list_transactions', 'commerce_list_invoices', 'deals_list']) expect(passes(reset, tool), `${tool} ${scopes}`).toBe(true);
+        expect(reachedBy(reset)).toEqual(
+          reachedBy(policy.envelopeForJobRole(SALES_LEAD)).filter((t) => passes(envelope(defaultScopesForRole('STAFF')), t)),
+        );
+      }
+    });
+
+    it('controls: a membership holding the position copy, and a contact-only position, keep the JobRole envelope', async () => {
+      const copy = (await routeThroughBridge(MEMBER, STAFF(SALES_LEAD.permissions))).env;
+      expect(reachedBy(copy)).toEqual(reachedBy(policy.envelopeForJobRole(SALES_LEAD)));
+      expect(await oversight.evaluate('biz_1', 'commerce_create_invoice', undefined, [], copy, reader())).toMatchObject({
+        allowed: true,
+        requiresQuickConfirm: true,
+      });
+      const contactOnly = (await routeThroughBridge({ membershipId: null, userId: null, jobRole: SALES_LEAD }, null)).env;
+      expect(reachedBy(contactOnly)).toEqual(reachedBy(policy.envelopeForJobRole(SALES_LEAD)));
+    });
+
+    it('fail closed: a membership-backed position whose membership cannot be read keeps the baseline only', async () => {
+      expect(await httpAnswer(null, 'revenue', 'write')).toBe('Not a member of this business');
+      const env = (await routeThroughBridge(MEMBER, null)).env;
+      expect(reachedBy(env)).toEqual(reachedBy(envelope({})));
+      expect(env.maxRiskTier).toBe(1);
+      // the same position with the membership not loaded at all
+      expect(reachedBy(policy.envelopeForPosition({ jobRole: SALES_LEAD, membershipId: 'm_1' } as any))).toEqual(reachedBy(envelope({})));
+      expect(reachedBy(policy.envelopeForPosition({ jobRole: SALES_LEAD, membershipId: null, userId: 'u_1' } as any))).toEqual(reachedBy(envelope({})));
+    });
+
+    it('K2 property: over position x membership maps, a governed tool KEY reaches is one HTTP gives the holder', async () => {
+      const ROUTED = Object.entries(CANONICAL_MODULE_TOOLS).flatMap(([m, tools]) =>
+        Object.entries(tools).map(([t, l]) => [t, m, l] as [string, string, Level]),
+      );
+      const positions: Record<string, unknown>[] = [
+        SALES_LEAD.permissions,
+        { crm: 'write' },
+        { revenue: 'write', crm: 'read' },
+        { operations: 'admin', team: 'read', expenses: 'write' },
+        Object.fromEntries(CANONICAL_MODULES.map((m) => [m, 'admin'])),
+        { sales: 'admin', finance: 'admin', crm: 'admin' },
+      ];
+      const memberships: MembershipRow[] = [];
+      for (const role of ['STAFF', 'ADMIN', 'OWNER', 'MANAGER']) memberships.push({ role, permissionScopes: null }, { role, permissionScopes: {} });
+      for (const m of CANONICAL_MODULES) for (const l of [...LEVELS, 'none', 'WRITE']) memberships.push(STAFF({ [m]: l }));
+      for (const p of positions) memberships.push(STAFF(p));
+      memberships.push(
+        STAFF({ crm: 'admin', crm_edit: 'none', crm_delete: 'none' }),
+        STAFF({ crm: 'write', crm_view: 'owned' }),
+        STAFF({ REVENUE: 'admin', CRM: 'admin' }),
+        STAFF(['admin']),
+      );
+
+      const memo = new Map<string, true | string>();
+      const violations: string[] = [];
+      let reached = 0;
+      for (const p of positions) {
+        const jobRole = { id: 'jr_1', name: 'Position', permissions: p as any };
+        const alone = policy.envelopeForJobRole(jobRole);
+        for (const membership of memberships) {
+          const env = policy.envelopeForPosition({ jobRole, membershipId: 'm_1', membership } as any);
+          const access = await resolveCrmAccess(memberPrisma(membership), 'biz_1', 'u_1');
+          const at = `${JSON.stringify(p)} / ${JSON.stringify(membership)}`;
+          for (const [tool, module, level] of ROUTED) {
+            if (!passes(env, tool)) continue;
+            reached++;
+            if (!passes(alone, tool)) violations.push(`${at} -> ${tool} (beyond the position)`);
+            const key = `${JSON.stringify(membership)}|${module}|${level}`;
+            if (!memo.has(key)) memo.set(key, await httpAnswer(membership, module, level));
+            if (memo.get(key) !== true) violations.push(`${at} -> ${tool} (${memo.get(key)})`);
+            if (['crm_create_contact', 'crm_update_contact', 'tag_contact'].includes(tool) && !access.isOwner && access.editScope !== 'any') {
+              violations.push(`${at} -> ${tool} (crm_edit ${access.editScope})`);
+            }
+            if (tool === 'crm_create_contact' && !access.isOwner && !access.viewAll) violations.push(`${at} -> ${tool} (crm_view)`);
+            if (VISIBILITY_BOUND.includes(tool)) violations.push(`${at} -> ${tool} (row visibility)`);
+          }
+        }
+      }
+      expect(reached, 'the property is not vacuous').toBeGreaterThan(100);
+      expect(violations).toEqual([]);
     });
   });
 });

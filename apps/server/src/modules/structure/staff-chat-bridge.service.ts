@@ -103,8 +103,9 @@ export class StaffChatBridgeService {
     // decide which tools KEY may use in this conversation. A position with no
     // JobRole (deleted: onDelete SetNull, or never set) gets the baseline
     // envelope, never none — no envelope would let the text-detected crew
-    // decide (V1-21b review 3 IC-2).
-    const envelope = this.getJobRolePolicy().envelopeForPosition(assignment.jobRole);
+    // decide (V1-21b review 3 IC-2). A membership-backed position is bounded
+    // by the holder's Membership scopes, which HTTP enforces (review 4 IC3-1).
+    const envelope = this.getJobRolePolicy().envelopeForPosition(assignment);
 
     const hints = [
       `You are talking to ${displayName}, a staff member${assignment.jobRole ? ` (position: ${assignment.jobRole.name})` : ''} over ${channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}, not the in-app chat. Keep replies short and text-message appropriate.`,
