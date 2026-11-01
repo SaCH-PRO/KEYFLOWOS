@@ -1819,8 +1819,10 @@ export class CommerceService {
      * PaymentEvidenceService pass KEY_SYSTEM_ACTOR_ID. It is written to
      * Payment.recordedBy, the posting's FinancialTransaction.createdById and
      * the contact timeline event. It is an option, never part of `input`, so a
-     * client body can not name the recorder. Absent (drive intake) records
-     * null. A replay returns the original row and never rewrites its recorder.
+     * client body can not name the recorder. Drive intake passes the approving
+     * user (R0-CMF2). Absent (a caller with no human, e.g. an auto-executed
+     * intake plan) records null. A replay returns the original row and never
+     * rewrites its recorder.
      */
     actorId?: string | null;
     /**
@@ -2315,6 +2317,13 @@ export class CommerceService {
    * report success while recording no refunder. The SUCCESSFUL -> REFUNDED
    * flip is conditional on the status, so two concurrent refunds of the same
    * payment produce one refund and one 409.
+   *
+   * R0-CMF2-PAYMENT-ACTOR-GAPS (ST-R011-2): every refund, posted or not,
+   * writes one FINANCE payment_refunded activity row naming the refunder
+   * (actorId; KEY is SYSTEM). A payment with no payment_recorded posting (a
+   * mark-paid row written before R0-PL-04) used to name its refunder nowhere.
+   * The row is recorded after the refund commits, so a refund that rolls back
+   * leaves none.
    */
   async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null) {
     const payment = await this.prisma.client.payment.findFirst({
@@ -2336,6 +2345,7 @@ export class CommerceService {
     // the caller's response, so the payment, the ledger and the invoice
     // status never disagree. Invoice events are emitted after commit.
     const pendingEvents: Array<{ name: string; payload: unknown }> = [];
+    const refundActivity: Parameters<RevenuePostingService['recordRefundActivity']>[0] = [];
     const updated = await this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
       if (payment.invoiceId) await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
@@ -2355,6 +2365,7 @@ export class CommerceService {
       await this.revenuePosting.onPaymentRefunded(paymentId, {
         tx: txClient,
         createdById: actorId ?? null,
+        activityBuffer: refundActivity,
       });
       if (payment.invoiceId) {
         await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId, {
@@ -2372,6 +2383,8 @@ export class CommerceService {
       }
       return next;
     });
+    // Committed: the refund's audit row (posted or not) names the refunder.
+    if (refundActivity.length > 0) await this.revenuePosting.recordRefundActivity(refundActivity);
     for (const evt of pendingEvents) {
       this.events.emit(evt.name, evt.payload);
     }
