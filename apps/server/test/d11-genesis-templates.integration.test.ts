@@ -40,6 +40,14 @@
  * industry and an archetype, so no apply writes no owner-only configuration;
  * the refusal comes before the template is read, so a non-owner learns nothing
  * about which template ids exist (cases T01-T03).
+ * THE OWNER CHECK IS BOUND TO THE ROUTE'S BUSINESS (review SEC-T1): a STAFF
+ * member of bizG and bizT who owns a business of their own (bizO: an OWNER
+ * membership and Business.ownerId) is refused on bizG and bizT, also when the
+ * x-business-id header, ?businessId= and the body's businessId all name bizO,
+ * with both Business rows byte-identical (cases G09, T06). Without this user an
+ * owner check that ignored which business it was asked about (for example
+ * `where: { ownerId: actor.id }` without `id: businessId`) would pass every
+ * other case, because no other non-owner owns anything.
  *
  * HOW THE APP IS COMPOSED (the contacts-visibility model): a real Nest app with
  * the real BusinessGenesisController, BusinessGenesisService,
@@ -88,13 +96,15 @@ const ID = {
   adminW: `${P}adminW`,           // ADMIN, ADMIN defaults with settings: write
   superAdmin: `${P}superAdmin`,   // User.role SUPER_ADMIN, no membership anywhere
   legacyOwner: `${P}legacyOwner`, // Business.ownerId of bizL, no membership row (founding-membership backfill window)
+  staffOwner: `${P}staffOwner`,   // STAFF, role defaults, on bizG and bizT; OWNER membership and Business.ownerId of bizO, their own business (review SEC-T1)
   bizG: `${P}bizG`,               // genesis answers: the non-owner refusals, then the owner controls
   bizT: `${P}bizT`,               // template apply: the non-owner refusals, then the owner controls
   bizS: `${P}bizS`,               // the SUPER_ADMIN controls (genesis and templates)
   bizL: `${P}bizL`,               // the distinguished-owner controls (genesis and templates)
+  bizO: `${P}bizO`,               // the staff owner's own business: the owner check is bound to the route's business (review SEC-T1)
   template: `${P}tpl`,            // a published business template (industry, archetype, products, services, expense categories)
 };
-const USERS = [ID.owner, ID.coOwner, ID.staff, ID.admin, ID.adminW, ID.superAdmin, ID.legacyOwner];
+const USERS = [ID.owner, ID.coOwner, ID.staff, ID.admin, ID.adminW, ID.superAdmin, ID.legacyOwner, ID.staffOwner];
 const NON_OWNERS: Array<{ id: string; label: string }> = [
   { id: ID.staff, label: 'STAFF, role defaults (settings:none)' },
   { id: ID.adminW, label: 'ADMIN, settings:write' },
@@ -204,6 +214,27 @@ function applyTemplate(actor: string, businessId: string, templateId: string = I
     .send({});
 }
 
+/**
+ * Review SEC-T1: the same writes, with every other place a request can name a
+ * tenant (the x-business-id header the web client sends, ?businessId= and a
+ * body businessId) pointing at `elsewhere` while the route names `businessId`.
+ */
+function answersNaming(actor: string, businessId: string, elsewhere: string, body: Record<string, unknown>) {
+  return request(app.getHttpServer())
+    .post(`/business-genesis/businesses/${businessId}/answers?businessId=${elsewhere}`)
+    .set('x-test-user', actor)
+    .set('x-business-id', elsewhere)
+    .send({ answers: body, businessId: elsewhere });
+}
+
+function applyTemplateNaming(actor: string, businessId: string, elsewhere: string) {
+  return request(app.getHttpServer())
+    .post(`/businesses/${businessId}/templates/${ID.template}/apply?businessId=${elsewhere}`)
+    .set('x-test-user', actor)
+    .set('x-business-id', elsewhere)
+    .send({ businessId: elsewhere });
+}
+
 /** A refused write: 403 with the expected code and no Business fields in the body. */
 function expectRefusal(res: { status: number; body: any }, label: string) {
   expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(403);
@@ -303,7 +334,7 @@ beforeAll(async () => {
   for (const id of USERS) {
     await db.user.create({ data: { id, email: emailOf(id), name: id, role: id === ID.superAdmin ? 'SUPER_ADMIN' : 'USER' } });
   }
-  for (const [businessId, ownerId] of [[ID.bizG, ID.owner], [ID.bizT, ID.owner], [ID.bizS, ID.owner], [ID.bizL, ID.legacyOwner]]) {
+  for (const [businessId, ownerId] of [[ID.bizG, ID.owner], [ID.bizT, ID.owner], [ID.bizS, ID.owner], [ID.bizL, ID.legacyOwner], [ID.bizO, ID.staffOwner]]) {
     await db.business.create({
       data: { id: businessId, name: nameOf(businessId), ownerId, currency: SEEDED.currency, country: SEEDED.country },
     });
@@ -316,11 +347,17 @@ beforeAll(async () => {
       { userId: ID.staff, role: 'STAFF' },
       { userId: ID.admin, role: 'ADMIN' },
       { userId: ID.adminW, role: 'ADMIN', permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, settings: 'write' } },
+      { userId: ID.staffOwner, role: 'STAFF' },
     ];
     for (const m of memberships) {
       await db.membership.create({ data: { id: `${P}m_${m.userId.slice(P.length)}_${businessId.slice(P.length)}`, businessId, ...m } });
     }
   }
+  // The staff owner's own business: both owner arms (OWNER membership and Business.ownerId), so an
+  // owner check that ignored which business it was asked about would admit them on bizG and bizT.
+  await db.membership.create({
+    data: { id: `${P}m_${ID.staffOwner.slice(P.length)}_${ID.bizO.slice(P.length)}`, businessId: ID.bizO, userId: ID.staffOwner, role: 'OWNER' },
+  });
   await db.businessTemplate.create({
     data: {
       id: ID.template,
@@ -345,14 +382,23 @@ afterAll(async () => {
 }, 60_000);
 
 describe('R0-09d fixture sanity (real rows)', () => {
-  it('[D11G-X01] seeded four tenants, seven users, ten memberships and one template; bizL, bizS and the super admin have no membership; the co-owner is not Business.ownerId', async () => {
-    expect(await db.business.count({ where: { id: { startsWith: P } } })).toBe(4);
-    expect(await db.user.count({ where: { id: { startsWith: P } } })).toBe(7);
-    expect(await db.membership.count({ where: { id: { startsWith: P } } })).toBe(10);
+  it('[D11G-X01] seeded five tenants, eight users, thirteen memberships and one template; bizL, bizS and the super admin have no membership; the co-owner is not Business.ownerId; the staff owner is STAFF on bizG and bizT and owns bizO (OWNER membership and Business.ownerId)', async () => {
+    expect(await db.business.count({ where: { id: { startsWith: P } } })).toBe(5);
+    expect(await db.user.count({ where: { id: { startsWith: P } } })).toBe(8);
+    expect(await db.membership.count({ where: { id: { startsWith: P } } })).toBe(13);
     expect(await db.businessTemplate.count({ where: { id: { startsWith: P } } })).toBe(1);
     expect(await db.membership.count({ where: { businessId: { in: [ID.bizL, ID.bizS] } } })).toBe(0);
     expect(await db.membership.count({ where: { userId: ID.superAdmin } })).toBe(0);
     expect(await db.business.count({ where: { ownerId: ID.coOwner } })).toBe(0);
+    const staffOwnerRoles = await db.membership.findMany({
+      where: { userId: ID.staffOwner }, select: { businessId: true, role: true }, orderBy: { businessId: 'asc' },
+    });
+    expect(staffOwnerRoles).toEqual([
+      { businessId: ID.bizG, role: 'STAFF' },
+      { businessId: ID.bizO, role: 'OWNER' },
+      { businessId: ID.bizT, role: 'STAFF' },
+    ]);
+    expect((await db.business.findMany({ where: { ownerId: ID.staffOwner }, select: { id: true } })).map((b: { id: string }) => b.id)).toEqual([ID.bizO]);
   });
 });
 
@@ -437,6 +483,30 @@ describe('R0-09d business-genesis answers cannot change the business profile for
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(await profile(ID.bizS)).toMatchObject({ name: `${P}super-name`, currency: 'USD', country: 'LC', businessIntent: `${P}super intent` });
   });
+
+  it("[D11G-G09] RED-BEFORE (review SEC-T1): the owner check is bound to the route's business: a STAFF member of bizG who owns another business (OWNER membership and Business.ownerId of bizO) is refused on bizG (403), also when the x-business-id header, ?businessId= and the body's businessId all name bizO; both Business rows byte-identical, no blueprint inference; on bizO itself the same answers are the owner's (201)", async () => {
+    for (const [variant, send] of [
+      ['route only', () => answers(ID.staffOwner, ID.bizG, ALL_PROFILE_ANSWERS)],
+      ['header, query and body name bizO', () => answersNaming(ID.staffOwner, ID.bizG, ID.bizO, ALL_PROFILE_ANSWERS)],
+    ] as const) {
+      await reset(ID.bizG);
+      await reset(ID.bizO);
+      const beforeG = await businessRowText(ID.bizG);
+      const beforeO = await businessRowText(ID.bizO);
+      const res = await send();
+      expect(await businessRowText(ID.bizG), `${variant}: answers ${res.status}: bizG byte-identical`).toBe(beforeG);
+      expect(await businessRowText(ID.bizO), `${variant}: answers ${res.status}: bizO byte-identical`).toBe(beforeO);
+      expectRefusal(res, `staff owner of bizO on bizG, ${variant}`);
+      expect(blueprintInferred, `${variant}: no blueprint inference`).toEqual([]);
+    }
+    // The fixture really makes them an owner: on their own business the same answers are admitted.
+    await reset(ID.bizO);
+    const own = await answers(ID.staffOwner, ID.bizO, ALL_PROFILE_ANSWERS);
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
+    expect(await profile(ID.bizO)).toMatchObject({ name: PROFILE_ANSWERS.businessName.value, currency: 'USD', country: 'JM' });
+    expect((await profile(ID.bizG))?.name).toBe(nameOf(ID.bizG));
+    await reset(ID.bizO);
+  });
 });
 
 describe('R0-09d template apply cannot change the business profile for a non-owner (D-11, R0-09b review SEC-1)', () => {
@@ -489,4 +559,35 @@ describe('R0-09d template apply cannot change the business profile for a non-own
       expect((await templateResidue(businessId)).usages, actor).toBe(1);
     }
   });
+
+  it("[D11G-T06] RED-BEFORE (review SEC-T1): the owner check is bound to the route's business: a STAFF member of bizT who owns another business (OWNER membership and Business.ownerId of bizO) is refused on bizT (403), also when the x-business-id header, ?businessId= and the body's businessId all name bizO; both Business rows byte-identical, nothing else written in either; on bizO itself the apply is the owner's (201)", async () => {
+    for (const [variant, send] of [
+      ['route only', () => applyTemplate(ID.staffOwner, ID.bizT)],
+      ['header, query and body name bizO', () => applyTemplateNaming(ID.staffOwner, ID.bizT, ID.bizO)],
+    ] as const) {
+      await reset(ID.bizT);
+      await reset(ID.bizO);
+      const beforeT = await businessRowText(ID.bizT);
+      const beforeO = await businessRowText(ID.bizO);
+      const res = await send();
+      expect(await businessRowText(ID.bizT), `${variant}: apply ${res.status}: bizT byte-identical`).toBe(beforeT);
+      expect(await businessRowText(ID.bizO), `${variant}: apply ${res.status}: bizO byte-identical`).toBe(beforeO);
+      expect(await templateResidue(ID.bizT), `${variant}: nothing written in bizT`).toEqual(NO_RESIDUE);
+      expect(await templateResidue(ID.bizO), `${variant}: nothing written in bizO`).toEqual(NO_RESIDUE);
+      expectRefusal(res, `staff owner of bizO on bizT, ${variant}`);
+    }
+    // The fixture really makes them an owner: on their own business the apply is admitted.
+    await reset(ID.bizO);
+    const own = await applyTemplate(ID.staffOwner, ID.bizO);
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
+    expect(await profile(ID.bizO)).toMatchObject({ industry: TEMPLATE_INDUSTRY, archetype: TEMPLATE_ARCHETYPE });
+    expect(await templateResidue(ID.bizT)).toEqual(NO_RESIDUE);
+    await reset(ID.bizO);
+  });
+});
+
+describe('R0-09d open follow-ups (outside the R0-09d write set)', () => {
+  it.todo(
+    'REQUIRED (follow-up; apps/web/src/app/app/templates/page.tsx — outside the R0-09d write set; review CR-1): a non-owner who clicks Apply on the templates page sees the server refusal (403 BUSINESS_PROFILE_OWNER_ONLY, "Only the business owner can apply a business template."), or is not offered Apply: handleApply reads only res.data and swallows errors, and apiPost answers a 403 with {data:null, error} without throwing, so since the R0-09d gate the click ends with no message at all',
+  );
 });
