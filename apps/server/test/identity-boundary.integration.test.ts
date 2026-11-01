@@ -1657,15 +1657,7 @@ describe('OPEN DEFECTS — D-11 sibling write paths still change owner-only prof
       'SEC-1, found by reading the code): POST /businesses/:id/templates/:templateId/apply writes the template\'s archetype and industry onto the ' +
       'Business row for any member; a non-owner answers 403 for the profile write with Business.archetype and industry unchanged',
   );
-  it.todo(
-    'REQUIRED (follow-up; key-cortex.controller.ts execute — outside the R0-09 write set; review R09-ST-4): POST /api/v1/cortex/execute ' +
-      "builds the ConnectorCommand with userId: dto.userId ?? 'system', so a member attributes a command to the OWNER; the actor comes from req.user",
-  );
-  it.todo(
-    'REQUIRED (follow-up after the R09-ST-4 actor fix; key-cortex/adapters/settings-adapter.service.ts — outside the R0-09 write set; review CR-3): ' +
-      'settings.update_business_profile and settings.update_branding reach IdentityService.updateBusiness with no owner check; they apply ' +
-      'IdentityService.assertBusinessOwner on the non-spoofable actor, so a STAFF command leaves name, timezone, currency and branding unchanged',
-  );
+  // R09-ST-4 and CR-3 — FIXED by R0-09c-KEY-ACTOR-BINDING; proven in test/key-cortex-actor-binding.integration.test.ts.
 });
 
 // ST-4 (R0-ID-F3-REVOCATION-IAT-CUTOFF). The marker used to be a per-user flag

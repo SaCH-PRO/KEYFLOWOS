@@ -153,6 +153,11 @@
       "packet": "R0-34 / R0-34b-KEY-TENANT-BINDING"
     },
     {
+      "prefix": "k34c_",
+      "owner": "apps/server/test/key-cortex-actor-binding.integration.test.ts",
+      "packet": "R0-34 / R0-09c-KEY-ACTOR-BINDING"
+    },
+    {
       "prefix": "kab_",
       "owner": "apps/server/test/key-action-boundary.integration.test.ts",
       "legacy": true
