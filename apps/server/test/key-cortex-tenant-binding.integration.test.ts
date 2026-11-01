@@ -427,8 +427,9 @@ beforeAll(async () => {
   };
   emitHandlerParamTypes(KeyCortexController, 'updateAutonomyProfile', [UpdateAutonomyProfileDto, String]);
   emitHandlerParamTypes(KeyCortexGoalsController, 'createGoal', [goalsDtos.CreateGoalDto, String]);
-  emitHandlerParamTypes(KeyCortexGoalsController, 'createPlanFromGoal', [String, goalsDtos.CreatePlanFromGoalDto, String]);
-  emitHandlerParamTypes(KeyCortexGoalsController, 'createPlanFromCommand', [goalsDtos.CreatePlanFromCommandDto, String]);
+  // The trailing Object is the @CurrentUser() principal the two plan handlers take since R0-09e.
+  emitHandlerParamTypes(KeyCortexGoalsController, 'createPlanFromGoal', [String, goalsDtos.CreatePlanFromGoalDto, String, Object]);
+  emitHandlerParamTypes(KeyCortexGoalsController, 'createPlanFromCommand', [goalsDtos.CreatePlanFromCommandDto, String, Object]);
   emitHandlerParamTypes(KeyCortexGoalsController, 'updateTriggerRule', [String, goalsDtos.UpdateTriggerRuleDto, String]);
 
   // The consciousness pipeline is not under test; it answers at once and records the session it was handed.
