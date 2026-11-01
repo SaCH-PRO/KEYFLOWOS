@@ -57,6 +57,7 @@ const SERVER_DIR = join(REPO_ROOT, 'apps', 'server');
 const EVALUATOR = join(SCRIPT_DIR, 'evaluate.mjs');
 const DEFAULT_MANIFESTS = join(SCRIPT_DIR, 'manifests');
 const VITEST = join(SERVER_DIR, 'node_modules', 'vitest', 'vitest.mjs');
+const VITEST_BIN = join(SERVER_DIR, 'node_modules', '.bin', process.platform === 'win32' ? 'vitest.cmd' : 'vitest');
 const DIST_MAIN = join(SERVER_DIR, 'dist', 'main.js');
 
 const EXIT = Object.freeze({ SATISFIED: 0, REJECTED: 2, INCOMPLETE: 3 });
@@ -204,8 +205,15 @@ function lineFor(entry, receipt) {
     return `${pad('SATISFIED', 10)}${pad(entry.file, 40)} ${entry.packageId} required=${receipt.requiredCaseCount}${kind} suites=${receipt.boundSuites.length} head=${receipt.sourceHead}`;
   }
   const reasons = (receipt?.reasons ?? ['KF_PROOF_EVALUATOR_FAILED']).join(',');
-  const detail =
-    receipt?.missing ?? receipt?.unexpected ?? receipt?.duplicated ?? receipt?.missingSuites ?? receipt?.failedCases ?? receipt?.notPassed;
+  const detail = [
+    receipt?.missing,
+    receipt?.unexpected,
+    receipt?.duplicated,
+    receipt?.missingSuites,
+    receipt?.notPassed,
+    receipt?.failedCases,
+    receipt?.failedSuites,
+  ].find((d) => Array.isArray(d) && d.length > 0);
   const shown = Array.isArray(detail) ? detail.slice(0, 3).map((d) => (typeof d === 'string' ? d : JSON.stringify(d))) : [];
   const more = Array.isArray(detail) && detail.length > 3 ? ` (+${detail.length - 3} more)` : '';
   return `${pad('REJECTED', 10)}${pad(entry.file, 40)} ${reasons}${shown.length ? `: ${shown.join(' | ')}${more}` : ''}`;
@@ -296,11 +304,13 @@ function runAndJudge({ args, dir, entries, runnable, union, needsDist, head, wor
     }
     const files = union.map((s) => join(SERVER_DIR, s));
     console.log(`run-manifests: vitest run over ${files.length} suites bound by ${runnable.length} manifests at ${head}`);
-    const run = spawnSync(
-      process.execPath,
-      [VITEST, 'run', ...files, '--reporter=dot', '--reporter=json', `--outputFile=${reportPath}`, ...args.vitestArgs],
-      { cwd: SERVER_DIR, stdio: 'inherit', env: process.env },
-    );
+    const vitestArgs = ['run', ...files, '--reporter=dot', '--reporter=json', `--outputFile=${reportPath}`, ...args.vitestArgs];
+    // The package-manager shim, as `pnpm test:ci` runs it: it sets the NODE_PATH
+    // under which vite resolves the repo-root postcss.config.js plugins. Calling
+    // vitest.mjs bare dies in config loading under pnpm's isolated layout.
+    const run = existsSync(VITEST_BIN)
+      ? spawnSync(VITEST_BIN, vitestArgs, { cwd: SERVER_DIR, stdio: 'inherit', env: process.env })
+      : spawnSync(process.execPath, [VITEST, ...vitestArgs], { cwd: SERVER_DIR, stdio: 'inherit', env: process.env });
     vitestExit = run.status ?? run.signal;
     if (!existsSync(reportPath)) {
       console.error(`run-manifests: vitest exited ${vitestExit} and wrote no report`);
