@@ -43,8 +43,9 @@ import {
  * HTTP (review 2 ESC-4, review 3 IC-1), and never reaches the contact writes whose
  * service bounds the row by visibilityClause (CRM_ROW_VISIBILITY_TOOLS, review 4 DRV-1).
  * A position with no JobRole gets the baseline envelope, never none, and a
- * membership-backed position is bounded by its holder's Membership scopes
- * (envelopeForPosition, review 3 IC-2, review 4 IC3-1). A registry tool some
+ * membership-backed position is bounded by its holder's Membership scopes in the
+ * assignment's business, the row HTTP reads (envelopeForPosition, review 3 IC-2,
+ * review 4 IC3-1, review 6 INP5-1). A registry tool some
  * pattern matches but no grant covers is
  * listed in `blockedTools`, which `isToolAllowed` checks first, so
  * AiOversightService.evaluate refuses it and the chat never advertises it.
@@ -303,16 +304,19 @@ export const NO_JOB_ROLE: Readonly<Pick<JobRole, 'id' | 'name' | 'permissions'>>
 export type HolderUser = Pick<User, 'deletedAt' | 'bannedAt'>;
 
 /**
- * The holder's Membership, as ModuleScopeGuard and resolveCrmAccess read it, with the
- * membership's user as AuthMiddleware reads it.
+ * The holder's Membership, as ModuleScopeGuard and resolveCrmAccess read it (the row of
+ * `userId` in `businessId`), with the membership's user as AuthMiddleware reads it.
  */
-export type HolderMembership = Pick<Membership, 'role' | 'permissionScopes'> & { user?: HolderUser | null };
+export type HolderMembership = Pick<Membership, 'role' | 'permissionScopes'> &
+  Partial<Pick<Membership, 'businessId' | 'userId'>> & { user?: HolderUser | null };
 
 /**
- * A staff position as StructureService.resolveStaffByPhone returns it: its JobRole and, on the
- * membership path (membershipId / userId set), the holder's Membership.
+ * A staff position as StructureService.resolveStaffByPhone returns it: the OrgAssignment's
+ * business, its JobRole and, on the membership path (membershipId / userId set), the
+ * Membership the assignment names.
  */
 export interface StaffPosition {
+  businessId?: string | null;
   jobRole?: Pick<JobRole, 'id' | 'name' | 'permissions'> | null;
   membershipId?: string | null;
   userId?: string | null;
@@ -338,6 +342,24 @@ function effectiveScopes(membership: HolderMembership): Record<string, unknown> 
 function holderMayAuthenticate(membership: HolderMembership): boolean {
   const user = membership.user;
   return !!user && !user.deletedAt && !user.bannedAt;
+}
+
+/**
+ * Whether the membership the assignment names is the one HTTP reads for its holder where KEY
+ * acts (V1-21b review 6 INP5-1). ModuleScopeGuard and resolveCrmAccess look the membership up
+ * by (user, the request's business), and BusinessGuard admits a user only to a business they
+ * own or are a member of; the bridge acts in the assignment's business. An assignment written
+ * before assertAssignmentRefs can name a membership in another business (see
+ * StructureService.listPeople), and its userId is a denormalized copy that can name another
+ * user than the membership's. Only the membership of the assignment's own user in the
+ * assignment's own business is the holder's here; one in another business or of another user,
+ * or one whose business or user is not given, is not (fail closed).
+ */
+function isHoldersMembershipHere(position: StaffPosition, membership: HolderMembership): boolean {
+  const businessId = position.businessId;
+  if (typeof businessId !== 'string' || !businessId || membership.businessId !== businessId) return false;
+  if (typeof membership.userId !== 'string' || !membership.userId) return false;
+  return !position.userId || position.userId === membership.userId;
 }
 
 /** Both envelope checks AiOversightService.evaluate applies: the tool is allowed and its tier within the cap. */
@@ -441,13 +463,24 @@ export class JobRolePolicyService {
    * the token of a soft-deleted or banned user, so that holder reaches no route whatever its
    * membership holds. Such a holder, and one whose User row is not given with the membership
    * (fail closed), keeps the baseline only, as a holder with no membership does.
+   *
+   * The cap is the membership HTTP reads, the holder's own in the business KEY acts in
+   * (V1-21b review 6 INP5-1): an older assignment can name the holder's membership in another
+   * business, where its scopes give nothing here, or another user's. Such a membership, or one
+   * whose business or user is not given, caps the position to the baseline (fail closed), as
+   * no membership does; this holds even when the holder has a membership of their own here,
+   * which the assignment does not name.
    */
   envelopeForPosition(position: StaffPosition | null | undefined): JobRoleEnvelope {
     const scoped = this.envelopeForJobRole(position?.jobRole ?? NO_JOB_ROLE);
-    const membershipBacked = !!(position?.membershipId || position?.userId || position?.membership);
+    if (!position) return scoped;
+    const membershipBacked = !!(position.membershipId || position.userId || position.membership);
     if (!membershipBacked) return scoped;
-    const membership = position?.membership;
-    const held = membership && holderMayAuthenticate(membership) ? effectiveScopes(membership) : {};
+    const membership = position.membership;
+    const held =
+      membership && isHoldersMembershipHere(position, membership) && holderMayAuthenticate(membership)
+        ? effectiveScopes(membership)
+        : {};
     return boundBy(
       scoped,
       this.envelopeForJobRole({ id: scoped.jobRoleId, name: scoped.jobRoleName, permissions: held as JobRole['permissions'] }),
