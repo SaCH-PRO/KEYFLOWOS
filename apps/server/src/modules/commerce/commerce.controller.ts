@@ -896,15 +896,35 @@ export class CommerceController {
   }
 
   // ========== GMAIL INTEGRATION ==========
+  //
+  // R0-CMF5-GMAIL-CONNECT-BINDING (owner ruling D-11; R0-07 review ST-2, ST-3):
+  // the mailbox invoices, reminders, receipts and quotes are sent from is
+  // business configuration. Starting a connection (auth-url), confirming it and
+  // disconnecting it are OWNER only (GmailService.assertConnectAuthority:
+  // OWNER membership, Business.ownerId, SUPER_ADMIN; 403 GMAIL_OWNER_ONLY
+  // otherwise). They carry AuthGuard and BusinessGuard but not ModuleScopeGuard,
+  // as the subscription plan changes do: a revenue scope admits no one the owner
+  // rule refuses, and ModuleScopeGuard would refuse a distinguished owner with
+  // no membership row. The callback links nothing; it stages a PENDING
+  // connection that only the user the state names can confirm.
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'read')
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/gmail/auth-url')
-  getGmailAuthUrl(@Param('businessId') businessId: string) {
-    const url = this.gmail.getAuthUrl(businessId);
+  async getGmailAuthUrl(@Param('businessId') businessId: string, @Req() req: { user?: { id: string; role?: string } }) {
+    await this.gmail.assertConnectAuthority(businessId, req.user);
+    const url = this.gmail.getAuthUrl(businessId, (req.user as { id: string }).id);
     return { url };
   }
 
+  /**
+   * Google's redirect after consent. Public by necessity (the browser comes
+   * back from Google, and the web proxy at /api/commerce/gmail/callback forwards
+   * no session), so it decides nothing about who is on the other end: a state
+   * that verifies (signature, expiry, single use) and names a user has its code
+   * exchanged and the tokens staged as a PENDING connection for that user; the
+   * browser is sent to gmail=pending with the pending id, which the same user
+   * must confirm from a signed-in request. Nothing is linked here.
+   */
   @Get('gmail/callback')
   async handleGmailCallback(
     @Query('code') code: string,
@@ -912,18 +932,37 @@ export class CommerceController {
     @Res() res: Response,
   ) {
     const frontendUrl = appUrl();
-    
-    const parsedState = this.gmail.verifyState(state);
-    if (!parsedState) {
+
+    const parsedState = typeof state === 'string' ? this.gmail.verifyState(state) : null;
+    if (!parsedState?.userId) {
       return res.redirect(`${frontendUrl}/app/commerce?gmail=error&reason=invalid_state`);
     }
 
     try {
-      await this.gmail.saveGmailCredentials(parsedState.businessId, code);
-      return res.redirect(`${frontendUrl}/app/commerce?gmail=success`);
+      const { pendingId } = await this.gmail.stagePendingConnection(parsedState, code);
+      return res.redirect(`${frontendUrl}/app/commerce?gmail=pending&pending=${encodeURIComponent(pendingId)}`);
     } catch {
       return res.redirect(`${frontendUrl}/app/commerce?gmail=error`);
     }
+  }
+
+  /**
+   * R0-CMF5: activate the connection the callback staged. Only the user the
+   * OAuth state named, still the business owner (or SUPER_ADMIN), within the
+   * pending window, once. Body: { pendingId } from the gmail=pending redirect.
+   */
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/gmail/confirm')
+  async confirmGmailConnection(
+    @Param('businessId') businessId: string,
+    @Body('pendingId') pendingId: unknown,
+    @Req() req: { user?: { id: string; role?: string } },
+  ) {
+    await this.gmail.assertConnectAuthority(businessId, req.user);
+    if (typeof pendingId !== 'string' || pendingId.length === 0 || pendingId.length > 200) {
+      throw new BadRequestException('pendingId is required');
+    }
+    return this.gmail.confirmPendingConnection(businessId, req.user, pendingId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -933,10 +972,10 @@ export class CommerceController {
     return this.gmail.getGmailStatus(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'write')
+  @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/gmail')
-  disconnectGmail(@Param('businessId') businessId: string) {
+  async disconnectGmail(@Param('businessId') businessId: string, @Req() req: { user?: { id: string; role?: string } }) {
+    await this.gmail.assertConnectAuthority(businessId, req.user);
     return this.gmail.disconnectGmail(businessId);
   }
 

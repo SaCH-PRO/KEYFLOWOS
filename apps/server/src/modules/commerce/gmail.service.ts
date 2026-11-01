@@ -1,8 +1,66 @@
-import { BadRequestException, Inject, Injectable, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { createHmac, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GmailConnector } from '../../core/connectors/implementations/gmail.connector';
+import { decryptToken, encryptToken } from '../../core/crypto/token-crypto';
+
+/**
+ * R0-CMF5-GMAIL-CONNECT-BINDING (COST-LEDGER-001 section 7 items 4 and 5;
+ * R0-07 review ST-2, ST-3). The mailbox invoices, reminders, receipts and
+ * quotes are sent from is business configuration, so connecting, replacing and
+ * disconnecting it is OWNER only (owner ruling D-11).
+ */
+export const GMAIL_OWNER_ONLY = 'GMAIL_OWNER_ONLY';
+const GMAIL_OWNER_ONLY_MESSAGE = 'Only the business owner can connect, replace or disconnect the business mailbox';
+export const GMAIL_PENDING_NOT_FOUND = 'GMAIL_PENDING_NOT_FOUND';
+
+/**
+ * How long a Gmail connection the callback staged waits for its confirmation.
+ * The OAuth state itself lives 10 minutes; this covers the consent screen and
+ * the confirmation that follows it.
+ */
+const PENDING_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * Where a staged connection lives: an existing connector_accounts row (no
+ * schema change). Its token columns are ciphertext by contract
+ * (token-encryption-coverage.integration.test.ts, HANDLED_ELSEWHERE), so the
+ * tokens are written through encryptToken here. No other code reads
+ * ConnectorAccount, so a PENDING row is never taken for a live connection:
+ * sendEmail and every inbox read use Business.gmail* only.
+ */
+const PENDING_ROW = { provider: 'GOOGLE', service: 'GMAIL', status: 'PENDING' } as const;
+
+/** What a staged connection is bound to (connector_accounts.settings). */
+interface PendingBinding {
+  purpose: 'gmail-connect';
+  userId: string;
+  nonce: string;
+  pendingExpiresAt: string;
+}
+
+export interface GmailConnectActor {
+  id: string;
+  role?: string;
+}
+
+function gmailPendingNotFound(): NotFoundException {
+  return new NotFoundException({
+    code: GMAIL_PENDING_NOT_FOUND,
+    message: 'No pending Gmail connection of yours with this id for this business; start the connection again',
+  });
+}
 
 /**
  * R0-07: Gmail is an optional service, and it fails visibly. When it is not set
@@ -37,6 +95,12 @@ interface GoogleToken {
 
 interface OAuthState {
   businessId: string;
+  /**
+   * R0-CMF5: the user who asked for the auth URL. Only this user can confirm
+   * the connection the callback stages; a state without one (the pre-CMF5
+   * shape) stages nothing.
+   */
+  userId?: string;
   nonce: string;
   exp: number;
   purpose: 'gmail';
@@ -58,9 +122,10 @@ export class GmailService {
    * Nonces of OAuth states this process has accepted, with their expiry (R0-07
    * review ST-2): a signed state is good for one callback, so a captured or
    * forwarded auth URL cannot be completed again within its 10 minutes. Entries
-   * leave when their state would have expired anyway. This is per process; it
-   * does not by itself bind the state to the user who asked for it (that check
-   * belongs to the callback in commerce.controller.ts).
+   * leave when their state would have expired anyway. This is per process. The
+   * binding to the user who asked for it (R0-CMF5) is the state's userId plus
+   * the confirmation step: the callback only stages a PENDING connection, which
+   * confirmPendingConnection activates for that user alone.
    */
   private readonly acceptedStateNonces = new Map<string, number>();
 
@@ -134,13 +199,44 @@ export class GmailService {
     }
   }
 
-  getAuthUrl(businessId: string): string {
+  /**
+   * R0-CMF5 / D-11: who may connect, replace or disconnect the business mailbox.
+   * The owner is the OWNER membership or the distinguished owner
+   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
+   * BusinessGuard admit an owner by; SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants. Restated rather than imported, as
+   * SubscriptionsService.assertPlanChangeAuthority does: CommerceModule does not
+   * import IdentityModule.
+   */
+  async assertConnectAuthority(businessId: string, actor: GmailConnectActor | undefined): Promise<void> {
+    if (!actor?.id) throw new UnauthorizedException('Authentication required');
+    if (actor.role === 'SUPER_ADMIN') return;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return;
+    const owned = await this.prisma.client.business.findFirst({
+      where: { id: businessId, ownerId: actor.id },
+      select: { id: true },
+    });
+    if (owned) return;
+    throw new ForbiddenException({ code: GMAIL_OWNER_ONLY, message: GMAIL_OWNER_ONLY_MESSAGE });
+  }
+
+  /**
+   * The Google consent URL. Its state names the business and the user who
+   * asked (R0-CMF5), with a nonce and a 10-minute expiry, HMAC-signed with
+   * GOOGLE_STATE_SECRET. The caller has already passed assertConnectAuthority.
+   */
+  getAuthUrl(businessId: string, userId: string): string {
     if (!this.clientId) {
       throw gmailNotConfigured('Google OAuth not configured');
     }
-    
+
     const state: OAuthState = {
       businessId,
+      userId,
       nonce: randomBytes(16).toString('hex'),
       exp: Date.now() + 10 * 60 * 1000,
       purpose: 'gmail',
@@ -231,26 +327,114 @@ export class GmailService {
     return response.json();
   }
 
-  async saveGmailCredentials(businessId: string, code: string): Promise<{ email: string }> {
+  /**
+   * R0-CMF5: the OAuth callback's half. GET /commerce/gmail/callback needs no
+   * login (Google redirects the browser, and the web proxy forwards no
+   * session), so it cannot tell who completed consent and must not link
+   * anything. It exchanges the code and stores the tokens as a PENDING
+   * connection bound to the user and business the verified state names, then
+   * hands back the pending id; Business.gmail* is not touched. A state with no
+   * user stages nothing and calls no Google endpoint.
+   *
+   * One pending connection per (business, user): a newer consent replaces an
+   * unconfirmed older one, and this business's pending rows past their window
+   * are removed on the way.
+   */
+  async stagePendingConnection(state: OAuthState, code: string): Promise<{ pendingId: string }> {
+    if (typeof state?.userId !== 'string' || state.userId.length === 0) {
+      throw new BadRequestException('OAuth state names no user');
+    }
+    if (typeof code !== 'string' || code.length === 0) {
+      throw new BadRequestException('Authorization code is required');
+    }
     const tokens = await this.exchangeCodeForTokens(code);
     const userInfo = await this.getUserInfo(tokens.access_token);
 
-    const expiryDate = tokens.expires_in
-      ? new Date(Date.now() + tokens.expires_in * 1000)
-      : null;
-
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        gmailEmail: userInfo.email,
-        gmailAccessToken: tokens.access_token,
-        gmailRefreshToken: tokens.refresh_token,
-        gmailTokenExpiry: expiryDate,
+    const now = Date.now();
+    const db = this.prisma.client;
+    await db.connectorAccount.deleteMany({
+      where: {
+        businessId: state.businessId,
+        ...PENDING_ROW,
+        OR: [
+          { settings: { path: ['userId'], equals: state.userId } },
+          { createdAt: { lt: new Date(now - PENDING_WINDOW_MS) } },
+        ],
       },
     });
 
-    this.logger.log(`Gmail connected for business ${businessId}: ${userInfo.email}`);
-    return { email: userInfo.email };
+    const pendingId = `gmc_${randomBytes(24).toString('base64url')}`;
+    const binding: PendingBinding = {
+      purpose: 'gmail-connect',
+      userId: state.userId,
+      nonce: state.nonce,
+      pendingExpiresAt: new Date(now + PENDING_WINDOW_MS).toISOString(),
+    };
+    await db.connectorAccount.create({
+      data: {
+        id: pendingId,
+        businessId: state.businessId,
+        ...PENDING_ROW,
+        accountEmail: userInfo.email,
+        accessTokenEncrypted: encryptToken(tokens.access_token),
+        refreshTokenEncrypted: encryptToken(tokens.refresh_token ?? null),
+        tokenExpiresAt: tokens.expires_in ? new Date(now + tokens.expires_in * 1000) : null,
+        settings: { ...binding },
+      },
+    });
+
+    this.logger.log(`Gmail connection staged for business ${state.businessId} by user ${state.userId}; awaiting confirmation`);
+    return { pendingId };
+  }
+
+  /**
+   * R0-CMF5: the confirmation, from an authenticated request. The owner rule is
+   * checked first (a refused member reads no pending row), then the pending
+   * connection must be this business's, staged for this user and inside its
+   * window; anything else is GMAIL_PENDING_NOT_FOUND. The row is claimed
+   * (deleted while still PENDING) before Business.gmail* is written, so a
+   * pending id activates at most once even when two confirmations race.
+   */
+  async confirmPendingConnection(
+    businessId: string,
+    actor: GmailConnectActor | undefined,
+    pendingId: string,
+  ): Promise<{ connected: true; email: string }> {
+    await this.assertConnectAuthority(businessId, actor);
+    const actorId = (actor as GmailConnectActor).id;
+    const db = this.prisma.client;
+
+    const row = await db.connectorAccount.findFirst({
+      where: { id: pendingId, businessId, ...PENDING_ROW },
+    });
+    if (!row) throw gmailPendingNotFound();
+
+    const binding = (row.settings ?? {}) as Partial<PendingBinding>;
+    if (binding.purpose !== 'gmail-connect' || binding.userId !== actorId) throw gmailPendingNotFound();
+    const expiresAt = typeof binding.pendingExpiresAt === 'string' ? Date.parse(binding.pendingExpiresAt) : NaN;
+    if (!(expiresAt > Date.now())) {
+      await db.connectorAccount.deleteMany({ where: { id: row.id, businessId, status: PENDING_ROW.status } });
+      throw gmailPendingNotFound();
+    }
+
+    const claimed = await db.connectorAccount.deleteMany({ where: { id: row.id, businessId, status: PENDING_ROW.status } });
+    if (claimed.count !== 1) throw gmailPendingNotFound();
+
+    const email = row.accountEmail as string;
+    const refreshToken = decryptToken(row.refreshTokenEncrypted);
+    await db.business.update({
+      where: { id: businessId },
+      data: {
+        gmailEmail: email,
+        gmailAccessToken: decryptToken(row.accessTokenEncrypted),
+        // As before R0-CMF5: a consent that returned no refresh token keeps the stored one.
+        gmailRefreshToken: refreshToken ?? undefined,
+        gmailTokenExpiry: row.tokenExpiresAt,
+      },
+    });
+
+    this.logger.log(`Gmail connected for business ${businessId} by user ${actorId}: ${email}`);
+    return { connected: true, email };
   }
 
   async disconnectGmail(businessId: string): Promise<void> {
