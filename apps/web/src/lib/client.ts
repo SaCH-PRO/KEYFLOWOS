@@ -2316,6 +2316,12 @@ export async function recordInvoicePayment(businessId: string, invoiceId: string
   notes?: string;
   evidenceUrl?: string;
   evidenceMimeType?: string;
+  /**
+   * R0-21: one key per payment-form open, reused on retry (RecordPaymentDto,
+   * R0-D2). The same key returns the payment already recorded instead of a
+   * second one.
+   */
+  idempotencyKey?: string;
 }): Promise<ApiResult<{ payment: PaymentRecord; invoice: Invoice; paidAmount: number; remaining: number }>> {
   return apiPost({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments`,

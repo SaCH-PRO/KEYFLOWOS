@@ -45,6 +45,7 @@ import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
 import { formatAmount, getDaysUntilDue } from "../../utils/commerce-utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { newPaymentAttemptKey } from "../../../finance/components/payment-record-modal";
 
 const STATUS_ORDER = ["DRAFT", "SENT", "PAID", "OVERDUE", "VOID"];
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
@@ -126,9 +127,23 @@ export default function InvoiceDetailPage() {
 
   useEffect(() => { if (activeTab === "payments" && payments.length === 0) void loadPayments(); }, [activeTab, loadPayments, payments.length]);
 
-  const paidAmount = (invoice?.payments ?? []).filter(p => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
-  const remaining = Math.max(0, Number(invoice?.total ?? 0) - paidAmount);
+  // R0-21 (M29): the server's status-aware figures (tenant detail route, and
+  // after a record the payments route's response). The SUCCESSFUL rows are
+  // only a fallback for a response that carries no figures.
+  const serverFigures = typeof invoice?.paidAmount === "number" && typeof invoice?.remaining === "number"
+    ? { paidAmount: invoice.paidAmount, remaining: invoice.remaining }
+    : null;
+  const paidAmount = serverFigures
+    ? serverFigures.paidAmount
+    : (invoice?.payments ?? []).filter(p => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
+  const remaining = serverFigures ? serverFigures.remaining : Math.max(0, Number(invoice?.total ?? 0) - paidAmount);
   const dueInfo = invoice ? getDaysUntilDue(invoice.dueDate) : null;
+
+  // R0-21 (M26, CF-08): one idempotency key per open of the payment form,
+  // made on its first submit and reused by every retry; closing drops it.
+  const paymentKeyRef = useRef<string | null>(null);
+  const recordingPaymentRef = useRef(false);
+  useEffect(() => { if (!showPaymentForm) paymentKeyRef.current = null; }, [showPaymentForm]);
 
   const withLoading = async (key: string, fn: () => Promise<void>) => {
     setActionLoading(prev => ({ ...prev, [key]: true }));
@@ -178,20 +193,25 @@ export default function InvoiceDetailPage() {
   };
 
   const handleRecordPayment = async () => {
-    if (!businessId || !invoice || recordingPayment) return;
+    if (!businessId || !invoice || recordingPayment || recordingPaymentRef.current) return;
     const amount = parseFloat(paymentForm.amount);
     if (isNaN(amount) || amount <= 0) { toast.error("Enter a valid amount"); return; }
-    if (amount > remaining + 0.005) { if (!window.confirm(`Amount exceeds remaining balance. Continue?`)) return; }
+    if (amount > remaining + 0.005) {
+      if (!window.confirm(`Over-payment of ${formatAmount(amount - remaining, invoice.currency)}: this invoice has ${formatAmount(remaining, invoice.currency)} remaining. Record it anyway? It will need a refund.`)) return;
+    }
+    if (!paymentKeyRef.current) paymentKeyRef.current = newPaymentAttemptKey();
+    recordingPaymentRef.current = true;
     setRecordingPayment(true);
     try {
-      const { data, error } = await recordInvoicePayment(businessId, invoice.id, { amount, method: paymentForm.method, reference: paymentForm.reference || undefined, notes: paymentForm.notes || undefined });
+      const { data, error } = await recordInvoicePayment(businessId, invoice.id, { amount, method: paymentForm.method, reference: paymentForm.reference || undefined, notes: paymentForm.notes || undefined, idempotencyKey: paymentKeyRef.current });
       if (!error && data) {
-        setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments } : prev);
-        setPayments(prev => [data.payment, ...prev]);
+        setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments, paidAmount: data.paidAmount, remaining: data.remaining } : prev);
+        // A keyed retry answers the payment already recorded: list it once.
+        setPayments(prev => [data.payment, ...prev.filter(p => p.id !== data.payment.id)]);
         toast.success(data.invoice.status === "PAID" ? "Fully paid!" : `Payment recorded`);
         setShowPaymentForm(false); setPaymentForm({ amount: "", method: "Cash", reference: "", notes: "" });
       } else toast.error(error ?? "Failed");
-    } finally { setRecordingPayment(false); }
+    } finally { recordingPaymentRef.current = false; setRecordingPayment(false); }
   };
 
   const handleSendReminder = () => {

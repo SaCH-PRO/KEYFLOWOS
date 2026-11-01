@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   updateQuoteStatus,
@@ -27,6 +27,8 @@ export interface PaymentForm {
   method: string;
   reference: string;
   notes: string;
+  /** R0-21: the form open's idempotency key (PaymentRecordModal), sent as-is. */
+  idempotencyKey?: string;
 }
 
 export interface ConvertForm {
@@ -198,9 +200,15 @@ export function usePipelineActions({
     [setInvoices],
   );
 
+  // R0-21: one request per invoice at a time. The loading flag disables the
+  // button only after React re-renders; two clicks that land before that
+  // would otherwise both POST.
+  const recordingRef = useRef<Set<string>>(new Set());
+
   const handleRecordPayment = useCallback(
     async (invoice: Invoice, form: PaymentForm) => {
-      if (!businessId) return;
+      if (!businessId || recordingRef.current.has(invoice.id)) return;
+      recordingRef.current.add(invoice.id);
       setLoading(`payment-${invoice.id}`, true);
       try {
         const { data, error } = await recordInvoicePayment(businessId, invoice.id, {
@@ -208,12 +216,19 @@ export function usePipelineActions({
           method: form.method,
           reference: form.reference || undefined,
           notes: form.notes || undefined,
+          idempotencyKey: form.idempotencyKey,
         });
         if (data) {
           setInvoices((prev) =>
             prev.map((inv) =>
               inv.id === invoice.id
-                ? { ...inv, status: data.invoice.status, paidAt: data.invoice.paidAt, payments: [...(inv.payments ?? []), data.payment] }
+                ? {
+                    ...inv,
+                    status: data.invoice.status,
+                    paidAt: data.invoice.paidAt,
+                    // A keyed retry answers the payment already recorded: list it once.
+                    payments: [...(inv.payments ?? []).filter((p) => p.id !== data.payment.id), data.payment],
+                  }
                 : inv,
             ),
           );
@@ -221,6 +236,7 @@ export function usePipelineActions({
           toast.success("Payment recorded");
         } else toast.error(error ?? "Failed to record payment");
       } finally {
+        recordingRef.current.delete(invoice.id);
         setLoading(`payment-${invoice.id}`, false);
       }
     },
