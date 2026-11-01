@@ -312,8 +312,9 @@ describe('KEY cortex controllers bind the tenant BusinessGuard checked (R0-34b, 
     }).toEqual({
       updateAutonomyProfile: ['UpdateAutonomyProfileDto', 'String'],
       createGoal: ['CreateGoalDto', 'String'],
-      createPlanFromGoal: ['String', 'CreatePlanFromGoalDto', 'String'],
-      createPlanFromCommand: ['CreatePlanFromCommandDto', 'String'],
+      // The trailing Object is the @CurrentUser() principal (R0-09e-KEY-PLAN-ACTOR).
+      createPlanFromGoal: ['String', 'CreatePlanFromGoalDto', 'String', 'Object'],
+      createPlanFromCommand: ['CreatePlanFromCommandDto', 'String', 'Object'],
       updateTriggerRule: ['String', 'UpdateTriggerRuleDto', 'String'],
     });
   });

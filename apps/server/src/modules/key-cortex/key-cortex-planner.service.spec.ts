@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { KeyCortexPlannerService } from './key-cortex-planner.service';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { KeyCortexPlannerService, SYSTEM_PLAN_ACTOR } from './key-cortex-planner.service';
 import { PlannerService } from '../ai/planner.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
@@ -233,5 +234,117 @@ describe('KeyCortexPlannerService', () => {
     expect(result.status).toBe('failed');
     expect(saga.compensate).toHaveBeenCalledWith('saga_1');
     expect(executor.execute).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2). executePlan built every
+ * step's command as `plan.userId ?? 'key_cortex'` and took no executing member,
+ * so whoever named the OWNER as a plan's userId ran its steps as the OWNER, and
+ * any member ran any plan. Pinned here: with a member (the HTTP route) the plan
+ * is read in the member's tenant only, the member must be its creator, the
+ * business OWNER (OWNER membership or Business.ownerId) or SUPER_ADMIN, and
+ * every step runs as that executing member; with no member (a system trigger) a
+ * member's plan runs as that member and only a plan no member created runs as
+ * SYSTEM_PLAN_ACTOR ('key_cortex'). The executePlan cases above run with no
+ * member (the system path) and are unchanged.
+ */
+describe('KeyCortexPlannerService.executePlan — the executing member (R0-09e, review ST-5 / CR-2)', () => {
+  const STAFF = 'user_staff';
+  const OWNER = 'user_owner';
+  const planSteps = () => [
+    { id: 's1', order: 1, module: 'settings', action: 'update_business_profile', inputPayload: { name: 'x' }, toolName: 'settings.update_business_profile', dependsOn: [] },
+    { id: 's2', order: 2, module: 'crm', action: 'list_contacts', inputPayload: {}, toolName: 'crm.list_contacts', dependsOn: [] },
+  ];
+  let prisma: any;
+  let executor: any;
+  let service: KeyCortexPlannerService;
+
+  function build(plan: Record<string, unknown>, memberships: Record<string, string> = {}, ownerId = OWNER) {
+    prisma = {
+      client: {
+        aiPlan: {
+          findFirst: vi.fn(async ({ where }: any) => (where.id === plan.id && where.businessId === plan.businessId ? { ...plan, steps: planSteps() } : null)),
+          findUnique: vi.fn(async ({ where }: any) => (where.id === plan.id ? { ...plan, steps: planSteps() } : null)),
+          update: vi.fn(async () => ({})),
+        },
+        aiPlanStep: { update: vi.fn(async () => ({})) },
+        aiPlanResult: { upsert: vi.fn(async () => ({})) },
+        membership: {
+          findUnique: vi.fn(async ({ where }: any) => {
+            const role = memberships[where.userId_businessId.userId];
+            return role && where.userId_businessId.businessId === 'biz_1' ? { role } : null;
+          }),
+        },
+        business: {
+          findFirst: vi.fn(async ({ where }: any) => (where.id === 'biz_1' && where.ownerId === ownerId ? { id: 'biz_1' } : null)),
+        },
+      },
+    };
+    executor = { execute: vi.fn(async () => ({ result: { success: true, data: {} }, durationMs: 1 })) };
+    const sagaStub = {
+      start: vi.fn(async () => ({ id: 'saga_1' })),
+      addStep: vi.fn(), completeStep: vi.fn(), failStep: vi.fn(), compensate: vi.fn(), completeSaga: vi.fn(), failSaga: vi.fn(),
+    };
+    service = new KeyCortexPlannerService(prisma, { createPlan: vi.fn() } as any, executor, sagaStub as any);
+  }
+  const actorsRun = () => executor.execute.mock.calls.map((c: any[]) => c[0].userId);
+
+  it("RED-BEFORE: every step runs as the EXECUTING member, never as the plan's creator: the OWNER running a STAFF member's plan runs it as the OWNER", async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF }, { [OWNER]: 'OWNER', [STAFF]: 'STAFF' });
+    const result = await service.executePlan('plan_1', {}, { userId: OWNER, role: 'USER', businessId: 'biz_1' });
+    expect(result.status).toBe('completed');
+    expect(actorsRun()).toEqual([OWNER, OWNER]);
+  });
+
+  it('the creator runs its own plan as itself', async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF }, { [STAFF]: 'STAFF' });
+    await service.executePlan('plan_1', {}, { userId: STAFF, role: 'USER', businessId: 'biz_1' });
+    expect(actorsRun()).toEqual([STAFF, STAFF]);
+  });
+
+  it("RED-BEFORE: a member who is neither the creator, the OWNER (membership or Business.ownerId) nor SUPER_ADMIN is refused 403 before the plan starts, on another member's plan and on a plan no member created", async () => {
+    for (const userId of [OWNER, null]) {
+      build({ id: 'plan_1', businessId: 'biz_1', userId }, { [STAFF]: 'STAFF', user_admin: 'ADMIN' }, 'someone_else');
+      for (const member of [STAFF, 'user_admin']) {
+        await expect(service.executePlan('plan_1', {}, { userId: member, role: 'USER', businessId: 'biz_1' })).rejects.toBeInstanceOf(ForbiddenException);
+      }
+      expect(prisma.client.aiPlan.update).not.toHaveBeenCalled();
+      expect(executor.execute).not.toHaveBeenCalled();
+    }
+  });
+
+  it('RED-BEFORE: the OWNER membership, the Business.ownerId owner and SUPER_ADMIN may run a plan no member created, each as itself', async () => {
+    for (const [userId, role, memberships, ownerId] of [
+      ['user_owner_member', 'USER', { user_owner_member: 'OWNER' }, 'someone_else'],
+      ['user_owner_id', 'USER', {}, 'user_owner_id'],
+      ['user_super', 'SUPER_ADMIN', {}, 'someone_else'],
+    ] as const) {
+      build({ id: 'plan_1', businessId: 'biz_1', userId: null }, memberships as Record<string, string>, ownerId);
+      const result = await service.executePlan('plan_1', {}, { userId, role, businessId: 'biz_1' });
+      expect(result.status, userId).toBe('completed');
+      expect(actorsRun(), userId).toEqual([userId, userId]);
+    }
+  });
+
+  it("RED-BEFORE: a member's execution reads the plan in the member's checked tenant only: another tenant's plan is not found and nothing runs", async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF });
+    await expect(service.executePlan('plan_1', {}, { userId: STAFF, role: 'USER', businessId: 'biz_2' })).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.client.aiPlan.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'plan_1', businessId: 'biz_2' } }));
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("with no member (a system trigger), a member's plan runs as that member and a plan no member created runs as the system actor 'key_cortex'", async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF });
+    await service.executePlan('plan_1');
+    expect(actorsRun()).toEqual([STAFF, STAFF]);
+
+    build({ id: 'plan_1', businessId: 'biz_1', userId: null });
+    await service.executePlan('plan_1');
+    expect(actorsRun()).toEqual(['key_cortex', 'key_cortex']);
+  });
+
+  it('SYSTEM_PLAN_ACTOR names that system actor', () => {
+    expect(SYSTEM_PLAN_ACTOR).toBe('key_cortex');
   });
 });

@@ -24,6 +24,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 
 // ─── Prisma ───────────────────────────────────────────────────────────────────
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 // ─── Connector ──────────────────────────────────────────────────────────────────
@@ -61,6 +62,28 @@ const BLOCKED_ACTIONS = new Set([
 
 function isBlockedCommand(command: ConnectorCommand): boolean {
   return BLOCKED_ACTIONS.has(command.action);
+}
+
+/** Past this many characters an audit payload is kept as a preview (as AiExecutionLogService does). */
+const AUDIT_JSON_MAX_CHARS = 5000;
+
+/**
+ * A value as the JSON an ai_execution_logs Json column stores: a JSON copy, a
+ * preview when it is large, or a marker when it cannot be serialized, so an
+ * odd payload never costs the execute its audit row.
+ */
+function auditJson(value: unknown): Prisma.InputJsonValue | null {
+  if (value === undefined || value === null) return null;
+  try {
+    const text = JSON.stringify(value);
+    if (text === undefined) return null;
+    if (text.length > AUDIT_JSON_MAX_CHARS) {
+      return { _truncated: true, _size: text.length, _preview: text.slice(0, 500) };
+    }
+    return JSON.parse(text) as Prisma.InputJsonValue;
+  } catch {
+    return { _error: 'Could not serialize payload' };
+  }
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -424,10 +447,15 @@ export class KeyCortexExecutorService {
       rollbackResult,
     };
 
-    // ── 5. Audit log (fire-and-forget) ───────────────────────────────────────
-    this.logExecution(record).catch((err) => {
-      this.logger.error(`[execute] Audit log failed: ${err.message}`);
-    });
+    // ── 5. Audit log (awaited; a failure is logged, never thrown) ────────────
+    // R0-09e (R0-09c review ST-7): this was fire-and-forget over a write that
+    // always failed, so no execute ever left its ai_execution_logs row. It is
+    // awaited now, so the row naming the actor exists when execute() returns.
+    try {
+      await this.logExecution(record);
+    } catch (err) {
+      this.logger.error(`[execute] Audit log failed: ${(err as Error).message}`);
+    }
 
     // ── 6. Emit completion event ─────────────────────────────────────────────
     if (options.emitEvents !== false) {
@@ -778,35 +806,53 @@ export class KeyCortexExecutorService {
   // SECTION 7 — logExecution()
   // ════════════════════════════════════════════════════════════════════════════
   /**
-   * Persist an execution record to the database for audit trail.
-   * Writes to aiExecutionLog (or equivalent) with full context.
+   * Persist an execution record to the database for audit trail: one
+   * ai_execution_logs row per execute, naming its actor.
+   *
+   * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-7): this wrote fields AiExecutionLog
+   * does not have (traceId, parameters, commandJson, resultData,
+   * executionTimeMs, rolledBack, rollbackResult, startedAt, finishedAt, source)
+   * through an untyped client, so Prisma refused every row ("Unknown argument
+   * `traceId`") and no execute was ever audited. It now writes only the model's
+   * own columns, through the typed client so a column that does not exist no
+   * longer compiles: the actor in `userId` (the command's actor when it names a
+   * User row; null for a system actor such as 'key_cortex', which the foreign
+   * key would refuse) and `actor` ('user', or 'system' for a system actor), the
+   * command in `module`, `action` and `toolName`, the actor id as sent, the
+   * parameters, source and trace in `inputSummary`, the result and rollback in
+   * `outputSummary`, then `success`, `errorMessage`, `durationMs` and
+   * `correlationId`.
    */
   async logExecution(record: ExecutionRecord): Promise<void> {
+    const { command, result } = record;
     try {
-      await (this.prisma.client as any).aiExecutionLog.create({
+      const humanActorId = await this.humanActorId(command.userId);
+      await this.prisma.client.aiExecutionLog.create({
         data: {
           id: record.id,
-          businessId: record.command.businessId,
-          userId: record.command.userId,
-          traceId: record.traceId,
-          correlationId: record.command.correlationId,
-          module: record.command.module,
-          action: record.command.action,
-          parameters: JSON.stringify(record.command.parameters),
-          commandJson: JSON.stringify(record.command),
-          success: record.result.success,
-          resultData: record.result.data
-            ? JSON.stringify(record.result.data)
-            : null,
-          errorMessage: record.result.error ?? null,
-          executionTimeMs: record.durationMs,
-          rolledBack: record.rolledBack,
-          rollbackResult: record.rollbackResult
-            ? JSON.stringify(record.rollbackResult)
-            : null,
-          startedAt: record.startedAt,
-          finishedAt: record.finishedAt,
-          source: 'key_cortex',
+          businessId: command.businessId,
+          userId: humanActorId,
+          actor: humanActorId ? 'user' : 'system',
+          action: command.action,
+          toolName: `${command.module}.${command.action}`,
+          module: command.module,
+          inputSummary: {
+            actorId: typeof command.userId === 'string' ? command.userId : null,
+            parameters: auditJson(command.parameters),
+            source: command.source ?? null,
+            traceId: record.traceId,
+          },
+          outputSummary: {
+            data: auditJson(result.data),
+            rolledBack: record.rolledBack,
+            rollbackError: record.rollbackResult && !record.rollbackResult.success
+              ? record.rollbackResult.error ?? null
+              : null,
+          },
+          success: result.success,
+          errorMessage: result.error ?? null,
+          durationMs: record.durationMs,
+          correlationId: command.correlationId ?? null,
         },
       });
 
@@ -819,6 +865,18 @@ export class KeyCortexExecutorService {
       );
       throw err; // Let caller decide
     }
+  }
+
+  /**
+   * The command's actor when it names a User row, else null: a system actor
+   * ('key_cortex', 'system', KEY's own 'key_ai') is recorded as `actor:
+   * 'system'` with no userId, which the AiExecutionLog -> User foreign key
+   * requires.
+   */
+  private async humanActorId(userId: unknown): Promise<string | null> {
+    if (typeof userId !== 'string' || userId.length === 0) return null;
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { id: true } });
+    return user ? user.id : null;
   }
 
   // ════════════════════════════════════════════════════════════════════════════

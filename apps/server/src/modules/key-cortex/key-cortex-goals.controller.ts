@@ -11,10 +11,12 @@ import {
   Logger,
   BadRequestException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
+import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { KeyCortexPlannerService, CreateGoalInput } from './key-cortex-planner.service';
 import { KeyCortexTriggerService } from './key-cortex-trigger.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -69,6 +71,9 @@ export class CreateGoalDto implements CreateGoalInput {
   businessId: string;
 }
 
+// `userId` on the two plan bodies below is accepted and IGNORED (R0-09e, as
+// KeyCortexController's DTOs since R0-09c): the plan's actor is the principal,
+// requestActor(). It is kept so clients that still send it are not refused.
 export class CreatePlanFromGoalDto {
   @IsOptional()
   @IsString()
@@ -169,6 +174,26 @@ export class UpdateTriggerRuleDto {
 }
 
 /**
+ * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2): the human a KEY plan
+ * request acts for. It is the principal AuthGuard admitted (`req.user`, read
+ * with @CurrentUser()), never the body `userId`: POST plans and POST
+ * goals/:goalId/plans handed the planner `dto.userId`, so a STAFF member wrote
+ * a plan as the OWNER's, and POST plans/:planId/execute took no actor at all,
+ * so the planner ran that plan's steps as the OWNER. A body `userId` is IGNORED,
+ * not refused, exactly as KeyCortexController's requestActorId (R0-09c); with no
+ * authenticated user the handler answers 401 (AuthGuard already refuses such a
+ * request; this keeps a handler reached any other way from running
+ * unattributed).
+ */
+function requestActor(user: AuthenticatedUser | undefined): AuthenticatedUser & { id: string } {
+  const id = user?.id;
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new UnauthorizedException('Authenticated user required');
+  }
+  return { ...user, id };
+}
+
+/**
  * R0-34b-KEY-TENANT-BINDING: mounted at `/api/v1/cortex` with no `:businessId`
  * segment, so BusinessGuard checks the tenant the request names (params, then
  * body, then query). The four handlers that read `@Query('businessId')` acted on
@@ -225,26 +250,30 @@ export class KeyCortexGoalsController {
   @Post('goals/:goalId/plans')
   async createPlanFromGoal(
     @Param('goalId') goalId: string,
-    @Body() dto: CreatePlanFromGoalDto,
+    @Body() _dto: CreatePlanFromGoalDto,
     @GuardedBusinessId() businessId: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ) {
     // businessId was absent here entirely, so the goal id from the URL was
     // resolved against every business. Every sibling route on this controller
     // already demanded it; this one did not, and it is the only one that wrote.
     if (!businessId) throw new BadRequestException('businessId is required');
+    const actor = requestActor(user);
     this.logger.log(`[goals] create plan from goal ${goalId}`);
-    return this.planner.createPlanFromGoal(businessId, goalId, dto.userId);
+    return this.planner.createPlanFromGoal(businessId, goalId, actor.id);
   }
 
   @Post('plans')
   async createPlanFromCommand(
     @Body() dto: CreatePlanFromCommandDto,
     @GuardedBusinessId() businessId: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ) {
     if (!businessId || !dto.objective) {
       throw new BadRequestException('businessId and objective are required');
     }
-    return this.planner.createPlanFromCommand(businessId, dto, dto.userId);
+    const actor = requestActor(user);
+    return this.planner.createPlanFromCommand(businessId, dto, actor.id);
   }
 
   @Get('plans/:planId')
@@ -252,16 +281,29 @@ export class KeyCortexGoalsController {
     return this.planner.getPlan(planId);
   }
 
+  /**
+   * R0-09e: the planner re-checks that the executing member may run this plan
+   * (its creator, the business OWNER or SUPER_ADMIN; 403 otherwise, 404 for a
+   * plan outside the checked tenant) and runs every step as that member.
+   */
   @Post('plans/:planId/execute')
   async executePlan(
     @Param('planId') planId: string,
     @Body() options: { traceId?: string; skipApproval?: boolean },
+    @GuardedBusinessId() businessId: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ) {
+    if (!businessId) throw new BadRequestException('businessId is required');
+    const actor = requestActor(user);
     this.logger.log(`[plans] execute ${planId}`);
-    return this.planner.executePlan(planId, {
-      traceId: options.traceId,
-      skipApproval: options.skipApproval,
-    });
+    return this.planner.executePlan(
+      planId,
+      {
+        traceId: options?.traceId,
+        skipApproval: options?.skipApproval,
+      },
+      { userId: actor.id, role: actor.role, businessId },
+    );
   }
 
   @Delete('goals/:goalId')
