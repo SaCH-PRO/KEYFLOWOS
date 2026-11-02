@@ -363,6 +363,11 @@
       "packet": "V1-52-QUOTE-PUBLIC-LINK"
     },
     {
+      "prefix": "v53a_",
+      "owner": "apps/server/test/commerce-quote-errors.integration.test.ts",
+      "packet": "V1-53-QUOTE-CREATE-ERRORS"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
