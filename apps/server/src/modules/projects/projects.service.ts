@@ -15,11 +15,14 @@ export class ProjectsService {
     @Inject(TaskAssignmentService) private readonly assignments: TaskAssignmentService,
   ) {}
 
+  // V1-21c: a relation include does not filter by business, so each task include names this
+  // business. A task another business filed on this project before TD9-1 (addTask, below) was
+  // read back as one of this project's tasks.
   listProjects(businessId: string) {
     return this.prisma.client.project.findMany({
       where: { businessId, deletedAt: null },
       include: {
-        tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } },
+        tasks: { where: { businessId, deletedAt: null }, orderBy: { sortOrder: 'asc' } },
         goal: { select: { id: true, title: true, category: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -30,7 +33,7 @@ export class ProjectsService {
     return this.prisma.client.project.findFirst({
       where: { id: projectId, businessId, deletedAt: null },
       include: {
-        tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } },
+        tasks: { where: { businessId, deletedAt: null }, orderBy: { sortOrder: 'asc' } },
         milestones: { orderBy: { dueDate: 'asc' } },
         goal: true,
       },
@@ -103,7 +106,7 @@ export class ProjectsService {
     const project = await this.prisma.client.project.update({
       where: { id: projectId, businessId },
       data,
-      include: { tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } } },
+      include: { tasks: { where: { businessId, deletedAt: null }, orderBy: { sortOrder: 'asc' } } },
     });
     await this.timeline.recordEvent({
       businessId,
@@ -340,7 +343,7 @@ export class ProjectsService {
     const project = await this.prisma.client.project.findFirst({
       where: { id: projectId, businessId },
       include: {
-        tasks: { where: { deletedAt: null } },
+        tasks: { where: { businessId, deletedAt: null } },
         timeEntries: { where: { billable: true, billed: false } },
         milestones: true,
       },
@@ -382,7 +385,7 @@ export class ProjectsService {
       where: { id: projectId, businessId },
       include: {
         tasks: {
-          where: { deletedAt: null },
+          where: { businessId, deletedAt: null },
           orderBy: [{ status: 'asc' }, { position: 'asc' }],
         },
         milestones: { orderBy: { dueDate: 'asc' } },

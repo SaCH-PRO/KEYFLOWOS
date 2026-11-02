@@ -16,11 +16,12 @@ function metaSignature(body: string, secret: string): string {
   return `sha256=${sig}`;
 }
 
+// X-Twilio-Signature as Twilio computes it: HMAC-SHA1 over the URL and the sorted params (V1-21c TW-SHA1)
 function twilioSignature(url: string, params: Record<string, string>, authToken: string): string {
   const payload = Object.keys(params)
     .sort()
     .reduce((acc, key) => acc + key + params[key], url);
-  return createHmac('sha256', authToken).update(payload).digest('base64');
+  return createHmac('sha1', authToken).update(payload).digest('base64');
 }
 
 describe('WhatsApp KEYInbox webhook smoke (B.5)', () => {
@@ -57,6 +58,10 @@ describe('WhatsApp KEYInbox webhook smoke (B.5)', () => {
             client: {
               business: {
                 findFirst: vi.fn().mockResolvedValue({ id: 'biz_smoke' }),
+              },
+              // a verified Twilio delivery is claimed by its signature (V1-21c WB3-SHIFT)
+              webhookEvent: {
+                create: vi.fn().mockResolvedValue({ id: 'we_smoke' }),
               },
             },
           },
