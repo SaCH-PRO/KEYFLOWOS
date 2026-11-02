@@ -37,6 +37,13 @@ export const GMAIL_PENDING_EMAIL_MISMATCH = 'GMAIL_PENDING_EMAIL_MISMATCH';
  * business the verified OAuth state names, so nothing is staged.
  */
 export const GMAIL_STATE_TENANT_MISMATCH = 'GMAIL_STATE_TENANT_MISMATCH';
+/**
+ * R0-CMF5 review 2 SEC-CMF5-R3: the consent returned no refresh token, so the
+ * staged mailbox could never send once its hour-long access token expires, and
+ * the business's stored refresh token belongs to another mailbox (or there is
+ * none). Nothing is linked; the stored mailbox stays whole.
+ */
+export const GMAIL_PENDING_NO_REFRESH_TOKEN = 'GMAIL_PENDING_NO_REFRESH_TOKEN';
 
 type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
 
@@ -60,12 +67,34 @@ const PENDING_WINDOW_MS = 15 * 60 * 1000;
  */
 const PENDING_ROW = { provider: 'GOOGLE', service: 'GMAIL', status: 'PENDING' } as const;
 
+/** The live Gmail check the Google Suite callback made with the fresh access token (no token in it). */
+export interface GmailLiveCheck {
+  ok: boolean;
+  account: string | null;
+  error: string | null;
+}
+
+/**
+ * R0-CMF5 review 2 CMF5R-1: where a staged connection came from. The Google
+ * Suite sign-in recorded the mailbox as the gmail connector (connector_statuses,
+ * which the nightly sync reads, and a connector activity row) when it linked it
+ * directly; now that it only stages, the confirmation records it, with the live
+ * check the callback made. The commerce callback never recorded it, and still
+ * does not.
+ */
+export interface PendingGmailOrigin {
+  source: 'google-suite';
+  verification: GmailLiveCheck;
+}
+
 /** What a staged connection is bound to (connector_accounts.settings). */
 interface PendingBinding {
   purpose: 'gmail-connect';
   userId: string;
   nonce: string;
   pendingExpiresAt: string;
+  origin?: 'google-suite';
+  verification?: GmailLiveCheck;
 }
 
 export interface GmailConnectActor {
@@ -219,6 +248,14 @@ export class GmailService {
         this.logger.warn('OAuth state expired');
         return null;
       }
+      // R0-CMF5 review 2 SEC-CMF5-R2: the Google Suite (and other Google) flows
+      // sign their states with the same secret and format, and the suite's now
+      // names a user too. Only a state minted by getAuthUrl is good here, so a
+      // member's calendar-only suite state cannot stage a Gmail connection.
+      if (state.purpose !== 'gmail') {
+        this.logger.warn('OAuth state was not issued for the Gmail callback');
+        return null;
+      }
 
       for (const [nonce, exp] of this.acceptedStateNonces) {
         if (exp < now) this.acceptedStateNonces.delete(nonce);
@@ -313,6 +350,75 @@ export class GmailService {
         entityId: businessId,
         title: change.title,
         meta: { ...change.meta, actorStanding: standing } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  /**
+   * R0-CMF5 review 2 SEC-CMF5-R4: the first statement of every transaction that
+   * changes the business mailbox. Confirm used to claim the pending row and then
+   * update the business, while disconnect updated the business and then deleted
+   * the pending rows; sent together they deadlocked (40P01) and the loser
+   * answered 500, a lost disconnect leaving the mailbox linked. Both now take
+   * this row lock first, so they queue instead. FOR NO KEY UPDATE is the lock
+   * the mailbox UPDATE takes anyway; it does not block inserts that reference
+   * the business.
+   */
+  private async lockBusinessRow(tx: PrismaTx, businessId: string): Promise<void> {
+    await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`;
+  }
+
+  /**
+   * R0-CMF5 review 2 CMF5R-1: a mailbox staged by the Google Suite sign-in is
+   * recorded as the gmail connector when the owner confirms it, as that sign-in
+   * did when it linked the mailbox itself: connector_statuses connected (intake
+   * on, GmailConnector being a Key Inbox 'communication' connector) or error
+   * with the live check's message, and one connector activity row. In the
+   * confirmation's transaction; no token is written to either.
+   */
+  private async recordSuiteGmailConnector(
+    tx: PrismaTx,
+    businessId: string,
+    email: string,
+    verification: Partial<GmailLiveCheck> | undefined,
+  ): Promise<void> {
+    const ok = verification?.ok === true;
+    const error = ok
+      ? null
+      : (typeof verification?.error === 'string' && verification.error.length > 0 ? verification.error : 'The live Gmail check did not complete');
+    const account = typeof verification?.account === 'string' && verification.account.length > 0 ? verification.account : email;
+    const now = new Date();
+    await tx.connectorStatus.upsert({
+      where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
+      create: {
+        businessId,
+        connectorType: 'gmail',
+        status: ok ? 'connected' : 'error',
+        connectedAt: now,
+        connectedAccount: account,
+        intakeEnabled: true,
+        lastError: error,
+        lastErrorAt: ok ? null : now,
+        errorCount: ok ? 0 : 1,
+      },
+      update: {
+        status: ok ? 'connected' : 'error',
+        connectedAt: now,
+        connectedAccount: account,
+        lastError: error,
+        lastErrorAt: ok ? null : now,
+        ...(ok ? { errorCount: 0 } : {}),
+      },
+    });
+    await tx.connectorActivityLog.create({
+      data: {
+        businessId,
+        connectorType: 'gmail',
+        action: 'connect',
+        status: ok ? 'success' : 'failure',
+        message: ok
+          ? `Connected via unified Google sign-in (${email}) — live verification OK`
+          : `OAuth granted but live verification failed: ${error}`,
       },
     });
   }
@@ -473,11 +579,15 @@ export class GmailService {
    * One pending connection per (business, user): a newer consent replaces an
    * unconfirmed older one, and this business's pending rows past their window
    * are removed on the way.
+   *
+   * `origin` (review 2 CMF5R-1) is the Google Suite callback's: it is kept on
+   * the row (no token in it) so the confirmation records the gmail connector.
    */
   async stagePendingTokens(
     binding: PendingGmailBinding,
     accountEmail: string,
     tokens: StagedGmailTokens,
+    origin?: PendingGmailOrigin,
   ): Promise<{ pendingId: string }> {
     if (typeof binding?.userId !== 'string' || binding.userId.length === 0) {
       throw new BadRequestException('OAuth state names no user');
@@ -510,6 +620,16 @@ export class GmailService {
       userId: binding.userId,
       nonce: binding.nonce,
       pendingExpiresAt: new Date(now + PENDING_WINDOW_MS).toISOString(),
+      ...(origin?.source === 'google-suite'
+        ? {
+            origin: 'google-suite' as const,
+            verification: {
+              ok: origin.verification?.ok === true,
+              account: typeof origin.verification?.account === 'string' ? origin.verification.account : null,
+              error: typeof origin.verification?.error === 'string' ? origin.verification.error : null,
+            },
+          }
+        : {}),
     };
     await db.connectorAccount.create({
       data: {
@@ -573,6 +693,12 @@ export class GmailService {
    * while still PENDING) before Business.gmail* is written, in one transaction
    * with the audit row naming the actor (ST-CMF5-4), so a pending id activates
    * at most once even when two confirmations race.
+   *
+   * Review 2: the transaction locks the business row first, as disconnect does
+   * (SEC-CMF5-R4); a consent with no refresh token links only as a re-consent
+   * of the stored mailbox, else 409 GMAIL_PENDING_NO_REFRESH_TOKEN and nothing
+   * changes (SEC-CMF5-R3); a Google Suite staging also records the gmail
+   * connector (CMF5R-1).
    */
   async confirmPendingConnection(
     businessId: string,
@@ -592,26 +718,42 @@ export class GmailService {
 
     const accessToken = decryptToken(row.accessTokenEncrypted);
     const refreshToken = decryptToken(row.refreshTokenEncrypted);
+    const staged = (row.settings ?? {}) as Partial<PendingBinding>;
     await this.prisma.client.$transaction(async (tx) => {
+      await this.lockBusinessRow(tx, businessId);
+      const previous = await tx.business.findUnique({ where: { id: businessId }, select: { gmailEmail: true, gmailRefreshToken: true } });
+      const previousEmail = previous?.gmailEmail ?? null;
+      // Review 2 SEC-CMF5-R3: a stored refresh token stays only with its own
+      // mailbox. A consent with none, for another mailbox (or with no mailbox
+      // stored), would pair the new address and access token with the replaced
+      // mailbox's refresh token, or with none at all, so it links nothing.
+      const sameMailbox = typeof previousEmail === 'string' && previousEmail.toLowerCase() === email.toLowerCase();
+      if (!refreshToken && !(sameMailbox && previous?.gmailRefreshToken)) {
+        throw new ConflictException({
+          code: GMAIL_PENDING_NO_REFRESH_TOKEN,
+          message: `Google did not grant lasting access to ${email}, so it cannot send for the business and was not connected; nothing was changed. Connect Gmail again and allow offline access.`,
+        });
+      }
       const claimed = await tx.connectorAccount.deleteMany({ where: { id: row.id, businessId, status: PENDING_ROW.status } });
       if (claimed.count !== 1) throw gmailPendingNotFound();
-      const previous = await tx.business.findUnique({ where: { id: businessId }, select: { gmailEmail: true } });
       await tx.business.update({
         where: { id: businessId },
         data: {
           gmailEmail: email,
           gmailAccessToken: accessToken,
-          // As before R0-CMF5: a consent that returned no refresh token keeps the stored one.
-          gmailRefreshToken: refreshToken ?? undefined,
+          // No refresh token in this consent: only a re-consent of the stored mailbox gets here, and it keeps its own.
+          ...(refreshToken ? { gmailRefreshToken: refreshToken } : {}),
           gmailTokenExpiry: row.tokenExpiresAt,
         },
       });
-      const previousEmail = previous?.gmailEmail ?? null;
       await this.auditMailboxChange(tx, businessId, actorId, standing, {
         action: previousEmail ? 'gmail_replaced' : 'gmail_connected',
         title: previousEmail ? `Replaced the business mailbox ${previousEmail} with ${email}` : `Connected the business mailbox ${email}`,
         meta: { email, previousEmail, pendingId: row.id },
       });
+      if (staged.origin === 'google-suite') {
+        await this.recordSuiteGmailConnector(tx, businessId, email, staged.verification);
+      }
     });
 
     this.logger.log(`Gmail connected for business ${businessId} by user ${actorId}: ${email}`);
@@ -629,6 +771,8 @@ export class GmailService {
     const standing = await this.connectStanding(businessId, actor);
     const actorId = (actor as GmailConnectActor).id;
     await this.prisma.client.$transaction(async (tx) => {
+      // Review 2 SEC-CMF5-R4: the same first lock as confirmPendingConnection.
+      await this.lockBusinessRow(tx, businessId);
       const previous = await tx.business.findUnique({ where: { id: businessId }, select: { gmailEmail: true } });
       await tx.business.update({
         where: { id: businessId },

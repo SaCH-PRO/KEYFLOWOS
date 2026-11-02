@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getGmailAuthUrl, disconnectGmail } from "@/lib/client";
 import { apiGet, apiPost } from "@/lib/api";
@@ -36,6 +36,13 @@ export function useCommerceIntegrations(businessId: string | null) {
   const [paymentGateways, setPaymentGateways] = useState<{ wipay: boolean; paypal: boolean }>({ wipay: false, paypal: false });
   const [pendingGmail, setPendingGmail] = useState<PendingGmailConnection | null>(null);
   const [confirmingGmail, setConfirmingGmail] = useState(false);
+  /**
+   * R0-CMF5 review 2 CMF5R-3: the pending id a confirmation was already sent
+   * for. A staged connection is confirmed once; a second click (or a second
+   * call before the first re-render) sends nothing, so the owner never sees
+   * "Gmail connected" next to the server's 404 for the repeat.
+   */
+  const confirmSentFor = useRef<string | null>(null);
 
   const handleConnectGmail = useCallback(async () => {
     if (!businessId) return;
@@ -68,6 +75,7 @@ export function useCommerceIntegrations(businessId: string | null) {
   const loadPendingGmail = useCallback(
     async (pendingId: string) => {
       if (!businessId || !pendingId) return;
+      confirmSentFor.current = null;
       const res = await apiGet<PendingGmailConnection>(
         `/commerce/businesses/${encodeURIComponent(businessId)}/gmail/pending/${encodeURIComponent(pendingId)}`,
       );
@@ -84,6 +92,8 @@ export function useCommerceIntegrations(businessId: string | null) {
   /** The owner's click on "Connect <email>": confirm exactly the mailbox that was shown. */
   const handleConfirmPendingGmail = useCallback(async () => {
     if (!businessId || !pendingGmail) return;
+    if (confirmSentFor.current === pendingGmail.pendingId) return;
+    confirmSentFor.current = pendingGmail.pendingId;
     setConfirmingGmail(true);
     const res = await apiPost<{ connected: boolean; email: string }>({
       path: `/commerce/businesses/${encodeURIComponent(businessId)}/gmail/confirm`,

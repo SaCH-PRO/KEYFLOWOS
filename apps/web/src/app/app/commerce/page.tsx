@@ -496,6 +496,7 @@ export default function CommercePage() {
           title={`Connect ${gmail.pendingGmail.email}?`}
           message={`Invoices, reminders, receipts and quotes will be sent from ${gmail.pendingGmail.email}. Connect it only if this is the mailbox you just signed in with.`}
           confirmLabel={gmail.confirmingGmail ? "Connecting..." : "Connect mailbox"}
+          busy={gmail.confirmingGmail}
           cancelLabel="Not this mailbox"
           onConfirm={() => void gmail.handleConfirmPendingGmail()}
           onCancel={gmail.handleCancelPendingGmail}
