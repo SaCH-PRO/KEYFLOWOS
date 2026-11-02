@@ -154,14 +154,13 @@ export class CallTaskController {
   async getScheduledToday(
     @Param('businessId') businessId: string,
     @Query('callerId') callerId: string | undefined,
-    @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
-    // A named callerId is a read filter, as on GET calls (any crm reader may list
-    // every member's calls). Without one this is the session member's day: an
-    // absent callerId used to reach Prisma as undefined, which drops the filter,
-    // so the web (which never sends one) got every member's calls as its own.
-    const caller = callerId || sessionCallerId(req);
-    return this.callLogs.getScheduledCalls(businessId, caller, new Date());
+    // callerId is an optional read filter, as on GET calls. Without one this is
+    // every member's open calls today in the business: the Operations dashboard
+    // ("Calls Today") and the call-tasks page ("Scheduled Today") send none and
+    // show the team's calls. Narrowing it to the session member would change what
+    // they show, which is outside V1-54's write-attribution scope (review CR-1).
+    return this.callLogs.getScheduledCalls(businessId, callerId || undefined, new Date());
   }
 
   @Post('businesses/:businessId/calls/:callId/generate-script')
@@ -192,9 +191,11 @@ export class CallTaskController {
     @Body() body: { callerId?: string; script?: string; autoGenerateScript?: boolean },
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
-    // The caller is the session member; a body callerId is ignored.
+    // The caller is the session member; a body callerId is ignored. The contact
+    // is looked up within the path business (review ST-3).
     const callerId = sessionCallerId(req);
     const callLog = await this.callLogs.createFromContactNextAction(
+      businessId,
       contactId,
       callerId,
       body.script,

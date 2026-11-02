@@ -688,9 +688,11 @@ describe('CRM e2e', () => {
 // businesses/:b/calls took `body.callerId ?? req.user.id ?? 'system'` and POST
 // contacts/:c/calls/from-next-action did the same, so any member could log a call
 // as another member (or as nobody), and complete/follow-up fell back to 'system'
-// as their actor. GET calls/scheduled/today read the caller from the query only,
-// so without one (the web never sends one) it answered every member's calls as
-// the caller's day. CallLog is under the tenant extension
+// as their actor. GET calls/scheduled/today keeps callerId as an optional read
+// filter: without one it is every member's day in the business, which the
+// Operations dashboard and the call-tasks page (neither sends one) show as the
+// team's calls (review CR-1 reverted a narrowing to the session member, which
+// was outside the packet's write-attribution proof). CallLog is under the tenant extension
 // (packages/db/src/client.ts:85) and the guards bind the business, so this is
 // attribution, not tenant isolation. The real CallLogService runs over a
 // recording Prisma double: the claim is which callerId the row is written with
@@ -740,6 +742,15 @@ class CallPrismaMock {
         ),
         findMany: vi.fn(() => Promise.resolve([])),
         count: vi.fn(() => Promise.resolve(0)),
+        // applies its whole where, as Postgres does under the row lock (review ST-1)
+        updateMany: vi.fn(({ where, data }: any) => {
+          const i = self.callLogs.findIndex((l) =>
+            Object.entries(where).every(([k, v]) => (v === null ? l[k] == null : l[k] === v)),
+          );
+          if (i < 0) return Promise.resolve({ count: 0 });
+          self.callLogs[i] = { ...self.callLogs[i], ...data };
+          return Promise.resolve({ count: 1 });
+        }),
       },
     };
   }
@@ -803,6 +814,8 @@ describe('call logs take the caller from the session (V1-54)', () => {
     ];
     prisma.contacts = [
       { id: 'contact_1', businessId: 'biz_1', nextActionType: 'call', nextActionAt: new Date('2026-11-03T10:00:00.000Z') },
+      // another business's contact, also due a call
+      { id: 'contact_b', businessId: 'biz_2', nextActionType: 'call', nextActionAt: new Date('2026-11-03T11:00:00.000Z') },
     ];
     prisma.callLogs = [];
   });
@@ -837,16 +850,80 @@ describe('call logs take the caller from the session (V1-54)', () => {
     );
   });
 
-  it("GET calls/scheduled/today without a callerId is the session member's day, not every member's calls; an explicit callerId stays a read filter", async () => {
+  // Review CR-1: the packet had narrowed this read to the session member when no
+  // callerId is sent. The web never sends one, so the Operations dashboard's
+  // "Calls Today" and the call-tasks page's "Scheduled Today" would have gone
+  // from the team's calls to the viewer's own, a consumer-visible change outside
+  // V1-54's write-attribution proof. Absent callerId is the business's day, now
+  // by an explicit where without the key rather than Prisma dropping undefined.
+  it("GET calls/scheduled/today keeps callerId as an optional read filter: absent, every member's open calls today; present, that member's", async () => {
     const agent = request(app.getHttpServer());
     await agent.get('/businesses/biz_1/calls/scheduled/today').set('x-test-user', 'user_2').expect(200);
     await agent.get('/businesses/biz_1/calls/scheduled/today?callerId=user_1').set('x-test-user', 'user_2').expect(200);
     expect(prisma.client.callLog.findMany).toHaveBeenCalledTimes(2);
-    const [own, named] = prisma.client.callLog.findMany.mock.calls.map((c: any[]) => c[0].where);
-    expect(own).toMatchObject({ businessId: 'biz_1', callerId: 'user_2', completedAt: null });
+    const [team, named] = prisma.client.callLog.findMany.mock.calls.map((c: any[]) => c[0].where);
+    expect(team).toMatchObject({ businessId: 'biz_1', completedAt: null });
+    expect(team).not.toHaveProperty('callerId');
     expect(named).toMatchObject({ businessId: 'biz_1', callerId: 'user_1', completedAt: null });
     expect(prisma.client.callLog.create).not.toHaveBeenCalled();
   });
+
+  // Review ST-3: createFromContactNextAction looked the contact up by id alone
+  // and wrote the call log under the contact's business. The double's
+  // findUnique answers by id alone, as Prisma does with no ambient tenant (the
+  // HTTP path arms one in TenantInterceptor; these cases do not). It now looks
+  // the contact up within the path business.
+  it("POST contacts/:contactId/calls/from-next-action for another business's contact answers 404 and writes nothing", async () => {
+    const res = await request(app.getHttpServer())
+      .post('/businesses/biz_1/contacts/contact_b/calls/from-next-action')
+      .send({})
+      .expect(404);
+    expect(JSON.stringify(res.body)).not.toContain('nextActionAt');
+    expect(prisma.client.callLog.create).not.toHaveBeenCalled();
+    expect(prisma.callLogs).toEqual([]);
+    expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
+  // Review ST-1: two members completing the same call at once both got 201 and
+  // each emitted call_log.completed with its own outcome and completedBy, while
+  // the row kept one. The completion is now a compare-and-set on completedAt.
+  it('POST calls/:callId/complete from two members at once: one 201, the other 400, one completion event naming the stored outcome', async () => {
+    prisma.callLogs = [
+      { id: 'call_open', businessId: 'biz_1', contactId: 'contact_1', callerId: 'user_1', completedAt: null, notes: null, evidenceIds: [] },
+    ];
+    const agent = request(app.getHttpServer());
+    const responses = await Promise.all([
+      agent.post('/businesses/biz_1/calls/call_open/complete').set('x-test-user', 'user_1').send({ outcome: 'reached' }),
+      agent.post('/businesses/biz_1/calls/call_open/complete').set('x-test-user', 'user_2').send({ outcome: 'callback_requested' }),
+    ]);
+    expect(responses.map((r) => r.status).sort()).toEqual([201, 400]);
+    const row = prisma.callLogs.find((l) => l.id === 'call_open');
+    const events = emitter.emit.mock.calls.filter((c: any[]) => c[0] === 'call_log.completed').map((c: any[]) => c[1]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ businessId: 'biz_1', callLogId: 'call_open', outcome: row.outcome });
+    const winner = responses.find((r) => r.status === 201)!;
+    expect(winner.body).toMatchObject({ id: 'call_open', outcome: row.outcome });
+    expect(events[0].completedBy).toBe(row.outcome === 'reached' ? 'user_1' : 'user_2');
+  });
+
+  // Review ST-2 (hand-off, not fixed here): no call-log route applies CRM record
+  // visibility. A crm 'write' STAFF member with crm_view 'owned' who gets 404 on
+  // GET contacts/:id for another member's PRIVATE contact can still create a call
+  // log on it through from-next-action and read its call notes through GET calls
+  // ?contactId=, GET calls/:callId and GET calls/scheduled/today?callerId=. This
+  // predates V1-54 and is not widened by it; applying visibility to call logs
+  // (resolveCrmAccess + visibilityClause through the contact) is a policy change
+  // across every call-log route that V1-54's proof does not cover and V1-08's 14
+  // sibling reads leave out. It needs its own packet.
+  it.todo('call-log routes apply the caller\'s CRM record visibility through the call log\'s contact (review ST-2, follow-up packet)');
+
+  // Review ST-4 (hand-off, not fixed here): the KEY tool call_create_task passes
+  // args.callerId, which the model chooses, to createCallLog, which stores it
+  // unchecked, so on the KEY, staff-bridge and auto-trigger paths a call log can
+  // name any member or any string as its caller. The tool contract defines
+  // callerId as the member who will make the call (an assignee), and the fix
+  // belongs in flow-orchestrator.service.ts, outside V1-54's write set.
+  it.todo('KEY call_create_task records a member of the business as the caller, never an arbitrary string (review ST-4, flow-orchestrator.service.ts)');
 
   it('GET calls keeps callerId as an optional read filter: absent, the list is the business\'s; present, it names whose calls to read', async () => {
     const agent = request(app.getHttpServer());
@@ -893,9 +970,9 @@ describe('call logs take the caller from the session (V1-54)', () => {
       await expect(
         Promise.resolve().then(() => controller.createFollowUp('biz_1', 'call_1', { title: 'Follow up' } as any, req)),
       ).rejects.toMatchObject({ status: 401 });
-      await expect(
-        Promise.resolve().then(() => (controller.getScheduledToday as any)('biz_1', undefined, req)),
-      ).rejects.toMatchObject({ status: 401 });
+      // GET calls/scheduled/today is not here: after review CR-1 it is a read
+      // that names no one from the session (callerId is a query filter), so like
+      // GET calls it relies on AuthGuard and BusinessGuard alone.
     }
     for (const fn of Object.values(callLogs)) {
       expect(fn).not.toHaveBeenCalled();

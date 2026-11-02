@@ -403,6 +403,11 @@
       "packet": "V1-53-QUOTE-CHAIN-finish"
     },
     {
+      "prefix": "v54a_",
+      "owner": "apps/server/test/call-log-complete-once.integration.test.ts",
+      "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
