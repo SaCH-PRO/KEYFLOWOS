@@ -269,6 +269,54 @@ function quoteAlreadyAccepted(): ConflictException {
 }
 
 /**
+ * V1-53: the 404 an edit, delete or convert answers for an unknown quote, a
+ * quote of another tenant (looked up under the path tenant, so the two read
+ * the same) or a deleted one. It was a plain Error, which
+ * GlobalHttpExceptionFilter maps to 500.
+ */
+function quoteNotFound(): NotFoundException {
+  return new NotFoundException('Quote not found');
+}
+
+/**
+ * V1-53: the 409 a convert answers for a quote the customer has not accepted
+ * (DRAFT, SENT, REJECTED, EXPIRED). The message is the one the plain Error
+ * (500) carried; `quoteStatus` reaches the client under `details`.
+ */
+function quoteNotAccepted(status: string): ConflictException {
+  return new ConflictException({
+    code: 'quote_not_accepted',
+    message: 'Only accepted quotes can be converted to invoices',
+    quoteStatus: status,
+  });
+}
+
+/**
+ * V1-53: the 409 a delete answers for a converted quote, with the message the
+ * plain Error (500) carried. `quote_converted` is the code the status route
+ * (V1-50) and convert (V1-51) answer for the same stored state.
+ */
+function quoteConvertedNotDeletable(): ConflictException {
+  return new ConflictException({
+    code: 'quote_converted',
+    message: 'Cannot delete a quote that has been converted to an invoice',
+  });
+}
+
+/**
+ * V1-53: the 409 a create answers when its quoteNumber is already used in the
+ * business (the unique index quotes_business_id_quote_number_key). The
+ * index's P2002 answered 500, from the HTTP route and from KEY's
+ * commerce_create_quote, whose count-based number can repeat.
+ */
+function quoteNumberTaken(): ConflictException {
+  return new ConflictException({
+    code: 'quote_number_taken',
+    message: 'A quote with this number already exists in this business.',
+  });
+}
+
+/**
  * V1-51 review (SEC-V51-1 / CR51-1): the discount type a quote is priced with.
  * createQuote and updateQuote price any discount that is not FIXED as a
  * percentage, a stored discount with no type included, so that is the type its
@@ -485,6 +533,59 @@ export class CommerceService {
       throw new NotFoundException('Contact not found');
     }
     return contactId;
+  }
+
+  /**
+   * V1-53: the lines a quote create or edit is about to write, checked before
+   * anything is written. CreateQuoteDto and UpdateQuoteDto hold the HTTP
+   * routes to the line rules; this holds every caller (KEY's create_quote
+   * passes the model's items) to the two the database cannot express:
+   *  - at least one line (an empty list wrote a quote of 0, and an edit with
+   *    one wiped the quote's lines);
+   *  - a line's productId resolves inside the tenant. QuoteItem.productId is an
+   *    FK to Product with no tenant condition, so a foreign id bound another
+   *    tenant's product (and convert copies it onto the invoice lines), and an
+   *    unknown id failed the FK (500). Both answer the same 404 as invoice edit
+   *    (R0-D3 review ST-D3-2). An empty productId is "no product".
+   */
+  private async assertQuoteLines(
+    items: ReadonlyArray<{ productId?: string | null }> | undefined,
+    businessId: string,
+  ): Promise<void> {
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new BadRequestException('items must contain at least 1 elements');
+    }
+    const productIds = Array.from(
+      new Set(
+        items
+          .map((item) => item?.productId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    );
+    if (productIds.length > 0) {
+      const products = await this.prisma.client.product.findMany({
+        where: { id: { in: productIds }, businessId },
+        select: { id: true },
+      });
+      if (products.length !== productIds.length) {
+        throw new NotFoundException('Product not found');
+      }
+    }
+  }
+
+  /**
+   * V1-53: a quote's computed subtotal and total obey the bound an invoice's
+   * do (assertInvoiceAmounts): finite and no larger than MAX_DOCUMENT_AMOUNT.
+   * A bounded quantity times a bounded price can still exceed it (2.1e23), and
+   * a NaN price from an internal caller made the total NaN; such a quote could
+   * be sent and accepted but never converted.
+   */
+  private assertQuoteAmounts(subtotal: number, total: number): void {
+    for (const amount of [subtotal, total]) {
+      if (!Number.isFinite(amount) || amount > MAX_DOCUMENT_AMOUNT) {
+        throw new BadRequestException(`Quote amount cannot exceed ${MAX_DOCUMENT_AMOUNT}`);
+      }
+    }
   }
 
   async createInvoice(input: {
@@ -2108,16 +2209,21 @@ export class CommerceService {
     // echoing) bizA's contact, and converting it created an Invoice bound to
     // that contact. Resolve it inside the tenant before anything is written.
     const contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
+    // V1-53: at least one line, each product inside the tenant (404).
+    await this.assertQuoteLines(input.items, input.businessId);
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
     const taxAmount = subtotal * taxRate / 100;
     const discountValue = input.discountValue ?? 0;
     const discountAmount = input.discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
     const total = subtotal + taxAmount - discountAmount;
+    this.assertQuoteAmounts(subtotal, total);
 
     // R2: viewToken is intentionally NOT generated at draft time. The
     // public accept/reject URL is minted only when the quote is sent so
     // pre-send drafts can never be acted on via a leaked link.
+    // V1-53: the only unique index a new quote can hit is
+    // (businessId, quoteNumber): its P2002 is a 409, not a 500.
     const quote = await this.prisma.client.quote.create({
       data: {
         businessId: input.businessId,
@@ -2141,11 +2247,14 @@ export class CommerceService {
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             total: item.total ?? item.quantity * item.unitPrice,
-            productId: item.productId ?? null,
+            productId: item.productId || null,
           })),
         },
       },
       include: { items: true, contact: true },
+    }).catch((err: unknown) => {
+      if ((err as { code?: string } | null)?.code === 'P2002') throw quoteNumberTaken();
+      throw err;
     });
     this.events.emit('quote.created', { quote, businessId: input.businessId } as QuoteCreatedPayload);
     if (input.contactId) {
@@ -2178,7 +2287,7 @@ export class CommerceService {
       where: { id: input.quoteId, businessId: input.businessId },
     });
     if (!quote) {
-      throw new Error('Quote not found');
+      throw quoteNotFound();
     }
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
     // V1-51 review (SEC-V51-2): a converted quote, and an accepted one, are
@@ -2200,6 +2309,9 @@ export class CommerceService {
       updateData.expiryDate = input.expiryDate ? new Date(input.expiryDate) : null;
     }
     if (input.notes !== undefined) updateData.notes = input.notes;
+    // V1-53: replacement lines obey the create rules (at least one, each
+    // product inside the tenant), checked before anything is written.
+    if (input.items !== undefined) await this.assertQuoteLines(input.items, input.businessId);
     
     // Get items for recalculating totals
     const currentItems = input.items ?? (await this.prisma.client.quoteItem.findMany({ where: { quoteId: input.quoteId } }));
@@ -2217,6 +2329,7 @@ export class CommerceService {
     const taxAmount = subtotal * taxRate / 100;
     const discountAmount = discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
     const total = subtotal + taxAmount - discountAmount;
+    this.assertQuoteAmounts(subtotal, total);
     
     updateData.subtotal = subtotal;
     updateData.taxRate = taxRate;
@@ -2227,14 +2340,17 @@ export class CommerceService {
     updateData.total = total;
     
     if (input.items) {
-      await this.prisma.client.quoteItem.deleteMany({ where: { quoteId: input.quoteId } });
+      // V1-53: the old lines are deleted in the same write that creates the
+      // new ones. A separate deleteMany ran first, so an update that then
+      // failed (a NaN price, 500) left the quote with no lines.
       updateData.items = {
+        deleteMany: {},
         create: input.items.map((item) => ({
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           total: item.quantity * item.unitPrice,
-          productId: item.productId ?? null,
+          productId: item.productId || null,
         })),
       };
     }
@@ -2268,10 +2384,12 @@ export class CommerceService {
       where: { id: quoteId, businessId },
     });
     if (!quote) {
-      throw new Error('Quote not found');
+      throw quoteNotFound();
     }
-    if (quote.invoiceId) {
-      throw new Error('Cannot delete a quote that has been converted to an invoice');
+    // V1-53: a converted quote is a 409 (it was a plain Error, 500). Converted
+    // as V1-50 reads it: an invoice linked, or a converted status.
+    if (isConvertedQuote(quote)) {
+      throw quoteConvertedNotDeletable();
     }
     const result = await this.prisma.client.quote.update({
       where: { id: quoteId },
@@ -2296,15 +2414,18 @@ export class CommerceService {
       include: { items: true },
     });
     if (!quote) {
-      throw new Error('Quote not found');
+      throw quoteNotFound();
     }
-    if (quote.status !== 'ACCEPTED') {
-      throw new Error('Only accepted quotes can be converted to invoices');
-    }
-    if (quote.invoiceId) {
+    if (isConvertedQuote(quote)) {
       // V1-51: a repeated convert is a conflict with the stored state (409),
       // not a server error; same code as the status route's refusal (V1-50).
+      // V1-53: checked first, so a converted quote stored with a converted
+      // status (INVOICED, PAID, CONVERTED) answers this, not quote_not_accepted.
       throw quoteAlreadyConverted();
+    }
+    if (quote.status !== 'ACCEPTED') {
+      // V1-53: a state conflict (409), not a server error (500).
+      throw quoteNotAccepted(quote.status);
     }
 
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);

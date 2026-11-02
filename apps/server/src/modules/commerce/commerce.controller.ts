@@ -15,6 +15,7 @@ import { appUrl } from '../../core/config/runtime-urls';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { ConvertQuoteDto, CreateQuoteDto, UpdateQuoteDto } from './dto/create-quote.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { sanitizeString } from '../../core/utils/sanitize';
@@ -46,6 +47,15 @@ const DOCUMENT_TEMPLATES_OWNER_ONLY_MESSAGE = 'Only the business owner can chang
  * twice with identical options, which is idempotent.
  */
 const CREATE_INVOICE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: CreateInvoiceDto });
+
+/**
+ * V1-53: the quote create, edit and convert bodies, bound the same way (see
+ * CREATE_INVOICE_BODY_PIPE) so the DTO contract holds wherever the controller
+ * runs.
+ */
+const CREATE_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: CreateQuoteDto });
+const UPDATE_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: UpdateQuoteDto });
+const CONVERT_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: ConvertQuoteDto });
 
 type OperatorQuoteContactKey = keyof typeof OPERATOR_QUOTE_CONTACT_SELECT;
 
@@ -921,14 +931,24 @@ export class CommerceController {
   @Post('businesses/:businessId/quotes')
   createQuote(
     @Param('businessId') businessId: string,
-    @Body() body: {
-      contactId: string;
-      items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
-      currency?: string;
-      expiryDate?: string;
-    },
+    @Body(CREATE_QUOTE_BODY_PIPE) body: CreateQuoteDto,
   ) {
-    return this.commerce.createQuote({ ...body, businessId });
+    // V1-53 (M19 quote half): the body is a validated DTO (it was an inline
+    // type the ValidationPipe could not see), and only its declared fields are
+    // forwarded. The service computes subtotal, tax, discount, total and every
+    // line total; the tenant is the guarded path param, never a body field.
+    return this.commerce.createQuote({
+      businessId,
+      contactId: body.contactId,
+      items: body.items.map(({ description, quantity, unitPrice, productId }) => ({ description, quantity, unitPrice, productId })),
+      currency: body.currency,
+      expiryDate: body.expiryDate,
+      taxRate: body.taxRate,
+      discountType: body.discountType,
+      discountValue: body.discountValue,
+      notes: body.notes,
+      quoteNumber: body.quoteNumber,
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -937,12 +957,9 @@ export class CommerceController {
   updateQuote(
     @Param('businessId') businessId: string,
     @Param('quoteId') quoteId: string,
-    @Body() body: {
-      contactId?: string;
-      items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
-      currency?: string;
-      expiryDate?: string | null;
-    },
+    // V1-53: the edit contract (UpdateQuoteDto); unknown keys are stripped,
+    // replacement lines obey the create rules. The tenant stays after the spread.
+    @Body(UPDATE_QUOTE_BODY_PIPE) body: UpdateQuoteDto,
   ) {
     return this.commerce.updateQuote({ ...body, quoteId, businessId });
   }
@@ -963,13 +980,8 @@ export class CommerceController {
   convertQuoteToInvoice(
     @Param('businessId') businessId: string,
     @Param('quoteId') quoteId: string,
-    @Body() body: {
-      taxRate?: number;
-      discountType?: 'PERCENT' | 'FIXED';
-      discountValue?: number;
-      notes?: string;
-      dueDate?: string;
-    },
+    // V1-53: the convert contract (ConvertQuoteDto); every field optional.
+    @Body(CONVERT_QUOTE_BODY_PIPE) body: ConvertQuoteDto,
   ) {
     return this.commerce.convertQuoteToInvoice({ ...body, quoteId, businessId });
   }
@@ -1220,7 +1232,8 @@ export class CommerceController {
   ) {
     const existing = await this.commerce.getQuote(quoteId);
     if (!existing || existing.businessId !== businessId) {
-      throw new Error('Quote not found');
+      // V1-53: an unknown or foreign id is a 404 (a plain Error answered 500).
+      throw new NotFoundException('Quote not found');
     }
 
     // R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 2) and its
@@ -1282,7 +1295,7 @@ export class CommerceController {
     if (quote.status !== 'DRAFT') return { success: true, quote };
     const sent = await this.commerce.getQuote(quoteId);
     if (!sent) {
-      throw new Error('Quote not found');
+      throw new NotFoundException('Quote not found');
     }
     return { success: true, quote: sent };
   }
