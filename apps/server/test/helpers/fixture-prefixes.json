@@ -395,7 +395,7 @@
     {
       "prefix": "v42b_",
       "owner": "apps/server/test/undo-tenant-scope.integration.test.ts",
-      "packet": "V1-42b-UNDO-TENANT-SCOPE"
+      "packet": "V1-42 / V1-42b-UNDO-TENANT-SCOPE"
     },
     {
       "prefix": "v46a_",

@@ -360,12 +360,15 @@ export class AiController {
     if (!step) throw new BadRequestException('Step not found');
     if (step.status !== 'completed') throw new BadRequestException('Only completed steps can be undone');
 
+    // V1-42b-UNDO-TENANT-SCOPE (SEC-V42-1): body.undoId is the client's. The
+    // service resolves it only inside this guarded business (404 otherwise) and
+    // requires req.user to hold write on the module of what is undone.
     if (!body.undoId) {
       // Try to find the most recent undoable action for this step
       const recent = await this.undoService.getRecentActions(businessId);
       const match = recent.find((a) => a.createdAt > new Date(Date.now() - 60 * 1000)); // within last minute
       if (!match) throw new BadRequestException('Undo window expired or no undoable action found');
-      const result = await this.undoService.undo(match.id, req.user?.id);
+      const result = await this.undoService.undo(match.id, req.user?.id, businessId);
       if (result.success) {
         await this.prisma.client.aiPlanStep.update({
           where: { id: stepId },
@@ -375,7 +378,7 @@ export class AiController {
       return result;
     }
 
-    const result = await this.undoService.undo(body.undoId, req.user?.id);
+    const result = await this.undoService.undo(body.undoId, req.user?.id, businessId);
     if (result.success) {
       await this.prisma.client.aiPlanStep.update({
         where: { id: stepId },

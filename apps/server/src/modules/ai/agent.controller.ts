@@ -241,6 +241,13 @@ export class AgentController {
     };
   }
 
+  /**
+   * V1-42b-UNDO-TENANT-SCOPE (SEC-V42-1): the undo id is the client's; the
+   * service resolves it only inside the guarded business (404 otherwise, the
+   * same as an unknown id) and requires req.user to hold write on the module of
+   * what is undone. No canUndo pre-check here: it read the record before the
+   * tenant check and told another business's id apart from an unknown one.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/agent/undo/:undoId')
   async undoAction(
@@ -251,12 +258,7 @@ export class AgentController {
     const userId = req.user?.id;
     if (!userId) return { error: 'Authentication required' };
 
-    const check = this.undoService.canUndo(undoId);
-    if (!check.canUndo) {
-      return { success: false, message: check.reason };
-    }
-
-    const result = await this.undoService.undo(undoId, userId);
+    const result = await this.undoService.undo(undoId, userId, businessId);
     return result;
   }
 

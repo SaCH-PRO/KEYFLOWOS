@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -6,6 +6,37 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { CrmService } from '../crm/crm.service';
 import { BookingsService } from '../bookings/bookings.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
+
+/**
+ * V1-42b-UNDO-TENANT-SCOPE (V1-42 review SEC-V42-1): the module whose WRITE
+ * scope an undo needs, keyed by the entity type that selects the undo writer
+ * below (the action dispatcher registers each tool result as one of these,
+ * action-dispatcher.service.ts inferEntityType). Every tool that registers an
+ * invoice, the payment one (commerce_mark_invoice_paid) included, is undone
+ * by CommerceService.undoInvoice: revenue.
+ *
+ * Deny by default: a type that is not listed here is refused to everyone.
+ * Two registrable types are deliberately left out (pinned by the census in
+ * test/undo-tenant-scope.integration.test.ts):
+ *   task     undoTask writes the generic Task table by id, while every tool
+ *            that registers a task creates a row of another table (ContactTask,
+ *            ProjectTask, CallTask, ...) owned by different modules;
+ *   message  undoMessage writes nothing a module scope could guard.
+ */
+export const UNDO_WRITE_SCOPE: Readonly<Record<string, CanonicalModule>> = Object.freeze({
+  invoice: 'revenue',
+  contact: 'crm',
+  booking: 'bookings',
+});
+
+/** The module an undo of `entityType` needs write access to, or null (refused). */
+export function undoWriteScopeFor(entityType: string): CanonicalModule | null {
+  return Object.prototype.hasOwnProperty.call(UNDO_WRITE_SCOPE, entityType) ? UNDO_WRITE_SCOPE[entityType] : null;
+}
+
+/** One answer for an unknown, expired-and-collected, and another tenant's undo id. */
+const UNDO_NOT_FOUND = 'Undo window expired or action not found';
 
 export interface UndoableAction {
   id: string;
@@ -94,9 +125,34 @@ export class UndoService {
   }
 
   /**
-   * Undo a previously registered action
+   * Undo a previously registered action.
+   *
+   * V1-42b-UNDO-TENANT-SCOPE (V1-42 review SEC-V42-1). Both undo routes
+   * (agent.controller.ts undoAction, ai.controller.ts undoPlanStep) pass the
+   * tenant BusinessGuard admitted and req.user's id; the undo id comes from the
+   * client. In this order, before anything is written:
+   *   1. the record is resolved only inside `guardedBusinessId`: another
+   *      business's id answers the same 404 as an unknown one;
+   *   2. the actor must be a member of the record's business holding WRITE on
+   *      the module of what is undone (UNDO_WRITE_SCOPE; ModuleScopeGuard's
+   *      rule: the explicit scope map, else the role defaults). A platform
+   *      SUPER_ADMIN who is not a member is refused (D-46), and an entity type
+   *      with no mapping is refused to everyone;
+   *   3. then the record's own state (already undone, window passed).
+   * Without `guardedBusinessId` (a caller outside a route) step 2 still binds
+   * the actor to the record's business.
    */
-  async undo(undoId: string, userId?: string): Promise<{ success: boolean; message: string; restored?: Record<string, any> }> {
+  async undo(
+    undoId: string,
+    actorId: string | undefined,
+    guardedBusinessId?: string,
+  ): Promise<{ success: boolean; message: string; restored?: Record<string, any> }> {
+    const record = this.recentActions.get(undoId);
+    if (!record || (guardedBusinessId !== undefined && record.businessId !== guardedBusinessId)) {
+      throw new NotFoundException(UNDO_NOT_FOUND);
+    }
+    const userId = await this.assertActorMayUndo(record, actorId);
+
     const check = this.canUndo(undoId);
     if (!check.canUndo || !check.action) {
       return { success: false, message: check.reason ?? 'Cannot undo' };
@@ -136,7 +192,8 @@ export class UndoService {
         action: 'action.undone',
         toolName: undefined,
         mode: 'manual',
-        actor: userId ?? 'user',
+        actor: userId,
+        userId,
         success: true,
         durationMs: 0,
         inputSummary: { undoId, entityType: action.entityType, entityId: action.entityId },
@@ -156,6 +213,33 @@ export class UndoService {
       this.logger.error(`Undo failed for ${undoId}: ${(err as Error).message}`);
       return { success: false, message: `Undo failed: ${(err as Error).message}` };
     }
+  }
+
+  /**
+   * The actor must hold WRITE on the module of what is undone, in the business
+   * the record belongs to (step 2 of undo()). Throws 403; never writes.
+   * Returns the actor, who is the one the undo is logged and announced for.
+   */
+  private async assertActorMayUndo(action: UndoableAction, actorId: string | undefined): Promise<string> {
+    if (!actorId) throw new ForbiddenException('Authentication required');
+    const module = undoWriteScopeFor(action.entityType);
+    if (!module) {
+      throw new ForbiddenException(`Undo is not permitted for ${action.entityType} actions`);
+    }
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actorId, businessId: action.businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) throw new ForbiddenException('Not a member of this business');
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes[module] || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: ${module} requires write access (you have ${level})`);
+    }
+    return actorId;
   }
 
   /**
