@@ -32,6 +32,8 @@
  *           silent replay of the first order, and writes nothing
  *   V33-06  two concurrent checkouts with the same key yield one order, and
  *           both are answered with it
+ *   V33-12  a retry after the first call's payment step failed is answered
+ *           with the same order and starts its payment session (once)
  *   V33-07  an operator (revenue:write) completes a CASH order offline: PAID
  *           and CONFIRMED, one PAID invoice INV-<orderNumber>, one SUCCESSFUL
  *           cash payment of the order total recorded by that operator, exactly
@@ -49,6 +51,9 @@
  *           an invoice or a payment
  *   V33-11  a MANUAL order (the other no-provider method the checkout accepts)
  *           completes offline the same way: one payment, one posting
+ *
+ * Added with the fix (not in the tests-first commit): V33-12 and the
+ * Idempotent-Replayed response-header assertions in V33-01 and V33-06.
  *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
@@ -111,6 +116,8 @@ let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: strin
 let seen: Array<{ name: string; payload: any }> = [];
 /** createStorePayment calls the checkout made (the provider stand-in). */
 let paymentCalls: Array<{ orderId: string; method: string }> = [];
+/** When set, the next createStorePayment call throws (a provider outage), once. */
+let failNextPayment = false;
 
 async function cleanup() {
   for (const sql of [
@@ -305,6 +312,10 @@ beforeAll(async () => {
   const paymentsRecorder = {
     createStorePayment: async (input: { orderId: string; method: string }) => {
       paymentCalls.push({ orderId: input.orderId, method: input.method });
+      if (failNextPayment) {
+        failNextPayment = false;
+        throw new Error('provider unavailable');
+      }
       sessions += 1;
       return { status: 'REDIRECT', redirectUrl: `https://pay.test.local/${P}session_${sessions}` };
     },
@@ -426,6 +437,8 @@ describe('V1-33 storefront checkout retry identity (Idempotency-Key)', () => {
 
     expect(second.body.order.id, 'the retry is answered with the first order').toBe(first.body.order.id);
     expect(second.body.order.orderNumber).toBe(first.body.order.orderNumber);
+    expect(first.headers['idempotent-replayed']).toBeUndefined();
+    expect(second.headers['idempotent-replayed'], 'the retry says it is a replay').toBe('true');
     expect(await orderCount(), 'one order for two submits').toBe(before + 1);
     expect(created(), 'store_order.created once').toEqual([first.body.order.id]);
     expect(await retryRowsFor(ID.bizA, first.body.order.id), 'the retry identity lives in idempotency_keys').toHaveLength(1);
@@ -507,6 +520,28 @@ describe('V1-33 storefront checkout retry identity (Idempotency-Key)', () => {
     expect(b.body.order.id).toBe(a.body.order.id);
     expect(await orderCount(), 'one order for two concurrent submits').toBe(before + 1);
     expect(created()).toEqual([a.body.order.id]);
+    expect([a, b].filter((r) => r.headers['idempotent-replayed'] === 'true'), 'exactly one of them is the replay').toHaveLength(1);
+  });
+
+  it('V33-12 a retry after the payment step failed keeps the one order and starts its payment session then', async () => {
+    const key = `${P}key_12`;
+    const before = await orderCount();
+    failNextPayment = true;
+
+    const first = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+    expect(first.status, 'the provider outage reaches the customer').toBe(500);
+    expect(await orderCount(), 'the order was written before the payment step').toBe(before + 1);
+    const [orderId] = created();
+
+    const retry = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.order.id, 'the retry is answered with the order the first call wrote').toBe(orderId);
+    expect(retry.body.payment?.redirectUrl, 'and a payment session to pay it').toBeTruthy();
+    const again = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+    expect(again.body.payment, 'a later retry gets the same session').toEqual(retry.body.payment);
+
+    expect(paymentCalls.map((c) => c.orderId), 'the failed call, then one session').toEqual([orderId, orderId]);
+    expect(await orderCount()).toBe(before + 1);
   });
 });
 

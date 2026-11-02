@@ -1,4 +1,5 @@
-import { Injectable, Inject, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -10,6 +11,42 @@ import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { InventoryRiskService } from '../commerce/inventory-risk.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+
+/**
+ * V1-33: what a storefront checkout's Idempotency-Key slot remembers, in the
+ * existing idempotency_keys row (`response`): the order it created and, once
+ * started, the payment session the customer was sent to. `paymentFailed` marks
+ * a payment step that threw, so a retry may start it again.
+ */
+interface CheckoutRetryRecord {
+  orderId?: string;
+  payment?: unknown;
+  paymentFailed?: boolean;
+}
+
+type StoreOrderWithItems = Prisma.MarketplaceOrderGetPayload<{ include: { items: true } }>;
+
+/** V1-33: storefront orders paid outside a provider, completed by an operator. */
+const OFFLINE_PAYMENT_METHODS = new Set(['CASH', 'MANUAL']);
+
+/** Prisma P2002: a unique index refused the write. */
+function isUniqueViolation(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === 'P2002';
+}
+
+/** JSON with sorted object keys, so the same checkout always hashes the same. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+const sha256 = (material: string) => createHash('sha256').update(material, 'utf8').digest('hex');
 
 @Injectable()
 export class StoreOrderService {
@@ -166,7 +203,7 @@ export class StoreOrderService {
     storefrontSlug?: string | null;
     visitorId?: string | null;
     referralCode?: string | null;
-  }) {
+  }, retryClaim?: { slot: string; requestHash: string }) {
     const totals = await this.calculateOrderTotals(
       input.cartItems,
       input.businessId,
@@ -176,49 +213,67 @@ export class StoreOrderService {
 
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-    const order = await this.prisma.client.marketplaceOrder.create({
-      data: {
-        businessId: input.businessId,
-        orderNumber,
-        status: 'PENDING',
-        type: 'STOREFRONT',
-        customerName: input.customerInfo.name,
-        customerEmail: input.customerInfo.email ?? null,
-        customerPhone: input.customerInfo.phone ?? null,
-        customerCountry: input.customerInfo.country ?? null,
-        shippingAddress: input.shippingInfo?.address ?? undefined,
-        subtotal: totals.subtotal,
-        shippingFee: totals.shippingFee,
-        taxAmount: totals.taxAmount,
-        discountAmount: totals.discountAmount,
-        total: totals.total,
-        currency: totals.currency,
-        paymentMethod: input.paymentMethod ?? null,
-        paymentStatus: input.paymentMethod === 'CASH' ? 'PENDING' : 'UNPAID',
-        promoCodeId: totals.promo?.id ?? null,
-        notes: input.notes ?? null,
-        metadata: {
-          taxRate: totals.taxRate,
-          promoCode: totals.promo?.code ?? null,
-          shipping: totals.shipping,
-          referralCode: input.referralCode ?? null,
-          visitorId: input.visitorId ?? null,
-          storefrontSlug: input.storefrontSlug ?? null,
-        },
-        items: {
-          create: totals.items.map((item) => ({
-            productId: item.productId,
-            name: item.name,
-            sku: item.sku ?? null,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            total: item.total,
-            currency: item.currency,
-          })),
-        },
+    const orderData = {
+      businessId: input.businessId,
+      orderNumber,
+      status: 'PENDING',
+      type: 'STOREFRONT',
+      customerName: input.customerInfo.name,
+      customerEmail: input.customerInfo.email ?? null,
+      customerPhone: input.customerInfo.phone ?? null,
+      customerCountry: input.customerInfo.country ?? null,
+      shippingAddress: input.shippingInfo?.address ?? undefined,
+      subtotal: totals.subtotal,
+      shippingFee: totals.shippingFee,
+      taxAmount: totals.taxAmount,
+      discountAmount: totals.discountAmount,
+      total: totals.total,
+      currency: totals.currency,
+      paymentMethod: input.paymentMethod ?? null,
+      paymentStatus: input.paymentMethod === 'CASH' ? 'PENDING' : 'UNPAID',
+      promoCodeId: totals.promo?.id ?? null,
+      notes: input.notes ?? null,
+      metadata: {
+        taxRate: totals.taxRate,
+        promoCode: totals.promo?.code ?? null,
+        shipping: totals.shipping,
+        referralCode: input.referralCode ?? null,
+        visitorId: input.visitorId ?? null,
+        storefrontSlug: input.storefrontSlug ?? null,
       },
-      include: { items: true },
-    });
+      items: {
+        create: totals.items.map((item) => ({
+          productId: item.productId,
+          name: item.name,
+          sku: item.sku ?? null,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          total: item.total,
+          currency: item.currency,
+        })),
+      },
+    };
+
+    // V1-33: with a retry slot, the order and its idempotency_keys row commit
+    // together. A concurrent checkout holding the same slot blocks on the
+    // unique index and then fails with P2002, rolling its order back; the
+    // caller (createOrderOnce) answers it with the order that won. Nothing
+    // below (promo usage, events, CRM) runs for the loser.
+    const order = retryClaim
+      ? await this.prisma.client.$transaction(async (tx) => {
+          const created = await tx.marketplaceOrder.create({ data: orderData, include: { items: true } });
+          await tx.idempotencyKey.create({
+            data: {
+              businessId: input.businessId,
+              idempotencyKey: retryClaim.slot,
+              status: 'completed',
+              requestHash: retryClaim.requestHash,
+              response: { orderId: created.id } satisfies CheckoutRetryRecord,
+            },
+          });
+          return created;
+        })
+      : await this.prisma.client.marketplaceOrder.create({ data: orderData, include: { items: true } });
 
     if (totals.promo?.id) {
       await this.promoCodeService.incrementUsage(totals.promo.id);
@@ -302,6 +357,115 @@ export class StoreOrderService {
     }
 
     return order;
+  }
+
+  /**
+   * V1-33 (M37, SSP-BP-03): a storefront checkout that carries an
+   * Idempotency-Key. The first call creates the order (createOrder, its
+   * idempotency_keys row committed with it) and starts the payment session;
+   * every later call with the same key on the same storefront is answered
+   * with that order and that session, and writes nothing. The key is scoped
+   * to the business and the slug, so the same key on another storefront is
+   * another order. The same key for a different checkout (cart, customer,
+   * promo, shipping, payment method or notes) is a conflict, not a replay.
+   *
+   * The slot is the existing idempotency_keys table (unique on business and
+   * key; no migration). The client's key is stored hashed, so its length is
+   * bounded whatever the client sends.
+   *
+   * A replay never calls the payment provider again, except when the first
+   * call's payment step threw (recorded as paymentFailed): the order exists
+   * and no session was handed out, so the retry starts one.
+   */
+  async createOrderOnce<P>(
+    input: Parameters<StoreOrderService['createOrder']>[0],
+    idempotencyKey: string,
+    startPayment: (order: StoreOrderWithItems) => Promise<P | null>,
+  ): Promise<{ order: StoreOrderWithItems; payment: P | null; replayed: boolean }> {
+    const slot = `storefront_checkout:${input.storefrontSlug ?? ''}:${sha256(idempotencyKey)}`;
+    const requestHash = sha256(
+      canonicalJson({
+        items: input.cartItems,
+        customer: input.customerInfo,
+        promoCode: input.promoCode ?? null,
+        shipping: input.shippingInfo ?? null,
+        paymentMethod: input.paymentMethod ?? null,
+        notes: input.notes ?? null,
+      }),
+    );
+
+    const prior = await this.checkoutReplay(input.businessId, slot, requestHash, startPayment);
+    if (prior) return prior;
+
+    let order: StoreOrderWithItems;
+    try {
+      order = await this.createOrder(input, { slot, requestHash });
+    } catch (err) {
+      // A concurrent checkout with the same key committed first: answer with its order.
+      if (!isUniqueViolation(err)) throw err;
+      const winner = await this.checkoutReplay(input.businessId, slot, requestHash, startPayment);
+      if (winner) return winner;
+      throw err;
+    }
+    const payment = await this.startCheckoutPayment(input.businessId, slot, order, startPayment);
+    return { order, payment, replayed: false };
+  }
+
+  /** V1-33: the order (and payment session) a used checkout key already answered with, or null when the key is new. */
+  private async checkoutReplay<P>(
+    businessId: string,
+    slot: string,
+    requestHash: string,
+    startPayment: (order: StoreOrderWithItems) => Promise<P | null>,
+  ): Promise<{ order: StoreOrderWithItems; payment: P | null; replayed: true } | null> {
+    const row = await this.prisma.client.idempotencyKey.findUnique({
+      where: { businessId_idempotencyKey: { businessId, idempotencyKey: slot } },
+    });
+    if (!row) return null;
+    if (row.requestHash !== requestHash) {
+      throw new ConflictException('This Idempotency-Key was already used for a different checkout; use a new key for a new order');
+    }
+    const record = (row.response ?? null) as unknown as CheckoutRetryRecord | null;
+    const order = record?.orderId
+      ? await this.prisma.client.marketplaceOrder.findFirst({ where: { id: record.orderId, businessId }, include: { items: true } })
+      : null;
+    if (!order) {
+      throw new ConflictException('This Idempotency-Key was already used and its order no longer exists; use a new key');
+    }
+    let payment = (record?.payment ?? null) as P | null;
+    if (record?.paymentFailed && order.paymentStatus !== 'PAID' && order.status !== 'CANCELLED') {
+      payment = await this.startCheckoutPayment(businessId, slot, order, startPayment);
+    }
+    return { order, payment, replayed: true };
+  }
+
+  /** V1-33: start the order's payment session and remember it (or that it failed) on the key. */
+  private async startCheckoutPayment<P>(
+    businessId: string,
+    slot: string,
+    order: StoreOrderWithItems,
+    startPayment: (order: StoreOrderWithItems) => Promise<P | null>,
+  ): Promise<P | null> {
+    let payment: P | null;
+    try {
+      payment = await startPayment(order);
+    } catch (err) {
+      await this.rememberCheckout(businessId, slot, { orderId: order.id, paymentFailed: true });
+      throw err;
+    }
+    await this.rememberCheckout(businessId, slot, { orderId: order.id, payment: payment ?? null });
+    return payment ?? null;
+  }
+
+  private async rememberCheckout(businessId: string, slot: string, record: CheckoutRetryRecord) {
+    try {
+      await this.prisma.client.idempotencyKey.updateMany({
+        where: { businessId, idempotencyKey: slot },
+        data: { response: record as unknown as Prisma.InputJsonValue },
+      });
+    } catch (err) {
+      this.logger.warn(`[store-order] could not record the checkout's payment session on its key: ${(err as Error).message}`);
+    }
   }
 
   async getOrder(orderId: string, businessId?: string) {
@@ -400,6 +564,62 @@ export class StoreOrderService {
   }
 
   /**
+   * V1-33 (M37, V18-T3): an operator records the cash (or manual payment) a
+   * storefront customer paid outside any provider. A CASH order is created
+   * PENDING and nothing else moves it: updatePaymentStatus('PAID') is reached
+   * only from provider callbacks, and CONFIRMED is fulfilment, not money
+   * (V1-18). This goes through the same door a provider payment does,
+   * completeCheckout: one PAID invoice, one SUCCESSFUL payment of the order
+   * total recorded by the operator, its payment_recorded posting, the stock
+   * decrement and the revenue attribution, in one transaction, then one
+   * store_order.paid carrying the invoiceId.
+   *
+   * Only STOREFRONT orders whose method needs no provider (CASH, MANUAL) are
+   * completed here; a provider-method order is settled by its provider. A
+   * cancelled or refunded order is refused. An order already PAID is answered
+   * as it stands and nothing is written, so a double click (or two operators
+   * at once: the second transaction fails on the invoice-number and
+   * payment-reference unique indexes and rolls back) records one payment.
+   */
+  async completeOfflineOrder(orderId: string, businessId: string, actorId: string | null) {
+    const order = await this.prisma.client.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      select: { id: true, type: true, status: true, paymentStatus: true, paymentMethod: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.paymentStatus === 'PAID') return this.getOrder(order.id, businessId);
+
+    const method = (order.paymentMethod ?? '').toUpperCase();
+    if (order.type !== 'STOREFRONT' || !OFFLINE_PAYMENT_METHODS.has(method)) {
+      throw new BadRequestException(
+        'Only a storefront order paid in cash or manually is completed offline; this order is settled by its payment provider',
+      );
+    }
+    if (order.status === 'CANCELLED' || order.status === 'REFUNDED' || order.paymentStatus === 'REFUNDED') {
+      throw new ConflictException(`This order is ${order.status.toLowerCase()} and cannot be completed`);
+    }
+
+    try {
+      return await this.completeCheckout({
+        orderId: order.id,
+        paymentRef: `storefront_offline_${order.id}`,
+        provider: method.toLowerCase(),
+        method: method.toLowerCase(),
+        actorId,
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        const settled = await this.prisma.client.marketplaceOrder.findFirst({
+          where: { id: order.id, businessId },
+          include: { items: true },
+        });
+        if (settled?.paymentStatus === 'PAID') return settled;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Atomically finalize a successful storefront checkout.
    *
    * Creates, in a single transaction:
@@ -421,6 +641,8 @@ export class StoreOrderService {
     provider?: string;
     method?: string;
     paidAmount?: number;
+    /** V1-33: the operator who recorded an offline payment (Payment.recordedBy, the posting's createdById). */
+    actorId?: string | null;
   }) {
     const order = await this.prisma.client.marketplaceOrder.findUnique({
       where: { id: input.orderId },
@@ -576,9 +798,10 @@ export class StoreOrderService {
           method,
           invoiceId: invoice.id,
           businessId: order.businessId,
+          recordedBy: input.actorId ?? null,
         },
       });
-      await this.revenuePosting.onPaymentRecorded(payment.id, { tx: txClient });
+      await this.revenuePosting.onPaymentRecorded(payment.id, { tx: txClient, createdById: input.actorId ?? null });
 
       // 3. Stock decrement + movement rows. Tracked products MUST have a
       //    warehouse + stock row with sufficient quantity; otherwise we
