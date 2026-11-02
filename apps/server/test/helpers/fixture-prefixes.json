@@ -423,6 +423,11 @@
       "packet": "V1-42 / V1-42b-UNDO-TENANT-SCOPE"
     },
     {
+      "prefix": "v42c_",
+      "owner": "apps/server/test/invoice-status-events.integration.test.ts",
+      "packet": "V1-42c-INVOICE-STATUS-EVENTS"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
