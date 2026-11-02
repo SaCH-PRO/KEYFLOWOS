@@ -228,7 +228,7 @@ export class KeyCortexActionsService implements OnModuleInit {
             error: verdict.reason,
           };
           results.push(blocked);
-          await this.trackActionExecution(blocked, session.id);
+          await this.trackActionExecution(blocked, session);
           continue;
         }
 
@@ -249,7 +249,7 @@ export class KeyCortexActionsService implements OnModuleInit {
 
         const result = await this.executeAction(action, session.businessId, session.userId, session.id);
         results.push(result);
-        await this.trackActionExecution(result, session.id);
+        await this.trackActionExecution(result, session);
         this.emitActionEvent(action.actionType, result, session);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
@@ -264,7 +264,7 @@ export class KeyCortexActionsService implements OnModuleInit {
           error: message,
         };
         results.push(failedResult);
-        await this.trackActionExecution(failedResult, session.id);
+        await this.trackActionExecution(failedResult, session);
       }
     }
 
@@ -393,7 +393,7 @@ export class KeyCortexActionsService implements OnModuleInit {
         error: reason,
       };
       results.push(blocked);
-      await this.trackActionExecution(blocked, session.id);
+      await this.trackActionExecution(blocked, session);
     }
     return results;
   }
@@ -493,14 +493,26 @@ export class KeyCortexActionsService implements OnModuleInit {
   // Audit & History
   // ========================================================================
 
+  /**
+   * The legacy gate's audit door: one CortexActionLog row per gate outcome.
+   *
+   * V1-02b review (SEC-V102b-1, CR-V102b-1): the row names its tenant and its
+   * actor from the session itself. businessId is a required column (a required
+   * Business relation), so a row without it was refused by Prisma unless an
+   * ambient tenant context happened to inject one, and even then it carried no
+   * user. A refusal (denied or failed closed) is attributed to the member the
+   * gate refused, as the parsed-command gate's rows are.
+   */
   async trackActionExecution(
     action: CortexActionResult,
-    sessionId: string,
+    session: Pick<CortexSession, 'id' | 'businessId' | 'userId'>,
   ): Promise<void> {
     try {
       await (this.prisma.client as any).cortexActionLog.create({
         data: {
-          sessionId,
+          sessionId: session.id,
+          businessId: session.businessId,
+          userId: session.userId ?? null,
           actionType: action.actionType,
           status: action.status,
           description: action.description,
@@ -513,7 +525,9 @@ export class KeyCortexActionsService implements OnModuleInit {
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      this.logger.error(`Failed to track action execution: ${message}`);
+      this.logger.error(
+        `Failed to track action execution (business ${session.businessId}, session ${session.id}): ${message}`,
+      );
     }
   }
 

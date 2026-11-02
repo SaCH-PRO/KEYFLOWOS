@@ -72,7 +72,15 @@ const createDocument = {
 };
 
 function setup() {
-  const cortexActionLogCreate = vi.fn().mockResolvedValue({});
+  // Refuses a row with no businessId, as the real schema does (CortexActionLog
+  // has a required Business relation; Prisma answers "Argument `business` is
+  // missing"). A mock that accepted any row let the audit hold only here.
+  const cortexActionLogCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    if (typeof data.businessId !== 'string' || data.businessId.length === 0) {
+      throw new Error('Argument `business` is missing.');
+    }
+    return {};
+  });
   const prisma = { client: { cortexActionLog: { create: cortexActionLogCreate } } };
   const toolExecute = vi.fn().mockResolvedValue({ success: true, data: { id: 'row_1' } });
   const keyCortexToolRegistry = {
@@ -155,6 +163,8 @@ describe('V1-02b legacy Cortex action gate — fail closed', () => {
       expect(t.auditRows()).toEqual([
         expect.objectContaining({
           sessionId: 'sess_1',
+          businessId: 'biz_1',
+          userId: 'user_1',
           actionType: 'CREATE_TASK',
           status: 'blocked',
           error: failedClosed,
@@ -194,7 +204,13 @@ describe('V1-02b legacy Cortex action gate — fail closed', () => {
       ]);
       expect(results[0].error).toContain('Unusable autonomy verdict for key_cortex.CREATE_TASK');
       expect(t.auditRows()).toEqual([
-        expect.objectContaining({ actionType: 'CREATE_TASK', status: 'blocked', error: failedClosed }),
+        expect.objectContaining({
+          businessId: 'biz_1',
+          userId: 'user_1',
+          actionType: 'CREATE_TASK',
+          status: 'blocked',
+          error: failedClosed,
+        }),
       ]);
     },
   );
@@ -216,10 +232,10 @@ describe('V1-02b legacy Cortex action gate — fail closed', () => {
       ['CREATE_DOCUMENT', 'blocked'],
     ]);
     for (const r of results) expect(r.error).toEqual(failedClosed);
-    expect(t.auditRows().map((row: any) => [row.actionType, row.status])).toEqual([
-      ['CREATE_TASK', 'blocked'],
-      ['CREATE_EVENT', 'blocked'],
-      ['CREATE_DOCUMENT', 'blocked'],
+    expect(t.auditRows().map((row: any) => [row.actionType, row.status, row.businessId, row.userId])).toEqual([
+      ['CREATE_TASK', 'blocked', 'biz_1', 'user_1'],
+      ['CREATE_EVENT', 'blocked', 'biz_1', 'user_1'],
+      ['CREATE_DOCUMENT', 'blocked', 'biz_1', 'user_1'],
     ]);
   });
 
@@ -291,10 +307,36 @@ describe('V1-02b legacy Cortex action gate — fail closed', () => {
     expect(results[0].error).toBe('Constitution values conflict');
     expect(t.toolExecute).toHaveBeenCalledTimes(1);
     expect(t.toolExecute).toHaveBeenCalledWith('cortex.create_event', expect.anything(), expect.anything());
-    expect(t.auditRows().map((row: any) => [row.actionType, row.status])).toEqual([
-      ['CREATE_TASK', 'blocked'],
-      ['CREATE_EVENT', 'success'],
+    expect(t.auditRows().map((row: any) => [row.actionType, row.status, row.businessId, row.userId])).toEqual([
+      ['CREATE_TASK', 'blocked', 'biz_1', 'user_1'],
+      ['CREATE_EVENT', 'success', 'biz_1', 'user_1'],
     ]);
+    expect(t.auditRows()[0].error).toBe('Constitution values conflict');
+  });
+
+  // Review repair (SEC-V102b-1, CR-V102b-1): businessId is a required column of
+  // CortexActionLog (a required Business relation). A row that left it out was
+  // refused by the real database and the refusal swallowed, so the audit above
+  // held only against this mock. Every row of every gate outcome names the
+  // session's tenant and actor itself; the real-database proof is
+  // test/key-cortex-legacy-gate-audit.integration.test.ts.
+  it.each([
+    ['failed closed', (o: any) => o.evaluateAction.mockRejectedValue(new Error('oracle down')), 'blocked'],
+    ['was denied', (o: any) => o.evaluateAction.mockResolvedValue(deny), 'blocked'],
+    ['ran', (o: any) => o.evaluateAction.mockResolvedValue(allow), 'success'],
+  ])('V1-02b-LG09 the audit row of an action that %s names the session tenant and actor', async (_label, arrange, status) => {
+    const t = setup();
+    arrange(t.autonomyOrchestrator);
+
+    await t.service.executeActions([createTask], session);
+
+    expect(t.auditRows()).toEqual([
+      expect.objectContaining({ sessionId: 'sess_1', businessId: 'biz_1', userId: 'user_1', status }),
+    ]);
+    const auditFailures = t.loggerError.mock.calls
+      .map(([m]) => String(m))
+      .filter((m) => m.includes('Failed to track action execution'));
+    expect(auditFailures).toEqual([]);
   });
 });
 
