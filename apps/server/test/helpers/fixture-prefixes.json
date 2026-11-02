@@ -64,6 +64,11 @@
       "packet": "R0-07 / R0-CMF5-GMAIL-CONNECT-BINDING"
     },
     {
+      "prefix": "k07w_",
+      "owner": "apps/server/test/whatsapp-config-authority.integration.test.ts",
+      "packet": "R0-07 / R0-SEC2-WHATSAPP-CONFIG-AUTHORITY"
+    },
+    {
       "prefix": "k08c_",
       "owner": "apps/server/test/subscriptions-authority.integration.test.ts",
       "packet": "R0-08 / R0-08c-SUBSCRIPTION-AUTHORITY"

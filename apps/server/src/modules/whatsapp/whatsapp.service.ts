@@ -1,9 +1,9 @@
-import { BadRequestException, Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
-import { encryptToken, decryptToken } from '../../core/crypto/token-crypto';
+import { encryptToken, decryptToken, isTokenEncrypted } from '../../core/crypto/token-crypto';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { KEY_INBOX_CHANNELS } from '../key-inbox/key-inbox.constants';
 import type { ResolvedEntity } from '../../core/connectors/entity-resolution.service';
@@ -83,7 +83,50 @@ function toTemplateData(params?: unknown): Record<string, string> | undefined {
 }
 
 /** Fields that should be encrypted at rest */
-const SENSITIVE_FIELDS: (keyof WhatsAppConfig)[] = ['authToken', 'accessToken', 'accountSid'];
+const SENSITIVE_FIELDS = ['authToken', 'accessToken', 'accountSid'] as const;
+type SensitiveField = (typeof SENSITIVE_FIELDS)[number];
+
+/**
+ * R0-SEC2 (owner ruling D-11): the refusal a non-owner gets on PATCH
+ * .../config, the code every D-11 business-config writer answers
+ * (IdentityService, TemplatesService, OnboardingConciergeService,
+ * BusinessGenesisService, FinanceSettingsService).
+ */
+export const BUSINESS_PROFILE_OWNER_ONLY = 'BUSINESS_PROFILE_OWNER_ONLY';
+
+/** R0-SEC2 review SEC2-R1: PATCH .../config refuses a credential that is already ciphertext (400). */
+export const WHATSAPP_CREDENTIAL_CIPHERTEXT = 'WHATSAPP_CREDENTIAL_CIPHERTEXT';
+
+/** R0-SEC2 review SEC2-R3: PATCH .../config refuses a phoneNumberId another business holds (409). */
+export const WHATSAPP_PHONE_NUMBER_ID_IN_USE = 'WHATSAPP_PHONE_NUMBER_ID_IN_USE';
+
+/** Advisory-lock namespace serialising claims of one phoneNumberId (saveConfig). */
+const PHONE_NUMBER_ID_LOCK_NAMESPACE = 'whatsapp:phone-number-id:';
+
+/**
+ * What GET .../config answers (R0-SEC2-WHATSAPP-CONFIG-AUTHORITY). Never a
+ * secret value: each credential is whether it is stored, and its last 4
+ * characters only for a member who may write the config. phoneNumberId (what
+ * the shared webhook routes inbound by) is also answered only to that member.
+ * No credential is answered under its own field name, so a form that sends
+ * this view back to PATCH writes no mask over a stored token.
+ */
+export interface WhatsAppConfigView {
+  provider: WhatsAppConfig['provider'];
+  fromNumber: string | null;
+  phoneNumberId?: string | null;
+  credentials: Record<SensitiveField, { configured: boolean; last4: string | null }>;
+}
+
+/**
+ * A submitted credential that does not replace the stored one: absent, not a
+ * string, blank, or the "•••• 1234" preview shape the connector framework uses.
+ */
+function isKeptCredential(value: unknown): boolean {
+  if (typeof value !== 'string') return true;
+  const v = value.trim();
+  return v.length === 0 || v.startsWith('•');
+}
 
 function encryptConfig(config: WhatsAppConfig): WhatsAppConfig {
   const encrypted = { ...config };
@@ -276,15 +319,148 @@ export class WhatsAppService {
     return decryptConfig(wa);
   }
 
-  async saveConfig(businessId: string, config: WhatsAppConfig): Promise<void> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
+  /**
+   * Who may write the WhatsApp config, and read the writer-only fields of its
+   * view: the business owner only — R0-SEC2-WHATSAPP-CONFIG-AUTHORITY, owner
+   * ruling D-11 (the business profile, its sending identity and sibling
+   * business-config writes are OWNER only, regardless of granted scopes). The
+   * config is the identity the business sends from (its Meta phone number id
+   * and access token, or its Twilio account), so replacing it is a D-11 write.
+   *
+   * The owner is the OWNER membership or the distinguished owner
+   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
+   * BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants. The actor is the authenticated user
+   * AuthMiddleware attached (req.user); none is not the owner (fails closed).
+   * Only the route's businessId is consulted. The rule is restated rather than
+   * imported, as TemplatesService.isProfileOwner and
+   * GmailService.assertConnectAuthority restate it: WhatsAppModule does not
+   * import IdentityModule.
+   */
+  async isConfigOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<boolean> {
+    if (!actor?.id) return false;
+    if (actor.role === 'SUPER_ADMIN') return true;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
     });
-    const meta = (business?.metaData as Record<string, unknown> | null) ?? {};
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: { ...meta, whatsapp: encryptConfig(config) } },
+    if (membership?.role === 'OWNER') return true;
+    const owned = await this.prisma.client.business.findFirst({
+      where: { id: businessId, ownerId: actor.id },
+      select: { id: true },
+    });
+    return !!owned;
+  }
+
+  /** PATCH .../config runs this before anything is read or written: 403 BUSINESS_PROFILE_OWNER_ONLY. */
+  async assertConfigOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<void> {
+    if (await this.isConfigOwner(businessId, actor)) return;
+    throw new ForbiddenException({
+      code: BUSINESS_PROFILE_OWNER_ONLY,
+      message: 'Only the business owner can change the WhatsApp sending configuration.',
+    });
+  }
+
+  /**
+   * The config as GET .../config answers it (see WhatsAppConfigView): no
+   * credential value, ever. `writer` (isConfigOwner) adds phoneNumberId and
+   * each credential's last 4 characters — for a value of at least 12
+   * characters, so a short value is never mostly shown.
+   */
+  async getConfigView(businessId: string, opts: { writer: boolean }): Promise<WhatsAppConfigView | null> {
+    const config = await this.getConfig(businessId);
+    if (!config) return null;
+    const credentials = {} as WhatsAppConfigView['credentials'];
+    for (const field of SENSITIVE_FIELDS) {
+      const value = config[field];
+      const configured = typeof value === 'string' && value.length > 0;
+      credentials[field] = {
+        configured,
+        last4: configured && opts.writer && value.length >= 12 ? value.slice(-4) : null,
+      };
+    }
+    return {
+      provider: config.provider,
+      fromNumber: config.fromNumber ?? null,
+      ...(opts.writer ? { phoneNumberId: config.phoneNumberId ?? null } : {}),
+      credentials,
+    };
+  }
+
+  /**
+   * Store the config. The caller has passed assertConfigOwner.
+   *
+   * Only the config's own fields are kept (provider, phoneNumberId,
+   * fromNumber and the three credentials), so a GET view sent back stores
+   * none of its view fields. A credential that is absent, blank or the
+   * "•••• 1234" preview shape keeps the stored one (its ciphertext, unchanged:
+   * encryptToken leaves an already-encrypted value as it is), so a form that
+   * resubmits the masked view never wipes or overwrites a token.
+   *
+   * R0-SEC2 review repairs, both refused with nothing written:
+   *  - SEC2-R1: a submitted credential that is already ciphertext ("enc:v1:")
+   *    answers 400 WHATSAPP_CREDENTIAL_CIPHERTEXT. encryptToken would store it
+   *    as given, and one platform key decrypts every business's ciphertext, so
+   *    an owner could paste another business's stored token and send with it.
+   *    Only a plaintext credential or a kept one (this business's own stored
+   *    ciphertext) is ever written.
+   *  - SEC2-R3: a phoneNumberId another business already holds answers 409
+   *    WHATSAPP_PHONE_NUMBER_ID_IN_USE. The shared webhook routes inbound by
+   *    that id (business.findFirst on metaData.whatsapp.phoneNumberId, the
+   *    predicate checked here), so a second holder could receive the first
+   *    one's customer messages. Re-saving the id this business already stores
+   *    is never refused (a pre-existing duplicate does not lock its owner out).
+   *    The check and the write run in one transaction behind an advisory lock
+   *    on the id, so two concurrent claims of the same id cannot both pass.
+   */
+  async saveConfig(businessId: string, config: WhatsAppConfig): Promise<void> {
+    const submitted = (config ?? {}) as unknown as Record<string, unknown>;
+    for (const field of SENSITIVE_FIELDS) {
+      const value = submitted[field];
+      if (!isKeptCredential(value) && isTokenEncrypted((value as string).trim())) {
+        throw new BadRequestException({
+          code: WHATSAPP_CREDENTIAL_CIPHERTEXT,
+          message: `${field} must be the credential itself; an encrypted value is not accepted.`,
+        });
+      }
+    }
+    const plain = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v) : undefined);
+    const next = { provider: submitted.provider } as WhatsAppConfig;
+    const phoneNumberId = plain(submitted.phoneNumberId);
+    if (phoneNumberId !== undefined) next.phoneNumberId = phoneNumberId;
+    const fromNumber = plain(submitted.fromNumber);
+    if (fromNumber !== undefined) next.fromNumber = fromNumber;
+
+    await this.prisma.client.$transaction(async (tx) => {
+      if (phoneNumberId) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PHONE_NUMBER_ID_LOCK_NAMESPACE + phoneNumberId}))`;
+      }
+      const business = await tx.business.findUnique({
+        where: { id: businessId },
+        select: { metaData: true },
+      });
+      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};
+      const stored = (meta.whatsapp as Partial<WhatsAppConfig> | undefined) ?? {};
+      if (phoneNumberId && phoneNumberId !== plain(stored.phoneNumberId)) {
+        const holder = await tx.business.findFirst({
+          where: { id: { not: businessId }, metaData: { path: ['whatsapp', 'phoneNumberId'], equals: phoneNumberId } },
+          select: { id: true },
+        });
+        if (holder) {
+          throw new ConflictException({
+            code: WHATSAPP_PHONE_NUMBER_ID_IN_USE,
+            message: 'This WhatsApp phone number id is already connected to another business.',
+          });
+        }
+      }
+      for (const field of SENSITIVE_FIELDS) {
+        const value = isKeptCredential(submitted[field]) ? stored[field] : submitted[field];
+        if (typeof value === 'string' && value.length > 0) next[field] = value;
+      }
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: { ...meta, whatsapp: encryptConfig(next) } },
+      });
     });
   }
 
@@ -382,17 +558,25 @@ export class WhatsAppService {
 
   // ── Queries backing the manage drawer ──────────────────────────────────
 
-  /** Whether WhatsApp is configured, and which number it sends from. */
-  async getStatus(businessId: string) {
+  /**
+   * Whether WhatsApp is configured, and which number it sends from.
+   *
+   * R0-SEC2: phoneNumberId (what the shared webhook routes inbound by) is
+   * answered only to a member who may write the config (`writer`,
+   * isConfigOwner), as GET .../config answers it; anyone else sees the
+   * sending number.
+   */
+  async getStatus(businessId: string, opts: { writer?: boolean } = {}) {
     const config = await this.getConfig(businessId);
     if (!config) return { connected: false as const };
-    const platformId = config.phoneNumberId ?? config.fromNumber ?? '';
+    const phoneNumberId = opts.writer ? config.phoneNumberId : undefined;
+    const platformId = phoneNumberId ?? config.fromNumber ?? '';
     return {
       connected: true as const,
       destination: {
         id: `${businessId}:whatsapp`,
         platformId,
-        displayName: config.fromNumber ?? config.phoneNumberId ?? null,
+        displayName: config.fromNumber ?? phoneNumberId ?? null,
       },
     };
   }
