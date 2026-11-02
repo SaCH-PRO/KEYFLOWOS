@@ -10,7 +10,7 @@
  *     under the same idempotency key as before, `plan:<planId>:step:<stepId>`
  *     (lines 194 and 316);
  *   - queue.service.ts:109 uses that key as the BullMQ job id, and keeps a
- *     failed job for seven days (removeOnFail, line 112);
+ *     failed job for seven days (removeOnFail, line 113);
  *   - action-dispatcher.service.ts:79-85 answers a dispatch whose key already
  *     has an ai_execution_logs row with that row's outcome, without running
  *     the tool.
@@ -266,7 +266,7 @@ describe('fixture sanity (real rows, real Redis)', () => {
  *      dispatch under the parked dispatch's key is an "idempotent hit" on the
  *      parked dispatch's ai_execution_logs failure row and returns that failure
  *      without running the tool (and without `awaitingApproval`).
- *   4. The queue layer (queue.service.ts:109-112), with a job id BullMQ
+ *   4. The queue layer (queue.service.ts:109-113), with a job id BullMQ
  *      accepts: the parked step's job is retried (attempts 3, backoff 2 s
  *      exponential); the retry's dispatch replays the logged failure (3.), so
  *      the step a human is about to approve is marked 'failed'; the job ends
@@ -389,7 +389,7 @@ describe('KEY-03, the dispatcher layer (action-dispatcher.service.ts:79-85)', ()
   });
 });
 
-describe("KEY-03, the queue layer (queue.service.ts:109-112), with a job id BullMQ accepts (no ':')", () => {
+describe("KEY-03, the queue layer (queue.service.ts:109-113), with a job id BullMQ accepts (no ':')", () => {
   const planId = `${P}plan_retained`;
   const jobId = `${planId}_s1_job`;
   let stepId: string;
