@@ -15,6 +15,7 @@ import type { Request, Response } from 'express';
 import twilio from 'twilio';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { mintPhoneStreamToken, PHONE_STREAM_TOKEN_PARAM } from './phone-voice.service';
 
 const STREAM_PATH = '/api/v1/cortex/phone/stream';
 const INBOUND_PATH = '/api/v1/cortex/phone/inbound';
@@ -33,6 +34,15 @@ export class PhoneVoiceController {
    * Twilio inbound-call webhook. Answers with TwiML that connects the call
    * to the realtime voice bridge. Configure the number's voice webhook to:
    *   {PUBLIC_BASE_URL}/api/v1/cortex/phone/inbound?businessId=<businessId>
+   *
+   * V1-14 (CF-47): the stream URL used to carry `?businessId=` as well, and
+   * the stream bound whatever tenant its upgrade URL named. This is the only
+   * place a tenant is proven (by Twilio's signature, checked first), so the
+   * tenant now leaves here inside a short-lived signed token, bound to the
+   * call's CallSid, as a <Parameter> of the <Stream> noun. Twilio delivers
+   * custom parameters in the stream's `start` frame (it does not forward a
+   * query string on the stream URL); the stream binds the tenant from that
+   * token only.
    */
   @Post('inbound')
   inbound(@Query('businessId') businessId: string, @Req() req: Request, @Res() res: Response) {
@@ -41,11 +51,17 @@ export class PhoneVoiceController {
     }
     this.assertValidTwilioSignature(req);
 
-    const wsUrl = `${baseUrl().replace(/^http/, 'ws')}${STREAM_PATH}?businessId=${encodeURIComponent(businessId)}`;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const callSid = typeof body.CallSid === 'string' && body.CallSid.length > 0 ? body.CallSid : undefined;
+    // base64url segments joined by '.': nothing in it needs XML escaping.
+    const tenantToken = mintPhoneStreamToken(businessId, { callSid });
+    const wsUrl = `${baseUrl().replace(/^http/, 'ws')}${STREAM_PATH}`;
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="${wsUrl}" />
+    <Stream url="${wsUrl}">
+      <Parameter name="${PHONE_STREAM_TOKEN_PARAM}" value="${tenantToken}" />
+    </Stream>
   </Connect>
 </Response>`;
     res.type('text/xml').send(twiml);

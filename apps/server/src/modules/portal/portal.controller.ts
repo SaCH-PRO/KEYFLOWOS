@@ -52,9 +52,25 @@ export class PortalController {
     return this.service.revoke(id, businessId);
   }
 
+  /**
+   * Public, unauthenticated portal token check (CF-46 / M38, V1-14).
+   *
+   * This carried @RateLimit(60, 60_000) with no RateLimitGuard. The decorator
+   * only writes metadata, and RateLimitGuard is not an APP_GUARD, so nothing
+   * read it: anyone could test portal tokens at any rate, and every hit on a
+   * live one wrote lastAccessedAt / accessCount. The guard now runs, keyed on
+   * caller IP and this handler, before the token is looked up.
+   *
+   * `token` is whatever the query string held: missing, an array for a
+   * repeated key, or an object for `token[x]=`. Only a non-empty string is a
+   * token; anything else answers { valid: false } like an unknown one, instead
+   * of reaching Prisma and surfacing as a 500.
+   */
   @Get('validate')
+  @UseGuards(RateLimitGuard)
   @RateLimit(60, 60_000)
-  async validateToken(@Query('token') token: string) {
+  async validateToken(@Query('token') token: unknown) {
+    if (typeof token !== 'string' || token.length === 0) return { valid: false };
     const access = await this.service.findByToken(token);
     if (!access) return { valid: false };
     await this.service.recordAccess(token);
