@@ -39,6 +39,8 @@ export interface KeyCortexToolContext {
   commandId?: string;
   autonomyLevel?: number;
   correlationId?: string;
+  /** The approval proposal this call executes, when it executes one: named on its CortexActionLog row. */
+  proposalId?: string;
   idempotencyKey?: string;
   sagaId?: string;
   /**
@@ -140,6 +142,20 @@ export interface KeyCortexToolScore {
   totalUses: number;
 }
 
+/**
+ * A tool's answer data as the CortexActionLog `result` text, or null when it
+ * has none or no JSON form (a cycle, a BigInt): an unserializable answer must
+ * not cost the execution its audit row.
+ */
+function serializeResult(data: unknown): string | null {
+  if (data === undefined || data === null) return null;
+  try {
+    return JSON.stringify(data) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class KeyCortexToolRegistryService {
   private readonly logger = new Logger(KeyCortexToolRegistryService.name);
@@ -148,6 +164,8 @@ export class KeyCortexToolRegistryService {
     string,
     { successes: number; failures: number; totalDurationMs: number; lastUsedAt: Date }
   >();
+  /** CortexActionLog rows this process failed to write (V1-19c): see audit(). */
+  private auditWriteFailures = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -520,7 +538,7 @@ export class KeyCortexToolRegistryService {
         }
       }
 
-      await this.audit(ctx, name, input, result, durationMs).catch((err) => {
+      await this.audit(ctx, name, result, startMs, durationMs).catch((err) => {
         this.logger.warn(`Tool audit failed: ${(err as Error).message}`);
       });
       await this.emitBusinessEvent(ctx, name, input, result, durationMs).catch((err) => {
@@ -558,7 +576,7 @@ export class KeyCortexToolRegistryService {
         }
       }
 
-      await this.audit(ctx, name, input, result, durationMs).catch((auditErr) => {
+      await this.audit(ctx, name, result, startMs, durationMs).catch((auditErr) => {
         this.logger.warn(`Tool audit failed: ${(auditErr as Error).message}`);
       });
       await this.emitBusinessEvent(ctx, name, input, result, durationMs).catch((err) => {
@@ -892,37 +910,62 @@ export class KeyCortexToolRegistryService {
     return { valid: true, parsed: input };
   }
 
+  /**
+   * The CortexActionLog row of one tool execution (V1-19c). Written through
+   * the typed client, so a field the model lacks is a compile error: the
+   * untyped write named `metadata`, which CortexActionLog has no column for,
+   * so Prisma refused every row and no execution was ever audited.
+   *
+   * Only the model's columns are written. Dropped, because no column holds
+   * them: the tool input (it can carry personal data and is never stored
+   * here) and the autonomy level.
+   *
+   * Never throws: a row that cannot be written costs the record, not the
+   * tool's answer. It is logged at error with the business id and counted.
+   */
   private async audit(
     ctx: KeyCortexToolContext,
     toolName: string,
-    input: Record<string, unknown>,
     result: KeyCortexToolResult,
+    startMs: number,
     durationMs: number,
   ): Promise<void> {
     try {
-      await (this.prisma.client as any).cortexActionLog.create({
+      await this.prisma.client.cortexActionLog.create({
         data: {
+          businessId: ctx.businessId,
+          userId: ctx.userId ?? null,
           sessionId: ctx.sessionId ?? ctx.correlationId ?? 'unknown',
+          commandId: ctx.commandId ?? null,
+          correlationId: ctx.correlationId ?? null,
+          proposalId: ctx.proposalId ?? null,
           actionType: toolName,
           status: result.success ? 'success' : 'error',
           description: result.success
             ? `Executed tool ${toolName}`
             : `Tool ${toolName} failed: ${result.error}`,
-          result: result.data ? JSON.stringify(result.data) : null,
+          result: serializeResult(result.data),
           error: result.error ?? null,
-          businessId: ctx.businessId,
-          userId: ctx.userId ?? null,
-          metadata: {
-            input,
-            durationMs,
-            autonomyLevel: ctx.autonomyLevel,
-          } as any,
+          requiresApproval: this.tools.get(toolName)?.requiresApproval ?? false,
+          startedAt: new Date(startMs),
+          completedAt: new Date(startMs + durationMs),
+          durationMs,
           createdAt: new Date(),
         },
       });
     } catch (err: unknown) {
-      this.logger.error(`Failed to audit tool execution: ${err instanceof Error ? err.message : String(err)}`);
+      this.auditWriteFailures += 1;
+      this.logger.error(
+        `[audit][${ctx.businessId}] CortexActionLog row for ${toolName} not written ` +
+          `(${this.auditWriteFailures} audit write failure(s) in this process): ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
     }
+  }
+
+  /** How many CortexActionLog rows this process failed to write (V1-19c). */
+  getAuditWriteFailureCount(): number {
+    return this.auditWriteFailures;
   }
 
   /**
@@ -967,7 +1010,7 @@ export class KeyCortexToolRegistryService {
           sessionId: ctx.sessionId,
           commandId: ctx.commandId,
           correlationId: ctx.correlationId,
-          proposalId: (ctx as any).proposalId,
+          proposalId: ctx.proposalId,
           metadata,
         },
         { status: 'attempted' },

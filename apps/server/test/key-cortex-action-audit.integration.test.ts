@@ -492,8 +492,14 @@ describe('the tool loop: registry.execute then lifecycle.recordExecution for the
     expect(result.success).toBe(true);
     const rows = await rowsFor(t.correlationId);
     expect(rows).toHaveLength(1);
-    // The registry's row, with the timing and command thread on it.
-    expect(rows[0]).toMatchObject({ actionType: TOOL_OK, status: 'success', commandId: t.commandId, sessionId: t.sessionId });
+    // The registry's row (its description), with the timing and command thread on it.
+    expect(rows[0]).toMatchObject({
+      actionType: TOOL_OK,
+      status: 'success',
+      description: `Executed tool ${TOOL_OK}`,
+      commandId: t.commandId,
+      sessionId: t.sessionId,
+    });
     expect(rows[0].durationMs).toBeGreaterThanOrEqual(10);
   });
 
