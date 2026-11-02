@@ -12,6 +12,22 @@ import { roundMoney } from '../commerce/money';
 export const CASH_POSITION_SYSTEM_KEYS = ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] as const;
 
 /**
+ * The FinancialAccount types whose opening balance is cash (the same three
+ * classes, as FinancialAccount.type spells them). The cockpit summed exactly
+ * these, active only, before V1-34.
+ */
+export const CASH_POSITION_ACCOUNT_TYPES = ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] as const;
+
+/**
+ * How an account's opening balance is recognised as posted: a booked
+ * FinancialTransaction of this type whose (sourceType, sourceId) is
+ * ('FinancialAccount', the account's id). A follow-up that posts the opening
+ * at FinanceAccountsService.create (and backfills older accounts) must post it
+ * this way; the bridge below then stops contributing for that account.
+ */
+export const OPENING_BALANCE_POSTING = { type: 'OPENING_BALANCE', sourceType: 'FinancialAccount' } as const;
+
+/**
  * Transaction statuses that are in the books, as the ledger reports read them
  * (ledger-reporting.service.ts BOOKED_TRANSACTION_STATUSES). PostingService
  * never edits an original: reverse() marks it REVERSED and posts a mirrored
@@ -28,12 +44,30 @@ export interface CashPositionAccount {
   balance: number;
 }
 
+/** An opening balance recorded on an account that has not reached the ledger yet. */
+export interface UnpostedOpeningBalance {
+  /** FinancialAccount.id */
+  financialAccountId: string;
+  name: string;
+  type: string;
+  /** FinancialAccount.openingBalance, rounded to cents. */
+  amount: number;
+}
+
 export interface CashPosition {
-  /** The business's cash: the sum of `accounts`, rounded to cents once. */
+  /**
+   * The business's cash: the sum of `accounts` plus `unpostedOpeningBalances`,
+   * rounded to cents once.
+   */
   cashBalance: number;
-  /** Always 'ledger': derived from LedgerEntry rows, never from FinancialAccount.currentBalance. */
+  /**
+   * Always 'ledger': derived from LedgerEntry rows (plus, until it is posted,
+   * an account's recorded opening balance), never from FinancialAccount.currentBalance.
+   */
   basis: 'ledger';
   accounts: CashPositionAccount[];
+  /** Opening balances on active cash-class accounts not yet posted (bridged into cashBalance). */
+  unpostedOpeningBalances: UnpostedOpeningBalance[];
 }
 
 const D = Prisma.Decimal;
@@ -56,9 +90,19 @@ function toMoney(value: Prisma.Decimal): number {
  * ledger door). A reversal nets its original to zero because both statuses are
  * read. Decimal sums are exact; the result is rounded to cents once.
  *
- * Tenant scope: the chart-of-account rows are selected by businessId and the
- * entries by businessId as well, so another tenant's entries are never summed,
- * whatever chart row a FinancialAccount points at.
+ * Opening-balance bridge (V1-34 review CR-34-01): FinanceAccountsService.create
+ * (the Books > Accounts 'Opening balance' field) records the opening on the
+ * account row only and posts nothing. So that such an opening is not dropped
+ * from the cockpit, the recorded openingBalance of each active CASH, BANK or
+ * PAYMENT_PROCESSOR FinancialAccount is added until a booked OPENING_BALANCE
+ * posting sourced from that account (OPENING_BALANCE_POSTING) exists; from
+ * then on the ledger carries it, so it is never counted twice. currentBalance
+ * is never read.
+ *
+ * Tenant scope: the chart-of-account rows, the entries, the FinancialAccount
+ * rows and the opening postings are all selected by businessId, so another
+ * tenant's entries or postings are never summed or matched, whatever chart row
+ * a FinancialAccount points at.
  *
  * Every cockpit reader of cash (safe-to-spend, the OS command center and the
  * Finance overview) consumes this one figure.
@@ -68,11 +112,40 @@ export class CashPositionService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async getCashPosition(businessId: string): Promise<CashPosition> {
+    const [ledgerAccounts, unposted] = await Promise.all([
+      this.ledgerAccounts(businessId),
+      this.unpostedOpenings(businessId),
+    ]);
+
+    let total = ZERO;
+    for (const a of ledgerAccounts) total = total.add(a.net);
+    for (const o of unposted) total = total.add(o.amount);
+
+    return {
+      cashBalance: toMoney(total),
+      basis: 'ledger',
+      accounts: ledgerAccounts.map((a) => ({
+        accountId: a.accountId,
+        systemKey: a.systemKey,
+        name: a.name,
+        balance: toMoney(a.net),
+      })),
+      unpostedOpeningBalances: unposted.map((o) => ({
+        financialAccountId: o.financialAccountId,
+        name: o.name,
+        type: o.type,
+        amount: toMoney(o.amount),
+      })),
+    };
+  }
+
+  /** The booked net (debit - credit) of each of the business's cash-class chart rows. */
+  private async ledgerAccounts(businessId: string) {
     const cashAccounts = await this.prisma.client.chartOfAccount.findMany({
       where: { businessId, systemKey: { in: [...CASH_POSITION_SYSTEM_KEYS] } },
       select: { id: true, name: true, systemKey: true },
     });
-    if (cashAccounts.length === 0) return { cashBalance: 0, basis: 'ledger', accounts: [] };
+    if (cashAccounts.length === 0) return [];
 
     const grouped = await this.prisma.client.ledgerEntry.groupBy({
       by: ['accountId'],
@@ -90,13 +163,46 @@ export class CashPositionService {
       ]),
     );
 
-    let total = ZERO;
-    const accounts = cashAccounts.map((a): CashPositionAccount => {
-      const net = netById.get(a.id) ?? ZERO;
-      total = total.add(net);
-      return { accountId: a.id, systemKey: a.systemKey ?? null, name: a.name, balance: toMoney(net) };
-    });
+    return cashAccounts.map((a) => ({
+      accountId: a.id,
+      systemKey: a.systemKey ?? null,
+      name: a.name,
+      net: netById.get(a.id) ?? ZERO,
+    }));
+  }
 
-    return { cashBalance: toMoney(total), basis: 'ledger', accounts };
+  /** Opening balances on the business's active cash-class accounts with no booked opening posting. */
+  private async unpostedOpenings(businessId: string) {
+    const rows = await this.prisma.client.financialAccount.findMany({
+      where: {
+        businessId,
+        isActive: true,
+        type: { in: [...CASH_POSITION_ACCOUNT_TYPES] },
+        openingBalance: { not: 0 },
+      },
+      select: { id: true, name: true, type: true, openingBalance: true },
+    });
+    const withOpening = rows
+      .map((r) => ({
+        financialAccountId: r.id,
+        name: r.name,
+        type: r.type,
+        amount: new D(String(r.openingBalance ?? 0)),
+      }))
+      .filter((r) => r.financialAccountId && !r.amount.isZero());
+    if (withOpening.length === 0) return [];
+
+    const posted = await this.prisma.client.financialTransaction.findMany({
+      where: {
+        businessId,
+        type: OPENING_BALANCE_POSTING.type,
+        sourceType: OPENING_BALANCE_POSTING.sourceType,
+        sourceId: { in: withOpening.map((r) => r.financialAccountId) },
+        status: { in: BOOKED_TRANSACTION_STATUSES },
+      },
+      select: { sourceId: true },
+    });
+    const postedIds = new Set(posted.map((t) => t.sourceId));
+    return withOpening.filter((r) => !postedIds.has(r.financialAccountId));
   }
 }

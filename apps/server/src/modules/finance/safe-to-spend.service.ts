@@ -94,6 +94,11 @@ export class SafeToSpendService {
 
     const explanation: string[] = [
       `Cash balance: ${currency} ${cashBalance.toFixed(2)} (ledger)`,
+      // V1-34 review CR-34-01: say so when an account opening balance that has
+      // not been posted yet is part of the cash figure.
+      ...cashPosition.unpostedOpeningBalances.map(
+        (o) => `  - includes ${o.name} opening balance not yet posted: ${currency} ${o.amount.toFixed(2)}`,
+      ),
       `Tax reserved: ${currency} ${taxReserved.toFixed(2)}`,
       `Bills due next 30 days: ${currency} ${billsDueNext30Days.toFixed(2)}`,
       `Operating buffer: ${currency} ${operatingBuffer.toFixed(2)}`,

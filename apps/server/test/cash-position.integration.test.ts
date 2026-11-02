@@ -32,9 +32,22 @@
  *          are never counted in A's figure, even with an A account linked to B's
  *          BANK chart-of-account row; B reads its own 5070; A's owner gets 403
  *          on B's safe-to-spend and command center
+ *   CP-06  (review CR-34-01) an opening balance entered on an account through
+ *          FinanceAccountsService.create (the Books > Accounts form), which
+ *          writes the row only and posts nothing, still counts on all three
+ *          surfaces (10000 -> safe 9000, OS money health Healthy); a card or an
+ *          archived account's opening does not; once the opening is posted
+ *          through the door (OPENING_BALANCE sourced from the FinancialAccount)
+ *          it is never counted twice; it never reaches another tenant
+ *   CP-07  (review V34-SEC-01 / CR-34-02) the Finance overview's Redis cache
+ *          (the finance app is composed with RedisService, as AppModule is)
+ *          never serves a pre-posting cash figure: right after a posting, inside
+ *          the 60s TTL, all three surfaces agree, and the cash-derived runway
+ *          and the cache entry carry the new figure
  *
  * Open (it.todo, outside the V1-34 write set): FinanceAccountsService.create
  * records an opening balance on the account row only; it does not post it.
+ * Until it does, CashPositionService bridges such an unposted opening (CP-06).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -74,7 +87,12 @@ const ID = {
   contactB: `${P}contactB`,
   invA: `${P}invA`,
   invB: `${P}invB`,
+  ownerC: `${P}ownerC`,
+  bizC: `${P}bizC`,
 };
+
+/** FinanceOverviewService's Redis key (finance-overview.service.ts cacheKey). */
+const overviewKey = (biz: string) => `finance:overview:${biz}`;
 
 const CASH_KEYS = ['CASH', 'BANK', 'PAYMENT_PROCESSOR'];
 
@@ -83,6 +101,7 @@ let commerceApp: any;
 let financeApp: any;
 let osApp: any;
 let redis: any;
+let financeRedis: any; // the finance app's RedisService client (quit when the app closes)
 let posting: any;
 let coaSeeder: any;
 let accounts: any;
@@ -103,6 +122,7 @@ async function cleanup() {
     `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -117,6 +137,10 @@ async function cleanup() {
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
+  }
+  // The fixture businesses' overview cache entries (60s TTL).
+  if (redis) {
+    for (const biz of [ID.bizA, ID.bizB, ID.bizC]) await redis.del(overviewKey(biz)).catch(() => undefined);
   }
 }
 
@@ -180,10 +204,16 @@ async function surfaces(biz: string, as: string) {
   };
 }
 
-async function expectCash(biz: string, as: string, expected: number) {
+/** Every surface serves `expected` for `biz`, each labelled ledger. */
+async function expectSurfaces(biz: string, as: string, expected: number) {
   const read = await surfaces(biz, as);
   expect(read.cash, `${biz}: every surface serves the ledger cash`).toEqual({ safe: expected, os: expected, overview: expected });
   expect(read.basis, `${biz}: every surface labels the figure as ledger-derived`).toEqual({ safe: 'ledger', os: 'ledger', overview: 'ledger' });
+  return read;
+}
+
+async function expectCash(biz: string, as: string, expected: number) {
+  const read = await expectSurfaces(biz, as, expected);
   expect(await ledgerCash(biz), `${biz}: LEDGER - the independent sum of the cash-class rows`).toBe(expected);
   return read;
 }
@@ -209,9 +239,12 @@ async function post(businessId: string, kind: string, amount: number, debitKey: 
   });
 }
 
-/** An account opened with `amount`, its opening balance posted through the door. */
-async function openAccount(businessId: string, name: string, type: string, systemKey: string, amount: number) {
-  const account = await accounts.create(businessId, { name, type, openingBalance: amount, currency: 'TTD' });
+/**
+ * Post `account`'s opening balance through the door: OPENING_BALANCE sourced
+ * from the FinancialAccount (what CashPositionService reads as "this opening is
+ * in the ledger"), DR its cash-class chart row / CR OWNER_EQUITY.
+ */
+async function postOpening(businessId: string, account: any, systemKey: string, amount: number) {
   const cash = await coaSeeder.getBySystemKey(businessId, systemKey);
   const equity = await coaSeeder.getBySystemKey(businessId, 'OWNER_EQUITY');
   await posting.post({
@@ -220,7 +253,7 @@ async function openAccount(businessId: string, name: string, type: string, syste
     date: new Date(Date.now() - 30 * 24 * 3600 * 1000),
     amount,
     currency: 'TTD',
-    description: `Opening balance ${name}`,
+    description: `Opening balance ${account.name}`,
     sourceType: 'FinancialAccount',
     sourceId: account.id,
     kind: 'opening_balance',
@@ -229,6 +262,12 @@ async function openAccount(businessId: string, name: string, type: string, syste
       { accountId: equity.id, credit: amount },
     ],
   });
+}
+
+/** An account opened with `amount`, its opening balance posted through the door. */
+async function openAccount(businessId: string, name: string, type: string, systemKey: string, amount: number) {
+  const account = await accounts.create(businessId, { name, type, openingBalance: amount, currency: 'TTD' });
+  await postOpening(businessId, account, systemKey, amount);
   return account;
 }
 
@@ -256,6 +295,7 @@ beforeAll(async () => {
   const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
   const { PublicRateLimitGuard } = await import('../src/core/guards/public-rate-limit.guard');
   const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+  const { RedisService } = await import('../src/core/redis/redis.service');
   const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
   const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
   const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
@@ -301,6 +341,8 @@ beforeAll(async () => {
     .catch(() => null);
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+  // Its own client: RedisService quits its client when the finance app closes.
+  financeRedis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   // ---- commerce app: the real manual payment and refund routes --------
   const commerceRef = await Test.createTestingModule({
@@ -392,6 +434,10 @@ beforeAll(async () => {
       PostingService,
       AccountingPeriodService,
       ...(cashPositionToken ? [cashPositionToken] : []),
+      // The overview's Redis cache, wired as AppModule wires it (V1-34 review
+      // V34-SEC-01 / CR-34-02): every overview read below runs the cache path.
+      { provide: REDIS_CLIENT, useValue: financeRedis },
+      RedisService,
       // FinanceController's other collaborators are off the cash path.
       ...collaborators.map((token) => ({ provide: token, useValue: {} })),
     ],
@@ -427,6 +473,7 @@ beforeAll(async () => {
   for (const [user, biz, name, email] of [
     [ID.ownerA, ID.bizA, 'V34A Biz A', `${P}owner_a@test.local`],
     [ID.ownerB, ID.bizB, 'V34A Biz B', `${P}owner_b@test.local`],
+    [ID.ownerC, ID.bizC, 'V34A Biz C', `${P}owner_c@test.local`],
   ] as const) {
     await db.user.create({ data: { id: user, email, role: 'USER' } });
     await db.business.create({ data: { id: biz, name, ownerId: user, currency: 'TTD' } });
@@ -464,6 +511,7 @@ afterAll(async () => {
   }
   if (db) await cleanup();
   if (redis) await redis.quit().catch(() => undefined);
+  if (financeRedis) await financeRedis.quit().catch(() => undefined);
 }, 60_000);
 
 describe('V1-34 fixture sanity (real rows)', () => {
@@ -475,7 +523,7 @@ describe('V1-34 fixture sanity (real rows)', () => {
     expect(await ledgerCash(ID.bizB)).toBe(5000);
     const cashClass = await db.chartOfAccount.findMany({ where: { businessId: ID.bizA, systemKey: { in: CASH_KEYS } } });
     expect(cashClass).toHaveLength(3);
-  });
+  }, 30_000);
 });
 
 describe('V1-34 cash position is ledger-derived (CF-41)', () => {
@@ -483,7 +531,7 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
     const read = await expectCash(ID.bizA, ID.ownerA, 1000);
     expect(read.safe.operatingBuffer).toBe(500);
     expect(read.safe.safeToSpend).toBe(500);
-  });
+  }, 30_000);
 
   it('CP-02 RED-BEFORE / GREEN-AFTER: a 100 manual payment moves cash to 1100 everywhere; currentBalance is untouched', async () => {
     paymentA = await pay(ID.bizA, ID.invA, ID.ownerA, 100, 'v34a-cash-100');
@@ -504,7 +552,7 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
     const till = await db.financialAccount.findUnique({ where: { id: tillA.id } });
     expect(Number(till.currentBalance), 'currentBalance is never written by the cash reader').toBe(1000);
     expect(Number(till.openingBalance)).toBe(1000);
-  });
+  }, 30_000);
 
   it('CP-03 the refund (REVERSED original beside its REVERSAL) returns cash to 1000 everywhere', async () => {
     const res = await request(commerceApp.getHttpServer())
@@ -526,7 +574,7 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
     expect(read.safe.safeToSpend).toBe(500);
     const till = await db.financialAccount.findUnique({ where: { id: tillA.id } });
     expect(Number(till.currentBalance)).toBe(1000);
-  });
+  }, 30_000);
 
   it('CP-04 only cash-class accounts count: credit card no, processor yes, transfers net, cents exact', async () => {
     // A credit-card expense: DR expense / CR CREDIT_CARD (a liability) -> no cash moved.
@@ -541,7 +589,7 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
     // Three 0.10 cash expenses take exactly 0.30 (floats would leave 1025.0500000000002).
     for (const n of [1, 2, 3]) await post(ID.bizA, `petty_${n}`, 0.1, 'EXPENSE_GENERAL', 'CASH', 'EXPENSE');
     await expectCash(ID.bizA, ID.ownerA, 1025.05);
-  });
+  }, 60_000);
 
   it("CP-05 TENANT: B's entries are never counted in A's figure, even through a link to B's BANK row", async () => {
     await pay(ID.bizB, ID.invB, ID.ownerB, 70, 'v34a-cash-70');
@@ -556,12 +604,87 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
     expect((await safeToSpend(ID.bizB, ID.ownerA)).status).toBe(403);
     expect((await commandCenter(ID.bizB, ID.ownerA)).status).toBe(403);
     expect((await overview(ID.bizB, ID.ownerA)).status).toBe(403);
-  });
+  }, 60_000);
+
+  it('CP-06 an opening balance entered on an account but not posted (Books > Accounts) counts everywhere until posted, and never twice', async () => {
+    // The Books > Accounts 'Opening balance' path: create writes openingBalance
+    // and currentBalance on the row only; nothing reaches the ledger.
+    const bankC = await accounts.create(ID.bizC, { name: 'V34A Bank C', type: 'BANK', openingBalance: 10000, currency: 'TTD' });
+    expect(await ledgerCash(ID.bizC), 'nothing is posted for the opening').toBe(0);
+
+    let read = await expectSurfaces(ID.bizC, ID.ownerC, 10000);
+    expect(read.safe.operatingBuffer).toBe(1000);
+    expect(read.safe.safeToSpend).toBe(9000);
+    expect(read.safe.explanation.slice(0, 2)).toEqual([
+      'Cash balance: TTD 10000.00 (ledger)',
+      '  - includes V34A Bank C opening balance not yet posted: TTD 10000.00',
+    ]);
+    expect(read.os.health.money).toMatchObject({ score: 100, label: 'Healthy' });
+
+    // Not cash: a credit card's opening (a liability) and an archived till's opening.
+    await accounts.create(ID.bizC, { name: 'V34A Card C', type: 'CREDIT_CARD', openingBalance: 300, currency: 'TTD' });
+    const oldTill = await accounts.create(ID.bizC, { name: 'V34A Old Till C', type: 'CASH', openingBalance: 50, currency: 'TTD' });
+    await accounts.archive(ID.bizC, oldTill.id);
+    await expectSurfaces(ID.bizC, ID.ownerC, 10000);
+
+    // Ledger movements add to the unposted opening.
+    await post(ID.bizC, 'c_receipt', 100, 'BANK', 'OTHER_INCOME', 'INCOME');
+    read = await expectSurfaces(ID.bizC, ID.ownerC, 10100);
+    expect(read.safe.safeToSpend).toBe(9090);
+
+    // Once the opening is posted through the door it is read from the ledger
+    // alone: never counted twice.
+    await postOpening(ID.bizC, bankC, 'BANK', 10000);
+    read = await expectCash(ID.bizC, ID.ownerC, 10100);
+    expect(read.safe.explanation.some((line: string) => line.includes('not yet posted'))).toBe(false);
+
+    // TENANT: C's opening never reaches A or B.
+    await expectCash(ID.bizA, ID.ownerA, 1025.05);
+    await expectCash(ID.bizB, ID.ownerB, 5070);
+  }, 60_000);
+
+  it('CP-07 the overview Redis cache never serves a pre-posting cash figure (production wiring)', async () => {
+    // A burn of 600 over the last six months (100 a month) gives a runway.
+    await db.expense.create({
+      data: {
+        id: `${P}expC1`,
+        businessId: ID.bizC,
+        description: 'V34A rent',
+        amount: 600,
+        currency: 'TTD',
+        date: new Date(Date.now() - 45 * 24 * 3600 * 1000),
+      },
+    });
+    await redis.del(overviewKey(ID.bizC));
+
+    const before = await overview(ID.bizC, ID.ownerC);
+    expect(before.status, JSON.stringify(before.body)).toBe(200);
+    expect(before.body.cashBalance).toBe(10100);
+    expect(before.body.cashRunwayMonths).toBe(101);
+    // The cache path ran: the overview is stored with its TTL.
+    const stored = JSON.parse((await redis.get(overviewKey(ID.bizC))) ?? 'null');
+    expect(stored?.cashBalance, 'the overview was cached').toBe(10100);
+    expect(await redis.ttl(overviewKey(ID.bizC))).toBeGreaterThan(0);
+
+    // A posting inside the TTL: every surface serves the new figure at once.
+    await post(ID.bizC, 'c_after_cache', 250, 'CASH', 'OTHER_INCOME', 'INCOME');
+    const read = await expectCash(ID.bizC, ID.ownerC, 10350);
+    expect(read.overview.cashRunwayMonths, 'the cash-derived runway is not stale either').toBe(103.5);
+    const restored = JSON.parse((await redis.get(overviewKey(ID.bizC))) ?? 'null');
+    expect(restored?.cashBalance, 'the cache entry carries the new figure').toBe(10350);
+
+    // With the ledger unchanged the cached entry is still served (the cache works).
+    await redis.set(overviewKey(ID.bizC), JSON.stringify({ ...restored, revenueThisMonth: 4242 }), 'EX', 60);
+    const hit = await overview(ID.bizC, ID.ownerC);
+    expect(hit.body.revenueThisMonth, 'a cache hit at the current cash is served').toBe(4242);
+    expect(hit.body.cashBalance).toBe(10350);
+  }, 60_000);
 
   it.todo(
     'FinanceAccountsService.create posts an account opening balance through the ledger door (OPENING_BALANCE, DR the account chart row / CR OWNER_EQUITY): '
-      + 'today it writes openingBalance and currentBalance on the row only, so an opening balance entered on an account reaches the '
-      + 'ledger-derived cash only once posted; finance-accounts.service.ts is outside the V1-34 write set (follow-up, with a backfill for '
-      + 'accounts whose openingBalance has no posting)',
+      + 'today it writes openingBalance and currentBalance on the row only, so CashPositionService bridges an opening with no '
+      + 'OPENING_BALANCE posting sourced from its FinancialAccount (CP-06) until it is posted; finance-accounts.service.ts is outside '
+      + 'the V1-34 write set (follow-up: post at create, sourceType FinancialAccount / sourceId the account id, with a backfill for '
+      + 'accounts whose openingBalance has no posting; the bridge then stops contributing)',
   );
 });

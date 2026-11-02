@@ -46,11 +46,33 @@ function matches(row: LedgerRow, where: any = {}): boolean {
   return true;
 }
 
+/** A FinancialAccount row (the Books > Accounts record) as the mock serves it. */
+interface AccountRow {
+  id: string;
+  businessId: string;
+  name: string;
+  type: string;
+  isActive: boolean;
+  openingBalance: number;
+  currentBalance: number;
+}
+
+/** A FinancialTransaction header as the mock serves it (the opening-posting lookup). */
+interface TxnRow {
+  businessId: string;
+  type: string;
+  sourceType: string;
+  sourceId: string;
+  status: 'POSTED' | 'REVERSED' | 'VOID' | 'DRAFT';
+}
+
 class PrismaServiceMock {
   readonly ledgerReads: any[] = [];
+  readonly accountReads: any[] = [];
+  readonly txnReads: any[] = [];
   readonly client: any;
 
-  constructor(opts: { ledger?: LedgerRow[]; currentBalance?: number } = {}) {
+  constructor(opts: { ledger?: LedgerRow[]; currentBalance?: number; accounts?: AccountRow[]; transactions?: TxnRow[] } = {}) {
     const ledger = opts.ledger ?? OPENING;
     const currentBalance = opts.currentBalance ?? 1000;
     const sum = (rows: LedgerRow[]) => ({
@@ -62,8 +84,23 @@ class PrismaServiceMock {
         findUnique: async () => ({ id: 'biz_1', name: 'Test Biz', currency: 'TTD' }),
       },
       financialAccount: {
-        // The stale opening snapshot: never written after the account is created.
-        findMany: async () => [{ currentBalance, chartOfAccountId: 'coa_cash', type: 'CASH', isActive: true }],
+        findMany: async (args: any = {}) => {
+          this.accountReads.push(args);
+          // The stale opening snapshot: never written after the account is created.
+          if (!opts.accounts) return [{ currentBalance, chartOfAccountId: 'coa_cash', type: 'CASH', isActive: true }];
+          const w = args.where ?? {};
+          return opts.accounts.filter((a) => inList(a.businessId, w.businessId) && inList(a.isActive, w.isActive) && inList(a.type, w.type));
+        },
+      },
+      financialTransaction: {
+        findMany: async (args: any = {}) => {
+          this.txnReads.push(args);
+          const w = args.where ?? {};
+          return (opts.transactions ?? [])
+            .filter((t) => inList(t.businessId, w.businessId) && inList(t.type, w.type) && inList(t.sourceType, w.sourceType)
+              && inList(t.sourceId, w.sourceId) && inList(t.status, w.status))
+            .map((t) => ({ sourceId: t.sourceId }));
+        },
       },
       invoice: {
         aggregate: async () => ({ _sum: { total: 500 }, _count: 2 }),
@@ -215,5 +252,57 @@ describe('V1-34 OS status cash is ledger-derived', () => {
     });
     const result: any = await build(prisma).commandCenter('biz_1');
     expect(result.flows.financial.cashBalance).toBe(1000);
+  });
+});
+
+/**
+ * V1-34 review CR-34-01: an opening balance entered on an account (Books >
+ * Accounts; FinanceAccountsService.create writes the row and posts nothing)
+ * counts until an OPENING_BALANCE posting sourced from that account is in the
+ * books, and is never counted twice.
+ */
+describe('V1-34 OS status cash bridges an unposted account opening balance', () => {
+  const ACCOUNTS: AccountRow[] = [
+    { id: 'fa_bank', businessId: 'biz_1', name: 'Bank', type: 'BANK', isActive: true, openingBalance: 10000, currentBalance: 10000 },
+    // Not cash: a liability, an archived till, another tenant's bank.
+    { id: 'fa_card', businessId: 'biz_1', name: 'Card', type: 'CREDIT_CARD', isActive: true, openingBalance: 300, currentBalance: 300 },
+    { id: 'fa_old', businessId: 'biz_1', name: 'Old till', type: 'CASH', isActive: false, openingBalance: 50, currentBalance: 50 },
+    { id: 'fa_b', businessId: 'biz_2', name: 'Bank B', type: 'BANK', isActive: true, openingBalance: 7000, currentBalance: 7000 },
+  ];
+  const OPENING_POSTED: LedgerRow[] = [
+    { businessId: 'biz_1', accountId: 'coa_bank', debit: 10000, credit: 0, status: 'POSTED' },
+    { businessId: 'biz_1', accountId: 'coa_equity', debit: 0, credit: 10000, status: 'POSTED' },
+  ];
+
+  it('OS-34-05: an unposted 10000 opening reads 10000 (money health Healthy), not 0; other rows are not cash', async () => {
+    const prisma = new PrismaServiceMock({ ledger: [], accounts: ACCOUNTS, transactions: [] });
+    const result: any = await build(prisma).commandCenter('biz_1');
+    expect(result.flows.financial.cashBalance).toBe(10000);
+    expect(result.flows.financial.cashBasis).toBe('ledger');
+    expect(result.health.money).toMatchObject({ score: 100, label: 'Healthy' });
+    for (const read of [...prisma.accountReads, ...prisma.txnReads]) expect(read.where?.businessId).toBe('biz_1');
+  });
+
+  it('OS-34-06: once the opening is posted (OPENING_BALANCE sourced from the account) it is read from the ledger only, never twice', async () => {
+    const prisma = new PrismaServiceMock({
+      ledger: [...OPENING_POSTED, { businessId: 'biz_1', accountId: 'coa_bank', debit: 100, credit: 0, status: 'POSTED' }],
+      accounts: ACCOUNTS,
+      transactions: [{ businessId: 'biz_1', type: 'OPENING_BALANCE', sourceType: 'FinancialAccount', sourceId: 'fa_bank', status: 'POSTED' }],
+    });
+    const result: any = await build(prisma).commandCenter('biz_1');
+    expect(result.flows.financial.cashBalance).toBe(10100);
+  });
+
+  it('OS-34-07: an unbooked or foreign-tenant posting does not mark the opening as posted', async () => {
+    const prisma = new PrismaServiceMock({
+      ledger: [],
+      accounts: ACCOUNTS,
+      transactions: [
+        { businessId: 'biz_1', type: 'OPENING_BALANCE', sourceType: 'FinancialAccount', sourceId: 'fa_bank', status: 'VOID' },
+        { businessId: 'biz_2', type: 'OPENING_BALANCE', sourceType: 'FinancialAccount', sourceId: 'fa_bank', status: 'POSTED' },
+      ],
+    });
+    const result: any = await build(prisma).commandCenter('biz_1');
+    expect(result.flows.financial.cashBalance).toBe(10000);
   });
 });

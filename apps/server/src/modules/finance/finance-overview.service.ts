@@ -67,9 +67,10 @@ export interface FinanceOverview {
 /**
  * FIN5 — Aggregates the headline numbers for the Finance Overview tab.
  * Cash is the ledger cash position (V1-34, CashPositionService: the booked
- * entries on the CASH, BANK and PAYMENT_PROCESSOR chart rows), the figure
- * safe-to-spend and the OS command center serve too; FinancialAccount rows
- * only give the account count. Invoice/Payment/Expense tables feed the rest,
+ * entries on the CASH, BANK and PAYMENT_PROCESSOR chart rows, plus account
+ * opening balances not yet posted), the figure safe-to-spend and the OS command
+ * center serve too, read fresh even when the rest is cached; FinancialAccount
+ * rows only give the account count. Invoice/Payment/Expense tables feed the rest,
  * and the Tax Payable holding account is read from the ledger so the figure
  * shown matches what the accountant sees in Reports.
  */
@@ -100,9 +101,18 @@ export class FinanceOverviewService {
 
   async getOverview(businessId: string): Promise<FinanceOverview> {
     const cacheKey = this.cacheKey(businessId);
+    // V1-34 review (V34-SEC-01 / CR-34-02): the cash position is read fresh on
+    // every call, outside the 60s cache. Nothing invalidates the cache when the
+    // ledger posts, so a cached overview is served only while its cash equals
+    // the ledger's now; otherwise it is recomputed (cash, runway and the
+    // low-runway action together) and re-cached. Safe-to-spend, the OS command
+    // center and this overview therefore never serve different cash.
+    const cashPosition = await this.cashPosition.getCashPosition(businessId);
     if (this.redis) {
       const cached = await this.redis.getJson<FinanceOverview>(cacheKey).catch(() => null);
-      if (cached) return cached;
+      if (cached && cached.cashBasis === cashPosition.basis && cached.cashBalance === cashPosition.cashBalance) {
+        return cached;
+      }
     }
 
     // First read of the surface seeds the default Cash + Bank accounts +
@@ -123,7 +133,6 @@ export class FinanceOverviewService {
 
     const [
       cashAccounts,
-      cashPosition,
       paidInvoices,
       monthExpenses,
       outstandingAgg,
@@ -143,7 +152,6 @@ export class FinanceOverviewService {
         where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
         select: { id: true },
       }),
-      this.cashPosition.getCashPosition(businessId),
       this.prisma.client.payment.aggregate({
         where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: monthStart } },
         _sum: { amount: true },
