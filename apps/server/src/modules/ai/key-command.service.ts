@@ -5,6 +5,9 @@ import { ToolResult } from './key-tool-registry.service';
 import { KeyToolRegistryService } from './key-tool-registry.service';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { CommandService } from '../command/command.service';
+import { AiOversightService } from './ai-oversight.service';
+import { getToolByName } from './flow-tool-registry';
+import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 
 export enum KeyMode {
   ASK = 'ask',
@@ -49,6 +52,39 @@ export interface DoItForMeResult {
   actions: SuggestedAction[];
 }
 
+/**
+ * One step's outcome. `notExecuted` means nothing ran: the step was refused or
+ * is awaiting approval (the same flag KeyCortexToolResult uses for it).
+ */
+export interface KeyCommandStepResult extends ToolResult {
+  tool?: string;
+  notExecuted?: boolean;
+  requiresApproval?: boolean;
+}
+
+/**
+ * The capabilities outside the FLOW_TOOLS catalogue that 'ask' may run, by
+ * their `module.tool` identity: each one only reads. Tier 1 is not read-only in
+ * either registry (contacts.createCommandItem and timeline.createReminder are
+ * tier-1 writes, and connect.scanDrive is a tier-1 Drive sync), so read-only
+ * is stated here rather than inferred from a tier.
+ */
+const ASK_READ_CAPABILITIES: ReadonlySet<string> = new Set([
+  'commerce.summarizeRevenue',
+  'contacts.recommendFollowUps',
+  'connect.listDriveIntake',
+  'messages.listMessageIntake',
+  'social.listRecentEngagement',
+]);
+
+type ResolvedCapability = {
+  registry: 'canonical' | 'legacy';
+  /** The identity it resolved under: a bare FLOW_TOOLS name or `module.tool`. */
+  name: string;
+  riskTier: number;
+  requiresApproval: boolean;
+};
+
 @Injectable()
 export class KeyCommandService {
   private readonly logger = new Logger(KeyCommandService.name);
@@ -63,6 +99,13 @@ export class KeyCommandService {
     @Optional()
     @Inject(forwardRef(() => KeyCortexToolRegistryService))
     private readonly keyCortexToolRegistry?: KeyCortexToolRegistryService,
+    // V1-09. Appended, never inserted: specs construct this positionally. Not
+    // @Optional: Nest refuses to boot without them, and executeApprovedPlan
+    // fails closed if a hand-built instance lacks them.
+    @Inject(forwardRef(() => AiOversightService))
+    private readonly oversight?: AiOversightService,
+    @Inject(forwardRef(() => KeyAutonomySafetyService))
+    private readonly safety?: KeyAutonomySafetyService,
   ) {}
 
   async receiveCommand(
@@ -169,7 +212,9 @@ export class KeyCommandService {
     } else if (domain === 'storefront' && action === 'storefront_audit') {
       plan.steps.push({ tool: 'auditStorefront', module: 'storefront', input: {}, riskTier: 'LOW', requiresApproval: false });
     } else if (domain === 'connect' && action === 'scan_drive') {
-      plan.steps.push({ tool: 'scanDrive', module: 'connect', input: {}, riskTier: 'LOW', requiresApproval: false });
+      // Not a read: syncGoogleDrive calls the Drive API and writes intake rows.
+      // The legacy registry declares it tier 1, so the plan states the risk.
+      plan.steps.push({ tool: 'scanDrive', module: 'connect', input: {}, riskTier: 'MEDIUM', requiresApproval: true });
     } else if (domain === 'connect' && action === 'drive_findings') {
       plan.steps.push({ tool: 'listDriveIntake', module: 'connect', input: { status: 'reviewing', limit: 20 }, riskTier: 'LOW', requiresApproval: false });
     } else if (domain === 'messages' && action === 'message_intake') {
@@ -177,7 +222,9 @@ export class KeyCommandService {
     } else if (domain === 'social' && action === 'recent_engagement') {
       plan.steps.push({ tool: 'listRecentEngagement', module: 'social', input: { limit: 20 }, riskTier: 'LOW', requiresApproval: false });
     } else {
-      plan.steps.push({ tool: 'searchContacts', module: 'contacts', input: { query: action }, riskTier: 'LOW', requiresApproval: false });
+      // Was contacts.searchContacts with the action name as the query: a tool
+      // no registry serves, searched for the word "unknown".
+      plan.summary = `KEY has no capability for ${domain}.${action}: nothing was planned and nothing will run.`;
     }
 
     await (this.prisma.client as any).keyCommand.update({
@@ -196,37 +243,54 @@ export class KeyCommandService {
     return maxRisk;
   }
 
-  async executeApprovedPlan(commandId: string, plan: KeyCommandPlan, businessId: string, userId?: string): Promise<ToolResult[]> {
-    const results: ToolResult[] = [];
+  /**
+   * The 'ask' executor (POST /key/command with mode 'ask' is its only caller).
+   *
+   * 'ask' is read-only and governed: a step runs only when it is a read-tier
+   * capability (LOW in the plan, tier 1 without approval in the registry that
+   * serves it, and read-only by the FLOW_TOOLS catalogue or
+   * ASK_READ_CAPABILITIES), the autonomy kill switch is off, and
+   * AiOversightService clears it. Both checks fail closed. Anything else is
+   * returned as not executed, so nothing here files a proposal or writes.
+   */
+  async executeApprovedPlan(commandId: string, plan: KeyCommandPlan, businessId: string, userId?: string): Promise<KeyCommandStepResult[]> {
+    const results: KeyCommandStepResult[] = [];
 
     for (const step of plan.steps) {
-      // Phase 3 Skeleton: prefer canonical registry; fall back to legacy AI-module registry.
-      const canonicalName = `${step.module}.${step.tool}`;
-      let result: ToolResult;
-      if (this.keyCortexToolRegistry?.getTool(canonicalName)) {
-        result = await this.keyCortexToolRegistry.execute(
-          canonicalName,
-          { businessId, userId: userId ?? undefined, commandId, autonomyLevel: 2 },
-          step.input,
-        );
-      } else if (this.toolRegistry) {
-        result = await this.toolRegistry.execute(
-          step.module,
-          step.tool,
-          { businessId, userId: userId ?? undefined, commandId, autonomyLevel: 2 },
-          step.input,
-        );
-      } else {
-        result = { success: false, error: 'No tool registry available' };
+      const gate = await this.governAskStep(step, businessId);
+      if (!gate.cleared) {
+        results.push(gate.result);
+        continue;
       }
-      results.push(result);
+      const capability = gate.capability;
+      // INTERNAL_EXEC is what both registries require for a tier-1 tool; it is
+      // granted only to a read that the checks above cleared.
+      const ctx = { businessId, userId: userId ?? undefined, commandId, autonomyLevel: KeyAutonomyLevel.INTERNAL_EXEC };
+      let result: KeyCommandStepResult;
+      try {
+        result = capability.registry === 'canonical'
+          ? await this.keyCortexToolRegistry!.execute(capability.name, ctx, step.input)
+          : await this.toolRegistry!.execute(step.module, step.tool, ctx, step.input);
+      } catch (err) {
+        result = { success: false, error: (err as Error).message };
+      }
+      results.push({ ...result, tool: capability.name });
     }
 
-    const allSuccess = results.every((r) => r.success);
+    const allSuccess = results.length > 0 && results.every((r) => r.success);
+    const nothingRan = results.every((r) => r.notExecuted);
+    // An empty plan or an all-refused one ran nothing and is not EXECUTED.
+    const status = allSuccess
+      ? 'EXECUTED'
+      : nothingRan && results.some((r) => r.requiresApproval)
+        ? 'PLANNED'
+        : nothingRan
+          ? 'REJECTED'
+          : 'FAILED';
     await (this.prisma.client as any).keyCommand.update({
       where: { id: commandId },
       data: {
-        status: allSuccess ? 'EXECUTED' : 'FAILED',
+        status,
         executionResult: { success: allSuccess, outputs: results } as any,
       },
     });
@@ -250,6 +314,83 @@ export class KeyCommandService {
     });
 
     return results;
+  }
+
+  /**
+   * Which registry serves a step, and under which identity. FLOW_TOOLS are
+   * bridged into the canonical registry under their BARE names; organ tools
+   * there are dotted. So: the bare canonical name, then the dotted canonical
+   * name, then the legacy registry (#160, the @@ -200 hunk only).
+   */
+  private resolveCapability(step: KeyCommandPlan['steps'][number]): ResolvedCapability | undefined {
+    const dotted = `${step.module}.${step.tool}`;
+    for (const name of [step.tool, dotted]) {
+      const tool = this.keyCortexToolRegistry?.getTool(name);
+      if (tool) return { registry: 'canonical', name, riskTier: tool.riskTier, requiresApproval: tool.requiresApproval };
+    }
+    const legacy = this.toolRegistry?.getTool(step.module, step.tool);
+    if (legacy) return { registry: 'legacy', name: dotted, riskTier: legacy.riskTier, requiresApproval: legacy.requiresApproval };
+    return undefined;
+  }
+
+  /** Read-only by the FLOW_TOOLS catalogue when it lists the name, else by ASK_READ_CAPABILITIES. */
+  private isReadCapability(name: string): boolean {
+    const flow = getToolByName(name);
+    if (flow) {
+      return flow.riskTier === 1 && (flow.family === 'read' || (flow.family === 'crud' && !flow.changedEntities?.length));
+    }
+    return ASK_READ_CAPABILITIES.has(name);
+  }
+
+  private async governAskStep(
+    step: KeyCommandPlan['steps'][number],
+    businessId: string,
+  ): Promise<{ cleared: true; capability: ResolvedCapability } | { cleared: false; result: KeyCommandStepResult }> {
+    const refuse = (tool: string, error: string, requiresApproval = false) =>
+      ({ cleared: false as const, result: { success: false, notExecuted: true, requiresApproval, tool, error } });
+    const planned = `${step.module}.${step.tool}`;
+
+    if (step.requiresApproval || step.riskTier !== 'LOW') {
+      return refuse(planned, `${planned} is ${step.riskTier} risk and requires approval; 'ask' only reads`, true);
+    }
+
+    const capability = this.resolveCapability(step);
+    if (!capability) {
+      return refuse(planned, `${planned} is not registered in any KEY tool registry; nothing was run`);
+    }
+    const { name } = capability;
+    if (capability.riskTier !== 1 || capability.requiresApproval || !this.isReadCapability(name)) {
+      return refuse(name, `${name} is not a read-only capability; 'ask' does not change the business`, true);
+    }
+
+    if (!this.safety) return refuse(name, 'The autonomy kill switch could not be checked; nothing was run');
+    try {
+      const safety = await this.safety.check({ businessId, toolName: name, riskTier: 1, mode: 'manual' });
+      if (!safety.allowed) {
+        return refuse(name, safety.reason ?? 'Blocked by the autonomy safety gate', !!safety.requiresApproval);
+      }
+    } catch (err) {
+      this.logger.error(`[ask] kill switch check failed for ${businessId}: ${(err as Error).message}`);
+      return refuse(name, 'The autonomy kill switch could not be checked; nothing was run');
+    }
+
+    if (!this.oversight) return refuse(name, 'KEY oversight is unavailable; nothing was run');
+    try {
+      const decision = await this.oversight.evaluate(businessId, name);
+      if (!decision.allowed) return refuse(name, decision.reason);
+      // Oversight tiers a tool by the FLOW_TOOLS catalogue, and gives any other
+      // name a placeholder tier 2. For a catalogued tool its confirm verdict
+      // stands ('ask' has no confirmation step). For the rest, the read-only
+      // check above is the tier verdict; oversight still rules on mode,
+      // blocklists and its own fail-closed state through `allowed`.
+      const needsHuman = decision.requiresQuickConfirm || decision.requiresFormalApproval || decision.requiresAdminApproval;
+      if (needsHuman && getToolByName(name)) return refuse(name, decision.reason, true);
+    } catch (err) {
+      this.logger.error(`[ask] oversight check failed for ${businessId}: ${(err as Error).message}`);
+      return refuse(name, 'KEY oversight could not be checked; nothing was run');
+    }
+
+    return { cleared: true, capability };
   }
 
   // ── Do It For Me: real business intelligence ───────────────────────────
