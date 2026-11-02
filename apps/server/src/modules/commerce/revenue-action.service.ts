@@ -4,6 +4,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { CASH_NET_PAYMENT_WHERE } from './invoice-workflow.service';
+import { roundMoney, sumMoney } from './money';
 import type {
   InvoicePaidPayload,
   InvoiceStatusPayload,
@@ -797,8 +799,10 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       collectedRows, outstandingRows, overdueRows, quotePipelineRows,
       recurringRows, paidThisMonthRows, billedThisMonthRows,
     ] = await Promise.all([
+      // V1-36 (CF-17): collected net of refunds (CASH_NET_PAYMENT_WHERE, the
+      // database form of computeBalance), not the SUCCESSFUL rows alone.
       this.prisma.client.payment.aggregate({
-        where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: monthStart } },
+        where: { businessId, createdAt: { gte: monthStart }, ...CASH_NET_PAYMENT_WHERE },
         _sum: { amount: true },
       }),
       this.prisma.client.invoice.aggregate({
@@ -828,7 +832,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       }),
     ]);
 
-    const collectedThisMonth = Number(collectedRows._sum.amount ?? 0);
+    const collectedThisMonth = roundMoney(Number(collectedRows._sum.amount ?? 0));
     const outstanding = Number(outstandingRows._sum.total ?? 0);
     const overdue = Number(overdueRows._sum.total ?? 0);
     const quotePipeline = Number(quotePipelineRows._sum.total ?? 0);
@@ -873,8 +877,9 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
     start.setHours(0, 0, 0, 0);
 
     const [payments, invoices] = await Promise.all([
+      // V1-36 (CF-17): a refund is collected money going back out in its week.
       this.prisma.client.payment.findMany({
-        where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: start } },
+        where: { businessId, createdAt: { gte: start }, ...CASH_NET_PAYMENT_WHERE },
         select: { amount: true, createdAt: true },
       }),
       this.prisma.client.invoice.findMany({
@@ -888,9 +893,9 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       weekStart.setDate(weekStart.getDate() + w * 7);
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 7);
-      const collected = payments
-        .filter((p) => p.createdAt >= weekStart && p.createdAt < weekEnd)
-        .reduce((s, p) => s + Number(p.amount ?? 0), 0);
+      const collected = sumMoney(
+        payments.filter((p) => p.createdAt >= weekStart && p.createdAt < weekEnd).map((p) => Number(p.amount ?? 0)),
+      );
       const billed = invoices
         .filter((i) => i.issueDate && i.issueDate >= weekStart && i.issueDate < weekEnd)
         .reduce((s, i) => s + Number(i.total ?? 0), 0);

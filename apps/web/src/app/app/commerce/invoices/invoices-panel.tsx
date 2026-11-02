@@ -8,6 +8,7 @@ import { SkeletonList } from "@/components/ui/skeleton";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@keyflow/ui";
+import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import {
   Search,
   FileText,
@@ -88,12 +89,17 @@ import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
 import type { ReactNode } from "react";
 
-/** R0-21 (M29): the row's own figures, SUCCESSFUL payments only (PENDING and FAILED rows are not cash). */
-function rowPaymentFigures(inv: Invoice): { paidAmount: number; remaining: number } {
-  const paidAmount = (inv.payments ?? [])
-    .filter((p) => p.status === "SUCCESSFUL")
-    .reduce((sum, p) => sum + p.amount, 0);
-  return { paidAmount, remaining: Math.max(0, Number(inv.total) - paidAmount) };
+/**
+ * R0-21 (M29): the row's own figures (PENDING and FAILED rows are not cash).
+ * V1-36 (CF-17): read through the shared balance contract, computeBalance's
+ * mirror, so a refund counts: paidAmount is what was received net of refunds
+ * and remaining what is still owed, the figures GET .../payments serves.
+ * Summing SUCCESSFUL rows alone read SUCCESSFUL 100 with 40 refunded as paid
+ * 100, remaining 0, and the form asked to confirm an over-payment for the 40.
+ */
+function rowPaymentFigures(inv: Invoice): { paidAmount: number; remaining: number; paidPercent: number } {
+  const balance = invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency);
+  return { paidAmount: balance.net, remaining: balance.remaining, paidPercent: invoicePaidPercent(balance) };
 }
 
 interface InvoicesPanelProps {
@@ -243,7 +249,7 @@ export default function InvoicesPanel({
   // (attemptIdempotencyKey, review R021-ST-1).
   const paymentAttemptRef = useRef<PaymentAttempt | null>(null);
   // R0-21 (M29): the server's status-aware figures for the open invoice
-  // (GET .../payments: paidAmount = SUCCESSFUL rows, remaining).
+  // (GET .../payments: paidAmount = received net of refunds, remaining; V1-36).
   const [paymentBalance, setPaymentBalance] = useState<{ invoiceId: string; paidAmount: number; remaining: number } | null>(null);
   // Review R021-ST-2: the invoice whose payments read failed (or answered no
   // figures); only then does the form fall back to the row's own figures.
@@ -594,8 +600,9 @@ export default function InvoicesPanel({
   /**
    * R0-21 (M29): paid and remaining for the open payment form: the server's
    * figures once its payments read answers. Only if that read fails (or there
-   * is no workspace to read from) the row's SUCCESSFUL payments, never PENDING
-   * or FAILED ones. Null while the read is in flight (review R021-ST-2): the
+   * is no workspace to read from) the row's own figures through the shared
+   * balance contract (rowPaymentFigures: net of refunds, never PENDING or
+   * FAILED rows). Null while the read is in flight (review R021-ST-2): the
    * list row may be stale, so it never decides the overpayment confirm, and
    * Record Payment waits for the figures, as the finance modal does.
    */
@@ -1006,8 +1013,8 @@ export default function InvoicesPanel({
               </>
             );
 
-            const paidAmount = (inv.payments ?? []).filter((p) => p.status === "SUCCESSFUL").reduce((sum, p) => sum + p.amount, 0);
-            const paymentPercent = Number(inv.total) > 0 ? Math.round((paidAmount / Number(inv.total)) * 100) : 0;
+            // V1-36 (CF-17): net of refunds, the server's reading (rowPaymentFigures).
+            const { paidAmount, paidPercent: paymentPercent } = rowPaymentFigures(inv);
 
             return (
               <div key={inv.id} className="flex items-start gap-1">

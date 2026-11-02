@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { FileText, Clock, AlertCircle, CheckCircle } from "lucide-react";
+import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { Invoice } from "@/lib/client";
 import { formatAmount } from "../../utils/commerce-utils";
 
@@ -27,10 +28,8 @@ export function InvoiceStatCards({ invoices, currency, onFilterClick }: InvoiceS
 
     for (const inv of invoices) {
       const total = Number(inv.total);
-      const paidAmount = (inv.payments ?? [])
-        .filter((p) => p.status === "SUCCESSFUL")
-        .reduce((sum, p) => sum + p.amount, 0);
-      const remaining = Math.max(0, total - paidAmount);
+      // V1-36 (CF-17): what is still owed, net of refunds (the shared balance contract).
+      const { remaining } = invoiceBalanceOfStoredRows(total, inv.payments ?? [], inv.currency);
 
       if (inv.status === "DRAFT") {
         draftsTotal += total;

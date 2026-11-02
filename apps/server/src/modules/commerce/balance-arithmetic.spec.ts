@@ -36,7 +36,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import * as workflow from './invoice-workflow.service';
-import { sumMoney } from './money';
+import { fromCents, sumMoney, toCents } from './money';
 
 const SERVER = join(__dirname, '..', '..', '..');
 const REPO = join(SERVER, '..', '..');
@@ -185,14 +185,24 @@ function matches(row: { amount: number; status: string }, where: any): boolean {
 }
 
 describe('BA-03: the database form of the contract', () => {
-  it('summing the amounts of the rows CASH_NET_PAYMENT_WHERE selects is balanceOfStoredRows(...).net (fixed and random cases)', () => {
+  it('summing the amounts of the rows CASH_NET_PAYMENT_WHERE selects is balanceOfStoredRows(...).net (fixed and random cases); a legacy sub-cent row may move it by one cent, never more', () => {
     const where = (workflow as any).CASH_NET_PAYMENT_WHERE;
     expect(where, 'invoice-workflow.service.ts exports CASH_NET_PAYMENT_WHERE').toBeTruthy();
+    let exact = 0;
     for (const c of [...FIXED, ...RANDOM]) {
       const rows = c.rows.map((r) => ({ amount: Number(r.amount) || 0, status: r.status }));
       const viaWhere = sumMoney(rows.filter((r) => matches(r, where)).map((r) => r.amount));
-      expect(viaWhere, JSON.stringify(c.rows)).toBe(workflow.balanceOfStoredRows(0, rows).net);
+      const net = workflow.balanceOfStoredRows(0, rows).net;
+      if (rows.every((r) => fromCents(toCents(r.amount)) === r.amount)) {
+        // Every row written since V1-22 is a whole number of cents: the two readings are one.
+        exact += 1;
+        expect(viaWhere, JSON.stringify(c.rows)).toBe(net);
+      } else {
+        // computeBalance rounds paid and refunded to cents separately; one sum rounds once.
+        expect(Math.abs(toCents(viaWhere) - toCents(net)), JSON.stringify(c.rows)).toBeLessThanOrEqual(1);
+      }
     }
+    expect(exact, 'most cases are whole-cent rows').toBeGreaterThan(500);
   });
 });
 

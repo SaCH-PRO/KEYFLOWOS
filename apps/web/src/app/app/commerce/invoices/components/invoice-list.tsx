@@ -20,6 +20,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { Invoice, Contact, Product } from "@/lib/client";
 import { formatAmount, getDaysUntilDue, formatRelativeDate } from "../../utils/commerce-utils";
 import { getStatusBadge, BILLING_SORT_OPTIONS, BillingSortKey, INVOICE_STATUS_FILTERS } from "../../components/commerce-types";
@@ -201,10 +202,8 @@ export function InvoiceList({
               {paginated.map((inv) => {
                 const dueInfo = getDaysUntilDue(inv.dueDate);
                 const _smartCTA = getInvoiceSmartCTA(inv.status);
-                const paidAmount = (inv.payments ?? [])
-                  .filter((p) => p.status === "SUCCESSFUL")
-                  .reduce((sum, p) => sum + p.amount, 0);
-                const paymentPercent = Number(inv.total) > 0 ? Math.round((paidAmount / Number(inv.total)) * 100) : 0;
+                // V1-36 (CF-17): the shared balance contract (computeBalance's mirror), net of refunds.
+                const paymentPercent = invoicePaidPercent(invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency));
                 const isMenuOpen = openMenuId === inv.id;
 
                 return (

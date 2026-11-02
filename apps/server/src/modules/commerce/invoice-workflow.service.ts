@@ -187,6 +187,27 @@ export function balanceOfStoredRows(
 }
 
 /**
+ * V1-36-DM-BALANCE-READ-CONTRACT (CF-17): the same contract for a figure that
+ * is summed in the database (money received in a period, across invoices).
+ * The Payment rows whose amounts add up to balanceOfStoredRows(...).net: the
+ * SUCCESSFUL rows (money in) and the negative REFUNDED rows (money out, D-14).
+ * A positive REFUNDED row, flipped before V1-29, stands for its payment plus
+ * its refund (net 0, readStoredPayments) and is left out; PENDING and FAILED
+ * rows are not cash. So `_sum.amount` over `{ ...where, ...CASH_NET_PAYMENT_WHERE }`
+ * is the cash received net of refunds, the ledger's cash net for those
+ * payments; round it with roundMoney. It equals the sum of the rows' nets
+ * exactly for whole-cent rows (every row written since V1-22); a legacy
+ * sub-cent row may move it by one cent (computeBalance rounds paid and
+ * refunded separately, one sum rounds once). Summing SUCCESSFUL rows alone counted
+ * refunded money as received (balance-arithmetic.spec.ts ratchets that form
+ * out and pins this filter to balanceOfStoredRows). It carries an `OR`: spread
+ * it into a where that has none of its own.
+ */
+export const CASH_NET_PAYMENT_WHERE = {
+  OR: [{ status: 'SUCCESSFUL' }, { status: 'REFUNDED', amount: { lt: 0 } }],
+} satisfies Prisma.PaymentWhereInput;
+
+/**
  * Compute the resulting invoice status after a payment is applied. Pure
  * function — no DB. Used by `applyPayment` and by tests.
  *

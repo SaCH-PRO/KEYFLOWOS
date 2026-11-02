@@ -4,6 +4,8 @@ import { RedisService } from '../../core/redis/redis.service';
 import { CashPositionService } from './cash-position.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 import { ReceivablesService } from './receivables.service';
+import { CASH_NET_PAYMENT_WHERE } from '../commerce/invoice-workflow.service';
+import { roundMoney } from '../commerce/money';
 
 /**
  * FIN5 — Compute the start of the current month in America/Port_of_Spain
@@ -152,8 +154,10 @@ export class FinanceOverviewService {
         where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
         select: { id: true },
       }),
+      // V1-36 (CF-17): cash received this month net of refunds (CASH_NET_PAYMENT_WHERE,
+      // the database form of computeBalance); SUCCESSFUL rows alone counted refunded money.
       this.prisma.client.payment.aggregate({
-        where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: monthStart } },
+        where: { businessId, createdAt: { gte: monthStart }, ...CASH_NET_PAYMENT_WHERE },
         _sum: { amount: true },
       }),
       this.prisma.client.expense.aggregate({
@@ -238,7 +242,7 @@ export class FinanceOverviewService {
       taxReserved = Number(agg._sum.credit ?? 0) - Number(agg._sum.debit ?? 0);
     }
 
-    const revenueThisMonth = Number(paidInvoices._sum.amount ?? 0);
+    const revenueThisMonth = roundMoney(Number(paidInvoices._sum.amount ?? 0));
     const expensesThisMonth = Number(monthExpenses._sum.amount ?? 0);
     const netProfitThisMonth = revenueThisMonth - expensesThisMonth;
 
