@@ -343,6 +343,11 @@
       "packet": "V1-19-KEY-IDEMPOTENCY-CLAIM"
     },
     {
+      "prefix": "v28a_",
+      "owner": "apps/server/test/booking-settlement.integration.test.ts",
+      "packet": "V1-28-BK-SETTLEMENT"
+    },
+    {
       "prefix": "v21a_",
       "owner": "apps/server/test/structure-authority-ceiling.integration.test.ts",
       "packet": "V1-21-AUTH-JOBROLE-CEILING"
