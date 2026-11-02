@@ -8,6 +8,9 @@ import { CommandService } from '../command/command.service';
 import { AiOversightService } from './ai-oversight.service';
 import { getToolByName } from './flow-tool-registry';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
+import { LEVEL_RANK, defaultScopesForRole, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
+import type { Prisma } from '@prisma/client';
 
 export enum KeyMode {
   ASK = 'ask',
@@ -63,19 +66,53 @@ export interface KeyCommandStepResult extends ToolResult {
 }
 
 /**
- * The capabilities outside the FLOW_TOOLS catalogue that 'ask' may run, by
- * their `module.tool` identity: each one only reads. Tier 1 is not read-only in
- * either registry (contacts.createCommandItem and timeline.createReminder are
- * tier-1 writes, and connect.scanDrive is a tier-1 Drive sync), so read-only
- * is stated here rather than inferred from a tier.
+ * How 'ask' governs a read outside the FLOW_TOOLS catalogue, keyed by its
+ * `module.tool` identity. Being listed here is what makes it read-only: tier 1
+ * is not read-only in either registry (contacts.createCommandItem and
+ * timeline.createReminder are tier-1 writes, and connect.scanDrive is a tier-1
+ * Drive sync), so read-only is stated rather than inferred from a tier.
+ *
+ * - blockableAs: the module names a business can block it under. Oversight
+ *   infers a module only from a snake_case FLOW name ('crm_', 'commerce_',
+ *   'social_' is 'content'), never from a `module.tool` identity, so 'ask'
+ *   applies blockedModules to these itself, and blockedTools to the bare tool
+ *   name as well as the dotted one (SEC-V109-2).
+ * - memberScope: the member module scope ModuleScopeGuard requires on the REST
+ *   read of the same data. The asking member must hold read on it (SEC-V109-1).
+ * - contactVisibility: it returns contacts. They are filtered by the asking
+ *   member's CRM visibility (resolveCrmAccess + visibilityClause, as the
+ *   contacts list route does) before they leave this service (SEC-V109-1).
  */
-const ASK_READ_CAPABILITIES: ReadonlySet<string> = new Set([
-  'commerce.summarizeRevenue',
-  'contacts.recommendFollowUps',
-  'connect.listDriveIntake',
-  'messages.listMessageIntake',
-  'social.listRecentEngagement',
+interface AskRead {
+  blockableAs: readonly string[];
+  memberScope?: CanonicalModule;
+  contactVisibility?: true;
+}
+
+const ASK_READ_CAPABILITIES: ReadonlyMap<string, AskRead> = new Map<string, AskRead>([
+  // The commerce invoice reads: RequireModuleScope('revenue', 'read').
+  ['commerce.summarizeRevenue', { blockableAs: ['commerce'], memberScope: 'revenue' }],
+  // GET crm/businesses/:b/contacts: RequireModuleScope('crm', 'read') + visibilityClause.
+  ['contacts.recommendFollowUps', { blockableAs: ['crm', 'contacts'], memberScope: 'crm', contactVisibility: true }],
+  // GET drive/businesses/:b/intake and communications/businesses/:b/message-intake
+  // require membership only (AuthGuard + BusinessGuard), which the 'ask' route
+  // already holds. Social engagements have no REST read.
+  ['connect.listDriveIntake', { blockableAs: ['connect'] }],
+  ['messages.listMessageIntake', { blockableAs: ['messages'] }],
+  ['social.listRecentEngagement', { blockableAs: ['content', 'social'] }],
 ]);
+
+/** The KeyCommand status of an 'ask', and the Activity ledger entry that says the same thing (SEC-V109-3). */
+type AskStatus = 'EXECUTED' | 'PLANNED' | 'REJECTED' | 'FAILED';
+const ASK_LEDGER: Record<AskStatus, { action: string; title: string; status: 'COMPLETED' | 'PENDING' | 'CANCELLED' | 'FAILED' }> = {
+  EXECUTED: { action: 'command.executed', title: 'KEY command executed', status: 'COMPLETED' },
+  PLANNED: { action: 'command.awaiting_approval', title: 'KEY command awaiting approval: nothing ran', status: 'PENDING' },
+  REJECTED: { action: 'command.refused', title: 'KEY command refused: nothing ran', status: 'CANCELLED' },
+  FAILED: { action: 'command.failed', title: 'KEY command failed', status: 'FAILED' },
+};
+
+/** The asking member's contact visibility; null sees every contact of the business. */
+type ContactScope = Prisma.ContactWhereInput | null;
 
 type ResolvedCapability = {
   registry: 'canonical' | 'legacy';
@@ -84,6 +121,10 @@ type ResolvedCapability = {
   riskTier: number;
   requiresApproval: boolean;
 };
+
+type AskGate =
+  | { cleared: true; capability: ResolvedCapability; contactScope: ContactScope }
+  | { cleared: false; result: KeyCommandStepResult };
 
 @Injectable()
 export class KeyCommandService {
@@ -249,15 +290,20 @@ export class KeyCommandService {
    * 'ask' is read-only and governed: a step runs only when it is a read-tier
    * capability (LOW in the plan, tier 1 without approval in the registry that
    * serves it, and read-only by the FLOW_TOOLS catalogue or
-   * ASK_READ_CAPABILITIES), the autonomy kill switch is off, and
-   * AiOversightService clears it. Both checks fail closed. Anything else is
-   * returned as not executed, so nothing here files a proposal or writes.
+   * ASK_READ_CAPABILITIES), the autonomy kill switch is off, AiOversightService
+   * clears it and the business has not blocked it, and the asking member may
+   * read that data. Every check fails closed. Anything else is returned as not
+   * executed, so nothing here files a proposal or writes.
+   *
+   * Advisory mode refuses these reads, as oversight rules (CR-V109-1): the
+   * governance screen labels "Read data / Fetch records" Suggest Only under
+   * advisory, and flow chat refuses read tools there too.
    */
   async executeApprovedPlan(commandId: string, plan: KeyCommandPlan, businessId: string, userId?: string): Promise<KeyCommandStepResult[]> {
     const results: KeyCommandStepResult[] = [];
 
     for (const step of plan.steps) {
-      const gate = await this.governAskStep(step, businessId);
+      const gate = await this.governAskStep(step, businessId, userId);
       if (!gate.cleared) {
         results.push(gate.result);
         continue;
@@ -271,6 +317,7 @@ export class KeyCommandService {
         result = capability.registry === 'canonical'
           ? await this.keyCortexToolRegistry!.execute(capability.name, ctx, step.input)
           : await this.toolRegistry!.execute(step.module, step.tool, ctx, step.input);
+        if (gate.contactScope) result = await this.scopeContacts(result, businessId, gate.contactScope);
       } catch (err) {
         result = { success: false, error: (err as Error).message };
       }
@@ -280,40 +327,93 @@ export class KeyCommandService {
     const allSuccess = results.length > 0 && results.every((r) => r.success);
     const nothingRan = results.every((r) => r.notExecuted);
     // An empty plan or an all-refused one ran nothing and is not EXECUTED.
-    const status = allSuccess
+    const status: AskStatus = allSuccess
       ? 'EXECUTED'
       : nothingRan && results.some((r) => r.requiresApproval)
         ? 'PLANNED'
         : nothingRan
           ? 'REJECTED'
           : 'FAILED';
-    await (this.prisma.client as any).keyCommand.update({
+    await this.prisma.client.keyCommand.update({
       where: { id: commandId },
       data: {
         status,
-        executionResult: { success: allSuccess, outputs: results } as any,
+        // GET key/commands lists every member's rows, so what one member was
+        // allowed to read is not kept here for the others (SEC-V109-1).
+        executionResult: { success: allSuccess, outputs: results.map((r) => this.persistableOutput(r)) } as unknown as Prisma.InputJsonObject,
       },
     });
 
-    // Write to unified Activity ledger (Wave 1)
+    // The unified Activity ledger says what the KeyCommand row says, and names
+    // the member who asked (SEC-V109-3).
+    const ledger = ASK_LEDGER[status];
+    const ran = results.filter((r) => !r.notExecuted).length;
     this.timeline.recordEvent({
       businessId,
       module: 'key-ai',
-      action: allSuccess ? 'command.executed' : 'command.failed',
+      action: ledger.action,
       entityType: 'key_command',
       entityId: commandId,
-      title: allSuccess ? 'KEY command executed' : 'KEY command failed',
-      detail: `${plan.steps.length} steps, ${results.filter((r) => r.success).length} succeeded`,
+      title: ledger.title,
+      detail: `${plan.steps.length} steps, ${ran} ran, ${results.filter((r) => r.success).length} succeeded`,
       category: 'AI',
       actorType: 'AI',
-      status: allSuccess ? 'COMPLETED' : 'FAILED',
-      data: { planSummary: plan.summary, results: results.map((r) => ({ success: r.success, error: r.error })) },
+      actorId: userId ?? undefined,
+      status: ledger.status,
+      data: {
+        planSummary: plan.summary,
+        commandStatus: status,
+        requestedBy: userId ?? null,
+        results: results.map((r) => ({
+          tool: r.tool,
+          success: r.success,
+          notExecuted: !!r.notExecuted,
+          requiresApproval: !!r.requiresApproval,
+          error: r.error,
+        })),
+      },
       occurredAt: new Date(),
     }).catch((err) => {
       this.logger.warn(`[UnifiedLedger] failed to record key command activity: ${(err as Error).message}`);
     });
 
     return results;
+  }
+
+  /**
+   * What an output keeps on the KeyCommand row. Data is kept only for a read
+   * of business-wide data that any member may read; a member-scoped read (or
+   * one 'ask' does not classify) keeps its outcome without its data.
+   */
+  private persistableOutput(r: KeyCommandStepResult): KeyCommandStepResult & { dataWithheld?: true } {
+    const read = r.tool ? ASK_READ_CAPABILITIES.get(r.tool) : undefined;
+    const businessWide = !!read && !read.memberScope && !read.contactVisibility;
+    if (businessWide || r.data === undefined) return r;
+    const outcome: KeyCommandStepResult & { dataWithheld?: true } = { ...r, dataWithheld: true };
+    delete outcome.data;
+    return outcome;
+  }
+
+  /**
+   * SEC-V109-1: keep only the contacts the asking member may see. The read ran
+   * business-wide in the legacy registry; the filter is the contacts list
+   * route's own clause (resolveCrmAccess + visibilityClause), applied before
+   * the rows leave this service. A result it cannot filter is not returned.
+   */
+  private async scopeContacts(result: KeyCommandStepResult, businessId: string, scope: Prisma.ContactWhereInput): Promise<KeyCommandStepResult> {
+    if (!result.success) return result;
+    const data = result.data as { contacts?: unknown } | undefined;
+    if (!data || !Array.isArray(data.contacts)) {
+      return { success: false, error: 'Contact visibility could not be applied to this answer; nothing was returned' };
+    }
+    const contacts = data.contacts as Array<{ id?: unknown }>;
+    const ids = contacts.map((c) => c.id).filter((id): id is string => typeof id === 'string');
+    const visible = ids.length
+      ? await this.prisma.client.contact.findMany({ where: { businessId, id: { in: ids }, AND: [scope] }, select: { id: true } })
+      : [];
+    const keep = new Set(visible.map((v) => v.id));
+    const scoped = contacts.filter((c) => typeof c.id === 'string' && keep.has(c.id));
+    return { ...result, data: { ...data, contacts: scoped, count: scoped.length } };
   }
 
   /**
@@ -345,7 +445,8 @@ export class KeyCommandService {
   private async governAskStep(
     step: KeyCommandPlan['steps'][number],
     businessId: string,
-  ): Promise<{ cleared: true; capability: ResolvedCapability } | { cleared: false; result: KeyCommandStepResult }> {
+    userId?: string,
+  ): Promise<AskGate> {
     const refuse = (tool: string, error: string, requiresApproval = false) =>
       ({ cleared: false as const, result: { success: false, notExecuted: true, requiresApproval, tool, error } });
     const planned = `${step.module}.${step.tool}`;
@@ -375,6 +476,7 @@ export class KeyCommandService {
     }
 
     if (!this.oversight) return refuse(name, 'KEY oversight is unavailable; nothing was run');
+    const read = ASK_READ_CAPABILITIES.get(name);
     try {
       const decision = await this.oversight.evaluate(businessId, name);
       if (!decision.allowed) return refuse(name, decision.reason);
@@ -382,15 +484,88 @@ export class KeyCommandService {
       // name a placeholder tier 2. For a catalogued tool its confirm verdict
       // stands ('ask' has no confirmation step). For the rest, the read-only
       // check above is the tier verdict; oversight still rules on mode,
-      // blocklists and its own fail-closed state through `allowed`.
+      // exact-name blocks and its own fail-closed state through `allowed`.
       const needsHuman = decision.requiresQuickConfirm || decision.requiresFormalApproval || decision.requiresAdminApproval;
       if (needsHuman && getToolByName(name)) return refuse(name, decision.reason, true);
+      // ...but not on module blocks, nor on a block of the bare tool name: it
+      // infers a module only from snake_case FLOW names (SEC-V109-2).
+      if (read) {
+        const blocked = await this.businessBlock(businessId, step.tool, name, read);
+        if (blocked) return refuse(name, blocked);
+      }
     } catch (err) {
       this.logger.error(`[ask] oversight check failed for ${businessId}: ${(err as Error).message}`);
       return refuse(name, 'KEY oversight could not be checked; nothing was run');
     }
 
-    return { cleared: true, capability };
+    let contactScope: ContactScope = null;
+    if (read && (read.memberScope || read.contactVisibility)) {
+      const actor = await this.bindAskActor(businessId, userId, name, read);
+      if (!actor.allowed) return refuse(name, actor.reason);
+      contactScope = actor.contactScope;
+    }
+
+    return { cleared: true, capability, contactScope };
+  }
+
+  /**
+   * The business's own block on a dotted 'ask' read, from the policy oversight
+   * reads (AiOversightService.getAutonomySettings). A policy that could not be
+   * read blocks, as oversight's own fail-closed state does. Null when clear.
+   */
+  private async businessBlock(businessId: string, tool: string, name: string, read: AskRead): Promise<string | null> {
+    const settings = await this.oversight!.getAutonomySettings(businessId);
+    if (settings.degraded) return 'KEY oversight could not read this business\'s AI policy; nothing was run';
+    const tools = settings.blockedTools ?? [];
+    const toolBlock = [name, tool].find((t) => tools.includes(t));
+    if (toolBlock) return `Tool "${toolBlock}" is blocked by business settings`;
+    const modules = settings.blockedModules ?? [];
+    const moduleBlock = read.blockableAs.find((m) => modules.includes(m));
+    if (moduleBlock) return `Module "${moduleBlock}" is blocked by business settings`;
+    return null;
+  }
+
+  /**
+   * SEC-V109-1: the asking member may read this data only as the REST read of
+   * it would let them. Module scope as ModuleScopeGuard computes it (SUPER_ADMIN
+   * passes; else the membership's explicit scope map or its role defaults),
+   * and for contacts the list route's visibility clause. Fails closed: no
+   * member, or a lookup that fails, runs nothing.
+   */
+  private async bindAskActor(
+    businessId: string,
+    userId: string | undefined,
+    name: string,
+    read: AskRead,
+  ): Promise<{ allowed: true; contactScope: ContactScope } | { allowed: false; reason: string }> {
+    if (!userId) return { allowed: false, reason: `${name} reads member-scoped data and no member is named; nothing was run` };
+    try {
+      // Throws for an unknown user or a non-member (SUPER_ADMIN excepted).
+      const crm = await resolveCrmAccess(this.prisma, businessId, userId);
+      if (read.memberScope && !crm.isSuperAdmin) {
+        const membership = await this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId, businessId } },
+          select: { role: true, permissionScopes: true },
+        });
+        if (!membership) return { allowed: false, reason: `${name}: not a member of this business; nothing was run` };
+        const scopes: Record<string, string> =
+          membership.permissionScopes && typeof membership.permissionScopes === 'object'
+            ? (membership.permissionScopes as Record<string, string>)
+            : defaultScopesForRole(membership.role);
+        const level = scopes[read.memberScope] || 'none';
+        if (rankOf(level) < LEVEL_RANK.read) {
+          return {
+            allowed: false,
+            reason: `${name} reads ${read.memberScope} data, which requires ${read.memberScope} read access (you have ${level}); nothing was run`,
+          };
+        }
+      }
+      const contactScope = read.contactVisibility ? (visibilityClause(crm, userId) as ContactScope) : null;
+      return { allowed: true, contactScope };
+    } catch (err) {
+      this.logger.warn(`[ask] member scope for ${name} could not be resolved in ${businessId}: ${(err as Error).message}`);
+      return { allowed: false, reason: `${name}: this member's access could not be confirmed; nothing was run` };
+    }
   }
 
   // ── Do It For Me: real business intelligence ───────────────────────────

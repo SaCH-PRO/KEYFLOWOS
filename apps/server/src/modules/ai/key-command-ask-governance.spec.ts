@@ -38,6 +38,20 @@ const LEGACY: Def[] = [
   { name: 'listRecentEngagement', module: 'social', riskTier: 1, requiresApproval: false },
 ];
 
+/** The business policy oversight reads (AiOversightService.getAutonomySettings). */
+const POLICY = {
+  mode: 'assisted',
+  maxAutoTier: 1,
+  blockedTools: [] as string[],
+  blockedModules: [] as string[],
+  autonomyLevel: 0,
+  approvedTools: [] as string[],
+  approvalTimeoutHours: 24,
+};
+
+/** The asking member's rows: a User and a Membership in biz_1. */
+type Member = { userRole?: string; role?: string; permissionScopes?: Record<string, string> | null } | null;
+
 function harness(
   opts: {
     canonical?: Def[];
@@ -46,13 +60,37 @@ function harness(
     withOversight?: boolean;
     withSafety?: boolean;
     rawInput?: string;
+    /** Defaults to the OWNER, who reads every contact. */
+    member?: Member;
+    memberLookup?: Error;
+    policy?: Partial<typeof POLICY> & { degraded?: boolean };
+    policyRead?: Error;
+    /** What the legacy registry's execute answers. */
+    legacyResult?: Record<string, unknown>;
+    /** Ids the contact visibility query returns. */
+    visibleContactIds?: string[];
   } = {},
 ) {
+  const member: Member = opts.member === undefined ? { role: 'OWNER', permissionScopes: null } : opts.member;
+  const lookup = <T>(value: T) =>
+    vi.fn(async () => {
+      if (opts.memberLookup) throw opts.memberLookup;
+      return value;
+    });
   const prisma = {
     client: {
       keyCommand: {
         update: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({ id: 'cmd_1', rawInput: opts.rawInput ?? '', mode: 'ask' }),
+      },
+      user: { findUnique: lookup(member ? { id: 'user_1', role: member.userRole ?? 'USER' } : null) },
+      membership: {
+        findUnique: lookup(
+          member && member.role ? { userId: 'user_1', businessId: 'biz_1', role: member.role, permissionScopes: member.permissionScopes ?? null } : null,
+        ),
+      },
+      contact: {
+        findMany: vi.fn(async () => (opts.visibleContactIds ?? []).map((id) => ({ id }))),
       },
     },
   };
@@ -65,13 +103,17 @@ function harness(
   };
   const legacy = {
     getTool: vi.fn((module: string, name: string) => legacyTools.get(`${module}.${name}`)),
-    execute: vi.fn().mockResolvedValue({ success: true, data: { from: 'legacy' } }),
+    execute: vi.fn().mockResolvedValue(opts.legacyResult ?? { success: true, data: { from: 'legacy' } }),
   };
   const decision = opts.decision ?? AUTO;
   const oversight = {
     evaluate: vi.fn(async () => {
       if (decision instanceof Error) throw decision;
       return decision;
+    }),
+    getAutonomySettings: vi.fn(async () => {
+      if (opts.policyRead) throw opts.policyRead;
+      return { ...POLICY, ...opts.policy };
     }),
   };
   const safety = {
@@ -101,6 +143,19 @@ function plan(tool: string, module: string, input: Record<string, unknown> = {})
 function lastStatus(prisma: ReturnType<typeof harness>['prisma']): string | undefined {
   const calls = prisma.client.keyCommand.update.mock.calls;
   return calls.length ? calls[calls.length - 1][0].data.status : undefined;
+}
+
+/** The executionResult the last keyCommand.update wrote. */
+function lastExecutionResult(prisma: ReturnType<typeof harness>['prisma']): { success: boolean; outputs: Array<Record<string, unknown>> } {
+  const calls = prisma.client.keyCommand.update.mock.calls as unknown as Array<[{ data: { executionResult?: unknown } }]>;
+  return calls[calls.length - 1][0].data.executionResult as { success: boolean; outputs: Array<Record<string, unknown>> };
+}
+
+/** The Activity ledger entry executeApprovedPlan recorded. */
+function lastLedgerEvent(timeline: ReturnType<typeof harness>['timeline']): Record<string, any> {
+  const calls = timeline.recordEvent.mock.calls as unknown as Array<[Record<string, any>]>;
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1][0];
 }
 
 function expectNothingRan(h: ReturnType<typeof harness>) {
@@ -309,5 +364,246 @@ describe("V1-09 'ask' is read-only", () => {
       expect(h.legacy.execute, `${intent.domain}.${intent.action}`).toHaveBeenCalledTimes(1);
       expect(results.every((r) => r.success), `${intent.domain}.${intent.action}`).toBe(true);
     }
+  });
+});
+
+// ── Review repairs (SEC-V109-1..3, CR-V109-1) ──────────────────────────────
+
+const FOLLOW_UPS = {
+  success: true,
+  data: {
+    contacts: [
+      { id: 'c_team', name: 'Team Contact', email: 'team@example.test', daysSinceContact: 40, status: 'ACTIVE' },
+      { id: 'c_private_other', name: 'Private Other', email: 'private@example.test', daysSinceContact: 60, status: 'ACTIVE' },
+    ],
+    count: 2,
+  },
+};
+
+describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
+  it('runs no follow-up read for a member whose crm scope is none', async () => {
+    const h = harness({ member: { role: 'STAFF', permissionScopes: { crm: 'none' } }, legacyResult: FOLLOW_UPS });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('recommendFollowUps', 'contacts'), 'biz_1', 'user_1');
+
+    expectNothingRan(h);
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true, tool: 'contacts.recommendFollowUps' });
+    expect(results[0].error).toMatch(/crm read access/);
+    expect(JSON.stringify(results)).not.toContain('private@example.test');
+    expect(lastStatus(h.prisma)).toBe('REJECTED');
+  });
+
+  it("filters the follow-ups by the member's CRM visibility clause before returning them", async () => {
+    const h = harness({
+      member: { role: 'STAFF', permissionScopes: { crm: 'read' } },
+      legacyResult: FOLLOW_UPS,
+      visibleContactIds: ['c_team'],
+    });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('recommendFollowUps', 'contacts'), 'biz_1', 'user_1');
+
+    expect(h.legacy.execute).toHaveBeenCalledTimes(1);
+    expect(h.prisma.client.contact.findMany).toHaveBeenCalledWith({
+      where: {
+        businessId: 'biz_1',
+        id: { in: ['c_team', 'c_private_other'] },
+        AND: [{ OR: [{ visibility: { in: ['TEAM', 'SHARED'] } }, { ownerId: 'user_1' }, { shares: { some: { userId: 'user_1' } } }] }],
+      },
+      select: { id: true },
+    });
+    expect(results[0]).toMatchObject({ success: true, data: { count: 1 } });
+    expect((results[0].data as typeof FOLLOW_UPS.data).contacts.map((c) => c.id)).toEqual(['c_team']);
+    expect(JSON.stringify(results)).not.toContain('private@example.test');
+  });
+
+  it('returns every follow-up to the OWNER without a visibility query (control)', async () => {
+    const h = harness({ legacyResult: FOLLOW_UPS });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('recommendFollowUps', 'contacts'), 'biz_1', 'user_1');
+
+    expect(h.prisma.client.contact.findMany).not.toHaveBeenCalled();
+    expect(results[0]).toMatchObject({ success: true, data: { count: 2 } });
+  });
+
+  it('runs no revenue read for a member whose revenue scope is none', async () => {
+    const h = harness({ member: { role: 'STAFF', permissionScopes: { revenue: 'none', crm: 'read' } } });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+
+    expectNothingRan(h);
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true });
+    expect(results[0].error).toMatch(/revenue read access/);
+  });
+
+  it('a STAFF member with role-default scopes still reads revenue (control)', async () => {
+    const h = harness({ member: { role: 'STAFF', permissionScopes: null } });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+
+    expect(h.legacy.execute).toHaveBeenCalledTimes(1);
+    expect(results[0]).toMatchObject({ success: true });
+  });
+
+  it('runs no member-scoped read when no member is named, or the lookup fails', async () => {
+    const anonymous = harness();
+    const noMember = await anonymous.service.executeApprovedPlan('cmd_1', plan('recommendFollowUps', 'contacts'), 'biz_1');
+    expectNothingRan(anonymous);
+    expect(noMember[0]).toMatchObject({ success: false, notExecuted: true });
+
+    const broken = harness({ memberLookup: new Error('connection terminated') });
+    const failed = await broken.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+    expectNothingRan(broken);
+    expect(failed[0]).toMatchObject({ success: false, notExecuted: true });
+  });
+
+  it('a non-member is refused', async () => {
+    const h = harness({ member: { role: undefined } });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+
+    expectNothingRan(h);
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true });
+  });
+
+  it('a read of business-wide data needs no member scope (control)', async () => {
+    const h = harness({ member: { role: 'STAFF', permissionScopes: { crm: 'none', revenue: 'none' } } });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('listMessageIntake', 'messages'), 'biz_1');
+
+    expect(h.legacy.execute).toHaveBeenCalledTimes(1);
+    expect(results[0]).toMatchObject({ success: true });
+  });
+
+  it("keeps a member-scoped read's outcome on the KeyCommand row without its data, which only the asker receives", async () => {
+    const h = harness({ legacyResult: FOLLOW_UPS });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('recommendFollowUps', 'contacts'), 'biz_1', 'user_1');
+
+    expect(results[0].data).toEqual(FOLLOW_UPS.data);
+    const persisted = lastExecutionResult(h.prisma);
+    expect(persisted.outputs[0]).toMatchObject({ success: true, tool: 'contacts.recommendFollowUps', dataWithheld: true });
+    expect(persisted.outputs[0]).not.toHaveProperty('data');
+    expect(JSON.stringify(persisted)).not.toContain('private@example.test');
+  });
+
+  it('keeps the data of a business-wide read on the KeyCommand row (control)', async () => {
+    const h = harness({ legacyResult: { success: true, data: { items: [{ id: 'mi_1' }], count: 1 } } });
+
+    await h.service.executeApprovedPlan('cmd_1', plan('listMessageIntake', 'messages'), 'biz_1', 'user_1');
+
+    expect(lastExecutionResult(h.prisma).outputs[0]).toMatchObject({ data: { items: [{ id: 'mi_1' }], count: 1 } });
+  });
+});
+
+describe("SEC-V109-2 'ask' honours the business's module and tool blocks on dotted reads", () => {
+  it.each([
+    ['contacts.recommendFollowUps', 'recommendFollowUps', 'contacts', 'crm'],
+    ['commerce.summarizeRevenue', 'summarizeRevenue', 'commerce', 'commerce'],
+    ['social.listRecentEngagement', 'listRecentEngagement', 'social', 'content'],
+  ])('runs no %s while blockedModules holds %s', async (_name, tool, module, blockedModule) => {
+    const h = harness({ policy: { blockedModules: [blockedModule] } });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan(tool, module), 'biz_1', 'user_1');
+
+    expectNothingRan(h);
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true });
+    expect(results[0].error).toContain(`Module "${blockedModule}" is blocked`);
+  });
+
+  it('runs no read whose bare tool name is in blockedTools', async () => {
+    const h = harness({ policy: { blockedTools: ['summarizeRevenue'] } });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+
+    expectNothingRan(h);
+    expect(results[0].error).toContain('Tool "summarizeRevenue" is blocked');
+  });
+
+  it('fails closed when the business policy cannot be read', async () => {
+    const degraded = harness({ policy: { degraded: true } });
+    expect((await degraded.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1'))[0])
+      .toMatchObject({ success: false, notExecuted: true });
+    expectNothingRan(degraded);
+
+    const thrown = harness({ policyRead: new Error('connection terminated') });
+    expect((await thrown.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1'))[0])
+      .toMatchObject({ success: false, notExecuted: true });
+    expectNothingRan(thrown);
+  });
+
+  it('a block on another module does not stop the read (control)', async () => {
+    const h = harness({ policy: { blockedModules: ['bookings', 'marketing'], blockedTools: ['crm_delete_contact'] } });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+
+    expect(h.legacy.execute).toHaveBeenCalledTimes(1);
+    expect(results[0]).toMatchObject({ success: true });
+  });
+});
+
+describe('SEC-V109-3 the Activity ledger says what the KeyCommand row says, and who asked', () => {
+  it('a refused ask (kill switch) is recorded as refused, not failed, with the asking member', async () => {
+    const h = harness({ killSwitch: true });
+
+    await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+
+    expect(lastStatus(h.prisma)).toBe('REJECTED');
+    const event = lastLedgerEvent(h.timeline);
+    expect(event).toMatchObject({ action: 'command.refused', status: 'CANCELLED', actorId: 'user_1', entityId: 'cmd_1' });
+    expect(event.title).not.toMatch(/failed/i);
+    expect(event.data.results[0]).toMatchObject({ tool: 'commerce.summarizeRevenue', success: false, notExecuted: true });
+    expect(event.data.requestedBy).toBe('user_1');
+  });
+
+  it("an approval-required ask ('scan drive') is recorded as awaiting approval", async () => {
+    const h = harness({ rawInput: 'scan drive' });
+    const planned = await h.service.planActions('cmd_1', await h.service.interpretIntent('cmd_1'));
+
+    await h.service.executeApprovedPlan('cmd_1', planned, 'biz_1', 'user_1');
+
+    expect(lastStatus(h.prisma)).toBe('PLANNED');
+    expect(lastLedgerEvent(h.timeline)).toMatchObject({ action: 'command.awaiting_approval', status: 'PENDING' });
+  });
+
+  it('an empty plan is recorded as refused', async () => {
+    const h = harness();
+
+    await h.service.executeApprovedPlan('cmd_1', { summary: 'nothing', steps: [] }, 'biz_1', 'user_1');
+
+    expect(lastStatus(h.prisma)).toBe('REJECTED');
+    expect(lastLedgerEvent(h.timeline)).toMatchObject({ action: 'command.refused', status: 'CANCELLED' });
+  });
+
+  it('an executed ask is recorded as executed, with the asking member', async () => {
+    const h = harness();
+
+    await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+
+    expect(lastStatus(h.prisma)).toBe('EXECUTED');
+    expect(lastLedgerEvent(h.timeline)).toMatchObject({ action: 'command.executed', status: 'COMPLETED', actorId: 'user_1' });
+  });
+
+  it('a read that ran and failed is recorded as failed', async () => {
+    const h = harness({ legacyResult: { success: false, error: 'boom' } });
+
+    await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+
+    expect(lastStatus(h.prisma)).toBe('FAILED');
+    expect(lastLedgerEvent(h.timeline)).toMatchObject({ action: 'command.failed', status: 'FAILED' });
+  });
+});
+
+describe('CR-V109-1 advisory mode refuses ask reads (ruling: oversight governs reads in advisory)', () => {
+  it('runs nothing and says advisory when oversight answers advisory', async () => {
+    const h = harness({
+      decision: { ...AUTO, allowed: false, reason: 'AI is in advisory mode — suggestions only, no execution' },
+    });
+
+    const results = await h.service.executeApprovedPlan('cmd_1', plan('summarizeRevenue', 'commerce'), 'biz_1', 'user_1');
+
+    expectNothingRan(h);
+    expect(results[0]).toMatchObject({ success: false, notExecuted: true });
+    expect(results[0].error).toMatch(/advisory mode/);
+    expect(lastStatus(h.prisma)).toBe('REJECTED');
   });
 });

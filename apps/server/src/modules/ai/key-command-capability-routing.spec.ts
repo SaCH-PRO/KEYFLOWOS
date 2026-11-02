@@ -42,7 +42,11 @@ function harness(opts: { canonical?: CanonicalDef[]; legacy?: LegacyDef[] } = {}
     getTool: vi.fn((module: string, name: string) => legacyTools.get(`${module}.${name}`)),
     execute: vi.fn().mockResolvedValue({ success: true, data: { from: 'legacy' } }),
   };
-  const oversight = { evaluate: vi.fn().mockResolvedValue(AUTO) };
+  const oversight = {
+    evaluate: vi.fn().mockResolvedValue(AUTO),
+    // The business policy 'ask' reads for dotted-name blocks (SEC-V109-2): nothing blocked.
+    getAutonomySettings: vi.fn().mockResolvedValue({ mode: 'assisted', blockedTools: [], blockedModules: [] }),
+  };
   const safety = { check: vi.fn().mockResolvedValue({ allowed: true }) };
   const commands = {};
 
