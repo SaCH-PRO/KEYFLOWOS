@@ -24,6 +24,9 @@ interface GatewayInfo {
   currencies: string[];
 }
 
+/** What a provider webhook answers. */
+type WebhookAck = { ok: true; received?: boolean; processed?: string };
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -105,6 +108,54 @@ export class PaymentsService {
       }
       return created;
     });
+  }
+
+  /**
+   * V1-15c — a provider delivery's dedupe claim (the webhook_events row that
+   * InvoiceWorkflowService.assertNewProviderEvent writes before any side
+   * effect) means "this event was handled". It commits before the payment
+   * transaction runs, so when that transaction aborts (P2028 behind a lock, a
+   * deadlock, a failed posting) the payment is rolled back while the claim
+   * stays, and every redelivery is acked as a duplicate: the payment is lost
+   * (the V1-15 verification; LWD-07 and LWD-21's history). A delivery that
+   * fails gives its claim back, so the provider's redelivery runs it again;
+   * every money write it repeats is idempotent on Payment.providerPaymentId.
+   * Best effort: a release that fails is logged and the delivery's own error
+   * stands.
+   */
+  private async releaseProviderEvent(provider: string, providerEventId: string | undefined): Promise<void> {
+    if (!providerEventId) return;
+    try {
+      await this.prisma.client.webhookEvent.deleteMany({ where: { provider, providerEventId } });
+    } catch (e) {
+      this.logger.error(
+        `Could not release ${provider} webhook ${providerEventId} after its delivery failed: ${e instanceof Error ? e.message : e}`,
+      );
+    }
+  }
+
+  /** V1-15c — run a claimed delivery's side effects; when they throw, release the claim, then rethrow. */
+  private async underProviderEventClaim<T>(provider: string, providerEventId: string | undefined, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (e) {
+      await this.releaseProviderEvent(provider, providerEventId);
+      throw e;
+    }
+  }
+
+  /**
+   * V1-15c — a provider refund whose row another delivery already recorded
+   * (unique providerPaymentId) is done; any other failure aborted the refund
+   * transaction, so it fails the delivery (and releases its claim) instead of
+   * being acked as processed with nothing recorded.
+   */
+  private refundAlreadyRecorded(provider: string, refundId: string | undefined) {
+    return (e: unknown): null => {
+      if ((e as { code?: string } | null)?.code !== 'P2002') throw e;
+      this.logger.warn(`${provider} refund ${refundId} was already recorded by another delivery`);
+      return null;
+    };
   }
 
   /**
@@ -459,26 +510,29 @@ export class PaymentsService {
     }
 
     // Dispatch by event type. Unknown event types are acked but ignored so
-    // Stripe doesn't keep retrying them.
-    switch (eventType) {
-      case 'checkout.session.completed':
-        // Note: Stripe Payment Links surface as `checkout.session.completed`
-        // events with `payment_link` set on the session — there is no
-        // separate `payment_link.completed` event in the Stripe API.
-        await this.processStripeChargeOrSession(eventType, obj, event.id);
-        return { ok: true, received: true, processed: eventType };
-      case 'charge.succeeded':
-      case 'payment_intent.succeeded':
-        await this.processStripeChargeOrSession(eventType, obj, event.id);
-        return { ok: true, received: true, processed: eventType };
-      case 'charge.refunded':
-      case 'refund.created':
-      case 'charge.refund.updated':
-        await this.processStripeRefund(eventType, obj);
-        return { ok: true, received: true, processed: eventType };
-      default:
-        return { ok: true, received: true };
-    }
+    // Stripe doesn't keep retrying them. A dispatch that throws gives the
+    // claim back (V1-15c), so Stripe's redelivery is processed, not acked.
+    return this.underProviderEventClaim<WebhookAck>('stripe', event.id, async () => {
+      switch (eventType) {
+        case 'checkout.session.completed':
+          // Note: Stripe Payment Links surface as `checkout.session.completed`
+          // events with `payment_link` set on the session — there is no
+          // separate `payment_link.completed` event in the Stripe API.
+          await this.processStripeChargeOrSession(eventType, obj, event.id);
+          return { ok: true, received: true, processed: eventType };
+        case 'charge.succeeded':
+        case 'payment_intent.succeeded':
+          await this.processStripeChargeOrSession(eventType, obj, event.id);
+          return { ok: true, received: true, processed: eventType };
+        case 'charge.refunded':
+        case 'refund.created':
+        case 'charge.refund.updated':
+          await this.processStripeRefund(eventType, obj);
+          return { ok: true, received: true, processed: eventType };
+        default:
+          return { ok: true, received: true };
+      }
+    });
   }
 
   private async processStripeChargeOrSession(
@@ -658,10 +712,7 @@ export class PaymentsService {
         businessId: original.businessId,
         reference: refund.charge,
         notes: refund.reason ?? null,
-      }).catch((e) => {
-        this.logger.warn(`Failed to persist Stripe refund ${refund.id}: ${e instanceof Error ? e.message : e}`);
-        return null;
-      });
+      }).catch(this.refundAlreadyRecorded('Stripe', refund.id));
       // Reopen the invoice if the refund moves the balance below total.
       if (persisted) {
         await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId).catch((e) => {
@@ -802,25 +853,28 @@ export class PaymentsService {
     const eventType = event.event_type || '';
     const resource = event.resource || {};
 
-    switch (eventType) {
-      case 'PAYMENT.CAPTURE.COMPLETED':
-        await this.processPaypalCaptureCompleted(resource);
-        return { ok: true, received: true, processed: eventType };
-      case 'CHECKOUT.ORDER.COMPLETED':
-        // For ORDER.COMPLETED, resource.id is the *order* id, not the
-        // capture id. Captures live under purchase_units[].payments.captures.
-        // Persist a Payment row per capture so refund linkage (which keys on
-        // capture id) keeps working, and idempotency stays intact even if
-        // PAYMENT.CAPTURE.COMPLETED also arrives for the same capture.
-        await this.processPaypalOrderCompleted(resource);
-        return { ok: true, received: true, processed: eventType };
-      case 'PAYMENT.CAPTURE.REFUNDED':
-      case 'PAYMENT.CAPTURE.REVERSED':
-        await this.processPaypalRefund(resource);
-        return { ok: true, received: true, processed: eventType };
-      default:
-        return { ok: true, received: true };
-    }
+    // A dispatch that throws gives the claim back (V1-15c): PayPal's redelivery is processed, not acked.
+    return this.underProviderEventClaim<WebhookAck>('paypal', event.id, async () => {
+      switch (eventType) {
+        case 'PAYMENT.CAPTURE.COMPLETED':
+          await this.processPaypalCaptureCompleted(resource);
+          return { ok: true, received: true, processed: eventType };
+        case 'CHECKOUT.ORDER.COMPLETED':
+          // For ORDER.COMPLETED, resource.id is the *order* id, not the
+          // capture id. Captures live under purchase_units[].payments.captures.
+          // Persist a Payment row per capture so refund linkage (which keys on
+          // capture id) keeps working, and idempotency stays intact even if
+          // PAYMENT.CAPTURE.COMPLETED also arrives for the same capture.
+          await this.processPaypalOrderCompleted(resource);
+          return { ok: true, received: true, processed: eventType };
+        case 'PAYMENT.CAPTURE.REFUNDED':
+        case 'PAYMENT.CAPTURE.REVERSED':
+          await this.processPaypalRefund(resource);
+          return { ok: true, received: true, processed: eventType };
+        default:
+          return { ok: true, received: true };
+      }
+    });
   }
 
   /**
@@ -1027,10 +1081,7 @@ export class PaymentsService {
     const persisted = await (captureId
       ? this.createRefundWithPosting(captureId, refundData)
       : this.createRefundWithPostingByInvoice(original.invoiceId, refundData)
-    ).catch((e) => {
-      this.logger.warn(`Failed to persist PayPal refund ${refundId}: ${e instanceof Error ? e.message : e}`);
-      return null;
-    });
+    ).catch(this.refundAlreadyRecorded('PayPal', refundId));
     if (persisted) {
       await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId).catch((e) => {
         this.logger.warn(`PayPal refund reconcile failed for invoice ${original.invoiceId}: ${e instanceof Error ? e.message : e}`);
@@ -1277,6 +1328,8 @@ export class PaymentsService {
       } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : 'Unknown error';
         this.logger.error(`Failed to process WiPay payment for order ${order_id}: ${errMsg}`);
+        // V1-15c: nothing was recorded, so the callback is not handled: a redelivery runs it again.
+        await this.releaseProviderEvent('wipay', wipayEventId);
         return { success: false, invoiceId: order_id, message: 'Payment processing error' };
       }
     }
@@ -1310,6 +1363,8 @@ export class PaymentsService {
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`Failed to record failed WiPay payment: ${errMsg}`);
+      // V1-15c: the failure was not recorded either, so a redelivery may record it.
+      await this.releaseProviderEvent('wipay', wipayEventId);
     }
 
     return { success: false, invoiceId: order_id, message: 'Payment was not successful' };
@@ -1601,16 +1656,16 @@ export class PaymentsService {
       if (result.status === 'COMPLETED') {
         const captureId = result.purchaseUnits?.[0]?.payments?.captures?.[0]?.id || orderId;
 
-        await this.prisma.client.payment.create({
-          data: {
-            provider: 'paypal',
-            providerPaymentId: captureId,
-            amount: invoice.total,
-            currency: invoice.currency,
-            status: 'SUCCESSFUL',
-            invoiceId,
-            businessId: invoice.businessId,
-          },
+        // V1-15c: the captured payment and its posting commit together (the
+        // door every provider settlement uses); payment.create left it unposted.
+        await this.createPaymentWithPosting({
+          provider: 'paypal',
+          providerPaymentId: captureId,
+          amount: invoice.total,
+          currency: invoice.currency,
+          status: 'SUCCESSFUL',
+          invoiceId,
+          businessId: invoice.businessId,
         });
 
         await this.invoiceWorkflow.reconcileFromPayments(invoiceId).catch((e) => {

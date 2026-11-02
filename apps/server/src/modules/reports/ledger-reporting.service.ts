@@ -898,19 +898,24 @@ export class LedgerReportingService {
     to: Date,
   ): Promise<DimensionRow[]> {
     if (dimension === 'customer') {
-      const grouped = await this.prisma.client.ledgerEntry.findMany({
+      // Every income entry of the range, paged past the 1000-row read cap (V1-15c, as LC-3).
+      const grouped = await readAllPages((cursor) => this.prisma.client.ledgerEntry.findMany({
         where: {
           businessId,
           date: { gte: from, lte: to },
           account: { type: 'INCOME' },
           transaction: { contactId: { not: null } },
+          ...(cursor ? { id: { gt: cursor } } : {}),
         },
+        orderBy: { id: 'asc' },
+        take: READ_PAGE,
         select: {
+          id: true,
           credit: true,
           debit: true,
           transaction: { select: { contactId: true } },
         },
-      });
+      }));
       const map = new Map<string, { total: number; count: number }>();
       for (const e of grouped) {
         const id = e.transaction?.contactId;
@@ -922,10 +927,12 @@ export class LedgerReportingService {
       }
       const ids = Array.from(map.keys());
       const contacts = ids.length
-        ? await this.prisma.client.contact.findMany({
-            where: { id: { in: ids } },
+        ? await readAllPages((cursor) => this.prisma.client.contact.findMany({
+            where: { id: cursor ? { in: ids, gt: cursor } : { in: ids } },
+            orderBy: { id: 'asc' },
+            take: READ_PAGE,
             select: { id: true, firstName: true, lastName: true, displayName: true, email: true },
-          })
+          }))
         : [];
       const labels = new Map(
         contacts.map((c) => [
@@ -947,10 +954,13 @@ export class LedgerReportingService {
       // remains the source of total amount; source rows are used only
       // for the dimension split (productId / category) which the
       // ledger does not carry.
-      const incomeEntries = await this.prisma.client.ledgerEntry.findMany({
-        where: { businessId, date: { gte: from, lte: to }, account: { type: 'INCOME' } },
-        select: { transactionId: true, debit: true, credit: true, transaction: { select: { sourceType: true, sourceId: true } } },
-      });
+      // Both reads page past the 1000-row read cap (V1-15c): the income entries, and the invoices they split over.
+      const incomeEntries = await readAllPages((cursor) => this.prisma.client.ledgerEntry.findMany({
+        where: { businessId, date: { gte: from, lte: to }, account: { type: 'INCOME' }, ...(cursor ? { id: { gt: cursor } } : {}) },
+        orderBy: { id: 'asc' },
+        take: READ_PAGE,
+        select: { id: true, transactionId: true, debit: true, credit: true, transaction: { select: { sourceType: true, sourceId: true } } },
+      }));
       const perTxn = new Map<string, { net: number; invoiceId?: string }>();
       for (const e of incomeEntries) {
         const cur = perTxn.get(e.transactionId) ?? { net: 0, invoiceId: undefined };
@@ -962,8 +972,10 @@ export class LedgerReportingService {
       }
       const invoiceIds = Array.from(new Set(Array.from(perTxn.values()).map((v) => v.invoiceId).filter(Boolean) as string[]));
       const invoices = invoiceIds.length
-        ? await this.prisma.client.invoice.findMany({
-            where: { id: { in: invoiceIds } },
+        ? await readAllPages((cursor) => this.prisma.client.invoice.findMany({
+            where: { id: cursor ? { in: invoiceIds, gt: cursor } : { in: invoiceIds } },
+            orderBy: { id: 'asc' },
+            take: READ_PAGE,
             select: {
               id: true, subtotal: true,
               items: {
@@ -973,7 +985,7 @@ export class LedgerReportingService {
                 select: { total: true, productId: true, description: true, product: { select: { name: true } } },
               },
             },
-          })
+          }))
         : [];
       const invoiceById = new Map(invoices.map((i) => [i.id, i]));
       const map = new Map<string, { label: string; total: number; count: number }>();
@@ -1024,10 +1036,24 @@ export class LedgerReportingService {
     // dimension key looked up from the originating Expense source row
     // (ledger has no vendor/project columns, source is used only for
     // labelling, the amount comes straight from the ledger).
-    const expEntries = await this.prisma.client.ledgerEntry.findMany({
-      where: { businessId, date: { gte: from, lte: to }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
-      select: { transactionId: true, debit: true, credit: true, transaction: { select: { sourceType: true, sourceId: true, contactId: true } } },
-    });
+    // Every read here pages past the 1000-row read cap (V1-15c, as LC-3).
+    const expEntries = await readAllPages((cursor) => this.prisma.client.ledgerEntry.findMany({
+      where: {
+        businessId,
+        date: { gte: from, lte: to },
+        account: { type: { in: ['EXPENSE', 'COGS'] } },
+        ...(cursor ? { id: { gt: cursor } } : {}),
+      },
+      orderBy: { id: 'asc' },
+      take: READ_PAGE,
+      select: {
+        id: true,
+        transactionId: true,
+        debit: true,
+        credit: true,
+        transaction: { select: { sourceType: true, sourceId: true, contactId: true } },
+      },
+    }));
     const perTxn = new Map<string, { net: number; sourceId?: string; contactId?: string }>();
     for (const e of expEntries) {
       const cur = perTxn.get(e.transactionId) ?? { net: 0, sourceId: undefined, contactId: undefined };
@@ -1038,10 +1064,12 @@ export class LedgerReportingService {
     }
     const expenseIds = Array.from(new Set(Array.from(perTxn.values()).map((v) => v.sourceId).filter(Boolean) as string[]));
     const expenseMeta = expenseIds.length
-      ? await this.prisma.client.expense.findMany({
-          where: { id: { in: expenseIds } },
+      ? await readAllPages((cursor) => this.prisma.client.expense.findMany({
+          where: { id: cursor ? { in: expenseIds, gt: cursor } : { in: expenseIds } },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: { id: true, vendor: true, contactId: true, projectId: true },
-        })
+        }))
       : [];
     const expenseById = new Map(expenseMeta.map((e) => [e.id, e]));
 
@@ -1051,10 +1079,12 @@ export class LedgerReportingService {
         ...expenseMeta.map((e) => e.contactId).filter(Boolean) as string[],
       ]));
       const contacts = contactIds.length
-        ? await this.prisma.client.contact.findMany({
-            where: { id: { in: contactIds } },
+        ? await readAllPages((cursor) => this.prisma.client.contact.findMany({
+            where: { id: cursor ? { in: contactIds, gt: cursor } : { in: contactIds } },
+            orderBy: { id: 'asc' },
+            take: READ_PAGE,
             select: { id: true, displayName: true, firstName: true, lastName: true },
-          })
+          }))
         : [];
       const contactLabel = new Map(contacts.map((c) => [c.id, c.displayName || `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim()]));
       const map = new Map<string, { label: string; total: number; count: number }>();
@@ -1078,10 +1108,12 @@ export class LedgerReportingService {
     // project
     const projectIds = Array.from(new Set(expenseMeta.map((e) => e.projectId).filter(Boolean) as string[]));
     const projects = projectIds.length
-      ? await this.prisma.client.project.findMany({
-          where: { id: { in: projectIds } },
+      ? await readAllPages((cursor) => this.prisma.client.project.findMany({
+          where: { id: cursor ? { in: projectIds, gt: cursor } : { in: projectIds } },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: { id: true, name: true },
-        })
+        }))
       : [];
     const labels = new Map(projects.map((p) => [p.id, p.name]));
     const map = new Map<string, { label: string; total: number; count: number }>();
@@ -1139,15 +1171,19 @@ export class LedgerReportingService {
     // Σ debits to AP across all member transactions. Groups with zero
     // remaining are fully settled and dropped. Orphan AP postings
     // without a sourceId are netted by transactionId as a fallback.
-    const apEntries = await this.prisma.client.ledgerEntry.findMany({
-      where: { businessId, accountId: apCoa.id, date: { lte: asOf } },
+    // Every AP entry, and below every open bill, paged past the 1000-row read cap (V1-15c, as LC-3).
+    const apEntries = await readAllPages((cursor) => this.prisma.client.ledgerEntry.findMany({
+      where: { businessId, accountId: apCoa.id, date: { lte: asOf }, ...(cursor ? { id: { gt: cursor } } : {}) },
+      orderBy: { id: 'asc' },
+      take: READ_PAGE,
       select: {
+        id: true,
         transactionId: true,
         debit: true,
         credit: true,
         transaction: { select: { sourceType: true, sourceId: true, contactId: true } },
       },
-    });
+    }));
     type Group = { key: string; sourceType: string | null; sourceId: string | null; contactId: string | null; remaining: number };
     const groups = new Map<string, Group>();
     for (const e of apEntries) {
@@ -1169,10 +1205,12 @@ export class LedgerReportingService {
       .filter((g) => g.sourceType === 'Expense' && !!g.sourceId)
       .map((g) => g.sourceId as string);
     const expenseMeta = expenseIds.length
-      ? await this.prisma.client.expense.findMany({
-          where: { id: { in: expenseIds } },
+      ? await readAllPages((cursor) => this.prisma.client.expense.findMany({
+          where: { id: cursor ? { in: expenseIds, gt: cursor } : { in: expenseIds } },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: { id: true, vendor: true, contactId: true, dueDate: true },
-        })
+        }))
       : [];
     const expenseById = new Map(expenseMeta.map((e) => [e.id, e]));
 
