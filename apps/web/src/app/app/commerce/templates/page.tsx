@@ -15,11 +15,30 @@ interface DocumentTemplate {
   isDefault: boolean;
 }
 
+/**
+ * R0-09g-D11-DOCUMENT-TEMPLATES: changing the default invoice or quote
+ * template is OWNER only (owner ruling D-11; PATCH .../document-templates
+ * answers a non-owner 403 BUSINESS_PROFILE_OWNER_ONLY). apiPatch returns a
+ * refusal as `{ data: null, error, status }` rather than throwing, so a refused
+ * change shows the server's refusal on the page (a 403 without a usable message
+ * names the owner-only rule) and the stored default stays marked.
+ */
+const OWNER_ONLY_FALLBACK_TEXT = "Only the business owner can change the default document templates.";
+const UPDATE_FAILED_TEXT = "Failed to update template";
+const GENERIC_FORBIDDEN = new Set(["forbidden", "forbidden resource", "request failed"]);
+
+function refusalText(res: { error: string | null; status?: number }): string {
+  const message = res.error?.trim() ?? "";
+  if (res.status === 403 && (!message || GENERIC_FORBIDDEN.has(message.toLowerCase()))) return OWNER_ONLY_FALLBACK_TEXT;
+  return message || UPDATE_FAILED_TEXT;
+}
+
 export default function DocumentTemplatesPage() {
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [branding, setBranding] = useState<{ primaryColor?: string; secondaryColor?: string; logoUrl?: string }>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
   const businessId = getStoredBusinessId();
 
   useEffect(() => {
@@ -36,10 +55,11 @@ export default function DocumentTemplatesPage() {
   const handleSetDefault = async (template: DocumentTemplate) => {
     if (!businessId) return;
     setSaving(`${template.type}-${template.id}`);
+    setRefusal(null);
     const body = template.type === 'invoice'
       ? { invoiceTemplate: template.id as 'classic' | 'modern' | 'minimal' }
       : { quoteTemplate: template.id as 'classic' | 'modern' | 'minimal' };
-    const res = await setDocumentTemplate(body, businessId);
+    const res: { data: unknown; error: string | null; status?: number } = await setDocumentTemplate(body, businessId);
     setSaving(null);
     if (res.data) {
       toast.success(`${template.name} set as default ${template.type} template`);
@@ -51,7 +71,8 @@ export default function DocumentTemplatesPage() {
         )
       );
     } else {
-      toast.error(res.error ?? "Failed to update template");
+      // The stored default stays marked: templates state changes only on success.
+      setRefusal(refusalText(res));
     }
   };
 
@@ -68,6 +89,12 @@ export default function DocumentTemplatesPage() {
           Choose the default look for invoices and quotes sent to customers.
         </p>
       </div>
+
+      {refusal && (
+        <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+          {refusal}
+        </div>
+      )}
 
       {branding.primaryColor && (
         <div className="flex items-center gap-3 text-sm">
@@ -127,7 +154,7 @@ function TemplateCard({
 }) {
   return (
     <Card>
-      <div className="p-4">
+      <div className="p-4" role="group" aria-label={`${template.name} ${template.type} template`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-muted-foreground" />

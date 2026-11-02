@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Optional, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
@@ -31,6 +31,10 @@ import { buildInvoiceEmailHtml } from './invoice-email.template';
 import type { InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { BUSINESS_PROFILE_OWNER_ONLY, FinanceSettingsService } from '../finance/finance-settings.service';
+
+/** R0-09g (owner ruling D-11): the refusal a non-owner's document-templates PATCH answers. */
+const DOCUMENT_TEMPLATES_OWNER_ONLY_MESSAGE = 'Only the business owner can change the document templates.';
 
 /**
  * R0-27: the global ValidationPipe's options, with the metatype bound
@@ -112,6 +116,12 @@ export class CommerceController {
     @Inject(SubscriptionsService) private readonly subscriptions: SubscriptionsService,
     @Inject(StoreReadinessService) private readonly storeReadiness: StoreReadinessService,
     @Inject(PaymentEvidenceService) private readonly paymentEvidence: PaymentEvidenceService,
+    // R0-09g: the owner test the document-templates PATCH runs (R0-09f's
+    // FinanceSettingsService.isProfileOwner; FinanceModule exports it and
+    // CommerceModule imports FinanceModule, so the app always supplies it).
+    // Optional only so the test modules that compose this controller for its
+    // other routes keep resolving; the route fails closed without it.
+    @Optional() @Inject(FinanceSettingsService) private readonly profileOwners?: FinanceSettingsService,
   ) {}
 
   private async verifyBusinessAccess(userId: string, businessId: string) {
@@ -502,13 +512,36 @@ export class CommerceController {
     };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('revenue', 'write')
+  /**
+   * R0-09g-D11-DOCUMENT-TEMPLATES, owner ruling D-11 (editing the business
+   * profile is OWNER only, regardless of granted scopes; found by the R0-09f
+   * static sweep): Business.invoiceTemplate and quoteTemplate are fields of the
+   * owner-only profile PATCH (UpdateBusinessDto), and they are all this route
+   * writes, so it is OWNER only as a whole: a non-owner — STAFF or ADMIN,
+   * revenue:write or settings:write included — is refused 403
+   * BUSINESS_PROFILE_OWNER_ONLY before the body is read or anything is written.
+   *
+   * The owner test is FinanceSettingsService.isProfileOwner (R0-09f): the OWNER
+   * membership or the distinguished owner (Business.ownerId), the two arms
+   * IdentityService.assertBusinessOwner and BusinessGuard admit an owner by,
+   * plus the SUPER_ADMIN bypass BusinessGuard grants. Without it the route
+   * refuses everyone (fails closed). The route carries AuthGuard and
+   * BusinessGuard but not ModuleScopeGuard, as the Gmail connect routes below
+   * (R0-CMF5): a revenue scope admits no one the owner rule refuses, and
+   * ModuleScopeGuard would refuse a distinguished owner with no membership row.
+   * GET .../document-templates above stays open to every member.
+   */
+  @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/document-templates')
   async setDocumentTemplate(
     @Param('businessId') businessId: string,
     @Body() body: { invoiceTemplate?: 'classic' | 'modern' | 'minimal'; quoteTemplate?: 'classic' | 'modern' | 'minimal' },
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
+    const owners = this.profileOwners;
+    if (!owners || !(await owners.isProfileOwner(businessId, req?.user))) {
+      throw new ForbiddenException({ code: BUSINESS_PROFILE_OWNER_ONLY, message: DOCUMENT_TEMPLATES_OWNER_ONLY_MESSAGE });
+    }
     const data: Record<string, any> = {};
     if (body.invoiceTemplate) data.invoiceTemplate = body.invoiceTemplate;
     if (body.quoteTemplate) data.quoteTemplate = body.quoteTemplate;

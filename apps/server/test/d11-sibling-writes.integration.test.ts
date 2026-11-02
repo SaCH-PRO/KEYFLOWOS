@@ -63,10 +63,35 @@
  * values, carry no profile content and stay open to any member (case C09,
  * review CR-2).
  *
+ * R0-09g-D11-DOCUMENT-TEMPLATES (cases D11-D*): the last writer the R0-09f
+ * static sweep (src/core/config/d11-owner-writes.spec.ts) pinned as open.
+ * PATCH /commerce/businesses/:id/document-templates writes
+ * Business.invoiceTemplate and quoteTemplate (UpdateBusinessDto fields, so
+ * part of the owner-only profile) and admitted any member holding
+ * revenue:write. Every value it accepts is one of those two columns, so the
+ * route is owner-only as a whole: a non-owner — STAFF on role defaults or
+ * granted every scope, ADMIN on role defaults or with settings:write — is
+ * refused 403 BUSINESS_PROFILE_OWNER_ONLY with the Business row byte-identical.
+ * The owner by either arm (the OWNER membership, or Business.ownerId with no
+ * membership row, whom the route's revenue:write ModuleScopeGuard used to
+ * refuse) and a SUPER_ADMIN set the templates; GET .../document-templates
+ * stays open to every member (revenue:read included) and a foreign business
+ * id writes nothing. The owner check is bound to the route's business (case
+ * D11-D09, R0-09g review SEC-R09G-1, the R0-09d review SEC-T1 fixture): a
+ * STAFF member of bizP granted every scope who owns another business, bizO,
+ * by both arms (OWNER membership and Business.ownerId) is refused on bizP,
+ * also when the x-business-id header, ?businessId= and the body's businessId
+ * name bizO, and sets bizO's templates as its owner. That fixture (staffOwner,
+ * bizO) is seeded by the D11-D block's own beforeAll, after the fixture sanity
+ * case D11-X01 has counted the shared fixtures.
+ *
  * HOW THE APP IS COMPOSED (the contacts-visibility model): a real Nest app with
  * the real PresenceController, PresenceService, OnboardingConciergeController,
  * OnboardingConciergeService, CatalogService (it creates the template's
- * products), PrismaService, AuthGuard, BusinessGuard and the production
+ * products), CommerceController (its document-templates routes; the
+ * collaborators those routes never call are stubs) with the real
+ * FinanceSettingsService (whose isProfileOwner it runs), ModuleScopeGuard,
+ * PrismaService, AuthGuard, BusinessGuard and the production
  * GlobalHttpExceptionFilter, against the database at DATABASE_URL. The one
  * stand-in on the authorization path is identity attachment: a test middleware
  * reads `x-test-user`, loads that seeded User row and attaches
@@ -116,6 +141,9 @@ const ID = {
   bizQ: `${P}bizQ`,               // concierge: the non-owner refusals, then the OWNER control
   bizS: `${P}bizS`,               // the SUPER_ADMIN controls (presence and concierge)
   bizL: `${P}bizL`,               // the distinguished-owner controls (presence and concierge)
+  // Seeded by the D11-D block's beforeAll (R0-09g review SEC-R09G-1), not counted by D11-X01:
+  staffOwner: `${P}staffOwner`,   // STAFF on bizP granted every scope admin; OWNER membership and Business.ownerId of bizO
+  bizO: `${P}bizO`,               // the staff owner's own business (both owner arms)
 };
 const USERS = [ID.owner, ID.staff, ID.staffAll, ID.admin, ID.adminW, ID.superAdmin, ID.legacyOwner];
 const NON_OWNERS: Array<{ id: string; label: string }> = [
@@ -144,6 +172,9 @@ const AI_REPLY = `Welcome to KeyFlow!\nEXTRACTED: country=${AI_COUNTRY}\nEXTRACT
 /** The refusal codes the server answers with (asserted, so a 403 from another layer does not pass). */
 const SLUG_CODE = 'PRESENCE_SLUG_OWNER_ONLY';
 const CONCIERGE_CODE = 'BUSINESS_PROFILE_OWNER_ONLY';
+const DOCUMENT_TEMPLATES_CODE = 'BUSINESS_PROFILE_OWNER_ONLY';
+/** The column default (schema.prisma Business.invoiceTemplate / quoteTemplate), the seeded state of every business. */
+const STORED_TEMPLATE = 'classic';
 
 let db: any;
 let app: any;
@@ -301,6 +332,60 @@ function expectRefusal(res: { status: number; body: any }, code: string, label: 
   for (const key of ['slug', 'name', 'businessHours', 'storeEnabled', 'metaData', 'ownerId']) expect(res.body).not.toHaveProperty(key);
 }
 
+function patchDocumentTemplates(actor: string, businessId: string, body: Record<string, unknown>) {
+  return request(app.getHttpServer())
+    .patch(`/commerce/businesses/${businessId}/document-templates`)
+    .set('x-test-user', actor)
+    .send(body);
+}
+
+/**
+ * The document-templates PATCH on the route's business, with another business
+ * named where a request can carry one: the x-business-id header, the
+ * ?businessId= query and the body's businessId (each optional).
+ */
+function patchDocumentTemplatesNaming(
+  actor: string,
+  businessId: string,
+  elsewhere: string,
+  body: Record<string, unknown>,
+  via: { header?: boolean; query?: boolean; body?: boolean },
+) {
+  const req = request(app.getHttpServer())
+    .patch(`/commerce/businesses/${businessId}/document-templates${via.query ? `?businessId=${elsewhere}` : ''}`)
+    .set('x-test-user', actor);
+  if (via.header) req.set('x-business-id', elsewhere);
+  return req.send(via.body ? { ...body, businessId: elsewhere } : body);
+}
+
+function getDocumentTemplates(actor: string, businessId: string) {
+  return request(app.getHttpServer()).get(`/commerce/businesses/${businessId}/document-templates`).set('x-test-user', actor);
+}
+
+/** The seeded (column default) templates back on a business. Raw SQL, so the reset itself does not touch updated_at. */
+async function resetDocumentTemplates(businessId: string) {
+  await db.$executeRawUnsafe('UPDATE businesses SET invoice_template = $2, quote_template = $2 WHERE id = $1', businessId, STORED_TEMPLATE);
+}
+
+async function documentTemplateColumns(businessId: string) {
+  return db.business.findUnique({ where: { id: businessId }, select: { invoiceTemplate: true, quoteTemplate: true } });
+}
+
+/** The ids GET .../document-templates marks as the default, per document type. */
+function defaultsOf(body: any): { invoice: string[]; quote: string[] } {
+  const templates: Array<{ id: string; type: string; isDefault: boolean }> = body?.templates ?? [];
+  return {
+    invoice: templates.filter((t) => t.type === 'invoice' && t.isDefault).map((t) => t.id),
+    quote: templates.filter((t) => t.type === 'quote' && t.isDefault).map((t) => t.id),
+  };
+}
+
+/** A refused document-templates PATCH: 403 BUSINESS_PROFILE_OWNER_ONLY, no success flag and no template echoed. */
+function expectTemplateRefusal(res: { status: number; body: any }, label: string) {
+  expectRefusal(res, DOCUMENT_TEMPLATES_CODE, label);
+  for (const key of ['success', 'invoiceTemplate', 'quoteTemplate']) expect(res.body, `${label}: ${key}`).not.toHaveProperty(key);
+}
+
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
@@ -325,18 +410,47 @@ beforeAll(async () => {
   const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
   const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
   const { getTemplateById } = await import('../src/modules/onboarding-concierge/industry-templates');
+  // R0-09g: the document-templates routes and the guards and interceptor
+  // CommerceController's other routes declare (Nest builds them at init).
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+  const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
+  const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
+  const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
+  const { CommerceController } = await import('../src/modules/commerce/commerce.controller');
+  const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+  const { TimeEntryService } = await import('../src/modules/time-tracking/time-entry.service');
+  const { InvoiceReceiptBuilderService } = await import('../src/modules/commerce/invoice-receipt-builder.service');
+  const { GmailService } = await import('../src/modules/commerce/gmail.service');
+  const { CommerceVisionService } = await import('../src/modules/commerce/commerce-vision.service');
+  const { StoreReadinessService } = await import('../src/modules/commerce/store-readiness.service');
+  const { PaymentEvidenceService } = await import('../src/modules/commerce/payment-evidence.service');
+  const { FinanceSettingsService } = await import('../src/modules/finance/finance-settings.service');
   templateHours = getTemplateById(TEMPLATE)?.businessHours;
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [PresenceController, OnboardingConciergeController],
+    controllers: [PresenceController, OnboardingConciergeController, CommerceController],
     providers: [
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      ModuleScopeGuard,
       PublicRateLimitGuard,
+      PlanLimitGuard,
+      TeamAuditInterceptor,
       PresenceService,
       OnboardingConciergeService,
       CatalogService,
+      // The owner test the document-templates PATCH runs (R0-09g): real, on the real database.
+      FinanceSettingsService,
+      // CommerceController's collaborators: not on the document-templates routes.
+      { provide: CommerceService, useValue: {} },
+      { provide: TimeEntryService, useValue: {} },
+      { provide: InvoiceReceiptBuilderService, useValue: {} },
+      { provide: GmailService, useValue: {} },
+      { provide: CommerceVisionService, useValue: {} },
+      { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
+      { provide: StoreReadinessService, useValue: {} },
+      { provide: PaymentEvidenceService, useValue: {} },
       { provide: EventEmitter2, useValue: { emit: (event: string) => { emitted.push(event); return true; } } },
       {
         provide: BlueprintService,
@@ -399,7 +513,7 @@ beforeAll(async () => {
       await db.membership.create({ data: { id: `${P}m_${m.userId.slice(P.length)}_${businessId.slice(P.length)}`, businessId, ...m } });
     }
   }
-}, 60_000);
+}, 120_000); // CommerceController's import graph is large; the dynamic imports count toward the hook clock
 
 afterAll(async () => {
   if (app) await app.close();
@@ -652,5 +766,154 @@ describe('R0-09b onboarding concierge auto-configure cannot change the business 
     expect(meta).toMatchObject({ ...ownerMeta, conciergeDismissed: false });
     const DISPLAY_STATE = ['conciergeDismissed', 'conciergeDismissedAt', 'snoozedNudges'];
     expect(Object.keys(meta).filter((k) => !(k in ownerMeta)).sort(), 'only display-state keys were added').toEqual(DISPLAY_STATE);
+  });
+});
+
+describe('R0-09g commerce document templates cannot change the business profile for a non-owner (D-11, R0-09f sweep)', () => {
+  const CHANGE = { invoiceTemplate: 'modern', quoteTemplate: 'minimal' };
+
+  // R0-09g review SEC-R09G-1 (the R0-09d review SEC-T1 fixture): a non-owner
+  // of bizP who owns another business by both arms, so an owner check that
+  // ignores which business it is asked about admits them. Seeded here, after
+  // D11-X01 counted the shared fixtures; the prefix cleanup removes it.
+  beforeAll(async () => {
+    const { ROLE_DEFAULT_SCOPES } = await import('../src/core/authority/module-vocabulary');
+    await db.user.create({ data: { id: ID.staffOwner, email: emailOf(ID.staffOwner), name: ID.staffOwner, role: 'USER' } });
+    await db.business.create({ data: { id: ID.bizO, name: `${ID.bizO}-name`, ownerId: ID.staffOwner, slug: slugOf('bizo-live') } });
+    for (const m of [
+      { businessId: ID.bizP, role: 'STAFF', permissionScopes: { ...ROLE_DEFAULT_SCOPES.OWNER } },
+      { businessId: ID.bizO, role: 'OWNER' },
+    ]) {
+      await db.membership.create({ data: { id: `${P}m_${ID.staffOwner.slice(P.length)}_${m.businessId.slice(P.length)}`, userId: ID.staffOwner, ...m } });
+    }
+  }, 60_000);
+
+  it('[D11-D01] RED-BEFORE: STAFF granted every scope admin (revenue:admin) is refused (403 BUSINESS_PROFILE_OWNER_ONLY) changing both templates, either one alone, or sending no field at all; the Business row is byte-identical', async () => {
+    await resetDocumentTemplates(ID.bizP);
+    const before = await businessRowText(ID.bizP);
+    for (const body of [CHANGE, { invoiceTemplate: 'modern' }, { quoteTemplate: 'minimal' }, {}]) {
+      const res = await patchDocumentTemplates(ID.staffAll, ID.bizP, body);
+      expect(await businessRowText(ID.bizP), `${JSON.stringify(body)} -> ${res.status}: the Business row is byte-identical`).toBe(before);
+      expectTemplateRefusal(res, `STAFF every scope admin, ${JSON.stringify(body)}`);
+    }
+    expect(await documentTemplateColumns(ID.bizP)).toEqual({ invoiceTemplate: STORED_TEMPLATE, quoteTemplate: STORED_TEMPLATE });
+  });
+
+  it('[D11-D02] RED-BEFORE: ADMIN on role defaults (revenue:admin, settings:admin) and ADMIN granted settings:write are refused (403 BUSINESS_PROFILE_OWNER_ONLY); the Business row is byte-identical', async () => {
+    await resetDocumentTemplates(ID.bizP);
+    for (const { id, label } of NON_OWNERS.slice(2)) {
+      const before = await businessRowText(ID.bizP);
+      for (const body of [CHANGE, { invoiceTemplate: 'minimal' }, { quoteTemplate: 'modern' }]) {
+        const res = await patchDocumentTemplates(id, ID.bizP, body);
+        expect(await businessRowText(ID.bizP), `${label}, ${JSON.stringify(body)} -> ${res.status}: the Business row is byte-identical`).toBe(before);
+        expectTemplateRefusal(res, `${label}, ${JSON.stringify(body)}`);
+      }
+    }
+  });
+
+  it("[D11-D03] RED-BEFORE (the route's revenue:write gate answered a generic 403): STAFF on role defaults (revenue:read, settings:none) is refused with the owner-only code, 403 BUSINESS_PROFILE_OWNER_ONLY; the Business row is byte-identical", async () => {
+    await resetDocumentTemplates(ID.bizP);
+    const before = await businessRowText(ID.bizP);
+    const res = await patchDocumentTemplates(ID.staff, ID.bizP, CHANGE);
+    expect(await businessRowText(ID.bizP), `PATCH ${res.status}: the Business row is byte-identical`).toBe(before);
+    expectTemplateRefusal(res, 'STAFF role defaults');
+  });
+
+  it('[D11-D04] positive control: the OWNER (OWNER membership) sets both templates (200 { success, invoiceTemplate, quoteTemplate }); the row carries them and GET marks them as the defaults', async () => {
+    await resetDocumentTemplates(ID.bizP);
+    const res = await patchDocumentTemplates(ID.owner, ID.bizP, CHANGE);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toEqual({ success: true, ...CHANGE });
+    expect(await documentTemplateColumns(ID.bizP)).toEqual(CHANGE);
+    const read = await getDocumentTemplates(ID.owner, ID.bizP);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(defaultsOf(read.body)).toEqual({ invoice: ['modern'], quote: ['minimal'] });
+
+    const one = await patchDocumentTemplates(ID.owner, ID.bizP, { quoteTemplate: 'classic' });
+    expect(one.status, JSON.stringify(one.body)).toBe(200);
+    expect(await documentTemplateColumns(ID.bizP), 'a one-field PATCH leaves the other template').toEqual({ invoiceTemplate: 'modern', quoteTemplate: 'classic' });
+  });
+
+  it("[D11-D05] today's rule kept: GET .../document-templates stays open to every member, revenue:read included (STAFF on role defaults, STAFF every scope admin, ADMIN on role defaults, ADMIN with settings:write): 200 with the stored defaults marked", async () => {
+    await resetDocumentTemplates(ID.bizP);
+    // The owner's stored choice, as raw SQL so this case does not depend on the PATCH.
+    await db.$executeRawUnsafe('UPDATE businesses SET invoice_template = $2, quote_template = $3 WHERE id = $1', ID.bizP, CHANGE.invoiceTemplate, CHANGE.quoteTemplate);
+    const before = await businessRowText(ID.bizP);
+    for (const { id, label } of NON_OWNERS) {
+      const read = await getDocumentTemplates(id, ID.bizP);
+      expect(read.status, `${label}: ${JSON.stringify(read.body)}`).toBe(200);
+      expect(defaultsOf(read.body), `${label}: the stored defaults`).toEqual({ invoice: ['modern'], quote: ['minimal'] });
+      expect(read.body?.templates, `${label}: three templates per type`).toHaveLength(6);
+    }
+    expect(await businessRowText(ID.bizP), 'a GET writes nothing').toBe(before);
+  });
+
+  it('[D11-D06] pinned: a SUPER_ADMIN with no membership keeps the platform bypass BusinessGuard grants: sets the templates (200)', async () => {
+    await resetDocumentTemplates(ID.bizS);
+    const res = await patchDocumentTemplates(ID.superAdmin, ID.bizS, CHANGE);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await documentTemplateColumns(ID.bizS)).toEqual(CHANGE);
+  });
+
+  it("[D11-D07] RED-BEFORE (the route's ModuleScopeGuard refused a member-less owner): the distinguished owner (Business.ownerId) with no membership row sets the templates (200), the owner rule's second arm", async () => {
+    await resetDocumentTemplates(ID.bizL);
+    const res = await patchDocumentTemplates(ID.legacyOwner, ID.bizL, CHANGE);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await documentTemplateColumns(ID.bizL)).toEqual(CHANGE);
+    const read = await getDocumentTemplates(ID.legacyOwner, ID.bizL);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(defaultsOf(read.body)).toEqual({ invoice: ['modern'], quote: ['minimal'] });
+  });
+
+  it('[D11-D08] a foreign business id writes nothing: the owner of bizP and STAFF every scope admin (members of bizP and bizQ only) are refused bizL (403), the Business row byte-identical; an unknown business id is refused (403 or 404) and no business row appears', async () => {
+    await resetDocumentTemplates(ID.bizL);
+    const before = await businessRowText(ID.bizL);
+    for (const actor of [ID.owner, ID.staffAll]) {
+      const res = await patchDocumentTemplates(actor, ID.bizL, CHANGE);
+      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body).not.toHaveProperty('success');
+      expect(await businessRowText(ID.bizL), `${actor}: the foreign Business row is byte-identical`).toBe(before);
+    }
+    const unknown = `${P}bizNone`;
+    const res = await patchDocumentTemplates(ID.owner, unknown, CHANGE);
+    expect([403, 404], JSON.stringify(res.body)).toContain(res.status);
+    expect(res.body).not.toHaveProperty('success');
+    expect(await db.business.count({ where: { id: unknown } })).toBe(0);
+  });
+
+  it("[D11-D09] the owner check is bound to the route's business (R0-09g review SEC-R09G-1): a STAFF member of bizP granted every scope admin who owns bizO by both arms (OWNER membership and Business.ownerId) is refused on bizP (403 BUSINESS_PROFILE_OWNER_ONLY) with the route only and when the x-business-id header, ?businessId= or the body's businessId (each alone, then all three) name bizO; both Business rows byte-identical; on bizO itself the same change is the owner's (200)", async () => {
+    // The fixture: a member, not an owner, of bizP; an owner of bizO by both arms.
+    const roles = await db.membership.findMany({ where: { userId: ID.staffOwner }, select: { businessId: true, role: true }, orderBy: { businessId: 'asc' } });
+    expect(roles).toEqual([{ businessId: ID.bizO, role: 'OWNER' }, { businessId: ID.bizP, role: 'STAFF' }]);
+    expect((await db.business.findUnique({ where: { id: ID.bizO }, select: { ownerId: true } }))?.ownerId).toBe(ID.staffOwner);
+    expect((await db.business.findUnique({ where: { id: ID.bizP }, select: { ownerId: true } }))?.ownerId).toBe(ID.owner);
+
+    for (const [variant, via] of [
+      ['route only', {}],
+      ['x-business-id names bizO', { header: true }],
+      ['?businessId= names bizO', { query: true }],
+      ['body businessId names bizO', { body: true }],
+      ['header, query and body name bizO', { header: true, query: true, body: true }],
+    ] as const) {
+      await resetDocumentTemplates(ID.bizP);
+      await resetDocumentTemplates(ID.bizO);
+      const beforeP = await businessRowText(ID.bizP);
+      const beforeO = await businessRowText(ID.bizO);
+      const res = await patchDocumentTemplatesNaming(ID.staffOwner, ID.bizP, ID.bizO, CHANGE, via);
+      expect(await businessRowText(ID.bizP), `${variant}: PATCH ${res.status}: bizP byte-identical`).toBe(beforeP);
+      expect(await businessRowText(ID.bizO), `${variant}: PATCH ${res.status}: bizO byte-identical`).toBe(beforeO);
+      expectTemplateRefusal(res, `staff owner of bizO on bizP, ${variant}`);
+    }
+
+    // The fixture really makes them an owner: on their own business the change is admitted, and bizP is untouched.
+    await resetDocumentTemplates(ID.bizP);
+    await resetDocumentTemplates(ID.bizO);
+    const beforeP = await businessRowText(ID.bizP);
+    const own = await patchDocumentTemplates(ID.staffOwner, ID.bizO, CHANGE);
+    expect(own.status, JSON.stringify(own.body)).toBe(200);
+    expect(own.body).toEqual({ success: true, ...CHANGE });
+    expect(await documentTemplateColumns(ID.bizO)).toEqual(CHANGE);
+    expect(await businessRowText(ID.bizP), "the owner's write on bizO leaves bizP byte-identical").toBe(beforeP);
+    await resetDocumentTemplates(ID.bizO);
   });
 });
