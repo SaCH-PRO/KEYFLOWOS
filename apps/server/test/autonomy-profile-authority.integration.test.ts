@@ -18,6 +18,20 @@
  * the tenant the handler writes, so a body businessId naming another tenant
  * never writes. Every member still reads the profile (GET).
  *
+ * Review repairs (V1-03 ST-1, CR-V103-1, ST-2), pinned in the last block:
+ *   - the write is judged against the profile it leaves behind: releasing the
+ *     kill switch, raising a daily cap, lifting the spend cap (0 is unlimited)
+ *     or turning block notices off needs the caller's tier to reach the tier
+ *     ceiling the profile keeps, so an ADMIN at tier 3 cannot release the kill
+ *     switch over an OWNER's ceiling of 4, and an ADMIN restricted to tier 0
+ *     loosens nothing;
+ *   - a field sent with its stored value is no change: the web form
+ *     (apps/web settings/autonomy) sends every field on every save, so an
+ *     ADMIN under an OWNER's ceiling of 4 can still switch the kill switch ON;
+ *   - every admitted write leaves one team_activity_logs row naming its
+ *     writer, with the stored profile as `before`, whichever request field
+ *     names the tenant; a refused write leaves none.
+ *
  * Two request pipelines, as in key-cortex-tenant-binding.integration.test.ts:
  *   - `production`: TenantInterceptor installed as an APP_INTERCEPTOR and the
  *     Prisma tenant extension's context provider installed (main.ts);
@@ -57,6 +71,8 @@ const HEADER = 'x-v03a-user';
 const ID = {
   ownerA: `${P}ownerA`, // OWNER membership of bizA and Business.ownerId
   adminA: `${P}adminA`, // ADMIN of bizA, role-default tier (3)
+  adminA0: `${P}adminA0`, // ADMIN of bizA the OWNER restricted to tier 0 (explicit scope map)
+  adminA2: `${P}adminA2`, // ADMIN of bizA the OWNER restricted to tier 2 (explicit scope map)
   staffA: `${P}staffA`, // STAFF of bizA
   dual: `${P}dual`, // STAFF of bizA and OWNER of bizB
   ownerB: `${P}ownerB`, // OWNER of bizB (Business.ownerId)
@@ -97,6 +113,7 @@ const apps: Partial<Record<Pipeline, any>> = {};
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_autonomy_profiles WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -248,6 +265,8 @@ beforeAll(async () => {
   for (const [id, role] of [
     [ID.ownerA, 'USER'],
     [ID.adminA, 'USER'],
+    [ID.adminA0, 'USER'],
+    [ID.adminA2, 'USER'],
     [ID.staffA, 'USER'],
     [ID.dual, 'USER'],
     [ID.ownerB, 'USER'],
@@ -270,6 +289,12 @@ beforeAll(async () => {
   ] as const) {
     await db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}_${businessId.slice(P.length)}`, userId, businessId, role } });
   }
+  // An explicit scope map makes the stored maxApprovalTier authoritative (core/authority/approval-tier.ts).
+  for (const [userId, maxApprovalTier] of [[ID.adminA0, 0], [ID.adminA2, 2]] as const) {
+    await db.membership.create({
+      data: { id: `${P}m_${userId.slice(P.length)}_bizA`, userId, businessId: ID.bizA, role: 'ADMIN', maxApprovalTier, permissionScopes: {} },
+    });
+  }
   for (const [businessId, row] of Object.entries(BASELINE)) {
     await db.businessAutonomyProfile.create({ data: { businessId, ...row } });
   }
@@ -290,17 +315,26 @@ beforeEach(async () => {
 });
 
 describe('fixture sanity (real rows)', () => {
-  it('three tenants hold a profile with the kill switch on; A has an OWNER, an ADMIN and two STAFF; C has an owner of record and no membership', async () => {
+  it('three tenants hold a profile with the kill switch on; A has an OWNER, three ADMINs (tiers 3, 0, 2) and two STAFF; C has an owner of record and no membership', async () => {
     for (const biz of [ID.bizA, ID.bizB, ID.bizC]) expect(await profile(biz)).toEqual(BASELINE[biz]);
     const roles = await db.membership.findMany({ where: { businessId: ID.bizA }, select: { userId: true, role: true }, orderBy: { userId: 'asc' } });
     expect(roles).toEqual([
       { userId: ID.adminA, role: 'ADMIN' },
+      { userId: ID.adminA0, role: 'ADMIN' },
+      { userId: ID.adminA2, role: 'ADMIN' },
       { userId: ID.dual, role: 'STAFF' },
       { userId: ID.ownerA, role: 'OWNER' },
       { userId: ID.staffA, role: 'STAFF' },
     ]);
     expect(await db.membership.count({ where: { businessId: ID.bizC } })).toBe(0);
     expect(await db.membership.findUnique({ where: { userId_businessId: { userId: ID.dual, businessId: ID.bizB } }, select: { role: true } })).toEqual({ role: 'OWNER' });
+    const restricted = await db.membership.findMany({
+      where: { userId: { in: [ID.adminA0, ID.adminA2] } }, select: { userId: true, maxApprovalTier: true, permissionScopes: true }, orderBy: { userId: 'asc' },
+    });
+    expect(restricted).toEqual([
+      { userId: ID.adminA0, maxApprovalTier: 0, permissionScopes: {} },
+      { userId: ID.adminA2, maxApprovalTier: 2, permissionScopes: {} },
+    ]);
   });
 });
 
@@ -410,6 +444,149 @@ for (const pipeline of PIPELINES) {
       const res = await patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { maxTierWithoutApproval: '4' } });
       expect([400, 403], describeBody(res)).toContain(res.status);
       expect(await snapshot()).toEqual(before);
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Review repairs: ST-1 (the profile the write leaves), CR-V103-1     */
+/*  (an unchanged field is no change), ST-2 (every write is audited)   */
+/* ------------------------------------------------------------------ */
+
+/** Overwrite a tenant's stored profile for one case (beforeEach restores the baseline). */
+async function setProfile(businessId: string, row: Partial<(typeof BASELINE)[string]>) {
+  await db.businessAutonomyProfile.update({ where: { businessId }, data: row });
+}
+
+/** The KEY autonomy-profile audit rows of a tenant, oldest first. */
+async function auditRows(businessId: string) {
+  return db.teamActivityLog.findMany({
+    where: { businessId, action: 'key_autonomy_profile_updated' },
+    orderBy: { createdAt: 'asc' },
+    select: { userId: true, module: true, entityType: true, entityId: true, title: true, meta: true },
+  });
+}
+
+/** What apps/web/src/app/app/settings/autonomy/page.tsx sends on every save: the tenant and every field. */
+const webForm = (businessId: string, row: (typeof BASELINE)[string]) => ({ businessId, ...row });
+
+for (const pipeline of PIPELINES) {
+  describe(`PATCH autonomy-profile review repairs — ${PIPELINE_LABEL[pipeline]}`, () => {
+    it("ST-1(a): an ADMIN restricted to tier 0 releasing the kill switch, removing the spend cap and raising the action cap under the OWNER's ceiling of 4 is 403 and nothing is written", async () => {
+      await setProfile(ID.bizA, { maxTierWithoutApproval: 4, globalKillSwitch: true, maxDailySpendTtd: 100 });
+      const before = await snapshot();
+      const res = await patch(pipeline, {
+        user: ID.adminA0, query: { businessId: ID.bizA }, body: { globalKillSwitch: false, maxDailySpendTtd: 0, maxDailyAutoActions: 1_000_000 },
+      });
+      expect(res.status, describeBody(res)).toBe(403);
+      expect(await snapshot()).toEqual(before);
+      expect(await profile(ID.bizA)).toEqual({ ...BASELINE[ID.bizA], maxTierWithoutApproval: 4, globalKillSwitch: true, maxDailySpendTtd: 100 });
+    });
+
+    it('ST-1(a): the tier-0 ADMIN loosening any one setting at the default ceiling of 3 is 403; each tightening is 200', async () => {
+      await setProfile(ID.bizA, { maxDailySpendTtd: 100 });
+      const before = await snapshot();
+      for (const body of [{ globalKillSwitch: false }, { maxDailySpendTtd: 0 }, { maxDailySpendTtd: 500 }, { maxDailyAutoActions: 11 }, { notifyOnBlock: false }]) {
+        const res = await patch(pipeline, { user: ID.adminA0, query: { businessId: ID.bizA }, body });
+        expect(res.status, `${JSON.stringify(body)} ${describeBody(res)}`).toBe(403);
+      }
+      expect(await snapshot()).toEqual(before);
+      const tighten = await patch(pipeline, { user: ID.adminA0, query: { businessId: ID.bizA }, body: { maxDailySpendTtd: 50, maxDailyAutoActions: 2, maxTierWithoutApproval: 1 } });
+      expect(tighten.status, describeBody(tighten)).toBe(200);
+      expect(await profile(ID.bizA)).toEqual({ ...BASELINE[ID.bizA], maxDailySpendTtd: 50, maxDailyAutoActions: 2, maxTierWithoutApproval: 1 });
+    });
+
+    it("ST-1(b): a default-tier ADMIN (tier 3) releasing the kill switch over the OWNER's ceiling of 4 is 403 and the kill switch stays on", async () => {
+      await setProfile(ID.bizA, { maxTierWithoutApproval: 4 });
+      const before = await snapshot();
+      const res = await patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { globalKillSwitch: false } });
+      expect(res.status, describeBody(res)).toBe(403);
+      expect(await snapshot()).toEqual(before);
+      expect(await profile(ID.bizA)).toMatchObject({ globalKillSwitch: true, maxTierWithoutApproval: 4 });
+    });
+
+    it("ST-1: the tier-3 ADMIN raising the action cap under the OWNER's ceiling of 4 is 403 with the kill switch off too", async () => {
+      await setProfile(ID.bizA, { maxTierWithoutApproval: 4, globalKillSwitch: false });
+      const before = await snapshot();
+      const res = await patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { maxDailyAutoActions: 50 } });
+      expect(res.status, describeBody(res)).toBe(403);
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it('ST-1(b) positive control: the tier-3 ADMIN releasing the kill switch while bringing the ceiling down to 3 is 200 and written', async () => {
+      await setProfile(ID.bizA, { maxTierWithoutApproval: 4 });
+      const res = await patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { globalKillSwitch: false, maxTierWithoutApproval: 3 } });
+      expect(res.status, describeBody(res)).toBe(200);
+      expect(await profile(ID.bizA)).toEqual({ ...BASELINE[ID.bizA], globalKillSwitch: false, maxTierWithoutApproval: 3 });
+    });
+
+    it("CR-V103-1: the tier-3 ADMIN saving the web form's full body to switch the kill switch ON under the OWNER's ceiling of 4 is 200 and the kill switch is on", async () => {
+      await setProfile(ID.bizA, { globalKillSwitch: false, maxTierWithoutApproval: 4 });
+      const res = await patch(pipeline, {
+        user: ID.adminA,
+        body: webForm(ID.bizA, { ...BASELINE[ID.bizA], globalKillSwitch: true, maxTierWithoutApproval: 4 }),
+      });
+      expect(res.status, describeBody(res)).toBe(200);
+      expect(await profile(ID.bizA)).toEqual({ ...BASELINE[ID.bizA], globalKillSwitch: true, maxTierWithoutApproval: 4 });
+    });
+
+    it('CR-V103-1: an ADMIN restricted to tier 2 saving the unchanged form at the default ceiling of 3 is 200; the same form releasing the kill switch is 403', async () => {
+      const save = await patch(pipeline, { user: ID.adminA2, body: webForm(ID.bizA, BASELINE[ID.bizA]) });
+      expect(save.status, describeBody(save)).toBe(200);
+      expect(await profile(ID.bizA)).toEqual(BASELINE[ID.bizA]);
+      const before = await snapshot();
+      const release = await patch(pipeline, { user: ID.adminA2, body: webForm(ID.bizA, { ...BASELINE[ID.bizA], globalKillSwitch: false }) });
+      expect(release.status, describeBody(release)).toBe(403);
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it('ST-2: a write naming the tenant in the query string leaves one audit row naming the writer, with the stored profile as before', async () => {
+      const prior = (await auditRows(ID.bizA)).length;
+      const res = await patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { globalKillSwitch: false } });
+      expect(res.status, describeBody(res)).toBe(200);
+      const rows = await auditRows(ID.bizA);
+      expect(rows.length).toBe(prior + 1);
+      expect(rows[rows.length - 1]).toMatchObject({
+        userId: ID.adminA,
+        module: 'settings',
+        entityType: 'businessAutonomyProfile',
+        entityId: res.body.id,
+        meta: {
+          before: BASELINE[ID.bizA],
+          after: { ...BASELINE[ID.bizA], globalKillSwitch: false },
+          changed: ['globalKillSwitch'],
+          loosened: ['globalKillSwitch'],
+          actorTier: 3,
+        },
+      });
+      expect(rows[rows.length - 1].title).toContain('globalKillSwitch true -> false');
+    });
+
+    it("ST-2: a write naming the tenant in the body is audited with the stored profile as before, not the request body; B's audit is untouched", async () => {
+      const prior = (await auditRows(ID.bizA)).length;
+      const priorB = (await auditRows(ID.bizB)).length;
+      const res = await patch(pipeline, { user: ID.ownerA, body: { businessId: ID.bizA, maxTierWithoutApproval: 4 } });
+      expect(res.status, describeBody(res)).toBe(200);
+      const rows = await auditRows(ID.bizA);
+      expect(rows.length).toBe(prior + 1);
+      expect(rows[rows.length - 1]).toMatchObject({
+        userId: ID.ownerA,
+        meta: { before: BASELINE[ID.bizA], after: { ...BASELINE[ID.bizA], maxTierWithoutApproval: 4 }, changed: ['maxTierWithoutApproval'], actorTier: 4 },
+      });
+      expect((await auditRows(ID.bizB)).length).toBe(priorB);
+    });
+
+    it('ST-2: a refused write (STAFF, a tier-3 ADMIN raising the ceiling, a non-member) leaves no audit row', async () => {
+      const prior = (await auditRows(ID.bizA)).length;
+      for (const [user, body] of [
+        [ID.staffA, { globalKillSwitch: false }],
+        [ID.adminA, { maxTierWithoutApproval: 4 }],
+        [ID.nomember, { globalKillSwitch: false }],
+      ] as const) {
+        const res = await patch(pipeline, { user, query: { businessId: ID.bizA }, body });
+        expect(res.status, `${user} ${describeBody(res)}`).toBe(403);
+      }
+      expect((await auditRows(ID.bizA)).length).toBe(prior);
     });
   });
 }

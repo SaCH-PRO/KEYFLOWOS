@@ -39,14 +39,17 @@ import {
   BadRequestException,
   ForbiddenException,
   HttpException,
+  InternalServerErrorException,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
   Logger,
   Inject,
   Injectable,
+  type CallHandler,
   type CanActivate,
   type ExecutionContext,
+  type NestInterceptor,
 } from '@nestjs/common';
 import { KeyCortexSessionService } from './key-cortex-session.service';
 import {
@@ -70,7 +73,7 @@ import {
 } from 'class-validator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
-import { Observable, Subject, interval, map, from, of, catchError, concatWith, defer, switchMap } from 'rxjs';
+import { Observable, Subject, interval, map, from, of, catchError, concatMap, concatWith, defer, switchMap } from 'rxjs';
 
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
 import { KeyCortexConversationService } from './key-cortex-conversation.service';
@@ -194,6 +197,107 @@ function requestActorId(user: AuthenticatedUser | undefined): string {
 /** The membership roles that may write the KEY autonomy profile (V1-03). */
 const AUTONOMY_PROFILE_WRITER_ROLES = new Set(['OWNER', 'ADMIN']);
 
+/** The BusinessAutonomyProfile columns PATCH autonomy-profile writes. */
+export interface AutonomyProfileSettings {
+  globalKillSwitch: boolean;
+  maxDailyAutoActions: number;
+  maxDailySpendTtd: number;
+  maxTierWithoutApproval: number;
+  notifyOnBlock: boolean;
+}
+
+const AUTONOMY_BOOLEAN_FIELDS = ['globalKillSwitch', 'notifyOnBlock'] as const;
+const AUTONOMY_NUMBER_FIELDS = ['maxDailyAutoActions', 'maxDailySpendTtd', 'maxTierWithoutApproval'] as const;
+const AUTONOMY_PROFILE_FIELDS: readonly (keyof AutonomyProfileSettings)[] = [
+  'globalKillSwitch', 'maxDailyAutoActions', 'maxDailySpendTtd', 'maxTierWithoutApproval', 'notifyOnBlock',
+];
+
+/** The five settings of a stored profile (or a handler's answer), without its id and timestamps. */
+function autonomySettingsOf(row: AutonomyProfileSettings): AutonomyProfileSettings {
+  return {
+    globalKillSwitch: row.globalKillSwitch,
+    maxDailyAutoActions: row.maxDailyAutoActions,
+    maxDailySpendTtd: row.maxDailySpendTtd,
+    maxTierWithoutApproval: row.maxTierWithoutApproval,
+    notifyOnBlock: row.notifyOnBlock,
+  };
+}
+
+/**
+ * The settings a PATCH body sets, read from the raw body (the ValidationPipe
+ * runs after the guards). A field that is absent or null sets nothing (the
+ * DTO's @IsOptional() admits both; updateProfile skips an absent one and
+ * Prisma refuses a null for these required columns). A field of the
+ * wrong type is 400 here, so it can never be misread as "no change" and slip
+ * past the comparison below.
+ */
+function requestedAutonomySettings(body: unknown): Partial<AutonomyProfileSettings> {
+  const raw = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const out: Partial<AutonomyProfileSettings> = {};
+  for (const field of AUTONOMY_BOOLEAN_FIELDS) {
+    const value = raw[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'boolean') throw new BadRequestException(`${field} must be a boolean`);
+    out[field] = value;
+  }
+  for (const field of AUTONOMY_NUMBER_FIELDS) {
+    const value = raw[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value)) throw new BadRequestException(`${field} must be a number`);
+    out[field] = value;
+  }
+  return out;
+}
+
+/**
+ * A daily spend cap as a limit: KeyAutonomySafetyService.check enforces it only
+ * when it is above 0, so 0 (the default) or below means no limit.
+ */
+const spendLimit = (ttd: number) => (ttd > 0 ? ttd : Number.POSITIVE_INFINITY);
+
+/**
+ * The settings a write LOOSENS against the stored profile: each lets KEY act
+ * more, or with less oversight, than it does now. Releasing the kill switch,
+ * raising the tier ceiling or the daily action cap, lifting or removing the
+ * spend cap (0 is unlimited) and turning block notices off. A field sent with
+ * its stored value is not a change (the web form, apps/web settings/autonomy,
+ * sends every field on every save), and tightening a field never needs tier.
+ */
+export function loosenedAutonomySettings(
+  stored: AutonomyProfileSettings,
+  requested: Partial<AutonomyProfileSettings>,
+): (keyof AutonomyProfileSettings)[] {
+  const out: (keyof AutonomyProfileSettings)[] = [];
+  if (requested.globalKillSwitch === false && stored.globalKillSwitch) out.push('globalKillSwitch');
+  if (requested.maxDailyAutoActions !== undefined && requested.maxDailyAutoActions > stored.maxDailyAutoActions) out.push('maxDailyAutoActions');
+  if (requested.maxDailySpendTtd !== undefined && spendLimit(requested.maxDailySpendTtd) > spendLimit(stored.maxDailySpendTtd)) {
+    out.push('maxDailySpendTtd');
+  }
+  if (requested.maxTierWithoutApproval !== undefined && requested.maxTierWithoutApproval > stored.maxTierWithoutApproval) {
+    out.push('maxTierWithoutApproval');
+  }
+  if (requested.notifyOnBlock === false && stored.notifyOnBlock) out.push('notifyOnBlock');
+  return out;
+}
+
+/**
+ * What AutonomyProfileWriteGuard decided, left on the request for
+ * AutonomyProfileAuditInterceptor: who wrote, at what tier, and the stored
+ * profile the write was judged against (the audit row's `before`).
+ */
+export interface AutonomyProfileWriteDecision {
+  businessId: string;
+  actorId: string;
+  actorTier: number;
+  before: AutonomyProfileSettings;
+  loosened: (keyof AutonomyProfileSettings)[];
+}
+
+export type AutonomyProfileWriteRequest = BusinessGuardedRequest & {
+  user?: { id?: string; role?: string };
+  autonomyProfileWrite?: AutonomyProfileWriteDecision;
+};
+
 /**
  * V1-03-KEY-CORTEX-PRINCIPAL (build map CF-28, M47; owner ruling D-17): who
  * may write the KEY autonomy profile, the global kill switch and the tier
@@ -207,26 +311,50 @@ const AUTONOMY_PROFILE_WRITER_ROLES = new Set(['OWNER', 'ADMIN']);
  *     record (Business.ownerId, the second arm IdentityService.assertBusinessOwner
  *     admits, at the OWNER tier), or SUPER_ADMIN (the platform bypass
  *     BusinessGuard grants, at the maximum tier); everyone else is 403;
- *   - nobody raises maxTierWithoutApproval above the approval tier they hold
- *     themselves (the Membership rule in core/authority/approval-tier.ts: OWNER
- *     4, ADMIN 3 by default), so an ADMIN cannot let KEY run tier-4 tools
- *     unapproved; a value that is not a finite number is 400 here, before it
- *     could slip past the comparison.
+ *   - the write is judged against the profile it leaves behind, not the one
+ *     value it names (review V1-03 ST-1, CR-V103-1). A write that LOOSENS any
+ *     setting (loosenedAutonomySettings: releasing the kill switch, raising the
+ *     tier ceiling or a daily cap, lifting the spend cap, turning block notices
+ *     off) needs the caller's own approval tier (the Membership rule in
+ *     core/authority/approval-tier.ts: OWNER 4, ADMIN 3 by default, or the
+ *     tier an explicit scope map pins) to reach the tier ceiling the profile
+ *     will hold: the one the body sets, else the stored one. So an ADMIN at
+ *     tier 3 cannot let KEY run tier-4 tools unapproved, whether by raising the
+ *     ceiling, releasing the kill switch over an OWNER's ceiling of 4 or
+ *     lifting its caps; an ADMIN restricted to tier 0 loosens nothing while
+ *     KEY may run tools above tier 0. Tightening (switching the kill switch on,
+ *     lowering the ceiling or a cap) is open to every writer, and a field sent
+ *     with its stored value is no change: the web form resubmits every field
+ *     on each save, as R0-09f's finance tax rate rule treats a resubmitted
+ *     rate (finance-settings.service.ts assertTaxRateOwner);
+ *   - a field of the wrong type is 400 here, before it could slip past the
+ *     comparison.
  *
- * The tenant is the one BusinessGuard checked (`guardedBusinessId`; for
- * SUPER_ADMIN, whom the guard admits without one, the same resolver), which is
- * the tenant @GuardedBusinessId() hands the handler, so a body businessId
- * naming another tenant cannot borrow the caller's role there. It runs as a
- * route guard, after the class guards, so the handler's signature (and the
- * parameter types key-cortex-tenant-binding.spec.ts pins) is unchanged; it
- * reads the raw body, which the ValidationPipe validates afterwards.
+ * The stored profile is the one KeyAutonomySafetyService.ensureProfile
+ * returns, the same call GET and updateProfile make (a business with no row
+ * gets its default row, as a GET would create it). The tenant is the one
+ * BusinessGuard checked (`guardedBusinessId`; for SUPER_ADMIN, whom the guard
+ * admits without one, the same resolver), which is the tenant
+ * @GuardedBusinessId() hands the handler, so a body businessId naming another
+ * tenant cannot borrow the caller's role there. It runs as a route guard,
+ * after the class guards, so the handler's signature (and the parameter types
+ * key-cortex-tenant-binding.spec.ts pins) is unchanged; it reads the raw body,
+ * which the ValidationPipe validates afterwards. The decision is left on the
+ * request (`autonomyProfileWrite`) for the audit row
+ * (AutonomyProfileAuditInterceptor).
+ *
+ * Residual: the stored profile is read here and written by updateProfile
+ * (key-autonomy-safety.service.ts, outside V1-03's write set) without a lock,
+ * so an OWNER's change landing between the two is not seen by this decision.
  */
 @Injectable()
 export class AutonomyProfileWriteGuard implements CanActivate {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  // One line on purpose: key-cortex-conscious-surface.spec.ts reads the controller's
+  // constructor from the first `  constructor(` in this file to the first `\n  ) {`.
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(KeyAutonomySafetyService) private readonly safety: KeyAutonomySafetyService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest<BusinessGuardedRequest>();
+    const req = context.switchToHttp().getRequest<AutonomyProfileWriteRequest>();
     const user = req?.user;
     if (typeof user?.id !== 'string' || user.id.length === 0) {
       throw new UnauthorizedException('Authenticated user required');
@@ -242,18 +370,22 @@ export class AutonomyProfileWriteGuard implements CanActivate {
       throw new ForbiddenException('Only an owner or admin of this business can change the KEY autonomy profile');
     }
 
-    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const requested = body.maxTierWithoutApproval;
-    if (requested !== undefined && requested !== null) {
-      if (typeof requested !== 'number' || !Number.isFinite(requested)) {
-        throw new BadRequestException('maxTierWithoutApproval must be a number');
-      }
-      if (requested > tier) {
+    const requested = requestedAutonomySettings(req.body);
+    const before = await this.storedSettings(businessId);
+    const loosened = loosenedAutonomySettings(before, requested);
+    const ceiling = requested.maxTierWithoutApproval ?? before.maxTierWithoutApproval;
+    if (loosened.length > 0 && ceiling > tier) {
+      if (loosened.includes('maxTierWithoutApproval')) {
         throw new ForbiddenException(
-          `Setting maxTierWithoutApproval to ${requested} requires approval tier ${requested}; you have tier ${tier}`,
+          `Setting maxTierWithoutApproval to ${ceiling} requires approval tier ${ceiling}; you have tier ${tier}`,
         );
       }
+      throw new ForbiddenException(
+        `Loosening ${loosened.join(', ')} while KEY may run tier-${ceiling} tools without approval requires approval tier ${ceiling}; you have tier ${tier}`,
+      );
     }
+
+    req.autonomyProfileWrite = { businessId, actorId: user.id, actorTier: tier, before, loosened };
     return true;
   }
 
@@ -278,6 +410,98 @@ export class AutonomyProfileWriteGuard implements CanActivate {
     } catch {
       // Fail closed, as BusinessGuard does when its lookup fails.
       throw new ForbiddenException('Unable to verify autonomy-profile authority');
+    }
+  }
+
+  /** The profile the write will change, as KeyAutonomySafetyService holds it. */
+  private async storedSettings(businessId: string): Promise<AutonomyProfileSettings> {
+    try {
+      return autonomySettingsOf(await this.safety.ensureProfile(businessId));
+    } catch {
+      // Fail closed: a write that cannot be compared with the stored profile is not judged.
+      throw new ForbiddenException('Unable to verify autonomy-profile authority');
+    }
+  }
+}
+
+/** A value for an audit title. */
+const auditValue = (field: keyof AutonomyProfileSettings, value: unknown) =>
+  field === 'maxDailySpendTtd' && typeof value === 'number' && value <= 0 ? 'unlimited' : String(value);
+
+/**
+ * V1-03 review ST-2: every autonomy-profile write leaves an audit row naming
+ * its writer. Neither the handler nor KeyAutonomySafetyService.updateProfile
+ * wrote one, and the global BusinessEventInterceptor takes the tenant only
+ * from params or body, so a write naming the tenant in the query string (which
+ * BusinessGuard and the handler accept) left no trace, and one naming it in
+ * the body was logged as 'unknown.update' with the request body as `before`.
+ *
+ * After the handler answers, this writes one team_activity_logs row (the
+ * mechanism the team-permission and AI-governance changes already use:
+ * IdentityService.logTeamActivity, AiOversightService) for the tenant the
+ * guard checked: the writer (`userId`), the stored profile the guard judged
+ * the write against (`meta.before`), the profile the handler returned
+ * (`meta.after`), the settings that changed and those that loosened, and the
+ * writer's approval tier. A refused write never reaches the handler, so it
+ * writes no row. The row is awaited: when it cannot be written the request
+ * fails (500) rather than answer success for an unaudited change. Residual:
+ * updateProfile (outside V1-03's write set) takes no transaction client, so
+ * the row commits after the profile change, not with it.
+ */
+@Injectable()
+export class AutonomyProfileAuditInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(AutonomyProfileAuditInterceptor.name);
+
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const req = context.switchToHttp().getRequest<AutonomyProfileWriteRequest>();
+    return next.handle().pipe(
+      concatMap(async (profile: unknown) => {
+        await this.audit(req, profile);
+        return profile;
+      }),
+    );
+  }
+
+  private async audit(req: AutonomyProfileWriteRequest, profile: unknown): Promise<void> {
+    const decision = req?.autonomyProfileWrite;
+    const row = profile && typeof profile === 'object' ? (profile as AutonomyProfileSettings & { id?: unknown; businessId?: unknown }) : undefined;
+    if (!decision || !row) {
+      this.logger.error('Autonomy-profile write reached the audit without a guard decision or a profile; refusing to answer success');
+      throw new InternalServerErrorException('The KEY autonomy profile change could not be audited');
+    }
+    const after = autonomySettingsOf(row);
+    const changed = AUTONOMY_PROFILE_FIELDS.filter((field) => decision.before[field] !== after[field]);
+    const title = changed.length === 0
+      ? 'Saved the KEY autonomy profile (no setting changed)'
+      : `Changed the KEY autonomy profile: ${changed
+        .map((field) => `${field} ${auditValue(field, decision.before[field])} -> ${auditValue(field, after[field])}`)
+        .join(', ')}`;
+    try {
+      await this.prisma.client.teamActivityLog.create({
+        data: {
+          businessId: decision.businessId,
+          userId: decision.actorId,
+          module: 'settings',
+          action: 'key_autonomy_profile_updated',
+          entityType: 'businessAutonomyProfile',
+          ...(typeof row.id === 'string' ? { entityId: row.id } : {}),
+          title,
+          meta: {
+            before: { ...decision.before },
+            after: { ...after },
+            changed: [...changed],
+            loosened: [...decision.loosened],
+            actorTier: decision.actorTier,
+          },
+        },
+      });
+    } catch (err) {
+      this.logger.error(
+        `Failed to audit the KEY autonomy profile change for ${decision.businessId} by ${decision.actorId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new InternalServerErrorException('The KEY autonomy profile was changed but its audit row could not be written');
     }
   }
 }
@@ -1393,11 +1617,15 @@ export class KeyCortexController {
    * read from the raw body first), and the tenant is the one the guard checked.
    *
    * V1-03 (CF-28): only an OWNER or ADMIN of that tenant (or its owner of
-   * record, or SUPER_ADMIN) may write it, and never above their own approval
-   * tier (AutonomyProfileWriteGuard). Any member still reads it (GET).
+   * record, or SUPER_ADMIN) may write it, and a write that loosens any setting
+   * needs the caller's own approval tier to reach the tier ceiling the profile
+   * keeps (AutonomyProfileWriteGuard). Every write leaves a team activity row
+   * naming its writer (AutonomyProfileAuditInterceptor, review ST-2). Any
+   * member still reads it (GET).
    */
   @Patch('autonomy-profile')
   @UseGuards(AutonomyProfileWriteGuard)
+  @UseInterceptors(AutonomyProfileAuditInterceptor)
   async updateAutonomyProfile(
     @Body() dto: UpdateAutonomyProfileDto,
     @GuardedBusinessId() businessId: string,

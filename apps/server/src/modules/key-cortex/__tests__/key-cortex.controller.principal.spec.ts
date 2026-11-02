@@ -1,7 +1,8 @@
 import 'reflect-metadata';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
-import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { BadRequestException, ForbiddenException, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { lastValueFrom, of } from 'rxjs';
+import { GUARDS_METADATA, INTERCEPTORS_METADATA } from '@nestjs/common/constants';
 import * as controllerModule from '../key-cortex.controller';
 import { KeyCortexExecutorService } from '../key-cortex-executor.service';
 import type { ConnectorCommand } from '../key-cortex-connector.types';
@@ -37,6 +38,8 @@ import type { ConnectorCommand } from '../key-cortex-connector.types';
 
 const KeyCortexController = controllerModule.KeyCortexController;
 const AutonomyProfileWriteGuard = (controllerModule as Record<string, any>).AutonomyProfileWriteGuard;
+const AutonomyProfileAuditInterceptor = (controllerModule as Record<string, any>).AutonomyProfileAuditInterceptor;
+const loosenedAutonomySettings = (controllerModule as Record<string, any>).loosenedAutonomySettings;
 
 const STAFF = { id: 'user_staff', role: 'USER' };
 const OWNER_ID = 'user_owner';
@@ -264,6 +267,24 @@ function guardPrisma(memberships: Record<string, MembershipRow>, owners: Record<
   };
 }
 
+interface StoredProfile {
+  globalKillSwitch: boolean;
+  maxDailyAutoActions: number;
+  maxDailySpendTtd: number;
+  maxTierWithoutApproval: number;
+  notifyOnBlock: boolean;
+}
+
+/** The schema defaults (BusinessAutonomyProfile): kill switch off, 10 actions a day, no spend cap, tier ceiling 3. */
+const DEFAULT_PROFILE: StoredProfile = { globalKillSwitch: false, maxDailyAutoActions: 10, maxDailySpendTtd: 0, maxTierWithoutApproval: 3, notifyOnBlock: true };
+
+/** KeyAutonomySafetyService.ensureProfile, holding `stored` for every tenant. */
+function guardSafety(stored: Partial<StoredProfile> = {}) {
+  return {
+    ensureProfile: vi.fn(async (businessId: string) => ({ id: `prof_${businessId}`, businessId, ...DEFAULT_PROFILE, ...stored })),
+  };
+}
+
 function httpContext(req: Record<string, unknown>) {
   return { switchToHttp: () => ({ getRequest: () => req }) } as any;
 }
@@ -281,6 +302,9 @@ const MEMBERS: Record<string, MembershipRow> = {
   'u_owner_t2@biz_1': { role: 'OWNER', maxApprovalTier: 2, permissionScopes: { crm: 'admin' } },
   // OWNER of biz_2 and STAFF of biz_1.
   'u_dual@biz_1': { role: 'STAFF', maxApprovalTier: 0, permissionScopes: null },
+  // ADMINs the OWNER restricted (an explicit scope map makes the stored tier authoritative): tier 0 and tier 2.
+  'u_admin_t0@biz_1': { role: 'ADMIN', maxApprovalTier: 0, permissionScopes: {} },
+  'u_admin_t2@biz_1': { role: 'ADMIN', maxApprovalTier: 2, permissionScopes: {} },
   'u_dual@biz_2': { role: 'OWNER', maxApprovalTier: 0, permissionScopes: null },
 };
 
@@ -293,9 +317,9 @@ async function decide(guard: any, req: Record<string, unknown>): Promise<true | 
 }
 
 describe('V1-03: PATCH autonomy-profile is limited to OWNER/ADMIN at the required tier (AutonomyProfileWriteGuard)', () => {
-  const guardFor = (owners: Record<string, string> = {}) => {
+  const guardFor = (owners: Record<string, string> = {}, stored: Partial<StoredProfile> = {}) => {
     expect(typeof AutonomyProfileWriteGuard, 'AutonomyProfileWriteGuard is exported by key-cortex.controller.ts').toBe('function');
-    return new AutonomyProfileWriteGuard(guardPrisma(MEMBERS, owners));
+    return new AutonomyProfileWriteGuard(guardPrisma(MEMBERS, owners), guardSafety(stored));
   };
 
   it('the PATCH handler carries AutonomyProfileWriteGuard; GET autonomy-profile does not (members keep reading it)', () => {
@@ -338,7 +362,8 @@ describe('V1-03: PATCH autonomy-profile is limited to OWNER/ADMIN at the require
   });
 
   it('an OWNER restricted to tier 2 cannot raise maxTierWithoutApproval to 3 (the tier is the one the membership holds)', async () => {
-    const guard = guardFor();
+    // The stored ceiling is 2, so 3 is a raise (review CR-V103-1: an unchanged ceiling is no raise).
+    const guard = guardFor({}, { maxTierWithoutApproval: 2 });
     expect(await decide(guard, patchRequest({ id: 'u_owner_t2' }, { maxTierWithoutApproval: 3 }))).toBeInstanceOf(ForbiddenException);
     expect(await decide(guard, patchRequest({ id: 'u_owner_t2' }, { maxTierWithoutApproval: 2 }))).toBe(true);
   });
@@ -358,10 +383,12 @@ describe('V1-03: PATCH autonomy-profile is limited to OWNER/ADMIN at the require
 
   it('no tenant is 400, before any authority read', async () => {
     const prisma = guardPrisma(MEMBERS);
-    const guard = new (AutonomyProfileWriteGuard ?? Object)(prisma);
+    const safety = guardSafety();
+    const guard = new (AutonomyProfileWriteGuard ?? Object)(prisma, safety);
     const res = await decide(guard, { user: { id: 'u_super', role: 'SUPER_ADMIN' }, body: { maxDailyAutoActions: 1 }, query: {}, params: {} });
     expect(res).toBeInstanceOf(BadRequestException);
     expect(prisma.client.membership.findUnique).not.toHaveBeenCalled();
+    expect(safety.ensureProfile).not.toHaveBeenCalled();
   });
 
   it('a non-numeric maxTierWithoutApproval is refused before it can slip past the tier check', async () => {
@@ -374,11 +401,186 @@ describe('V1-03: PATCH autonomy-profile is limited to OWNER/ADMIN at the require
 
   it('the role is read in the tenant BusinessGuard checked: STAFF of biz_1 (OWNER of biz_2) naming biz_1 is 403, naming biz_2 is allowed', async () => {
     const prisma = guardPrisma(MEMBERS);
-    const guard = new (AutonomyProfileWriteGuard ?? Object)(prisma);
+    const guard = new (AutonomyProfileWriteGuard ?? Object)(prisma, guardSafety());
     // BusinessGuard resolved the body's biz_1 (params, then body, then query) even though the query names biz_2.
     const res = await decide(guard, { user: { id: 'u_dual' }, body: { businessId: 'biz_1', globalKillSwitch: false }, query: { businessId: 'biz_2' }, params: {}, guardedBusinessId: 'biz_1' });
     expect(res).toBeInstanceOf(ForbiddenException);
     expect(prisma.client.membership.findUnique.mock.calls[0][0].where.userId_businessId).toEqual({ userId: 'u_dual', businessId: 'biz_1' });
     expect(await decide(guard, patchRequest({ id: 'u_dual' }, { globalKillSwitch: false }, 'biz_2'))).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  3. Review repairs: the write is judged against the profile it       */
+/*     leaves (ST-1), an unchanged field is no change (CR-V103-1), and  */
+/*     every write is audited (ST-2)                                    */
+/* ------------------------------------------------------------------ */
+
+describe('V1-03 review ST-1 / CR-V103-1: a write that loosens the profile needs the tier of the ceiling the profile keeps', () => {
+  const guardFor = (stored: Partial<StoredProfile> = {}) => new AutonomyProfileWriteGuard(guardPrisma(MEMBERS), guardSafety(stored));
+
+  it('loosenedAutonomySettings names each setting that lets KEY act more or with less oversight, and nothing else', () => {
+    const stored = { ...DEFAULT_PROFILE, globalKillSwitch: true, maxDailySpendTtd: 100 };
+    expect(loosenedAutonomySettings(stored, {})).toEqual([]);
+    // Resubmitting every stored value (the web form) loosens nothing.
+    expect(loosenedAutonomySettings(stored, { ...stored })).toEqual([]);
+    expect(loosenedAutonomySettings(stored, { globalKillSwitch: false })).toEqual(['globalKillSwitch']);
+    expect(loosenedAutonomySettings(stored, { maxDailyAutoActions: 11 })).toEqual(['maxDailyAutoActions']);
+    // 0 (or below) is an unlimited spend cap (KeyAutonomySafetyService.check), so it lifts a cap of 100.
+    expect(loosenedAutonomySettings(stored, { maxDailySpendTtd: 0 })).toEqual(['maxDailySpendTtd']);
+    expect(loosenedAutonomySettings(stored, { maxDailySpendTtd: -1 })).toEqual(['maxDailySpendTtd']);
+    expect(loosenedAutonomySettings(stored, { maxDailySpendTtd: 101 })).toEqual(['maxDailySpendTtd']);
+    expect(loosenedAutonomySettings(stored, { maxTierWithoutApproval: 4 })).toEqual(['maxTierWithoutApproval']);
+    expect(loosenedAutonomySettings(stored, { notifyOnBlock: false })).toEqual(['notifyOnBlock']);
+    // Tightening: kill switch on, lower ceiling and caps, a cap where there was none, notices on.
+    expect(loosenedAutonomySettings({ ...DEFAULT_PROFILE, notifyOnBlock: false }, {
+      globalKillSwitch: true, maxTierWithoutApproval: 1, maxDailyAutoActions: 2, maxDailySpendTtd: 50, notifyOnBlock: true,
+    })).toEqual([]);
+  });
+
+  it("ST-1(b): an ADMIN at tier 3 releasing the kill switch over the OWNER's ceiling of 4 is 403 (KEY would run tier-4 tools unapproved)", async () => {
+    const res = await decide(guardFor({ globalKillSwitch: true, maxTierWithoutApproval: 4 }), patchRequest({ id: 'u_admin' }, { globalKillSwitch: false }));
+    expect(res).toBeInstanceOf(ForbiddenException);
+    expect((res as Error).message).toContain('you have tier 3');
+  });
+
+  it('ST-1(b): the same ADMIN releasing the kill switch while bringing the ceiling down to their tier 3 is allowed', async () => {
+    const guard = guardFor({ globalKillSwitch: true, maxTierWithoutApproval: 4 });
+    expect(await decide(guard, patchRequest({ id: 'u_admin' }, { globalKillSwitch: false, maxTierWithoutApproval: 3 }))).toBe(true);
+  });
+
+  it("ST-1: an ADMIN at tier 3 raising a daily cap or lifting the spend cap under the OWNER's ceiling of 4 is 403, kill switch on or off", async () => {
+    for (const globalKillSwitch of [false, true]) {
+      const guard = guardFor({ globalKillSwitch, maxTierWithoutApproval: 4, maxDailySpendTtd: 100 });
+      for (const body of [{ maxDailyAutoActions: 11 }, { maxDailySpendTtd: 0 }, { maxDailySpendTtd: 500 }, { notifyOnBlock: false }]) {
+        expect(await decide(guard, patchRequest({ id: 'u_admin' }, body)), `${globalKillSwitch} ${JSON.stringify(body)}`).toBeInstanceOf(ForbiddenException);
+      }
+    }
+  });
+
+  it('ST-1(a): an ADMIN the OWNER restricted to tier 0 cannot release the kill switch, remove the spend cap or raise the action cap', async () => {
+    const guard = guardFor({ globalKillSwitch: true, maxTierWithoutApproval: 4, maxDailySpendTtd: 100 });
+    expect(await decide(guard, patchRequest({ id: 'u_admin_t0' }, { globalKillSwitch: false, maxDailySpendTtd: 0, maxDailyAutoActions: 1_000_000 })))
+      .toBeInstanceOf(ForbiddenException);
+    const atDefaultCeiling = guardFor({ globalKillSwitch: true, maxDailySpendTtd: 100 });
+    for (const body of [{ globalKillSwitch: false }, { maxDailySpendTtd: 0 }, { maxDailyAutoActions: 11 }, { notifyOnBlock: false }]) {
+      expect(await decide(atDefaultCeiling, patchRequest({ id: 'u_admin_t0' }, body)), JSON.stringify(body)).toBeInstanceOf(ForbiddenException);
+    }
+  });
+
+  it('ST-1: a restricted ADMIN still tightens (kill switch on, lower ceiling and caps, a new spend cap) and may loosen only once the ceiling is within their tier', async () => {
+    const guard = guardFor({ maxTierWithoutApproval: 4, maxDailySpendTtd: 100 });
+    for (const body of [{ globalKillSwitch: true }, { maxTierWithoutApproval: 0 }, { maxDailyAutoActions: 2 }, { maxDailySpendTtd: 50 }, { notifyOnBlock: true }]) {
+      expect(await decide(guard, patchRequest({ id: 'u_admin_t0' }, body)), JSON.stringify(body)).toBe(true);
+    }
+    expect(await decide(guardFor({ globalKillSwitch: true }), patchRequest({ id: 'u_admin_t0' }, { globalKillSwitch: false, maxTierWithoutApproval: 0 }))).toBe(true);
+  });
+
+  it("CR-V103-1: an ADMIN saving the web form's full body with the OWNER's stored ceiling of 4, to switch the kill switch ON, is allowed", async () => {
+    const guard = guardFor({ globalKillSwitch: false, maxTierWithoutApproval: 4 });
+    const form = { globalKillSwitch: true, maxDailyAutoActions: 10, maxDailySpendTtd: 0, maxTierWithoutApproval: 4, notifyOnBlock: true };
+    expect(await decide(guard, patchRequest({ id: 'u_admin' }, form))).toBe(true);
+  });
+
+  it('CR-V103-1: an ADMIN restricted to tier 2 saving the unchanged default form (ceiling 3) is allowed; changing nothing is no raise', async () => {
+    const form = { ...DEFAULT_PROFILE };
+    expect(await decide(guardFor(), patchRequest({ id: 'u_admin_t2' }, form))).toBe(true);
+    // ...but the same form releasing the kill switch over that ceiling of 3 is 403.
+    expect(await decide(guardFor({ globalKillSwitch: true }), patchRequest({ id: 'u_admin_t2' }, { ...form, globalKillSwitch: false })))
+      .toBeInstanceOf(ForbiddenException);
+  });
+
+  it('CR-V103-1: the full form raising the ceiling above the stored one and the caller tier is still 403 with the tier message', async () => {
+    const res = await decide(guardFor(), patchRequest({ id: 'u_admin' }, { ...DEFAULT_PROFILE, maxTierWithoutApproval: 4 }));
+    expect(res).toBeInstanceOf(ForbiddenException);
+    expect((res as Error).message).toBe('Setting maxTierWithoutApproval to 4 requires approval tier 4; you have tier 3');
+  });
+
+  it('a field of the wrong type is 400 before it could be misread as no change', async () => {
+    const guard = guardFor({ globalKillSwitch: true });
+    for (const body of [{ globalKillSwitch: 'false' }, { notifyOnBlock: 0 }, { maxDailyAutoActions: '1000' }, { maxDailySpendTtd: Number.NaN }]) {
+      expect(await decide(guard, patchRequest({ id: 'u_admin' }, body)), JSON.stringify(body)).toBeInstanceOf(BadRequestException);
+    }
+  });
+
+  it('the stored profile is the one KeyAutonomySafetyService.ensureProfile holds for the guarded tenant; a failed read fails closed (403)', async () => {
+    const safety = guardSafety();
+    const guard = new AutonomyProfileWriteGuard(guardPrisma(MEMBERS), safety);
+    expect(await decide(guard, patchRequest({ id: 'u_dual' }, { globalKillSwitch: false }, 'biz_2'))).toBe(true);
+    expect(safety.ensureProfile.mock.calls).toEqual([['biz_2']]);
+    const failing = { ensureProfile: vi.fn(async () => { throw new Error('db down'); }) };
+    expect(await decide(new AutonomyProfileWriteGuard(guardPrisma(MEMBERS), failing), patchRequest({ id: 'u_admin' }, { globalKillSwitch: true })))
+      .toBeInstanceOf(ForbiddenException);
+  });
+
+  it('an admitted write leaves the decision on the request for the audit row: writer, tier, stored profile, loosened settings', async () => {
+    const req = patchRequest({ id: 'u_admin' }, { globalKillSwitch: false, maxDailyAutoActions: 20 });
+    expect(await decide(guardFor({ globalKillSwitch: true }), req)).toBe(true);
+    expect((req as any).autonomyProfileWrite).toEqual({
+      businessId: 'biz_1',
+      actorId: 'u_admin',
+      actorTier: 3,
+      before: { ...DEFAULT_PROFILE, globalKillSwitch: true },
+      loosened: ['globalKillSwitch', 'maxDailyAutoActions'],
+    });
+  });
+});
+
+describe('V1-03 review ST-2: every autonomy-profile write leaves an audit row naming its writer (AutonomyProfileAuditInterceptor)', () => {
+  const decision = {
+    businessId: 'biz_1',
+    actorId: 'u_admin',
+    actorTier: 3,
+    before: { ...DEFAULT_PROFILE, globalKillSwitch: true },
+    loosened: ['globalKillSwitch'],
+  };
+  const answered = { id: 'prof_1', businessId: 'biz_1', ...DEFAULT_PROFILE, globalKillSwitch: false, createdAt: new Date(), updatedAt: new Date() };
+
+  function interceptorWith(create: (...args: any[]) => Promise<unknown>) {
+    const prisma = { client: { teamActivityLog: { create: vi.fn(create) } } };
+    return { prisma, interceptor: new AutonomyProfileAuditInterceptor(prisma) };
+  }
+
+  it('the PATCH handler carries the audit interceptor', () => {
+    const interceptors: unknown[] = Reflect.getMetadata(INTERCEPTORS_METADATA, KeyCortexController.prototype.updateAutonomyProfile) ?? [];
+    expect(AutonomyProfileAuditInterceptor).toBeDefined();
+    expect(interceptors).toContain(AutonomyProfileAuditInterceptor);
+  });
+
+  it("writes one team_activity_logs row: the guard's tenant and writer, the stored profile as before, the handler's answer as after", async () => {
+    const { prisma, interceptor } = interceptorWith(async () => ({}));
+    const out = await lastValueFrom(interceptor.intercept(httpContext({ autonomyProfileWrite: decision }), { handle: () => of(answered) }));
+    expect(out).toBe(answered);
+    expect(prisma.client.teamActivityLog.create).toHaveBeenCalledTimes(1);
+    const { data } = (prisma.client.teamActivityLog.create.mock.calls[0] as any[])[0];
+    expect(data).toMatchObject({
+      businessId: 'biz_1',
+      userId: 'u_admin',
+      module: 'settings',
+      action: 'key_autonomy_profile_updated',
+      entityType: 'businessAutonomyProfile',
+      entityId: 'prof_1',
+      meta: {
+        before: decision.before,
+        after: { ...DEFAULT_PROFILE, globalKillSwitch: false },
+        changed: ['globalKillSwitch'],
+        loosened: ['globalKillSwitch'],
+        actorTier: 3,
+      },
+    });
+    expect(data.title).toContain('globalKillSwitch true -> false');
+  });
+
+  it('a failed audit write fails the request (500) instead of answering success for an unaudited change', async () => {
+    const { interceptor } = interceptorWith(async () => { throw new Error('db down'); });
+    await expect(lastValueFrom(interceptor.intercept(httpContext({ autonomyProfileWrite: decision }), { handle: () => of(answered) })))
+      .rejects.toBeInstanceOf(InternalServerErrorException);
+  });
+
+  it('a write that reached the handler without a guard decision is not answered as a success', async () => {
+    const { prisma, interceptor } = interceptorWith(async () => ({}));
+    await expect(lastValueFrom(interceptor.intercept(httpContext({}), { handle: () => of(answered) })))
+      .rejects.toBeInstanceOf(InternalServerErrorException);
+    expect(prisma.client.teamActivityLog.create).not.toHaveBeenCalled();
   });
 });
