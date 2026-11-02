@@ -66,7 +66,7 @@
  * a NEW writer visible.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import * as ts from 'typescript';
 
@@ -613,5 +613,38 @@ describe('R0-09f D-11 static guard: every write of an owner-only Business field 
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  // Review CR-1 (R0-09f): R0-16 added a two-suite `suites` list to this
+  // manifest on the integration branch; git merged it with this packet's
+  // cases without a conflict, so run-manifests never ran this spec or
+  // d11-finance-settings and rejected the manifest (a required case missing),
+  // while every other unit test stayed green. This reads the manifest's case
+  // ids and its bound suites' source, so a merge that drops a binding fails here.
+  it('[D11W-07] the d11-sibling-writes proof manifest binds every suite its required cases come from: each case id is in a declared suite, and every declared suite supplies a case', () => {
+    const serverDir = resolve(SRC, '..');
+    const manifestFile = resolve(serverDir, '../../scripts/proof-admission/manifests/d11-sibling-writes.json');
+    const manifest = JSON.parse(readFileSync(manifestFile, 'utf8')) as { suites?: unknown; requiredCases?: unknown };
+    expect(Array.isArray(manifest.suites), 'the manifest declares "suites"').toBe(true);
+    expect(Array.isArray(manifest.requiredCases)).toBe(true);
+    const suites = (manifest.suites as unknown[]).map((s) => String(typeof s === 'object' && s !== null ? (s as { path: unknown }).path : s));
+    const sources = new Map(suites.map((s) => [s, existsSync(join(serverDir, s)) ? readFileSync(join(serverDir, s), 'utf8') : null]));
+    expect([...sources].filter(([, text]) => text === null).map(([s]) => s), 'declared suite files missing').toEqual([]);
+    const ids: string[] = [];
+    const unbound: string[] = [];
+    const supplied = new Set<string>();
+    for (const name of manifest.requiredCases as string[]) {
+      const found = [...name.matchAll(/\[([A-Z0-9]+(?:-[A-Z0-9]+)+)\]/g)].map((m) => m[1]);
+      expect(found, `one case id in: ${name.slice(0, 80)}`).toHaveLength(1);
+      const id = found[0];
+      ids.push(id);
+      const hits = suites.filter((s) => sources.get(s)?.includes(`[${id}]`));
+      if (hits.length === 0) unbound.push(id);
+      for (const s of hits) supplied.add(s);
+    }
+    // This file's cases and the finance settings suite's are among them.
+    expect(ids).toEqual(expect.arrayContaining(['D11W-01', 'D11W-07', 'D11F-X01', 'D11F-F01', 'D11G-T01', 'D11-X01']));
+    expect(unbound, 'required cases whose suite the manifest does not bind').toEqual([]);
+    expect(suites.filter((s) => !supplied.has(s)), 'bound suites that supply no required case').toEqual([]);
   });
 });
