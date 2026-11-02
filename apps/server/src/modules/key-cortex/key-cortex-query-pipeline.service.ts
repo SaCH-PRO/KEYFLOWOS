@@ -39,6 +39,7 @@ import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
 import { KeyCortexCommandService } from './key-cortex-command.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
+import { mapCortexBatchResult, unverifiedCortexBatchAction } from './key-cortex-batch-result.mapper';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexGenomeBridgeService, AutonomyCheck } from './key-cortex-genome-bridge.service';
@@ -405,72 +406,30 @@ export class KeyCortexQueryPipelineService {
         })),
       });
 
-      let autonomyCheckedCommands = parsedCommands;
-      const autonomyResults: Record<string, AutonomyVerdict | AutonomyCheck> = {};
-
-      if (parsedCommands.length > 0) {
-        try {
-          const approvedCommands: typeof parsedCommands = [];
-
-          for (const cmd of parsedCommands) {
-            const actionKey = `${cmd.module}.${cmd.action}`;
-            let autonomyCheck: AutonomyVerdict | AutonomyCheck;
-
-            if (this.autonomyOrchestrator) {
-              autonomyCheck = await this.autonomyOrchestrator.evaluateAction(
-                query.businessId,
-                actionKey,
-                cmd.parameters ?? {},
-                { proposedBy: query.userId, role: session.detectedRole },
-              );
-            } else if (flags.genomeV3Enabled && this.genomeBridgeService) {
-              autonomyCheck = await this.genomeBridgeService.checkAutonomy(
-                query.businessId,
-                actionKey,
-                cmd.parameters ?? {},
-              );
-            } else {
-              autonomyCheck = {
-                allowed: false,
-                requiresApproval: true,
-                reason: 'No autonomy oracle available',
-              } as AutonomyCheck;
-            }
-
-            autonomyResults[`${cmd.module}:${cmd.action}`] = autonomyCheck;
-
-            const requiresApproval =
-              ('requiresApproval' in autonomyCheck &&
-                autonomyCheck.requiresApproval) ||
-              ('tier' in autonomyCheck && autonomyCheck.tier === 'manual');
-            const isAllowed =
-              autonomyCheck.allowed &&
-              !requiresApproval &&
-              !cmd.requiresApproval;
-
-            if (isAllowed) {
-              approvedCommands.push(cmd);
-            } else {
-              this.logger.log(
-                `[processQuery][${correlationId}] Action ${actionKey} requires approval — autonomy: ${'reason' in autonomyCheck ? autonomyCheck.reason : ''}`,
-              );
-            }
-          }
-
-          autonomyCheckedCommands = approvedCommands;
-          this.logger.log(
-            `[processQuery][${correlationId}] Autonomy check: ${approvedCommands.length}/${parsedCommands.length} commands approved`,
-          );
-        } catch (err: any) {
-          this.logger.warn(
-            `[processQuery][${correlationId}] Autonomy check failed, using all parsed commands: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
+      // KF-EXEC-AUTH-FAIL-CLOSED-001 (#155), V1-02: fails closed. The same
+      // evaluation gates the stream path (streamQuery) before executeBatch.
+      const {
+        executable: autonomyCheckedCommands,
+        results: autonomyResults,
+        error: autonomyCheckError,
+      } = await this.evaluateParsedCommandAutonomy(
+        parsedCommands,
+        query,
+        session,
+        flags,
+        correlationId,
+        'processQuery',
+      );
 
       await this.logEvent(correlationId, 'STEP_5_CHECK_AUTONOMY', {
         totalCommands: parsedCommands.length,
         approvedCommands: autonomyCheckedCommands.length,
+        outcome:
+          autonomyCheckError === null
+            ? 'evaluated'
+            : 'authority_check_failed_closed',
+        authorityCheckFailed: autonomyCheckError !== null,
+        authorityCheckError: autonomyCheckError,
         autonomyMap: Object.fromEntries(
           Object.entries(autonomyResults).map(([k, v]) => [k, v.allowed]),
         ),
@@ -805,25 +764,16 @@ export class KeyCortexQueryPipelineService {
               ),
             );
 
-            const results = await (this.executorService as any).executeBatch(
+            // BatchResult is an object with nested ExecutionRecord results.
+            // Never run legacy actions after the v2 executor may have written.
+            const batch = await this.executorService.executeBatch(
               connectorCommands,
-              { businessId: query.businessId, userId: query.userId },
+              { sourceInfo: { businessId: query.businessId, userId: query.userId } },
             );
-
-            executedActions = results.map((result: any) => ({
-              actionType: (result.command.action
-                .toUpperCase()
-                .replace(/\s+/g, '_') ?? 'EXECUTE_TOOL') as CortexActionType,
-              status: result.success ? 'success' : 'error',
-              description: result.success
-                ? `Executed ${result.command.action} on ${result.command.module}`
-                : `Failed: ${result.error ?? 'Unknown error'}`,
-              result: result.success
-                ? (result.data as Record<string, unknown>)
-                : undefined,
-              error: result.error,
-              requiresApproval: false,
-            }));
+            executedActions = mapCortexBatchResult(batch);
+            if (batch.stoppedEarly) {
+              this.logger.warn(`[processQuery][${correlationId}] v2 batch stopped early; trailing commands were not attempted`);
+            }
 
             assistantMessage.metadata!.actionsTriggered = executedActions;
             this.logger.log(
@@ -833,16 +783,10 @@ export class KeyCortexQueryPipelineService {
             this.logger.error(
               `[processQuery][${correlationId}] v2 execution failed: ${err instanceof Error ? err.message : String(err)}`,
             );
-            const detectedActions = await this.actionDetectionService.detectActions(
-              completionResult.content ?? '',
-            );
-            if (detectedActions.length > 0) {
-              executedActions = await this.actionsService.executeActions(
-                detectedActions,
-                session as any,
-              );
-              assistantMessage.metadata!.actionsTriggered = executedActions;
-            }
+            // Result-shaping failures occur after possible effects. Do not
+            // retry through another executor without inspecting the audit.
+            executedActions = [unverifiedCortexBatchAction()];
+            assistantMessage.metadata!.actionsTriggered = executedActions;
           }
         } else {
           const detectedActions = query.enableActions
@@ -1462,52 +1406,70 @@ export class KeyCortexQueryPipelineService {
 
         let executedActions: CortexActionResult[] = [];
         if (flags.integrationV2Enabled && this.executorService) {
-          try {
-            const connectorCommands = detectedActions.map((a: any) => ({
-              module: 'autopilot' as any,
+          // V1-02: the commands parsed from the model's text pass the same
+          // fail-closed autonomy evaluation as processQuery's before anything
+          // reaches the executor. An evaluation that throws, or a verdict that
+          // is not usable, leaves none executable; nothing falls back to the
+          // legacy executor.
+          const { executable } = await this.evaluateParsedCommandAutonomy(
+            detectedActions.map((a) => ({
+              module: 'autopilot' as const,
               action: a.actionType.toLowerCase(),
-              parameters: { description: a.description },
-              businessId: query.businessId,
-              userId: query.userId,
-              source: 'key_cortex' as const,
-              timestamp: new Date(),
-              correlationId,
-            }));
-            const results = await (this.executorService as any).executeBatch(
-              connectorCommands,
-              { businessId: query.businessId, userId: query.userId },
-            );
-            executedActions = results.map(
-              (r: any) =>
-                ({
-                  actionType: r.command.action.toUpperCase() as CortexActionType,
-                  status: r.success ? 'success' : 'error',
-                  description: r.success
-                    ? `Executed ${r.command.action}`
-                    : `Failed: ${r.error ?? ''}`,
-                }) as CortexActionResult,
-            );
+              parameters: { description: a.description } as Record<string, unknown>,
+              requiresApproval: a.requiresApproval === true,
+            })),
+            query,
+            session,
+            flags,
+            correlationId,
+            'streamQuery',
+          );
+          if (executable.length > 0) {
+            try {
+              const connectorCommands = executable.map((cmd) => ({
+                module: cmd.module,
+                action: cmd.action,
+                parameters: cmd.parameters,
+                businessId: query.businessId,
+                userId: query.userId,
+                source: 'key_cortex' as const,
+                timestamp: new Date(),
+                correlationId,
+              }));
+              const batch = await this.executorService.executeBatch(
+                connectorCommands,
+                { sourceInfo: { businessId: query.businessId, userId: query.userId } },
+              );
+              executedActions = mapCortexBatchResult(batch);
+              if (batch.stoppedEarly) {
+                this.logger.warn(`[streamQuery][${correlationId}] v2 batch stopped early; trailing commands were not attempted`);
+              }
 
-            if (flags.genomeV3Enabled && this.genomeBridgeService) {
-              for (const action of executedActions) {
-                await (this.genomeBridgeService as any).reportActionOutcome(
-                  query.businessId,
-                  {
-                    actionId: action.actionType,
-                    status: action.status,
-                    description: action.description,
-                    result: action.result ?? {},
-                    timestamp: new Date(),
-                    correlationId,
-                  },
-                );
+              if (flags.genomeV3Enabled && this.genomeBridgeService) {
+                for (const action of executedActions) {
+                  await (this.genomeBridgeService as any).reportActionOutcome(
+                    query.businessId,
+                    {
+                      actionId: action.actionType,
+                      status: action.status,
+                      description: action.description,
+                      result: action.result ?? {},
+                      timestamp: new Date(),
+                      correlationId,
+                    },
+                  );
+                }
+              }
+            } catch (err: unknown) {
+              // A completed v2 batch must never be replayed by a legacy backend
+              // because result shaping, audit or reporting raised an exception.
+              this.logger.error(
+                `[streamQuery][${correlationId}] v2 batch outcome unavailable: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              if (executedActions.length === 0) {
+                executedActions = [unverifiedCortexBatchAction()];
               }
             }
-          } catch {
-            executedActions = await this.actionsService.executeActions(
-              detectedActions,
-              session as any,
-            );
           }
         } else {
           executedActions = await this.actionsService.executeActions(
@@ -1633,6 +1595,137 @@ export class KeyCortexQueryPipelineService {
         // Non-critical
       }
     }
+  }
+
+  // ── Autonomy helpers ──────────────────────────────────────
+
+  /**
+   * Evaluate a batch of parsed commands against the autonomy authority
+   * (KF-EXEC-AUTH-FAIL-CLOSED-001, #155; V1-02 applies it to both
+   * processQuery and streamQuery). A command is executable only when its
+   * verdict is usable, allowed, needs no approval, is not tier 'manual', and
+   * the command itself needs no approval.
+   *
+   * Fail closed: nothing parsed is executable until the whole batch has been
+   * evaluated. An authority error, or an unusable verdict, may only narrow the
+   * executable set, never widen it: the batch is atomic, so commands approved
+   * before the failure are not kept either.
+   */
+  private async evaluateParsedCommandAutonomy<
+    C extends {
+      module: string;
+      action: string;
+      parameters?: Record<string, unknown>;
+      requiresApproval?: boolean;
+    },
+  >(
+    commands: C[],
+    query: CortexQuery,
+    session: CortexSession,
+    flags: { integrationV2Enabled: boolean; genomeV3Enabled: boolean },
+    correlationId: string,
+    path: 'processQuery' | 'streamQuery',
+  ): Promise<{
+    executable: C[];
+    results: Record<string, AutonomyVerdict | AutonomyCheck>;
+    error: string | null;
+  }> {
+    let executable: C[] = [];
+    const results: Record<string, AutonomyVerdict | AutonomyCheck> = {};
+    let error: string | null = null;
+
+    if (commands.length > 0) {
+      try {
+        const approvedCommands: C[] = [];
+
+        for (const cmd of commands) {
+          const actionKey = `${cmd.module}.${cmd.action}`;
+          let autonomyCheck: AutonomyVerdict | AutonomyCheck;
+
+          if (this.autonomyOrchestrator) {
+            autonomyCheck = await this.autonomyOrchestrator.evaluateAction(
+              query.businessId,
+              actionKey,
+              cmd.parameters ?? {},
+              { proposedBy: query.userId, role: session.detectedRole },
+            );
+          } else if (flags.genomeV3Enabled && this.genomeBridgeService) {
+            autonomyCheck = await this.genomeBridgeService.checkAutonomy(
+              query.businessId,
+              actionKey,
+              cmd.parameters ?? {},
+            );
+          } else {
+            autonomyCheck = {
+              allowed: false,
+              tier: 'manual',
+              requiresApproval: true,
+              reason: 'No autonomy oracle available',
+            } as AutonomyCheck;
+          }
+
+          if (!this.isUsableAutonomyVerdict(autonomyCheck)) {
+            throw new Error(`Unusable autonomy verdict for ${actionKey}`);
+          }
+
+          results[`${cmd.module}:${cmd.action}`] = autonomyCheck;
+
+          const requiresApproval =
+            ('requiresApproval' in autonomyCheck &&
+              autonomyCheck.requiresApproval) ||
+            ('tier' in autonomyCheck && autonomyCheck.tier === 'manual');
+          const isAllowed =
+            autonomyCheck.allowed &&
+            !requiresApproval &&
+            !cmd.requiresApproval;
+
+          if (isAllowed) {
+            approvedCommands.push(cmd);
+          } else {
+            this.logger.log(
+              `[${path}][${correlationId}] Action ${actionKey} requires approval — autonomy: ${'reason' in autonomyCheck ? autonomyCheck.reason : ''}`,
+            );
+          }
+        }
+
+        executable = approvedCommands;
+        this.logger.log(
+          `[${path}][${correlationId}] Autonomy check: ${approvedCommands.length}/${commands.length} commands approved`,
+        );
+      } catch (err: unknown) {
+        // The batch is atomic: commands approved before the failure are not
+        // kept, because `executable` is only assigned above.
+        error = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `[${path}][${correlationId}] Autonomy check failed, failing closed: ${executable.length}/${commands.length} parsed commands executable: ${error}`,
+        );
+      }
+    }
+
+    return { executable, results, error };
+  }
+
+  /**
+   * A verdict is usable only when it is an object that states every field the
+   * execution decision reads: a boolean `allowed`, a boolean `requiresApproval`
+   * and a recognized `tier`. Anything else (nothing returned, a string, a
+   * truthy non-boolean, an `allowed` with the approval semantics left out) is
+   * not an answer from the authority and must not be read as one: an omitted
+   * `requiresApproval` or `tier` is not a statement that no approval is needed.
+   */
+  private isUsableAutonomyVerdict(verdict: unknown): boolean {
+    if (typeof verdict !== 'object' || verdict === null) {
+      return false;
+    }
+    const { allowed, requiresApproval, tier } = verdict as Record<
+      string,
+      unknown
+    >;
+    return (
+      typeof allowed === 'boolean' &&
+      typeof requiresApproval === 'boolean' &&
+      (tier === 'manual' || tier === 'supervised' || tier === 'full')
+    );
   }
 
   // ── Safety helpers ────────────────────────────────────────
