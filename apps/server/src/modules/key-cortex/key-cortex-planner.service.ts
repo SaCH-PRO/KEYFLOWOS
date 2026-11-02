@@ -427,8 +427,9 @@ export class KeyCortexPlannerService {
    * SYSTEM_PLAN_ACTOR. With no member (a system trigger or the query pipeline,
    * which call this directly): a member's plan runs as that member, and only a
    * plan no member created runs as SYSTEM_PLAN_ACTOR. On either path a plan
-   * runs only once it is claimed out of RUNNABLE_PLAN_STATUSES (409 otherwise:
-   * running, completed, or a concurrent execute claimed it first).
+   * runs only once it is claimed out of RUNNABLE_PLAN_STATUSES (409 'not
+   * claimable' otherwise: running, completed, or a concurrent execute claimed
+   * it first; V1-10, PRS-M24).
    */
   async executePlan(planId: string, options: ExecuteOptions = {}, member?: PlanExecutionActor) {
     const plan = member
@@ -455,7 +456,7 @@ export class KeyCortexPlannerService {
       data: { status: 'running', startedAt: new Date() },
     });
     if (claimed.count !== 1) {
-      throw new ConflictException('Plan is already running, completed or otherwise not runnable');
+      throw new ConflictException('Plan is not claimable: it is already running, completed or otherwise not runnable');
     }
 
     try {
@@ -489,6 +490,12 @@ export class KeyCortexPlannerService {
     const sorted = this.topologicalSort(plan.steps);
     const executed: ExecutionRecord[] = [];
     let stopped = false;
+    // V1-10 (PRS-M25): whether the run stopped at a step the executor parked
+    // for approval. The final status was read from `plan.steps`, the rows as
+    // loaded BEFORE the run (never 'waiting_approval'), so every pause was
+    // recorded as a failure: the plan 'failed', a failed plan result written
+    // and the saga failed.
+    let pausedForApproval = false;
 
     for (let i = 0; i < sorted.length; i++) {
       const step = sorted[i];
@@ -555,6 +562,7 @@ export class KeyCortexPlannerService {
           where: { id: step.id },
           data: { status: 'waiting_approval' },
         });
+        pausedForApproval = true;
         stopped = true;
       } else {
         await this.prisma.client.aiPlanStep.update({
@@ -576,11 +584,7 @@ export class KeyCortexPlannerService {
       }
     }
 
-    const finalStatus = stopped
-      ? plan.steps.some((s: any) => s.status === 'waiting_approval')
-        ? 'waiting_approval'
-        : 'failed'
-      : 'completed';
+    const finalStatus = pausedForApproval ? 'waiting_approval' : stopped ? 'failed' : 'completed';
 
     await this.prisma.client.aiPlan.update({
       where: { id: planId },
@@ -594,9 +598,11 @@ export class KeyCortexPlannerService {
       await this.recordPlanResult(planId, executed, finalStatus);
     }
 
-    await (finalStatus === 'completed'
-      ? this.saga.completeSaga(saga.id)
-      : this.saga.failSaga(saga.id));
+    // A plan waiting for approval has not failed: its saga is left open
+    // ('running', the parked step still 'pending'), neither failed nor
+    // compensated: a pause undoes none of the steps that ran.
+    if (finalStatus === 'completed') await this.saga.completeSaga(saga.id);
+    else if (finalStatus === 'failed') await this.saga.failSaga(saga.id);
 
     return { planId, status: finalStatus, executed: executed.length, sagaId: saga.id };
   }
