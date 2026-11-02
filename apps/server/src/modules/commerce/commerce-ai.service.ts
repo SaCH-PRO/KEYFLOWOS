@@ -132,20 +132,49 @@ export class CommerceAiService {
     return parts.join('\n');
   }
 
-  private async findInvoice(businessId: string, params: Record<string, any>) {
+  /**
+   * The invoice a command names, by id or by number, in this tenant.
+   *
+   * V1-42 review (SEC-V42-2): mark_paid records a real payment and its ledger
+   * posting, and void_invoice reverses the receivable, on the invoice found
+   * here. A number was matched with `contains` and findFirst (no order, no
+   * exact match), so `INV-001` could pay `INV-0012`. The invoice whose number
+   * is exactly the one given wins (numbers are unique per business). Failing
+   * that, a partial number (the command prompt allows one) must match exactly
+   * one invoice; one that matches more is refused, naming the ambiguity, and
+   * nothing is touched.
+   */
+  private async findInvoice(
+    businessId: string,
+    params: Record<string, any>,
+  ): Promise<{ invoice: { id: string; invoiceNumber: string } | null; error: string }> {
+    const select = { id: true, invoiceNumber: true } as const;
+    const notFound = { invoice: null, error: 'Invoice not found' };
     if (params.invoiceId) {
-      return this.db.invoice.findFirst({
+      const invoice = await this.db.invoice.findFirst({
         where: { id: String(params.invoiceId), businessId, deletedAt: null },
-        select: { id: true, invoiceNumber: true },
+        select,
       });
+      return invoice ? { invoice, error: '' } : notFound;
     }
     if (params.invoiceNumber) {
-      return this.db.invoice.findFirst({
-        where: { businessId, invoiceNumber: { contains: String(params.invoiceNumber) }, deletedAt: null },
-        select: { id: true, invoiceNumber: true },
+      const number = String(params.invoiceNumber);
+      const exact = await this.db.invoice.findFirst({
+        where: { businessId, invoiceNumber: number, deletedAt: null },
+        select,
       });
+      if (exact) return { invoice: exact, error: '' };
+      const partial = await this.db.invoice.findMany({
+        where: { businessId, invoiceNumber: { contains: number }, deletedAt: null },
+        select,
+        take: 2,
+      });
+      if (partial.length === 1) return { invoice: partial[0], error: '' };
+      if (partial.length > 1) {
+        return { invoice: null, error: `Invoice number "${number}" matches more than one invoice; give the full number` };
+      }
     }
-    return null;
+    return notFound;
   }
 
   private async findProduct(businessId: string, params: Record<string, any>) {
@@ -831,24 +860,24 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
     try {
       switch (action) {
         case 'mark_paid': {
-          const invoice = await this.findInvoice(businessId, params);
-          if (!invoice) return { success: false, error: `Invoice not found` };
+          const { invoice, error } = await this.findInvoice(businessId, params);
+          if (!invoice) return { success: false, error };
           await this.commerce.markInvoicePaid(invoice.id, actorId, businessId);
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Invoice #${invoice.invoiceNumber} marked as paid`, invoiceId: invoice.id };
         }
 
         case 'void_invoice': {
-          const invoice = await this.findInvoice(businessId, params);
-          if (!invoice) return { success: false, error: `Invoice not found` };
+          const { invoice, error } = await this.findInvoice(businessId, params);
+          if (!invoice) return { success: false, error };
           await this.commerce.updateInvoiceStatus({ invoiceId: invoice.id, status: 'VOID', actorId, businessId });
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Invoice #${invoice.invoiceNumber} voided`, invoiceId: invoice.id };
         }
 
         case 'send_reminder': {
-          const invoice = await this.findInvoice(businessId, params);
-          if (!invoice) return { success: false, error: `Invoice not found` };
+          const { invoice, error } = await this.findInvoice(businessId, params);
+          if (!invoice) return { success: false, error };
           const reminder = await this.generateInvoiceReminder(businessId, invoice.id);
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Reminder drafted for Invoice #${invoice.invoiceNumber}`, invoiceId: invoice.id, reminder };

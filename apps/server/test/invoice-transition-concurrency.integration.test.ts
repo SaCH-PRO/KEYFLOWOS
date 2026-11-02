@@ -36,11 +36,34 @@
  *         (base: raw VOID, the receivable left open, commerce-ai.service.ts:825-832)
  *   AI-04 RED-BEFORE ai-execute void_invoice on a PAID invoice -> 409, still PAID (base: VOID over PAID)
  *   AI-05 RED-BEFORE ai-execute mark_paid on a VOID invoice -> 409, no payment (base: PAID over VOID)
- *   UN-01 RED-BEFORE + LEDGER undoing a SENT invoice voids it with an AR reversal (nets to zero) and
- *         one invoice.void (base: raw revert to DRAFT with the receivable open, commerce.service.ts:674)
+ *   UN-01 + LEDGER (review SEC-V42-1) undoing a SENT invoice returns it to DRAFT through the workflow,
+ *         non-terminal: no void, no invoice.* event, the AR recognition left posted, so re-issuing it
+ *         posts nothing twice (the receivable stays 100, one recognition row). The packet first voided
+ *         it with an AR reversal; VOID is terminal and both undo routes (agent.controller.ts,
+ *         ai.controller.ts) check no revenue scope and do not bind the undo's tenant to the route's,
+ *         so the undo stays non-terminal until a follow-up packet guards them
  *   UN-02 control: undoing a DRAFT soft-deletes it; undoing a PAID invoice still returns it to DRAFT
  *         (pinned by payments-mark-paid MP-16), now through the workflow, with no event
  *   UN-03 RED-BEFORE undoing a VOID invoice is refused 409: VOID is terminal (base: reverted to DRAFT)
+ *   UN-04 + LEDGER (review CR-V42-3) undoing an OVERDUE invoice that a payment of 40 touched returns it
+ *         to DRAFT: the payment stays SUCCESSFUL, the receivable stays 60, nothing is reversed (the
+ *         packet voided it by status alone: the full recognition reversed, the receivable -40)
+ *   UN-05 (review SEC-V42-1) through UndoService.undo, the service both undo routes call, a SENT,
+ *         PENDING, OVERDUE or FAILED invoice comes back reverted_to_draft, never voided
+ *   LC-02c (review CR-V42-2) two overlapping updateInvoiceStatus(SENT) calls on a DRAFT (the
+ *         send-email after Gmail accepted the message) both answer SENT; one invoice.sent, one
+ *         recognition, one timeline entry (the packet answered the loser 409)
+ *   LC-02d (review CR-V42-2) two overlapping markInvoicePaid calls on a zero-balance invoice both
+ *         answer PAID; one invoice.paid (the packet answered the loser 409)
+ *   PF-01 (review CR-V42-1) PATCH payment-failed on an invoice already FAILED (a second failed
+ *         attempt) -> 200, still FAILED, its timeline entry logged, no second invoice.payment_failed
+ *         (the packet answered 409 and logged nothing; the base answered 200)
+ *   PF-02 (review CR-V42-1 / CR-V42-2) two overlapping markInvoicePaymentFailed calls on a SENT invoice
+ *         both answer FAILED; one invoice.payment_failed; both attempts logged
+ *   AI-06 (review SEC-V42-2) mark_paid by invoiceNumber binds the invoice with exactly that number,
+ *         not another whose number contains it (the packet paid whichever `contains` matched first)
+ *   AI-07 (review SEC-V42-2) mark_paid by a partial number that matches more than one invoice is
+ *         refused; nothing is paid
  *
  * The static ratchet on every other status writer is
  * apps/server/src/modules/commerce/invoice-status-writers.spec.ts.
@@ -90,6 +113,8 @@ const ID = {
 
 type Emitted = { name: string; payload: any };
 const emitted: Emitted[] = [];
+/** The contact timeline entries CommerceService logged (CrmService.logContactEvent). */
+const contactEvents: Array<{ type: string; data: any }> = [];
 const recorder = {
   emit: (name: string, payload: unknown) => {
     emitted.push({ name, payload });
@@ -110,6 +135,7 @@ let testing: any;
 let commerce: any;
 let workflow: any;
 let coa: any;
+let undoService: any;
 let DelegationLoopServiceRef: any;
 
 async function cleanup() {
@@ -140,25 +166,33 @@ function aiExecute(as: string, action: string, params: Record<string, unknown>) 
 }
 
 /** A 100.00 invoice moved to `status` the way the product moves it (issue posts the receivable). */
-async function seedInvoice(key: string, status: 'DRAFT' | 'SENT' | 'OVERDUE' | 'PAID' | 'VOID', dueInDays = 14) {
+async function seedInvoice(
+  key: string,
+  status: 'DRAFT' | 'SENT' | 'PENDING' | 'OVERDUE' | 'FAILED' | 'PAID' | 'VOID',
+  dueInDays = 14,
+  opts: { invoiceNumber?: string; total?: number } = {},
+) {
   const id = `${P}inv_${key}`;
+  const total = opts.total ?? TOTAL;
   await db.invoice.create({
     data: {
       id,
-      invoiceNumber: `${P}INV-${key}`,
+      invoiceNumber: opts.invoiceNumber ?? `${P}INV-${key}`,
       businessId: ID.biz,
       contactId: ID.contact,
       status: 'DRAFT',
-      subtotal: TOTAL,
-      total: TOTAL,
+      subtotal: total,
+      total,
       currency: 'TTD',
       dueDate: new Date(Date.now() + dueInDays * DAY_MS),
-      items: { create: [{ description: `v42a ${key}`, quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
+      items: { create: [{ description: `v42a ${key}`, quantity: 1, unitPrice: total, total }] },
     },
   });
   if (status === 'DRAFT') return id;
   await workflow.transition(id, 'SENT', { sentAt: new Date() });
+  if (status === 'PENDING') await workflow.transition(id, 'PENDING');
   if (status === 'OVERDUE') await workflow.transition(id, 'OVERDUE');
+  if (status === 'FAILED') await workflow.transition(id, 'FAILED');
   if (status === 'VOID') await workflow.transition(id, 'VOID');
   if (status === 'PAID') {
     await commerce.recordPayment(id, ID.biz, { amount: TOTAL, method: 'cash', reference: `${P}seed_${key}` }, { actorId: ID.owner });
@@ -192,6 +226,12 @@ async function receivableNet(invoiceId: string): Promise<number> {
     ID.biz, ar.id, invoiceId,
   );
   return Math.round((Number(row.d) - Number(row.c)) * 100) / 100;
+}
+
+/** The invoice's own accrual recognition rows (sourceType Invoice), their statuses sorted. */
+async function recognitionStatuses(invoiceId: string): Promise<string[]> {
+  const rows = await db.financialTransaction.findMany({ where: { businessId: ID.biz, sourceType: 'Invoice', sourceId: invoiceId }, select: { status: true } });
+  return rows.map((t: any) => t.status).sort();
 }
 
 async function paymentPostings(paymentId: string) {
@@ -295,6 +335,7 @@ beforeAll(async () => {
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   ({ DelegationLoopService: DelegationLoopServiceRef } = await import('../src/modules/autopilot/delegation-loop.service'));
+  const { UndoService } = await import('../src/modules/ai/undo.service');
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
@@ -322,7 +363,15 @@ beforeAll(async () => {
       { provide: AiUsageService, useValue: { callAi: async () => ({ content: '{}' }) } },
       { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
       { provide: EventEmitter2, useValue: recorder },
-      { provide: CrmService, useValue: { logContactEvent: async () => null } },
+      {
+        provide: CrmService,
+        useValue: {
+          logContactEvent: async (e: { type: string; data: any }) => {
+            contactEvents.push(e);
+            return null;
+          },
+        },
+      },
       { provide: EvidenceService, useValue: {} },
       { provide: TaskAssignmentService, useValue: {} },
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
@@ -341,6 +390,9 @@ beforeAll(async () => {
   commerce = testing.get(CommerceService);
   workflow = testing.get(InvoiceWorkflowService);
   coa = testing.get(ChartOfAccountsSeederService);
+  // The real UndoService both undo routes call (POST /ai/businesses/:businessId/agent/undo/:undoId and
+  // the plan-step undo); it resolves CommerceService from this module. Its execution log is off the boundary.
+  undoService = new UndoService(testing.get(PrismaService), recorder as any, { log: async () => undefined } as any, testing);
 
   app = testing.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -382,6 +434,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   emitted.length = 0;
+  contactEvents.length = 0;
 });
 
 describe('CAS: one transition wins, the other is refused 409 with no event (CF-39)', () => {
@@ -414,6 +467,31 @@ describe('CAS: one transition wins, the other is refused 409 with no event (CF-3
     expect(eventsFor(inv)).toHaveLength(0);
   }, 60_000);
 
+  it('LC-02c (review CR-V42-2): two overlapping updateInvoiceStatus(SENT) calls on a DRAFT -> both answer SENT; one invoice.sent, one recognition, one timeline entry', async () => {
+    const inv = await seedInvoice('lc02c', 'DRAFT');
+    // What send-email calls once Gmail has accepted the message (commerce.controller.ts send-email).
+    const send = () => commerce.updateInvoiceStatus({ invoiceId: inv, status: 'SENT', actorId: ID.owner, businessId: ID.biz, sentAt: new Date() });
+    const results = await interleave(inv, 2, () => [send(), send()]);
+    const outcome = results.map((r) => (r.status === 'fulfilled' ? `fulfilled ${(r.value as any).status}` : `rejected ${String(r.reason)}`));
+    expect(outcome).toEqual(['fulfilled SENT', 'fulfilled SENT']);
+    for (const r of results) expect((r as PromiseFulfilledResult<any>).value).toMatchObject({ id: inv, status: 'SENT' });
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    expect(eventsFor(inv, 'invoice.sent')).toHaveLength(1);
+    expect(await recognitionStatuses(inv)).toEqual(['POSTED']);
+    expect(await receivableNet(inv)).toBe(TOTAL);
+    expect(contactEvents.filter((e) => e.type === 'invoice.sent')).toHaveLength(1);
+  }, 60_000);
+
+  it('LC-02d (review CR-V42-2): two overlapping markInvoicePaid calls on a zero-balance invoice -> both answer PAID; one invoice.paid; no payment invented', async () => {
+    const inv = await seedInvoice('lc02d', 'SENT', 14, { total: 0 });
+    const results = await interleave(inv, 2, () => [commerce.markInvoicePaid(inv, ID.owner, ID.biz), commerce.markInvoicePaid(inv, ID.owner, ID.biz)]);
+    const outcome = results.map((r) => (r.status === 'fulfilled' ? `fulfilled ${(r.value as any).status}` : `rejected ${String(r.reason)}`));
+    expect(outcome).toEqual(['fulfilled PAID', 'fulfilled PAID']);
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    expect(eventsFor(inv, 'invoice.paid')).toHaveLength(1);
+    expect(await db.payment.count({ where: { invoiceId: inv } })).toBe(0);
+  }, 60_000);
+
   it('LC-03 RED-BEFORE: a payment settles the invoice while transition(OVERDUE) is in flight -> the transition is refused 409; PAID stands; no invoice.overdue', async () => {
     const inv = await seedInvoice('lc03', 'SENT');
     const results = await interleave(
@@ -427,6 +505,37 @@ describe('CAS: one transition wins, the other is refused 409 with no event (CF-3
     expect((results[0] as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
     expect((await invoiceRow(inv)).status).toBe('PAID');
     expect(eventsFor(inv, 'invoice.overdue')).toHaveLength(0);
+  }, 60_000);
+});
+
+describe('payment-failed answers a repeated failed attempt (review CR-V42-1)', () => {
+  const paymentFailed = (inv: string, reason: string) =>
+    agent().patch(`/commerce/invoices/${inv}/payment-failed?businessId=${ID.biz}`).set(HEADER, ID.owner).send({ reason });
+  const failedAttempts = () => contactEvents.filter((e) => e.type === 'invoice.payment_failed').map((e) => e.data?.reason);
+
+  it('PF-01: PATCH payment-failed on an invoice already FAILED (a second failed attempt) -> 200; still FAILED; the attempt logged; no second invoice.payment_failed', async () => {
+    const inv = await seedInvoice('pf01', 'SENT');
+    const first = await paymentFailed(inv, 'card declined');
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const second = await paymentFailed(inv, 'card declined again');
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    expect(second.body).toMatchObject({ id: inv, status: 'FAILED' });
+    expect((await invoiceRow(inv)).status).toBe('FAILED');
+    expect(eventsFor(inv, 'invoice.payment_failed')).toHaveLength(1);
+    expect(failedAttempts()).toEqual(['card declined', 'card declined again']);
+  }, 60_000);
+
+  it('PF-02: two overlapping markInvoicePaymentFailed calls on a SENT invoice -> both answer FAILED; one invoice.payment_failed; both attempts logged', async () => {
+    const inv = await seedInvoice('pf02', 'SENT');
+    const results = await interleave(inv, 2, () => [
+      commerce.markInvoicePaymentFailed(inv, ID.owner, 'attempt 1', ID.biz),
+      commerce.markInvoicePaymentFailed(inv, ID.owner, 'attempt 2', ID.biz),
+    ]);
+    const outcome = results.map((r) => (r.status === 'fulfilled' ? `fulfilled ${(r.value as any).status}` : `rejected ${String(r.reason)}`));
+    expect(outcome).toEqual(['fulfilled FAILED', 'fulfilled FAILED']);
+    expect((await invoiceRow(inv)).status).toBe('FAILED');
+    expect(eventsFor(inv, 'invoice.payment_failed')).toHaveLength(1);
+    expect(failedAttempts().sort()).toEqual(['attempt 1', 'attempt 2']);
   }, 60_000);
 });
 
@@ -564,17 +673,51 @@ describe('POST /commerce/businesses/:businessId/ai-execute goes through the work
     expect(await db.payment.count({ where: { invoiceId: inv } })).toBe(0);
     expect(eventsFor(inv)).toHaveLength(0);
   }, 60_000);
+
+  it('AI-06 (review SEC-V42-2): mark_paid by invoiceNumber pays the invoice with exactly that number, not another whose number contains it', async () => {
+    const longer = await seedInvoice('ai06a', 'SENT', 14, { invoiceNumber: `${P}N-0012` });
+    const named = await seedInvoice('ai06b', 'SENT', 14, { invoiceNumber: `${P}N-001` });
+    const res = await aiExecute(ID.owner, 'mark_paid', { invoiceNumber: `${P}N-001` });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ success: true, invoiceId: named });
+    expect((await invoiceRow(named)).status).toBe('PAID');
+    expect(await db.payment.count({ where: { invoiceId: named, status: 'SUCCESSFUL' } })).toBe(1);
+    expect((await invoiceRow(longer)).status).toBe('SENT');
+    expect(await db.payment.count({ where: { invoiceId: longer } })).toBe(0);
+    expect(eventsFor(longer)).toHaveLength(0);
+  }, 60_000);
+
+  it('AI-07 (review SEC-V42-2): mark_paid by a partial number that matches more than one invoice -> refused; nothing paid', async () => {
+    const a = await seedInvoice('ai07a', 'SENT', 14, { invoiceNumber: `${P}M-0012` });
+    const b = await seedInvoice('ai07b', 'SENT', 14, { invoiceNumber: `${P}M-0013` });
+    const res = await aiExecute(ID.owner, 'mark_paid', { invoiceNumber: `${P}M-001` });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ success: false });
+    expect(res.body.error).toMatch(/more than one invoice/);
+    for (const inv of [a, b]) {
+      expect((await invoiceRow(inv)).status).toBe('SENT');
+      expect(await db.payment.count({ where: { invoiceId: inv } })).toBe(0);
+      expect(eventsFor(inv)).toHaveLength(0);
+    }
+  }, 60_000);
 });
 
 describe('Undo of an AI-created invoice (CommerceService.undoInvoice) goes through the workflow', () => {
-  it('UN-01 RED-BEFORE + LEDGER: undoing a SENT invoice voids it; the AR recognition is reversed (nets to zero); one invoice.void', async () => {
+  it('UN-01 + LEDGER (review SEC-V42-1): undoing a SENT invoice returns it to DRAFT, non-terminal: no void, no reversal, no event; re-issuing it posts nothing twice', async () => {
     const inv = await seedInvoice('un01', 'SENT');
     expect(await receivableNet(inv)).toBe(TOTAL);
     const result = await commerce.undoInvoice(inv, ID.biz);
-    expect(result).toMatchObject({ id: inv, status: 'voided' });
-    expect((await invoiceRow(inv)).status).toBe('VOID');
-    expect(await receivableNet(inv)).toBe(0);
-    expect(eventsFor(inv, 'invoice.void')).toHaveLength(1);
+    expect(result).toMatchObject({ id: inv, status: 'reverted_to_draft' });
+    expect((await invoiceRow(inv)).status).toBe('DRAFT');
+    expect(eventsFor(inv)).toHaveLength(0);
+    expect(await recognitionStatuses(inv)).toEqual(['POSTED']);
+    expect(await receivableNet(inv)).toBe(TOTAL);
+    // Non-terminal: a person can issue it again, and the recognition is not posted a second time.
+    await workflow.transition(inv, 'SENT', { sentAt: new Date() });
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    expect(await recognitionStatuses(inv)).toEqual(['POSTED']);
+    expect(await receivableNet(inv)).toBe(TOTAL);
+    expect(eventsFor(inv, 'invoice.sent')).toHaveLength(1);
   }, 60_000);
 
   it('UN-02 control: undoing a DRAFT soft-deletes it; undoing a PAID invoice returns it to DRAFT (MP-16) with no event', async () => {
@@ -593,5 +736,36 @@ describe('Undo of an AI-created invoice (CommerceService.undoInvoice) goes throu
     await expect(commerce.undoInvoice(inv, ID.biz)).rejects.toMatchObject({ status: 409 });
     expect((await invoiceRow(inv)).status).toBe('VOID');
     expect(eventsFor(inv)).toHaveLength(0);
+  }, 60_000);
+
+  it('UN-04 + LEDGER (review CR-V42-3): undoing an OVERDUE invoice a payment of 40 touched returns it to DRAFT; the payment stands; the receivable stays 60; nothing reversed', async () => {
+    const inv = await seedInvoice('un04', 'SENT');
+    await commerce.recordPayment(inv, ID.biz, { amount: 40, method: 'cash', reference: `${P}un04_pay` }, { actorId: ID.owner });
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_PAID');
+    await commerce.updateInvoiceStatus({ invoiceId: inv, status: 'OVERDUE', actorId: ID.owner, businessId: ID.biz });
+    expect((await invoiceRow(inv)).status).toBe('OVERDUE');
+    expect(await receivableNet(inv)).toBe(60);
+    emitted.length = 0;
+    const result = await commerce.undoInvoice(inv, ID.biz);
+    expect(result).toMatchObject({ id: inv, status: 'reverted_to_draft' });
+    expect((await invoiceRow(inv)).status).toBe('DRAFT');
+    const payments = await db.payment.findMany({ where: { invoiceId: inv } });
+    expect(payments.map((p: any) => [p.status, Number(p.amount)])).toEqual([['SUCCESSFUL', 40]]);
+    expect(await recognitionStatuses(inv)).toEqual(['POSTED']);
+    expect(await receivableNet(inv)).toBe(60);
+    expect(eventsFor(inv)).toHaveLength(0);
+  }, 60_000);
+
+  it('UN-05 (review SEC-V42-1): through UndoService.undo (both undo routes) a SENT, PENDING, OVERDUE or FAILED invoice comes back reverted_to_draft, never voided', async () => {
+    for (const status of ['SENT', 'PENDING', 'OVERDUE', 'FAILED'] as const) {
+      const inv = await seedInvoice(`un05_${status.toLowerCase()}`, status);
+      const undoId = await undoService.registerAction({ businessId: ID.biz, actionType: 'create_invoice', entityType: 'invoice', entityId: inv, originalPayload: {} });
+      const out = await undoService.undo(undoId, ID.owner);
+      expect(out, `${status}: ${JSON.stringify(out)}`).toMatchObject({ success: true, restored: { id: inv, status: 'reverted_to_draft' } });
+      expect((await invoiceRow(inv)).status, status).toBe('DRAFT');
+      expect(await recognitionStatuses(inv), status).toEqual(['POSTED']);
+      expect(await receivableNet(inv), status).toBe(TOTAL);
+      expect(eventsFor(inv), status).toHaveLength(0);
+    }
   }, 60_000);
 });

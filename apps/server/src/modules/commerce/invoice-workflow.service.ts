@@ -76,16 +76,32 @@ const REFUND_REOPENS_TO_SENT: ReadonlySet<InvoiceStatus> = new Set<InvoiceStatus
 
 /**
  * V1-42-DM-LIFECYCLE-OWNER-CAS: the statuses the AI undo
- * (CommerceService.undoInvoice) returns to DRAFT. An issued invoice nothing
- * has been paid on (SENT, PENDING, OVERDUE, FAILED) is voided instead, through
- * transition(), so its receivable is reversed; DRAFT is soft-deleted; VOID is
- * terminal and is not undone. What is left are the statuses money or credit
- * has touched, which cannot be voided: the undo has always put those back to
- * DRAFT for a person to review (payments-mark-paid MP-16, payments-manual
- * PM-20), and it now does so here, compare-and-set, rather than by a raw
- * write in CommerceService.
+ * (CommerceService.undoInvoice) returns to DRAFT: every status but DRAFT
+ * (soft-deleted instead) and VOID (terminal, so undoing it is a 409). The undo
+ * has always put an invoice back to DRAFT for a person to review
+ * (payments-mark-paid MP-16, payments-manual PM-20); it now does so here,
+ * compare-and-set, rather than by a raw write in CommerceService.
+ *
+ * V1-42 review (SEC-V42-1, CR-V42-3): the undo stays non-terminal. The packet
+ * voided an issued invoice (SENT, PENDING, OVERDUE, FAILED) instead, but VOID
+ * is terminal, and both callers (POST /ai/businesses/:businessId/agent/undo/
+ * :undoId and the plan-step undo) check no revenue scope and never bind the
+ * undo's tenant to the route's, so a member without revenue authority, or
+ * another tenant's owner, could void an invoice for good. Choosing by status
+ * also voided an OVERDUE or FAILED invoice a payment had touched, reversing its
+ * whole receivable while the payment stayed. Until those routes require
+ * revenue:write and bind the tenant (a follow-up packet; they are outside
+ * V1-42), every undone invoice returns to DRAFT: status only, no posting, no
+ * event. Its payments and its accrual recognition stay as they are, so
+ * re-issuing it posts nothing twice (RevenuePostingService.onInvoiceFinalized
+ * is idempotent per invoice) and voiding it later reverses the recognition
+ * once.
  */
 const UNDO_RETURNS_TO_DRAFT: ReadonlySet<string> = new Set<string>([
+  'SENT',
+  'PENDING',
+  'OVERDUE',
+  'FAILED',
   'PAID',
   'PARTIALLY_PAID',
   'PARTIALLY_CREDITED',
@@ -568,12 +584,12 @@ export class InvoiceWorkflowService {
 
   /**
    * V1-42: the AI undo's return of an invoice to DRAFT, for the statuses in
-   * UNDO_RETURNS_TO_DRAFT only (money or credit is on it, so it cannot be
-   * voided). Compare-and-set like transition(); writes the status alone, with
-   * no posting and no event, exactly as the undo did before it moved here.
-   * Any other status is a 409: CommerceService.undoInvoice voids an issued
-   * unpaid invoice through transition() and soft-deletes a DRAFT, and VOID is
-   * terminal.
+   * UNDO_RETURNS_TO_DRAFT (every one but DRAFT and VOID). Compare-and-set like
+   * transition(); writes the status alone, with no posting and no event,
+   * exactly as the undo did before it moved here. Any other status is a 409:
+   * CommerceService.undoInvoice soft-deletes a DRAFT, and VOID is terminal.
+   * Non-terminal on purpose until its callers are guarded (V1-42 review
+   * SEC-V42-1, see UNDO_RETURNS_TO_DRAFT).
    */
   async returnToDraftOnUndo(invoiceId: string) {
     return this.prisma.client.$transaction(async (tx) => {
