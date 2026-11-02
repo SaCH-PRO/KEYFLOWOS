@@ -11,6 +11,8 @@ import type {
   ConnectorSmokeResult,
 } from './connector.interface';
 
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
+
 export interface ConnectorDashboardEntry {
   meta: ConnectorMeta;
   health: ConnectorHealth;
@@ -235,7 +237,7 @@ export class ConnectorRegistryService {
           status: 'connected',
         };
         if (result.account) update.connectedAccount = result.account;
-        await this.prisma.client.connectorStatus.upsert({
+        const args = {
           where: { businessId_connectorType: { businessId, connectorType: type } },
           create: {
             businessId,
@@ -249,7 +251,16 @@ export class ConnectorRegistryService {
             ...update,
             syncCount: { increment: 1 },
           },
-        });
+        };
+        if (type === 'gmail') {
+          // R0-CMF6b: the gmail row follows the business mailbox (see writeWhileGmailMailboxLinked).
+          const recorded = await this.writeWhileGmailMailboxLinked(businessId, (tx) => tx.connectorStatus.upsert(args));
+          if (!recorded) {
+            this.logger.warn(`Gmail smoke test for ${businessId}: the mailbox was disconnected while it ran; status not written`);
+          }
+        } else {
+          await this.prisma.client.connectorStatus.upsert(args);
+        }
       } catch (e) {
         this.logger.warn(
           `Failed to persist smoke success for ${type}: ${e instanceof Error ? e.message : String(e)}`,
@@ -269,6 +280,32 @@ export class ConnectorRegistryService {
       duration: Date.now() - startedAt,
     });
     return result;
+  }
+
+  /**
+   * R0-CMF6b (review SEC-CMF6-2): the gmail connector row follows the business
+   * mailbox. GmailService.disconnectGmail clears the mailbox and marks the row
+   * disconnected in one transaction that first locks the business row; a smoke
+   * test that had started before it used to write the row connected again
+   * afterwards (or create one), so the nightly sync selected a mailbox that was
+   * gone. Its write now runs in a transaction that takes the same lock first
+   * and is made only while the business still has its mailbox
+   * (gmail_access_token, what GmailConnector.isConnected reads): a disconnect
+   * that committed first is seen and nothing is written; one that starts later
+   * waits for this write, then marks the row disconnected. Returns whether it
+   * wrote. GmailIngestionService.syncInbox applies the same rule.
+   */
+  private async writeWhileGmailMailboxLinked(
+    businessId: string,
+    write: (tx: PrismaTx) => Promise<unknown>,
+  ): Promise<boolean> {
+    return this.prisma.client.$transaction(async (tx) => {
+      const rows = (await tx.$queryRaw`
+        SELECT gmail_access_token IS NOT NULL AS linked FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`) as Array<{ linked: boolean }>;
+      if (rows[0]?.linked !== true) return false;
+      await write(tx);
+      return true;
+    });
   }
 
   async reconnectConnector(type: ConnectorType, businessId: string): Promise<{ connected: boolean; authUrl?: string }> {

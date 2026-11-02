@@ -9,6 +9,10 @@ import { KEY_INBOX_CHANNELS } from '../../../modules/key-inbox/key-inbox.constan
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const INBOX_LABEL = 'INBOX';
+/** R0-CMF6b: what a sync reports when the mailbox was disconnected while it ran (its status write was left out). */
+const DISCONNECTED_DURING_SYNC = 'Gmail was disconnected while this sync ran; its connector status was left as the disconnect set it';
+
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
 
 interface GmailHeader {
   name: string;
@@ -178,8 +182,9 @@ export class GmailIngestionService {
         }
       }
 
-      // Persist sync cursor and health regardless of per-message errors.
-      await this.prisma.client.connectorStatus.upsert({
+      // Persist sync cursor and health regardless of per-message errors, while
+      // the business still has its mailbox (R0-CMF6b).
+      const recorded = await this.writeStatusWhileMailboxLinked(businessId, (tx) => tx.connectorStatus.upsert({
         where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
         create: {
           businessId,
@@ -201,7 +206,17 @@ export class GmailIngestionService {
           lastError: errors.length > 0 ? errors.slice(0, 3).join('; ') : null,
           lastErrorAt: errors.length > 0 ? new Date() : undefined,
         },
-      });
+      }));
+
+      if (!recorded) {
+        this.logger.warn(`Gmail sync for ${businessId}: the mailbox was disconnected while it ran; status not written`);
+        return {
+          success: false,
+          itemsSynced: ingested,
+          errors: [...errors, DISCONNECTED_DURING_SYNC],
+          duration: Date.now() - start,
+        };
+      }
 
       return {
         success: errors.length === 0,
@@ -213,7 +228,8 @@ export class GmailIngestionService {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Gmail ingestion failed for ${businessId}: ${message}`);
 
-      await this.prisma.client.connectorStatus.upsert({
+      // R0-CMF6b: a failure after a disconnect leaves the row as the disconnect set it.
+      await this.writeStatusWhileMailboxLinked(businessId, (tx) => tx.connectorStatus.upsert({
         where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
         create: {
           businessId,
@@ -229,7 +245,7 @@ export class GmailIngestionService {
           lastErrorAt: new Date(),
           errorCount: { increment: 1 },
         },
-      });
+      }));
 
       return {
         success: false,
@@ -238,6 +254,32 @@ export class GmailIngestionService {
         duration: Date.now() - start,
       };
     }
+  }
+
+  /**
+   * R0-CMF6b (review SEC-CMF6-2): a sync's final status write follows the
+   * business mailbox. GmailService.disconnectGmail clears the mailbox and marks
+   * the gmail connector row disconnected in one transaction that first locks
+   * the business row; a sync that had started before it used to write the row
+   * connected (or error) again afterwards, or create one, so the nightly sync
+   * selected a mailbox that was gone. The write now runs in a transaction that
+   * takes the same lock first and is made only while the business still has
+   * its mailbox (gmail_access_token, what GmailConnector.isConnected reads): a
+   * disconnect that committed first is seen and nothing is written; one that
+   * starts later waits for this write, then marks the row disconnected.
+   * Returns whether it wrote.
+   */
+  private async writeStatusWhileMailboxLinked(
+    businessId: string,
+    write: (tx: PrismaTx) => Promise<unknown>,
+  ): Promise<boolean> {
+    return this.prisma.client.$transaction(async (tx) => {
+      const rows = (await tx.$queryRaw`
+        SELECT gmail_access_token IS NOT NULL AS linked FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`) as Array<{ linked: boolean }>;
+      if (rows[0]?.linked !== true) return false;
+      await write(tx);
+      return true;
+    });
   }
 
   /**
