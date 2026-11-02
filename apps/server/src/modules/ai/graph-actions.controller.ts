@@ -30,6 +30,13 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
 import { ActionExecutedPayload, ActionBlockedPayload } from '../../core/event-bus/events.types';
 import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { resolveCrmAccess } from '../crm/crm-permissions.helper';
+import {
+  CANONICAL_MODULE_TOOLS,
+  CRM_ROW_VISIBILITY_TOOLS,
+  CRM_SUBPERMISSION_TOOLS,
+  GOVERNED_UNGRANTED,
+} from '../structure/job-role-policy.service';
 import { getToolByName } from './flow-tool-registry';
 import type { BusinessRole } from './role-engine.service';
 
@@ -39,12 +46,15 @@ interface AuthenticatedRequest extends Request {
 
 /**
  * V1-31b-KEY-ACTION-ROUTES-BIND (V1-31 review SEC-V131-1, M46). The module scope
- * a tool executed from POST actions/businesses/:businessId/execute needs, by
+ * a tool executed from POST actions/businesses/:businessId/execute needs, for a
+ * tool NO route governs (one CANONICAL_MODULE_TOOLS does not list; those take
+ * the canonical table's module and level, see graphActionModuleScope), by
  * tool-name prefix (an entry ending in '_') or exact name; the first match
- * wins. The executing member must hold it as ModuleScopeGuard computes scopes
- * (a 'read' family tool needs read, every other tool write). A tool that
- * matches nothing is refused: deny by default, so a tool added to the
- * registry is not executable from this route until it is mapped here.
+ * wins. It is a floor where HTTP has no rule to copy: the executing member must
+ * hold it as ModuleScopeGuard computes scopes (a 'read' family tool needs read,
+ * every other tool write). A tool that matches nothing is refused: deny by
+ * default, so a tool added to the registry is not executable from this route
+ * until it is mapped (graphActionRequirement covers every registry tool).
  */
 export const GRAPH_ACTION_TOOL_MODULES: ReadonlyArray<readonly [string, CanonicalModule]> = [
   ['fetch_', 'analytics'],
@@ -92,7 +102,7 @@ export const GRAPH_ACTION_TOOL_MODULES: ReadonlyArray<readonly [string, Canonica
   ['draft_storefront_copy', 'storefront'],
   ['structure_', 'team'],
   ['people_', 'team'],
-  ['performance_', 'team'],
+  ['performance_', 'operations'],
   ['payroll_', 'operations'],
   ['contracts_', 'operations'],
   ['contract_', 'operations'],
@@ -105,17 +115,98 @@ export const GRAPH_ACTION_TOOL_MODULES: ReadonlyArray<readonly [string, Canonica
   ['evidence_', 'operations'],
   ['documents_', 'operations'],
   ['drive_', 'operations'],
+  // V1-31b review CR-2: registry tools the prefixes above missed.
+  ['keyflow_create_note', 'operations'], // a note on any module's item
+  ['portal_', 'crm'], // a contact's client-portal access
+  ['present_onboarding_card', 'settings'],
+  ['save_onboarding_step', 'settings'],
+  ['update_business_blueprint', 'settings'],
+  ['send_message_with_approval', 'crm'], // floor; GOVERNED_UNGRANTED, OWNER only (graphActionRequirement)
+  ['update_status_with_confirmation', 'crm'], // floor, with revenue; GOVERNED_UNGRANTED, OWNER only
 ];
 
-/** The module scope a graph action needs, or null when the tool is mapped to none (refused). */
-export function graphActionModuleScope(toolName: string): { module: CanonicalModule; minLevel: 'read' | 'write' } | null {
+/** A module scope a graph action needs, as ModuleScopeGuard reads it. */
+export interface GraphActionScope {
+  module: CanonicalModule;
+  minLevel: 'read' | 'write' | 'admin';
+}
+
+/** Exact canonical table: tool -> the module whose routes govern it and the lowest level they accept. */
+const CANONICAL_TOOL_SCOPES: ReadonlyMap<string, GraphActionScope> = new Map(
+  (Object.entries(CANONICAL_MODULE_TOOLS) as Array<[CanonicalModule, Readonly<Record<string, GraphActionScope['minLevel']>>]>).flatMap(
+    ([module, tools]) => Object.entries(tools).map(([tool, minLevel]): [string, GraphActionScope] => [tool, { module, minLevel }]),
+  ),
+);
+
+/**
+ * The module scope a graph action needs, or null when the tool is mapped to none (refused).
+ * V1-31b review CR-3: a tool some route governs takes the module and level of
+ * CANONICAL_MODULE_TOOLS (the table job-role-tool-families.spec.ts re-derives from the route
+ * decorators), exactly as the KEY envelope reads it; only a tool no route governs falls back
+ * to GRAPH_ACTION_TOOL_MODULES.
+ */
+export function graphActionModuleScope(toolName: string): GraphActionScope | null {
+  const canonical = CANONICAL_TOOL_SCOPES.get(toolName);
+  if (canonical) return canonical;
   const entry = GRAPH_ACTION_TOOL_MODULES.find(([key]) => (key.endsWith('_') ? toolName.startsWith(key) : toolName === key));
   if (!entry) return null;
   return { module: entry[1], minLevel: getToolByName(toolName)?.family === 'read' ? 'read' : 'write' };
 }
 
-/** The plan states whose pending steps this route may still execute. */
-const OPEN_PLAN_STATUSES = new Set(['draft', 'pending', 'approved', 'executing']);
+/**
+ * Tools never executed from this route, whoever asks. execute_custom_logic re-enters the
+ * dispatcher for any tool (GOVERNED_UNGRANTED), so no single scope bounds it.
+ */
+export const GRAPH_ACTION_REFUSED: Readonly<Record<string, string>> = {
+  execute_custom_logic: GOVERNED_UNGRANTED.execute_custom_logic,
+};
+
+/** A second module some tools need beside their own (GOVERNED_UNGRANTED: "needs crm AND revenue"). */
+const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActionScope>>> = {
+  update_status_with_confirmation: [{ module: 'revenue', minLevel: 'write' }],
+};
+
+/** What a member must hold to execute a stored step of `toolName` from this route. */
+export interface GraphActionRequirement {
+  /** Every module scope, as ModuleScopeGuard reads it. */
+  scopes: ReadonlyArray<GraphActionScope>;
+  /**
+   * Why only the business's OWNER (or a SUPER_ADMIN) may run it (V1-31b review SEC-V131b-1).
+   * The dispatcher calls these with no actor, so the HTTP row checks never run:
+   * CRM_ROW_VISIBILITY_TOOLS reach any contact (visibilityClause keeps another member's PRIVATE
+   * contact from everyone but the OWNER), and GOVERNED_UNGRANTED tools do work beside the
+   * governed call that no member route does. JobRolePolicy grants them to no key; here only the
+   * principal whose HTTP access is the whole business runs them.
+   */
+  ownerOnly?: string;
+  /** The CRM sub-permission resolveCrmAccess checks over HTTP (crm_edit / crm_delete), held at 'any' with crm_view 'all'. */
+  crmSubPermission?: 'crm_edit' | 'crm_delete';
+}
+
+/** The requirement for `toolName`, `{ refused }` when this route never runs it, or null when it is mapped to nothing. */
+export function graphActionRequirement(toolName: string): GraphActionRequirement | { refused: string } | null {
+  if (Object.prototype.hasOwnProperty.call(GRAPH_ACTION_REFUSED, toolName)) return { refused: GRAPH_ACTION_REFUSED[toolName] };
+  const scope = graphActionModuleScope(toolName);
+  if (!scope) return null;
+  const extra = Object.prototype.hasOwnProperty.call(GRAPH_ACTION_EXTRA_SCOPES, toolName) ? GRAPH_ACTION_EXTRA_SCOPES[toolName] : [];
+  const requirement: GraphActionRequirement = { scopes: [scope, ...extra] };
+  if (CRM_ROW_VISIBILITY_TOOLS.includes(toolName)) {
+    requirement.ownerOnly = 'it writes a contact with no actor, so no visibility clause bounds the row it reaches';
+  } else if (Object.prototype.hasOwnProperty.call(GOVERNED_UNGRANTED, toolName)) {
+    requirement.ownerOnly = GOVERNED_UNGRANTED[toolName];
+  }
+  if (CRM_SUBPERMISSION_TOOLS.crm_delete.includes(toolName)) requirement.crmSubPermission = 'crm_delete';
+  else if (CRM_SUBPERMISSION_TOOLS.crm_edit.includes(toolName)) requirement.crmSubPermission = 'crm_edit';
+  return requirement;
+}
+
+/**
+ * The plan states whose pending steps this route may still execute: the ones
+ * PlanExecutorService does not drive (it enqueues the steps of approved and
+ * executing plans with no compare-and-set of its own; V1-31b review SEC-V131b-2).
+ */
+const OPEN_PLAN_STATUSES = ['draft', 'pending'] as const;
+const OPEN_PLAN_STATUS_SET: ReadonlySet<string> = new Set(OPEN_PLAN_STATUSES);
 
 /** What a caller is told when it sends a tool name and arguments instead of a stored step. */
 const UNBOUND_GRAPH_ACTION =
@@ -207,13 +298,19 @@ export class GraphActionsController {
    * guarded business: the step's own tool and stored arguments, never a tool
    * name or arguments the client sends (those are ignored beside the ids, and
    * refused 400 without them). A step of another business, of another plan
-   * or that does not exist is the same 404. The executing member must hold the
-   * tool's module scope (graphActionModuleScope; an unmapped tool is refused).
-   * The step is claimed pending -> executing (or awaiting_approval) by one
-   * compare-and-set, so a replay or a concurrent call is 409 and runs nothing.
-   * Confirming a stored step by its id is the quick confirmation; a step that
-   * needs formal approval is queued once, with the stored payload, requested
-   * by the caller.
+   * or that does not exist is the same 404. The executing member must hold
+   * what graphActionRequirement names (module scopes, the CRM sub-permission,
+   * OWNER for the tools no grant reaches; an unmapped tool is refused). Only
+   * a step of a plan PlanExecutorService does not drive (draft, pending) runs
+   * here. The step is claimed pending -> executing (or awaiting_approval) by
+   * one compare-and-set that also requires the plan to be open, so a replay,
+   * a concurrent call or an approval of the plan in between is 409 and runs
+   * nothing. Confirming a stored step by its id is the quick confirmation; a
+   * step that needs formal approval is queued once, with the stored payload,
+   * requested by the caller. A step the action boundary holds for a
+   * confirmation or an approval is given back (pending): asking again reaches
+   * the boundary, which answers the same action for the same step, or, once it
+   * ran, its recorded outcome. Every run is recorded under the caller's id.
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('actions/businesses/:businessId/execute')
@@ -239,14 +336,10 @@ export class GraphActionsController {
     }
     const toolName = step.toolName;
     if (!toolName) throw new BadRequestException('This plan step has no action to execute');
-    if (!OPEN_PLAN_STATUSES.has(step.plan.status)) {
-      throw new ConflictException(`This plan is ${step.plan.status}; its steps are not executed`);
+    if (!OPEN_PLAN_STATUS_SET.has(step.plan.status)) {
+      throw new ConflictException(`This plan is ${step.plan.status}; its steps are executed by the plan, not from here`);
     }
-    const scope = graphActionModuleScope(toolName);
-    if (!scope) {
-      throw new ForbiddenException(`Tool "${toolName}" is mapped to no module scope, so it is not executed from this route`);
-    }
-    await this.requireModuleScope(businessId, { id: userId, role: user.role }, scope.module, scope.minLevel);
+    await this.authorizeGraphAction(businessId, { id: userId, role: user.role }, toolName);
 
     const spent = () => new ConflictException('This plan step was already executed or is being executed');
     if (step.status !== 'pending') throw spent();
@@ -254,14 +347,32 @@ export class GraphActionsController {
     const args: Record<string, unknown> = isJsonObject(step.inputPayload) ? { ...step.inputPayload } : {};
     const role = (step.role ?? step.plan.role ?? undefined) as BusinessRole | undefined;
     const decision = await this.governance.evaluate(businessId, toolName, undefined, role);
-    /** The claim: true when this call moved the step out of 'pending'. */
+    /**
+     * The claim: true when this call moved the step out of 'pending' while its plan is still one
+     * the executor does not drive (an approval of the plan in between loses the claim).
+     */
     const claim = async (status: string) => {
       const { count } = await this.prisma.client.aiPlanStep.updateMany({
-        where: { id: step.id, planId, status: 'pending' },
+        where: { id: step.id, planId, status: 'pending', plan: { businessId, status: { in: [...OPEN_PLAN_STATUSES] } } },
         data: { status, ...(status === 'executing' ? { startedAt: new Date() } : {}) },
       });
       return count === 1;
     };
+    /** The audit row naming the member this route ran the step for (V1-31b review SEC-V131b-5). */
+    const audit = (action: string, outcome: { success: boolean; rationale: string; errorMessage?: string; durationMs?: number }) =>
+      this.executionLog.log({
+        businessId,
+        action,
+        toolName,
+        module: this.inferModule(toolName) ?? undefined,
+        riskTier: decision.tier,
+        mode: 'assisted',
+        actor: 'user',
+        userId,
+        planId,
+        planStepId: step.id,
+        ...outcome,
+      });
 
     if (!decision.allowed) {
       // Nothing is claimed: the step can run once policy allows it.
@@ -298,6 +409,10 @@ export class GraphActionsController {
       await this.prisma.client.aiApprovalItem
         .updateMany({ where: { id: approval.id, businessId }, data: { userId } })
         .catch((e: unknown) => this.logger.warn(`Could not name the requester of approval item ${approval.id}: ${e instanceof Error ? e.message : String(e)}`));
+      await audit('approval_queued_graph_action', {
+        success: true,
+        rationale: `Plan step ${step.id} queued for approval ${approval.id} (Tier ${decision.tier}) at the request of ${userId}`,
+      });
       return {
         success: false,
         requiresApproval: true,
@@ -321,8 +436,14 @@ export class GraphActionsController {
       );
       if (result.notCleared) {
         // The action boundary recorded the action and is waiting for it to be
-        // confirmed or approved by its server-issued id. Nothing ran.
-        await this.planner.updateStepStatus(step.id, 'awaiting_approval');
+        // confirmed or approved by its server-issued id. Nothing ran. The step
+        // is given back (V1-31b review CR-5): the boundary keeps one action per
+        // plan step, so asking again answers the same id while it waits and the
+        // recorded outcome once it ran, and the step is then settled here. The
+        // boundary's action record names the caller as its requester.
+        await this.prisma.client.aiPlanStep
+          .updateMany({ where: { id: step.id, planId, status: 'executing' }, data: { status: 'pending', startedAt: null } })
+          .catch((e: unknown) => this.logger.warn(`Could not give back plan step ${step.id}: ${e instanceof Error ? e.message : String(e)}`));
         return {
           success: false,
           requiresConfirmation: result.notCleared.disposition === 'AWAITING_CONFIRMATION',
@@ -332,13 +453,20 @@ export class GraphActionsController {
           tier: decision.tier,
         };
       }
+      const durationMs = Date.now() - startedAt;
       await this.planner.updateStepStatus(
         step.id,
         result.success ? 'completed' : 'failed',
         result.success && isJsonObject(result.result) ? result.result : null,
         result.success ? undefined : result.error,
-        Date.now() - startedAt,
+        durationMs,
       );
+      await audit('graph_action:execute', {
+        success: result.success,
+        rationale: `Plan step ${step.id} executed by ${userId}`,
+        errorMessage: result.success ? undefined : result.error,
+        durationMs,
+      });
       const executedPayload: ActionExecutedPayload = {
         businessId,
         toolName,
@@ -357,9 +485,11 @@ export class GraphActionsController {
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      const durationMs = Date.now() - startedAt;
       await this.planner
-        .updateStepStatus(step.id, 'failed', null, message, Date.now() - startedAt)
+        .updateStepStatus(step.id, 'failed', null, message, durationMs)
         .catch((e: unknown) => this.logger.warn(`Could not record the failure of plan step ${step.id}: ${e instanceof Error ? e.message : String(e)}`));
+      await audit('graph_action:execute', { success: false, rationale: `Plan step ${step.id} executed by ${userId}`, errorMessage: message, durationMs });
       const failPayload: ActionExecutedPayload = {
         businessId,
         toolName,
@@ -377,28 +507,49 @@ export class GraphActionsController {
   }
 
   /**
-   * The member's scope on `module`, as ModuleScopeGuard computes it: SUPER_ADMIN
-   * passes; otherwise the membership's explicit scope map, else its role's
-   * defaults. A non-member, or a level below `minLevel`, is 403.
+   * Whether the member may execute `toolName` here (graphActionRequirement). A refused or
+   * unmapped tool is 403 for everyone. SUPER_ADMIN passes the rest. Otherwise: a member of the
+   * business; the OWNER alone for an owner-only tool; every module scope as ModuleScopeGuard
+   * computes it (the membership's explicit scope map, else its role's defaults); and, for a
+   * contact create / edit / delete, the CRM sub-permission as resolveCrmAccess computes it over
+   * HTTP, held for the whole book (crm_view 'all' and the scope 'any'), because the dispatcher
+   * passes no actor that could keep the write to the member's own contacts (the rule
+   * JobRolePolicy's crmWithheld applies to a KEY envelope).
    */
-  private async requireModuleScope(
-    businessId: string,
-    user: { id: string; role?: string },
-    module: CanonicalModule,
-    minLevel: 'read' | 'write',
-  ): Promise<void> {
+  private async authorizeGraphAction(businessId: string, user: { id: string; role?: string }, toolName: string): Promise<void> {
+    const requirement = graphActionRequirement(toolName);
+    if (!requirement) {
+      throw new ForbiddenException(`Tool "${toolName}" is mapped to no module scope, so it is not executed from this route`);
+    }
+    if ('refused' in requirement) {
+      throw new ForbiddenException(`Tool "${toolName}" is not executed from this route: ${requirement.refused}`);
+    }
     if (user.role === 'SUPER_ADMIN') return;
     const membership = await this.prisma.client.membership.findUnique({
       where: { userId_businessId: { userId: user.id, businessId } },
       select: { role: true, permissionScopes: true },
     });
     if (!membership) throw new ForbiddenException('Not a member of this business');
+    if (requirement.ownerOnly && membership.role !== 'OWNER') {
+      throw new ForbiddenException(`Tool "${toolName}" is executed from here only for the business owner: ${requirement.ownerOnly}`);
+    }
     const scopes: Record<string, string> = isJsonObject(membership.permissionScopes)
       ? (membership.permissionScopes as Record<string, string>)
       : defaultScopesForRole(membership.role);
-    const level = scopes[module] || 'none';
-    if (rankOf(level) < LEVEL_RANK[minLevel]) {
-      throw new ForbiddenException(`Insufficient permissions: ${module} requires ${minLevel} access (you have ${level})`);
+    for (const { module, minLevel } of requirement.scopes) {
+      const level = scopes[module] || 'none';
+      if (rankOf(level) < LEVEL_RANK[minLevel]) {
+        throw new ForbiddenException(`Insufficient permissions: ${module} requires ${minLevel} access (you have ${level})`);
+      }
+    }
+    if (requirement.crmSubPermission) {
+      const access = await resolveCrmAccess(this.prisma, businessId, user.id);
+      const scope = requirement.crmSubPermission === 'crm_delete' ? access.deleteScope : access.editScope;
+      if (!access.viewAll || scope !== 'any') {
+        throw new ForbiddenException(
+          `Insufficient permissions: "${toolName}" needs crm_view all and ${requirement.crmSubPermission} any (you have crm_view ${access.viewAll ? 'all' : 'owned'}, ${requirement.crmSubPermission} ${scope})`,
+        );
+      }
     }
   }
 

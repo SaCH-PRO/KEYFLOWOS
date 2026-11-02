@@ -70,10 +70,14 @@ const ID = {
   staffNoRev: `${P}staffNoRev`, // STAFF of bizA: crm write, revenue read, operations write
   staffNoCrm: `${P}staffNoCrm`, // STAFF of bizA: crm read, operations write
   other: `${P}other`, // OWNER of bizB only
+  staffOwned: `${P}staffOwned`, // STAFF of bizA: crm write kept to their own book (crm_view owned, crm_edit owned, crm_delete none), operations write
+  staffExp: `${P}staffExp`, // STAFF of bizA: expenses write, revenue read, operations read
+  staffRO: `${P}staffRO`, // STAFF of bizA with no scope map (read-only role defaults)
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   contactA: `${P}contactA`,
   contactB: `${P}contactB`,
+  contactPriv: `${P}contactPriv`, // the OWNER's PRIVATE contact
   // graph-action plans
   planA: `${P}planA`,
   planB: `${P}planB`,
@@ -83,6 +87,23 @@ const ID = {
   sUnmapped: `${P}sUnmapped`, // execute_custom_logic (mapped to no module: denied by default)
   sApproval: `${P}sApproval`, // crm_delete_contact (governance stand-in asks for formal approval)
   sForeign: `${P}sForeign`, // a step of bizB's plan
+  // review repairs (planC, draft)
+  planC: `${P}planC`,
+  sPrivUpdate: `${P}sPrivUpdate`, // crm_update_contact on the OWNER's PRIVATE contact
+  sPrivDelete: `${P}sPrivDelete`, // crm_delete_contact on it
+  sPrivTag: `${P}sPrivTag`, // tag_contact on it
+  sCreate: `${P}sCreate`, // crm_create_contact
+  sTask: `${P}sTask`, // create_task (CR-2)
+  sPayBill: `${P}sPayBill`, // finance_pay_bill (expenses write, CR-3)
+  sExtract: `${P}sExtract`, // contract_extract_terms (operations write, CR-3)
+  sListContacts: `${P}sListContacts`, // crm_list_contacts (crm read, CR-3)
+  // plans the plan executor drives (SEC-V131b-2)
+  planApproved: `${P}planApproved`,
+  planExecuting: `${P}planExecuting`,
+  planRace: `${P}planRace`, // draft when read, approved before the claim
+  sApprovedPlan: `${P}sApprovedPlan`,
+  sExecutingPlan: `${P}sExecutingPlan`,
+  sRace: `${P}sRace`,
   // key inbox
   threadA: `${P}threadA`,
   threadB: `${P}threadB`,
@@ -90,6 +111,9 @@ const ID = {
   msgB: `${P}msgB`,
   // autopilot / approvals
   taskA: `${P}taskA`,
+  taskB: `${P}taskB`, // awaiting approval; a read-only member may not resolve it
+  taskC: `${P}taskC`, // no approval needed; completed through the status route
+  taskD: `${P}taskD`, // awaiting approval; AUTO_EXECUTED is refused on it
   itemA: `${P}itemA`,
 };
 
@@ -103,6 +127,7 @@ const ACTIONS = [
   { type: 'create_task', label: 'Task', confidence: 0.9, payload: { title: 'v31b stored title 2' } }, // 2: staffNoCrm refused
   { type: 'transfer_funds', label: 'Unknown', confidence: 0.9, payload: {} }, // 3: an unmapped type
   { type: 'create_task', label: 'Task', confidence: 0.9, payload: { title: 'v31b stored title 4' } }, // 4: editable title honoured
+  { type: 'create_task', label: 'Task', confidence: 0.9, payload: { title: 'v31b stored title 5', dueDate: '2026-12-01T10:00:00.000Z' } }, // 5: title and dueDate, as the dialog sends them
 ];
 
 const EXECUTOR_DELAY_MS = 40;
@@ -121,11 +146,14 @@ const businessEvents: any[] = [];
 const timelineEvents: any[] = [];
 /** Tools governance asks a formal approval for. */
 const FORMAL_APPROVAL_TOOLS = new Set(['crm_delete_contact']);
+/** Run inside governance.evaluate, between the route's step read and its claim (GA-14). */
+let beforeEvaluate: (() => Promise<void>) | null = null;
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM idempotency_keys WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM key_inbox_messages WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -212,6 +240,7 @@ beforeAll(async () => {
   const governance = {
     evaluate: async (_businessId: string, toolName: string) => {
       evaluations.push(toolName);
+      if (beforeEvaluate) await beforeEvaluate();
       const base = { allowed: true, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier: 1 };
       return FORMAL_APPROVAL_TOOLS.has(toolName)
         ? { ...base, tier: 3, requiresFormalApproval: true, reason: 'Tier 3 action requires explicit approval before execution' }
@@ -300,7 +329,7 @@ beforeAll(async () => {
       },
       { provide: AiOversightService, useValue: governance },
       { provide: FlowOrchestratorService, useValue: orchestrator },
-      { provide: AiExecutionLogService, useValue: {} },
+      AiExecutionLogService,
       { provide: WorkspaceRecommendationsService, useValue: {} },
       AiApprovalsService,
       KeyInboxService,
@@ -333,7 +362,7 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const id of [ID.owner, ID.staffNoRev, ID.staffNoCrm, ID.other]) {
+  for (const id of [ID.owner, ID.staffNoRev, ID.staffNoCrm, ID.other, ID.staffOwned, ID.staffExp, ID.staffRO]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V31b Biz A', ownerId: ID.owner } });
@@ -344,9 +373,13 @@ beforeAll(async () => {
   await m(ID.staffNoRev, ID.bizA, 'STAFF', { crm: 'write', revenue: 'read', operations: 'write' });
   await m(ID.staffNoCrm, ID.bizA, 'STAFF', { crm: 'read', operations: 'write' });
   await m(ID.other, ID.bizB, 'OWNER');
+  await m(ID.staffOwned, ID.bizA, 'STAFF', { crm: 'write', crm_view: 'owned', crm_edit: 'owned', crm_delete: 'none', operations: 'write' });
+  await m(ID.staffExp, ID.bizA, 'STAFF', { expenses: 'write', revenue: 'read', operations: 'read' });
+  await m(ID.staffRO, ID.bizA, 'STAFF');
 
   await db.contact.create({ data: { id: ID.contactA, businessId: ID.bizA, firstName: 'V31b A', visibility: 'TEAM' } });
   await db.contact.create({ data: { id: ID.contactB, businessId: ID.bizB, firstName: 'V31b B', visibility: 'TEAM' } });
+  await db.contact.create({ data: { id: ID.contactPriv, businessId: ID.bizA, firstName: 'V31b Private', visibility: 'PRIVATE', ownerId: ID.owner } });
 
   await db.aiPlan.create({ data: { id: ID.planA, businessId: ID.bizA, userId: ID.owner, objective: 'v31b plan A', status: 'draft' } });
   await db.aiPlan.create({ data: { id: ID.planB, businessId: ID.bizB, userId: ID.other, objective: 'v31b plan B', status: 'draft' } });
@@ -356,6 +389,23 @@ beforeAll(async () => {
   await seedStep(ID.sUnmapped, ID.planA, 4, 'execute_custom_logic', { code: 'return 1' });
   await seedStep(ID.sApproval, ID.planA, 5, 'crm_delete_contact', { contactId: ID.contactA });
   await seedStep(ID.sForeign, ID.planB, 1, 'crm_add_note', { contactId: ID.contactB, body: 'b' });
+  await db.aiPlan.create({ data: { id: ID.planC, businessId: ID.bizA, userId: ID.owner, objective: 'v31b plan C', status: 'draft' } });
+  await seedStep(ID.sPrivUpdate, ID.planC, 1, 'crm_update_contact', { contactId: ID.contactPriv, email: 'v31b-attacker@test.local' });
+  await seedStep(ID.sPrivDelete, ID.planC, 2, 'crm_delete_contact', { contactId: ID.contactPriv });
+  await seedStep(ID.sPrivTag, ID.planC, 3, 'tag_contact', { contactId: ID.contactPriv, tag: 'v31b' });
+  await seedStep(ID.sCreate, ID.planC, 4, 'crm_create_contact', { firstName: 'V31b Created' });
+  await seedStep(ID.sTask, ID.planC, 5, 'create_task', { contactId: ID.contactA, title: 'v31b graph task' });
+  await seedStep(ID.sPayBill, ID.planC, 6, 'finance_pay_bill', { billId: `${P}bill` });
+  await seedStep(ID.sExtract, ID.planC, 7, 'contract_extract_terms', { contractId: `${P}contract` });
+  await seedStep(ID.sListContacts, ID.planC, 8, 'crm_list_contacts', {});
+  for (const [planId, status, stepId] of [
+    [ID.planApproved, 'approved', ID.sApprovedPlan],
+    [ID.planExecuting, 'executing', ID.sExecutingPlan],
+    [ID.planRace, 'draft', ID.sRace],
+  ] as const) {
+    await db.aiPlan.create({ data: { id: planId, businessId: ID.bizA, userId: ID.owner, objective: `v31b ${status}`, status } });
+    await seedStep(stepId, planId, 1, 'crm_add_note', STORED_ARGS);
+  }
 
   await db.keyInboxThread.create({ data: { id: ID.threadA, businessId: ID.bizA, channel: 'email', contactId: ID.contactA, subject: 'v31b A' } });
   await db.keyInboxThread.create({ data: { id: ID.threadB, businessId: ID.bizB, channel: 'email', contactId: ID.contactB, subject: 'v31b B' } });
@@ -367,6 +417,9 @@ beforeAll(async () => {
   });
 
   await db.autopilotTask.create({ data: { id: ID.taskA, businessId: ID.bizA, title: 'v31b approve me', category: 'OPERATIONS', status: 'AWAITING_APPROVAL', requiresApproval: true } });
+  await db.autopilotTask.create({ data: { id: ID.taskB, businessId: ID.bizA, title: 'v31b not yours to resolve', category: 'OPERATIONS', status: 'AWAITING_APPROVAL', requiresApproval: true } });
+  await db.autopilotTask.create({ data: { id: ID.taskC, businessId: ID.bizA, title: 'v31b complete me', category: 'OPERATIONS', status: 'PENDING', requiresApproval: false } });
+  await db.autopilotTask.create({ data: { id: ID.taskD, businessId: ID.bizA, title: 'v31b not auto-executed', category: 'OPERATIONS', status: 'PENDING', requiresApproval: true } });
   await db.aiApprovalItem.create({ data: { id: ID.itemA, businessId: ID.bizA, toolName: 'crm_add_note', title: 'v31b item', riskTier: 1 } });
 }, 120_000);
 
@@ -378,7 +431,8 @@ afterAll(async () => {
 describe('fixture sanity (real rows)', () => {
   it('seeded the plans, steps, inbox thread and memberships', async () => {
     expect(await db.aiPlanStep.count({ where: { planId: ID.planA, status: 'pending' } })).toBe(5);
-    expect(await db.membership.count({ where: { businessId: ID.bizA } })).toBe(3);
+    expect(await db.membership.count({ where: { businessId: ID.bizA } })).toBe(6);
+    expect(await db.aiPlanStep.count({ where: { planId: ID.planC, status: 'pending' } })).toBe(8);
     const msg = await db.keyInboxMessage.findUnique({ where: { id: ID.msgA } });
     expect(msg.suggestedActions).toHaveLength(ACTIONS.length);
   });
@@ -484,6 +538,101 @@ describe('V1-31b GA: POST /actions/businesses/:businessId/execute executes only 
   });
 });
 
+describe('V1-31b review repairs: who may run a stored step, and when', () => {
+  it('GA-10 (SEC-V131b-1) a crm-write member kept to their own book cannot run the contact writes the dispatcher makes without an actor; nothing runs', async () => {
+    const before = executions.length;
+    for (const stepId of [ID.sPrivUpdate, ID.sPrivDelete, ID.sPrivTag, ID.sCreate]) {
+      const res = await executeGraph(ID.staffOwned, { planId: ID.planC, planStepId: stepId });
+      expect(res.status, stepId).toBe(403);
+      expect(await stepStatus(stepId)).toBe('pending');
+    }
+    expect(executions.length).toBe(before);
+  });
+
+  it('GA-11 (SEC-V131b-1) the row-visibility contact writes run only for the OWNER; crm_create_contact runs for crm_view all with crm_edit any', async () => {
+    const before = executions.length;
+    // crm write with the default sub-permissions (crm_view all, crm_edit any) still cannot reach another member's PRIVATE contact over HTTP.
+    const staff = await executeGraph(ID.staffNoRev, { planId: ID.planC, planStepId: ID.sPrivUpdate });
+    expect(staff.status).toBe(403);
+    expect(JSON.stringify(staff.body)).toMatch(/business owner/);
+    expect(executions.length).toBe(before);
+
+    const create = await executeGraph(ID.staffNoRev, { planId: ID.planC, planStepId: ID.sCreate });
+    expect(create.status).toBe(201);
+    const owner = await executeGraph(ID.owner, { planId: ID.planC, planStepId: ID.sPrivUpdate });
+    expect(owner.status).toBe(201);
+    const ran = executions.slice(before);
+    expect(ran.map((e) => e.toolName)).toEqual(['crm_create_contact', 'crm_update_contact']);
+    expect(ran[0].action).toMatchObject({ principalUserId: ID.staffNoRev });
+    expect(ran[1].action).toMatchObject({ principalUserId: ID.owner });
+  });
+
+  it('GA-12 (CR-2) a stored create_task step runs for the OWNER, and every registry tool is mapped or refused by name', async () => {
+    const before = executions.length;
+    const res = await executeGraph(ID.owner, { planId: ID.planC, planStepId: ID.sTask });
+    expect(res.status).toBe(201);
+    expect(executions.slice(before)).toMatchObject([{ toolName: 'create_task', planStepId: ID.sTask }]);
+
+    const { FLOW_TOOLS } = await import('../src/modules/ai/flow-tool-registry');
+    const { graphActionRequirement } = await import('../src/modules/ai/graph-actions.controller');
+    const names = FLOW_TOOLS.map((t: { name: string }) => t.name);
+    expect(names.filter((n: string) => graphActionRequirement(n) === null)).toEqual([]);
+    expect(names.filter((n: string) => 'refused' in (graphActionRequirement(n) ?? {}))).toEqual(['execute_custom_logic']);
+  });
+
+  it('GA-13 (CR-3) a tool some route governs needs exactly the module and level of CANONICAL_MODULE_TOOLS', async () => {
+    const { CANONICAL_MODULE_TOOLS } = await import('../src/modules/structure/job-role-policy.service');
+    const { graphActionModuleScope } = await import('../src/modules/ai/graph-actions.controller');
+    const mismatches: string[] = [];
+    for (const [module, tools] of Object.entries(CANONICAL_MODULE_TOOLS)) {
+      for (const [tool, level] of Object.entries(tools as Record<string, string>)) {
+        const got = graphActionModuleScope(tool);
+        if (!got || got.module !== module || got.minLevel !== level) mismatches.push(`${tool}: ${module}:${level} != ${got?.module}:${got?.minLevel}`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+
+    const before = executions.length;
+    const pay = await executeGraph(ID.staffExp, { planId: ID.planC, planStepId: ID.sPayBill });
+    expect(pay.status).toBe(201);
+    const extract = await executeGraph(ID.staffExp, { planId: ID.planC, planStepId: ID.sExtract });
+    expect(extract.status).toBe(403);
+    expect(JSON.stringify(extract.body)).toMatch(/operations requires write/);
+    const list = await executeGraph(ID.staffNoCrm, { planId: ID.planC, planStepId: ID.sListContacts });
+    expect(list.status).toBe(201);
+    expect(executions.slice(before).map((e) => e.toolName)).toEqual(['finance_pay_bill', 'crm_list_contacts']);
+    expect(await stepStatus(ID.sExtract)).toBe('pending');
+  });
+
+  it('GA-14 (SEC-V131b-2) a step of a plan the plan executor drives is 409; a plan approved between the read and the claim loses the claim; nothing runs', async () => {
+    const before = executions.length;
+    const approved = await executeGraph(ID.owner, { planId: ID.planApproved, planStepId: ID.sApprovedPlan });
+    const executing = await executeGraph(ID.owner, { planId: ID.planExecuting, planStepId: ID.sExecutingPlan });
+    expect([approved.status, executing.status]).toEqual([409, 409]);
+
+    beforeEvaluate = async () => {
+      await db.aiPlan.update({ where: { id: ID.planRace }, data: { status: 'approved' } });
+    };
+    try {
+      const raced = await executeGraph(ID.owner, { planId: ID.planRace, planStepId: ID.sRace });
+      expect(raced.status).toBe(409);
+    } finally {
+      beforeEvaluate = null;
+    }
+    expect(executions.length).toBe(before);
+    for (const stepId of [ID.sApprovedPlan, ID.sExecutingPlan, ID.sRace]) expect(await stepStatus(stepId)).toBe('pending');
+  });
+
+  it('GA-15 (SEC-V131b-5) an executed step and a queued approval are on record under the member who asked', async () => {
+    const logs = await db.aiExecutionLog.findMany({ where: { businessId: ID.bizA, planStepId: { in: [ID.sTask, ID.sApproval, ID.sPrivUpdate] } } });
+    expect(logs.find((l: any) => l.planStepId === ID.sTask)).toMatchObject({
+      action: 'graph_action:execute', actor: 'user', userId: ID.owner, toolName: 'create_task', planId: ID.planC, success: true,
+    });
+    expect(logs.find((l: any) => l.planStepId === ID.sPrivUpdate)).toMatchObject({ action: 'graph_action:execute', userId: ID.owner });
+    expect(logs.find((l: any) => l.planStepId === ID.sApproval)).toMatchObject({ action: 'approval_queued_graph_action', userId: ID.owner, planId: ID.planA });
+  });
+});
+
 describe('V1-31b AA: ai-approvals resolution records the real principal', () => {
   it('AA-01 resolve and bulk-resolve hand the authenticated user to oversight', async () => {
     resolutions.length = 0;
@@ -551,6 +700,17 @@ describe('V1-31b KI: key-inbox executes a stored suggestion once, under its modu
     expect(await contactTasks('v31b edited title')).toHaveLength(1);
     expect(businessEvents.map((e) => e.actorId)).toEqual([ID.owner, ID.owner]);
   });
+
+  it('KI-07 (CR-1) a create_task confirm with the title and due date the dialog sends is executed', async () => {
+    const res = await executeInbox(ID.owner, ID.threadA, 5, {
+      confirmed: true,
+      messageId: ID.msgA,
+      payloadOverride: { title: 'v31b edited title 5', dueDate: '2026-12-02T09:00:00.000Z' },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ success: true, type: 'create_task' });
+    expect(await contactTasks('v31b edited title 5')).toHaveLength(1);
+  });
 });
 
 describe('V1-31b AP: autopilot', () => {
@@ -573,6 +733,36 @@ describe('V1-31b AP: autopilot', () => {
     const task = await db.autopilotTask.findUnique({ where: { id: ID.taskA } });
     expect(task.approvedBy).toBe(ID.owner);
   });
+
+  it('AP-03 (SEC-V131b-3) a read-only member can neither approve nor deny (automations write); the OWNER can deny', async () => {
+    const approve = await http().post(`/autopilot/businesses/${ID.bizA}/tasks/${ID.taskB}/approve`).set('x-test-user', ID.staffRO).send({});
+    const deny = await http().post(`/autopilot/businesses/${ID.bizA}/tasks/${ID.taskB}/deny`).set('x-test-user', ID.staffRO).send({});
+    expect([approve.status, deny.status]).toEqual([403, 403]);
+    expect(await db.autopilotTask.findUnique({ where: { id: ID.taskB } })).toMatchObject({ status: 'AWAITING_APPROVAL', approvedBy: null, approvedAt: null });
+
+    const ownerDeny = await http().post(`/autopilot/businesses/${ID.bizA}/tasks/${ID.taskB}/deny`).set('x-test-user', ID.owner).send({});
+    expect(ownerDeny.status).toBe(201);
+    expect(await db.autopilotTask.findUnique({ where: { id: ID.taskB } })).toMatchObject({ status: 'SKIPPED' });
+  });
+
+  it('AP-04 (SEC-V131b-4) the status route names the caller, never takes executedBy from the body, and never records AUTO_EXECUTED', async () => {
+    const route = (taskId: string) => `/autopilot/businesses/${ID.bizA}/tasks/${taskId}/status`;
+    const readOnly = await http().patch(route(ID.taskD)).set('x-test-user', ID.staffRO).send({ status: 'AUTO_EXECUTED', executedBy: ID.owner });
+    expect(readOnly.status).toBe(403);
+    const auto = await http().patch(route(ID.taskD)).set('x-test-user', ID.owner).send({ status: 'AUTO_EXECUTED', executedBy: ID.owner });
+    expect(auto.status).toBe(400);
+    expect(await db.autopilotTask.findUnique({ where: { id: ID.taskD } })).toMatchObject({ status: 'PENDING', executedBy: null, executedAt: null });
+
+    const done = await http().patch(route(ID.taskC)).set('x-test-user', ID.owner).send({ status: 'COMPLETED', executedBy: `${P}someone_else` });
+    expect(done.status).toBe(200);
+    expect(await db.autopilotTask.findUnique({ where: { id: ID.taskC } })).toMatchObject({ status: 'COMPLETED', executedBy: ID.owner });
+  });
+});
+
+describe('V1-31b review CR-4: web callers outside the write set', () => {
+  it.todo(
+    'CR-4 control-tower priority-queue (action buttons, dismiss log) and daily-plan block execute still POST {toolName, args} with no stored plan step (apps/web lib/client.ts executeAction) and get 400: a companion web packet must first obtain a stored step (POST .../plan) or a server-held proposal, then execute it by planId/planStepId. Executing a client tool name here would reopen SEC-V131-1.',
+  );
 });
 
 /* ------------------------------------------------------------------------ */
@@ -606,7 +796,7 @@ const KNOWN_BODY_EXECUTORS: Record<string, { kind: 'bounded' | 'open'; reason: s
   'modules/key-inbox/key-inbox.controller.ts#KeyInboxController.executeAction': {
     kind: 'bounded',
     reason:
-      'V1-31b: the action (type, thread, contact) is the stored suggestion by index; the only body data passed is the member-edited text the confirm dialog shows (title; title and dueDate; draft/content), per type, every other key refused 400 (KI-01).',
+      'V1-31b: the action (type, thread, contact) is the stored suggestion by index; the only body data passed is the member-edited text the confirm dialog shows (title and dueDate for create_task and schedule_followup; draft/content), per type, every other key refused 400 (KI-01, KI-07).',
   },
   'modules/ai/code-executor.controller.ts#CodeExecutorController.toolBridge': {
     kind: 'bounded',

@@ -56,10 +56,12 @@ const KEY_INBOX_ACTION_SCOPES: Readonly<Record<string, { module: CanonicalModule
  * V1-31b. The payload fields of a stored suggestion the confirming member may
  * edit in the confirm dialog (apps/web key-inbox page): text they type, never
  * the action's type or target (thread, contact), which stay the stored ones.
- * Any other key is refused 400.
+ * Any other key is refused 400. The dialog shows Title and Due date for both
+ * create_task and schedule_followup and sends dueDate whenever it is filled
+ * (it is pre-filled from the stored payload; V1-31b review CR-1).
  */
 const KEY_INBOX_EDITABLE_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  create_task: ['title'],
+  create_task: ['title', 'dueDate'],
   schedule_followup: ['title', 'dueDate'],
   draft_reply: ['draft', 'content'],
 };

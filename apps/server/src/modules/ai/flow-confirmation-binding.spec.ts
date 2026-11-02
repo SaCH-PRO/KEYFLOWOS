@@ -704,8 +704,9 @@ describe('V1-31 review SEC-V131-1 — sibling execution routes (closed by V1-31b
     };
     const planner = { updateStepStatus: vi.fn(async () => ({})) };
     const emitter = { emit: vi.fn() };
-    const controller = new (GraphActionsController as any)({}, {}, planner, governance, orchestrator, {}, {}, prisma, emitter);
-    return { controller, executed, orchestrator, governance };
+    const executionLog = { log: vi.fn(async () => 'log_1') };
+    const controller = new (GraphActionsController as any)({}, {}, planner, governance, orchestrator, executionLog, {}, prisma, emitter);
+    return { controller, executed, orchestrator, governance, executionLog };
   }
 
   it('a client toolName and args with no stored plan step are refused 400; nothing is evaluated or run', async () => {
@@ -728,5 +729,9 @@ describe('V1-31 review SEC-V131-1 — sibling execution routes (closed by V1-31b
     expect(response).toMatchObject({ success: true });
     expect(h.executed).toEqual([{ toolName: 'crm_add_note', args: { contactId: 'c_1', body: 'stored' } }]);
     expect(h.governance.evaluate).toHaveBeenCalledWith(BIZ, 'crm_add_note', undefined, undefined);
+    // V1-31b review SEC-V131b-5: the run is recorded under the member who asked.
+    expect(h.executionLog.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'graph_action:execute', userId: OWNER, planId: 'plan_1', planStepId: 'step_1', toolName: 'crm_add_note', success: true }),
+    );
   });
 });

@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject, Req, Logger, GoneException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject, Req, Logger, GoneException, UnauthorizedException } from '@nestjs/common';
 import { AutopilotService } from './autopilot.service';
 import { AutopilotAiService } from './autopilot-ai.service';
 import { DelegationLoopService } from './delegation-loop.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -16,8 +17,25 @@ function resolvingUserId(req: { user?: { id?: string } } | undefined): string {
   return userId;
 }
 
+/*
+ * V1-31b review SEC-V131b-3 / SEC-V131b-4: who may resolve an autopilot task. A
+ * member's approve (COMPLETED) or deny (SKIPPED) is the human evidence
+ * DelegationLoopService.adaptGovernanceFromHistory counts to raise the
+ * business's maxAutoTier, so resolving one is an automations write
+ * (RequireModuleScope('automations', 'write') under ModuleScopeGuard; STAFF
+ * defaults to automations read). The status route needs the same scope: it
+ * writes the same COMPLETED / SKIPPED rows.
+ */
+
+/**
+ * Statuses only the autopilot itself records: AUTO_EXECUTED is the loop's own
+ * execution (executedBy 'AI'), never a member's, and it skips the approval
+ * check in AutopilotService.updateTaskStatus.
+ */
+const SYSTEM_ONLY_TASK_STATUSES: ReadonlySet<string> = new Set(['AUTO_EXECUTED']);
+
 @Controller('autopilot/businesses/:businessId')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class AutopilotController {
   private readonly logger = new Logger(AutopilotController.name);
   constructor(
@@ -77,21 +95,37 @@ export class AutopilotController {
     });
   }
 
+  /**
+   * V1-31b review SEC-V131b-4: the member who sets the status is the
+   * authenticated caller (a body executedBy is not read), and AUTO_EXECUTED,
+   * which skips the approval check, is refused: a member does not record the
+   * autopilot's own execution.
+   */
   @Patch('tasks/:taskId/status')
+  @RequireModuleScope('automations', 'write')
   async updateTaskStatus(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
-    @Body() body: { status: string; executedBy?: string }
+    @Body() body: { status: string },
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.autopilotService.updateTaskStatus(taskId, businessId, body.status, body.executedBy);
+    const userId = resolvingUserId(req);
+    const status = typeof body?.status === 'string' ? body.status : '';
+    if (!status) throw new BadRequestException('status is required');
+    if (SYSTEM_ONLY_TASK_STATUSES.has(status)) {
+      throw new BadRequestException(`${status} is recorded only by the autopilot itself`);
+    }
+    return this.autopilotService.updateTaskStatus(taskId, businessId, status, userId);
   }
 
   /**
    * V1-31b-KEY-ACTION-ROUTES-BIND: the approver is the authenticated caller.
    * `approvedBy` came from the request body, so any member could record the
-   * approval in anyone's name; a body value is no longer read.
+   * approval in anyone's name; a body value is no longer read. The approver
+   * needs automations write (review SEC-V131b-3).
    */
   @Post('tasks/:taskId/approve')
+  @RequireModuleScope('automations', 'write')
   async approveTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
@@ -101,6 +135,7 @@ export class AutopilotController {
   }
 
   @Post('tasks/:taskId/deny')
+  @RequireModuleScope('automations', 'write')
   async denyTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
