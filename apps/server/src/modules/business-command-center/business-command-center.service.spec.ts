@@ -14,6 +14,8 @@ import { GenomeModuleReadinessService } from '../business-genome/key-genome/geno
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 import { GenomeRecommendationService } from '../business-genome/key-genome/genome-recommendation.service';
 import { CommandCenterKeyGenomeBridgeService } from './command-center-key-genome-bridge.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { runWithTenant } from '../../core/tenant/tenant-context';
 import type { BusinessExecutiveBrief } from '../intelligence/business-intelligence.types';
 import type { KeyExecutiveModeBrief } from '../intelligence/key-executive-mode.types';
 import type { TemporalFlowAnalysis } from '../temporal-flow/temporal-flow.types';
@@ -241,6 +243,100 @@ const mockKeyProposal: KeyActionProposalData = {
   updatedAt: new Date().toISOString(),
 };
 
+// ---------------------------------------------------------------------------
+// V1-47-COCKPIT-TRUTH fixtures: two tenants' rows behind an in-memory Prisma
+// stand-in whose count() honours the where clause it is handed, so "counts
+// ignore another tenant's rows" is measured on the query, not assumed.
+// ---------------------------------------------------------------------------
+type Row = Record<string, unknown>;
+const DELETED = new Date('2026-01-01T00:00:00Z');
+
+const TENANT_ROWS: Record<'contact' | 'invoice' | 'payment', Row[]> = {
+  contact: [
+    { businessId: 'biz_1', deletedAt: null, archivedAt: null, visibility: 'TEAM', ownerId: 'u_staff', shares: [] },
+    { businessId: 'biz_1', deletedAt: null, archivedAt: null, visibility: 'PRIVATE', ownerId: 'u_owner', shares: [] },
+    { businessId: 'biz_1', deletedAt: DELETED, archivedAt: null, visibility: 'TEAM', ownerId: 'u_owner', shares: [] },
+    { businessId: 'biz_1', deletedAt: null, archivedAt: DELETED, visibility: 'TEAM', ownerId: 'u_owner', shares: [] },
+    { businessId: 'biz_2', deletedAt: null, archivedAt: null, visibility: 'TEAM', ownerId: 'u_other', shares: [] },
+    { businessId: 'biz_2', deletedAt: null, archivedAt: null, visibility: 'TEAM', ownerId: 'u_other', shares: [] },
+    { businessId: 'biz_2', deletedAt: null, archivedAt: null, visibility: 'TEAM', ownerId: 'u_other', shares: [] },
+  ],
+  invoice: [
+    { businessId: 'biz_1', deletedAt: null, status: 'SENT' },
+    { businessId: 'biz_1', deletedAt: null, status: 'PARTIALLY_PAID' },
+    { businessId: 'biz_1', deletedAt: null, status: 'OVERDUE' },
+    { businessId: 'biz_1', deletedAt: null, status: 'PAID' },
+    { businessId: 'biz_1', deletedAt: null, status: 'DRAFT' },
+    { businessId: 'biz_1', deletedAt: null, status: 'VOID' },
+    { businessId: 'biz_1', deletedAt: DELETED, status: 'SENT' },
+    { businessId: 'biz_2', deletedAt: null, status: 'SENT' },
+    { businessId: 'biz_2', deletedAt: null, status: 'OVERDUE' },
+  ],
+  payment: [
+    { businessId: 'biz_1', status: 'SUCCESSFUL' },
+    { businessId: 'biz_1', status: 'SUCCESSFUL' },
+    { businessId: 'biz_2', status: 'SUCCESSFUL' },
+    { businessId: 'biz_2', status: 'SUCCESSFUL' },
+    { businessId: 'biz_2', status: 'FAILED' },
+  ],
+};
+
+/** The subset of Prisma's where semantics the cockpit counts use. */
+function matchesWhere(row: Row, where: Row | undefined): boolean {
+  if (!where) return true;
+  return Object.entries(where).every(([key, cond]) => {
+    if (key === 'AND') return (cond as Row[]).every((w) => matchesWhere(row, w));
+    if (key === 'OR') return (cond as Row[]).some((w) => matchesWhere(row, w));
+    if (key === 'shares') {
+      const userId = ((cond as Row).some as Row).userId;
+      return ((row.shares as string[]) ?? []).includes(userId as string);
+    }
+    if (cond !== null && typeof cond === 'object' && !(cond instanceof Date)) {
+      const c = cond as Row;
+      if ('in' in c) return (c.in as unknown[]).includes(row[key]);
+      if ('notIn' in c) return !(c.notIn as unknown[]).includes(row[key]);
+      throw new Error(`unsupported where operator on ${key}: ${JSON.stringify(c)}`);
+    }
+    return row[key] === cond;
+  });
+}
+
+type MembershipFixture = { role: string; permissionScopes?: Record<string, string> | null };
+
+function makeCountingPrisma(opts: {
+  users?: Record<string, { role: string }>;
+  memberships?: Record<string, MembershipFixture>;
+  fail?: Partial<Record<'contact' | 'invoice' | 'payment', boolean>>;
+} = {}) {
+  const users = opts.users ?? { u_owner: { role: 'USER' } };
+  const memberships = opts.memberships ?? { 'u_owner:biz_1': { role: 'OWNER', permissionScopes: null } };
+  const counter = (model: 'contact' | 'invoice' | 'payment') =>
+    vi.fn(async (args: { where?: Row } = {}) => {
+      if (opts.fail?.[model]) throw new Error(`${model} table unavailable`);
+      return TENANT_ROWS[model].filter((row) => matchesWhere(row, args.where)).length;
+    });
+  return {
+    client: {
+      contact: { count: counter('contact') },
+      invoice: { count: counter('invoice') },
+      payment: { count: counter('payment') },
+      user: {
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
+          const u = users[where.id];
+          return u ? { id: where.id, ...u } : null;
+        }),
+      },
+      membership: {
+        findUnique: vi.fn(async ({ where }: { where: { userId_businessId: { userId: string; businessId: string } } }) => {
+          const { userId, businessId } = where.userId_businessId;
+          const m = memberships[`${userId}:${businessId}`];
+          return m ? { userId, businessId, permissionScopes: null, ...m } : null;
+        }),
+      },
+    },
+  };
+}
+
 describe('BusinessCommandCenterService', () => {
   let service: BusinessCommandCenterService;
   const mockSignalList = vi.fn().mockResolvedValue([]);
@@ -265,6 +361,8 @@ describe('BusinessCommandCenterService', () => {
         { provide: GenomeSignalService, useValue: { listSignals: mockSignalList } },
         { provide: GenomeRecommendationService, useValue: { listRecommendations: mockRecommendationList } },
         { provide: CommandCenterKeyGenomeBridgeService, useValue: { buildCrossDomainBrief: vi.fn().mockResolvedValue(mockCrossDomainBrief) } },
+        // V1-47: the Release 0 result counts read through the global PrismaService.
+        { provide: PrismaService, useValue: makeCountingPrisma() },
       ],
     }).compile();
 
@@ -501,5 +599,168 @@ describe('BusinessCommandCenterService', () => {
     expect(item).toBeDefined();
     expect(item!.title).toContain('business_name');
     expect(item!.priority).toBe('HIGH');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1-47-COCKPIT-TRUTH (CF-19, COMMAND-001): a failed source is reported as
+// FAILED, never as a healthy zero; the Release 0 records (contacts, open
+// invoices, payments) are counted per tenant; missing and zero stay distinct.
+// ---------------------------------------------------------------------------
+describe('V1-47-COCKPIT-TRUTH: per-source status, Release 0 result counts, degraded', () => {
+  type Build = {
+    prisma?: ReturnType<typeof makeCountingPrisma>;
+    pendingThrows?: boolean;
+    signalsThrow?: boolean;
+    recommendationsThrow?: boolean;
+  };
+
+  async function build(o: Build = {}) {
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        BusinessCommandCenterService,
+        { provide: BusinessIntelligenceService, useValue: { generateExecutiveBrief: async () => mockBrief } },
+        { provide: KeyExecutiveModeService, useValue: { generateModeBrief: async (_biz: string, mode: string) => makeModeBrief(mode) } },
+        {
+          provide: KeyActionProposalService,
+          useValue: {
+            list: async (_biz: string, query: { status?: string }) => {
+              if (o.pendingThrows && query?.status === 'PENDING') throw new Error('proposal store unavailable');
+              return query?.status === 'PENDING' ? [mockKeyProposal] : [];
+            },
+          },
+        },
+        { provide: TemporalFlowService, useValue: { analyze: async () => mockTemporal } },
+        { provide: GenomeEvolutionService, useValue: { list: async () => [mockProposal] } },
+        { provide: BlueprintService, useValue: { calculateGenomeIntegrity: async () => mockGenome } },
+        { provide: BusinessAssetsService, useValue: { list: async () => mockAssets } },
+        { provide: ConstitutionVersionService, useValue: { latest: async () => mockConstitution, staleness: async () => mockStaleness } },
+        { provide: GenomeScoringService, useValue: { computeFactScores: vi.fn().mockResolvedValue([]), computeBusinessScore: vi.fn().mockReturnValue(mockKeyGenomeScore) } },
+        { provide: GenomeModuleReadinessService, useValue: { computeReadiness: vi.fn().mockResolvedValue(mockModuleReadiness) } },
+        {
+          provide: GenomeSignalService,
+          useValue: { listSignals: async () => { if (o.signalsThrow) throw new Error('signal store unavailable'); return []; } },
+        },
+        {
+          provide: GenomeRecommendationService,
+          useValue: { listRecommendations: async () => { if (o.recommendationsThrow) throw new Error('recommendation store unavailable'); return []; } },
+        },
+        { provide: CommandCenterKeyGenomeBridgeService, useValue: { buildCrossDomainBrief: vi.fn().mockResolvedValue(mockCrossDomainBrief) } },
+        { provide: PrismaService, useValue: o.prisma ?? makeCountingPrisma() },
+      ],
+    }).compile();
+    return moduleRef.get(BusinessCommandCenterService);
+  }
+
+  /** The guarded HTTP route runs the handler inside the TenantInterceptor's scope. */
+  const as = <T>(businessId: string, userId: string, fn: () => Promise<T>) => runWithTenant(businessId, userId, fn);
+
+  const SOURCE_LABELS = [
+    'executiveBrief', 'modeBriefs', 'pendingApprovals', 'approvedAwaitingExecution', 'temporalAnalysis',
+    'genomeProposals', 'genome', 'rawAssets', 'latestConstitution', 'constitutionStaleness', 'keyGenomeFacts',
+    'keyGenomeScore', 'moduleReadiness', 'crossDomainBrief', 'genomeSignals', 'genomeRecommendations',
+    'callerAccess', 'contacts', 'openInvoices', 'payments',
+  ];
+
+  it('RED-BEFORE (CF-19): a throwing source is reported FAILED with its fetchedAt, the snapshot is still returned and degraded is true', async () => {
+    const service = await build({ pendingThrows: true });
+    const snapshot = await as('biz_1', 'u_owner', () => service.snapshot('biz_1'));
+    expect(snapshot.businessId).toBe('biz_1');
+    expect(snapshot.sources?.pendingApprovals).toMatchObject({ label: 'pendingApprovals', status: 'FAILED' });
+    expect(Number.isNaN(Date.parse(snapshot.sources.pendingApprovals.fetchedAt))).toBe(false);
+    // Its sibling reads the same store and answered: only the failed source is FAILED.
+    expect(snapshot.sources.approvedAwaitingExecution).toMatchObject({ label: 'approvedAwaitingExecution', status: 'OK' });
+    expect(snapshot.degraded).toBe(true);
+  });
+
+  it('RED-BEFORE (COMMAND-001): a failed count is missing (null, FAILED), not a zero; the other counts are still read and degraded is true', async () => {
+    const service = await build({ prisma: makeCountingPrisma({ fail: { contact: true } }) });
+    const snapshot = await as('biz_1', 'u_owner', () => service.snapshot('biz_1'));
+    expect(snapshot.results?.contacts).toMatchObject({ count: null, status: 'FAILED', href: '/app/crm/contacts' });
+    expect(snapshot.sources.contacts).toMatchObject({ label: 'contacts', status: 'FAILED' });
+    expect(snapshot.results.openInvoices).toMatchObject({ count: 3, status: 'OK' });
+    expect(snapshot.results.payments).toMatchObject({ count: 2, status: 'OK' });
+    expect(snapshot.degraded).toBe(true);
+  });
+
+  it('genome signals and recommendations that throw no longer reject the whole snapshot: each is a FAILED source', async () => {
+    const service = await build({ signalsThrow: true, recommendationsThrow: true });
+    const snapshot = await as('biz_1', 'u_owner', () => service.snapshot('biz_1'));
+    expect(snapshot.sources?.genomeSignals).toMatchObject({ label: 'genomeSignals', status: 'FAILED' });
+    expect(snapshot.sources.genomeRecommendations).toMatchObject({ label: 'genomeRecommendations', status: 'FAILED' });
+    expect(snapshot.topPriorities.some((i) => i.type === 'GENOME_SIGNAL' || i.type === 'GENOME_RECOMMENDATION')).toBe(false);
+    expect(snapshot.degraded).toBe(true);
+  });
+
+  it('GREEN: every source healthy gives degraded false, and every source is OK with its own label and a fetchedAt', async () => {
+    const service = await build();
+    const snapshot = await as('biz_1', 'u_owner', () => service.snapshot('biz_1'));
+    expect(snapshot.degraded).toBe(false);
+    expect(Object.keys(snapshot.sources ?? {}).sort()).toEqual([...SOURCE_LABELS].sort());
+    for (const [key, source] of Object.entries(snapshot.sources)) {
+      expect(source).toMatchObject({ label: key, status: 'OK' });
+      expect(Number.isNaN(Date.parse(source.fetchedAt)), `${key}.fetchedAt`).toBe(false);
+    }
+  });
+
+  it("Release 0 counts ignore another tenant's rows, soft-deleted and archived contacts, deleted invoices and invoices that are not open", async () => {
+    const prisma = makeCountingPrisma({
+      users: { u_owner: { role: 'USER' }, u_other: { role: 'USER' } },
+      memberships: { 'u_owner:biz_1': { role: 'OWNER' }, 'u_other:biz_2': { role: 'OWNER' } },
+    });
+    const service = await build({ prisma });
+    const a = await as('biz_1', 'u_owner', () => service.snapshot('biz_1'));
+    expect(a.results).toEqual({
+      contacts: { label: 'Contacts', count: 2, status: 'OK', href: '/app/crm/contacts' },
+      openInvoices: { label: 'Open invoices', count: 3, status: 'OK', href: '/app/commerce/invoices' },
+      payments: { label: 'Payments', count: 2, status: 'OK', href: '/app/payments' },
+    });
+    for (const model of ['contact', 'invoice', 'payment'] as const) {
+      const where = (prisma.client[model].count.mock.calls[0]?.[0] as { where: Row } | undefined)?.where;
+      expect(where?.businessId, `${model}.count is scoped to the tenant`).toBe('biz_1');
+    }
+    const b = await as('biz_2', 'u_other', () => service.snapshot('biz_2'));
+    expect([b.results.contacts.count, b.results.openInvoices.count, b.results.payments.count]).toEqual([3, 2, 3]);
+  });
+
+  it('zero is a real zero, distinct from missing: a tenant with no records reads 0 / OK and is not degraded', async () => {
+    const prisma = makeCountingPrisma({ memberships: { 'u_owner:biz_empty': { role: 'OWNER' } } });
+    const service = await build({ prisma });
+    const snapshot = await as('biz_empty', 'u_owner', () => service.snapshot('biz_empty'));
+    expect([snapshot.results?.contacts, snapshot.results?.openInvoices, snapshot.results?.payments].map((r) => [r?.count, r?.status])).toEqual([
+      [0, 'OK'], [0, 'OK'], [0, 'OK'],
+    ]);
+    expect(snapshot.degraded).toBe(false);
+  });
+
+  it("a member is counted only what the list routes show them: no revenue scope gives RESTRICTED (null, never read); another member's PRIVATE contact is not counted", async () => {
+    const prisma = makeCountingPrisma({
+      users: { u_staff: { role: 'USER' } },
+      memberships: { 'u_staff:biz_1': { role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } },
+    });
+    const service = await build({ prisma });
+    const snapshot = await as('biz_1', 'u_staff', () => service.snapshot('biz_1'));
+    expect(snapshot.results?.contacts).toMatchObject({ count: 1, status: 'OK' });
+    expect(snapshot.results.openInvoices).toMatchObject({ count: null, status: 'RESTRICTED' });
+    expect(snapshot.results.payments).toMatchObject({ count: null, status: 'RESTRICTED' });
+    expect(prisma.client.invoice.count).not.toHaveBeenCalled();
+    expect(prisma.client.payment.count).not.toHaveBeenCalled();
+    // A scope the caller lacks is not a failure of the cockpit.
+    expect(snapshot.degraded).toBe(false);
+  });
+
+  it('with no caller for this tenant in the request context (an internal caller, or another tenant) nothing is counted: RESTRICTED, never a guess', async () => {
+    const prisma = makeCountingPrisma();
+    const service = await build({ prisma });
+    const internal = await service.snapshot('biz_1');
+    const foreign = await as('biz_2', 'u_owner', () => service.snapshot('biz_1'));
+    for (const snapshot of [internal, foreign]) {
+      for (const key of ['contacts', 'openInvoices', 'payments'] as const) {
+        expect(snapshot.results?.[key]).toMatchObject({ count: null, status: 'RESTRICTED' });
+      }
+    }
+    expect(prisma.client.contact.count).not.toHaveBeenCalled();
+    expect(prisma.client.invoice.count).not.toHaveBeenCalled();
+    expect(prisma.client.payment.count).not.toHaveBeenCalled();
   });
 });

@@ -202,9 +202,41 @@ export interface GovernanceSummary {
   urgentRisks: number;
 }
 
+/**
+ * V1-47-COCKPIT-TRUTH: every source the server read, and whether it answered.
+ * Mirrors apps/server/src/modules/business-command-center/business-command-center.types.ts.
+ */
+export type CommandCenterSourceStatus = "OK" | "FAILED";
+
+export interface CommandCenterSource {
+  label: string;
+  status: CommandCenterSourceStatus;
+  fetchedAt: string;
+}
+
+/** `count` is null when it is not known (FAILED, or RESTRICTED for this member); 0 is a real zero. */
+export type CommandCenterResultStatus = CommandCenterSourceStatus | "RESTRICTED";
+
+export interface CommandCenterResult {
+  label: string;
+  count: number | null;
+  status: CommandCenterResultStatus;
+  href: string;
+}
+
+export interface CommandCenterResults {
+  contacts: CommandCenterResult;
+  openInvoices: CommandCenterResult;
+  payments: CommandCenterResult;
+}
+
 export interface BusinessCommandCenterSnapshot {
   businessId: string;
   generatedAt: string;
+  /** True when any source FAILED: figures that depend on it are fallbacks. */
+  degraded: boolean;
+  sources: Record<string, CommandCenterSource>;
+  results: CommandCenterResults;
   health: CommandCenterHealth;
   summary: string;
   pulse: BusinessPulse;

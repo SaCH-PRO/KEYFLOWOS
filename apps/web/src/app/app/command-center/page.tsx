@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { openKey, KeyAwarenessPanel, KeyNoticedStream } from "@/components/key";
@@ -27,11 +28,20 @@ import {
   Store,
   Calendar,
   Settings,
+  Receipt,
+  CreditCard,
+  type LucideIcon,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { getStoredBusinessId, ensureWorkspace } from "@/lib/workspace";
-import { getBusinessCommandCenterSnapshot, type BusinessCommandCenterSnapshot } from "@/lib/api/business-command-center";
+import {
+  getBusinessCommandCenterSnapshot,
+  type BusinessCommandCenterSnapshot,
+  type CommandCenterResult,
+  type CommandCenterResults,
+  type CommandCenterSource,
+} from "@/lib/api/business-command-center";
 import {
   fetchCommandItems,
   completeCommandItem,
@@ -123,6 +133,77 @@ function CommandQuickLauncher() {
         sections={sections}
       />
     </>
+  );
+}
+
+/* ── V1-47-COCKPIT-TRUTH ─────────────────────────────────────────────────
+   The Release 0 records, each linked to its list, and a banner whenever a
+   source the server read did not answer. A count that is not known reads
+   "Unavailable" (the source failed) or "No access" (this member may not read
+   that list), never 0: a 0 here is always a real zero. */
+
+const RESULT_TILES: Array<{ key: keyof CommandCenterResults; icon: LucideIcon }> = [
+  { key: "contacts", icon: Users },
+  { key: "openInvoices", icon: Receipt },
+  { key: "payments", icon: CreditCard },
+];
+
+function resultValue(result: CommandCenterResult): string {
+  if (result.status === "OK" && result.count !== null) return String(result.count);
+  return result.status === "RESTRICTED" ? "No access" : "Unavailable";
+}
+
+function ReleaseResultTiles({ results }: { results: CommandCenterResults }) {
+  return (
+    <div data-testid="cockpit-results" className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {RESULT_TILES.map(({ key, icon: Icon }) => {
+        const result = results[key];
+        const known = result.status === "OK" && result.count !== null;
+        return (
+          <Link
+            key={key}
+            href={result.href}
+            data-testid={`cockpit-result-${key}`}
+            className="flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 px-4 py-3 hover:bg-card hover:border-primary/20 transition-colors focus-ring"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+              <Icon className="h-4 w-4 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">{result.label}</p>
+              <p
+                data-testid="cockpit-result-count"
+                className={known ? "text-xl font-semibold text-foreground" : "text-sm font-medium text-muted-foreground"}
+              >
+                {resultValue(result)}
+              </p>
+            </div>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function DegradedBanner({ sources }: { sources: Record<string, CommandCenterSource> }) {
+  const failed = Object.values(sources)
+    .filter((source) => source.status === "FAILED")
+    .map((source) => source.label);
+  return (
+    <div
+      role="alert"
+      data-testid="cockpit-degraded-banner"
+      className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3"
+    >
+      <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-foreground">Part of this cockpit could not be loaded</p>
+        <p className="text-xs text-muted-foreground">
+          {failed.length > 0 ? `Sources that did not answer: ${failed.join(", ")}. ` : "A source did not answer. "}
+          Figures that depend on them may be incomplete; a count that could not be read shows as Unavailable, not 0.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -289,7 +370,12 @@ export default function CommandCenterPage() {
       headerRight={<CommandQuickLauncher />}
     >
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+        {snapshot.degraded && <DegradedBanner sources={snapshot.sources ?? {}} />}
+
         <MissionControlHero businessId={businessId} hullScore={snapshot.keyGenome.overall} />
+
+        {/* A server that predates V1-47 sends no results: show nothing rather than zeros. */}
+        {snapshot.results && <ReleaseResultTiles results={snapshot.results} />}
 
         <CommandHealthStripV2 health={snapshot.health} />
 

@@ -8,9 +8,15 @@
  *   3. create an invoice with line items, issue it (DRAFT -> SENT), reload
  *   4. record an offline payment, check the Payment row / invoice balance /
  *      duplicate-submit idempotency / ledger rows, settle to PAID
- *   5. list contacts, invoices and payments again (simulated refresh)
+ *   5. list contacts, invoices and payments again (simulated refresh), and read
+ *      the cockpit snapshot: its Release 0 counts agree with those lists and
+ *      the read writes no ledger row (V1-47-COCKPIT-TRUTH); a STAFF member the
+ *      owner invites with crm read, crm_view=owned and revenue none sees only
+ *      what its own guarded lists disclose (owned-only contacts, before and
+ *      after a share; revenue counts RESTRICTED)
  *   6. a second tenant's owner is denied on every step-2..5 resource, by
- *      business-prefixed route and by bare id (403/404, never 200, never 500)
+ *      business-prefixed route and by bare id (403/404, never 200, never 500);
+ *      its own cockpit counts none of the first tenant's rows
  *   7. no step needed an external provider (AI_DISABLED=1, no provider keys)
  *
  * It began as a CHARACTERIZATION: every step asserts the product's intended
@@ -60,8 +66,9 @@
  * FIXTURES
  * --------
  * Every row the journey creates is reachable from the `r0_` prefix: user ids
- * `r0_owner` / `r0_other`, business names `r0_bizA` / `r0_bizB`, and every
- * child row hangs off those businesses. They are hard-deleted by raw SQL in FK
+ * `r0_owner` / `r0_other` / `r0_staff`, business names `r0_bizA` / `r0_bizB` /
+ * `r0_bizStaff` (the staff member's own bootstrap workspace), and every child
+ * row hangs off those businesses. They are hard-deleted by raw SQL in FK
  * order in beforeAll and afterAll. No $transaction wrapping: the server writes
  * from another process, so the test observes committed state only.
  *
@@ -107,10 +114,13 @@ const PROVIDER_KEYS = [
 const ID = {
   owner: `${P}owner`,
   other: `${P}other`,
+  staff: `${P}staff`,
   ownerEmail: `${P}owner@test.local`,
   otherEmail: `${P}other@test.local`,
+  staffEmail: `${P}staff@test.local`,
   bizAName: `${P}bizA`,
   bizBName: `${P}bizB`,
+  bizStaffName: `${P}bizStaff`,
 };
 
 const IDLE_MS = 90_000;      // silence from the child counts; slow-but-talking does not
@@ -158,6 +168,7 @@ function mintToken(sub: string, email: string, opts: { secret?: string; expiresI
 
 let OWNER = '';
 let OTHER = '';
+let STAFF = '';
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -325,6 +336,7 @@ beforeAll(async () => {
 
   OWNER = mintToken(ID.owner, ID.ownerEmail);
   OTHER = mintToken(ID.other, ID.otherEmail);
+  STAFF = mintToken(ID.staff, ID.staffEmail);
 
   if (!existsSync(ENTRY)) {
     bootDiagnosis = 'dist/main.js is missing — run `pnpm build` in apps/server first';
@@ -721,6 +733,89 @@ describe('step 5 — simulated refresh: the tenant list routes agree with steps 
     expect(tenantPayments.body.map((p: any) => p.id).sort()).toEqual(dbPayments.map((p: any) => p.id).sort());
     expect(tenantPayments.body.map((p: any) => p.id)).toEqual(expect.arrayContaining([S.firstPaymentId, S.settlePaymentId]));
     note(5, 'refresh lists', 'GET contacts / invoices / invoices/:id/payments / payments', `${contacts.status}/${invoices.status}/${perInvoice.status}/${tenantPayments.status}`, `contacts=1 invoices=1(PAID) payments=${dbPayments.length}`);
+
+    // V1-47-COCKPIT-TRUTH: the cockpit is one more read of the same records. With AI_DISABLED=1 it answers 200,
+    // its Release 0 counts are what the list routes above just returned (the invoice is PAID, so none is open:
+    // a real zero, status OK), a source that failed says so instead of reading as zero, and the read writes
+    // nothing to the ledger. Folded into this case rather than added as a new one: release0-journey.json binds
+    // exactly these 26 titles (allowAdditionalCases false).
+    const ledgerScope = { businessId: { in: [S.bizA!, S.bizB!] } };
+    const ledgerBefore = [await db.financialTransaction.count({ where: ledgerScope }), await db.ledgerEntry.count({ where: ledgerScope })];
+    const cockpit = await call(5, 'get', `/business-command-center/businesses/${S.bizA}/snapshot`, { token: OWNER });
+    const ledgerAfter = [await db.financialTransaction.count({ where: ledgerScope }), await db.ledgerEntry.count({ where: ledgerScope })];
+    expect(cockpit.status, JSON.stringify(cockpit.body).slice(0, 400)).toBe(200);
+    const openListed = invoices.body.data.filter((i: any) => ['SENT', 'OVERDUE', 'PARTIALLY_PAID'].includes(i.status)).length;
+    expect(cockpit.body.results).toEqual({
+      contacts: { label: 'Contacts', count: contacts.body.contacts.length, status: 'OK', href: '/app/crm/contacts' },
+      openInvoices: { label: 'Open invoices', count: openListed, status: 'OK', href: '/app/commerce/invoices' },
+      payments: { label: 'Payments', count: tenantPayments.body.length, status: 'OK', href: '/app/payments' },
+    });
+    expect([cockpit.body.results.contacts.count, cockpit.body.results.openInvoices.count, cockpit.body.results.payments.count]).toEqual([1, 0, dbPayments.length]);
+    const sources = Object.entries(cockpit.body.sources ?? {}) as Array<[string, any]>;
+    expect(sources.length).toBeGreaterThan(0);
+    for (const [key, s] of sources) {
+      expect(s.label, key).toBe(key);
+      expect(['OK', 'FAILED'], `${key} status`).toContain(s.status);
+      expect(Number.isNaN(Date.parse(s.fetchedAt)), `${key} fetchedAt`).toBe(false);
+    }
+    const failedSources = sources.filter(([, s]) => s.status === 'FAILED').map(([key]) => key);
+    expect(cockpit.body.degraded).toBe(failedSources.length > 0);
+    expect(ledgerAfter, 'the cockpit snapshot is a read: no FinancialTransaction or LedgerEntry row appears').toEqual(ledgerBefore);
+    note(5, 'cockpit snapshot', 'GET /business-command-center/businesses/:bizA/snapshot', cockpit.status, `contacts=${cockpit.body.results.contacts.count} openInvoices=${cockpit.body.results.openInvoices.count} payments=${cockpit.body.results.payments.count} degraded=${cockpit.body.degraded} failed=[${failedSources.join(',')}] ledger ${ledgerBefore.join('/')}->${ledgerAfter.join('/')}`);
+
+    // V1-47 review repair SEC-V47-1: the within-tenant rule on the real database, not only on the spec's
+    // where-clause emulator. A STAFF member the owner invites through the real team route with crm read,
+    // crm_view=owned and revenue none reads the same cockpit. Its contacts count is what ITS contacts list
+    // returns: the M7 owned-only clause leaves the owner's contact out of its book, then counts it once the
+    // contact is shared with it (Prisma's shares.some against Postgres). Its revenue counts are RESTRICTED with
+    // no number while the revenue list routes answer it 403. The staff member signs up through the real
+    // bootstrap route (which also gives it its own r0_bizStaff workspace). The ContactShare row is written
+    // directly because no route writes one, and is removed again so step 6 sees the state the owner left.
+    // Folded into this case for the same reason as the owner's cockpit read above (release0-journey.json).
+    const STAFF_SCOPES = { crm: 'read', crm_view: 'owned', revenue: 'none' };
+    const staffBoot = await call(5, 'post', '/identity/bootstrap', { token: STAFF, body: { company: ID.bizStaffName, firstName: 'Sam' } });
+    expect(staffBoot.status, JSON.stringify(staffBoot.body)).toBe(201);
+    expect(staffBoot.body.user?.id).toBe(ID.staff);
+    expect(staffBoot.body.business?.id).not.toBe(S.bizA);
+    const invite = await call(5, 'post', `/identity/businesses/${S.bizA}/team`, { token: OWNER, body: { email: ID.staffEmail, role: 'STAFF', scopes: STAFF_SCOPES } });
+    expect(invite.status, JSON.stringify(invite.body)).toBe(201);
+    const staffMembership = await db.membership.findUnique({ where: { userId_businessId: { userId: ID.staff, businessId: S.bizA } } });
+    expect(staffMembership).toMatchObject({ role: 'STAFF', permissionScopes: STAFF_SCOPES });
+
+    const staffReads = async () => ({
+      list: await call(5, 'get', `/crm/businesses/${S.bizA}/contacts`, { token: STAFF, query: { take: '100' } }),
+      snap: await call(5, 'get', `/business-command-center/businesses/${S.bizA}/snapshot`, { token: STAFF }),
+    });
+    const staffRevenueResults = {
+      openInvoices: { label: 'Open invoices', count: null, status: 'RESTRICTED', href: '/app/commerce/invoices' },
+      payments: { label: 'Payments', count: null, status: 'RESTRICTED', href: '/app/payments' },
+    };
+
+    const unshared = await staffReads();
+    expect(unshared.list.status, JSON.stringify(unshared.list.body).slice(0, 400)).toBe(200);
+    expect(unshared.list.body.contacts.map((c: { id: string }) => c.id)).toEqual([]);
+    expect(unshared.snap.status, JSON.stringify(unshared.snap.body).slice(0, 400)).toBe(200);
+    expect(unshared.snap.body.results).toEqual({
+      contacts: { label: 'Contacts', count: unshared.list.body.contacts.length, status: 'OK', href: '/app/crm/contacts' },
+      ...staffRevenueResults,
+    });
+    const staffRevenueRoutes = [
+      await call(5, 'get', `/commerce/businesses/${S.bizA}/invoices`, { token: STAFF }),
+      await call(5, 'get', `/commerce/businesses/${S.bizA}/payments`, { token: STAFF }),
+    ];
+    expect(staffRevenueRoutes.map((r) => r.status), 'the revenue lists the RESTRICTED tiles stand for refuse this member').toEqual([403, 403]);
+
+    const share = await db.contactShare.create({ data: { businessId: S.bizA, contactId: S.contactId, userId: ID.staff, createdBy: ID.owner } });
+    // The share is removed whatever the reads answer, before anything is asserted on them.
+    const shared = await staffReads().finally(() => db.contactShare.delete({ where: { id: share.id } }));
+    expect(shared.list.status).toBe(200);
+    expect(shared.list.body.contacts.map((c: { id: string }) => c.id)).toEqual([S.contactId]);
+    expect(shared.snap.status).toBe(200);
+    expect(shared.snap.body.results).toEqual({
+      contacts: { label: 'Contacts', count: shared.list.body.contacts.length, status: 'OK', href: '/app/crm/contacts' },
+      ...staffRevenueResults,
+    });
+    note(5, 'cockpit snapshot as STAFF (crm_view=owned, revenue none)', 'GET /business-command-center/businesses/:bizA/snapshot', `${unshared.snap.status}/${shared.snap.status}; revenue lists ${staffRevenueRoutes.map((r) => r.status).join('/')}`, `contacts unshared ${unshared.snap.body.results.contacts.count} (list ${unshared.list.body.contacts.length}), shared ${shared.snap.body.results.contacts.count} (list ${shared.list.body.contacts.length}); openInvoices/payments RESTRICTED`);
   });
 });
 
@@ -758,8 +853,10 @@ describe("step 6 — the second tenant's owner is denied on every step-2..5 reso
       ['post', `/commerce/businesses/${S.bizA}/invoices/${S.invoiceId}/payments`, { amount: 1, method: 'cash' }],
       ['get', `/commerce/businesses/${S.bizA}/invoices/${S.invoiceId}/timeline`],
       ['get', `/commerce/businesses/${S.bizA}/payments`],
+      // V1-47-COCKPIT-TRUTH: the cockpit that now counts bizA's records is bizA's alone.
+      ['get', `/business-command-center/businesses/${S.bizA}/snapshot`],
     ]);
-    note(6, 'bizA routes as r0_other', '12 business-prefixed routes', rows.map((r) => r.status).join(','), 'expect all 403');
+    note(6, 'bizA routes as r0_other', '13 business-prefixed routes', rows.map((r) => r.status).join(','), 'expect all 403');
     for (const r of rows) {
       expect(r.status, `${r.method} ${r.path}`).toBe(403);
       expect(JSON.stringify(r.body)).not.toContain(S.invoiceNumber!);
@@ -885,7 +982,17 @@ describe("step 6 — the second tenant's owner is denied on every step-2..5 reso
     expect(await db.payment.count({ where: { businessId: S.bizB } })).toBe(0);
     const owned = await call(6, 'get', `/commerce/businesses/${S.bizA}/invoices`, { token: OWNER });
     expect(owned.body.total).toBe(1);
-    note(6, 'state after denials', 'db + GET /commerce/businesses/:bizA/invoices', owned.status, 'contact, invoice, payments unchanged; bizB owns nothing');
+    // V1-47-COCKPIT-TRUTH: bizB's own cockpit counts none of bizA's rows; its zeros are real zeros (status OK).
+    const otherCockpit = await call(6, 'get', `/business-command-center/businesses/${S.bizB}/snapshot`, { token: OTHER });
+    expect(otherCockpit.status, JSON.stringify(otherCockpit.body).slice(0, 400)).toBe(200);
+    expect(otherCockpit.body.businessId).toBe(S.bizB);
+    expect(otherCockpit.body.results).toMatchObject({
+      contacts: { count: 0, status: 'OK' },
+      openInvoices: { count: 0, status: 'OK' },
+      payments: { count: 0, status: 'OK' },
+    });
+    expect(JSON.stringify(otherCockpit.body)).not.toContain(S.invoiceNumber!);
+    note(6, 'state after denials', 'db + GET /commerce/businesses/:bizA/invoices + GET bizB cockpit as r0_other', `${owned.status}/${otherCockpit.status}`, 'contact, invoice, payments unchanged; bizB owns nothing and its cockpit counts 0/0/0');
   });
 });
 
