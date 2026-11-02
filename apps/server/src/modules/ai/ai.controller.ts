@@ -1318,12 +1318,10 @@ export class AiController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/key/commands')
   @CrmRateLimit(60, 60_000)
-  async listKeyCommands(@Param('businessId') businessId: string) {
-    return (this.prisma as any).client.keyCommand.findMany({
-      where: { businessId },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
+  async listKeyCommands(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    // SEC-V109-1 (V1-09b): a member's own rows, an OWNER/ADMIN's every row,
+    // each projected to the caller's module scopes and contact visibility.
+    return this.keyCommand.listCommands(businessId, req.user?.id);
   }
 
   // ── Briefings (Phase 7 MD) ──────────────────────────────────────────────

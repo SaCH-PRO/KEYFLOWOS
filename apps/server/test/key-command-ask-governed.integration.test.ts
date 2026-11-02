@@ -291,7 +291,9 @@ describe("SEC-V109-1 'ask' reads only what the asking member may read", () => {
 
     const listed = await listCommands(ID.staffNone);
     expect(listed.status, JSON.stringify(listed.body)).toBe(200);
-    expect(listed.body.map((c: any) => c.id)).toContain(owned.body.commandId);
+    // V1-09b-KEY-COMMANDS-READ-SCOPE: a member lists only its own rows, so the
+    // owner's row is not listed to staffNone at all (it was, data withheld).
+    expect(listed.body.map((c: any) => c.id)).not.toContain(owned.body.commandId);
     expect(JSON.stringify(listed.body)).not.toContain(PRIVATE_EMAIL);
     expect(JSON.stringify(listed.body)).not.toContain(TEAM_EMAIL);
   });

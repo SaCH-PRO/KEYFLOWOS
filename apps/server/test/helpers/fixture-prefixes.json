@@ -300,7 +300,7 @@
     {
       "prefix": "v09b_",
       "owner": "apps/server/test/key-commands-read-scope.integration.test.ts",
-      "packet": "V1-09b-KEY-COMMANDS-READ-SCOPE"
+      "packet": "V1-09 / V1-09b-KEY-COMMANDS-READ-SCOPE"
     },
     {
       "prefix": "v10a_",

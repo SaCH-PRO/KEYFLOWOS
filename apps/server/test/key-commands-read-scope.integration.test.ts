@@ -187,8 +187,8 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const id of [ID.owner, ID.admin, ID.adminNoMoney, ID.staffRead, ID.staffNone]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
+  for (const name of ['owner', 'admin', 'adminNoMoney', 'staffRead', 'staffNone'] as const) {
+    await db.user.create({ data: { id: ID[name], email: `${P}${name}@test.local`, role: 'USER' } });
   }
   for (const id of [ID.biz, ID.bizOther]) {
     await db.business.create({ data: { id, name: `V09B ${id}`, ownerId: ID.owner, currency: 'TTD' } });
