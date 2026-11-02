@@ -40,7 +40,8 @@
  * R0-SEC2b-WHATSAPP-SECRET-READS (review SEC2-R2, SEC2-R1 second writer,
  * CR-SEC2-2), cases SEC2-T*:
  *   T  The Business reads (GET /identity/businesses/:businessId, GET
- *      /identity/businesses and the PATCH response, all through
+ *      /identity/businesses, the PATCH response and, review SEC2b-R1, the
+ *      business POST /identity/bootstrap answers, all through
  *      sanitizeBusiness) answered metaData.whatsapp as stored: phoneNumberId
  *      and the three credential ciphertexts, to any member (operations: none
  *      included). They now answer it as { configured } and nothing else, to
@@ -63,8 +64,8 @@
  * the real WhatsAppController, WhatsAppService, IdentityController (R0-SEC2b),
  * IdentityService, PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard
  * and the production GlobalHttpExceptionFilter, against the database at
- * DATABASE_URL. IdentityController collaborators the business GET and PATCH
- * paths never reach are empty stand-ins (BlueprintService a no-op: its mirror
+ * DATABASE_URL. IdentityController collaborators the business GET, PATCH and
+ * bootstrap paths never reach are empty stand-ins (BlueprintService a no-op: its mirror
  * is best-effort and asynchronous). The one stand-in on the authorization
  * path is identity attachment: a test middleware reads `x-test-user`, loads
  * that seeded User row and attaches `{ id, email, role }` exactly as
@@ -880,6 +881,39 @@ describe('R0-SEC2b business reads never carry the WhatsApp config (review SEC2-R
     expect(res.body.metaData.sec2bNote).toBe(`${P}note`);
     expect(await storedWhatsApp(ID.bizW), 'the stored config is byte-identical').toEqual(before);
     await reset(ID.bizW);
+  });
+
+  // Review SEC2b-R1: bootstrapUser answered the row ensureBootstrapWorkspace
+  // found (business.findFirst, no select) without sanitizeBusiness, so the
+  // owner's sign-in call (apps/web lib/client.ts bootstrapIdentity) received
+  // metaData.whatsapp as stored and every OAuth token column in plaintext.
+  it('[SEC2-T09] RED-BEFORE (review SEC2b-R1): POST /identity/bootstrap, the owner\'s sign-in call, answers the business it found as a Business read: metaData.whatsapp {configured:true} only, no OAuth token column (gmailAccessToken seeded), the other metaData keys kept, the stored config untouched', async () => {
+    const { BUSINESS_SECRET_FIELDS } = await import('../src/core/security/sanitize-business');
+    const GMAIL_TOKEN = `${P}GMAIL_OAUTH_TOKEN_SECRET_3e7a91c4`;
+    await reset(ID.bizW);
+    // Raw SQL: a plaintext token column (the canary), and a fixture-prefixed
+    // referral code so bootstrap generates no unprefixed unique value.
+    await db.$executeRawUnsafe('UPDATE businesses SET gmail_access_token = $2 WHERE id = $1', ID.bizW, GMAIL_TOKEN);
+    await db.$executeRawUnsafe('UPDATE users SET referral_code = $2 WHERE id = $1', ID.owner, `${P}ref_owner`);
+    const before = await storedWhatsApp(ID.bizW);
+    try {
+      const res = await as(http().post('/identity/bootstrap'), ID.owner).send({});
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.isNewBusiness).toBe(false);
+      expect(res.body.business?.id, 'bootstrap found the owner\'s business').toBe(ID.bizW);
+      expectNoSecret(res.body, 'POST /identity/bootstrap');
+      expect(JSON.stringify(res.body).includes(GMAIL_TOKEN), 'the gmail token is in the bootstrap body').toBe(false);
+      expectMaskedBusiness(res.body.business, 'POST /identity/bootstrap business');
+      const leaked = BUSINESS_SECRET_FIELDS.filter((f) => Object.prototype.hasOwnProperty.call(res.body.business, f));
+      expect(leaked, 'OAuth token columns in the bootstrap business').toEqual([]);
+      // The answer is masked; the stored row is not.
+      expect(await storedWhatsApp(ID.bizW)).toEqual(before);
+      const [row] = await db.$queryRawUnsafe('SELECT gmail_access_token AS t FROM businesses WHERE id = $1', ID.bizW);
+      expect(row.t).toBe(GMAIL_TOKEN);
+    } finally {
+      await db.$executeRawUnsafe('UPDATE businesses SET gmail_access_token = NULL WHERE id = $1', ID.bizW);
+      await reset(ID.bizW);
+    }
   });
 });
 

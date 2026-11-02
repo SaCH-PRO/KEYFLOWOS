@@ -1321,7 +1321,10 @@ export class IdentityService {
 
     const { business, isNewBusiness } = await this.ensureBootstrapWorkspace(user.id, businessName);
 
-    return { user, business, isNewBusiness };
+    // R0-SEC2b review SEC2b-R1: POST /identity/bootstrap answers the business it
+    // found, a Business read like GET /identity/businesses/:id: no OAuth token
+    // column and metaData.whatsapp masked, for the owner too.
+    return { user, business: sanitizeBusiness(business), isNewBusiness };
   }
 
   /** 409 for an address another local account holds; bootstrap writes nothing. */
