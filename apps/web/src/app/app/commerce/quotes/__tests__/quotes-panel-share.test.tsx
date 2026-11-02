@@ -19,6 +19,10 @@
  *     refusal (409: send the quote first) instead of opening a message with no
  *     link; a converted quote offers no "Copy link";
  *   - nothing here calls a Gmail route or the email composer.
+ *   - V1-52 review (CR-V152-2): a member without revenue write access is refused
+ *     the link (403). Their WhatsApp share of a sent quote still opens with the
+ *     quote's number and amount and no link (the pre-packet message), with a
+ *     notice that the link needs write access; their Copy link shows the refusal.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React from "react";
@@ -77,6 +81,10 @@ function quote(id: string, fields: Partial<Quote>): Quote {
 const SENT = quote("q_sent", { status: "SENT", viewToken: "tok_v52_sent" });
 const DRAFT = quote("q_draft", { status: "DRAFT", viewToken: null });
 const CONVERTED = quote("q_conv", { status: "ACCEPTED", invoiceId: "inv_v52", viewToken: "tok_v52_conv" });
+// Quotes the server refuses with 403 (the member has revenue read access only).
+const READ_SENT = quote("q_ro_sent", { status: "SENT" });
+const READ_DRAFT = quote("q_ro_draft", { status: "DRAFT" });
+const FORBIDDEN = "Insufficient permissions: revenue requires write access (you have read)";
 
 function jsonResponse(status: number, body: unknown): Response {
   const text = JSON.stringify(body);
@@ -106,6 +114,9 @@ function installServer() {
         code: "quote_not_sent",
         message: "This quote is a draft: send it first, then share its link.",
       });
+    }
+    if (method === "POST" && /\/quotes\/q_ro_[a-z]+\/public-link$/.test(url.pathname)) {
+      return jsonResponse(403, { statusCode: 403, message: FORBIDDEN });
     }
     return jsonResponse(200, {});
   });
@@ -150,6 +161,7 @@ beforeEach(() => {
   window.open = windowOpen as unknown as typeof window.open;
   toastMock.success.mockClear();
   toastMock.error.mockClear();
+  toastMock.info.mockClear();
   composerOpen.mockClear();
 });
 
@@ -216,5 +228,41 @@ describe("V1-52 quotes panel: provider-free public link", () => {
     renderPanel([CONVERTED]);
     openMenu();
     expect(screen.queryByText("Copy link")).toBeNull();
+  });
+
+  it("CR-V152-2: a member refused the link (403) still shares a sent quote on WhatsApp, with its number and amount and no link, and is told why", async () => {
+    const server = installServer();
+    renderPanel([READ_SENT]);
+    openMenu();
+    fireEvent.click(screen.getByText("Share via WhatsApp"));
+    await waitFor(() => expect(windowOpen).toHaveBeenCalledTimes(1));
+    const target = String(windowOpen.mock.calls[0]![0]);
+    expect(target.startsWith("https://wa.me/?text=")).toBe(true);
+    const text = decodeURIComponent(target.slice("https://wa.me/?text=".length));
+    expect(text).toContain("Hi Ana Lee, here is your quote QT-q_ro_sent for");
+    expect(text).not.toContain("/quote/");
+    expect(text).not.toContain("http");
+    expect(toastMock.info).toHaveBeenCalledTimes(1);
+    expect(String(toastMock.info.mock.calls[0]![0])).toContain("without the quote link");
+    expect(toastMock.error).not.toHaveBeenCalled();
+    expect(server.linkCalls()).toEqual([{ method: "POST", path: `/commerce/businesses/${BIZ}/quotes/q_ro_sent/public-link` }]);
+  });
+
+  it("CR-V152-2: the same member's Copy link shows the refusal and copies nothing; their DRAFT share is refused as before", async () => {
+    installServer();
+    renderPanel([READ_SENT]);
+    openMenu();
+    fireEvent.click(screen.getByText("Copy link"));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledTimes(1));
+    expect(String(toastMock.error.mock.calls[0]![0])).toContain("requires write access");
+    expect(clipboardWrite).not.toHaveBeenCalled();
+    cleanup();
+
+    toastMock.error.mockClear();
+    renderPanel([READ_DRAFT]);
+    openMenu();
+    fireEvent.click(screen.getByText("Share via WhatsApp"));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledTimes(1));
+    expect(windowOpen).not.toHaveBeenCalled();
   });
 });

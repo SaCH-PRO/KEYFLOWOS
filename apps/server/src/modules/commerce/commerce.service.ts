@@ -207,6 +207,25 @@ function toOperatorQuote<Q extends { businessId: string; contact: OperatorQuoteC
   return { ...rest, contact: { firstName: contact.firstName, lastName: contact.lastName, email: contact.email } };
 }
 
+/**
+ * V1-52 review (SEC-V52-1): the quote as the operator READ routes serve it,
+ * without its viewToken. The token is the customer's bearer credential: whoever
+ * holds it can view, accept or reject the quote on the public routes. The
+ * revenue:read reads (GET .../quotes, .../quotes/stale, .../quotes/:quoteId and
+ * the KEY adapter's getQuoteStatus) used to serve it, so a member refused the
+ * status route and the public-link route (both revenue:write) could still read
+ * the link, share it or accept the quote themselves, and the list served a token
+ * send-email reserved on a DRAFT. The link reaches an operator only through
+ * POST .../quotes/:quoteId/public-link (revenue:write, never for a DRAFT).
+ * Events and the signed-token routes keep the token (their readers build the
+ * customer's link from it, or already hold it).
+ */
+function withoutViewToken<Q extends { viewToken?: string | null }>(quote: Q): Omit<Q, 'viewToken'> {
+  const served: Partial<Q> = { ...quote };
+  delete served.viewToken;
+  return served as Omit<Q, 'viewToken'>;
+}
+
 /** Older invoices stored subtotal 0 with priced items; derive it so totals render. */
 function withLegacySubtotal<
   T extends { subtotal: number; taxRate: number | null; taxAmount: number | null; items: Array<{ total: number }> },
@@ -1388,7 +1407,11 @@ export class CommerceService {
    * row is not written. The one write is the CR-V150-2 repair of a SENT quote
    * that has no token (repairSentQuoteViewToken). Nothing is emitted, logged or
    * posted: creating a link is not a send (no sentAt, no quote.sent) and no
-   * ledger row is involved.
+   * ledger row is involved. The route opts out of the global business-event
+   * audit (V1-52 review CR-V152-1), which would store the url in plain text.
+   * The revenue:read list, stale and detail reads serve no token
+   * (withoutViewToken, SEC-V52-1), so a member without revenue:write cannot
+   * obtain the link from them either.
    *
    * Refusals, before any write:
    * - converted (invoiceId set, or INVOICED/PAID/CONVERTED): 400 quote_converted,
@@ -1764,7 +1787,8 @@ export class CommerceService {
     const now = new Date();
     return {
       // R0-CMF3 review (ST-CMF3-3): a legacy row's foreign contact reads null.
-      data: data.map((q) => this.decorateQuote(withTenantContact(q), now)),
+      // V1-52 review (SEC-V52-1): no row carries its viewToken (withoutViewToken).
+      data: data.map((q) => withoutViewToken(this.decorateQuote(withTenantContact(q), now))),
       total,
       page,
       pageSize,
@@ -1823,7 +1847,9 @@ export class CommerceService {
         daysSinceSent: event.daysSinceSent,
       } as QuoteStalePayload);
     }
-    return decoratedRows.map(({ served }) => served);
+    // V1-52 review (SEC-V52-1): the revenue:read stale list serves no viewToken;
+    // the quote.stale events above keep the quote as before.
+    return decoratedRows.map(({ served }) => withoutViewToken(served));
   }
 
   /**
@@ -1893,7 +1919,9 @@ export class CommerceService {
    * an unknown id and a soft-deleted row all read as absent, which the
    * controller turns into one 404. No status gate — the operator opens DRAFT.
    * A read stamps nothing (no viewedAt, no event): only the signed-token
-   * route records a customer view.
+   * route records a customer view. It serves no viewToken (V1-52 review
+   * SEC-V52-1, withoutViewToken): the route is revenue:read, and the KEY
+   * adapter's getQuoteStatus hands this shape to the assistant.
    */
   async getQuoteForBusiness(quoteId: string, businessId: string) {
     const quote = await this.prisma.client.quote.findFirst({
@@ -1901,7 +1929,7 @@ export class CommerceService {
       include: OPERATOR_QUOTE_INCLUDE,
     });
     if (!quote) return null;
-    return this.decorateQuote(toOperatorQuote(quote));
+    return withoutViewToken(this.decorateQuote(toOperatorQuote(quote)));
   }
 
   // ----- R2: public quote-view + accept/reject by signed token -----

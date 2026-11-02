@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Optional, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Optional, Param, Patch, Post, Query, Req, Res, SetMetadata, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
@@ -30,6 +30,7 @@ import { buildQuoteEmailHtml } from './quote-email.template';
 import { buildInvoiceEmailHtml } from './invoice-email.template';
 import type { InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { SKIP_BUSINESS_EVENT_KEY } from '../business-events/business-event.interceptor';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { BUSINESS_PROFILE_OWNER_ONLY, FinanceSettingsService } from '../finance/finance-settings.service';
 
@@ -981,8 +982,24 @@ export class CommerceController {
   // one token of a SENT quote stored without one, so it is revenue:write like
   // send-email. A DRAFT is a 409, an expired or converted quote a 400
   // (CommerceService.getQuotePublicLink).
+  //
+  // V1-52 review (CR-V152-1): the global BusinessEventInterceptor
+  // (APP_INTERCEPTOR) audits every successful POST that names a business. Here
+  // it labelled the call quote.create with subjectId 'unknown' (the body has no
+  // id) and stored the body as the after-snapshot: the redaction policy drops
+  // `token` but not `url`, so each call wrote the customer's bearer
+  // accept/reject link in plain text into the business event log, the KEY flow
+  // bridge and KEY episodic memory. Handing out a link is not a business
+  // event (it returns the stored token; its one write is the CR-V150-2 repair
+  // mint of a SENT quote stored without one), so the route is skipped, as the
+  // service contract says: nothing is emitted, logged or posted.
+  // SetMetadata, not @SkipBusinessEvent(): that decorator (Reflect.metadata)
+  // stores the flag on the prototype property, while the interceptor reads it
+  // from the handler function (Reflector.get), so it skips nothing;
+  // SetMetadata stores it on the handler.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
+  @SetMetadata(SKIP_BUSINESS_EVENT_KEY, true)
   @Post('businesses/:businessId/quotes/:quoteId/public-link')
   createQuotePublicLink(
     @Param('businessId') businessId: string,

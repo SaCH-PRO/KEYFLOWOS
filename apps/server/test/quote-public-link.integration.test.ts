@@ -38,12 +38,21 @@
  *          recorded on a never-sent DRAFT has none -> 409 quote_link_unavailable
  *   LEDGER no FinancialTransaction (or ledger entry) is written by link creation or
  *          by a public view, on an ACCRUAL tenant with a seeded chart of accounts
+ *   PL-11  (review CR-V152-1) the production global BusinessEventInterceptor writes
+ *          no audit row for the link route, so the url (the bearer accept/reject
+ *          link) is never stored by it; the create route in the same app still
+ *          writes its quote.create row (the interceptor is live)
+ *   PL-12  (review SEC-V52-1) the revenue:read quote reads (list, stale, detail)
+ *          serve no viewToken, to a revenue:read member or the owner, and not the
+ *          token send-email reserved on a DRAFT; the link route is the operator's
+ *          one way to it, and it refuses that member
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PublicRateLimitGuard (on this suite's Redis index),
  * CommerceService, InvoiceWorkflowService and the real ledger chain run
  * against DATABASE_URL behind the production GlobalHttpExceptionFilter and
- * ValidationPipe, with the app's TenantInterceptor. Identity attachment is the
+ * ValidationPipe, with the app's BusinessEventInterceptor (its emitter a
+ * recorder) and TenantInterceptor. Identity attachment is the
  * one stand-in: a test middleware reads `x-v52a-user`, loads that seeded user
  * row and attaches `{ id, email, role }` as AuthMiddleware would. Collaborators
  * off the boundary (event bus, contact timeline, stats cache, AI / Drive) are
@@ -98,6 +107,14 @@ const eventRecorder = {
   off: () => undefined,
   once: () => undefined,
   removeListener: () => undefined,
+};
+
+/** What the global BusinessEventInterceptor hands ResilientEmitterService (the audit row it writes). */
+const auditJobs: Array<Record<string, any>> = [];
+const auditRecorder = {
+  emit: async (job: Record<string, any>) => {
+    auditJobs.push(job);
+  },
 };
 
 const crmCalls: Array<{ type: string }> = [];
@@ -263,6 +280,8 @@ beforeAll(async () => {
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+  const { BusinessEventInterceptor } = await import('../src/modules/business-events/business-event.interceptor');
+  const { Reflector } = await import('@nestjs/core');
 
   previousNamespace = process.env.RATE_LIMIT_KEY_NAMESPACE;
   process.env.RATE_LIMIT_KEY_NAMESPACE = P;
@@ -318,7 +337,12 @@ beforeAll(async () => {
   });
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.useGlobalInterceptors(new TenantInterceptor(moduleRef.get(PrismaService)));
+  // The production global interceptors (app.module.ts APP_INTERCEPTOR), in order:
+  // the business-event audit (its emitter a recorder) and the tenant scope.
+  app.useGlobalInterceptors(
+    new BusinessEventInterceptor(auditRecorder as any, new Reflector()),
+    new TenantInterceptor(moduleRef.get(PrismaService)),
+  );
   await app.init();
 
   await cleanup(); // in case a prior run aborted
@@ -350,6 +374,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   recordedEvents.length = 0;
+  auditJobs.length = 0;
   crmCalls.length = 0;
   gmailCalls.length = 0;
   await clearOwnRateLimits();
@@ -580,5 +605,85 @@ describe('LEDGER (V1-52)', () => {
     expect(await ledgerCounts(ID.bizA)).toEqual(ledgerA);
     expect(await ledgerCounts(ID.bizB)).toEqual(ledgerB);
     expect(gmailCalls).toHaveLength(0);
+  });
+});
+
+describe('business-event audit (V1-52 review CR-V152-1)', () => {
+  it('PL-11: the global BusinessEventInterceptor writes no audit row for the link route and no audit row of the case carries the token or url; the create route in the same app still writes its quote.create row', async () => {
+    const created = await createQuote(ID.ownerA, ID.bizA, ID.contactA);
+    // Positive control: the interceptor is installed and live in this app.
+    expect(auditJobs.filter((j) => j.eventType === 'quote.create' && j.subjectId === created.id)).toHaveLength(1);
+    const sent = await setQuoteStatus(ID.ownerA, ID.bizA, created.id, 'sent');
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    const token = String((await quoteRow(created.id)).view_token);
+    const beforeLink = auditJobs.length;
+
+    const first = await publicLink(ID.ownerA, ID.bizA, created.id);
+    const second = await publicLink(ID.ownerA, ID.bizA, created.id);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(second.body).toEqual(first.body);
+    expect(first.body.token).toBe(token);
+
+    // No audit row for the link route: none labelled quote.create with an unknown subject, none at all.
+    expect(auditJobs.length).toBe(beforeLink);
+    expect(auditJobs.filter((j) => String(j.metadata?.route ?? '').endsWith('/public-link'))).toHaveLength(0);
+    expect(auditJobs.some((j) => j.subjectId === 'unknown')).toBe(false);
+    // Nothing the interceptor recorded in this case (create, sent, two links) carries the token or the url.
+    const recorded = JSON.stringify(auditJobs);
+    expect(recorded).not.toContain(token);
+    expect(recorded).not.toContain('/quote/');
+  });
+});
+
+describe('operator quote reads serve no viewToken (V1-52 review SEC-V52-1)', () => {
+  it('PL-12: the revenue:read list, stale and detail reads serve no viewToken, to the revenue:read member or the owner, nor a token reserved on a DRAFT; the member is still refused the link and cannot reach the token', async () => {
+    const quoteId = await sentQuote(ID.ownerA, ID.bizA, ID.contactA);
+    const token = String((await quoteRow(quoteId)).view_token);
+    // A stale SENT quote (sent 30 days ago, never viewed) for the stale list.
+    const staleId = await sentQuote(ID.ownerA, ID.bizA, ID.contactA);
+    await db.$executeRawUnsafe(`UPDATE quotes SET sent_at = now() - interval '30 days' WHERE id = $1`, staleId);
+    const staleToken = String((await quoteRow(staleId)).view_token);
+    // A DRAFT holding a token send-email reserved (R0-CMF4).
+    const reserved = await createQuote(ID.ownerA, ID.bizA, ID.contactA);
+    const reservedToken = `${P}tok_reserved_read`;
+    await db.$executeRawUnsafe(`UPDATE quotes SET view_token = $1 WHERE id = $2`, reservedToken, reserved.id);
+    const secrets = [token, staleToken, reservedToken];
+
+    // The member is refused the link route (PL-05) ...
+    expect((await publicLink(ID.staffReadA, ID.bizA, quoteId)).status).toBe(403);
+
+    for (const user of [ID.staffReadA, ID.ownerA]) {
+      const list = await agent().get(`/commerce/businesses/${ID.bizA}/quotes`).set(HEADER, user);
+      expect(list.status, JSON.stringify(list.body)).toBe(200);
+      const ids = list.body.data.map((q: any) => q.id);
+      expect(ids).toEqual(expect.arrayContaining([quoteId, staleId, reserved.id]));
+      for (const row of list.body.data) expect(row, `${user} list ${row.id}`).not.toHaveProperty('viewToken');
+
+      const stale = await agent().get(`/commerce/businesses/${ID.bizA}/quotes/stale`).set(HEADER, user);
+      expect(stale.status, JSON.stringify(stale.body)).toBe(200);
+      expect(stale.body.map((q: any) => q.id)).toContain(staleId);
+      for (const row of stale.body) expect(row, `${user} stale ${row.id}`).not.toHaveProperty('viewToken');
+
+      for (const id of [quoteId, reserved.id]) {
+        const detail = await agent().get(`/commerce/businesses/${ID.bizA}/quotes/${id}`).set(HEADER, user);
+        expect(detail.status, JSON.stringify(detail.body)).toBe(200);
+        expect(detail.body.id).toBe(id);
+        expect(detail.body, `${user} detail ${id}`).not.toHaveProperty('viewToken');
+        for (const secret of secrets) expect(JSON.stringify(detail.body)).not.toContain(secret);
+      }
+
+      for (const secret of secrets) {
+        expect(JSON.stringify(list.body), `${user} list`).not.toContain(secret);
+        expect(JSON.stringify(stale.body), `${user} stale`).not.toContain(secret);
+      }
+    }
+
+    // ... while the token exists: the owner's link route answers it.
+    const ownerLink = await publicLink(ID.ownerA, ID.bizA, quoteId);
+    expect(ownerLink.status, JSON.stringify(ownerLink.body)).toBe(201);
+    expect(ownerLink.body.token).toBe(token);
+    // The quote events keep the token their listeners build the customer's link from.
+    const staleEvent = recordedEvents.find((e) => e.name === 'quote.stale' && e.payload?.quote?.id === staleId);
+    expect(staleEvent?.payload.quote.viewToken).toBe(staleToken);
   });
 });

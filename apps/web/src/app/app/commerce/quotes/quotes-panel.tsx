@@ -601,19 +601,25 @@ export default function QuotesPanel({
   // shared with no email provider connected. A refusal (a DRAFT must be sent
   // first; an expired or converted quote has no link to share) is shown to the
   // operator, never replaced by a message without a link.
-  async function fetchQuoteLink(quote: Quote): Promise<string | null> {
-    if (!businessId) return null;
-    const { data, error } = await createQuotePublicLink(businessId, quote.id);
-    if (!data?.url) {
-      toast.error(error ?? "Could not create a link for this quote");
-      return null;
-    }
-    return data.url;
+  //
+  // V1-52 review (CR-V152-2): the link route is revenue:write and the quote
+  // reads no longer carry the token (SEC-V52-1), so a revenue:read member is
+  // refused the link (403). Their WhatsApp share used to open with the quote's
+  // number and amount and no link; it still does (shareMessage without a url),
+  // for a sent, unconverted quote, and says the link needs revenue write access.
+  async function fetchQuoteLink(quote: Quote): Promise<{ url: string | null; forbidden: boolean; error: string | null }> {
+    if (!businessId) return { url: null, forbidden: false, error: null };
+    const { data, error, status } = await createQuotePublicLink(businessId, quote.id);
+    if (data?.url) return { url: data.url, forbidden: false, error: null };
+    return { url: null, forbidden: status === 403, error: error ?? "Could not create a link for this quote" };
   }
 
   async function copyQuoteLink(quote: Quote) {
-    const url = await fetchQuoteLink(quote);
-    if (!url) return;
+    const { url, error } = await fetchQuoteLink(quote);
+    if (!url) {
+      if (error) toast.error(error);
+      return;
+    }
     try {
       await navigator.clipboard.writeText(url);
       toast.success("Quote link copied");
@@ -622,14 +628,29 @@ export default function QuotesPanel({
     }
   }
 
-  async function shareQuoteViaWhatsApp(quote: Quote) {
-    const url = await fetchQuoteLink(quote);
-    if (!url) return;
+  function shareMessage(quote: Quote, url: string | null): string {
     const contactName = quote.contact
       ? `${quote.contact.firstName ?? ""} ${quote.contact.lastName ?? ""}`.trim()
       : "there";
-    const msg = `Hi ${contactName}, here is your quote ${quote.quoteNumber} for ${formatAmount(quote.total, quote.currency)}. You can view and accept it here: ${url}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener,noreferrer");
+    const intro = `Hi ${contactName}, here is your quote ${quote.quoteNumber} for ${formatAmount(quote.total, quote.currency)}.`;
+    return url
+      ? `${intro} You can view and accept it here: ${url}`
+      : `${intro} Please review and let us know if you'd like to proceed!`;
+  }
+
+  async function shareQuoteViaWhatsApp(quote: Quote) {
+    const { url, forbidden, error } = await fetchQuoteLink(quote);
+    if (!url) {
+      const shareable = quote.status !== "DRAFT" && !quote.invoiceId;
+      if (!forbidden || !shareable) {
+        if (error) toast.error(error);
+        return;
+      }
+      toast.info("Shared without the quote link", {
+        description: "Sharing the customer link needs revenue write access.",
+      });
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage(quote, url))}`, "_blank", "noopener,noreferrer");
   }
 
   async function handleConvert() {
