@@ -1,0 +1,44 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-SEC2-WHATSAPP-CONFIG-AUTHORITY",
+  "proofScope": "whatsapp-config-authority-real-database",
+  "description": "The WhatsApp operator routes (WhatsAppController, found by the V1-21b final repair with AuthGuard and BusinessGuard only) no longer leak or let any member change the business's sending identity. GET /whatsapp/businesses/:b/config answers no secret value to anyone: provider and fromNumber, and each credential (accessToken, authToken, accountSid) as {configured, last4}, last4 and phoneNumberId only for a member who may write the config. PATCH .../config is OWNER only (owner ruling D-11: the business profile, its sending identity and sibling business-config writes): the OWNER membership or Business.ownerId, plus the SUPER_ADMIN bypass, bound to the route's business; anyone else gets 403 {code:'BUSINESS_PROFILE_OWNER_ONLY'} (the code every D-11 writer answers) with the Business row byte-identical. A PATCH that omits a credential, sends it blank or mask-shaped, or echoes the GET view back keeps the stored ciphertext. POST send and POST messages need operations:write; GET status, conversations, conversations/:id, templates and POST test need operations:read (the module key KeyInboxController requires). GET status carries phoneNumberId (as platformId) only to a config writer. A foreign business answers 403 with nothing written; the four webhook handlers are unchanged (no guards). No provider traffic: sends use the mock provider, global fetch is a failing recorder. Run from apps/server against this packet's isolated, migrated database: npx vitest run test/whatsapp-config-authority.integration.test.ts test/whatsapp.controller.test.ts",
+  "notes": [
+    "The owner rule is restated in WhatsAppService.isConfigOwner (WhatsAppModule does not import IdentityModule), as TemplatesService.isProfileOwner, FinanceSettingsService and GmailService.assertConnectAuthority restate it: the OWNER membership, Business.ownerId and the SUPER_ADMIN platform bypass. PATCH config keeps AuthGuard + BusinessGuard and runs assertConfigOwner first; ModuleScopeGuard is not put on the config routes because it refuses a distinguished owner with no membership row (R0-CMF5 notes).",
+    "Module key: 'operations', the key every KeyInboxController route requires (WhatsApp inbound is ingested into the KEY inbox). Role defaults: STAFF operations:read (reads, no send), ADMIN and OWNER admin. ModuleScopeGuard requires a membership row, so a distinguished owner without one is refused the send and inbox routes, as on the KEY inbox routes; that rule is not widened here.",
+    "phoneNumberId stays plain at rest: the shared webhook routes inbound by metaData.whatsapp.phoneNumberId. The three credentials stay encrypted with core/crypto/token-crypto encryptToken as before; a kept credential is the stored ciphertext, not re-encrypted.",
+    "Not covered here: the d11-owner-writes static guard's OWNER_ONLY_META_KEYS does not list metaData.whatsapp (src/core/config/d11-owner-writes.spec.ts is outside this packet's write set), so a NEW unguarded writer of metaData.whatsapp would not be caught statically."
+  ],
+  "requireReportSuccess": true,
+  "allowAdditionalCases": true,
+  "suites": [
+    "test/whatsapp-config-authority.integration.test.ts",
+    "test/whatsapp.controller.test.ts"
+  ],
+  "requiredCases": [
+    "R0-SEC2 fixture sanity (real rows) [SEC2-X01] seeded four businesses, ten users and nine memberships; bizW stores the Meta config with its three credentials encrypted and phoneNumberId plain; bizL and the super admin have no membership",
+    "R0-SEC2 GET config never answers a secret value [SEC2-C01] RED-BEFORE: a STAFF member (role defaults) reads the config: 200 with the provider and fromNumber, each credential a configured flag with no characters of it, no phoneNumberId",
+    "R0-SEC2 GET config never answers a secret value [SEC2-C02] RED-BEFORE: an ADMIN (role defaults: settings and operations admin) and a STAFF member granted operations:write read the same masked view: no secret, no phoneNumberId",
+    "R0-SEC2 GET config never answers a secret value [SEC2-C03] RED-BEFORE: the owner, a co-owner (OWNER membership arm), the distinguished owner of bizL (Business.ownerId arm) and a SUPER_ADMIN get phoneNumberId and each credential's last 4 characters, never the value",
+    "R0-SEC2 GET config never answers a secret value [SEC2-C04] a Twilio config with no Meta token answers accessToken {configured:false}; an unconfigured business answers data null",
+    "R0-SEC2 GET config never answers a secret value [SEC2-C05] RED-BEFORE: GET status, the other route that answered phoneNumberId (as platformId), does not carry it to a STAFF member; the owner still sees it",
+    "R0-SEC2 PATCH config is OWNER only (D-11 sending identity) [SEC2-W01] RED-BEFORE: a STAFF member replaces the WhatsApp credentials: 403 BUSINESS_PROFILE_OWNER_ONLY, the Business row byte-identical",
+    "R0-SEC2 PATCH config is OWNER only (D-11 sending identity) [SEC2-W02] RED-BEFORE: an ADMIN (role defaults: settings admin), a STAFF member granted operations:write and a STAFF member who owns another business are refused the same way: 403, the Business row byte-identical",
+    "R0-SEC2 PATCH config is OWNER only (D-11 sending identity) [SEC2-W03] RED-BEFORE: the owner check is bound to the route's business: a STAFF member of bizW who owns bizO, naming bizO in x-business-id, ?businessId= and the body, is refused on bizW (403) with the row byte-identical",
+    "R0-SEC2 PATCH config is OWNER only (D-11 sending identity) [SEC2-W04] the owner replaces the config: 200, the credentials encrypted at rest, phoneNumberId plain (the shared webhook looks it up), the other metaData keys kept, the response carries no secret",
+    "R0-SEC2 PATCH config is OWNER only (D-11 sending identity) [SEC2-W05] RED-BEFORE: a PATCH that omits the credentials, sends them blank or echoes the masked GET view back keeps the stored ones byte-identical (the mask never overwrites a token)",
+    "R0-SEC2 PATCH config is OWNER only (D-11 sending identity) [SEC2-W06] the co-owner (OWNER membership arm), the distinguished owner of bizL (Business.ownerId arm, no membership) and a SUPER_ADMIN may write the config",
+    "R0-SEC2 sending and the inbox reads need an operations scope [SEC2-S01] RED-BEFORE: a STAFF member on role defaults (operations: read) cannot send from the business number: POST send and POST messages answer 403 and write no conversation or message",
+    "R0-SEC2 sending and the inbox reads need an operations scope [SEC2-S02] RED-BEFORE: a STAFF member with operations: none is refused every inbox read (status, conversations, conversation detail, templates, POST test): 403 with no conversation in the body",
+    "R0-SEC2 sending and the inbox reads need an operations scope [SEC2-S03] a STAFF member on role defaults (operations: read) keeps every inbox read: 200 from status, conversations, conversation detail, templates and POST test, none carrying a secret",
+    "R0-SEC2 sending and the inbox reads need an operations scope [SEC2-S04] a STAFF member granted operations: write, an ADMIN (operations: admin), the owner and a SUPER_ADMIN send from the business number (mock provider): one OUTBOUND SENT message per send, no provider traffic",
+    "R0-SEC2 a business the caller does not belong to [SEC2-F01] the owner of bizX reads, writes, sends and lists on bizW: 403 on every route, bizW byte-identical and no message written",
+    "R0-SEC2 a business the caller does not belong to [SEC2-F02] the owner of bizW PATCHes bizX's config naming bizW in x-business-id and ?businessId=: 403, bizX byte-identical",
+    "R0-SEC2 the webhooks are unchanged (no session, provider checks only) [SEC2-H01] GET webhook and GET webhook/:businessId answer the Meta handshake challenge without a session, and refuse a wrong verify token (403)",
+    "R0-SEC2 the webhooks are unchanged (no session, provider checks only) [SEC2-H02] POST webhook/:businessId with an unsigned Meta payload and no session is refused by the signature check (403, not 401) and writes nothing",
+    "WhatsAppController route guards (R0-SEC2) [SEC2-G01] every operator route runs AuthGuard and BusinessGuard, and each scoped one ModuleScopeGuard with its operations level",
+    "WhatsAppController route guards (R0-SEC2) [SEC2-G02] the webhooks stay unauthenticated (no guards: the provider handshake and signature are their checks)",
+    "WhatsAppController route guards (R0-SEC2) [SEC2-G03] no other route exists unclassified"
+  ],
+  "maxReportAgeSeconds": 600
+}

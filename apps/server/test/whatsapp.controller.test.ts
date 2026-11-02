@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createHmac } from 'crypto';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { WhatsAppController } from '../src/modules/whatsapp/whatsapp.controller';
+import { MODULE_SCOPE_KEY } from '../src/core/auth/module-scope.guard';
 
 function metaSignature(body: string, secret: string): string {
   const sig = createHmac('sha256', secret).update(body).digest('hex');
@@ -99,5 +101,54 @@ describe('WhatsAppController webhook signatures', () => {
       makeReq({ headers: { 'x-twilio-signature': sig }, rawBody: '' }),
     );
     expect(res).toMatchObject({ success: true, contactId: 'c1', isNew: false });
+  });
+});
+
+/**
+ * R0-SEC2-WHATSAPP-CONFIG-AUTHORITY: the guard set of every route, read from the
+ * decorator metadata Nest enforces. The real-database proof is
+ * test/whatsapp-config-authority.integration.test.ts; this pins the shape so a
+ * new operator route cannot appear with AuthGuard and BusinessGuard alone.
+ */
+describe('WhatsAppController route guards (R0-SEC2)', () => {
+  const OPERATOR: Record<string, { scope: { module: string; minLevel: string } | null }> = {
+    // Any member reads the masked config; the write is OWNER only, checked in the handler.
+    getConfig: { scope: null },
+    saveConfig: { scope: null },
+    sendMessage: { scope: { module: 'operations', minLevel: 'write' } },
+    sendFromDrawer: { scope: { module: 'operations', minLevel: 'write' } },
+    testConnection: { scope: { module: 'operations', minLevel: 'read' } },
+    getStatus: { scope: { module: 'operations', minLevel: 'read' } },
+    listConversations: { scope: { module: 'operations', minLevel: 'read' } },
+    getConversation: { scope: { module: 'operations', minLevel: 'read' } },
+    listTemplates: { scope: { module: 'operations', minLevel: 'read' } },
+  };
+  const WEBHOOKS = ['verifySharedWebhook', 'sharedWebhook', 'verifyWebhook', 'webhook'];
+  const proto = WhatsAppController.prototype as unknown as Record<string, unknown>;
+  const guardNames = (name: string) =>
+    ((Reflect.getMetadata(GUARDS_METADATA, proto[name] as object) ?? []) as Array<{ name: string }>).map((g) => g.name);
+
+  it('[SEC2-G01] every operator route runs AuthGuard and BusinessGuard, and each scoped one ModuleScopeGuard with its operations level', () => {
+    for (const [name, { scope }] of Object.entries(OPERATOR)) {
+      expect(typeof proto[name], `${name} exists`).toBe('function');
+      const guards = guardNames(name);
+      expect(guards.slice(0, 2), `${name}: ${guards.join(',')}`).toEqual(['AuthGuard', 'BusinessGuard']);
+      expect(Reflect.getMetadata(MODULE_SCOPE_KEY, proto[name] as object) ?? null, `${name} scope`).toEqual(scope);
+      if (scope) expect(guards, `${name}: ${guards.join(',')}`).toContain('ModuleScopeGuard');
+    }
+  });
+
+  it('[SEC2-G02] the webhooks stay unauthenticated (no guards: the provider handshake and signature are their checks)', () => {
+    for (const name of WEBHOOKS) {
+      expect(typeof proto[name], `${name} exists`).toBe('function');
+      expect(guardNames(name), name).toEqual([]);
+    }
+  });
+
+  it('[SEC2-G03] no other route exists unclassified', () => {
+    const handlers = Object.getOwnPropertyNames(proto).filter(
+      (n) => n !== 'constructor' && typeof proto[n] === 'function' && Reflect.getMetadata('path', proto[n] as object) !== undefined,
+    );
+    expect(handlers.sort()).toEqual([...Object.keys(OPERATOR), ...WEBHOOKS].sort());
   });
 });
