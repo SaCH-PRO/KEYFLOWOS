@@ -235,7 +235,8 @@ export class PaymentsOpsService {
               email: true,
             },
           },
-          payments: { select: { amount: true, status: true } },
+          // Own-tenant rows only: Payment has no FK to Business (M31, review SEC-V29B-1).
+          payments: { where: { businessId }, select: { amount: true, status: true } },
         },
         orderBy: { dueDate: 'asc' },
         take: 100,
@@ -276,7 +277,9 @@ export class PaymentsOpsService {
 
     const buildInvoicePayable = <T extends 'invoice' | 'mass_comm'>(inv: (typeof invoices)[number], type: T) => {
       // V1-29b-REFUND-READERS (V1-22 residual): what is still owed is the
-      // balance read contract over the invoice's rows, in integer cents. The
+      // balance read contract over the invoice's own-tenant rows, in integer
+      // cents (a row tagged with another businessId is not this invoice's
+      // money, M31; the receipt and the receivables read the same rows). The
       // status-blind float sum counted PENDING and FAILED rows and a row
       // flipped to REFUNDED before V1-29 as received (10.10 + 20.20 + 30.30
       // left 39.400000000000006 owed).

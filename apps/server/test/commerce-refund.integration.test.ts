@@ -80,9 +80,16 @@
  *   RR-08  (V1-22 residual) the open payables (payments-ops listOpenPayables) carry the contract's
  *          remaining in integer cents: a PENDING row is not cash, a flipped row reads as the base
  *          read it, 10.10 + 20.20 + 30.30 leaves exactly 39.40
+ *   RR-04 / RR-08 M31 controls (review SEC-V29B-1): a Payment row on A's invoice tagged with tenant
+ *          B (Payment has no FK to Business) is not A's money. Receivables and the open payables
+ *          read the own-tenant rows, the rows the receipt, the reminder email and the evidence match
+ *          read: 50 paid + a foreign SUCCESSFUL 30 reads paid 50 / 50 owed (not 80 / 20), 100 paid +
+ *          a foreign REFUNDED -100 reads paid 100 / 0 owed (not 0 / 100), 60 paid + a foreign
+ *          REFUNDED -60 reads 40 owed (not 100); each = the public receipt's figures
  *
  * Open (it.todo, outside the V1-29 write set; owner decision): SEC-V29-2 (the refund audit
- * names the payment's full amount).
+ * names the payment's full amount). Outside the V1-29b write set (it.todo, queued follow-up):
+ * CR-29b-1 (the public token view still states the gross paid beside the receipt's net).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
@@ -153,6 +160,12 @@ const ID = {
   invOpsPending: `${P}invOpsPending`,
   invOpsLegacy: `${P}invOpsLegacy`,
   invOpsCents: `${P}invOpsCents`,
+  // review SEC-V29B-1 (M31 controls on RR-04 / RR-08)
+  contactRecvForeign: `${P}contactRecvForeign`,
+  invRecvForeignPaid: `${P}invRecvForeignPaid`,
+  invRecvForeignRefund: `${P}invRecvForeignRefund`,
+  invOpsForeign: `${P}invOpsForeign`,
+  invOpsForeignRefund: `${P}invOpsForeignRefund`,
 };
 
 /**
@@ -165,6 +178,8 @@ const CONTACT_OF: Record<string, string> = {
   [ID.invRecvPart]: ID.contactRecv,
   [ID.invRecvFull]: ID.contactRecv,
   [ID.invRecvLegacy]: ID.contactRecv,
+  [ID.invRecvForeignPaid]: ID.contactRecvForeign,
+  [ID.invRecvForeignRefund]: ID.contactRecvForeign,
 };
 
 const TOTAL = 100;
@@ -283,10 +298,13 @@ async function reversalsFor(paymentId: string): Promise<any[]> {
 /**
  * The invoice's balance over its stored rows (balanceOfStoredRows: computeBalance for every row
  * written since V1-29; a pre-V1-29 flipped row is read as its payment plus its refund, CR-V29-4).
+ * Over the rows of the invoice's own tenant: Payment has no FK to Business (M31), so a row tagged
+ * with another businessId is not this invoice's money (review SEC-V29B-1; every invoice here is
+ * bizA's, and only the M31 controls seed a foreign row).
  */
 async function balanceOf(invoiceId: string) {
   const inv = await invoiceRow(invoiceId);
-  const rows = await paymentsOf(invoiceId);
+  const rows = (await paymentsOf(invoiceId)).filter((r) => r.businessId === inv.businessId);
   return storedBalanceFn(Number(inv.total), rows.map((r) => ({ amount: Number(r.amount), status: r.status })), inv.currency);
 }
 
@@ -472,6 +490,7 @@ beforeAll(async () => {
   await db.contact.create({ data: { id: ID.contact, businessId: ID.bizA, firstName: 'V29a', lastName: 'Customer', email: `${P}c@test.local` } });
   await db.contact.create({ data: { id: ID.contactMail, businessId: ID.bizA, firstName: 'V29a', lastName: 'Mailed', email: `${P}mail@test.local` } });
   await db.contact.create({ data: { id: ID.contactRecv, businessId: ID.bizA, firstName: 'V29a', lastName: 'Receivable', email: `${P}recv@test.local` } });
+  await db.contact.create({ data: { id: ID.contactRecvForeign, businessId: ID.bizA, firstName: 'V29a', lastName: 'Stray', email: `${P}stray@test.local` } });
 
   let n = 0;
   for (const id of Object.values(ID).filter((v) => v.startsWith(`${P}inv`))) {
@@ -955,6 +974,19 @@ async function flipLegacy(paymentId: string) {
   await revenuePosting.onPaymentRefunded(paymentId, { createdById: ID.ownerA });
 }
 
+/**
+ * M31: a Payment row on one of A's invoices tagged with tenant B, as a stray row would sit (Payment
+ * has no FK to Business). Seeded directly: no posting, no reconcile.
+ */
+async function foreignRow(inv: string, tag: string, amount: number, status: 'SUCCESSFUL' | 'REFUNDED') {
+  return db.payment.create({
+    data: {
+      id: `${inv}_${tag}`, businessId: ID.bizB, invoiceId: inv, amount, currency: 'TTD', status, provider: 'cash', method: 'cash',
+      providerPaymentId: `${P}m31_${tag}`, notes: 'seeded: a row tagged with another tenant (M31)',
+    },
+  });
+}
+
 /** The CF-17 invoice: 60 + 40 paid with the 40 refunded (SUCCESSFUL 100 in all, one REFUNDED -40). */
 async function seedPartRefund(inv: string, tag: string) {
   await paid(inv, 60, `${tag}-60`);
@@ -1067,6 +1099,49 @@ describe('V1-29b-REFUND-READERS: CASH-basis receivables (CR-V29-2)', () => {
     // RED-BEFORE: 100 (the flipped invoice alone; the two refunded invoices read as settled).
     expect(aging.customers.find((c: any) => c.contactId === ID.contactRecv)).toMatchObject({ total: 240, current: 240 });
   });
+
+  it('RR-04 (M31 control, review SEC-V29B-1): a row on A\'s invoice tagged with tenant B is not A\'s money: receivables read the own-tenant rows, the figures the public receipt and the reminder email state (50 paid + a foreign SUCCESSFUL 30 -> paid 50 / outstanding 50; 100 paid + a foreign REFUNDED -100 -> paid 100 / outstanding 0); = total - the ledger cash net', async () => {
+    await paid(ID.invRecvForeignPaid, 50, 'V29A-RX-50');
+    await foreignRow(ID.invRecvForeignPaid, 'rx_s30', 30, 'SUCCESSFUL');
+    await paid(ID.invRecvForeignRefund, 100, 'V29A-RXR-100');
+    await foreignRow(ID.invRecvForeignRefund, 'rxr_r100', -100, 'REFUNDED');
+    expect((await invoiceRow(ID.invRecvForeignPaid)).status).toBe('PARTIALLY_PAID');
+    expect((await invoiceRow(ID.invRecvForeignRefund)).status).toBe('PAID');
+    // The foreign rows sit on A's invoices; read with every tenant's rows they would move A's figures.
+    expect((await paymentsOf(ID.invRecvForeignPaid)).map((r) => r.businessId).sort()).toEqual([ID.bizA, ID.bizB]);
+    expect(await rawBalanceOf(ID.invRecvForeignRefund), 'every tenant\'s rows: the foreign refund cancels A\'s payment').toMatchObject({ net: 0, remaining: 100 });
+
+    const want: Record<string, { paid: number; outstanding: number }> = {
+      [ID.invRecvForeignPaid]: { paid: 50, outstanding: 50 },
+      [ID.invRecvForeignRefund]: { paid: 100, outstanding: 0 },
+    };
+    for (const [inv, w] of Object.entries(want)) {
+      const { cashNet } = await expectLedgerAgrees(inv, { net: w.paid, reversals: 0 });
+      expect(money(TOTAL - cashNet), `${inv}: total - the ledger cash net`).toBe(w.outstanding);
+      const receipt = await receipts.buildPublicReceipt(inv, ID.bizA);
+      expect({ paid: receipt.amountPaid, outstanding: receipt.amountDue }, `${inv}: the public receipt (own-tenant rows)`).toEqual(w);
+    }
+
+    const balance = await receivables.getCustomerBalance(ID.bizA, ID.contactRecvForeign);
+    expect(balance.basis).toBe('CASH');
+    const rows = Object.fromEntries(balance.invoices.map((i: any) => [i.id, { paid: i.paid, outstanding: i.outstanding }]));
+    // RED-BEFORE (V1-29b 052d3939, every tenant's rows): paid 80 / outstanding 20 and paid 0 /
+    // outstanding 100: the foreign refund moved A's receivables (base 7f4b81a2: 80 / 20 and 100 / 0).
+    expect(rows).toEqual(want);
+    expect(balance).toMatchObject({ invoicedTotal: 200, paidTotal: 150, outstanding: 50 });
+
+    const aging = await receivables.getAging(ID.bizA);
+    // RED-BEFORE: 20. The PAID invoice is not open, so the aging row holds the part-paid one alone.
+    expect(aging.customers.find((c: any) => c.contactId === ID.contactRecvForeign)).toMatchObject({ total: 50, current: 50 });
+
+    sentEmails.length = 0;
+    const res = await remind(ID.invRecvForeignPaid);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(sentEmails).toHaveLength(1);
+    expect(emailFigures(sentEmails[0].htmlBody), 'the reminder email states the same figures').toEqual({
+      awaiting: 'TT$50.00', received: null, paid: 'TT$50.00', balanceDue: 'TT$50.00',
+    });
+  });
 });
 
 describe('V1-29b-REFUND-READERS: the receipt email and the public receipt (CR-V29-3)', () => {
@@ -1166,10 +1241,36 @@ describe('V1-29b-REFUND-READERS: the open payables (V1-22 residual)', () => {
       expect(p.amount, `${p.id}: balanceOfStoredRows(...).remaining`).toBe((await balanceOf(p.id)).remaining);
     }
   });
+
+  it('RR-08 (M31 control, review SEC-V29B-1): listOpenPayables reads the own-tenant rows: 50 paid + a foreign SUCCESSFUL 30 -> 50 owed (not 20), 60 paid + a foreign REFUNDED -60 -> 40 owed (not 100); each = the public receipt\'s amountDue and total - the ledger cash net', async () => {
+    await paid(ID.invOpsForeign, 50, 'V29A-OX-50');
+    await foreignRow(ID.invOpsForeign, 'ox_s30', 30, 'SUCCESSFUL');
+    await paid(ID.invOpsForeignRefund, 60, 'V29A-OXR-60');
+    await foreignRow(ID.invOpsForeignRefund, 'oxr_r60', -60, 'REFUNDED');
+    expect(await rawBalanceOf(ID.invOpsForeign), 'every tenant\'s rows').toMatchObject({ net: 80, remaining: 20 });
+    expect(await rawBalanceOf(ID.invOpsForeignRefund), 'every tenant\'s rows').toMatchObject({ net: 0, remaining: 100 });
+
+    const { payables } = await paymentsOps.listOpenPayables(ID.bizA);
+    const amountOf = (id: string) => payables.find((p: any) => p.type === 'invoice' && p.id === id)?.amount;
+    // RED-BEFORE (V1-29b 052d3939, every tenant's rows): 20, 100 and 20 (base 7f4b81a2's
+    // status-blind sum read the same).
+    expect({
+      foreign: amountOf(ID.invOpsForeign),
+      foreignRefund: amountOf(ID.invOpsForeignRefund),
+      recvForeign: amountOf(ID.invRecvForeignPaid), // RR-04's M31 control, still open
+    }).toEqual({ foreign: 50, foreignRefund: 40, recvForeign: 50 });
+    for (const inv of [ID.invOpsForeign, ID.invOpsForeignRefund, ID.invRecvForeignPaid]) {
+      await expectLedgerAgrees(inv, { net: money(TOTAL - amountOf(inv)), reversals: 0 });
+      expect(amountOf(inv), `${inv}: the public receipt's amountDue`).toBe((await receipts.buildPublicReceipt(inv, ID.bizA)).amountDue);
+    }
+  });
 });
 
 describe('V1-29 review findings outside the V1-29 and V1-29b write sets (owner decision; it.todo)', () => {
   it.todo(
     'SEC-V29-2: the FINANCE payment_refunded audit row of a manual refund names the amount refunded and the refund row (a "what is left" refund of 60 after a provider -40 records data.amount 100, the original\'s amount): needs a refund amount / refund id option on RevenuePostingService.onPaymentRefunded (finance/revenue-posting.service.ts, outside the write set)',
+  );
+  it.todo(
+    'CR-29b-1 (review of V1-29b): the public token view (GET public/invoice-link/:token, CommerceService.getPaymentLinkBalance) states the net received as amountPaid, the figure the public receipt states beside it on /public/invoice/[token] (60 for 60 + 40 paid with the 40 refunded; the token view reads the gross 100, the receipt 60): needs amountPaid: balance.net in getPaymentLinkBalance (commerce/commerce.service.ts) and public-invoice-link.integration L-14 (pins the gross 160), both outside the V1-29b write set; queued follow-up',
   );
 });

@@ -94,11 +94,16 @@ const EMPTY_TOTALS = (): AgingBucket[] => [
  *     date / status metadata only.
  *   CASH businesses — there are no AR ledger entries by design (revenue
  *     posts against deposit accounts directly). We fall back to the
- *     invoice balance read contract over its Payment rows
+ *     invoice balance read contract over its Payment rows of its own tenant
  *     (balanceOfStoredRows: integer cents, each refund a separate negative
  *     REFUNDED row, D-14; a row flipped to REFUNDED before V1-29 read as its
  *     payment plus its refund): paid = the net received, outstanding = the
- *     remaining (V1-29b-REFUND-READERS, CR-V29-2).
+ *     remaining (V1-29b-REFUND-READERS, CR-V29-2). Payment sits outside the
+ *     tenant extension and has no FK to Business (M31), so a row carrying
+ *     another businessId is not this invoice's money: the same rows the
+ *     receipt, the invoice / reminder emails and the evidence match read
+ *     (ownTenantReceiptBalance), so they state the same figures (review
+ *     SEC-V29B-1).
  *
  * `ledgerArBalance` / `ledgerReconciled` are returned in both cases so
  * Reports can surface posting drift.
@@ -240,7 +245,8 @@ export class ReceivablesService {
         dueDate: true,
         contactId: true,
         contact: { select: { id: true, firstName: true, lastName: true, email: true } },
-        payments: { select: { amount: true, status: true } },
+        // Own-tenant rows only (M31, review SEC-V29B-1).
+        payments: { where: { businessId }, select: { amount: true, status: true } },
       },
     });
 
@@ -358,7 +364,8 @@ export class ReceivablesService {
         currency: true,
         issueDate: true,
         dueDate: true,
-        payments: { select: { amount: true, status: true } },
+        // Own-tenant rows only (M31, review SEC-V29B-1).
+        payments: { where: { businessId }, select: { amount: true, status: true } },
       },
     });
     const ledgerArByInvoice =
