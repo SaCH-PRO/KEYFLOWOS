@@ -23,13 +23,19 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
 import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
 import {
+  decideQuoteBulkMove,
   decideQuoteTransition,
   mintQuoteViewToken,
+  needsViewTokenRepair,
+  quoteBulkRefusalCode,
+  quoteBulkTarget,
   quoteTransitionRefusal,
+  requireQuoteBulkRequest,
   requireQuoteStatusTarget,
   type QuoteStatus,
   type QuoteStatusTarget,
 } from './quote-workflow';
+import { getTenantContext } from '../../core/tenant/tenant-context';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { appUrl } from '../../core/config/runtime-urls';
@@ -568,25 +574,43 @@ export class CommerceService {
    * V1-50: `send` and `reject` go through the quote transition table
    * (quote-workflow.ts), row by row, with the same compare-and-set move as the
    * status route (moveQuoteStatus), so a bulk send mints a DRAFT's view token
-   * only when it has none and a bulk reject stamps rejectedAt. They used their
-   * own rules: `reject` skipped a DRAFT the status route would reject and left
-   * rejectedAt empty. A row already in the target status is left as it is; a
-   * row the table refuses (decided, converted) is left as it is and listed in
-   * `skipped`. Side effects are unchanged: a bulk send emits quote.sent with
-   * the same minimal quote ({ id, status, sentAt, viewToken }, no contact), a
-   * bulk reject emits nothing. `delete` is not a status move and keeps its rule.
+   * only when it has none and a bulk reject stamps rejectedAt (it used to
+   * leave rejectedAt empty). A row already in the target status is left as it
+   * is; a row the table refuses (decided, converted), or that the bulk action
+   * does not move from (bulk reject moves only a quote whose link is out, as
+   * before V1-50: see decideQuoteBulkMove), is left as it is and listed in
+   * `skipped`. `delete` is not a status move and keeps its rule.
+   *
+   * V1-50 review:
+   * - SEC-V50-1, SEC-V50-2, CR-V150-1: the body is checked before any read or
+   *   write (requireQuoteBulkRequest). An unknown or missing action is a 400
+   *   (it fell through to `reject`, which is final), and so are missing or
+   *   empty ids (Prisma drops `id: { in: undefined }`, which reached every
+   *   quote of the tenant).
+   * - SEC-V50-3: each bulk move is recorded as the status route records it. A
+   *   bulk reject emits quote.rejected (source internal, so no customer or
+   *   owner email) with the tenant-checked contact; a bulk send keeps its
+   *   minimal quote.sent ({ id, status, sentAt, viewToken }, no contact, so
+   *   flow.listener emails no customer, as before). Both write the contact
+   *   timeline entry naming the actor: `actorId`, else the authenticated user
+   *   the request runs as (TenantInterceptor's context, for this tenant only;
+   *   the controller, outside the V1-50 write set, forwards none), else SYSTEM.
    */
-  async bulkUpdateQuotes(businessId: string, ids: string[], action: 'send' | 'reject' | 'delete') {
-    const where = { id: { in: ids }, businessId, deletedAt: null };
-    if (action === 'delete') {
+  async bulkUpdateQuotes(businessId: string, ids: unknown, action: unknown, actorId?: string | null) {
+    const request = requireQuoteBulkRequest(ids, action);
+    const where = { id: { in: request.ids }, businessId, deletedAt: null };
+    if (request.action === 'delete') {
       const result = await this.prisma.client.quote.updateMany({
         where: { ...where, status: { in: ['DRAFT', 'SENT', 'REJECTED', 'EXPIRED'] } },
         data: { deletedAt: new Date() },
       });
       this.statsCache.invalidateCache(businessId);
-      return { updated: result.count, action };
+      return { updated: result.count, action: request.action };
     }
-    const target: QuoteStatusTarget = action === 'send' ? 'SENT' : 'REJECTED';
+    const bulkAction = request.action;
+    const target = quoteBulkTarget(bulkAction);
+    const ambient = getTenantContext();
+    const actor = actorId ?? (ambient?.businessId === businessId ? ambient.userId : undefined);
     const rows = await this.prisma.client.quote.findMany({
       where,
       select: { id: true, status: true, viewToken: true, invoiceId: true },
@@ -594,16 +618,16 @@ export class CommerceService {
     let updated = 0;
     const skipped: Array<{ id: string; quoteStatus: string; code: string }> = [];
     for (const row of rows) {
-      const decision = decideQuoteTransition(row, target);
+      const decision = decideQuoteBulkMove(row, bulkAction);
       if (decision.kind === 'noop') continue;
       if (decision.kind === 'refuse') {
-        const refusal = quoteTransitionRefusal(row, target, decision.reason).getResponse() as { code: string };
-        skipped.push({ id: row.id, quoteStatus: row.status, code: refusal.code });
+        skipped.push({ id: row.id, quoteStatus: row.status, code: quoteBulkRefusalCode(decision.reason) });
         continue;
       }
+      const now = new Date();
       let moved: Awaited<ReturnType<CommerceService['moveQuoteStatus']>>;
       try {
-        moved = await this.moveQuoteStatus(row, target, new Date());
+        moved = await this.moveQuoteStatus(row, target, now);
       } catch (err) {
         if (err instanceof NotFoundException) continue; // deleted meanwhile
         if (!(err instanceof ConflictException)) throw err;
@@ -613,13 +637,23 @@ export class CommerceService {
       }
       if (!moved.moved) continue;
       updated++;
+      const eventQuote = forQuoteEvent(moved.row, withTenantContact(moved.row));
       if (target === 'SENT') {
         const { id, status, sentAt, viewToken } = moved.row;
         this.events.emit('quote.sent', { quote: { id, status, sentAt, viewToken }, businessId } as QuoteSentPayload);
+      } else {
+        this.events.emit('quote.rejected', {
+          quote: eventQuote,
+          businessId,
+          rejectedAt: now,
+          source: 'internal',
+          reason: null,
+        } as QuoteRejectedPayload);
       }
+      await this.logQuoteMoveOnTimeline(eventQuote, target, { actorId: actor, source: 'internal' });
     }
     this.statsCache.invalidateCache(businessId);
-    return { updated, action, skipped, skippedCount: skipped.length };
+    return { updated, action: bulkAction, skipped, skippedCount: skipped.length };
   }
 
   async deleteInvoice(invoiceId: string, businessId: string) {
@@ -1244,6 +1278,17 @@ export class CommerceService {
       const decision = decideQuoteTransition(existingQuote, target);
       if (decision.kind === 'refuse') throw quoteTransitionRefusal(existingQuote, target, decision.reason);
       if (decision.kind === 'noop') {
+        // V1-50 review CR-V150-2: the one exception. A SENT quote written
+        // without a view token (the ai-execute send_quote action writes one)
+        // has no public link; `sent` on it mints the quote's one token,
+        // compare-and-set on no token, so overlapping requests store one.
+        // The status does not change, so nothing is emitted or logged.
+        if (target === 'SENT' && needsViewTokenRepair(existingQuote)) {
+          await this.prisma.client.quote.updateMany({
+            where: { id: params.quoteId, status: 'SENT', viewToken: null, invoiceId: null, deletedAt: null },
+            data: { viewToken: mintQuoteViewToken() },
+          });
+        }
         const current = await this.prisma.client.quote.findUnique({ where: { id: params.quoteId }, include: { contact: true } });
         if (!current) throw new NotFoundException('Quote not found');
         return withTenantContact(current);
@@ -1276,25 +1321,39 @@ export class CommerceService {
         reason: params.reason ?? null,
       } as QuoteRejectedPayload);
     }
-    if (eventQuote.contactId) {
-      await this.crm.logContactEvent({
-        businessId: quote.businessId,
-        contactId: eventQuote.contactId,
-        type: `quote.${target.toLowerCase()}`,
-        data: {
-          quoteId: quote.id,
-          total: quote.total,
-          currency: quote.currency,
-          source,
-          reason: params.reason ?? undefined,
-        },
-        actorType: params.actorId ? 'USER' : 'SYSTEM',
-        actorId: params.actorId ?? undefined,
-        source: 'commerce',
-      });
-    }
+    await this.logQuoteMoveOnTimeline(eventQuote, target, { actorId: params.actorId, source, reason: params.reason });
     this.statsCache.invalidateCache(existingQuote.businessId);
     return quote;
+  }
+
+  /**
+   * The contact timeline entry of a quote status move, naming who made it:
+   * the status route, send-email and the public accept/reject
+   * (updateQuoteStatus), and bulkUpdateQuotes (V1-50 review SEC-V50-3).
+   * `eventQuote` is the forQuoteEvent shape, so a foreign contact (a legacy
+   * row) is never logged against.
+   */
+  private async logQuoteMoveOnTimeline(
+    eventQuote: { id: string; businessId: string; contactId: string | null; total: unknown; currency: string | null },
+    target: QuoteStatusTarget,
+    opts: { actorId?: string | null; source: 'public' | 'internal'; reason?: string | null },
+  ): Promise<void> {
+    if (!eventQuote.contactId) return;
+    await this.crm.logContactEvent({
+      businessId: eventQuote.businessId,
+      contactId: eventQuote.contactId,
+      type: `quote.${target.toLowerCase()}`,
+      data: {
+        quoteId: eventQuote.id,
+        total: eventQuote.total,
+        currency: eventQuote.currency,
+        source: opts.source,
+        reason: opts.reason ?? undefined,
+      },
+      actorType: opts.actorId ? 'USER' : 'SYSTEM',
+      actorId: opts.actorId ?? undefined,
+      source: 'commerce',
+    });
   }
 
   /**

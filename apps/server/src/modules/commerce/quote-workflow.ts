@@ -13,7 +13,11 @@ import { randomBytes } from 'crypto';
  * the status route and the send-email move (updateQuoteStatus), the public
  * accept/reject (which then calls updateQuoteStatus) and bulkUpdateQuotes.
  * Writers outside CommerceService that still set Quote.status directly are not
- * covered here (commerce-ai.service.ts convert_quote/send_quote).
+ * covered here, so CF-15/M21 stays open for them: POST
+ * /commerce/businesses/:businessId/ai-execute (commerce-ai.service.ts
+ * send_quote and convert_quote, outside the V1-50 write set) can still re-open
+ * a REJECTED quote to SENT, or mark a REJECTED or converted quote ACCEPTED,
+ * with revenue:read and no event (review SEC-V50-4, a follow-up packet).
  */
 
 /** Every value of the QuoteStatus enum (packages/db/prisma/schema.prisma). */
@@ -169,9 +173,91 @@ export function assertQuoteStatusAgreement(pathStatus: unknown, bodyStatus: unkn
 
 /**
  * The one quote view-token mint: 24 random bytes, base64url. Called only where
- * a DRAFT holds no token yet (the DRAFT -> SENT move, and the send-email
- * reservation), so a quote's token is minted once and then kept.
+ * a quote holds no token yet (the DRAFT -> SENT move, the send-email
+ * reservation, and the repair of a SENT quote written without one, see
+ * needsViewTokenRepair), so a quote's token is minted once and then kept.
  */
 export function mintQuoteViewToken(): string {
   return randomBytes(24).toString('base64url');
+}
+
+/**
+ * V1-50 review CR-V150-2: a SENT quote with no view token has no public link,
+ * so its customer can never accept it. Such rows are still written outside
+ * this table (the ai-execute send_quote action sets SENT with no token).
+ * Asking the status route for `sent` on one is otherwise a no-op; it mints the
+ * quote's one token instead (the repair the route made before V1-50). A
+ * converted quote is never repaired: the table refuses it first.
+ */
+export function needsViewTokenRepair(quote: QuoteTransitionSubject & { viewToken?: string | null }): boolean {
+  return !isConvertedQuote(quote) && quote.status === 'SENT' && (quote.viewToken === null || quote.viewToken === undefined);
+}
+
+/** The actions PATCH /commerce/businesses/:businessId/quotes/bulk takes. */
+export const QUOTE_BULK_ACTIONS = ['send', 'reject', 'delete'] as const;
+export type QuoteBulkAction = (typeof QUOTE_BULK_ACTIONS)[number];
+
+/**
+ * V1-50 review SEC-V50-1, SEC-V50-2, CR-V150-1: the bulk route's body has no
+ * DTO (commerce.controller.ts, outside the V1-50 write set), so the service
+ * checks it before any read or write. An action that is not send, reject or
+ * delete (a misspelling, `accept`, a missing one) is a 400: it used to fall
+ * through to `reject`, which is final. `ids` must be a non-empty array of
+ * non-empty strings: without it Prisma drops `id: { in: undefined }` and the
+ * request reaches every quote of the tenant.
+ */
+export function requireQuoteBulkRequest(ids: unknown, action: unknown): { ids: string[]; action: QuoteBulkAction } {
+  if (typeof action !== 'string' || !(QUOTE_BULK_ACTIONS as readonly string[]).includes(action)) {
+    throw new BadRequestException({
+      code: 'quote_bulk_action_unknown',
+      message: `Unknown bulk action. Expected one of ${QUOTE_BULK_ACTIONS.join(', ')}.`,
+    });
+  }
+  if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id) => typeof id === 'string' && id.length > 0)) {
+    throw new BadRequestException({
+      code: 'quote_bulk_ids_required',
+      message: 'ids must be a non-empty array of quote ids.',
+    });
+  }
+  return { ids: ids as string[], action: action as QuoteBulkAction };
+}
+
+/**
+ * The statuses a bulk status action moves from, inside what the table allows.
+ * Bulk send moves a DRAFT (the only status the table sends from). Bulk reject
+ * moves a quote whose link is out (SENT, or the legacy VIEWED), as it did
+ * before V1-50: the table's DRAFT -> REJECTED is an operator decision made one
+ * quote at a time on the status route, and the web bulk consumers
+ * (quotes-panel.tsx, use-pipeline-actions.ts) treat only SENT quotes as
+ * rejected by a bulk reject (review CR-V150-3). REJECTED is final, so a bulk
+ * request never widens what one click can close for good.
+ */
+const QUOTE_BULK_SOURCES: Readonly<Record<'send' | 'reject', ReadonlySet<string>>> = {
+  send: new Set(['DRAFT']),
+  reject: new Set(['SENT', 'VIEWED']),
+};
+
+/** The status a bulk status action asks for. */
+export function quoteBulkTarget(action: 'send' | 'reject'): QuoteStatusTarget {
+  return action === 'send' ? 'SENT' : 'REJECTED';
+}
+
+/**
+ * What a bulk `send` or `reject` does to one quote: the table's decision, and
+ * a move the table allows from a status the bulk action does not move from is
+ * a refusal (`bulk_not_eligible`).
+ */
+export function decideQuoteBulkMove(quote: QuoteTransitionSubject, action: 'send' | 'reject'): QuoteTransitionDecision | { kind: 'refuse'; reason: 'bulk_not_eligible' } {
+  const decision = decideQuoteTransition(quote, quoteBulkTarget(action));
+  if (decision.kind === 'move' && !QUOTE_BULK_SOURCES[action].has(quote.status)) {
+    return { kind: 'refuse', reason: 'bulk_not_eligible' };
+  }
+  return decision;
+}
+
+/** The code a bulk refusal lists in `skipped`. */
+export function quoteBulkRefusalCode(reason: 'converted' | 'not_allowed' | 'bulk_not_eligible'): string {
+  if (reason === 'converted') return 'quote_converted';
+  if (reason === 'bulk_not_eligible') return 'quote_bulk_not_eligible';
+  return 'quote_transition_not_allowed';
 }

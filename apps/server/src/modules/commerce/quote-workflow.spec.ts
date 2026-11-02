@@ -24,14 +24,20 @@ import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { describe, expect, it } from 'vitest';
 import {
+  QUOTE_BULK_ACTIONS,
   QUOTE_STATUS_TARGETS,
   assertQuoteStatusAgreement,
   assertQuoteTransition,
   canTransitionQuote,
+  decideQuoteBulkMove,
   decideQuoteTransition,
   isConvertedQuote,
   mintQuoteViewToken,
+  needsViewTokenRepair,
   parseQuoteStatusTarget,
+  quoteBulkRefusalCode,
+  quoteBulkTarget,
+  requireQuoteBulkRequest,
   requireQuoteStatusTarget,
   type QuoteStatus,
   type QuoteStatusTarget,
@@ -207,5 +213,83 @@ describe('the one view-token mint (V1-50)', () => {
       tokens.add(token);
     }
     expect(tokens.size).toBe(50);
+  });
+});
+
+describe('the bulk route body and its sources (V1-50 review SEC-V50-1, SEC-V50-2, CR-V150-1, CR-V150-3)', () => {
+  it('QW-14: requireQuoteBulkRequest answers 400 quote_bulk_action_unknown for any action that is not send, reject or delete (a missing one included), so nothing falls through to reject', () => {
+    expect([...QUOTE_BULK_ACTIONS]).toEqual(['send', 'reject', 'delete']);
+    for (const action of [undefined, null, '', 'accept', 'Reject', 'REJECT', 'sent', 'void', 1, ['reject'], { reject: true }]) {
+      const body = badRequestBody(() => requireQuoteBulkRequest(['q1'], action));
+      expect(body.code, JSON.stringify(action)).toBe('quote_bulk_action_unknown');
+    }
+    // An unknown action is refused even when ids are missing too: nothing about the request is acted on.
+    expect(badRequestBody(() => requireQuoteBulkRequest(undefined, 'accept')).code).toBe('quote_bulk_action_unknown');
+  });
+
+  it('QW-15: requireQuoteBulkRequest answers 400 quote_bulk_ids_required unless ids is a non-empty array of non-empty strings (Prisma drops `in: undefined`, which reached the whole tenant)', () => {
+    for (const ids of [undefined, null, [], 'q1', { in: ['q1'] }, [''], ['q1', 2], [null], [{ not: 'x' }]]) {
+      for (const action of QUOTE_BULK_ACTIONS) {
+        const body = badRequestBody(() => requireQuoteBulkRequest(ids, action));
+        expect(body.code, `${JSON.stringify(ids)} / ${action}`).toBe('quote_bulk_ids_required');
+      }
+    }
+    expect(requireQuoteBulkRequest(['q1', 'q2'], 'reject')).toEqual({ ids: ['q1', 'q2'], action: 'reject' });
+    expect(requireQuoteBulkRequest(['q1'], 'send')).toEqual({ ids: ['q1'], action: 'send' });
+    expect(requireQuoteBulkRequest(['q1'], 'delete')).toEqual({ ids: ['q1'], action: 'delete' });
+  });
+
+  it("QW-16: bulk send moves only a DRAFT; bulk reject moves only a quote whose link is out (SENT, VIEWED) and lists a DRAFT as quote_bulk_not_eligible; every other cell is the table's decision", () => {
+    expect(quoteBulkTarget('send')).toBe('SENT');
+    expect(quoteBulkTarget('reject')).toBe('REJECTED');
+    const expected: Record<'send' | 'reject', Record<QuoteStatus, string>> = {
+      send: {
+        DRAFT: 'move',
+        SENT: 'noop',
+        VIEWED: 'refuse:not_allowed',
+        ACCEPTED: 'refuse:not_allowed',
+        REJECTED: 'refuse:not_allowed',
+        EXPIRED: 'refuse:not_allowed',
+        INVOICED: 'refuse:converted',
+        PAID: 'refuse:converted',
+        CONVERTED: 'refuse:converted',
+      },
+      reject: {
+        DRAFT: 'refuse:bulk_not_eligible',
+        SENT: 'move',
+        VIEWED: 'move',
+        ACCEPTED: 'refuse:not_allowed',
+        REJECTED: 'noop',
+        EXPIRED: 'refuse:not_allowed',
+        INVOICED: 'refuse:converted',
+        PAID: 'refuse:converted',
+        CONVERTED: 'refuse:converted',
+      },
+    };
+    for (const action of ['send', 'reject'] as const) {
+      for (const status of ALL_STATUSES) {
+        const d = decideQuoteBulkMove({ status, invoiceId: null }, action);
+        expect(d.kind === 'refuse' ? `refuse:${d.reason}` : d.kind, `${action} on ${status}`).toBe(expected[action][status]);
+        // A converted row refuses whatever its status.
+        expect(decideQuoteBulkMove({ status, invoiceId: 'inv_1' }, action), `${action} on converted ${status}`).toEqual({ kind: 'refuse', reason: 'converted' });
+        // Every bulk move is one the table allows.
+        if (d.kind === 'move') expect(canTransitionQuote(status, quoteBulkTarget(action)), `${action} on ${status}`).toBe(true);
+      }
+    }
+    expect(quoteBulkRefusalCode('converted')).toBe('quote_converted');
+    expect(quoteBulkRefusalCode('not_allowed')).toBe('quote_transition_not_allowed');
+    expect(quoteBulkRefusalCode('bulk_not_eligible')).toBe('quote_bulk_not_eligible');
+  });
+});
+
+describe('the view-token repair of a SENT quote without one (V1-50 review CR-V150-2)', () => {
+  it('QW-17: needsViewTokenRepair is true only for an unconverted SENT quote with no token', () => {
+    expect(needsViewTokenRepair({ status: 'SENT', viewToken: null, invoiceId: null })).toBe(true);
+    expect(needsViewTokenRepair({ status: 'SENT', viewToken: undefined })).toBe(true);
+    expect(needsViewTokenRepair({ status: 'SENT', viewToken: 'tok' })).toBe(false);
+    expect(needsViewTokenRepair({ status: 'SENT', viewToken: null, invoiceId: 'inv_1' })).toBe(false);
+    for (const status of ALL_STATUSES.filter((s) => s !== 'SENT')) {
+      expect(needsViewTokenRepair({ status, viewToken: null }), status).toBe(false);
+    }
   });
 });

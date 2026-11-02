@@ -22,7 +22,11 @@
  *   a status that is not DRAFT/SENT/ACCEPTED/REJECTED                      -> 400 quote_status_unknown; row unchanged
  *   a foreign quote, whatever the move                                     -> R0-28's 404, byte-identical to an unknown id
  *   DRAFT -> SENT                                                          -> one viewToken, minted once; a repeat is a no-op
+ *   `sent` on a SENT quote with no viewToken                               -> its one token is minted (review CR-V150-2); nothing else
  *   bulk send / reject                                                     -> the same table, row by row; refused rows listed
+ *   bulk reject on a DRAFT                                                 -> skipped quote_bulk_not_eligible (review CR-V150-3)
+ *   bulk with an unknown/missing action, or missing/empty ids              -> 400 before any read or write (SEC-V50-1/2, CR-V150-1)
+ *   a bulk move                                                            -> its event and a timeline entry naming the actor (SEC-V50-3)
  *   public accept by token, then convert                                   -> the positive control still passes
  *   LEDGER: no quote transition writes a FinancialTransaction or a LedgerEntry
  *
@@ -30,12 +34,17 @@
  * disagrees with the path. The handler (commerce.controller.ts, not in the
  * V1-50 write set) reads only the path segment and never forwards the body, so
  * the service cannot see the disagreement; quote-workflow.ts exports
- * assertQuoteStatusAgreement for the controller to call.
+ * assertQuoteStatusAgreement for the controller to call. And review
+ * SEC-V50-4: the ai-execute route (commerce-ai.service.ts and its controller,
+ * outside the write set) still writes Quote.status around the table.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PublicRateLimitGuard (on this suite's Redis index),
  * CommerceService and the real ledger chain run against DATABASE_URL, behind
- * the production GlobalHttpExceptionFilter and ValidationPipe. Identity
+ * the production GlobalHttpExceptionFilter and ValidationPipe, and the app's
+ * TenantInterceptor (APP_INTERCEPTOR in app.module.ts; the bulk route's actor
+ * comes from its context). The Prisma tenant context provider (main.ts) is
+ * not installed. Identity
  * attachment is the one stand-in: a test middleware reads `x-v50a-user`, loads
  * that seeded user row and attaches `{ id, email, role }` as AuthMiddleware
  * would. Collaborators off the boundary (event bus, contact timeline, stats
@@ -94,6 +103,13 @@ const Q = {
   rejConverted: `${P}qRejConverted`,
   bOwn: `${P}qBOwn`,
   journey: `${P}qJourney`,
+  badActionSent: `${P}qBadActionSent`,
+  badActionDraft: `${P}qBadActionDraft`,
+  auditBulkSent: `${P}qAuditBulkSent`,
+  auditBulkDraft: `${P}qAuditBulkDraft`,
+  auditRouteSent: `${P}qAuditRouteSent`,
+  sentNoToken: `${P}qSentNoToken`,
+  sentNoTokenRace: `${P}qSentNoTokenRace`,
 };
 
 const SENT_AT = new Date('2026-10-01T10:00:00.000Z');
@@ -157,7 +173,12 @@ function setQuoteStatus(actor: string, quoteId: string, status: string, business
 }
 
 function bulk(actor: string, businessId: string, ids: string[], action: 'send' | 'reject' | 'delete') {
-  return agent().patch(`/commerce/businesses/${businessId}/quotes/bulk`).set(HEADER, actor).send({ ids, action });
+  return bulkRaw(actor, businessId, { ids, action });
+}
+
+/** The bulk route with any body: the controller binds it to no DTO, so ValidationPipe checks nothing. */
+function bulkRaw(actor: string, businessId: string, body: Record<string, unknown>) {
+  return agent().patch(`/commerce/businesses/${businessId}/quotes/bulk`).set(HEADER, actor).send(body);
 }
 
 function stripVolatile(body: Record<string, unknown>) {
@@ -289,6 +310,7 @@ beforeAll(async () => {
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
 
   // This suite's public rate-limit windows live under its own prefix (R0-00).
   previousNamespace = process.env.RATE_LIMIT_KEY_NAMESPACE;
@@ -342,6 +364,8 @@ beforeAll(async () => {
   });
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // The app's TenantInterceptor (APP_INTERCEPTOR), installed where Nest runs it: after the guards.
+  app.useGlobalInterceptors(new TenantInterceptor(moduleRef.get(PrismaService)));
   await app.init();
 
   await cleanup(); // in case a prior run aborted
@@ -384,6 +408,14 @@ beforeAll(async () => {
   await seedQuote(Q.rejConverted, 'ACCEPTED', { converted: true });
   await seedQuote(Q.bOwn, 'DRAFT', { businessId: ID.bizB });
   await seedQuote(Q.journey, 'DRAFT');
+  await seedQuote(Q.badActionSent, 'SENT');
+  await seedQuote(Q.badActionDraft, 'DRAFT');
+  await seedQuote(Q.auditBulkSent, 'SENT');
+  await seedQuote(Q.auditBulkDraft, 'DRAFT');
+  await seedQuote(Q.auditRouteSent, 'SENT');
+  // A SENT quote written without a view token, as the ai-execute send_quote action writes one (review CR-V150-2).
+  await seedQuote(Q.sentNoToken, 'SENT', { viewToken: null });
+  await seedQuote(Q.sentNoTokenRace, 'SENT', { viewToken: null });
 
   ledgerAtStart = { a: await ledgerCounts(ID.bizA), b: await ledgerCounts(ID.bizB) };
 }, 180_000);
@@ -590,20 +622,27 @@ describe('bulkUpdateQuotes goes through the same table (V1-50)', () => {
     expect(recordedEvents.filter((e) => e.name === 'quote.sent').map((e) => e.payload.quote.id).sort()).toEqual([Q.bulkDraft, Q.bulkReserved].sort());
   });
 
-  it('QSM-12: bulk reject rejects what the status route would (a DRAFT and a SENT quote, each with rejectedAt) and refuses the ACCEPTED and the converted quote, which stay byte-identical', async () => {
+  it('QSM-12: bulk reject rejects a SENT quote (with rejectedAt), leaves a DRAFT as it is (quote_bulk_not_eligible: bulk reject moves only a quote whose link is out, as before V1-50 and as the web bulk consumers expect, review CR-V150-3), and refuses the ACCEPTED and the converted quote; the skipped rows stay byte-identical', async () => {
+    const draftBefore = await quoteRow(Q.rejDraft);
     const acceptedBefore = await quoteRow(Q.rejAccepted);
     const convertedBefore = await quoteRow(Q.rejConverted);
     const res = await bulk(ID.ownerA, ID.bizA, [Q.rejDraft, Q.rejSent, Q.rejAccepted, Q.rejConverted], 'reject');
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body).toMatchObject({ updated: 2, action: 'reject' });
-    expect(res.body.skipped.map((s: any) => s.id).sort()).toEqual([Q.rejAccepted, Q.rejConverted].sort());
-    for (const id of [Q.rejDraft, Q.rejSent]) {
-      const row = await quoteRow(id);
-      expect(row.status, id).toBe('REJECTED');
-      expect(row.rejectedAt, id).toBeInstanceOf(Date);
-    }
+    expect(res.body).toMatchObject({ updated: 1, action: 'reject', skippedCount: 3 });
+    expect([...res.body.skipped].sort((x: any, y: any) => x.id.localeCompare(y.id))).toEqual(
+      [
+        { id: Q.rejDraft, quoteStatus: 'DRAFT', code: 'quote_bulk_not_eligible' },
+        { id: Q.rejAccepted, quoteStatus: 'ACCEPTED', code: 'quote_transition_not_allowed' },
+        { id: Q.rejConverted, quoteStatus: 'ACCEPTED', code: 'quote_converted' },
+      ].sort((x, y) => x.id.localeCompare(y.id)),
+    );
+    const sent = await quoteRow(Q.rejSent);
+    expect(sent.status).toBe('REJECTED');
+    expect(sent.rejectedAt).toBeInstanceOf(Date);
+    expect(await quoteRow(Q.rejDraft)).toEqual(draftBefore);
     expect(await quoteRow(Q.rejAccepted)).toEqual(acceptedBefore);
     expect(await quoteRow(Q.rejConverted)).toEqual(convertedBefore);
+    expect(recordedEvents.map((e) => `${e.name}:${e.payload.quote.id}`)).toEqual([`quote.rejected:${Q.rejSent}`]);
   });
 
   it("QSM-13: bulk under A's path naming B's quote touches nothing of B's", async () => {
@@ -616,6 +655,130 @@ describe('bulkUpdateQuotes goes through the same table (V1-50)', () => {
     expect(await tenantQuotes(ID.bizB)).toBe(tenantBBefore);
     expect(recordedEvents).toHaveLength(0);
   });
+});
+
+describe('the bulk route body is checked before any read or write (V1-50 review SEC-V50-1, SEC-V50-2, CR-V150-1)', () => {
+  it("QSM-17: an action that is not send, reject or delete ('accept', a misspelling, a wrong case, a number, none) answers 400 quote_bulk_action_unknown; the SENT and DRAFT quotes named stay byte-identical and nothing is emitted or logged", async () => {
+    const sentBefore = await quoteRow(Q.badActionSent);
+    const draftBefore = await quoteRow(Q.badActionDraft);
+    const bodies: Array<Record<string, unknown>> = [
+      { ids: [Q.badActionSent], action: 'accept' },
+      { ids: [Q.badActionDraft] },
+      { ids: [Q.badActionSent, Q.badActionDraft], action: 'Reject' },
+      { ids: [Q.badActionSent, Q.badActionDraft], action: 'rejected' },
+      { ids: [Q.badActionSent], action: 1 },
+      { ids: [Q.badActionSent], action: null },
+    ];
+    for (const body of bodies) {
+      const res = await bulkRaw(ID.ownerA, ID.bizA, body);
+      expect(res.status, `${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body.code, JSON.stringify(body)).toBe('quote_bulk_action_unknown');
+    }
+    expect(await quoteRow(Q.badActionSent)).toEqual(sentBefore);
+    expect(await quoteRow(Q.badActionDraft)).toEqual(draftBefore);
+    expect(recordedEvents).toHaveLength(0);
+    expect(crmCalls).toHaveLength(0);
+  });
+
+  it('QSM-18: missing, empty or malformed ids answer 400 quote_bulk_ids_required for send, reject and delete alike; no quote of the tenant changes (without the check, `id: { in: undefined }` reached every quote of the tenant)', async () => {
+    const tenantABefore = await tenantQuotes(ID.bizA);
+    const bodies: Array<Record<string, unknown>> = [];
+    for (const action of ['send', 'reject', 'delete']) {
+      bodies.push({ action }, { ids: [], action }, { ids: Q.badActionSent, action }, { ids: [{ not: 'x' }], action }, { ids: [''], action });
+    }
+    for (const body of bodies) {
+      const res = await bulkRaw(ID.ownerA, ID.bizA, body);
+      expect(res.status, `${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body.code, JSON.stringify(body)).toBe('quote_bulk_ids_required');
+    }
+    // An empty body names neither: the action is reported first.
+    const empty = await bulkRaw(ID.ownerA, ID.bizA, {});
+    expect(empty.status, JSON.stringify(empty.body)).toBe(400);
+    expect(empty.body.code).toBe('quote_bulk_action_unknown');
+    expect(await tenantQuotes(ID.bizA)).toBe(tenantABefore);
+    expect(recordedEvents).toHaveLength(0);
+    expect(crmCalls).toHaveLength(0);
+  });
+});
+
+describe('a bulk move is recorded as the status route records it (V1-50 review SEC-V50-3)', () => {
+  it("QSM-19: bulk reject emits quote.rejected (source internal, the quote's contact) and logs quote.rejected naming A's owner as a USER, exactly as the status route does; bulk send logs quote.sent naming A's owner and keeps its minimal quote.sent payload (no contact, so no customer email)", async () => {
+    const route = await setQuoteStatus(ID.ownerA, Q.auditRouteSent, 'rejected');
+    expect(route.status, JSON.stringify(route.body)).toBe(200);
+    const routeEvents = recordedEvents.map((e) => ({ name: e.name, source: e.payload.source, contactId: e.payload.quote.contactId }));
+    const routeCrm = crmCalls.map((c) => ({ type: c.type, actorType: c.actorType, actorId: c.actorId, contactId: c.contactId, source: c.data.source }));
+
+    recordedEvents.length = 0;
+    crmCalls.length = 0;
+    const rejected = await bulk(ID.ownerA, ID.bizA, [Q.auditBulkSent], 'reject');
+    expect(rejected.status, JSON.stringify(rejected.body)).toBe(200);
+    expect(rejected.body).toMatchObject({ updated: 1, action: 'reject' });
+    expect((await quoteRow(Q.auditBulkSent)).status).toBe('REJECTED');
+    const bulkEvents = recordedEvents.map((e) => ({ name: e.name, source: e.payload.source, contactId: e.payload.quote.contactId }));
+    const bulkCrm = crmCalls.map((c) => ({ type: c.type, actorType: c.actorType, actorId: c.actorId, contactId: c.contactId, source: c.data.source }));
+    expect(bulkEvents).toEqual([{ name: 'quote.rejected', source: 'internal', contactId: ID.contactA }]);
+    expect(bulkCrm).toEqual([{ type: 'quote.rejected', actorType: 'USER', actorId: ID.ownerA, contactId: ID.contactA, source: 'internal' }]);
+    expect(bulkEvents).toEqual(routeEvents);
+    expect(bulkCrm).toEqual(routeCrm);
+    expect(crmCalls[0].data.quoteId).toBe(Q.auditBulkSent);
+
+    recordedEvents.length = 0;
+    crmCalls.length = 0;
+    const sent = await bulk(ID.ownerA, ID.bizA, [Q.auditBulkDraft], 'send');
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    expect(sent.body).toMatchObject({ updated: 1, action: 'send' });
+    const sentRow = await quoteRow(Q.auditBulkDraft);
+    expect(recordedEvents).toHaveLength(1);
+    expect(recordedEvents[0].name).toBe('quote.sent');
+    expect(recordedEvents[0].payload.quote).toEqual({ id: Q.auditBulkDraft, status: 'SENT', sentAt: sentRow.sentAt, viewToken: sentRow.viewToken });
+    expect(crmCalls.map((c) => ({ type: c.type, actorType: c.actorType, actorId: c.actorId, contactId: c.contactId }))).toEqual([
+      { type: 'quote.sent', actorType: 'USER', actorId: ID.ownerA, contactId: ID.contactA },
+    ]);
+  });
+});
+
+describe('the view-token repair of a SENT quote without one (V1-50 review CR-V150-2)', () => {
+  it('QSM-20: `sent` on a SENT quote with no viewToken mints its one token (sentAt and status unchanged, nothing emitted or logged); a repeat keeps it, and the public accept link then works', async () => {
+    const before = await quoteRow(Q.sentNoToken);
+    expect(before.viewToken).toBeNull();
+    const first = await setQuoteStatus(ID.ownerA, Q.sentNoToken, 'sent');
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const row = await quoteRow(Q.sentNoToken);
+    expect(row.viewToken).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(first.body).toMatchObject({ id: Q.sentNoToken, status: 'SENT', viewToken: row.viewToken });
+    expect(row.status).toBe('SENT');
+    expect(row.sentAt).toEqual(before.sentAt);
+    expect(recordedEvents).toHaveLength(0);
+    expect(crmCalls).toHaveLength(0);
+
+    const again = await setQuoteStatus(ID.ownerA, Q.sentNoToken, 'sent');
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body.viewToken).toBe(row.viewToken);
+    expect(await quoteRow(Q.sentNoToken)).toEqual(row);
+
+    const accepted = await agent().post(`/commerce/public/quotes/${row.viewToken}/accept`).send({});
+    expect([200, 201], JSON.stringify(accepted.body)).toContain(accepted.status);
+    expect((await quoteRow(Q.sentNoToken)).status).toBe('ACCEPTED');
+  });
+
+  it('QSM-21: two concurrent `sent` requests on a SENT quote with no viewToken store one token, and both answer it', async () => {
+    const [a, b] = await Promise.all([
+      setQuoteStatus(ID.ownerA, Q.sentNoTokenRace, 'sent'),
+      setQuoteStatus(ID.ownerA, Q.sentNoTokenRace, 'sent'),
+    ]);
+    expect(a.status, JSON.stringify(a.body)).toBe(200);
+    expect(b.status, JSON.stringify(b.body)).toBe(200);
+    const row = await quoteRow(Q.sentNoTokenRace);
+    expect(row.viewToken).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(a.body.viewToken).toBe(row.viewToken);
+    expect(b.body.viewToken).toBe(row.viewToken);
+  });
+});
+
+describe('writers outside the V1-50 write set (review SEC-V50-4)', () => {
+  it.todo(
+    'QSM-22: POST /commerce/businesses/:businessId/ai-execute send_quote and convert_quote go through the transition table and need revenue:write — BLOCKED outside the write set: commerce-ai.controller.ts runs AuthGuard, BusinessGuard and FeatureFlagGuard only (no ModuleScopeGuard), and commerce-ai.service.ts send_quote/convert_quote write Quote.status directly, so a revenue:read member can re-open a REJECTED quote to SENT or mark a REJECTED or converted quote ACCEPTED with no event; a follow-up packet must add revenue:write and route both actions through updateQuoteStatus',
+  );
 });
 
 describe('positive control: send, public accept by token, convert (V1-50)', () => {
