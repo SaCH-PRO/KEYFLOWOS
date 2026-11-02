@@ -23,7 +23,10 @@
  *   BR-02  recording the 40 still owed is not an over-payment: 201, paidAmount 100, remaining 0,
  *          PAID, nothing over the total (regression control, V1-29)
  *   BR-03  the web's reading of the list row it renders (the shared mirror over inv.payments) is
- *          the server's: net 60, remaining 40, 60% paid; 40 is within the remaining, 40.01 is not
+ *          the server's: net 60, remaining 40, 60% paid; 40 is within the remaining, 40.01 is not.
+ *          This proves the mirror over the served rows. The three web files of the V1-36 write set
+ *          render on no route (review V36-CR-1, balance-arithmetic.spec.ts BA-07); the live web
+ *          surfaces are outside the write set (BA-08, it.todo)
  *   BR-04  Finance overview revenueThisMonth subtracts refunds: = the tenant's ledger cash net
  *   BR-05  revenue KPIs collectedThisMonth and the 12-week revenue pulse subtract refunds
  *   BR-06  the collected-vs-expected report subtracts refunds
@@ -494,5 +497,8 @@ describe('per tenant: the revenue surfaces subtract refunds', () => {
 describe('V1-36 discovery outside the write set (it.todo)', () => {
   it.todo(
     'BR-07 LEDGER: a provider partial refund (the real Stripe refund webhook, refund.created 40 of a 100 PaymentIntent payment) leaves every balance surface at net 60, remaining 40, but the ledger cash net of the invoice at 0: createRefundWithPosting (payments/payments.service.ts) calls RevenuePostingService.onPaymentRefunded (finance/revenue-posting.service.ts), which reverses the WHOLE original posting whatever the refund amount. Observed at the V1-34 head with this suite\'s fixtures; both files are outside the V1-36 write set (a partial refund needs a partial reversing posting)',
+  );
+  it.todo(
+    'BR-08 (review ST-V36-1): one Stripe refund is one negative REFUNDED row. A charge.refunded event without refunds.data (Stripe API 2022-11-15 and later omit Charge.refunds by default) is stored under the synthetic id re_synth_<charge> (payments/payments.service.ts processStripeRefund), and refund.created for the same refund under its real re_ id; the refund dedupe looks at providerPaymentId alone, so both rows land. On a 100 invoice paid by a PaymentIntent (latest_charge ch_x), charge.refunded {amount_refunded 4000, no refunds list} then refund.created {amount 4000, charge ch_x} write SUCCESSFUL 100, REFUNDED -40 (re_synth_ch_x) and REFUNDED -40 (re_x): balanceOfStoredRows reads net 20, remaining 80, and since V1-36 every tenant revenue read over CASH_NET_PAYMENT_WHERE (Finance overview revenueThisMonth, revenue KPIs and pulse, collected-vs-expected) subtracts the refund twice; the right reading is net 60, remaining 40. The read contract is not where the duplicate is made: the fix is at the refund write door (dedupe on charge plus cumulative amount_refunded, or skip the synthetic row when real re_ rows on the charge already cover it), payments.service.ts, outside the V1-36 write set',
   );
 });

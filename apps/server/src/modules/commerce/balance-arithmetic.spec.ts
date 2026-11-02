@@ -28,12 +28,19 @@
  *   BA-05  the web surfaces read the shared contract: each imports invoiceBalanceOfStoredRows
  *          from @keyflow/shared, and the package index re-exports ./invoice-balance
  *   BA-06  scanner self-test: an injected SUCCESSFUL-only sum is found
+ *   BA-07  reachability (review V36-CR-1): which write-set web files a Next.js route renders. The
+ *          three web files the V1-36 write set names render on no route (invoice-list.tsx and
+ *          invoice-stat-cards.tsx have no importer; invoices-panel.tsx is imported only by
+ *          billing/billing-panel.tsx, which nothing imports). BA-04 / BA-05 on them prove the files
+ *          read the contract, not that a screen does. The live web balance surfaces (the nav
+ *          "Invoices" hub invoices/page.tsx, the invoice detail page, the finance payment-record
+ *          modal) are outside the write set and still in the BA-04 inventory: it.todo below.
  *
  * The mirror is loaded by path from the tree this spec runs in (a worktree
  * resolves @keyflow/shared to the main tree's built dist).
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import * as workflow from './invoice-workflow.service';
 import { fromCents, sumMoney, toCents } from './money';
@@ -319,7 +326,7 @@ const KNOWN_OUTSIDE_WRITE_SET: Record<string, { count: number; why: string }> = 
   },
   'apps/web/src/app/app/finance/components/payment-record-modal.tsx': {
     count: 1,
-    why: 'the finance payment modal fallback figures (successfulPaid)',
+    why: 'the finance payment modal fallback figures (successfulPaid): the live Record-payment form of the Sales pipeline (finance-pipeline.tsx), V36-CR-1',
   },
   'apps/web/src/app/app/commerce/invoices/[id]/page.tsx': {
     count: 1,
@@ -327,7 +334,7 @@ const KNOWN_OUTSIDE_WRITE_SET: Record<string, { count: number; why: string }> = 
   },
   'apps/web/src/app/app/commerce/invoices/page.tsx': {
     count: 2,
-    why: 'the invoices page summary and row paid figures',
+    why: 'the nav "Invoices" hub (nav-config.ts -> /app/commerce/invoices): stat cards and row "% paid" still read a refunded invoice as paid (V36-CR-1); the live CF-17 web list, outside the write set',
   },
 };
 
@@ -375,6 +382,96 @@ describe('BA-05: the web surfaces read the shared contract', () => {
     const imports = /import\s*\{[^}]*\binvoiceBalanceOfStoredRows\b[^}]*\}\s*from\s*["']@keyflow\/shared["']/.test(src);
     expect(imports, `${file} imports invoiceBalanceOfStoredRows from @keyflow/shared`).toBe(true);
   });
+});
+
+// ---------------------------------------------------------------------------
+// BA-07: which write-set web files a route renders (review V36-CR-1)
+// ---------------------------------------------------------------------------
+
+const WEB_SRC = join(REPO, 'apps', 'web', 'src');
+const WEB_APP = join(WEB_SRC, 'app');
+/** Next.js App Router entry files: everything a route renders is imported from one of these. */
+const ROUTE_ENTRY = /^(page|layout|template|loading|error|global-error|not-found|default|route|sitemap|robots|manifest)\.(tsx|ts)$/;
+/** Static (`from '...'`, `import '...'`) and dynamic (`import('...')`, `require('...')`) specifiers. */
+const IMPORT_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['"])([^'"\n]+)\1/g;
+
+function resolveWebImport(fromFile: string, spec: string, known: Set<string>): string | null {
+  let base: string;
+  if (spec.startsWith('@/')) base = join(WEB_SRC, spec.slice(2));
+  else if (spec.startsWith('./') || spec.startsWith('../')) base = join(dirname(fromFile), spec);
+  else return null;
+  for (const candidate of [base, `${base}.tsx`, `${base}.ts`, join(base, 'index.tsx'), join(base, 'index.ts')]) {
+    if (known.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Repo-relative web source files reachable from a route entry (or middleware) through imports; tests excluded. */
+function routeReachableWebFiles(): Set<string> {
+  const files = walk(WEB_SRC, isWebSource);
+  const known = new Set(files);
+  const edges = new Map<string, string[]>();
+  for (const f of files) {
+    const targets: string[] = [];
+    for (const m of stripComments(readFileSync(f, 'utf8')).matchAll(IMPORT_SPECIFIER)) {
+      const to = resolveWebImport(f, m[2], known);
+      if (to) targets.push(to);
+    }
+    edges.set(f, targets);
+  }
+  const entries = files.filter(
+    (f) => (f.startsWith(WEB_APP + sep) && ROUTE_ENTRY.test(basename(f))) || f === join(WEB_SRC, 'middleware.ts'),
+  );
+  const seen = new Set(entries);
+  const queue = [...entries];
+  while (queue.length > 0) {
+    for (const to of edges.get(queue.pop() as string) ?? []) {
+      if (!seen.has(to)) {
+        seen.add(to);
+        queue.push(to);
+      }
+    }
+  }
+  return new Set([...seen].map(repoPath));
+}
+
+/**
+ * The V1-36 write-set web files that no route renders, at the V1-36 review.
+ * Exact; the list only shrinks. BA-04 / BA-05 hold on these files, but no
+ * screen shows what they compute.
+ */
+const UNREACHABLE_WRITE_SET_WEB: Record<string, string> = {
+  'apps/web/src/app/app/commerce/invoices/components/invoice-list.tsx': 'no importer',
+  'apps/web/src/app/app/commerce/invoices/components/invoice-stat-cards.tsx': 'no importer',
+  'apps/web/src/app/app/commerce/invoices/invoices-panel.tsx':
+    'imported only by commerce/billing/billing-panel.tsx, which nothing imports (commerce/billing/page.tsx redirects to /app/settings/billing)',
+};
+
+describe('BA-07: which write-set web files a route renders (V36-CR-1)', () => {
+  const reachable = routeReachableWebFiles();
+
+  it('the import graph sees the live balance surfaces: the nav "Invoices" hub, the invoice detail page, and Sales -> finance pipeline -> payment-record modal', () => {
+    expect(readFileSync(join(WEB_SRC, 'lib', 'nav-config.ts'), 'utf8'), 'the nav "Invoices" door is /app/commerce/invoices').toMatch(
+      /label:\s*"Invoices",\s*href:\s*"\/app\/commerce\/invoices"/,
+    );
+    for (const f of [
+      'apps/web/src/app/app/commerce/invoices/page.tsx',
+      'apps/web/src/app/app/commerce/invoices/[id]/page.tsx',
+      'apps/web/src/app/app/finance/components/finance-pipeline.tsx',
+      'apps/web/src/app/app/finance/components/payment-record-modal.tsx',
+    ]) {
+      expect(reachable.has(f), `${f} is rendered by a route`).toBe(true);
+    }
+  });
+
+  it('the write-set web files no route renders are exactly the known inventory (one wired onto a route lowers it)', () => {
+    const unreachable = WRITE_SET_SURFACES.filter((f) => f.startsWith('apps/web/') && !reachable.has(f)).sort();
+    expect(unreachable).toEqual(Object.keys(UNREACHABLE_WRITE_SET_WEB).sort());
+  });
+
+  it.todo(
+    'BA-08 (V36-CR-1, outside the V1-36 write set): the live web balance surfaces read invoiceBalanceOfStoredRows from @keyflow/shared. apps/web/src/app/app/commerce/invoices/page.tsx (the nav "Invoices" hub: stat cards ~line 151, row "% paid" ~line 316) reads a 100 invoice paid 60 + 40 with the 40 refunded as "100% paid", where the mirror gives 60% and remaining 40; invoices/[id]/page.tsx (detail fallback paid figure) and finance/components/payment-record-modal.tsx (the Sales pipeline Record-payment fallback) sum SUCCESSFUL rows too. The V1-36 write set named invoice-list.tsx, invoice-stat-cards.tsx and invoices-panel.tsx, which no route renders (BA-07): the fix needs a packet whose write set holds the live files',
+  );
 });
 
 describe('BA-06: scanner self-test', () => {
