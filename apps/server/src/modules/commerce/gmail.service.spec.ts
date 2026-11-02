@@ -18,12 +18,19 @@
  * row is this business's, this user's and inside its window, claims it (single
  * use), and only then writes Business.gmail*. assertConnectAuthority is the
  * owner rule (OWNER membership, Business.ownerId, SUPER_ADMIN).
+ *
+ * Review repairs (U10-U14): the confirmation names the previewed mailbox
+ * (ST-CMF5-2); staging refuses a request whose tenant is not the state's
+ * business (ST-CMF5-3); confirm and disconnect write their audit row in the
+ * change's transaction (ST-CMF5-4); expired pending rows are swept and a
+ * disconnect removes every pending row (ST-CMF5-5).
  */
 import 'reflect-metadata';
 import { createHmac } from 'crypto';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { GmailService } from './gmail.service';
+import { runWithTenant } from '../../core/tenant/tenant-context';
 
 const BIZ = 'biz_gmail_1';
 const OWNER = { id: 'u_owner', role: 'USER' };
@@ -49,7 +56,7 @@ interface Call { model: string; method: string; args: any }
  * business.findFirst answer the owner rule from `state`; connectorAccount keeps
  * the rows it was given in memory, so a staged row can be confirmed.
  */
-function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: string; claimLoses?: boolean } = {}) {
+function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: string; claimLoses?: boolean; currentEmail?: string } = {}) {
   const calls: Call[] = [];
   const pending: any[] = [];
   // Scalar equality on every key but OR; an OR of { settings: { path: ['userId'], equals } } and
@@ -58,8 +65,12 @@ function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: str
     !or || or.some((c) =>
       (c.settings ? row.settings?.[c.settings.path[0]] === c.settings.equals : true) &&
       (c.createdAt ? row.createdAt < c.createdAt.lt : true));
+  // `{ in: [...] }` is the sweep's id list (R0-CMF5 review ST-CMF5-5).
+  const matchesValue = (value: any, v: any) =>
+    v && typeof v === 'object' && Array.isArray(v.in) ? v.in.includes(value) : value === v;
   const matches = (row: any, where: any) =>
-    Object.entries(where ?? {}).every(([k, v]) => k === 'OR' || row[k] === v) && matchesOr(row, where?.OR);
+    Object.entries(where ?? {}).every(([k, v]) => k === 'OR' || matchesValue(row[k], v)) && matchesOr(row, where?.OR);
+  const audit: any[] = [];
   const client: any = {
     membership: {
       findUnique: async (args: any) => {
@@ -73,9 +84,20 @@ function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: str
         calls.push({ model: 'business', method: 'findFirst', args });
         return args.where.ownerId === state.ownerId && args.where.id === BIZ ? { id: BIZ } : null;
       },
+      findUnique: async (args: any) => {
+        calls.push({ model: 'business', method: 'findUnique', args });
+        return { id: args.where.id, gmailEmail: state.currentEmail ?? null, gmailRefreshToken: state.currentEmail ? 'ref' : null };
+      },
       update: async (args: any) => {
         calls.push({ model: 'business', method: 'update', args });
         return { id: args.where.id, ...args.data };
+      },
+    },
+    teamActivityLog: {
+      create: async (args: any) => {
+        calls.push({ model: 'teamActivityLog', method: 'create', args });
+        audit.push(args.data);
+        return args.data;
       },
     },
     connectorAccount: {
@@ -89,9 +111,13 @@ function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: str
         calls.push({ model: 'connectorAccount', method: 'findFirst', args });
         return pending.find((r) => matches(r, args.where)) ?? null;
       },
+      findMany: async (args: any) => {
+        calls.push({ model: 'connectorAccount', method: 'findMany', args });
+        return pending.filter((r) => matches(r, args.where));
+      },
       deleteMany: async (args: any) => {
         calls.push({ model: 'connectorAccount', method: 'deleteMany', args });
-        if (state.claimLoses && args.where.id) return { count: 0 };
+        if (state.claimLoses && typeof args.where.id === 'string') return { count: 0 };
         const before = pending.length;
         for (let i = pending.length - 1; i >= 0; i -= 1) {
           if (matches(pending[i], args.where)) pending.splice(i, 1);
@@ -100,8 +126,13 @@ function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: str
       },
     },
   };
+  // The transaction runs on the same recording client (calls keep their order).
+  client.$transaction = async (fn: (tx: any) => Promise<unknown>) => {
+    calls.push({ model: '$transaction', method: 'begin', args: null });
+    return fn(client);
+  };
   const writes = () => calls.filter((c) => WRITE_METHODS.has(c.method));
-  return { prisma: { client } as any, calls, pending, writes };
+  return { prisma: { client } as any, calls, pending, writes, audit };
 }
 
 const fetchCalls: string[] = [];
@@ -228,7 +259,7 @@ describe('GmailService — the Gmail connection is bound to the owner who starte
   it('[R0-CMF5-U06] RED-BEFORE: confirmPendingConnection checks the owner rule before it reads any pending row; a refused member reads and writes nothing', async () => {
     const { prisma, calls, writes } = fakePrisma({ memberships: { [STAFF.id]: 'STAFF' } });
     const gmail = new GmailService(prisma) as any;
-    const err = await gmail.confirmPendingConnection(BIZ, STAFF, 'gmc_whatever').catch((e: unknown) => e);
+    const err = await gmail.confirmPendingConnection(BIZ, STAFF, 'gmc_whatever', 'mailbox@gmail.test').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ForbiddenException);
     expect(calls.filter((c) => c.model === 'connectorAccount')).toEqual([]);
     expect(writes()).toEqual([]);
@@ -237,7 +268,7 @@ describe('GmailService — the Gmail connection is bound to the owner who starte
   it('[R0-CMF5-U07] RED-BEFORE: confirmPendingConnection refuses (404 GMAIL_PENDING_NOT_FOUND, no Business write) a pending id of another user, of another business, past its window, unknown, or claimed by a concurrent confirmation', async () => {
     stubGoogle();
     const expectNotFound = async (gmail: any, businessId: string, actor: any, pendingId: string, writes: () => Call[]) => {
-      const err = await gmail.confirmPendingConnection(businessId, actor, pendingId).catch((e: unknown) => e);
+      const err = await gmail.confirmPendingConnection(businessId, actor, pendingId, 'mailbox@gmail.test').catch((e: unknown) => e);
       expect(err).toBeInstanceOf(NotFoundException);
       expect((err as NotFoundException).getResponse()).toMatchObject({ code: 'GMAIL_PENDING_NOT_FOUND' });
       expect(writes().filter((c) => c.model === 'business')).toEqual([]);
@@ -267,7 +298,7 @@ describe('GmailService — the Gmail connection is bound to the owner who starte
     const { pendingId } = await gmail.stagePendingConnection(
       { businessId: BIZ, userId: OWNER.id, nonce: 'n-u08', exp: Date.now() + 60_000, purpose: 'gmail' }, 'good-code');
 
-    await expect(gmail.confirmPendingConnection(BIZ, OWNER, pendingId)).resolves.toEqual({ connected: true, email: 'owner8@gmail.test' });
+    await expect(gmail.confirmPendingConnection(BIZ, OWNER, pendingId, 'owner8@gmail.test')).resolves.toEqual({ connected: true, email: 'owner8@gmail.test' });
     expect(pending).toEqual([]);
     const claim = calls.findIndex((c) => c.model === 'connectorAccount' && c.method === 'deleteMany' && c.args.where.id === pendingId);
     const write = calls.findIndex((c) => c.model === 'business' && c.method === 'update');
@@ -284,5 +315,104 @@ describe('GmailService — the Gmail connection is bound to the owner who starte
   it('[R0-CMF5-U09] RED-BEFORE: saveGmailCredentials, which linked a mailbox in the unauthenticated callback, is gone', () => {
     const { prisma } = fakePrisma();
     expect((new GmailService(prisma) as any).saveGmailCredentials).toBeUndefined();
+  });
+
+  it('[R0-CMF5-U10] ST-CMF5-3: stagePendingConnection under another business\'s tenant (the request\'s TenantInterceptor scope) refuses before any Google call or write; under the state\'s own tenant it stages', async () => {
+    stubGoogle();
+    const { prisma, writes } = fakePrisma();
+    const gmail = new GmailService(prisma) as any;
+    const state = { businessId: BIZ, userId: OWNER.id, nonce: 'n-u10', exp: Date.now() + 60_000, purpose: 'gmail' as const };
+    const err = await runWithTenant('biz_other', OWNER.id, () => gmail.stagePendingConnection(state, 'good-code')).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect((err as BadRequestException).getResponse()).toMatchObject({ code: 'GMAIL_STATE_TENANT_MISMATCH' });
+    expect(fetchCalls).toEqual([]);
+    expect(writes()).toEqual([]);
+    const staged = await runWithTenant(BIZ, OWNER.id, () => gmail.stagePendingConnection(state, 'good-code'));
+    expect(staged.pendingId).toMatch(/^gmc_/);
+  });
+
+  it('[R0-CMF5-U11] ST-CMF5-2: previewPendingConnection shows the bound owner the staged mailbox and consumes nothing; confirmPendingConnection naming another mailbox is 409 GMAIL_PENDING_EMAIL_MISMATCH with no claim and no Business write, and naming it in any letter case activates it', async () => {
+    stubGoogle({ access: 'acc_tok_11', refresh: 'ref_tok_11', email: 'Stranger11@gmail.test' });
+    const { prisma, writes, pending } = fakePrisma({ memberships: { [OWNER.id]: 'OWNER', [STAFF.id]: 'STAFF' } });
+    const gmail = new GmailService(prisma) as any;
+    const { pendingId } = await gmail.stagePendingConnection(
+      { businessId: BIZ, userId: OWNER.id, nonce: 'n-u11', exp: Date.now() + 60_000, purpose: 'gmail' }, 'good-code');
+    const before = writes().length;
+
+    await expect(gmail.previewPendingConnection(BIZ, OWNER, pendingId)).resolves.toMatchObject({ pendingId, email: 'Stranger11@gmail.test' });
+    await expect(gmail.previewPendingConnection(BIZ, STAFF, pendingId)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(gmail.previewPendingConnection(BIZ, SUPER, pendingId)).rejects.toBeInstanceOf(NotFoundException);
+
+    const err = await gmail.confirmPendingConnection(BIZ, OWNER, pendingId, 'owner@gmail.test').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toMatchObject({ code: 'GMAIL_PENDING_EMAIL_MISMATCH' });
+    expect(writes().length).toBe(before);
+    expect(pending.map((r) => r.id)).toEqual([pendingId]);
+
+    await expect(gmail.confirmPendingConnection(BIZ, OWNER, pendingId, ' stranger11@GMAIL.test ')).resolves.toEqual({ connected: true, email: 'Stranger11@gmail.test' });
+  });
+
+  it('[R0-CMF5-U12] ST-CMF5-4: confirm writes Business.gmail* and one audit row naming the actor inside one transaction (gmail_connected, or gmail_replaced with the replaced mailbox); disconnect clears the mailbox and writes gmail_disconnected; a refused disconnect writes nothing', async () => {
+    stubGoogle({ access: 'acc_tok_12', refresh: 'ref_tok_12', email: 'next12@gmail.test' });
+    const { prisma, calls, audit, writes } = fakePrisma({ memberships: { [OWNER.id]: 'OWNER', [STAFF.id]: 'STAFF' }, currentEmail: 'current12@gmail.test' });
+    const gmail = new GmailService(prisma) as any;
+    const { pendingId } = await gmail.stagePendingConnection(
+      { businessId: BIZ, userId: OWNER.id, nonce: 'n-u12', exp: Date.now() + 60_000, purpose: 'gmail' }, 'good-code');
+    await gmail.confirmPendingConnection(BIZ, OWNER, pendingId, 'next12@gmail.test');
+
+    const begin = calls.findIndex((c) => c.model === '$transaction');
+    const claim = calls.findIndex((c) => c.model === 'connectorAccount' && c.method === 'deleteMany' && c.args.where.id === pendingId);
+    const update = calls.findIndex((c) => c.model === 'business' && c.method === 'update');
+    const log = calls.findIndex((c) => c.model === 'teamActivityLog');
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(begin).toBeLessThan(claim);
+    expect(claim).toBeLessThan(update);
+    expect(update).toBeLessThan(log);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      businessId: BIZ, userId: OWNER.id, module: 'commerce', action: 'gmail_replaced', entityType: 'gmail_mailbox',
+      meta: { email: 'next12@gmail.test', previousEmail: 'current12@gmail.test', actorStanding: 'OWNER' },
+    });
+    expect(JSON.stringify(audit)).not.toContain('acc_tok_12');
+    expect(JSON.stringify(audit)).not.toContain('ref_tok_12');
+
+    const beforeRefusal = writes().length;
+    await expect(gmail.disconnectGmail(BIZ, STAFF)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(gmail.disconnectGmail(BIZ, undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(writes().length).toBe(beforeRefusal);
+
+    await gmail.disconnectGmail(BIZ, SUPER);
+    expect(audit).toHaveLength(2);
+    expect(audit[1]).toMatchObject({ userId: SUPER.id, action: 'gmail_disconnected', meta: { previousEmail: 'current12@gmail.test', actorStanding: 'SUPER_ADMIN' } });
+  });
+
+  it('[R0-CMF5-U13] ST-CMF5-5: a disconnect removes every PENDING Gmail row of the business, so a consent staged before it cannot be confirmed after it', async () => {
+    stubGoogle();
+    const { prisma, pending } = fakePrisma({ memberships: { [OWNER.id]: 'OWNER' } });
+    const gmail = new GmailService(prisma) as any;
+    const { pendingId } = await gmail.stagePendingConnection(
+      { businessId: BIZ, userId: OWNER.id, nonce: 'n-u13', exp: Date.now() + 60_000, purpose: 'gmail' }, 'good-code');
+    expect(pending).toHaveLength(1);
+    await gmail.disconnectGmail(BIZ, OWNER);
+    expect(pending).toEqual([]);
+    const err = await gmail.confirmPendingConnection(BIZ, OWNER, pendingId, 'mailbox@gmail.test').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NotFoundException);
+  });
+
+  it('[R0-CMF5-U14] ST-CMF5-5: getGmailStatus sweeps this business\'s pending rows past their window (by age or by pendingExpiresAt) and keeps fresh ones; the sweep names the business', async () => {
+    stubGoogle();
+    const { prisma, pending, calls } = fakePrisma({ memberships: { [OWNER.id]: 'OWNER' } });
+    const gmail = new GmailService(prisma) as any;
+    pending.push(
+      { id: 'gmc_old', businessId: BIZ, provider: 'GOOGLE', service: 'GMAIL', status: 'PENDING', createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1000), settings: { purpose: 'gmail-connect', userId: STAFF.id, pendingExpiresAt: new Date(Date.now() + 60_000).toISOString() } },
+      { id: 'gmc_late', businessId: BIZ, provider: 'GOOGLE', service: 'GMAIL', status: 'PENDING', createdAt: new Date(), settings: { purpose: 'gmail-connect', userId: ADMIN.id, pendingExpiresAt: new Date(Date.now() - 1000).toISOString() } },
+      { id: 'gmc_fresh', businessId: BIZ, provider: 'GOOGLE', service: 'GMAIL', status: 'PENDING', createdAt: new Date(), settings: { purpose: 'gmail-connect', userId: OWNER.id, pendingExpiresAt: new Date(Date.now() + 60_000).toISOString() } },
+      { id: 'gmc_other_biz', businessId: 'biz_other', provider: 'GOOGLE', service: 'GMAIL', status: 'PENDING', createdAt: new Date(0), settings: {} },
+    );
+    await gmail.getGmailStatus(BIZ);
+    expect(pending.map((r) => r.id).sort()).toEqual(['gmc_fresh', 'gmc_other_biz']);
+    for (const c of calls.filter((x) => x.model === 'connectorAccount')) {
+      expect(c.args.where.businessId, `${c.method} names the business`).toBe(BIZ);
+    }
   });
 });

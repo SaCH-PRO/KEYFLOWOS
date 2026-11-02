@@ -49,6 +49,17 @@
  * oauth2.googleapis.com/token and www.googleapis.com/oauth2/v2/userinfo from
  * this file's table of Google accounts and refuses (and records) anything else.
  *
+ * REVIEW REPAIRS (R0-CMF5 review, cases D-I): the preview route and the
+ * confirmation naming the previewed mailbox (ST-CMF5-2); the callbacks refuse a
+ * request whose tenant is not the state's business, proved under production
+ * wiring: TenantInterceptor as APP_INTERCEPTOR and the Prisma tenant extension's
+ * context provider installed, as main.ts does, for every case (ST-CMF5-3); a
+ * team_activity_logs row naming the actor for each connect, replace and
+ * disconnect (ST-CMF5-4); expired PENDING rows swept and every PENDING row
+ * removed by a disconnect (ST-CMF5-5); the Google Suite connect and the
+ * connector disconnect/reconnect routes under the same owner rule and binding
+ * (ST-CMF5-1).
+ *
  * Fixtures: prefix `k07d_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
  * $transaction wrapping.
@@ -58,7 +69,7 @@ import path from 'path';
 import { createHmac, randomBytes } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -86,22 +97,39 @@ const USERS = [ID.owner, ID.coOwner, ID.staff, ID.staffAdmin, ID.staffWrite, ID.
 const emailOf = (id: string) => `${id}@k07d.test.local`;
 const OWNER_ONLY = 'GMAIL_OWNER_ONLY';
 const PENDING_NOT_FOUND = 'GMAIL_PENDING_NOT_FOUND';
+const EMAIL_MISMATCH = 'GMAIL_PENDING_EMAIL_MISMATCH';
 
 const OAUTH_ENV: Record<string, string> = {
   GOOGLE_CLIENT_ID: `${P}client-id`,
   GOOGLE_CLIENT_SECRET: `${P}client-secret`,
   GMAIL_REDIRECT_URI: 'http://localhost:3001/api/commerce/gmail/callback',
   GOOGLE_STATE_SECRET: `${P}state-secret`,
+  GOOGLE_SUITE_REDIRECT_URI: 'http://localhost:3001/api/connect/google-suite/callback',
+  // The Google Suite callback redirects to APP_URL (absolute only when it is set).
+  APP_URL: 'http://localhost:5000',
 };
 const OAUTH_KEYS = [...Object.keys(OAUTH_ENV), 'GOOGLE_REDIRECT_URI'];
 const savedEnv: Record<string, string | undefined> = {};
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
+/** The scopes the stubbed consent grants (the Google Suite callback provisions only granted services). */
+const GRANTED_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+  'openid',
+].join(' ');
 
 let db: any;
 let app: any;
 let realFetch: typeof fetch;
+/** The connector registry stand-in behind ConnectorController: records what reached it. */
+const registry = {
+  disconnectConnector: vi.fn(async () => undefined),
+  reconnectConnector: vi.fn(async () => ({ connected: false })),
+};
 
 /** A Google account the stubbed consent screen can sign in as: one code, one mailbox, one token pair. */
 interface GoogleAccount { code: string; email: string; access: string; refresh: string }
@@ -140,7 +168,7 @@ async function stubFetch(input: any, init?: any): Promise<Response> {
       return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400, headers: { 'content-type': 'application/json' } });
     }
     return new Response(
-      JSON.stringify({ access_token: account.access, refresh_token: account.refresh, expires_in: 3600, token_type: 'Bearer' }),
+      JSON.stringify({ access_token: account.access, refresh_token: account.refresh, expires_in: 3600, token_type: 'Bearer', scope: GRANTED_SCOPES }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     );
   }
@@ -181,8 +209,34 @@ function authUrl(businessId: string, actor?: string) {
   return as(agent().get(`/commerce/businesses/${businessId}/gmail/auth-url`), actor);
 }
 
-function confirm(businessId: string, pendingId: unknown, actor?: string) {
-  return as(agent().post(`/commerce/businesses/${businessId}/gmail/confirm`), actor).send({ pendingId });
+/** The confirmation names the mailbox the owner was shown (ST-CMF5-2); `email` undefined sends none. */
+function confirm(businessId: string, pendingId: unknown, actor: string | undefined, email: unknown) {
+  return as(agent().post(`/commerce/businesses/${businessId}/gmail/confirm`), actor).send({ pendingId, email });
+}
+
+function preview(businessId: string, pendingId: string, actor?: string) {
+  return as(agent().get(`/commerce/businesses/${businessId}/gmail/pending/${encodeURIComponent(pendingId)}`), actor);
+}
+
+function suiteAuthUrl(businessId: string, actor: string | undefined, body: Record<string, unknown>) {
+  return as(agent().post(`/connect/google-suite/businesses/${businessId}/auth-url`), actor).send(body);
+}
+
+function suiteCallback(state: string, code: string, actor?: string, query: Record<string, string> = {}) {
+  return as(agent().get('/connect/google-suite/callback').query({ state, code, ...query }), actor);
+}
+
+function connectorOp(op: 'disconnect' | 'reconnect', businessId: string, type: string, actor?: string) {
+  return as(agent().post(`/connectors/businesses/${businessId}/${op}/${type}`), actor).send({});
+}
+
+/** The audit rows the mailbox changes wrote for a business (raw SQL). */
+async function mailboxAuditOf(businessId: string): Promise<any[]> {
+  return db.$queryRawUnsafe(
+    `SELECT user_id, module, action, entity_type, entity_id, title, meta FROM team_activity_logs
+      WHERE business_id = $1 AND entity_type = 'gmail_mailbox' ORDER BY created_at ASC`,
+    businessId,
+  );
 }
 
 function disconnect(businessId: string, actor?: string) {
@@ -194,8 +248,8 @@ function status(businessId: string, actor = ID.owner) {
 }
 
 /** The Google redirect: the browser that completed consent, with whatever session it has (none by default). */
-function callback(state: string, code: string, actor?: string) {
-  return as(agent().get('/commerce/gmail/callback').query({ state, code }), actor);
+function callback(state: string, code: string, actor?: string, query: Record<string, string> = {}) {
+  return as(agent().get('/commerce/gmail/callback').query({ state, code, ...query }), actor);
 }
 
 function stateOf(url: string): string {
@@ -323,10 +377,25 @@ beforeAll(async () => {
   const { StoreReadinessService } = await import('../src/modules/commerce/store-readiness.service');
   const { PaymentEvidenceService } = await import('../src/modules/commerce/payment-evidence.service');
   const { TimeEntryService } = await import('../src/modules/time-tracking/time-entry.service');
+  const { APP_INTERCEPTOR } = await import('@nestjs/core');
+  const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+  const { getCurrentBusinessId } = await import('../src/core/tenant/tenant-context');
+  const { GoogleSuiteController } = await import('../src/core/connectors/google-suite.controller');
+  const { GoogleSuiteService } = await import('../src/core/connectors/google-suite.service');
+  const { ConnectorController } = await import('../src/core/connectors/connector.controller');
+  const { ConnectorRegistryService } = await import('../src/core/connectors/connector-registry.service');
+  const { ConnectorActivityService } = await import('../src/core/connectors/connector-activity.service');
+  const { ConnectorHealthMonitorService } = await import('../src/core/connectors/connector-health-monitor.service');
+  const { ConnectorCredentialsService } = await import('../src/core/connectors/connector-credentials.service');
+
+  // Production wiring (main.ts): the Prisma tenant extension reads the request's
+  // AsyncLocalStorage tenant, which TenantInterceptor (APP_INTERCEPTOR) installs.
+  dbMod.setTenantContextProvider({ getCurrentBusinessId });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController],
+    controllers: [CommerceController, GoogleSuiteController, ConnectorController],
     providers: [
+      { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
       PrismaService,
       AuthGuard,
       BusinessGuard,
@@ -345,6 +414,13 @@ beforeAll(async () => {
       { provide: CommerceVisionService, useValue: {} },
       { provide: StoreReadinessService, useValue: {} },
       { provide: PaymentEvidenceService, useValue: {} },
+      // ST-CMF5-1: the Google Suite connect and the connector routes, real controllers and GoogleSuiteService.
+      // The registry, activity, health and credential collaborators are stand-ins (no provider is reached).
+      GoogleSuiteService,
+      { provide: ConnectorRegistryService, useValue: { ...registry, get: () => undefined } },
+      { provide: ConnectorActivityService, useValue: { record: async () => undefined } },
+      { provide: ConnectorHealthMonitorService, useValue: {} },
+      { provide: ConnectorCredentialsService, useValue: {} },
     ],
   }).compile();
 
@@ -388,10 +464,11 @@ beforeAll(async () => {
       data: { id: `${P}m${n}`, userId, businessId, role, ...(permissionScopes ? { permissionScopes } : {}) },
     });
   }
-});
+}, 120_000);
 
 afterAll(async () => {
   if (db) await cleanup();
+  if (db) (await import('@keyflow/db')).setTenantContextProvider({ getCurrentBusinessId: () => undefined });
   if (app) await app.close();
   if (realFetch) globalThis.fetch = realFetch;
   for (const key of OAUTH_KEYS) {
@@ -509,15 +586,16 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
   it('[R0-CMF5-B02] RED-BEFORE: nobody but the user the state names can confirm it: the stranger (403, BusinessGuard), a STAFF member and an ADMIN (403 GMAIL_OWNER_ONLY), a co-owner and a SUPER_ADMIN (404 GMAIL_PENDING_NOT_FOUND); nothing is linked and the pending connection stays', async () => {
     const pendingId = forwarded.pendingId;
     expect(pendingId, 'B01 did not stage a pending connection').toBeTruthy();
+    const attackerEmail = forwarded.attacker?.email;
 
-    const stranger = await confirm(ID.biz, pendingId, ID.stranger);
+    const stranger = await confirm(ID.biz, pendingId, ID.stranger, attackerEmail);
     expect(stranger.status, JSON.stringify(stranger.body)).toBe(403);
-    expectOwnerOnly(await confirm(ID.biz, pendingId, ID.staff));
-    expectOwnerOnly(await confirm(ID.biz, pendingId, ID.admin));
-    expectOwnerOnly(await confirm(ID.biz, pendingId, ID.staffAdmin));
-    expectPendingNotFound(await confirm(ID.biz, pendingId, ID.coOwner));
-    expectPendingNotFound(await confirm(ID.biz, pendingId, ID.superAdmin));
-    const anonymous = await confirm(ID.biz, pendingId);
+    expectOwnerOnly(await confirm(ID.biz, pendingId, ID.staff, attackerEmail));
+    expectOwnerOnly(await confirm(ID.biz, pendingId, ID.admin, attackerEmail));
+    expectOwnerOnly(await confirm(ID.biz, pendingId, ID.staffAdmin, attackerEmail));
+    expectPendingNotFound(await confirm(ID.biz, pendingId, ID.coOwner, attackerEmail));
+    expectPendingNotFound(await confirm(ID.biz, pendingId, ID.superAdmin, attackerEmail));
+    const anonymous = await confirm(ID.biz, pendingId, undefined, attackerEmail);
     expect(anonymous.status, JSON.stringify(anonymous.body)).toBe(401);
 
     expect((await mailboxOf(ID.biz)).email).toBeNull();
@@ -533,7 +611,7 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
     expect((await pendingOf(ID.biz)).map((r) => r.id)).toEqual([back.pending]);
     expect((await mailboxOf(ID.biz)).email).toBeNull();
 
-    const res = await confirm(ID.biz, back.pending, ID.owner);
+    const res = await confirm(ID.biz, back.pending, ID.owner, mine.email);
     expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
     expect(res.body).toEqual({ connected: true, email: mine.email });
 
@@ -550,7 +628,7 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
     expect(await pendingOf(ID.biz)).toEqual([]);
 
     // The forwarded (stranger's) pending connection can no longer be confirmed by anyone.
-    expectPendingNotFound(await confirm(ID.biz, forwarded.pendingId, ID.owner));
+    expectPendingNotFound(await confirm(ID.biz, forwarded.pendingId, ID.owner, forwarded.attacker?.email));
     expect((await mailboxOf(ID.biz)).email).toBe(mine.email);
   });
 
@@ -558,12 +636,12 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
     await clearMailbox(ID.biz);
     const mine = googleAccount('owner_once');
     const back = await startAndComplete(ID.biz, ID.owner, mine);
-    const first = await confirm(ID.biz, back.pending, ID.owner);
+    const first = await confirm(ID.biz, back.pending, ID.owner, mine.email);
     expect([200, 201], JSON.stringify(first.body)).toContain(first.status);
     expect((await mailboxOf(ID.biz)).email).toBe(mine.email);
 
     await clearMailbox(ID.biz);
-    expectPendingNotFound(await confirm(ID.biz, back.pending, ID.owner));
+    expectPendingNotFound(await confirm(ID.biz, back.pending, ID.owner, mine.email));
     expect((await mailboxOf(ID.biz)).email).toBeNull();
   });
 
@@ -624,7 +702,7 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
       back.pending,
       new Date(Date.now() - 1000).toISOString(),
     );
-    expectPendingNotFound(await confirm(ID.biz, back.pending, ID.owner));
+    expectPendingNotFound(await confirm(ID.biz, back.pending, ID.owner, account.email));
     expect((await mailboxOf(ID.biz)).email).toBeNull();
   });
 
@@ -635,7 +713,7 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
     expect(back.gmail).toBe('pending');
     await db.membership.update({ where: { userId_businessId: { userId: ID.coOwner, businessId: ID.biz } }, data: { role: 'STAFF' } });
     try {
-      expectOwnerOnly(await confirm(ID.biz, back.pending, ID.coOwner));
+      expectOwnerOnly(await confirm(ID.biz, back.pending, ID.coOwner, account.email));
       expect((await mailboxOf(ID.biz)).email).toBeNull();
     } finally {
       await db.membership.update({ where: { userId_businessId: { userId: ID.coOwner, businessId: ID.biz } }, data: { role: 'OWNER' } });
@@ -646,7 +724,7 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
     await clearPending(ID.biz);
     const account = googleAccount('cross');
     const back = await startAndComplete(ID.biz, ID.owner, account);
-    expectPendingNotFound(await confirm(ID.bizTwo, back.pending, ID.owner));
+    expectPendingNotFound(await confirm(ID.bizTwo, back.pending, ID.owner, account.email));
     expect((await mailboxOf(ID.bizTwo)).email).toBeNull();
     expect((await mailboxOf(ID.biz)).email).toBeNull();
     expect((await pendingOf(ID.biz)).map((r) => r.id)).toEqual([back.pending]);
@@ -673,7 +751,7 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
     const kept = await db.business.findUnique({ where: { id: ID.biz }, select: { gmailAccessToken: true, gmailRefreshToken: true } });
     expect(kept).toEqual({ gmailAccessToken: current.access, gmailRefreshToken: current.refresh });
 
-    const res = await confirm(ID.biz, back.pending, ID.owner);
+    const res = await confirm(ID.biz, back.pending, ID.owner, next.email);
     expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
     expect((await status(ID.biz)).body).toEqual({ connected: true, email: next.email });
     const replaced = await db.business.findUnique({ where: { id: ID.biz }, select: { gmailAccessToken: true, gmailRefreshToken: true } });
@@ -683,7 +761,7 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
   it('[R0-CMF5-B14] positive: the distinguished owner (no membership row) and a SUPER_ADMIN each start, complete and confirm their own connection', async () => {
     const dist = googleAccount('dist');
     const distBack = await startAndComplete(ID.bizDist, ID.distOwner, dist);
-    const distRes = await confirm(ID.bizDist, distBack.pending, ID.distOwner);
+    const distRes = await confirm(ID.bizDist, distBack.pending, ID.distOwner, dist.email);
     expect([200, 201], JSON.stringify(distRes.body)).toContain(distRes.status);
     expect(distRes.body).toEqual({ connected: true, email: dist.email });
     expect((await mailboxOf(ID.bizDist)).email).toBe(dist.email);
@@ -691,7 +769,7 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
     await clearMailbox(ID.bizTwo);
     const platform = googleAccount('platform');
     const saBack = await startAndComplete(ID.bizTwo, ID.superAdmin, platform);
-    const saRes = await confirm(ID.bizTwo, saBack.pending, ID.superAdmin);
+    const saRes = await confirm(ID.bizTwo, saBack.pending, ID.superAdmin, platform.email);
     expect([200, 201], JSON.stringify(saRes.body)).toContain(saRes.status);
     expect(saRes.body).toEqual({ connected: true, email: platform.email });
     expect((await mailboxOf(ID.bizTwo)).email).toBe(platform.email);
@@ -705,15 +783,6 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
     }
     expect((await mailboxOf(ID.bizTwo)).email).toBeNull();
   });
-
-  it.todo(
-    'R0-CMF5 follow-up (outside the write set): the web app does not yet confirm a pending connection. /app/commerce receives gmail=pending&pending=<id> ' +
-      'and needs a "Confirm this mailbox" step that POSTs the id to /commerce/businesses/:b/gmail/confirm (apps/web/src/lib/client.ts and the commerce page)',
-  );
-  it.todo(
-    'R0-CMF5 follow-up (outside the write set): POST /connect/google-suite/businesses/:b/auth-url with services [gmail] (core/connectors/google-suite.controller.ts, AuthGuard + BusinessGuard only) ' +
-      'still lets any member connect a mailbox to Business.gmail* with a state that names no user, and DELETE through core/connectors/connector.controller.ts disconnect clears it; both need the same OWNER rule and binding',
-  );
 });
 
 describe('R0-CMF5 disconnecting the mailbox is OWNER only (D-11)', () => {
@@ -733,6 +802,314 @@ describe('R0-CMF5 disconnecting the mailbox is OWNER only (D-11)', () => {
     expect([200, 204], JSON.stringify(res.body)).toContain(res.status);
     expect(await mailboxOf(ID.biz)).toMatchObject({ email: null, access: null, refresh: null, expiry: null });
     expect((await status(ID.biz)).body).toEqual({ connected: false, email: null });
+  });
+});
+
+describe('R0-CMF5 review: the owner sees the mailbox they confirm (ST-CMF5-2)', () => {
+  /** D01's pending connection: the owner's state, completed with a stranger's Google account. */
+  const previewed: { pendingId?: string; attacker?: GoogleAccount } = {};
+
+  it('[R0-CMF5-D01] the forwarded-URL attack, previewed: GET .../gmail/pending/:id shows the owner the stranger\'s mailbox; it is OWNER only and bound to the user the state names (STAFF and ADMIN 403 GMAIL_OWNER_ONLY; a co-owner, a SUPER_ADMIN, another business and an unknown id 404; a non-member 403; anonymous 401); previewing returns no token, consumes nothing and links nothing', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    const attacker = googleAccount('preview_attacker');
+    previewed.attacker = attacker;
+    const back = await startAndComplete(ID.biz, ID.owner, attacker);
+    expect(back.gmail).toBe('pending');
+    const pendingId = back.pending as string;
+    previewed.pendingId = pendingId;
+
+    const shown = await preview(ID.biz, pendingId, ID.owner);
+    expect(shown.status, JSON.stringify(shown.body)).toBe(200);
+    expect(shown.body).toMatchObject({ pendingId, email: attacker.email });
+    expect(Date.parse(shown.body.expiresAt)).toBeGreaterThan(Date.now());
+    expect(JSON.stringify(shown.body)).not.toContain(attacker.access);
+    expect(JSON.stringify(shown.body)).not.toContain(attacker.refresh);
+
+    expectOwnerOnly(await preview(ID.biz, pendingId, ID.staff));
+    expectOwnerOnly(await preview(ID.biz, pendingId, ID.admin));
+    expectPendingNotFound(await preview(ID.biz, pendingId, ID.coOwner));
+    expectPendingNotFound(await preview(ID.biz, pendingId, ID.superAdmin));
+    expectPendingNotFound(await preview(ID.bizTwo, pendingId, ID.owner));
+    expectPendingNotFound(await preview(ID.biz, 'gmc_unknown', ID.owner));
+    const stranger = await preview(ID.biz, pendingId, ID.stranger);
+    expect(stranger.status, JSON.stringify(stranger.body)).toBe(403);
+    const anonymous = await preview(ID.biz, pendingId);
+    expect(anonymous.status, JSON.stringify(anonymous.body)).toBe(401);
+
+    expect((await pendingOf(ID.biz)).map((r) => r.id)).toEqual([pendingId]);
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+  });
+
+  it('[R0-CMF5-D02] the confirmation names the previewed mailbox: the owner confirming the stranger\'s pending connection as their own mailbox gets 409 GMAIL_PENDING_EMAIL_MISMATCH, nothing is linked and the row stays; naming the mailbox the preview showed (any letter case) links it', async () => {
+    const { pendingId, attacker } = previewed;
+    expect(pendingId, 'D01 did not stage a pending connection').toBeTruthy();
+    const mismatch = await confirm(ID.biz, pendingId, ID.owner, emailOf(ID.owner));
+    expect(mismatch.status, JSON.stringify(mismatch.body)).toBe(409);
+    expect(mismatch.body.code).toBe(EMAIL_MISMATCH);
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+    expect((await pendingOf(ID.biz)).map((r) => r.id)).toEqual([pendingId]);
+
+    const named = await confirm(ID.biz, pendingId, ID.owner, String(attacker?.email).toUpperCase());
+    expect([200, 201], JSON.stringify(named.body)).toContain(named.status);
+    expect(named.body).toEqual({ connected: true, email: attacker?.email });
+    expect((await mailboxOf(ID.biz)).email).toBe(attacker?.email);
+    await clearMailbox(ID.biz);
+  });
+
+  it('[R0-CMF5-D03] the confirm route refuses (400) a confirmation that names no mailbox, or a mailbox that is not a string, and links nothing; the pending connection stays', async () => {
+    await clearPending(ID.biz);
+    const account = googleAccount('no_email');
+    const back = await startAndComplete(ID.biz, ID.owner, account);
+    for (const bad of [undefined, '', '   ', 42, { not: 'x' }, [account.email]]) {
+      const res = await confirm(ID.biz, back.pending, ID.owner, bad);
+      expect(res.status, JSON.stringify({ bad, body: res.body })).toBe(400);
+    }
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+    expect((await pendingOf(ID.biz)).map((r) => r.id)).toEqual([back.pending]);
+    await clearPending(ID.biz);
+  });
+});
+
+describe('R0-CMF5 review: a callback stages into the business its state names, whatever tenant the request carries (ST-CMF5-3)', () => {
+  it('[R0-CMF5-E01] the review reproduction under production wiring (TenantInterceptor + the Prisma tenant extension): the owner\'s state for biz completed with the owner\'s session and ?businessId=bizTwo (a business the owner also owns, so the request\'s tenant is bizTwo) redirects gmail=error; no code is exchanged, neither business has a pending connection and nothing is linked', async () => {
+    await clearPending(ID.biz);
+    await clearPending(ID.bizTwo);
+    await clearMailbox(ID.bizTwo);
+    const account = googleAccount('tenant_swap');
+    const start = await authUrl(ID.biz, ID.owner);
+    const state = stateOf(start.body.url);
+    const back = redirectOf(await callback(state, account.code, ID.owner, { businessId: ID.bizTwo }));
+    expect(back).toMatchObject({ gmail: 'error', pending: null });
+    expect(exchanges).not.toContain(account.code);
+    expect(await pendingOf(ID.biz)).toEqual([]);
+    expect(await pendingOf(ID.bizTwo)).toEqual([]);
+    expect((await mailboxOf(ID.bizTwo)).email).toBeNull();
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+  });
+
+  it('[R0-CMF5-E02] control: the same request naming the state\'s own business (?businessId=biz with the owner\'s session) stages on biz as usual, and only there', async () => {
+    await clearPending(ID.biz);
+    await clearPending(ID.bizTwo);
+    const account = googleAccount('tenant_same');
+    const start = await authUrl(ID.biz, ID.owner);
+    const back = redirectOf(await callback(stateOf(start.body.url), account.code, ID.owner, { businessId: ID.biz }));
+    expect(back.gmail).toBe('pending');
+    expect((await pendingOf(ID.biz)).map((r) => r.id)).toEqual([back.pending]);
+    expect(await pendingOf(ID.bizTwo)).toEqual([]);
+    await clearPending(ID.biz);
+  });
+});
+
+describe('R0-CMF5 review: every mailbox change names its actor (ST-CMF5-4)', () => {
+  it('[R0-CMF5-F01] the review reproduction: confirm (connect), confirm (replace) and DELETE .../gmail each write one team_activity_logs row naming the owner (gmail_connected, gmail_replaced with the mailbox it replaced, gmail_disconnected); refused attempts write none, and no row carries a token', async () => {
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+
+    const first = googleAccount('audit_first');
+    const a = await startAndComplete(ID.biz, ID.owner, first);
+    expectOwnerOnly(await confirm(ID.biz, a.pending, ID.staff, first.email));
+    expectOwnerOnly(await disconnect(ID.biz, ID.staffWrite));
+    expect(await mailboxAuditOf(ID.biz)).toEqual([]);
+
+    const connected = await confirm(ID.biz, a.pending, ID.owner, first.email);
+    expect([200, 201], JSON.stringify(connected.body)).toContain(connected.status);
+    const second = googleAccount('audit_second');
+    const b = await startAndComplete(ID.biz, ID.owner, second);
+    const replaced = await confirm(ID.biz, b.pending, ID.owner, second.email);
+    expect([200, 201], JSON.stringify(replaced.body)).toContain(replaced.status);
+    const removed = await disconnect(ID.biz, ID.owner);
+    expect([200, 204], JSON.stringify(removed.body)).toContain(removed.status);
+
+    const rows = await mailboxAuditOf(ID.biz);
+    expect(rows.map((r) => r.action)).toEqual(['gmail_connected', 'gmail_replaced', 'gmail_disconnected']);
+    for (const row of rows) {
+      expect(row).toMatchObject({ user_id: ID.owner, module: 'commerce', entity_type: 'gmail_mailbox', entity_id: ID.biz });
+      expect(row.meta).toMatchObject({ actorStanding: 'OWNER' });
+    }
+    expect(rows[0].meta).toMatchObject({ email: first.email, previousEmail: null, pendingId: a.pending });
+    expect(rows[1].meta).toMatchObject({ email: second.email, previousEmail: first.email, pendingId: b.pending });
+    expect(rows[2].meta).toMatchObject({ previousEmail: second.email });
+    const all = JSON.stringify(rows);
+    for (const secret of [first.access, first.refresh, second.access, second.refresh]) expect(all).not.toContain(secret);
+  });
+});
+
+describe('R0-CMF5 review: an unconfirmed consent does not outlive its window (ST-CMF5-5)', () => {
+  it('[R0-CMF5-G01] the review reproduction: a pending connection backdated two days (its encrypted refresh token still stored) is removed by the business\'s next Gmail status read; one only past its pendingExpiresAt is removed the same way', async () => {
+    await clearPending(ID.biz);
+    const stale = googleAccount('stale');
+    const back = await startAndComplete(ID.biz, ID.owner, stale);
+    await db.$executeRawUnsafe(`UPDATE connector_accounts SET created_at = now() - interval '2 days' WHERE id = $1`, back.pending);
+    expect((await pendingOf(ID.biz)).map((r) => r.id)).toEqual([back.pending]);
+    expect((await status(ID.biz)).status).toBe(200);
+    expect(await pendingOf(ID.biz)).toEqual([]);
+
+    const late = googleAccount('stale_window');
+    const lateBack = await startAndComplete(ID.biz, ID.owner, late);
+    await db.$executeRawUnsafe(
+      `UPDATE connector_accounts SET settings = jsonb_set(settings::jsonb, '{pendingExpiresAt}', to_jsonb($2::text)) WHERE id = $1`,
+      lateBack.pending,
+      new Date(Date.now() - 1000).toISOString(),
+    );
+    expect((await status(ID.biz)).status).toBe(200);
+    expect(await pendingOf(ID.biz)).toEqual([]);
+  });
+
+  it('[R0-CMF5-G02] another user\'s expired pending connection is removed when a new consent is staged on the business (the owner\'s own fresh one stays)', async () => {
+    await clearPending(ID.biz);
+    const old = googleAccount('stale_coowner');
+    const oldBack = await startAndComplete(ID.biz, ID.coOwner, old);
+    await db.$executeRawUnsafe(`UPDATE connector_accounts SET created_at = now() - interval '2 days' WHERE id = $1`, oldBack.pending);
+    const fresh = googleAccount('fresh_owner');
+    const freshBack = await startAndComplete(ID.biz, ID.owner, fresh);
+    expect((await pendingOf(ID.biz)).map((r) => r.id)).toEqual([freshBack.pending]);
+    await clearPending(ID.biz);
+  });
+
+  it('[R0-CMF5-G03] the review reproduction: DELETE .../gmail removes every PENDING Gmail connection of the business (each user\'s, with its encrypted tokens), so a consent staged before the disconnect cannot be confirmed after it (404) and nothing is linked', async () => {
+    await clearPending(ID.biz);
+    const current = googleAccount('g03_current');
+    await seedMailbox(ID.biz, current);
+    const staged = googleAccount('g03_staged');
+    const back = await startAndComplete(ID.biz, ID.owner, staged);
+    const coStaged = googleAccount('g03_costaged');
+    await startAndComplete(ID.biz, ID.coOwner, coStaged);
+    expect(await pendingOf(ID.biz)).toHaveLength(2);
+
+    const res = await disconnect(ID.biz, ID.owner);
+    expect([200, 204], JSON.stringify(res.body)).toContain(res.status);
+    expect(await pendingOf(ID.biz)).toEqual([]);
+    expectPendingNotFound(await confirm(ID.biz, back.pending, ID.owner, staged.email));
+    expect(await mailboxOf(ID.biz)).toMatchObject({ email: null, access: null, refresh: null });
+  });
+});
+
+describe('R0-CMF5 review: the Google Suite connect and the connector routes follow the same rule and binding (ST-CMF5-1)', () => {
+  it('[R0-CMF5-H01] the review reproduction: POST /connect/google-suite/businesses/:b/auth-url asking for gmail, or for the default set (which includes gmail), is refused for a STAFF member and an ADMIN (403 GMAIL_OWNER_ONLY, no URL); a STAFF member asking only for calendar still gets a URL (control); the owner\'s gmail URL carries a state naming the owner; a non-member 403, anonymous 401', async () => {
+    expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.staff, { services: ['gmail'] }));
+    expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.staff, {}));
+    expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.admin, { services: ['gmail', 'calendar'] }));
+
+    const calendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
+    expect(calendar.body.services).toEqual(['calendar']);
+
+    const own = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
+    expect([200, 201], JSON.stringify(own.body)).toContain(own.status);
+    expect(decodeState(stateOf(own.body.authUrl)).claims).toMatchObject({ businessId: ID.biz, userId: ID.owner, services: ['gmail'] });
+
+    const stranger = await suiteAuthUrl(ID.biz, ID.stranger, { services: ['gmail'] });
+    expect(stranger.status, JSON.stringify(stranger.body)).toBe(403);
+    const anonymous = await suiteAuthUrl(ID.biz, undefined, { services: ['gmail'] });
+    expect(anonymous.status, JSON.stringify(anonymous.body)).toBe(401);
+  });
+
+  it('[R0-CMF5-H02] the review reproduction: the owner\'s Google Suite gmail URL completed with a stranger\'s account (no session) links no mailbox: it redirects to /app/commerce?gmail=pending, businesses.gmail_email stays empty and the pending connection is bound to the owner; only the owner, shown the stranger\'s mailbox, could confirm it; the owner\'s own consent replaces it and confirms', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    const stranger = googleAccount('suite_stranger');
+    const own = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
+    const back = redirectOf(await suiteCallback(stateOf(own.body.authUrl), stranger.code));
+    expect(back.path).toBe('/app/commerce');
+    expect(back.gmail).toBe('pending');
+    expect(exchanges).toContain(stranger.code);
+    expect(await mailboxOf(ID.biz)).toMatchObject({ email: null, access: null, refresh: null });
+
+    const rows = await pendingOf(ID.biz);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: back.pending, provider: 'GOOGLE', service: 'GMAIL', status: 'PENDING', account_email: stranger.email });
+    expect(rows[0].settings).toMatchObject({ purpose: 'gmail-connect', userId: ID.owner });
+    expect(rows[0].refresh_token_encrypted).toMatch(/^enc:v1:/);
+    expectOwnerOnly(await confirm(ID.biz, back.pending, ID.staff, stranger.email));
+    expectPendingNotFound(await confirm(ID.biz, back.pending, ID.coOwner, stranger.email));
+    expect((await preview(ID.biz, back.pending as string, ID.owner)).body).toMatchObject({ email: stranger.email });
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+
+    const mine = googleAccount('suite_owner');
+    const again = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
+    const mineBack = redirectOf(await suiteCallback(stateOf(again.body.authUrl), mine.code));
+    expect(mineBack.gmail).toBe('pending');
+    expect((await pendingOf(ID.biz)).map((r) => r.id)).toEqual([mineBack.pending]);
+    const ok = await confirm(ID.biz, mineBack.pending, ID.owner, mine.email);
+    expect([200, 201], JSON.stringify(ok.body)).toContain(ok.status);
+    const linked = await db.business.findUnique({ where: { id: ID.biz }, select: { gmailEmail: true, gmailAccessToken: true, gmailRefreshToken: true } });
+    expect(linked).toEqual({ gmailEmail: mine.email, gmailAccessToken: mine.access, gmailRefreshToken: mine.refresh });
+    await clearMailbox(ID.biz);
+  });
+
+  it('[R0-CMF5-H03] ST-CMF5-3 on the Google Suite callback: the owner\'s state for biz completed with the owner\'s session and ?businessId=bizTwo redirects google=error; no code is exchanged and nothing is staged on either business', async () => {
+    await clearPending(ID.biz);
+    await clearPending(ID.bizTwo);
+    const account = googleAccount('suite_swap');
+    const own = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
+    const res = await suiteCallback(stateOf(own.body.authUrl), account.code, ID.owner, { businessId: ID.bizTwo });
+    expect([301, 302, 303, 307, 308], JSON.stringify(res.headers)).toContain(res.status);
+    const location = new URL(String(res.headers.location));
+    expect(location.pathname).toBe('/app/key-connect');
+    expect(location.searchParams.get('google')).toBe('error');
+    expect(exchanges).not.toContain(account.code);
+    expect(await pendingOf(ID.biz)).toEqual([]);
+    expect(await pendingOf(ID.bizTwo)).toEqual([]);
+  });
+
+  it('[R0-CMF5-H04] a Google Suite state that asks for gmail and names no user (the pre-CMF5 shape), correctly signed, provisions nothing: redirect google=error, no code exchanged, no mailbox and no pending connection', async () => {
+    const account = googleAccount('suite_userless');
+    const state = signState({ businessId: ID.biz, services: ['gmail'], nonce: randomBytes(16).toString('hex'), exp: Date.now() + 60_000 });
+    const res = await suiteCallback(state, account.code);
+    const location = new URL(String(res.headers.location));
+    expect(location.searchParams.get('google')).toBe('error');
+    expect(exchanges).not.toContain(account.code);
+    expect(await pendingOf(ID.biz)).toEqual([]);
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+  });
+
+  it('[R0-CMF5-I01] the review reproduction: POST /connectors/businesses/:b/disconnect/gmail and .../reconnect/gmail are refused for a STAFF member granted revenue: write, an ADMIN and a STAFF member granted revenue: admin (403 GMAIL_OWNER_ONLY) before the registry is reached; the mailbox and the pending connection stay; another connector type is not gated by the mailbox rule (control)', async () => {
+    await clearPending(ID.biz);
+    const current = googleAccount('conn_kept');
+    await seedMailbox(ID.biz, current);
+    const staged = googleAccount('conn_staged');
+    await startAndComplete(ID.biz, ID.owner, staged);
+    registry.disconnectConnector.mockClear();
+    registry.reconnectConnector.mockClear();
+
+    for (const actor of [ID.staffWrite, ID.admin, ID.staffAdmin]) {
+      for (const op of ['disconnect', 'reconnect'] as const) {
+        expectOwnerOnly(await connectorOp(op, ID.biz, 'gmail', actor));
+      }
+    }
+    expect(registry.disconnectConnector).not.toHaveBeenCalled();
+    expect(registry.reconnectConnector).not.toHaveBeenCalled();
+    expect((await status(ID.biz)).body).toEqual({ connected: true, email: current.email });
+    expect(await pendingOf(ID.biz)).toHaveLength(1);
+
+    const calendar = await connectorOp('disconnect', ID.biz, 'google_calendar', ID.staffWrite);
+    expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
+    expect(registry.disconnectConnector).toHaveBeenCalledWith('google_calendar', ID.biz);
+  });
+
+  it('[R0-CMF5-I02] positive: the owner disconnects through the connector route (mailbox columns cleared, every PENDING Gmail connection removed, the registry\'s connector-level disconnect still runs) and reconnects the same way; each writes an audit row naming the owner', async () => {
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    registry.disconnectConnector.mockClear();
+    registry.reconnectConnector.mockClear();
+    const res = await connectorOp('disconnect', ID.biz, 'gmail', ID.owner);
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(res.body).toEqual({ success: true });
+    expect(await mailboxOf(ID.biz)).toMatchObject({ email: null, access: null, refresh: null, expiry: null });
+    expect(await pendingOf(ID.biz)).toEqual([]);
+    expect(registry.disconnectConnector).toHaveBeenCalledWith('gmail', ID.biz);
+
+    const again = googleAccount('conn_again');
+    await seedMailbox(ID.biz, again);
+    const re = await connectorOp('reconnect', ID.biz, 'gmail', ID.owner);
+    expect([200, 201], JSON.stringify(re.body)).toContain(re.status);
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+    expect(registry.reconnectConnector).toHaveBeenCalledWith('gmail', ID.biz);
+    expect((await mailboxAuditOf(ID.biz)).map((r) => [r.action, r.user_id])).toEqual([
+      ['gmail_disconnected', ID.owner],
+      ['gmail_disconnected', ID.owner],
+    ]);
   });
 });
 

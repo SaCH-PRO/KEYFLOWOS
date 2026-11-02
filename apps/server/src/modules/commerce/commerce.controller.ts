@@ -947,22 +947,42 @@ export class CommerceController {
   }
 
   /**
+   * R0-CMF5 review ST-CMF5-2: what the owner is about to confirm (the mailbox
+   * the consent was completed with), so the confirmation is never blind. The
+   * same owner rule and user binding as the confirmation; it consumes nothing.
+   */
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/gmail/pending/:pendingId')
+  previewGmailConnection(
+    @Param('businessId') businessId: string,
+    @Param('pendingId') pendingId: string,
+    @Req() req: { user?: { id: string; role?: string } },
+  ) {
+    return this.gmail.previewPendingConnection(businessId, req.user, pendingId);
+  }
+
+  /**
    * R0-CMF5: activate the connection the callback staged. Only the user the
    * OAuth state named, still the business owner (or SUPER_ADMIN), within the
-   * pending window, once. Body: { pendingId } from the gmail=pending redirect.
+   * pending window, once. Body: { pendingId, email } — the id from the
+   * gmail=pending redirect and the mailbox the preview showed (ST-CMF5-2).
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/gmail/confirm')
   async confirmGmailConnection(
     @Param('businessId') businessId: string,
     @Body('pendingId') pendingId: unknown,
+    @Body('email') email: unknown,
     @Req() req: { user?: { id: string; role?: string } },
   ) {
     await this.gmail.assertConnectAuthority(businessId, req.user);
     if (typeof pendingId !== 'string' || pendingId.length === 0 || pendingId.length > 200) {
       throw new BadRequestException('pendingId is required');
     }
-    return this.gmail.confirmPendingConnection(businessId, req.user, pendingId);
+    if (typeof email !== 'string' || email.trim().length === 0 || email.length > 320) {
+      throw new BadRequestException('email (the mailbox shown for this pending connection) is required');
+    }
+    return this.gmail.confirmPendingConnection(businessId, req.user, pendingId, email);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -975,8 +995,8 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/gmail')
   async disconnectGmail(@Param('businessId') businessId: string, @Req() req: { user?: { id: string; role?: string } }) {
-    await this.gmail.assertConnectAuthority(businessId, req.user);
-    return this.gmail.disconnectGmail(businessId);
+    // The owner rule, the PENDING-row removal and the audit row are in the service.
+    return this.gmail.disconnectGmail(businessId, req.user);
   }
 
   // ----- Gmail full inbox -----

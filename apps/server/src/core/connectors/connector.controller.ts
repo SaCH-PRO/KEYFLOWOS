@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Patch, Post, Param, Query, UseGuards, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Patch, Post, Param, Query, Req, UseGuards, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
 import { ConnectorHealthMonitorService } from './connector-health-monitor.service';
@@ -10,6 +11,9 @@ import { apiLink } from '../config/runtime-urls';
 import { randomBytes } from 'crypto';
 import type { ConnectorType, ConnectorCredentialField } from './connector.interface';
 import { UpdateInboxConfigDto } from '../../modules/ingestion/dto/ingestion-item.dto';
+import { resolveGmailService } from './google-suite.service';
+
+type ConnectorRequest = { user?: { id: string; role?: string } };
 
 @Controller('connectors')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -20,7 +24,23 @@ export class ConnectorController {
     @Inject(ConnectorHealthMonitorService) private readonly healthMonitor: ConnectorHealthMonitorService,
     @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * R0-CMF5 review ST-CMF5-1: disconnecting (or reconnecting, which disconnects
+   * first) the gmail connector clears the business mailbox invoices,
+   * reminders, receipts and quotes are sent from. That is the commerce
+   * GmailService.disconnectGmail: the Gmail owner rule (403 GMAIL_OWNER_ONLY
+   * before anything is written), the mailbox columns, every PENDING Gmail
+   * connection, and the audit row naming the actor. It runs before the
+   * registry's connector-level disconnect and outside the handlers' error
+   * mapping, so a refusal is the 403 it is.
+   */
+  private async disconnectBusinessMailbox(businessId: string, req: ConnectorRequest): Promise<void> {
+    const gmail = await resolveGmailService(this.moduleRef);
+    await gmail.disconnectGmail(businessId, req.user);
+  }
 
   @Get('businesses/:businessId/dashboard')
   async getDashboard(@Param('businessId') businessId: string) {
@@ -64,7 +84,9 @@ export class ConnectorController {
   async disconnect(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    if (type === 'gmail') await this.disconnectBusinessMailbox(businessId, req);
     try {
       await this.registry.disconnectConnector(type as ConnectorType, businessId);
       return { success: true };
@@ -91,7 +113,9 @@ export class ConnectorController {
   async reconnect(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    if (type === 'gmail') await this.disconnectBusinessMailbox(businessId, req);
     try {
       return await this.registry.reconnectConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {

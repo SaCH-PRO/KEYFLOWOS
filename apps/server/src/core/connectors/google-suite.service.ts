@@ -1,16 +1,44 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { timingSafeStringEqual } from '../security/timing-safe-equal';
 import { createHmac, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { getCurrentBusinessId } from '../tenant/tenant-context';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
 import type { ConnectorType } from './connector.interface';
+import type { GmailService } from '../../modules/commerce/gmail.service';
 
 interface OAuthState {
   businessId: string;
   services: GoogleService[];
+  /**
+   * R0-CMF5 review ST-CMF5-1: the user who asked for the auth URL. A Gmail
+   * grant is staged as a PENDING connection only this user can confirm; a
+   * state that asks for gmail and names no user provisions nothing.
+   */
+  userId?: string;
   nonce: string;
   exp: number;
+}
+
+/**
+ * R0-CMF5 review ST-CMF5-1: the commerce GmailService owns the business
+ * mailbox's owner rule, its pending/confirm binding and its audit row. This
+ * (global, core) module does not import CommerceModule, so the routes that
+ * connect or disconnect gmail here resolve it from the application container,
+ * and fail closed (503) when it is not there rather than skip the rule.
+ */
+export async function resolveGmailService(moduleRef: ModuleRef): Promise<GmailService> {
+  const { GmailService: GmailServiceClass } = await import('../../modules/commerce/gmail.service');
+  let gmail: GmailService | undefined;
+  try {
+    gmail = moduleRef.get(GmailServiceClass, { strict: false });
+  } catch {
+    gmail = undefined;
+  }
+  if (!gmail) throw new ServiceUnavailableException('The Gmail connection service is not available');
+  return gmail;
 }
 
 export type GoogleService =
@@ -85,9 +113,19 @@ export class GoogleSuiteService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ConnectorRegistryService) private readonly registry: ConnectorRegistryService,
     @Inject(ConnectorActivityService) private readonly activity: ConnectorActivityService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
 
-  buildAuthUrl(businessId: string, services: GoogleService[] = ALL_SERVICES): string {
+  /** The commerce GmailService (owner rule, pending/confirm binding); 503 when absent. */
+  gmailBinding(): Promise<GmailService> {
+    return resolveGmailService(this.moduleRef);
+  }
+
+  /**
+   * `userId` is the authenticated caller (R0-CMF5 review ST-CMF5-1); the route
+   * has already applied the Gmail owner rule when `services` includes gmail.
+   */
+  buildAuthUrl(businessId: string, services: GoogleService[] = ALL_SERVICES, userId?: string): string {
     if (!this.clientId) {
       throw new BadRequestException('Google OAuth not configured (GOOGLE_CLIENT_ID missing)');
     }
@@ -109,6 +147,7 @@ export class GoogleSuiteService {
     const state: OAuthState = {
       businessId,
       services,
+      ...(userId ? { userId } : {}),
       // Math.random() is not a cryptographic source and its output is
       // predictable from prior draws in V8. The state is HMAC-signed, so the
       // nonce is defence in depth rather than the only control — but a
@@ -134,6 +173,23 @@ export class GoogleSuiteService {
   async handleCallback(code: string, signedState: string) {
     const state = this.verifyState(signedState);
     if (!state) throw new BadRequestException('Invalid or expired OAuth state');
+    // R0-CMF5 review ST-CMF5-3: this public callback can still carry a tenant
+    // (a session plus ?businessId=), which the Prisma tenant extension would
+    // write over the state's business. The verified state decides the business;
+    // a request scoped to any other one provisions nothing.
+    const ambient = getCurrentBusinessId();
+    if (ambient !== undefined && ambient !== state.businessId) {
+      throw new BadRequestException('This request is scoped to another business than the one the Google connection was started for');
+    }
+    // R0-CMF5 review ST-CMF5-1: a Gmail grant never writes Business.gmail* here.
+    // It is staged as a PENDING connection for the user the state names, which
+    // only that user, still the owner, confirms (GmailService). Resolved before
+    // any exchange or write, so a missing binding provisions nothing.
+    const wantsGmail = Array.isArray(state.services) && state.services.includes('gmail');
+    if (wantsGmail && (typeof state.userId !== 'string' || state.userId.length === 0)) {
+      throw new BadRequestException('OAuth state names no user');
+    }
+    const gmail = wantsGmail ? await this.gmailBinding() : null;
     if (!this.clientId || !this.clientSecret || !this.redirectUri) {
       throw new BadRequestException('Google OAuth not configured');
     }
@@ -182,6 +238,7 @@ export class GoogleSuiteService {
     // corresponding scope was actually granted (so partial grants work too).
     const data: Record<string, unknown> = { googleSuiteEmail: email || null };
     const enabledServices: GoogleService[] = [];
+    let gmailGranted = false;
 
     for (const svc of state.services) {
       const required = SERVICE_SCOPES[svc];
@@ -192,6 +249,11 @@ export class GoogleSuiteService {
         );
         continue;
       }
+      if (svc === 'gmail') {
+        // Staged below, never written to Business.gmail* by this callback.
+        gmailGranted = true;
+        continue;
+      }
       enabledServices.push(svc);
       const fields = this.fieldsForService(svc);
       data[fields.email] = email || null;
@@ -200,7 +262,25 @@ export class GoogleSuiteService {
       data[fields.expiry] = expiry;
     }
 
-    await this.prisma.client.business.update({ where: { id: state.businessId }, data });
+    let gmailPendingId: string | null = null;
+    if (gmailGranted && gmail) {
+      if (!email) {
+        this.logger.warn('Gmail granted but Google returned no mailbox address; nothing staged');
+      } else {
+        const staged = await gmail.stagePendingTokens(
+          { businessId: state.businessId, userId: state.userId as string, nonce: state.nonce },
+          email,
+          tokens,
+        );
+        gmailPendingId = staged.pendingId;
+      }
+    }
+
+    // Only a service actually provisioned here writes to the business row; a
+    // Gmail-only grant (staged above) writes nothing to it.
+    if (enabledServices.length > 0) {
+      await this.prisma.client.business.update({ where: { id: state.businessId }, data });
+    }
 
     // Ironclad verification: for each provisioned service, do a cheap live API
     // call with the freshly-issued access token. Only mark `connected` if the
@@ -257,6 +337,8 @@ export class GoogleSuiteService {
       businessId: state.businessId,
       email,
       enabledServices,
+      /** R0-CMF5 review ST-CMF5-1: the PENDING Gmail connection the state's user confirms, if one was staged. */
+      gmailPendingId,
       verification: verified.map((v) => ({ service: v.svc, ok: v.ok, error: v.error })),
     };
   }
