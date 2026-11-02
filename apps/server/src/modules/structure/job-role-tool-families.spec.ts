@@ -146,7 +146,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import * as ts from 'typescript';
+import { NotFoundException } from '@nestjs/common';
 import { FLOW_TOOLS, CORTEX_TOOL_BRIDGE } from '../ai/flow-tool-registry';
+import { BookingsService } from '../bookings/bookings.service';
 import { KeyInboxController } from '../key-inbox/key-inbox.controller';
 import { KeyInboxAdapterService } from '../key-cortex/organs/key-inbox-adapter.service';
 import { CANONICAL_MODULES, LEVEL_RANK, type CanonicalModule } from '../../core/authority/module-vocabulary';
@@ -404,66 +406,95 @@ function controllerFiles(dir: string): string[] {
   return out;
 }
 
+/**
+ * The controller classes a file declares: every top-level class decorated with @Controller,
+ * with its class decorators (`head`) and its own text, from its `class` line through its
+ * closing brace. The controller is not simply the file's first `export class`: a file may
+ * declare a body DTO first so that the controller's decorator metadata can name it when the
+ * class is defined (crm.controller.ts BulkUpdateContactsDto, R0-13e; crm-deals.controller.ts
+ * BulkMoveDealsStageDto, R0-13f; the key-cortex controllers), and then every route of that
+ * controller was read without its '/crm' prefix or its class guards. A file may also declare
+ * two controllers (feature-flags, flow-signal-role), each with its own prefix and guards.
+ */
+function controllerClasses(src: string): Array<{ head: string; text: string }> {
+  const sf = ts.createSourceFile('controller.ts', src, ts.ScriptTarget.Latest, true);
+  const out: Array<{ head: string; text: string }> = [];
+  for (const st of sf.statements) {
+    if (!ts.isClassDeclaration(st) || !st.name) continue;
+    const decorators = ts.getDecorators(st) ?? [];
+    const isController = decorators.some(
+      (d) => ts.isCallExpression(d.expression) && ts.isIdentifier(d.expression.expression) && d.expression.expression.text === 'Controller',
+    );
+    if (!isController) continue;
+    const classLine = src.lastIndexOf('\n', st.name.getStart(sf)) + 1;
+    out.push({ head: decorators.map((d) => d.getText(sf)).join('\n'), text: src.slice(classLine, st.end) });
+  }
+  return out;
+}
+
 function controllerRoutes(): Route[] {
   const routes: Route[] = [];
   for (const file of controllerFiles(join(SRC, 'modules'))) {
-    const src = readFileSync(file, 'utf8');
-    const classAt = src.search(/^export class /m);
-    if (classAt < 0) continue;
-    const head = src.slice(0, classAt);
-    const prefix = (head.match(/@Controller\(\s*'([^']*)'/) ?? [])[1] ?? '';
-    const classGuard = /@UseGuards\([^)]*\bModuleScopeGuard\b/.test(head);
-    const classAuth = /@UseGuards\([^)]*\bAuthGuard\b/.test(head);
-    const fields = new Map<string, string>();
-    for (const m of src.matchAll(/(?:private|public|protected)\s+(?:readonly\s+)?([a-zA-Z0-9_$]+)\s*:\s*([A-Z][A-Za-z0-9_]*)/g)) {
-      fields.set(m[1], m[2]);
-    }
+    for (const { head, text } of controllerClasses(readFileSync(file, 'utf8'))) routes.push(...classRoutes(file, head, text));
+  }
+  return routes;
+}
 
-    // Members of the class: a signature at two-space indent. Decorators of a member are
-    // the lines between the previous member's closing `  }` and its signature.
-    const lines = src.slice(classAt).split('\n');
-    const sigs: number[] = [];
-    lines.forEach((l, i) => {
-      if (/^ {2}(?:public |private |protected )?(?:async )?[A-Za-z_$][\w$]*\s*\(/.test(l)) sigs.push(i);
-    });
-    for (let k = 0; k < sigs.length; k++) {
-      const s = sigs[k];
-      let decoStart = k === 0 ? 1 : sigs[k - 1] + 1;
-      for (let j = s - 1; j >= decoStart; j--) {
-        if (/^ {2}\}/.test(lines[j])) {
-          decoStart = j + 1;
-          break;
-        }
+/** The routes of one controller class (`head`: its class decorators; `text`: the class). */
+function classRoutes(file: string, head: string, text: string): Route[] {
+  const routes: Route[] = [];
+  const prefix = (head.match(/@Controller\(\s*'([^']*)'/) ?? [])[1] ?? '';
+  const classGuard = /@UseGuards\([^)]*\bModuleScopeGuard\b/.test(head);
+  const classAuth = /@UseGuards\([^)]*\bAuthGuard\b/.test(head);
+  const fields = new Map<string, string>();
+  for (const m of text.matchAll(/(?:private|public|protected)\s+(?:readonly\s+)?([a-zA-Z0-9_$]+)\s*:\s*([A-Z][A-Za-z0-9_]*)/g)) {
+    fields.set(m[1], m[2]);
+  }
+
+  // Members of the class: a signature at two-space indent. Decorators of a member are
+  // the lines between the previous member's closing `  }` and its signature.
+  const lines = text.split('\n');
+  const sigs: number[] = [];
+  lines.forEach((l, i) => {
+    if (/^ {2}(?:public |private |protected )?(?:async )?[A-Za-z_$][\w$]*\s*\(/.test(l)) sigs.push(i);
+  });
+  for (let k = 0; k < sigs.length; k++) {
+    const s = sigs[k];
+    let decoStart = k === 0 ? 1 : sigs[k - 1] + 1;
+    for (let j = s - 1; j >= decoStart; j--) {
+      if (/^ {2}\}/.test(lines[j])) {
+        decoStart = j + 1;
+        break;
       }
-      const deco = lines.slice(decoStart, s).join('\n');
-      const verb = deco.match(/@(Get|Post|Put|Patch|Delete|All)\(\s*(?:'([^']*)')?/);
-      if (!verb) continue;
-      let bodyEnd = k + 1 < sigs.length ? sigs[k + 1] : lines.length;
-      for (let j = bodyEnd - 1; j > s; j--) {
-        if (/^ {2}\}/.test(lines[j])) {
-          bodyEnd = j + 1;
-          break;
-        }
-      }
-      const body = lines.slice(s, bodyEnd).join('\n');
-      const scopeM = deco.match(/@RequireModuleScope\(\s*'([a-z]+)'(?:\s*,\s*'([a-z]+)')?\s*\)/);
-      const enforced = classGuard || /@UseGuards\([^)]*\bModuleScopeGuard\b/.test(deco);
-      const calls = new Set<string>();
-      for (const m of body.matchAll(/this\.([a-zA-Z0-9_$]+)\s*\.\s*([a-zA-Z0-9_$]+)\s*\(/g)) {
-        const svc = fields.get(m[1]);
-        if (svc && svc !== 'PrismaService') calls.add(`${svc}.${m[2]}`);
-      }
-      routes.push({
-        file: relative(SRC, file),
-        verb: verb[1].toUpperCase(),
-        path: ('/' + [prefix, verb[2] ?? ''].filter(Boolean).join('/')).replace(/\/+/g, '/'),
-        scope: scopeM && enforced ? `${scopeM[1]}:${scopeM[2] ?? 'read'}` : null,
-        authGuard: classAuth || /@UseGuards\([^)]*\bAuthGuard\b/.test(deco),
-        calls,
-        guarded: stateGuardedCalls(body, fields),
-        body,
-      });
     }
+    const deco = lines.slice(decoStart, s).join('\n');
+    const verb = deco.match(/@(Get|Post|Put|Patch|Delete|All)\(\s*(?:'([^']*)')?/);
+    if (!verb) continue;
+    let bodyEnd = k + 1 < sigs.length ? sigs[k + 1] : lines.length;
+    for (let j = bodyEnd - 1; j > s; j--) {
+      if (/^ {2}\}/.test(lines[j])) {
+        bodyEnd = j + 1;
+        break;
+      }
+    }
+    const body = lines.slice(s, bodyEnd).join('\n');
+    const scopeM = deco.match(/@RequireModuleScope\(\s*'([a-z]+)'(?:\s*,\s*'([a-z]+)')?\s*\)/);
+    const enforced = classGuard || /@UseGuards\([^)]*\bModuleScopeGuard\b/.test(deco);
+    const calls = new Set<string>();
+    for (const m of body.matchAll(/this\.([a-zA-Z0-9_$]+)\s*\.\s*([a-zA-Z0-9_$]+)\s*\(/g)) {
+      const svc = fields.get(m[1]);
+      if (svc && svc !== 'PrismaService') calls.add(`${svc}.${m[2]}`);
+    }
+    routes.push({
+      file: relative(SRC, file),
+      verb: verb[1].toUpperCase(),
+      path: ('/' + [prefix, verb[2] ?? ''].filter(Boolean).join('/')).replace(/\/+/g, '/'),
+      scope: scopeM && enforced ? `${scopeM[1]}:${scopeM[2] ?? 'read'}` : null,
+      authGuard: classAuth || /@UseGuards\([^)]*\bAuthGuard\b/.test(deco),
+      calls,
+      guarded: stateGuardedCalls(body, fields),
+      body,
+    });
   }
   return routes;
 }
@@ -1286,7 +1317,7 @@ const UNMAPPED_GOVERNED: Record<string, string[]> = {
 const UNGRANTED: Record<string, string> = {
   calendar_check_conflicts: 'reads Prisma directly; no service call (baseline read for every position)',
   commerce_send_invoice:
-    "mails the invoice's customer through TransactionalEmailService.send, which no member route makes run for a customer (drive email-content mails only the caller: ARGUMENT_BOUND), so revenue:write (updateInvoiceStatus) is only a floor (review 7 DRV5-2)",
+    "mails the invoice's customer through TransactionalEmailService.send, which no member route makes run for a customer (drive email-content mails only the caller: ARGUMENT_BOUND), with a pay link from CommerceService.automatedInvoiceUrl, which backs no route (V1-46b), so revenue:write (updateInvoiceStatus) is only a floor (review 7 DRV5-2)",
   commerce_create_product: 'CatalogService.createProduct is reached by catalog.controller, which is unscoped',
   commerce_update_product: 'CatalogService.updateProduct is reached by catalog.controller and trash restore, both unscoped',
   contract_extract_clauses: 'ContractClauseService.extractClauses backs no route',
@@ -1340,6 +1371,28 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     // label outside it would be approved by a family pattern with no per-grant check
     const registry = new Set(FLOW_TOOLS.map((t) => t.name));
     expect([...dispatcherCases().keys()].filter((l) => !registry.has(l))).toEqual([]);
+  });
+
+  it('every @Controller class is read with its own prefix and guards, wherever it sits in its file (guards the guard)', () => {
+    // a body DTO declared before the controller (R0-13e, R0-13f) is not the controller
+    for (const file of ['modules/crm/crm.controller.ts', 'modules/crm/crm-deals.controller.ts']) {
+      const src = read(file);
+      expect(src.search(/^export class /m), file).toBeLessThan(src.search(/^@Controller\(/m));
+      const rs = routes.filter((r) => r.file === file);
+      expect(rs.length, file).toBeGreaterThan(10);
+      expect(rs.filter((r) => !r.path.startsWith('/crm/')).map((r) => `${r.verb} ${r.path}`), file).toEqual([]);
+      expect(rs.filter((r) => r.scope).length, file).toBeGreaterThan(10);
+    }
+    // two controllers in one file keep their own prefixes and class guards
+    const flags = routes.filter((r) => r.file === 'modules/feature-flags/feature-flags.controller.ts');
+    expect(flags.map((r) => `${r.verb} ${r.path} ${r.authGuard}`).sort()).toEqual(
+      ['GET /api/admin/feature-flags true', 'GET /api/feature-flags true', 'PUT /api/admin/feature-flags/:key true'].sort(),
+    );
+    // every @Controller decorator in the app is a class the parser reads
+    for (const file of controllerFiles(join(SRC, 'modules'))) {
+      const src = readFileSync(file, 'utf8');
+      expect(controllerClasses(src).length, relative(SRC, file)).toBe((src.match(/^@Controller\(/gm) ?? []).length);
+    }
   });
 
   it.each(EVIDENCE)('$tool -> $service -> $route [$scope]', ({ tool, service, route, scope, file }) => {
@@ -1706,10 +1759,28 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
   describe('review 2 ESC-4 — the CRM tools whose service checks crm_edit / crm_delete', () => {
     const crm = read('modules/crm/crm.service.ts');
     const methods = [...crm.matchAll(/^ {2}(?:async )?([a-zA-Z]+)\(/gm)].map((m) => m[1]);
-    const gated = (re: RegExp) =>
-      new Set(methods.filter((m) => re.test(memberBody(crm, m) ?? '')).map((m) => `CrmService.${m}`));
-    const editGated = gated(/access\.editScope|this\.assertCanCreateContacts\(/);
+    /** Every CrmService member, private helpers included (what `this.x(` can call). */
+    const ownMembers = new Set([...crm.matchAll(/^ {2}(?:private |public |protected )?(?:async )?([a-zA-Z]+)\s*[(<]/gm)].map((m) => m[1]));
+    /**
+     * A method is gated when its body reads the scope, or when it calls an own-class method that
+     * is (followed through private helpers). createContact and findOrCreateContact reach crm_edit
+     * through assertCanCreateContacts, and since R0-13c (review CR-1) updateContact reaches it
+     * through assertCanEditContact, the one contact-level edit check it shares with the
+     * enrichment route. The rule read the bodies alone, with assertCanCreateContacts listed by
+     * hand: on the current code that dropped updateContact, and with it crm_update_contact and
+     * tag_contact, from the crm_edit list.
+     */
+    const reachesGate = (re: RegExp, m: string, seen = new Set<string>()): boolean => {
+      if (seen.has(m)) return false;
+      seen.add(m);
+      const body = memberBody(crm, m) ?? '';
+      if (re.test(body)) return true;
+      return [...body.matchAll(/this\.([a-zA-Z0-9_$]+)\s*\(/g)].some(([, c]) => c !== m && ownMembers.has(c) && reachesGate(re, c, seen));
+    };
+    const gated = (re: RegExp) => new Set(methods.filter((m) => reachesGate(re, m)).map((m) => `CrmService.${m}`));
+    const editGated = gated(/access\.editScope/);
     const deleteGated = gated(/access\.deleteScope/);
+    const cases = dispatcherCases();
     const SUB = ((policyModule as Record<string, unknown>).CRM_SUBPERMISSION_TOOLS ?? {}) as Record<string, readonly string[]>;
     const grantedCalling = (set: Set<string>) =>
       Object.keys(derived.mapping.crm)
@@ -1718,9 +1789,32 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
 
     it('the gated service methods are the ones resolveCrmAccess bounds over HTTP', () => {
       expect([...editGated].sort()).toEqual(
-        ['CrmService.assertCanCreateContacts', 'CrmService.bulkUpdateContacts', 'CrmService.createContact', 'CrmService.findOrCreateContact', 'CrmService.updateContact'].sort(),
+        [
+          'CrmService.assertCanCreateContacts',
+          'CrmService.assertCanEditContact',
+          'CrmService.bulkUpdateContacts',
+          'CrmService.createContact',
+          'CrmService.findOrCreateContact',
+          'CrmService.updateContact',
+        ].sort(),
       );
       expect([...deleteGated].sort()).toEqual(['CrmService.bulkDeleteContacts', 'CrmService.softDeleteContact']);
+    });
+
+    it('updateContact is gated through assertCanEditContact, which refuses an edit scope of none before the contact is read or written', () => {
+      const update = memberBody(crm, 'updateContact')!;
+      // the gate is not in its own body any more: only the helper reads editScope
+      expect(update).not.toMatch(/access\.editScope/);
+      const check = update.indexOf('await this.assertCanEditContact(input.businessId, input.contactId, input.actorUserId);');
+      expect(check).toBeGreaterThan(-1);
+      expect(check).toBeLessThan(update.indexOf('tx.contact.update('));
+      const helper = memberBody(crm, 'assertCanEditContact')!;
+      expect(helper).toMatch(/const access = await resolveCrmAccess\(this\.prisma, businessId, actorUserId\);/);
+      expect(helper).toMatch(/if \(access\.editScope === 'none'\) \{\s*throw new ForbiddenException\('You do not have permission to edit contacts'\);/);
+      expect(helper).toMatch(/if \(access\.editScope === 'owned'\) \{/);
+      // without an actor (the dispatcher passes none) it checks nothing: the grant has to
+      expect(helper).toMatch(/if \(!actorUserId\) return \{ access: null, reachableWhere \};/);
+      expect(cases.get('crm_update_contact'), 'crm_update_contact').not.toMatch(/actorUserId/);
     });
 
     it('CRM_SUBPERMISSION_TOOLS lists exactly the granted tools that call them', () => {
@@ -1765,9 +1859,23 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     it('the CrmService methods that call visibilityClause themselves', () => {
       const methods = [...crm.matchAll(/^ {2}(?:private |public )?(?:async )?([a-zA-Z]+)\(/gm)].map((m) => m[1]);
       const direct = [...new Set(methods.filter((m) => /\bvisibilityClause\(/.test(memberBody(crm, m) ?? '')))].sort();
+      // R0-13c (review CR-1) moved updateContact's clause into assertCanEditContact, the check it
+      // shares with the enrichment route; updateContact reaches it through that helper (below)
       expect(direct).toEqual(
-        ['bulkDeleteContacts', 'editableContactClause', 'listContacts', 'reassignContacts', 'rejectContactIdentityTaken', 'softDeleteContact', 'updateContact'].sort(),
+        ['assertCanEditContact', 'bulkDeleteContacts', 'editableContactClause', 'listContacts', 'reassignContacts', 'rejectContactIdentityTaken', 'softDeleteContact'].sort(),
       );
+    });
+
+    it('updateContact still bounds the row it reads and writes by the clause, through assertCanEditContact', () => {
+      expect(serviceDelegates('CrmService.updateContact')).toContain('CrmService.assertCanEditContact');
+      expect(reachesClause('CrmService.updateContact')).toBe(true);
+      const helper = memberBody(crm, 'assertCanEditContact')!;
+      expect(helper).toMatch(/const visClause = visibilityClause\(access, actorUserId\);\s*if \(visClause\) reachableWhere\.AND = \[visClause\];/);
+      expect(helper).toMatch(/return \{ access, reachableWhere \};/);
+      const update = memberBody(crm, 'updateContact')!;
+      expect(update).toMatch(/const \{ access, reachableWhere \} = await this\.assertCanEditContact\(/);
+      // the row it locks and writes is the one the clause bounds
+      expect(update).toMatch(/tx\.contact\.findFirst\(\{\s*where: reachableWhere,/);
     });
 
     it('CRM_ROW_VISIBILITY_TOOLS is exactly the granted write tools whose service reaches the clause', () => {
@@ -1930,13 +2038,32 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     it("commerce_send_invoice mails the invoice's customer an invoice_sent pay link, and is governed by revenue but granted by none", () => {
       const body = dispatcherCases().get('commerce_send_invoice')!;
       expect(body).toMatch(/this\.getTransactionalEmail\(\)\.send\(\{[\s\S]*type: 'invoice_sent',\s*recipientEmail: invoice\.contact\.email,/);
+      // V1-46b: the pay link in that mail is the invoice's token link, built through the
+      // dispatcher's customerInvoiceUrl helper by CommerceService.automatedInvoiceUrl (it never
+      // mints a link for an invoice whose links were all revoked or expired). No member route
+      // calls that method: the operator's send-email builds its link through publicInvoiceUrl.
+      expect(body).toContain('const invoiceUrl = await this.customerInvoiceUrl(invoice.id, businessId);');
+      expect(memberBody(read(ORCHESTRATOR), 'customerInvoiceUrl')).toContain('await this.getCommerce().automatedInvoiceUrl(invoiceId, businessId)');
+      expect(derived.byMethod.get('CommerceService.automatedInvoiceUrl') ?? []).toEqual([]);
+      expect(derived.guardedBy.get('CommerceService.automatedInvoiceUrl') ?? []).toEqual([]);
       expect(calls.get('commerce_send_invoice')!.sort()).toEqual(
-        ['ActivityLogService.createActivity', 'CommerceService.updateInvoiceStatus', 'TransactionalEmailService.send'].sort(),
+        ['ActivityLogService.createActivity', 'CommerceService.automatedInvoiceUrl', 'CommerceService.updateInvoiceStatus', 'TransactionalEmailService.send'].sort(),
       );
       expect([...derived.toolLevels.get('commerce_send_invoice')!]).toEqual([['revenue', 'write']]);
-      expect(derived.unknownCalls.get('commerce_send_invoice')).toEqual(['TransactionalEmailService.send']);
+      expect([...derived.unknownCalls.get('commerce_send_invoice')!].sort()).toEqual(['CommerceService.automatedInvoiceUrl', 'TransactionalEmailService.send']);
       expect(granted.get('commerce_send_invoice')).toBeUndefined();
       expect(GOVERNED_UNGRANTED.commerce_send_invoice).toMatch(/TransactionalEmailService\.send/);
+    });
+
+    it('drift guard: without the pay-link lookup (the review 7 shape), the customer mail alone still keeps it ungranted', () => {
+      const noLink = new Map(calls).set(
+        'commerce_send_invoice',
+        calls.get('commerce_send_invoice')!.filter((c) => c !== 'CommerceService.automatedInvoiceUrl'),
+      );
+      const d = derive(noLink, routes);
+      expect(d.unknownCalls.get('commerce_send_invoice')).toEqual(['TransactionalEmailService.send']);
+      expect(d.mapping.revenue.commerce_send_invoice).toBeUndefined();
+      expect(d.governedUngranted).toContain('commerce_send_invoice');
     });
 
     it('drift guard: even were the drive route to send unconditionally, it does not stand in for mailing a customer', () => {
@@ -2246,19 +2373,106 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       for (const rel of ['deals', 'invoices', 'bookings', 'tasks']) expect(script, rel).toMatch(new RegExp(`${rel}: \\{\\s*where: \\{ businessId[,\\s}]`));
     });
 
+    /**
+     * TD9-3 on V1-06's createBooking (the merge kept V1-06's version, which covers the service,
+     * the contact, the staff member and the org unit): the service and the contact are looked up
+     * within the business in createBooking itself, and the staff member and the org unit in
+     * assertOwnedRefs, which createBooking hands its whole input before anything is written.
+     */
     it('TD9-3: BookingsService.createBooking refuses a service, staff member, contact or unit outside the business before the booking is written', () => {
-      const body = memberBody(read('modules/bookings/bookings.service.ts'), 'createBooking')!;
+      const src = read('modules/bookings/bookings.service.ts');
+      const body = memberBody(src, 'createBooking')!;
       const write = body.indexOf('this.prisma.client.booking.create');
-      for (const refusal of [
-        "throw new NotFoundException('Service not found')",
-        "throw new NotFoundException('Staff member not found')",
-        "throw new NotFoundException('Contact not found')",
-        "throw new NotFoundException('Org unit not found')",
-      ]) {
-        expect(body.indexOf(refusal), refusal).toBeGreaterThan(-1);
-        expect(body.indexOf(refusal), refusal).toBeLessThan(write);
-      }
-      expect(body).toMatch(/staffMember\.findFirst\(\{\s*where: \{ id: input\.staffId, businessId: input\.businessId, deletedAt: null \},/);
+      expect(write).toBeGreaterThan(-1);
+      const before = (re: RegExp, label: string) => {
+        const at = body.search(re);
+        expect(at, label).toBeGreaterThan(-1);
+        expect(at, label).toBeLessThan(write);
+        return at;
+      };
+      const service = before(/this\.prisma\.client\.service\.findFirst\(\{\s*where: \{ id: input\.serviceId, businessId: input\.businessId, deletedAt: null \},/, 'service lookup');
+      expect(before(/if \(!bookedService\) throw new NotFoundException\('Service not found'\);/, 'service refusal')).toBeGreaterThan(service);
+      const contact = before(/const contactWhere: Prisma\.ContactWhereInput = \{ \.\.\.contactWhereWithId\(input\.businessId, input\.contactId\) \};/, 'contact where');
+      expect(before(/this\.prisma\.client\.contact\.findFirst\(\{ where: contactWhere,/, 'contact lookup')).toBeGreaterThan(contact);
+      before(/if \(!contact\) throw new NotFoundException\('Contact not found'\);/, 'contact refusal');
+      expect(read('modules/crm/crm.helpers.ts')).toMatch(
+        /export function contactWhereWithId\(businessId: string, contactId: string\) \{\s*return \{ id: contactId, businessId, deletedAt: null \} as const;/,
+      );
+      before(/await this\.assertOwnedRefs\(input\);/, 'assertOwnedRefs');
+      const refs = memberBody(src, 'assertOwnedRefs')!;
+      expect(refs).toMatch(
+        /this\.prisma\.client\.staffMember\.findFirst\(\{\s*where: \{ id: params\.staffId, businessId: params\.businessId, deletedAt: null \},[\s\S]*?\}\);\s*if \(!staff\) throw new NotFoundException\('Staff member not found'\);/,
+      );
+      expect(refs).toMatch(
+        /this\.prisma\.client\.orgUnit\.findFirst\(\{\s*where: \{ id: params\.orgUnitId, businessId: params\.businessId \},[\s\S]*?\}\);\s*if \(!orgUnit\) throw new NotFoundException\('Org unit not found'\);/,
+      );
+      // what is written is what was checked
+      expect(body).toMatch(/contactId: input\.contactId,\s*serviceId: input\.serviceId,/);
+      expect(body).toMatch(/if \(input\.staffId\) createData\.staffId = input\.staffId;/);
+      expect(body).toMatch(/if \(input\.orgUnitId\) createData\.orgUnitId = input\.orgUnitId;/);
+    });
+
+    describe('TD9-3, run: createBooking against rows of two businesses (the lookup must name the business to refuse)', () => {
+      type Row = { id: string; businessId: string; deletedAt: null };
+      const row = (id: string, businessId: string): Row => ({ id, businessId, deletedAt: null });
+      const ROWS: Record<string, Row[]> = {
+        service: [row('svc_a', 'biz_a'), row('svc_b', 'biz_b')],
+        contact: [row('ct_a', 'biz_a'), row('ct_b', 'biz_b')],
+        staffMember: [row('st_a', 'biz_a'), row('st_b', 'biz_b')],
+        orgUnit: [row('ou_a', 'biz_a'), row('ou_b', 'biz_b')],
+      };
+      const make = () => {
+        // a lookup finds the row its where names, and refuses a where shape it was not written for
+        const lookup = (model: string) =>
+          vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+            for (const k of Object.keys(where)) if (!['id', 'businessId', 'deletedAt'].includes(k)) throw new Error(`unexpected ${model} where key ${k}`);
+            return ROWS[model].find((r) => Object.entries(where).every(([k, v]) => (r as Record<string, unknown>)[k] === v)) ?? null;
+          });
+        const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'bk_new', ...data, contact: null }));
+        const client = {
+          service: { findFirst: lookup('service') },
+          contact: { findFirst: lookup('contact') },
+          staffMember: { findFirst: lookup('staffMember') },
+          orgUnit: { findFirst: lookup('orgUnit') },
+          booking: { findFirst: vi.fn(async () => null), create },
+          availability: { findMany: vi.fn(async () => []) },
+          business: { findUnique: vi.fn(async () => ({ businessHours: null })) },
+        };
+        const svc = new BookingsService(
+          { client } as any,
+          { emit: vi.fn() } as any,
+          { logContactEvent: vi.fn(async () => undefined) } as any,
+          {} as any,
+          {} as any,
+          {} as any,
+          {} as any,
+          {} as any,
+          {} as any,
+        );
+        return { svc, create };
+      };
+      const start = new Date(Date.now() + 30 * 24 * 3600_000);
+      const own = { businessId: 'biz_a', contactId: 'ct_a', serviceId: 'svc_a', staffId: 'st_a', orgUnitId: 'ou_a', startTime: start, endTime: new Date(start.getTime() + 3600_000) };
+
+      it.each([
+        ['service', { serviceId: 'svc_b' }, 'Service not found'],
+        ['contact', { contactId: 'ct_b' }, 'Contact not found'],
+        ['staff member', { staffId: 'st_b' }, 'Staff member not found'],
+        ['org unit', { orgUnitId: 'ou_b' }, 'Org unit not found'],
+      ])("another business's %s is refused (404) before the booking is written", async (_label, foreign, message) => {
+        const { svc, create } = make();
+        const err = await svc.createBooking({ ...own, ...foreign }).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(NotFoundException);
+        expect((err as Error).message).toBe(message);
+        expect(create).not.toHaveBeenCalled();
+      });
+
+      it("control: the business's own service, contact, staff member and org unit are booked, and those are the ids written", async () => {
+        const { svc, create } = make();
+        await svc.createBooking(own);
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(create.mock.calls[0][0].data).toMatchObject({ businessId: 'biz_a', contactId: 'ct_a', serviceId: 'svc_a', staffId: 'st_a', orgUnitId: 'ou_a' });
+      });
     });
 
     it("TD9-4: the dispatcher finds an invoice's or a quote's contact within the business before CommerceService writes it", () => {

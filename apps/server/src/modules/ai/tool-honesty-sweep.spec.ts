@@ -38,10 +38,23 @@ import { FlowService } from '../flow/flow.service';
 
 const orchestrator = readFileSync(join(__dirname, 'flow-orchestrator.service.ts'), 'utf8');
 
+/**
+ * The text of a dispatcher case, from its label to the next label (or `default:`) at the
+ * dispatcher's indentation. A fixed-length slice stopped short of send() once the handler grew
+ * (the V1-21b VOID guard, the V1-46b pay-link comment), and a longer one could reach into the
+ * next case and pass on its text.
+ */
+function dispatcherCase(label: string): string {
+  const start = orchestrator.indexOf(`case '${label}':`);
+  expect(start, `case '${label}'`).toBeGreaterThan(-1);
+  const ends = ["\n      case '", '\n      default:'].map((m) => orchestrator.indexOf(m, start + 1)).filter((i) => i > start);
+  expect(ends.length, `end of case '${label}'`).toBeGreaterThan(0);
+  return orchestrator.slice(start, Math.min(...ends));
+}
+
 describe('a tool that promises an email sends one', () => {
   it('commerce_send_invoice reaches a mail service', () => {
-    const start = orchestrator.indexOf("case 'commerce_send_invoice':");
-    const body = orchestrator.slice(start, start + 2400);
+    const body = dispatcherCase('commerce_send_invoice');
 
     expect(body, 'the handler never calls a mail service').toMatch(/getTransactionalEmail\(\)\.send\(/);
   });
@@ -57,8 +70,7 @@ describe('a tool that promises an email sends one', () => {
     // invoice-send-delivery.spec.ts is the real guard: it runs the handler with
     // a FAILED delivery and asserts nothing is flipped, nothing is logged, and
     // the caller is told. This one only checks the result is bound at all.
-    const start = orchestrator.indexOf("case 'commerce_send_invoice':");
-    const body = orchestrator.slice(start, start + 4000);
+    const body = dispatcherCase('commerce_send_invoice');
 
     expect(body).toMatch(/const delivery = await this\.getTransactionalEmail\(\)\.send\(/);
     expect(body).toMatch(/delivery\.status === 'FAILED'/);
