@@ -30,6 +30,24 @@
  * runs every step as that member, and each step writes one ai_execution_logs
  * row naming its actor.
  *
+ * Review repairs (V1-10 review ST-1..ST-3), pinned in the last describe:
+ *   - ST-1: the pausing run's saga was left 'running' with no completedAt, and
+ *     nothing ever closes it (an approval runs the parked step outside the
+ *     saga). It is now closed as 'stopped_for_approval' (completedAt set,
+ *     neither failed nor compensated; the parked saga step names its approval
+ *     request), so no saga is left claiming work in flight. The two pause cases
+ *     below were updated from 'running' to that closed record.
+ *   - ST-2: Run on a paused plan re-ran the steps that had completed and parked
+ *     the paused step a second time (a second approval request). A step that
+ *     completed in the run that paused is not run again and a parked step is
+ *     not parked again, so Run on a still-paused plan routes nothing, parks
+ *     nothing and starts no saga (also for a pause the V1 base recorded as
+ *     'failed').
+ *   - ST-3: skipApproval from the request body skipped the business's approval
+ *     policy for any member allowed to run the plan. It is honoured only for
+ *     the business OWNER or SUPER_ADMIN; for a STAFF creator or a system caller
+ *     the step follows the policy.
+ *
  * WHAT IS REAL: PrismaService and the Prisma client against DATABASE_URL,
  * KeyCortexPlannerService (claim, run, final status), KeyCortexSagaService
  * (saga_executions and saga_steps rows), KeyCortexExecutorService (the
@@ -59,6 +77,8 @@ const P = 'v10a_';
 
 const ID = {
   owner: `${P}owner`, // OWNER membership of biz and Business.ownerId
+  staff: `${P}staff`, // STAFF membership of biz (may run only the plans it created)
+  superAdmin: `${P}super`, // User.role SUPER_ADMIN, no membership
   biz: `${P}biz`,
 };
 
@@ -100,14 +120,21 @@ async function cleanup() {
  * carrying a marker (`<planId>_s<n>`) in its input so a routed command names
  * the step it ran.
  */
-async function seedPlan(id: string, steps: Array<{ module: string; action: string }>, userId: string | null = ID.owner) {
+async function seedPlan(
+  id: string,
+  steps: Array<{ module: string; action: string }>,
+  userId: string | null = ID.owner,
+  /** A plan as an earlier run left it: its status and each step's status. */
+  as?: { status: string; stepStatuses: string[] },
+) {
   await db.aiPlan.create({
     data: {
-      id, businessId: ID.biz, userId, objective: `v10a ${id}`, status: 'pending',
+      id, businessId: ID.biz, userId, objective: `v10a ${id}`, status: as?.status ?? 'pending',
       steps: {
         create: steps.map((s, i) => ({
           id: `${id}_s${i + 1}`, order: i + 1, module: s.module, action: s.action,
           toolName: `${s.module}.${s.action}`, inputPayload: { marker: `${id}_s${i + 1}` },
+          ...(as ? { status: as.stepStatuses[i] } : {}),
         })),
       },
     },
@@ -135,6 +162,15 @@ function routedPerStep(planId: string, from = 0): Record<string, number> {
 const sagaCount = () => db.sagaExecution.count({ where: { businessId: ID.biz } });
 const auditCount = () => db.aiExecutionLog.count({ where: { businessId: ID.biz } });
 const asOwner = () => ({ userId: ID.owner, role: 'USER', businessId: ID.biz });
+const asStaff = () => ({ userId: ID.staff, role: 'USER', businessId: ID.biz });
+const asSuperAdmin = () => ({ userId: ID.superAdmin, role: 'SUPER_ADMIN', businessId: ID.biz });
+
+/** The approval requests the executor holds for `planId`'s steps, by step marker. */
+function approvalsFor(planId: string): string[] {
+  return [...executor.pendingApprovals.values()]
+    .map((r: any) => r?.command?.parameters?.marker)
+    .filter((m: unknown): m is string => typeof m === 'string' && m.startsWith(`${planId}_s`));
+}
 
 /** Settle every promise; the fulfilled values and the rejection reasons, apart. */
 async function race<T>(calls: Array<() => Promise<T>>) {
@@ -208,8 +244,11 @@ beforeAll(async () => {
   await cleanup(); // in case a prior run aborted
 
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.staff, email: `${P}staff@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.superAdmin, email: `${P}super@test.local`, role: 'SUPER_ADMIN' } });
   await db.business.create({ data: { id: ID.biz, name: 'V10A Biz', ownerId: ID.owner } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
+  await db.membership.create({ data: { id: `${P}m_staff`, userId: ID.staff, businessId: ID.biz, role: 'STAFF' } });
   // Full autonomy, except the one action every case that pauses uses.
   await db.businessSetting.create({
     data: {
@@ -228,8 +267,13 @@ afterAll(async () => {
 });
 
 describe('fixture sanity (real rows)', () => {
-  it("biz has its OWNER (membership and Business.ownerId) and a full-autonomy policy that parks communications.send_message only", async () => {
-    expect(await db.membership.findMany({ where: { businessId: ID.biz }, select: { userId: true, role: true } })).toEqual([{ userId: ID.owner, role: 'OWNER' }]);
+  it("biz has its OWNER (membership and Business.ownerId), one STAFF member, a SUPER_ADMIN user with no membership, and a full-autonomy policy that parks communications.send_message only", async () => {
+    expect(await db.membership.findMany({ where: { businessId: ID.biz }, select: { userId: true, role: true }, orderBy: { userId: 'asc' } })).toEqual([
+      { userId: ID.owner, role: 'OWNER' },
+      { userId: ID.staff, role: 'STAFF' },
+    ]);
+    expect(await db.user.findUnique({ where: { id: ID.superAdmin }, select: { role: true } })).toEqual({ role: 'SUPER_ADMIN' });
+    expect(await db.business.findUnique({ where: { id: ID.biz }, select: { ownerId: true } })).toEqual({ ownerId: ID.owner });
     const asCommand = (s: { module: string; action: string }) => ({
       module: s.module as any, action: s.action, parameters: {}, businessId: ID.biz, userId: ID.owner, source: 'key_cortex', timestamp: new Date(),
     });
@@ -334,7 +378,7 @@ describe('a plan is claimed once: concurrent or repeated executes run each step 
  * left open (not failed, not compensated), and no plan result is written.
  */
 describe('an approval pause is recorded as a pause, not a failure (PRS-M25)', () => {
-  it("RED-BEFORE: step 2 of 2 needs approval: step 1 runs once, step 2 is parked and not routed; the plan is waiting_approval, its saga is not failed, and no plan result is written", async () => {
+  it("RED-BEFORE: step 2 of 2 needs approval: step 1 runs once, step 2 is parked and not routed; the plan is waiting_approval, its saga is closed 'stopped_for_approval' (not failed, not left running), and no plan result is written", async () => {
     const planId = `${P}plan_pause_step2`;
     await seedPlan(planId, [NOTE, NEEDS_APPROVAL]);
     const audits = await auditCount();
@@ -352,10 +396,16 @@ describe('an approval pause is recorded as a pause, not a failure (PRS-M25)', ()
       where: { id: result.sagaId },
       select: { businessId: true, status: true, completedAt: true, steps: { select: { stepIndex: true, status: true }, orderBy: { stepIndex: 'asc' } } },
     });
+    // Review ST-1: the saga is closed (completedAt set), neither failed nor
+    // compensated, and its parked step is marked as waiting for approval: the
+    // approval runs that step outside this saga, so nothing would close it.
     expect(saga).toEqual({
-      businessId: ID.biz, status: 'running', completedAt: null,
-      steps: [{ stepIndex: 0, status: 'completed' }, { stepIndex: 1, status: 'pending' }],
+      businessId: ID.biz, status: 'stopped_for_approval', completedAt: expect.any(Date),
+      steps: [{ stepIndex: 0, status: 'completed' }, { stepIndex: 1, status: 'waiting_approval' }],
     });
+    const parked = await db.sagaStep.findFirst({ where: { sagaId: result.sagaId, stepIndex: 1 }, select: { output: true, completedAt: true } });
+    expect(parked).toEqual({ output: { approvalStatus: 'pending', approvalId: expect.any(String) }, completedAt: null });
+    expect(approvalsFor(planId)).toEqual([`${planId}_s2`]);
     // The executor still writes its row for each step (R0-09e): the run, then the park.
     const rows = await db.aiExecutionLog.findMany({
       where: { businessId: ID.biz }, orderBy: { createdAt: 'desc' }, take: 2,
@@ -368,7 +418,7 @@ describe('an approval pause is recorded as a pause, not a failure (PRS-M25)', ()
     ]);
   });
 
-  it('RED-BEFORE: step 1 of 2 needs approval: nothing is routed, step 2 does not run; the plan is waiting_approval and its saga is not failed', async () => {
+  it("RED-BEFORE: step 1 of 2 needs approval: nothing is routed, step 2 does not run; the plan is waiting_approval and its saga is closed 'stopped_for_approval', not failed", async () => {
     const planId = `${P}plan_pause_step1`;
     await seedPlan(planId, [NEEDS_APPROVAL, TASK], null);
     const from = routed.length;
@@ -382,7 +432,7 @@ describe('an approval pause is recorded as a pause, not a failure (PRS-M25)', ()
     // The step after the pause is not run (left 'skipped', as before this packet).
     expect(row.steps.map((s: any) => s.status)).toEqual(['waiting_approval', 'skipped']);
     const saga = await db.sagaExecution.findUnique({ where: { id: result.sagaId }, select: { status: true, completedAt: true } });
-    expect(saga).toEqual({ status: 'running', completedAt: null });
+    expect(saga).toEqual({ status: 'stopped_for_approval', completedAt: expect.any(Date) });
   });
 
   it("regression control: a step that fails still fails the plan and its saga and records a plan result", async () => {
@@ -400,5 +450,129 @@ describe('an approval pause is recorded as a pause, not a failure (PRS-M25)', ()
     expect(row.steps.map((s: any) => s.status)).toEqual(['completed', 'failed']);
     const saga = await db.sagaExecution.findUnique({ where: { id: result.sagaId }, select: { status: true } });
     expect(saga).toEqual({ status: 'failed' });
+  });
+});
+
+/**
+ * V1-10 review repairs. ST-1: a paused plan left its saga 'running' for ever.
+ * ST-2: Run on a paused plan repeated the steps that had completed and parked
+ * the paused step again (a second approval request, so two approvals ran it
+ * twice). ST-3: the request body's skipApproval bypassed the business's
+ * approval policy for any member allowed to run the plan.
+ */
+describe('review repairs: a paused plan is not re-run, its saga is closed, and only the OWNER or SUPER_ADMIN may skip approval', () => {
+  it("RED-BEFORE (ST-1, ST-2): Run twice on a plan that pauses at step 2 (OWNER): step 1 is routed once, step 2 is parked once, the second Run routes, parks and audits nothing and starts no saga, and no saga is left 'running'", async () => {
+    const planId = `${P}plan_rerun_owner`;
+    await seedPlan(planId, [NOTE, NEEDS_APPROVAL]);
+    const sagas = await sagaCount();
+    const audits = await auditCount();
+    const from = routed.length;
+
+    const first = await planner.executePlan(planId, {}, asOwner());
+    expect(first).toMatchObject({ planId, status: 'waiting_approval', executed: 2 });
+    const second = await planner.executePlan(planId, {}, asOwner());
+
+    expect(second).toEqual({ planId, status: 'waiting_approval', executed: 0, sagaId: null });
+    expect(routedPerStep(planId, from)).toEqual({ [`${planId}_s1`]: 1 });
+    expect(approvalsFor(planId)).toEqual([`${planId}_s2`]);
+    expect(await auditCount()).toBe(audits + 2);
+    expect(await sagaCount()).toBe(sagas + 1);
+    const saga = await db.sagaExecution.findUnique({ where: { id: first.sagaId }, select: { status: true, completedAt: true } });
+    expect(saga).toEqual({ status: 'stopped_for_approval', completedAt: expect.any(Date) });
+    const row = await planRow(planId);
+    expect(row).toMatchObject({ status: 'waiting_approval', completedAt: null, result: null });
+    expect(row.steps.map((s: any) => s.status)).toEqual(['completed', 'waiting_approval']);
+    // Every saga this suite started has been closed.
+    expect(await db.sagaExecution.count({ where: { businessId: ID.biz, status: 'running' } })).toBe(0);
+  });
+
+  it("RED-BEFORE (ST-2): the same for a STAFF creator on its own plan: step 1 is routed once, as the STAFF member, and step 2 is parked once", async () => {
+    const planId = `${P}plan_rerun_staff`;
+    await seedPlan(planId, [NOTE, NEEDS_APPROVAL], ID.staff);
+    const sagas = await sagaCount();
+    const from = routed.length;
+
+    expect(await planner.executePlan(planId, {}, asStaff())).toMatchObject({ status: 'waiting_approval', executed: 2 });
+    expect(await planner.executePlan(planId, {}, asStaff())).toEqual({ planId, status: 'waiting_approval', executed: 0, sagaId: null });
+
+    expect(routedPerStep(planId, from)).toEqual({ [`${planId}_s1`]: 1 });
+    expect(routed.slice(from).filter((r) => String(r.marker).startsWith(planId)).map((r) => r.userId)).toEqual([ID.staff]);
+    expect(approvalsFor(planId)).toEqual([`${planId}_s2`]);
+    expect(await sagaCount()).toBe(sagas + 1);
+    expect((await planRow(planId)).steps.map((s: any) => s.status)).toEqual(['completed', 'waiting_approval']);
+  });
+
+  it("RED-BEFORE (ST-2): a pause the V1 base recorded as 'failed' (steps completed, waiting_approval, skipped) is not re-run either: nothing is routed or parked, no saga starts, and the plan is recorded waiting_approval", async () => {
+    const planId = `${P}plan_legacy_pause`;
+    await seedPlan(planId, [NOTE, NEEDS_APPROVAL, TASK], ID.owner, { status: 'failed', stepStatuses: ['completed', 'waiting_approval', 'skipped'] });
+    const sagas = await sagaCount();
+    const audits = await auditCount();
+    const from = routed.length;
+
+    const result = await planner.executePlan(planId, {}, asOwner());
+
+    expect(result).toEqual({ planId, status: 'waiting_approval', executed: 0, sagaId: null });
+    expect(routedPerStep(planId, from)).toEqual({});
+    expect(approvalsFor(planId)).toEqual([]);
+    expect(await sagaCount()).toBe(sagas);
+    expect(await auditCount()).toBe(audits);
+    const row = await planRow(planId);
+    expect(row).toMatchObject({ status: 'waiting_approval', completedAt: null });
+    expect(row.steps.map((s: any) => s.status)).toEqual(['completed', 'waiting_approval', 'skipped']);
+  });
+
+  it('regression control: two concurrent executes of a plan that pauses at step 2: step 1 is routed once and step 2 parked once', async () => {
+    const planId = `${P}plan_pause_concurrent`;
+    await seedPlan(planId, [NOTE, NEEDS_APPROVAL]);
+    const from = routed.length;
+
+    const { fulfilled, rejected } = await race([() => planner.executePlan(planId, {}, asOwner()), () => planner.executePlan(planId, {}, asOwner())]);
+
+    expect(routedPerStep(planId, from)).toEqual({ [`${planId}_s1`]: 1 });
+    expect(approvalsFor(planId)).toEqual([`${planId}_s2`]);
+    expect(fulfilled.map((f: any) => f.status).sort()).toEqual(fulfilled.length === 2 ? ['waiting_approval', 'waiting_approval'] : ['waiting_approval']);
+    for (const reason of rejected) expectConflict(reason);
+  });
+
+  it("RED-BEFORE (ST-3): a STAFF creator's skipApproval does not bypass the business's approval policy: the step is parked and nothing is routed", async () => {
+    const planId = `${P}plan_skip_staff`;
+    await seedPlan(planId, [NEEDS_APPROVAL], ID.staff);
+    const from = routed.length;
+
+    const result = await planner.executePlan(planId, { skipApproval: true }, asStaff());
+
+    expect(result).toMatchObject({ planId, status: 'waiting_approval', executed: 1 });
+    expect(routedPerStep(planId, from)).toEqual({});
+    expect(approvalsFor(planId)).toEqual([`${planId}_s1`]);
+    expect((await planRow(planId)).steps.map((s: any) => s.status)).toEqual(['waiting_approval']);
+  });
+
+  it("RED-BEFORE (ST-3): a system caller's skipApproval (no member) does not bypass the policy either", async () => {
+    const planId = `${P}plan_skip_system`;
+    await seedPlan(planId, [NEEDS_APPROVAL], null);
+    const from = routed.length;
+
+    const result = await planner.executePlan(planId, { skipApproval: true });
+
+    expect(result).toMatchObject({ planId, status: 'waiting_approval', executed: 1 });
+    expect(routedPerStep(planId, from)).toEqual({});
+    expect(approvalsFor(planId)).toEqual([`${planId}_s1`]);
+  });
+
+  it("regression control (ST-3): the OWNER's skipApproval and SUPER_ADMIN's are still honoured: the step runs once, as that actor, and nothing is parked", async () => {
+    for (const [planId, creator, actor] of [
+      [`${P}plan_skip_owner`, ID.owner, asOwner()],
+      [`${P}plan_skip_super`, null, asSuperAdmin()],
+    ] as const) {
+      await seedPlan(planId, [NEEDS_APPROVAL], creator);
+      const from = routed.length;
+
+      const result = await planner.executePlan(planId, { skipApproval: true }, actor);
+
+      expect(result, planId).toMatchObject({ planId, status: 'completed', executed: 1 });
+      expect(routedPerStep(planId, from), planId).toEqual({ [`${planId}_s1`]: 1 });
+      expect(routed.slice(from).filter((r) => String(r.marker).startsWith(planId)).map((r) => r.userId), planId).toEqual([actor.userId]);
+      expect(approvalsFor(planId), planId).toEqual([]);
+    }
   });
 });
