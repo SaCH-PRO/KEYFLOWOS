@@ -268,6 +268,16 @@
       "legacy": true
     },
     {
+      "prefix": "v15a_",
+      "owner": "apps/server/test/ledger-write-door.integration.test.ts",
+      "packet": "V1-15-DM-LEDGER-WRITE-DOOR"
+    },
+    {
+      "prefix": "v15b_",
+      "owner": "apps/server/test/expense-void-reversal.integration.test.ts",
+      "packet": "V1-15-DM-LEDGER-WRITE-DOOR"
+    },
+    {
       "prefix": "v21a_",
       "owner": "apps/server/test/structure-authority-ceiling.integration.test.ts",
       "packet": "V1-21-AUTH-JOBROLE-CEILING"
