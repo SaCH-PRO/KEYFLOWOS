@@ -36,6 +36,12 @@
  *     are pinned by name, so a new one fails and a fixed one must leave the list.
  *   - KF_DISABLE_SCHEDULERS and the per-scheduler flags are still read where they
  *     were (the change is additive).
+ *   - What KEY_DISABLED does NOT cover yet (review SEC-V124-1, V124-CR-1): a census
+ *     of every source file that reaches an AI provider without the gateway (an SDK
+ *     client, or a provider credential plus its own fetch/WebSocket). Each one that
+ *     does not read keyDisabled() must be in KEY_DISABLED_NOT_COVERED, which the
+ *     boot warning prints, so the operator is never told "no provider is called"
+ *     while one of these still calls it. A fixed entry must leave the list.
  *
  * Every scan asserts its input was non-empty (gate-vacuity.spec.ts).
  */
@@ -47,6 +53,7 @@ import { MarginSnapshotSchedulerService } from '../../modules/commerce/margin-sn
 import { FinancialBriefingSchedulerService } from '../../modules/commerce/financial-briefing-scheduler.service';
 import { BestChannelSchedulerService } from '../../modules/crm/best-channel-scheduler.service';
 import { CrmSequenceSchedulerService } from '../../modules/crm/crm-sequence-scheduler.service';
+import { KEY_DISABLED_NOT_COVERED } from '../../modules/ai/model-gateway.service';
 
 const SERVER_ROOT = join(__dirname, '..', '..', '..');
 const SRC = join(SERVER_ROOT, 'src');
@@ -514,4 +521,60 @@ describe('every cortex @Cron handler returns early with KEY off', () => {
     }
     expect(touched).toEqual([]);
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// direct AI provider paths that bypass the gateway (review SEC-V124-1, V124-CR-1)
+// ---------------------------------------------------------------------------
+
+const GATEWAY_FILE = 'src/modules/ai/model-gateway.service.ts';
+/** An AI provider SDK client built outside the gateway. */
+const BUILDS_SDK_CLIENT = /\bnew\s+(?:OpenAI|Anthropic)\s*\(/;
+/** An AI provider credential (the ones the gateway reads, plus OPENAI_API_KEY and ELEVENLABS_API_KEY). */
+const PROVIDER_CREDENTIAL =
+  /\bprocess\.env\.(?:AI_INTEGRATIONS_OPENAI_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|XAI_API_KEY|KIMI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|OPENROUTER_API_KEY|NATIVE_AI_API_KEY|NATIVE_AI_BASE_URL|KEYFLOW_NATIVE_AI_URL|OLLAMA_BASE_URL|ELEVENLABS_API_KEY)\b|\bdirectOpenAiKey\s*\(/;
+/** ...used by a file that opens its own connection. */
+const OPENS_CONNECTION = /\bfetch\s*\(|\bnew\s+WebSocket\s*\(/;
+const READS_KEY_SWITCH = /\bkeyDisabled\s*\(/;
+
+interface DirectPath { file: string; gated: boolean }
+
+function directProviderPaths(): DirectPath[] {
+  const out: DirectPath[] = [];
+  for (const abs of sourceFiles(SRC)) {
+    const src = readFileSync(abs, 'utf8');
+    if (!BUILDS_SDK_CLIENT.test(src) && !(PROVIDER_CREDENTIAL.test(src) && OPENS_CONNECTION.test(src))) continue;
+    out.push({ file: posix(abs), gated: READS_KEY_SWITCH.test(src) });
+  }
+  return out.sort((a, b) => a.file.localeCompare(b.file));
+}
+
+describe('KEY_DISABLED coverage: every direct AI provider path outside the gateway is either gated or named in the boot warning', () => {
+  const all = directProviderPaths();
+  const notCovered = KEY_DISABLED_NOT_COVERED.map((p) => p.file);
+
+  it('the scan is non-empty and finds the gateway as a gated path (gate-vacuity control)', () => {
+    expect(all.length).toBeGreaterThanOrEqual(7);
+    expect(all.find((p) => p.file === GATEWAY_FILE)).toEqual({ file: GATEWAY_FILE, gated: true });
+    // The paths the review reproduced are seen by the scan (it would otherwise pass vacuously).
+    for (const f of [
+      'src/modules/key-cortex/key-cortex-voice.service.ts',
+      'src/modules/ai/ai-usage.service.ts',
+      'src/modules/key-cortex/key-cortex-document.service.ts',
+      'src/modules/phone-voice/realtime-bridge.service.ts',
+    ]) {
+      expect(all.map((p) => p.file)).toContain(f);
+    }
+  });
+
+  it('ratchet: every ungated direct path is in KEY_DISABLED_NOT_COVERED (so the boot line names it), and every listed entry is still a direct, ungated path (remove it when it reads keyDisabled())', () => {
+    const ungated = all.filter((p) => !p.gated && p.file !== GATEWAY_FILE).map((p) => p.file);
+    expect(ungated.filter((f) => !notCovered.includes(f)), 'a direct AI provider path ignores KEY_DISABLED and the boot line does not name it').toEqual([]);
+    expect(notCovered.filter((f) => !ungated.includes(f)), 'listed as not covered but no longer an ungated direct path').toEqual([]);
+    expect(new Set(notCovered).size).toBe(notCovered.length);
+  });
+
+  it.todo(
+    'every direct AI provider path refuses while KEY_DISABLED is set (directOpenAiKey()/requireDirectOpenAiKey() in ai-usage.service.ts, the KEY voice and document OpenAI clients, the phone realtime bridge, ElevenLabs TTS, the diagnostics key check): all outside the V1-24 write set (follow-up packet); until then KEY_DISABLED_NOT_COVERED and the boot line name them',
+  );
 });

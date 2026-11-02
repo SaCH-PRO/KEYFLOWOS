@@ -1063,10 +1063,16 @@ describe('step 7 — no step required an external provider', () => {
     // V1-24-KEY-KILL-SWITCHES. The title above is pinned by release0-journey.json and
     // payments-actor.json, so the kill-switch proof extends this case instead of adding one.
     // (a) The switch reached the server: the gateway logs one boot line per process when KEY_DISABLED is set.
+    const keyBootLines = serverLog.filter((l) => /KEY_DISABLED is set: KEY is switched off on this server/.test(l));
     expect(
-      serverLog.filter((l) => /KEY_DISABLED is set: KEY is switched off on this server/.test(l)),
+      keyBootLines,
       'the gateway never logged the KEY_DISABLED boot line, so the journey did not run with KEY switched off',
     ).toHaveLength(1);
+    // V1-24 review (SEC-V124-1, V124-CR-1): the line claims gateway dispatch only and names
+    // the direct provider paths the switch does not cover yet, never "no AI provider is called".
+    expect(keyBootLines[0]).toMatch(/Every model-gateway dispatch answers 503 and reaches no AI provider/);
+    expect(keyBootLines[0]).toMatch(/NOT covered yet/);
+    expect(keyBootLines[0]).not.toMatch(/no AI provider is called/i);
     // Every gateway dispatch the journey triggered (listeners and fallbacks that try AI) was refused by
     // the switch, before any provider check: the gateway's two other refusals never appear.
     const keyRefusals = serverLog.filter((l) => /No AI providers available: KEY is switched off on this server \(KEY_DISABLED\)/.test(l));

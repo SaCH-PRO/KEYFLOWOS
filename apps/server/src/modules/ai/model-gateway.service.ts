@@ -152,6 +152,36 @@ export type AiUnavailableCode = 'provider_not_configured' | 'provider_unavailabl
  */
 export type AiDisabledReason = 'key_disabled';
 
+/**
+ * V1-24 review (SEC-V124-1, V124-CR-1): what KEY_DISABLED does NOT stop yet.
+ * The switch covers model-gateway dispatch (and the cortex crons). These
+ * paths reach an AI provider without the gateway and do not read the switch,
+ * so with a provider key configured they keep sending content while KEY is
+ * off. The boot warning names every entry so the operator is not told "no
+ * provider is called"; scheduler-kill-switch.spec.ts pins the list against a
+ * census of direct provider calls in apps/server/src, so a new path fails there
+ * and a path that starts reading keyDisabled() must leave this list (and the
+ * boot line). Gating them is a follow-up packet: every file is outside V1-24.
+ */
+export const KEY_DISABLED_NOT_COVERED: ReadonlyArray<{ file: string; path: string }> = [
+  { file: 'src/modules/key-cortex/key-cortex-voice.service.ts', path: 'KEY voice speak/listen (OpenAI TTS and Whisper)' },
+  { file: 'src/modules/ai/ai-usage.service.ts', path: 'the embedding, vision and audio helpers (OpenAI)' },
+  { file: 'src/modules/key-cortex/key-cortex-document.service.ts', path: 'KEY document embeddings (OpenAI)' },
+  { file: 'src/modules/phone-voice/realtime-bridge.service.ts', path: 'the phone realtime bridge (OpenAI Realtime)' },
+  { file: 'src/modules/voice/elevenlabs-voice.provider.ts', path: 'ElevenLabs text-to-speech' },
+  { file: 'src/modules/diagnostics/diagnostics.service.ts', path: 'the diagnostics OpenAI key check (no tenant content)' },
+];
+
+/** The boot warning KEY_DISABLED produces: what it stops, and what it does not stop yet. */
+export function keyDisabledBootLine(): string {
+  return (
+    'KEY_DISABLED is set: KEY is switched off on this server. Every model-gateway dispatch answers 503 and reaches no AI provider, ' +
+    'and the KEY cortex crons do not run. NOT covered yet (they call their provider directly whenever its key is configured; ' +
+    'unset AI_INTEGRATIONS_OPENAI_API_KEY, OPENAI_API_KEY and ELEVENLABS_API_KEY to stop them): ' +
+    KEY_DISABLED_NOT_COVERED.map((p) => p.path).join('; ')
+  );
+}
+
 export interface ProviderHealth {
   provider: AiProvider;
   available: boolean;
@@ -667,11 +697,10 @@ export class ModelGatewayService {
     if (keyDisabled() && !ModelGatewayService.keyDisabledAnnounced) {
       // V1-24 (D-17): one boot line per process (the module graph builds more
       // than one gateway), so an operator (and the Release 0 journey) can see the
-      // switch reached the server. Dispatch reads the switch per call.
+      // switch reached the server. Dispatch reads the switch per call. The line
+      // names the direct provider paths the switch does not cover yet.
       ModelGatewayService.keyDisabledAnnounced = true;
-      this.logger.warn(
-        'KEY_DISABLED is set: KEY is switched off on this server; every gateway dispatch answers 503 and no AI provider is called',
-      );
+      this.logger.warn(keyDisabledBootLine());
     }
     const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
     if (!openaiKey) {
@@ -1003,7 +1032,10 @@ export class ModelGatewayService {
 
   async *streamComplete(request: GatewayRequest): AsyncGenerator<StreamChunk> {
     // V1-24 (D-17): the same refusal complete() throws, as one error chunk, before
-    // anything is read or called.
+    // anything is read or called. Known gap (SEC-V124-2, follow-up outside V1-24):
+    // AiUsageService.trackAndStream still writes a credited aiUsageLog row naming
+    // 'openai' for a stream that ends on this chunk, as it already did for the
+    // R0-07 provider_not_configured chunk (pinned as an it.todo in the spec).
     if (keyDisabled()) {
       const refusal = this.keyDisabledRefusal();
       const body = refusal.getResponse() as { code: AiUnavailableCode; reason: AiDisabledReason };

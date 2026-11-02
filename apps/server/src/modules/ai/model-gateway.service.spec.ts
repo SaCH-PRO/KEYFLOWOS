@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { Logger } from '@nestjs/common';
-import { ModelGatewayService, SELECTABLE_PROVIDERS, type GatewayRequest, type AiProvider, type AiMode, type TaskCategory } from './model-gateway.service';
+import { ModelGatewayService, SELECTABLE_PROVIDERS, KEY_DISABLED_NOT_COVERED, keyDisabledBootLine, type GatewayRequest, type AiProvider, type AiMode, type TaskCategory } from './model-gateway.service';
 import { LLMCostService } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
 
@@ -1189,5 +1189,43 @@ describe('ModelGatewayService', () => {
       expect(keyLines()).toHaveLength(1);
       expect(keyLines()[0]).toMatch(/KEY is switched off on this server/);
     });
+
+    // V1-24 review (SEC-V124-1, V124-CR-1): the boot line used to end "no AI provider
+    // is called", which is false while the direct paths in KEY_DISABLED_NOT_COVERED
+    // (KEY voice, embeddings, vision, audio, phone realtime, ElevenLabs) skip the
+    // gateway. The operator must be told exactly what the switch stops and what it
+    // does not, and how to stop the rest.
+    it('the boot line claims only gateway dispatch, never "no AI provider is called", and names every path KEY_DISABLED does not cover yet and the keys that stop them', () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      (ModelGatewayService as any).keyDisabledAnnounced = false;
+      createService({ KEY_DISABLED: '1' });
+      const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('KEY_DISABLED'));
+      expect(lines).toEqual([keyDisabledBootLine()]);
+      const line = lines[0];
+
+      expect(line).toMatch(/^KEY_DISABLED is set: KEY is switched off on this server\b/);
+      expect(line).toMatch(/Every model-gateway dispatch answers 503 and reaches no AI provider/);
+      expect(line).not.toMatch(/no AI provider is called/i);
+      expect(line).toMatch(/NOT covered yet/);
+      // The direct paths the review found, each named (and the list is the census-pinned one).
+      expect(KEY_DISABLED_NOT_COVERED.length).toBeGreaterThanOrEqual(5);
+      const missing = KEY_DISABLED_NOT_COVERED.filter((p) => !line.includes(p.path)).map((p) => p.file);
+      expect(missing).toEqual([]);
+      for (const named of ['KEY voice speak/listen', 'embedding', 'vision', 'audio', 'phone realtime bridge', 'ElevenLabs']) {
+        expect(line, `boot line does not name ${named}`).toContain(named);
+      }
+      // ...and what an operator can do about them today.
+      for (const key of ['AI_INTEGRATIONS_OPENAI_API_KEY', 'OPENAI_API_KEY', 'ELEVENLABS_API_KEY']) expect(line).toContain(key);
+    });
+
+    // V1-24 review (SEC-V124-2): confirmed by the reviewer, outside the V1-24 write set.
+    // AiUsageService.trackAndStream persists a credited, billable aiUsageLog row naming
+    // provider 'openai' / model 'gpt-4o' even when the stream is this one refusal chunk
+    // (inherited from the R0-07 provider_not_configured chunk). Fixing it means changing
+    // ai-usage.service.ts (no credited row for a stream that ends on a coded error chunk
+    // with no usage chunk), which this packet may not touch.
+    it.todo(
+      'a streamed dispatch refused by KEY_DISABLED (one error chunk, reason key_disabled, no usage chunk) writes no credited aiUsageLog row: needs AiUsageService.trackAndStream (ai-usage.service.ts), outside the V1-24 write set (follow-up)',
+    );
   });
 });

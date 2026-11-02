@@ -267,9 +267,14 @@ export function schedulersDisabled(): boolean {
 /**
  * The server-side KEY off switch (D-17): KEY_DISABLED. With it on, the model
  * gateway refuses every dispatch with the R0-07 structured 503 (reason
- * 'key_disabled') before reading anything or calling any provider, and every
- * cortex @Cron handler returns before it scans a business. Distinct from
- * AI_DISABLED, which only the storefront reads and which does not stop KEY.
+ * 'key_disabled') before reading anything, so no gateway dispatch reaches a
+ * provider, and every cortex @Cron handler returns before it scans a business.
+ * It does NOT yet stop the AI calls that bypass the gateway (KEY voice
+ * speak/listen, embeddings, vision, audio, the phone realtime bridge,
+ * ElevenLabs TTS): those are listed in KEY_DISABLED_NOT_COVERED
+ * (model-gateway.service.ts), named in the boot warning, and pinned by
+ * scheduler-kill-switch.spec.ts. Distinct from AI_DISABLED, which only the
+ * storefront reads and which does not stop KEY.
  */
 export function keyDisabled(): boolean {
   return envFlagOn(process.env.KEY_DISABLED);
