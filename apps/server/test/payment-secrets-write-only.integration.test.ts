@@ -462,3 +462,129 @@ describe('R0-SEC2c PATCH /identity/businesses/:businessId writes payment secrets
     expect(out.metaData).toEqual({ stripeSecretKey: 'sk_live_new', paypalClientSecret: null });
   });
 });
+
+/**
+ * Review SEC2c-ST-1: Business.metaData is one jsonb column many writers
+ * read-modify-write. The profile PATCH read the stored metaData, merged the
+ * caller's bag and the secret writes over it, and wrote the whole value back,
+ * so a writer that committed between that read and that write was undone, and
+ * a second profile PATCH in flight wrote its stale copy (the cleared or
+ * rotated secret included) over the first. The PATCH now takes the business
+ * row (SELECT ... FOR NO KEY UPDATE, the lock GmailService takes on the same
+ * row) before it reads, in one transaction with its write.
+ *
+ * HOW THE INTERLEAVING IS MADE: the test holds the business row in a
+ * transaction of its own (a concurrent metaData writer mid-write), sends the
+ * PATCHes, waits until Postgres shows each one waiting on that row lock, then
+ * commits. Nothing is mocked: the requests run the real guards and the real
+ * IdentityService against the database. The transaction is the simulated
+ * concurrent writer, not a fixture wrapper: fixtures are still reset by raw SQL.
+ */
+async function holdBusinessRow(businessId: string, write?: (tx: any) => Promise<unknown>) {
+  let release!: () => void;
+  const released = new Promise<void>((r) => { release = r; });
+  let ready!: () => void;
+  const held = new Promise<void>((r) => { ready = r; });
+  const done = db.$transaction(async (tx: any) => {
+    await tx.$queryRawUnsafe('SELECT id FROM businesses WHERE id = $1 FOR NO KEY UPDATE', businessId);
+    if (write) await write(tx);
+    ready();
+    await released;
+  }, { maxWait: 10_000, timeout: 30_000 });
+  await Promise.race([held, done]);
+  return { commit: async () => { release(); await done; } };
+}
+
+/** Wait until `n` statements on the businesses table are waiting on a lock (the held row). */
+async function waitForBusinessLockWaiters(n: number) {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const rows = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%businesses%'`,
+    );
+    const seen = Number(rows[0]?.n ?? 0);
+    if (seen >= n) return;
+    if (Date.now() > deadline) throw new Error(`expected ${n} statement(s) waiting on the business row, saw ${seen}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+describe('R0-SEC2c concurrent metaData writers cannot undo a secret write (review SEC2c-ST-1)', () => {
+  it('[SEC2c-C01] RED-BEFORE: the owner clears a secret while a co-owner\'s profile PATCH is in flight: the clear holds (no stale copy writes the secret back) and the co-owner\'s edit is kept', async () => {
+    await reset(ID.bizP);
+    const BANK = `${P}Scotiabank`;
+    try {
+      const hold = await holdBusinessRow(ID.bizP);
+      let clear: Promise<any> | undefined;
+      let edit: Promise<any> | undefined;
+      try {
+        clear = patchBusiness(ID.owner, ID.bizP, { metaData: { paypalClientSecret: null } }).then((r: any) => r);
+        await waitForBusinessLockWaiters(1);
+        edit = patchBusiness(ID.coOwner, ID.bizP, { metaData: { bankName: BANK } }).then((r: any) => r);
+        await waitForBusinessLockWaiters(2);
+      } finally {
+        await hold.commit();
+      }
+      const [cleared, edited] = await Promise.all([clear, edit]);
+      expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+      expect(edited.status, JSON.stringify(edited.body)).toBe(200);
+      expect(leakedKeys(cleared.body)).toEqual([]);
+      expect(leakedKeys(edited.body)).toEqual([]);
+
+      const meta = await storedMeta(ID.bizP);
+      expect(Object.prototype.hasOwnProperty.call(meta, 'paypalClientSecret'), 'the cleared paypalClientSecret written back').toBe(false);
+      expect(meta.bankName, 'the co-owner\'s edit').toBe(BANK);
+      for (const k of SECRET_KEYS.filter((s) => s !== 'paypalClientSecret')) expect(meta[k], `stored ${k}`).toBe(SECRET[k]);
+      expect(edited.body.metaData).not.toHaveProperty('paypalClientSecret');
+    } finally {
+      await reset(ID.bizP);
+    }
+  });
+
+  it('[SEC2c-C02] RED-BEFORE: a metaData writer that commits while the owner\'s PATCH rotates one secret and clears another keeps its key, and the rotation and the clear both hold', async () => {
+    await reset(ID.bizP);
+    const NEW = `sk_live_${P}ROTATED_C02_5be1`;
+    const EVENTS = [{ type: 'page_view', itemId: null, timestamp: '2026-11-02T00:00:00.000Z' }];
+    try {
+      // A concurrent writer that merges its own key into the stored value in
+      // the database (jsonb ||), mid-write when the PATCH arrives.
+      const hold = await holdBusinessRow(ID.bizP, (tx) => tx.$executeRawUnsafe(
+        `UPDATE businesses SET meta_data = COALESCE(meta_data, '{}'::jsonb) || jsonb_build_object('storefrontEvents', $2::jsonb) WHERE id = $1`,
+        ID.bizP, JSON.stringify(EVENTS),
+      ));
+      let rotate: Promise<any> | undefined;
+      try {
+        rotate = patchBusiness(ID.owner, ID.bizP, { metaData: { stripeSecretKey: NEW, wipayApiKey: null } }).then((r: any) => r);
+        await waitForBusinessLockWaiters(1);
+      } finally {
+        await hold.commit();
+      }
+      const res = await rotate;
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(JSON.stringify(res.body).includes(NEW), 'the new secret in the PATCH response').toBe(false);
+      expect(leakedKeys(res.body)).toEqual([]);
+
+      const meta = await storedMeta(ID.bizP);
+      expect(meta.storefrontEvents, 'the concurrent writer\'s key').toEqual(EVENTS);
+      expect(meta.stripeSecretKey, 'the rotated secret').toBe(NEW);
+      expect(Object.prototype.hasOwnProperty.call(meta, 'wipayApiKey'), 'the cleared wipayApiKey').toBe(false);
+      expect(meta.stripeWebhookSecret).toBe(SECRET.stripeWebhookSecret);
+      expect(meta.paypalClientSecret).toBe(SECRET.paypalClientSecret);
+    } finally {
+      await reset(ID.bizP);
+    }
+  });
+
+  // Review SEC2c-ST-1, the half outside this packet's write set: the public
+  // POST /site/businesses/:businessId/analytics/event (SiteService.trackEvent,
+  // apps/server/src/modules/site/site.service.ts) and about twenty other
+  // Business.metaData writers (gamification listeners, lead magnet, concierge
+  // and others) read the stored metaData without the row lock and write the
+  // whole value back, so one that read before an owner's clear or rotation and
+  // writes after it still writes the old secret back. The fix belongs to those
+  // writers (merge their own key in the database, jsonb_set or ||, as
+  // SEC2c-C02's concurrent writer does, or take the row lock the profile PATCH
+  // now takes); none of them is in R0-SEC2c's write set.
+  it.todo('[SEC2c-C03] a storefront event (SiteService.trackEvent) that read metaData before an owner\'s secret clear and writes after it does not write the cleared secret back (follow-up: the other metaData read-modify-write writers, outside the R0-SEC2c write set)');
+});

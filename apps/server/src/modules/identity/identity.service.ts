@@ -85,6 +85,13 @@ function applyPaymentSecretWrites(
 }
 
 /**
+ * R0-SEC2c review SEC2c-ST-1: the profile PATCH's transaction (the row lock,
+ * the read of the stored row and the write). maxWait and timeout leave room
+ * for a PATCH queued behind another holder of the business row.
+ */
+const PROFILE_PATCH_TX_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const;
+
+/**
  * The CRM ownership authority a membership's scope map confers (level, crm_view,
  * crm_edit, crm_reassign, crm_delete), by `resolveCrmAccess` itself — the rule every
  * CRM read and write enforces — evaluated on an in-memory membership rather than a
@@ -446,9 +453,6 @@ export class IdentityService {
       if (existing) throw new BadRequestException('Slug is already taken');
     }
 
-    const oldBusiness = await this.prisma.client.business.findUnique({ where: { id: businessId } });
-    if (!oldBusiness) throw new NotFoundException('Business not found');
-
     const {
       lastHealthCheck, metaData,
       skills, interests, preferredProjectTypes,
@@ -456,93 +460,112 @@ export class IdentityService {
       ...rest
     } = input;
 
-    const stringFields: (keyof typeof rest)[] = [
-      'name', 'slug', 'timezone', 'currency', 'logoUrl', 'address', 'phone',
-      'email', 'website', 'facebook', 'instagram', 'twitter', 'linkedin',
-      'tiktok', 'youtube', 'whatsapp', 'primaryColor', 'secondaryColor',
-      'complianceStatus', 'tagline', 'description', 'city', 'country',
-      'industry', 'businessIntent', 'headline', 'bio', 'businessStage', 'teamSize',
-    ];
+    // R0-SEC2c review SEC2c-ST-1: Business.metaData is one jsonb column that
+    // many writers read, change and write back whole. Reading the stored row
+    // outside the write let a profile PATCH write a stale copy over a writer
+    // that committed in between, and let two PATCHes in flight undo each other
+    // (an owner's cleared or rotated secret written back by a co-owner's edit).
+    // The row is locked first (FOR NO KEY UPDATE: the lock GmailService takes on
+    // it, and the one the UPDATE takes anyway), then read and written in the
+    // same transaction, so a concurrent writer's UPDATE waits for this one and
+    // this read sees every write committed before it. A writer that reads
+    // without the lock and writes its whole copy back afterwards (the public
+    // storefront event among them) can still undo this write; that fix belongs
+    // to those writers (it.todo SEC2c-C03).
+    const { oldBusiness: previous, result } = await this.prisma.client.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`;
+      const oldBusiness = await tx.business.findUnique({ where: { id: businessId } });
+      if (!oldBusiness) throw new NotFoundException('Business not found');
 
-    const data: Record<string, unknown> = {};
-    for (const key of stringFields) {
-      if (rest[key] !== undefined) {
-        const val = rest[key];
-        data[key] = typeof val === 'string' ? val.trim() : val;
+      const stringFields: (keyof typeof rest)[] = [
+        'name', 'slug', 'timezone', 'currency', 'logoUrl', 'address', 'phone',
+        'email', 'website', 'facebook', 'instagram', 'twitter', 'linkedin',
+        'tiktok', 'youtube', 'whatsapp', 'primaryColor', 'secondaryColor',
+        'complianceStatus', 'tagline', 'description', 'city', 'country',
+        'industry', 'businessIntent', 'headline', 'bio', 'businessStage', 'teamSize',
+      ];
+
+      const data: Record<string, unknown> = {};
+      for (const key of stringFields) {
+        if (rest[key] !== undefined) {
+          const val = rest[key];
+          data[key] = typeof val === 'string' ? val.trim() : val;
+        }
       }
-    }
 
-    if (currentCapacity !== undefined) data.currentCapacity = currentCapacity?.trim();
-    if (leadTime !== undefined) data.leadTime = leadTime?.trim();
-    if (budgetFit !== undefined) data.budgetFit = budgetFit?.trim();
-    if (positioningStatement !== undefined) data.positioningStatement = positioningStatement?.trim();
+      if (currentCapacity !== undefined) data.currentCapacity = currentCapacity?.trim();
+      if (leadTime !== undefined) data.leadTime = leadTime?.trim();
+      if (budgetFit !== undefined) data.budgetFit = budgetFit?.trim();
+      if (positioningStatement !== undefined) data.positioningStatement = positioningStatement?.trim();
 
-    const nonStringFields: (keyof typeof rest)[] = [
-      'defaultTaxRate', 'complianceData', 'storeEnabled', 'businessHours', 'messageIntakeEnabled',
-    ];
-    for (const key of nonStringFields) {
-      if (rest[key] !== undefined) {
-        data[key] = rest[key];
+      const nonStringFields: (keyof typeof rest)[] = [
+        'defaultTaxRate', 'complianceData', 'storeEnabled', 'businessHours', 'messageIntakeEnabled',
+      ];
+      for (const key of nonStringFields) {
+        if (rest[key] !== undefined) {
+          data[key] = rest[key];
+        }
       }
-    }
 
-    if (acceptingWork !== undefined) {
-      data.acceptingWork = acceptingWork;
-    }
+      if (acceptingWork !== undefined) {
+        data.acceptingWork = acceptingWork;
+      }
 
-    if (skills !== undefined) {
-      data.skills = skills.map((s) => s.trim());
-    }
-    if (interests !== undefined) {
-      data.interests = interests.map((s) => s.trim());
-    }
-    if (preferredProjectTypes !== undefined) {
-      data.preferredProjectTypes = preferredProjectTypes.map((s) => s.trim());
-    }
+      if (skills !== undefined) {
+        data.skills = skills.map((s) => s.trim());
+      }
+      if (interests !== undefined) {
+        data.interests = interests.map((s) => s.trim());
+      }
+      if (preferredProjectTypes !== undefined) {
+        data.preferredProjectTypes = preferredProjectTypes.map((s) => s.trim());
+      }
 
-    if (lastHealthCheck) {
-      data.lastHealthCheck = new Date(lastHealthCheck);
-    }
+      if (lastHealthCheck) {
+        data.lastHealthCheck = new Date(lastHealthCheck);
+      }
 
-    if (metaData) {
-      const existingMeta = (oldBusiness.metaData as Record<string, any>) || {};
-      const merged: Record<string, unknown> = { ...existingMeta, ...metaData };
-      applyPaymentSecretWrites(merged, existingMeta, metaData);
-      data.metaData = merged;
-    }
+      if (metaData) {
+        const existingMeta = (oldBusiness.metaData as Record<string, any>) || {};
+        const merged: Record<string, unknown> = { ...existingMeta, ...metaData };
+        applyPaymentSecretWrites(merged, existingMeta, metaData);
+        data.metaData = merged;
+      }
 
-    const getStr = (key: string): string | null => {
-      const v = data[key] ?? (oldBusiness as Record<string, unknown>)[key];
-      return typeof v === 'string' ? v : null;
-    };
-    const getStrArr = (key: string): string[] => {
-      const v = data[key] ?? (oldBusiness as Record<string, unknown>)[key];
-      return Array.isArray(v) ? (v as string[]) : [];
-    };
-    data.profileCompleteness = computeProfileCompleteness({
-      name: getStr('name'),
-      logoUrl: getStr('logoUrl'),
-      headline: getStr('headline'),
-      bio: getStr('bio'),
-      industry: getStr('industry'),
-      skills: getStrArr('skills'),
-      businessStage: getStr('businessStage'),
-      city: getStr('city'),
-      country: getStr('country'),
-      interests: getStrArr('interests'),
-      tagline: getStr('tagline'),
-      description: getStr('description'),
-      positioningStatement: getStr('positioningStatement'),
-      currentCapacity: getStr('currentCapacity'),
-      preferredProjectTypes: getStrArr('preferredProjectTypes'),
-    });
+      const getStr = (key: string): string | null => {
+        const v = data[key] ?? (oldBusiness as Record<string, unknown>)[key];
+        return typeof v === 'string' ? v : null;
+      };
+      const getStrArr = (key: string): string[] => {
+        const v = data[key] ?? (oldBusiness as Record<string, unknown>)[key];
+        return Array.isArray(v) ? (v as string[]) : [];
+      };
+      data.profileCompleteness = computeProfileCompleteness({
+        name: getStr('name'),
+        logoUrl: getStr('logoUrl'),
+        headline: getStr('headline'),
+        bio: getStr('bio'),
+        industry: getStr('industry'),
+        skills: getStrArr('skills'),
+        businessStage: getStr('businessStage'),
+        city: getStr('city'),
+        country: getStr('country'),
+        interests: getStrArr('interests'),
+        tagline: getStr('tagline'),
+        description: getStr('description'),
+        positioningStatement: getStr('positioningStatement'),
+        currentCapacity: getStr('currentCapacity'),
+        preferredProjectTypes: getStrArr('preferredProjectTypes'),
+      });
 
-    const result = await this.prisma.client.business.update({
-      where: { id: businessId },
-      data,
-    });
+      const result = await tx.business.update({
+        where: { id: businessId },
+        data,
+      });
+      return { oldBusiness, result };
+    }, PROFILE_PATCH_TX_OPTIONS);
 
-    const oldBusinessRecord = oldBusiness as Record<string, unknown>;
+    const oldBusinessRecord = previous as Record<string, unknown>;
     const changedFields = Object.keys(rest).filter((k) => {
       const key = k as keyof typeof rest;
       if (rest[key] === undefined) return false;
@@ -552,8 +575,8 @@ export class IdentityService {
     });
 
     if (changedFields.length > 0) {
-      this.detectDocumentImpact(businessId, changedFields, oldBusiness.name).catch((err) =>
-        this.logger.warn(`Document impact detection failed for business "${oldBusiness.name}" (${businessId}): ${err?.message ?? err}`),
+      this.detectDocumentImpact(businessId, changedFields, previous.name).catch((err) =>
+        this.logger.warn(`Document impact detection failed for business "${previous.name}" (${businessId}): ${err?.message ?? err}`),
       );
 
       // Mirror the changed Business fields into the BusinessBlueprint so KEY's
