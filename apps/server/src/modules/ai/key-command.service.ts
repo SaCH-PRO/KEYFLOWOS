@@ -129,6 +129,22 @@ interface CommandViewer {
   unrestricted: boolean;
 }
 
+/**
+ * SUPER_ADMIN, and a Business.ownerId BusinessGuard admits without a
+ * Membership (CR-V109b-1): every row, every module, every contact.
+ */
+const EVERY_ROW_EVERY_READ: CommandViewer = { seesAllRows: true, reads: () => true, contactScope: null, unrestricted: true };
+
+/** A KeyCommand row as GET key/commands lists it; `dataWithheld` marks another member's withheld text (SEC-V109b-1). */
+export type ListedKeyCommand = KeyCommand & { dataWithheld?: true };
+
+/** A 'do'/'draft' result as one caller may read it (SEC-V109b-2); findings are absent when withheld. */
+export type ProjectedDoItForMe = Omit<DoItForMeResult, 'findings'> & {
+  findings?: string[];
+  commandItemIds: string[];
+  dataWithheld?: true;
+};
+
 /** The module read each groundIntent figure needs; null is not business data. Any other key is withheld. */
 const GROUNDED_READS: Readonly<Record<string, CanonicalModule | null>> = {
   businessId: null,
@@ -643,11 +659,15 @@ export class KeyCommandService {
    * revenue and quotes need revenue read, contact names crm read plus the
    * contacts list route's visibility clause, bookings bookings read. Free
    * text KEY cannot classify (a Cortex responseText, executionLogs) is kept
-   * only for a caller with nothing to withhold. Withheld data is marked
-   * `dataWithheld: true`. Fails closed: an unknown user or a non-member is
-   * refused.
+   * only for a caller with nothing to withhold, and so is another member's
+   * typed text (rawInput, a Cortex chat message) with its Cortex identity
+   * thread (sessionId, correlationId): such a row reads `rawInput: ''` and is
+   * marked `dataWithheld: true` (SEC-V109b-1); a caller keeps their own.
+   * Withheld data is marked `dataWithheld: true`. Fails closed: an unknown
+   * user or a non-member is refused; the Business.ownerId BusinessGuard
+   * admits without a membership reads every row (CR-V109b-1).
    */
-  async listCommands(businessId: string, userId: string | undefined, take = 50): Promise<KeyCommand[]> {
+  async listCommands(businessId: string, userId: string | undefined, take = 50): Promise<ListedKeyCommand[]> {
     if (!userId) throw new ForbiddenException('Authentication required');
     const viewer = await this.commandViewer(businessId, userId);
     const rows = await this.prisma.client.keyCommand.findMany({
@@ -656,24 +676,59 @@ export class KeyCommandService {
       take,
     });
     if (viewer.unrestricted) return rows;
-    const visibleContacts = await this.visibleActionContacts(businessId, rows, viewer);
-    return rows.map((row) => ({
-      ...row,
-      groundedData: this.projectGrounded(row.groundedData, viewer),
-      executionResult: this.projectExecutionResult(row.executionResult, viewer, visibleContacts),
-      executionLogs: null,
-    }));
+    const visibleContacts = await this.visibleActionContacts(businessId, rows.map((r) => r.executionResult), viewer);
+    return rows.map((row): ListedKeyCommand => {
+      const projected = {
+        ...row,
+        groundedData: this.projectGrounded(row.groundedData, viewer),
+        executionResult: this.projectExecutionResult(row.executionResult, viewer, visibleContacts),
+        executionLogs: null,
+      };
+      if (row.userId === userId) return projected;
+      // SEC-V109b-1: free text KEY cannot classify; it can name a contact or an amount this reader may not read.
+      return { ...projected, rawInput: '', sessionId: null, correlationId: null, dataWithheld: true };
+    });
+  }
+
+  /**
+   * SEC-V109b-2. The POST key/command 'do'/'auto'/'draft' response, projected
+   * exactly as listCommands projects the executionResult that POST wrote, so a
+   * member cannot read by POSTing what GET key/commands withholds from them.
+   * The row itself keeps what generateDoItForMe found business-wide.
+   */
+  async projectDoItForMe(
+    businessId: string,
+    userId: string | undefined,
+    result: DoItForMeResult & { commandItemIds: string[] },
+  ): Promise<ProjectedDoItForMe> {
+    if (!userId) throw new ForbiddenException('Authentication required');
+    const viewer = await this.commandViewer(businessId, userId);
+    if (viewer.unrestricted) return result;
+    const asRow = result as unknown as Prisma.JsonObject;
+    const visibleContacts = await this.visibleActionContacts(businessId, [asRow], viewer);
+    return this.projectExecutionResult(asRow, viewer, visibleContacts) as unknown as ProjectedDoItForMe;
   }
 
   private async commandViewer(businessId: string, userId: string): Promise<CommandViewer> {
-    // Throws for an unknown user or a non-member (SUPER_ADMIN excepted).
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (!user) throw new ForbiddenException('User not found');
+    // resolveCrmAccess and ModuleScopeGuard pass SUPER_ADMIN on every module and contact.
+    if (user.role === 'SUPER_ADMIN') return EVERY_ROW_EVERY_READ;
+    const member = await this.memberScopes(businessId, userId);
+    if (!member) {
+      // CR-V109b-1: BusinessGuard (userCanAccessBusiness) also admits the
+      // Business.ownerId without a Membership row (businesses created before
+      // the founding OWNER membership was written with them). That owner
+      // listed every row before V1-09b and still does. Anyone else is refused.
+      const owned = await this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: userId }, select: { id: true } });
+      if (owned) return EVERY_ROW_EVERY_READ;
+      throw new ForbiddenException('Not a member of this business');
+    }
     const crm = await resolveCrmAccess(this.prisma, businessId, userId);
-    const member = crm.isSuperAdmin ? null : await this.memberScopes(businessId, userId);
-    if (!crm.isSuperAdmin && !member) throw new ForbiddenException('Not a member of this business');
-    const reads = (module: CanonicalModule) => !member || rankOf(member.scopes[module] || 'none') >= LEVEL_RANK.read;
+    const reads = (module: CanonicalModule) => rankOf(member.scopes[module] || 'none') >= LEVEL_RANK.read;
     const contactScope = visibilityClause(crm, userId) as ContactScope;
     return {
-      seesAllRows: !member || member.role === 'OWNER' || member.role === 'ADMIN',
+      seesAllRows: member.role === 'OWNER' || member.role === 'ADMIN',
       reads,
       contactScope,
       // connect is NONE for every role by default; the connect data KEY rows
@@ -683,12 +738,16 @@ export class KeyCommandService {
   }
 
   /** The contacts named by 'do'/'draft' actions that this viewer may see; null is every contact. */
-  private async visibleActionContacts(businessId: string, rows: KeyCommand[], viewer: CommandViewer): Promise<ReadonlySet<string> | null> {
+  private async visibleActionContacts(
+    businessId: string,
+    results: readonly Prisma.JsonValue[],
+    viewer: CommandViewer,
+  ): Promise<ReadonlySet<string> | null> {
     if (!viewer.reads('crm')) return new Set();
     if (!viewer.contactScope) return null;
     const ids = new Set<string>();
-    for (const row of rows) {
-      const actions = isJsonObject(row.executionResult) ? row.executionResult.actions : undefined;
+    for (const result of results) {
+      const actions = isJsonObject(result) ? result.actions : undefined;
       if (!Array.isArray(actions)) continue;
       for (const a of actions) if (isJsonObject(a) && typeof a.contactId === 'string') ids.add(a.contactId);
     }

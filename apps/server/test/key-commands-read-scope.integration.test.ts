@@ -31,6 +31,18 @@
  *     kept only for a caller with no restriction to apply;
  *   - another business's rows never appear.
  *
+ *   V1-09b review repairs (pinned below the original rule):
+ *   - SEC-V109b-1: another member's typed text (rawInput, or a Cortex chat
+ *     message) and its Cortex identity thread (sessionId, correlationId) are
+ *     withheld from an OWNER/ADMIN reader who has anything to withhold; a
+ *     reader keeps their own;
+ *   - SEC-V109b-2: the POST key/command 'do'/'auto'/'draft' response is
+ *     projected exactly as GET key/commands projects the row it wrote, so a
+ *     member cannot read by POSTing what GET withholds from them;
+ *   - CR-V109b-1: a business owner (Business.ownerId) without an OWNER
+ *     Membership, whom BusinessGuard admits, is not refused: they read every
+ *     row with its data, as before V1-09b.
+ *
  * Every seeded row id starts with `v09b_` and is hard-deleted in beforeAll and
  * afterAll, matched through sqlLikePrefix() from test/helpers/sql-like.js.
  */
@@ -51,8 +63,13 @@ const ID = {
   adminNoMoney: `${P}adminNoMoney`, // ADMIN of biz, explicit map with revenue none
   staffRead: `${P}staffRead`,       // STAFF of biz, no scope map: role defaults (crm/revenue/bookings read)
   staffNone: `${P}staffNone`,       // STAFF of biz, explicit map { crm: none, revenue: none, bookings: none }
+  staffMine: `${P}staffMine`,       // STAFF of biz, explicit map: crm read with crm_view 'mine' (owns no contact), revenue/bookings read
+  orphanOwner: `${P}orphanOwner`,   // Business.ownerId of bizOrphan, with NO membership row (CR-V109b-1)
   biz: `${P}biz`,
   bizOther: `${P}bizOther`,
+  bizOrphan: `${P}bizOrphan`,       // a legacy business: ownerId set, no OWNER membership
+  orphanOwn: `${P}orphanOwn`,       // a bizOrphan row the owner ran
+  orphanOther: `${P}orphanOther`,   // a bizOrphan row someone else ran
   cTeam: `${P}cTeam`,               // TEAM contact, owned by the owner, stale
   cPrivate: `${P}cPrivate`,         // PRIVATE contact, owned by the owner, stale
   cortexOwner: `${P}cortexOwner`,   // a KEY Cortex turn row the owner ran
@@ -65,6 +82,11 @@ const PRIVATE_EMAIL = `${P}quillon@test.local`;
 const PAID_TOTAL = 4321.77;   // the one PAID invoice: groundIntent's totalRevenue
 const OVERDUE_TOTAL = 987.65; // the one overdue invoice: a 'do' finding and invoice_reminder action
 const OTHER_MARKER = `${P}other business marker`;
+// SEC-V109b-1: the owner's own typed text names its PRIVATE contact and the overdue amount.
+const NAMED_INPUT = `chase ${PRIVATE_NAME} Privett for the ${OVERDUE_TOTAL} he owes us`;
+const SESSION = { owner: `${P}sessOwner`, staff: `${P}sessStaff` };
+const CORRELATION = { owner: `${P}corrOwner`, staff: `${P}corrStaff` };
+const ORPHAN_OTHER_INPUT = `${P}orphan other member text`;
 
 const OFF_BOUNDARY = new Set([
   'AiAdvisorService', 'AiUsageService', 'AiExecutionLogService', 'BusinessGraphService', 'IntentParserService',
@@ -85,6 +107,7 @@ let app: any;
 const ROW = {
   ownerDo: '',       // owner, mode 'do': follow up and chase invoices (names, overdue total)
   ownerPlan: '',     // owner, mode 'plan': revenue (groundedData.totalRevenue)
+  ownerNamed: '',    // owner, mode 'plan': NAMED_INPUT (SEC-V109b-1)
   staffNonePlan: '', // staffNone, mode 'plan': revenue (its own row is grounded business-wide too)
   staffNoneDo: '',   // staffNone, mode 'do': follow up (its own row names contacts)
   staffReadDo: '',   // staffRead, mode 'do': follow up (TEAM and PRIVATE contact names)
@@ -112,6 +135,13 @@ async function command(actor: string, rawInput: string, mode: 'do' | 'plan', bus
   if (res.status !== 201) throw new Error(`POST key/command ${actor} ${mode}: ${res.status} ${JSON.stringify(res.body)}`);
   const row = await db.keyCommand.findFirst({ where: { businessId, userId: actor, rawInput }, orderBy: { createdAt: 'desc' } });
   return row.id;
+}
+
+function post(actor: string, rawInput: string, mode: 'do' | 'draft' | 'auto', businessId = ID.biz) {
+  return request(app.getHttpServer())
+    .post(`/ai/businesses/${businessId}/key/command`)
+    .set(HEADER, actor)
+    .send({ rawInput, mode });
 }
 
 function list(actor: string, businessId = ID.biz) {
@@ -187,7 +217,7 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const name of ['owner', 'admin', 'adminNoMoney', 'staffRead', 'staffNone'] as const) {
+  for (const name of ['owner', 'admin', 'adminNoMoney', 'staffRead', 'staffNone', 'staffMine', 'orphanOwner'] as const) {
     await db.user.create({ data: { id: ID[name], email: `${P}${name}@test.local`, role: 'USER' } });
   }
   for (const id of [ID.biz, ID.bizOther]) {
@@ -208,6 +238,14 @@ beforeAll(async () => {
       permissionScopes: { crm: 'none', revenue: 'none', bookings: 'none' },
     },
   });
+  await db.membership.create({
+    data: {
+      id: `${P}m_staffMine`, userId: ID.staffMine, businessId: ID.biz, role: 'STAFF',
+      permissionScopes: { crm: 'read', crm_view: 'mine', revenue: 'read', bookings: 'read' },
+    },
+  });
+  // CR-V109b-1: ownerId set and no membership row, as legacy businesses were created.
+  await db.business.create({ data: { id: ID.bizOrphan, name: 'V09B orphan', ownerId: ID.orphanOwner, currency: 'TTD' } });
 
   const stale = new Date(Date.now() - 60 * 86400000);
   await db.contact.create({
@@ -238,6 +276,7 @@ beforeAll(async () => {
   // Rows written by the real POST key/command pipeline.
   ROW.ownerDo = await command(ID.owner, 'follow up with everyone and chase every overdue invoice', 'do');
   ROW.ownerPlan = await command(ID.owner, 'how much revenue did we make', 'plan');
+  ROW.ownerNamed = await command(ID.owner, NAMED_INPUT, 'plan');
   ROW.staffNonePlan = await command(ID.staffNone, 'how much revenue did we make this year', 'plan');
   ROW.staffNoneDo = await command(ID.staffNone, 'who should I follow up with', 'do');
   ROW.staffReadDo = await command(ID.staffRead, 'follow up with my stale leads', 'do');
@@ -252,11 +291,12 @@ beforeAll(async () => {
     autonomyApproved: 0,
   };
   const cortexLogs = [{ step: 'tool', output: `${PRIVATE_NAME} Privett ${PRIVATE_EMAIL}` }];
-  for (const [id, userId] of [[ID.cortexOwner, ID.owner], [ID.cortexStaff, ID.staffNone]] as const) {
+  for (const [id, userId, who] of [[ID.cortexOwner, ID.owner, 'owner'], [ID.cortexStaff, ID.staffNone, 'staff']] as const) {
     await db.keyCommand.create({
       data: {
         id, businessId: ID.biz, userId, rawInput: 'cortex turn', mode: 'do', status: 'EXECUTED',
         executionResult: cortexResult, executionLogs: cortexLogs,
+        sessionId: SESSION[who], correlationId: CORRELATION[who],
       },
     });
   }
@@ -269,6 +309,16 @@ beforeAll(async () => {
         outputs: [{ success: true, data: { contacts: [{ id: ID.cPrivate, firstName: PRIVATE_NAME, email: PRIVATE_EMAIL }], count: 1 } }],
       },
     },
+  });
+  // CR-V109b-1: bizOrphan's rows, in the shape groundIntent writes.
+  await db.keyCommand.create({
+    data: {
+      id: ID.orphanOwn, businessId: ID.bizOrphan, userId: ID.orphanOwner, rawInput: 'how much revenue did we make', mode: 'plan',
+      status: 'PLANNED', groundedData: { contactCount: 0, totalRevenue: PAID_TOTAL, businessId: ID.bizOrphan },
+    },
+  });
+  await db.keyCommand.create({
+    data: { id: ID.orphanOther, businessId: ID.bizOrphan, userId: ID.admin, rawInput: ORPHAN_OTHER_INPUT, mode: 'plan', status: 'PLANNED' },
   });
 }, 180_000);
 
@@ -313,7 +363,7 @@ describe('SEC-V109-1 rows: a member sees only the rows they created', () => {
   });
 
   it('an ADMIN lists every row of the business, any member\'s (control for the OWNER/ADMIN rule)', async () => {
-    const all = [ROW.ownerDo, ROW.ownerPlan, ROW.staffNonePlan, ROW.staffNoneDo, ROW.staffReadDo, ID.cortexOwner, ID.cortexStaff, ID.legacyAsk].sort();
+    const all = [ROW.ownerDo, ROW.ownerPlan, ROW.ownerNamed, ROW.staffNonePlan, ROW.staffNoneDo, ROW.staffReadDo, ID.cortexOwner, ID.cortexStaff, ID.legacyAsk].sort();
     expect(ids(await listed(ID.admin))).toEqual(all);
     expect(ids(await listed(ID.adminNoMoney))).toEqual(all);
     expect(ids(await listed(ID.owner))).toEqual(all);
@@ -415,5 +465,154 @@ describe("SEC-V109-1 another business's rows never appear", () => {
     const res = await list(ID.staffNone, ID.bizOther);
     expect(res.status).toBe(403);
     expect(JSON.stringify(res.body)).not.toContain(OTHER_MARKER);
+  });
+});
+
+describe("SEC-V109b-1 another member's typed text and Cortex identity thread are withheld from a reader with something to withhold", () => {
+  it("an ADMIN with revenue none lists the owner's rows without their typed text, session or correlation id", async () => {
+    const rows = await listed(ID.adminNoMoney);
+    const body = JSON.stringify(rows);
+
+    expect(byId(rows, ROW.ownerNamed)).toMatchObject({ mode: 'plan', status: 'PLANNED', rawInput: '', dataWithheld: true });
+    expect(byId(rows, ID.cortexOwner)).toMatchObject({ sessionId: null, correlationId: null, dataWithheld: true });
+    expect(byId(rows, ID.cortexStaff)).toMatchObject({ sessionId: null, correlationId: null, dataWithheld: true });
+    expect(body).not.toContain(NAMED_INPUT);
+    expect(body).not.toContain(PRIVATE_NAME);
+    expect(body).not.toContain(String(OVERDUE_TOTAL));
+    expect(body).not.toContain(SESSION.owner);
+    expect(body).not.toContain(CORRELATION.staff);
+  });
+
+  it("an ADMIN with role-default scopes (the owner's PRIVATE contacts are not theirs to see) gets the same", async () => {
+    const rows = await listed(ID.admin);
+
+    expect(byId(rows, ROW.ownerNamed)).toMatchObject({ rawInput: '', dataWithheld: true });
+    expect(byId(rows, ID.cortexOwner)).toMatchObject({ sessionId: null, correlationId: null });
+    expect(JSON.stringify(rows)).not.toContain(NAMED_INPUT);
+  });
+
+  it('a member keeps its own typed text and its own Cortex identity thread (control)', async () => {
+    const rows = await listed(ID.staffNone);
+
+    const plan = byId(rows, ROW.staffNonePlan);
+    expect(plan.rawInput).toBe('how much revenue did we make this year');
+    expect(plan).not.toHaveProperty('dataWithheld');
+    expect(byId(rows, ID.cortexStaff)).toMatchObject({ sessionId: SESSION.staff, correlationId: CORRELATION.staff });
+  });
+
+  it("the OWNER, with nothing to withhold, reads every member's typed text and identity thread (control)", async () => {
+    const rows = await listed(ID.owner);
+
+    expect(byId(rows, ROW.ownerNamed).rawInput).toBe(NAMED_INPUT);
+    expect(byId(rows, ROW.ownerNamed)).not.toHaveProperty('dataWithheld');
+    expect(byId(rows, ROW.staffNonePlan).rawInput).toBe('how much revenue did we make this year');
+    expect(byId(rows, ID.cortexStaff)).toMatchObject({ sessionId: SESSION.staff, correlationId: CORRELATION.staff });
+  });
+});
+
+describe("SEC-V109b-2 the POST key/command 'do'/'draft' response is projected as GET key/commands projects the row it wrote", () => {
+  const CHASE = 'follow up and chase every overdue invoice';
+
+  /** POSTs, returns the response body, the persisted row and the row GET lists for it, then deletes the row. */
+  async function postAndList(actor: string, rawInput: string, mode: 'do' | 'draft' | 'auto') {
+    const res = await post(actor, rawInput, mode);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const row = await db.keyCommand.findFirst({ where: { businessId: ID.biz, userId: actor, rawInput }, orderBy: { createdAt: 'desc' } });
+    try {
+      const listedRow = byId(await listed(actor), row.id);
+      return { body: res.body, persisted: row, listedRow };
+    } finally {
+      await db.keyCommand.delete({ where: { id: row.id } });
+    }
+  }
+
+  it("a STAFF member who sees only their own book gets no contact outside it from 'do', and the same actions GET lists", async () => {
+    const { body, persisted, listedRow } = await postAndList(ID.staffMine, CHASE, 'do');
+    const text = JSON.stringify(body);
+
+    // The row still holds what generateDoItForMe found business-wide (the leak source is real).
+    expect(JSON.stringify(persisted.executionResult)).toContain(PRIVATE_NAME);
+
+    expect(text).not.toContain(PRIVATE_NAME);
+    expect(text).not.toContain(TEAM_NAME);
+    expect(text).not.toContain(ID.cPrivate);
+    expect(body.actions).toEqual([]);
+    expect(body).toMatchObject({ dataWithheld: true });
+    expect(body.actions).toEqual(listedRow.executionResult.actions);
+  });
+
+  it("the same member's 'draft' returns no drafts outside their book", async () => {
+    const { body, listedRow } = await postAndList(ID.staffMine, CHASE, 'draft');
+    const text = JSON.stringify(body);
+
+    expect(body.mode).toBe('draft');
+    expect(body.drafts).toEqual([]);
+    expect(text).not.toContain(PRIVATE_NAME);
+    expect(text).not.toContain(TEAM_NAME);
+    expect(body.drafts).toEqual(listedRow.executionResult.actions);
+  });
+
+  it("'auto' (the 'do' branch) is projected too", async () => {
+    const { body } = await postAndList(ID.staffMine, CHASE, 'auto');
+
+    expect(body.actions).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain(PRIVATE_NAME);
+  });
+
+  it("a STAFF member with role-default crm read gets the TEAM contact's action and not the owner's PRIVATE contact's", async () => {
+    const { body, listedRow } = await postAndList(ID.staffRead, 'follow up with my stale leads', 'do');
+
+    expect(body.actions.map((a: any) => a.contactId)).toEqual([ID.cTeam]);
+    expect(JSON.stringify(body)).not.toContain(PRIVATE_NAME);
+    expect(body.actions).toEqual(listedRow.executionResult.actions);
+  });
+
+  it('a STAFF member with crm/revenue/bookings none gets no action, no finding and no amount', async () => {
+    const { body } = await postAndList(ID.staffNone, CHASE, 'do');
+    const text = JSON.stringify(body);
+
+    expect(body.actions).toEqual([]);
+    expect(body).not.toHaveProperty('findings');
+    expect(text).not.toContain(String(OVERDUE_TOTAL));
+    expect(text).not.toContain(TEAM_NAME);
+    expect(text).not.toContain(PRIVATE_NAME);
+  });
+
+  it("the OWNER's 'do' response is unchanged: every action, finding and amount (control)", async () => {
+    const { body } = await postAndList(ID.owner, CHASE, 'do');
+    const text = JSON.stringify(body);
+
+    expect(text).toContain(PRIVATE_NAME);
+    expect(text).toContain(TEAM_NAME);
+    expect(body.findings.join(' ')).toContain(String(OVERDUE_TOTAL));
+    expect(body.actions.map((a: any) => a.actionType)).toEqual(expect.arrayContaining(['follow_up', 'invoice_reminder']));
+    expect(body).not.toHaveProperty('dataWithheld');
+  });
+});
+
+describe('CR-V109b-1 a business owner without an OWNER membership (a legacy business BusinessGuard admits) is not refused', () => {
+  it('GET key/commands: 200 with every row of the business and its data, as before V1-09b', async () => {
+    const rows = await listed(ID.orphanOwner, ID.bizOrphan);
+
+    expect(ids(rows)).toEqual([ID.orphanOther, ID.orphanOwn].sort());
+    expect(byId(rows, ID.orphanOwn).groundedData).toEqual({ contactCount: 0, totalRevenue: PAID_TOTAL, businessId: ID.bizOrphan });
+    expect(byId(rows, ID.orphanOther).rawInput).toBe(ORPHAN_OTHER_INPUT);
+  });
+
+  it("POST key/command 'do': 201, unprojected", async () => {
+    const res = await post(ID.orphanOwner, 'follow up with everyone', 'do', ID.bizOrphan);
+    try {
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).not.toHaveProperty('dataWithheld');
+      expect(Array.isArray(res.body.actions)).toBe(true);
+    } finally {
+      await db.keyCommand.deleteMany({ where: { businessId: ID.bizOrphan, userId: ID.orphanOwner, rawInput: 'follow up with everyone' } });
+    }
+  });
+
+  it('a user who neither owns nor belongs to that business is still refused', async () => {
+    const res = await list(ID.staffNone, ID.bizOrphan);
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).not.toContain(ORPHAN_OTHER_INPUT);
   });
 });
