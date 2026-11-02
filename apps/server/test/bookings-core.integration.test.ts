@@ -60,7 +60,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -87,6 +87,16 @@ const ID = {
   staffFree: `${P}staffFree`, // A, no availability rows: business hours apply
   staffAvail: `${P}staffAvail`, // A, works Mondays 09:00-13:00 only
   staffB: `${P}staffB`,
+  staffBAvail: `${P}staffBAvail`, // B, works Mondays 09:00-10:00 (review ST-1)
+  // review repairs
+  staffUser: `${P}staffUser`, // STAFF of A with crm_view 'owned' (ST-4)
+  contactPrivate: `${P}contactPrivate`, // A, owned by ownerA, PRIVATE
+  contactStaffOwned: `${P}contactStaffOwned`, // A, owned by staffUser
+  orgA: `${P}orgA`,
+  orgB: `${P}orgB`,
+  bizC: `${P}bizC`, // owned by ownerA; a day row without open/close (CR-2)
+  contactC: `${P}contactC`,
+  svcC: `${P}svcC`,
   svc: `${P}svc`,
   svcLead: `${P}svcLead`,
   svcBooking: `${P}svcBooking`,
@@ -130,6 +140,7 @@ const MSG = {
   staffDay: 'The selected staff member is not available on this day.',
   staffHours: "The selected time is outside this staff member's available hours.",
   reschedule: 'Cannot reschedule a cancelled or completed booking',
+  endBeforeStart: 'The end time must be after the start time.',
 };
 
 let db: any;
@@ -158,18 +169,23 @@ const eventStub = {
  */
 const crmStub = {
   logContactEvent: async () => null,
-  findOrCreateContact: async (businessId: string, input: { firstName?: string | null; lastName?: string | null; email?: string | null }) =>
-    db.contact.upsert({
-      where: { id: ID.contactPub },
+  // One public contact per business, so a public booking in another fixture
+  // business never points at A's contact.
+  findOrCreateContact: async (businessId: string, input: { firstName?: string | null; lastName?: string | null; email?: string | null }) => {
+    const id = businessId === ID.bizA ? ID.contactPub : `${ID.contactPub}_${businessId.slice(P.length)}`;
+    return db.contact.upsert({
+      where: { id },
       update: {},
-      create: { id: ID.contactPub, businessId, firstName: input.firstName ?? 'Public', lastName: input.lastName ?? null, email: input.email ?? null },
-    }),
+      create: { id, businessId, firstName: input.firstName ?? 'Public', lastName: input.lastName ?? null, email: input.email ?? null },
+    });
+  },
 };
 
 async function cleanup() {
   for (const sql of [
     `DELETE FROM availabilities WHERE staff_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM org_units WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
@@ -200,13 +216,14 @@ function inAppCreate(actor: string, businessId: string, body: Record<string, unk
   return agent().post(`/bookings/businesses/${businessId}`).set(HEADER, actor).send(body);
 }
 
-/** The public widget's create for business A, anonymous. */
-function publicCreate(body: { serviceId: string; staffId?: string; startTime: Date }) {
+/** The public widget's create for business A (or `businessId`), anonymous. */
+function publicCreate(body: { serviceId: string; staffId?: string; startTime: Date; orgUnitId?: string; businessId?: string }) {
   return agent()
-    .post(`/bookings/public/businesses/${ID.bizA}`)
+    .post(`/bookings/public/businesses/${body.businessId ?? ID.bizA}`)
     .send({
       serviceId: body.serviceId,
       ...(body.staffId ? { staffId: body.staffId } : {}),
+      ...(body.orgUnitId ? { orgUnitId: body.orgUnitId } : {}),
       startTime: body.startTime.toISOString(),
       firstName: 'Pat',
       lastName: 'Public',
@@ -303,7 +320,9 @@ beforeAll(async () => {
   // does not: without them the global ValidationPipe has no metatype and passes
   // every body unchecked. A control case below reads the same list from what
   // tsc emits for bookings.controller.ts.
-  Reflect.defineMetadata('design:paramtypes', [String, CreateBookingDto], BookingsController.prototype, 'createBooking');
+  // createBooking's third parameter is the @Req() request (the actor, V1-06
+  // review ST-4); pipes do not run on it.
+  Reflect.defineMetadata('design:paramtypes', [String, CreateBookingDto, Object], BookingsController.prototype, 'createBooking');
   Reflect.defineMetadata('design:paramtypes', [String, PublicCreateBookingDto], BookingsController.prototype, 'publicCreateBooking');
 
   Logger.overrideLogger(false);
@@ -382,6 +401,32 @@ beforeAll(async () => {
   await db.staffMember.create({ data: { id: ID.staffB, businessId: ID.bizB, name: 'Other Staff' } });
   await db.availability.create({ data: { id: `${P}av_mon`, staffId: ID.staffAvail, dayOfWeek: 1, startTime: '09:00', endTime: '13:00' } });
 
+  // ---- review repairs (ST-1..ST-4, CR-2) ----
+  // B's staff member with availability rows: the schedule lookup is scoped to
+  // the booking's business, so for A it finds none and falls through to A's hours.
+  await db.staffMember.create({ data: { id: ID.staffBAvail, businessId: ID.bizB, name: `${P}B-secret-staff-name` } });
+  await db.availability.create({ data: { id: `${P}av_b_mon`, staffId: ID.staffBAvail, dayOfWeek: 1, startTime: '09:00', endTime: '10:00' } });
+  await db.orgUnit.create({ data: { id: ID.orgA, businessId: ID.bizA, name: `${P}A-branch` } });
+  await db.orgUnit.create({ data: { id: ID.orgB, businessId: ID.bizB, name: `${P}B-secret-branch` } });
+  // A STAFF member of A whose CRM view is "my book" only.
+  await db.user.create({ data: { id: ID.staffUser, email: `${P}staffUser@test.local`, role: 'USER' } });
+  await db.membership.create({
+    data: { id: `${P}m_staffUser`, userId: ID.staffUser, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'read', crm_view: 'owned' } },
+  });
+  await db.contact.create({
+    data: {
+      id: ID.contactPrivate, businessId: ID.bizA, firstName: 'Priv', lastName: 'Ate', ownerId: ID.ownerA, visibility: 'PRIVATE',
+      email: `${P}secret@test.local`, phone: '+18685559999',
+    },
+  });
+  await db.contact.create({ data: { id: ID.contactStaffOwned, businessId: ID.bizA, firstName: 'Sam', lastName: 'Mine', ownerId: ID.staffUser } });
+  // C: a Monday row that is open but carries no open/close times.
+  await db.business.create({
+    data: { id: ID.bizC, name: 'V06A Biz C', ownerId: ID.ownerA, currency: 'TTD', businessHours: { mon: { closed: false } } },
+  });
+  await db.membership.create({ data: { id: `${P}m_ownerA_C`, userId: ID.ownerA, businessId: ID.bizC, role: 'OWNER' } });
+  await db.contact.create({ data: { id: ID.contactC, businessId: ID.bizC, firstName: 'Cid', lastName: 'Client' } });
+
   // The lead time of svcSlotsLead ends between 11:30 and 12:00 on FRI, so the
   // picker must drop every earlier slot and keep 12:00 onward.
   const slotsLeadMins = Math.floor((at(FRI, 12).getTime() - Date.now()) / 60_000) - 1;
@@ -396,6 +441,7 @@ beforeAll(async () => {
   await service(ID.svcNoStaff2, ID.bizA);
   await service(ID.svcLedger, ID.bizA, { price: 100 });
   await service(ID.svcB, ID.bizB);
+  await service(ID.svcC, ID.bizC);
 
   // ---- seeded bookings (written directly: they are the state, not the act) ----
   const seed = (id: string, data: Record<string, unknown>) =>
@@ -429,7 +475,7 @@ describe('V1-06 bookings core: regression controls (green at the base)', () => {
     const emitted = ts.transpileModule(source, {
       compilerOptions: { experimentalDecorators: true, emitDecoratorMetadata: true, target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS },
     }).outputText;
-    for (const [handler, dto] of [['createBooking', 'CreateBookingDto'], ['publicCreateBooking', 'PublicCreateBookingDto']]) {
+    for (const [handler, expected] of [['createBooking', 'String, CreateBookingDto, Object'], ['publicCreateBooking', 'String, PublicCreateBookingDto']]) {
       const end = emitted.indexOf(`], BookingsController.prototype, "${handler}", null)`);
       expect(end, handler).toBeGreaterThan(0);
       const decorators = emitted.slice(emitted.lastIndexOf('__decorate([', end), end);
@@ -438,7 +484,7 @@ describe('V1-06 bookings core: regression controls (green at the base)', () => {
       const types = decorators
         .match(/design:paramtypes", \[([^\]]*)\]/)?.[1]
         ?.replace(/typeof \(_\w+ = typeof \w+\.(\w+) !== "undefined" && \w+\.\1\) === "function" \? _\w+ : Object/g, '$1');
-      expect(types, handler).toBe(`String, ${dto}`);
+      expect(types, handler).toBe(expected);
     }
 
     // The pipe is live in this harness: a malformed time is a 400 on both paths.
@@ -448,7 +494,7 @@ describe('V1-06 bookings core: regression controls (green at the base)', () => {
     const pub = await agent().post(`/bookings/public/businesses/${ID.bizA}`).send({ serviceId: ID.svc, startTime: 'next tuesday' });
     expect(pub.status).toBe(400);
     expect(pub.body.message).toContain('startTime must be a valid ISO 8601 date string');
-  });
+  }, 30_000); // loading the TypeScript compiler alone can pass 5 s on a loaded machine
 
   it('CONTROL: an in-app create persists the booking in the business', async () => {
     const start = at(MON, 10);
@@ -647,4 +693,138 @@ describe('V1-06 in-app create parity (RED at the base)', () => {
     const otherRes = await inAppCreate(ID.ownerA, ID.bizA, other);
     expect(otherRes.status, otherRes.body?.message).toBe(201);
   });
+});
+
+/**
+ * Review repairs (ST-1..ST-4, CR-2). Each case below failed at the packet head
+ * 60749f65; the comment on each names what it observed there.
+ */
+describe('V1-06 review repairs', () => {
+  // The public create allows 10 a minute per caller; the cases above use most.
+  beforeEach(clearRateLimits);
+
+  it("ST-1: the public path refuses another business's staff member (404) and writes nothing, as the in-app path does", async () => {
+    // At 60749f65: public 201, the row held businessId=A and B's staffId.
+    for (const staffId of [ID.staffBAvail, ID.staffB]) {
+      const pub = await publicCreate({ serviceId: ID.svc, staffId, startTime: at(TUE, 12) });
+      expect(pub.status, `${staffId}: public (${pub.body?.message ?? pub.body?.bookingId})`).toBe(404);
+      expect(pub.body.message).toBe('Staff member not found');
+      expect(JSON.stringify(pub.body)).not.toContain('B-secret-staff-name');
+
+      const inApp = await inAppCreate(ID.ownerA, ID.bizA, body(at(TUE, 12), { staffId }));
+      expect(inApp.status, `${staffId}: in-app`).toBe(404);
+      expect(inApp.body.message).toBe(pub.body.message);
+      expect(await db.booking.count({ where: { staffId } }), `${staffId}: no booking written`).toBe(0);
+    }
+
+    // A's list carries no foreign staff member.
+    const list = await agent().get(`/bookings/businesses/${ID.bizA}`).set(HEADER, ID.ownerA);
+    expect(list.status).toBe(200);
+    expect(JSON.stringify(list.body)).not.toContain('B-secret-staff-name');
+  });
+
+  it('ST-2: an in-app end at or before the start is refused with 400 and writes nothing', async () => {
+    // At 60749f65: Thu 16:30 -> Thu 09:00 without staff was 201 (the hours
+    // check added a negative duration).
+    const cases: Array<[string, Record<string, unknown>, Date]> = [
+      ['end before start, no staff', { serviceId: ID.svcNoStaff2, staffId: undefined, endTime: at(THU, 9).toISOString() }, at(THU, 16, 30)],
+      ['end equal to start', { endTime: at(THU, 11).toISOString() }, at(THU, 11)],
+    ];
+    for (const [label, over, start] of cases) {
+      const res = await inAppCreate(ID.ownerA, ID.bizA, body(start, over));
+      expect(res.status, `${label} (${res.body?.message ?? res.body?.id})`).toBe(400);
+      expect(res.body.message, label).toBe(MSG.endBeforeStart);
+      expect(await bookingsAt(ID.bizA, start), `${label}: no booking written`).toBe(0);
+    }
+  });
+
+  it('ST-2: an in-app booking spanning several days is held to every day it covers', async () => {
+    // At 60749f65: staffAvail (Mondays 09:00-13:00) Mon 10:00 -> Wed 10:00 was
+    // 201, because the staff check read only the time of day of the end.
+    const staffSpan = await inAppCreate(ID.ownerA, ID.bizA, body(at(MON, 10), { staffId: ID.staffAvail, endTime: at(WED, 10).toISOString() }));
+    expect(staffSpan.status, staffSpan.body?.message ?? staffSpan.body?.id).toBe(400);
+    expect(staffSpan.body.message).toBe(MSG.staffHours);
+    expect(await db.booking.count({ where: { staffId: ID.staffAvail } })).toBe(0);
+
+    // Control: business hours already measured the span (start + length), so
+    // Mon 11:00 -> Tue 11:00 was refused at 60749f65 too; it stays refused now
+    // that the staff check measures the same way. A service as the resource,
+    // so no booking of staffFree's is in the way.
+    const hoursSpan = await inAppCreate(
+      ID.ownerA,
+      ID.bizA,
+      body(at(MON, 11), { serviceId: ID.svcNoStaff, staffId: undefined, endTime: at(TUE, 11).toISOString() }),
+    );
+    expect(hoursSpan.status, hoursSpan.body?.message ?? hoursSpan.body?.id).toBe(400);
+    expect(hoursSpan.body.message).toBe(MSG.hours);
+    expect(await bookingsAt(ID.bizA, at(MON, 11))).toBe(0);
+
+    // A same-day booking longer than the service, inside hours, is still the
+    // caller's choice (the web form sends its own end time).
+    const longer = await inAppCreate(ID.ownerA, ID.bizA, body(at(THU, 9), { endTime: at(THU, 10, 30).toISOString() }));
+    expect(longer.status, longer.body?.message ?? longer.body?.id).toBe(201);
+  });
+
+  it("ST-3: another business's orgUnitId is a 404 on both create paths and writes nothing; A's own is kept", async () => {
+    // At 60749f65: in-app 201 with orgUnitId=orgB, and A's list showed B's
+    // org-unit name.
+    const inApp = await inAppCreate(ID.ownerA, ID.bizA, body(at(FRI, 13), { orgUnitId: ID.orgB }));
+    expect(inApp.status, inApp.body?.message ?? inApp.body?.id).toBe(404);
+    expect(inApp.body.message).toBe('Org unit not found');
+
+    const pub = await publicCreate({ serviceId: ID.svc, startTime: at(FRI, 14), orgUnitId: ID.orgB });
+    expect(pub.status, pub.body?.message ?? pub.body?.bookingId).toBe(404);
+    expect(pub.body.message).toBe('Org unit not found');
+    expect(await db.booking.count({ where: { orgUnitId: ID.orgB } })).toBe(0);
+
+    const own = await inAppCreate(ID.ownerA, ID.bizA, body(at(FRI, 13), { orgUnitId: ID.orgA }));
+    expect(own.status, own.body?.message ?? own.body?.id).toBe(201);
+    expect((await bookingRow(own.body.id)).orgUnitId).toBe(ID.orgA);
+
+    const list = await agent().get(`/bookings/businesses/${ID.bizA}`).set(HEADER, ID.ownerA);
+    expect(JSON.stringify(list.body)).not.toContain('B-secret-branch');
+  });
+
+  it('ST-4: a member cannot book a contact their CRM view hides; the refusal is a 404 that discloses nothing', async () => {
+    // At 60749f65: the STAFF member (crm_view 'owned') booked ownerA's PRIVATE
+    // contact with 201 and the body carried its email and phone.
+    for (const contactId of [ID.contactPrivate, ID.contactA]) {
+      const res = await inAppCreate(ID.staffUser, ID.bizA, body(at(THU, 12), { contactId }));
+      expect(res.status, `${contactId} (${res.body?.message ?? res.body?.id})`).toBe(404);
+      expect(res.body.message).toBe('Contact not found');
+      expect(JSON.stringify(res.body)).not.toContain('secret@test.local');
+      expect(JSON.stringify(res.body)).not.toContain('+18685559999');
+    }
+    expect(await bookingsAt(ID.bizA, at(THU, 12))).toBe(0);
+
+    // The member's own contact is bookable.
+    const own = await inAppCreate(ID.staffUser, ID.bizA, body(at(THU, 15), { contactId: ID.contactStaffOwned }));
+    expect(own.status, own.body?.message ?? own.body?.id).toBe(201);
+    expect((await bookingRow(own.body.id)).contactId).toBe(ID.contactStaffOwned);
+
+    // The owner sees every contact, so the PRIVATE one is bookable for them.
+    const owner = await inAppCreate(ID.ownerA, ID.bizA, body(at(THU, 12), { contactId: ID.contactPrivate }));
+    expect(owner.status, owner.body?.message ?? owner.body?.id).toBe(201);
+    expect((await bookingRow(owner.body.id)).contactId).toBe(ID.contactPrivate);
+  });
+
+  it('CR-2: a day row without open/close times does not crash either create path', async () => {
+    // At 60749f65: in-app 500 (TypeError reading split of undefined); at the
+    // base the in-app create was 201. The public path crashed at both.
+    const { staffId: _none, ...inAppBody } = body(at(MON, 10), { contactId: ID.contactC, serviceId: ID.svcC });
+    const inApp = await inAppCreate(ID.ownerA, ID.bizC, inAppBody);
+    expect(inApp.status, inApp.body?.message ?? inApp.body?.id).toBe(201);
+    expect(await bookingRow(inApp.body.id)).toMatchObject({ businessId: ID.bizC, contactId: ID.contactC });
+
+    const pub = await publicCreate({ businessId: ID.bizC, serviceId: ID.svcC, startTime: at(MON, 12) });
+    expect(pub.status, pub.body?.message ?? pub.body?.bookingId).toBe(201);
+    expect(await bookingRow(pub.body.bookingId)).toMatchObject({ businessId: ID.bizC, serviceId: ID.svcC });
+  });
+
+  // CR-1 is disclosed, not fixed here: both create paths and getAvailableSlots
+  // read hours and weekdays in the server's local time. Making only the create
+  // paths read Business.timezone would refuse the very slots the public picker
+  // offers, so the change belongs with the picker in V1-16 (depends on V1-06;
+  // its RED-BEFORE is defined at the V1-06 head).
+  it.todo('CR-1 (V1-16): in-app and public creates read business hours in Business.timezone, not the server timezone');
 });

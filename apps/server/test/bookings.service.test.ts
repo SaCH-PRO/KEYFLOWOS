@@ -154,7 +154,7 @@ describe('BookingsService', () => {
       serviceId: 'service_1',
       staffId: 'staff_1',
       startTime: new Date(),
-      endTime: new Date(),
+      endTime: new Date(Date.now() + 60 * 60000), // V1-06 review: the end must follow the start
     });
 
     expect(emit).toHaveBeenCalledWith(
@@ -188,7 +188,7 @@ describe('BookingsService', () => {
       serviceId: 'service_1',
       staffId: 'staff_1',
       startTime: new Date(),
-      endTime: new Date(),
+      endTime: new Date(Date.now() + 60 * 60000),
     });
     await service.createBooking({
       businessId: 'biz_2',
@@ -196,7 +196,7 @@ describe('BookingsService', () => {
       serviceId: 'service_2',
       staffId: 'staff_2',
       startTime: new Date(),
-      endTime: new Date(),
+      endTime: new Date(Date.now() + 60 * 60000),
     });
 
     const biz1 = await service.listBookings('biz_1');
