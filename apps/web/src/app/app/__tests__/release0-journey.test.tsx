@@ -67,8 +67,13 @@ import ContactsPage from "../crm/contacts/page";
 import NewInvoicePage from "../commerce/invoices/new/page";
 import InvoiceDetailPage from "../commerce/invoices/[id]/page";
 import OnboardingPage from "../onboarding/page";
-import { GenomeProvider } from "@/contexts/genome-context";
+import { NavigationContextProvider } from "@/lib/navigation-context";
+import { AiContextProvider } from "@/contexts/ai-context";
+import { NotesProvider } from "@/components/keyflow/notes-context";
+import { GuideProvider } from "@/contexts/guide-context";
 import { TtsProvider } from "@/components/tts";
+import { KeyChatProvider } from "@/components/key/chat";
+import { GenomeProvider } from "@/contexts/genome-context";
 
 // ---------------------------------------------------------------------------
 // The key list: what release0-journey.integration.test.ts asserts, per response
@@ -86,6 +91,14 @@ const INVOICE_ROW = [
   "status", "subtotal", "total",
 ];
 
+/**
+ * DRIFT RECORDED (R0-23): lib/client.ts contactListResponseSchema also requires
+ * `nextCursor` and `hasMore`, which the journey does not assert. CrmService
+ * returns both, so the browser is fine today, but nothing on the server side
+ * proves them: against this list the screen logs "schema validation failed:
+ * nextCursor: Required, hasMore: Required" and renders the rows from the raw
+ * body (apiGet's fallback). Asserting both in the journey closes it.
+ */
 const CONTACT_LIST = ["contacts", "contacts[]", "contacts[].id", "contacts[].lastName", "contacts[].status"];
 
 const JOURNEY_ASSERTED_SHAPES: Record<string, { route: string; status: number; keys: string[] }> = {
@@ -219,10 +232,33 @@ function signedIn() {
   routes[key("GET", P.me)] = answer(J.me);
 }
 
-function renderScreen(ui: ReactNode) {
+/**
+ * The providers app/app/layout.tsx wraps every /app route in, in its order
+ * (RequireAuth and the chrome of AppLayoutInner left out), and the root
+ * providers' Toaster, so a toast is on the page as it is in the browser.
+ */
+function AppProviders({ children }: { children: ReactNode }) {
+  return (
+    <NavigationContextProvider>
+      <AiContextProvider>
+        <NotesProvider>
+          <GuideProvider>
+            <TtsProvider>
+              <KeyChatProvider>
+                <GenomeProvider>{children}</GenomeProvider>
+              </KeyChatProvider>
+            </TtsProvider>
+          </GuideProvider>
+        </NotesProvider>
+      </AiContextProvider>
+    </NavigationContextProvider>
+  );
+}
+
+function renderScreen(ui: ReactNode, opts: { app?: boolean } = { app: true }) {
   return render(
     <>
-      {ui}
+      {opts.app ? <AppProviders>{ui}</AppProviders> : ui}
       <Toaster />
     </>,
   );
@@ -321,7 +357,7 @@ describe("step 1 — sign in and select the business", () => {
     routes[key("POST", P.identityLogin)] = answer(S.login);
     routes[key("POST", P.bootstrap)] = answer(J.bootstrap);
     nav.pathname = "/auth/login";
-    renderScreen(<LoginForm />);
+    renderScreen(<LoginForm />, { app: false });
 
     fireEvent.change(screen.getByPlaceholderText("you@example.com"), { target: { value: "r023_owner@test.local" } });
     fireEvent.change(screen.getByPlaceholderText("Enter your password"), { target: { value: "correct horse battery staple" } });
@@ -432,7 +468,7 @@ describe("step 3 — create and open the invoice", () => {
     expect(header.getByText("Draft")).toBeInTheDocument();
     expect(screen.getByText("Consulting")).toBeInTheDocument();
     expect(screen.getByText("Setup")).toBeInTheDocument();
-    expect(paymentSummary()).toEqual({ total: "TT$250.00", paid: "TT$0.00", remaining: "TT$250.00" });
+    expect(paymentSummary()).toEqual({ total: "TTD 250.00", paid: "TTD 0.00", remaining: "TTD 250.00" });
     // A DRAFT is edited and sent; it does not take payments.
     expect(screen.getAllByRole("button", { name: /send/i }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /record payment/i })).not.toBeInTheDocument();
@@ -471,7 +507,7 @@ describe("step 4 — record an offline payment", () => {
     expect(posts).toHaveLength(1);
     expect(posts[0].body).toMatchObject({ amount: 100, method: "Cash" });
     expect(typeof (posts[0].body as { idempotencyKey?: unknown }).idempotencyKey).toBe("string");
-    expect(paymentSummary()).toEqual({ total: "TT$250.00", paid: "TT$100.00", remaining: "TT$150.00" });
+    expect(paymentSummary()).toEqual({ total: "TTD 250.00", paid: "TTD 100.00", remaining: "TTD 150.00" });
     const header = within(screen.getByRole("heading", { name: `Invoice ${INVOICE.invoiceNumber}` }).parentElement as HTMLElement);
     expect(header.getByText("Part-paid")).toBeInTheDocument();
     expect(writes()).toEqual([key("POST", P.payments)]);
@@ -551,13 +587,7 @@ describe("step 7 — optional services fail visibly", () => {
     nav.pathname = "/app/onboarding";
     routes[key("GET", P.onboardingState)] = answer(S.onboardingState);
     routes[key("GET", P.business)] = answer(J.business);
-    renderScreen(
-      <TtsProvider>
-        <GenomeProvider>
-          <OnboardingPage />
-        </GenomeProvider>
-      </TtsProvider>,
-    );
+    renderScreen(<OnboardingPage />);
 
     const heading = await screen.findByRole("heading", { name: /set up manually/i }, { timeout: 3000 });
     const step = within((heading.closest("section") ?? heading.parentElement) as HTMLElement);
